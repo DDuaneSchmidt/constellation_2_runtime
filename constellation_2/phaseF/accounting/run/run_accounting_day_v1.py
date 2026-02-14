@@ -70,7 +70,6 @@ def _lock_git_sha_if_exists(existing_path: Path, provided_sha: str) -> Optional[
 
 
 def _cents_to_int_dollars_failclosed(cents: int) -> int:
-    # Accounting schema uses JSON "number"; we emit integer USD dollars (no floats).
     if cents % 100 != 0:
         raise ValueError("CENTS_NOT_DIVISIBLE_BY_100_FOR_INTEGER_DOLLARS")
     return int(cents // 100)
@@ -79,7 +78,7 @@ def _cents_to_int_dollars_failclosed(cents: int) -> int:
 def _expiry_bucket_from_expiry_utc(expiry_utc: str) -> str:
     s = (expiry_utc or "").strip()
     if len(s) >= 10 and s[4] == "-" and s[7] == "-":
-        return s[:7]  # YYYY-MM bucket
+        return s[:7]
     return "unknown"
 
 
@@ -111,14 +110,6 @@ def _build_failure(
 
 
 def _select_positions_input_for_day(day_utc: str) -> Tuple[Path, str, str, Optional[Path]]:
-    """
-    Returns:
-      (positions_snapshot_path, positions_producer_label, positions_input_type, pointer_path_used_or_none)
-
-    Semantics:
-      - If effective pointer exists, it MUST be readable/valid; otherwise fail-closed.
-      - If effective pointer does not exist, fall back to v2 snapshot path.
-    """
     pos_eff = pos_effective_day_paths_v1(day_utc)
     pos_v2 = pos_day_paths_v2(day_utc)
 
@@ -158,8 +149,8 @@ def main(argv: List[str] | None = None) -> int:
 
     out = accounting_day_paths_v1(day_utc)
 
-    # Idempotency guard: if any day artifacts already exist, sha must match.
-    for p in (out.nav_path, out.exposure_path, out.attribution_path, out.latest_path):
+    # DAY-scoped sha lock only (nav/exposure/attribution). No global latest.json in strict immutability mode.
+    for p in (out.nav_path, out.exposure_path, out.attribution_path):
         ex_sha = _lock_git_sha_if_exists(p, producer_sha)
         if ex_sha is not None:
             print(f"FAIL: PRODUCER_GIT_SHA_MISMATCH_FOR_EXISTING_DAY: existing={ex_sha} provided={producer_sha}", file=sys.stderr)
@@ -167,7 +158,6 @@ def main(argv: List[str] | None = None) -> int:
 
     cash_paths = cash_day_paths_v1(day_utc)
 
-    # Positions input selection (effective pointer preferred; fallback to v2 if pointer absent).
     try:
         pos_snapshot_path, pos_producer, pos_input_type, pos_ptr_path_used = _select_positions_input_for_day(day_utc)
     except Exception as e:
@@ -188,7 +178,6 @@ def main(argv: List[str] | None = None) -> int:
                 {"path": str(out.nav_path), "sha256": None},
                 {"path": str(out.exposure_path), "sha256": None},
                 {"path": str(out.attribution_path), "sha256": None},
-                {"path": str(out.latest_path), "sha256": None},
             ],
         )
         validate_against_repo_schema_v1(failure, REPO_ROOT, SCHEMA_FAILURE)
@@ -223,7 +212,6 @@ def main(argv: List[str] | None = None) -> int:
                 {"path": str(out.nav_path), "sha256": None},
                 {"path": str(out.exposure_path), "sha256": None},
                 {"path": str(out.attribution_path), "sha256": None},
-                {"path": str(out.latest_path), "sha256": None},
             ],
         )
         validate_against_repo_schema_v1(failure, REPO_ROOT, SCHEMA_FAILURE)
@@ -232,7 +220,6 @@ def main(argv: List[str] | None = None) -> int:
         print("FAIL: MISSING_REQUIRED_INPUTS (failure artifact written)", file=sys.stderr)
         return 2
 
-    # Optional lifecycle (for bucketing). If present but invalid, fail closed.
     lifecycle = None
     lifecycle_paths = lifecycle_day_paths_v1(day_utc)
     if lifecycle_paths.snapshot_path.exists() and lifecycle_paths.snapshot_path.is_file():
@@ -254,7 +241,6 @@ def main(argv: List[str] | None = None) -> int:
                     {"path": str(out.nav_path), "sha256": None},
                     {"path": str(out.exposure_path), "sha256": None},
                     {"path": str(out.attribution_path), "sha256": None},
-                    {"path": str(out.latest_path), "sha256": None},
                 ],
             )
             validate_against_repo_schema_v1(failure, REPO_ROOT, SCHEMA_FAILURE)
@@ -263,7 +249,6 @@ def main(argv: List[str] | None = None) -> int:
             print("FAIL: POSITION_LIFECYCLE_INVALID (failure artifact written)", file=sys.stderr)
             return 2
 
-    # Optional defined risk snapshot (for exposure dollars). If present but invalid, fail closed.
     defined_risk = None
     defined_risk_paths = defined_risk_day_paths_v1(day_utc)
     if defined_risk_paths.snapshot_path.exists() and defined_risk_paths.snapshot_path.is_file():
@@ -286,7 +271,6 @@ def main(argv: List[str] | None = None) -> int:
                     {"path": str(out.nav_path), "sha256": None},
                     {"path": str(out.exposure_path), "sha256": None},
                     {"path": str(out.attribution_path), "sha256": None},
-                    {"path": str(out.latest_path), "sha256": None},
                 ],
             )
             validate_against_repo_schema_v1(failure, REPO_ROOT, SCHEMA_FAILURE)
@@ -306,7 +290,6 @@ def main(argv: List[str] | None = None) -> int:
     status = "DEGRADED_MISSING_MARKS"
     reason_codes = ["BOOTSTRAP_NAV_CASH_ONLY", "MISSING_MARKS", "MISSING_INSTRUMENT_IDENTITY"]
 
-    # If positions schema is v3, instrument identity is present.
     try:
         sid = str(positions.get("schema_id") or "")
         sver = int(positions.get("schema_version") or 0)
@@ -328,7 +311,6 @@ def main(argv: List[str] | None = None) -> int:
     if defined_risk is not None:
         input_manifest.append({"type": "defined_risk_snapshot", "path": str(defined_risk_paths.snapshot_path), "sha256": _sha256_file(defined_risk_paths.snapshot_path), "day_utc": day_utc, "producer": "defined_risk_v1"})
 
-    # NAV remains cash-only (marks missing).
     components = [
         {
             "kind": "CASH",
@@ -364,7 +346,6 @@ def main(argv: List[str] | None = None) -> int:
     nav_bytes = canonical_json_bytes_v1(nav_obj) + b"\n"
     wr_nav = write_file_immutable_v1(path=out.nav_path, data=nav_bytes, create_dirs=True)
 
-    # Build lifecycle-derived buckets and position->bucket maps.
     underlyings = set()
     expiry_buckets = set()
     pos_underlying_by_id: Dict[str, str] = {}
@@ -395,7 +376,6 @@ def main(argv: List[str] | None = None) -> int:
                     pos_expiry_bucket_by_id[pid] = bucket
                     expiry_buckets.add(bucket)
 
-    # Build defined risk dollars map (position_id -> integer USD dollars).
     defined_risk_dollars_by_id: Dict[str, int] = {}
     any_defined_risk = False
     if isinstance(defined_risk, dict):
@@ -418,7 +398,6 @@ def main(argv: List[str] | None = None) -> int:
                 defined_risk_dollars_by_id[pid] = dollars
                 any_defined_risk = True
 
-    # Aggregate totals and buckets.
     defined_risk_total = 0
     by_underlying_sum: Dict[str, int] = {}
     by_expiry_bucket_sum: Dict[str, int] = {}
@@ -469,7 +448,6 @@ def main(argv: List[str] | None = None) -> int:
     exp_bytes = canonical_json_bytes_v1(exposure_obj) + b"\n"
     wr_exp = write_file_immutable_v1(path=out.exposure_path, data=exp_bytes, create_dirs=True)
 
-    # Attribution remains bootstrap, but include defined_risk_total as a deterministic proxy.
     items = positions.get("positions", {}).get("items", [])
     pos_count = len(items) if isinstance(items, list) else 0
 
@@ -499,28 +477,11 @@ def main(argv: List[str] | None = None) -> int:
     }
     validate_against_repo_schema_v1(attr_obj, REPO_ROOT, SCHEMA_ATTR)
     attr_bytes = canonical_json_bytes_v1(attr_obj) + b"\n"
-    wr_attr = write_file_immutable_v1(path=out.attribution_path, data=attr_bytes, create_dirs=True)
+    _ = write_file_immutable_v1(path=out.attribution_path, data=attr_bytes, create_dirs=True)
 
-    latest_obj: Dict[str, Any] = {
-        "schema_id": "C2_ACCOUNTING_LATEST_POINTER_V1",
-        "schema_version": 1,
-        "produced_utc": _produced_utc_idempotent(out.latest_path, produced_utc),
-        "day_utc": day_utc,
-        "producer": {"repo": producer_repo, "git_sha": producer_sha, "module": module},
-        "status": status,
-        "reason_codes": sorted(set(reason_codes)),
-        "pointers": {
-            "nav_path": str(out.nav_path),
-            "nav_sha256": wr_nav.sha256,
-            "exposure_path": str(out.exposure_path),
-            "exposure_sha256": wr_exp.sha256,
-            "attribution_path": str(out.attribution_path),
-            "attribution_sha256": wr_attr.sha256,
-        },
-    }
-    validate_against_repo_schema_v1(latest_obj, REPO_ROOT, SCHEMA_LATEST)
-    latest_bytes = canonical_json_bytes_v1(latest_obj) + b"\n"
-    _ = write_file_immutable_v1(path=out.latest_path, data=latest_bytes, create_dirs=True)
+    # NOTE: No global accounting_v1/latest.json write.
+    # Global latest pointers are incompatible with strict no-overwrite invariants.
+    # Allocation should consume day-scoped outputs instead.
 
     print("OK: ACCOUNTING_BOOTSTRAP_WRITTEN")
     return 0
