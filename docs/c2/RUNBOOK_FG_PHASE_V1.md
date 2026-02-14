@@ -11,11 +11,16 @@ scope: constellation_2_0
 
 # Runbook: Bundle F + G Phase v1
 
-This runbook is audit-grade and fail-closed. All commands are deterministic and must end at a shell prompt.
+This runbook is audit-grade and fail-closed.
+All commands are deterministic and must terminate at a shell prompt.
+No background execution. No implicit state.
 
-## 0) Preconditions (must pass)
+---
 
-### 0.1 Repo root + governance preflight
+# 0) Preconditions (must pass)
+
+## 0.1 Repo root + governance preflight
+
 **SAFE TO RUN**
 ```bash
 set -euo pipefail
