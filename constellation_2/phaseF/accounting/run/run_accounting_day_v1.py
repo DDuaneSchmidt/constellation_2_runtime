@@ -169,7 +169,7 @@ def main(argv: List[str] | None = None) -> int:
             status="FAIL_CORRUPT_INPUTS",
             reason_codes=["POSITIONS_EFFECTIVE_POINTER_INVALID"],
             input_manifest=[
-                {"type": "positions_effective_pointer", "path": str(pos_effective_day_paths_v1(day_utc).pointer_path), "sha256": "0" * 64, "day_utc": day_utc, "producer": "positions_effective_v1"}
+                {"type": "other", "path": str(pos_effective_day_paths_v1(day_utc).pointer_path), "sha256": "0" * 64, "day_utc": day_utc, "producer": "positions_effective_v1"}
             ],
             code="FAIL_CORRUPT_INPUTS",
             message=str(e),
@@ -194,7 +194,7 @@ def main(argv: List[str] | None = None) -> int:
             {"type": "cash_ledger", "path": str(cash_paths.snapshot_path), "sha256": "0" * 64, "day_utc": day_utc, "producer": "cash_ledger_v1"},
         ]
         if pos_ptr_path_used is not None:
-            input_manifest.append({"type": "positions_effective_pointer", "path": str(pos_ptr_path_used), "sha256": "0" * 64, "day_utc": day_utc, "producer": "positions_effective_v1"})
+            input_manifest.append({"type": "other", "path": str(pos_ptr_path_used), "sha256": "0" * 64, "day_utc": day_utc, "producer": "positions_effective_v1"})
         input_manifest.append({"type": "positions_truth", "path": str(pos_snapshot_path), "sha256": "0" * 64, "day_utc": day_utc, "producer": pos_producer})
 
         failure = _build_failure(
@@ -233,7 +233,7 @@ def main(argv: List[str] | None = None) -> int:
                 module=module,
                 status="FAIL_CORRUPT_INPUTS",
                 reason_codes=["POSITION_LIFECYCLE_INVALID"],
-                input_manifest=[{"type": "position_lifecycle", "path": str(lifecycle_paths.snapshot_path), "sha256": "0" * 64, "day_utc": day_utc, "producer": "position_lifecycle_v1"}],
+                input_manifest=[{"type": "lifecycle_truth", "path": str(lifecycle_paths.snapshot_path), "sha256": "0" * 64, "day_utc": day_utc, "producer": "position_lifecycle_v1"}],
                 code="FAIL_CORRUPT_INPUTS",
                 message=str(e),
                 details={"error": str(e)},
@@ -263,7 +263,7 @@ def main(argv: List[str] | None = None) -> int:
                 module=module,
                 status="FAIL_CORRUPT_INPUTS",
                 reason_codes=["DEFINED_RISK_INVALID"],
-                input_manifest=[{"type": "defined_risk_snapshot", "path": str(defined_risk_paths.snapshot_path), "sha256": "0" * 64, "day_utc": day_utc, "producer": "defined_risk_v1"}],
+                input_manifest=[{"type": "other", "path": str(defined_risk_paths.snapshot_path), "sha256": "0" * 64, "day_utc": day_utc, "producer": "defined_risk_v1"}],
                 code="FAIL_CORRUPT_INPUTS",
                 message=str(e),
                 details={"error": str(e)},
@@ -304,12 +304,12 @@ def main(argv: List[str] | None = None) -> int:
         {"type": "cash_ledger", "path": str(cash_paths.snapshot_path), "sha256": _sha256_file(cash_paths.snapshot_path), "day_utc": day_utc, "producer": "cash_ledger_v1"},
     ]
     if pos_ptr_path_used is not None:
-        input_manifest.append({"type": "positions_effective_pointer", "path": str(pos_ptr_path_used), "sha256": _sha256_file(pos_ptr_path_used), "day_utc": day_utc, "producer": "positions_effective_v1"})
+        input_manifest.append({"type": "other", "path": str(pos_ptr_path_used), "sha256": _sha256_file(pos_ptr_path_used), "day_utc": day_utc, "producer": "positions_effective_v1"})
     input_manifest.append({"type": "positions_truth", "path": str(pos_snapshot_path), "sha256": _sha256_file(pos_snapshot_path), "day_utc": day_utc, "producer": pos_producer})
     if lifecycle is not None:
-        input_manifest.append({"type": "position_lifecycle", "path": str(lifecycle_paths.snapshot_path), "sha256": _sha256_file(lifecycle_paths.snapshot_path), "day_utc": day_utc, "producer": "position_lifecycle_v1"})
+        input_manifest.append({"type": "lifecycle_truth", "path": str(lifecycle_paths.snapshot_path), "sha256": _sha256_file(lifecycle_paths.snapshot_path), "day_utc": day_utc, "producer": "position_lifecycle_v1"})
     if defined_risk is not None:
-        input_manifest.append({"type": "defined_risk_snapshot", "path": str(defined_risk_paths.snapshot_path), "sha256": _sha256_file(defined_risk_paths.snapshot_path), "day_utc": day_utc, "producer": "defined_risk_v1"})
+        input_manifest.append({"type": "other", "path": str(defined_risk_paths.snapshot_path), "sha256": _sha256_file(defined_risk_paths.snapshot_path), "day_utc": day_utc, "producer": "defined_risk_v1"})
 
     components = [
         {
