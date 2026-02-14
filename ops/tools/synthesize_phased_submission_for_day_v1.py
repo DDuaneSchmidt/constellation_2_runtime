@@ -80,6 +80,17 @@ def _require_iso_z(ts: str, name: str) -> None:
         raise ValueError(f"{name}_NOT_ISO_Z: {s!r}")
 
 
+def _u32_from_hex8(h8: str, name: str) -> int:
+    """
+    Deterministic non-negative integer suitable for broker_ids.* fields.
+    Input must be exactly 8 hex chars.
+    """
+    s = (h8 or "").strip()
+    if not re.fullmatch(r"^[a-f0-9]{8}$", s):
+        raise SystemExit(f"FAIL: {name}_NOT_HEX8: {s!r}")
+    return int(s, 16)
+
+
 def main(argv: list[str] | None = None) -> int:
     # Deterministic import bootstrap (no env vars required)
     repo_root = _repo_root_from_this_file_failclosed()
@@ -115,6 +126,11 @@ def main(argv: list[str] | None = None) -> int:
     # submission_id == binding_hash (PhaseD convention)
     submission_id = binding_hash
 
+    # Deterministic broker integer ids (schema allows integer|null; we choose integers)
+    # order_id_int := first 8 hex chars; perm_id_int := next 8 hex chars
+    order_id_int = _u32_from_hex8(submission_id[0:8], "BROKER_ORDER_ID_INT")
+    perm_id_int = _u32_from_hex8(submission_id[8:16], "BROKER_PERM_ID_INT")
+
     # Determine avg_price from plan.order_terms.limit_price when present; else "0.00"
     avg_price = "0.00"
     ot = plan.get("order_terms")
@@ -123,23 +139,24 @@ def main(argv: list[str] | None = None) -> int:
         if isinstance(lp, str) and lp.strip():
             avg_price = lp.strip()
 
-    # Create broker_submission_record.v2.json
+    # Create broker_submission_record.v2.json (must match schema exactly)
     broker_obj: Dict[str, Any] = {
         "schema_id": "broker_submission_record",
         "schema_version": "v2",
         "submission_id": submission_id,
-        "binding_hash": submission_id,
-        "broker": "IB_PAPER_SYNTH_V1",
-        "broker_ids": {"order_id": f"SYNTH-{submission_id[:12]}", "perm_id": f"SYNTH-{submission_id[:12]}"},
-        "status": "SUBMITTED",
         "submitted_at_utc": eval_time_utc,
+        "binding_hash": submission_id,
+        "broker": {"name": "INTERACTIVE_BROKERS", "environment": "PAPER"},
+        "status": "SUBMITTED",
+        "broker_ids": {"order_id": order_id_int, "perm_id": perm_id_int},
     }
 
     # Hash broker record deterministically
     broker_bytes = _canon_bytes(broker_obj)
     broker_sha = _sha256_bytes(broker_bytes)
 
-    # Create execution_event_record.v1.json
+    # Create execution_event_record.v1.json (broker_order_id/perm_id are STRINGS per schema)
+    synth_id_str = f"SYNTH-{submission_id[:12]}"
     evt_obj: Dict[str, Any] = {
         "schema_id": "execution_event_record",
         "schema_version": "v1",
@@ -147,8 +164,8 @@ def main(argv: list[str] | None = None) -> int:
         "event_time_utc": eval_time_utc,
         "binding_hash": submission_id,
         "broker_submission_hash": broker_sha,
-        "broker_order_id": str(broker_obj["broker_ids"]["order_id"]),
-        "perm_id": str(broker_obj["broker_ids"]["perm_id"]),
+        "broker_order_id": synth_id_str,
+        "perm_id": synth_id_str,
         "status": "FILLED",
         "filled_qty": int(args.filled_qty),
         "avg_price": avg_price,
