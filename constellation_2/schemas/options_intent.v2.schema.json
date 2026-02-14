@@ -1,0 +1,265 @@
+{
+  "$id": "https://constellation.local/schemas/options_intent.v2.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OptionsIntent v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "intent_id",
+    "created_at_utc",
+    "engine",
+    "underlying",
+    "strategy",
+    "risk",
+    "exit_policy",
+    "selection_policy"
+  ],
+  "properties": {
+    "schema_id": { "const": "options_intent" },
+    "schema_version": { "const": "v2" },
+
+    "intent_id": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 128,
+      "description": "Deterministic intent identifier (hash-derived preferred; random UUID forbidden by policy)."
+    },
+
+    "created_at_utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp when intent was created."
+    },
+
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine_id", "suite", "mode"],
+      "properties": {
+        "engine_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "description": "Engine identifier (e.g., E78, M34, etc)."
+        },
+        "suite": {
+          "type": "string",
+          "enum": ["C2_OPTIONS_7"],
+          "description": "Fixed suite identifier for the options-only 7-engine suite."
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["PAPER", "LIVE"],
+          "description": "Execution mode intent was authored for."
+        }
+      }
+    },
+
+    "underlying": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["symbol", "currency"],
+      "properties": {
+        "symbol": { "type": "string", "minLength": 1, "maxLength": 16 },
+        "currency": { "type": "string", "minLength": 3, "maxLength": 3 }
+      }
+    },
+
+    "strategy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "structure",
+        "right",
+        "direction"
+      ],
+      "properties": {
+        "structure": {
+          "type": "string",
+          "enum": ["VERTICAL_SPREAD"],
+          "description": "Only one structure is supported at first; future structures require new schema versions."
+        },
+        "right": { "type": "string", "enum": ["CALL", "PUT"] },
+        "direction": {
+          "type": "string",
+          "enum": ["CREDIT", "DEBIT"],
+          "description": "CREDIT means net credit (short spread), DEBIT means net debit (long spread)."
+        }
+      }
+    },
+
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_risk_usd",
+        "max_contracts",
+        "multiplier"
+      ],
+      "properties": {
+        "max_risk_usd": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$",
+          "description": "Maximum allowed risk in USD as decimal string."
+        },
+        "max_contracts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "multiplier": {
+          "type": "integer",
+          "enum": [100],
+          "description": "US equity option multiplier is 100."
+        }
+      }
+    },
+
+    "exit_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy_id",
+        "profit_target",
+        "stop_loss",
+        "time_exit"
+      ],
+      "properties": {
+        "policy_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Deterministic identifier for the exit policy configuration."
+        },
+
+        "profit_target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "take_profit_pct"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "take_profit_pct": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "description": "Percent of max profit to take. Interpretation depends on CREDIT/DEBIT but must be deterministic."
+            }
+          }
+        },
+
+        "stop_loss": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "stop_loss_pct"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "stop_loss_pct": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "description": "Percent loss threshold relative to entry premium. Deterministic interpretation required."
+            }
+          }
+        },
+
+        "time_exit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "max_holding_days"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "max_holding_days": { "type": "integer", "minimum": 0, "maximum": 365 }
+          }
+        },
+
+        "regime_exit": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["enabled", "regime_blocklist"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "regime_blocklist": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1, "maxLength": 64 }
+            }
+          }
+        }
+      }
+    },
+
+    "selection_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expiry_policy",
+        "width_policy",
+        "liquidity_policy",
+        "pricing_policy"
+      ],
+      "properties": {
+        "expiry_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "target_dte_min", "target_dte_max"],
+          "properties": {
+            "mode": { "type": "string", "enum": ["DTE_WINDOW"] },
+            "target_dte_min": { "type": "integer", "minimum": 0, "maximum": 3650 },
+            "target_dte_max": { "type": "integer", "minimum": 0, "maximum": 3650 }
+          }
+        },
+
+        "width_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width_points"],
+          "properties": {
+            "width_points": {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "description": "Vertical width in underlying points, as decimal string."
+            }
+          }
+        },
+
+        "liquidity_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["min_open_interest", "min_volume", "max_bid_ask_spread"],
+          "properties": {
+            "min_open_interest": { "type": "integer", "minimum": 0 },
+            "min_volume": { "type": "integer", "minimum": 0 },
+            "max_bid_ask_spread": {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$"
+            }
+          }
+        },
+
+        "pricing_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["limit_offset", "tick_rounding"],
+          "properties": {
+            "limit_offset": {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$",
+              "description": "Deterministic offset applied to mid to form limit."
+            },
+            "tick_rounding": {
+              "type": "string",
+              "enum": ["ROUND_DOWN", "ROUND_UP"],
+              "description": "ROUND_DOWN for credit, ROUND_UP for debit (enforced by mapping)."
+            }
+          }
+        }
+      }
+    },
+
+    "canonical_json_hash": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "$id": "https://constellation.local/schemas/position_lifecycle.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PositionLifecycle v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "position_id",
+    "underlying",
+    "structure",
+    "events"
+  ],
+  "properties": {
+    "schema_id": { "const": "position_lifecycle" },
+    "schema_version": { "const": "v1" },
+
+    "position_id": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 128,
+      "description": "Deterministic position identifier (hash-derived preferred)."
+    },
+
+    "underlying": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["symbol", "currency"],
+      "properties": {
+        "symbol": { "type": "string", "minLength": 1, "maxLength": 16 },
+        "currency": { "type": "string", "minLength": 3, "maxLength": 3 }
+      }
+    },
+
+    "structure": {
+      "type": "string",
+      "enum": ["VERTICAL_SPREAD"]
+    },
+
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/event" },
+      "description": "Append-only event list (immutable once written). Ordering is chronological."
+    },
+
+    "canonical_json_hash": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+
+  "$defs": {
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "event_time_utc",
+        "event_type",
+        "broker_submission_hash",
+        "summary"
+      ],
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 128,
+          "description": "Deterministic event identifier (hash-derived preferred)."
+        },
+
+        "event_time_utc": { "type": "string", "format": "date-time" },
+
+        "event_type": {
+          "type": "string",
+          "enum": ["OPEN", "ADJUST", "CLOSE", "EXPIRE", "ASSIGNMENT", "OTHER"]
+        },
+
+        "broker_submission_hash": {
+          "type": ["string", "null"],
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "Hash pointer to BrokerSubmissionRecord when applicable."
+        },
+
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        }
+      }
+    }
+  }
+}

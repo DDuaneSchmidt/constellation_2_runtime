@@ -1,0 +1,84 @@
+{
+  "schema_id": "options_chain_snapshot",
+  "schema_version": "v1",
+  "as_of_utc": "2026-02-13T21:50:00Z",
+  "underlying": {
+    "symbol": "SPY",
+    "spot_price": "500.00",
+    "spot_as_of_utc": "2026-02-13T21:50:00Z"
+  },
+  "contracts": [
+    {
+      "contract_key": "SPY|2026-03-20T00:00:00Z|PUT|495.00",
+      "expiry_utc": "2026-03-20T00:00:00Z",
+      "strike": "495.00",
+      "right": "PUT",
+      "bid": "1.10",
+      "ask": "1.20",
+      "open_interest": 1200,
+      "volume": 300,
+      "ib": {
+        "conId": 111111111,
+        "localSymbol": "SPY  260320P00495000",
+        "tradingClass": "SPY",
+        "exchange": "SMART",
+        "currency": "USD",
+        "multiplier": 100
+      }
+    },
+    {
+      "contract_key": "SPY|2026-03-20T00:00:00Z|PUT|490.00",
+      "expiry_utc": "2026-03-20T00:00:00Z",
+      "strike": "490.00",
+      "right": "PUT",
+      "bid": "0.70",
+      "ask": "0.80",
+      "open_interest": 1500,
+      "volume": 260,
+      "ib": {
+        "conId": 222222222,
+        "localSymbol": "SPY  260320P00490000",
+        "tradingClass": "SPY",
+        "exchange": "SMART",
+        "currency": "USD",
+        "multiplier": 100
+      }
+    }
+  ],
+  "derived": {
+    "derivation_policy": {
+      "dte_method": "CALENDAR_DAYS_UTC",
+      "liquidity_policy": {
+        "min_open_interest": 500,
+        "min_volume": 50,
+        "max_bid_ask_spread": "0.10"
+      },
+      "pricing_policy": {
+        "mid_definition": "(bid+ask)/2"
+      }
+    },
+    "features": [
+      {
+        "contract_key": "SPY|2026-03-20T00:00:00Z|PUT|495.00",
+        "dte_days": 35,
+        "is_liquid": true,
+        "bid_ask_spread": "0.10",
+        "mid": "1.15"
+      },
+      {
+        "contract_key": "SPY|2026-03-20T00:00:00Z|PUT|490.00",
+        "dte_days": 35,
+        "is_liquid": true,
+        "bid_ask_spread": "0.10",
+        "mid": "0.75"
+      }
+    ]
+  },
+  "provenance": {
+    "source": "SAMPLE_ONLY",
+    "capture_method": "SYNTHETIC_SAMPLE",
+    "capture_host": "LOCAL",
+    "capture_run_id": "sample_run_20260213T215000Z"
+  },
+  "canonical_json_hash": null
+}

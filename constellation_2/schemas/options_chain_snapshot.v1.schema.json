@@ -1,0 +1,193 @@
+{
+  "$id": "https://constellation.local/schemas/options_chain_snapshot.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OptionsChainSnapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "as_of_utc",
+    "underlying",
+    "contracts",
+    "provenance"
+  ],
+  "properties": {
+    "schema_id": { "const": "options_chain_snapshot" },
+    "schema_version": { "const": "v1" },
+
+    "as_of_utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp representing the market snapshot time (Z-suffix required by policy)."
+    },
+
+    "underlying": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["symbol", "spot_price", "spot_as_of_utc"],
+      "properties": {
+        "symbol": { "type": "string", "minLength": 1, "maxLength": 16 },
+        "spot_price": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$",
+          "description": "Spot price as a decimal string for determinism."
+        },
+        "spot_as_of_utc": { "type": "string", "format": "date-time" }
+      }
+    },
+
+    "contracts": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/contract" },
+      "description": "All option contracts in the snapshot. Ordering MUST be deterministic in implementation."
+    },
+
+    "derived": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["derivation_policy", "features"],
+      "properties": {
+        "derivation_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["dte_method", "liquidity_policy", "pricing_policy"],
+          "properties": {
+            "dte_method": {
+              "type": "string",
+              "enum": ["CALENDAR_DAYS_UTC"],
+              "description": "DTE computed as calendar-day difference between as_of_utc and expiry_utc date."
+            },
+            "liquidity_policy": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["min_open_interest", "min_volume", "max_bid_ask_spread"],
+              "properties": {
+                "min_open_interest": { "type": "integer", "minimum": 0 },
+                "min_volume": { "type": "integer", "minimum": 0 },
+                "max_bid_ask_spread": {
+                  "type": "string",
+                  "pattern": "^[0-9]+(\\.[0-9]+)?$",
+                  "description": "Absolute spread threshold as decimal string."
+                }
+              }
+            },
+            "pricing_policy": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mid_definition"],
+              "properties": {
+                "mid_definition": {
+                  "type": "string",
+                  "enum": ["(bid+ask)/2"],
+                  "description": "Defines mid calculation."
+                }
+              }
+            }
+          }
+        },
+        "features": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/derived_feature" }
+        }
+      }
+    },
+
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "capture_method",
+        "capture_host",
+        "capture_run_id"
+      ],
+      "properties": {
+        "source": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "capture_method": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "capture_host": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "capture_run_id": { "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    },
+
+    "canonical_json_hash": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+
+  "$defs": {
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_key",
+        "expiry_utc",
+        "strike",
+        "right",
+        "bid",
+        "ask",
+        "open_interest",
+        "volume",
+        "ib"
+      ],
+      "properties": {
+        "contract_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Deterministic unique key for the contract (e.g. SYMBOL|EXPIRY|RIGHT|STRIKE)."
+        },
+        "expiry_utc": { "type": "string", "format": "date-time" },
+        "strike": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$",
+          "description": "Strike as decimal string for determinism."
+        },
+        "right": { "type": "string", "enum": ["CALL", "PUT"] },
+        "bid": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+        "ask": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+        "open_interest": { "type": "integer", "minimum": 0 },
+        "volume": { "type": "integer", "minimum": 0 },
+
+        "ib": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["conId", "localSymbol", "tradingClass", "exchange", "currency", "multiplier"],
+          "properties": {
+            "conId": { "type": "integer", "minimum": 1 },
+            "localSymbol": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "tradingClass": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "exchange": { "type": "string", "minLength": 1, "maxLength": 16 },
+            "currency": { "type": "string", "minLength": 3, "maxLength": 3 },
+            "multiplier": {
+              "type": "integer",
+              "enum": [100],
+              "description": "Options contract multiplier. For US equity options this is 100."
+            }
+          }
+        }
+      }
+    },
+
+    "derived_feature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_key", "dte_days", "is_liquid"],
+      "properties": {
+        "contract_key": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "dte_days": { "type": "integer", "minimum": 0, "maximum": 3650 },
+        "is_liquid": { "type": "boolean" },
+        "bid_ask_spread": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]+(\\.[0-9]+)?$"
+        },
+        "mid": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]+(\\.[0-9]+)?$"
+        }
+      }
+    }
+  }
+}

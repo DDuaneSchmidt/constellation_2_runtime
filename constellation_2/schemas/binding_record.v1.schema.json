@@ -1,0 +1,80 @@
+{
+  "$id": "https://constellation.local/schemas/binding_record.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BindingRecord v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "binding_id",
+    "created_at_utc",
+    "plan_hash",
+    "mapping_ledger_hash",
+    "freshness_cert_hash",
+    "broker_payload_digest",
+    "preflight"
+  ],
+  "properties": {
+    "schema_id": { "const": "binding_record" },
+    "schema_version": { "const": "v1" },
+
+    "binding_id": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 128,
+      "description": "Deterministic binding identifier (hash-derived preferred)."
+    },
+
+    "created_at_utc": { "type": "string", "format": "date-time" },
+
+    "plan_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "mapping_ledger_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "freshness_cert_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+
+    "broker_payload_digest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["digest_sha256", "format", "notes"],
+      "properties": {
+        "digest_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "format": {
+          "type": "string",
+          "enum": ["IB_BAG_ORDER_V1"],
+          "description": "Declared broker payload format. Only IB vertical spread BAG orders supported initially."
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "Human-readable summary of what was bound (no secrets)."
+        }
+      }
+    },
+
+    "preflight": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "validated_schema",
+        "validated_invariants",
+        "validated_freshness",
+        "defined_risk_proven",
+        "exit_policy_present"
+      ],
+      "properties": {
+        "validated_schema": { "type": "boolean" },
+        "validated_invariants": { "type": "boolean" },
+        "validated_freshness": { "type": "boolean" },
+        "defined_risk_proven": { "type": "boolean" },
+        "exit_policy_present": { "type": "boolean" }
+      }
+    },
+
+    "canonical_json_hash": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}
+

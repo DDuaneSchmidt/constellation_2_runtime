@@ -1,0 +1,155 @@
+{
+  "$id": "https://constellation.local/schemas/order_plan.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OrderPlan v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "plan_id",
+    "created_at_utc",
+    "intent_hash",
+    "structure",
+    "underlying",
+    "legs",
+    "order_terms",
+    "exit_policy_ref"
+  ],
+  "properties": {
+    "schema_id": { "const": "order_plan" },
+    "schema_version": { "const": "v1" },
+
+    "plan_id": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 128,
+      "description": "Deterministic plan identifier (hash-derived preferred)."
+    },
+
+    "created_at_utc": { "type": "string", "format": "date-time" },
+
+    "intent_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA-256 of canonical OptionsIntent."
+    },
+
+    "structure": {
+      "type": "string",
+      "enum": ["VERTICAL_SPREAD"],
+      "description": "Only vertical spreads supported in v1."
+    },
+
+    "underlying": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["symbol", "currency"],
+      "properties": {
+        "symbol": { "type": "string", "minLength": 1, "maxLength": 16 },
+        "currency": { "type": "string", "minLength": 3, "maxLength": 3 }
+      }
+    },
+
+    "legs": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 4,
+      "items": { "$ref": "#/$defs/leg" },
+      "description": "Order legs. For vertical spread v1, exactly 2 legs required."
+    },
+
+    "order_terms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order_type",
+        "limit_price",
+        "time_in_force",
+        "is_credit",
+        "tick_rounding"
+      ],
+      "properties": {
+        "order_type": { "type": "string", "enum": ["LIMIT"] },
+
+        "limit_price": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$",
+          "description": "Limit price as decimal string. For credit spreads, this is the credit; for debit spreads, the debit."
+        },
+
+        "is_credit": {
+          "type": "boolean",
+          "description": "True for credit spreads, false for debit spreads."
+        },
+
+        "tick_rounding": {
+          "type": "string",
+          "enum": ["ROUND_DOWN", "ROUND_UP"],
+          "description": "Deterministic rounding rule applied to computed limit."
+        },
+
+        "time_in_force": { "type": "string", "enum": ["DAY", "GTC"] }
+      }
+    },
+
+    "exit_policy_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_id"],
+      "properties": {
+        "policy_id": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+
+    "risk_proof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["defined_risk_proven", "max_loss_usd", "width_points", "multiplier", "contracts"],
+      "properties": {
+        "defined_risk_proven": { "type": "boolean" },
+        "max_loss_usd": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$",
+          "description": "Deterministically computed max loss for the plan."
+        },
+        "width_points": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$"
+        },
+        "multiplier": { "type": "integer", "enum": [100] },
+        "contracts": { "type": "integer", "minimum": 1, "maximum": 1000 }
+      }
+    },
+
+    "canonical_json_hash": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+
+  "$defs": {
+    "leg": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "ratio",
+        "right",
+        "expiry_utc",
+        "strike",
+        "ib_conId",
+        "ib_localSymbol"
+      ],
+      "properties": {
+        "action": { "type": "string", "enum": ["BUY", "SELL"] },
+        "ratio": { "type": "integer", "enum": [1] },
+        "right": { "type": "string", "enum": ["CALL", "PUT"] },
+        "expiry_utc": { "type": "string", "format": "date-time" },
+        "strike": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+        "ib_conId": { "type": "integer", "minimum": 1 },
+        "ib_localSymbol": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    }
+  }
+}

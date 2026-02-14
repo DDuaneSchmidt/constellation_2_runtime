@@ -1,0 +1,77 @@
+{
+  "$id": "https://constellation.local/schemas/broker_submission_record.v2.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BrokerSubmissionRecord v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "submission_id",
+    "submitted_at_utc",
+    "binding_hash",
+    "broker",
+    "status",
+    "broker_ids"
+  ],
+  "properties": {
+    "schema_id": { "const": "broker_submission_record" },
+    "schema_version": { "const": "v2" },
+
+    "submission_id": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 128,
+      "description": "Deterministic submission identifier (hash-derived preferred)."
+    },
+
+    "submitted_at_utc": { "type": "string", "format": "date-time" },
+
+    "binding_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA-256 of canonical BindingRecord."
+    },
+
+    "broker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "environment"],
+      "properties": {
+        "name": { "type": "string", "enum": ["INTERACTIVE_BROKERS"] },
+        "environment": { "type": "string", "enum": ["PAPER", "LIVE"] }
+      }
+    },
+
+    "status": {
+      "type": "string",
+      "enum": ["SUBMITTED", "ACKNOWLEDGED", "REJECTED", "CANCELLED", "UNKNOWN"],
+      "description": "Submission status at time of recording."
+    },
+
+    "broker_ids": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order_id", "perm_id"],
+      "properties": {
+        "order_id": { "type": ["integer", "null"], "minimum": 0 },
+        "perm_id": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+
+    "error": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": ["integer", "string"] },
+        "message": { "type": "string", "minLength": 1, "maxLength": 4000 }
+      }
+    },
+
+    "canonical_json_hash": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

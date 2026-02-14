@@ -1,0 +1,87 @@
+{
+  "$id": "https://constellation.local/schemas/freshness_certificate.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FreshnessCertificate v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "issued_at_utc",
+    "valid_from_utc",
+    "valid_until_utc",
+    "snapshot_hash",
+    "snapshot_as_of_utc",
+    "source",
+    "capture_method",
+    "policy"
+  ],
+  "properties": {
+    "schema_id": { "const": "freshness_certificate" },
+    "schema_version": { "const": "v1" },
+
+    "issued_at_utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp when certificate was issued."
+    },
+    "valid_from_utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp from which this certificate is valid."
+    },
+    "valid_until_utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp after which this certificate is invalid."
+    },
+
+    "snapshot_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA-256 hash of the canonical OptionsChainSnapshot bound to this certificate."
+    },
+    "snapshot_as_of_utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "The as_of_utc timestamp inside the bound chain snapshot."
+    },
+
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "capture_method": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_age_seconds",
+        "clock_skew_tolerance_seconds"
+      ],
+      "properties": {
+        "max_age_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "clock_skew_tolerance_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3600
+        }
+      }
+    },
+
+    "canonical_json_hash": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

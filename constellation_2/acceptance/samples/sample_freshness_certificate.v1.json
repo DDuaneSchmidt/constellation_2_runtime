@@ -1,0 +1,16 @@
+{
+  "schema_id": "freshness_certificate",
+  "schema_version": "v1",
+  "issued_at_utc": "2026-02-13T21:50:05Z",
+  "valid_from_utc": "2026-02-13T21:50:00Z",
+  "valid_until_utc": "2026-02-13T21:55:00Z",
+  "snapshot_hash": "ce958807d4bca62dae85bb314c1687f43e91561b5a5fbe68f7809485026f00f4",
+  "snapshot_as_of_utc": "2026-02-13T21:50:00Z",
+  "source": "SAMPLE_ONLY",
+  "capture_method": "SYNTHETIC_SAMPLE",
+  "policy": {
+    "max_age_seconds": 300,
+    "clock_skew_tolerance_seconds": 5
+  },
+  "canonical_json_hash": null
+}
