@@ -16,7 +16,7 @@ from constellation_2.phaseF.positions.lib.paths_v2 import REPO_ROOT, day_paths_v
 from constellation_2.phaseF.positions.lib.write_failure_v1 import build_failure_obj_v1, write_failure_immutable_v1
 
 SCHEMA_POSITIONS_SNAPSHOT_V2 = "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_snapshot.v2.schema.json"
-SCHEMA_POSITIONS_LATEST_PTR_V1 = "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_latest_pointer.v1.schema.json"
+SCHEMA_POSITIONS_LATEST_PTR_V2 = "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_latest_pointer.v2.schema.json"
 
 
 def _utc_now_iso() -> str:
@@ -55,7 +55,7 @@ def _read_json_obj(path: Path) -> Dict[str, Any]:
     return obj
 
 
-def build_latest_ptr_obj_v1(
+def build_latest_ptr_obj_v2(
     *,
     produced_utc: str,
     day_utc: str,
@@ -68,8 +68,8 @@ def build_latest_ptr_obj_v1(
     snapshot_sha256: str,
 ) -> Dict[str, Any]:
     return {
-        "schema_id": "C2_POSITIONS_LATEST_POINTER_V1",
-        "schema_version": 1,
+        "schema_id": "C2_POSITIONS_LATEST_POINTER_V2",
+        "schema_version": 2,
         "produced_utc": produced_utc,
         "day_utc": day_utc,
         "producer": {"repo": producer_repo, "git_sha": producer_git_sha, "module": producer_module},
@@ -77,6 +77,7 @@ def build_latest_ptr_obj_v1(
         "reason_codes": reason_codes,
         "pointers": {"snapshot_path": snapshot_path, "snapshot_sha256": snapshot_sha256},
     }
+
 
 
 def main(argv: List[str] | None = None) -> int:
@@ -184,7 +185,7 @@ def main(argv: List[str] | None = None) -> int:
         print(f"FAIL: {e}", file=sys.stderr)
         return 4
 
-    latest_obj = build_latest_ptr_obj_v1(
+    latest_obj = build_latest_ptr_obj_v2(
         produced_utc=f"{day_utc}T00:00:00Z",
         day_utc=day_utc,
         producer_repo=producer_repo,
@@ -196,7 +197,7 @@ def main(argv: List[str] | None = None) -> int:
         snapshot_sha256=wr_snap.sha256,
     )
 
-    validate_against_repo_schema_v1(latest_obj, REPO_ROOT, SCHEMA_POSITIONS_LATEST_PTR_V1)
+    validate_against_repo_schema_v1(latest_obj, REPO_ROOT, SCHEMA_POSITIONS_LATEST_PTR_V2)
     latest_bytes = canonical_json_bytes_v1(latest_obj) + b"\n"
     try:
         _ = write_file_immutable_v1(path=dp_pos.latest_path, data=latest_bytes, create_dirs=True)
