@@ -1,0 +1,6 @@
+# Phase A: ignore Python bytecode caches everywhere under this subtree
+__pycache__/
+*.pyc
+
+# Phase A outputs are local-only (also ignored by outputs/.gitignore)
+outputs/
