@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_CASH_LEDGER_SNAPSHOT_V1",
+  "title": "C2 Cash Ledger Snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "day_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "input_manifest",
+    "snapshot"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_CASH_LEDGER_SNAPSHOT_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+
+    "produced_utc": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "module": { "type": "string", "minLength": 1 },
+        "build": { "type": "object" }
+      }
+    },
+
+    "status": {
+      "type": "string",
+      "enum": [
+        "OK",
+        "DEGRADED_OPERATOR_INPUT",
+        "FAIL_CORRUPT_INPUTS",
+        "FAIL_SCHEMA_VIOLATION"
+      ]
+    },
+
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256", "day_utc", "producer"],
+        "properties": {
+          "type": { "type": "string", "enum": ["broker_account_values", "operator_statement", "other"] },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "day_utc": { "anyOf": [{ "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }, { "type": "null" }] },
+          "producer": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observed_at_utc",
+        "currency",
+        "cash_total_cents",
+        "nlv_total_cents",
+        "available_funds_cents",
+        "excess_liquidity_cents",
+        "account_id",
+        "notes"
+      ],
+      "properties": {
+        "observed_at_utc": { "type": "string", "minLength": 1 },
+        "currency": { "type": "string", "minLength": 1 },
+
+        "cash_total_cents": { "type": "integer" },
+        "nlv_total_cents": { "type": "integer" },
+
+        "available_funds_cents": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+        "excess_liquidity_cents": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+
+        "account_id": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}
