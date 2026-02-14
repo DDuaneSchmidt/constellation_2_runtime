@@ -16,6 +16,7 @@ REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 TRUTH_ROOT = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
 
 ACCOUNTING_LATEST = (TRUTH_ROOT / "accounting_v1" / "latest.json").resolve()
+POSITIONS_EFFECTIVE_LATEST = (TRUTH_ROOT / "positions_v1" / "effective_v1" / "latest_effective.json").resolve()
 
 ALLOC_ROOT = (TRUTH_ROOT / "allocation_v1").resolve()
 SCHEMA_SUMMARY = "governance/04_DATA/SCHEMAS/C2/ALLOCATION/allocation_summary.v1.schema.json"
@@ -89,6 +90,16 @@ def main(argv: List[str] | None = None) -> int:
         print(f"FAIL: ACCOUNTING_LATEST_MISSING_OR_INVALID: {e}", file=sys.stderr)
         return 2
 
+    # Optional: include positions effective latest pointer for traceability.
+    pos_eff_latest_sha: Optional[str] = None
+    if POSITIONS_EFFECTIVE_LATEST.exists() and POSITIONS_EFFECTIVE_LATEST.is_file():
+        try:
+            _ = _read_json_obj(POSITIONS_EFFECTIVE_LATEST)
+            pos_eff_latest_sha = _sha256_file(POSITIONS_EFFECTIVE_LATEST)
+        except Exception as e:
+            print(f"FAIL: POSITIONS_EFFECTIVE_LATEST_INVALID: {e}", file=sys.stderr)
+            return 2
+
     reason_codes: List[str] = []
     notes: List[str] = []
 
@@ -99,6 +110,14 @@ def main(argv: List[str] | None = None) -> int:
         reason_codes.append("G_ACCOUNTING_OK")
         notes.append("bootstrap: no intents processed")
 
+    input_manifest: List[Dict[str, Any]] = [
+        {"type": "accounting_latest", "path": str(ACCOUNTING_LATEST), "sha256": acc_sha, "day_utc": day_utc, "producer": "bundle_f_accounting_v1"}
+    ]
+    if pos_eff_latest_sha is not None:
+        input_manifest.append(
+            {"type": "positions_effective_latest", "path": str(POSITIONS_EFFECTIVE_LATEST), "sha256": pos_eff_latest_sha, "day_utc": day_utc, "producer": "positions_effective_v1"}
+        )
+
     summary_obj: Dict[str, Any] = {
         "schema_id": "C2_ALLOCATION_SUMMARY_V1",
         "schema_version": 1,
@@ -107,9 +126,7 @@ def main(argv: List[str] | None = None) -> int:
         "producer": {"repo": producer_repo, "git_sha": producer_sha, "module": module},
         "status": "OK",
         "reason_codes": reason_codes,
-        "input_manifest": [
-            {"type": "accounting_latest", "path": str(ACCOUNTING_LATEST), "sha256": acc_sha, "day_utc": day_utc, "producer": "bundle_f_accounting_v1"}
-        ],
+        "input_manifest": input_manifest,
         "summary": {"decisions": [], "counts": {"allow": 0, "block": 0}, "notes": notes},
     }
 

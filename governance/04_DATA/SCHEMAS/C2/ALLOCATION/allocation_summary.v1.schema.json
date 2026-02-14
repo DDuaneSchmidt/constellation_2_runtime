@@ -61,6 +61,7 @@
             "type": "string",
             "enum": [
               "accounting_latest",
+              "positions_effective_latest",
               "positions_truth",
               "risk_budget",
               "engine_mode_registry",
