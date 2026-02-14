@@ -70,6 +70,31 @@ def _lock_git_sha_if_exists(existing_path: Path, provided_sha: str) -> Optional[
     return None
 
 
+def _day_scoped_sha_lock_from_manifests_dir(manifests_day_dir: Path, provided_sha: str) -> Optional[str]:
+    """
+    Day-scoped producer SHA lock.
+
+    If the manifests day dir contains any JSON artifacts (manifest or patch),
+    read the first one deterministically and enforce producer.git_sha == provided_sha.
+
+    Returns the existing sha if it mismatches; otherwise None.
+    """
+    if not manifests_day_dir.exists() or not manifests_day_dir.is_dir():
+        return None
+
+    files = sorted([p for p in manifests_day_dir.iterdir() if p.is_file() and p.name.endswith(".json")], key=lambda p: p.name)
+    if not files:
+        return None
+
+    ex = _read_json_obj(files[0])
+    prod = ex.get("producer")
+    ex_sha = prod.get("git_sha") if isinstance(prod, dict) else None
+    if isinstance(ex_sha, str) and ex_sha.strip():
+        if ex_sha.strip() != provided_sha:
+            return ex_sha.strip()
+    return None
+
+
 def _derive_day_utc_from_inputs(broker_obj: Dict[str, Any], exec_obj: Optional[Dict[str, Any]], veto_obj: Optional[Dict[str, Any]]) -> str:
     """
     Deterministically derive day_utc from the first valid timestamp found across broker/exec/veto objects.
@@ -150,8 +175,8 @@ def main(argv: List[str] | None = None) -> int:
 
     dp = day_paths_v1(day_utc)
 
-    # Producer sha lock on reruns: if latest already exists, must match.
-    ex_sha = _lock_git_sha_if_exists(dp.latest_path, producer_sha)
+    # Producer sha lock on reruns: DAY-SCOPED (manifests/<day>/), not global latest.json.
+    ex_sha = _day_scoped_sha_lock_from_manifests_dir(dp.manifests_day_dir, producer_sha)
     if ex_sha is not None:
         print(f"FAIL: PRODUCER_GIT_SHA_MISMATCH_FOR_EXISTING_DAY: existing={ex_sha} provided={producer_sha}", file=sys.stderr)
         return 4
@@ -339,7 +364,7 @@ def main(argv: List[str] | None = None) -> int:
     validate_against_repo_schema_v1(latest_obj, REPO_ROOT, SCHEMA_LATEST_POINTER)
     latest_bytes = canonical_json_bytes_v1(latest_obj) + b"\n"
 
-    # Idempotent latest: if exists, do not rewrite. Producer sha lock already checked.
+    # Idempotent latest: if exists, do not rewrite.
     if not dp.latest_path.exists():
         _ = write_file_immutable_v1(path=dp.latest_path, data=latest_bytes, create_dirs=True)
 
