@@ -10,6 +10,10 @@ Single-writer:
 Fail-closed:
 - On any failure, writes NOTHING (no output dir, no partial files).
 
+Output directory rule:
+- The parent directory of --out_dir MUST already exist and be a directory.
+  (Matches Phase A operational style: required output base must exist.)
+
 Usage (module form required):
   python3 -m constellation_2.phaseB.tools.c2_build_chain_truth_v1 \
     --raw_input <path> \
@@ -20,12 +24,6 @@ Usage (module form required):
 Outputs (only if all steps succeed):
 - <out_dir>/options_chain_snapshot.v1.json
 - <out_dir>/freshness_certificate.v1.json
-
-Determinism:
-- No network calls
-- No use of system time for artifact content
-- Canonical JSON writes (sorted keys, no whitespace)
-- canonical_json_hash fields are computed deterministically and injected before write
 """
 
 from __future__ import annotations
@@ -112,6 +110,11 @@ def main() -> int:
 
     raw_p = _must_file(Path(args.raw_input).expanduser().resolve())
     out_dir = Path(args.out_dir).expanduser().resolve()
+
+    # Parent directory must exist (fail-closed, no implicit directory creation beyond out_dir itself)
+    out_parent = out_dir.parent
+    if not out_parent.exists() or not out_parent.is_dir():
+        raise CliError(f"Output parent directory missing: {out_parent}")
 
     # Single-writer: refuse overwrite
     if out_dir.exists():
