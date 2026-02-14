@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_POSITIONS_LATEST_POINTER_V3",
+  "title": "C2 Positions Latest Pointer v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "day_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "pointers"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_POSITIONS_LATEST_POINTER_V3" },
+    "schema_version": { "type": "integer", "const": 3 },
+
+    "produced_utc": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "module": { "type": "string", "minLength": 1 },
+        "build": { "type": "object" }
+      }
+    },
+
+    "status": {
+      "type": "string",
+      "enum": [
+        "OK",
+        "DEGRADED_MISSING_LIFECYCLE",
+        "FAIL_CORRUPT_INPUTS",
+        "FAIL_SCHEMA_VIOLATION",
+        "FAIL_UNDEFINED_POSITION_IDENTITY"
+      ]
+    },
+
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+
+    "pointers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshot_path", "snapshot_sha256"],
+      "properties": {
+        "snapshot_path": { "type": "string", "minLength": 1 },
+        "snapshot_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
+  }
+}
