@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_ACCOUNTING_ATTRIBUTION_V1",
+  "title": "C2 Accounting Engine Attribution Artifact v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "day_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "input_manifest",
+    "attribution"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_ACCOUNTING_ATTRIBUTION_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+
+    "produced_utc": { "type": "string", "minLength": 1 },
+    "day_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "module": { "type": "string", "minLength": 1 },
+        "build": { "type": "object" }
+      }
+    },
+
+    "status": {
+      "type": "string",
+      "enum": [
+        "OK",
+        "DEGRADED_MISSING_MARKS",
+        "DEGRADED_MISSING_LIFECYCLE",
+        "FAIL_CORRUPT_INPUTS",
+        "FAIL_SCHEMA_VIOLATION"
+      ]
+    },
+
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256", "day_utc", "producer"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "cash_ledger",
+              "marks_underlying",
+              "marks_options",
+              "positions_truth",
+              "fills_truth",
+              "lifecycle_truth",
+              "trade_intents",
+              "order_plans",
+              "broker_submissions",
+              "other"
+            ]
+          },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "day_utc": {
+            "anyOf": [
+              { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+              { "type": "null" }
+            ]
+          },
+          "producer": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+
+    "attribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currency", "by_engine", "notes"],
+      "properties": {
+        "currency": { "type": "string", "minLength": 1 },
+        "by_engine": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "engine_id",
+              "realized_pnl_to_date",
+              "unrealized_pnl",
+              "defined_risk_exposure",
+              "positions_count",
+              "symbols"
+            ],
+            "properties": {
+              "engine_id": { "type": "string", "minLength": 1 },
+              "realized_pnl_to_date": { "type": "number" },
+              "unrealized_pnl": { "type": "number" },
+              "defined_risk_exposure": { "type": "number" },
+              "positions_count": { "type": "integer", "minimum": 0 },
+              "symbols": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}
