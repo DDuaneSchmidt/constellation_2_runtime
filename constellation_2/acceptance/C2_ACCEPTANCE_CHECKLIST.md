@@ -1,7 +1,7 @@
 ---
-id: C2_ACCEPTANCE_CHECKLIST_V2
-title: Constellation 2.0 Acceptance Checklist (Design Pack + Phase C Extension)
-version: 2
+id: C2_ACCEPTANCE_CHECKLIST_V3
+title: Constellation 2.0 Acceptance Checklist (Design Pack + Phase D Extension)
+version: 3
 status: DRAFT
 type: acceptance_checklist
 created: 2026-02-14
@@ -12,12 +12,7 @@ authority_level: ROOT_SUPPORT
 
 ## 0. Purpose
 
-This checklist defines the minimum acceptance criteria for the **C2 design pack** and its governed schema extensions.
-
-It is intentionally offline:
-- no broker access required
-- no market data APIs required
-- no network required
+This checklist defines the minimum acceptance criteria for the **C2 design pack** and its governed schema extensions through **Phase D**.
 
 Acceptance is satisfied when every check below is PASS.
 
@@ -31,7 +26,10 @@ PASS if all exist:
 - `constellation_2/schemas/`
 - `constellation_2/specs/`
 - `constellation_2/acceptance/`
-- `constellation_2/acceptance/samples/`
+- `constellation_2/phaseA/`
+- `constellation_2/phaseB/`
+- `constellation_2/phaseC/`
+- `constellation_2/phaseD/`
 
 FAIL otherwise.
 
@@ -43,6 +41,7 @@ PASS if all exist:
 - `constellation_2/governance/C2_INVARIANTS_AND_REASON_CODES.md`
 - `constellation_2/governance/C2_SCHEMA_REGISTRY.md`
 - `constellation_2/governance/C2_AUDIT_EVIDENCE_CHAIN.md`
+- `constellation_2/governance/C2_FAILURE_SEMANTICS.md`
 
 FAIL otherwise.
 
@@ -64,13 +63,8 @@ PASS if all exist:
 - `constellation_2/schemas/mapping_ledger_record.v1.schema.json`
 - `constellation_2/schemas/binding_record.v1.schema.json`
 - `constellation_2/schemas/submit_preflight_decision.v1.schema.json`
-
-FAIL otherwise.
-
-### 1.5 Phase implementations (optional by design pack, required if present)
-PASS if:
-- If `constellation_2/phaseB/` exists, it contains at least a README describing offline truth spine behavior.
-- If `constellation_2/phaseC/` exists, it contains at least a README describing offline submit preflight behavior.
+- `constellation_2/schemas/risk_budget.v1.schema.json`
+- `constellation_2/schemas/execution_event_record.v1.schema.json`
 
 FAIL otherwise.
 
@@ -125,28 +119,41 @@ FAIL otherwise.
 
 ---
 
-## 6. Sample Artifacts (Offline Schema Validation)
-
-PASS if the following sample files exist and are valid JSON:
-- `constellation_2/acceptance/samples/sample_options_intent.v2.json`
-- `constellation_2/acceptance/samples/sample_chain_snapshot.v1.json`
-- `constellation_2/acceptance/samples/sample_freshness_certificate.v1.json`
-
-FAIL otherwise.
-
----
-
-## 7. Explicit Non-Claims
+## 6. Evidence Chain Consistency
 
 PASS if:
-- `DESIGN_PACK_INDEX.md` includes an explicit non-claims section.
-- `C2_EXECUTION_CONTRACT.md` includes explicit non-claims.
+- `C2_AUDIT_EVIDENCE_CHAIN.md` enumerates the chain objects and ordered sequences.
+- Blocked attempts are VetoRecord-only.
+- No broker call is allowed without the BindingRecord existing first (per contract + invariants).
 
 FAIL otherwise.
 
 ---
 
-## 8. Acceptance Conclusion
+## 7. Phase D Presence (Structure Only)
+
+PASS if all exist:
+- `constellation_2/phaseD/adapters/`
+- `constellation_2/phaseD/lib/`
+- `constellation_2/phaseD/tools/`
+- `constellation_2/phaseD/tests/`
+- `constellation_2/phaseD/runbooks/`
+
+FAIL otherwise.
+
+---
+
+## 8. Explicit Non-Claims
+
+PASS if:
+- `C2_EXECUTION_CONTRACT.md` includes explicit non-claims.
+- `C2_ARCHITECTURE_ONE_PAGE.md` includes explicit non-claims.
+
+FAIL otherwise.
+
+---
+
+## 9. Acceptance Conclusion
 
 PASS if all sections above are PASS.
 Otherwise FAIL.

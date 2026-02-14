@@ -1,0 +1,101 @@
+{
+  "$id": "https://constellation.local/schemas/risk_budget.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RiskBudget v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "budget_id",
+    "created_at_utc",
+    "max_margin_usd",
+    "max_notional_usd",
+    "max_open_positions",
+    "per_engine_limit"
+  ],
+  "properties": {
+    "schema_id": { "const": "risk_budget" },
+    "schema_version": { "const": "v1" },
+
+    "budget_id": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 128,
+      "description": "Deterministic identifier for this budget (hash-derived preferred)."
+    },
+
+    "created_at_utc": { "type": "string", "format": "date-time" },
+
+    "max_margin_usd": {
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+)?$",
+      "description": "Maximum allowed margin impact in USD for the evaluated submission attempt."
+    },
+
+    "max_notional_usd": {
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+)?$",
+      "description": "Maximum allowed notional exposure in USD for the evaluated submission attempt."
+    },
+
+    "max_open_positions": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000,
+      "description": "Maximum allowed open positions (portfolio-level gate)."
+    },
+
+    "per_engine_limit": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Per-engine risk limits. Keys are engine identifiers; values are per-engine caps.",
+      "required": [],
+      "properties": {}
+    },
+
+    "engine_limits": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/engine_limit" },
+      "description": "Optional map: engine_id -> engine_limit. Use when per-engine enforcement is enabled."
+    },
+
+    "canonical_json_hash": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    },
+
+    "upstream_hash": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Optional pointer when this budget is derived from another governed artifact."
+    }
+  },
+
+  "$defs": {
+    "engine_limit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_margin_usd",
+        "max_notional_usd",
+        "max_open_positions"
+      ],
+      "properties": {
+        "max_margin_usd": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$"
+        },
+        "max_notional_usd": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$"
+        },
+        "max_open_positions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        }
+      }
+    }
+  }
+}
