@@ -97,6 +97,23 @@ def main(argv: List[str] | None = None) -> int:
     dp_exec = exec_day_paths_v1(day_utc)
     dp_pos = day_paths_v2(day_utc)
 
+    # Fail-closed: if snapshot already exists, lock producer git sha to the original.
+    if dp_pos.snapshot_path.exists() and dp_pos.snapshot_path.is_file():
+        try:
+            ex = _read_json_obj(dp_pos.snapshot_path)
+            ex_prod = ex.get("producer") if isinstance(ex, dict) else None
+            ex_sha = ex_prod.get("git_sha") if isinstance(ex_prod, dict) else None
+            if isinstance(ex_sha, str) and ex_sha.strip():
+                if ex_sha.strip() != producer_sha:
+                    print(
+                        f"FAIL: PRODUCER_GIT_SHA_MISMATCH_FOR_EXISTING_DAY: existing={ex_sha.strip()} provided={producer_sha}",
+                        file=sys.stderr,
+                    )
+                    return 4
+        except Exception:
+            print("FAIL: EXISTING_SNAPSHOT_UNREADABLE_FOR_SHA_LOCK", file=sys.stderr)
+            return 4
+
     if not dp_exec.submissions_day_dir.exists():
         failure = build_failure_obj_v1(
             day_utc=day_utc,
