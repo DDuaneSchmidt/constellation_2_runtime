@@ -226,7 +226,6 @@ def main(argv: List[str] | None = None) -> int:
             details={"missing_path": str(dp_exec.submissions_day_dir)},
             attempted_outputs=[
                 {"path": str(dp_pos.snapshot_path), "sha256": None},
-                {"path": str(dp_pos.latest_v3_path), "sha256": None},
             ],
         )
         _ = write_failure_immutable_v1(failure_path=dp_pos.failure_path, failure_obj=failure)
@@ -314,30 +313,14 @@ def main(argv: List[str] | None = None) -> int:
         return 4
 
     try:
-        wr_snap = write_file_immutable_v1(path=dp_pos.snapshot_path, data=snap_bytes, create_dirs=True)
+        _ = write_file_immutable_v1(path=dp_pos.snapshot_path, data=snap_bytes, create_dirs=True)
     except ImmutableWriteError as e:
         print(f"FAIL: {e}", file=sys.stderr)
         return 4
 
-    latest_obj = build_latest_ptr_obj_v3(
-        produced_utc=f"{day_utc}T00:00:00Z",
-        day_utc=day_utc,
-        producer_repo=producer_repo,
-        producer_git_sha=producer_sha,
-        producer_module="constellation_2/phaseF/positions/run/run_positions_snapshot_day_v3.py",
-        status=status,
-        reason_codes=sorted(set(reason_codes)),
-        snapshot_path=str(dp_pos.snapshot_path),
-        snapshot_sha256=wr_snap.sha256,
-    )
-
-    validate_against_repo_schema_v1(latest_obj, REPO_ROOT, SCHEMA_POSITIONS_LATEST_PTR_V3)
-    latest_bytes = canonical_json_bytes_v1(latest_obj) + b"\n"
-    try:
-        _ = write_file_immutable_v1(path=dp_pos.latest_v3_path, data=latest_bytes, create_dirs=True)
-    except ImmutableWriteError as e:
-        print(f"FAIL: {e}", file=sys.stderr)
-        return 4
+    # NOTE: No global latest_v3.json write.
+    # Global latest pointers are incompatible with strict no-overwrite invariants.
+    # Downstream spines consume day-scoped snapshots and effective pointers.
 
     print("OK: POSITIONS_SNAPSHOT_V3_WRITTEN")
     return 0
