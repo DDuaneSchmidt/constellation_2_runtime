@@ -9,10 +9,44 @@ from pathlib import Path
 from typing import Any, Dict
 
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-SUBMISSIONS_ROOT = (REPO_ROOT / "constellation_2" / "phaseD" / "outputs" / "submissions").resolve()
-
 HEX64 = re.compile(r"^[a-f0-9]{64}$")
+
+
+def _repo_root_from_this_file_failclosed() -> Path:
+    """
+    Deterministically derive repo root from this script location:
+      <repo_root>/ops/tools/synthesize_phased_submission_for_day_v1.py
+    Fail-closed if expected structure is not present.
+    """
+    this_file = Path(__file__).resolve()
+
+    # Expect: .../<repo_root>/ops/tools/<this_file>
+    try:
+        repo_root = this_file.parents[2]
+    except Exception as e:
+        raise SystemExit(f"FAIL: cannot derive repo_root from __file__: {e!r}")
+
+    # Fail-closed structural proofs (in-process)
+    if not (repo_root / "ops").is_dir():
+        raise SystemExit(f"FAIL: derived repo_root missing ops/: {str(repo_root)}")
+    if not (repo_root / "constellation_2").is_dir():
+        raise SystemExit(f"FAIL: derived repo_root missing constellation_2/: {str(repo_root)}")
+
+    return repo_root
+
+
+def _ensure_repo_on_syspath_failclosed(repo_root: Path) -> None:
+    """
+    Ensure imports like `constellation_2.*` resolve when running as a script.
+    Deterministic: insert repo_root at sys.path[0] iff not already present.
+    """
+    rr = str(repo_root)
+    if rr not in sys.path:
+        sys.path.insert(0, rr)
+
+    # Fail-closed: prove the package dir is visible at runtime
+    if not (repo_root / "constellation_2").is_dir():
+        raise SystemExit(f"FAIL: constellation_2 dir not found under repo_root: {rr}")
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -29,6 +63,7 @@ def _read_json_obj(p: Path) -> Dict[str, Any]:
 def _canon_bytes(obj: Dict[str, Any]) -> bytes:
     # Use repo canonicalizer (fail-closed if unavailable)
     from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1  # type: ignore
+
     return canonical_json_bytes_v1(obj)
 
 
@@ -46,6 +81,12 @@ def _require_iso_z(ts: str, name: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Deterministic import bootstrap (no env vars required)
+    repo_root = _repo_root_from_this_file_failclosed()
+    _ensure_repo_on_syspath_failclosed(repo_root)
+
+    submissions_root = (repo_root / "constellation_2" / "phaseD" / "outputs" / "submissions").resolve()
+
     ap = argparse.ArgumentParser(prog="synthesize_phased_submission_for_day_v1")
     ap.add_argument("--phasec_out_dir", required=True, help="PhaseC out_dir containing order_plan/mapping/binding")
     ap.add_argument("--eval_time_utc", required=True, help="UTC ISO-8601 Z timestamp; also used as submitted_at_utc")
@@ -121,10 +162,14 @@ def main(argv: list[str] | None = None) -> int:
     # Validate against repo schemas (fail-closed)
     from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1  # type: ignore
 
-    validate_against_repo_schema_v1(broker_obj, REPO_ROOT, "constellation_2/schemas/broker_submission_record.v2.schema.json")
-    validate_against_repo_schema_v1(evt_obj, REPO_ROOT, "constellation_2/schemas/execution_event_record.v1.schema.json")
+    validate_against_repo_schema_v1(
+        broker_obj, repo_root, "constellation_2/schemas/broker_submission_record.v2.schema.json"
+    )
+    validate_against_repo_schema_v1(
+        evt_obj, repo_root, "constellation_2/schemas/execution_event_record.v1.schema.json"
+    )
 
-    out_dir = (SUBMISSIONS_ROOT / submission_id).resolve()
+    out_dir = (submissions_root / submission_id).resolve()
     out_broker = out_dir / "broker_submission_record.v2.json"
     out_evt = out_dir / "execution_event_record.v1.json"
 
