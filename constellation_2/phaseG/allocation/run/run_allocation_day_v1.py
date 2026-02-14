@@ -109,10 +109,10 @@ def main(argv: List[str] | None = None) -> int:
         notes.append("bootstrap: no intents processed")
 
     input_manifest: List[Dict[str, Any]] = [
-        {"type": "accounting_day_nav", "path": str(nav_path), "sha256": nav_sha, "day_utc": day_utc, "producer": "bundle_f_accounting_v1"}
+        {"type": "other", "path": str(nav_path), "sha256": nav_sha, "day_utc": day_utc, "producer": "bundle_f_accounting_v1"}
     ]
     if pos_eff_ptr_sha is not None:
-        input_manifest.append({"type": "positions_effective_pointer", "path": str(pos_eff_ptr_path), "sha256": pos_eff_ptr_sha, "day_utc": day_utc, "producer": "positions_effective_v1"})
+        input_manifest.append({"type": "other", "path": str(pos_eff_ptr_path), "sha256": pos_eff_ptr_sha, "day_utc": day_utc, "producer": "positions_effective_v1"})
 
     summary_obj: Dict[str, Any] = {
         "schema_id": "C2_ALLOCATION_SUMMARY_V1",
