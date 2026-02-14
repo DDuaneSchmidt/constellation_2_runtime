@@ -1,10 +1,10 @@
 ---
-id: C2_ARCHITECTURE_ONE_PAGE_V1
+id: C2_ARCHITECTURE_ONE_PAGE_V2
 title: Constellation 2.0 One-Page Architecture + File Manifest
-version: 1
+version: 2
 status: DRAFT
 type: architecture_spec
-created: 2026-02-13
+created: 2026-02-14
 authority_level: ROOT_SUPPORT
 ---
 
@@ -14,8 +14,8 @@ authority_level: ROOT_SUPPORT
 
 Legend:
 - Solid arrows are deterministic data flow.
-- Brackets `[]` are immutable truth artifacts.
-- Parentheses `()` are processes (implementation later).
+- Brackets `[]` are immutable truth artifacts (JSON + schema + canonical hash).
+- Parentheses `()` are processes (tools) with fail-closed behavior.
 
 Diagram:
 
@@ -53,28 +53,30 @@ Diagram:
         v
 [BindingRecord v1]
         |
-        | if submit allowed (paper/live)
+        | OFFLINE submit boundary (no broker call)
+        | evaluates invariants + hash bindings + freshness
         v
-(Submitter: Preflight + Broker Call)
+(Submit Preflight: Offline)
         |
-        | produces
+        | if allowed
         v
-[BrokerSubmissionRecord v2]
+[SubmitPreflightDecision v1 (ALLOW)]
         |
-        | lifecycle aggregation over time (open/adjust/close)
+        | if later executing (outside Phase C)
         v
-[PositionLifecycle v1]
+(Submitter: Broker Call)  ---> [BrokerSubmissionRecord v2] ---> [PositionLifecycle v1]
+
 
 Blocked path (any boundary):
-- If any validation fails at INTENT/MAPPING/SUBMIT:
+- If any validation fails at INTENT / MAPPING / SUBMIT PREFLIGHT:
   → emit [VetoRecord v1]
   → do not proceed downstream
   → no broker call
 
 Key enforcement points:
-- Options-only invariant enforced at INTENT + SUBMIT
-- Defined-risk invariant enforced at MAPPING + SUBMIT
-- Freshness enforced at MAPPING + SUBMIT
+- Options-only invariant enforced at INTENT + SUBMIT PREFLIGHT
+- Defined-risk invariant enforced at MAPPING + SUBMIT PREFLIGHT
+- Freshness enforced at MAPPING + SUBMIT PREFLIGHT
 - Binding chain enforced across all evidence outputs
 - Single-writer immutability enforced globally
 
@@ -96,7 +98,7 @@ Key enforcement points:
 - `constellation_2/governance/C2_ABUSE_CASES.md` — abuse cases and fail-closed expectations
 - `constellation_2/governance/C2_REGRESSION_TEST_PLAN.md` — regression test plan for structural guarantees
 
-### Schemas (Bundle A/B/C)
+### Schemas (Bundle A/B/C + Phase C Extension)
 - `constellation_2/schemas/options_intent.v2.schema.json` — OptionsIntent v2
 - `constellation_2/schemas/order_plan.v1.schema.json` — OrderPlan v1
 - `constellation_2/schemas/broker_submission_record.v2.schema.json` — BrokerSubmissionRecord v2
@@ -106,6 +108,7 @@ Key enforcement points:
 - `constellation_2/schemas/options_chain_snapshot.v1.schema.json` — OptionsChainSnapshot v1
 - `constellation_2/schemas/mapping_ledger_record.v1.schema.json` — MappingLedgerRecord v1
 - `constellation_2/schemas/binding_record.v1.schema.json` — BindingRecord v1
+- `constellation_2/schemas/submit_preflight_decision.v1.schema.json` — SubmitPreflightDecision v1 (offline submit boundary outcome)
 
 ### Acceptance
 - `constellation_2/acceptance/C2_ACCEPTANCE_CHECKLIST.md` — deterministic acceptance checklist
@@ -115,6 +118,12 @@ Key enforcement points:
 
 ### Specs
 - `constellation_2/specs/C2_ARCHITECTURE_ONE_PAGE.md` — this one-page diagram + manifest
+
+### Phase B (Options Market Data Truth Spine Implementation)
+- `constellation_2/phaseB/` — offline chain snapshot + freshness certificate builder (deterministic, fail-closed)
+
+### Phase C (Offline Mapping + Submit Preflight + Evidence Writer)
+- `constellation_2/phaseC/` — offline mapping + submit preflight boundary (deterministic, fail-closed)
 
 ---
 
@@ -130,3 +139,4 @@ It claims only:
 - deterministic structure
 - fail-closed enforcement
 - immutable evidence chain suitable for hostile review
+- offline submit boundary decision (Phase C) without broker access

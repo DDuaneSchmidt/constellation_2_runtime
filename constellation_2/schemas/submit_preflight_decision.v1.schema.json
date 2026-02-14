@@ -1,0 +1,89 @@
+{
+  "$id": "https://constellation.local/schemas/submit_preflight_decision.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SubmitPreflightDecision v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "created_at_utc",
+    "binding_hash",
+    "decision",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "submit_preflight_decision" },
+    "schema_version": { "const": "v1" },
+
+    "created_at_utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp in ISO-8601 Z form. For offline determinism, implementations MUST set this equal to eval_time_utc."
+    },
+
+    "binding_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "canonical_json_hash of the BindingRecord being evaluated."
+    },
+
+    "decision": {
+      "type": "string",
+      "enum": ["ALLOW", "BLOCK"]
+    },
+
+    "block_detail": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["veto_reason_code", "veto_detail", "veto_record_hash"],
+      "properties": {
+        "veto_reason_code": {
+          "type": "string",
+          "pattern": "^C2_[A-Z0-9_]+$"
+        },
+        "veto_detail": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "veto_record_hash": {
+          "type": ["string", "null"],
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "If a VetoRecord was also produced, this may point to its canonical_json_hash. For Phase C fail-closed, BLOCK should normally be represented by VetoRecord-only, so this is typically null."
+        }
+      }
+    },
+
+    "upstream_hash": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Optional pointer to upstream artifact hash when applicable (typically BindingRecord hash)."
+    },
+
+    "canonical_json_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA-256 of canonical JSON representation (see C2_DETERMINISM_STANDARD.md). Must not be null in Phase C implementation."
+    }
+  },
+
+  "allOf": [
+    {
+      "if": {
+        "properties": { "decision": { "const": "ALLOW" } }
+      },
+      "then": {
+        "properties": { "block_detail": { "const": null } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "decision": { "const": "BLOCK" } }
+      },
+      "then": {
+        "required": ["block_detail"]
+      }
+    }
+  ]
+}

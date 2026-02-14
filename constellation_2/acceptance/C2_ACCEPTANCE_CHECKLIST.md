@@ -1,10 +1,10 @@
 ---
-id: C2_ACCEPTANCE_CHECKLIST_V1
-title: Constellation 2.0 Acceptance Checklist (Design Pack)
-version: 1
+id: C2_ACCEPTANCE_CHECKLIST_V2
+title: Constellation 2.0 Acceptance Checklist (Design Pack + Phase C Extension)
+version: 2
 status: DRAFT
 type: acceptance_checklist
-created: 2026-02-13
+created: 2026-02-14
 authority_level: ROOT_SUPPORT
 ---
 
@@ -12,12 +12,12 @@ authority_level: ROOT_SUPPORT
 
 ## 0. Purpose
 
-This checklist defines the minimum acceptance criteria for the **C2 design pack**.
+This checklist defines the minimum acceptance criteria for the **C2 design pack** and its governed schema extensions.
 
 It is intentionally offline:
 - no broker access required
 - no market data APIs required
-- no runtime dependencies required
+- no network required
 
 Acceptance is satisfied when every check below is PASS.
 
@@ -29,6 +29,7 @@ Acceptance is satisfied when every check below is PASS.
 PASS if all exist:
 - `constellation_2/governance/`
 - `constellation_2/schemas/`
+- `constellation_2/specs/`
 - `constellation_2/acceptance/`
 - `constellation_2/acceptance/samples/`
 
@@ -41,10 +42,17 @@ PASS if all exist:
 - `constellation_2/governance/C2_DETERMINISM_STANDARD.md`
 - `constellation_2/governance/C2_INVARIANTS_AND_REASON_CODES.md`
 - `constellation_2/governance/C2_SCHEMA_REGISTRY.md`
+- `constellation_2/governance/C2_AUDIT_EVIDENCE_CHAIN.md`
 
 FAIL otherwise.
 
-### 1.3 Required schemas exist
+### 1.3 Required specs exist
+PASS if all exist:
+- `constellation_2/specs/C2_ARCHITECTURE_ONE_PAGE.md`
+
+FAIL otherwise.
+
+### 1.4 Required schemas exist
 PASS if all exist:
 - `constellation_2/schemas/options_intent.v2.schema.json`
 - `constellation_2/schemas/order_plan.v1.schema.json`
@@ -55,6 +63,14 @@ PASS if all exist:
 - `constellation_2/schemas/options_chain_snapshot.v1.schema.json`
 - `constellation_2/schemas/mapping_ledger_record.v1.schema.json`
 - `constellation_2/schemas/binding_record.v1.schema.json`
+- `constellation_2/schemas/submit_preflight_decision.v1.schema.json`
+
+FAIL otherwise.
+
+### 1.5 Phase implementations (optional by design pack, required if present)
+PASS if:
+- If `constellation_2/phaseB/` exists, it contains at least a README describing offline truth spine behavior.
+- If `constellation_2/phaseC/` exists, it contains at least a README describing offline submit preflight behavior.
 
 FAIL otherwise.
 
@@ -134,4 +150,3 @@ FAIL otherwise.
 
 PASS if all sections above are PASS.
 Otherwise FAIL.
-
