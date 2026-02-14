@@ -5,7 +5,7 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from constellation_2.phaseD.lib.canon_json_v1 import CanonicalizationError, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
@@ -64,6 +64,14 @@ def _lock_git_sha_if_exists(existing_path: Path, provided_sha: str) -> Optional[
     return None
 
 
+def _cents_to_int_dollars_failclosed(cents: int) -> int:
+    # Schema uses JSON numbers; floats forbidden. We store integer USD dollars.
+    # Fail closed if not divisible by 100.
+    if cents % 100 != 0:
+        raise ValueError("CENTS_NOT_DIVISIBLE_BY_100_FOR_INTEGER_DOLLARS")
+    return int(cents // 100)
+
+
 def _build_failure(
     *,
     day_utc: str,
@@ -94,7 +102,7 @@ def _build_failure(
 def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="run_accounting_day_v1",
-        description="C2 Bundle F Accounting v1 (bootstrap: cash-only NAV, deterministic, immutable).",
+        description="C2 Bundle F Accounting v1 (bootstrap: schema-valid, deterministic, immutable).",
     )
     ap.add_argument("--day_utc", required=True, help="UTC day key YYYY-MM-DD")
     ap.add_argument("--producer_git_sha", required=True, help="Producing git sha (explicit)")
@@ -108,8 +116,8 @@ def main(argv: List[str] | None = None) -> int:
 
     out = accounting_day_paths_v1(day_utc)
 
-    # Idempotency guard: if any of the day artifacts already exist, sha must match.
-    for p in (out.nav_path, out.exposure_path, out.attribution_path):
+    # Idempotency guard: if any day artifacts already exist, sha must match.
+    for p in (out.nav_path, out.exposure_path, out.attribution_path, out.latest_path):
         ex_sha = _lock_git_sha_if_exists(p, producer_sha)
         if ex_sha is not None:
             print(f"FAIL: PRODUCER_GIT_SHA_MISMATCH_FOR_EXISTING_DAY: existing={ex_sha} provided={producer_sha}", file=sys.stderr)
@@ -131,7 +139,7 @@ def main(argv: List[str] | None = None) -> int:
             reason_codes=["MISSING_REQUIRED_INPUTS"],
             input_manifest=[
                 {"type": "cash_ledger", "path": str(cash_paths.snapshot_path), "sha256": "0"*64, "day_utc": day_utc, "producer": "cash_ledger_v1"},
-                {"type": "positions", "path": str(pos_paths.snapshot_path), "sha256": "0"*64, "day_utc": day_utc, "producer": "positions_v2"},
+                {"type": "positions_truth", "path": str(pos_paths.snapshot_path), "sha256": "0"*64, "day_utc": day_utc, "producer": "positions_v2"},
             ],
             code="FAIL_CORRUPT_INPUTS",
             message=str(e),
@@ -149,22 +157,34 @@ def main(argv: List[str] | None = None) -> int:
         print("FAIL: MISSING_REQUIRED_INPUTS (failure artifact written)", file=sys.stderr)
         return 2
 
-    # Validate upstream schemas loosely via presence of key fields (fail closed if missing).
     try:
-        cash_cents = int(cash["snapshot"]["cash_total_cents"])
-    except Exception:
-        print("FAIL: CASH_LEDGER_INVALID_SHAPE", file=sys.stderr)
+        cash_total_cents = int(cash["snapshot"]["cash_total_cents"])
+    except Exception as e:
+        print(f"FAIL: CASH_LEDGER_INVALID: {e}", file=sys.stderr)
         return 4
 
-    # Bootstrap policy: NAV is cash-only because marks/instrument identity are missing.
+    # Bootstrap: represent money fields as integer USD dollars (schema numbers; floats forbidden).
+    cash_total = _cents_to_int_dollars_failclosed(cash_total_cents)
+
     status = "DEGRADED_MISSING_MARKS"
-    reason_codes = ["NAV_CASH_ONLY_BOOTSTRAP", "MISSING_MARKS", "MISSING_INSTRUMENT_IDENTITY"]
+    reason_codes = ["BOOTSTRAP_NAV_CASH_ONLY", "MISSING_MARKS", "MISSING_INSTRUMENT_IDENTITY"]
 
     produced_utc = _produced_utc_idempotent(out.nav_path, f"{day_utc}T00:00:00Z")
 
     input_manifest = [
         {"type": "cash_ledger", "path": str(cash_paths.snapshot_path), "sha256": _sha256_file(cash_paths.snapshot_path), "day_utc": day_utc, "producer": "cash_ledger_v1"},
-        {"type": "positions", "path": str(pos_paths.snapshot_path), "sha256": _sha256_file(pos_paths.snapshot_path), "day_utc": day_utc, "producer": "positions_v2"},
+        {"type": "positions_truth", "path": str(pos_paths.snapshot_path), "sha256": _sha256_file(pos_paths.snapshot_path), "day_utc": day_utc, "producer": "positions_v2"},
+    ]
+
+    # Components: we cannot value positions without marks; include a single CASH component.
+    components = [
+        {
+            "kind": "CASH",
+            "symbol": "USD",
+            "qty": cash_total,
+            "mv": cash_total,
+            "mark": {"bid": None, "ask": None, "last": None, "source": "CASH_LEDGER", "asof_utc": produced_utc},
+        }
     ]
 
     nav_obj: Dict[str, Any] = {
@@ -178,21 +198,21 @@ def main(argv: List[str] | None = None) -> int:
         "input_manifest": input_manifest,
         "nav": {
             "currency": "USD",
-            "cash_cents": cash_cents,
-            "unrealized_cents": 0,
-            "realized_cents": 0,
-            "nav_total_cents": cash_cents,
-            "peak_nav_cents": cash_cents,
-            "drawdown_cents": 0
-        }
+            "nav_total": cash_total,
+            "cash_total": cash_total,
+            "gross_positions_value": 0,
+            "realized_pnl_to_date": 0,
+            "unrealized_pnl": 0,
+            "components": components,
+            "notes": ["bootstrap: marks missing; NAV is cash-only; positions listed elsewhere"],
+        },
+        "history": {"peak_nav": None, "drawdown_abs": None, "drawdown_pct": None},
     }
     validate_against_repo_schema_v1(nav_obj, REPO_ROOT, SCHEMA_NAV)
     nav_bytes = canonical_json_bytes_v1(nav_obj) + b"\n"
     wr_nav = write_file_immutable_v1(path=out.nav_path, data=nav_bytes, create_dirs=True)
 
-    # Exposure: only counts; defined-risk unknown.
-    items = positions.get("positions", {}).get("items", [])
-    pos_count = len(items) if isinstance(items, list) else 0
+    # Exposure schema expects breakdown lists; we provide zeros (cannot prove defined-risk).
     exposure_obj: Dict[str, Any] = {
         "schema_id": "C2_ACCOUNTING_EXPOSURE_V1",
         "schema_version": 1,
@@ -200,20 +220,25 @@ def main(argv: List[str] | None = None) -> int:
         "day_utc": day_utc,
         "producer": {"repo": producer_repo, "git_sha": producer_sha, "module": module},
         "status": status,
-        "reason_codes": sorted(set(reason_codes + ["EXPOSURE_COUNTS_ONLY"])),
+        "reason_codes": sorted(set(reason_codes + ["EXPOSURE_BOOTSTRAP_DEFINED_RISK_UNKNOWN"])),
         "input_manifest": input_manifest,
         "exposure": {
-            "positions_total": pos_count,
-            "defined_risk_positions_total": 0,
-            "undefined_risk_positions_total": pos_count,
-            "defined_risk_max_loss_cents": 0
-        }
+            "currency": "USD",
+            "defined_risk_total": 0,
+            "by_engine": [{"key": "unknown", "defined_risk": 0}],
+            "by_underlying": [{"key": "unknown", "defined_risk": 0}],
+            "by_expiry_bucket": [{"key": "unknown", "defined_risk": 0}],
+            "notes": ["bootstrap: defined-risk exposure not provable without instrument identity + lifecycle"],
+        },
     }
     validate_against_repo_schema_v1(exposure_obj, REPO_ROOT, SCHEMA_EXPOSURE)
     exp_bytes = canonical_json_bytes_v1(exposure_obj) + b"\n"
     wr_exp = write_file_immutable_v1(path=out.exposure_path, data=exp_bytes, create_dirs=True)
 
-    # Attribution: unknown engines until engine linkage exists.
+    # Attribution: by_engine list with required fields.
+    items = positions.get("positions", {}).get("items", [])
+    pos_count = len(items) if isinstance(items, list) else 0
+
     attr_obj: Dict[str, Any] = {
         "schema_id": "C2_ACCOUNTING_ATTRIBUTION_V1",
         "schema_version": 1,
@@ -221,13 +246,22 @@ def main(argv: List[str] | None = None) -> int:
         "day_utc": day_utc,
         "producer": {"repo": producer_repo, "git_sha": producer_sha, "module": module},
         "status": status,
-        "reason_codes": sorted(set(reason_codes + ["ENGINE_ATTRIBUTION_UNKNOWN"])),
+        "reason_codes": sorted(set(reason_codes + ["ENGINE_LINKAGE_UNKNOWN"])),
         "input_manifest": input_manifest,
         "attribution": {
-            "engines": [
-                {"engine_id": "unknown", "nav_contrib_cents": cash_cents, "notes": ["bootstrap: no engine linkage yet"]}
-            ]
-        }
+            "currency": "USD",
+            "by_engine": [
+                {
+                    "engine_id": "unknown",
+                    "realized_pnl_to_date": 0,
+                    "unrealized_pnl": 0,
+                    "defined_risk_exposure": 0,
+                    "positions_count": int(pos_count),
+                    "symbols": ["unknown"],
+                }
+            ],
+            "notes": ["bootstrap: engine linkage not available; positions counted under unknown engine"],
+        },
     }
     validate_against_repo_schema_v1(attr_obj, REPO_ROOT, SCHEMA_ATTR)
     attr_bytes = canonical_json_bytes_v1(attr_obj) + b"\n"
@@ -247,8 +281,8 @@ def main(argv: List[str] | None = None) -> int:
             "exposure_path": str(out.exposure_path),
             "exposure_sha256": wr_exp.sha256,
             "attribution_path": str(out.attribution_path),
-            "attribution_sha256": wr_attr.sha256
-        }
+            "attribution_sha256": wr_attr.sha256,
+        },
     }
     validate_against_repo_schema_v1(latest_obj, REPO_ROOT, SCHEMA_LATEST)
     latest_bytes = canonical_json_bytes_v1(latest_obj) + b"\n"
