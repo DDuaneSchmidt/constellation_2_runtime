@@ -63,7 +63,20 @@ def _lock_git_sha_if_exists(existing_path: Path, provided_sha: str) -> Optional[
     return None
 
 
-def _write_failure(*, out: Path, day_utc: str, producer_repo: str, producer_sha: str, module: str, reason_codes: List[str], input_manifest: List[Dict[str, Any]], code: str, message: str, details: Dict[str, Any], attempted_outputs: List[Dict[str, Any]]) -> int:
+def _write_failure(
+    *,
+    out: Path,
+    day_utc: str,
+    producer_repo: str,
+    producer_sha: str,
+    module: str,
+    reason_codes: List[str],
+    input_manifest: List[Dict[str, Any]],
+    code: str,
+    message: str,
+    details: Dict[str, Any],
+    attempted_outputs: List[Dict[str, Any]],
+) -> int:
     failure_obj: Dict[str, Any] = {
         "schema_id": "C2_POSITION_LIFECYCLE_FAILURE_V1",
         "schema_version": 1,
@@ -110,17 +123,16 @@ def main(argv: List[str] | None = None) -> int:
 
     out = lifecycle_day_paths_v1(day_utc)
 
-    # Producer sha lock on reruns for snapshot + latest
-    for p in (out.snapshot_path, out.latest_path):
-        ex_sha = _lock_git_sha_if_exists(p, producer_sha)
-        if ex_sha is not None:
-            print(f"FAIL: PRODUCER_GIT_SHA_MISMATCH_FOR_EXISTING_DAY: existing={ex_sha} provided={producer_sha}", file=sys.stderr)
-            return 4
+    # Producer sha lock is DAY-SCOPED (snapshot only). Global latest.json is not written in strict immutability mode.
+    ex_sha = _lock_git_sha_if_exists(out.snapshot_path, producer_sha)
+    if ex_sha is not None:
+        print(f"FAIL: PRODUCER_GIT_SHA_MISMATCH_FOR_EXISTING_DAY: existing={ex_sha} provided={producer_sha}", file=sys.stderr)
+        return 4
 
     dp_exec = exec_day_paths_v1(day_utc)
     dp_pos_eff = pos_eff_day_paths_v1(day_utc)
 
-    attempted_outputs = [{"path": str(out.snapshot_path), "sha256": None}, {"path": str(out.latest_path), "sha256": None}]
+    attempted_outputs = [{"path": str(out.snapshot_path), "sha256": None}]
 
     # Required: positions effective pointer for the day
     if not dp_pos_eff.pointer_path.exists():
@@ -279,7 +291,7 @@ def main(argv: List[str] | None = None) -> int:
     input_manifest = [
         {"type": "positions_effective_pointer", "path": str(dp_pos_eff.pointer_path), "sha256": _sha256_file(dp_pos_eff.pointer_path), "day_utc": day_utc, "producer": "positions_effective_v1"},
         {"type": "positions_snapshot", "path": str(snap_path), "sha256": _sha256_file(snap_path), "day_utc": day_utc, "producer": "positions"},
-        {"type": "execution_evidence_day_dir", "path": str(dp_exec.submissions_day_dir), "sha256": "0" * 64, "day_utc": day_utc, "producer": "execution_evidence_v1"}
+        {"type": "execution_evidence_day_dir", "path": str(dp_exec.submissions_day_dir), "sha256": "0" * 64, "day_utc": day_utc, "producer": "execution_evidence_v1"},
     ]
 
     snap_obj: Dict[str, Any] = {
@@ -302,29 +314,14 @@ def main(argv: List[str] | None = None) -> int:
         return 4
 
     try:
-        wr_snap = write_file_immutable_v1(path=out.snapshot_path, data=snap_bytes, create_dirs=True)
+        _ = write_file_immutable_v1(path=out.snapshot_path, data=snap_bytes, create_dirs=True)
     except ImmutableWriteError as e:
         print(f"FAIL: {e}", file=sys.stderr)
         return 4
 
-    latest_obj: Dict[str, Any] = {
-        "schema_id": "C2_POSITION_LIFECYCLE_LATEST_POINTER_V1",
-        "schema_version": 1,
-        "produced_utc": f"{day_utc}T00:00:00Z",
-        "day_utc": day_utc,
-        "producer": {"repo": producer_repo, "git_sha": producer_sha, "module": module},
-        "status": status,
-        "reason_codes": sorted(set(reason_codes)),
-        "pointers": {"snapshot_path": str(out.snapshot_path), "snapshot_sha256": wr_snap.sha256},
-    }
-
-    validate_against_repo_schema_v1(latest_obj, REPO_ROOT, SCHEMA_LIFECYCLE_LATEST_V1)
-    latest_bytes = canonical_json_bytes_v1(latest_obj) + b"\n"
-    try:
-        _ = write_file_immutable_v1(path=out.latest_path, data=latest_bytes, create_dirs=True)
-    except ImmutableWriteError as e:
-        print(f"FAIL: {e}", file=sys.stderr)
-        return 4
+    # NOTE: No global latest.json write.
+    # Global latest pointers are incompatible with strict no-overwrite invariants.
+    # Downstream spines consume day-scoped snapshots.
 
     print("OK: POSITION_LIFECYCLE_SNAPSHOT_V1_WRITTEN")
     return 0
