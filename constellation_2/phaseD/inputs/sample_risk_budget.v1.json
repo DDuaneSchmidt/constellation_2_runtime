@@ -1,0 +1,19 @@
+{
+  "schema_id": "risk_budget",
+  "schema_version": "v1",
+  "budget_id": "RISK_BUDGET_SAMPLE_V1_20260214",
+  "created_at_utc": "2026-02-14T00:00:00Z",
+  "max_margin_usd": "5000",
+  "max_notional_usd": "20000",
+  "max_open_positions": 100000,
+  "per_engine_limit": {},
+  "engine_limits": {
+    "E78": {
+      "max_margin_usd": "2500",
+      "max_notional_usd": "10000",
+      "max_open_positions": 100000
+    }
+  },
+  "canonical_json_hash": null,
+  "upstream_hash": null
+}

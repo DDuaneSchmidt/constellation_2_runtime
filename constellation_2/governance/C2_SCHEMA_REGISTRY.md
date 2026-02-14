@@ -1,7 +1,7 @@
 ---
-id: C2_SCHEMA_REGISTRY_V2
+id: C2_SCHEMA_REGISTRY_V3
 title: Constellation 2.0 Schema Registry
-version: 2
+version: 3
 status: DRAFT
 type: schema_registry
 created: 2026-02-14
@@ -27,7 +27,7 @@ Rules:
 
 ---
 
-## 2. Schema Inventory (Bundle A/B/C + Phase C Extension)
+## 2. Schema Inventory (Bundle A/B/C + Phase C + Phase D)
 
 ### Bundle A (Contracts + Core Models)
 
@@ -72,8 +72,20 @@ Rules:
 
 10. SubmitPreflightDecision v1  
     Path: `constellation_2/schemas/submit_preflight_decision.v1.schema.json`  
-    Purpose: Deterministic decision artifact for offline submit preflight.  
-    NOTE: Phase C fail-closed behavior still prefers **VetoRecord-only** on BLOCK; this schema exists to make the submit boundary explicit and auditable in the ALLOW case.
+    Purpose: Deterministic decision artifact for offline submit preflight in the ALLOW case.  
+    NOTE: Blocked attempts remain VetoRecord-only.
+
+---
+
+### Phase D Extension (Paper Broker Integration + Execution Lifecycle Truth Spine)
+
+11. RiskBudget v1  
+    Path: `constellation_2/schemas/risk_budget.v1.schema.json`  
+    Purpose: Deterministic risk budget constraints used by the WhatIf margin gate and submit boundary enforcement.
+
+12. ExecutionEventRecord v1  
+    Path: `constellation_2/schemas/execution_event_record.v1.schema.json`  
+    Purpose: Immutable lifecycle ingestion event record that binds broker status transitions to `BindingRecord` and `BrokerSubmissionRecord`.
 
 ---
 

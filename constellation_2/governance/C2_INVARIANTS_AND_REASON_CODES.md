@@ -1,10 +1,10 @@
 ---
-id: C2_INVARIANTS_AND_REASON_CODES_V1
+id: C2_INVARIANTS_AND_REASON_CODES_V2
 title: Constellation 2.0 Invariants and Reason Codes (Fail-Closed)
-version: 1
+version: 2
 status: DRAFT
 type: invariants_and_reason_codes
-created: 2026-02-13
+created: 2026-02-14
 authority_level: ROOT_SUPPORT
 ---
 
@@ -33,7 +33,7 @@ Rules:
 
 ---
 
-## 3. Mandatory Invariants (Bundle A)
+## 3. Mandatory Invariants (Bundle A/B/C)
 
 ### C2_OPTIONS_ONLY_VIOLATION
 **Invariant:** Intent/Plan MUST be options-only. No STK orders.  
@@ -123,7 +123,81 @@ Rules:
 
 ---
 
-## 4. Required VetoRecord Evidence Fields (Hostile Review Minimum)
+## 4. Mandatory Invariants (Phase D: Paper Broker Integration + Execution Lifecycle)
+
+### C2_BROKER_ENV_NOT_PAPER
+**Invariant:** Phase D broker interaction MUST be PAPER only. LIVE is forbidden.  
+**Detect:** Any broker environment != PAPER at submit boundary OR adapter constructed without explicit PAPER mode.  
+**Boundary:** SUBMIT  
+**Fail behavior:** VETO (mandatory)
+
+---
+
+### C2_BROKER_ADAPTER_NOT_AVAILABLE
+**Invariant:** No broker call may occur unless a deterministic adapter implementation is available and enabled.  
+**Detect:** Selected adapter backend requires missing dependency OR adapter cannot be constructed deterministically.  
+**Boundary:** SUBMIT  
+**Fail behavior:** VETO (mandatory)
+
+---
+
+### C2_WHATIF_REQUIRED
+**Invariant:** A WhatIf (margin/risk) precheck MUST be executed before any broker submission attempt.  
+**Detect:** Submit path proceeds without a WhatIf result bound to the decision.  
+**Boundary:** SUBMIT  
+**Fail behavior:** VETO (mandatory)
+
+---
+
+### C2_RISK_BUDGET_SCHEMA_INVALID
+**Invariant:** RiskBudget MUST validate against schema prior to enforcement.  
+**Detect:** RiskBudget missing/invalid/unparseable OR schema validation fails.  
+**Boundary:** SUBMIT  
+**Fail behavior:** VETO (mandatory)
+
+---
+
+### C2_RISK_BUDGET_EXCEEDED
+**Invariant:** WhatIf projected margin/notional impact MUST not exceed RiskBudget caps.  
+**Detect:** WhatIf projected margin or notional > allowed budget (portfolio or per-engine).  
+**Boundary:** SUBMIT  
+**Fail behavior:** VETO (mandatory)
+
+---
+
+### C2_IDEMPOTENCY_DUPLICATE_SUBMISSION
+**Invariant:** Duplicate submission attempts for the same binding_hash MUST be blocked.  
+**Detect:** A submission_id derived from binding_hash already exists in the evidence store.  
+**Boundary:** SUBMIT  
+**Fail behavior:** HARD FAIL
+
+---
+
+### C2_BROKER_CALL_WITHOUT_BINDING
+**Invariant:** No broker interaction may occur unless BindingRecord is already written immutably.  
+**Detect:** Adapter.submit_order invoked before BindingRecord exists on disk in the submission out_dir.  
+**Boundary:** SUBMIT  
+**Fail behavior:** VETO (mandatory)
+
+---
+
+### C2_BROKER_SUBMISSION_RECORD_REQUIRED
+**Invariant:** Any broker submission attempt MUST emit a BrokerSubmissionRecord OR a VetoRecord. No silent exits.  
+**Detect:** Adapter invoked but no BrokerSubmissionRecord written; or submit path returns without a governed outcome artifact.  
+**Boundary:** SUBMIT  
+**Fail behavior:** HARD FAIL
+
+---
+
+### C2_EXECUTION_EVENT_REQUIRED
+**Invariant:** Any broker submission attempt that yields broker identifiers MUST emit an ExecutionEventRecord capturing the initial status transition.  
+**Detect:** BrokerSubmissionRecord written with broker_ids present but no ExecutionEventRecord written.  
+**Boundary:** SUBMIT  
+**Fail behavior:** HARD FAIL
+
+---
+
+## 5. Required VetoRecord Evidence Fields (Hostile Review Minimum)
 
 Every `VetoRecord` MUST include:
 
@@ -144,9 +218,10 @@ If any required field is missing:
 
 ---
 
-## 5. Explicit Non-Claims
+## 6. Explicit Non-Claims
 
 This document does not claim:
 - coverage of every possible options structure (future expansions expected)
 - correctness of liquidity proxies
 - correctness of broker contract mapping details beyond what is explicitly defined in schemas
+- correctness of broker-reported statuses beyond capture and binding

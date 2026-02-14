@@ -1,0 +1,120 @@
+{
+  "$id": "https://constellation.local/schemas/execution_event_record.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExecutionEventRecord v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "created_at_utc",
+    "event_time_utc",
+    "binding_hash",
+    "broker_submission_hash",
+    "broker_order_id",
+    "perm_id",
+    "status",
+    "filled_qty",
+    "avg_price"
+  ],
+  "properties": {
+    "schema_id": { "const": "execution_event_record" },
+    "schema_version": { "const": "v1" },
+
+    "created_at_utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp when this record was created (Z-suffix required by determinism standard)."
+    },
+
+    "event_time_utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp of the broker-reported event occurrence (Z-suffix required by determinism standard)."
+    },
+
+    "binding_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Canonical hash of BindingRecord v1."
+    },
+
+    "broker_submission_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Canonical hash of BrokerSubmissionRecord v2."
+    },
+
+    "broker_order_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Broker-assigned order identifier (string to avoid loss of leading zeros / format drift)."
+    },
+
+    "perm_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Broker permanent identifier when available (normalized as string)."
+    },
+
+    "status": {
+      "type": "string",
+      "enum": [
+        "SUBMITTED",
+        "ACKNOWLEDGED",
+        "REJECTED",
+        "CANCELLED",
+        "PARTIALLY_FILLED",
+        "FILLED",
+        "UNKNOWN"
+      ],
+      "description": "Normalized status transition for lifecycle ingestion."
+    },
+
+    "filled_qty": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000,
+      "description": "Cumulative filled quantity as of this event."
+    },
+
+    "avg_price": {
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+)?$",
+      "description": "Average fill price as decimal string (normalized)."
+    },
+
+    "raw_broker_status": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Optional raw broker status text for forensic traceability."
+    },
+
+    "raw_payload_digest": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Optional SHA-256 digest of raw broker event payload after canonical capture (if captured)."
+    },
+
+    "sequence_num": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 1000000000,
+      "description": "Optional monotonic sequence number if provided by adapter boundary."
+    },
+
+    "canonical_json_hash": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    },
+
+    "upstream_hash": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Optional pointer to upstream event hash when chaining events deterministically."
+    }
+  }
+}
