@@ -1,0 +1,6 @@
+# Phase B generated artifacts (never commit)
+__pycache__/
+*.pyc
+
+# Optional generated outputs (tool writes to operator-provided out_dir)
+outputs/
