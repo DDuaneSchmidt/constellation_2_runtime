@@ -105,7 +105,7 @@ def main(argv: List[str] | None = None) -> int:
             code="FAIL_CORRUPT_INPUTS",
             message="No positions snapshot found for day (need v3 or v2 snapshot).",
             details={"day_utc": day_utc},
-            attempted_outputs=[{"path": str(dp.pointer_path), "sha256": None}, {"path": str(dp.latest_effective_path), "sha256": None}],
+            attempted_outputs=[{"path": str(dp.pointer_path), "sha256": None}],
         )
         _ = write_failure_immutable_v1(failure_path=dp.failure_path, failure_obj=failure)
         print("FAIL: NO_POSITIONS_SNAPSHOT_FOUND (failure artifact written)")
@@ -152,34 +152,13 @@ def main(argv: List[str] | None = None) -> int:
         print(f"FAIL: {e}", file=sys.stderr)
         return 4
 
-    # latest_effective is immutable too; first writer wins (fail-closed on rewrite)
-    latest_obj = {
-        "schema_id": "C2_POSITIONS_EFFECTIVE_POINTER_V1",
-        "schema_version": 1,
-        "produced_utc": f"{day_utc}T00:00:00Z",
-        "day_utc": day_utc,
-        "producer": {
-            "repo": producer_repo,
-            "git_sha": producer_sha,
-            "module": "constellation_2/phaseF/positions/run/run_positions_effective_pointer_day_v1.py",
-        },
-        "status": "OK",
-        "reason_codes": reason_codes,
-        "selection": {"selected_schema_id": selected_schema_id, "selected_schema_version": selected_schema_version},
-        "pointers": {"snapshot_path": str(snap_path), "snapshot_sha256": snap_sha},
-    }
-
-    validate_against_repo_schema_v1(latest_obj, REPO_ROOT, SCHEMA_EFFECTIVE_PTR_V1)
-    latest_bytes = canonical_json_bytes_v1(latest_obj) + b"\n"
-    try:
-        _ = write_file_immutable_v1(path=dp.latest_effective_path, data=latest_bytes, create_dirs=True)
-    except ImmutableWriteError as e:
-        print(f"FAIL: {e}", file=sys.stderr)
-        return 4
+    # NOTE: No global latest_effective.json write.
+    # Global latest pointers are incompatible with strict no-overwrite invariants.
+    # Downstream spines consume day-scoped effective pointers.
 
     print("OK: POSITIONS_EFFECTIVE_POINTER_V1_WRITTEN")
     print(f"OK: selected={selected_schema_id} v{selected_schema_version}")
-    print(f"OK: snapshot_sha256={wr_ptr.sha256}")
+    print(f"OK: pointer_sha256={wr_ptr.sha256}")
     return 0
 
 
