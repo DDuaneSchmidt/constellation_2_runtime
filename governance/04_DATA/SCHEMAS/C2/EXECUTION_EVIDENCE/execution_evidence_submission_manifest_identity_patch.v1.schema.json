@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_EXECUTION_EVIDENCE_SUBMISSION_MANIFEST_IDENTITY_PATCH_V1",
+  "title": "C2 Execution Evidence Submission Manifest Identity Patch v1 (immutable sidecar for late identity inputs)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "day_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "submission_id",
+    "base_manifest",
+    "identity_inputs"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_EXECUTION_EVIDENCE_SUBMISSION_MANIFEST_IDENTITY_PATCH_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+
+    "produced_utc": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "module": { "type": "string", "minLength": 1 },
+        "build": { "type": "object" }
+      }
+    },
+
+    "status": {
+      "type": "string",
+      "enum": ["OK", "FAIL_CORRUPT_INPUTS", "FAIL_SCHEMA_VIOLATION"]
+    },
+
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+
+    "submission_id": { "type": "string", "minLength": 16, "maxLength": 128 },
+
+    "base_manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+
+    "identity_inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order_plan", "binding_record", "mapping_ledger_record"],
+      "properties": {
+        "order_plan": {
+          "anyOf": [
+            { "$ref": "#/$defs/pointer" },
+            { "type": "null" }
+          ]
+        },
+        "binding_record": {
+          "anyOf": [
+            { "$ref": "#/$defs/pointer" },
+            { "type": "null" }
+          ]
+        },
+        "mapping_ledger_record": {
+          "anyOf": [
+            { "$ref": "#/$defs/pointer" },
+            { "type": "null" }
+          ]
+        }
+      }
+    }
+  },
+
+  "$defs": {
+    "pointer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
+  }
+}

@@ -55,3 +55,10 @@ def submission_manifest_path_v1(*, day_utc: str, submission_id: str) -> Path:
     if not sid:
         raise ValueError("SUBMISSION_ID_REQUIRED")
     return dp.manifests_day_dir / f"{sid}.manifest.json"
+
+def submission_manifest_identity_patch_path_v1(*, day_utc: str, submission_id: str) -> Path:
+    dp = day_paths_v1(day_utc)
+    sid = (submission_id or "").strip()
+    if not sid:
+        raise ValueError("SUBMISSION_ID_REQUIRED")
+    return (dp.manifests_day_dir / f"{sid}.manifest_identity_patch.v1.json").resolve()
