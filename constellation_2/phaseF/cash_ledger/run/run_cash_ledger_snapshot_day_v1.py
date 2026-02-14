@@ -20,6 +20,7 @@ SCHEMA_RELPATH_LATEST = "governance/04_DATA/SCHEMAS/C2/CASH_LEDGER/cash_ledger_l
 
 def _sha256_file(path: Path) -> str:
     import hashlib
+
     b = path.read_bytes()
     return hashlib.sha256(b).hexdigest()
 
@@ -289,42 +290,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 4
 
     try:
-        wr = write_file_immutable_v1(path=paths.snapshot_path, data=snap_bytes, create_dirs=True)
+        _ = write_file_immutable_v1(path=paths.snapshot_path, data=snap_bytes, create_dirs=True)
     except ImmutableWriteError as e:
         print(f"FAIL: {e}", file=sys.stderr)
         return 4
 
-    # Latest pointer should also be idempotent for reruns; reuse existing produced_utc if latest exists.
-    produced_utc_latest = _deterministic_produced_utc_for_day(
-        existing_artifact_path=paths.latest_path,
-        fallback_observed_at_utc=produced_utc_snapshot,
-    )
-
-    latest = build_latest_obj_v1(
-        produced_utc=produced_utc_latest,
-        day_utc=day_utc,
-        producer_repo=str(args.producer_repo),
-        producer_git_sha=str(args.producer_git_sha),
-        producer_module="constellation_2/phaseF/cash_ledger/run/run_cash_ledger_snapshot_day_v1.py",
-        status=status,
-        reason_codes=reason_codes,
-        snapshot_path=str(paths.snapshot_path),
-        snapshot_sha256=wr.sha256,
-    )
-
-    validate_against_repo_schema_v1(latest, REPO_ROOT, SCHEMA_RELPATH_LATEST)
-
-    try:
-        latest_bytes = canonical_json_bytes_v1(latest) + b"\n"
-    except CanonicalizationError as e:
-        print(f"FAIL: LATEST_CANONICALIZATION_ERROR: {e}", file=sys.stderr)
-        return 4
-
-    try:
-        _ = write_file_immutable_v1(path=paths.latest_path, data=latest_bytes, create_dirs=True)
-    except ImmutableWriteError as e:
-        print(f"FAIL: {e}", file=sys.stderr)
-        return 4
+    # NOTE: No global latest.json write.
+    # Global latest pointers are incompatible with strict no-overwrite invariants.
+    # Consumers (accounting/orchestrator) read day-scoped snapshots directly.
 
     print("OK: CASH_LEDGER_SNAPSHOT_WRITTEN")
     return 0
