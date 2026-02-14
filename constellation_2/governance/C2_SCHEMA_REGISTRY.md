@@ -1,10 +1,10 @@
 ---
-id: C2_SCHEMA_REGISTRY_V1
+id: C2_SCHEMA_REGISTRY_V2
 title: Constellation 2.0 Schema Registry
-version: 1
+version: 2
 status: DRAFT
 type: schema_registry
-created: 2026-02-13
+created: 2026-02-14
 authority_level: ROOT_SUPPORT
 ---
 
@@ -12,17 +12,22 @@ authority_level: ROOT_SUPPORT
 
 ## 1. Purpose
 
-This registry enumerates every C2 schema and assigns each schema a stable identity.
+This registry enumerates every **Constellation 2.0** schema and assigns each schema a stable identity.
 
 Rules:
 - All schemas MUST live under: `constellation_2/schemas/`
-- All schemas MUST have a stable `$id`
+- All schemas MUST have a stable `$id` of the form: `https://constellation.local/schemas/<filename>`
+- All root objects MUST declare:
+  - `schema_id`
+  - `schema_version`
+- All root objects MUST set: `"additionalProperties": false`
 - Implementations MUST refuse any schema-less artifact
-- Schema mismatch is a hard block
+- Schema mismatch is a HARD BLOCK
+- Schema validation failure MUST produce `VetoRecord v1` and STOP
 
 ---
 
-## 2. Schema Inventory (Bundle A/B/C)
+## 2. Schema Inventory (Bundle A/B/C + Phase C Extension)
 
 ### Bundle A (Contracts + Core Models)
 
@@ -63,6 +68,15 @@ Rules:
 
 ---
 
+### Phase C Extension (Offline Submit Boundary)
+
+10. SubmitPreflightDecision v1  
+    Path: `constellation_2/schemas/submit_preflight_decision.v1.schema.json`  
+    Purpose: Deterministic decision artifact for offline submit preflight.  
+    NOTE: Phase C fail-closed behavior still prefers **VetoRecord-only** on BLOCK; this schema exists to make the submit boundary explicit and auditable in the ALLOW case.
+
+---
+
 ## 3. Compatibility Statement
 
 These C2 schemas:
@@ -71,14 +85,14 @@ These C2 schemas:
 
 ---
 
-## 4. Enforcement Requirement
+## 4. Enforcement Requirement (Every Boundary)
 
 Every boundary MUST perform:
 
 - schema validation
-- canonicalization
-- hashing
+- canonicalization (see `C2_DETERMINISM_STANDARD.md`)
+- hashing (SHA-256; lowercase hex; see `C2_DETERMINISM_STANDARD.md`)
 
 If schema validation fails:
-→ VetoRecord REQUIRED
-
+→ `VetoRecord v1` REQUIRED  
+→ STOP (no downstream writes)
