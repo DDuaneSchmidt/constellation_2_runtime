@@ -237,6 +237,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     status = "DEGRADED_OPERATOR_INPUT"
     reason_codes = ["OPERATOR_STATEMENT_MODE_V1"]
 
+    # If artifact exists, lock producer git sha to the original to prevent accidental rewrites.
+    if paths.snapshot_path.exists() and paths.snapshot_path.is_file():
+        try:
+            ex = _read_json_object_strict(paths.snapshot_path)
+            ex_prod = ex.get("producer") if isinstance(ex, dict) else None
+            ex_sha = ex_prod.get("git_sha") if isinstance(ex_prod, dict) else None
+            if isinstance(ex_sha, str) and ex_sha.strip():
+                if ex_sha.strip() != str(args.producer_git_sha).strip():
+                    print(
+                        f"FAIL: PRODUCER_GIT_SHA_MISMATCH_FOR_EXISTING_DAY: existing={ex_sha.strip()} provided={str(args.producer_git_sha).strip()}",
+                        file=sys.stderr,
+                    )
+                    return 4
+        except Exception:
+            # Fail closed: if we cannot read existing producer info, do not proceed.
+            print("FAIL: EXISTING_ARTIFACT_UNREADABLE_FOR_SHA_LOCK", file=sys.stderr)
+            return 4
+
     # Deterministic/idempotent produced_utc: reuse existing artifact's produced_utc if present.
     produced_utc_snapshot = _deterministic_produced_utc_for_day(
         existing_artifact_path=paths.snapshot_path,
