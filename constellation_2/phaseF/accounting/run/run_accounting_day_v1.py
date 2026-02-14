@@ -13,7 +13,9 @@ from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_again
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 from constellation_2.phaseF.accounting.lib.paths_v1 import REPO_ROOT, day_paths_v1 as accounting_day_paths_v1
 from constellation_2.phaseF.cash_ledger.lib.paths_v1 import day_paths_v1 as cash_day_paths_v1
+from constellation_2.phaseF.positions.lib.paths_effective_v1 import day_paths_effective_v1 as pos_effective_day_paths_v1
 from constellation_2.phaseF.positions.lib.paths_v2 import day_paths_v2 as pos_day_paths_v2
+
 
 SCHEMA_NAV = "governance/04_DATA/SCHEMAS/C2/ACCOUNTING/accounting_nav.v1.schema.json"
 SCHEMA_EXPOSURE = "governance/04_DATA/SCHEMAS/C2/ACCOUNTING/accounting_exposure.v1.schema.json"
@@ -38,6 +40,7 @@ def _read_json_obj(path: Path) -> Dict[str, Any]:
 
 def _sha256_file(path: Path) -> str:
     import hashlib
+
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
@@ -99,6 +102,37 @@ def _build_failure(
     }
 
 
+def _select_positions_input_for_day(day_utc: str) -> Tuple[Path, str, str, Optional[Path]]:
+    """
+    Returns:
+      (positions_snapshot_path, positions_producer_label, positions_input_type, pointer_path_used_or_none)
+
+    Semantics:
+      - If effective pointer exists, it MUST be readable/valid; otherwise fail-closed.
+      - If effective pointer does not exist, fall back to v2 snapshot path.
+    """
+    pos_eff = pos_effective_day_paths_v1(day_utc)
+    pos_v2 = pos_day_paths_v2(day_utc)
+
+    pos_snapshot_path = pos_v2.snapshot_path
+    pos_producer = "positions_v2"
+    pos_input_type = "positions_truth"
+    pos_ptr_path_used: Optional[Path] = None
+
+    if pos_eff.pointer_path.exists() and pos_eff.pointer_path.is_file():
+        ptr = _read_json_obj(pos_eff.pointer_path)
+        p = ptr.get("pointers") if isinstance(ptr, dict) else None
+        snap_path_s = p.get("snapshot_path") if isinstance(p, dict) else None
+        if not isinstance(snap_path_s, str) or not snap_path_s.strip():
+            raise ValueError("POSITIONS_EFFECTIVE_POINTER_INVALID: missing pointers.snapshot_path")
+        pos_snapshot_path = Path(snap_path_s).resolve()
+        pos_producer = "positions_effective_v1"
+        pos_input_type = "positions_effective_pointer"
+        pos_ptr_path_used = pos_eff.pointer_path
+
+    return (pos_snapshot_path, pos_producer, pos_input_type, pos_ptr_path_used)
+
+
 def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="run_accounting_day_v1",
@@ -120,16 +154,84 @@ def main(argv: List[str] | None = None) -> int:
     for p in (out.nav_path, out.exposure_path, out.attribution_path, out.latest_path):
         ex_sha = _lock_git_sha_if_exists(p, producer_sha)
         if ex_sha is not None:
-            print(f"FAIL: PRODUCER_GIT_SHA_MISMATCH_FOR_EXISTING_DAY: existing={ex_sha} provided={producer_sha}", file=sys.stderr)
+            print(
+                f"FAIL: PRODUCER_GIT_SHA_MISMATCH_FOR_EXISTING_DAY: existing={ex_sha} provided={producer_sha}",
+                file=sys.stderr,
+            )
             return 4
 
     cash_paths = cash_day_paths_v1(day_utc)
-    pos_paths = pos_day_paths_v2(day_utc)
+
+    # Positions input selection (effective pointer preferred; fallback to v2 if pointer absent).
+    try:
+        pos_snapshot_path, pos_producer, pos_input_type, pos_ptr_path_used = _select_positions_input_for_day(day_utc)
+    except Exception as e:
+        # fail-closed: if effective pointer exists but invalid/unreadable, treat as corrupt inputs
+        failure = _build_failure(
+            day_utc=day_utc,
+            producer_repo=producer_repo,
+            producer_git_sha=producer_sha,
+            module=module,
+            status="FAIL_CORRUPT_INPUTS",
+            reason_codes=["POSITIONS_EFFECTIVE_POINTER_INVALID"],
+            input_manifest=[
+                {
+                    "type": "positions_effective_pointer",
+                    "path": str(pos_effective_day_paths_v1(day_utc).pointer_path),
+                    "sha256": "0" * 64,
+                    "day_utc": day_utc,
+                    "producer": "positions_effective_v1",
+                }
+            ],
+            code="FAIL_CORRUPT_INPUTS",
+            message=str(e),
+            details={"error": str(e)},
+            attempted_outputs=[
+                {"path": str(out.nav_path), "sha256": None},
+                {"path": str(out.exposure_path), "sha256": None},
+                {"path": str(out.attribution_path), "sha256": None},
+                {"path": str(out.latest_path), "sha256": None},
+            ],
+        )
+        validate_against_repo_schema_v1(failure, REPO_ROOT, SCHEMA_FAILURE)
+        b = canonical_json_bytes_v1(failure) + b"\n"
+        _ = write_file_immutable_v1(path=out.failure_path, data=b, create_dirs=True)
+        print("FAIL: POSITIONS_EFFECTIVE_POINTER_INVALID (failure artifact written)", file=sys.stderr)
+        return 2
 
     try:
         cash = _read_json_obj(cash_paths.snapshot_path)
-        positions = _read_json_obj(pos_paths.snapshot_path)
+        positions = _read_json_obj(pos_snapshot_path)
     except Exception as e:
+        input_manifest = [
+            {
+                "type": "cash_ledger",
+                "path": str(cash_paths.snapshot_path),
+                "sha256": "0" * 64,
+                "day_utc": day_utc,
+                "producer": "cash_ledger_v1",
+            },
+        ]
+        if pos_ptr_path_used is not None:
+            input_manifest.append(
+                {
+                    "type": "positions_effective_pointer",
+                    "path": str(pos_ptr_path_used),
+                    "sha256": "0" * 64,
+                    "day_utc": day_utc,
+                    "producer": "positions_effective_v1",
+                }
+            )
+        input_manifest.append(
+            {
+                "type": "positions_truth",
+                "path": str(pos_snapshot_path),
+                "sha256": "0" * 64,
+                "day_utc": day_utc,
+                "producer": pos_producer,
+            }
+        )
+
         failure = _build_failure(
             day_utc=day_utc,
             producer_repo=producer_repo,
@@ -137,10 +239,7 @@ def main(argv: List[str] | None = None) -> int:
             module=module,
             status="FAIL_CORRUPT_INPUTS",
             reason_codes=["MISSING_REQUIRED_INPUTS"],
-            input_manifest=[
-                {"type": "cash_ledger", "path": str(cash_paths.snapshot_path), "sha256": "0"*64, "day_utc": day_utc, "producer": "cash_ledger_v1"},
-                {"type": "positions_truth", "path": str(pos_paths.snapshot_path), "sha256": "0"*64, "day_utc": day_utc, "producer": "positions_v2"},
-            ],
+            input_manifest=input_manifest,
             code="FAIL_CORRUPT_INPUTS",
             message=str(e),
             details={"error": str(e)},
@@ -169,12 +268,45 @@ def main(argv: List[str] | None = None) -> int:
     status = "DEGRADED_MISSING_MARKS"
     reason_codes = ["BOOTSTRAP_NAV_CASH_ONLY", "MISSING_MARKS", "MISSING_INSTRUMENT_IDENTITY"]
 
+    # If positions schema is v3, instrument identity is present.
+    try:
+        sid = str(positions.get("schema_id") or "")
+        sver = int(positions.get("schema_version") or 0)
+        if sid == "C2_POSITIONS_SNAPSHOT_V3" and sver == 3:
+            reason_codes = ["BOOTSTRAP_NAV_CASH_ONLY", "MISSING_MARKS"]
+    except Exception:
+        pass
+
     produced_utc = _produced_utc_idempotent(out.nav_path, f"{day_utc}T00:00:00Z")
 
-    input_manifest = [
-        {"type": "cash_ledger", "path": str(cash_paths.snapshot_path), "sha256": _sha256_file(cash_paths.snapshot_path), "day_utc": day_utc, "producer": "cash_ledger_v1"},
-        {"type": "positions_truth", "path": str(pos_paths.snapshot_path), "sha256": _sha256_file(pos_paths.snapshot_path), "day_utc": day_utc, "producer": "positions_v2"},
+    input_manifest: List[Dict[str, Any]] = [
+        {
+            "type": "cash_ledger",
+            "path": str(cash_paths.snapshot_path),
+            "sha256": _sha256_file(cash_paths.snapshot_path),
+            "day_utc": day_utc,
+            "producer": "cash_ledger_v1",
+        }
     ]
+    if pos_ptr_path_used is not None:
+        input_manifest.append(
+            {
+                "type": "positions_effective_pointer",
+                "path": str(pos_ptr_path_used),
+                "sha256": _sha256_file(pos_ptr_path_used),
+                "day_utc": day_utc,
+                "producer": "positions_effective_v1",
+            }
+        )
+    input_manifest.append(
+        {
+            "type": "positions_truth",
+            "path": str(pos_snapshot_path),
+            "sha256": _sha256_file(pos_snapshot_path),
+            "day_utc": day_utc,
+            "producer": pos_producer,
+        }
+    )
 
     # Components: we cannot value positions without marks; include a single CASH component.
     components = [
