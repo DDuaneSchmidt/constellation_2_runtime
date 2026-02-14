@@ -71,11 +71,34 @@ def _lock_git_sha_if_exists(existing_path: Path, provided_sha: str) -> Optional[
 
 
 def _derive_day_utc_from_inputs(broker_obj: Dict[str, Any], exec_obj: Optional[Dict[str, Any]], veto_obj: Optional[Dict[str, Any]]) -> str:
-    # Broker submission record always has created_at_utc. Use its date component.
-    ts = str(broker_obj.get("created_at_utc") or "").strip()
-    if not ts or "T" not in ts:
-        raise ValueError("BROKER_CREATED_AT_UTC_MISSING_OR_INVALID")
-    return ts.split("T", 1)[0]
+    """
+    Deterministically derive day_utc from the first valid timestamp found across broker/exec/veto objects.
+
+    Fail-closed if no valid timestamp is found.
+    """
+    candidates: List[str] = []
+
+    def _add(obj: Optional[Dict[str, Any]], keys: List[str]) -> None:
+        if not isinstance(obj, dict):
+            return
+        for k in keys:
+            v = obj.get(k)
+            if isinstance(v, str) and v.strip():
+                candidates.append(v.strip())
+
+    # Prefer broker timestamps, then execution, then veto.
+    _add(broker_obj, ["created_at_utc", "created_time_utc", "created_utc", "submitted_at_utc", "submitted_time_utc"])
+    _add(exec_obj, ["event_time_utc", "created_at_utc", "created_time_utc", "created_utc"])
+    _add(veto_obj, ["created_at_utc", "created_time_utc", "created_utc"])
+
+    for ts in candidates:
+        # Accept full ISO "YYYY-MM-DDTHH:MM:SSZ" (or with fractional seconds), require 'T'.
+        if "T" in ts and len(ts) >= 10:
+            day = ts.split("T", 1)[0].strip()
+            if len(day) == 10 and day[4] == "-" and day[7] == "-":
+                return day
+
+    raise ValueError("NO_VALID_UTC_TIMESTAMP_FOR_DAY_DERIVATION")
 
 
 def _maybe_copy_identity_file(*, src_dir: Path, dst_dir: Path, filename: str) -> Optional[Dict[str, Any]]:
