@@ -22,5 +22,13 @@ constellation_2/.venv/
 *.swp
 *.swo
 
-# Local outputs (Phase D directories are governed, but outputs inside are not committed)
+# Local outputs (never committed; runtime truth is authoritative but not tracked in git)
+constellation_2/runtime/
+constellation_2/runtime/**
+
+# Operator/local inputs used for runs (samples belong in docs or committed fixtures; live inputs are local)
+constellation_2/phaseF/**/inputs/
+constellation_2/phaseF/**/inputs/**
+
+# Phase D local outputs (Phase D directories are governed, but outputs inside are not committed)
 constellation_2/phaseD/outputs/
