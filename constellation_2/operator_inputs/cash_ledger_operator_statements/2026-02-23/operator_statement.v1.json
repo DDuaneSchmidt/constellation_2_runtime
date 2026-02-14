@@ -1,0 +1,12 @@
+{
+  "observed_at_utc": "2026-02-23T00:00:00Z",
+  "currency": "USD",
+  "cash_total": "0.00",
+  "nlv_total": "0.00",
+  "available_funds": null,
+  "excess_liquidity": null,
+  "account_id": null,
+  "notes": [
+    "BOOTSTRAP_OPERATOR_STATEMENT_V1: values set to 0.00 pending IB account snapshot capture"
+  ]
+}
