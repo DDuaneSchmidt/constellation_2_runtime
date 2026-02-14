@@ -20,6 +20,23 @@ documents:
     class: GOVERNANCE_INDEX
     status: ACTIVE
 
+
+  # Prerequisites for Bundle F/G (new C2 truth spines)
+  - id: C2_E_CASH_LEDGER_SPINE_V1
+    path: docs/c2/E_CASH_LEDGER_SPINE_V1.md
+    class: C2_PREREQ_CASH_LEDGER
+    status: DRAFT
+
+  - id: C2_E_EXECUTION_EVIDENCE_TRUTH_SPINE_V1
+    path: docs/c2/E_EXECUTION_EVIDENCE_TRUTH_SPINE_V1.md
+    class: C2_PREREQ_EXECUTION_EVIDENCE_TRUTH
+    status: DRAFT
+
+  - id: C2_E_POSITIONS_SNAPSHOT_TRUTH_V1
+    path: docs/c2/E_POSITIONS_SNAPSHOT_TRUTH_V1.md
+    class: C2_PREREQ_POSITIONS_SNAPSHOT_TRUTH
+    status: DRAFT
+
   # Bundle F (design docs; docs/ is governed when listed here)
   - id: C2_F_ACCOUNTING_SPINE_V1
     path: docs/c2/F_ACCOUNTING_SPINE_V1.md
