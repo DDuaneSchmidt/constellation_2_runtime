@@ -24,6 +24,11 @@ Phase D outputs:
   - broker_submission_record.v2.json only
 - BLOCK (fail-closed before broker call):
   - veto_record.v1.json only
+
+Optional identity inputs (written when provided; immutable, canonical):
+- order_plan.v1.json
+- binding_record.v1.json
+- mapping_ledger_record.v1.json
 """
 
 from __future__ import annotations
@@ -78,23 +83,58 @@ def _refuse_if_exists(path: Path) -> None:
         raise EvidenceWriteError(f"REFUSE_OVERWRITE_EXISTING_FILE: {str(path)}")
 
 
+def _write_optional_inputs_v1(
+    out_dir: Path,
+    *,
+    order_plan: Optional[Dict[str, Any]],
+    binding_record: Optional[Dict[str, Any]],
+    mapping_ledger_record: Optional[Dict[str, Any]],
+) -> None:
+    pairs = [
+        ("order_plan.v1.json", order_plan),
+        ("binding_record.v1.json", binding_record),
+        ("mapping_ledger_record.v1.json", mapping_ledger_record),
+    ]
+    for fname, obj in pairs:
+        if obj is None:
+            continue
+        p = out_dir / fname
+        _refuse_if_exists(p)
+        try:
+            _atomic_write_bytes(p, canonical_json_bytes_v1(obj) + b"\n")
+        except CanonicalizationError as e:
+            raise EvidenceWriteError(f"CANONICALIZATION_FAILED_DURING_WRITE: {fname}: {e}") from e
+
+
 def write_phased_submission_only_v1(
     out_dir: Path,
     *,
     broker_submission_record: Dict[str, Any],
+    order_plan: Optional[Dict[str, Any]] = None,
+    binding_record: Optional[Dict[str, Any]] = None,
+    mapping_ledger_record: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     Write BrokerSubmissionRecord only (used when broker rejects and no ids/event are available).
+    Optional identity inputs may also be written.
     """
     _ensure_out_dir_ready(out_dir)
 
     p_sub = out_dir / "broker_submission_record.v2.json"
     _refuse_if_exists(p_sub)
 
+    # Primary required output first (prevents "optional-only" partial dirs).
     try:
         _atomic_write_bytes(p_sub, canonical_json_bytes_v1(broker_submission_record) + b"\n")
     except CanonicalizationError as e:
         raise EvidenceWriteError(f"CANONICALIZATION_FAILED_DURING_WRITE: {e}") from e
+
+    _write_optional_inputs_v1(
+        out_dir,
+        order_plan=order_plan,
+        binding_record=binding_record,
+        mapping_ledger_record=mapping_ledger_record,
+    )
 
 
 def write_phased_success_outputs_v1(
@@ -102,9 +142,13 @@ def write_phased_success_outputs_v1(
     *,
     broker_submission_record: Dict[str, Any],
     execution_event_record: Dict[str, Any],
+    order_plan: Optional[Dict[str, Any]] = None,
+    binding_record: Optional[Dict[str, Any]] = None,
+    mapping_ledger_record: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     Write BrokerSubmissionRecord + ExecutionEventRecord (ids present).
+    Optional identity inputs may also be written.
     """
     _ensure_out_dir_ready(out_dir)
 
@@ -120,12 +164,26 @@ def write_phased_success_outputs_v1(
     except CanonicalizationError as e:
         raise EvidenceWriteError(f"CANONICALIZATION_FAILED_DURING_WRITE: {e}") from e
 
+    _write_optional_inputs_v1(
+        out_dir,
+        order_plan=order_plan,
+        binding_record=binding_record,
+        mapping_ledger_record=mapping_ledger_record,
+    )
+
 
 def write_phased_veto_only_v1(
     out_dir: Path,
     *,
     veto_record: Dict[str, Any],
+    order_plan: Optional[Dict[str, Any]] = None,
+    binding_record: Optional[Dict[str, Any]] = None,
+    mapping_ledger_record: Optional[Dict[str, Any]] = None,
 ) -> None:
+    """
+    Write VetoRecord only (blocked before broker call).
+    Optional identity inputs may also be written for forensic traceability.
+    """
     _ensure_out_dir_ready(out_dir)
 
     p_veto = out_dir / "veto_record.v1.json"
@@ -136,10 +194,20 @@ def write_phased_veto_only_v1(
     except CanonicalizationError as e:
         raise EvidenceWriteError(f"CANONICALIZATION_FAILED_DURING_WRITE: {e}") from e
 
+    _write_optional_inputs_v1(
+        out_dir,
+        order_plan=order_plan,
+        binding_record=binding_record,
+        mapping_ledger_record=mapping_ledger_record,
+    )
+
 
 def expected_outputs_for_dir_v1(out_dir: Path) -> Dict[str, Optional[Path]]:
     return {
         "broker_submission_record": out_dir / "broker_submission_record.v2.json",
         "execution_event_record": out_dir / "execution_event_record.v1.json",
         "veto_record": out_dir / "veto_record.v1.json",
+        "order_plan": out_dir / "order_plan.v1.json",
+        "binding_record": out_dir / "binding_record.v1.json",
+        "mapping_ledger_record": out_dir / "mapping_ledger_record.v1.json",
     }

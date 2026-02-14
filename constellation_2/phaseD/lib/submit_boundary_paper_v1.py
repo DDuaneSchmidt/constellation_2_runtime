@@ -259,7 +259,6 @@ def run_submit_boundary_paper_v1(
         submissions_root.mkdir(parents=True, exist_ok=True)
         submission_dir = submissions_root / submission_id
         submission_dir.mkdir(parents=True, exist_ok=False)
-        (submission_dir / "binding_record.v1.json").write_bytes(p_bind.read_bytes())
 
         submit_res = adapter.submit_order(order_plan=order_plan)
         adapter.disconnect()
@@ -282,7 +281,13 @@ def run_submit_boundary_paper_v1(
         validate_against_repo_schema_v1(bsr, repo_root, "constellation_2/schemas/broker_submission_record.v2.schema.json")
 
         if submit_res.order_id is None or submit_res.perm_id is None:
-            write_phased_submission_only_v1(phased_out_dir, broker_submission_record=bsr)
+            write_phased_submission_only_v1(
+                phased_out_dir,
+                broker_submission_record=bsr,
+                order_plan=order_plan,
+                binding_record=binding_record,
+                mapping_ledger_record=mapping_ledger_record,
+        )
             return 3
 
         evt = {
@@ -313,8 +318,15 @@ def run_submit_boundary_paper_v1(
         }
         evt["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(evt)
         validate_against_repo_schema_v1(evt, repo_root, "constellation_2/schemas/execution_event_record.v1.schema.json")
+        write_phased_success_outputs_v1(
+            phased_out_dir,
+            broker_submission_record=bsr,
+            execution_event_record=evt,
+            order_plan=order_plan,
+            binding_record=binding_record,
+            mapping_ledger_record=mapping_ledger_record,
+        )
 
-        write_phased_success_outputs_v1(phased_out_dir, broker_submission_record=bsr, execution_event_record=evt)
         return 0
 
     except IdempotencyError:
@@ -332,7 +344,15 @@ def run_submit_boundary_paper_v1(
             upstream_hash=binding_hash,
             repo_root=repo_root,
         )
-        write_phased_veto_only_v1(phased_out_dir, veto_record=veto)
+
+        write_phased_veto_only_v1(
+            phased_out_dir,
+            veto_record=veto,
+            order_plan=order_plan if "order_plan" in locals() else None,
+            binding_record=binding_record if "binding_record" in locals() else None,
+            mapping_ledger_record=mapping_ledger_record if "mapping_ledger_record" in locals() else None,
+        )
+
         return 2
     except EvidenceWriteError:
         raise
