@@ -15,6 +15,7 @@ from constellation_2.phaseF.accounting.lib.paths_v1 import REPO_ROOT, day_paths_
 from constellation_2.phaseF.cash_ledger.lib.paths_v1 import day_paths_v1 as cash_day_paths_v1
 from constellation_2.phaseF.positions.lib.paths_effective_v1 import day_paths_effective_v1 as pos_effective_day_paths_v1
 from constellation_2.phaseF.positions.lib.paths_v2 import day_paths_v2 as pos_day_paths_v2
+from constellation_2.phaseF.position_lifecycle.lib.paths_v1 import day_paths_v1 as lifecycle_day_paths_v1
 
 
 SCHEMA_NAV = "governance/04_DATA/SCHEMAS/C2/ACCOUNTING/accounting_nav.v1.schema.json"
@@ -73,6 +74,14 @@ def _cents_to_int_dollars_failclosed(cents: int) -> int:
     if cents % 100 != 0:
         raise ValueError("CENTS_NOT_DIVISIBLE_BY_100_FOR_INTEGER_DOLLARS")
     return int(cents // 100)
+
+
+def _expiry_bucket_from_expiry_utc(expiry_utc: str) -> str:
+    s = (expiry_utc or "").strip()
+    # Expect "YYYY-MM-DDT..." or "YYYY-MM-DD"
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        return s[:7]  # YYYY-MM bucket
+    return "unknown"
 
 
 def _build_failure(
@@ -166,7 +175,6 @@ def main(argv: List[str] | None = None) -> int:
     try:
         pos_snapshot_path, pos_producer, pos_input_type, pos_ptr_path_used = _select_positions_input_for_day(day_utc)
     except Exception as e:
-        # fail-closed: if effective pointer exists but invalid/unreadable, treat as corrupt inputs
         failure = _build_failure(
             day_utc=day_utc,
             producer_repo=producer_repo,
@@ -256,6 +264,39 @@ def main(argv: List[str] | None = None) -> int:
         print("FAIL: MISSING_REQUIRED_INPUTS (failure artifact written)", file=sys.stderr)
         return 2
 
+    # Optional lifecycle (for exposure bucketing). If present but invalid, fail closed.
+    lifecycle = None
+    lifecycle_paths = lifecycle_day_paths_v1(day_utc)
+    if lifecycle_paths.snapshot_path.exists() and lifecycle_paths.snapshot_path.is_file():
+        try:
+            lifecycle = _read_json_obj(lifecycle_paths.snapshot_path)
+        except Exception as e:
+            failure = _build_failure(
+                day_utc=day_utc,
+                producer_repo=producer_repo,
+                producer_git_sha=producer_sha,
+                module=module,
+                status="FAIL_CORRUPT_INPUTS",
+                reason_codes=["POSITION_LIFECYCLE_INVALID"],
+                input_manifest=[
+                    {"type": "position_lifecycle", "path": str(lifecycle_paths.snapshot_path), "sha256": "0" * 64, "day_utc": day_utc, "producer": "position_lifecycle_v1"}
+                ],
+                code="FAIL_CORRUPT_INPUTS",
+                message=str(e),
+                details={"error": str(e)},
+                attempted_outputs=[
+                    {"path": str(out.nav_path), "sha256": None},
+                    {"path": str(out.exposure_path), "sha256": None},
+                    {"path": str(out.attribution_path), "sha256": None},
+                    {"path": str(out.latest_path), "sha256": None},
+                ],
+            )
+            validate_against_repo_schema_v1(failure, REPO_ROOT, SCHEMA_FAILURE)
+            b = canonical_json_bytes_v1(failure) + b"\n"
+            _ = write_file_immutable_v1(path=out.failure_path, data=b, create_dirs=True)
+            print("FAIL: POSITION_LIFECYCLE_INVALID (failure artifact written)", file=sys.stderr)
+            return 2
+
     try:
         cash_total_cents = int(cash["snapshot"]["cash_total_cents"])
     except Exception as e:
@@ -307,6 +348,10 @@ def main(argv: List[str] | None = None) -> int:
             "producer": pos_producer,
         }
     )
+    if lifecycle is not None:
+        input_manifest.append(
+            {"type": "position_lifecycle", "path": str(lifecycle_paths.snapshot_path), "sha256": _sha256_file(lifecycle_paths.snapshot_path), "day_utc": day_utc, "producer": "position_lifecycle_v1"}
+        )
 
     # Components: we cannot value positions without marks; include a single CASH component.
     components = [
@@ -344,7 +389,29 @@ def main(argv: List[str] | None = None) -> int:
     nav_bytes = canonical_json_bytes_v1(nav_obj) + b"\n"
     wr_nav = write_file_immutable_v1(path=out.nav_path, data=nav_bytes, create_dirs=True)
 
-    # Exposure schema expects breakdown lists; we provide zeros (cannot prove defined-risk).
+    # Exposure: derive grouping keys from lifecycle when available; defined-risk remains 0.
+    underlyings = set()
+    expiry_buckets = set()
+    if isinstance(lifecycle, dict):
+        items_lc = ((lifecycle.get("lifecycle") or {}).get("items") or [])
+        if isinstance(items_lc, list):
+            for li in items_lc:
+                if not isinstance(li, dict):
+                    continue
+                instr = li.get("instrument")
+                if isinstance(instr, dict):
+                    u = instr.get("underlying")
+                    if isinstance(u, str) and u.strip():
+                        underlyings.add(u.strip())
+                    legs = instr.get("legs")
+                    if isinstance(legs, list):
+                        for lg in legs:
+                            if not isinstance(lg, dict):
+                                continue
+                            expiry_utc = lg.get("expiry_utc")
+                            if isinstance(expiry_utc, str) and expiry_utc.strip():
+                                expiry_buckets.add(_expiry_bucket_from_expiry_utc(expiry_utc))
+
     exposure_obj: Dict[str, Any] = {
         "schema_id": "C2_ACCOUNTING_EXPOSURE_V1",
         "schema_version": 1,
@@ -358,9 +425,9 @@ def main(argv: List[str] | None = None) -> int:
             "currency": "USD",
             "defined_risk_total": 0,
             "by_engine": [{"key": "unknown", "defined_risk": 0}],
-            "by_underlying": [{"key": "unknown", "defined_risk": 0}],
-            "by_expiry_bucket": [{"key": "unknown", "defined_risk": 0}],
-            "notes": ["bootstrap: defined-risk exposure not provable without instrument identity + lifecycle"],
+            "by_underlying": [{"key": k, "defined_risk": 0} for k in sorted(list(underlyings))] if underlyings else [{"key": "unknown", "defined_risk": 0}],
+            "by_expiry_bucket": [{"key": k, "defined_risk": 0} for k in sorted(list(expiry_buckets))] if expiry_buckets else [{"key": "unknown", "defined_risk": 0}],
+            "notes": ["bootstrap: defined-risk exposure not provable without max-loss; grouping derived from lifecycle when available"],
         },
     }
     validate_against_repo_schema_v1(exposure_obj, REPO_ROOT, SCHEMA_EXPOSURE)
