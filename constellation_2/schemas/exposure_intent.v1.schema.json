@@ -1,0 +1,107 @@
+{
+  "$id": "https://constellation.local/schemas/exposure_intent.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExposureIntent v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "intent_id",
+    "created_at_utc",
+    "engine",
+    "underlying",
+    "exposure_type",
+    "target_notional_pct",
+    "expected_holding_days",
+    "risk_class"
+  ],
+  "properties": {
+    "schema_id": { "const": "exposure_intent" },
+    "schema_version": { "const": "v1" },
+
+    "intent_id": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 128,
+      "description": "Deterministic intent identifier (hash-derived preferred)."
+    },
+
+    "created_at_utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp in ISO-8601 Z form."
+    },
+
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine_id", "suite", "mode"],
+      "properties": {
+        "engine_id": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "suite": {
+          "type": "string",
+          "enum": ["C2_HYBRID_V1"],
+          "description": "Hybrid suite identifier (exposure-intent authoring)."
+        },
+        "mode": { "type": "string", "enum": ["PAPER", "LIVE"] }
+      }
+    },
+
+    "underlying": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["symbol", "currency"],
+      "properties": {
+        "symbol": { "type": "string", "minLength": 1, "maxLength": 16 },
+        "currency": { "type": "string", "minLength": 3, "maxLength": 3 }
+      }
+    },
+
+    "exposure_type": {
+      "type": "string",
+      "enum": [
+        "LONG_EQUITY",
+        "SHORT_VOL_DEFINED"
+      ],
+      "description": "Exposure primitive type. v1 keeps the enum small; expand only via new schema version."
+    },
+
+    "target_notional_pct": {
+      "type": "string",
+      "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$",
+      "description": "Target notional as fraction of NAV, decimal string in [0,1]."
+    },
+
+    "expected_holding_days": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 365
+    },
+
+    "risk_class": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Risk class label (e.g. TREND, VRP_DEFINED, MEAN_REVERSION)."
+    },
+
+    "constraints": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["max_risk_pct"],
+      "properties": {
+        "max_risk_pct": {
+          "type": "string",
+          "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$",
+          "description": "Per-position max risk fraction of NAV. For v1 equity, treated conservatively as notional cap."
+        }
+      }
+    },
+
+    "canonical_json_hash": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

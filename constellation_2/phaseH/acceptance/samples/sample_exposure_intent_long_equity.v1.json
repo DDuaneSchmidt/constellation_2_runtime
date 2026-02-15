@@ -1,0 +1,23 @@
+{
+  "schema_id": "exposure_intent",
+  "schema_version": "v1",
+  "intent_id": "c2_phaseh_sample_long_equity_20260215_v1",
+  "created_at_utc": "2026-02-25T00:00:00Z",
+  "engine": {
+    "engine_id": "E78",
+    "suite": "C2_HYBRID_V1",
+    "mode": "PAPER"
+  },
+  "underlying": {
+    "symbol": "SPY",
+    "currency": "USD"
+  },
+  "exposure_type": "LONG_EQUITY",
+  "target_notional_pct": "0.01",
+  "expected_holding_days": 10,
+  "risk_class": "TREND",
+  "constraints": {
+    "max_risk_pct": "0.01"
+  },
+  "canonical_json_hash": null
+}
