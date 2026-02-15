@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Constellation 2.0 — Ops Dashboard (Read-Only)</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="title">Constellation 2.0 — Ops Dashboard</div>
+      <div class="subtitle">Read-only • Deterministic • Fail-closed</div>
+    </div>
+    <div class="controls">
+      <label class="control">
+        <span>Refresh</span>
+        <select id="refreshSelect">
+          <option value="60">60s</option>
+          <option value="300">300s</option>
+        </select>
+      </label>
+      <label class="control">
+        <span>Day (UTC)</span>
+        <select id="daySelect"></select>
+      </label>
+      <button id="btnToday" class="btn">Today</button>
+      <button id="btnHistory" class="btn">By Day</button>
+      <button id="btnCharts" class="btn">Charts</button>
+    </div>
+  </header>
+
+  <main class="main">
+    <section id="banners" class="banners"></section>
+
+    <section id="viewToday" class="view">
+      <h2>Today / Day Ops</h2>
+
+      <div class="grid2">
+        <div class="card">
+          <h3>Summary</h3>
+          <div id="summaryMeta" class="mono small"></div>
+          <div id="summaryCounts"></div>
+        </div>
+
+        <div class="card">
+          <h3>By Engine</h3>
+          <div id="byEngine"></div>
+          <div class="small mono muted" id="engineJoinNote"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Planned Actions (Order Plan)</h3>
+        <div id="planTable"></div>
+      </div>
+
+      <div class="card">
+        <h3>Submissions + Execution Events</h3>
+        <div id="submissionsTable"></div>
+      </div>
+    </section>
+
+    <section id="viewHistory" class="view hidden">
+      <h2>By Day History</h2>
+      <div class="card">
+        <div id="historyTable"></div>
+      </div>
+    </section>
+
+    <section id="viewCharts" class="view hidden">
+      <h2>Charts</h2>
+      <div class="grid2">
+        <div class="card">
+          <h3>Daily NAV (last N days)</h3>
+          <div class="row">
+            <label class="control">
+              <span>N</span>
+              <input id="navDays" type="number" min="5" max="365" value="60" />
+            </label>
+            <button id="btnReloadCharts" class="btn">Reload</button>
+          </div>
+          <div id="chartDailyNav"></div>
+        </div>
+
+        <div class="card">
+          <h3>Cumulative (derived from daily NAV)</h3>
+          <div id="chartCumulative"></div>
+        </div>
+      </div>
+      <div class="small mono muted">
+        Charts are derived only from canonical truth artifacts returned by <span class="mono">/api/series/nav</span>.
+      </div>
+    </section>
+
+    <footer class="footer mono small muted">
+      <div id="footerProvenance"></div>
+    </footer>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
