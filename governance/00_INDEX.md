@@ -63,6 +63,16 @@ These canonical contracts are governance-controlled and must be explicitly liste
 
 These JSON schemas are governance-controlled and must be explicitly listed in `governance/00_MANIFEST.yaml` to be treated as governed artifacts:
 
+### Existing governed schemas
 - `governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_snapshot.v4.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MARKET_DATA/market_data_snapshot.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MARKET_DATA/market_calendar.v1.schema.json`
+
+### Phase J — Monitoring schemas (new governed outputs)
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/portfolio_nav_series.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/engine_metrics.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/engine_daily_returns.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/engine_correlation_matrix.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/stress_replay_report.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/degradation_sentinel.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/capital_efficiency.v1.schema.json`

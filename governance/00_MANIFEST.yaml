@@ -47,6 +47,42 @@ documents:
     class: C2_SCHEMA
     status: DRAFT
 
+  # Phase J Monitoring schemas (new governed outputs)
+  - id: C2_MONITORING_PORTFOLIO_NAV_SERIES_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/MONITORING/portfolio_nav_series.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_MONITORING_ENGINE_METRICS_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/MONITORING/engine_metrics.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_MONITORING_ENGINE_DAILY_RETURNS_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/MONITORING/engine_daily_returns.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_MONITORING_ENGINE_CORRELATION_MATRIX_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/MONITORING/engine_correlation_matrix.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_MONITORING_STRESS_REPLAY_REPORT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/MONITORING/stress_replay_report.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_MONITORING_DEGRADATION_SENTINEL_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/MONITORING/degradation_sentinel.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_MONITORING_CAPITAL_EFFICIENCY_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/MONITORING/capital_efficiency.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
   # Prerequisites for Bundle F/G (new C2 truth spines)
   - id: C2_E_CASH_LEDGER_SPINE_V1
     path: docs/c2/E_CASH_LEDGER_SPINE_V1.md
