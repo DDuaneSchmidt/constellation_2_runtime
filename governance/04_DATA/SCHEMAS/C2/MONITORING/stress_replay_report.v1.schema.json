@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_STRESS_REPLAY_REPORT_V1",
+  "title": "C2 Stress Replay Report Artifact v1 (Phase J)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "status",
+    "asof_day_utc",
+    "scenario",
+    "results",
+    "input_manifest",
+    "produced_utc",
+    "producer",
+    "reason_codes"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_STRESS_REPLAY_REPORT_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+
+    "status": {
+      "type": "string",
+      "enum": [
+        "OK",
+        "DEGRADED_INSUFFICIENT_DATA",
+        "FAIL_CORRUPT_INPUTS",
+        "FAIL_NONDETERMINISTIC"
+      ]
+    },
+
+    "asof_day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scenario_id", "dataset_version", "window", "symbols", "exchange"],
+      "properties": {
+        "scenario_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "dataset_version": { "type": "string", "minLength": 1, "maxLength": 16 },
+        "exchange": { "type": "string", "minLength": 1, "maxLength": 16 },
+        "symbols": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1, "maxLength": 16 } },
+        "window": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["start_day_utc", "end_day_utc"],
+          "properties": {
+            "start_day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+            "end_day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+          }
+        }
+      }
+    },
+
+    "results": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "peak_drawdown_pct",
+        "peak_drawdown_abs",
+        "recovery_days",
+        "capital_utilization_peak",
+        "risk_constraints",
+        "notes"
+      ],
+      "properties": {
+        "peak_drawdown_pct": { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{6}$" },
+        "peak_drawdown_abs": { "type": "integer" },
+
+        "recovery_days": {
+          "description": "Number of trading sessions until NAV returns to peak after max drawdown; null if not recovered in window.",
+          "anyOf": [{ "type": "null" }, { "type": "integer", "minimum": 0, "maximum": 5000 }]
+        },
+
+        "capital_utilization_peak": {
+          "description": "Peak utilization fraction over scenario, 6dp in [0,1].",
+          "type": "string",
+          "pattern": "^[0-1]\\.[0-9]{6}$"
+        },
+
+        "risk_constraints": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["hard_cap_never_breached", "violations"],
+          "properties": {
+            "hard_cap_never_breached": { "type": "boolean" },
+            "violations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["day_utc", "code", "details"],
+                "properties": {
+                  "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+                  "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+                  "details": { "type": "object" }
+                }
+              }
+            }
+          }
+        },
+
+        "notes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256", "producer"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "producer": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+
+    "produced_utc": { "type": "string", "format": "date-time" },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 7 },
+        "module": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}

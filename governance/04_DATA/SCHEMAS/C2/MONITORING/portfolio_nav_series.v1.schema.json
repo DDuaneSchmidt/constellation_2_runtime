@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_PORTFOLIO_NAV_SERIES_V1",
+  "title": "C2 Portfolio NAV Series Artifact v1 (Phase J)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "status",
+    "day_utc",
+    "series",
+    "input_manifest",
+    "produced_utc",
+    "producer",
+    "reason_codes"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_PORTFOLIO_NAV_SERIES_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "status": {
+      "type": "string",
+      "enum": [
+        "OK",
+        "DEGRADED_MISSING_DAYS",
+        "DEGRADED_INCOMPLETE_HISTORY",
+        "FAIL_CORRUPT_INPUTS"
+      ]
+    },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+
+    "series": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_id",
+        "window_days",
+        "points",
+        "invariants"
+      ],
+      "properties": {
+        "contract_id": { "type": "string", "minLength": 1 },
+        "window_days": { "type": "integer", "minimum": 2, "maximum": 4000 },
+
+        "points": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "day_utc",
+              "nav_total",
+              "daily_return",
+              "cumulative_return",
+              "rolling_peak_nav",
+              "drawdown_pct",
+              "rolling_vol_30d",
+              "rolling_sharpe_90d"
+            ],
+            "properties": {
+              "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+
+              "nav_total": { "type": "integer", "minimum": 0 },
+
+              "daily_return": {
+                "description": "(NAV_t / NAV_{t-1}) - 1, decimal string quantized to 8dp",
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{8}$"
+              },
+              "cumulative_return": {
+                "description": "(NAV_t / NAV_0) - 1, decimal string quantized to 8dp",
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{8}$"
+              },
+
+              "rolling_peak_nav": { "type": "integer", "minimum": 0 },
+
+              "drawdown_pct": {
+                "description": "Per C2_DRAWDOWN_CONVENTION_V1: (NAV - peak) / peak, quantized to 6dp, underwater negative",
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{6}$"
+              },
+
+              "rolling_vol_30d": {
+                "description": "StdDev(daily_return over last 30 points) * sqrt(252), quantized to 8dp; null if <30 points",
+                "anyOf": [
+                  { "type": "null" },
+                  { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{8}$" }
+                ]
+              },
+              "rolling_sharpe_90d": {
+                "description": "(mean/StdDev over last 90 points) * sqrt(252), quantized to 8dp; null if <90 points or vol=0",
+                "anyOf": [
+                  { "type": "null" },
+                  { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{8}$" }
+                ]
+              }
+            }
+          }
+        },
+
+        "invariants": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "no_gaps",
+            "no_lookahead",
+            "drawdown_convention"
+          ],
+          "properties": {
+            "no_gaps": { "type": "boolean" },
+            "no_lookahead": { "type": "boolean" },
+            "drawdown_convention": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["contract_id", "underwater_negative"],
+              "properties": {
+                "contract_id": { "type": "string", "minLength": 1 },
+                "underwater_negative": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256", "producer", "day_utc"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "producer": { "type": "string", "minLength": 1 },
+          "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+        }
+      }
+    },
+
+    "produced_utc": { "type": "string", "format": "date-time" },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 7 },
+        "module": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

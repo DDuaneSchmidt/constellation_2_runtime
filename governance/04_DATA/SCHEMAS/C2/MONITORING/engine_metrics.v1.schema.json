@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_ENGINE_METRICS_V1",
+  "title": "C2 Engine Metrics Artifact v1 (Phase J)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "status",
+    "day_utc",
+    "window_days",
+    "metrics",
+    "reconciliation",
+    "input_manifest",
+    "produced_utc",
+    "producer",
+    "reason_codes"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_ENGINE_METRICS_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "status": {
+      "type": "string",
+      "enum": [
+        "OK",
+        "DEGRADED_INSUFFICIENT_HISTORY",
+        "DEGRADED_ENGINE_LINKAGE_UNKNOWN",
+        "FAIL_CORRUPT_INPUTS"
+      ]
+    },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "window_days": { "type": "integer", "minimum": 2, "maximum": 4000 },
+
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["by_engine"],
+      "properties": {
+        "by_engine": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "engine_id",
+              "currency",
+              "rolling_return_30d",
+              "rolling_return_90d",
+              "rolling_return_180d",
+              "rolling_sharpe_30d",
+              "rolling_sharpe_90d",
+              "rolling_sharpe_180d",
+              "expectancy",
+              "win_rate",
+              "avg_gain",
+              "avg_loss",
+              "contribution_to_portfolio_return",
+              "notes"
+            ],
+            "properties": {
+              "engine_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+              "currency": { "type": "string", "minLength": 1, "maxLength": 8 },
+
+              "rolling_return_30d": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{8}$" }] },
+              "rolling_return_90d": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{8}$" }] },
+              "rolling_return_180d": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{8}$" }] },
+
+              "rolling_sharpe_30d": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{8}$" }] },
+              "rolling_sharpe_90d": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{8}$" }] },
+              "rolling_sharpe_180d": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{8}$" }] },
+
+              "expectancy": {
+                "description": "Per-trade expectancy in return units (decimal string 8dp). Null if trades < min threshold.",
+                "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{8}$" }]
+              },
+              "win_rate": {
+                "description": "Wins / (wins+losses), decimal string 6dp. Null if trades < min threshold.",
+                "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9]+\\.[0-9]{6}$" }]
+              },
+              "avg_gain": {
+                "description": "Mean return of winning trades, decimal string 8dp. Null if no wins.",
+                "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{8}$" }]
+              },
+              "avg_loss": {
+                "description": "Mean return of losing trades (negative), decimal string 8dp. Null if no losses.",
+                "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{8}$" }]
+              },
+
+              "contribution_to_portfolio_return": {
+                "description": "Engine contribution to portfolio cumulative return over window, decimal string 8dp.",
+                "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{8}$" }]
+              },
+
+              "notes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+            }
+          }
+        }
+      }
+    },
+
+    "reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "portfolio_return_window",
+        "sum_engine_contributions",
+        "delta",
+        "ok"
+      ],
+      "properties": {
+        "portfolio_return_window": { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{8}$" },
+        "sum_engine_contributions": { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{8}$" },
+        "delta": { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{8}$" },
+        "ok": { "type": "boolean" }
+      }
+    },
+
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256", "producer", "day_utc"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "producer": { "type": "string", "minLength": 1 },
+          "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+        }
+      }
+    },
+
+    "produced_utc": { "type": "string", "format": "date-time" },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 7 },
+        "module": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

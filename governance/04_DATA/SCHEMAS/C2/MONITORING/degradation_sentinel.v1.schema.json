@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_DEGRADATION_SENTINEL_V1",
+  "title": "C2 Degradation Sentinel Artifact v1 (Phase J, non-invasive)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "status",
+    "day_utc",
+    "signals",
+    "recommendations",
+    "input_manifest",
+    "produced_utc",
+    "producer",
+    "reason_codes"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_DEGRADATION_SENTINEL_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "status": {
+      "type": "string",
+      "enum": [
+        "OK",
+        "DEGRADED_INSUFFICIENT_HISTORY",
+        "FAIL_CORRUPT_INPUTS"
+      ]
+    },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+
+    "signals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rolling_sharpe_180d",
+        "expectancy_drift",
+        "win_rate_collapse",
+        "correlation_clustering_shift",
+        "flags"
+      ],
+      "properties": {
+        "rolling_sharpe_180d": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["threshold", "value", "flag"],
+          "properties": {
+            "threshold": { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{8}$" },
+            "value": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{8}$" }] },
+            "flag": { "type": "boolean" }
+          }
+        },
+
+        "expectancy_drift": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["threshold", "value", "flag"],
+          "properties": {
+            "threshold": { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{8}$" },
+            "value": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{8}$" }] },
+            "flag": { "type": "boolean" }
+          }
+        },
+
+        "win_rate_collapse": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["confidence_level", "value", "lower_band", "flag"],
+          "properties": {
+            "confidence_level": { "type": "string", "pattern": "^[0-1]\\.[0-9]{2}$" },
+            "value": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9]+\\.[0-9]{6}$" }] },
+            "lower_band": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9]+\\.[0-9]{6}$" }] },
+            "flag": { "type": "boolean" }
+          }
+        },
+
+        "correlation_clustering_shift": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["metric", "threshold", "value", "flag"],
+          "properties": {
+            "metric": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "threshold": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{6}$" },
+            "value": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9]+\\.[0-9]{6}$" }] },
+            "flag": { "type": "boolean" }
+          }
+        },
+
+        "flags": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["code", "severity", "flag", "details"],
+            "properties": {
+              "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+              "severity": { "type": "string", "enum": ["INFO", "WARN", "ALERT"] },
+              "flag": { "type": "boolean" },
+              "details": { "type": "object" }
+            }
+          }
+        }
+      }
+    },
+
+    "recommendations": {
+      "description": "Non-binding recommendations only. Must not be consumed by execution without explicit deterministic rule.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["recommendation_id", "text", "severity"],
+        "properties": {
+          "recommendation_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "text": { "type": "string", "minLength": 1, "maxLength": 4000 },
+          "severity": { "type": "string", "enum": ["INFO", "WARN", "ALERT"] }
+        }
+      }
+    },
+
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256", "producer"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "producer": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+
+    "produced_utc": { "type": "string", "format": "date-time" },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 7 },
+        "module": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}
