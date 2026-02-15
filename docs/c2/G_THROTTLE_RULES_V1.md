@@ -11,6 +11,10 @@ scope: constellation_2_0
 
 # Bundle G: Throttle Rules v1
 
+## Authority
+
+- Canonical drawdown convention: `C2_DRAWDOWN_CONVENTION_V1` (governance contract)
+
 ## 1. Purpose
 
 Throttle rules define how allocation sizing is reduced or blocked based on:
@@ -47,24 +51,33 @@ If the risk budget contract registry/config cannot be loaded or is schema invali
 
 Multipliers never increase size above base caps. They only reduce or leave unchanged.
 
-### 3.1 Drawdown multiplier
+### 3.1 Drawdown multiplier (CANONICAL NEGATIVE UNDERWATER)
 
 Inputs:
-- `drawdown_pct` from Bundle F nav history (or equivalent governed field)
+- `drawdown_pct` from Bundle F accounting nav history
 
-Piecewise multiplier function (v1):
+Definition:
+- `drawdown_pct = (NAV_t - rolling_peak_nav) / rolling_peak_nav` (see `C2_DRAWDOWN_CONVENTION_V1`)
+- At peaks: `drawdown_pct == 0`
+- Underwater: `drawdown_pct < 0` (negative)
 
-- If `drawdown_pct` is null → multiplier = 0.0 and BLOCK (accounting not OK should already block)
-- If `drawdown_pct <= 0.05` → `mult_drawdown = 1.00`
-- If `0.05 < drawdown_pct <= 0.10` → `mult_drawdown = 0.50`
-- If `0.10 < drawdown_pct <= 0.15` → `mult_drawdown = 0.25`
-- If `drawdown_pct > 0.15` → `mult_drawdown = 0.00` and BLOCK
+Piecewise multiplier function (v1), evaluated from **most severe** to **least** (inclusive thresholds):
+
+- If `drawdown_pct` is null → `mult_drawdown = 0.00` and BLOCK
+- Else if `drawdown_pct <= -0.150000` → `mult_drawdown = 0.25`
+- Else if `drawdown_pct <= -0.100000` → `mult_drawdown = 0.50`
+- Else if `drawdown_pct <= -0.050000` → `mult_drawdown = 0.75`
+- Else → `mult_drawdown = 1.00`
+
+Clamping:
+- If `drawdown_pct < -0.150000`, multiplier remains `0.25` (no further reductions).
 
 Reason codes:
-- `G_DD_OK`
-- `G_DD_REDUCE_50`
-- `G_DD_REDUCE_25`
-- `G_DD_BLOCK`
+- `G_DD_OK` (mult_drawdown = 1.00)
+- `G_DD_REDUCE_75` (mult_drawdown = 0.75)
+- `G_DD_REDUCE_50` (mult_drawdown = 0.50)
+- `G_DD_REDUCE_25` (mult_drawdown = 0.25)
+- `G_DD_BLOCK` (drawdown missing → BLOCK)
 
 ### 3.2 Volatility multiplier
 
@@ -123,4 +136,3 @@ Fail-closed means:
 - Volatility regime tests: verify multiplier table and missing-vol degraded behavior
 - Ordering test: ensure constraint binding ordering stable
 - Determinism test: rerun yields byte-identical decision artifacts
-

@@ -4,21 +4,26 @@ import argparse
 import json
 import sys
 from datetime import datetime, timezone
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from constellation_2.phaseD.lib.canon_json_v1 import CanonicalizationError, canonical_json_bytes_v1
+from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
-from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
+from constellation_2.phaseF.accounting.lib.immut_write_v1 import write_file_immutable_v1
+
+# Drawdown convention authority (canonical, negative underwater)
+# Contract: C2_DRAWDOWN_CONVENTION_V1
+C2_DRAWDOWN_CONTRACT_ID = "C2_DRAWDOWN_CONVENTION_V1"
+DRAWDOWN_QUANT = Decimal("0.000001")  # 6dp
+
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 TRUTH_ROOT = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
-
 ALLOC_ROOT = (TRUTH_ROOT / "allocation_v1").resolve()
 
 SCHEMA_SUMMARY = "governance/04_DATA/SCHEMAS/C2/ALLOCATION/allocation_summary.v1.schema.json"
-SCHEMA_LATEST = "governance/04_DATA/SCHEMAS/C2/ALLOCATION/allocation_latest_pointer.v1.schema.json"
 
 
 def _utc_now_iso() -> str:
@@ -51,10 +56,57 @@ def _lock_git_sha_if_exists(existing_path: Path, provided_sha: str) -> Optional[
     return None
 
 
+def _parse_dd_pct_str_or_fail(nav_obj: Dict[str, Any]) -> Tuple[int, int, int, str]:
+    """
+    Fail-closed: require accounting nav history has populated drawdown fields.
+    Returns: (nav_total_int, peak_nav_int, drawdown_abs_int, drawdown_pct_str)
+    """
+    nav = nav_obj.get("nav")
+    if not isinstance(nav, dict):
+        raise ValueError("ACCOUNTING_NAV_OBJECT_MISSING")
+    nav_total = nav.get("nav_total")
+    if not isinstance(nav_total, int):
+        raise ValueError("ACCOUNTING_NAV_TOTAL_NOT_INT")
+
+    hist = nav_obj.get("history")
+    if not isinstance(hist, dict):
+        raise ValueError("ACCOUNTING_HISTORY_MISSING")
+    peak_nav = hist.get("peak_nav")
+    dd_abs = hist.get("drawdown_abs")
+    dd_pct = hist.get("drawdown_pct")
+    if not isinstance(peak_nav, int):
+        raise ValueError("ACCOUNTING_PEAK_NAV_NOT_INT")
+    if not isinstance(dd_abs, int):
+        raise ValueError("ACCOUNTING_DRAWDOWN_ABS_NOT_INT")
+    if not isinstance(dd_pct, str) or not dd_pct.strip():
+        raise ValueError("ACCOUNTING_DRAWDOWN_PCT_MISSING_OR_NOT_STRING")
+
+    # Quantize/normalize dd_pct to 6dp for strict comparison (string must already be 6dp)
+    d = Decimal(dd_pct).quantize(DRAWDOWN_QUANT, rounding=ROUND_HALF_UP)
+    dd_pct_s = f"{d:.6f}"
+    return int(nav_total), int(peak_nav), int(dd_abs), dd_pct_s
+
+
+def drawdown_multiplier_v1(drawdown_pct_s: str) -> str:
+    """
+    Canonical multiplier rule per C2_DRAWDOWN_CONVENTION_V1 and G_THROTTLE_RULES_V1.
+    Returns multiplier as string with 2 dp.
+    """
+    dd = Decimal(drawdown_pct_s).quantize(DRAWDOWN_QUANT, rounding=ROUND_HALF_UP)
+
+    if dd <= Decimal("-0.150000"):
+        return "0.25"
+    if dd <= Decimal("-0.100000"):
+        return "0.50"
+    if dd <= Decimal("-0.050000"):
+        return "0.75"
+    return "1.00"
+
+
 def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="run_allocation_day_v1",
-        description="C2 Bundle G Allocation v1 (minimal bootstrap: summary only, day-scoped inputs).",
+        description="C2 Bundle G Allocation v1 (bootstrap: summary + audit-grade drawdown enforcement block).",
     )
     ap.add_argument("--day_utc", required=True, help="UTC day key YYYY-MM-DD")
     ap.add_argument("--producer_git_sha", required=True, help="Producing git sha (explicit)")
@@ -69,7 +121,6 @@ def main(argv: List[str] | None = None) -> int:
     summary_dir = (ALLOC_ROOT / "summary" / day_utc).resolve()
     summary_path = summary_dir / "summary.json"
 
-    # Day-scoped sha lock only (summary). No global allocation_v1/latest.json in strict immutability mode.
     ex_sha = _lock_git_sha_if_exists(summary_path, producer_sha)
     if ex_sha is not None:
         print(f"FAIL: PRODUCER_GIT_SHA_MISMATCH_FOR_EXISTING_DAY: existing={ex_sha} provided={producer_sha}", file=sys.stderr)
@@ -77,17 +128,16 @@ def main(argv: List[str] | None = None) -> int:
 
     produced_utc = f"{day_utc}T00:00:00Z"
 
-    # Required: accounting day NAV exists (bundle F produced).
     nav_path = (TRUTH_ROOT / "accounting_v1" / "nav" / day_utc / "nav.json").resolve()
     try:
-        nav = _read_json_obj(nav_path)
-        nav_status = str(nav.get("status") or "").strip() or "UNKNOWN"
+        nav_obj = _read_json_obj(nav_path)
+        nav_status = str(nav_obj.get("status") or "").strip() or "UNKNOWN"
         nav_sha = _sha256_file(nav_path)
+        nav_total, peak_nav, dd_abs, dd_pct_s = _parse_dd_pct_str_or_fail(nav_obj)
     except Exception as e:
         print(f"FAIL: ACCOUNTING_DAY_NAV_MISSING_OR_INVALID: {e}", file=sys.stderr)
         return 2
 
-    # Optional: positions effective pointer for this day (traceability).
     pos_eff_ptr_path = (TRUTH_ROOT / "positions_v1" / "effective_v1" / "days" / day_utc / "positions_effective_pointer.v1.json").resolve()
     pos_eff_ptr_sha: Optional[str] = None
     if pos_eff_ptr_path.exists() and pos_eff_ptr_path.is_file():
@@ -97,6 +147,28 @@ def main(argv: List[str] | None = None) -> int:
         except Exception as e:
             print(f"FAIL: POSITIONS_EFFECTIVE_POINTER_INVALID: {e}", file=sys.stderr)
             return 2
+
+    # Deterministic drawdown enforcement block (always present; fail-closed handled above)
+    mult = drawdown_multiplier_v1(dd_pct_s)
+    thresholds = [
+        {"drawdown_pct": "0.000000", "multiplier": "1.00"},
+        {"drawdown_pct": "-0.050000", "multiplier": "0.75"},
+        {"drawdown_pct": "-0.100000", "multiplier": "0.50"},
+        {"drawdown_pct": "-0.150000", "multiplier": "0.25"},
+    ]
+
+    dd_block = {
+        "contract_id": C2_DRAWDOWN_CONTRACT_ID,
+        "nav_source_path": str(nav_path),
+        "nav_source_sha256": nav_sha,
+        "nav_asof_day_utc": day_utc,
+        "rolling_peak_nav": int(peak_nav),
+        "nav_total": int(nav_total),
+        "drawdown_abs": int(dd_abs),
+        "drawdown_pct": dd_pct_s,
+        "multiplier": mult,
+        "thresholds": thresholds,
+    }
 
     reason_codes: List[str] = []
     notes: List[str] = []
@@ -123,15 +195,12 @@ def main(argv: List[str] | None = None) -> int:
         "status": "OK",
         "reason_codes": reason_codes,
         "input_manifest": input_manifest,
-        "summary": {"decisions": [], "counts": {"allow": 0, "block": 0}, "notes": notes},
+        "summary": {"decisions": [], "counts": {"allow": 0, "block": 0}, "notes": notes, "drawdown_enforcement": dd_block},
     }
 
     validate_against_repo_schema_v1(summary_obj, REPO_ROOT, SCHEMA_SUMMARY)
     s_bytes = canonical_json_bytes_v1(summary_obj) + b"\n"
     _ = write_file_immutable_v1(path=summary_path, data=s_bytes, create_dirs=True)
-
-    # NOTE: No global allocation_v1/latest.json write.
-    # Global latest pointers are incompatible with strict no-overwrite invariants.
 
     print("OK: ALLOCATION_BOOTSTRAP_SUMMARY_WRITTEN")
     return 0

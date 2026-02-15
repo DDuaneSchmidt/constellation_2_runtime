@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 from datetime import datetime, timezone
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -15,6 +16,8 @@ from constellation_2.phaseF.accounting.lib.paths_v1 import REPO_ROOT, day_paths_
 from constellation_2.phaseF.cash_ledger.lib.paths_v1 import day_paths_v1 as cash_day_paths_v1
 from constellation_2.phaseF.positions.lib.paths_effective_v1 import day_paths_effective_v1 as pos_effective_day_paths_v1
 from constellation_2.phaseF.positions.lib.paths_v2 import day_paths_v2 as pos_day_paths_v2
+from constellation_2.phaseF.positions.lib.paths_v3 import day_paths_v3 as pos_day_paths_v3
+from constellation_2.phaseF.positions.lib.paths_v4 import day_paths_v4 as pos_day_paths_v4
 from constellation_2.phaseF.position_lifecycle.lib.paths_v1 import day_paths_v1 as lifecycle_day_paths_v1
 from constellation_2.phaseF.defined_risk.lib.paths_v1 import day_paths_v1 as defined_risk_day_paths_v1
 
@@ -26,6 +29,8 @@ SCHEMA_LATEST = "governance/04_DATA/SCHEMAS/C2/ACCOUNTING/accounting_latest_poin
 SCHEMA_FAILURE = "governance/04_DATA/SCHEMAS/C2/ACCOUNTING/accounting_failure.v1.schema.json"
 
 SCHEMA_DEFINED_RISK_SNAPSHOT_V1 = "governance/04_DATA/SCHEMAS/C2/RISK/defined_risk_snapshot.v1.schema.json"
+
+DRAWDOWN_QUANT = Decimal("0.000001")  # 6dp per C2_DRAWDOWN_CONVENTION_V1
 
 
 def _utc_now_iso() -> str:
@@ -82,6 +87,75 @@ def _expiry_bucket_from_expiry_utc(expiry_utc: str) -> str:
     return "unknown"
 
 
+def _parse_day_key(s: str) -> Tuple[int, int, int]:
+    v = (s or "").strip()
+    if len(v) != 10 or v[4] != "-" or v[7] != "-":
+        raise ValueError(f"BAD_DAY_KEY: {s!r}")
+    return (int(v[0:4]), int(v[5:7]), int(v[8:10]))
+
+def _compute_peak_and_drawdown_or_fail(day_utc: str, nav_total_int: int) -> Tuple[int, int, str]:
+    """
+    Canonical drawdown convention C2_DRAWDOWN_CONVENTION_V1
+
+    peak_nav_t = max(NAV_d) for d <= t
+    drawdown_abs = nav_total - peak_nav
+    drawdown_pct = (nav_total - peak_nav) / peak_nav  (quantized to 6dp, ROUND_HALF_UP, stored as string)
+
+    Contract notes:
+    - NAV_t must be integer >= 0 (NAV may be 0)
+    - peak_nav_t must be > 0 (otherwise drawdown undefined)
+    """
+    if not isinstance(nav_total_int, int):
+        raise ValueError("NAV_TOTAL_NOT_INT_FOR_DRAWDOWN")
+    if nav_total_int < 0:
+        raise ValueError("NAV_TOTAL_NEGATIVE_FOR_DRAWDOWN")
+
+    y, m, d = _parse_day_key(day_utc)
+
+    nav_root = (REPO_ROOT / "constellation_2" / "runtime" / "truth" / "accounting_v1" / "nav").resolve()
+    if not nav_root.exists() or not nav_root.is_dir():
+        # No history exists. Drawdown can only be defined if NAV is positive (peak must be > 0).
+        if nav_total_int == 0:
+            raise ValueError("NO_POSITIVE_PEAK_AVAILABLE_FOR_DRAWDOWN")
+        peak = nav_total_int
+        dd_abs = 0
+        dd_pct = Decimal("0").quantize(DRAWDOWN_QUANT, rounding=ROUND_HALF_UP)
+        return peak, dd_abs, f"{dd_pct:.6f}"
+
+    # Determine peak from all prior <= day nav.json files that have integer nav_total.
+    peak = 0
+    for day_dir in sorted([p for p in nav_root.iterdir() if p.is_dir()], key=lambda p: p.name):
+        dn = day_dir.name
+        try:
+            y2, m2, d2 = _parse_day_key(dn)
+        except Exception:
+            continue
+        if (y2, m2, d2) > (y, m, d):
+            continue
+        nav_path = (day_dir / "nav.json").resolve()
+        if not nav_path.exists() or not nav_path.is_file():
+            continue
+        obj = _read_json_obj(nav_path)
+        nav = obj.get("nav")
+        if not isinstance(nav, dict):
+            continue
+        v = nav.get("nav_total")
+        if not isinstance(v, int):
+            continue
+        if v > peak:
+            peak = v
+
+    # Incorporate current day NAV into peak.
+    if nav_total_int > peak:
+        peak = nav_total_int
+
+    if peak <= 0:
+        raise ValueError("NO_POSITIVE_PEAK_AVAILABLE_FOR_DRAWDOWN")
+
+    dd_abs = int(nav_total_int - peak)
+    dd_pct = (Decimal(dd_abs) / Decimal(peak)).quantize(DRAWDOWN_QUANT, rounding=ROUND_HALF_UP)
+    return int(peak), int(dd_abs), f"{dd_pct:.6f}"
+
 def _build_failure(
     *,
     day_utc: str,
@@ -110,12 +184,17 @@ def _build_failure(
 
 
 def _select_positions_input_for_day(day_utc: str) -> Tuple[Path, str, str, Optional[Path]]:
+    """
+    Deterministic selection:
+    1) If positions_effective pointer exists -> use it (points to the snapshot path).
+    2) Else prefer newest snapshot version present: v4, then v3, then v2.
+    Fail-closed if none exist.
+    """
     pos_eff = pos_effective_day_paths_v1(day_utc)
+    pos_v4 = pos_day_paths_v4(day_utc)
+    pos_v3 = pos_day_paths_v3(day_utc)
     pos_v2 = pos_day_paths_v2(day_utc)
 
-    pos_snapshot_path = pos_v2.snapshot_path
-    pos_producer = "positions_v2"
-    pos_input_type = "positions_truth"
     pos_ptr_path_used: Optional[Path] = None
 
     if pos_eff.pointer_path.exists() and pos_eff.pointer_path.is_file():
@@ -125,11 +204,18 @@ def _select_positions_input_for_day(day_utc: str) -> Tuple[Path, str, str, Optio
         if not isinstance(snap_path_s, str) or not snap_path_s.strip():
             raise ValueError("POSITIONS_EFFECTIVE_POINTER_INVALID: missing pointers.snapshot_path")
         pos_snapshot_path = Path(snap_path_s).resolve()
-        pos_producer = "positions_effective_v1"
-        pos_input_type = "positions_effective_pointer"
-        pos_ptr_path_used = pos_eff.pointer_path
+        return (pos_snapshot_path, "positions_effective_v1", "positions_effective_pointer", pos_eff.pointer_path)
 
-    return (pos_snapshot_path, pos_producer, pos_input_type, pos_ptr_path_used)
+    if pos_v4.snapshot_path.exists() and pos_v4.snapshot_path.is_file():
+        return (pos_v4.snapshot_path, "positions_v4_snapshot", "positions_truth", pos_ptr_path_used)
+
+    if pos_v3.snapshot_path.exists() and pos_v3.snapshot_path.is_file():
+        return (pos_v3.snapshot_path, "positions_v3_snapshot", "positions_truth", pos_ptr_path_used)
+
+    if pos_v2.snapshot_path.exists() and pos_v2.snapshot_path.is_file():
+        return (pos_v2.snapshot_path, "positions_v2_snapshot", "positions_truth", pos_ptr_path_used)
+
+    raise FileNotFoundError(f"POSITIONS_SNAPSHOT_MISSING_ALL_VERSIONS: day={day_utc}")
 
 
 def main(argv: List[str] | None = None) -> int:
@@ -149,7 +235,6 @@ def main(argv: List[str] | None = None) -> int:
 
     out = accounting_day_paths_v1(day_utc)
 
-    # DAY-scoped sha lock only (nav/exposure/attribution). No global latest.json in strict immutability mode.
     for p in (out.nav_path, out.exposure_path, out.attribution_path):
         ex_sha = _lock_git_sha_if_exists(p, producer_sha)
         if ex_sha is not None:
@@ -167,7 +252,7 @@ def main(argv: List[str] | None = None) -> int:
             producer_git_sha=producer_sha,
             module=module,
             status="FAIL_CORRUPT_INPUTS",
-            reason_codes=["POSITIONS_EFFECTIVE_POINTER_INVALID"],
+            reason_codes=["POSITIONS_SNAPSHOT_MISSING_OR_POINTER_INVALID"],
             input_manifest=[
                 {"type": "other", "path": str(pos_effective_day_paths_v1(day_utc).pointer_path), "sha256": "0" * 64, "day_utc": day_utc, "producer": "positions_effective_v1"}
             ],
@@ -183,7 +268,7 @@ def main(argv: List[str] | None = None) -> int:
         validate_against_repo_schema_v1(failure, REPO_ROOT, SCHEMA_FAILURE)
         b = canonical_json_bytes_v1(failure) + b"\n"
         _ = write_file_immutable_v1(path=out.failure_path, data=b, create_dirs=True)
-        print("FAIL: POSITIONS_EFFECTIVE_POINTER_INVALID (failure artifact written)", file=sys.stderr)
+        print("FAIL: POSITIONS_SNAPSHOT_MISSING_OR_POINTER_INVALID (failure artifact written)", file=sys.stderr)
         return 2
 
     try:
@@ -321,6 +406,32 @@ def main(argv: List[str] | None = None) -> int:
         }
     ]
 
+    try:
+        peak_nav, drawdown_abs, drawdown_pct_s = _compute_peak_and_drawdown_or_fail(day_utc, int(cash_total))
+    except Exception as e:
+        failure = _build_failure(
+            day_utc=day_utc,
+            producer_repo=producer_repo,
+            producer_git_sha=producer_sha,
+            module=module,
+            status="FAIL_CORRUPT_INPUTS",
+            reason_codes=["DRAWDOWN_COMPUTE_FAILED_FAIL_CLOSED"],
+            input_manifest=input_manifest,
+            code="FAIL_CORRUPT_INPUTS",
+            message=str(e),
+            details={"error": str(e)},
+            attempted_outputs=[
+                {"path": str(out.nav_path), "sha256": None},
+                {"path": str(out.exposure_path), "sha256": None},
+                {"path": str(out.attribution_path), "sha256": None},
+            ],
+        )
+        validate_against_repo_schema_v1(failure, REPO_ROOT, SCHEMA_FAILURE)
+        b = canonical_json_bytes_v1(failure) + b"\n"
+        _ = write_file_immutable_v1(path=out.failure_path, data=b, create_dirs=True)
+        print("FAIL: DRAWDOWN_COMPUTE_FAILED_FAIL_CLOSED (failure artifact written)", file=sys.stderr)
+        return 2
+
     nav_obj: Dict[str, Any] = {
         "schema_id": "C2_ACCOUNTING_NAV_V1",
         "schema_version": 1,
@@ -340,11 +451,11 @@ def main(argv: List[str] | None = None) -> int:
             "components": components,
             "notes": ["bootstrap: marks missing; NAV is cash-only; positions listed elsewhere"],
         },
-        "history": {"peak_nav": None, "drawdown_abs": None, "drawdown_pct": None},
+        "history": {"peak_nav": int(peak_nav), "drawdown_abs": int(drawdown_abs), "drawdown_pct": str(drawdown_pct_s)},
     }
     validate_against_repo_schema_v1(nav_obj, REPO_ROOT, SCHEMA_NAV)
     nav_bytes = canonical_json_bytes_v1(nav_obj) + b"\n"
-    wr_nav = write_file_immutable_v1(path=out.nav_path, data=nav_bytes, create_dirs=True)
+    _ = write_file_immutable_v1(path=out.nav_path, data=nav_bytes, create_dirs=True)
 
     underlyings = set()
     expiry_buckets = set()
@@ -446,7 +557,7 @@ def main(argv: List[str] | None = None) -> int:
     }
     validate_against_repo_schema_v1(exposure_obj, REPO_ROOT, SCHEMA_EXPOSURE)
     exp_bytes = canonical_json_bytes_v1(exposure_obj) + b"\n"
-    wr_exp = write_file_immutable_v1(path=out.exposure_path, data=exp_bytes, create_dirs=True)
+    _ = write_file_immutable_v1(path=out.exposure_path, data=exp_bytes, create_dirs=True)
 
     items = positions.get("positions", {}).get("items", [])
     pos_count = len(items) if isinstance(items, list) else 0
@@ -478,10 +589,6 @@ def main(argv: List[str] | None = None) -> int:
     validate_against_repo_schema_v1(attr_obj, REPO_ROOT, SCHEMA_ATTR)
     attr_bytes = canonical_json_bytes_v1(attr_obj) + b"\n"
     _ = write_file_immutable_v1(path=out.attribution_path, data=attr_bytes, create_dirs=True)
-
-    # NOTE: No global accounting_v1/latest.json write.
-    # Global latest pointers are incompatible with strict no-overwrite invariants.
-    # Allocation should consume day-scoped outputs instead.
 
     print("OK: ACCOUNTING_BOOTSTRAP_WRITTEN")
     return 0

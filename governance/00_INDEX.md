@@ -28,10 +28,13 @@ This repository is the constitutional root of **Constellation 2.0**.
 ### A) C2 Bundle Contracts (Design Authority)
 - `governance/01_CONTRACTS/C2/`
 
-### B) Registries (Enumerations / reason codes / constants)
+### B) C2 Canonical Contracts (Runtime + Audit Authority)
+- `governance/05_CONTRACTS/C2/`
+
+### C) Registries (Enumerations / reason codes / constants)
 - `governance/02_REGISTRIES/`
 
-### C) Operator docs and runbooks (non-authoritative guidance)
+### D) Operator docs and runbooks (non-authoritative guidance)
 - `docs/` (informational; not a contract unless also registered in the manifest)
 
 ## Bundle F + G (Accounting + Allocation)
@@ -49,6 +52,12 @@ The following C2 Bundle F/G documents are introduced under `docs/c2/` and are tr
 - `docs/c2/RUNBOOK_FG_PHASE_V1.md`
 
 NOTE: In this repo, docs under `docs/` are treated as governed artifacts **only when explicitly listed** in `governance/00_MANIFEST.yaml`.
+
+## Governed canonical contracts
+
+These canonical contracts are governance-controlled and must be explicitly listed in `governance/00_MANIFEST.yaml` to be treated as governed artifacts:
+
+- `governance/05_CONTRACTS/C2/drawdown_convention_v1.contract.md`
 
 ## Governed data schemas
 

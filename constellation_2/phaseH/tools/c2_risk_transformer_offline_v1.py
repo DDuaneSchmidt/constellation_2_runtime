@@ -5,9 +5,15 @@ import json
 import os
 import sys
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation, ROUND_FLOOR
+from decimal import Decimal, InvalidOperation, ROUND_FLOOR, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
+
+# Drawdown convention authority (canonical, negative underwater)
+# Contract: C2_DRAWDOWN_CONVENTION_V1
+C2_DRAWDOWN_CONTRACT_ID = "C2_DRAWDOWN_CONVENTION_V1"
+DRAWDOWN_QUANT = Decimal("0.000001")  # 6dp per contract
+
 
 # Fail-closed import root
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -112,36 +118,44 @@ CAPS = CapsV1(
 )
 
 
-def _risk_multiplier_from_drawdown_pct(drawdown_pct: Optional[Decimal]) -> Decimal:
-    # drawdown_pct expected negative for drawdown. If missing, assume 1.0 (fail-open is forbidden; but missing drawdown is common bootstrap).
-    if drawdown_pct is None:
-        return Decimal("1.0")
-    if drawdown_pct <= Decimal("-0.15"):
-        return Decimal("0.25")
-    if drawdown_pct <= Decimal("-0.10"):
-        return Decimal("0.50")
-    if drawdown_pct <= Decimal("-0.05"):
-        return Decimal("0.75")
-    return Decimal("1.0")
-
-
-def _parse_drawdown_pct_from_nav(nav_obj: Dict[str, Any]) -> Optional[Decimal]:
+def drawdown_multiplier_v1(drawdown_pct: Decimal) -> Decimal:
     """
-    Best-effort: accounting nav has history.drawdown_pct (may be null).
-    If missing or null -> None.
+    Canonical drawdown-to-multiplier rule per C2_DRAWDOWN_CONVENTION_V1.
+
+    - drawdown_pct == 0 at peaks
+    - drawdown_pct < 0 underwater (negative)
+    - inclusive thresholds, evaluated from most severe to least
+    - clamp at 0.25 for drawdown < -0.15
+    """
+    dd = drawdown_pct.quantize(DRAWDOWN_QUANT, rounding=ROUND_HALF_UP)
+
+    if dd <= Decimal("-0.150000"):
+        return Decimal("0.25")
+    if dd <= Decimal("-0.100000"):
+        return Decimal("0.50")
+    if dd <= Decimal("-0.050000"):
+        return Decimal("0.75")
+    return Decimal("1.00")
+
+
+def _parse_drawdown_pct_from_nav_or_fail(nav_obj: Dict[str, Any]) -> Decimal:
+    """
+    Contract enforcement: drawdown_pct must exist and must be a DECIMAL STRING.
+    Fail-closed if missing/null/invalid.
+
+    NOTE: This is Blocker A hardening; missing drawdown is no longer allowed.
     """
     hist = nav_obj.get("history")
     if not isinstance(hist, dict):
-        return None
+        raise TransformerError("DRAWDOWN_HISTORY_MISSING_FAIL_CLOSED")
     dd = hist.get("drawdown_pct")
     if dd is None:
-        return None
+        raise TransformerError("DRAWDOWN_MISSING_FAIL_CLOSED")
     if isinstance(dd, (int, float)):
-        # floats forbidden elsewhere; but this is input JSON; still fail-closed because determinism standard forbids floats.
         raise TransformerError("ACCOUNTING_DRAWDOWN_PCT_FLOAT_FORBIDDEN")
     if isinstance(dd, str):
-        return _dec(dd, "drawdown_pct")
-    return None
+        return _dec(dd, "drawdown_pct").quantize(DRAWDOWN_QUANT, rounding=ROUND_HALF_UP)
+    raise TransformerError("DRAWDOWN_INVALID_TYPE_FAIL_CLOSED")
 
 
 def _equity_qty_from_notional(nav_total_usd_int: int, target_pct: Decimal, ref_price: Decimal) -> int:
@@ -186,10 +200,10 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     nav_total_usd_int, nav_path = _load_nav_usd_from_accounting_latest(repo_root)
 
-    # Drawdown scaling (from nav history if present)
+    # Drawdown scaling (strict: fail closed if drawdown missing)
     nav_obj = _read_json_obj(Path(nav_path))
-    dd_pct = _parse_drawdown_pct_from_nav(nav_obj)
-    mult = _risk_multiplier_from_drawdown_pct(dd_pct)
+    dd_pct = _parse_drawdown_pct_from_nav_or_fail(nav_obj)
+    mult = drawdown_multiplier_v1(dd_pct)
     scaled_pct = (target_pct * mult)
 
     # Output routing

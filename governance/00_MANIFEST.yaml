@@ -20,6 +20,12 @@ documents:
     class: GOVERNANCE_INDEX
     status: ACTIVE
 
+  # Governed C2 contracts (canonical definitions; runtime code and docs must conform)
+  - id: C2_DRAWDOWN_CONVENTION_V1
+    path: governance/05_CONTRACTS/C2/drawdown_convention_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
   # Governed data schemas (governance-controlled; runtime code must conform)
   - id: C2_POSITIONS_SNAPSHOT_SCHEMA_V4
     path: governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_snapshot.v4.schema.json
@@ -48,7 +54,7 @@ documents:
     status: DRAFT
 
   - id: C2_E_EXECUTION_EVIDENCE_TRUTH_SPINE_V1
-    path: docs/c2/E_EXECUTION_EVIDENCE_TRUTH_V1.md
+    path: docs/c2/E_EXECUTION_EVIDENCE_TRUTH_SPINE_V1.md
     class: C2_PREREQ_EXECUTION_EVIDENCE_TRUTH
     status: DRAFT
 
