@@ -258,10 +258,21 @@ def main(argv: List[str] | None = None) -> int:
             b_exec = p_exec.read_bytes()
             wr_exec = write_file_immutable_v1(path=art_dir / "execution_event_record.v1.json", data=b_exec, create_dirs=True)
 
-        # Mirror identity inputs when present.
-        ptr_plan = _maybe_copy_identity_file(src_dir=sd, dst_dir=art_dir, filename="order_plan.v1.json")
-        ptr_bind = _maybe_copy_identity_file(src_dir=sd, dst_dir=art_dir, filename="binding_record.v1.json")
-        ptr_map = _maybe_copy_identity_file(src_dir=sd, dst_dir=art_dir, filename="mapping_ledger_record.v1.json")
+        # Mirror identity inputs when present (options v1 and/or equity v1/v2).
+        ptr_plan_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=art_dir, filename="order_plan.v1.json")
+        ptr_equity_plan_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=art_dir, filename="equity_order_plan.v1.json")
+
+        ptr_bind_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=art_dir, filename="binding_record.v1.json")
+        ptr_bind_v2 = _maybe_copy_identity_file(src_dir=sd, dst_dir=art_dir, filename="binding_record.v2.json")
+
+        ptr_map_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=art_dir, filename="mapping_ledger_record.v1.json")
+        ptr_map_v2 = _maybe_copy_identity_file(src_dir=sd, dst_dir=art_dir, filename="mapping_ledger_record.v2.json")
+
+        # Manifest schema only has slots for order_plan/binding_record/mapping_ledger_record.
+        # We populate those with the best available identity pointers deterministically.
+        manifest_ptr_plan = ptr_plan_v1
+        manifest_ptr_bind = ptr_bind_v1 if ptr_bind_v1 is not None else ptr_bind_v2
+        manifest_ptr_map = ptr_map_v1 if ptr_map_v1 is not None else ptr_map_v2
 
         input_manifest = [{"type": "phaseD_submission_dir", "path": str(sd), "sha256": "0" * 64, "day_utc": day_utc, "producer": "phaseD"}]
 
@@ -281,9 +292,9 @@ def main(argv: List[str] | None = None) -> int:
                 "broker_submission_record": {"path": str(art_dir / "broker_submission_record.v2.json"), "sha256": wr_broker.sha256},
                 "execution_event_record": None if wr_exec is None else {"path": str(art_dir / "execution_event_record.v1.json"), "sha256": wr_exec.sha256},
                 "veto_record": None,
-                "order_plan": ptr_plan,
-                "binding_record": ptr_bind,
-                "mapping_ledger_record": ptr_map,
+                "order_plan": manifest_ptr_plan,
+                "binding_record": manifest_ptr_bind,
+                "mapping_ledger_record": manifest_ptr_map,
             },
         }
 
@@ -298,13 +309,17 @@ def main(argv: List[str] | None = None) -> int:
             ex_manifest = _read_json_obj(m_path)
             _ = _validate_manifest_any_version(ex_manifest)
 
-            # Identity patch is only needed when identity inputs are present (files exist) AND
-            # either the existing manifest lacks pointers (v1) or we want an immutable record
-            # of late-arriving identity inputs without rewriting the base manifest.
             patch_path = submission_manifest_identity_patch_path_v1(day_utc=day_utc, submission_id=submission_id)
 
             need_patch = False
-            if (ptr_plan is not None) or (ptr_bind is not None) or (ptr_map is not None):
+            if (
+                (ptr_plan_v1 is not None)
+                or (ptr_equity_plan_v1 is not None)
+                or (ptr_bind_v1 is not None)
+                or (ptr_bind_v2 is not None)
+                or (ptr_map_v1 is not None)
+                or (ptr_map_v2 is not None)
+            ):
                 need_patch = True
 
             if need_patch:
@@ -326,11 +341,15 @@ def main(argv: List[str] | None = None) -> int:
                         "submission_id": submission_id,
                         "base_manifest": {"path": str(m_path), "sha256": _sha256_file(m_path)},
                         "identity_inputs": {
-                            "order_plan": ptr_plan,
-                            "binding_record": ptr_bind,
-                            "mapping_ledger_record": ptr_map,
+                            "order_plan": ptr_plan_v1,
+                            "binding_record": manifest_ptr_bind,
+                            "mapping_ledger_record": manifest_ptr_map,
                         },
                     }
+
+                    # Equity plan is mirrored to artifact_dir; if present, it is still
+                    # immutably recorded even if not represented in manifest schema.
+                    # We rely on its presence in artifact_dir for downstream equity-aware consumers.
 
                     validate_against_repo_schema_v1(patch_obj, REPO_ROOT, SCHEMA_MANIFEST_ID_PATCH_V1)
                     p_bytes = canonical_json_bytes_v1(patch_obj) + b"\n"

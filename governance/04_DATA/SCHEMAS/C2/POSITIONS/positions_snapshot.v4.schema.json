@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_POSITIONS_SNAPSHOT_V4",
+  "title": "C2 Positions Snapshot v4 (equity-native + option-native instruments; no synthetic legs)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "day_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "input_manifest",
+    "positions"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_POSITIONS_SNAPSHOT_V4" },
+    "schema_version": { "type": "integer", "const": 4 },
+
+    "produced_utc": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "module": { "type": "string", "minLength": 1 },
+        "build": { "type": "object" }
+      }
+    },
+
+    "status": {
+      "type": "string",
+      "enum": [
+        "OK",
+        "DEGRADED_MISSING_LIFECYCLE",
+        "FAIL_CORRUPT_INPUTS",
+        "FAIL_SCHEMA_VIOLATION",
+        "FAIL_UNDEFINED_POSITION_IDENTITY"
+      ]
+    },
+
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256", "day_utc", "producer"],
+        "properties": {
+          "type": { "type": "string", "enum": ["execution_evidence", "position_lifecycle", "other"] },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "day_utc": { "anyOf": [{ "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }, { "type": "null" }] },
+          "producer": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+
+    "positions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currency", "asof_utc", "items", "notes"],
+      "properties": {
+        "currency": { "type": "string", "minLength": 1 },
+        "asof_utc": { "type": "string", "minLength": 1 },
+        "notes": { "type": "array", "items": { "type": "string" } },
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/position_item" }
+        }
+      }
+    }
+  },
+
+  "$defs": {
+    "instrument_option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "underlying", "legs", "summary"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["OPTION_SINGLE", "OPTION_MULTI"] },
+        "underlying": { "type": "string", "minLength": 1 },
+
+        "summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["expiry_utc", "strike", "right"],
+          "properties": {
+            "expiry_utc": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+            "strike": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+            "right": { "anyOf": [{ "type": "string", "enum": ["C", "P"] }, { "type": "null" }] }
+          }
+        },
+
+        "legs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/option_leg" }
+        }
+      }
+    },
+
+    "option_leg": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "expiry_utc", "strike", "right", "ratio", "ib_conId", "ib_localSymbol"],
+      "properties": {
+        "action": { "type": "string", "enum": ["BUY", "SELL"] },
+        "expiry_utc": { "type": "string", "minLength": 1 },
+        "strike": { "type": "string", "minLength": 1 },
+        "right": { "type": "string", "enum": ["C", "P"] },
+        "ratio": { "type": "integer", "minimum": 1 },
+        "ib_conId": { "type": "integer" },
+        "ib_localSymbol": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "instrument_equity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "symbol", "currency"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["EQUITY"] },
+        "symbol": { "type": "string", "minLength": 1, "maxLength": 16 },
+        "currency": { "type": "string", "minLength": 3, "maxLength": 3 },
+        "ib_conId": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+        "ib_localSymbol": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] }
+      }
+    },
+
+    "instrument": {
+      "oneOf": [
+        { "$ref": "#/$defs/instrument_option" },
+        { "$ref": "#/$defs/instrument_equity" }
+      ]
+    },
+
+    "position_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "position_id",
+        "engine_id",
+        "instrument",
+        "qty",
+        "avg_cost_cents",
+        "market_exposure_type",
+        "max_loss_cents",
+        "opened_day_utc",
+        "status"
+      ],
+      "properties": {
+        "position_id": { "type": "string", "minLength": 16, "maxLength": 128 },
+        "engine_id": { "type": "string", "minLength": 1 },
+        "instrument": { "$ref": "#/$defs/instrument" },
+        "qty": { "type": "integer" },
+        "avg_cost_cents": { "type": "integer" },
+        "market_exposure_type": { "type": "string", "enum": ["DEFINED_RISK", "UNDEFINED_RISK"] },
+        "max_loss_cents": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+        "opened_day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "status": { "type": "string", "enum": ["OPEN", "CLOSED"] }
+      }
+    }
+  }
+}

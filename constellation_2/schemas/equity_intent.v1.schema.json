@@ -1,0 +1,121 @@
+{
+  "$id": "https://constellation.local/schemas/equity_intent.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EquityIntent v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "intent_id",
+    "created_at_utc",
+    "engine",
+    "underlying",
+    "intent_type",
+    "sizing",
+    "exit_policy"
+  ],
+  "properties": {
+    "schema_id": { "const": "equity_intent" },
+    "schema_version": { "const": "v1" },
+
+    "intent_id": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 128,
+      "description": "Deterministic intent identifier (hash-derived preferred; random UUID forbidden by policy)."
+    },
+
+    "created_at_utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp when intent was created."
+    },
+
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine_id", "suite", "mode"],
+      "properties": {
+        "engine_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "description": "Engine identifier (e.g., E78, M34, etc)."
+        },
+        "suite": {
+          "type": "string",
+          "enum": ["C2_HYBRID_V1"],
+          "description": "Hybrid suite identifier (equity-capable)."
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["PAPER", "LIVE"],
+          "description": "Execution mode intent was authored for."
+        }
+      }
+    },
+
+    "underlying": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["symbol", "currency"],
+      "properties": {
+        "symbol": { "type": "string", "minLength": 1, "maxLength": 16 },
+        "currency": { "type": "string", "minLength": 3, "maxLength": 3 }
+      }
+    },
+
+    "intent_type": {
+      "type": "string",
+      "enum": ["EQUITY_LONG_OPEN", "EQUITY_LONG_CLOSE"],
+      "description": "Equity spot long open/close intents."
+    },
+
+    "sizing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_notional_pct", "max_risk_pct"],
+      "properties": {
+        "target_notional_pct": {
+          "type": "string",
+          "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$",
+          "description": "Target notional as fraction of portfolio NAV, decimal string in [0,1]."
+        },
+        "max_risk_pct": {
+          "type": "string",
+          "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$",
+          "description": "Per-position max risk fraction of NAV, decimal string in [0,1]. For stable system: <= 0.01."
+        }
+      }
+    },
+
+    "exit_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_id", "time_exit"],
+      "properties": {
+        "policy_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Deterministic identifier for the exit policy configuration."
+        },
+        "time_exit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "max_holding_days"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "max_holding_days": { "type": "integer", "minimum": 0, "maximum": 365 }
+          }
+        }
+      }
+    },
+
+    "canonical_json_hash": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

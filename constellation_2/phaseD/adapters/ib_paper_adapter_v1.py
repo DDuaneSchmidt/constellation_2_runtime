@@ -15,6 +15,10 @@ Hard rules:
 - No hidden defaults: connection spec required.
 - Adapter does not write truth artifacts (submit boundary handles evidence chain).
 - Any broker connection failure must raise (submit boundary converts to VetoRecord).
+
+Supported plan types:
+- Options: OrderPlan v1 (schema_id=order_plan, structure=VERTICAL_SPREAD) => IB BAG combo order (existing behavior)
+- Equity: EquityOrderPlan v1 (schema_id=equity_order_plan, structure=EQUITY_SPOT) => IB STK order (new)
 """
 
 from __future__ import annotations
@@ -73,6 +77,44 @@ def _order_plan_require_vertical_v1(order_plan: Dict[str, Any]) -> Tuple[Dict[st
     return order_plan, l0, l1
 
 
+def _equity_plan_require_v1(plan: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(plan, dict):
+        raise IBAdapterError("EQUITY_ORDER_PLAN_NOT_OBJECT")
+    if plan.get("schema_id") != "equity_order_plan" or plan.get("schema_version") != "v1":
+        raise IBAdapterError("EQUITY_ORDER_PLAN_SCHEMA_MISMATCH")
+    if plan.get("structure") != "EQUITY_SPOT":
+        raise IBAdapterError("ONLY_EQUITY_SPOT_SUPPORTED")
+    sym = plan.get("symbol")
+    ccy = plan.get("currency")
+    act = plan.get("action")
+    qty = plan.get("qty_shares")
+    if not isinstance(sym, str) or not sym.strip():
+        raise IBAdapterError("EQUITY_SYMBOL_INVALID")
+    if not isinstance(ccy, str) or len(ccy) != 3:
+        raise IBAdapterError("EQUITY_CURRENCY_INVALID")
+    if act not in ("BUY", "SELL"):
+        raise IBAdapterError("EQUITY_ACTION_INVALID")
+    if not isinstance(qty, int) or qty <= 0:
+        raise IBAdapterError("EQUITY_QTY_INVALID")
+    terms = plan.get("order_terms")
+    if not isinstance(terms, dict):
+        raise IBAdapterError("EQUITY_ORDER_TERMS_MISSING")
+    ot = terms.get("order_type")
+    tif = terms.get("time_in_force")
+    lp = terms.get("limit_price")
+    if ot not in ("LIMIT", "MARKET"):
+        raise IBAdapterError("EQUITY_ORDER_TYPE_INVALID")
+    if tif not in ("DAY", "GTC"):
+        raise IBAdapterError("EQUITY_TIF_INVALID")
+    if ot == "LIMIT":
+        if not isinstance(lp, str) or not lp.strip():
+            raise IBAdapterError("EQUITY_LIMIT_PRICE_REQUIRED_FOR_LIMIT")
+    else:
+        if lp is not None:
+            raise IBAdapterError("EQUITY_LIMIT_PRICE_MUST_BE_NULL_FOR_MARKET")
+    return plan
+
+
 def _build_ib_bag_and_order_from_order_plan_v1(order_plan: Dict[str, Any]) -> Tuple[Any, Any, Dict[str, Any]]:
     """
     Build ib_insync Contract (BAG) + Order from OrderPlan.v1.
@@ -90,7 +132,6 @@ def _build_ib_bag_and_order_from_order_plan_v1(order_plan: Dict[str, Any]) -> Tu
 
     op, l0, l1 = _order_plan_require_vertical_v1(order_plan)
 
-    # Legs: require BUY/SELL and conId present
     def _leg(leg: Dict[str, Any]) -> Tuple[int, str]:
         conid = leg.get("ib_conId")
         act = leg.get("action")
@@ -120,7 +161,6 @@ def _build_ib_bag_and_order_from_order_plan_v1(order_plan: Dict[str, Any]) -> Tu
     limit_price_s = terms.get("limit_price")
     if not isinstance(limit_price_s, str) or not limit_price_s:
         raise IBAdapterError("LIMIT_PRICE_INVALID")
-    # Convert to float only at the last moment (IB API requirement); we keep deterministic string in raw payload.
     try:
         limit_price_f = float(str(Decimal(limit_price_s)))
     except Exception as e:  # noqa: BLE001
@@ -146,7 +186,6 @@ def _build_ib_bag_and_order_from_order_plan_v1(order_plan: Dict[str, Any]) -> Tu
     order.lmtPrice = limit_price_f
     order.tif = tif
 
-    # Deterministic raw payload (JSON-safe, no floats)
     raw = {
         "format": "IB_BAG_ORDER_V1",
         "routing": {"exchange": exchange},
@@ -164,11 +203,71 @@ def _build_ib_bag_and_order_from_order_plan_v1(order_plan: Dict[str, Any]) -> Tu
             "orderType": "LMT",
             "tif": tif,
             "totalQuantity": contracts,
-            "lmtPrice": str(Decimal(limit_price_s)),  # string, not float
+            "lmtPrice": str(Decimal(limit_price_s)),
         },
     }
 
     return bag, order, raw
+
+
+def _build_ib_stock_and_order_from_equity_order_plan_v1(plan: Dict[str, Any]) -> Tuple[Any, Any, Dict[str, Any]]:
+    """
+    Build ib_insync Stock contract + Order from EquityOrderPlan.v1.
+
+    Deterministic constant routing:
+    - exchange = "SMART"
+    - primaryExchange not specified (schema has none)
+
+    Returns:
+      (contract, order, raw_payload_dict_json_safe)
+    """
+    try:
+        from ib_insync import Stock, Order  # type: ignore
+    except Exception as e:  # noqa: BLE001
+        raise IBAdapterError("C2_BROKER_ADAPTER_NOT_AVAILABLE: ib_insync import failed") from e
+
+    ep = _equity_plan_require_v1(plan)
+
+    exchange = "SMART"
+    sym = str(ep["symbol"]).strip()
+    ccy = str(ep["currency"]).strip()
+
+    contract = Stock(sym, exchange, ccy)
+
+    terms = ep["order_terms"]
+    ot = terms["order_type"]
+    tif = terms["time_in_force"]
+
+    order = Order()
+    order.action = str(ep["action"])
+    order.totalQuantity = int(ep["qty_shares"])
+    order.tif = tif
+
+    if ot == "MARKET":
+        order.orderType = "MKT"
+        limit_price_s = None
+    else:
+        order.orderType = "LMT"
+        limit_price_s = str(terms["limit_price"])
+        try:
+            order.lmtPrice = float(str(Decimal(limit_price_s)))
+        except Exception as e:  # noqa: BLE001
+            raise IBAdapterError("EQUITY_LIMIT_PRICE_PARSE_FAILED") from e
+
+    raw = {
+        "format": "IB_STK_ORDER_V1",
+        "routing": {"exchange": exchange},
+        "contract": {"secType": "STK", "symbol": sym, "currency": ccy, "exchange": exchange},
+        "order": {
+            "orderType": "MKT" if ot == "MARKET" else "LMT",
+            "tif": tif,
+            "action": str(ep["action"]),
+            "totalQuantity": int(ep["qty_shares"]),
+            "lmtPrice": None if limit_price_s is None else str(Decimal(limit_price_s)),
+        },
+    }
+
+    return contract, order, raw
 
 
 @dataclass
@@ -227,13 +326,21 @@ class IBPaperAdapterV1(BrokerAdapterV1):
     def whatif_order(self, *, order_plan: Dict[str, Any]) -> BrokerWhatIfResult:
         """
         Deterministic WhatIf precheck:
-        - Builds BAG + LMT order from OrderPlan
+        - Builds BAG+LMT order from OrderPlan OR STK order from EquityOrderPlan
         - Calls whatIfOrder
         - Normalizes margin deltas to decimal strings
         """
         ib = self._require_connected()
 
-        contract, order, raw_payload = _build_ib_bag_and_order_from_order_plan_v1(order_plan)
+        schema_id = str(order_plan.get("schema_id") or "").strip()
+
+        if schema_id == "order_plan":
+            contract, order, raw_payload = _build_ib_bag_and_order_from_order_plan_v1(order_plan)
+        elif schema_id == "equity_order_plan":
+            contract, order, raw_payload = _build_ib_stock_and_order_from_equity_order_plan_v1(order_plan)
+        else:
+            raise IBAdapterError(f"UNSUPPORTED_PLAN_SCHEMA_ID: {schema_id!r}")
+
         order.whatIf = True
 
         try:
@@ -241,7 +348,6 @@ class IBPaperAdapterV1(BrokerAdapterV1):
         except Exception as e:  # noqa: BLE001
             raise IBAdapterError(f"WHATIF_CALL_FAILED: {e}") from e
 
-        # IB returns OrderState values (often strings); capture safely.
         st = getattr(trade, "orderState", None)
         init_change = None
         maint_change = None
@@ -255,103 +361,90 @@ class IBPaperAdapterV1(BrokerAdapterV1):
         margin_change = maint_change if maint_change not in (None, "", "0") else init_change
         margin_change_s = _dec_str_from_any(margin_change, "marginChange")
 
-        # Use max_loss_usd as a deterministic proxy for notional if present (schema carries it as string).
         notional_s = "0"
         rp = order_plan.get("risk_proof")
-        if isinstance(rp, dict) and isinstance(rp.get("max_loss_usd"), str) and rp["max_loss_usd"]:
-            notional_s = _dec_str_from_any(rp["max_loss_usd"], "risk_proof.max_loss_usd")
+        if isinstance(rp, dict):
+            ml = rp.get("max_loss_usd")
+            if isinstance(ml, str) and ml.strip():
+                notional_s = str(Decimal(ml.strip()))
+        if schema_id == "equity_order_plan":
+            # crude deterministic proxy: qty_shares * limit_price if limit, else 0
+            try:
+                qty = int(order_plan.get("qty_shares") or 0)
+                terms = order_plan.get("order_terms") if isinstance(order_plan.get("order_terms"), dict) else {}
+                if isinstance(terms, dict) and terms.get("order_type") == "LIMIT":
+                    lp = terms.get("limit_price")
+                    if isinstance(lp, str) and lp.strip():
+                        notional_s = str(Decimal(lp.strip()) * Decimal(qty))
+            except Exception:
+                pass
 
         return BrokerWhatIfResult(
             ok=True,
             margin_change_usd=margin_change_s,
-            notional_usd=notional_s,
-            detail="OK",
-            raw={
-                "raw_payload": raw_payload,
-                "initMarginChange": str(init_change) if init_change is not None else None,
-                "maintMarginChange": str(maint_change) if maint_change is not None else None,
-            },
+            notional_usd=str(Decimal(notional_s)),
+            raw_payload=raw_payload,
         )
 
     def submit_order(self, *, order_plan: Dict[str, Any]) -> BrokerSubmitResult:
         """
-        Submit BAG order (PAPER only):
-        - Builds BAG + LMT order from OrderPlan
-        - Calls placeOrder
-        - Returns broker ids + normalized status
+        Submit order to IB (PAPER only).
         """
         ib = self._require_connected()
 
-        contract, order, raw_payload = _build_ib_bag_and_order_from_order_plan_v1(order_plan)
-        order.whatIf = False
+        schema_id = str(order_plan.get("schema_id") or "").strip()
+
+        if schema_id == "order_plan":
+            contract, order, _raw_payload = _build_ib_bag_and_order_from_order_plan_v1(order_plan)
+        elif schema_id == "equity_order_plan":
+            contract, order, _raw_payload = _build_ib_stock_and_order_from_equity_order_plan_v1(order_plan)
+        else:
+            raise IBAdapterError(f"UNSUPPORTED_PLAN_SCHEMA_ID: {schema_id!r}")
 
         try:
             trade = ib.placeOrder(contract, order)
         except Exception as e:  # noqa: BLE001
-            return BrokerSubmitResult(
-                ok=False,
-                status="REJECTED",
-                order_id=None,
-                perm_id=None,
-                error_code="BROKER_PLACE_ORDER_FAILED",
-                error_message=str(e),
-                raw={"raw_payload": raw_payload},
-            )
+            raise IBAdapterError(f"SUBMIT_CALL_FAILED: {e}") from e
 
-        # Try to extract ids/status deterministically
         oid = None
         pid = None
-        status = "UNKNOWN"
         try:
-            os_ = getattr(trade, "orderStatus", None)
-            if os_ is not None:
-                status = str(getattr(os_, "status", "UNKNOWN") or "UNKNOWN").upper()
-                oid_val = getattr(os_, "orderId", None)
-                pid_val = getattr(os_, "permId", None)
-                if isinstance(oid_val, int):
-                    oid = oid_val
-                if isinstance(pid_val, int):
-                    pid = pid_val
-        except Exception:  # noqa: BLE001
+            oid = getattr(getattr(trade, "order", None), "orderId", None)
+        except Exception:
+            oid = None
+        try:
+            pid = getattr(getattr(trade, "order", None), "permId", None)
+        except Exception:
+            pid = None
+
+        status = "SUBMITTED"
+        try:
+            st = getattr(trade, "orderStatus", None)
+            s = getattr(st, "status", None) if st is not None else None
+            if isinstance(s, str) and s.strip():
+                status = s.strip().upper()
+        except Exception:
             pass
 
-        # Normalize status to schema enums
-        norm = status
-        if norm not in ("SUBMITTED", "ACKNOWLEDGED", "REJECTED", "CANCELLED", "UNKNOWN"):
-            # Common IB statuses: Submitted, PreSubmitted, Filled, Cancelled, ApiCancelled, Inactive
-            s = norm
-            if "SUBMITTED" in s:
-                norm = "SUBMITTED"
-            elif "PRESUBMITTED" in s:
-                norm = "ACKNOWLEDGED"
-            elif "CANCEL" in s:
-                norm = "CANCELLED"
-            elif "INACTIVE" in s or "REJECT" in s:
-                norm = "REJECTED"
-            else:
-                norm = "UNKNOWN"
+        # Best-effort normalization to known surface
+        if status not in ("SUBMITTED", "ACKNOWLEDGED", "REJECTED", "CANCELLED", "UNKNOWN"):
+            status = "UNKNOWN"
+
+        ok = True
+        err_code = None
+        err_msg = None
+
+        # If orderId is missing, treat as non-ok submission
+        if oid is None or pid is None:
+            ok = False
+            err_code = "BROKER_REJECTED"
+            err_msg = "Missing broker order identifiers"
 
         return BrokerSubmitResult(
-            ok=(norm in ("SUBMITTED", "ACKNOWLEDGED")),
-            status=norm,
-            order_id=oid,
-            perm_id=pid,
-            error_code=None,
-            error_message=None,
-            raw={"raw_payload": raw_payload, "ib_status_raw": status},
-        )
-
-    def cancel_order(self, *, order_id: int) -> BrokerSubmitResult:
-        """
-        Deterministic cancellation requires an Order object; without stored trade/order object, refuse.
-        """
-        _ = self._require_connected()
-        return BrokerSubmitResult(
-            ok=False,
-            status="UNKNOWN",
-            order_id=int(order_id),
-            perm_id=None,
-            error_code="C2_SUBMIT_FAIL_CLOSED_REQUIRED",
-            error_message="CANCEL_NOT_IMPLEMENTED: deterministic cancellation requires stored broker order object",
-            raw=None,
+            ok=ok,
+            status=status,
+            order_id=int(oid) if isinstance(oid, int) else None,
+            perm_id=int(pid) if isinstance(pid, int) else None,
+            error_code=err_code,
+            error_message=err_msg,
         )

@@ -2,12 +2,7 @@
 evidence_writer_v1.py
 
 Constellation 2.0 Phase C
-Single-writer evidence output writer (OFFLINE ONLY).
-
-Design authority:
-- constellation_2/governance/C2_EXECUTION_CONTRACT.md (single-writer rule)
-- constellation_2/governance/C2_DETERMINISM_STANDARD.md (canonical JSON)
-- constellation_2/governance/C2_INVARIANTS_AND_REASON_CODES.md (C2_SINGLE_WRITER_VIOLATION)
+Single-writer evidence output writer (NO BROKER CALLS).
 
 Rules:
 - Refuse overwrite: if any target output file exists => HARD FAIL
@@ -15,7 +10,22 @@ Rules:
 - Write JSON deterministically (canonical) and atomically (temp + rename)
 - No post-write mutation. Once written, caller must not rewrite.
 
-This module does not call network or broker APIs.
+Phase C outputs:
+
+OPTIONS SUCCESS:
+- order_plan.v1.json
+- mapping_ledger_record.v1.json
+- binding_record.v1.json
+- submit_preflight_decision.v1.json
+
+EQUITY SUCCESS:
+- equity_order_plan.v1.json
+- mapping_ledger_record.v2.json
+- binding_record.v2.json
+- submit_preflight_decision.v1.json
+
+BLOCK:
+- veto_record.v1.json only
 """
 
 from __future__ import annotations
@@ -24,7 +34,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .canon_json_v1 import CanonicalizationError, canonical_json_bytes_v1
+from constellation_2.phaseD.lib.canon_json_v1 import CanonicalizationError, canonical_json_bytes_v1
 
 
 class EvidenceWriteError(Exception):
@@ -42,7 +52,6 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
             os.fsync(f.fileno())
         os.replace(str(tmp), str(path))
     except Exception as e:  # noqa: BLE001
-        # Best-effort cleanup
         try:
             if tmp.exists():
                 tmp.unlink()
@@ -55,7 +64,6 @@ def _ensure_out_dir_ready(out_dir: Path) -> None:
     if out_dir.exists():
         if not out_dir.is_dir():
             raise EvidenceWriteError(f"OUT_DIR_NOT_DIRECTORY: {str(out_dir)}")
-        # must be empty
         entries = list(out_dir.iterdir())
         if entries:
             raise EvidenceWriteError(f"OUT_DIR_NOT_EMPTY: {str(out_dir)}")
@@ -71,7 +79,21 @@ def _refuse_if_exists(path: Path) -> None:
         raise EvidenceWriteError(f"REFUSE_OVERWRITE_EXISTING_FILE: {str(path)}")
 
 
-def write_phasec_success_outputs_v1(
+def _write_json_obj(out_dir: Path, filename: str, obj: Dict[str, Any]) -> None:
+    p = out_dir / filename
+    _refuse_if_exists(p)
+    try:
+        _atomic_write_bytes(p, canonical_json_bytes_v1(obj) + b"\n")
+    except CanonicalizationError as e:
+        raise EvidenceWriteError(f"CANONICALIZATION_FAILED_DURING_WRITE: {filename}: {e}") from e
+
+
+def write_phasec_veto_only_v1(out_dir: Path, *, veto_record: Dict[str, Any]) -> None:
+    _ensure_out_dir_ready(out_dir)
+    _write_json_obj(out_dir, "veto_record.v1.json", veto_record)
+
+
+def write_phasec_success_outputs_options_v1(
     out_dir: Path,
     *,
     order_plan: Dict[str, Any],
@@ -81,47 +103,23 @@ def write_phasec_success_outputs_v1(
 ) -> None:
     _ensure_out_dir_ready(out_dir)
 
-    p_plan = out_dir / "order_plan.v1.json"
-    p_map = out_dir / "mapping_ledger_record.v1.json"
-    p_bind = out_dir / "binding_record.v1.json"
-    p_dec = out_dir / "submit_preflight_decision.v1.json"
-
-    for p in (p_plan, p_map, p_bind, p_dec):
-        _refuse_if_exists(p)
-
-    try:
-        _atomic_write_bytes(p_plan, canonical_json_bytes_v1(order_plan) + b"\n")
-        _atomic_write_bytes(p_map, canonical_json_bytes_v1(mapping_ledger_record) + b"\n")
-        _atomic_write_bytes(p_bind, canonical_json_bytes_v1(binding_record) + b"\n")
-        _atomic_write_bytes(p_dec, canonical_json_bytes_v1(submit_preflight_decision) + b"\n")
-    except CanonicalizationError as e:
-        raise EvidenceWriteError(f"CANONICALIZATION_FAILED_DURING_WRITE: {e}") from e
+    _write_json_obj(out_dir, "order_plan.v1.json", order_plan)
+    _write_json_obj(out_dir, "mapping_ledger_record.v1.json", mapping_ledger_record)
+    _write_json_obj(out_dir, "binding_record.v1.json", binding_record)
+    _write_json_obj(out_dir, "submit_preflight_decision.v1.json", submit_preflight_decision)
 
 
-def write_phasec_veto_only_v1(
+def write_phasec_success_outputs_equity_v1(
     out_dir: Path,
     *,
-    veto_record: Dict[str, Any],
+    equity_order_plan: Dict[str, Any],
+    mapping_ledger_record_v2: Dict[str, Any],
+    binding_record_v2: Dict[str, Any],
+    submit_preflight_decision: Dict[str, Any],
 ) -> None:
     _ensure_out_dir_ready(out_dir)
 
-    p_veto = out_dir / "veto_record.v1.json"
-    _refuse_if_exists(p_veto)
-
-    try:
-        _atomic_write_bytes(p_veto, canonical_json_bytes_v1(veto_record) + b"\n")
-    except CanonicalizationError as e:
-        raise EvidenceWriteError(f"CANONICALIZATION_FAILED_DURING_WRITE: {e}") from e
-
-
-def expected_outputs_for_dir_v1(out_dir: Path) -> Dict[str, Optional[Path]]:
-    """
-    Convenience for callers/tests.
-    """
-    return {
-        "order_plan": out_dir / "order_plan.v1.json",
-        "mapping_ledger_record": out_dir / "mapping_ledger_record.v1.json",
-        "binding_record": out_dir / "binding_record.v1.json",
-        "submit_preflight_decision": out_dir / "submit_preflight_decision.v1.json",
-        "veto_record": out_dir / "veto_record.v1.json",
-    }
+    _write_json_obj(out_dir, "equity_order_plan.v1.json", equity_order_plan)
+    _write_json_obj(out_dir, "mapping_ledger_record.v2.json", mapping_ledger_record_v2)
+    _write_json_obj(out_dir, "binding_record.v2.json", binding_record_v2)
+    _write_json_obj(out_dir, "submit_preflight_decision.v1.json", submit_preflight_decision)

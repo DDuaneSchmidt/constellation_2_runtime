@@ -16,15 +16,26 @@ Hard rules:
 - Idempotency: duplicate submission_id -> HARD FAIL
 - PAPER only
 - No floats anywhere in outputs
-- BindingRecord must exist BEFORE broker call (Phase C produces it; Phase D verifies it)
 - Phase D creates a deterministic submission directory only after gates pass
+
+Supported identity sets:
+
+OPTIONS (existing Phase C outputs):
+- order_plan.v1.json
+- mapping_ledger_record.v1.json
+- binding_record.v1.json
+
+EQUITY (new Phase C outputs):
+- equity_order_plan.v1.json
+- mapping_ledger_record.v2.json
+- binding_record.v2.json
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from constellation_2.phaseD.adapters.broker_adapter_v1 import BrokerConnectionSpec
 from constellation_2.phaseD.adapters.ib_paper_adapter_v1 import IBAdapterError, IBPaperAdapterV1
@@ -36,6 +47,7 @@ from constellation_2.phaseD.lib.evidence_writer_v1 import (
     write_phased_veto_only_v1,
 )
 from constellation_2.phaseD.lib.ib_payload_bag_order_v1 import IBPayloadError, build_binding_digest_for_order_plan_v1
+from constellation_2.phaseD.lib.ib_payload_stock_order_v1 import build_binding_digest_for_equity_order_plan_v1
 from constellation_2.phaseD.lib.idempotency_guard_v1 import (
     IdempotencyError,
     assert_idempotent_or_raise_v1,
@@ -118,6 +130,36 @@ def _require_paper(env: str) -> None:
         raise SubmitBoundaryError(RC_ENV_NOT_PAPER)
 
 
+def _load_identity_set(phasec_out_dir: Path) -> Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Any], List[str]]:
+    """
+    Returns:
+      (mode, plan_obj, mapping_obj, binding_obj, pointers)
+    mode: "OPTIONS" or "EQUITY"
+    """
+    p_op = (phasec_out_dir / "order_plan.v1.json").resolve()
+    p_ep = (phasec_out_dir / "equity_order_plan.v1.json").resolve()
+
+    if p_op.exists() and p_op.is_file():
+        p_map = (phasec_out_dir / "mapping_ledger_record.v1.json").resolve()
+        p_bind = (phasec_out_dir / "binding_record.v1.json").resolve()
+        plan = _read_json_file(p_op)
+        mapping = _read_json_file(p_map)
+        binding = _read_json_file(p_bind)
+        pointers = [str(p_op), str(p_map), str(p_bind)]
+        return ("OPTIONS", plan, mapping, binding, pointers)
+
+    if p_ep.exists() and p_ep.is_file():
+        p_map = (phasec_out_dir / "mapping_ledger_record.v2.json").resolve()
+        p_bind = (phasec_out_dir / "binding_record.v2.json").resolve()
+        plan = _read_json_file(p_ep)
+        mapping = _read_json_file(p_map)
+        binding = _read_json_file(p_bind)
+        pointers = [str(p_ep), str(p_map), str(p_bind)]
+        return ("EQUITY", plan, mapping, binding, pointers)
+
+    raise SubmitBoundaryError("PHASEC_OUT_DIR_MISSING_IDENTITY_SET: expected order_plan.v1.json or equity_order_plan.v1.json")
+
+
 def run_submit_boundary_paper_v1(
     repo_root: Path,
     *,
@@ -140,12 +182,7 @@ def run_submit_boundary_paper_v1(
     """
     _parse_utc_z(eval_time_utc)
 
-    p_plan = (phasec_out_dir / "order_plan.v1.json").resolve()
-    p_map = (phasec_out_dir / "mapping_ledger_record.v1.json").resolve()
-    p_bind = (phasec_out_dir / "binding_record.v1.json").resolve()
     p_budget = risk_budget_path.resolve()
-
-    pointers = [str(p_plan), str(p_map), str(p_bind), str(p_budget)]
 
     intent_hash = None
     plan_hash = None
@@ -154,40 +191,69 @@ def run_submit_boundary_paper_v1(
     binding_hash = None
 
     try:
-        order_plan = _read_json_file(p_plan)
-        mapping_ledger_record = _read_json_file(p_map)
-        binding_record = _read_json_file(p_bind)
+        mode, plan_obj, mapping_obj, binding_obj, pointers = _load_identity_set(phasec_out_dir)
+        pointers = list(pointers) + [str(p_budget)]
+
         risk_budget = _read_json_file(p_budget)
 
-        validate_against_repo_schema_v1(order_plan, repo_root, "constellation_2/schemas/order_plan.v1.schema.json")
-        validate_against_repo_schema_v1(mapping_ledger_record, repo_root, "constellation_2/schemas/mapping_ledger_record.v1.schema.json")
-        validate_against_repo_schema_v1(binding_record, repo_root, "constellation_2/schemas/binding_record.v1.schema.json")
+        if mode == "OPTIONS":
+            validate_against_repo_schema_v1(plan_obj, repo_root, "constellation_2/schemas/order_plan.v1.schema.json")
+            validate_against_repo_schema_v1(mapping_obj, repo_root, "constellation_2/schemas/mapping_ledger_record.v1.schema.json")
+            validate_against_repo_schema_v1(binding_obj, repo_root, "constellation_2/schemas/binding_record.v1.schema.json")
+            plan_hash = canonical_hash_for_c2_artifact_v1(plan_obj)
+            binding_hash = canonical_hash_for_c2_artifact_v1(binding_obj)
+            if binding_obj.get("plan_hash") != plan_hash:
+                raise SubmitBoundaryError("BindingRecord plan_hash mismatch")
+            if mapping_obj.get("plan_hash") != plan_hash:
+                raise SubmitBoundaryError("MappingLedgerRecord plan_hash mismatch")
 
-        plan_hash = canonical_hash_for_c2_artifact_v1(order_plan)
-        binding_hash = canonical_hash_for_c2_artifact_v1(binding_record)
+            _payload_obj, dig = build_binding_digest_for_order_plan_v1(plan_obj)
+            bound = binding_obj.get("broker_payload_digest", {}).get("digest_sha256")
+            if bound != dig.digest_sha256:
+                veto = _mk_veto(
+                    eval_time_utc=eval_time_utc,
+                    reason_code=RC_BINDING_MISMATCH,
+                    reason_detail=f"BindingRecord broker_payload_digest mismatch: bound={bound} recomputed={dig.digest_sha256}",
+                    pointers=pointers,
+                    intent_hash=intent_hash,
+                    plan_hash=plan_hash,
+                    chain_snapshot_hash=chain_hash,
+                    freshness_cert_hash=cert_hash,
+                    upstream_hash=binding_hash,
+                    repo_root=repo_root,
+                )
+                write_phased_veto_only_v1(phased_out_dir, veto_record=veto, order_plan=plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
+                return 2
 
-        if binding_record.get("plan_hash") != plan_hash:
-            raise SubmitBoundaryError("BindingRecord plan_hash mismatch")
-        if mapping_ledger_record.get("plan_hash") != plan_hash:
-            raise SubmitBoundaryError("MappingLedgerRecord plan_hash mismatch")
+        else:
+            # EQUITY
+            validate_against_repo_schema_v1(plan_obj, repo_root, "constellation_2/schemas/equity_order_plan.v1.schema.json")
+            validate_against_repo_schema_v1(mapping_obj, repo_root, "constellation_2/schemas/mapping_ledger_record.v2.schema.json")
+            validate_against_repo_schema_v1(binding_obj, repo_root, "constellation_2/schemas/binding_record.v2.schema.json")
+            plan_hash = canonical_hash_for_c2_artifact_v1(plan_obj)
+            binding_hash = canonical_hash_for_c2_artifact_v1(binding_obj)
+            if binding_obj.get("plan_hash") != plan_hash:
+                raise SubmitBoundaryError("BindingRecord plan_hash mismatch")
+            if mapping_obj.get("plan_hash") != plan_hash:
+                raise SubmitBoundaryError("MappingLedgerRecord plan_hash mismatch")
 
-        _payload_obj, dig = build_binding_digest_for_order_plan_v1(order_plan)
-        bound = binding_record.get("broker_payload_digest", {}).get("digest_sha256")
-        if bound != dig.digest_sha256:
-            veto = _mk_veto(
-                eval_time_utc=eval_time_utc,
-                reason_code=RC_BINDING_MISMATCH,
-                reason_detail=f"BindingRecord broker_payload_digest mismatch: bound={bound} recomputed={dig.digest_sha256}",
-                pointers=pointers,
-                intent_hash=intent_hash,
-                plan_hash=plan_hash,
-                chain_snapshot_hash=chain_hash,
-                freshness_cert_hash=cert_hash,
-                upstream_hash=binding_hash,
-                repo_root=repo_root,
-            )
-            write_phased_veto_only_v1(phased_out_dir, veto_record=veto)
-            return 2
+            _payload_obj, dig = build_binding_digest_for_equity_order_plan_v1(plan_obj)
+            bound = binding_obj.get("broker_payload_digest", {}).get("digest_sha256")
+            if bound != dig.digest_sha256:
+                veto = _mk_veto(
+                    eval_time_utc=eval_time_utc,
+                    reason_code=RC_BINDING_MISMATCH,
+                    reason_detail=f"BindingRecord broker_payload_digest mismatch: bound={bound} recomputed={dig.digest_sha256}",
+                    pointers=pointers,
+                    intent_hash=intent_hash,
+                    plan_hash=plan_hash,
+                    chain_snapshot_hash=chain_hash,
+                    freshness_cert_hash=cert_hash,
+                    upstream_hash=binding_hash,
+                    repo_root=repo_root,
+                )
+                write_phased_veto_only_v1(phased_out_dir, veto_record=veto, order_plan=plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
+                return 2
 
         _require_paper("PAPER")
 
@@ -210,11 +276,11 @@ def run_submit_boundary_paper_v1(
                 upstream_hash=binding_hash,
                 repo_root=repo_root,
             )
-            write_phased_veto_only_v1(phased_out_dir, veto_record=veto)
+            write_phased_veto_only_v1(phased_out_dir, veto_record=veto, order_plan=plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
             return 2
 
         try:
-            whatif = adapter.whatif_order(order_plan=order_plan)
+            whatif = adapter.whatif_order(order_plan=plan_obj)
         except Exception as e:  # noqa: BLE001
             adapter.disconnect()
             veto = _mk_veto(
@@ -229,7 +295,7 @@ def run_submit_boundary_paper_v1(
                 upstream_hash=binding_hash,
                 repo_root=repo_root,
             )
-            write_phased_veto_only_v1(phased_out_dir, veto_record=veto)
+            write_phased_veto_only_v1(phased_out_dir, veto_record=veto, order_plan=plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
             return 2
 
         rb_dec: RiskBudgetDecisionV1 = enforce_risk_budget_against_whatif_v1(
@@ -253,14 +319,14 @@ def run_submit_boundary_paper_v1(
                 upstream_hash=binding_hash,
                 repo_root=repo_root,
             )
-            write_phased_veto_only_v1(phased_out_dir, veto_record=veto)
+            write_phased_veto_only_v1(phased_out_dir, veto_record=veto, order_plan=plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
             return 2
 
         submissions_root.mkdir(parents=True, exist_ok=True)
         submission_dir = submissions_root / submission_id
         submission_dir.mkdir(parents=True, exist_ok=False)
 
-        submit_res = adapter.submit_order(order_plan=order_plan)
+        submit_res = adapter.submit_order(order_plan=plan_obj)
         adapter.disconnect()
 
         bsr = {
@@ -284,10 +350,10 @@ def run_submit_boundary_paper_v1(
             write_phased_submission_only_v1(
                 phased_out_dir,
                 broker_submission_record=bsr,
-                order_plan=order_plan,
-                binding_record=binding_record,
-                mapping_ledger_record=mapping_ledger_record,
-        )
+                order_plan=plan_obj,
+                binding_record=binding_obj,
+                mapping_ledger_record=mapping_obj,
+            )
             return 3
 
         evt = {
@@ -318,13 +384,14 @@ def run_submit_boundary_paper_v1(
         }
         evt["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(evt)
         validate_against_repo_schema_v1(evt, repo_root, "constellation_2/schemas/execution_event_record.v1.schema.json")
+
         write_phased_success_outputs_v1(
             phased_out_dir,
             broker_submission_record=bsr,
             execution_event_record=evt,
-            order_plan=order_plan,
-            binding_record=binding_record,
-            mapping_ledger_record=mapping_ledger_record,
+            order_plan=plan_obj,
+            binding_record=binding_obj,
+            mapping_ledger_record=mapping_obj,
         )
 
         return 0
@@ -336,7 +403,7 @@ def run_submit_boundary_paper_v1(
             eval_time_utc=eval_time_utc,
             reason_code=RC_FAIL_CLOSED,
             reason_detail=str(e),
-            pointers=pointers,
+            pointers=[str(p_budget)],
             intent_hash=intent_hash,
             plan_hash=plan_hash,
             chain_snapshot_hash=chain_hash,
@@ -348,9 +415,9 @@ def run_submit_boundary_paper_v1(
         write_phased_veto_only_v1(
             phased_out_dir,
             veto_record=veto,
-            order_plan=order_plan if "order_plan" in locals() else None,
-            binding_record=binding_record if "binding_record" in locals() else None,
-            mapping_ledger_record=mapping_ledger_record if "mapping_ledger_record" in locals() else None,
+            order_plan=plan_obj if "plan_obj" in locals() else None,
+            binding_record=binding_obj if "binding_obj" in locals() else None,
+            mapping_ledger_record=mapping_obj if "mapping_obj" in locals() else None,
         )
 
         return 2

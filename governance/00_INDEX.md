@@ -49,3 +49,9 @@ The following C2 Bundle F/G documents are introduced under `docs/c2/` and are tr
 - `docs/c2/RUNBOOK_FG_PHASE_V1.md`
 
 NOTE: In this repo, docs under `docs/` are treated as governed artifacts **only when explicitly listed** in `governance/00_MANIFEST.yaml`.
+
+## Governed data schemas
+
+These JSON schemas are governance-controlled and must be explicitly listed in `governance/00_MANIFEST.yaml` to be treated as governed artifacts:
+
+- `governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_snapshot.v4.schema.json`

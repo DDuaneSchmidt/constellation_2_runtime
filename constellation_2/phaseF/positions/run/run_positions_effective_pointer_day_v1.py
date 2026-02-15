@@ -4,7 +4,6 @@ import argparse
 import hashlib
 import json
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -14,10 +13,12 @@ from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteE
 from constellation_2.phaseF.positions.lib.paths_effective_v1 import REPO_ROOT, day_paths_effective_v1
 from constellation_2.phaseF.positions.lib.paths_v2 import day_paths_v2
 from constellation_2.phaseF.positions.lib.paths_v3 import day_paths_v3
+from constellation_2.phaseF.positions.lib.paths_v4 import day_paths_v4
 from constellation_2.phaseF.positions.lib.write_failure_v1 import build_failure_obj_v1, write_failure_immutable_v1
 
 
 SCHEMA_EFFECTIVE_PTR_V1 = "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_effective_pointer.v1.schema.json"
+SCHEMA_V4 = "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_snapshot.v4.schema.json"
 SCHEMA_V3 = "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_snapshot.v3.schema.json"
 SCHEMA_V2 = "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_snapshot.v2.schema.json"
 
@@ -61,7 +62,10 @@ def _producer_sha_lock_if_existing(path: Path, producer_sha: str) -> int:
 
 
 def _choose_snapshot(day_utc: str) -> Tuple[str, int, Path]:
-    # Prefer v3 if present; else v2. Fail if neither exists.
+    # Prefer v4 if present; else v3; else v2.
+    p4 = day_paths_v4(day_utc).snapshot_path
+    if p4.exists() and p4.is_file():
+        return ("C2_POSITIONS_SNAPSHOT_V4", 4, p4)
     p3 = day_paths_v3(day_utc).snapshot_path
     if p3.exists() and p3.is_file():
         return ("C2_POSITIONS_SNAPSHOT_V3", 3, p3)
@@ -103,7 +107,7 @@ def main(argv: List[str] | None = None) -> int:
             reason_codes=["NO_POSITIONS_SNAPSHOT_FOUND"],
             input_manifest=[],
             code="FAIL_CORRUPT_INPUTS",
-            message="No positions snapshot found for day (need v3 or v2 snapshot).",
+            message="No positions snapshot found for day (need v4, v3, or v2 snapshot).",
             details={"day_utc": day_utc},
             attempted_outputs=[{"path": str(dp.pointer_path), "sha256": None}],
         )
@@ -113,7 +117,10 @@ def main(argv: List[str] | None = None) -> int:
 
     # Schema-validate selected snapshot (fail closed).
     snap_obj = _read_json_obj(snap_path)
-    if selected_schema_version == 3:
+    if selected_schema_version == 4:
+        validate_against_repo_schema_v1(snap_obj, REPO_ROOT, SCHEMA_V4)
+        reason_codes = ["SELECTED_POSITIONS_V4"]
+    elif selected_schema_version == 3:
         validate_against_repo_schema_v1(snap_obj, REPO_ROOT, SCHEMA_V3)
         reason_codes = ["SELECTED_POSITIONS_V3"]
     else:
@@ -151,10 +158,6 @@ def main(argv: List[str] | None = None) -> int:
     except ImmutableWriteError as e:
         print(f"FAIL: {e}", file=sys.stderr)
         return 4
-
-    # NOTE: No global latest_effective.json write.
-    # Global latest pointers are incompatible with strict no-overwrite invariants.
-    # Downstream spines consume day-scoped effective pointers.
 
     print("OK: POSITIONS_EFFECTIVE_POINTER_V1_WRITTEN")
     print(f"OK: selected={selected_schema_id} v{selected_schema_version}")

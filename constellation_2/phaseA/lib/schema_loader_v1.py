@@ -43,6 +43,10 @@ SCHEMA_NAME_TO_FILE: Dict[str, str] = {
     "veto_record.v1": "veto_record.v1.schema.json",
     "broker_submission_record.v2": "broker_submission_record.v2.schema.json",
     "position_lifecycle.v1": "position_lifecycle.v1.schema.json",
+
+    # Bundle H (Hybrid Equity primitives)
+    "equity_intent.v1": "equity_intent.v1.schema.json",
+    "equity_order_plan.v1": "equity_order_plan.v1.schema.json",
 }
 
 

@@ -1,0 +1,105 @@
+{
+  "$id": "https://constellation.local/schemas/equity_order_plan.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EquityOrderPlan v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "plan_id",
+    "created_at_utc",
+    "intent_hash",
+    "structure",
+    "symbol",
+    "currency",
+    "action",
+    "qty_shares",
+    "order_terms"
+  ],
+  "properties": {
+    "schema_id": { "const": "equity_order_plan" },
+    "schema_version": { "const": "v1" },
+
+    "plan_id": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 128,
+      "description": "Deterministic plan identifier (hash-derived preferred)."
+    },
+
+    "created_at_utc": { "type": "string", "format": "date-time" },
+
+    "intent_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA-256 of canonical EquityIntent."
+    },
+
+    "structure": {
+      "type": "string",
+      "enum": ["EQUITY_SPOT"],
+      "description": "Equity spot order plan."
+    },
+
+    "symbol": { "type": "string", "minLength": 1, "maxLength": 16 },
+    "currency": { "type": "string", "minLength": 3, "maxLength": 3 },
+
+    "action": {
+      "type": "string",
+      "enum": ["BUY", "SELL"],
+      "description": "BUY to open/increase long, SELL to close/decrease long."
+    },
+
+    "qty_shares": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10000000,
+      "description": "Share quantity. Deterministic integer."
+    },
+
+    "order_terms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order_type", "time_in_force"],
+      "properties": {
+        "order_type": { "type": "string", "enum": ["LIMIT", "MARKET"] },
+        "limit_price": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]+(\\.[0-9]+)?$",
+          "description": "Limit price as decimal string. Required when order_type=LIMIT; null when MARKET."
+        },
+        "time_in_force": { "type": "string", "enum": ["DAY", "GTC"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "order_type": { "const": "LIMIT" } } },
+          "then": { "required": ["limit_price"], "properties": { "limit_price": { "type": "string" } } }
+        },
+        {
+          "if": { "properties": { "order_type": { "const": "MARKET" } } },
+          "then": { "properties": { "limit_price": { "const": null } } }
+        }
+      ]
+    },
+
+    "risk_proof": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["max_loss_usd", "defined_risk_proven"],
+      "properties": {
+        "defined_risk_proven": { "type": "boolean" },
+        "max_loss_usd": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$",
+          "description": "For equity spot this may be null in early bootstrap, but if present must be deterministic."
+        }
+      }
+    },
+
+    "canonical_json_hash": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

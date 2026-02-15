@@ -1,0 +1,28 @@
+{
+  "schema_id": "equity_intent",
+  "schema_version": "v1",
+  "intent_id": "e7b0f50b6b2f4a2aa2bdf1b8d6f3c6a0",
+  "created_at_utc": "2026-02-14T00:00:00Z",
+  "engine": {
+    "engine_id": "E78",
+    "suite": "C2_HYBRID_V1",
+    "mode": "PAPER"
+  },
+  "underlying": {
+    "symbol": "SPY",
+    "currency": "USD"
+  },
+  "intent_type": "EQUITY_LONG_OPEN",
+  "sizing": {
+    "target_notional_pct": "0.10",
+    "max_risk_pct": "0.01"
+  },
+  "exit_policy": {
+    "policy_id": "c2_equity_time_exit_10d_v1",
+    "time_exit": {
+      "enabled": true,
+      "max_holding_days": 10
+    }
+  },
+  "canonical_json_hash": null
+}

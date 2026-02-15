@@ -4,12 +4,6 @@ evidence_writer_v1.py
 Constellation 2.0 Phase D
 Single-writer evidence output writer (BROKER BOUNDARY SAFE).
 
-Design authority:
-- constellation_2/governance/C2_EXECUTION_CONTRACT.md (single-writer rule)
-- constellation_2/governance/C2_DETERMINISM_STANDARD.md (canonical JSON)
-- constellation_2/governance/C2_INVARIANTS_AND_REASON_CODES.md (C2_SINGLE_WRITER_VIOLATION)
-- constellation_2/governance/C2_AUDIT_EVIDENCE_CHAIN.md (required outputs)
-
 Rules:
 - Refuse overwrite: if any target output file exists => HARD FAIL
 - Refuse non-empty out_dir unless explicitly empty (caller may pre-create it)
@@ -26,9 +20,19 @@ Phase D outputs:
   - veto_record.v1.json only
 
 Optional identity inputs (written when provided; immutable, canonical):
-- order_plan.v1.json
-- binding_record.v1.json
-- mapping_ledger_record.v1.json
+- Options identity set:
+  - order_plan.v1.json
+  - binding_record.v1.json
+  - mapping_ledger_record.v1.json
+- Equity identity set:
+  - equity_order_plan.v1.json
+  - binding_record.v2.json
+  - mapping_ledger_record.v2.json
+
+IMPORTANT:
+- For plan files, write EXACTLY ONE of:
+  - order_plan.v1.json (options) OR
+  - equity_order_plan.v1.json (equity)
 """
 
 from __future__ import annotations
@@ -55,7 +59,6 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
             os.fsync(f.fileno())
         os.replace(str(tmp), str(path))
     except Exception as e:  # noqa: BLE001
-        # Best-effort cleanup
         try:
             if tmp.exists():
                 tmp.unlink()
@@ -86,24 +89,59 @@ def _refuse_if_exists(path: Path) -> None:
 def _write_optional_inputs_v1(
     out_dir: Path,
     *,
-    order_plan: Optional[Dict[str, Any]],
+    plan_obj: Optional[Dict[str, Any]],
     binding_record: Optional[Dict[str, Any]],
     mapping_ledger_record: Optional[Dict[str, Any]],
 ) -> None:
-    pairs = [
-        ("order_plan.v1.json", order_plan),
-        ("binding_record.v1.json", binding_record),
-        ("mapping_ledger_record.v1.json", mapping_ledger_record),
-    ]
-    for fname, obj in pairs:
-        if obj is None:
-            continue
-        p = out_dir / fname
+    # Plan: write exactly one filename based on schema_id.
+    if isinstance(plan_obj, dict):
+        sid = str(plan_obj.get("schema_id") or "").strip()
+        if sid == "order_plan":
+            p = out_dir / "order_plan.v1.json"
+            _refuse_if_exists(p)
+            try:
+                _atomic_write_bytes(p, canonical_json_bytes_v1(plan_obj) + b"\n")
+            except CanonicalizationError as e:
+                raise EvidenceWriteError(f"CANONICALIZATION_FAILED_DURING_WRITE: order_plan.v1.json: {e}") from e
+        elif sid == "equity_order_plan":
+            p = out_dir / "equity_order_plan.v1.json"
+            _refuse_if_exists(p)
+            try:
+                _atomic_write_bytes(p, canonical_json_bytes_v1(plan_obj) + b"\n")
+            except CanonicalizationError as e:
+                raise EvidenceWriteError(f"CANONICALIZATION_FAILED_DURING_WRITE: equity_order_plan.v1.json: {e}") from e
+        else:
+            raise EvidenceWriteError(f"UNKNOWN_PLAN_SCHEMA_ID_FOR_OPTIONAL_WRITE: {sid!r}")
+
+    # Binding record: v1 vs v2
+    if isinstance(binding_record, dict):
+        v = str(binding_record.get("schema_version") or "").strip()
+        if v == "v1":
+            p = out_dir / "binding_record.v1.json"
+        elif v == "v2":
+            p = out_dir / "binding_record.v2.json"
+        else:
+            raise EvidenceWriteError(f"UNKNOWN_BINDING_RECORD_SCHEMA_VERSION: {v!r}")
         _refuse_if_exists(p)
         try:
-            _atomic_write_bytes(p, canonical_json_bytes_v1(obj) + b"\n")
+            _atomic_write_bytes(p, canonical_json_bytes_v1(binding_record) + b"\n")
         except CanonicalizationError as e:
-            raise EvidenceWriteError(f"CANONICALIZATION_FAILED_DURING_WRITE: {fname}: {e}") from e
+            raise EvidenceWriteError(f"CANONICALIZATION_FAILED_DURING_WRITE: {p.name}: {e}") from e
+
+    # Mapping ledger record: v1 vs v2
+    if isinstance(mapping_ledger_record, dict):
+        v = str(mapping_ledger_record.get("schema_version") or "").strip()
+        if v == "v1":
+            p = out_dir / "mapping_ledger_record.v1.json"
+        elif v == "v2":
+            p = out_dir / "mapping_ledger_record.v2.json"
+        else:
+            raise EvidenceWriteError(f"UNKNOWN_MAPPING_LEDGER_SCHEMA_VERSION: {v!r}")
+        _refuse_if_exists(p)
+        try:
+            _atomic_write_bytes(p, canonical_json_bytes_v1(mapping_ledger_record) + b"\n")
+        except CanonicalizationError as e:
+            raise EvidenceWriteError(f"CANONICALIZATION_FAILED_DURING_WRITE: {p.name}: {e}") from e
 
 
 def write_phased_submission_only_v1(
@@ -114,16 +152,11 @@ def write_phased_submission_only_v1(
     binding_record: Optional[Dict[str, Any]] = None,
     mapping_ledger_record: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """
-    Write BrokerSubmissionRecord only (used when broker rejects and no ids/event are available).
-    Optional identity inputs may also be written.
-    """
     _ensure_out_dir_ready(out_dir)
 
     p_sub = out_dir / "broker_submission_record.v2.json"
     _refuse_if_exists(p_sub)
 
-    # Primary required output first (prevents "optional-only" partial dirs).
     try:
         _atomic_write_bytes(p_sub, canonical_json_bytes_v1(broker_submission_record) + b"\n")
     except CanonicalizationError as e:
@@ -131,7 +164,7 @@ def write_phased_submission_only_v1(
 
     _write_optional_inputs_v1(
         out_dir,
-        order_plan=order_plan,
+        plan_obj=order_plan,
         binding_record=binding_record,
         mapping_ledger_record=mapping_ledger_record,
     )
@@ -146,10 +179,6 @@ def write_phased_success_outputs_v1(
     binding_record: Optional[Dict[str, Any]] = None,
     mapping_ledger_record: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """
-    Write BrokerSubmissionRecord + ExecutionEventRecord (ids present).
-    Optional identity inputs may also be written.
-    """
     _ensure_out_dir_ready(out_dir)
 
     p_sub = out_dir / "broker_submission_record.v2.json"
@@ -166,7 +195,7 @@ def write_phased_success_outputs_v1(
 
     _write_optional_inputs_v1(
         out_dir,
-        order_plan=order_plan,
+        plan_obj=order_plan,
         binding_record=binding_record,
         mapping_ledger_record=mapping_ledger_record,
     )
@@ -180,10 +209,6 @@ def write_phased_veto_only_v1(
     binding_record: Optional[Dict[str, Any]] = None,
     mapping_ledger_record: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """
-    Write VetoRecord only (blocked before broker call).
-    Optional identity inputs may also be written for forensic traceability.
-    """
     _ensure_out_dir_ready(out_dir)
 
     p_veto = out_dir / "veto_record.v1.json"
@@ -196,7 +221,7 @@ def write_phased_veto_only_v1(
 
     _write_optional_inputs_v1(
         out_dir,
-        order_plan=order_plan,
+        plan_obj=order_plan,
         binding_record=binding_record,
         mapping_ledger_record=mapping_ledger_record,
     )
@@ -207,7 +232,12 @@ def expected_outputs_for_dir_v1(out_dir: Path) -> Dict[str, Optional[Path]]:
         "broker_submission_record": out_dir / "broker_submission_record.v2.json",
         "execution_event_record": out_dir / "execution_event_record.v1.json",
         "veto_record": out_dir / "veto_record.v1.json",
+
+        # identity inputs (either options or equity)
         "order_plan": out_dir / "order_plan.v1.json",
-        "binding_record": out_dir / "binding_record.v1.json",
-        "mapping_ledger_record": out_dir / "mapping_ledger_record.v1.json",
+        "equity_order_plan": out_dir / "equity_order_plan.v1.json",
+        "binding_record_v1": out_dir / "binding_record.v1.json",
+        "binding_record_v2": out_dir / "binding_record.v2.json",
+        "mapping_ledger_record_v1": out_dir / "mapping_ledger_record.v1.json",
+        "mapping_ledger_record_v2": out_dir / "mapping_ledger_record.v2.json",
     }

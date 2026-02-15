@@ -89,6 +89,16 @@ Rules:
 
 ---
 
+### Bundle H (Hybrid Exposure: Equity Primitives)
+
+13. EquityIntent v1  
+    Path: `constellation_2/schemas/equity_intent.v1.schema.json`
+
+14. EquityOrderPlan v1  
+    Path: `constellation_2/schemas/equity_order_plan.v1.schema.json`
+
+---
+
 ## 3. Compatibility Statement
 
 These C2 schemas:
