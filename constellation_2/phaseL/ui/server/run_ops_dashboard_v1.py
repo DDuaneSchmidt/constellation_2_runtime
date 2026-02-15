@@ -33,6 +33,51 @@ E_NO_ORDER_PLAN_PRESENT = "NO_ORDER_PLAN_PRESENT"
 E_NAV_SERIES_MISSING = "NAV_SERIES_MISSING"
 E_ENGINE_JOIN_NOT_POSSIBLE = "ENGINE_JOIN_NOT_POSSIBLE_WITHOUT_ENGINE_LINKAGE"
 
+# Submission index (day-level) — preferred for speed when present
+SUBMISSION_INDEX_SCHEMA_ID = "C2_SUBMISSION_INDEX_V1"
+SUBMISSION_INDEX_SCHEMA_VERSION = 1
+SUBMISSION_INDEX_FILENAME = "submission_index.v1.json"
+
+
+def _try_load_submission_index(day: str) -> Tuple[Optional[Dict[str, Any]], List[str], List[str], Dict[str, float], List[str]]:
+    """
+    Load submissions/<day>/submission_index.v1.json if present and minimally valid.
+    Returns (index_obj_or_none, missing_paths, source_paths, source_mtimes, warnings)
+    """
+    missing: List[str] = []
+    source_paths: List[str] = []
+    source_mtimes: Dict[str, float] = {}
+    warnings: List[str] = []
+
+    idx_path = (SUBMISSIONS_ROOT / day / SUBMISSION_INDEX_FILENAME).resolve()
+    if not idx_path.exists():
+        missing.append(str(idx_path))
+        return None, missing, source_paths, source_mtimes, warnings
+
+    obj, err = _safe_read_json(idx_path)
+    source_paths.append(str(idx_path))
+    mt = _mtime(idx_path)
+    if mt is not None:
+        source_mtimes[str(idx_path)] = mt
+
+    if obj is None or not isinstance(obj, dict):
+        warnings.append(f"SUBMISSION_INDEX_UNREADABLE:{err}")
+        return None, missing, source_paths, source_mtimes, warnings
+
+    if obj.get("schema_id") != SUBMISSION_INDEX_SCHEMA_ID or obj.get("schema_version") != SUBMISSION_INDEX_SCHEMA_VERSION:
+        warnings.append("SUBMISSION_INDEX_SCHEMA_MISMATCH")
+        return None, missing, source_paths, source_mtimes, warnings
+
+    if obj.get("day_utc") != day:
+        warnings.append("SUBMISSION_INDEX_DAY_MISMATCH")
+        return None, missing, source_paths, source_mtimes, warnings
+
+    if not isinstance(obj.get("items"), list):
+        warnings.append("SUBMISSION_INDEX_ITEMS_MISSING_OR_INVALID")
+        return None, missing, source_paths, source_mtimes, warnings
+
+    return obj, missing, source_paths, source_mtimes, warnings
+
 # --------------------------
 # Repo / truth roots (deterministic)
 # --------------------------
@@ -115,6 +160,74 @@ def _scan_submissions_for_day(day: str) -> Tuple[List[Dict[str, Any]], List[str]
     if not day_root.exists():
         missing.append(str(day_root))
         return [], missing, source_paths, source_mtimes
+
+
+    # Prefer day-level submission index if present (fast path)
+    idx, miss_i, sp_i, sm_i, w_i = _try_load_submission_index(day)
+    missing.extend(miss_i)
+    source_paths.extend(sp_i)
+    source_mtimes.update(sm_i)
+
+    if idx is not None:
+        out: List[Dict[str, Any]] = []
+        for it in idx.get("items", []):
+            if not isinstance(it, dict):
+                continue
+
+            paths = it.get("paths") if isinstance(it.get("paths"), dict) else {}
+            subdir = paths.get("submission_dir") if isinstance(paths, dict) else None
+
+            rec: Dict[str, Any] = {
+                "submission_dir": subdir,
+                "submission_id": it.get("submission_id"),
+                "broker_submission_record": {
+                    "schema_id": "broker_submission_record",
+                    "schema_version": "v2",
+                    "submission_id": it.get("submission_id"),
+                    "binding_hash": it.get("binding_hash"),
+                    "broker": it.get("broker"),
+                    "broker_ids": it.get("broker_ids"),
+                    "status": it.get("broker_status"),
+                    "submitted_at_utc": it.get("submitted_at_utc"),
+                },
+                "execution_event_record": None,
+                "order_plan": None,
+                "missing_paths": [],
+            }
+
+            ex = it.get("execution") if isinstance(it.get("execution"), dict) else None
+            if isinstance(ex, dict) and ex.get("status") is not None:
+                rec["execution_event_record"] = {
+                    "schema_id": "execution_event_record",
+                    "schema_version": "v1",
+                    "status": ex.get("status"),
+                    "filled_qty": ex.get("filled_qty"),
+                    "avg_price": ex.get("avg_price"),
+                    "event_time_utc": ex.get("event_time_utc"),
+                    "perm_id": ex.get("perm_id"),
+                    "broker_order_id": ex.get("broker_order_id"),
+                }
+
+            # Prefer full order_plan via path pointer; else store summary from index
+            op_path = paths.get("order_plan") if isinstance(paths, dict) else None
+            if isinstance(op_path, str) and op_path:
+                op_obj, op_err = _safe_read_json(Path(op_path))
+                if op_obj is None:
+                    rec["missing_paths"].append(op_path)
+                else:
+                    rec["order_plan"] = op_obj
+                    source_paths.append(op_path)
+                    mt2 = _mtime(Path(op_path))
+                    if mt2 is not None:
+                        source_mtimes[op_path] = mt2
+            else:
+                ops = it.get("order_plan") if isinstance(it.get("order_plan"), dict) else None
+                if isinstance(ops, dict):
+                    rec["order_plan"] = ops
+
+            out.append(rec)
+
+        return out, sorted(set(missing)), sorted(set(source_paths)), source_mtimes
 
     submission_dirs = [p for p in day_root.iterdir() if p.is_dir()]
     submission_dirs.sort(key=lambda p: p.name)

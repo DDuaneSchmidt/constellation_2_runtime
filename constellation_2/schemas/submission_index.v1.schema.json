@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Constellation 2.0 Submission Index V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "generated_utc",
+    "status",
+    "items",
+    "source_paths",
+    "source_mtimes",
+    "missing_paths",
+    "warnings"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "C2_SUBMISSION_INDEX_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "generated_utc": { "type": "string" },
+    "status": { "type": "string", "enum": ["OK", "DEGRADED", "FAIL"] },
+
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "submission_id",
+          "day_utc",
+          "engine_id",
+          "binding_hash",
+          "broker",
+          "broker_status",
+          "submitted_at_utc",
+          "paths",
+          "sha256",
+          "execution",
+          "order_plan",
+          "warnings"
+        ],
+        "properties": {
+          "submission_id": { "type": "string" },
+          "day_utc": { "type": "string" },
+
+          "engine_id": { "type": "string" },
+
+          "binding_hash": { "type": ["string", "null"] },
+
+          "broker": { "type": ["string", "null"] },
+          "broker_status": { "type": ["string", "null"] },
+          "submitted_at_utc": { "type": ["string", "null"] },
+
+          "broker_ids": {
+            "type": ["object", "null"],
+            "additionalProperties": true
+          },
+
+          "paths": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "submission_dir",
+              "broker_submission_record",
+              "execution_event_record",
+              "order_plan",
+              "binding_record",
+              "mapping_ledger_record",
+              "manifest"
+            ],
+            "properties": {
+              "submission_dir": { "type": "string" },
+              "broker_submission_record": { "type": ["string", "null"] },
+              "execution_event_record": { "type": ["string", "null"] },
+              "order_plan": { "type": ["string", "null"] },
+              "binding_record": { "type": ["string", "null"] },
+              "mapping_ledger_record": { "type": ["string", "null"] },
+              "manifest": { "type": ["string", "null"] }
+            }
+          },
+
+          "sha256": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "broker_submission_record",
+              "execution_event_record",
+              "order_plan",
+              "binding_record",
+              "mapping_ledger_record",
+              "manifest"
+            ],
+            "properties": {
+              "broker_submission_record": { "type": ["string", "null"] },
+              "execution_event_record": { "type": ["string", "null"] },
+              "order_plan": { "type": ["string", "null"] },
+              "binding_record": { "type": ["string", "null"] },
+              "mapping_ledger_record": { "type": ["string", "null"] },
+              "manifest": { "type": ["string", "null"] }
+            }
+          },
+
+          "execution": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["status", "filled_qty", "avg_price", "event_time_utc", "perm_id", "broker_order_id"],
+            "properties": {
+              "status": { "type": ["string", "null"] },
+              "filled_qty": { "type": ["integer", "number", "null"] },
+              "avg_price": { "type": ["integer", "number", "null"] },
+              "event_time_utc": { "type": ["string", "null"] },
+              "perm_id": { "type": ["string", "integer", "null"] },
+              "broker_order_id": { "type": ["string", "integer", "null"] }
+            }
+          },
+
+          "order_plan": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["plan_id", "intent_hash", "underlying", "structure", "schema_id", "schema_version"],
+            "properties": {
+              "plan_id": { "type": ["string", "null"] },
+              "intent_hash": { "type": ["string", "null"] },
+              "underlying": { "type": ["string", "null"] },
+              "structure": { "type": ["string", "null"] },
+              "schema_id": { "type": ["string", "null"] },
+              "schema_version": { "type": ["integer", "string", "null"] }
+            }
+          },
+
+          "warnings": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "source_paths": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "source_mtimes": {
+      "type": "object",
+      "additionalProperties": { "type": "number" }
+    },
+    "missing_paths": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}
