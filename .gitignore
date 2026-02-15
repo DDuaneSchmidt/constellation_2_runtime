@@ -5,6 +5,10 @@
 # - Runtime truth under constellation_2/runtime/truth/** is the authoritative immutable output surface
 #   and MUST be trackable in git for reproducible, hash-verifiable replay.
 # - Non-truth runtime outputs remain local by default.
+#
+# IMPORTANT (Derived artifacts):
+# - Human-readable summaries derived from canonical truth are NON-authoritative operational conveniences.
+# - They MUST NOT be committed. They are regenerated deterministically from canonical truth.
 
 # Python
 __pycache__/
@@ -37,6 +41,9 @@ constellation_2/runtime/**
 !constellation_2/runtime/truth/
 !constellation_2/runtime/truth/**
 !constellation_2/runtime/truth/**/**
+
+# EXCEPTION: derived human summaries are NON-authoritative and must remain local-only
+constellation_2/runtime/truth/reports/daily_portfolio_summary_*.txt
 
 # Operator/local inputs used for runs (samples belong in docs or committed fixtures; live inputs are local)
 constellation_2/phaseF/**/inputs/
