@@ -1,0 +1,1 @@
+{"created_utc":"2026-02-15T03:44:00Z","dataset_version":"v1","date_range":{"end":"2017-01-17","start":"2017-01-03"},"files":[{"file":"SPY/2017.jsonl","sha256":"2e41ce00689ec3421ba466140cf29d34f4b0051da6d9f7565df7c51e60af3627","symbol":"SPY","year":2017}],"global_hash":"6899e802320d3eadfb600aa8ff46e114106539693beec3bf0c42c02cce4b6e8c","symbols":["SPY"]}

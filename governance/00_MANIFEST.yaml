@@ -26,6 +26,16 @@ documents:
     class: C2_SCHEMA
     status: DRAFT
 
+  - id: C2_MARKET_DATA_SNAPSHOT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/MARKET_DATA/market_data_snapshot.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_MARKET_CALENDAR_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/MARKET_DATA/market_calendar.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
   - id: C2_EXPOSURE_INTENT_SCHEMA_V1
     path: constellation_2/schemas/exposure_intent.v1.schema.json
     class: C2_SCHEMA
@@ -38,7 +48,7 @@ documents:
     status: DRAFT
 
   - id: C2_E_EXECUTION_EVIDENCE_TRUTH_SPINE_V1
-    path: docs/c2/E_EXECUTION_EVIDENCE_TRUTH_SPINE_V1.md
+    path: docs/c2/E_EXECUTION_EVIDENCE_TRUTH_V1.md
     class: C2_PREREQ_EXECUTION_EVIDENCE_TRUTH
     status: DRAFT
 

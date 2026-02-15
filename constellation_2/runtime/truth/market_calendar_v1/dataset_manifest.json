@@ -1,0 +1,1 @@
+{"created_utc":"2026-02-15T03:52:26Z","dataset_version":"v1","date_range":{"end":"2017-01-18","start":"2017-01-03"},"exchanges":["NYSE"],"files":[{"exchange":"NYSE","file":"NYSE/2017.jsonl","sha256":"6e0c8235f261acd8a6de2129a1055291acaeeed1fbbc722a800c6e029d402dbb","year":2017}],"global_hash":"012b014c7bf5212560e78948bad44b97d6ae9360bdc696806467fda4b287488b"}

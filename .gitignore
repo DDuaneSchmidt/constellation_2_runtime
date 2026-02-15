@@ -1,5 +1,10 @@
 # Constellation 2.0 - repo hygiene (audit-grade)
 # Rule: ignore build artifacts, virtualenvs, caches, and local outputs.
+#
+# IMPORTANT (C2 authority):
+# - Runtime truth under constellation_2/runtime/truth/** is the authoritative immutable output surface
+#   and MUST be trackable in git for reproducible, hash-verifiable replay.
+# - Non-truth runtime outputs remain local by default.
 
 # Python
 __pycache__/
@@ -22,9 +27,16 @@ constellation_2/.venv/
 *.swp
 *.swo
 
-# Local outputs (never committed; runtime truth is authoritative but not tracked in git)
+# Runtime outputs
+# Default: ignore everything under constellation_2/runtime/
 constellation_2/runtime/
 constellation_2/runtime/**
+
+# EXCEPTION: canonical immutable truth MUST be trackable
+!constellation_2/runtime/
+!constellation_2/runtime/truth/
+!constellation_2/runtime/truth/**
+!constellation_2/runtime/truth/**/**
 
 # Operator/local inputs used for runs (samples belong in docs or committed fixtures; live inputs are local)
 constellation_2/phaseF/**/inputs/
