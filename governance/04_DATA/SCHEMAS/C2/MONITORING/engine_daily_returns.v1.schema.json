@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_ENGINE_DAILY_RETURNS_V1",
+  "title": "C2 Engine Daily Returns Artifact v1 (Phase J substrate)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "status",
+    "day_utc",
+    "returns",
+    "input_manifest",
+    "produced_utc",
+    "producer",
+    "reason_codes"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_ENGINE_DAILY_RETURNS_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "status": {
+      "type": "string",
+      "enum": ["OK", "DEGRADED_INSUFFICIENT_HISTORY", "FAIL_CORRUPT_INPUTS"]
+    },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+
+    "returns": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currency", "by_engine"],
+      "properties": {
+        "currency": { "type": "string", "minLength": 1, "maxLength": 8 },
+        "by_engine": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["engine_id", "daily_return"],
+            "properties": {
+              "engine_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+              "daily_return": { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{8}$" }
+            }
+          }
+        }
+      }
+    },
+
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256", "producer", "day_utc"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "producer": { "type": "string", "minLength": 1 },
+          "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+        }
+      }
+    },
+
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 7 },
+        "module": { "type": "string", "minLength": 1 }
+      }
+    },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}
