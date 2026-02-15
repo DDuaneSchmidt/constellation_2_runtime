@@ -1,0 +1,12 @@
+{
+  "observed_at_utc": "2026-02-14T00:00:00Z",
+  "currency": "USD",
+  "cash_total": "10000.00",
+  "nlv_total": "10000.00",
+  "available_funds": "10000.00",
+  "excess_liquidity": "10000.00",
+  "account_id": "PAPER",
+  "notes": [
+    "BOOTSTRAP_OPERATOR_STATEMENT_V1: initial baseline cash = 10000.00 USD (decimal-string fields required)"
+  ]
+}
