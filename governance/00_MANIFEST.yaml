@@ -26,6 +26,11 @@ documents:
     class: C2_SCHEMA
     status: DRAFT
 
+  - id: C2_EXPOSURE_INTENT_SCHEMA_V1
+    path: constellation_2/schemas/exposure_intent.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
   # Prerequisites for Bundle F/G (new C2 truth spines)
   - id: C2_E_CASH_LEDGER_SPINE_V1
     path: docs/c2/E_CASH_LEDGER_SPINE_V1.md

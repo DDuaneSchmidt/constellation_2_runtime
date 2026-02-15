@@ -99,6 +99,13 @@ Rules:
 
 ---
 
+### Bundle I (Risk Transformer: Exposure Intent)
+
+15. ExposureIntent v1  
+    Path: `constellation_2/schemas/exposure_intent.v1.schema.json`
+
+---
+
 ## 3. Compatibility Statement
 
 These C2 schemas:
