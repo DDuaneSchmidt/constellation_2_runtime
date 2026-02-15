@@ -1,0 +1,21 @@
+{
+  "schema_id": "broker_submission_record",
+  "schema_version": "v2",
+  "submission_id": "9f5955983b07c2b4eea8232e98734df7d8b0a4cf47d069ba2fd95e8c233c711e",
+  "submitted_at_utc": "2026-03-02T00:00:00Z",
+  "binding_hash": "9f5955983b07c2b4eea8232e98734df7d8b0a4cf47d069ba2fd95e8c233c711e",
+  "broker": {
+    "name": "INTERACTIVE_BROKERS",
+    "environment": "PAPER"
+  },
+  "status": "REJECTED",
+  "broker_ids": {
+    "order_id": null,
+    "perm_id": null
+  },
+  "error": {
+    "code": "C2_BROKER_ADAPTER_NOT_AVAILABLE",
+    "message": "Controlled test submission: broker unreachable"
+  },
+  "canonical_json_hash": null
+}

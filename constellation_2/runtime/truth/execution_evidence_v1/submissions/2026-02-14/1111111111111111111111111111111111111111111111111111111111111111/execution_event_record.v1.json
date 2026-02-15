@@ -1,0 +1,13 @@
+{
+  "schema_id": "execution_event_record",
+  "schema_version": "v1",
+  "created_at_utc": "2026-02-14T15:00:01Z",
+  "event_time_utc": "2026-02-14T15:00:00Z",
+  "binding_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+  "broker_submission_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+  "broker_order_id": "1",
+  "perm_id": "1",
+  "status": "FILLED",
+  "filled_qty": 1,
+  "avg_price": "1.23"
+}
