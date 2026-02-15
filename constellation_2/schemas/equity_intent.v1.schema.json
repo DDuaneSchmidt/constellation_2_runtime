@@ -39,9 +39,13 @@
       "properties": {
         "engine_id": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 32,
-          "description": "Engine identifier (e.g., E78, M34, etc)."
+          "enum": [
+            "C2_TREND_EQ_PRIMARY_V1",
+            "C2_MEAN_REVERSION_EQ_V1",
+            "C2_EVENT_DISLOCATION_V1",
+            "C2_DEFENSIVE_TAIL_V1"
+          ],
+          "description": "Constellation 2.0 sleeve engine identifier (equity-capable). Legacy engine IDs are forbidden."
         },
         "suite": {
           "type": "string",

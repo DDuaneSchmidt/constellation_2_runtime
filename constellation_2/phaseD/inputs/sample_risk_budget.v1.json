@@ -8,7 +8,27 @@
   "max_open_positions": 100000,
   "per_engine_limit": {},
   "engine_limits": {
-    "E78": {
+    "C2_TREND_EQ_PRIMARY_V1": {
+      "max_margin_usd": "2500",
+      "max_notional_usd": "10000",
+      "max_open_positions": 100000
+    },
+    "C2_VOL_INCOME_DEFINED_RISK_V1": {
+      "max_margin_usd": "2500",
+      "max_notional_usd": "10000",
+      "max_open_positions": 100000
+    },
+    "C2_MEAN_REVERSION_EQ_V1": {
+      "max_margin_usd": "2500",
+      "max_notional_usd": "10000",
+      "max_open_positions": 100000
+    },
+    "C2_EVENT_DISLOCATION_V1": {
+      "max_margin_usd": "2500",
+      "max_notional_usd": "10000",
+      "max_open_positions": 100000
+    },
+    "C2_DEFENSIVE_TAIL_V1": {
       "max_margin_usd": "2500",
       "max_notional_usd": "10000",
       "max_open_positions": 100000

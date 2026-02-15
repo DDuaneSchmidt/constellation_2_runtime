@@ -1,10 +1,10 @@
 {
   "schema_id": "options_intent",
   "schema_version": "v2",
-  "intent_id": "c2_intent_20260213_e78_spy_vertical_put_credit_v1",
+  "intent_id": "c2_intent_20260213_vol_income_spy_vertical_put_credit_v1",
   "created_at_utc": "2026-02-13T21:49:00Z",
   "engine": {
-    "engine_id": "E78",
+    "engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1",
     "suite": "C2_OPTIONS_7",
     "mode": "PAPER"
   },
