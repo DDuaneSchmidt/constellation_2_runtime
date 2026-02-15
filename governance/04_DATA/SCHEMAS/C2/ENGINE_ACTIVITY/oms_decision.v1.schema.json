@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_OMS_DECISION_V1",
+  "title": "C2 OMS Decision v1 (per-intent immutable disposition truth)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "day_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "input_manifest",
+    "engine",
+    "intent",
+    "decision",
+    "source"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_OMS_DECISION_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "module": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "status": {
+      "type": "string",
+      "enum": ["OK", "FAIL_CORRUPT_INPUTS", "FAIL_SCHEMA_VIOLATION", "FAIL_RECONCILIATION"]
+    },
+
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+
+    "input_manifest": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256", "producer", "day_utc"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "producer": { "type": "string", "minLength": 1 },
+          "day_utc": { "anyOf": [{ "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }, { "type": "null" }] }
+        }
+      }
+    },
+
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine_id", "mode", "suite"],
+      "properties": {
+        "engine_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "mode": { "type": "string", "enum": ["PAPER", "LIVE", "SHADOW", "TESTONLY"] },
+        "suite": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intent_hash", "intent_id", "intent_path"],
+      "properties": {
+        "intent_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "intent_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "intent_path": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["disposition", "reason_code", "reason_detail"],
+      "properties": {
+        "disposition": { "type": "string", "enum": ["RELEASED", "BLOCKED"] },
+        "reason_code": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "string",
+              "enum": [
+                "FRESHNESS_EXPIRED",
+                "ALLOCATION_LIMIT",
+                "RISK_LIMIT",
+                "MODE_MISMATCH",
+                "MAPPING_INVALID",
+                "DUPLICATE_INTENT"
+              ]
+            }
+          ]
+        },
+        "reason_detail": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "disposition": { "const": "RELEASED" } }
+          },
+          "then": {
+            "properties": {
+              "reason_code": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "disposition": { "const": "BLOCKED" } }
+          },
+          "then": {
+            "properties": {
+              "reason_code": {
+                "type": "string",
+                "enum": [
+                  "FRESHNESS_EXPIRED",
+                  "ALLOCATION_LIMIT",
+                  "RISK_LIMIT",
+                  "MODE_MISMATCH",
+                  "MAPPING_INVALID",
+                  "DUPLICATE_INTENT"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_type", "source_path", "source_sha256", "source_reason_code", "source_decision"],
+      "properties": {
+        "source_type": { "type": "string", "enum": ["submit_preflight_decision_v1", "veto_record_v1"] },
+        "source_path": { "type": "string", "minLength": 1 },
+        "source_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "source_reason_code": { "type": "string", "minLength": 1 },
+        "source_decision": { "type": "string", "enum": ["ALLOW", "VETO"] }
+      }
+    }
+  }
+}

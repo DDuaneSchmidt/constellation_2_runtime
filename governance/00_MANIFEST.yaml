@@ -83,6 +83,12 @@ documents:
     class: C2_SCHEMA
     status: DRAFT
 
+  # Bundle H-0 OMS decision truth schema (new governed output)
+  - id: C2_OMS_DECISION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/oms_decision.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
   # Prerequisites for Bundle F/G (new C2 truth spines)
   - id: C2_E_CASH_LEDGER_SPINE_V1
     path: docs/c2/E_CASH_LEDGER_SPINE_V1.md

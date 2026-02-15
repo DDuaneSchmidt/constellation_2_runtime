@@ -76,3 +76,6 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/stress_replay_report.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/degradation_sentinel.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/capital_efficiency.v1.schema.json`
+
+### Bundle H-0 — OMS decision truth schema (new governed output)
+- `governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/oms_decision.v1.schema.json`
