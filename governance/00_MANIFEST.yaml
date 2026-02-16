@@ -29,6 +29,14 @@ documents:
     path: governance/05_CONTRACTS/C2/capital_risk_envelope_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
+  - id: C2_BUNDLE_A_PAPER_TRADING_READINESS_AUDIT_PROOF_V1
+    path: governance/05_CONTRACTS/C2/bundle_a_paper_trading_readiness_audit_proof_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_BUNDLE_B_RISK_BLINDSPOT_ELIMINATION_V1
+    path: governance/05_CONTRACTS/C2/bundle_b_risk_blindspot_elimination_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
 
   # Governed data schemas (governance-controlled; runtime code must conform)
   - id: C2_POSITIONS_SNAPSHOT_SCHEMA_V4
@@ -93,6 +101,11 @@ documents:
     class: C2_SCHEMA
     status: DRAFT
 
+  - id: C2_REPORTS_OPERATOR_GATE_VERDICT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/operator_gate_verdict.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
   - id: C2_REPORTS_RECONCILIATION_REPORT_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/reconciliation_report.v1.schema.json
     class: C2_SCHEMA
@@ -110,6 +123,11 @@ documents:
     class: C2_SCHEMA
     status: DRAFT
 
+  - id: C2_EXECUTION_EVIDENCE_SUBMISSION_INDEX_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/submission_index.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
   - id: C2_EXECUTION_EVIDENCE_BROKER_EVENT_RAW_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_event_raw.v1.schema.json
     class: C2_SCHEMA
@@ -119,8 +137,15 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_event_day_manifest.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
+
+  # Risk schemas
   - id: C2_RISK_ENGINE_MODEL_REGISTRY_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/RISK/engine_model_registry.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_RISK_ENGINE_RISK_BUDGET_LEDGER_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/RISK/engine_risk_budget_ledger.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
 
@@ -132,6 +157,11 @@ documents:
   # Bundle H-0 OMS decision truth schema (new governed output)
   - id: C2_OMS_DECISION_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/oms_decision.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_ENGINE_ACTIVITY_INTENTS_DAY_ROLLUP_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/intents_day_rollup.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
 
@@ -198,23 +228,3 @@ documents:
     path: docs/c2/RUNBOOK_FG_PHASE_V1.md
     class: C2_RUNBOOK
     status: DRAFT
-
-  - id: C2_TRUE_EVIDENCE_SPINE_V2
-    path: governance/03_CONTRACTS/C2_TRUE_EVIDENCE_SPINE_V2.md
-    status: ACTIVE
-    version: 2
-    owner: Constellation
-    created_utc: 2026-02-15
-    authority: governance+git+runtime_truth
-
-  - id: C2_PHASED_SUBMISSION_RUNNER_V1
-    path: governance/03_CONTRACTS/C2_PHASED_SUBMISSION_RUNNER_V1.md
-    status: ACTIVE
-    version: 1
-    owner: Constellation
-    created_utc: 2026-02-16
-    authority: governance+git+runtime_truth
-  - id: C2_ENGINE_MODEL_REGISTRY_GATE_CONTRACT_V1
-    path: governance/03_CONTRACTS/C2_ENGINE_MODEL_REGISTRY_GATE_CONTRACT_V1.md
-    class: C2_CONTRACT
-    status: CANONICAL

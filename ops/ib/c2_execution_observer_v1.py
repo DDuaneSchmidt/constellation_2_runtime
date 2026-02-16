@@ -4,7 +4,7 @@ C2 IB Execution Observer (PAPER) — Canonical BROKER_EVENT_RAW writer
 clientId: 79 (default)
 
 Writes append-only JSONL:
-constellation_2/runtime/truth/execution_evidence_v2/broker_events/<DAY>/broker_event_log.v1.jsonl
+constellation_2/runtime/truth/execution_evidence_v1/broker_events/<DAY>/broker_event_log.v1.jsonl
 
 Contract:
 - single-writer required for monotonic sequence_number

@@ -61,14 +61,16 @@ ALLOCATION_ROOT = (TRUTH / "allocation_v1/summary").resolve()
 PHASED_ROOT = (REPO_ROOT / "constellation_2/phaseD/outputs/submissions").resolve()
 EXEC_TRUTH_ROOT = (TRUTH / "execution_evidence_v1/submissions").resolve()
 EXEC_MANIFEST_ROOT = (TRUTH / "execution_evidence_v1/manifests").resolve()
-SUBMISSION_INDEX_ROOT = (TRUTH / "execution_evidence_v1/submissions").resolve()  # index file lives under exec_evidence submissions day
+SUBMISSION_INDEX_ROOT = (TRUTH / "execution_evidence_v1" / "submission_index").resolve()
 POSITIONS_ROOT = (TRUTH / "positions_v1/snapshots").resolve()
 CASH_ROOT = (TRUTH / "cash_ledger_v1/snapshots").resolve()
 ACCOUNTING_ROOT = (TRUTH / "accounting_v1").resolve()
+RISK_LEDGER_ROOT = (TRUTH / "risk_v1" / "engine_budget").resolve()
+CAP_RISK_ROOT = (TRUTH / "reports" / "capital_risk_envelope_v1").resolve()
 
-RECON_ROOT = (TRUTH / "reports" / "reconciliation_report_v1").resolve()
+RECON_ROOT_V2 = (TRUTH / "reports" / "reconciliation_report_v2").resolve()
+RECON_ROOT_V1 = (TRUTH / "reports" / "reconciliation_report_v1").resolve()
 GATE_ROOT = (TRUTH / "reports" / "operator_daily_gate_v1").resolve()
-
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -295,7 +297,7 @@ def main() -> int:
     stages.append(_stage("EXEC_EVIDENCE_MANIFEST", man_day, man_present, man_sha, man_count, man_status, man_blocking, man_rc))
 
     # SUBMISSION INDEX
-    idx_path = (EXEC_TRUTH_ROOT / day / "submission_index.v1.json").resolve()
+    idx_path = (SUBMISSION_INDEX_ROOT / day / "submission_index.v1.json").resolve()
     idx_present = idx_path.exists()
     idx_sha = _sha256_file(idx_path) if idx_present else _sha256_bytes(b"")
     add_input("submission_index_v1", idx_path, idx_sha)
@@ -360,11 +362,80 @@ def main() -> int:
         top_reason_codes += acct_rc
     stages.append(_stage("ACCOUNTING", ACCOUNTING_ROOT, acct_present, acct_sha, 0, acct_status, acct_blocking, acct_rc))
 
-    # RECONCILIATION (required)
-    recon_path = (RECON_ROOT / day / "reconciliation_report.v1.json").resolve()
+    # ENGINE RISK BUDGET LEDGER (required)
+    risk_path = (RISK_LEDGER_ROOT / day / "engine_risk_budget_ledger.v1.json").resolve()
+    risk_present = risk_path.exists()
+    risk_sha = _sha256_file(risk_path) if risk_present else _sha256_bytes(b"")
+    add_input("engine_risk_budget_ledger_v1", risk_path, risk_sha)
+    risk_rc: List[str] = []
+    risk_status = "OK" if risk_present else "MISSING"
+    risk_blocking = True
+
+    if not risk_present:
+        risk_rc.append("MISSING_ENGINE_RISK_BUDGET_LEDGER")
+        blocking_failures += 1
+        top_reason_codes += risk_rc
+    else:
+        rl = _read_json(risk_path)
+        st = str(rl.get("status") or "FAIL")
+        if st != "OK":
+            risk_status = "FAIL"
+            risk_rc.append("ENGINE_RISK_BUDGET_LEDGER_NOT_OK")
+            blocking_failures += 1
+            top_reason_codes += risk_rc
+
+    stages.append(
+        _stage(
+            "ENGINE_RISK_BUDGET_LEDGER",
+            risk_path,
+            risk_present,
+            risk_sha,
+            1 if risk_present else 0,
+            risk_status,
+            risk_blocking,
+            risk_rc,
+        )
+    )
+
+    # CAPITAL RISK ENVELOPE (required): PASS required
+    cap_path = (CAP_RISK_ROOT / day / "capital_risk_envelope.v1.json").resolve()
+    cap_present = cap_path.exists()
+    cap_sha = _sha256_file(cap_path) if cap_present else _sha256_bytes(b"")
+    add_input("capital_risk_envelope_v1", cap_path, cap_sha)
+    cap_rc: List[str] = []
+    cap_status = "OK" if cap_present else "MISSING"
+    cap_blocking = True
+
+    if not cap_present:
+        cap_rc.append("MISSING_CAPITAL_RISK_ENVELOPE")
+        blocking_failures += 1
+        top_reason_codes += cap_rc
+    else:
+        ce = _read_json(cap_path)
+        st = str(ce.get("status") or "FAIL").strip().upper()
+        if st != "PASS":
+            cap_status = "FAIL"
+            cap_rc.append("CAPITAL_RISK_ENVELOPE_NOT_PASS")
+            blocking_failures += 1
+            top_reason_codes += cap_rc
+
+    stages.append(_stage("CAPITAL_RISK_ENVELOPE", cap_path, cap_present, cap_sha, 1 if cap_present else 0, cap_status, cap_blocking, cap_rc))
+
+
+    # RECONCILIATION (required): prefer v2, fallback v1
+    recon_path_v2 = (RECON_ROOT_V2 / day / "reconciliation_report.v2.json").resolve()
+    recon_path_v1 = (RECON_ROOT_V1 / day / "reconciliation_report.v1.json").resolve()
+
+    if recon_path_v2.exists():
+        recon_path = recon_path_v2
+        recon_kind = "reconciliation_report_v2"
+    else:
+        recon_path = recon_path_v1
+        recon_kind = "reconciliation_report_v1"
+
     recon_present = recon_path.exists()
     recon_sha = _sha256_file(recon_path) if recon_present else _sha256_bytes(b"")
-    add_input("reconciliation_report_v1", recon_path, recon_sha)
+    add_input(recon_kind, recon_path, recon_sha)
     recon_rc: List[str] = []
     recon_status = "OK" if recon_present else "MISSING"
     recon_blocking = True

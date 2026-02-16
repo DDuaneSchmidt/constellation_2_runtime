@@ -182,6 +182,48 @@ def _instrument_from_order_plan(op: Dict[str, Any]) -> Dict[str, Any]:
 
     return {"kind": kind, "underlying": underlying, "legs": out_legs, "summary": summary}
 
+def _defined_risk_from_order_plan_or_none(op: Dict[str, Any]) -> Tuple[str, Any]:
+    """
+    Deterministic defined-risk extraction from order_plan.risk_proof.
+
+    Returns: (market_exposure_type, max_loss_cents_or_none)
+
+    Rules:
+    - If risk_proof.defined_risk_proven is true:
+        - max_loss_usd must be int or a decimal string with 0 or 2 dp.
+        - Convert to integer cents exactly; fail-closed if non-integer cents.
+      Emit: ("DEFINED_RISK", <int cents>)
+    - Otherwise emit: ("UNDEFINED_RISK", None)
+    """
+    rp = op.get("risk_proof")
+    if not isinstance(rp, dict):
+        return ("UNDEFINED_RISK", None)
+
+    proven = rp.get("defined_risk_proven")
+    if proven is not True:
+        return ("UNDEFINED_RISK", None)
+
+    ml_usd = rp.get("max_loss_usd")
+    if isinstance(ml_usd, int):
+        if ml_usd < 0:
+            raise ValueError("RISK_PROOF_MAX_LOSS_USD_NEGATIVE")
+        return ("DEFINED_RISK", int(ml_usd) * 100)
+
+    if isinstance(ml_usd, str):
+        s = ml_usd.strip()
+        if s == "":
+            raise ValueError("RISK_PROOF_MAX_LOSS_USD_EMPTY")
+        # Decimal-only (no floats)
+        d = Decimal(s)
+        if d < 0:
+            raise ValueError("RISK_PROOF_MAX_LOSS_USD_NEGATIVE")
+        cents = (d * Decimal("100"))
+        # Fail-closed unless exact integer cents
+        if cents != cents.to_integral_value(rounding=ROUND_HALF_UP):
+            raise ValueError("RISK_PROOF_MAX_LOSS_USD_NOT_INTEGER_CENTS")
+        return ("DEFINED_RISK", int(cents))
+
+    raise ValueError("RISK_PROOF_MAX_LOSS_USD_BAD_TYPE")
 
 def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
@@ -261,6 +303,7 @@ def main(argv: List[str] | None = None) -> int:
             raise ValueError(f"POSITION_ID_MISSING: {submission_id}")
 
         instr = _instrument_from_order_plan(op)
+        mkt_exposure_type, max_loss_cents = _defined_risk_from_order_plan_or_none(op)
 
         items.append(
             {
@@ -269,8 +312,8 @@ def main(argv: List[str] | None = None) -> int:
                 "instrument": instr,
                 "qty": qty,
                 "avg_cost_cents": avg_cents,
-                "market_exposure_type": "UNDEFINED_RISK",
-                "max_loss_cents": None,
+                "market_exposure_type": mkt_exposure_type,
+                "max_loss_cents": max_loss_cents,
                 "opened_day_utc": day_utc,
                 "status": "OPEN",
             }

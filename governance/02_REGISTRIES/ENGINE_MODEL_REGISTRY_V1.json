@@ -13,6 +13,7 @@
     {
       "engine_id": "C2_MEAN_REVERSION_EQ_V1",
       "activation_status": "ACTIVE",
+      "budget_notional_pct": "0.10",
       "approved_git_sha": "f4a2b82012213bba7d13a306a050a0733d8f5ab1",
       "engine_runner_path": "constellation_2/phaseI/mean_reversion/run/run_mean_reversion_intents_day_v1.py",
       "engine_runner_sha256": "8afd3c752b6ee058fa0fef7fced466c024636be1bf015828e767846ed9f4b356",
@@ -21,12 +22,14 @@
       "parameter_lock": null,
       "notes": [
         "Code-lock enforced via engine_runner_sha256.",
-        "Parameter lock is null in v1; will be enforced in v2 after governed param hashing is introduced."
+        "Parameter lock is null in v1; will be enforced in v2 after governed param hashing is introduced.",
+        "Budget is a hard notional cap as fraction of NAV; Bundle B enforces fail-closed gating on budget breaches."
       ]
     },
     {
       "engine_id": "C2_TREND_EQ_PRIMARY_V1",
       "activation_status": "ACTIVE",
+      "budget_notional_pct": "0.15",
       "approved_git_sha": "f4a2b82012213bba7d13a306a050a0733d8f5ab1",
       "engine_runner_path": "constellation_2/phaseI/trend_eq_primary/run/run_trend_eq_primary_intents_day_v1.py",
       "engine_runner_sha256": "71f7ea74d2b610a6e69f642c6fcf9fc8521b081da6568620abc1b261078b4f49",
@@ -35,12 +38,14 @@
       "parameter_lock": null,
       "notes": [
         "Code-lock enforced via engine_runner_sha256.",
-        "Parameter lock is null in v1; will be enforced in v2 after governed param hashing is introduced."
+        "Parameter lock is null in v1; will be enforced in v2 after governed param hashing is introduced.",
+        "Budget is a hard notional cap as fraction of NAV; Bundle B enforces fail-closed gating on budget breaches."
       ]
     },
     {
       "engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1",
       "activation_status": "ACTIVE",
+      "budget_notional_pct": "0.10",
       "approved_git_sha": "f4a2b82012213bba7d13a306a050a0733d8f5ab1",
       "engine_runner_path": "constellation_2/phaseI/vol_income_defined_risk/run/run_vol_income_defined_risk_intents_day_v1.py",
       "engine_runner_sha256": "55e92f527ae5498c52b27bb92c9f7bf1c33bfd15f5bf4adf32e72ff981d76c6c",
@@ -49,7 +54,8 @@
       "parameter_lock": null,
       "notes": [
         "Code-lock enforced via engine_runner_sha256.",
-        "Parameter lock is null in v1; will be enforced in v2 after governed param hashing is introduced."
+        "Parameter lock is null in v1; will be enforced in v2 after governed param hashing is introduced.",
+        "Budget is a hard notional cap as fraction of NAV; Bundle B enforces fail-closed gating on budget breaches."
       ]
     }
   ]

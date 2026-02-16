@@ -58,6 +58,9 @@ NOTE: In this repo, docs under `docs/` are treated as governed artifacts **only 
 These canonical contracts are governance-controlled and must be explicitly listed in `governance/00_MANIFEST.yaml` to be treated as governed artifacts:
 
 - `governance/05_CONTRACTS/C2/drawdown_convention_v1.contract.md`
+- `governance/05_CONTRACTS/C2/capital_risk_envelope_v1.contract.md`
+- `governance/05_CONTRACTS/C2/bundle_a_paper_trading_readiness_audit_proof_v1.contract.md`
+- `governance/05_CONTRACTS/C2/bundle_b_risk_blindspot_elimination_v1.contract.md`
 
 ## Governed data schemas
 
@@ -68,7 +71,11 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/MARKET_DATA/market_data_snapshot.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MARKET_DATA/market_calendar.v1.schema.json`
 
-### Phase J — Monitoring schemas (new governed outputs)
+### Engine activity schemas (governed outputs)
+- `governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/oms_decision.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/intents_day_rollup.v1.schema.json`
+
+### Phase J — Monitoring schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/portfolio_nav_series.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/engine_metrics.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/engine_daily_returns.v1.schema.json`
@@ -77,13 +84,22 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/degradation_sentinel.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/capital_efficiency.v1.schema.json`
 
-### Bundle 4 — Reports schemas (new governed outputs)
+### Reports schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/operator_daily_gate.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/operator_gate_verdict.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/reconciliation_report.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/reconciliation_report.v2.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/pipeline_manifest.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v1.schema.json`
 
+### Execution evidence schemas (governed outputs)
+- `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/submission_index.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_event_raw.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_event_day_manifest.v1.schema.json`
 
-### Bundle H-0 — OMS decision truth schema (new governed output)
-- `governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/oms_decision.v1.schema.json`
+### Risk schemas (governed outputs)
+- `governance/04_DATA/SCHEMAS/C2/RISK/engine_model_registry.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/RISK/engine_risk_budget_ledger.v1.schema.json`
 
 - governance/03_CONTRACTS/C2_TRUE_EVIDENCE_SPINE_V2.md — True Evidence Spine v2 (broker-truth contract)
 - governance/03_CONTRACTS/C2_PHASED_SUBMISSION_RUNNER_V1.md — Phase D Submission Runner v1 (audit-grade submission entrypoint)
