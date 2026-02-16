@@ -68,14 +68,20 @@ def main() -> int:
 
     ap = argparse.ArgumentParser(prog="run_c2_paper_day_orchestrator_v1")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
+    ap.add_argument("--input_day_utc", default="", help="Optional: day key to read input truth from (default: same as --day_utc)")
     ap.add_argument("--mode", required=True, choices=["PAPER", "LIVE"])
     ap.add_argument("--symbol", default="SPY", help="Underlying symbol (default: SPY)")
 
     args = ap.parse_args()
 
     day = args.day_utc.strip()
+    input_day = (args.input_day_utc or "").strip() or day
     mode = args.mode.strip().upper()
     symbol = str(args.symbol).strip().upper()
+
+    # Deterministic produced_utc captured once for this orchestrator run
+    import datetime as _dt
+    produced_utc = _dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
     if mode != "PAPER":
         print("FATAL: Orchestrator v1 supports PAPER mode only.", file=sys.stderr)
@@ -86,7 +92,6 @@ def main() -> int:
          "ops/tools/run_engine_model_registry_gate_v1.py",
          "--day_utc", day],
     )
-    return 2
 
     # --- Stage 1: Engines ---
     _run_stage(
@@ -130,6 +135,15 @@ def main() -> int:
         ["python3", "-m",
          "constellation_2.phaseH.tools.run_oms_decisions_day_v1",
          "--day_utc", day],
+    )
+    # --- Stage 3.5: Bundle B.2 Capital-at-Risk Envelope Gate (pre-PhaseD) ---
+    _run_stage(
+        "BUNDLEB2_CAPITAL_RISK_ENVELOPE_GATE",
+        ["python3",
+         "ops/tools/run_c2_capital_risk_envelope_gate_v1.py",
+         "--out_day_utc", day,
+         "--input_day_utc",input_day,
+         "--produced_utc", produced_utc],
     )
 
     # --- Stage 4: PhaseD PAPER submit ---

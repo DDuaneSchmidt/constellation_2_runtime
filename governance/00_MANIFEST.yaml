@@ -25,6 +25,10 @@ documents:
     path: governance/05_CONTRACTS/C2/drawdown_convention_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
+  - id: C2_CAPITAL_RISK_ENVELOPE_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/capital_risk_envelope_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
 
   # Governed data schemas (governance-controlled; runtime code must conform)
   - id: C2_POSITIONS_SNAPSHOT_SCHEMA_V4
@@ -97,7 +101,10 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/reconciliation_report.v2.schema.json
     class: C2_SCHEMA
     status: DRAFT
-
+  - id: C2_REPORTS_CAPITAL_RISK_ENVELOPE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
   - id: C2_REPORTS_PIPELINE_MANIFEST_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/pipeline_manifest.v1.schema.json
     class: C2_SCHEMA
