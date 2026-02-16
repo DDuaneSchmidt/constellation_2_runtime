@@ -1,0 +1,13 @@
+[Unit]
+Description=Constellation 2.0 Daily Operator Gate (PASS/FAIL) v1
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/node/constellation_2_runtime
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/node/constellation_2_runtime/ops/run/c2_operator_gate_run_v1.sh
+
+[Install]
+WantedBy=default.target
