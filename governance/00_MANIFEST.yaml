@@ -214,3 +214,7 @@ documents:
     owner: Constellation
     created_utc: 2026-02-16
     authority: governance+git+runtime_truth
+  - id: C2_ENGINE_MODEL_REGISTRY_GATE_CONTRACT_V1
+    path: governance/03_CONTRACTS/C2_ENGINE_MODEL_REGISTRY_GATE_CONTRACT_V1.md
+    class: C2_CONTRACT
+    status: CANONICAL
