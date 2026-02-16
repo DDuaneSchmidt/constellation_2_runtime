@@ -1,0 +1,1 @@
+{"day_utc":"2026-02-19","index_sha256":"01a922e5a7cd981b598a122844ee2f328ffb4badab9e1cd6134cc6cce2952f9c","produced_utc":"2026-02-16T20:40:12Z","producer":{"component":"ops/tools/run_submission_index_v1.py","git_sha":"748b33293c7c40505ea14673cb074bd62654d982","version":"v1"},"records":[],"schema_id":"submission_index.v1"}
