@@ -1,22 +1,22 @@
 {
   "schema_id": "engine_model_registry",
   "schema_version": "v1",
-  "produced_utc": "2026-02-16T18:35:00Z",
+  "produced_utc": "2026-02-16T18:45:00Z",
   "producer": {
     "repo": "constellation_2_runtime",
     "module": "governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json",
-    "git_sha": "41cb15abe4aa5a59249fcc3f2a4d9ba1ce356ae7"
+    "git_sha": "f4a2b82012213bba7d13a306a050a0733d8f5ab1"
   },
-  "registry_version": 3,
-  "approved_git_sha": "41cb15abe4aa5a59249fcc3f2a4d9ba1ce356ae7",
+  "registry_version": 4,
+  "approved_git_sha": "f4a2b82012213bba7d13a306a050a0733d8f5ab1",
   "engines": [
     {
       "engine_id": "C2_MEAN_REVERSION_EQ_V1",
       "activation_status": "ACTIVE",
-      "approved_git_sha": "41cb15abe4aa5a59249fcc3f2a4d9ba1ce356ae7",
+      "approved_git_sha": "f4a2b82012213bba7d13a306a050a0733d8f5ab1",
       "engine_runner_path": "constellation_2/phaseI/mean_reversion/run/run_mean_reversion_intents_day_v1.py",
       "engine_runner_sha256": "8afd3c752b6ee058fa0fef7fced466c024636be1bf015828e767846ed9f4b356",
-      "approved_utc": "2026-02-16T18:35:00Z",
+      "approved_utc": "2026-02-16T18:45:00Z",
       "approved_by": "OPERATOR",
       "parameter_lock": null,
       "notes": [
@@ -27,10 +27,10 @@
     {
       "engine_id": "C2_TREND_EQ_PRIMARY_V1",
       "activation_status": "ACTIVE",
-      "approved_git_sha": "41cb15abe4aa5a59249fcc3f2a4d9ba1ce356ae7",
+      "approved_git_sha": "f4a2b82012213bba7d13a306a050a0733d8f5ab1",
       "engine_runner_path": "constellation_2/phaseI/trend_eq_primary/run/run_trend_eq_primary_intents_day_v1.py",
       "engine_runner_sha256": "71f7ea74d2b610a6e69f642c6fcf9fc8521b081da6568620abc1b261078b4f49",
-      "approved_utc": "2026-02-16T18:35:00Z",
+      "approved_utc": "2026-02-16T18:45:00Z",
       "approved_by": "OPERATOR",
       "parameter_lock": null,
       "notes": [
@@ -41,10 +41,10 @@
     {
       "engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1",
       "activation_status": "ACTIVE",
-      "approved_git_sha": "41cb15abe4aa5a59249fcc3f2a4d9ba1ce356ae7",
+      "approved_git_sha": "f4a2b82012213bba7d13a306a050a0733d8f5ab1",
       "engine_runner_path": "constellation_2/phaseI/vol_income_defined_risk/run/run_vol_income_defined_risk_intents_day_v1.py",
       "engine_runner_sha256": "55e92f527ae5498c52b27bb92c9f7bf1c33bfd15f5bf4adf32e72ff981d76c6c",
-      "approved_utc": "2026-02-16T18:35:00Z",
+      "approved_utc": "2026-02-16T18:45:00Z",
       "approved_by": "OPERATOR",
       "parameter_lock": null,
       "notes": [
