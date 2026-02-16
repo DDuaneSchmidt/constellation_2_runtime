@@ -29,6 +29,7 @@ Stages:
 6. PhaseF submission index
 7. PhaseG bundle F→G (accounting + allocation)
 8. PhaseJ daily snapshot
+9. Bundle A pipeline manifest (final hostile-review completeness check)
 
 This orchestrator performs no network operations itself.
 It delegates to existing modules via subprocess with strict return-code checks.
@@ -37,7 +38,6 @@ It delegates to existing modules via subprocess with strict return-code checks.
 from __future__ import annotations
 
 import argparse
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -160,6 +160,14 @@ def main() -> int:
         "PHASEJ_DAILY_SNAPSHOT",
         ["python3", "-m",
          "constellation_2.phaseJ.reporting.daily_snapshot_v1",
+         "--day_utc", day],
+    )
+
+    # --- Stage 9: Bundle A Pipeline Manifest (final completeness gate) ---
+    _run_stage(
+        "BUNDLEA_PIPELINE_MANIFEST",
+        ["python3",
+         "ops/tools/run_pipeline_manifest_v1.py",
          "--day_utc", day],
     )
 

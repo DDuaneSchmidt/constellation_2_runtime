@@ -16,29 +16,46 @@ PASS only if:
 - positions snapshot exists (v3 preferred; else any v*.json)
 - cash ledger snapshot exists for the day
 
-Otherwise FAIL (or DEGRADED if only non-critical missing).
+Otherwise FAIL.
 
 Output is immutable.
+
+Runnability requirement:
+- Must run as:  python3 ops/tools/run_operator_daily_gate_v1.py --day_utc YYYY-MM-DD
+- Must NOT require PYTHONPATH or other environment setup.
 """
 
 from __future__ import annotations
+
+# --- Import bootstrap (audit-grade, deterministic, fail-closed) ---
+import sys
+from pathlib import Path
+
+_THIS_FILE = Path(__file__).resolve()
+_REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
+if str(_REPO_ROOT_FROM_FILE) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
+
+if not (_REPO_ROOT_FROM_FILE / "constellation_2").exists():
+    raise SystemExit(f"FATAL: repo_root_missing_constellation_2: derived={_REPO_ROOT_FROM_FILE}")
+if not (_REPO_ROOT_FROM_FILE / "governance").exists():
+    raise SystemExit(f"FATAL: repo_root_missing_governance: derived={_REPO_ROOT_FROM_FILE}")
 
 import argparse
 import hashlib
 import json
 import subprocess
-import sys
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
-from constellation_2.phaseF.accounting.lib.immut_write_v1 import write_file_immutable_v1
+from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
-SCHEMA_PATH = (REPO_ROOT / "governance/04_DATA/SCHEMAS/C2/REPORTS/operator_daily_gate.v1.schema.json").resolve()
+SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/operator_daily_gate.v1.schema.json"
+SCHEMA_PATH = (REPO_ROOT / SCHEMA_RELPATH).resolve()
 OUT_ROOT = (TRUTH / "reports" / "operator_daily_gate_v1").resolve()
 
 RECON_ROOT = (TRUTH / "reports" / "reconciliation_report_v1").resolve()
@@ -108,7 +125,7 @@ def main() -> int:
     # Exec evidence day dir required
     exec_day_dir = (EXEC_TRUTH_ROOT / day).resolve()
     exec_present = exec_day_dir.exists()
-    input_manifest.append({"type": "exec_evidence_day_dir", "path": str(exec_day_dir), "sha256": _sha256_bytes(b"") if not exec_present else _sha256_bytes(b"present")})
+    input_manifest.append({"type": "exec_evidence_day_dir", "path": str(exec_day_dir), "sha256": _sha256_bytes(b"present") if exec_present else _sha256_bytes(b"")})
     if not exec_present:
         reason_codes.append("MISSING_EXEC_EVIDENCE_DAY_DIR")
 
@@ -169,17 +186,18 @@ def main() -> int:
         },
     }
 
-    validate_against_repo_schema_v1(gate, SCHEMA_PATH)
+    validate_against_repo_schema_v1(gate, REPO_ROOT, SCHEMA_RELPATH)
 
     out_dir = (OUT_ROOT / day).resolve()
     out_path = (out_dir / "operator_daily_gate.v1.json").resolve()
     payload = (json.dumps(gate, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
 
-    wr = write_file_immutable_v1(path=out_path, data=payload, create_dirs=True)
-    if not wr.ok:
-        raise SystemExit(f"FAIL: IMMUTABLE_WRITE_ERROR: {wr.error}")
+    try:
+        wr = write_file_immutable_v1(path=out_path, data=payload, create_dirs=True)
+    except ImmutableWriteError as e:
+        raise SystemExit(f"FAIL: IMMUTABLE_WRITE_ERROR: {e}") from e
 
-    print(f"OK: OPERATOR_DAILY_GATE_WRITTEN day_utc={day} status={status} path={out_path} sha256={wr.sha256}")
+    print(f"OK: OPERATOR_DAILY_GATE_WRITTEN day_utc={day} status={status} path={wr.path} sha256={wr.sha256} action={wr.action}")
     return 0 if status == "PASS" else 1
 
 

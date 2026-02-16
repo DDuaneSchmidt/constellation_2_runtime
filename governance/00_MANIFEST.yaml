@@ -93,7 +93,25 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/reconciliation_report.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
+  - id: C2_REPORTS_RECONCILIATION_REPORT_SCHEMA_V2
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/reconciliation_report.v2.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
 
+  - id: C2_REPORTS_PIPELINE_MANIFEST_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/pipeline_manifest.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_EXECUTION_EVIDENCE_BROKER_EVENT_RAW_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_event_raw.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_EXECUTION_EVIDENCE_BROKER_EVENT_DAY_MANIFEST_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_event_day_manifest.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
 
   # Bundle H-0 OMS decision truth schema (new governed output)
   - id: C2_OMS_DECISION_SCHEMA_V1
@@ -150,7 +168,7 @@ documents:
     status: DRAFT
 
   - id: C2_G_RISK_BUDGET_CONTRACT_V1
-    path: docs/c2/G_RISK_BUDGET_CONTRACT_V1.md
+    path: docs/c2/G_ALLOCATION_SPINE_V1.md
     class: C2_BUNDLE_G_CONTRACT
     status: DRAFT
 

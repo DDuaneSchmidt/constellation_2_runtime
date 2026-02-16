@@ -1,0 +1,135 @@
+{
+  "$id": "https://constellation.local/schemas/pipeline_manifest.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pipeline Manifest v1 (End-to-End Paper Trading Readiness, Audit-Proof)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "notes",
+    "input_manifest",
+    "stages",
+    "summary"
+  ],
+  "properties": {
+    "schema_id": { "const": "pipeline_manifest" },
+    "schema_version": { "const": "v1" },
+
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+
+    "produced_utc": { "type": "string", "format": "date-time" },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "module": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "git_sha": { "type": "string", "minLength": 7, "maxLength": 64 }
+      }
+    },
+
+    "status": {
+      "type": "string",
+      "enum": ["OK", "FAIL", "DEGRADED"]
+    },
+
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+    },
+
+    "notes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+    },
+
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+
+    "stages": {
+      "type": "array",
+      "minItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["stage_id", "status", "blocking", "reason_codes", "counts", "artifacts"],
+        "properties": {
+          "stage_id": {
+            "type": "string",
+            "enum": [
+              "INTENTS",
+              "PREFLIGHT",
+              "OMS",
+              "ALLOCATION",
+              "PHASED_SUBMISSIONS",
+              "EXEC_EVIDENCE_TRUTH",
+              "EXEC_EVIDENCE_MANIFEST",
+              "SUBMISSION_INDEX",
+              "POSITIONS",
+              "CASH_LEDGER",
+              "ACCOUNTING",
+              "RECONCILIATION",
+              "OPERATOR_GATE"
+            ]
+          },
+          "status": { "type": "string", "enum": ["OK", "FAIL", "MISSING", "DEGRADED"] },
+          "blocking": { "type": "boolean" },
+          "reason_codes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+          },
+          "counts": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["items_total"],
+            "properties": {
+              "items_total": { "type": "integer", "minimum": 0 },
+              "items_ok": { "type": ["integer", "null"], "minimum": 0 },
+              "items_fail": { "type": ["integer", "null"], "minimum": 0 }
+            }
+          },
+          "artifacts": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["root", "present", "sha256"],
+            "properties": {
+              "root": { "type": "string", "minLength": 1, "maxLength": 1024 },
+              "present": { "type": "boolean" },
+              "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+            }
+          }
+        }
+      }
+    },
+
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["blocking_failures", "nonblocking_degradations"],
+      "properties": {
+        "blocking_failures": { "type": "integer", "minimum": 0 },
+        "nonblocking_degradations": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}
