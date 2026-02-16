@@ -1,0 +1,10 @@
+[Unit]
+Description=Constellation 2.0 Daily Operator Gate Timer (00:05 UTC)
+
+[Timer]
+OnCalendar=*-*-* 00:05:00 UTC
+Persistent=true
+Unit=c2-operator-gate.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,15 @@
+[Unit]
+Description=Constellation 2.0 Paper Supervisor v2 (PhaseD-watching, immutable-safe)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/node/constellation_2_runtime
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=10
+ExecStart=/home/node/constellation_2_runtime/.venv_c2/bin/python /home/node/constellation_2_runtime/ops/run/c2_supervisor_paper_v2.py --run_once false --poll_seconds 30
+
+[Install]
+WantedBy=default.target
