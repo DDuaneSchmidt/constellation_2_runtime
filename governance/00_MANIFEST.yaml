@@ -112,6 +112,15 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_event_day_manifest.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
+  - id: C2_RISK_ENGINE_MODEL_REGISTRY_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/RISK/engine_model_registry.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_REGISTRY_ENGINE_MODEL_REGISTRY_V1
+    path: governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json
+    class: C2_REGISTRY
+    status: ACTIVE
 
   # Bundle H-0 OMS decision truth schema (new governed output)
   - id: C2_OMS_DECISION_SCHEMA_V1

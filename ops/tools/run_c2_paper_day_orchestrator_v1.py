@@ -21,6 +21,8 @@ NON-NEGOTIABLE PROPERTIES:
 - Refuse execution if not launched from repo root (audit reproducibility)
 
 Stages:
+Stages:
+0. Bundle B Engine Model Registry Gate (fail-closed)
 1. Engines (MR, Trend, Vol Income)
 2. PhaseC submit preflight
 3. PhaseH OMS decisions
@@ -77,7 +79,14 @@ def main() -> int:
 
     if mode != "PAPER":
         print("FATAL: Orchestrator v1 supports PAPER mode only.", file=sys.stderr)
-        return 2
+    # --- Stage 0: Bundle B Engine Model Registry Gate (fail-closed) ---
+    _run_stage(
+        "BUNDLEB_ENGINE_MODEL_REGISTRY_GATE",
+        ["python3",
+         "ops/tools/run_engine_model_registry_gate_v1.py",
+         "--day_utc", day],
+    )
+    return 2
 
     # --- Stage 1: Engines ---
     _run_stage(
