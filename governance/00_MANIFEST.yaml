@@ -164,3 +164,19 @@ documents:
     path: docs/c2/RUNBOOK_FG_PHASE_V1.md
     class: C2_RUNBOOK
     status: DRAFT
+
+  - id: C2_TRUE_EVIDENCE_SPINE_V2
+    path: governance/03_CONTRACTS/C2_TRUE_EVIDENCE_SPINE_V2.md
+    status: ACTIVE
+    version: 2
+    owner: Constellation
+    created_utc: 2026-02-15
+    authority: governance+git+runtime_truth
+
+  - id: C2_PHASED_SUBMISSION_RUNNER_V1
+    path: governance/03_CONTRACTS/C2_PHASED_SUBMISSION_RUNNER_V1.md
+    status: ACTIVE
+    version: 1
+    owner: Constellation
+    created_utc: 2026-02-16
+    authority: governance+git+runtime_truth

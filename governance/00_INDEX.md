@@ -84,3 +84,6 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 
 ### Bundle H-0 — OMS decision truth schema (new governed output)
 - `governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/oms_decision.v1.schema.json`
+
+- governance/03_CONTRACTS/C2_TRUE_EVIDENCE_SPINE_V2.md — True Evidence Spine v2 (broker-truth contract)
+- governance/03_CONTRACTS/C2_PHASED_SUBMISSION_RUNNER_V1.md — Phase D Submission Runner v1 (audit-grade submission entrypoint)
