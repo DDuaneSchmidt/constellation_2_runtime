@@ -199,6 +199,38 @@ def _git_sha() -> str:
     return s
 
 
+def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | None:
+    """
+    Immutable truth rule (audit-grade):
+    - If the report already exists at the immutable day-keyed path, do NOT attempt rewrite.
+    - Treat the existing file as authoritative for that day.
+    - Return its PASS/FAIL as exit code (PASS->0, FAIL->2).
+    """
+    if not out_path.exists():
+        return None
+
+    existing_sha = _sha256_file(out_path)
+    existing = _read_json(out_path)
+
+    schema_id = str(existing.get("schema_id") or "").strip()
+    day_utc = str(existing.get("day_utc") or "").strip()
+    status = str(existing.get("status") or "").strip().upper()
+
+    if schema_id != "capital_risk_envelope":
+        raise SystemExit(f"FAIL: EXISTING_REPORT_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
+    if day_utc != expected_day_utc:
+        raise SystemExit(f"FAIL: EXISTING_REPORT_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}")
+    if status not in ("PASS", "FAIL"):
+        raise SystemExit(f"FAIL: EXISTING_REPORT_STATUS_INVALID: status={status!r} path={out_path}")
+
+    print(f"CAPITAL_RISK_ENVELOPE_WRITTEN day_utc={expected_day_utc} path={str(out_path)} sha256={existing_sha} action=EXISTS")
+    if status != "PASS":
+        print(f"FAIL: CAPITAL_RISK_ENVELOPE_GATE status={status} reason_codes={existing.get('reason_codes')}", file=sys.stderr)
+        return 2
+    print("OK: CAPITAL_RISK_ENVELOPE_GATE PASS")
+    return 0
+
+
 def _compute(out_day: str, produced_utc: str, inp: Inputs) -> Dict[str, Any]:
     reason_codes: List[str] = []
     notes: List[str] = []
@@ -443,6 +475,10 @@ def main() -> int:
 
     out_dir = (truth_root / "reports" / "capital_risk_envelope_v1" / out_day).resolve()
     out_path = (out_dir / "capital_risk_envelope.v1.json").resolve()
+
+    existing_rc = _return_if_existing_report(out_path=out_path, expected_day_utc=out_day)
+    if existing_rc is not None:
+        return int(existing_rc)
 
     inp: Optional[Inputs] = None
     missing_err: Optional[str] = None

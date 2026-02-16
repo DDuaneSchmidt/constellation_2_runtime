@@ -112,13 +112,17 @@ def main() -> int:
 
     # Deterministic produced_utc captured once for this orchestrator run
     import datetime as _dt
+
     produced_utc = _dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
     # Capture current git sha once (passed to stage 0; audit-only mismatch permitted by gate contract)
     import subprocess as _sp
-    current_git_sha = _sp.check_output(
-        ["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(Path.cwd())
-    ).decode("utf-8").strip()
+
+    current_git_sha = (
+        _sp.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(Path.cwd()))
+        .decode("utf-8")
+        .strip()
+    )
 
     # Track whether any prerequisite stage failed (blocks PhaseD).
     prereq_failed = False
@@ -188,20 +192,24 @@ def main() -> int:
     if not ok:
         prereq_failed = True
 
-    # --- Stage 2: PhaseC Preflight (strict; uses input_day to read truth if needed) ---
-    _run_stage_strict(
+    # --- Stage 2: PhaseC Preflight (ALWAYS ATTEMPT; record failure; uses input_day) ---
+    ok, _rc = _run_stage_soft(
         "PHASEC_PREFLIGHT",
         [
             "python3",
             "-m",
-            "constellation_2.phaseC.tools.c2_submit_preflight_offline_v1",
+            "constellation_2.phaseC.tools.run_phaseC_preflight_day_v1",
             "--day_utc",
             input_day,
+            "--eval_time_utc",
+            produced_utc,
         ],
     )
+    if not ok:
+        prereq_failed = True
 
-    # --- Stage 3: PhaseH OMS (strict; uses input_day) ---
-    _run_stage_strict(
+    # --- Stage 3: PhaseH OMS (ALWAYS ATTEMPT; record failure; uses input_day) ---
+    ok, _rc = _run_stage_soft(
         "PHASEH_OMS",
         [
             "python3",
@@ -209,11 +217,15 @@ def main() -> int:
             "constellation_2.phaseH.tools.run_oms_decisions_day_v1",
             "--day_utc",
             input_day,
+            "--producer_git_sha",
+            current_git_sha,
         ],
     )
+    if not ok:
+        prereq_failed = True
 
-    # --- Stage 3.5: Bundle B.2 Capital-at-Risk Envelope Gate (strict; always run, uses input_day) ---
-    _run_stage_strict(
+    # --- Stage 3.5: Bundle B.2 Capital-at-Risk Envelope Gate (ALWAYS ATTEMPT; record failure; uses input_day) ---
+    ok, _rc = _run_stage_soft(
         "BUNDLEB2_CAPITAL_RISK_ENVELOPE_GATE",
         [
             "python3",
@@ -226,10 +238,12 @@ def main() -> int:
             produced_utc,
         ],
     )
+    if not ok:
+        prereq_failed = True
 
-    # If any engine failed, block submissions after writing gates/reports.
+    # If any prerequisite failed, block submissions after attempting required gates/reports.
     if prereq_failed:
-        print("FATAL: one or more engine stages failed; submission blocked (gates written).", file=sys.stderr)
+        print("FATAL: prerequisite stage failure; submission blocked (PhaseC/OMS/B.2 attempted).", file=sys.stderr)
         return 2
 
     # --- Stage 4+: Only run submission pipeline if all prerequisites succeeded ---

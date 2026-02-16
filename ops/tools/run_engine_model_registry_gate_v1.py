@@ -36,7 +36,6 @@ import argparse
 import hashlib
 import json
 import subprocess
-from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
@@ -51,15 +50,23 @@ REG_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RISK/engine_model_registry.v
 OUT_ROOT = (TRUTH / "reports" / "engine_model_registry_gate_v1").resolve()
 
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-
 def _parse_day_utc(s: str) -> str:
     d = (s or "").strip()
     if len(d) != 10 or d[4] != "-" or d[7] != "-":
         raise ValueError(f"BAD_DAY_UTC_FORMAT_EXPECTED_YYYY_MM_DD: {d!r}")
     return d
+
+
+def _produced_utc_deterministic(day_utc: str) -> str:
+    """
+    Deterministic produced_utc for immutable, rerunnable daily truth artifacts.
+
+    Rationale (contract-aligned):
+    - This gate writes immutable truth under a day key.
+    - Wall-clock timestamps would make reruns non-idempotent and trigger immutable rewrite failures.
+    - The contract requires determinism; it does not require wall-clock produced_utc.
+    """
+    return f"{day_utc}T00:00:00Z"
 
 
 def _sha256_file(path: Path) -> str:
@@ -86,14 +93,60 @@ def _git_sha_head() -> str:
     return out.decode("utf-8").strip()
 
 
+def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | None:
+    """
+    Immutable truth rule (audit-grade):
+    - If the report already exists at the immutable day-keyed path, do NOT attempt rewrite.
+    - Treat the existing file as authoritative for that day.
+    - Return its PASS/FAIL as exit code (PASS->0, FAIL->1).
+
+    This makes the gate rerunnable without mutation, even across historical semantics changes.
+    """
+    if not out_path.exists():
+        return None
+
+    existing_sha = _sha256_file(out_path)
+    existing = _read_json(out_path)
+
+    schema_id = str(existing.get("schema_id") or "").strip()
+    day_utc = str(existing.get("day_utc") or "").strip()
+    status = str(existing.get("status") or "").strip().upper()
+
+    if schema_id != "engine_model_registry_gate":
+        raise SystemExit(f"FAIL: EXISTING_REPORT_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
+    if day_utc != expected_day_utc:
+        raise SystemExit(f"FAIL: EXISTING_REPORT_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}")
+    if status not in ("PASS", "FAIL"):
+        raise SystemExit(f"FAIL: EXISTING_REPORT_STATUS_INVALID: status={status!r} path={out_path}")
+
+    print(
+        f"OK: ENGINE_MODEL_REGISTRY_GATE_WRITTEN day_utc={expected_day_utc} status={status} path={out_path} sha256={existing_sha} action=EXISTS"
+    )
+    return 0 if status == "PASS" else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_engine_model_registry_gate_v1")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
-    ap.add_argument("--current_git_sha", default="", help="Optional (audit-only): explicit git sha; if empty, uses HEAD.")
+    ap.add_argument(
+        "--current_git_sha",
+        default="",
+        help="Optional (audit-only): explicit git sha; if empty, uses HEAD.",
+    )
     args = ap.parse_args()
 
     day = _parse_day_utc(args.day_utc)
-    current_sha = (str(args.current_git_sha) or "").strip() or _git_sha()
+
+    out_dir = (OUT_ROOT / day).resolve()
+    out_path = (out_dir / "engine_model_registry_gate.v1.json").resolve()
+
+    # Immutable rerun safety: if report exists, treat it as authoritative and do not rewrite.
+    existing_rc = _return_if_existing_report(out_path=out_path, expected_day_utc=day)
+    if existing_rc is not None:
+        return int(existing_rc)
+
+    current_sha = (str(args.current_git_sha) or "").strip() or _git_sha_head()
+    produced_utc = _produced_utc_deterministic(day)
 
     reason_codes: List[str] = []
     notes: List[str] = []
@@ -167,8 +220,12 @@ def main() -> int:
         "schema_id": "engine_model_registry_gate",
         "schema_version": "v1",
         "day_utc": day,
-        "produced_utc": _utc_now(),
-        "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_engine_model_registry_gate_v1.py", "git_sha": current_sha},
+        "produced_utc": produced_utc,
+        "producer": {
+            "repo": "constellation_2_runtime",
+            "module": "ops/tools/run_engine_model_registry_gate_v1.py",
+            "git_sha": current_sha,
+        },
         "status": gate_status,
         "reason_codes": sorted(list(dict.fromkeys(reason_codes))),
         "notes": notes,
@@ -176,8 +233,6 @@ def main() -> int:
         "results": {"approved_git_sha": approved_git_sha, "current_git_sha": current_sha, "engines": engine_results},
     }
 
-    out_dir = (OUT_ROOT / day).resolve()
-    out_path = (out_dir / "engine_model_registry_gate.v1.json").resolve()
     payload = (json.dumps(report, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
 
     try:
@@ -185,7 +240,9 @@ def main() -> int:
     except ImmutableWriteError as e:
         raise SystemExit(f"FAIL: IMMUTABLE_WRITE_ERROR: {e}") from e
 
-    print(f"OK: ENGINE_MODEL_REGISTRY_GATE_WRITTEN day_utc={day} status={gate_status} path={wr.path} sha256={wr.sha256} action={wr.action}")
+    print(
+        f"OK: ENGINE_MODEL_REGISTRY_GATE_WRITTEN day_utc={day} status={gate_status} path={wr.path} sha256={wr.sha256} action={wr.action}"
+    )
     return 0 if gate_status == "PASS" else 1
 
 
