@@ -82,6 +82,8 @@ def main() -> int:
     # Deterministic produced_utc captured once for this orchestrator run
     import datetime as _dt
     produced_utc = _dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    import subprocess as _sp
+    current_git_sha = _sp.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(Path.cwd())).decode("utf-8").strip()
 
     if mode != "PAPER":
         print("FATAL: Orchestrator v1 supports PAPER mode only.", file=sys.stderr)
@@ -90,7 +92,8 @@ def main() -> int:
         "BUNDLEB_ENGINE_MODEL_REGISTRY_GATE",
         ["python3",
          "ops/tools/run_engine_model_registry_gate_v1.py",
-         "--day_utc", day],
+         "--day_utc", day,
+         "--current_git_sha", current_git_sha],
     )
 
     # --- Stage 1: Engines ---

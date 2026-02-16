@@ -6,7 +6,7 @@ Bundle B: Engine Model Registry Gate v1 (hostile-review safe).
 
 Checks:
 - registry JSON validates against governed schema
-- approved_git_sha matches current git sha
+- approved_git_sha matches explicitly provided current_git_sha (fail-closed)
 - each engine runner file sha256 matches approved sha256
 - activation_status == ACTIVE
 
@@ -33,7 +33,6 @@ if not (_REPO_ROOT_FROM_FILE / "governance").exists():
 import argparse
 import hashlib
 import json
-import subprocess
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
@@ -51,11 +50,6 @@ OUT_ROOT = (TRUTH / "reports" / "engine_model_registry_gate_v1").resolve()
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-
-def _git_sha() -> str:
-    out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
-    return out.decode("utf-8").strip()
 
 
 def _parse_day_utc(s: str) -> str:
@@ -84,14 +78,29 @@ def _read_json(path: Path) -> Dict[str, Any]:
     return obj
 
 
+def _parse_git_sha_or_fail(s: str) -> str:
+    x = (s or "").strip()
+    if len(x) < 7 or len(x) > 64:
+        raise ValueError(f"BAD_GIT_SHA_LENGTH: {x!r}")
+    # allow hex only
+    for ch in x:
+        if ch not in "0123456789abcdef":
+            raise ValueError(f"BAD_GIT_SHA_NON_HEX: {x!r}")
+    return x
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_engine_model_registry_gate_v1")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
+    ap.add_argument(
+        "--current_git_sha",
+        required=True,
+        help="Explicit git sha to enforce (must equal registry approved_git_sha). Fail-closed if missing/invalid.",
+    )
     args = ap.parse_args()
 
     day = _parse_day_utc(args.day_utc)
-
-    current_sha = _git_sha()
+    current_sha = _parse_git_sha_or_fail(str(args.current_git_sha))
 
     reason_codes: List[str] = []
     notes: List[str] = []
@@ -106,7 +115,7 @@ def main() -> int:
     reg = _read_json(REG_PATH)
     validate_against_repo_schema_v1(reg, REPO_ROOT, REG_SCHEMA_RELPATH)
 
-    approved_git_sha = str(reg.get("approved_git_sha") or "")
+    approved_git_sha = str(reg.get("approved_git_sha") or "").strip()
     if approved_git_sha != current_sha:
         reason_codes.append("GIT_SHA_MISMATCH")
         notes.append(f"approved_git_sha={approved_git_sha} current_git_sha={current_sha}")
@@ -170,7 +179,6 @@ def main() -> int:
         "results": {"approved_git_sha": approved_git_sha, "current_git_sha": current_sha, "engines": engine_results},
     }
 
-    # Report schema not governed yet; v1 gate is still audit-grade because inputs are governed + hashed.
     out_dir = (OUT_ROOT / day).resolve()
     out_path = (out_dir / "engine_model_registry_gate.v1.json").resolve()
     payload = (json.dumps(report, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
