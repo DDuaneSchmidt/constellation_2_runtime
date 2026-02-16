@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "c2.execution_evidence.submission_index.v1",
+  "title": "C2 Submission Index v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "records",
+    "index_sha256"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "submission_index.v1" },
+    "day_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "produced_utc": { "type": "string" },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component", "version", "git_sha"],
+      "properties": {
+        "component": { "type": "string" },
+        "version": { "type": "string" },
+        "git_sha": { "type": "string" }
+      }
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "submission_id",
+          "engine_id",
+          "intent_hash",
+          "oms_decision_hash",
+          "allocation_decision_hash",
+          "broker",
+          "status",
+          "mode",
+          "execution_event_record_hash",
+          "timestamps"
+        ],
+        "properties": {
+          "submission_id": { "type": "string" },
+          "engine_id": { "type": "string" },
+          "intent_hash": {
+            "type": ["string", "null"],
+            "description": "Must be non-null for READY days"
+          },
+          "oms_decision_hash": { "type": ["string", "null"] },
+          "allocation_decision_hash": { "type": ["string", "null"] },
+          "broker": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["venue", "account", "order_id"],
+            "properties": {
+              "venue": { "type": "string", "const": "IB" },
+              "account": { "type": "string" },
+              "order_id": { "type": ["string", "null"] }
+            }
+          },
+          "status": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["final_state", "filled_qty", "avg_fill_px"],
+            "properties": {
+              "final_state": { "type": "string" },
+              "filled_qty": { "type": "number" },
+              "avg_fill_px": { "type": ["number", "null"] }
+            }
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["REAL_IB_PAPER", "SIMULATED"]
+          },
+          "execution_event_record_hash": { "type": ["string", "null"] },
+          "timestamps": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["submitted_utc", "last_update_utc"],
+            "properties": {
+              "submitted_utc": { "type": "string" },
+              "last_update_utc": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "index_sha256": {
+      "type": "string",
+      "description": "sha256 of the canonical JSON for this document, excluding this field"
+    }
+  }
+}

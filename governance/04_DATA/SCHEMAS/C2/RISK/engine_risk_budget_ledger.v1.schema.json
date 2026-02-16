@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "c2.risk.engine_risk_budget_ledger.v1",
+  "title": "C2 Engine Risk Budget Ledger v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "input_manifest",
+    "engines",
+    "ledger_sha256"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "engine_risk_budget_ledger" },
+    "schema_version": { "type": "string", "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string" },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string" },
+        "module": { "type": "string" },
+        "git_sha": { "type": "string" }
+      }
+    },
+    "status": { "type": "string", "enum": ["OK", "FAIL"] },
+    "reason_codes": { "type": "array", "items": { "type": "string" } },
+    "input_manifest": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256"],
+        "properties": {
+          "type": { "type": "string" },
+          "path": { "type": "string" },
+          "sha256": { "type": "string" }
+        }
+      }
+    },
+    "engines": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "engine_id",
+          "budget_notional_pct",
+          "used_notional_pct",
+          "remaining_notional_pct",
+          "status",
+          "reason_codes"
+        ],
+        "properties": {
+          "engine_id": { "type": "string" },
+
+          "budget_notional_pct": {
+            "type": "string",
+            "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$",
+            "description": "Engine notional budget as fraction of NAV, decimal string in [0,1]."
+          },
+          "used_notional_pct": {
+            "type": "string",
+            "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$",
+            "description": "Used notional fraction of NAV attributed to this engine."
+          },
+          "remaining_notional_pct": {
+            "type": "string",
+            "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$",
+            "description": "Remaining = max(0, budget - used), decimal string."
+          },
+
+          "rolling_drawdown_pct": {
+            "type": ["string", "null"],
+            "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$"
+          },
+          "rolling_volatility": {
+            "type": ["string", "null"],
+            "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$"
+          },
+
+          "status": { "type": "string", "enum": ["OK", "THROTTLED", "HALTED", "UNKNOWN"] },
+          "reason_codes": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "ledger_sha256": {
+      "type": "string",
+      "description": "sha256 of the canonical JSON for this document, excluding this field"
+    }
+  }
+}

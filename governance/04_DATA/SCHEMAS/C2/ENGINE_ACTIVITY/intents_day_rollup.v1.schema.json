@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "c2.engine_activity.intents_day_rollup.v1",
+  "title": "C2 Intents Day Rollup v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "inputs",
+    "engines",
+    "rollup_sha256"
+  ],
+  "properties": {
+    "schema_id": {
+      "type": "string",
+      "const": "intents_day_rollup.v1"
+    },
+    "day_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "produced_utc": {
+      "type": "string"
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component", "version", "git_sha"],
+      "properties": {
+        "component": { "type": "string" },
+        "version": { "type": "string" },
+        "git_sha": { "type": "string" }
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "market_data_snapshot_hashes",
+        "market_calendar_hash",
+        "engine_config_hashes"
+      ],
+      "properties": {
+        "market_data_snapshot_hashes": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "market_calendar_hash": { "type": "string" },
+        "engine_config_hashes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "engines": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "engine_id",
+          "intent_type",
+          "intent_hashes",
+          "intent_count"
+        ],
+        "properties": {
+          "engine_id": { "type": "string" },
+          "intent_type": { "type": "string" },
+          "intent_hashes": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "intent_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "rollup_sha256": {
+      "type": "string",
+      "description": "sha256 of the canonical JSON for this document, excluding this field"
+    }
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "c2.reports.operator_gate_verdict.v1",
+  "title": "C2 Operator Gate Verdict v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "checks",
+    "missing_artifacts",
+    "hash_mismatches",
+    "ready",
+    "exit_code",
+    "verdict_sha256"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "operator_gate_verdict.v1" },
+    "day_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "produced_utc": { "type": "string" },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component", "version", "git_sha"],
+      "properties": {
+        "component": { "type": "string" },
+        "version": { "type": "string" },
+        "git_sha": { "type": "string" }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["check_id", "pass", "evidence_paths", "details"],
+        "properties": {
+          "check_id": { "type": "string" },
+          "pass": { "type": "boolean" },
+          "evidence_paths": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "details": { "type": "string" }
+        }
+      }
+    },
+    "missing_artifacts": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "hash_mismatches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["expected", "observed", "context"],
+        "properties": {
+          "expected": { "type": "string" },
+          "observed": { "type": "string" },
+          "context": { "type": "string" }
+        }
+      }
+    },
+    "ready": { "type": "boolean" },
+    "exit_code": { "type": "integer" },
+    "verdict_sha256": {
+      "type": "string",
+      "description": "sha256 of the canonical JSON for this document, excluding this field"
+    }
+  }
+}
