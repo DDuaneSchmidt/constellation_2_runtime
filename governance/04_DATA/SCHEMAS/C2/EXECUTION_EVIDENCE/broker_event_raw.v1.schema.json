@@ -1,0 +1,59 @@
+{
+  "$id": "https://constellation.local/schemas/broker_event_raw.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Broker Event Raw v1 (IB API Raw Callback Record, JSONL Line)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "received_utc",
+    "sequence_number",
+    "broker",
+    "event_type",
+    "ib_fields",
+    "sha256"
+  ],
+  "properties": {
+    "schema_id": { "const": "BROKER_EVENT_RAW" },
+    "schema_version": { "type": "integer", "const": 1 },
+
+    "received_utc": { "type": "string", "format": "date-time" },
+
+    "sequence_number": { "type": "integer", "minimum": 1 },
+
+    "broker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["client_id", "environment", "name"],
+      "properties": {
+        "client_id": { "type": "integer", "minimum": 0 },
+        "environment": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+
+    "event_type": { "type": "string", "minLength": 1, "maxLength": 128 },
+
+    "ib_fields": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["args"],
+      "properties": {
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["value"],
+            "properties": {
+              "value": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

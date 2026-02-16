@@ -1,0 +1,141 @@
+{
+  "$id": "https://constellation.local/schemas/reconciliation_report.v2.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Reconciliation Report v2 (Broker Truth vs Internal Truth)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "notes",
+    "input_manifest",
+    "broker_side",
+    "truth_side",
+    "comparisons"
+  ],
+  "properties": {
+    "schema_id": { "const": "reconciliation_report" },
+    "schema_version": { "const": "v2" },
+
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "format": "date-time" },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "module": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "git_sha": { "type": "string", "minLength": 7, "maxLength": 64 }
+      }
+    },
+
+    "status": { "type": "string", "enum": ["OK", "FAIL", "DEGRADED"] },
+
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+    },
+
+    "notes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+    },
+
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+
+    "broker_side": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["broker_event_log_path", "broker_event_log_sha256", "broker_event_manifest_path", "counts"],
+      "properties": {
+        "broker_event_log_path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "broker_event_log_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "broker_event_manifest_path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["broker_events_total", "execDetails_total"],
+          "properties": {
+            "broker_events_total": { "type": "integer", "minimum": 0 },
+            "execDetails_total": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+
+    "truth_side": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exec_evidence_day_dir", "submission_ids", "counts"],
+      "properties": {
+        "exec_evidence_day_dir": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "submission_ids": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["submissions_total"],
+          "properties": {
+            "submissions_total": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+
+    "comparisons": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["truth_submissions_vs_broker_execdetails", "cash", "positions"],
+      "properties": {
+        "truth_submissions_vs_broker_execdetails": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason"],
+          "properties": {
+            "status": { "type": "string", "enum": ["OK", "FAIL", "DEGRADED"] },
+            "reason": { "type": "string", "minLength": 1, "maxLength": 256 }
+          }
+        },
+
+        "cash": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason"],
+          "properties": {
+            "status": { "type": "string", "enum": ["OK", "DEGRADED", "MISSING"] },
+            "reason": { "type": "string", "minLength": 1, "maxLength": 256 }
+          }
+        },
+
+        "positions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason"],
+          "properties": {
+            "status": { "type": "string", "enum": ["OK", "DEGRADED", "MISSING"] },
+            "reason": { "type": "string", "minLength": 1, "maxLength": 256 }
+          }
+        }
+      }
+    }
+  }
+}

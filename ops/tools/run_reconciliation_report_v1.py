@@ -17,21 +17,37 @@ Hostile-review properties:
 - Fail-closed for structural violations (missing required files for a submission)
 - Immutable output (refuses rewrite)
 - Explicit input_manifest with sha256 for all inputs used
+
+Runnability requirement:
+- Must run as:  python3 ops/tools/run_reconciliation_report_v1.py --day_utc YYYY-MM-DD
+- Must NOT require PYTHONPATH or other environment setup.
 """
 
 from __future__ import annotations
+
+# --- Import bootstrap (audit-grade, deterministic, fail-closed) ---
+import sys
+from pathlib import Path
+
+_THIS_FILE = Path(__file__).resolve()
+_REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
+if str(_REPO_ROOT_FROM_FILE) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
+
+if not (_REPO_ROOT_FROM_FILE / "constellation_2").exists():
+    raise SystemExit(f"FATAL: repo_root_missing_constellation_2: derived={_REPO_ROOT_FROM_FILE}")
+if not (_REPO_ROOT_FROM_FILE / "governance").exists():
+    raise SystemExit(f"FATAL: repo_root_missing_governance: derived={_REPO_ROOT_FROM_FILE}")
 
 import argparse
 import hashlib
 import json
 import subprocess
-import sys
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
-from constellation_2.phaseF.accounting.lib.immut_write_v1 import write_file_immutable_v1
+from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
@@ -39,7 +55,8 @@ TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 PHASED_ROOT = (REPO_ROOT / "constellation_2/phaseD/outputs/submissions").resolve()
 EXEC_TRUTH_ROOT = (TRUTH / "execution_evidence_v1/submissions").resolve()
 
-SCHEMA_PATH = (REPO_ROOT / "governance/04_DATA/SCHEMAS/C2/REPORTS/reconciliation_report.v1.schema.json").resolve()
+SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/reconciliation_report.v1.schema.json"
+SCHEMA_PATH = (REPO_ROOT / SCHEMA_RELPATH).resolve()
 OUT_ROOT = (TRUTH / "reports" / "reconciliation_report_v1").resolve()
 
 
@@ -143,12 +160,9 @@ def main() -> int:
 
     exec_day_dir = (EXEC_TRUTH_ROOT / day).resolve()
 
-    # Broker-side: collect submission_ids whose timestamps map to day
     broker_ids: List[str] = []
     broker_filled_qty_total = 0
     input_manifest: List[Dict[str, str]] = []
-
-    # Hash the PhaseD root directory deterministically (strong evidence)
     input_manifest.append({"type": "phaseD_submissions_root", "path": str(PHASED_ROOT), "sha256": _sha256_dir_deterministic(PHASED_ROOT)})
 
     sub_dirs = sorted([p for p in PHASED_ROOT.iterdir() if p.is_dir()], key=lambda p: p.name)
@@ -159,7 +173,6 @@ def main() -> int:
         sid = sd.name
         broker_ids.append(sid)
 
-        # Record hashes of the specific files used for this submission
         bsr = sd / "broker_submission_record.v2.json"
         exr = sd / "execution_event_record.v1.json"
         if bsr.exists():
@@ -170,7 +183,6 @@ def main() -> int:
 
     broker_set = set(broker_ids)
 
-    # Truth-side: enumerate exec-evidence truth submission ids for day
     truth_ids: List[str] = []
     truth_filled_qty_total = 0
     if exec_day_dir.exists() and exec_day_dir.is_dir():
@@ -182,7 +194,6 @@ def main() -> int:
                 input_manifest.append({"type": "exec_truth_execution_event_record_v1", "path": str(exr), "sha256": _sha256_file(exr)})
                 truth_filled_qty_total += _filled_qty_from_execution_event(exr)
     else:
-        # Missing truth day dir is not a crash; it's a recon FAIL.
         input_manifest.append({"type": "exec_evidence_day_dir_missing", "path": str(exec_day_dir), "sha256": _sha256_bytes(b"")})
 
     truth_set = set(truth_ids)
@@ -205,7 +216,6 @@ def main() -> int:
         status = "DEGRADED" if status == "OK" else status
         reason_codes.append("EXTRA_SUBMISSIONS_IN_TRUTH")
 
-    # Cash/positions comparisons (minimal viable: presence only; values may be added later)
     cash_cmp = {"status": "MISSING", "reason": "cash delta computation not implemented in v1; requires governed broker cash source"}
     pos_cmp = {"status": "MISSING", "reason": "positions delta computation not implemented in v1; requires governed broker position source"}
 
@@ -240,18 +250,18 @@ def main() -> int:
         },
     }
 
-    # Validate against governed schema (fail-closed)
-    validate_against_repo_schema_v1(report, SCHEMA_PATH)
+    validate_against_repo_schema_v1(report, REPO_ROOT, SCHEMA_RELPATH)
 
     out_dir = (OUT_ROOT / day).resolve()
     out_path = (out_dir / "reconciliation_report.v1.json").resolve()
     payload = (json.dumps(report, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
 
-    wr = write_file_immutable_v1(path=out_path, data=payload, create_dirs=True)
-    if not wr.ok:
-        raise SystemExit(f"FAIL: IMMUTABLE_WRITE_ERROR: {wr.error}")
+    try:
+        wr = write_file_immutable_v1(path=out_path, data=payload, create_dirs=True)
+    except ImmutableWriteError as e:
+        raise SystemExit(f"FAIL: IMMUTABLE_WRITE_ERROR: {e}") from e
 
-    print(f"OK: RECON_REPORT_WRITTEN day_utc={day} path={out_path} sha256={wr.sha256}")
+    print(f"OK: RECON_REPORT_WRITTEN day_utc={day} path={wr.path} sha256={wr.sha256} action={wr.action}")
     return 0 if status == "OK" else 1
 
 

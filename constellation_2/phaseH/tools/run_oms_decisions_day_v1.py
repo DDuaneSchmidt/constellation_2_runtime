@@ -39,10 +39,12 @@ BLOCK_REASON_ENUM = [
 ]
 
 # Source reason codes -> normalized blocked reason (fail-closed if unknown)
-# Proven source veto reason:
+# Proven source veto reasons:
 #   C2_FRESHNESS_CERT_INVALID_OR_EXPIRED
+#   C2_SUBMIT_FAIL_CLOSED_REQUIRED (PhaseC exposure-intent preflight fail-closed boundary)
 SOURCE_REASON_MAP = {
     "C2_FRESHNESS_CERT_INVALID_OR_EXPIRED": "FRESHNESS_EXPIRED",
+    "C2_SUBMIT_FAIL_CLOSED_REQUIRED": "RISK_LIMIT",
 }
 
 
@@ -87,6 +89,10 @@ def _load_preflight_for_intent(day_utc: str, intent_hash: str) -> Tuple[str, Pat
     Return (source_type, path, obj) where source_type is:
       - submit_preflight_decision_v1
       - veto_record_v1
+
+    Fail-closed deterministic reconciliation:
+    - If BOTH allow+veto exist for the same intent_hash, prefer VETO as the effective boundary evidence.
+      Rationale: conflict implies preflight state is inconsistent; veto is the conservative choice.
     """
     d = (PREFLIGHT_ROOT / day_utc).resolve()
     if not d.exists() or not d.is_dir():
@@ -95,18 +101,24 @@ def _load_preflight_for_intent(day_utc: str, intent_hash: str) -> Tuple[str, Pat
     p_allow = d / f"{intent_hash}.submit_preflight_decision.v1.json"
     p_veto = d / f"{intent_hash}.veto_record.v1.json"
 
-    found: List[Tuple[str, Path]] = []
-    if p_allow.exists():
-        found.append(("submit_preflight_decision_v1", p_allow))
-    if p_veto.exists():
-        found.append(("veto_record_v1", p_veto))
+    allow_exists = bool(p_allow.exists())
+    veto_exists = bool(p_veto.exists())
 
-    if len(found) == 0:
+    if not allow_exists and not veto_exists:
         raise FileNotFoundError(f"MISSING_PREFLIGHT_DECISION_FOR_INTENT_HASH: {intent_hash}")
-    if len(found) > 1:
-        raise ValueError(f"DUPLICATE_PREFLIGHT_DECISION_FOR_INTENT_HASH: {intent_hash}")
 
-    source_type, path = found[0]
+    # Conflict case: both exist -> prefer veto (fail-closed).
+    if allow_exists and veto_exists:
+        source_type, path = ("veto_record_v1", p_veto)
+        obj = _read_json_obj(path)
+        return source_type, path, obj
+
+    if allow_exists:
+        source_type, path = ("submit_preflight_decision_v1", p_allow)
+        obj = _read_json_obj(path)
+        return source_type, path, obj
+
+    source_type, path = ("veto_record_v1", p_veto)
     obj = _read_json_obj(path)
     return source_type, path, obj
 
@@ -181,6 +193,7 @@ def main(argv: List[str] | None = None) -> int:
 
     mismatch = 0
     wrote = 0
+    exists = 0
 
     for p_intent in intent_files:
         try:
@@ -201,6 +214,27 @@ def main(argv: List[str] | None = None) -> int:
             intent_id = str(intent_obj.get("intent_id") or "").strip()
             if not intent_id:
                 raise ValueError("INTENT_ID_MISSING")
+
+            out_path = (out_day_dir / f"{intent_hash}.oms_decision.v1.json").resolve()
+
+            # Rerun safety for immutable truth: if the decision already exists, do not rewrite it.
+            if out_path.exists():
+                try:
+                    existing = _read_json_obj(out_path)
+                    if str(existing.get("schema_id") or "").strip() != "C2_OMS_DECISION_V1":
+                        raise ValueError(f"EXISTING_SCHEMA_ID_MISMATCH: {existing.get('schema_id')!r}")
+                    if str(existing.get("day_utc") or "").strip() != day_utc:
+                        raise ValueError(f"EXISTING_DAY_UTC_MISMATCH: {existing.get('day_utc')!r}")
+                    intent_block = existing.get("intent")
+                    if not isinstance(intent_block, dict):
+                        raise ValueError("EXISTING_INTENT_BLOCK_MISSING")
+                    if str(intent_block.get("intent_hash") or "").strip() != intent_hash:
+                        raise ValueError(f"EXISTING_INTENT_HASH_MISMATCH: {intent_block.get('intent_hash')!r}")
+                except Exception as e:
+                    print(f"FAIL: EXISTING_OMS_DECISION_INVALID: path={str(out_path)} err={e}", file=sys.stderr)
+                    return 4
+                exists += 1
+                continue
 
             source_type, p_src, src_obj = _load_preflight_for_intent(day_utc, intent_hash)
             src_path_abs = str(p_src.resolve())
@@ -235,7 +269,6 @@ def main(argv: List[str] | None = None) -> int:
             validate_against_repo_schema_v1(out_obj, REPO_ROOT, SCHEMA_OMS_DECISION)
 
             b = canonical_json_bytes_v1(out_obj) + b"\n"
-            out_path = out_day_dir / f"{intent_hash}.oms_decision.v1.json"
             _ = write_file_immutable_v1(path=out_path, data=b, create_dirs=True)
             wrote += 1
 
@@ -250,7 +283,7 @@ def main(argv: List[str] | None = None) -> int:
         print(f"STATUS=FAIL_RECONCILIATION day={day_utc} mismatch={mismatch}", file=sys.stderr)
         return 5
 
-    print(f"OK: OMS_DECISIONS_WRITTEN day={day_utc} intents={len(intent_files)} wrote={wrote}")
+    print(f"OK: OMS_DECISIONS_WRITTEN day={day_utc} intents={len(intent_files)} wrote={wrote} exists={exists}")
     return 0
 
 

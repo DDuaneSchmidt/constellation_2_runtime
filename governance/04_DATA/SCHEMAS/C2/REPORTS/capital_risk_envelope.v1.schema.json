@@ -1,0 +1,188 @@
+{
+  "$id": "https://constellation.local/schemas/capital_risk_envelope.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Capital Risk Envelope v1 (Pre-PhaseD Gate Output)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "input_manifest",
+    "envelope",
+    "checks"
+  ],
+  "properties": {
+    "schema_id": { "const": "capital_risk_envelope" },
+    "schema_version": { "const": "v1" },
+
+    "day_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "produced_utc": { "type": "string", "format": "date-time" },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "module": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "git_sha": { "type": "string", "minLength": 7, "maxLength": 64 }
+      }
+    },
+
+    "status": { "type": "string", "enum": ["PASS", "FAIL", "DEGRADED"] },
+
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+    },
+
+    "notes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+    },
+
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allocation_summary_present",
+        "nav_present",
+        "positions_present",
+        "drawdown_present",
+        "positions_all_have_max_loss",
+        "portfolio_within_envelope"
+      ],
+      "properties": {
+        "allocation_summary_present": { "type": "boolean" },
+        "nav_present": { "type": "boolean" },
+        "positions_present": { "type": "boolean" },
+        "drawdown_present": { "type": "boolean" },
+        "positions_all_have_max_loss": { "type": "boolean" },
+        "portfolio_within_envelope": { "type": "boolean" }
+      }
+    },
+
+    "envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contracts",
+        "drawdown_multiplier_table",
+        "base_envelope_pct",
+        "nav_total",
+        "nav_total_cents",
+        "peak_nav",
+        "drawdown_abs",
+        "drawdown_pct",
+        "multiplier",
+        "allowed_capital_at_risk_cents",
+        "portfolio_capital_at_risk_cents",
+        "headroom_cents",
+        "positions"
+      ],
+      "properties": {
+        "contracts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["drawdown_contract", "capital_risk_envelope_contract"],
+          "properties": {
+            "drawdown_contract": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "sha256"],
+              "properties": {
+                "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+                "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+              }
+            },
+            "capital_risk_envelope_contract": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "sha256"],
+              "properties": {
+                "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+                "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+              }
+            }
+          }
+        },
+
+        "drawdown_multiplier_table": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["threshold_drawdown_pct", "multiplier"],
+            "properties": {
+              "threshold_drawdown_pct": { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{6}$" },
+              "multiplier": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" }
+            }
+          }
+        },
+
+        "base_envelope_pct": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{6}$" },
+
+        "nav_total": { "type": "integer" },
+        "nav_total_cents": { "type": "integer" },
+
+        "peak_nav": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+        "drawdown_abs": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+        "drawdown_pct": { "anyOf": [{ "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{6}$" }, { "type": "null" }] },
+
+        "multiplier": { "anyOf": [{ "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" }, { "type": "null" }] },
+
+        "allowed_capital_at_risk_cents": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+        "portfolio_capital_at_risk_cents": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+        "headroom_cents": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+
+        "positions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "position_id",
+              "engine_id",
+              "market_exposure_type",
+              "status",
+              "max_loss_cents",
+              "included_in_risk_sum"
+            ],
+            "properties": {
+              "position_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "engine_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "market_exposure_type": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "status": { "type": "string", "minLength": 1, "maxLength": 32 },
+              "max_loss_cents": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+              "included_in_risk_sum": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

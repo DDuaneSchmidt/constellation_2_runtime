@@ -39,7 +39,11 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from constellation_2.phaseD.lib.canon_json_v1 import CanonicalizationError, canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1
+from constellation_2.phaseD.lib.canon_json_v1 import (
+    CanonicalizationError,
+    canonical_hash_for_c2_artifact_v1,
+    canonical_json_bytes_v1,
+)
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
 
@@ -167,7 +171,9 @@ def _mk_allow_decision(*, created_at_utc: str, binding_hash: str) -> Dict[str, A
     return dec
 
 
-def _evaluate_exposure_intent_v1(intent_obj: Dict[str, Any], *, eval_time_utc: str, intent_hash: str, intent_path: Path) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+def _evaluate_exposure_intent_v1(
+    intent_obj: Dict[str, Any], *, eval_time_utc: str, intent_hash: str, intent_path: Path
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """
     Return (decision_obj, veto_obj). Exactly one is non-null.
     """
@@ -205,6 +211,16 @@ def _evaluate_exposure_intent_v1(intent_obj: Dict[str, Any], *, eval_time_utc: s
     return decision, None
 
 
+def _mark_exists_for_intent(out_day_dir: Path, intent_hash: str) -> bool:
+    """
+    Rerun safety:
+    - If either output already exists for this intent_hash, treat as EXISTS and do not rewrite.
+    """
+    p_dec = out_day_dir / f"{intent_hash}.submit_preflight_decision.v1.json"
+    p_veto = out_day_dir / f"{intent_hash}.veto_record.v1.json"
+    return bool(p_dec.exists() or p_veto.exists())
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
         prog="run_phaseC_preflight_day_v1",
@@ -236,23 +252,37 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
 
     wrote = 0
+    exists = 0
+
     for p_intent in intent_files:
+        # intent_hash is sha256(file bytes), which MUST be canonical-json-bytes + newline in producer.
+        try:
+            intent_bytes = p_intent.read_bytes()
+        except Exception as e:  # noqa: BLE001
+            print(f"FAIL: INTENT_READ_FAILED: intent_file={str(p_intent)} err={e}", file=sys.stderr)
+            return 2
+
+        intent_hash = _sha256_bytes(intent_bytes)
+
+        # Rerun safety: if outputs already exist for this intent, do not attempt overwrite.
+        if _mark_exists_for_intent(out_day_dir, intent_hash):
+            exists += 1
+            continue
+
         try:
             intent_obj = _read_json_obj(p_intent)
-
-            # intent_hash is sha256(file bytes), which MUST be canonical-json-bytes + newline in producer.
-            intent_bytes = p_intent.read_bytes()
-            intent_hash = _sha256_bytes(intent_bytes)
 
             schema_id = str(intent_obj.get("schema_id") or "").strip()
             schema_version = str(intent_obj.get("schema_version") or "").strip()
 
-            pointers = [str(p_intent.resolve())]
-
             if schema_id == "exposure_intent" and schema_version == "v1":
-                decision, veto = _evaluate_exposure_intent_v1(intent_obj, eval_time_utc=eval_time_utc, intent_hash=intent_hash, intent_path=p_intent)
+                decision, veto = _evaluate_exposure_intent_v1(
+                    intent_obj, eval_time_utc=eval_time_utc, intent_hash=intent_hash, intent_path=p_intent
+                )
             else:
-                raise PreflightDayError(f"UNSUPPORTED_INTENT_SCHEMA_FOR_THIS_RUNNER: schema_id={schema_id!r} schema_version={schema_version!r}")
+                raise PreflightDayError(
+                    f"UNSUPPORTED_INTENT_SCHEMA_FOR_THIS_RUNNER: schema_id={schema_id!r} schema_version={schema_version!r}"
+                )
 
             if veto is not None:
                 out_path = out_day_dir / f"{intent_hash}.veto_record.v1.json"
@@ -270,18 +300,29 @@ def main(argv: Optional[List[str]] = None) -> int:
         except Exception as e:  # noqa: BLE001
             # Fail-closed per-intent: write veto_record for this intent hash if possible
             try:
-                intent_bytes = p_intent.read_bytes()
-                intent_hash = _sha256_bytes(intent_bytes)
-                veto = _mk_veto(observed_at_utc=eval_time_utc, reason_detail=str(e), intent_hash=intent_hash, pointers=[str(p_intent.resolve())])
+                # Rerun safety: if outputs exist now (race/partial), do not attempt overwrite.
+                if _mark_exists_for_intent(out_day_dir, intent_hash):
+                    exists += 1
+                    continue
+
+                veto = _mk_veto(
+                    observed_at_utc=eval_time_utc,
+                    reason_detail=str(e),
+                    intent_hash=intent_hash,
+                    pointers=[str(p_intent.resolve())],
+                )
                 out_path = out_day_dir / f"{intent_hash}.veto_record.v1.json"
                 payload = canonical_json_bytes_v1(veto) + b"\n"
                 _atomic_write_bytes_refuse_overwrite(out_path, payload)
                 wrote += 1
             except Exception as e2:  # noqa: BLE001
-                print(f"FAIL: PREFLIGHT_INTENT_PROCESSING_FAILED: intent_file={str(p_intent)} err={e} veto_write_err={e2}", file=sys.stderr)
+                print(
+                    f"FAIL: PREFLIGHT_INTENT_PROCESSING_FAILED: intent_file={str(p_intent)} err={e} veto_write_err={e2}",
+                    file=sys.stderr,
+                )
                 return 2
 
-    print(f"OK: PHASEC_PREFLIGHT_WRITTEN day={day_utc} intents={len(intent_files)} wrote={wrote}")
+    print(f"OK: PHASEC_PREFLIGHT_WRITTEN day={day_utc} intents={len(intent_files)} wrote={wrote} exists={exists}")
     return 0
 
 

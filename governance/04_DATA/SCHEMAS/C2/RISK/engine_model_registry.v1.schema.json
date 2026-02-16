@@ -1,0 +1,89 @@
+{
+  "$id": "https://constellation.local/schemas/engine_model_registry.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Engine Model Registry v1 (Governed Engine Authorization + Code Lock)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "producer",
+    "registry_version",
+    "approved_git_sha",
+    "engines"
+  ],
+  "properties": {
+    "schema_id": { "const": "engine_model_registry" },
+    "schema_version": { "const": "v1" },
+
+    "produced_utc": { "type": "string", "format": "date-time" },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "module": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "git_sha": { "type": "string", "minLength": 7, "maxLength": 64 }
+      }
+    },
+
+    "registry_version": { "type": "integer", "minimum": 1 },
+
+    "approved_git_sha": { "type": "string", "pattern": "^[0-9a-f]{7,64}$" },
+
+    "engines": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "engine_id",
+          "activation_status",
+          "approved_git_sha",
+          "engine_runner_path",
+          "engine_runner_sha256",
+          "approved_utc",
+          "approved_by",
+          "notes"
+        ],
+        "properties": {
+          "engine_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "activation_status": { "type": "string", "enum": ["ACTIVE", "DISABLED", "EXPERIMENTAL"] },
+
+          "approved_git_sha": { "type": "string", "pattern": "^[0-9a-f]{7,64}$" },
+
+          "engine_runner_path": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "engine_runner_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+
+          "approved_utc": { "type": "string", "format": "date-time" },
+          "approved_by": { "type": "string", "minLength": 1, "maxLength": 64 },
+
+          "parameter_lock": {
+            "description": "Optional (v1): engine parameter lock. If present, must be enforced. If null, enforcement is code-only.",
+            "anyOf": [
+              { "type": "null" },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["param_sha256", "description"],
+                "properties": {
+                  "param_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+                  "description": { "type": "string", "minLength": 1, "maxLength": 256 }
+                }
+              }
+            ]
+          },
+
+          "notes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+          }
+        }
+      }
+    }
+  }
+}

@@ -257,9 +257,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--poll-seconds", type=int, default=10)
     p.add_argument(
         "--log-root",
-        default="constellation_2/runtime/truth/execution_evidence_v2/broker_events",
+        default="constellation_2/runtime/truth/execution_evidence_v1/broker_events",
     )
     p.add_argument("--environment", default="PAPER")
+    p.add_argument("--day-utc", default="", help="Optional override YYYY-MM-DD. If set, writes under that day dir.")
+
     return p.parse_args()
 
 
@@ -275,7 +277,16 @@ def main() -> int:
         print(f"FATAL: log_root not under repo: {log_root}", file=sys.stderr)
         return 2
 
-    day_dir = log_root / day_utc()
+    d_override = str(getattr(args, "day_utc", "") or "").strip()
+    if d_override != "":
+        if len(d_override) != 10 or d_override[4] != "-" or d_override[7] != "-":
+            print(f"FATAL: BAD_DAY_UTC_FORMAT_EXPECTED_YYYY_MM_DD: {d_override!r}", file=sys.stderr)
+            return 2
+        day_dir = log_root / d_override
+    else:
+        day_dir = log_root / day_utc()
+
+
     log_path = day_dir / "broker_event_log.v1.jsonl"
 
     broker = {"client_id": int(args.client_id), "environment": str(args.environment), "name": "INTERACTIVE_BROKERS"}

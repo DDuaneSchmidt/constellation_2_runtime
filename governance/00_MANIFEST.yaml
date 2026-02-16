@@ -25,6 +25,10 @@ documents:
     path: governance/05_CONTRACTS/C2/drawdown_convention_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
+  - id: C2_CAPITAL_RISK_ENVELOPE_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/capital_risk_envelope_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
 
   # Governed data schemas (governance-controlled; runtime code must conform)
   - id: C2_POSITIONS_SNAPSHOT_SCHEMA_V4
@@ -93,7 +97,37 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/reconciliation_report.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
+  - id: C2_REPORTS_RECONCILIATION_REPORT_SCHEMA_V2
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/reconciliation_report.v2.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_CAPITAL_RISK_ENVELOPE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_PIPELINE_MANIFEST_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/pipeline_manifest.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
 
+  - id: C2_EXECUTION_EVIDENCE_BROKER_EVENT_RAW_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_event_raw.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_EXECUTION_EVIDENCE_BROKER_EVENT_DAY_MANIFEST_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_event_day_manifest.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_RISK_ENGINE_MODEL_REGISTRY_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/RISK/engine_model_registry.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_REGISTRY_ENGINE_MODEL_REGISTRY_V1
+    path: governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json
+    class: C2_REGISTRY
+    status: ACTIVE
 
   # Bundle H-0 OMS decision truth schema (new governed output)
   - id: C2_OMS_DECISION_SCHEMA_V1
@@ -150,7 +184,7 @@ documents:
     status: DRAFT
 
   - id: C2_G_RISK_BUDGET_CONTRACT_V1
-    path: docs/c2/G_RISK_BUDGET_CONTRACT_V1.md
+    path: docs/c2/G_ALLOCATION_SPINE_V1.md
     class: C2_BUNDLE_G_CONTRACT
     status: DRAFT
 
@@ -180,3 +214,7 @@ documents:
     owner: Constellation
     created_utc: 2026-02-16
     authority: governance+git+runtime_truth
+  - id: C2_ENGINE_MODEL_REGISTRY_GATE_CONTRACT_V1
+    path: governance/03_CONTRACTS/C2_ENGINE_MODEL_REGISTRY_GATE_CONTRACT_V1.md
+    class: C2_CONTRACT
+    status: CANONICAL
