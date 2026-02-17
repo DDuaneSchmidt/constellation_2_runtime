@@ -2,12 +2,12 @@
 """
 run_c2_paper_day_orchestrator_v1.py
 
-Constellation 2.0 — Bundle 2
+Constellation 2.0 — Bundle 2 (+ Paper Readiness Enhancements)
 Institutional-grade PAPER day orchestrator.
 
 USAGE (authoritative, proven safe):
   cd /home/node/constellation_2_runtime
-  python3 ops/tools/run_c2_paper_day_orchestrator_v1.py --day_utc YYYY-MM-DD --mode PAPER
+  python3 ops/tools/run_c2_paper_day_orchestrator_v1.py --day_utc YYYY-MM-DD --mode PAPER --ib_account DUXXXXXXX
 
 NON-NEGOTIABLE PROPERTIES:
 - Deterministic stage order
@@ -15,6 +15,7 @@ NON-NEGOTIABLE PROPERTIES:
 - No implicit deletion or mutation
 - Structured audit logging
 - Fail-closed for submission (PhaseD blocked on prereq failure)
+- Fail-closed for paper readiness (broker evidence + linkage + attribution + monitor)
 """
 
 from __future__ import annotations
@@ -61,12 +62,14 @@ def main() -> int:
     ap.add_argument("--input_day_utc", default="", help="Optional input day key")
     ap.add_argument("--mode", required=True, choices=["PAPER", "LIVE"])
     ap.add_argument("--symbol", default="SPY")
+    ap.add_argument("--ib_account", required=True, help="IB PAPER account id (must be DU* per adapter policy)")
     args = ap.parse_args()
 
     day = args.day_utc.strip()
     input_day = (args.input_day_utc or "").strip() or day
     mode = args.mode.strip().upper()
     symbol = str(args.symbol).strip().upper()
+    ib_account = str(args.ib_account).strip()
 
     if mode != "PAPER":
         print("FATAL: Orchestrator v1 supports PAPER mode only.", file=sys.stderr)
@@ -163,13 +166,122 @@ def main() -> int:
         print("FATAL: prerequisite stage failure; submission blocked.", file=sys.stderr)
         return 2
 
-    # --- PhaseD ---
+    # --- PhaseD (v2) ---
     _run_stage_strict(
-        "PHASED_PAPER_SUBMIT",
+        "PHASED_PAPER_SUBMIT_V2",
         [
             "python3",
             "-m",
-            "constellation_2.phaseD.tools.c2_submit_paper_v1",
+            "constellation_2.phaseD.tools.c2_submit_paper_v2",
+            "--day_utc",
+            day,
+            "--ib_account",
+            ib_account,
+        ],
+    )
+
+    # --- A+2 Broker Day Manifest (strict) ---
+    _run_stage_strict(
+        "A2_BROKER_EVENT_DAY_MANIFEST",
+        [
+            "python3",
+            "ops/ib/run_broker_event_day_manifest_v1.py",
+            "--day_utc",
+            day,
+        ],
+    )
+
+    # --- A+2 Execution Event Linker (strict) ---
+    _run_stage_strict(
+        "A2_EXECUTION_EVENT_LINKER",
+        [
+            "python3",
+            "ops/tools/run_execution_event_linker_v1.py",
+            "--day_utc",
+            day,
+            "--environment",
+            "PAPER",
+        ],
+    )
+
+    # --- B+1 Positions Snapshot v5 (strict) ---
+    _run_stage_strict(
+        "B1_POSITIONS_SNAPSHOT_V5",
+        [
+            "python3",
+            "-m",
+            "constellation_2.phaseF.positions.run.run_positions_snapshot_day_v5",
+            "--day_utc",
+            day,
+            "--producer_git_sha",
+            current_git_sha,
+        ],
+    )
+
+    # --- Bundle F++: Position Lifecycle Snapshot (strict) ---
+    _run_stage_strict(
+        "BUNDLEF_LIFECYCLE_SNAPSHOT_V2",
+        [
+            "python3",
+            "ops/tools/run_position_lifecycle_snapshot_v2.py",
+            "--day_utc",
+            day,
+        ],
+    )
+
+    # --- Bundle F++: Exit Obligations (strict) ---
+    _run_stage_strict(
+        "BUNDLEF_EXIT_OBLIGATIONS_V1",
+        [
+            "python3",
+            "ops/tools/run_exit_obligations_v1.py",
+            "--day_utc",
+            day,
+        ],
+    )
+
+    # --- Bundle F++: Exposure Reconciliation (strict) ---
+    _run_stage_strict(
+        "BUNDLEF_EXPOSURE_RECONCILIATION_V2",
+        [
+            "python3",
+            "ops/tools/run_exposure_reconciliation_v2.py",
+            "--day_utc",
+            day,
+        ],
+    )
+
+    # --- Bundle F++: Lifecycle Monitor (strict) ---
+    _run_stage_strict(
+        "BUNDLEF_LIFECYCLE_MONITOR_V1",
+        [
+            "python3",
+            "ops/tools/run_lifecycle_monitor_v1.py",
+            "--day_utc",
+            day,
+        ],
+    )
+
+    # --- B+2 Positions Effective Pointer (strict; immutable) ---
+    _run_stage_strict(
+        "B2_POSITIONS_EFFECTIVE_POINTER_V1",
+        [
+            "python3",
+            "-m",
+            "constellation_2.phaseF.positions.run.run_positions_effective_pointer_day_v2",
+            "--day_utc",
+            day,
+            "--producer_git_sha",
+            current_git_sha,
+        ],
+    )
+
+    # --- A+3 Paper Readiness Monitor (strict) ---
+    _run_stage_strict(
+        "A3_PAPER_READINESS_MONITOR_V2",
+        [
+            "python3",
+            "ops/tools/run_paper_readiness_monitor_v2.py",
             "--day_utc",
             day,
         ],

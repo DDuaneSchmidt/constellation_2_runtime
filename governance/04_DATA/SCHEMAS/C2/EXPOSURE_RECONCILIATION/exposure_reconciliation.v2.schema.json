@@ -1,0 +1,59 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "engines",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_EXPOSURE_RECONCILIATION" },
+    "schema_version": { "const": 2 },
+    "day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
+    "produced_utc": { "type": "string", "minLength": 20 },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 7 },
+        "module": { "type": "string", "minLength": 1 }
+      }
+    },
+    "status": { "type": "string", "enum": ["OK", "FAIL"] },
+    "reason_codes": { "type": "array", "items": { "type": "string" } },
+    "engines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "engine_id",
+          "desired_positions",
+          "actual_positions",
+          "delta_positions",
+          "orphaned_positions",
+          "exit_obligation_count",
+          "breach_flag"
+        ],
+        "properties": {
+          "engine_id": { "type": "string", "minLength": 1 },
+          "desired_positions": { "type": "integer" },
+          "actual_positions": { "type": "integer" },
+          "delta_positions": { "type": "integer" },
+          "orphaned_positions": { "type": "integer", "minimum": 0 },
+          "exit_obligation_count": { "type": "integer", "minimum": 0 },
+          "breach_flag": { "type": "boolean" }
+        }
+      }
+    },
+    "canonical_json_hash": { "type": "string", "minLength": 64, "maxLength": 64 }
+  }
+}

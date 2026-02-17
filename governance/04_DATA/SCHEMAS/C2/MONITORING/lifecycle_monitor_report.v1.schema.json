@@ -1,0 +1,37 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id","schema_version","day_utc","produced_utc","producer","status","reason_codes","checks","canonical_json_hash"],
+  "properties": {
+    "schema_id": { "const": "C2_LIFECYCLE_MONITOR_REPORT" },
+    "schema_version": { "const": 1 },
+    "day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
+    "produced_utc": { "type": "string", "minLength": 20 },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo","git_sha","module"],
+      "properties": {
+        "repo": { "type": "string" },
+        "git_sha": { "type": "string" },
+        "module": { "type": "string" }
+      }
+    },
+    "status": { "type": "string", "enum": ["OK","FAIL"] },
+    "reason_codes": { "type": "array", "items": { "type": "string" } },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name","status","details"],
+        "properties": {
+          "name": { "type": "string" },
+          "status": { "type": "string", "enum": ["OK","FAIL"] },
+          "details": { "type": "object" }
+        }
+      }
+    },
+    "canonical_json_hash": { "type": "string", "minLength": 64, "maxLength": 64 }
+  }
+}

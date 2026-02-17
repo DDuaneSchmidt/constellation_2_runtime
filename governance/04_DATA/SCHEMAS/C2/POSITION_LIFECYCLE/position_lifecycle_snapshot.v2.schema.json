@@ -1,0 +1,82 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "items",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_POSITION_LIFECYCLE_SNAPSHOT" },
+    "schema_version": { "const": 2 },
+    "day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
+    "produced_utc": { "type": "string", "minLength": 20 },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 7 },
+        "module": { "type": "string", "minLength": 1 }
+      }
+    },
+    "status": { "type": "string", "enum": ["OK", "FAIL"] },
+    "reason_codes": { "type": "array", "items": { "type": "string" } },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "position_id",
+          "engine_id",
+          "source_intent_id",
+          "intent_sha256",
+          "lifecycle_state",
+          "lifecycle_reason_code",
+          "opened_day_utc",
+          "last_transition_utc",
+          "kill_switch_override"
+        ],
+        "properties": {
+          "position_id": { "type": "string", "minLength": 1 },
+          "engine_id": { "type": "string", "minLength": 1 },
+          "source_intent_id": { "type": "string", "minLength": 1 },
+          "intent_sha256": { "type": "string", "minLength": 64, "maxLength": 64 },
+
+          "lifecycle_state": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "MANAGING",
+              "REDUCE_PENDING",
+              "REDUCING",
+              "CLOSE_PENDING",
+              "CLOSING",
+              "CLOSED",
+              "FORCED_CLOSE_PENDING",
+              "FORCED_CLOSED",
+              "ORPHANED"
+            ]
+          },
+          "lifecycle_reason_code": { "type": "string", "minLength": 1 },
+          "opened_day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
+          "last_transition_utc": { "type": "string", "minLength": 20 },
+
+          "exit_policy_ref": { "type": ["string", "null"] },
+          "regime_snapshot_ref": { "type": ["string", "null"] },
+          "kill_switch_override": { "type": "boolean" }
+        }
+      }
+    },
+    "canonical_json_hash": { "type": "string", "minLength": 64, "maxLength": 64 }
+  }
+}
+

@@ -1,0 +1,59 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "obligations",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_EXIT_OBLIGATIONS" },
+    "schema_version": { "const": 1 },
+    "day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
+    "produced_utc": { "type": "string", "minLength": 20 },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 7 },
+        "module": { "type": "string", "minLength": 1 }
+      }
+    },
+    "status": { "type": "string", "enum": ["OK", "FAIL"] },
+    "reason_codes": { "type": "array", "items": { "type": "string" } },
+    "obligations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "position_id",
+          "engine_id",
+          "obligation_type",
+          "required_qty",
+          "deadline_utc",
+          "reason_code"
+        ],
+        "properties": {
+          "position_id": { "type": "string", "minLength": 1 },
+          "engine_id": { "type": "string", "minLength": 1 },
+          "obligation_type": { "type": "string", "enum": ["REDUCE", "CLOSE", "FORCED_CLOSE"] },
+          "required_qty": { "type": "integer", "minimum": 0 },
+          "deadline_utc": { "type": "string", "minLength": 20 },
+          "reason_code": { "type": "string", "minLength": 1 },
+          "regime_condition": { "type": ["string", "null"] },
+          "kill_switch_condition": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "canonical_json_hash": { "type": "string", "minLength": 64, "maxLength": 64 }
+  }
+}

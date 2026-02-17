@@ -1,0 +1,60 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "submission_id",
+    "environment",
+    "raw_broker_status",
+    "broker_ids",
+    "broker_manifest_log_sha256",
+    "matched_broker_event_sha256",
+    "broker_event_count",
+    "producer",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "EXECUTION_EVENT_RECORD" },
+    "schema_version": { "const": 2 },
+    "day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
+    "submission_id": { "type": "string", "minLength": 8 },
+    "environment": { "type": "string", "enum": ["PAPER"] },
+
+    "raw_broker_status": { "type": "string", "minLength": 1 },
+    "broker_ids": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order_id", "perm_id"],
+      "properties": {
+        "order_id": { "type": ["string", "null"] },
+        "perm_id": { "type": ["string", "null"] }
+      }
+    },
+
+    "broker_manifest_log_sha256": { "type": "string", "minLength": 64, "maxLength": 64 },
+    "matched_broker_event_sha256": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 64, "maxLength": 64 }
+    },
+    "broker_event_count": { "type": "integer", "minimum": 0 },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 7 },
+        "module": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "canonical_json_hash": { "type": "string", "minLength": 64, "maxLength": 64 },
+
+    "engine_id": { "type": "string" },
+    "source_intent_id": { "type": "string" },
+    "intent_sha256": { "type": "string" }
+  }
+}

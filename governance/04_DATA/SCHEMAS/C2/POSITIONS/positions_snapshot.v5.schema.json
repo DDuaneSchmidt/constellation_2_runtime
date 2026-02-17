@@ -1,0 +1,43 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id","schema_version","day_utc","produced_utc","producer","status","reason_codes","items","canonical_json_hash"],
+  "properties": {
+    "schema_id": { "const": "C2_POSITIONS_SNAPSHOT_V5" },
+    "schema_version": { "const": 5 },
+    "day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
+    "produced_utc": { "type": "string", "minLength": 20 },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo","git_sha","module"],
+      "properties": {
+        "repo": { "type": "string" },
+        "git_sha": { "type": "string" },
+        "module": { "type": "string" }
+      }
+    },
+    "status": { "type": "string", "enum": ["OK","FAIL"] },
+    "reason_codes": { "type": "array", "items": { "type": "string" } },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["position_id","engine_id","source_intent_id","intent_sha256","instrument","qty","avg_cost_cents","opened_day_utc","status"],
+        "properties": {
+          "position_id": { "type": "string", "minLength": 1 },
+          "engine_id": { "type": "string", "minLength": 1 },
+          "source_intent_id": { "type": "string", "minLength": 1 },
+          "intent_sha256": { "type": "string", "minLength": 64, "maxLength": 64 },
+          "instrument": { "type": "object" },
+          "qty": { "type": "integer" },
+          "avg_cost_cents": { "type": "integer" },
+          "opened_day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
+          "status": { "type": "string" }
+        }
+      }
+    },
+    "canonical_json_hash": { "type": "string", "minLength": 64, "maxLength": 64 }
+  }
+}
