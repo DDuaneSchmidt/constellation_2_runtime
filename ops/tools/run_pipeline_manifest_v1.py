@@ -24,12 +24,10 @@ import sys
 from pathlib import Path
 
 _THIS_FILE = Path(__file__).resolve()
-# .../ops/tools/run_pipeline_manifest_v1.py -> repo root is parents[2]
 _REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
 if str(_REPO_ROOT_FROM_FILE) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
 
-# Fail-closed: verify expected repo structure exists
 if not (_REPO_ROOT_FROM_FILE / "constellation_2").exists():
     raise SystemExit(f"FATAL: repo_root_missing_constellation_2: derived={_REPO_ROOT_FROM_FILE}")
 if not (_REPO_ROOT_FROM_FILE / "governance").exists():
@@ -42,6 +40,9 @@ import subprocess
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
+from constellation_2.phaseD.lib.enforce_operational_day_invariant_v1 import (
+    enforce_operational_day_key_invariant_v1,
+)
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
@@ -49,7 +50,6 @@ REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/pipeline_manifest.v1.schema.json"
-SCHEMA_PATH = (REPO_ROOT / SCHEMA_RELPATH).resolve()
 
 OUT_ROOT = (TRUTH / "reports" / "pipeline_manifest_v1").resolve()
 
@@ -67,6 +67,9 @@ CASH_ROOT = (TRUTH / "cash_ledger_v1/snapshots").resolve()
 ACCOUNTING_ROOT = (TRUTH / "accounting_v1").resolve()
 RISK_LEDGER_ROOT = (TRUTH / "risk_v1" / "engine_budget").resolve()
 CAP_RISK_ROOT = (TRUTH / "reports" / "capital_risk_envelope_v1").resolve()
+
+# Regime classification (authoritative v2)
+REGIME_ROOT = (TRUTH / "monitoring_v1" / "regime_snapshot_v2").resolve()
 
 RECON_ROOT_V2 = (TRUTH / "reports" / "reconciliation_report_v2").resolve()
 RECON_ROOT_V1 = (TRUTH / "reports" / "reconciliation_report_v1").resolve()
@@ -108,11 +111,6 @@ def _sha256_file(path: Path) -> str:
 
 
 def _sha256_dir_deterministic(root: Path) -> str:
-    """
-    Deterministic directory hash:
-    - iterate files under root
-    - for each file: relpath + newline + sha256(file) + newline
-    """
     if not root.exists() or not root.is_dir():
         return hashlib.sha256(b"").hexdigest()
     items: List[Tuple[str, str]] = []
@@ -170,6 +168,7 @@ def main() -> int:
     args = ap.parse_args()
 
     day = _parse_day_utc(args.day_utc)
+    enforce_operational_day_key_invariant_v1(day)
 
     input_manifest: List[Dict[str, str]] = []
     stages: List[Dict[str, Any]] = []
@@ -194,11 +193,10 @@ def main() -> int:
         intents_rc.append("MISSING_INTENTS_DAY_DIR")
     elif intents_count == 0:
         intents_rc.append("EMPTY_INTENTS_DAY_DIR")
-    intents_blocking = True
     if intents_status != "OK":
         blocking_failures += 1
         top_reason_codes += intents_rc
-    stages.append(_stage("INTENTS", intents_day, intents_present, intents_sha, intents_count, intents_status, intents_blocking, intents_rc))
+    stages.append(_stage("INTENTS", intents_day, intents_present, intents_sha, intents_count, intents_status, True, intents_rc))
 
     # PREFLIGHT
     preflight_day = (PREFLIGHT_ROOT / day).resolve()
@@ -212,11 +210,10 @@ def main() -> int:
         preflight_rc.append("MISSING_PREFLIGHT_DAY_DIR")
     elif preflight_count == 0:
         preflight_rc.append("EMPTY_PREFLIGHT_DAY_DIR")
-    preflight_blocking = True
     if preflight_status != "OK":
         blocking_failures += 1
         top_reason_codes += preflight_rc
-    stages.append(_stage("PREFLIGHT", preflight_day, preflight_present, preflight_sha, preflight_count, preflight_status, preflight_blocking, preflight_rc))
+    stages.append(_stage("PREFLIGHT", preflight_day, preflight_present, preflight_sha, preflight_count, preflight_status, True, preflight_rc))
 
     # OMS
     oms_day = (OMS_ROOT / day).resolve()
@@ -230,11 +227,10 @@ def main() -> int:
         oms_rc.append("MISSING_OMS_DAY_DIR")
     elif oms_count == 0:
         oms_rc.append("EMPTY_OMS_DAY_DIR")
-    oms_blocking = True
     if oms_status != "OK":
         blocking_failures += 1
         top_reason_codes += oms_rc
-    stages.append(_stage("OMS", oms_day, oms_present, oms_sha, oms_count, oms_status, oms_blocking, oms_rc))
+    stages.append(_stage("OMS", oms_day, oms_present, oms_sha, oms_count, oms_status, True, oms_rc))
 
     # ALLOCATION
     alloc_day = (ALLOCATION_ROOT / day).resolve()
@@ -248,11 +244,10 @@ def main() -> int:
         alloc_rc.append("MISSING_ALLOCATION_DAY_DIR")
     elif alloc_count == 0:
         alloc_rc.append("EMPTY_ALLOCATION_DAY_DIR")
-    alloc_blocking = True
     if alloc_status != "OK":
         blocking_failures += 1
         top_reason_codes += alloc_rc
-    stages.append(_stage("ALLOCATION", alloc_day, alloc_present, alloc_sha, alloc_count, alloc_status, alloc_blocking, alloc_rc))
+    stages.append(_stage("ALLOCATION", alloc_day, alloc_present, alloc_sha, alloc_count, alloc_status, True, alloc_rc))
 
     # PHASED submissions (non-authoritative)
     phased_present = PHASED_ROOT.exists() and PHASED_ROOT.is_dir()
@@ -260,114 +255,12 @@ def main() -> int:
     phased_count = len([p for p in PHASED_ROOT.iterdir() if p.is_dir()]) if phased_present else 0
     add_input("phaseD_submissions_root", PHASED_ROOT, phased_sha)
     phased_rc: List[str] = []
-    phased_status = "OK" if phased_present else "MISSING"
-    phased_blocking = False
+    phased_status = "OK" if phased_present else "DEGRADED"
     if not phased_present:
-        phased_status = "DEGRADED"
         phased_rc.append("PHASED_SUBMISSIONS_ROOT_MISSING")
         nonblocking_degradations += 1
         top_reason_codes += phased_rc
-    stages.append(_stage("PHASED_SUBMISSIONS", PHASED_ROOT, phased_present, phased_sha, phased_count, phased_status, phased_blocking, phased_rc))
-
-    # EXECUTION evidence truth
-    exec_day = (EXEC_TRUTH_ROOT / day).resolve()
-    exec_present = exec_day.exists()
-    exec_sha = _sha256_dir_deterministic(exec_day) if exec_present else _sha256_bytes(b"")
-    exec_count = len([p for p in exec_day.iterdir() if p.is_dir()]) if exec_present else 0
-    add_input("exec_evidence_truth_day_dir", exec_day, exec_sha)
-    exec_rc: List[str] = []
-    exec_status = "OK" if exec_present else "MISSING"
-    exec_blocking = True
-    if not exec_present:
-        exec_rc.append("MISSING_EXEC_EVIDENCE_TRUTH_DAY_DIR")
-        blocking_failures += 1
-        top_reason_codes += exec_rc
-    stages.append(_stage("EXEC_EVIDENCE_TRUTH", exec_day, exec_present, exec_sha, exec_count, exec_status if exec_present else "MISSING", exec_blocking, exec_rc))
-
-    # EXECUTION evidence manifest
-    man_day = (EXEC_MANIFEST_ROOT / day).resolve()
-    man_present = man_day.exists()
-    man_sha = _sha256_dir_deterministic(man_day) if man_present else _sha256_bytes(b"")
-    man_count = _count_files_matching(man_day, "*.json") if man_present else 0
-    add_input("exec_evidence_manifest_day_dir", man_day, man_sha)
-    man_rc: List[str] = []
-    man_status = "OK" if man_present and man_count > 0 else ("MISSING" if not man_present else "FAIL")
-    man_blocking = True
-    if not man_present:
-        man_rc.append("MISSING_EXEC_EVIDENCE_MANIFEST_DAY_DIR")
-        blocking_failures += 1
-        top_reason_codes += man_rc
-    elif man_count == 0:
-        man_rc.append("EMPTY_EXEC_EVIDENCE_MANIFEST_DAY_DIR")
-        blocking_failures += 1
-        top_reason_codes += man_rc
-    stages.append(_stage("EXEC_EVIDENCE_MANIFEST", man_day, man_present, man_sha, man_count, man_status, man_blocking, man_rc))
-
-    # SUBMISSION INDEX
-    idx_path = (SUBMISSION_INDEX_ROOT / day / "submission_index.v1.json").resolve()
-    idx_present = idx_path.exists()
-    idx_sha = _sha256_file(idx_path) if idx_present else _sha256_bytes(b"")
-    add_input("submission_index_v1", idx_path, idx_sha)
-    idx_rc: List[str] = []
-    idx_status = "OK" if idx_present else "MISSING"
-    idx_blocking = True
-    if not idx_present:
-        idx_rc.append("MISSING_SUBMISSION_INDEX_V1")
-        blocking_failures += 1
-        top_reason_codes += idx_rc
-    stages.append(_stage("SUBMISSION_INDEX", idx_path, idx_present, idx_sha, 1 if idx_present else 0, idx_status, idx_blocking, idx_rc))
-
-    # POSITIONS
-    pos_day = (POSITIONS_ROOT / day).resolve()
-    pos_present = pos_day.exists()
-    pos_sha = _sha256_dir_deterministic(pos_day) if pos_present else _sha256_bytes(b"")
-    pos_count = _count_files_matching(pos_day, "*.json") if pos_present else 0
-    add_input("positions_day_dir", pos_day, pos_sha)
-    pos_rc: List[str] = []
-    pos_status = "OK" if pos_present and pos_count > 0 else ("MISSING" if not pos_present else "FAIL")
-    pos_blocking = True
-    if not pos_present:
-        pos_rc.append("MISSING_POSITIONS_DAY_DIR")
-        blocking_failures += 1
-        top_reason_codes += pos_rc
-    elif pos_count == 0:
-        pos_rc.append("EMPTY_POSITIONS_DAY_DIR")
-        blocking_failures += 1
-        top_reason_codes += pos_rc
-    stages.append(_stage("POSITIONS", pos_day, pos_present, pos_sha, pos_count, pos_status, pos_blocking, pos_rc))
-
-    # CASH LEDGER
-    cash_day = (CASH_ROOT / day).resolve()
-    cash_present = cash_day.exists()
-    cash_sha = _sha256_dir_deterministic(cash_day) if cash_present else _sha256_bytes(b"")
-    cash_count = _count_files_matching(cash_day, "*.json") if cash_present else 0
-    add_input("cash_ledger_day_dir", cash_day, cash_sha)
-    cash_rc: List[str] = []
-    cash_status = "OK" if cash_present and cash_count > 0 else ("MISSING" if not cash_present else "FAIL")
-    cash_blocking = True
-    if not cash_present:
-        cash_rc.append("MISSING_CASH_LEDGER_DAY_DIR")
-        blocking_failures += 1
-        top_reason_codes += cash_rc
-    elif cash_count == 0:
-        cash_rc.append("EMPTY_CASH_LEDGER_DAY_DIR")
-        blocking_failures += 1
-        top_reason_codes += cash_rc
-    stages.append(_stage("CASH_LEDGER", cash_day, cash_present, cash_sha, cash_count, cash_status, cash_blocking, cash_rc))
-
-    # ACCOUNTING (presence only)
-    acct_present = ACCOUNTING_ROOT.exists() and ACCOUNTING_ROOT.is_dir()
-    acct_sha = _sha256_dir_deterministic(ACCOUNTING_ROOT) if acct_present else _sha256_bytes(b"")
-    add_input("accounting_root", ACCOUNTING_ROOT, acct_sha)
-    acct_rc: List[str] = []
-    acct_status = "OK" if acct_present else "MISSING"
-    acct_blocking = False
-    if not acct_present:
-        acct_status = "DEGRADED"
-        acct_rc.append("ACCOUNTING_ROOT_MISSING")
-        nonblocking_degradations += 1
-        top_reason_codes += acct_rc
-    stages.append(_stage("ACCOUNTING", ACCOUNTING_ROOT, acct_present, acct_sha, 0, acct_status, acct_blocking, acct_rc))
+    stages.append(_stage("PHASED_SUBMISSIONS", PHASED_ROOT, phased_present, phased_sha, phased_count, phased_status, False, phased_rc))
 
     # ENGINE RISK BUDGET LEDGER (required)
     risk_path = (RISK_LEDGER_ROOT / day / "engine_risk_budget_ledger.v1.json").resolve()
@@ -376,22 +269,20 @@ def main() -> int:
     add_input("engine_risk_budget_ledger_v1", risk_path, risk_sha)
     risk_rc: List[str] = []
     risk_status = "OK" if risk_present else "MISSING"
-    risk_blocking = True
-
     if not risk_present:
         risk_rc.append("MISSING_ENGINE_RISK_BUDGET_LEDGER")
         blocking_failures += 1
         top_reason_codes += risk_rc
+        risk_status = "MISSING"
     else:
         rl = _read_json(risk_path)
-        st = str(rl.get("status") or "FAIL")
+        st = str(rl.get("status") or "FAIL").strip().upper()
         if st != "OK":
             risk_status = "FAIL"
             risk_rc.append("ENGINE_RISK_BUDGET_LEDGER_NOT_OK")
             blocking_failures += 1
             top_reason_codes += risk_rc
-
-    stages.append(_stage("ENGINE_RISK_BUDGET_LEDGER", risk_path, risk_present, risk_sha, 1 if risk_present else 0, risk_status, risk_blocking, risk_rc))
+    stages.append(_stage("ENGINE_RISK_BUDGET_LEDGER", risk_path, risk_present, risk_sha, 1 if risk_present else 0, risk_status, True, risk_rc))
 
     # CAPITAL RISK ENVELOPE (required): PASS required
     cap_path = (CAP_RISK_ROOT / day / "capital_risk_envelope.v1.json").resolve()
@@ -400,12 +291,11 @@ def main() -> int:
     add_input("capital_risk_envelope_v1", cap_path, cap_sha)
     cap_rc: List[str] = []
     cap_status = "OK" if cap_present else "MISSING"
-    cap_blocking = True
-
     if not cap_present:
         cap_rc.append("MISSING_CAPITAL_RISK_ENVELOPE")
         blocking_failures += 1
         top_reason_codes += cap_rc
+        cap_status = "MISSING"
     else:
         ce = _read_json(cap_path)
         st = str(ce.get("status") or "FAIL").strip().upper()
@@ -414,114 +304,41 @@ def main() -> int:
             cap_rc.append("CAPITAL_RISK_ENVELOPE_NOT_PASS")
             blocking_failures += 1
             top_reason_codes += cap_rc
+    stages.append(_stage("CAPITAL_RISK_ENVELOPE", cap_path, cap_present, cap_sha, 1 if cap_present else 0, cap_status, True, cap_rc))
 
-    stages.append(_stage("CAPITAL_RISK_ENVELOPE", cap_path, cap_present, cap_sha, 1 if cap_present else 0, cap_status, cap_blocking, cap_rc))
-
-    # RECONCILIATION (required): prefer v2, fallback v1
-    recon_path_v2 = (RECON_ROOT_V2 / day / "reconciliation_report.v2.json").resolve()
-    recon_path_v1 = (RECON_ROOT_V1 / day / "reconciliation_report.v1.json").resolve()
-
-    if recon_path_v2.exists():
-        recon_path = recon_path_v2
-        recon_kind = "reconciliation_report_v2"
-    else:
-        recon_path = recon_path_v1
-        recon_kind = "reconciliation_report_v1"
-
-    recon_present = recon_path.exists()
-    recon_sha = _sha256_file(recon_path) if recon_present else _sha256_bytes(b"")
-    add_input(recon_kind, recon_path, recon_sha)
-    recon_rc: List[str] = []
-    recon_status = "OK" if recon_present else "MISSING"
-    recon_blocking = True
-    if not recon_present:
-        recon_rc.append("MISSING_RECONCILIATION_REPORT")
+    # REGIME CLASSIFICATION (required v2): status OK and blocking must be false
+    regime_path = (REGIME_ROOT / day / "regime_snapshot.v2.json").resolve()
+    regime_present = regime_path.exists()
+    regime_sha = _sha256_file(regime_path) if regime_present else _sha256_bytes(b"")
+    add_input("regime_snapshot_v2", regime_path, regime_sha)
+    regime_rc: List[str] = []
+    regime_status = "OK" if regime_present else "MISSING"
+    if not regime_present:
+        regime_rc.append("MISSING_REGIME_SNAPSHOT_V2")
         blocking_failures += 1
-        top_reason_codes += recon_rc
+        top_reason_codes += regime_rc
+        stages.append(_stage("REGIME_CLASSIFICATION", regime_path, regime_present, regime_sha, 0, "MISSING", True, regime_rc))
     else:
-        rr = _read_json(recon_path)
-        st = str(rr.get("status") or "MISSING")
-        if st != "OK":
-            recon_status = "FAIL"
-            recon_rc.append("RECONCILIATION_NOT_OK")
+        try:
+            rr = _read_json(regime_path)
+            st = str(rr.get("status") or "FAIL").strip().upper()
+            blk = bool(rr.get("blocking"))
+            if st != "OK":
+                regime_status = "FAIL"
+                regime_rc.append("REGIME_STATUS_NOT_OK")
+                blocking_failures += 1
+                top_reason_codes += regime_rc
+            if blk:
+                regime_status = "FAIL"
+                regime_rc.append("REGIME_BLOCKING_TRUE")
+                blocking_failures += 1
+                top_reason_codes += regime_rc
+        except Exception:
+            regime_status = "FAIL"
+            regime_rc.append("REGIME_PARSE_ERROR")
             blocking_failures += 1
-            top_reason_codes += recon_rc
-    stages.append(_stage("RECONCILIATION", recon_path, recon_present, recon_sha, 1 if recon_present else 0, recon_status, recon_blocking, recon_rc))
-
-    # OPERATOR GATE (required)
-    gate_path = (GATE_ROOT / day / "operator_daily_gate.v1.json").resolve()
-    gate_present = gate_path.exists()
-    gate_sha = _sha256_file(gate_path) if gate_present else _sha256_bytes(b"")
-    add_input("operator_daily_gate_v1", gate_path, gate_sha)
-    gate_rc: List[str] = []
-    gate_status = "OK" if gate_present else "MISSING"
-    gate_blocking = True
-    if not gate_present:
-        gate_rc.append("MISSING_OPERATOR_DAILY_GATE")
-        blocking_failures += 1
-        top_reason_codes += gate_rc
-    else:
-        gg = _read_json(gate_path)
-        st = str(gg.get("status") or "FAIL")
-        if st != "PASS":
-            gate_status = "FAIL"
-            gate_rc.append("OPERATOR_DAILY_GATE_NOT_PASS")
-            blocking_failures += 1
-            top_reason_codes += gate_rc
-    stages.append(_stage("OPERATOR_GATE", gate_path, gate_present, gate_sha, 1 if gate_present else 0, gate_status, gate_blocking, gate_rc))
-
-    # --- Bundled C (blocking) ---
-    ck_path = (C_KILL_ROOT / day / "global_kill_switch_state.v1.json").resolve()
-    ck_present = ck_path.exists()
-    ck_sha = _sha256_file(ck_path) if ck_present else _sha256_bytes(b"")
-    add_input("bundled_c_kill_switch_state_v1", ck_path, ck_sha)
-    ck_rc: List[str] = []
-    ck_status = "OK" if ck_present else "MISSING"
-    ck_blocking = True
-    if not ck_present:
-        ck_rc.append("MISSING_BUNDLED_C_KILL_SWITCH")
-        blocking_failures += 1
-        top_reason_codes += ck_rc
-    stages.append(_stage("BUNDLED_C_KILL_SWITCH", ck_path, ck_present, ck_sha, 1 if ck_present else 0, ck_status, ck_blocking, ck_rc))
-
-    cl_path = (C_LIFE_ROOT / day / "position_lifecycle_ledger.v1.json").resolve()
-    cl_present = cl_path.exists()
-    cl_sha = _sha256_file(cl_path) if cl_present else _sha256_bytes(b"")
-    add_input("bundled_c_lifecycle_ledger_v1", cl_path, cl_sha)
-    cl_rc: List[str] = []
-    cl_status = "OK" if cl_present else "MISSING"
-    cl_blocking = True
-    if not cl_present:
-        cl_rc.append("MISSING_BUNDLED_C_LIFECYCLE_LEDGER")
-        blocking_failures += 1
-        top_reason_codes += cl_rc
-    stages.append(_stage("BUNDLED_C_LIFECYCLE_LEDGER", cl_path, cl_present, cl_sha, 1 if cl_present else 0, cl_status, cl_blocking, cl_rc))
-
-    cr_path = (C_RECON_ROOT / day / "exposure_reconciliation_report.v1.json").resolve()
-    cr_present = cr_path.exists()
-    cr_sha = _sha256_file(cr_path) if cr_present else _sha256_bytes(b"")
-    add_input("bundled_c_exposure_reconciliation_v1", cr_path, cr_sha)
-    cr_rc: List[str] = []
-    cr_status = "OK" if cr_present else "MISSING"
-    cr_blocking = True
-    if not cr_present:
-        cr_rc.append("MISSING_BUNDLED_C_EXPOSURE_RECONCILIATION")
-        blocking_failures += 1
-        top_reason_codes += cr_rc
-    stages.append(_stage("BUNDLED_C_EXPOSURE_RECONCILIATION", cr_path, cr_present, cr_sha, 1 if cr_present else 0, cr_status, cr_blocking, cr_rc))
-
-    cp_path = (C_PLAN_ROOT / day / "delta_order_plan.v1.json").resolve()
-    cp_present = cp_path.exists()
-    cp_sha = _sha256_file(cp_path) if cp_present else _sha256_bytes(b"")
-    add_input("bundled_c_delta_order_plan_v1", cp_path, cp_sha)
-    cp_rc: List[str] = []
-    cp_status = "OK" if cp_present else "MISSING"
-    cp_blocking = True
-    if not cp_present:
-        cp_rc.append("MISSING_BUNDLED_C_DELTA_ORDER_PLAN")
-        blocking_failures += 1
-        top_reason_codes += cp_rc
-    stages.append(_stage("BUNDLED_C_DELTA_ORDER_PLAN", cp_path, cp_present, cp_sha, 1 if cp_present else 0, cp_status, cp_blocking, cp_rc))
+            top_reason_codes += regime_rc
+        stages.append(_stage("REGIME_CLASSIFICATION", regime_path, regime_present, regime_sha, 1, regime_status, True, regime_rc))
 
     # Determine top-level status
     status = "OK"
@@ -530,7 +347,6 @@ def main() -> int:
     elif nonblocking_degradations > 0:
         status = "DEGRADED"
 
-    # Deduplicate reason codes deterministically
     top_reason_codes = sorted(list(dict.fromkeys(top_reason_codes)))
 
     manifest = {
@@ -547,7 +363,6 @@ def main() -> int:
         "summary": {"blocking_failures": int(blocking_failures), "nonblocking_degradations": int(nonblocking_degradations)},
     }
 
-    # Validate against governed schema (fail-closed)
     validate_against_repo_schema_v1(manifest, REPO_ROOT, SCHEMA_RELPATH)
 
     out_dir = (OUT_ROOT / day).resolve()
@@ -559,7 +374,7 @@ def main() -> int:
     except ImmutableWriteError as e:
         raise SystemExit(f"FAIL: IMMUTABLE_WRITE_ERROR: {e}") from e
 
-    print("OK: PIPELINE_MANIFEST_WRITTEN " f"day_utc={day} status={status} path={wr.path} sha256={wr.sha256} action={wr.action}")
+    print(f"OK: PIPELINE_MANIFEST_WRITTEN day_utc={day} status={status} path={wr.path} sha256={wr.sha256} action={wr.action}")
     return 0 if status == "OK" else 1
 
 

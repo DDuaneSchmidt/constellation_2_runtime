@@ -16,6 +16,11 @@ Also enforces Bundle B gates when present:
   engine_risk_budget_ledger.v1.json status=OK
   capital_risk_envelope.v1.json status=PASS
 
+Regime Classification Spine v2 enforcement (blocking readiness):
+  regime_snapshot.v2.json exists
+  status == OK
+  blocking == false
+
 Bundled C enforcement (blocking readiness):
   global_kill_switch_state.v1.json exists and state=INACTIVE
   position_lifecycle_ledger.v1.json exists
@@ -65,6 +70,9 @@ PATH_EXEC_SUBMISSIONS = TRUTH / "execution_evidence_v1" / "submissions"
 PATH_BROKER_DAY_MANIFEST = TRUTH / "execution_evidence_v1" / "broker_events"
 PATH_ENGINE_RISK_BUDGET_LEDGER = TRUTH / "risk_v1" / "engine_budget"
 PATH_CAPITAL_RISK_ENVELOPE = TRUTH / "reports" / "capital_risk_envelope_v1"
+
+# Regime classification (authoritative v2)
+PATH_REGIME_SNAPSHOT = TRUTH / "monitoring_v1" / "regime_snapshot_v2"
 
 # Bundled C
 PATH_KILL_SWITCH = TRUTH / "risk_v1" / "kill_switch_v1"
@@ -187,6 +195,9 @@ def main() -> int:
     risk_ledger_path = (PATH_ENGINE_RISK_BUDGET_LEDGER / day / "engine_risk_budget_ledger.v1.json").resolve()
     cap_env_path = (PATH_CAPITAL_RISK_ENVELOPE / day / "capital_risk_envelope.v1.json").resolve()
 
+    # Regime snapshot path (v2)
+    regime_path = (PATH_REGIME_SNAPSHOT / day / "regime_snapshot.v2.json").resolve()
+
     # Bundled C paths
     kill_path = (PATH_KILL_SWITCH / day / "global_kill_switch_state.v1.json").resolve()
     life_path = (PATH_LIFECYCLE_LEDGER / day / "position_lifecycle_ledger.v1.json").resolve()
@@ -205,6 +216,9 @@ def main() -> int:
         ("REQ_PIPELINE_MANIFEST", pipe_path),
         ("REQ_ENGINE_RISK_BUDGET_LEDGER", risk_ledger_path),
         ("REQ_CAPITAL_RISK_ENVELOPE", cap_env_path),
+
+        # Regime snapshot required (v2)
+        ("REQ_REGIME_SNAPSHOT_V2", regime_path),
 
         # Bundled C required artifacts
         ("REQ_BUNDLED_C_KILL_SWITCH", kill_path),
@@ -288,7 +302,7 @@ def main() -> int:
             try:
                 bm = _read_json(manifest_path)
                 st = str(bm.get("status") or "").strip().upper()
-                if st not in ("OK", "PASS"):
+                if st != "OK":
                     broker_ok = False
             except Exception:
                 broker_ok = False
@@ -331,6 +345,41 @@ def main() -> int:
             "pass": recon_ok,
             "evidence_paths": [str(recon_path)],
             "details": "reconciliation_report.v2 must have verdict PASS",
+        }
+    )
+
+    # Regime snapshot (v2): status must be OK and blocking must be false
+    regime_ok = False
+    regime_not_blocking = False
+    regime_details = "missing"
+    if _check_exists(regime_path):
+        try:
+            rs = _read_json(regime_path)
+            st = str(rs.get("status") or "").strip().upper()
+            blk = bool(rs.get("blocking"))
+            risk_mult = str(rs.get("risk_multiplier") or "UNKNOWN").strip()
+            regime_ok = (st == "OK")
+            regime_not_blocking = (not blk)
+            regime_details = f"status={st} blocking={blk} risk_multiplier={risk_mult}"
+        except Exception as e:
+            regime_ok = False
+            regime_not_blocking = False
+            regime_details = f"parse_error={e!r}"
+
+    checks.append(
+        {
+            "check_id": "REGIME_STATUS_OK_V2",
+            "pass": regime_ok,
+            "evidence_paths": [str(regime_path)],
+            "details": regime_details,
+        }
+    )
+    checks.append(
+        {
+            "check_id": "REGIME_NOT_BLOCKING_V2",
+            "pass": regime_not_blocking,
+            "evidence_paths": [str(regime_path)],
+            "details": regime_details,
         }
     )
 

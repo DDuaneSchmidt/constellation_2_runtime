@@ -67,7 +67,9 @@ These canonical contracts are governance-controlled and must be explicitly liste
 - `governance/05_CONTRACTS/C2/nav_history_ledger_v1.contract.md`
 - `governance/05_CONTRACTS/C2/drawdown_window_pack_v1.contract.md`
 - `governance/05_CONTRACTS/C2/economic_truth_availability_certificate_v1.contract.md`
-
+- `governance/05_CONTRACTS/C2/regime_classification_spine_v1.contract.md`
+- `governance/05_CONTRACTS/C2/regime_classification_spine_v1.deprecation_notice.md`
+- `governance/05_CONTRACTS/C2/regime_classification_spine_v2.contract.md`
 
 ## Governed data schemas
 
@@ -94,6 +96,8 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/nav_history_ledger.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/drawdown_window_pack.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/economic_truth_availability_certificate.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/regime_snapshot.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/regime_snapshot.v2.schema.json`
 
 ### Reports schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/operator_daily_gate.v1.schema.json`

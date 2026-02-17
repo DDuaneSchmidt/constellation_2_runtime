@@ -66,6 +66,21 @@ documents:
     class: C2_CONTRACT
     status: DRAFT
 
+  - id: C2_REGIME_CLASSIFICATION_SPINE_V1
+    path: governance/05_CONTRACTS/C2/regime_classification_spine_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_REGIME_CLASSIFICATION_SPINE_V1_DEPRECATION_NOTICE
+    path: governance/05_CONTRACTS/C2/regime_classification_spine_v1.deprecation_notice.md
+    class: C2_CONTRACT
+    status: ACTIVE
+
+  - id: C2_REGIME_CLASSIFICATION_SPINE_V2
+    path: governance/05_CONTRACTS/C2/regime_classification_spine_v2.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
   # Governed data schemas (governance-controlled; runtime code must conform)
   - id: C2_POSITIONS_SNAPSHOT_SCHEMA_V4
     path: governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_snapshot.v4.schema.json
@@ -139,6 +154,16 @@ documents:
 
   - id: C2_MONITORING_ECONOMIC_TRUTH_AVAILABILITY_CERTIFICATE_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/MONITORING/economic_truth_availability_certificate.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_MONITORING_REGIME_SNAPSHOT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/MONITORING/regime_snapshot.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_MONITORING_REGIME_SNAPSHOT_SCHEMA_V2
+    path: governance/04_DATA/SCHEMAS/C2/MONITORING/regime_snapshot.v2.schema.json
     class: C2_SCHEMA
     status: DRAFT
 

@@ -70,6 +70,7 @@
               "SUBMISSION_INDEX",
               "ENGINE_RISK_BUDGET_LEDGER",
               "CAPITAL_RISK_ENVELOPE",
+              "REGIME_CLASSIFICATION",
               "POSITIONS",
               "CASH_LEDGER",
               "ACCOUNTING",
