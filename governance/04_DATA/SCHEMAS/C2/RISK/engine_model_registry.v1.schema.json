@@ -51,16 +51,49 @@
           "notes"
         ],
         "properties": {
-          "engine_id": { "type": "string", "minLength": 1, "maxLength": 64 },
-          "activation_status": { "type": "string", "enum": ["ACTIVE", "DISABLED", "EXPERIMENTAL"] },
+          "engine_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
 
-          "approved_git_sha": { "type": "string", "pattern": "^[0-9a-f]{7,64}$" },
+          "activation_status": {
+            "type": "string",
+            "enum": ["ACTIVE", "DISABLED", "EXPERIMENTAL"]
+          },
 
-          "engine_runner_path": { "type": "string", "minLength": 1, "maxLength": 512 },
-          "engine_runner_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "budget_notional_pct": {
+            "description": "Optional v1: hard notional cap as fraction of NAV. Decimal string, exactly two decimals, 0.00–1.00.",
+            "type": "string",
+            "pattern": "^(0\\.[0-9]{2}|1\\.00)$"
+          },
 
-          "approved_utc": { "type": "string", "format": "date-time" },
-          "approved_by": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "approved_git_sha": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{7,64}$"
+          },
+
+          "engine_runner_path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+
+          "engine_runner_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+
+          "approved_utc": {
+            "type": "string",
+            "format": "date-time"
+          },
+
+          "approved_by": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
 
           "parameter_lock": {
             "description": "Optional (v1): engine parameter lock. If present, must be enforced. If null, enforcement is code-only.",
@@ -71,8 +104,15 @@
                 "additionalProperties": false,
                 "required": ["param_sha256", "description"],
                 "properties": {
-                  "param_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-                  "description": { "type": "string", "minLength": 1, "maxLength": 256 }
+                  "param_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
                 }
               }
             ]
@@ -80,7 +120,11 @@
 
           "notes": {
             "type": "array",
-            "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
           }
         }
       }
