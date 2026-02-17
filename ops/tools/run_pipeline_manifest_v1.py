@@ -40,7 +40,7 @@ import hashlib
 import json
 import subprocess
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
@@ -71,6 +71,13 @@ CAP_RISK_ROOT = (TRUTH / "reports" / "capital_risk_envelope_v1").resolve()
 RECON_ROOT_V2 = (TRUTH / "reports" / "reconciliation_report_v2").resolve()
 RECON_ROOT_V1 = (TRUTH / "reports" / "reconciliation_report_v1").resolve()
 GATE_ROOT = (TRUTH / "reports" / "operator_daily_gate_v1").resolve()
+
+# --- Bundled C (control-plane) ---
+C_KILL_ROOT = (TRUTH / "risk_v1" / "kill_switch_v1").resolve()
+C_LIFE_ROOT = (TRUTH / "position_lifecycle_v1" / "ledger").resolve()
+C_RECON_ROOT = (TRUTH / "reports" / "exposure_reconciliation_report_v1").resolve()
+C_PLAN_ROOT = (TRUTH / "reports" / "delta_order_plan_v1").resolve()
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -384,18 +391,7 @@ def main() -> int:
             blocking_failures += 1
             top_reason_codes += risk_rc
 
-    stages.append(
-        _stage(
-            "ENGINE_RISK_BUDGET_LEDGER",
-            risk_path,
-            risk_present,
-            risk_sha,
-            1 if risk_present else 0,
-            risk_status,
-            risk_blocking,
-            risk_rc,
-        )
-    )
+    stages.append(_stage("ENGINE_RISK_BUDGET_LEDGER", risk_path, risk_present, risk_sha, 1 if risk_present else 0, risk_status, risk_blocking, risk_rc))
 
     # CAPITAL RISK ENVELOPE (required): PASS required
     cap_path = (CAP_RISK_ROOT / day / "capital_risk_envelope.v1.json").resolve()
@@ -420,7 +416,6 @@ def main() -> int:
             top_reason_codes += cap_rc
 
     stages.append(_stage("CAPITAL_RISK_ENVELOPE", cap_path, cap_present, cap_sha, 1 if cap_present else 0, cap_status, cap_blocking, cap_rc))
-
 
     # RECONCILIATION (required): prefer v2, fallback v1
     recon_path_v2 = (RECON_ROOT_V2 / day / "reconciliation_report.v2.json").resolve()
@@ -475,6 +470,59 @@ def main() -> int:
             top_reason_codes += gate_rc
     stages.append(_stage("OPERATOR_GATE", gate_path, gate_present, gate_sha, 1 if gate_present else 0, gate_status, gate_blocking, gate_rc))
 
+    # --- Bundled C (blocking) ---
+    ck_path = (C_KILL_ROOT / day / "global_kill_switch_state.v1.json").resolve()
+    ck_present = ck_path.exists()
+    ck_sha = _sha256_file(ck_path) if ck_present else _sha256_bytes(b"")
+    add_input("bundled_c_kill_switch_state_v1", ck_path, ck_sha)
+    ck_rc: List[str] = []
+    ck_status = "OK" if ck_present else "MISSING"
+    ck_blocking = True
+    if not ck_present:
+        ck_rc.append("MISSING_BUNDLED_C_KILL_SWITCH")
+        blocking_failures += 1
+        top_reason_codes += ck_rc
+    stages.append(_stage("BUNDLED_C_KILL_SWITCH", ck_path, ck_present, ck_sha, 1 if ck_present else 0, ck_status, ck_blocking, ck_rc))
+
+    cl_path = (C_LIFE_ROOT / day / "position_lifecycle_ledger.v1.json").resolve()
+    cl_present = cl_path.exists()
+    cl_sha = _sha256_file(cl_path) if cl_present else _sha256_bytes(b"")
+    add_input("bundled_c_lifecycle_ledger_v1", cl_path, cl_sha)
+    cl_rc: List[str] = []
+    cl_status = "OK" if cl_present else "MISSING"
+    cl_blocking = True
+    if not cl_present:
+        cl_rc.append("MISSING_BUNDLED_C_LIFECYCLE_LEDGER")
+        blocking_failures += 1
+        top_reason_codes += cl_rc
+    stages.append(_stage("BUNDLED_C_LIFECYCLE_LEDGER", cl_path, cl_present, cl_sha, 1 if cl_present else 0, cl_status, cl_blocking, cl_rc))
+
+    cr_path = (C_RECON_ROOT / day / "exposure_reconciliation_report.v1.json").resolve()
+    cr_present = cr_path.exists()
+    cr_sha = _sha256_file(cr_path) if cr_present else _sha256_bytes(b"")
+    add_input("bundled_c_exposure_reconciliation_v1", cr_path, cr_sha)
+    cr_rc: List[str] = []
+    cr_status = "OK" if cr_present else "MISSING"
+    cr_blocking = True
+    if not cr_present:
+        cr_rc.append("MISSING_BUNDLED_C_EXPOSURE_RECONCILIATION")
+        blocking_failures += 1
+        top_reason_codes += cr_rc
+    stages.append(_stage("BUNDLED_C_EXPOSURE_RECONCILIATION", cr_path, cr_present, cr_sha, 1 if cr_present else 0, cr_status, cr_blocking, cr_rc))
+
+    cp_path = (C_PLAN_ROOT / day / "delta_order_plan.v1.json").resolve()
+    cp_present = cp_path.exists()
+    cp_sha = _sha256_file(cp_path) if cp_present else _sha256_bytes(b"")
+    add_input("bundled_c_delta_order_plan_v1", cp_path, cp_sha)
+    cp_rc: List[str] = []
+    cp_status = "OK" if cp_present else "MISSING"
+    cp_blocking = True
+    if not cp_present:
+        cp_rc.append("MISSING_BUNDLED_C_DELTA_ORDER_PLAN")
+        blocking_failures += 1
+        top_reason_codes += cp_rc
+    stages.append(_stage("BUNDLED_C_DELTA_ORDER_PLAN", cp_path, cp_present, cp_sha, 1 if cp_present else 0, cp_status, cp_blocking, cp_rc))
+
     # Determine top-level status
     status = "OK"
     if blocking_failures > 0:
@@ -511,10 +559,7 @@ def main() -> int:
     except ImmutableWriteError as e:
         raise SystemExit(f"FAIL: IMMUTABLE_WRITE_ERROR: {e}") from e
 
-    print(
-        "OK: PIPELINE_MANIFEST_WRITTEN "
-        f"day_utc={day} status={status} path={wr.path} sha256={wr.sha256} action={wr.action}"
-    )
+    print("OK: PIPELINE_MANIFEST_WRITTEN " f"day_utc={day} status={status} path={wr.path} sha256={wr.sha256} action={wr.action}")
     return 0 if status == "OK" else 1
 
 

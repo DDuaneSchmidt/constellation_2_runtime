@@ -74,7 +74,11 @@
               "CASH_LEDGER",
               "ACCOUNTING",
               "RECONCILIATION",
-              "OPERATOR_GATE"
+              "OPERATOR_GATE",
+              "BUNDLED_C_KILL_SWITCH",
+              "BUNDLED_C_LIFECYCLE_LEDGER",
+              "BUNDLED_C_EXPOSURE_RECONCILIATION",
+              "BUNDLED_C_DELTA_ORDER_PLAN"
             ]
           },
           "status": { "type": "string", "enum": ["OK", "FAIL", "MISSING", "DEGRADED"] },

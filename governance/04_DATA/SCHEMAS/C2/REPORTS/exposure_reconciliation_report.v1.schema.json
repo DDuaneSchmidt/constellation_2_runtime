@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "c2.reports.exposure_reconciliation_report.v1",
+  "title": "C2 Exposure Reconciliation Report v1 (Target vs Actual Constraints, Audit-Proof)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "notes",
+    "input_manifest",
+    "targets",
+    "actuals",
+    "deltas",
+    "mode",
+    "report_sha256"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "exposure_reconciliation_report" },
+    "schema_version": { "type": "string", "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "minLength": 1 },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "module": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "git_sha": { "type": "string", "minLength": 7, "maxLength": 64 }
+      }
+    },
+    "status": { "type": "string", "enum": ["OK", "FAIL", "DEGRADED"] },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+    "notes": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 1024 } },
+    "mode": { "type": "string", "enum": ["NORMAL", "REDUCE_ONLY", "FLATTEN_ONLY"] },
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "targets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/exposure_bucket" }
+    },
+    "actuals": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/exposure_bucket" }
+    },
+    "deltas": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/delta_bucket" }
+    },
+    "report_sha256": {
+      "type": "string",
+      "description": "sha256 of canonical JSON for this document, excluding this field"
+    }
+  },
+  "$defs": {
+    "exposure_bucket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine_id", "underlying", "target_notional_pct"],
+      "properties": {
+        "engine_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "underlying": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "target_notional_pct": {
+          "type": "string",
+          "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$",
+          "description": "Decimal string fraction in [0,1]."
+        }
+      }
+    },
+    "delta_bucket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine_id", "underlying", "delta_notional_pct", "direction"],
+      "properties": {
+        "engine_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "underlying": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "delta_notional_pct": {
+          "type": "string",
+          "pattern": "^-?(0(\\.[0-9]+)?|1(\\.0+)?)$",
+          "description": "Signed decimal string in [-1,1]."
+        },
+        "direction": { "type": "string", "enum": ["INCREASE", "DECREASE", "FLATTEN", "UNKNOWN"] },
+        "notes": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
+      }
+    }
+  }
+}

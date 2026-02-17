@@ -61,6 +61,7 @@ These canonical contracts are governance-controlled and must be explicitly liste
 - `governance/05_CONTRACTS/C2/capital_risk_envelope_v1.contract.md`
 - `governance/05_CONTRACTS/C2/bundle_a_paper_trading_readiness_audit_proof_v1.contract.md`
 - `governance/05_CONTRACTS/C2/bundle_b_risk_blindspot_elimination_v1.contract.md`
+- `governance/05_CONTRACTS/C2/bundled_c_exposure_convergence_lifecycle_v1.contract.md`
 
 ## Governed data schemas
 
@@ -91,6 +92,8 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/reconciliation_report.v2.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/pipeline_manifest.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/exposure_reconciliation_report.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/delta_order_plan.v1.schema.json`
 
 ### Execution evidence schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/submission_index.v1.schema.json`
@@ -100,6 +103,10 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 ### Risk schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/RISK/engine_model_registry.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/RISK/engine_risk_budget_ledger.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/RISK/global_kill_switch_state.v1.schema.json`
+
+### Positions schemas (governed outputs)
+- `governance/04_DATA/SCHEMAS/C2/POSITIONS/position_lifecycle_ledger.v1.schema.json`
 
 - governance/03_CONTRACTS/C2_TRUE_EVIDENCE_SPINE_V2.md — True Evidence Spine v2 (broker-truth contract)
 - governance/03_CONTRACTS/C2_PHASED_SUBMISSION_RUNNER_V1.md — Phase D Submission Runner v1 (audit-grade submission entrypoint)

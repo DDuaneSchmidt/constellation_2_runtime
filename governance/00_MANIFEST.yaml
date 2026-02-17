@@ -37,6 +37,10 @@ documents:
     path: governance/05_CONTRACTS/C2/bundle_b_risk_blindspot_elimination_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
+  - id: C2_BUNDLED_C_EXPOSURE_CONVERGENCE_LIFECYCLE_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/bundled_c_exposure_convergence_lifecycle_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
 
   # Governed data schemas (governance-controlled; runtime code must conform)
   - id: C2_POSITIONS_SNAPSHOT_SCHEMA_V4
@@ -123,6 +127,16 @@ documents:
     class: C2_SCHEMA
     status: DRAFT
 
+  - id: C2_REPORTS_EXPOSURE_RECONCILIATION_REPORT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/exposure_reconciliation_report.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_REPORTS_DELTA_ORDER_PLAN_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/delta_order_plan.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
   - id: C2_EXECUTION_EVIDENCE_SUBMISSION_INDEX_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/submission_index.v1.schema.json
     class: C2_SCHEMA
@@ -146,6 +160,16 @@ documents:
 
   - id: C2_RISK_ENGINE_RISK_BUDGET_LEDGER_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/RISK/engine_risk_budget_ledger.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_RISK_GLOBAL_KILL_SWITCH_STATE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/RISK/global_kill_switch_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_POSITIONS_POSITION_LIFECYCLE_LEDGER_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/POSITIONS/position_lifecycle_ledger.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
 

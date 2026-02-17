@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "c2.positions.position_lifecycle_ledger.v1",
+  "title": "C2 Position Lifecycle Ledger v1 (Deterministic Transitions + Exit Governance)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "input_manifest",
+    "positions",
+    "ledger_sha256"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "position_lifecycle_ledger" },
+    "schema_version": { "type": "string", "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "minLength": 1 },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "module": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "git_sha": { "type": "string", "minLength": 7, "maxLength": 64 }
+      }
+    },
+    "status": { "type": "string", "enum": ["OK", "FAIL"] },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "positions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/pos_item" }
+    },
+    "ledger_sha256": {
+      "type": "string",
+      "description": "sha256 of canonical JSON for this document, excluding this field"
+    }
+  },
+  "$defs": {
+    "pos_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "position_id",
+        "prior_state",
+        "new_state",
+        "transition",
+        "legal",
+        "reason_codes",
+        "pointers"
+      ],
+      "properties": {
+        "position_id": { "type": "string", "minLength": 16, "maxLength": 128 },
+        "prior_state": { "type": "string", "enum": ["OPEN", "CLOSING_REQUESTED", "CLOSED", "UNKNOWN"] },
+        "new_state": { "type": "string", "enum": ["OPEN", "CLOSING_REQUESTED", "CLOSED", "UNKNOWN"] },
+        "transition": { "type": "string", "enum": ["NOOP", "REQUEST_CLOSE", "CLOSE_CONFIRMED", "ILLEGAL"] },
+        "legal": { "type": "boolean" },
+        "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "pointers": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 1024 } }
+      }
+    }
+  }
+}

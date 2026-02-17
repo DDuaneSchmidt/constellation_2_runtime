@@ -66,6 +66,7 @@ RC_BINDING_MISMATCH = "C2_BINDING_HASH_MISMATCH"
 RC_ENV_NOT_PAPER = "C2_BROKER_ENV_NOT_PAPER"
 RC_ADAPTER_NOT_AVAIL = "C2_BROKER_ADAPTER_NOT_AVAILABLE"
 RC_WHATIF_REQUIRED = "C2_WHATIF_REQUIRED"
+RC_KILL_SWITCH_ACTIVE = "C2_KILL_SWITCH_ACTIVE"
 
 
 def _parse_utc_z(ts: str) -> None:
@@ -74,6 +75,13 @@ def _parse_utc_z(ts: str) -> None:
     dt = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(timezone.utc)
     if dt.tzinfo is None:
         raise SubmitBoundaryError("EVAL_TIME_UTC_TZINFO_MISSING")
+
+
+def _day_from_eval_time_utc(eval_time_utc: str) -> str:
+    if not isinstance(eval_time_utc, str) or not eval_time_utc.endswith("Z"):
+        raise SubmitBoundaryError(f"EVAL_TIME_UTC_INVALID_Z: {eval_time_utc!r}")
+    dt = datetime.fromisoformat(eval_time_utc.replace("Z", "+00:00")).astimezone(timezone.utc)
+    return dt.date().isoformat()
 
 
 def _read_json_file(path: Path) -> Any:
@@ -88,6 +96,16 @@ def _read_json_file(path: Path) -> Any:
             return json.load(f)
     except json.JSONDecodeError as e:
         raise SubmitBoundaryError(f"INPUT_JSON_INVALID: {str(path)}: {e}") from e
+
+
+def _sha256_file(path: Path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def _mk_veto(
@@ -160,6 +178,86 @@ def _load_identity_set(phasec_out_dir: Path) -> Tuple[str, Dict[str, Any], Dict[
     raise SubmitBoundaryError("PHASEC_OUT_DIR_MISSING_IDENTITY_SET: expected order_plan.v1.json or equity_order_plan.v1.json")
 
 
+def _enforce_kill_switch_or_veto(
+    *,
+    repo_root: Path,
+    eval_time_utc: str,
+    phased_out_dir: Path,
+    pointers: List[str],
+    intent_hash: Optional[str],
+    plan_hash: Optional[str],
+    chain_hash: Optional[str],
+    cert_hash: Optional[str],
+    upstream_hash: Optional[str],
+    order_plan_obj: Dict[str, Any],
+    binding_obj: Dict[str, Any],
+    mapping_obj: Dict[str, Any],
+) -> Optional[int]:
+    """
+    Returns:
+      None if allowed to proceed
+      2 if veto was written due to kill switch ACTIVE (or missing -> ACTIVE)
+    """
+    day = _day_from_eval_time_utc(eval_time_utc)
+    truth_root = (repo_root / "constellation_2/runtime/truth").resolve()
+    kill_path = (truth_root / "risk_v1" / "kill_switch_v1" / day / "global_kill_switch_state.v1.json").resolve()
+
+    if not kill_path.exists():
+        veto = _mk_veto(
+            eval_time_utc=eval_time_utc,
+            reason_code=RC_KILL_SWITCH_ACTIVE,
+            reason_detail=f"KILL_SWITCH_MISSING_FAILCLOSED: {str(kill_path)}",
+            pointers=list(pointers) + [str(kill_path)],
+            intent_hash=intent_hash,
+            plan_hash=plan_hash,
+            chain_snapshot_hash=chain_hash,
+            freshness_cert_hash=cert_hash,
+            upstream_hash=upstream_hash,
+            repo_root=repo_root,
+        )
+        write_phased_veto_only_v1(phased_out_dir, veto_record=veto, order_plan=order_plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
+        return 2
+
+    try:
+        ks = _read_json_file(kill_path)
+        if not isinstance(ks, dict):
+            raise SubmitBoundaryError("KILL_SWITCH_NOT_OBJECT")
+        state = str(ks.get("state") or "").strip().upper()
+        sha = _sha256_file(kill_path)
+        if state != "INACTIVE":
+            veto = _mk_veto(
+                eval_time_utc=eval_time_utc,
+                reason_code=RC_KILL_SWITCH_ACTIVE,
+                reason_detail=f"KILL_SWITCH_ACTIVE: state={state} path={str(kill_path)} sha256={sha}",
+                pointers=list(pointers) + [str(kill_path)],
+                intent_hash=intent_hash,
+                plan_hash=plan_hash,
+                chain_snapshot_hash=chain_hash,
+                freshness_cert_hash=cert_hash,
+                upstream_hash=upstream_hash,
+                repo_root=repo_root,
+            )
+            write_phased_veto_only_v1(phased_out_dir, veto_record=veto, order_plan=order_plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
+            return 2
+    except Exception as e:  # noqa: BLE001
+        veto = _mk_veto(
+            eval_time_utc=eval_time_utc,
+            reason_code=RC_KILL_SWITCH_ACTIVE,
+            reason_detail=f"KILL_SWITCH_READ_OR_PARSE_FAILCLOSED: {e!r} path={str(kill_path)}",
+            pointers=list(pointers) + [str(kill_path)],
+            intent_hash=intent_hash,
+            plan_hash=plan_hash,
+            chain_snapshot_hash=chain_hash,
+            freshness_cert_hash=cert_hash,
+            upstream_hash=upstream_hash,
+            repo_root=repo_root,
+        )
+        write_phased_veto_only_v1(phased_out_dir, veto_record=veto, order_plan=order_plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
+        return 2
+
+    return None
+
+
 def run_submit_boundary_paper_v1(
     repo_root: Path,
     *,
@@ -226,7 +324,6 @@ def run_submit_boundary_paper_v1(
                 return 2
 
         else:
-            # EQUITY
             validate_against_repo_schema_v1(plan_obj, repo_root, "constellation_2/schemas/equity_order_plan.v1.schema.json")
             validate_against_repo_schema_v1(mapping_obj, repo_root, "constellation_2/schemas/mapping_ledger_record.v2.schema.json")
             validate_against_repo_schema_v1(binding_obj, repo_root, "constellation_2/schemas/binding_record.v2.schema.json")
@@ -256,6 +353,24 @@ def run_submit_boundary_paper_v1(
                 return 2
 
         _require_paper("PAPER")
+
+        # --- Bundled C kill switch enforcement (hard boundary; fail-closed) ---
+        kill_rc = _enforce_kill_switch_or_veto(
+            repo_root=repo_root,
+            eval_time_utc=eval_time_utc,
+            phased_out_dir=phased_out_dir,
+            pointers=pointers,
+            intent_hash=intent_hash,
+            plan_hash=plan_hash,
+            chain_hash=chain_hash,
+            cert_hash=cert_hash,
+            upstream_hash=binding_hash,
+            order_plan_obj=plan_obj,
+            binding_obj=binding_obj,
+            mapping_obj=mapping_obj,
+        )
+        if kill_rc is not None:
+            return kill_rc
 
         submission_id = derive_submission_id_from_binding_hash_v1(binding_hash)
         assert_idempotent_or_raise_v1(submissions_root=submissions_root, submission_id=submission_id)
