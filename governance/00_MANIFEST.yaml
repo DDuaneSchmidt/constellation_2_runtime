@@ -41,6 +41,30 @@ documents:
     path: governance/05_CONTRACTS/C2/bundled_c_exposure_convergence_lifecycle_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
+  - id: C2_ECONOMIC_NAV_DRAWDOWN_TRUTH_SPINE_BUNDLE_V1
+    path: governance/05_CONTRACTS/C2/economic_nav_drawdown_truth_spine_bundle_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_NAV_SNAPSHOT_TRUTH_V1
+    path: governance/05_CONTRACTS/C2/nav_snapshot_truth_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_NAV_HISTORY_LEDGER_V1
+    path: governance/05_CONTRACTS/C2/nav_history_ledger_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_DRAWDOWN_WINDOW_PACK_V1
+    path: governance/05_CONTRACTS/C2/drawdown_window_pack_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_ECONOMIC_TRUTH_AVAILABILITY_CERTIFICATE_V1
+    path: governance/05_CONTRACTS/C2/economic_truth_availability_certificate_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
 
   # Governed data schemas (governance-controlled; runtime code must conform)
   - id: C2_POSITIONS_SNAPSHOT_SCHEMA_V4
@@ -96,6 +120,25 @@ documents:
 
   - id: C2_MONITORING_CAPITAL_EFFICIENCY_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/MONITORING/capital_efficiency.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_MONITORING_NAV_SNAPSHOT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/MONITORING/nav_snapshot.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_MONITORING_NAV_HISTORY_LEDGER_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/MONITORING/nav_history_ledger.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_MONITORING_DRAWDOWN_WINDOW_PACK_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/MONITORING/drawdown_window_pack.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_MONITORING_ECONOMIC_TRUTH_AVAILABILITY_CERTIFICATE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/MONITORING/economic_truth_availability_certificate.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
 

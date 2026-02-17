@@ -62,6 +62,12 @@ These canonical contracts are governance-controlled and must be explicitly liste
 - `governance/05_CONTRACTS/C2/bundle_a_paper_trading_readiness_audit_proof_v1.contract.md`
 - `governance/05_CONTRACTS/C2/bundle_b_risk_blindspot_elimination_v1.contract.md`
 - `governance/05_CONTRACTS/C2/bundled_c_exposure_convergence_lifecycle_v1.contract.md`
+- `governance/05_CONTRACTS/C2/economic_nav_drawdown_truth_spine_bundle_v1.contract.md`
+- `governance/05_CONTRACTS/C2/nav_snapshot_truth_v1.contract.md`
+- `governance/05_CONTRACTS/C2/nav_history_ledger_v1.contract.md`
+- `governance/05_CONTRACTS/C2/drawdown_window_pack_v1.contract.md`
+- `governance/05_CONTRACTS/C2/economic_truth_availability_certificate_v1.contract.md`
+
 
 ## Governed data schemas
 
@@ -84,6 +90,10 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/stress_replay_report.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/degradation_sentinel.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/capital_efficiency.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/nav_snapshot.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/nav_history_ledger.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/drawdown_window_pack.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/economic_truth_availability_certificate.v1.schema.json`
 
 ### Reports schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/operator_daily_gate.v1.schema.json`
