@@ -4,6 +4,7 @@ C2 Paper Supervisor v2 (always-on, deterministic, fail-closed).
 
 Watches PhaseD outputs submissions root (flat by submission_id). On change, derives affected days and:
 - runs exec_evidence truth writer for each day (immutable-safe by producer sha locking)
+- runs pillars bootstrap writer for each day (default ON; derived convenience surface)
 - OPTIONAL: runs submission index writer (LEGACY) only when explicitly enabled
 
 Writes local state only for fingerprints + health (NOT truth; NOT git tracked).
@@ -179,12 +180,30 @@ def _submission_index_path(day_utc: str) -> Path:
     return (TRUTH / "execution_evidence_v1" / "submissions" / day_utc / "submission_index.v1.json").resolve()
 
 
+def _pillars_decisions_dir(day_utc: str) -> Path:
+    # Canonical preferred output surface is pillars_v1r1
+    return (TRUTH / "pillars_v1r1" / day_utc / "decisions").resolve()
+
+
+def _pillars_present_for_day(day_utc: str) -> bool:
+    d = _pillars_decisions_dir(day_utc)
+    if not d.exists() or not d.is_dir():
+        return False
+    for p in d.iterdir():
+        if p.is_file() and p.name.endswith(".submission_decision_record.v1.json"):
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class CycleResult:
     phasd_fp: str
     phasd_fp_prev: str
     days_considered: List[str]
     days_ran_exec_evidence: List[str]
+    days_ran_pillars: List[str]
+    days_skipped_pillars_present: List[str]
+    pillars_failures: Dict[str, str]
     days_ran_submission_index: List[str]
     days_skipped_submission_index_present: List[str]
     producer_sha_by_day: Dict[str, str]
@@ -192,7 +211,7 @@ class CycleResult:
     reason: str
 
 
-def _cycle_once(*, day_override: str, write_submission_index: bool) -> CycleResult:
+def _cycle_once(*, day_override: str, write_submission_index: bool, write_pillars: bool, pillars_fail_mode: str) -> CycleResult:
     STATE_ROOT.mkdir(parents=True, exist_ok=True)
 
     fp_path = STATE_ROOT / "phaseD_submissions_root_fp.sha256"
@@ -208,6 +227,9 @@ def _cycle_once(*, day_override: str, write_submission_index: bool) -> CycleResu
                 phasd_fp_prev=phasd_prev,
                 days_considered=days_all,
                 days_ran_exec_evidence=[],
+                days_ran_pillars=[],
+                days_skipped_pillars_present=[],
+                pillars_failures={},
                 days_ran_submission_index=[],
                 days_skipped_submission_index_present=[],
                 producer_sha_by_day={},
@@ -217,6 +239,10 @@ def _cycle_once(*, day_override: str, write_submission_index: bool) -> CycleResu
         days_to_run = [day_override]
 
     ran_exec: List[str] = []
+    ran_pillars: List[str] = []
+    skipped_pillars: List[str] = []
+    pillars_failures: Dict[str, str] = {}
+
     ran_idx: List[str] = []
     skipped_idx: List[str] = []
     sha_by_day: Dict[str, str] = {}
@@ -226,6 +252,7 @@ def _cycle_once(*, day_override: str, write_submission_index: bool) -> CycleResu
             producer_sha = _lock_producer_sha_for_day(day_utc)
             sha_by_day[day_utc] = producer_sha
 
+            # 1) EXEC EVIDENCE (fail-closed)
             rc = _run(
                 [
                     str(VENV_PY),
@@ -245,6 +272,9 @@ def _cycle_once(*, day_override: str, write_submission_index: bool) -> CycleResu
                     phasd_fp_prev=phasd_prev,
                     days_considered=days_all,
                     days_ran_exec_evidence=ran_exec,
+                    days_ran_pillars=ran_pillars,
+                    days_skipped_pillars_present=skipped_pillars,
+                    pillars_failures=pillars_failures,
                     days_ran_submission_index=ran_idx,
                     days_skipped_submission_index_present=skipped_idx,
                     producer_sha_by_day=sha_by_day,
@@ -253,11 +283,42 @@ def _cycle_once(*, day_override: str, write_submission_index: bool) -> CycleResu
                 )
             ran_exec.append(day_utc)
 
-            # LEGACY bloat surface: submission_index writer
-            idx_path = _submission_index_path(day_utc)
+            # 2) PILLARS (default ON; SOFT by default)
+            if write_pillars:
+                if _pillars_present_for_day(day_utc):
+                    skipped_pillars.append(day_utc)
+                else:
+                    rc_p = _run(
+                        [
+                            "python3",
+                            "ops/tools/run_pillars_v1_day_bootstrap.py",
+                            "--day_utc",
+                            day_utc,
+                        ]
+                    )
+                    if rc_p != 0:
+                        pillars_failures[day_utc] = f"rc={rc_p}"
+                        if pillars_fail_mode == "HARD":
+                            return CycleResult(
+                                phasd_fp=phasd_fp,
+                                phasd_fp_prev=phasd_prev,
+                                days_considered=days_all,
+                                days_ran_exec_evidence=ran_exec,
+                                days_ran_pillars=ran_pillars,
+                                days_skipped_pillars_present=skipped_pillars,
+                                pillars_failures=pillars_failures,
+                                days_ran_submission_index=ran_idx,
+                                days_skipped_submission_index_present=skipped_idx,
+                                producer_sha_by_day=sha_by_day,
+                                status="FAIL",
+                                reason="PILLARS_BOOTSTRAP_FAILED_HARD",
+                            )
+                    else:
+                        ran_pillars.append(day_utc)
 
+            # 3) LEGACY submission_index writer (opt-in)
+            idx_path = _submission_index_path(day_utc)
             if not write_submission_index:
-                # Explicitly disabled: do not run the writer.
                 skipped_idx.append(day_utc)
             else:
                 if idx_path.exists():
@@ -278,6 +339,9 @@ def _cycle_once(*, day_override: str, write_submission_index: bool) -> CycleResu
                             phasd_fp_prev=phasd_prev,
                             days_considered=days_all,
                             days_ran_exec_evidence=ran_exec,
+                            days_ran_pillars=ran_pillars,
+                            days_skipped_pillars_present=skipped_pillars,
+                            pillars_failures=pillars_failures,
                             days_ran_submission_index=ran_idx,
                             days_skipped_submission_index_present=skipped_idx,
                             producer_sha_by_day=sha_by_day,
@@ -293,6 +357,9 @@ def _cycle_once(*, day_override: str, write_submission_index: bool) -> CycleResu
         phasd_fp_prev=phasd_prev,
         days_considered=days_all,
         days_ran_exec_evidence=ran_exec,
+        days_ran_pillars=ran_pillars,
+        days_skipped_pillars_present=skipped_pillars,
+        pillars_failures=pillars_failures,
         days_ran_submission_index=ran_idx,
         days_skipped_submission_index_present=skipped_idx,
         producer_sha_by_day=sha_by_day,
@@ -309,18 +376,32 @@ def main() -> int:
     ap.add_argument("--run_once", default="false", choices=["true", "false"])
     ap.add_argument("--day_utc", default="", help="Optional override day_utc to run when PhaseD changes.")
 
-    # NEW: legacy submission_index writer toggle (default OFF)
+    # Legacy submission_index writer toggle (default OFF)
     ap.add_argument("--write_submission_index", default="NO", choices=["YES", "NO"], help="Legacy: write submission_index.v1.json (default NO).")
+
+    # Pillars bootstrap toggle (default ON)
+    ap.add_argument("--write_pillars", default="YES", choices=["YES", "NO"], help="Write pillars decision records (default YES).")
+
+    # Pillars failure mode (default SOFT)
+    ap.add_argument("--pillars_fail_mode", default="SOFT", choices=["SOFT", "HARD"], help="SOFT: record pillars failure but keep running. HARD: fail supervisor on pillars failure.")
 
     args = ap.parse_args()
 
     poll = int(str(args.poll_seconds).strip())
     run_once = str(args.run_once).strip().lower() == "true"
     day_override = str(args.day_utc).strip()
+
     write_idx = str(args.write_submission_index).strip().upper() == "YES"
+    write_pillars = str(args.write_pillars).strip().upper() == "YES"
+    pillars_fail_mode = str(args.pillars_fail_mode).strip().upper()
 
     while True:
-        res = _cycle_once(day_override=day_override, write_submission_index=write_idx)
+        res = _cycle_once(
+            day_override=day_override,
+            write_submission_index=write_idx,
+            write_pillars=write_pillars,
+            pillars_fail_mode=pillars_fail_mode,
+        )
 
         health_path = STATE_ROOT / f"supervisor_health_{_utc_day_now()}.v1.json"
         _write_json_atomic(
@@ -339,10 +420,15 @@ def main() -> int:
                 },
                 "days_considered": res.days_considered,
                 "days_ran_exec_evidence": res.days_ran_exec_evidence,
+                "days_ran_pillars": res.days_ran_pillars,
+                "days_skipped_pillars_present": res.days_skipped_pillars_present,
+                "pillars_failures": res.pillars_failures,
                 "days_ran_submission_index": res.days_ran_submission_index,
                 "days_skipped_submission_index_present": res.days_skipped_submission_index_present,
                 "producer_sha_by_day": res.producer_sha_by_day,
                 "write_submission_index": bool(write_idx),
+                "write_pillars": bool(write_pillars),
+                "pillars_fail_mode": pillars_fail_mode,
             },
         )
 
