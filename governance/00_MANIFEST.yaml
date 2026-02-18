@@ -388,3 +388,9 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/operator_gate_verdict.v2.schema.json
     class: C2_SCHEMA
     status: DRAFT
+
+  # Deprecations (canonical notices)
+  - id: C2_SUBMISSION_INDEX_V1_DEPRECATION_NOTICE
+    path: governance/05_CONTRACTS/C2/submission_index_v1.deprecation_notice.md
+    class: C2_CONTRACT
+    status: ACTIVE
