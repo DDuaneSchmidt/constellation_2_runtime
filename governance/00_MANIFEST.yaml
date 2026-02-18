@@ -394,3 +394,8 @@ documents:
     path: governance/05_CONTRACTS/C2/submission_index_v1.deprecation_notice.md
     class: C2_CONTRACT
     status: ACTIVE
+
+  - id: C2_PILLARS_V1_DEPRECATION_NOTICE
+    path: governance/05_CONTRACTS/C2/pillars_v1.deprecation_notice.md
+    class: C2_CONTRACT
+    status: ACTIVE
