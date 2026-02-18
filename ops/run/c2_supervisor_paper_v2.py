@@ -4,7 +4,7 @@ C2 Paper Supervisor v2 (always-on, deterministic, fail-closed).
 
 Watches PhaseD outputs submissions root (flat by submission_id). On change, derives affected days and:
 - runs exec_evidence truth writer for each day (immutable-safe by producer sha locking)
-- runs submission index writer ONLY if submission_index.v1.json is not already present (immutable-safe)
+- OPTIONAL: runs submission index writer (LEGACY) only when explicitly enabled
 
 Writes local state only for fingerprints + health (NOT truth; NOT git tracked).
 """
@@ -175,6 +175,7 @@ def _lock_producer_sha_for_day(day_utc: str) -> str:
 
 
 def _submission_index_path(day_utc: str) -> Path:
+    # LEGACY PATH (kept for backwards compatibility). Supervisor no longer writes by default.
     return (TRUTH / "execution_evidence_v1" / "submissions" / day_utc / "submission_index.v1.json").resolve()
 
 
@@ -191,7 +192,7 @@ class CycleResult:
     reason: str
 
 
-def _cycle_once(*, day_override: str) -> CycleResult:
+def _cycle_once(*, day_override: str, write_submission_index: bool) -> CycleResult:
     STATE_ROOT.mkdir(parents=True, exist_ok=True)
 
     fp_path = STATE_ROOT / "phaseD_submissions_root_fp.sha256"
@@ -252,32 +253,38 @@ def _cycle_once(*, day_override: str) -> CycleResult:
                 )
             ran_exec.append(day_utc)
 
+            # LEGACY bloat surface: submission_index writer
             idx_path = _submission_index_path(day_utc)
-            if idx_path.exists():
+
+            if not write_submission_index:
+                # Explicitly disabled: do not run the writer.
                 skipped_idx.append(day_utc)
             else:
-                rc2 = _run(
-                    [
-                        str(VENV_PY),
-                        "-m",
-                        "constellation_2.phaseF.execution_evidence.run.run_submission_index_day_v1",
-                        "--day",
-                        day_utc,
-                    ]
-                )
-                if rc2 != 0:
-                    return CycleResult(
-                        phasd_fp=phasd_fp,
-                        phasd_fp_prev=phasd_prev,
-                        days_considered=days_all,
-                        days_ran_exec_evidence=ran_exec,
-                        days_ran_submission_index=ran_idx,
-                        days_skipped_submission_index_present=skipped_idx,
-                        producer_sha_by_day=sha_by_day,
-                        status="FAIL",
-                        reason="SUBMISSION_INDEX_FAILED",
+                if idx_path.exists():
+                    skipped_idx.append(day_utc)
+                else:
+                    rc2 = _run(
+                        [
+                            str(VENV_PY),
+                            "-m",
+                            "constellation_2.phaseF.execution_evidence.run.run_submission_index_day_v1",
+                            "--day",
+                            day_utc,
+                        ]
                     )
-                ran_idx.append(day_utc)
+                    if rc2 != 0:
+                        return CycleResult(
+                            phasd_fp=phasd_fp,
+                            phasd_fp_prev=phasd_prev,
+                            days_considered=days_all,
+                            days_ran_exec_evidence=ran_exec,
+                            days_ran_submission_index=ran_idx,
+                            days_skipped_submission_index_present=skipped_idx,
+                            producer_sha_by_day=sha_by_day,
+                            status="FAIL",
+                            reason="SUBMISSION_INDEX_FAILED",
+                        )
+                    ran_idx.append(day_utc)
 
         _write_text_atomic(fp_path, phasd_fp)
 
@@ -301,14 +308,19 @@ def main() -> int:
     ap.add_argument("--poll_seconds", default=str(DEFAULT_POLL_SECONDS))
     ap.add_argument("--run_once", default="false", choices=["true", "false"])
     ap.add_argument("--day_utc", default="", help="Optional override day_utc to run when PhaseD changes.")
+
+    # NEW: legacy submission_index writer toggle (default OFF)
+    ap.add_argument("--write_submission_index", default="NO", choices=["YES", "NO"], help="Legacy: write submission_index.v1.json (default NO).")
+
     args = ap.parse_args()
 
     poll = int(str(args.poll_seconds).strip())
     run_once = str(args.run_once).strip().lower() == "true"
     day_override = str(args.day_utc).strip()
+    write_idx = str(args.write_submission_index).strip().upper() == "YES"
 
     while True:
-        res = _cycle_once(day_override=day_override)
+        res = _cycle_once(day_override=day_override, write_submission_index=write_idx)
 
         health_path = STATE_ROOT / f"supervisor_health_{_utc_day_now()}.v1.json"
         _write_json_atomic(
@@ -330,6 +342,7 @@ def main() -> int:
                 "days_ran_submission_index": res.days_ran_submission_index,
                 "days_skipped_submission_index_present": res.days_skipped_submission_index_present,
                 "producer_sha_by_day": res.producer_sha_by_day,
+                "write_submission_index": bool(write_idx),
             },
         )
 
