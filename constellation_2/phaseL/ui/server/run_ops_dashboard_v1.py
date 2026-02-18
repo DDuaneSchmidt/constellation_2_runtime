@@ -31,52 +31,17 @@ E_DAY_INVALID = "DAY_INVALID"
 E_NO_SUBMISSIONS_FOUND = "NO_SUBMISSIONS_FOUND"
 E_NO_ORDER_PLAN_PRESENT = "NO_ORDER_PLAN_PRESENT"
 E_NAV_SERIES_MISSING = "NAV_SERIES_MISSING"
-E_ENGINE_JOIN_NOT_POSSIBLE = "ENGINE_JOIN_NOT_POSSIBLE_WITHOUT_ENGINE_LINKAGE"
+E_ENGINE_JOIN_NOT_POSSIBLE_WITHOUT_ENGINE_LINKAGE = "ENGINE_JOIN_NOT_POSSIBLE_WITHOUT_ENGINE_LINKAGE"
 
-# Submission index (day-level) — preferred for speed when present
+# Submission index (day-level) — preferred for speed when present (legacy path used by this UI)
 SUBMISSION_INDEX_SCHEMA_ID = "C2_SUBMISSION_INDEX_V1"
 SUBMISSION_INDEX_SCHEMA_VERSION = 1
 SUBMISSION_INDEX_FILENAME = "submission_index.v1.json"
 
-
-def _try_load_submission_index(day: str) -> Tuple[Optional[Dict[str, Any]], List[str], List[str], Dict[str, float], List[str]]:
-    """
-    Load submissions/<day>/submission_index.v1.json if present and minimally valid.
-    Returns (index_obj_or_none, missing_paths, source_paths, source_mtimes, warnings)
-    """
-    missing: List[str] = []
-    source_paths: List[str] = []
-    source_mtimes: Dict[str, float] = {}
-    warnings: List[str] = []
-
-    idx_path = (SUBMISSIONS_ROOT / day / SUBMISSION_INDEX_FILENAME).resolve()
-    if not idx_path.exists():
-        missing.append(str(idx_path))
-        return None, missing, source_paths, source_mtimes, warnings
-
-    obj, err = _safe_read_json(idx_path)
-    source_paths.append(str(idx_path))
-    mt = _mtime(idx_path)
-    if mt is not None:
-        source_mtimes[str(idx_path)] = mt
-
-    if obj is None or not isinstance(obj, dict):
-        warnings.append(f"SUBMISSION_INDEX_UNREADABLE:{err}")
-        return None, missing, source_paths, source_mtimes, warnings
-
-    if obj.get("schema_id") != SUBMISSION_INDEX_SCHEMA_ID or obj.get("schema_version") != SUBMISSION_INDEX_SCHEMA_VERSION:
-        warnings.append("SUBMISSION_INDEX_SCHEMA_MISMATCH")
-        return None, missing, source_paths, source_mtimes, warnings
-
-    if obj.get("day_utc") != day:
-        warnings.append("SUBMISSION_INDEX_DAY_MISMATCH")
-        return None, missing, source_paths, source_mtimes, warnings
-
-    if not isinstance(obj.get("items"), list):
-        warnings.append("SUBMISSION_INDEX_ITEMS_MISSING_OR_INVALID")
-        return None, missing, source_paths, source_mtimes, warnings
-
-    return obj, missing, source_paths, source_mtimes, warnings
+# Pillars decision record (preferred submission evidence surface)
+PILLARS_DECISION_SCHEMA_ID = "submission_decision_record"
+PILLARS_DECISION_SCHEMA_VERSION = "v1"
+PILLARS_DECISION_SUFFIX = ".submission_decision_record.v1.json"
 
 # --------------------------
 # Repo / truth roots (deterministic)
@@ -93,6 +58,10 @@ MONITORING_NAV_SERIES_ROOT = TRUTH_ROOT / "monitoring_v1/nav_series"
 ACCOUNTING_NAV_ROOT = TRUTH_ROOT / "accounting_v1/nav"
 ACCOUNTING_ATTR_ROOT = TRUTH_ROOT / "accounting_v1/attribution"
 ENGINE_LINKAGE_ROOT = TRUTH_ROOT / "engine_linkage_v1"
+
+# Pillars roots (preferred submission evidence)
+PILLARS_V1_ROOT = TRUTH_ROOT / "pillars_v1"
+PILLARS_V1R1_ROOT = TRUTH_ROOT / "pillars_v1r1"
 
 
 def _utc_now_iso() -> str:
@@ -141,14 +110,208 @@ def _list_day_dirs(root: Path) -> List[str]:
 
 def _union_days() -> List[str]:
     days = set()
+    # Existing surfaces
     for root in [SUBMISSIONS_ROOT, MONITORING_NAV_SERIES_ROOT, ACCOUNTING_NAV_ROOT, ACCOUNTING_ATTR_ROOT]:
         for d in _list_day_dirs(root):
             days.add(d)
+
+    # Pillars surfaces (so UI can pick days that exist only in pillars)
+    for root in [PILLARS_V1R1_ROOT, PILLARS_V1_ROOT]:
+        for d in _list_day_dirs(root):
+            days.add(d)
+
     return sorted(days)
 
 
 def _select_latest_day(days: List[str]) -> Optional[str]:
     return days[-1] if days else None
+
+
+def _pillars_decisions_dir(day: str) -> Optional[Path]:
+    """
+    Prefer pillars_v1r1, then pillars_v1.
+    """
+    d1 = (PILLARS_V1R1_ROOT / day / "decisions").resolve()
+    if d1.exists() and d1.is_dir():
+        return d1
+    d0 = (PILLARS_V1_ROOT / day / "decisions").resolve()
+    if d0.exists() and d0.is_dir():
+        return d0
+    return None
+
+
+def _try_load_submission_index(day: str) -> Tuple[Optional[Dict[str, Any]], List[str], List[str], Dict[str, float], List[str]]:
+    """
+    Load submissions/<day>/submission_index.v1.json if present and minimally valid.
+    Returns (index_obj_or_none, missing_paths, source_paths, source_mtimes, warnings)
+    """
+    missing: List[str] = []
+    source_paths: List[str] = []
+    source_mtimes: Dict[str, float] = {}
+    warnings: List[str] = []
+
+    idx_path = (SUBMISSIONS_ROOT / day / SUBMISSION_INDEX_FILENAME).resolve()
+    if not idx_path.exists():
+        missing.append(str(idx_path))
+        return None, missing, source_paths, source_mtimes, warnings
+
+    obj, err = _safe_read_json(idx_path)
+    source_paths.append(str(idx_path))
+    mt = _mtime(idx_path)
+    if mt is not None:
+        source_mtimes[str(idx_path)] = mt
+
+    if obj is None or not isinstance(obj, dict):
+        warnings.append(f"SUBMISSION_INDEX_UNREADABLE:{err}")
+        return None, missing, source_paths, source_mtimes, warnings
+
+    if obj.get("schema_id") != SUBMISSION_INDEX_SCHEMA_ID or obj.get("schema_version") != SUBMISSION_INDEX_SCHEMA_VERSION:
+        warnings.append("SUBMISSION_INDEX_SCHEMA_MISMATCH")
+        return None, missing, source_paths, source_mtimes, warnings
+
+    if obj.get("day_utc") != day:
+        warnings.append("SUBMISSION_INDEX_DAY_MISMATCH")
+        return None, missing, source_paths, source_mtimes, warnings
+
+    if not isinstance(obj.get("items"), list):
+        warnings.append("SUBMISSION_INDEX_ITEMS_MISSING_OR_INVALID")
+        return None, missing, source_paths, source_mtimes, warnings
+
+    return obj, missing, source_paths, source_mtimes, warnings
+
+
+def _try_load_pillars_decisions(day: str) -> Tuple[List[Dict[str, Any]], List[str], List[str], Dict[str, float], List[str]]:
+    """
+    Load pillars decisions for the day if present.
+
+    Returns:
+      (records, missing_paths, source_paths, source_mtimes, warnings)
+
+    Each record is shaped similarly to the output from submission_index fast-path:
+      {
+        "submission_dir": "...",
+        "submission_id": "...",
+        "decision": {...},
+        "decision_status": "...",
+        "decision_reason_codes": [...],
+        "broker_submission_record": {...} | None,
+        "execution_event_record": {...} | None,
+        "order_plan": {...} | None,
+        "missing_paths": [...]
+      }
+    """
+    missing: List[str] = []
+    source_paths: List[str] = []
+    source_mtimes: Dict[str, float] = {}
+    warnings: List[str] = []
+
+    ddir = _pillars_decisions_dir(day)
+    if ddir is None:
+        return [], missing, source_paths, source_mtimes, warnings
+
+    files = sorted([p for p in ddir.iterdir() if p.is_file() and p.name.endswith(PILLARS_DECISION_SUFFIX)], key=lambda p: p.name)
+    if not files:
+        missing.append(str(ddir))
+        warnings.append("PILLARS_DECISIONS_EMPTY")
+        return [], missing, source_paths, source_mtimes, warnings
+
+    out: List[Dict[str, Any]] = []
+    for fp in files:
+        obj, err = _safe_read_json(fp)
+        source_paths.append(str(fp))
+        mt = _mtime(fp)
+        if mt is not None:
+            source_mtimes[str(fp)] = mt
+
+        if obj is None or not isinstance(obj, dict):
+            warnings.append(f"PILLARS_DECISION_UNREADABLE:{fp}:{err}")
+            continue
+
+        if str(obj.get("schema_id") or "") != PILLARS_DECISION_SCHEMA_ID or str(obj.get("schema_version") or "") != PILLARS_DECISION_SCHEMA_VERSION:
+            warnings.append(f"PILLARS_DECISION_SCHEMA_MISMATCH:{fp}")
+            continue
+
+        decision_id = str(obj.get("decision_id") or "").strip()
+        if decision_id == "":
+            warnings.append(f"PILLARS_DECISION_MISSING_DECISION_ID:{fp}")
+            continue
+
+        input_manifest = obj.get("input_manifest")
+        if not isinstance(input_manifest, list):
+            warnings.append(f"PILLARS_DECISION_INPUT_MANIFEST_INVALID:{fp}")
+            input_manifest = []
+
+        broker_path: Optional[str] = None
+        exec_path: Optional[str] = None
+        plan_path: Optional[str] = None
+
+        for it in input_manifest:
+            if not isinstance(it, dict):
+                continue
+            t = str(it.get("type") or "")
+            p = str(it.get("path") or "")
+            if t == "broker_submission_record_v2" and p:
+                broker_path = p
+            elif t == "execution_event_record_v1" and p:
+                exec_path = p
+            elif t == "order_plan_v1" and p:
+                plan_path = p
+
+        rec: Dict[str, Any] = {
+            "submission_dir": None,
+            "submission_id": decision_id,
+            "decision": obj.get("decision"),
+            "decision_status": obj.get("status"),
+            "decision_reason_codes": obj.get("reason_codes"),
+            "broker_submission_record": None,
+            "execution_event_record": None,
+            "order_plan": None,
+            "missing_paths": [],
+        }
+
+        if isinstance(broker_path, str) and broker_path:
+            try:
+                rec["submission_dir"] = str(Path(broker_path).resolve().parent)
+            except Exception:
+                rec["submission_dir"] = None
+
+        if isinstance(broker_path, str) and broker_path:
+            bobj, berr = _safe_read_json(Path(broker_path))
+            if bobj is None:
+                rec["missing_paths"].append(broker_path)
+                warnings.append(f"PILLARS_BROKER_RECORD_UNREADABLE:{berr}")
+            else:
+                rec["broker_submission_record"] = bobj
+                source_paths.append(broker_path)
+                mtb = _mtime(Path(broker_path))
+                if mtb is not None:
+                    source_mtimes[broker_path] = mtb
+
+        if isinstance(exec_path, str) and exec_path:
+            eobj, _eerr = _safe_read_json(Path(exec_path))
+            if eobj is None:
+                rec["missing_paths"].append(exec_path)
+            else:
+                rec["execution_event_record"] = eobj
+                source_paths.append(exec_path)
+                mte = _mtime(Path(exec_path))
+                if mte is not None:
+                    source_mtimes[exec_path] = mte
+
+        if isinstance(plan_path, str) and plan_path:
+            pobj, _perr = _safe_read_json(Path(plan_path))
+            if pobj is None:
+                rec["missing_paths"].append(plan_path)
+            else:
+                rec["order_plan"] = pobj
+                source_paths.append(plan_path)
+                mtp = _mtime(Path(plan_path))
+                if mtp is not None:
+                    source_mtimes[plan_path] = mtp
+
+        out.append(rec)
+
+    return out, sorted(set(missing)), sorted(set(source_paths)), source_mtimes, sorted(set(warnings))
 
 
 def _scan_submissions_for_day(day: str) -> Tuple[List[Dict[str, Any]], List[str], List[str], Dict[str, float]]:
@@ -161,14 +324,14 @@ def _scan_submissions_for_day(day: str) -> Tuple[List[Dict[str, Any]], List[str]
         missing.append(str(day_root))
         return [], missing, source_paths, source_mtimes
 
-
-    # Prefer day-level submission index if present (fast path)
-    idx, miss_i, sp_i, sm_i, w_i = _try_load_submission_index(day)
-    missing.extend(miss_i)
-    source_paths.extend(sp_i)
-    source_mtimes.update(sm_i)
+    # Try submission index first (legacy fast path).
+    idx, miss_i, sp_i, sm_i, _w_i = _try_load_submission_index(day)
 
     if idx is not None:
+        missing.extend(miss_i)
+        source_paths.extend(sp_i)
+        source_mtimes.update(sm_i)
+
         out: List[Dict[str, Any]] = []
         for it in idx.get("items", []):
             if not isinstance(it, dict):
@@ -208,10 +371,9 @@ def _scan_submissions_for_day(day: str) -> Tuple[List[Dict[str, Any]], List[str]
                     "broker_order_id": ex.get("broker_order_id"),
                 }
 
-            # Prefer full order_plan via path pointer; else store summary from index
             op_path = paths.get("order_plan") if isinstance(paths, dict) else None
             if isinstance(op_path, str) and op_path:
-                op_obj, op_err = _safe_read_json(Path(op_path))
+                op_obj, _op_err = _safe_read_json(Path(op_path))
                 if op_obj is None:
                     rec["missing_paths"].append(op_path)
                 else:
@@ -229,6 +391,21 @@ def _scan_submissions_for_day(day: str) -> Tuple[List[Dict[str, Any]], List[str]
 
         return out, sorted(set(missing)), sorted(set(source_paths)), source_mtimes
 
+    # Submission index not present/valid: try pillars decisions (preferred).
+    pill_records, miss_p, sp_p, sm_p, _w_p = _try_load_pillars_decisions(day)
+    if pill_records:
+        # NOTE: do NOT treat submission_index as missing if pillars decisions are present.
+        missing.extend(miss_p)
+        source_paths.extend(sp_p)
+        source_mtimes.update(sm_p)
+        return pill_records, sorted(set(missing)), sorted(set(source_paths)), source_mtimes
+
+    # Neither submission index nor pillars decisions available: record submission_index missing.
+    missing.extend(miss_i)
+    source_paths.extend(sp_i)
+    source_mtimes.update(sm_i)
+
+    # Fall back to direct scan of submissions day dir
     submission_dirs = [p for p in day_root.iterdir() if p.is_dir()]
     submission_dirs.sort(key=lambda p: p.name)
 
@@ -351,7 +528,7 @@ def _load_engine_join_map_for_day(day: str) -> Tuple[Dict[str, str], List[str], 
                         subid_to_engine.update(tmp2)
                         return subid_to_engine, missing, source_paths, source_mtimes, warnings
 
-    warnings.append(E_ENGINE_JOIN_NOT_POSSIBLE)
+    warnings.append(E_ENGINE_JOIN_NOT_POSSIBLE_WITHOUT_ENGINE_LINKAGE)
     return {}, missing, source_paths, source_mtimes, warnings
 
 
@@ -624,7 +801,7 @@ def _day_submissions(day: str) -> Dict[str, Any]:
         "source_mtimes": {},
         "missing_paths": [],
         "submissions": [],
-        "engine_join": {"status": "unknown", "warning": E_ENGINE_JOIN_NOT_POSSIBLE, "source_paths": []},
+        "engine_join": {"status": "unknown", "warning": E_ENGINE_JOIN_NOT_POSSIBLE_WITHOUT_ENGINE_LINKAGE, "source_paths": []},
     }
 
     if not _is_day_str(day):
@@ -692,7 +869,7 @@ def _days_list() -> Dict[str, Any]:
     if not days:
         resp["warnings"].append(E_NO_DAYS_FOUND)
 
-    for p in [SUBMISSIONS_ROOT, MONITORING_NAV_SERIES_ROOT, ACCOUNTING_NAV_ROOT, ACCOUNTING_ATTR_ROOT]:
+    for p in [SUBMISSIONS_ROOT, MONITORING_NAV_SERIES_ROOT, ACCOUNTING_NAV_ROOT, ACCOUNTING_ATTR_ROOT, PILLARS_V1R1_ROOT, PILLARS_V1_ROOT]:
         resp["source_paths"].append(str(p))
         mt = _mtime(p)
         if mt is not None:
