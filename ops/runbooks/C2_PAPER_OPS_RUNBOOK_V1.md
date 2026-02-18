@@ -20,14 +20,36 @@ This runbook is suitable for hostile review: it is deterministic, fail-closed, a
 ## Services (systemd --user)
 
 - `c2-supervisor.service` (always-on): runs `ops/run/c2_supervisor_paper_v2.py`
-- `c2-operator-gate.timer` (daily 00:05 UTC): runs the PASS/FAIL operator gate tool
+- `c2-operator-gate.timer` (daily 00:05 UTC): runs the PASS/FAIL operator gate tool (v2 readiness surfaces)
 
-## Source of truth vs derived truth
+## Source truth vs derived truth
 
+### Source-of-truth (authoritative inputs)
 - Source-of-truth submissions: `constellation_2/phaseD/outputs/submissions/` (flat by submission_id)
-- Derived exec evidence truth: `constellation_2/runtime/truth/execution_evidence_v1/...`
 
-Supervisor v2 watches PhaseD outputs and refreshes derived truth immutably.
+### Derived truth (authoritative outputs)
+- Derived exec evidence truth (mirrored immutably): `constellation_2/runtime/truth/execution_evidence_v1/...`
+
+### Canonical readiness surfaces (v2, pillars-aware)
+Submission evidence and readiness are canonicalized through:
+
+- Pillars decisions (preferred submission evidence surface):
+  - `constellation_2/runtime/truth/pillars_v1r1/DAY/decisions/*.submission_decision_record.v1.json`
+
+- Pipeline manifest v2 (pillars-aware pipeline completeness):
+  - `constellation_2/runtime/truth/reports/pipeline_manifest_v2/DAY/pipeline_manifest.v2.json`
+
+- Operator gate verdict v2 (pillars-aware readiness verdict):
+  - `constellation_2/runtime/truth/reports/operator_gate_verdict_v2/DAY/operator_gate_verdict.v2.json`
+
+### Legacy surface (not required by default)
+- Submission index is legacy and no longer required for readiness if pillars decisions exist.
+- Supervisor default behavior does NOT generate submission index.
+- If explicitly needed for backward compatibility, supervisor can be run with:
+  - `--write_submission_index YES`
+
+Legacy submission index path (if enabled):
+- `constellation_2/runtime/truth/execution_evidence_v1/submission_index/DAY/submission_index.v1.json`
 
 ## Install / Update unit files (authoritative definitions are in repo)
 
