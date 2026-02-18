@@ -320,3 +320,60 @@ documents:
     path: docs/c2/RUNBOOK_FG_PHASE_V1.md
     class: C2_RUNBOOK
     status: DRAFT
+
+  # C2 Pillars v1 (new canonical truth infrastructure)
+  - id: C2_PILLARS_V1
+    path: governance/05_CONTRACTS/C2/pillars_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_DETERMINISM_BUNDLE_V1
+    path: governance/05_CONTRACTS/C2/determinism_bundle_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_MODEL_GOVERNANCE_BUNDLE_V1
+    path: governance/05_CONTRACTS/C2/model_governance_bundle_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_EXECUTION_QUALITY_BUNDLE_V1
+    path: governance/05_CONTRACTS/C2/execution_quality_bundle_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  # C2 Pillars v1 schemas (governed outputs)
+  - id: C2_PILLARS_INPUTS_FROZEN_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/PILLARS/inputs_frozen.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_PILLARS_SUBMISSION_DECISION_RECORD_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/PILLARS/submission_decision_record.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_PILLARS_DAILY_EXECUTION_STATE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/PILLARS/daily_execution_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_PILLARS_DAY_ROOT_ANCHOR_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/PILLARS/day_root_anchor.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_PILLARS_DETERMINISM_BUNDLE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/PILLARS/determinism_bundle.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_PILLARS_MODEL_GOVERNANCE_BUNDLE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/PILLARS/model_governance_bundle.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_PILLARS_EXECUTION_QUALITY_BUNDLE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/PILLARS/execution_quality_bundle.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT

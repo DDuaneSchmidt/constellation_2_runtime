@@ -29,6 +29,9 @@ import json
 import subprocess
 from typing import Any, Dict, List, Tuple
 
+from constellation_2.phaseD.lib.enforce_operational_day_invariant_v1 import (
+    enforce_operational_day_key_invariant_v1,
+)
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
@@ -49,9 +52,21 @@ OUT_ROOT = (TRUTH / "monitoring_v1/regime_snapshot_v2").resolve()
 
 
 def _parse_day_utc(s: str) -> str:
+    """
+    Strict UTC day key validator (institutional hardening).
+
+    Requirements:
+    - exactly 10 chars: YYYY-MM-DD
+    - positions 4 and 7 are '-'
+    - all other positions MUST be digits
+
+    This rejects templates like "YYYY-MM-DD".
+    """
     d = (s or "").strip()
     if len(d) != 10 or d[4] != "-" or d[7] != "-":
         raise ValueError(f"BAD_DAY_UTC_FORMAT_EXPECTED_YYYY_MM_DD: {d!r}")
+    if (not d[0:4].isdigit()) or (not d[5:7].isdigit()) or (not d[8:10].isdigit()):
+        raise ValueError(f"BAD_DAY_UTC_NOT_NUMERIC_YYYY_MM_DD: {d!r}")
     return d
 
 
@@ -163,6 +178,9 @@ def main() -> int:
 
     day = _parse_day_utc(args.day_utc)
 
+    # Policy enforcement (fail-closed): refuse future-day truth writes.
+    enforce_operational_day_key_invariant_v1(day)
+
     nav_path = (PATH_ACCOUNTING_NAV / day / "nav.json").resolve()
     if not nav_path.exists():
         raise SystemExit(f"FAIL: MISSING_REQUIRED_NAV: {nav_path}")
@@ -264,7 +282,7 @@ def main() -> int:
     input_manifest: List[Dict[str, str]] = [
         {"type": "accounting_nav", "path": str(nav_path), "sha256": _sha256_file(nav_path)},
         {"type": "economic_drawdown_nav_snapshot", "path": str(dd_path), "sha256": _sha256_file(dd_path)},
-        {"type": "engine_risk_budget_ledger_v1", "path": str(risk_path), "sha256": _sha256_file(risk_path)}
+        {"type": "engine_risk_budget_ledger_v1", "path": str(risk_path), "sha256": _sha256_file(risk_path)},
     ]
     if cap_present:
         input_manifest.append({"type": "capital_risk_envelope_v1", "path": str(cap_path), "sha256": _sha256_file(cap_path)})
@@ -284,7 +302,7 @@ def main() -> int:
         "broker_manifest_required": bool(broker_required),
         "broker_manifest_present": bool(broker_present),
         "broker_manifest_status": broker_status,
-        "broker_truth_missing_during_submissions": bool(broker_truth_missing)
+        "broker_truth_missing_during_submissions": bool(broker_truth_missing),
     }
 
     out_obj: Dict[str, Any] = {
@@ -300,7 +318,7 @@ def main() -> int:
         "reason_codes": reason_codes,
         "input_manifest": input_manifest,
         "evidence": evidence,
-        "snapshot_sha256": None
+        "snapshot_sha256": None,
     }
     out_obj["snapshot_sha256"] = _compute_self_sha(out_obj, "snapshot_sha256")
 

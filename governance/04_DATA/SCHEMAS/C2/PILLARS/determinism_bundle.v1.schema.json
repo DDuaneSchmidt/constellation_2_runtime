@@ -1,0 +1,62 @@
+{
+  "$id": "https://constellation.local/schemas/determinism_bundle.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Determinism Bundle v1 (Inputs + Data Integrity + Replay Proof)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "input_manifest",
+    "anchors"
+  ],
+  "properties": {
+    "schema_id": { "const": "determinism_bundle" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "module": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "git_sha": { "type": "string", "minLength": 7, "maxLength": 64 }
+      }
+    },
+    "status": { "type": "string", "enum": ["OK", "DEGRADED", "FAIL"] },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "anchors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inputs_frozen_sha256", "daily_execution_state_sha256", "event_ledger_sha256", "replay_proof_mode"],
+      "properties": {
+        "inputs_frozen_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "daily_execution_state_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "event_ledger_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "replay_proof_mode": { "type": "string", "enum": ["NOT_IMPLEMENTED", "HASH_MATCH"] },
+        "replay_output_sha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  }
+}

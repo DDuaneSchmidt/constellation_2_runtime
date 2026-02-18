@@ -56,6 +56,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1  # type: ignore
+from constellation_2.phaseD.lib.enforce_operational_day_invariant_v1 import (
+    enforce_operational_day_key_invariant_v1,
+)
 
 
 TRUTH = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
@@ -183,6 +186,9 @@ def main() -> int:
     day = str(args.day_utc).strip()
     if not DAY_RE.match(day):
         raise SystemExit(f"FAIL: bad --day_utc (expected YYYY-MM-DD): {day!r}")
+
+    # Policy enforcement (fail-closed): refuse future-day truth writes.
+    enforce_operational_day_key_invariant_v1(day)
 
     schema_path = (REPO_ROOT / SCHEMA_RELPATH).resolve()
     _validate_schema_available(schema_path)

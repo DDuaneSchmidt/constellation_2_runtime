@@ -1,0 +1,63 @@
+{
+  "$id": "https://constellation.local/schemas/submission_decision_record.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Submission Decision Record v1 (Atomic Decision, Audit-Proof)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "decision_id",
+    "produced_utc",
+    "producer",
+    "status",
+    "decision",
+    "reason_codes",
+    "input_manifest",
+    "decision_sha256"
+  ],
+  "properties": {
+    "schema_id": { "const": "submission_decision_record" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "decision_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "module": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "git_sha": { "type": "string", "minLength": 7, "maxLength": 64 }
+      }
+    },
+    "status": { "type": "string", "enum": ["OK", "DEGRADED", "FAIL"] },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["disposition"],
+      "properties": {
+        "disposition": { "type": "string", "enum": ["ALLOW", "BLOCK"] },
+        "detail": { "type": ["string", "null"], "minLength": 0, "maxLength": 512 }
+      }
+    },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "decision_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

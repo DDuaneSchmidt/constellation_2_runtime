@@ -92,9 +92,21 @@ def _git_sha() -> str:
 
 
 def _parse_day_utc(s: str) -> str:
+    """
+    Strict UTC day key validator (institutional hardening).
+
+    Requirements:
+    - exactly 10 chars: YYYY-MM-DD
+    - positions 4 and 7 are '-'
+    - all other positions MUST be digits
+
+    This rejects templates like "YYYY-MM-DD".
+    """
     d = (s or "").strip()
     if len(d) != 10 or d[4] != "-" or d[7] != "-":
         raise ValueError(f"BAD_DAY_UTC_FORMAT_EXPECTED_YYYY_MM_DD: {d!r}")
+    if (not d[0:4].isdigit()) or (not d[5:7].isdigit()) or (not d[8:10].isdigit()):
+        raise ValueError(f"BAD_DAY_UTC_NOT_NUMERIC_YYYY_MM_DD: {d!r}")
     return d
 
 

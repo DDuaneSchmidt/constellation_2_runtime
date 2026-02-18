@@ -1,0 +1,67 @@
+{
+  "$id": "https://constellation.local/schemas/model_governance_bundle.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Model Governance Bundle v1 (Registry + Engine Runners + Effective Map)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "input_manifest",
+    "engines"
+  ],
+  "properties": {
+    "schema_id": { "const": "model_governance_bundle" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "module": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "git_sha": { "type": "string", "minLength": 7, "maxLength": 64 }
+      }
+    },
+    "status": { "type": "string", "enum": ["OK", "DEGRADED", "FAIL"] },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "engines": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["engine_id", "activation_status", "runner_path", "runner_sha256_actual"],
+        "properties": {
+          "engine_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "activation_status": { "type": "string", "minLength": 1, "maxLength": 32 },
+          "runner_path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "runner_sha256_actual": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "ok": { "type": ["boolean", "null"] },
+          "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 128 } }
+        }
+      }
+    }
+  }
+}
