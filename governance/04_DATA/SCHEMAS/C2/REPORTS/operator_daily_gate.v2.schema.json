@@ -1,0 +1,82 @@
+{
+  "$id": "https://constellation.local/schemas/operator_daily_gate.v2.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Operator Daily Gate v2 (SAFE_IDLE aware; forward-only readiness)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "input_manifest",
+    "checks"
+  ],
+  "properties": {
+    "schema_id": { "const": "operator_daily_gate" },
+    "schema_version": { "const": "v2" },
+
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "format": "date-time" },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "module": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "git_sha": { "type": "string", "minLength": 7, "maxLength": 64 }
+      }
+    },
+
+    "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+    },
+
+    "notes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+    },
+
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reconciliation_v3_status",
+        "cash_ledger_integrity_ok",
+        "positions_snapshot_present",
+        "allocation_summary_present",
+        "capital_risk_envelope_v2_status"
+      ],
+      "properties": {
+        "reconciliation_v3_status": { "type": "string", "enum": ["OK", "FAIL", "MISSING"] },
+        "cash_ledger_integrity_ok": { "type": "boolean" },
+        "positions_snapshot_present": { "type": "boolean" },
+        "allocation_summary_present": { "type": "boolean" },
+        "capital_risk_envelope_v2_status": { "type": "string", "enum": ["PASS", "FAIL", "MISSING"] }
+      }
+    }
+  }
+}

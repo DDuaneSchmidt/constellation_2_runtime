@@ -11,6 +11,13 @@ This writer mirrors the full v1 stage graph, with one controlled change:
   - pillars decisions directory (pillars_v1r1 preferred, else pillars_v1) containing >=1 decision record, OR
   - "no submissions" case (OK).
 
+Hardened (B posture):
+- produced_utc is deterministic: <DAY>T00:00:00Z
+- CASH_LEDGER stage validates:
+  - cash failure artifact absent
+  - cash_ledger_snapshot.v1.json exists
+  - cash snapshot day-integrity holds (produced_utc + observed_at_utc start with DAYT)
+
 Writes:
   constellation_2/runtime/truth/reports/pipeline_manifest_v2/<DAY>/pipeline_manifest.v2.json
 
@@ -67,13 +74,15 @@ PILLARS_V1R1 = (TRUTH / "pillars_v1r1").resolve()
 
 POSITIONS_ROOT = (TRUTH / "positions_v1/snapshots").resolve()
 CASH_ROOT = (TRUTH / "cash_ledger_v1/snapshots").resolve()
+CASH_FAIL_ROOT = (TRUTH / "cash_ledger_v1/failures").resolve()
+
 ACCOUNTING_ROOT = (TRUTH / "accounting_v1").resolve()
 RISK_LEDGER_ROOT = (TRUTH / "risk_v1" / "engine_budget").resolve()
-CAP_RISK_ROOT = (TRUTH / "reports" / "capital_risk_envelope_v1").resolve()
+CAP_RISK_ROOT = (TRUTH / "reports" / "capital_risk_envelope_v2").resolve()
 
-REGIME_ROOT = (TRUTH / "monitoring_v1" / "regime_snapshot_v2").resolve()
+REGIME_ROOT = (TRUTH / "monitoring_v1" / "regime_snapshot_v3").resolve()
 
-RECON_ROOT_V2 = (TRUTH / "reports" / "reconciliation_report_v2").resolve()
+RECON_ROOT_V3 = (TRUTH / "reports" / "reconciliation_report_v3").resolve()
 GATE_ROOT = (TRUTH / "reports" / "operator_daily_gate_v1").resolve()
 
 # --- Bundled C (control-plane) ---
@@ -168,6 +177,22 @@ def _pillars_decisions_dir(day: str) -> Optional[Path]:
 
 def _count_decision_records(decisions_dir: Path) -> int:
     return len([p for p in decisions_dir.iterdir() if p.is_file() and p.name.endswith(".submission_decision_record.v1.json")])
+
+
+def _day_prefix(day_utc: str) -> str:
+    return f"{day_utc}T"
+
+
+def _cash_snapshot_day_integrity(day_utc: str, cash_obj: Dict[str, Any]) -> Tuple[bool, List[str]]:
+    rc: List[str] = []
+    pu = str(cash_obj.get("produced_utc") or "").strip()
+    snap = cash_obj.get("snapshot") if isinstance(cash_obj.get("snapshot"), dict) else {}
+    ou = str(snap.get("observed_at_utc") or "").strip()
+    if not pu.startswith(_day_prefix(day_utc)):
+        rc.append("CASH_LEDGER_PRODUCED_UTC_DAY_MISMATCH")
+    if not ou.startswith(_day_prefix(day_utc)):
+        rc.append("CASH_LEDGER_OBSERVED_AT_UTC_DAY_MISMATCH")
+    return (len(rc) == 0, rc)
 
 
 def main() -> int:
@@ -321,7 +346,7 @@ def main() -> int:
     subs_present = exec_present and exec_subdir_count > 0
 
     if not subs_present:
-        si_rc: List[str] = []
+        si_rc = []
         si_status = "OK"
         si_root = pillars_dir if pillars_dir is not None else subidx_path
         si_sha = _sha256_dir_deterministic(pillars_dir) if (pillars_dir is not None) else (_sha256_file(subidx_path) if subidx_present else _sha256_bytes(b""))
@@ -349,9 +374,6 @@ def main() -> int:
             add_input("submission_index_v1", subidx_path, _sha256_bytes(b""))
             stages.append(_stage("SUBMISSION_INDEX", subidx_path, False, _sha256_bytes(b""), 0, si_status, True, si_rc))
 
-    # The remaining stages match v1 behavior exactly (risk, capital envelope, regime, positions, cash, accounting, reconciliation, operator gate, bundled C...)
-    # For brevity and audit safety, we reuse the same logic paths by reading existing truth surfaces.
-
     # ENGINE RISK BUDGET LEDGER (required)
     risk_path = (RISK_LEDGER_ROOT / day / "engine_risk_budget_ledger.v1.json").resolve()
     risk_present = risk_path.exists()
@@ -375,14 +397,14 @@ def main() -> int:
     stages.append(_stage("ENGINE_RISK_BUDGET_LEDGER", risk_path, risk_present, risk_sha, 1 if risk_present else 0, risk_status, True, risk_rc))
 
     # CAPITAL RISK ENVELOPE (required): PASS required
-    cap_path = (CAP_RISK_ROOT / day / "capital_risk_envelope.v1.json").resolve()
+    cap_path = (CAP_RISK_ROOT / day / "capital_risk_envelope.v2.json").resolve()
     cap_present = cap_path.exists()
     cap_sha = _sha256_file(cap_path) if cap_present else _sha256_bytes(b"")
-    add_input("capital_risk_envelope_v1", cap_path, cap_sha)
+    add_input("capital_risk_envelope_v2", cap_path, cap_sha)
     cap_rc: List[str] = []
     cap_status = "OK" if cap_present else "MISSING"
     if not cap_present:
-        cap_rc.append("MISSING_CAPITAL_RISK_ENVELOPE")
+        cap_rc.append("MISSING_CAPITAL_RISK_ENVELOPE_V2")
         blocking_failures += 1
         top_reason_codes += cap_rc
         cap_status = "MISSING"
@@ -391,20 +413,20 @@ def main() -> int:
         st = str(ce.get("status") or "FAIL").strip().upper()
         if st != "PASS":
             cap_status = "FAIL"
-            cap_rc.append("CAPITAL_RISK_ENVELOPE_NOT_PASS")
+            cap_rc.append("CAPITAL_RISK_ENVELOPE_V2_NOT_PASS")
             blocking_failures += 1
             top_reason_codes += cap_rc
     stages.append(_stage("CAPITAL_RISK_ENVELOPE", cap_path, cap_present, cap_sha, 1 if cap_present else 0, cap_status, True, cap_rc))
 
     # REGIME CLASSIFICATION
-    regime_path = (REGIME_ROOT / day / "regime_snapshot.v2.json").resolve()
+    regime_path = (REGIME_ROOT / day / "regime_snapshot.v3.json").resolve()
     regime_present = regime_path.exists()
     regime_sha = _sha256_file(regime_path) if regime_present else _sha256_bytes(b"")
-    add_input("regime_snapshot_v2", regime_path, regime_sha)
+    add_input("regime_snapshot_v3", regime_path, regime_sha)
     regime_rc: List[str] = []
     regime_status = "OK" if regime_present else "MISSING"
     if not regime_present:
-        regime_rc.append("MISSING_REGIME_SNAPSHOT_V2")
+        regime_rc.append("MISSING_REGIME_SNAPSHOT_V3")
         blocking_failures += 1
         top_reason_codes += regime_rc
         stages.append(_stage("REGIME_CLASSIFICATION", regime_path, regime_present, regime_sha, 0, "MISSING", True, regime_rc))
@@ -448,23 +470,43 @@ def main() -> int:
         top_reason_codes += pos_rc
     stages.append(_stage("POSITIONS", pos_day, pos_present, pos_sha, pos_count, pos_status, True, pos_rc))
 
-    # CASH_LEDGER
+    # CASH_LEDGER (hardened)
     cash_day = (CASH_ROOT / day).resolve()
     cash_present = cash_day.exists() and cash_day.is_dir()
-    cash_count = _count_files_matching(cash_day, "*.json") if cash_present else 0
     cash_sha = _sha256_dir_deterministic(cash_day) if cash_present else _sha256_bytes(b"")
     add_input("cash_ledger_day_dir", cash_day, cash_sha)
+
     cash_rc: List[str] = []
-    cash_status = "OK" if cash_present and cash_count > 0 else ("MISSING" if not cash_present else "FAIL")
-    if not cash_present:
-        cash_rc.append("MISSING_CASH_LEDGER_DAY_DIR")
+    cash_status = "OK"
+    cash_items_total = 0
+
+    cash_fail_path = (CASH_FAIL_ROOT / day / "failure.json").resolve()
+    if cash_fail_path.exists() and cash_fail_path.is_file():
+        cash_rc.append("CASH_LEDGER_FAILURE_PRESENT_FAILCLOSED")
+        cash_status = "FAIL"
+    cash_snap_path = (cash_day / "cash_ledger_snapshot.v1.json").resolve()
+    if not cash_snap_path.exists():
+        cash_rc.append("CASH_LEDGER_SNAPSHOT_MISSING")
+        cash_status = "FAIL"
+    else:
+        cash_items_total = 1
+        try:
+            cash_obj = _read_json(cash_snap_path)
+            ok, rc2 = _cash_snapshot_day_integrity(day, cash_obj)
+            if not ok:
+                cash_rc += rc2
+                cash_rc.append("CASH_LEDGER_SNAPSHOT_DAY_INTEGRITY_FAILCLOSED")
+                cash_status = "FAIL"
+        except Exception:
+            cash_rc.append("CASH_LEDGER_SNAPSHOT_PARSE_ERROR_FAILCLOSED")
+            cash_status = "FAIL"
+
+    if cash_status != "OK":
         blocking_failures += 1
         top_reason_codes += cash_rc
-    elif cash_count == 0:
-        cash_rc.append("EMPTY_CASH_LEDGER_DAY_DIR")
-        blocking_failures += 1
-        top_reason_codes += cash_rc
-    stages.append(_stage("CASH_LEDGER", cash_day, cash_present, cash_sha, cash_count, cash_status, True, cash_rc))
+
+    cash_rc = sorted(list(dict.fromkeys(cash_rc)))
+    stages.append(_stage("CASH_LEDGER", cash_day, cash_present, cash_sha, cash_items_total if cash_present else 0, cash_status, True, cash_rc))
 
     # ACCOUNTING
     acct_present = ACCOUNTING_ROOT.exists() and ACCOUNTING_ROOT.is_dir()
@@ -473,10 +515,10 @@ def main() -> int:
     stages.append(_stage("ACCOUNTING", ACCOUNTING_ROOT, acct_present, acct_sha, 0, "OK" if acct_present else "DEGRADED", False, []))
 
     # RECONCILIATION
-    recon_path = (RECON_ROOT_V2 / day / "reconciliation_report.v2.json").resolve()
+    recon_path = (RECON_ROOT_V3 / day / "reconciliation_report.v3.json").resolve()
     recon_present = recon_path.exists()
     recon_sha = _sha256_file(recon_path) if recon_present else _sha256_bytes(b"")
-    add_input("reconciliation_report_v2", recon_path, recon_sha)
+    add_input("reconciliation_report_v3", recon_path, recon_sha)
     recon_rc: List[str] = []
     recon_status = "OK" if recon_present else "MISSING"
     if not recon_present:
@@ -562,7 +604,7 @@ def main() -> int:
         "schema_id": "pipeline_manifest",
         "schema_version": "v2",
         "day_utc": day,
-        "produced_utc": _utc_now(),
+        "produced_utc": f"{day}T00:00:00Z",
         "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_pipeline_manifest_v2.py", "git_sha": _git_sha()},
         "status": status,
         "reason_codes": top_reason_codes,

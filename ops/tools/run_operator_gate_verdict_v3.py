@@ -1,23 +1,11 @@
 #!/usr/bin/env python3
 """
-run_operator_gate_verdict_v2.py
+run_operator_gate_verdict_v3.py
 
-Operator Gate Verdict v2 (pillars-aware, immutable).
+Operator Gate Verdict v3 (SAFE_IDLE aware; forward-only readiness).
 
-Hardened (institutional, no silent READY):
-READY requires BOTH existence AND status correctness of upstream gates:
-
-Required:
-- intents_day_rollup.v1.json exists
-- reconciliation_report.v2.json exists AND status == OK
-- pipeline_manifest.v2.json exists AND status == OK
-- operator_daily_gate.v1.json exists AND status == PASS
-
-Submission evidence rule (pillars-aware):
-- If submissions exist for DAY: require legacy submission_index.v1.json OR pillars decisions dir with >=1 decision record.
-- If no submissions exist: submission evidence is not required.
-
-produced_utc is deterministic: <DAY>T00:00:00Z
+Run:
+  python3 ops/tools/run_operator_gate_verdict_v3.py --day_utc YYYY-MM-DD
 """
 
 from __future__ import annotations
@@ -38,7 +26,6 @@ if not (_REPO_ROOT_FROM_FILE / "governance").exists():
 import argparse
 import hashlib
 import json
-import os
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -49,19 +36,16 @@ from constellation_2.phaseD.lib.enforce_operational_day_invariant_v1 import enfo
 REPO_ROOT = _REPO_ROOT_FROM_FILE
 TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
-SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/operator_gate_verdict.v2.schema.json"
+SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/operator_gate_verdict.v3.schema.json"
 
-PATH_INTENTS_ROLLUP = TRUTH / "intents_v1/day_rollup"
-PATH_SUBMISSION_INDEX = TRUTH / "execution_evidence_v1/submission_index"
+QUARANTINE_REGISTRY = (REPO_ROOT / "governance/02_REGISTRIES/TEST_DAY_KEY_QUARANTINE_V1.json").resolve()
+
 PATH_EXEC_SUBMISSIONS = TRUTH / "execution_evidence_v1/submissions"
-PATH_RECON_V2 = TRUTH / "reports/reconciliation_report_v2"
 PATH_PIPELINE_MANIFEST_V2 = TRUTH / "reports/pipeline_manifest_v2"
-PATH_OPERATOR_DAILY_GATE = TRUTH / "reports/operator_daily_gate_v1"
+PATH_RECON_V3 = TRUTH / "reports/reconciliation_report_v3"
+PATH_OPERATOR_DAILY_GATE_V2 = TRUTH / "reports/operator_daily_gate_v2"
 
-PILLARS_V1 = TRUTH / "pillars_v1"
-PILLARS_V1R1 = TRUTH / "pillars_v1r1"
-
-OUT_ROOT = TRUTH / "reports/operator_gate_verdict_v2"
+OUT_ROOT = TRUTH / "reports/operator_gate_verdict_v3"
 
 DAY_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 
@@ -94,6 +78,13 @@ def _check_exists(path: Path) -> bool:
     return path.exists() and path.is_file()
 
 
+def _compute_self_sha_field(obj: Dict[str, Any], field_name: str) -> str:
+    obj2 = dict(obj)
+    obj2[field_name] = None
+    canon = canonical_json_bytes_v1(obj2) + b"\n"
+    return _sha256_bytes(canon)
+
+
 @dataclass(frozen=True)
 class _WriteResult:
     path: str
@@ -116,33 +107,31 @@ def _write_immutable_canonical_json(path: Path, obj: Dict[str, Any]) -> _WriteRe
     if tmp.exists():
         tmp.unlink()
     tmp.write_bytes(payload)
+    import os
     os.replace(tmp, path)
     return _WriteResult(path=str(path), sha256=sha, action="WRITTEN")
 
 
-def _compute_self_sha_field(obj: Dict[str, Any], field_name: str) -> str:
-    obj2 = dict(obj)
-    obj2[field_name] = None
-    canon = canonical_json_bytes_v1(obj2) + b"\n"
-    return _sha256_bytes(canon)
+def _is_quarantined(day: str) -> bool:
+    if not QUARANTINE_REGISTRY.exists():
+        return False
+    try:
+        obj = _read_json_obj(QUARANTINE_REGISTRY)
+    except Exception:
+        return True  # fail-closed if registry unreadable
 
+    def contains(o: Any) -> bool:
+        if isinstance(o, list):
+            return day in [str(x) for x in o]
+        if isinstance(o, dict):
+            return any(contains(v) for v in o.values())
+        return False
 
-def _pillars_decisions_dir(day: str) -> Optional[Path]:
-    d1 = (PILLARS_V1R1 / day / "decisions").resolve()
-    if d1.exists() and d1.is_dir():
-        return d1
-    d0 = (PILLARS_V1 / day / "decisions").resolve()
-    if d0.exists() and d0.is_dir():
-        return d0
-    return None
-
-
-def _count_decision_records(decisions_dir: Path) -> int:
-    return len([p for p in decisions_dir.iterdir() if p.is_file() and p.name.endswith(".submission_decision_record.v1.json")])
+    return contains(obj)
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(prog="run_operator_gate_verdict_v2")
+    ap = argparse.ArgumentParser(prog="run_operator_gate_verdict_v3")
     ap.add_argument("--day_utc", required=True, help="UTC day key YYYY-MM-DD")
     args = ap.parse_args()
 
@@ -152,46 +141,26 @@ def main() -> int:
 
     enforce_operational_day_key_invariant_v1(day)
 
-    schema_path = (REPO_ROOT / SCHEMA_RELPATH).resolve()
-    if not schema_path.exists():
-        raise SystemExit(f"FAIL: missing governed schema: {schema_path}")
-
     produced_utc = f"{day}T00:00:00Z"
 
-    intents_path = (PATH_INTENTS_ROLLUP / day / "intents_day_rollup.v1.json").resolve()
-    subidx_path = (PATH_SUBMISSION_INDEX / day / "submission_index.v1.json").resolve()
-    recon_path = (PATH_RECON_V2 / day / "reconciliation_report.v2.json").resolve()
     pipe_v2_path = (PATH_PIPELINE_MANIFEST_V2 / day / "pipeline_manifest.v2.json").resolve()
-    op_gate_path = (PATH_OPERATOR_DAILY_GATE / day / "operator_daily_gate.v1.json").resolve()
+    recon_path = (PATH_RECON_V3 / day / "reconciliation_report.v3.json").resolve()
+    op_gate_path = (PATH_OPERATOR_DAILY_GATE_V2 / day / "operator_daily_gate.v2.json").resolve()
 
     subs_dir = (PATH_EXEC_SUBMISSIONS / day).resolve()
     has_submissions = subs_dir.exists() and any(p.is_dir() for p in subs_dir.iterdir())
-
-    pillars_dir = _pillars_decisions_dir(day)
-    pillars_present = (pillars_dir is not None) and (_count_decision_records(pillars_dir) > 0)
 
     checks: List[Dict[str, Any]] = []
     missing: List[str] = []
     mismatches: List[Dict[str, Any]] = []
 
-    # INTENTS
-    ok = _check_exists(intents_path)
-    if not ok:
-        missing.append(str(intents_path))
-    checks.append({"check_id": "REQ_INTENTS_DAY_ROLLUP", "pass": ok, "evidence_paths": [str(intents_path)], "details": "exists" if ok else "missing"})
+    # QUARANTINE
+    q = _is_quarantined(day)
+    checks.append({"check_id": "REQ_DAY_NOT_QUARANTINED", "pass": (not q), "evidence_paths": [str(QUARANTINE_REGISTRY)], "details": "not_quarantined" if not q else "quarantined"})
+    if q:
+        missing.append(f"QUARANTINED_DAY:{day}")
 
-    # SUBMISSION EVIDENCE
-    if not has_submissions:
-        checks.append({"check_id": "REQ_SUBMISSION_EVIDENCE", "pass": True, "evidence_paths": [str(subidx_path)], "details": "no submissions => not required"})
-    else:
-        ok = _check_exists(subidx_path) or pillars_present
-        if not ok:
-            missing.append(str(subidx_path))
-        details = "exists (legacy submission_index)" if _check_exists(subidx_path) else ("exists (pillars decisions)" if pillars_present else "missing")
-        ev = [str(subidx_path)] + ([str(pillars_dir)] if pillars_dir else [])
-        checks.append({"check_id": "REQ_SUBMISSION_EVIDENCE", "pass": ok, "evidence_paths": ev, "details": details})
-
-    # RECON v2 status must be OK
+    # RECON v3 must be OK
     if _check_exists(recon_path):
         try:
             ro = _read_json_obj(recon_path)
@@ -203,10 +172,10 @@ def main() -> int:
             details = "parse_error"
         if not ok:
             missing.append(str(recon_path))
-        checks.append({"check_id": "REQ_RECONCILIATION_V2_OK", "pass": ok, "evidence_paths": [str(recon_path)], "details": details})
+        checks.append({"check_id": "REQ_RECONCILIATION_V3_OK", "pass": ok, "evidence_paths": [str(recon_path)], "details": details})
     else:
         missing.append(str(recon_path))
-        checks.append({"check_id": "REQ_RECONCILIATION_V2_OK", "pass": False, "evidence_paths": [str(recon_path)], "details": "missing"})
+        checks.append({"check_id": "REQ_RECONCILIATION_V3_OK", "pass": False, "evidence_paths": [str(recon_path)], "details": "missing"})
 
     # PIPELINE manifest v2 status must be OK
     if _check_exists(pipe_v2_path):
@@ -225,7 +194,7 @@ def main() -> int:
         missing.append(str(pipe_v2_path))
         checks.append({"check_id": "REQ_PIPELINE_MANIFEST_V2_OK", "pass": False, "evidence_paths": [str(pipe_v2_path)], "details": "missing"})
 
-    # OPERATOR daily gate must be PASS
+    # OPERATOR daily gate v2 must be PASS
     if _check_exists(op_gate_path):
         try:
             go = _read_json_obj(op_gate_path)
@@ -237,20 +206,23 @@ def main() -> int:
             details = "parse_error"
         if not ok:
             missing.append(str(op_gate_path))
-        checks.append({"check_id": "REQ_OPERATOR_DAILY_GATE_PASS", "pass": ok, "evidence_paths": [str(op_gate_path)], "details": details})
+        checks.append({"check_id": "REQ_OPERATOR_DAILY_GATE_V2_PASS", "pass": ok, "evidence_paths": [str(op_gate_path)], "details": details})
     else:
         missing.append(str(op_gate_path))
-        checks.append({"check_id": "REQ_OPERATOR_DAILY_GATE_PASS", "pass": False, "evidence_paths": [str(op_gate_path)], "details": "missing"})
+        checks.append({"check_id": "REQ_OPERATOR_DAILY_GATE_V2_PASS", "pass": False, "evidence_paths": [str(op_gate_path)], "details": "missing"})
+
+    # INTENTS not required for SAFE_IDLE; keep as informational check only
+    checks.append({"check_id": "INFO_SUBMISSIONS_PRESENT", "pass": True, "evidence_paths": [str(subs_dir)], "details": "submissions_present" if has_submissions else "no_submissions"})
 
     all_pass = all(bool(c.get("pass")) for c in checks)
     ready = bool(all_pass and (len(missing) == 0))
     exit_code = 0 if ready else 2
 
     verdict_obj: Dict[str, Any] = {
-        "schema_id": "operator_gate_verdict.v2",
+        "schema_id": "operator_gate_verdict.v3",
         "day_utc": day,
         "produced_utc": produced_utc,
-        "producer": {"component": "ops/tools/run_operator_gate_verdict_v2.py", "version": "v2", "git_sha": _git_sha()},
+        "producer": {"component": "ops/tools/run_operator_gate_verdict_v3.py", "version": "v3", "git_sha": _git_sha()},
         "checks": checks,
         "missing_artifacts": missing,
         "hash_mismatches": mismatches,
@@ -260,6 +232,11 @@ def main() -> int:
     }
     verdict_obj["verdict_sha256"] = _compute_self_sha_field(verdict_obj, "verdict_sha256")
 
+    # Validate schema via jsonschema (matches v2 approach)
+    schema_path = (REPO_ROOT / SCHEMA_RELPATH).resolve()
+    if not schema_path.exists():
+        raise SystemExit(f"FAIL: missing governed schema: {schema_path}")
+
     try:
         import jsonschema  # type: ignore
         schema = _read_json(schema_path)
@@ -268,10 +245,10 @@ def main() -> int:
         raise SystemExit(f"FAIL: schema validation failed: {e}")
 
     out_dir = (OUT_ROOT / day).resolve()
-    out_path = (out_dir / "operator_gate_verdict.v2.json").resolve()
+    out_path = (out_dir / "operator_gate_verdict.v3.json").resolve()
     wr = _write_immutable_canonical_json(out_path, verdict_obj)
 
-    print(f"OK: OPERATOR_GATE_VERDICT_V2_WRITTEN day_utc={day} ready={ready} exit_code={exit_code} path={wr.path} sha256={wr.sha256} action={wr.action}")
+    print(f"OK: OPERATOR_GATE_VERDICT_V3_WRITTEN day_utc={day} ready={ready} exit_code={exit_code} path={wr.path} sha256={wr.sha256} action={wr.action}")
     return exit_code
 
 

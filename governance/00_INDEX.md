@@ -124,3 +124,4 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 
 - governance/03_CONTRACTS/C2_TRUE_EVIDENCE_SPINE_V2.md — True Evidence Spine v2 (broker-truth contract)
 - governance/03_CONTRACTS/C2_PHASED_SUBMISSION_RUNNER_V1.md — Phase D Submission Runner v1 (audit-grade submission entrypoint)
+- governance/03_CONTRACTS/C2_LATEST_POINTER_MUTABILITY_CONTRACT_V1.md — Latest Pointer Mutability Contract v1 (atomic mutable latest pointers; day-keyed truth remains immutable)

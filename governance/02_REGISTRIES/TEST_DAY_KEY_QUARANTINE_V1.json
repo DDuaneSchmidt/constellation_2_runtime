@@ -2,9 +2,12 @@
   "registry_id": "TEST_DAY_KEY_QUARANTINE_V1",
   "schema_version": 1,
   "authority": "governance+git",
-  "blocked_day_utc": [],
+  "blocked_day_utc": [
+    "2026-02-18"
+  ],
   "notes": [
     "This registry lists explicit day_utc keys that are quarantined for operational writers.",
-    "Future-day prohibition is enforced independently by C2_TEST_DAY_QUARANTINE_POLICY_V1."
+    "Future-day prohibition is enforced independently by C2_TEST_DAY_QUARANTINE_POLICY_V1.",
+    "2026-02-18 quarantined due to immutable cash ledger day-integrity violation (produced_utc/observed_at_utc mismatch)."
   ]
 }

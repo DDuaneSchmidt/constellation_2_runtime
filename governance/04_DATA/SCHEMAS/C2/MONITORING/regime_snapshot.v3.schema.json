@@ -1,0 +1,98 @@
+{
+  "$id": "https://constellation.local/schemas/regime_snapshot.v3.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Regime Snapshot v3 (Forward-Only, Envelope v2 Aware, Deterministic, Audit-Proof)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "regime_label",
+    "risk_multiplier",
+    "blocking",
+    "reason_codes",
+    "input_manifest",
+    "evidence",
+    "snapshot_sha256"
+  ],
+  "properties": {
+    "schema_id": { "const": "regime_snapshot" },
+    "schema_version": { "const": "v3" },
+
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "format": "date-time" },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "module": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "git_sha": { "type": "string", "minLength": 7, "maxLength": 64 }
+      }
+    },
+
+    "status": { "type": "string", "enum": ["OK", "FAIL"] },
+    "regime_label": { "type": "string", "enum": ["NORMAL", "HIGH_RISK", "STRESS", "CRASH"] },
+    "risk_multiplier": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+    "blocking": { "type": "boolean" },
+
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+    },
+
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "drawdown_pct",
+        "engine_risk_budget_ledger_status",
+        "capital_risk_envelope_v2_present",
+        "capital_risk_envelope_v2_status",
+        "capital_risk_envelope_v2_severe_failure",
+        "submissions_present",
+        "broker_manifest_required",
+        "broker_manifest_present",
+        "broker_manifest_status",
+        "broker_truth_missing_during_submissions"
+      ],
+      "properties": {
+        "drawdown_pct": { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{6}$" },
+        "engine_risk_budget_ledger_status": { "type": "string", "minLength": 1, "maxLength": 32 },
+
+        "capital_risk_envelope_v2_present": { "type": "boolean" },
+        "capital_risk_envelope_v2_status": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "capital_risk_envelope_v2_severe_failure": { "type": "boolean" },
+
+        "submissions_present": { "type": "boolean" },
+        "broker_manifest_required": { "type": "boolean" },
+        "broker_manifest_present": { "type": "boolean" },
+        "broker_manifest_status": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "broker_truth_missing_during_submissions": { "type": "boolean" }
+      }
+    },
+
+    "snapshot_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

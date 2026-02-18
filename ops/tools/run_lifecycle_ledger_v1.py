@@ -36,7 +36,6 @@ import argparse
 import hashlib
 import json
 import subprocess
-from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
@@ -50,10 +49,6 @@ SCHEMA_LEDGER = "governance/04_DATA/SCHEMAS/C2/POSITIONS/position_lifecycle_ledg
 POS_PTR_ROOT = (TRUTH / "positions_v1" / "effective_v1" / "days").resolve()
 OUT_ROOT = (TRUTH / "position_lifecycle_v1" / "ledger").resolve()
 DELTA_PLAN_ROOT = (TRUTH / "reports" / "delta_order_plan_v1").resolve()
-
-
-def _now_utc_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _git_sha() -> str:
@@ -104,7 +99,9 @@ def main() -> int:
     args = ap.parse_args()
 
     day = _parse_day_utc(args.day_utc)
-    produced_utc = _now_utc_iso()
+
+    # Deterministic produced_utc for replay (schema requires non-empty string).
+    produced_utc = f"{day}T00:00:00Z"
 
     ptr_path = (POS_PTR_ROOT / day / "positions_effective_pointer.v1.json").resolve()
     plan_path = (DELTA_PLAN_ROOT / day / "delta_order_plan.v1.json").resolve()
@@ -155,10 +152,12 @@ def main() -> int:
         except Exception:
             reason_codes.append("C2_LIFECYCLE_INPUTS_MISSING_FAILCLOSED")
 
+    pos_items_sorted = sorted(pos_items, key=lambda x: str(x.get("position_id") or ""))
+
     positions_out: List[Dict[str, Any]] = []
     status = "OK"
 
-    for it in sorted(pos_items, key=lambda x: str(x.get("position_id") or "")):
+    for it in pos_items_sorted:
         pid = str(it.get("position_id") or "").strip()
         if not pid:
             continue

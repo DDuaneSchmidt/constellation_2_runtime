@@ -10,6 +10,7 @@ Institutional posture:
 - Parses each intent JSON, validates against governed exposure intent schema.
 - Uses engine attribution from intent["engine"]["engine_id"] (required by schema).
 - Emits rollup enumerating the configured engines, including explicit zero-intent engines.
+- MUST succeed (emit rollup) even when there are zero intent snapshots for the day.
 
 Output:
   constellation_2/runtime/truth/intents_v1/day_rollup/<DAY>/intents_day_rollup.v1.json
@@ -31,9 +32,8 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 
 # --- Import bootstrap (audit-grade, deterministic) ---
@@ -61,10 +61,6 @@ ALLOWED_ENGINE_IDS: List[str] = [
     "C2_TREND_EQ_PRIMARY_V1",
     "C2_VOL_INCOME_DEFINED_RISK_V1",
 ]
-
-
-def _now_utc_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -160,7 +156,8 @@ def main() -> int:
     if not DAY_RE.match(day):
         raise SystemExit(f"FAIL: bad --day_utc (expected YYYY-MM-DD): {day!r}")
 
-    produced_utc = _now_utc_iso()
+    # Deterministic produced_utc for audit + replay (schema requires string; not necessarily wall-clock).
+    produced_utc = f"{day}T00:00:00Z"
 
     day_dir = (SNAP_ROOT / day).resolve()
     files = _list_intent_files(day_dir)
@@ -168,7 +165,7 @@ def main() -> int:
     # Engine -> list of intent hashes
     grouped: Dict[str, List[str]] = {eid: [] for eid in ALLOWED_ENGINE_IDS}
 
-    # Validate and group
+    # Validate and group (if no files, we still emit rollup with explicit zeros)
     for p in files:
         ih = _validate_intent_file_hash(p)
         intent = _read_json(p)
@@ -211,14 +208,17 @@ def main() -> int:
     }
     payload["rollup_sha256"] = _compute_self_sha_field(payload, "rollup_sha256")
 
-    # Validate rollup against governed schema
-    validate_against_repo_schema_v1(intent, REPO_ROOT, EXPOSURE_INTENT_SCHEMA_RELPATH)
+    # Validate rollup against governed rollup schema (NOT the exposure intent schema)
+    validate_against_repo_schema_v1(payload, REPO_ROOT, ROLLUP_SCHEMA_RELPATH)
 
     out_dir = (OUT_ROOT / day).resolve()
     out_path = (out_dir / "intents_day_rollup.v1.json").resolve()
     wr = _write_immutable_canonical_json(out_path, payload)
 
-    print(f"OK: INTENTS_DAY_ROLLUP_WRITTEN day_utc={day} path={wr.path} sha256={wr.sha256} action={wr.action} intents_total={len(files)}")
+    print(
+        "OK: INTENTS_DAY_ROLLUP_WRITTEN "
+        f"day_utc={day} path={wr.path} sha256={wr.sha256} action={wr.action} intents_total={len(files)}"
+    )
     return 0
 
 

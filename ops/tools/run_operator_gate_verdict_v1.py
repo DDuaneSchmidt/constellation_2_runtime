@@ -46,7 +46,6 @@ import os
 import re
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -86,10 +85,6 @@ PATH_DELTA_PLAN = TRUTH / "reports" / "delta_order_plan_v1"
 OUT_ROOT = TRUTH / "reports" / "operator_gate_verdict_v1"
 
 DAY_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
-
-
-def _now_utc_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -187,12 +182,12 @@ def main() -> int:
     if not DAY_RE.match(day):
         raise SystemExit(f"FAIL: bad --day_utc (expected YYYY-MM-DD): {day!r}")
 
-    # Policy enforcement (fail-closed): refuse future-day truth writes.
     enforce_operational_day_key_invariant_v1(day)
 
     schema_path = (REPO_ROOT / SCHEMA_RELPATH).resolve()
     _validate_schema_available(schema_path)
-    produced_utc = _now_utc_iso()
+
+    produced_utc = f"{day}T00:00:00Z"
 
     intents_path = (PATH_INTENTS_ROLLUP / day / "intents_day_rollup.v1.json").resolve()
     subidx_path = (PATH_SUBMISSION_INDEX / day / "submission_index.v1.json").resolve()
@@ -201,10 +196,8 @@ def main() -> int:
     risk_ledger_path = (PATH_ENGINE_RISK_BUDGET_LEDGER / day / "engine_risk_budget_ledger.v1.json").resolve()
     cap_env_path = (PATH_CAPITAL_RISK_ENVELOPE / day / "capital_risk_envelope.v1.json").resolve()
 
-    # Regime snapshot path (v2)
     regime_path = (PATH_REGIME_SNAPSHOT / day / "regime_snapshot.v2.json").resolve()
 
-    # Bundled C paths
     kill_path = (PATH_KILL_SWITCH / day / "global_kill_switch_state.v1.json").resolve()
     life_path = (PATH_LIFECYCLE_LEDGER / day / "position_lifecycle_ledger.v1.json").resolve()
     exp_path = (PATH_EXPOSURE_RECON / day / "exposure_reconciliation_report.v1.json").resolve()
@@ -214,7 +207,6 @@ def main() -> int:
     missing: List[str] = []
     mismatches: List[Dict[str, Any]] = []
 
-    # Required existence
     for cid, p in [
         ("REQ_INTENTS_DAY_ROLLUP", intents_path),
         ("REQ_SUBMISSION_INDEX", subidx_path),
@@ -222,11 +214,7 @@ def main() -> int:
         ("REQ_PIPELINE_MANIFEST", pipe_path),
         ("REQ_ENGINE_RISK_BUDGET_LEDGER", risk_ledger_path),
         ("REQ_CAPITAL_RISK_ENVELOPE", cap_env_path),
-
-        # Regime snapshot required (v2)
         ("REQ_REGIME_SNAPSHOT_V2", regime_path),
-
-        # Bundled C required artifacts
         ("REQ_BUNDLED_C_KILL_SWITCH", kill_path),
         ("REQ_BUNDLED_C_LIFECYCLE_LEDGER", life_path),
         ("REQ_BUNDLED_C_EXPOSURE_RECON", exp_path),
@@ -237,7 +225,6 @@ def main() -> int:
             missing.append(str(p))
         checks.append({"check_id": cid, "pass": ok, "evidence_paths": [str(p)], "details": "exists" if ok else "missing"})
 
-    # No SYNTH markers
     has_synth = _scan_for_synth_markers(day)
     checks.append(
         {
@@ -248,7 +235,6 @@ def main() -> int:
         }
     )
 
-    # Engine risk budget ledger must be OK (Bundle B fail-closed)
     ledger_ok = False
     ledger_details = "missing"
     if _check_exists(risk_ledger_path):
@@ -261,16 +247,8 @@ def main() -> int:
             ledger_ok = False
             ledger_details = f"parse_error={e!r}"
 
-    checks.append(
-        {
-            "check_id": "ENGINE_RISK_BUDGET_LEDGER_OK",
-            "pass": ledger_ok,
-            "evidence_paths": [str(risk_ledger_path)],
-            "details": ledger_details,
-        }
-    )
+    checks.append({"check_id": "ENGINE_RISK_BUDGET_LEDGER_OK", "pass": ledger_ok, "evidence_paths": [str(risk_ledger_path)], "details": ledger_details})
 
-    # Capital risk envelope must be PASS (Bundle B fail-closed)
     cap_ok = False
     cap_details = "missing"
     if _check_exists(cap_env_path):
@@ -283,16 +261,8 @@ def main() -> int:
             cap_ok = False
             cap_details = f"parse_error={e!r}"
 
-    checks.append(
-        {
-            "check_id": "CAPITAL_RISK_ENVELOPE_PASS",
-            "pass": cap_ok,
-            "evidence_paths": [str(cap_env_path)],
-            "details": cap_details,
-        }
-    )
+    checks.append({"check_id": "CAPITAL_RISK_ENVELOPE_PASS", "pass": cap_ok, "evidence_paths": [str(cap_env_path)], "details": cap_details})
 
-    # Broker truth manifest must be OK if submissions exist
     broker_ok = True
     broker_details = "no submissions => broker manifest not required"
     subs_dir = (PATH_EXEC_SUBMISSIONS / day).resolve()
@@ -322,7 +292,6 @@ def main() -> int:
         }
     )
 
-    # Submission index mode constraints
     sim_found = False
     if _check_exists(subidx_path):
         subidx = _read_json(subidx_path)
@@ -339,7 +308,6 @@ def main() -> int:
         }
     )
 
-    # Reconciliation verdict PASS
     recon_ok = False
     if _check_exists(recon_path):
         recon = _read_json(recon_path)
@@ -354,7 +322,6 @@ def main() -> int:
         }
     )
 
-    # Regime snapshot (v2): status must be OK and blocking must be false
     regime_ok = False
     regime_not_blocking = False
     regime_details = "missing"
@@ -372,24 +339,9 @@ def main() -> int:
             regime_not_blocking = False
             regime_details = f"parse_error={e!r}"
 
-    checks.append(
-        {
-            "check_id": "REGIME_STATUS_OK_V2",
-            "pass": regime_ok,
-            "evidence_paths": [str(regime_path)],
-            "details": regime_details,
-        }
-    )
-    checks.append(
-        {
-            "check_id": "REGIME_NOT_BLOCKING_V2",
-            "pass": regime_not_blocking,
-            "evidence_paths": [str(regime_path)],
-            "details": regime_details,
-        }
-    )
+    checks.append({"check_id": "REGIME_STATUS_OK_V2", "pass": regime_ok, "evidence_paths": [str(regime_path)], "details": regime_details})
+    checks.append({"check_id": "REGIME_NOT_BLOCKING_V2", "pass": regime_not_blocking, "evidence_paths": [str(regime_path)], "details": regime_details})
 
-    # Bundled C: kill switch must be INACTIVE
     kill_inactive = False
     kill_details = "missing"
     if _check_exists(kill_path):
@@ -401,16 +353,8 @@ def main() -> int:
         except Exception as e:
             kill_inactive = False
             kill_details = f"parse_error={e!r}"
-    checks.append(
-        {
-            "check_id": "BUNDLED_C_KILL_SWITCH_INACTIVE",
-            "pass": kill_inactive,
-            "evidence_paths": [str(kill_path)],
-            "details": kill_details,
-        }
-    )
+    checks.append({"check_id": "BUNDLED_C_KILL_SWITCH_INACTIVE", "pass": kill_inactive, "evidence_paths": [str(kill_path)], "details": kill_details})
 
-    # Ready iff all checks pass and no missing artifacts
     all_pass = all(bool(c.get("pass")) for c in checks)
     ready = bool(all_pass and (len(missing) == 0))
     exit_code = 0 if ready else 2

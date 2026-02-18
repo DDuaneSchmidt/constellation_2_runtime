@@ -37,7 +37,6 @@ import hashlib
 import json
 import subprocess
 from decimal import Decimal, InvalidOperation
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
@@ -56,10 +55,6 @@ KILL_ROOT = (TRUTH / "risk_v1" / "kill_switch_v1").resolve()
 
 OUT_RECON_ROOT = (TRUTH / "reports" / "exposure_reconciliation_report_v1").resolve()
 OUT_PLAN_ROOT = (TRUTH / "reports" / "delta_order_plan_v1").resolve()
-
-
-def _now_utc_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _git_sha() -> str:
@@ -159,7 +154,9 @@ def main() -> int:
     args = ap.parse_args()
 
     day = _parse_day_utc(args.day_utc)
-    produced_utc = _now_utc_iso()
+
+    # Deterministic produced_utc for replay (schemas require non-empty string).
+    produced_utc = f"{day}T00:00:00Z"
 
     intents_day = (INTENTS_ROOT / day).resolve()
     ptr_path = (POS_PTR_ROOT / day / "positions_effective_pointer.v1.json").resolve()
@@ -227,7 +224,6 @@ def main() -> int:
     if has_open_positions:
         reason_codes.append("C2_EXPOSURE_ACTUAL_UNKNOWN_FAILCLOSED")
         notes.append("positions present but actual notional exposure not provable; forcing reduce/flatten-only.")
-    # else: actuals remain empty (implicitly zero)
 
     targets_arr = [{"engine_id": eng, "underlying": und, "target_notional_pct": _dec_str(pct)} for (eng, und), pct in sorted(targets_map.items())]
     actuals_arr = [{"engine_id": eng, "underlying": und, "target_notional_pct": _dec_str(pct)} for (eng, und), pct in sorted(actuals_map.items())]

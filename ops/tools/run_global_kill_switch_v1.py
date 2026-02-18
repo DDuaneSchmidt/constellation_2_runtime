@@ -24,12 +24,10 @@ import sys
 from pathlib import Path
 
 _THIS_FILE = Path(__file__).resolve()
-# .../ops/tools/run_global_kill_switch_v1.py -> repo root is parents[2]
 _REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
 if str(_REPO_ROOT_FROM_FILE) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
 
-# Fail-closed: verify expected repo structure exists
 if not (_REPO_ROOT_FROM_FILE / "constellation_2").exists():
     raise SystemExit(f"FATAL: repo_root_missing_constellation_2: derived={_REPO_ROOT_FROM_FILE}")
 if not (_REPO_ROOT_FROM_FILE / "governance").exists():
@@ -39,7 +37,6 @@ import argparse
 import hashlib
 import json
 import subprocess
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
@@ -54,10 +51,6 @@ OUT_ROOT = (TRUTH / "risk_v1" / "kill_switch_v1").resolve()
 PATH_OPERATOR_VERDICT = (TRUTH / "reports" / "operator_gate_verdict_v1").resolve()
 PATH_CAPITAL_ENV = (TRUTH / "reports" / "capital_risk_envelope_v1").resolve()
 PATH_RECON_V2 = (TRUTH / "reports" / "reconciliation_report_v2").resolve()
-
-
-def _now_utc_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _git_sha() -> str:
@@ -103,11 +96,6 @@ def _compute_self_sha(obj: Dict[str, Any], field: str) -> str:
 
 
 def _load_inputs(day: str) -> Tuple[List[Dict[str, str]], List[str], Dict[str, Any]]:
-    """
-    Returns:
-      (input_manifest, reason_codes, decisions)
-    decisions contains parsed statuses to aid explainability.
-    """
     input_manifest: List[Dict[str, str]] = []
     rc: List[str] = []
     decisions: Dict[str, Any] = {}
@@ -161,7 +149,9 @@ def main() -> int:
     args = ap.parse_args()
 
     day = _parse_day_utc(args.day_utc)
-    produced_utc = _now_utc_iso()
+
+    # Deterministic produced_utc for replay (schema requires non-empty string).
+    produced_utc = f"{day}T00:00:00Z"
 
     input_manifest, reason_codes, decisions = _load_inputs(day)
 

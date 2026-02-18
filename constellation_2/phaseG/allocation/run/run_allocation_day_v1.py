@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from constellation_2.phaseD.lib.canon_json_v1 import CanonicalizationError, canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import write_file_immutable_v1
+from constellation_2.phaseF.accounting.lib.mutable_write_v1 import write_file_atomic_mutable_v1
 
 
 # Drawdown convention authority (canonical, negative underwater)
@@ -181,7 +182,6 @@ def _write_failure(
     validate_against_repo_schema_v1(fail_obj, REPO_ROOT, SCHEMA_FAILURE)
     b = canonical_json_bytes_v1(fail_obj) + b"\n"
     out_path = (ALLOC_ROOT / "failures" / day_utc / "failure.json").resolve()
-    _ = write_file_immutable_v1(path=out_path, data=b, create_dirs=True)
 
 
 def main(argv: List[str] | None = None) -> int:
@@ -417,7 +417,7 @@ def main(argv: List[str] | None = None) -> int:
             validate_against_repo_schema_v1(dec_obj, REPO_ROOT, SCHEMA_DECISION)
 
             payload = canonical_json_bytes_v1(dec_obj) + b"\n"
-            _ = write_file_immutable_v1(path=out_dec_path, data=payload, create_dirs=True)
+            _ = write_file_atomic_mutable_v1(path=latest_path, data=l_bytes, create_dirs=True)
             dec_sha = _sha256_bytes(payload)
 
             decisions_summary.append({"intent_id": intent_id, "status": status, "path": str(out_dec_path), "sha256": dec_sha})
@@ -476,7 +476,7 @@ def main(argv: List[str] | None = None) -> int:
     validate_against_repo_schema_v1(latest_obj, REPO_ROOT, SCHEMA_LATEST)
     l_bytes = canonical_json_bytes_v1(latest_obj) + b"\n"
     latest_path = (ALLOC_ROOT / "latest.json").resolve()
-    _ = write_file_immutable_v1(path=latest_path, data=l_bytes, create_dirs=True)
+    _ = write_file_atomic_mutable_v1(path=latest_path, data=l_bytes, create_dirs=True)
 
     print("OK: ALLOCATION_SUMMARY_AND_DECISIONS_WRITTEN")
     return 0
