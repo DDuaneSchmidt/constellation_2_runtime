@@ -377,3 +377,14 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/PILLARS/execution_quality_bundle.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
+
+  # Reports schemas (v2 additions)
+  - id: C2_REPORTS_PIPELINE_MANIFEST_SCHEMA_V2
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/pipeline_manifest.v2.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_REPORTS_OPERATOR_GATE_VERDICT_SCHEMA_V2
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/operator_gate_verdict.v2.schema.json
+    class: C2_SCHEMA
+    status: DRAFT

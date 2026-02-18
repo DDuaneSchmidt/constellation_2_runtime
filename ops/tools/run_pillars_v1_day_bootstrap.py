@@ -4,22 +4,26 @@ run_pillars_v1_day_bootstrap.py
 
 C2 Pillars v1 — bootstrap writer (compile-from-existing truth).
 
+IMPORTANT:
+This tool writes to a revisioned pillars root to avoid immutable rewrite collisions:
+  constellation_2/runtime/truth/pillars_v1r1/<DAY>/
+
 Writes (immutable, day-keyed):
-- constellation_2/runtime/truth/pillars_v1/<DAY>/inputs_frozen.v1.json
-- constellation_2/runtime/truth/pillars_v1/<DAY>/event_ledger.v1.jsonl
-- constellation_2/runtime/truth/pillars_v1/<DAY>/decisions/<DECISION_ID>.submission_decision_record.v1.json
-- constellation_2/runtime/truth/pillars_v1/<DAY>/daily_execution_state.v1.json
-- constellation_2/runtime/truth/pillars_v1/<DAY>/day_root_anchor.v1.json
-- constellation_2/runtime/truth/pillars_v1/<DAY>/bundles/{determinism,model_governance,execution_quality}_bundle.v1.json
+- .../pillars_v1r1/<DAY>/inputs_frozen.v1.json
+- .../pillars_v1r1/<DAY>/event_ledger.v1.jsonl
+- .../pillars_v1r1/<DAY>/decisions/<DECISION_ID>.submission_decision_record.v1.json
+- .../pillars_v1r1/<DAY>/daily_execution_state.v1.json
+- .../pillars_v1r1/<DAY>/day_root_anchor.v1.json
+- .../pillars_v1r1/<DAY>/bundles/{determinism,model_governance,execution_quality}_bundle.v1.json
+
+Execution-evidence collapse (Bundle B, bootstrap phase):
+For each submission_id directory under execution_evidence_v1/submissions/<DAY>/<SUBMISSION_ID>/,
+emit ONE atomic submission_decision_record.v1.json containing evidence pointers + sha256s.
 
 Fail-closed:
-- refuses future day (C2_TEST_DAY_QUARANTINE_POLICY_V1 via enforce_operational_day_key_invariant_v1)
-- refuses template day keys via strict numeric day parser
+- refuses future day (C2_TEST_DAY_QUARANTINE_POLICY_V1)
+- refuses template day keys
 - refuses missing required upstream inputs (writes nothing if cannot prove inputs)
-
-Runnability:
-  cd /home/node/constellation_2_runtime
-  python3 ops/tools/run_pillars_v1_day_bootstrap.py --day_utc YYYY-MM-DD
 """
 
 from __future__ import annotations
@@ -52,7 +56,8 @@ from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteE
 REPO_ROOT = _REPO_ROOT_FROM_FILE
 TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
-PILLARS_ROOT = (TRUTH / "pillars_v1").resolve()
+# Revisioned pillars root to avoid immutable overwrite collisions.
+PILLARS_ROOT = (TRUTH / "pillars_v1r1").resolve()
 
 SCHEMA_INPUTS_FROZEN = "governance/04_DATA/SCHEMAS/C2/PILLARS/inputs_frozen.v1.schema.json"
 SCHEMA_DECISION = "governance/04_DATA/SCHEMAS/C2/PILLARS/submission_decision_record.v1.schema.json"
@@ -73,6 +78,7 @@ PATH_REGIME = TRUTH / "monitoring_v1/regime_snapshot_v2"
 PATH_PIPE = TRUTH / "reports/pipeline_manifest_v1"
 PATH_OPVER = TRUTH / "reports/operator_gate_verdict_v1"
 
+PATH_EXEC_SUBMISSIONS = TRUTH / "execution_evidence_v1/submissions"
 PATH_EXEC_MANIFESTS = TRUTH / "execution_evidence_v1/manifests"
 PATH_BROKER_LOG = TRUTH / "execution_evidence_v1/broker_events"
 
@@ -163,24 +169,77 @@ def _load_engine_registry() -> Tuple[Dict[str, Any], str]:
     return (reg, reg_sha)
 
 
+def _collect_submission_evidence(day: str, submission_id: str) -> Tuple[List[Dict[str, str]], str, str, List[str]]:
+    """
+    Returns:
+      - input_manifest entries for evidence files
+      - disposition: ALLOW|BLOCK
+      - status: OK|DEGRADED
+      - reason_codes
+    """
+    reason_codes: List[str] = []
+    input_manifest: List[Dict[str, str]] = []
+
+    sub_dir = (PATH_EXEC_SUBMISSIONS / day / submission_id).resolve()
+    if not sub_dir.exists() or not sub_dir.is_dir():
+        raise SystemExit(f"FAIL: MISSING_EXECUTION_EVIDENCE_SUBMISSION_DIR: {sub_dir}")
+
+    files: List[Tuple[str, str, bool]] = [
+        ("broker_submission_record.v2.json", "broker_submission_record_v2", True),
+        ("execution_event_record.v1.json", "execution_event_record_v1", False),
+        ("veto_record.v1.json", "veto_record_v1", False),
+        ("binding_record.v1.json", "binding_record_v1", False),
+        ("mapping_ledger_record.v1.json", "mapping_ledger_record_v1", False),
+        ("order_plan.v1.json", "order_plan_v1", False),
+    ]
+
+    veto_present = False
+    missing_optional = False
+
+    for fname, ftype, required in files:
+        p = (sub_dir / fname).resolve()
+        if p.exists() and p.is_file():
+            sha = _sha256_file(p)
+            input_manifest.append({"type": ftype, "path": str(p), "sha256": sha})
+            if fname == "veto_record.v1.json":
+                veto_present = True
+        else:
+            if required:
+                raise SystemExit(f"FAIL: REQUIRED_EVIDENCE_FILE_MISSING: {p}")
+            missing_optional = True
+            reason_codes.append(f"MISSING_OPTIONAL_EVIDENCE:{ftype}")
+
+    mf = (PATH_EXEC_MANIFESTS / day / f"{submission_id}.manifest.json").resolve()
+    if mf.exists() and mf.is_file():
+        input_manifest.append({"type": "execution_evidence_submission_manifest", "path": str(mf), "sha256": _sha256_file(mf)})
+    else:
+        missing_optional = True
+        reason_codes.append("MISSING_OPTIONAL_EVIDENCE:submission_manifest")
+
+    disposition = "BLOCK" if veto_present else "ALLOW"
+    status = "DEGRADED" if missing_optional else "OK"
+
+    reason_codes.append("BOOTSTRAP_COMPILED_FROM_EXECUTION_EVIDENCE_V1")
+    reason_codes = sorted(list(dict.fromkeys(reason_codes)))
+
+    return (input_manifest, disposition, status, reason_codes)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_pillars_v1_day_bootstrap")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
     args = ap.parse_args()
 
     day = _parse_day_utc_strict(args.day_utc)
-
-    # policy enforcement: refuse future-day operational truth writes
     enforce_operational_day_key_invariant_v1(day)
 
     git_sha = _git_sha()
     produced_utc = f"{day}T23:59:59Z"
 
     out_day_dir = (PILLARS_ROOT / day).resolve()
-    out_decisions = (out_day_dir / "decisions").resolve()
-    out_bundles = (out_day_dir / "bundles").resolve()
+    out_decisions_dir = (out_day_dir / "decisions").resolve()
+    out_bundles_dir = (out_day_dir / "bundles").resolve()
 
-    # --- Resolve required upstream inputs (fail-closed) ---
     pos_path = _pick_positions(day)
     nav_path = (PATH_NAV / day / "nav.json").resolve()
     alloc_path = (PATH_ALLOC / day / "summary.json").resolve()
@@ -202,7 +261,6 @@ def main() -> int:
     ]:
         _must_exist_file(p, code)
 
-    # --- inputs_frozen ---
     inputs_manifest: List[Dict[str, str]] = []
 
     def add_input(t: str, p: Path) -> None:
@@ -233,17 +291,20 @@ def main() -> int:
     inputs_path = (out_day_dir / "inputs_frozen.v1.json").resolve()
     inputs_written_path, inputs_sha = _write_json_immutable(inputs_path, inputs_obj)
 
-    # --- decision records (compiled from execution evidence manifests for that day) ---
     decisions_written: List[Tuple[str, str]] = []
     decision_record_sha256s: List[str] = []
+    decision_ids: List[str] = []
 
-    manifests_day = (PATH_EXEC_MANIFESTS / day).resolve()
-    if manifests_day.exists() and manifests_day.is_dir():
-        for mf in sorted([p for p in manifests_day.iterdir() if p.is_file() and p.name.endswith(".manifest.json")], key=lambda p: p.name):
-            submission_id = mf.name.split(".manifest.json", 1)[0].strip()
+    subs_day_dir = (PATH_EXEC_SUBMISSIONS / day).resolve()
+    if subs_day_dir.exists() and subs_day_dir.is_dir():
+        subdirs = sorted([p for p in subs_day_dir.iterdir() if p.is_dir()], key=lambda p: p.name)
+        for sd in subdirs:
+            submission_id = sd.name.strip()
             if len(submission_id) != 64:
                 continue
-            msha = _sha256_file(mf)
+
+            ev_manifest, disposition, dec_status, dec_reason_codes = _collect_submission_evidence(day, submission_id)
+
             dec_obj: Dict[str, Any] = {
                 "schema_id": "submission_decision_record",
                 "schema_version": "v1",
@@ -251,29 +312,32 @@ def main() -> int:
                 "decision_id": submission_id,
                 "produced_utc": produced_utc,
                 "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_pillars_v1_day_bootstrap.py", "git_sha": git_sha},
-                "status": "OK",
-                "decision": {"disposition": "ALLOW", "detail": None},
-                "reason_codes": ["BOOTSTRAP_FROM_EXECUTION_EVIDENCE_MANIFEST_V1"],
-                "input_manifest": [{"type": "execution_evidence_submission_manifest", "path": str(mf), "sha256": msha}],
+                "status": dec_status,
+                "decision": {"disposition": disposition, "detail": ("veto_record present" if disposition == "BLOCK" else None)},
+                "reason_codes": dec_reason_codes,
+                "input_manifest": ev_manifest,
                 "decision_sha256": None,
             }
             dec_obj["decision_sha256"] = _self_sha(dec_obj, "decision_sha256")
             validate_against_repo_schema_v1(dec_obj, REPO_ROOT, SCHEMA_DECISION)
-            out_dec_path = (out_decisions / f"{submission_id}.submission_decision_record.v1.json").resolve()
+
+            out_dec_path = (out_decisions_dir / f"{submission_id}.submission_decision_record.v1.json").resolve()
             p_written, p_sha = _write_json_immutable(out_dec_path, dec_obj)
+
             decisions_written.append((p_written, p_sha))
             decision_record_sha256s.append(p_sha)
+            decision_ids.append(submission_id)
 
     decision_count = len(decisions_written)
 
-    # --- event ledger (minimal bootstrap) ---
     ledger_lines: List[bytes] = []
-    for p_written, p_sha in decisions_written:
+    for decision_id, (p_written, p_sha) in zip(decision_ids, decisions_written):
         ev = {
-            "event_id": _sha256_bytes((day + "|" + p_written + "|" + p_sha).encode("utf-8")),
+            "event_id": _sha256_bytes((day + "|submission_decision|" + decision_id + "|" + p_sha).encode("utf-8")),
             "event_type": "submission_decision_written",
             "day_utc": day,
             "event_time_utc": produced_utc,
+            "decision_id": decision_id,
             "ref_path": p_written,
             "ref_sha256": p_sha,
         }
@@ -282,7 +346,6 @@ def main() -> int:
     ledger_path = (out_day_dir / "event_ledger.v1.jsonl").resolve()
     ledger_written_path, ledger_sha = _write_bytes_immutable(ledger_path, ledger_bytes)
 
-    # --- daily execution state ---
     daily_obj: Dict[str, Any] = {
         "schema_id": "daily_execution_state",
         "schema_version": "v1",
@@ -313,7 +376,6 @@ def main() -> int:
     daily_path = (out_day_dir / "daily_execution_state.v1.json").resolve()
     daily_written_path, daily_sha = _write_json_immutable(daily_path, daily_obj)
 
-    # --- bundles ---
     det_obj: Dict[str, Any] = {
         "schema_id": "determinism_bundle",
         "schema_version": "v1",
@@ -336,7 +398,7 @@ def main() -> int:
         },
     }
     validate_against_repo_schema_v1(det_obj, REPO_ROOT, SCHEMA_BUNDLE_DET)
-    det_path = (out_bundles / "determinism_bundle.v1.json").resolve()
+    det_path = (out_bundles_dir / "determinism_bundle.v1.json").resolve()
     _write_json_immutable(det_path, det_obj)
 
     reg, reg_sha = _load_engine_registry()
@@ -373,7 +435,7 @@ def main() -> int:
         "engines": engine_items,
     }
     validate_against_repo_schema_v1(mg_obj, REPO_ROOT, SCHEMA_BUNDLE_MODEL)
-    mg_path = (out_bundles / "model_governance_bundle.v1.json").resolve()
+    mg_path = (out_bundles_dir / "model_governance_bundle.v1.json").resolve()
     _write_json_immutable(mg_path, mg_obj)
 
     broker_log = (PATH_BROKER_LOG / day / "broker_event_log.v1.jsonl").resolve()
@@ -412,7 +474,7 @@ def main() -> int:
         },
     }
     validate_against_repo_schema_v1(eq_obj, REPO_ROOT, SCHEMA_BUNDLE_EXEC)
-    eq_path = (out_bundles / "execution_quality_bundle.v1.json").resolve()
+    eq_path = (out_bundles_dir / "execution_quality_bundle.v1.json").resolve()
     _write_json_immutable(eq_path, eq_obj)
 
     anchor_obj: Dict[str, Any] = {
@@ -436,7 +498,7 @@ def main() -> int:
     anchor_path = (out_day_dir / "day_root_anchor.v1.json").resolve()
     _write_json_immutable(anchor_path, anchor_obj)
 
-    print(f"OK: PILLARS_V1_BOOTSTRAP_WRITTEN day_utc={day} pillars_dir={out_day_dir}")
+    print(f"OK: PILLARS_V1_BOOTSTRAP_WRITTEN day_utc={day} pillars_dir={out_day_dir} decision_count={decision_count}")
     return 0
 
 

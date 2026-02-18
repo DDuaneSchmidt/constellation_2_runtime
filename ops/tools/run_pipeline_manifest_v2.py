@@ -1,26 +1,21 @@
 #!/usr/bin/env python3
 """
-run_pipeline_manifest_v1.py
+run_pipeline_manifest_v2.py
 
-Bundle A: pipeline_manifest.v1.json writer (immutable truth artifact).
+Pipeline Manifest v2 (pillars-aware, immutable truth artifact).
 
-IMPORTANT:
-This writer now emits to a revisioned output root to avoid immutable rewrite collisions:
-  constellation_2/runtime/truth/reports/pipeline_manifest_v1r1/<DAY>/pipeline_manifest.v1.json
+This writer mirrors the full v1 stage graph, with one controlled change:
 
-Schema remains pipeline_manifest.v1.schema.json (v1). Only the output directory is revisioned.
+- Stage SUBMISSION_INDEX is satisfied by:
+  - legacy submission_index.v1.json (execution_evidence_v1/submission_index/<DAY>/submission_index.v1.json), OR
+  - pillars decisions directory (pillars_v1r1 preferred, else pillars_v1) containing >=1 decision record, OR
+  - "no submissions" case (OK).
 
-Purpose (hostile-review safe):
-- One artifact answers: "is the full paper-trading pipeline structurally complete for this day?"
-- Deterministic, fail-closed on schema violations
-- Uses only runtime truth + governed schemas
-- Provides counts + deterministic directory hashes so auditors can reproduce state
+Writes:
+  constellation_2/runtime/truth/reports/pipeline_manifest_v2/<DAY>/pipeline_manifest.v2.json
 
-This is NOT a trading decision artifact. It is a structural readiness manifest.
-
-Runnability requirement:
-- Must run as:  python3 ops/tools/run_pipeline_manifest_v1.py --day_utc YYYY-MM-DD
-- Must NOT require PYTHONPATH or other environment setup.
+Run:
+  python3 ops/tools/run_pipeline_manifest_v2.py --day_utc YYYY-MM-DD
 """
 
 from __future__ import annotations
@@ -46,19 +41,15 @@ import subprocess
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple, Optional
 
-from constellation_2.phaseD.lib.enforce_operational_day_invariant_v1 import (
-    enforce_operational_day_key_invariant_v1,
-)
+from constellation_2.phaseD.lib.enforce_operational_day_invariant_v1 import enforce_operational_day_key_invariant_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
-SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/pipeline_manifest.v1.schema.json"
-
-# Revisioned output root (to avoid rewriting immutable historical artifacts)
-OUT_ROOT = (TRUTH / "reports" / "pipeline_manifest_v1r1").resolve()
+SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/pipeline_manifest.v2.schema.json"
+OUT_ROOT = (TRUTH / "reports" / "pipeline_manifest_v2").resolve()
 
 INTENTS_ROOT = (TRUTH / "intents_v1/snapshots").resolve()
 PREFLIGHT_ROOT = (TRUTH / "phaseC_preflight_v1").resolve()
@@ -80,7 +71,6 @@ ACCOUNTING_ROOT = (TRUTH / "accounting_v1").resolve()
 RISK_LEDGER_ROOT = (TRUTH / "risk_v1" / "engine_budget").resolve()
 CAP_RISK_ROOT = (TRUTH / "reports" / "capital_risk_envelope_v1").resolve()
 
-# Regime classification (authoritative v2)
 REGIME_ROOT = (TRUTH / "monitoring_v1" / "regime_snapshot_v2").resolve()
 
 RECON_ROOT_V2 = (TRUTH / "reports" / "reconciliation_report_v2").resolve()
@@ -103,14 +93,6 @@ def _git_sha() -> str:
 
 
 def _parse_day_utc(s: str) -> str:
-    """
-    Strict UTC day key validator (institutional hardening).
-
-    Requirements:
-    - exactly 10 chars: YYYY-MM-DD
-    - positions 4 and 7 are '-'
-    - all other positions MUST be digits
-    """
     d = (s or "").strip()
     if len(d) != 10 or d[4] != "-" or d[7] != "-":
         raise ValueError(f"BAD_DAY_UTC_FORMAT_EXPECTED_YYYY_MM_DD: {d!r}")
@@ -163,16 +145,7 @@ def _read_json(path: Path) -> Dict[str, Any]:
     return obj
 
 
-def _stage(
-    stage_id: str,
-    root: Path,
-    present: bool,
-    sha256: str,
-    items_total: int,
-    status: str,
-    blocking: bool,
-    reason_codes: List[str],
-) -> Dict[str, Any]:
+def _stage(stage_id: str, root: Path, present: bool, sha256: str, items_total: int, status: str, blocking: bool, reason_codes: List[str]) -> Dict[str, Any]:
     return {
         "stage_id": stage_id,
         "status": status,
@@ -198,7 +171,7 @@ def _count_decision_records(decisions_dir: Path) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(prog="run_pipeline_manifest_v1")
+    ap = argparse.ArgumentParser(prog="run_pipeline_manifest_v2")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
     args = ap.parse_args()
 
@@ -338,7 +311,7 @@ def main() -> int:
             top_reason_codes += man_rc
     stages.append(_stage("EXEC_EVIDENCE_MANIFEST", man_day, man_present, man_sha, man_count, man_status, True, man_rc))
 
-    # SUBMISSION_INDEX (legacy) — now satisfied by pillars decisions when present
+    # SUBMISSION_INDEX (pillars-aware)
     subidx_path = (SUBMISSION_INDEX_ROOT / day / "submission_index.v1.json").resolve()
     subidx_present = subidx_path.exists() and subidx_path.is_file()
 
@@ -376,47 +349,8 @@ def main() -> int:
             add_input("submission_index_v1", subidx_path, _sha256_bytes(b""))
             stages.append(_stage("SUBMISSION_INDEX", subidx_path, False, _sha256_bytes(b""), 0, si_status, True, si_rc))
 
-    # POSITIONS
-    pos_day = (POSITIONS_ROOT / day).resolve()
-    pos_present = pos_day.exists() and pos_day.is_dir()
-    pos_count = _count_files_matching(pos_day, "*.json") if pos_present else 0
-    pos_sha = _sha256_dir_deterministic(pos_day) if pos_present else _sha256_bytes(b"")
-    add_input("positions_day_dir", pos_day, pos_sha)
-    pos_rc: List[str] = []
-    pos_status = "OK" if pos_present and pos_count > 0 else ("MISSING" if not pos_present else "FAIL")
-    if not pos_present:
-        pos_rc.append("MISSING_POSITIONS_DAY_DIR")
-        blocking_failures += 1
-        top_reason_codes += pos_rc
-    elif pos_count == 0:
-        pos_rc.append("EMPTY_POSITIONS_DAY_DIR")
-        blocking_failures += 1
-        top_reason_codes += pos_rc
-    stages.append(_stage("POSITIONS", pos_day, pos_present, pos_sha, pos_count, pos_status, True, pos_rc))
-
-    # CASH_LEDGER
-    cash_day = (CASH_ROOT / day).resolve()
-    cash_present = cash_day.exists() and cash_day.is_dir()
-    cash_count = _count_files_matching(cash_day, "*.json") if cash_present else 0
-    cash_sha = _sha256_dir_deterministic(cash_day) if cash_present else _sha256_bytes(b"")
-    add_input("cash_ledger_day_dir", cash_day, cash_sha)
-    cash_rc: List[str] = []
-    cash_status = "OK" if cash_present and cash_count > 0 else ("MISSING" if not cash_present else "FAIL")
-    if not cash_present:
-        cash_rc.append("MISSING_CASH_LEDGER_DAY_DIR")
-        blocking_failures += 1
-        top_reason_codes += cash_rc
-    elif cash_count == 0:
-        cash_rc.append("EMPTY_CASH_LEDGER_DAY_DIR")
-        blocking_failures += 1
-        top_reason_codes += cash_rc
-    stages.append(_stage("CASH_LEDGER", cash_day, cash_present, cash_sha, cash_count, cash_status, True, cash_rc))
-
-    # ACCOUNTING (root is informational here)
-    acct_present = ACCOUNTING_ROOT.exists() and ACCOUNTING_ROOT.is_dir()
-    acct_sha = _sha256_dir_deterministic(ACCOUNTING_ROOT) if acct_present else _sha256_bytes(b"")
-    add_input("accounting_root", ACCOUNTING_ROOT, acct_sha)
-    stages.append(_stage("ACCOUNTING", ACCOUNTING_ROOT, acct_present, acct_sha, 0, "OK" if acct_present else "DEGRADED", False, []))
+    # The remaining stages match v1 behavior exactly (risk, capital envelope, regime, positions, cash, accounting, reconciliation, operator gate, bundled C...)
+    # For brevity and audit safety, we reuse the same logic paths by reading existing truth surfaces.
 
     # ENGINE RISK BUDGET LEDGER (required)
     risk_path = (RISK_LEDGER_ROOT / day / "engine_risk_budget_ledger.v1.json").resolve()
@@ -462,7 +396,7 @@ def main() -> int:
             top_reason_codes += cap_rc
     stages.append(_stage("CAPITAL_RISK_ENVELOPE", cap_path, cap_present, cap_sha, 1 if cap_present else 0, cap_status, True, cap_rc))
 
-    # REGIME CLASSIFICATION (required v2): status OK and blocking must be false
+    # REGIME CLASSIFICATION
     regime_path = (REGIME_ROOT / day / "regime_snapshot.v2.json").resolve()
     regime_present = regime_path.exists()
     regime_sha = _sha256_file(regime_path) if regime_present else _sha256_bytes(b"")
@@ -473,3 +407,185 @@ def main() -> int:
         regime_rc.append("MISSING_REGIME_SNAPSHOT_V2")
         blocking_failures += 1
         top_reason_codes += regime_rc
+        stages.append(_stage("REGIME_CLASSIFICATION", regime_path, regime_present, regime_sha, 0, "MISSING", True, regime_rc))
+    else:
+        try:
+            rr = _read_json(regime_path)
+            st = str(rr.get("status") or "FAIL").strip().upper()
+            blk = bool(rr.get("blocking"))
+            if st != "OK":
+                regime_status = "FAIL"
+                regime_rc.append("REGIME_STATUS_NOT_OK")
+                blocking_failures += 1
+                top_reason_codes += regime_rc
+            if blk:
+                regime_status = "FAIL"
+                regime_rc.append("REGIME_BLOCKING_TRUE")
+                blocking_failures += 1
+                top_reason_codes += regime_rc
+        except Exception:
+            regime_status = "FAIL"
+            regime_rc.append("REGIME_PARSE_ERROR")
+            blocking_failures += 1
+            top_reason_codes += regime_rc
+        stages.append(_stage("REGIME_CLASSIFICATION", regime_path, regime_present, regime_sha, 1, regime_status, True, regime_rc))
+
+    # POSITIONS
+    pos_day = (POSITIONS_ROOT / day).resolve()
+    pos_present = pos_day.exists() and pos_day.is_dir()
+    pos_count = _count_files_matching(pos_day, "*.json") if pos_present else 0
+    pos_sha = _sha256_dir_deterministic(pos_day) if pos_present else _sha256_bytes(b"")
+    add_input("positions_day_dir", pos_day, pos_sha)
+    pos_rc: List[str] = []
+    pos_status = "OK" if pos_present and pos_count > 0 else ("MISSING" if not pos_present else "FAIL")
+    if not pos_present:
+        pos_rc.append("MISSING_POSITIONS_DAY_DIR")
+        blocking_failures += 1
+        top_reason_codes += pos_rc
+    elif pos_count == 0:
+        pos_rc.append("EMPTY_POSITIONS_DAY_DIR")
+        blocking_failures += 1
+        top_reason_codes += pos_rc
+    stages.append(_stage("POSITIONS", pos_day, pos_present, pos_sha, pos_count, pos_status, True, pos_rc))
+
+    # CASH_LEDGER
+    cash_day = (CASH_ROOT / day).resolve()
+    cash_present = cash_day.exists() and cash_day.is_dir()
+    cash_count = _count_files_matching(cash_day, "*.json") if cash_present else 0
+    cash_sha = _sha256_dir_deterministic(cash_day) if cash_present else _sha256_bytes(b"")
+    add_input("cash_ledger_day_dir", cash_day, cash_sha)
+    cash_rc: List[str] = []
+    cash_status = "OK" if cash_present and cash_count > 0 else ("MISSING" if not cash_present else "FAIL")
+    if not cash_present:
+        cash_rc.append("MISSING_CASH_LEDGER_DAY_DIR")
+        blocking_failures += 1
+        top_reason_codes += cash_rc
+    elif cash_count == 0:
+        cash_rc.append("EMPTY_CASH_LEDGER_DAY_DIR")
+        blocking_failures += 1
+        top_reason_codes += cash_rc
+    stages.append(_stage("CASH_LEDGER", cash_day, cash_present, cash_sha, cash_count, cash_status, True, cash_rc))
+
+    # ACCOUNTING
+    acct_present = ACCOUNTING_ROOT.exists() and ACCOUNTING_ROOT.is_dir()
+    acct_sha = _sha256_dir_deterministic(ACCOUNTING_ROOT) if acct_present else _sha256_bytes(b"")
+    add_input("accounting_root", ACCOUNTING_ROOT, acct_sha)
+    stages.append(_stage("ACCOUNTING", ACCOUNTING_ROOT, acct_present, acct_sha, 0, "OK" if acct_present else "DEGRADED", False, []))
+
+    # RECONCILIATION
+    recon_path = (RECON_ROOT_V2 / day / "reconciliation_report.v2.json").resolve()
+    recon_present = recon_path.exists()
+    recon_sha = _sha256_file(recon_path) if recon_present else _sha256_bytes(b"")
+    add_input("reconciliation_report_v2", recon_path, recon_sha)
+    recon_rc: List[str] = []
+    recon_status = "OK" if recon_present else "MISSING"
+    if not recon_present:
+        recon_rc.append("MISSING_RECONCILIATION_REPORT")
+        blocking_failures += 1
+        top_reason_codes += recon_rc
+    stages.append(_stage("RECONCILIATION", recon_path, recon_present, recon_sha, 1 if recon_present else 0, recon_status, True, recon_rc))
+
+    # OPERATOR_GATE
+    gate_path = (GATE_ROOT / day / "operator_daily_gate.v1.json").resolve()
+    gate_present = gate_path.exists()
+    gate_sha = _sha256_file(gate_path) if gate_present else _sha256_bytes(b"")
+    add_input("operator_daily_gate_v1", gate_path, gate_sha)
+    gate_rc: List[str] = []
+    gate_status = "OK" if gate_present else "MISSING"
+    if not gate_present:
+        gate_rc.append("MISSING_OPERATOR_DAILY_GATE")
+        blocking_failures += 1
+        top_reason_codes += gate_rc
+    stages.append(_stage("OPERATOR_GATE", gate_path, gate_present, gate_sha, 1 if gate_present else 0, gate_status, True, gate_rc))
+
+    # Bundled C: kill switch
+    c_kill_path = (C_KILL_ROOT / day / "global_kill_switch_state.v1.json").resolve()
+    c_kill_present = c_kill_path.exists()
+    c_kill_sha = _sha256_file(c_kill_path) if c_kill_present else _sha256_bytes(b"")
+    add_input("bundled_c_kill_switch_state_v1", c_kill_path, c_kill_sha)
+    c_kill_rc: List[str] = []
+    c_kill_status = "OK" if c_kill_present else "MISSING"
+    if not c_kill_present:
+        c_kill_rc.append("MISSING_BUNDLED_C_KILL_SWITCH")
+        blocking_failures += 1
+        top_reason_codes += c_kill_rc
+    stages.append(_stage("BUNDLED_C_KILL_SWITCH", c_kill_path, c_kill_present, c_kill_sha, 1 if c_kill_present else 0, c_kill_status, True, c_kill_rc))
+
+    # Bundled C: lifecycle ledger
+    c_life_path = (C_LIFE_ROOT / day / "position_lifecycle_ledger.v1.json").resolve()
+    c_life_present = c_life_path.exists()
+    c_life_sha = _sha256_file(c_life_path) if c_life_present else _sha256_bytes(b"")
+    add_input("bundled_c_lifecycle_ledger_v1", c_life_path, c_life_sha)
+    c_life_rc: List[str] = []
+    c_life_status = "OK" if c_life_present else "MISSING"
+    if not c_life_present:
+        c_life_rc.append("MISSING_BUNDLED_C_LIFECYCLE_LEDGER")
+        blocking_failures += 1
+        top_reason_codes += c_life_rc
+    stages.append(_stage("BUNDLED_C_LIFECYCLE_LEDGER", c_life_path, c_life_present, c_life_sha, 1 if c_life_present else 0, c_life_status, True, c_life_rc))
+
+    # Bundled C: exposure reconciliation
+    c_recon_path = (C_RECON_ROOT / day / "exposure_reconciliation_report.v1.json").resolve()
+    c_recon_present = c_recon_path.exists()
+    c_recon_sha = _sha256_file(c_recon_path) if c_recon_present else _sha256_bytes(b"")
+    add_input("bundled_c_exposure_reconciliation_v1", c_recon_path, c_recon_sha)
+    c_recon_rc: List[str] = []
+    c_recon_status = "OK" if c_recon_present else "MISSING"
+    if not c_recon_present:
+        c_recon_rc.append("MISSING_BUNDLED_C_EXPOSURE_RECONCILIATION")
+        blocking_failures += 1
+        top_reason_codes += c_recon_rc
+    stages.append(_stage("BUNDLED_C_EXPOSURE_RECONCILIATION", c_recon_path, c_recon_present, c_recon_sha, 1 if c_recon_present else 0, c_recon_status, True, c_recon_rc))
+
+    # Bundled C: delta order plan
+    c_plan_path = (C_PLAN_ROOT / day / "delta_order_plan.v1.json").resolve()
+    c_plan_present = c_plan_path.exists()
+    c_plan_sha = _sha256_file(c_plan_path) if c_plan_present else _sha256_bytes(b"")
+    add_input("bundled_c_delta_order_plan_v1", c_plan_path, c_plan_sha)
+    c_plan_rc: List[str] = []
+    c_plan_status = "OK" if c_plan_present else "MISSING"
+    if not c_plan_present:
+        c_plan_rc.append("MISSING_BUNDLED_C_DELTA_ORDER_PLAN")
+        blocking_failures += 1
+        top_reason_codes += c_plan_rc
+    stages.append(_stage("BUNDLED_C_DELTA_ORDER_PLAN", c_plan_path, c_plan_present, c_plan_sha, 1 if c_plan_present else 0, c_plan_status, True, c_plan_rc))
+
+    status = "OK"
+    if blocking_failures > 0:
+        status = "FAIL"
+    elif nonblocking_degradations > 0:
+        status = "DEGRADED"
+
+    top_reason_codes = sorted(list(dict.fromkeys(top_reason_codes)))
+
+    manifest = {
+        "schema_id": "pipeline_manifest",
+        "schema_version": "v2",
+        "day_utc": day,
+        "produced_utc": _utc_now(),
+        "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_pipeline_manifest_v2.py", "git_sha": _git_sha()},
+        "status": status,
+        "reason_codes": top_reason_codes,
+        "notes": notes,
+        "input_manifest": input_manifest,
+        "stages": stages,
+        "summary": {"blocking_failures": int(blocking_failures), "nonblocking_degradations": int(nonblocking_degradations)},
+    }
+
+    validate_against_repo_schema_v1(manifest, REPO_ROOT, SCHEMA_RELPATH)
+
+    out_dir = (OUT_ROOT / day).resolve()
+    out_path = (out_dir / "pipeline_manifest.v2.json").resolve()
+    payload = (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+
+    try:
+        wr = write_file_immutable_v1(path=out_path, data=payload, create_dirs=True)
+    except ImmutableWriteError as e:
+        raise SystemExit(f"FAIL: IMMUTABLE_WRITE_ERROR: {e}") from e
+
+    print(f"OK: PIPELINE_MANIFEST_V2_WRITTEN day_utc={day} status={status} path={wr.path} sha256={wr.sha256} action={wr.action}")
+    return 0 if status == "OK" else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
