@@ -1,1 +1,0 @@
-{"artifact_sha256":"10da4316eec92c6e21cbc038dc4e0f45034a98108a6390f41ac8a61f8d3dad3b","fail_closed":true,"path":"reports/broker_reconciliation_v1/2026-02-20/broker_reconciliation.v1.json","produced_utc":"2026-02-19T14:20:14Z","producer":"ops/tools/run_broker_reconciliation_day_v1.py","schema_id":"C2_LATEST_POINTER_V1","status":"MISSING_INPUTS"}
