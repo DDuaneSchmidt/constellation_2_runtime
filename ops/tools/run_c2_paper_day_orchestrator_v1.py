@@ -143,6 +143,21 @@ def main() -> int:
         ],
     )
 
+    # --- Bundle A4: Engine Linkage Snapshot (soft) ---
+    ok, _rc = _run_stage_soft(
+        "A4_ENGINE_LINKAGE_SNAPSHOT_V1",
+        [
+            "python3",
+            "ops/tools/run_engine_linkage_snapshot_day_v1.py",
+            "--day_utc",
+            day,
+            "--producer_git_sha",
+            current_git_sha,
+            "--producer_repo",
+            "constellation_2_runtime",
+        ],
+    )
+
     # --- Stage 0 ---
     _run_stage_strict(
         "BUNDLEB_ENGINE_MODEL_REGISTRY_GATE",

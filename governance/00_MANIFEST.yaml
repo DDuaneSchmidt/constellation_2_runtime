@@ -451,3 +451,7 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/ACCOUNTING/accounting_nav.v2.schema.json
     class: C2_SCHEMA
     status: DRAFT
+  - id: C2_ENGINE_LINKAGE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/engine_linkage.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT

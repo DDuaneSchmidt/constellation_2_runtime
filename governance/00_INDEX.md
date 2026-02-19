@@ -137,3 +137,4 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/03_CONTRACTS/C2/EXECUTION_EVIDENCE/execution_reconciliation_spine_v1.md` — Execution Reconciliation Spine v1 (broker vs truth)
 
 - [Accounting NAV Schema JSON (V2)](04_DATA/SCHEMAS/C2/ACCOUNTING/accounting_nav.v2.schema.json) — id: C2_ACCOUNTING_NAV_SCHEMA_V2 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/ACCOUNTING/accounting_nav.v2.schema.json`
+- [Engine Linkage Snapshot Schema JSON (V1)](04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/engine_linkage.v1.schema.json) — id: C2_ENGINE_LINKAGE_SCHEMA_V1 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/engine_linkage.v1.schema.json`
