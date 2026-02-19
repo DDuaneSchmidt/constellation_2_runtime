@@ -1,0 +1,8 @@
+{
+  "cash_end": "100000.00",
+  "fees_total": "0.00",
+  "positions": [
+    {"symbol":"AAPL","sec_type":"STK","qty":"10","avg_cost":"180.00","market_value":"1820.00","currency":"USD"}
+  ],
+  "notes": ["exported from IB portal, end-of-day"]
+}

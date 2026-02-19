@@ -1,0 +1,1 @@
+{"artifact_sha256":"80809d449287c2c5b9e03697d4e6c5765a255b95f97d8b50c46bea2424758233","fail_closed":true,"path":"reports/engine_correlation_gate_v1/2026-02-19/engine_correlation_gate.v1.json","produced_utc":"2026-02-19T15:11:02Z","producer":"ops/tools/run_c2_engine_correlation_gate_v1.py","schema_id":"C2_LATEST_POINTER_V1","status":"MISSING_INPUTS"}

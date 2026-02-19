@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_ENGINE_LINKAGE_V1",
+  "title": "C2 Engine Linkage Snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "day_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "linkage"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_ENGINE_LINKAGE_V1" },
+    "schema_version": { "const": 1 },
+    "produced_utc": { "type": "string" },
+    "day_utc": { "type": "string" },
+    "producer": {
+      "type": "object",
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string" },
+        "git_sha": { "type": "string" },
+        "module": { "type": "string" }
+      }
+    },
+    "status": { "type": "string" },
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "linkage": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["instrument_id", "engine_id"],
+        "properties": {
+          "instrument_id": { "type": "string" },
+          "engine_id": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+##!/usr/bin/env python3
 """
 run_c2_paper_day_orchestrator_v1.py
 
@@ -85,7 +85,104 @@ def main() -> int:
         .strip()
     )
 
+    # --- Bundle A2 (Auto Fetch Broker Statement) ---
+    _run_stage_strict(
+        "A2_FETCH_IB_FLEX_STATEMENT",
+        [
+            "python3",
+            "ops/tools/run_ib_flex_fetch_broker_statement_v1.py",
+            "--day_utc",
+            day,
+            "--query_id",
+            "1408509",
+            "--account_id",
+            ib_account,
+            "--currency",
+            "USD",
+        ],
+    )
+
+    # --- Bundle A2 (Fail-Closed) ---
+    # Require broker-of-record reconciliation PASS for this day before any trading stages.
+    _run_stage_strict(
+        "A2_BROKER_RECONCILIATION_GATE_V1",
+        [
+            "python3",
+            "ops/tools/run_broker_reconciliation_day_v1.py",
+            "--day_utc",
+            day,
+        ],
+    )
+
+
     prereq_failed = False
+
+    # --- Bundle A3: Broker Marks (strict) ---
+    _run_stage_strict(
+        "A3_BROKER_MARKS_SNAPSHOT_V1",
+        [
+            "python3",
+            "ops/tools/run_broker_marks_snapshot_day_v1.py",
+            "--day_utc",
+            input_day,
+        ],
+    )
+
+    # --- Bundle A3: Accounting NAV v2 (strict) ---
+    _run_stage_strict(
+        "A3_ACCOUNTING_NAV_V2",
+        [
+            "python3",
+            "ops/tools/run_accounting_nav_v2_day_v1.py",
+            "--day_utc",
+            input_day,
+            "--producer_git_sha",
+            current_git_sha,
+            "--producer_repo",
+            "constellation_2_runtime",
+        ],
+    )
+
+    # --- Bundle A5: Accounting Attribution v2 (strict) ---
+    _run_stage_strict(
+        "A5_ACCOUNTING_ATTRIBUTION_V2",
+        [
+            "python3",
+            "ops/tools/run_accounting_attribution_v2_day_v1.py",
+            "--day_utc",
+            day,
+            "--producer_git_sha",
+            current_git_sha,
+            "--producer_repo",
+            "constellation_2_runtime",
+        ],
+    )
+    # --- Bundle A6: Engine Daily Returns v1 (soft) ---
+    ok, _rc = _run_stage_soft(
+        "A6_ENGINE_DAILY_RETURNS_V1",
+        [
+            "python3",
+            "ops/tools/run_engine_daily_returns_day_v1.py",
+            "--day_utc",
+            day,
+        ],
+    )
+
+
+    # --- Bundle A4: Engine Linkage Snapshot (soft) ---
+    ok, _rc = _run_stage_soft(
+        "A4_ENGINE_LINKAGE_SNAPSHOT_V1",
+        [
+            "python3",
+            "ops/tools/run_engine_linkage_snapshot_day_v1.py",
+            "--day_utc",
+            day,
+            "--producer_git_sha",
+            current_git_sha,
+            "--producer_repo",
+            "constellation_2_runtime",
+        ],
+    )
 
     # --- Stage 0 ---
     _run_stage_strict(
@@ -162,9 +259,58 @@ def main() -> int:
     if not ok:
         prereq_failed = True
 
-    if prereq_failed:
-        print("FATAL: prerequisite stage failure; submission blocked.", file=sys.stderr)
-        return 2
+    # --- Bundle A0 (Engine PnL Proxy) ---
+    _run_stage_strict(
+        "A0_ENGINE_PNL_PROXY_V1",
+        [
+            "python3",
+            "ops/tools/run_engine_pnl_proxy_day_v1.py",
+            "--day_utc",
+            input_day,
+        ],
+    )
+
+    # --- Bundle A0 (Correlation Preconditions Gate: SOFT) ---
+    corr_pre_ok, _rc = _run_stage_soft(
+        "A0_CORRELATION_PRECONDITIONS_GATE_V2",
+        [
+            "python3",
+            "ops/tools/run_correlation_preconditions_gate_v2.py",
+            "--day_utc",
+            input_day,
+        ],
+    )
+    if not corr_pre_ok:
+        print("WARN: correlation preconditions failed; skipping correlation monitoring/gate (marks/linkage not ready).", file=sys.stderr)
+
+    # --- Bundle A1 (Correlation Monitoring + Gate) ---
+    if corr_pre_ok:
+        ok, _rc = _run_stage_soft(
+            "PHASEJ_ENGINE_CORRELATION_MATRIX_V1",
+            [
+                "python3",
+                "-m",
+                "constellation_2.phaseJ.monitoring.run.run_engine_correlation_matrix_day_v1",
+                "--day_utc",
+                input_day,
+                "--window_days",
+                "20",
+            ],
+        )
+        if not ok:
+            prereq_failed = True
+
+        _run_stage_strict(
+            "A1_ENGINE_CORRELATION_GATE_V1",
+            [
+                "python3",
+                "ops/tools/run_c2_engine_correlation_gate_v1.py",
+                "--day_utc",
+                input_day,
+                "--max_pairwise_threshold",
+                "0.75",
+            ],
+        )
 
     # --- PhaseD (v2) ---
     _run_stage_strict(

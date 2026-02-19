@@ -186,7 +186,16 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/reconciliation_report.v2.schema.json
     class: C2_SCHEMA
     status: DRAFT
-  - id: C2_REPORTS_CAPITAL_RISK_ENVELOPE_SCHEMA_V1
+  - id: C2_REPORTS_BROKER_RECONCILIATION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_ENGINE_CORRELATION_GATE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/engine_correlation_gate.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+- id: C2_REPORTS_CAPITAL_RISK_ENVELOPE_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
@@ -217,6 +226,10 @@ documents:
 
   - id: C2_EXECUTION_EVIDENCE_BROKER_EVENT_DAY_MANIFEST_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_event_day_manifest.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_EXECUTION_EVIDENCE_BROKER_STATEMENT_NORMALIZED_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_statement_normalized.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
 
@@ -433,4 +446,20 @@ documents:
   - id: C2_EXECUTION_RECONCILIATION_SPINE_V1
     path: governance/03_CONTRACTS/C2/EXECUTION_EVIDENCE/execution_reconciliation_spine_v1.md
     class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_ACCOUNTING_NAV_SCHEMA_V2
+    path: governance/04_DATA/SCHEMAS/C2/ACCOUNTING/accounting_nav.v2.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_ENGINE_LINKAGE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/engine_linkage.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_ACCOUNTING_ENGINE_ATTRIBUTION_SCHEMA_V2
+    path: governance/04_DATA/SCHEMAS/C2/ACCOUNTING/engine_attribution.v2.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_CORRELATION_PRECONDITIONS_GATE_SCHEMA_V2
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/correlation_preconditions_gate.v2.schema.json
+    class: C2_SCHEMA
     status: DRAFT
