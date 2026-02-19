@@ -51,3 +51,6 @@ constellation_2/phaseF/**/inputs/**
 
 # Phase D local outputs (Phase D directories are governed, but outputs inside are not committed)
 constellation_2/phaseD/outputs/
+# C2 runtime outputs (must never be committed)
+constellation_2/runtime/truth/reports/
+constellation_2/runtime/truth/monitoring_v2/

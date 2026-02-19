@@ -48,8 +48,13 @@ TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RISK/global_kill_switch_state.v1.schema.json"
 OUT_ROOT = (TRUTH / "risk_v1" / "kill_switch_v1").resolve()
 
-PATH_OPERATOR_VERDICT = (TRUTH / "reports" / "operator_gate_verdict_v1").resolve()
-PATH_CAPITAL_ENV = (TRUTH / "reports" / "capital_risk_envelope_v1").resolve()
+# Prefer v2 when present; fall back to v1.
+PATH_OPERATOR_VERDICT_V1 = (TRUTH / "reports" / "operator_gate_verdict_v1").resolve()
+PATH_OPERATOR_VERDICT_V2 = (TRUTH / "reports" / "operator_gate_verdict_v2").resolve()
+
+PATH_CAPITAL_ENV_V1 = (TRUTH / "reports" / "capital_risk_envelope_v1").resolve()
+PATH_CAPITAL_ENV_V2 = (TRUTH / "reports" / "capital_risk_envelope_v2").resolve()
+
 PATH_RECON_V2 = (TRUTH / "reports" / "reconciliation_report_v2").resolve()
 
 
@@ -100,9 +105,25 @@ def _load_inputs(day: str) -> Tuple[List[Dict[str, str]], List[str], Dict[str, A
     rc: List[str] = []
     decisions: Dict[str, Any] = {}
 
-    verdict_path = (PATH_OPERATOR_VERDICT / day / "operator_gate_verdict.v1.json").resolve()
-    cap_path = (PATH_CAPITAL_ENV / day / "capital_risk_envelope.v1.json").resolve()
+    # --- Prefer v2 artifacts when present; fall back to v1. ---
+    verdict_type = "operator_gate_verdict_v1_missing"
+    verdict_path = (PATH_OPERATOR_VERDICT_V1 / day / "operator_gate_verdict.v1.json").resolve()
+    p_verdict_v2 = (PATH_OPERATOR_VERDICT_V2 / day / "operator_gate_verdict.v2.json").resolve()
+    if p_verdict_v2.exists():
+        verdict_type = "operator_gate_verdict_v2"
+        verdict_path = p_verdict_v2
+
+    cap_type = "capital_risk_envelope_v1"
+    cap_path = (PATH_CAPITAL_ENV_V1 / day / "capital_risk_envelope.v1.json").resolve()
+    p_cap_v2 = (PATH_CAPITAL_ENV_V2 / day / "capital_risk_envelope.v2.json").resolve()
+    if p_cap_v2.exists():
+        cap_type = "capital_risk_envelope_v2"
+        cap_path = p_cap_v2
+
+    recon_type = "reconciliation_report_v2_missing"
     recon_path = (PATH_RECON_V2 / day / "reconciliation_report.v2.json").resolve()
+    if recon_path.exists():
+        recon_type = "reconciliation_report_v2"
 
     def add(t: str, p: Path) -> None:
         if p.exists() and p.is_file():
@@ -111,9 +132,9 @@ def _load_inputs(day: str) -> Tuple[List[Dict[str, str]], List[str], Dict[str, A
             input_manifest.append({"type": f"{t}_missing", "path": str(p), "sha256": _sha256_bytes(b"")})
             rc.append("C2_KILL_SWITCH_DEFAULT_ACTIVE_MISSING_INPUTS")
 
-    add("operator_gate_verdict_v1", verdict_path)
-    add("capital_risk_envelope_v1", cap_path)
-    add("reconciliation_report_v2", recon_path)
+    add(verdict_type, verdict_path)
+    add(cap_type, cap_path)
+    add(recon_type, recon_path)
 
     if verdict_path.exists():
         try:
@@ -155,7 +176,27 @@ def main() -> int:
 
     input_manifest, reason_codes, decisions = _load_inputs(day)
 
-    state = "ACTIVE" if ("C2_KILL_SWITCH_DEFAULT_ACTIVE_MISSING_INPUTS" in reason_codes or "C2_KILL_SWITCH_INPUT_SCHEMA_INVALID" in reason_codes) else "INACTIVE"
+    # PAPER bootstrap policy:
+    # - If required inputs are missing BUT there are no submissions yet, allow entries (paper trading bootstrap).
+    # - Once submissions exist, enforce strict fail-closed rules.
+    subs_dir = (TRUTH / "execution_evidence_v1" / "submissions" / day).resolve()
+    submissions_present = False
+    if subs_dir.exists() and subs_dir.is_dir():
+        for p in subs_dir.iterdir():
+            if p.is_dir():
+                submissions_present = True
+                break
+
+    missing_or_invalid = (
+        ("C2_KILL_SWITCH_DEFAULT_ACTIVE_MISSING_INPUTS" in reason_codes)
+        or ("C2_KILL_SWITCH_INPUT_SCHEMA_INVALID" in reason_codes)
+    )
+
+    if missing_or_invalid and (not submissions_present):
+        state = "INACTIVE"
+        reason_codes.append("C2_PAPER_BOOTSTRAP_ALLOW_ENTRIES_NO_SUBMISSIONS_YET")
+    else:
+        state = "ACTIVE" if missing_or_invalid else "INACTIVE"
 
     if state == "INACTIVE":
         if decisions.get("operator_gate_ready") is not True:

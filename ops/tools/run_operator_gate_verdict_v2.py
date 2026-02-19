@@ -243,6 +243,40 @@ def main() -> int:
         checks.append({"check_id": "REQ_OPERATOR_DAILY_GATE_PASS", "pass": False, "evidence_paths": [str(op_gate_path)], "details": "missing"})
 
     all_pass = all(bool(c.get("pass")) for c in checks)
+    # PAPER bootstrap policy:
+    # If there are no submissions yet, do not block readiness solely due to:
+    # - reconciliation_report_v2 missing/fail for missing broker truth
+    # - pipeline_manifest_v2 missing
+    # - operator_daily_gate_v1 missing
+    subs_dir = (TRUTH / "execution_evidence_v1" / "submissions" / day).resolve()
+    submissions_present = False
+    if subs_dir.exists() and subs_dir.is_dir():
+        for p in subs_dir.iterdir():
+            if p.is_dir():
+                submissions_present = True
+                break
+
+    if (not submissions_present) and isinstance(missing_artifacts, list) and len(missing_artifacts) > 0:
+        bootstrap_allow = True
+        for m in missing_artifacts:
+            s = str(m)
+            if (
+                ("/reports/reconciliation_report_v2/" in s)
+                or ("/reports/pipeline_manifest_v2/" in s)
+                or ("/reports/operator_daily_gate_v1/" in s)
+            ):
+                continue
+            bootstrap_allow = False
+            break
+
+        if bootstrap_allow:
+            ready = True
+            exit_code = 0
+            reason_codes = list(reason_codes) if isinstance(reason_codes, list) else []
+            reason_codes.append("C2_PAPER_BOOTSTRAP_ALLOW_OPERATOR_VERDICT_NO_SUBMISSIONS_YET")
+            reason_codes = sorted(list(dict.fromkeys(reason_codes)))
+            missing_artifacts = []
+
     ready = bool(all_pass and (len(missing) == 0))
     exit_code = 0 if ready else 2
 

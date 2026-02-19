@@ -44,7 +44,10 @@ PATH_ACCOUNTING_NAV = (TRUTH / "accounting_v1/nav").resolve()
 PATH_ECON_DD_SNAP = (TRUTH / "monitoring_v1/economic_nav_drawdown_v1/nav_snapshot").resolve()
 PATH_RISK_LEDGER = (TRUTH / "risk_v1/engine_budget").resolve()
 
-PATH_CAP_ENVELOPE = (TRUTH / "reports/capital_risk_envelope_v1").resolve()
+# Prefer v2 envelope if present; fall back to v1.
+PATH_CAP_ENVELOPE_V1 = (TRUTH / "reports/capital_risk_envelope_v1").resolve()
+PATH_CAP_ENVELOPE_V2 = (TRUTH / "reports/capital_risk_envelope_v2").resolve()
+
 PATH_SUBMISSIONS = (TRUTH / "execution_evidence_v1/submissions").resolve()
 PATH_BROKER_MANIFEST = (TRUTH / "execution_evidence_v1/broker_events").resolve()
 
@@ -54,13 +57,6 @@ OUT_ROOT = (TRUTH / "monitoring_v1/regime_snapshot_v2").resolve()
 def _parse_day_utc(s: str) -> str:
     """
     Strict UTC day key validator (institutional hardening).
-
-    Requirements:
-    - exactly 10 chars: YYYY-MM-DD
-    - positions 4 and 7 are '-'
-    - all other positions MUST be digits
-
-    This rejects templates like "YYYY-MM-DD".
     """
     d = (s or "").strip()
     if len(d) != 10 or d[4] != "-" or d[7] != "-":
@@ -205,7 +201,14 @@ def main() -> int:
     if risk_status == "":
         risk_status = "MISSING"
 
-    cap_path = (PATH_CAP_ENVELOPE / day / "capital_risk_envelope.v1.json").resolve()
+    # --- Prefer v2 envelope if present; fall back to v1. ---
+    cap_type = "capital_risk_envelope_v1"
+    cap_path = (PATH_CAP_ENVELOPE_V1 / day / "capital_risk_envelope.v1.json").resolve()
+    p_cap_v2 = (PATH_CAP_ENVELOPE_V2 / day / "capital_risk_envelope.v2.json").resolve()
+    if p_cap_v2.exists():
+        cap_type = "capital_risk_envelope_v2"
+        cap_path = p_cap_v2
+
     cap_present = cap_path.exists()
     cap_status = "MISSING"
     cap_severe = False
@@ -285,7 +288,7 @@ def main() -> int:
         {"type": "engine_risk_budget_ledger_v1", "path": str(risk_path), "sha256": _sha256_file(risk_path)},
     ]
     if cap_present:
-        input_manifest.append({"type": "capital_risk_envelope_v1", "path": str(cap_path), "sha256": _sha256_file(cap_path)})
+        input_manifest.append({"type": cap_type, "path": str(cap_path), "sha256": _sha256_file(cap_path)})
     if broker_required:
         if broker_present:
             input_manifest.append({"type": "broker_event_day_manifest_v1", "path": str(broker_manifest_path), "sha256": _sha256_file(broker_manifest_path)})
