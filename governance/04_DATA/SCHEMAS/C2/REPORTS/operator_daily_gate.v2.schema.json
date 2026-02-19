@@ -68,14 +68,19 @@
         "cash_ledger_integrity_ok",
         "positions_snapshot_present",
         "allocation_summary_present",
-        "capital_risk_envelope_v2_status"
+        "capital_risk_envelope_v2_status",
+        "exit_reconciliation_present",
+        "exit_intents_satisfied_when_obligations_exist"
       ],
       "properties": {
         "reconciliation_v3_status": { "type": "string", "enum": ["OK", "FAIL", "MISSING"] },
         "cash_ledger_integrity_ok": { "type": "boolean" },
         "positions_snapshot_present": { "type": "boolean" },
         "allocation_summary_present": { "type": "boolean" },
-        "capital_risk_envelope_v2_status": { "type": "string", "enum": ["PASS", "FAIL", "MISSING"] }
+        "capital_risk_envelope_v2_status": { "type": "string", "enum": ["PASS", "FAIL", "MISSING"] },
+
+        "exit_reconciliation_present": { "type": "boolean" },
+        "exit_intents_satisfied_when_obligations_exist": { "type": "boolean" }
       }
     }
   }

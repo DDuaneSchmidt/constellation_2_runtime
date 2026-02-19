@@ -1,0 +1,96 @@
+{
+  "$id": "https://constellation.local/schemas/equity_order_plan.v2.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EquityOrderPlan v2 (adds required lineage fields for PhaseD submit boundary v2+)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "plan_id",
+    "created_at_utc",
+    "intent_hash",
+    "structure",
+    "symbol",
+    "currency",
+    "action",
+    "qty_shares",
+    "order_terms",
+    "engine_id",
+    "source_intent_id",
+    "intent_sha256"
+  ],
+  "properties": {
+    "schema_id": { "const": "equity_order_plan" },
+    "schema_version": { "const": "v2" },
+
+    "plan_id": { "type": "string", "minLength": 16, "maxLength": 128 },
+    "created_at_utc": { "type": "string", "format": "date-time" },
+
+    "intent_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+
+    "structure": { "type": "string", "enum": ["EQUITY_SPOT"] },
+    "symbol": { "type": "string", "minLength": 1, "maxLength": 16 },
+    "currency": { "type": "string", "minLength": 3, "maxLength": 3 },
+
+    "action": { "type": "string", "enum": ["BUY", "SELL"] },
+
+    "qty_shares": { "type": "integer", "minimum": 1, "maximum": 10000000 },
+
+    "order_terms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order_type", "time_in_force"],
+      "properties": {
+        "order_type": { "type": "string", "enum": ["LIMIT", "MARKET"] },
+        "limit_price": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]+(\\.[0-9]+)?$"
+        },
+        "time_in_force": { "type": "string", "enum": ["DAY", "GTC"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "order_type": { "const": "LIMIT" } } },
+          "then": { "required": ["limit_price"], "properties": { "limit_price": { "type": "string" } } }
+        },
+        {
+          "if": { "properties": { "order_type": { "const": "MARKET" } } },
+          "then": { "properties": { "limit_price": { "const": null } } }
+        }
+      ]
+    },
+
+    "risk_proof": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["max_loss_usd", "defined_risk_proven"],
+      "properties": {
+        "defined_risk_proven": { "type": "boolean" },
+        "max_loss_usd": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" }
+      }
+    },
+
+    "engine_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Required lineage: producing engine id."
+    },
+
+    "source_intent_id": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 128,
+      "description": "Required lineage: source intent id (exposure_intent.intent_id)."
+    },
+
+    "intent_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Required lineage: sha256 of the *source* intent file bytes (ExposureIntent)."
+    },
+
+    "canonical_json_hash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }
+  }
+}

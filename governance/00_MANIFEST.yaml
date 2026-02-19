@@ -399,3 +399,38 @@ documents:
     path: governance/05_CONTRACTS/C2/pillars_v1.deprecation_notice.md
     class: C2_CONTRACT
     status: ACTIVE
+  # Bundle 1 — Execution & Fill Spine (governed outputs + contracts)
+  - id: C2_EXECUTION_EVENT_STREAM_RECORD_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/execution_event_stream_record.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_FILL_LEDGER_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/fill_ledger.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_EXECUTION_RECONCILIATION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/execution_reconciliation.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_ORDER_LIFECYCLE_EVENT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/order_lifecycle_event.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_EXECUTION_OBSERVER_SPINE_V1
+    path: governance/03_CONTRACTS/C2/EXECUTION_EVIDENCE/execution_observer_spine_v1.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_FILL_LEDGER_SPINE_V1
+    path: governance/03_CONTRACTS/C2/EXECUTION_EVIDENCE/fill_ledger_spine_v1.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_EXECUTION_RECONCILIATION_SPINE_V1
+    path: governance/03_CONTRACTS/C2/EXECUTION_EVIDENCE/execution_reconciliation_spine_v1.md
+    class: C2_CONTRACT
+    status: DRAFT

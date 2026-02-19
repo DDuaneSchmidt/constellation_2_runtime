@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_EXIT_RECONCILIATION_V1",
+  "title": "C2 Exit Reconciliation v1 (deterministic exit obligations from positions snapshot + intents)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "day_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "input_manifest",
+    "obligations"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_EXIT_RECONCILIATION_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+
+    "produced_utc": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "module": { "type": "string", "minLength": 1 },
+        "build": { "type": "object" }
+      }
+    },
+
+    "status": {
+      "type": "string",
+      "enum": [
+        "OK",
+        "DEGRADED_MISSING_ENGINE_INTENTS",
+        "DEGRADED_UNKNOWN_INSTRUMENT_FIELDS",
+        "FAIL_CORRUPT_INPUTS",
+        "FAIL_SCHEMA_VIOLATION",
+        "FAIL_MISSING_POSITIONS_SNAPSHOT"
+      ]
+    },
+
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256", "day_utc", "producer"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "positions_snapshot",
+              "engine_intents_day_dir",
+              "other"
+            ]
+          },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "day_utc": {
+            "anyOf": [
+              { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+              { "type": "null" }
+            ]
+          },
+          "producer": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+
+    "obligations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/exit_obligation" }
+    }
+  },
+
+  "$defs": {
+    "instrument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "underlying", "expiry", "strike", "right"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["EQUITY", "OPTION", "UNKNOWN"] },
+        "underlying": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+        "expiry": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+        "strike": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+        "right": { "anyOf": [{ "type": "string", "enum": ["C", "P"] }, { "type": "null" }] }
+      }
+    },
+
+    "exit_obligation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "engine_id",
+        "position_id",
+        "instrument",
+        "currency",
+        "recommended_exposure_type",
+        "recommended_target_notional_pct",
+        "reason_code",
+        "upstream"
+      ],
+      "properties": {
+        "engine_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "position_id": { "type": "string", "minLength": 16, "maxLength": 128 },
+        "instrument": { "$ref": "#/$defs/instrument" },
+        "currency": { "type": "string", "minLength": 3, "maxLength": 3 },
+
+        "recommended_exposure_type": {
+          "type": "string",
+          "enum": ["LONG_EQUITY", "SHORT_VOL_DEFINED"]
+        },
+
+        "recommended_target_notional_pct": {
+          "type": "string",
+          "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$",
+          "description": "Exit obligation target is normally '0' (explicit flatten)."
+        },
+
+        "reason_code": { "type": "string", "minLength": 1 },
+
+        "upstream": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["positions_snapshot_sha256"],
+          "properties": {
+            "positions_snapshot_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+            "engine_intents_day_dir_sha256": { "anyOf": [{ "type": "string", "pattern": "^[a-f0-9]{64}$" }, { "type": "null" }] }
+          }
+        }
+      }
+    }
+  }
+}

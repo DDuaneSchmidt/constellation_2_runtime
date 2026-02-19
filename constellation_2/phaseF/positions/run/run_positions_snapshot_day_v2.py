@@ -24,7 +24,6 @@ def _utc_now_iso() -> str:
 
 
 def _parse_price_to_cents(price_str: str) -> int:
-    # Same deterministic cents parsing approach as cash ledger.
     if not isinstance(price_str, str):
         raise ValueError("AVG_PRICE_NOT_STRING")
     s = price_str.strip()
@@ -41,7 +40,6 @@ def _parse_price_to_cents(price_str: str) -> int:
     if frac and not frac.isdigit():
         raise ValueError("AVG_PRICE_INVALID_FRAC")
     if len(frac) > 2:
-        # truncate NOT allowed; fail closed
         raise ValueError("AVG_PRICE_TOO_MANY_DECIMALS")
     frac2 = (frac + "00")[:2]
     return int(whole) * 100 + int(frac2)
@@ -79,6 +77,44 @@ def build_latest_ptr_obj_v2(
     }
 
 
+def _safe_idle_snapshot_obj(
+    *,
+    day_utc: str,
+    producer_sha: str,
+    producer_repo: str,
+    exec_day_dir: Path,
+    exec_manifest_sha: str,
+) -> Dict[str, Any]:
+    # SAFE_IDLE: no submissions => empty positions, OK.
+    return {
+        "schema_id": "C2_POSITIONS_SNAPSHOT_V2",
+        "schema_version": 2,
+        "produced_utc": f"{day_utc}T00:00:00Z",
+        "day_utc": day_utc,
+        "producer": {
+            "repo": producer_repo,
+            "git_sha": producer_sha,
+            "module": "constellation_2/phaseF/positions/run/run_positions_snapshot_day_v2.py",
+        },
+        "status": "OK",
+        "reason_codes": ["NO_SUBMISSIONS_EMPTY_POSITIONS_V2"],
+        "input_manifest": [
+            {
+                "type": "execution_evidence",
+                "path": str(exec_day_dir),
+                "sha256": exec_manifest_sha,
+                "day_utc": day_utc,
+                "producer": "execution_evidence_v1",
+            }
+        ],
+        "positions": {
+            "currency": "USD",
+            "asof_utc": f"{day_utc}T00:00:00Z",
+            "items": [],
+            "notes": ["SAFE_IDLE: no submissions present for day; emitting empty positions snapshot (v2)"],
+        },
+    }
+
 
 def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
@@ -114,84 +150,87 @@ def main(argv: List[str] | None = None) -> int:
             print("FAIL: EXISTING_SNAPSHOT_UNREADABLE_FOR_SHA_LOCK", file=sys.stderr)
             return 4
 
-    if not dp_exec.submissions_day_dir.exists():
-        failure = build_failure_obj_v1(
+    # SAFE_IDLE detection:
+    # - If submissions_day_dir missing => treat as no submissions (safe idle)
+    # - If exists but contains no submission directories => safe idle
+    exec_dir = dp_exec.submissions_day_dir
+    if (not exec_dir.exists()) or (not exec_dir.is_dir()):
+        snap_obj = _safe_idle_snapshot_obj(
             day_utc=day_utc,
+            producer_sha=producer_sha,
             producer_repo=producer_repo,
-            producer_git_sha=producer_sha,
-            producer_module="constellation_2/phaseF/positions/run/run_positions_snapshot_day_v2.py",
-            status="FAIL_CORRUPT_INPUTS",
-            reason_codes=["EXECUTION_EVIDENCE_DAY_DIR_MISSING"],
-            input_manifest=[{"type": "execution_evidence", "path": str(dp_exec.submissions_day_dir), "sha256": "0"*64, "day_utc": day_utc, "producer": "execution_evidence_v1"}],
-            code="FAIL_CORRUPT_INPUTS",
-            message=f"Missing execution evidence day directory: {str(dp_exec.submissions_day_dir)}",
-            details={"missing_path": str(dp_exec.submissions_day_dir)},
-            attempted_outputs=[{"path": str(dp_pos.snapshot_path), "sha256": None}, {"path": str(dp_pos.latest_path), "sha256": None}],
+            exec_day_dir=exec_dir,
+            exec_manifest_sha="0" * 64,
         )
-        _ = write_failure_immutable_v1(failure_path=dp_pos.failure_path, failure_obj=failure)
-        print("FAIL: EXECUTION_EVIDENCE_DAY_DIR_MISSING (failure artifact written)")
-        return 2
+    else:
+        sub_dirs = sorted([p for p in exec_dir.iterdir() if p.is_dir()], key=lambda p: p.name)
+        if len(sub_dirs) == 0:
+            snap_obj = _safe_idle_snapshot_obj(
+                day_utc=day_utc,
+                producer_sha=producer_sha,
+                producer_repo=producer_repo,
+                exec_day_dir=exec_dir,
+                exec_manifest_sha="0" * 64,
+            )
+        else:
+            # Build one position per submission with an execution event.
+            items: List[Dict[str, Any]] = []
+            reason_codes: List[str] = ["BOOTSTRAP_UNKNOWN_INSTRUMENT_V2"]
+            status = "DEGRADED_MISSING_INSTRUMENT_IDENTITY"
 
-    # Build one position per submission with an execution event.
-    items: List[Dict[str, Any]] = []
-    reason_codes: List[str] = ["BOOTSTRAP_UNKNOWN_INSTRUMENT_V2"]
-    status = "DEGRADED_MISSING_INSTRUMENT_IDENTITY"
+            for sd in sub_dirs:
+                submission_id = sd.name.strip()
+                p_exec = sd / "execution_event_record.v1.json"
+                if not p_exec.exists():
+                    continue
+                evt = _read_json_obj(p_exec)
+                validate_against_repo_schema_v1(evt, REPO_ROOT, "constellation_2/schemas/execution_event_record.v1.schema.json")
 
-    sub_dirs = sorted([p for p in dp_exec.submissions_day_dir.iterdir() if p.is_dir()], key=lambda p: p.name)
-    for sd in sub_dirs:
-        submission_id = sd.name.strip()
-        p_exec = sd / "execution_event_record.v1.json"
-        if not p_exec.exists():
-            continue
-        evt = _read_json_obj(p_exec)
-        validate_against_repo_schema_v1(evt, REPO_ROOT, "constellation_2/schemas/execution_event_record.v1.schema.json")
+                qty = int(evt["filled_qty"])
+                avg_cents = _parse_price_to_cents(str(evt["avg_price"]))
 
-        qty = int(evt["filled_qty"])
-        avg_cents = _parse_price_to_cents(str(evt["avg_price"]))
+                pos_id = str(evt.get("binding_hash") or submission_id)
 
-        # Deterministic identity: use binding_hash if present; else submission_id.
-        pos_id = str(evt.get("binding_hash") or submission_id)
+                items.append(
+                    {
+                        "position_id": pos_id,
+                        "engine_id": "unknown",
+                        "instrument": {"kind": "UNKNOWN", "underlying": None, "expiry": None, "strike": None, "right": None},
+                        "qty": qty,
+                        "avg_cost_cents": avg_cents,
+                        "market_exposure_type": "UNDEFINED_RISK",
+                        "max_loss_cents": None,
+                        "opened_day_utc": day_utc,
+                        "status": "OPEN",
+                    }
+                )
 
-        items.append(
-            {
-                "position_id": pos_id,
-                "engine_id": "unknown",
-                "instrument": {"kind": "UNKNOWN", "underlying": None, "expiry": None, "strike": None, "right": None},
-                "qty": qty,
-                "avg_cost_cents": avg_cents,
-                "market_exposure_type": "UNDEFINED_RISK",
-                "max_loss_cents": None,
-                "opened_day_utc": day_utc,
-                "status": "OPEN",
+            snap_obj = {
+                "schema_id": "C2_POSITIONS_SNAPSHOT_V2",
+                "schema_version": 2,
+                "produced_utc": f"{day_utc}T00:00:00Z",
+                "day_utc": day_utc,
+                "producer": {
+                    "repo": producer_repo,
+                    "git_sha": producer_sha,
+                    "module": "constellation_2/phaseF/positions/run/run_positions_snapshot_day_v2.py",
+                },
+                "status": status,
+                "reason_codes": sorted(set(reason_codes)),
+                "input_manifest": [
+                    {"type": "execution_evidence", "path": str(exec_dir), "sha256": "0" * 64, "day_utc": day_utc, "producer": "execution_evidence_v1"}
+                ],
+                "positions": {
+                    "currency": "USD",
+                    "asof_utc": f"{day_utc}T00:00:00Z",
+                    "items": items,
+                    "notes": ["bootstrap: instrument identity unavailable in execution evidence v1; emitting UNKNOWN instruments"],
+                },
             }
-        )
 
-    snapshot_obj: Dict[str, Any] = {
-        "schema_id": "C2_POSITIONS_SNAPSHOT_V2",
-        "schema_version": 2,
-        "produced_utc": f"{day_utc}T00:00:00Z",
-        "day_utc": day_utc,
-        "producer": {
-            "repo": producer_repo,
-            "git_sha": producer_sha,
-            "module": "constellation_2/phaseF/positions/run/run_positions_snapshot_day_v2.py",
-        },
-        "status": status,
-        "reason_codes": sorted(set(reason_codes)),
-        "input_manifest": [
-            {"type": "execution_evidence", "path": str(dp_exec.submissions_day_dir), "sha256": "0"*64, "day_utc": day_utc, "producer": "execution_evidence_v1"}
-        ],
-        "positions": {
-            "currency": "USD",
-            "asof_utc": f"{day_utc}T00:00:00Z",
-            "items": items,
-            "notes": ["bootstrap: instrument identity unavailable in execution evidence v1; emitting UNKNOWN instruments"],
-        },
-    }
-
-    validate_against_repo_schema_v1(snapshot_obj, REPO_ROOT, SCHEMA_POSITIONS_SNAPSHOT_V2)
+    validate_against_repo_schema_v1(snap_obj, REPO_ROOT, SCHEMA_POSITIONS_SNAPSHOT_V2)
     try:
-        snap_bytes = canonical_json_bytes_v1(snapshot_obj) + b"\n"
+        snap_bytes = canonical_json_bytes_v1(snap_obj) + b"\n"
     except CanonicalizationError as e:
         print(f"FAIL: SNAPSHOT_CANONICALIZATION_ERROR: {e}", file=sys.stderr)
         return 4
@@ -208,8 +247,8 @@ def main(argv: List[str] | None = None) -> int:
         producer_repo=producer_repo,
         producer_git_sha=producer_sha,
         producer_module="constellation_2/phaseF/positions/run/run_positions_snapshot_day_v2.py",
-        status=status,
-        reason_codes=sorted(set(reason_codes)),
+        status=str(snap_obj.get("status") or "OK"),
+        reason_codes=list(snap_obj.get("reason_codes") or []),
         snapshot_path=str(dp_pos.snapshot_path),
         snapshot_sha256=wr_snap.sha256,
     )

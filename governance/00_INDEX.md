@@ -113,6 +113,10 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/submission_index.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_event_raw.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_event_day_manifest.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/execution_event_stream_record.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/fill_ledger.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/execution_reconciliation.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/order_lifecycle_event.v1.schema.json`
 
 ### Risk schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/RISK/engine_model_registry.v1.schema.json`
@@ -125,3 +129,6 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - governance/03_CONTRACTS/C2_TRUE_EVIDENCE_SPINE_V2.md — True Evidence Spine v2 (broker-truth contract)
 - governance/03_CONTRACTS/C2_PHASED_SUBMISSION_RUNNER_V1.md — Phase D Submission Runner v1 (audit-grade submission entrypoint)
 - governance/03_CONTRACTS/C2_LATEST_POINTER_MUTABILITY_CONTRACT_V1.md — Latest Pointer Mutability Contract v1 (atomic mutable latest pointers; day-keyed truth remains immutable)
+- `governance/03_CONTRACTS/C2/EXECUTION_EVIDENCE/execution_observer_spine_v1.md` — Execution Observer Spine v1 (pull-based broker snapshot)
+- `governance/03_CONTRACTS/C2/EXECUTION_EVIDENCE/fill_ledger_spine_v1.md` — Fill Ledger Spine v1 (deterministic aggregation)
+- `governance/03_CONTRACTS/C2/EXECUTION_EVIDENCE/execution_reconciliation_spine_v1.md` — Execution Reconciliation Spine v1 (broker vs truth)

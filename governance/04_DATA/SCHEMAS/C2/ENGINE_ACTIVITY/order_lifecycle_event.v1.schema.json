@@ -1,0 +1,84 @@
+{
+  "$id": "https://constellation.local/schemas/C2_ORDER_LIFECYCLE_EVENT_V1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "C2 Order Lifecycle Event v1 (state machine trace)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "day_utc",
+    "producer",
+    "submission_id",
+    "binding_hash",
+    "engine_id",
+    "source_intent_id",
+    "intent_sha256",
+    "from_state",
+    "to_state",
+    "event_time_utc",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_ORDER_LIFECYCLE_EVENT_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "module": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "submission_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "binding_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "engine_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "source_intent_id": { "type": "string", "minLength": 16, "maxLength": 128 },
+    "intent_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+
+    "from_state": {
+      "type": "string",
+      "enum": [
+        "INTENT_CREATED",
+        "PREFLIGHT_ALLOWED",
+        "OMS_RELEASED",
+        "SUBMITTED",
+        "PRESUBMITTED",
+        "ACKNOWLEDGED",
+        "PARTIALLY_FILLED",
+        "FILLED",
+        "CANCELLED",
+        "REJECTED",
+        "UNKNOWN"
+      ]
+    },
+
+    "to_state": {
+      "type": "string",
+      "enum": [
+        "INTENT_CREATED",
+        "PREFLIGHT_ALLOWED",
+        "OMS_RELEASED",
+        "SUBMITTED",
+        "PRESUBMITTED",
+        "ACKNOWLEDGED",
+        "PARTIALLY_FILLED",
+        "FILLED",
+        "CANCELLED",
+        "REJECTED",
+        "UNKNOWN"
+      ]
+    },
+
+    "event_time_utc": { "type": "string", "format": "date-time" },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

@@ -6,6 +6,11 @@ Operator Daily Gate v2 (SAFE_IDLE aware; forward-only readiness).
 
 Run:
   python3 ops/tools/run_operator_daily_gate_v2.py --day_utc YYYY-MM-DD
+
+v2 Exit Enforcement (Bundle A2):
+- Requires exit_reconciliation_v1/<DAY>/exit_reconciliation.v1.json to exist (fail-closed).
+- If exit_reconciliation lists obligations, requires that explicit EXIT intents (ExposureIntent v1 with target_notional_pct=="0")
+  exist in intents_v1/snapshots/<DAY>/ for each obligated engine_id.
 """
 
 from __future__ import annotations
@@ -45,6 +50,15 @@ CAP_ENV_ROOT_V2 = (TRUTH / "reports" / "capital_risk_envelope_v2").resolve()
 
 CASH_SNAP_ROOT = (TRUTH / "cash_ledger_v1/snapshots").resolve()
 CASH_FAIL_ROOT = (TRUTH / "cash_ledger_v1/failures").resolve()
+
+# Bundle A1 output
+EXIT_RECON_ROOT = (TRUTH / "exit_reconciliation_v1").resolve()
+# Engine intents root (mixed schemas; we only check ExposureIntent v1 exits)
+INTENTS_ROOT = (TRUTH / "intents_v1/snapshots").resolve()
+
+RC_EXIT_RECON_MISSING = "MISSING_EXIT_RECONCILIATION_V1"
+RC_EXIT_RECON_PARSE_FAIL = "EXIT_RECONCILIATION_PARSE_ERROR_FAILCLOSED"
+RC_EXIT_INTENTS_UNSATISFIED = "EXIT_INTENTS_UNSATISFIED_FAILCLOSED"
 
 
 def _git_sha() -> str:
@@ -95,6 +109,43 @@ def _cash_snapshot_day_integrity(day_utc: str, cash_obj: Dict[str, Any]) -> Tupl
     return (len(rc) == 0, rc)
 
 
+def _scan_exit_intents(day: str) -> Dict[str, int]:
+    """
+    Return engine_id -> count of EXIT exposure intents for that engine_id.
+    Exit intent definition:
+      schema_id == "exposure_intent"
+      schema_version == "v1"
+      target_notional_pct == "0"
+    """
+    out: Dict[str, int] = {}
+    d = (INTENTS_ROOT / day).resolve()
+    if not d.exists() or not d.is_dir():
+        return out
+    for p in d.iterdir():
+        if not p.is_file() or not p.name.endswith(".json"):
+            continue
+        try:
+            o = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(o, dict):
+            continue
+        if o.get("schema_id") != "exposure_intent":
+            continue
+        if o.get("schema_version") != "v1":
+            continue
+        if str(o.get("target_notional_pct") or "").strip() != "0":
+            continue
+        eng = o.get("engine")
+        if not isinstance(eng, dict):
+            continue
+        engine_id = str(eng.get("engine_id") or "").strip()
+        if not engine_id:
+            continue
+        out[engine_id] = out.get(engine_id, 0) + 1
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_operator_daily_gate_v2")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
@@ -113,9 +164,7 @@ def main() -> int:
     if recon_path.exists():
         input_manifest.append({"type": "reconciliation_report_v3", "path": str(recon_path), "sha256": _sha256_file(recon_path)})
         recon = _read_json(recon_path)
-        recon_status = str(recon.get("status") or "MISSING").strip().upper()
-        if recon_status == "":
-            recon_status = "MISSING"
+        recon_status = str(recon.get("status") or "MISSING").strip().upper() or "MISSING"
         if recon_status != "OK":
             reason_codes.append("RECONCILIATION_V3_NOT_OK")
     else:
@@ -157,9 +206,7 @@ def main() -> int:
     if cap_path.exists():
         input_manifest.append({"type": "capital_risk_envelope_v2", "path": str(cap_path), "sha256": _sha256_file(cap_path)})
         ce = _read_json(cap_path)
-        cap_status = str(ce.get("status") or "MISSING").strip().upper()
-        if cap_status == "":
-            cap_status = "MISSING"
+        cap_status = str(ce.get("status") or "MISSING").strip().upper() or "MISSING"
         if cap_status != "PASS":
             reason_codes.append("CAPITAL_RISK_ENVELOPE_V2_NOT_PASS")
     else:
@@ -194,6 +241,43 @@ def main() -> int:
         reason_codes.append("MISSING_CASH_LEDGER_SNAPSHOT")
         input_manifest.append({"type": "cash_ledger_snapshot_missing", "path": str(cash_path), "sha256": _sha256_bytes(b"")})
 
+    # ---- Exit reconciliation enforcement ----
+    exit_recon_path = (EXIT_RECON_ROOT / day / "exit_reconciliation.v1.json").resolve()
+    exit_recon_present = False
+    exit_intents_satisfied = True
+
+    obligations_engine_ids: List[str] = []
+    if exit_recon_path.exists() and exit_recon_path.is_file():
+        exit_recon_present = True
+        input_manifest.append({"type": "exit_reconciliation_v1", "path": str(exit_recon_path), "sha256": _sha256_file(exit_recon_path)})
+        try:
+            er = _read_json(exit_recon_path)
+            obligations = er.get("obligations")
+            if not isinstance(obligations, list):
+                raise ValueError("EXIT_RECON_OBLIGATIONS_NOT_LIST")
+            for ob in obligations:
+                if isinstance(ob, dict):
+                    eid = str(ob.get("engine_id") or "").strip()
+                    if eid:
+                        obligations_engine_ids.append(eid)
+        except Exception:
+            reason_codes.append(RC_EXIT_RECON_PARSE_FAIL)
+            exit_intents_satisfied = False
+    else:
+        reason_codes.append(RC_EXIT_RECON_MISSING)
+        input_manifest.append({"type": "exit_reconciliation_v1_missing", "path": str(exit_recon_path), "sha256": _sha256_bytes(b"")})
+        exit_intents_satisfied = False
+
+    obligations_engine_ids = sorted(set(obligations_engine_ids))
+
+    if obligations_engine_ids:
+        exit_map = _scan_exit_intents(day)
+        missing_eids = [eid for eid in obligations_engine_ids if exit_map.get(eid, 0) <= 0]
+        if missing_eids:
+            reason_codes.append(RC_EXIT_INTENTS_UNSATISFIED)
+            notes.append(f"missing_exit_intents_for_engines={','.join(missing_eids)}")
+            exit_intents_satisfied = False
+
     status = "PASS"
     if reason_codes:
         status = "FAIL"
@@ -216,6 +300,8 @@ def main() -> int:
             "positions_snapshot_present": bool(pos_present),
             "allocation_summary_present": bool(alloc_present),
             "capital_risk_envelope_v2_status": (cap_status if cap_status in ("PASS", "FAIL", "MISSING") else "MISSING"),
+            "exit_reconciliation_present": bool(exit_recon_present),
+            "exit_intents_satisfied_when_obligations_exist": bool(exit_intents_satisfied),
         },
     }
 

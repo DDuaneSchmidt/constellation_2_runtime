@@ -45,8 +45,18 @@
 
     "status": {
       "type": "string",
-      "enum": ["SUBMITTED", "ACKNOWLEDGED", "REJECTED", "CANCELLED", "UNKNOWN"],
-      "description": "Submission status at time of recording."
+      "enum": [
+        "PRESUBMITTED",
+        "SUBMITTED",
+        "ACKNOWLEDGED",
+        "REJECTED",
+        "CANCELLED",
+        "INACTIVE",
+        "PARTIALLY_FILLED",
+        "FILLED",
+        "UNKNOWN"
+      ],
+      "description": "Submission status at time of recording (IB-compatible)."
     },
 
     "broker_ids": {
