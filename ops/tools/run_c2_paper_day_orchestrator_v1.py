@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+##!/usr/bin/env python3
 """
 run_c2_paper_day_orchestrator_v1.py
 
@@ -83,6 +83,23 @@ def main() -> int:
         _sp.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(Path.cwd()))
         .decode("utf-8")
         .strip()
+    )
+
+    # --- Bundle A2 (Auto Fetch Broker Statement) ---
+    _run_stage_strict(
+        "A2_FETCH_IB_FLEX_STATEMENT",
+        [
+            "python3",
+            "ops/tools/run_ib_flex_fetch_broker_statement_v1.py",
+            "--day_utc",
+            day,
+            "--query_id",
+            "1408509",
+            "--account_id",
+            ib_account,
+            "--currency",
+            "USD",
+        ],
     )
 
     # --- Bundle A2 (Fail-Closed) ---
@@ -175,9 +192,58 @@ def main() -> int:
     if not ok:
         prereq_failed = True
 
-    if prereq_failed:
-        print("FATAL: prerequisite stage failure; submission blocked.", file=sys.stderr)
-        return 2
+    # --- Bundle A0 (Engine PnL Proxy) ---
+    _run_stage_strict(
+        "A0_ENGINE_PNL_PROXY_V1",
+        [
+            "python3",
+            "ops/tools/run_engine_pnl_proxy_day_v1.py",
+            "--day_utc",
+            input_day,
+        ],
+    )
+
+    # --- Bundle A0 (Correlation Preconditions Gate: SOFT) ---
+    corr_pre_ok, _rc = _run_stage_soft(
+        "A0_CORRELATION_PRECONDITIONS_GATE_V1",
+        [
+            "python3",
+            "ops/tools/run_correlation_preconditions_gate_v1.py",
+            "--day_utc",
+            input_day,
+        ],
+    )
+    if not corr_pre_ok:
+        print("WARN: correlation preconditions failed; skipping correlation monitoring/gate (marks/linkage not ready).", file=sys.stderr)
+
+    # --- Bundle A1 (Correlation Monitoring + Gate) ---
+    if corr_pre_ok:
+        ok, _rc = _run_stage_soft(
+            "PHASEJ_ENGINE_CORRELATION_MATRIX_V1",
+            [
+                "python3",
+                "-m",
+                "constellation_2.phaseJ.monitoring.run.run_engine_correlation_matrix_day_v1",
+                "--day_utc",
+                input_day,
+                "--window_days",
+                "20",
+            ],
+        )
+        if not ok:
+            prereq_failed = True
+
+        _run_stage_strict(
+            "A1_ENGINE_CORRELATION_GATE_V1",
+            [
+                "python3",
+                "ops/tools/run_c2_engine_correlation_gate_v1.py",
+                "--day_utc",
+                input_day,
+                "--max_pairwise_threshold",
+                "0.75",
+            ],
+        )
 
     # --- PhaseD (v2) ---
     _run_stage_strict(

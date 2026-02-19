@@ -190,6 +190,10 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
+  - id: C2_REPORTS_ENGINE_CORRELATION_GATE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/engine_correlation_gate.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
 
 - id: C2_REPORTS_CAPITAL_RISK_ENVELOPE_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v1.schema.json

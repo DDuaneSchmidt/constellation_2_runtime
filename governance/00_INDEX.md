@@ -109,6 +109,7 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/exposure_reconciliation_report.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/delta_order_plan.v1.schema.json`
 - [Broker Reconciliation Schema JSON (V1)](04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v1.schema.json) — id: C2_REPORTS_BROKER_RECONCILIATION_SCHEMA_V1 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v1.schema.json`
+- [Engine Correlation Gate Schema JSON (V1)](04_DATA/SCHEMAS/C2/REPORTS/engine_correlation_gate.v1.schema.json) — id: C2_REPORTS_ENGINE_CORRELATION_GATE_SCHEMA_V1 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/engine_correlation_gate.v1.schema.json`
 
 ### Execution evidence schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/submission_index.v1.schema.json`

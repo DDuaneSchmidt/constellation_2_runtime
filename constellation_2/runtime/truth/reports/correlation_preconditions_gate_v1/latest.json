@@ -1,0 +1,1 @@
+{"artifact_sha256":"d581b4621783821a2ea9e42e399b65b2602410b0ebce57ee285607fe728d0a23","fail_closed":true,"path":"reports/correlation_preconditions_gate_v1/2026-02-19/correlation_preconditions_gate.v1.json","produced_utc":"2026-02-19T15:30:20Z","producer":"ops/tools/run_correlation_preconditions_gate_v1.py","schema_id":"C2_LATEST_POINTER_V1","status":"FAIL"}

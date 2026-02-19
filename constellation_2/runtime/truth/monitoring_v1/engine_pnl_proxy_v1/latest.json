@@ -1,0 +1,1 @@
+{"artifact_sha256":"b0c3a25aaf6a26b54a80dc4ba1e7add47aff2f80c9ba46eda66009a069f4311d","path":"monitoring_v1/engine_pnl_proxy_v1/2026-02-19/engine_pnl_proxy.v1.json","produced_utc":"2026-02-19T15:30:20Z","producer":"ops/tools/run_engine_pnl_proxy_day_v1.py","schema_id":"C2_LATEST_POINTER_V1","status":"DEGRADED_MISSING_MARKS"}
