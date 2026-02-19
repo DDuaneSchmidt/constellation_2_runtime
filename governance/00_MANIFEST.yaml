@@ -194,8 +194,7 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/engine_correlation_gate.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
-
-- id: C2_REPORTS_CAPITAL_RISK_ENVELOPE_SCHEMA_V1
+  - id: C2_REPORTS_CAPITAL_RISK_ENVELOPE_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
@@ -461,5 +460,13 @@ documents:
     status: DRAFT
   - id: C2_REPORTS_CORRELATION_PRECONDITIONS_GATE_SCHEMA_V2
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/correlation_preconditions_gate.v2.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_RISK_SYSTEMIC_RISK_GATE_SCHEMA_V2
+    path: governance/04_DATA/SCHEMAS/C2/RISK/systemic_risk_gate.v2.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_BROKER_RECONCILIATION_SCHEMA_V2
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v2.schema.json
     class: C2_SCHEMA
     status: DRAFT

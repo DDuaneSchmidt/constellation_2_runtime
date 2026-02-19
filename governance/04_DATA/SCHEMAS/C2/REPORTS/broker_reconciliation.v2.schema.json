@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_BROKER_RECONCILIATION_V2_SCHEMA",
+  "title": "C2 Broker Reconciliation v2 (Deterministic produced_utc, Immutable Output)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "day_utc",
+    "producer",
+    "status",
+    "fail_closed",
+    "broker_statement_path",
+    "broker_statement_sha256",
+    "internal_positions_path",
+    "internal_positions_sha256",
+    "internal_cash_ledger_path",
+    "internal_cash_ledger_sha256",
+    "cash_diff",
+    "position_mismatches",
+    "tolerances",
+    "notes"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "C2_BROKER_RECONCILIATION_V2" },
+    "schema_version": { "type": "string", "const": "1.0.0" },
+
+    "produced_utc": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "producer": { "type": "string", "minLength": 1, "maxLength": 256 },
+
+    "status": { "type": "string", "enum": ["PASS", "FAIL", "MISSING_INPUTS"] },
+    "fail_closed": { "type": "boolean" },
+
+    "broker_statement_path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "broker_statement_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+
+    "internal_positions_path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "internal_positions_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+
+    "internal_cash_ledger_path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "internal_cash_ledger_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+
+    "cash_diff": { "type": "string", "minLength": 1, "maxLength": 64 },
+
+    "position_mismatches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["symbol", "sec_type", "internal_qty", "broker_qty", "qty_diff"],
+        "properties": {
+          "symbol": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "sec_type": { "type": "string", "minLength": 1, "maxLength": 32 },
+          "internal_qty": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "broker_qty": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "qty_diff": { "type": "string", "minLength": 1, "maxLength": 64 }
+        }
+      }
+    },
+
+    "tolerances": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cash_abs", "qty_abs"],
+      "properties": {
+        "cash_abs": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "qty_abs": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+
+    "notes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+    }
+  }
+}

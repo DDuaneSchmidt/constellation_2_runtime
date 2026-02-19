@@ -110,6 +110,7 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/delta_order_plan.v1.schema.json`
 - [Broker Reconciliation Schema JSON (V1)](04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v1.schema.json) — id: C2_REPORTS_BROKER_RECONCILIATION_SCHEMA_V1 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v1.schema.json`
 - [Engine Correlation Gate Schema JSON (V1)](04_DATA/SCHEMAS/C2/REPORTS/engine_correlation_gate.v1.schema.json) — id: C2_REPORTS_ENGINE_CORRELATION_GATE_SCHEMA_V1 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/engine_correlation_gate.v1.schema.json`
+- [Broker Reconciliation Schema JSON (V2)](04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v2.schema.json) — id: C2_REPORTS_BROKER_RECONCILIATION_SCHEMA_V2 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v2.schema.json`
 
 ### Execution evidence schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/submission_index.v1.schema.json`
@@ -141,3 +142,4 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - [Engine Attribution Schema JSON (V2)](04_DATA/SCHEMAS/C2/ACCOUNTING/engine_attribution.v2.schema.json) — id: C2_ACCOUNTING_ENGINE_ATTRIBUTION_SCHEMA_V2 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/ACCOUNTING/engine_attribution.v2.schema.json`
 - [Engine Daily Returns Schema JSON (V1)](04_DATA/SCHEMAS/C2/MONITORING/engine_daily_returns.v1.schema.json) — id: C2_MONITORING_ENGINE_DAILY_RETURNS_SCHEMA_V1 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/MONITORING/engine_daily_returns.v1.schema.json`
 - [Correlation Preconditions Gate Schema JSON (V2)](04_DATA/SCHEMAS/C2/REPORTS/correlation_preconditions_gate.v2.schema.json) — id: C2_REPORTS_CORRELATION_PRECONDITIONS_GATE_SCHEMA_V2 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/correlation_preconditions_gate.v2.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/RISK/systemic_risk_gate.v2.schema.json`

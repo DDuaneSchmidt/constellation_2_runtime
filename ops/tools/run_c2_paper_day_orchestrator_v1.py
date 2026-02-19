@@ -85,35 +85,18 @@ def main() -> int:
         .strip()
     )
 
-    # --- Bundle A2 (Auto Fetch Broker Statement) ---
-    _run_stage_strict(
-        "A2_FETCH_IB_FLEX_STATEMENT",
-        [
-            "python3",
-            "ops/tools/run_ib_flex_fetch_broker_statement_v1.py",
-            "--day_utc",
-            day,
-            "--query_id",
-            "1408509",
-            "--account_id",
-            ib_account,
-            "--currency",
-            "USD",
-        ],
-    )
-
     # --- Bundle A2 (Fail-Closed) ---
     # Require broker-of-record reconciliation PASS for this day before any trading stages.
+
     _run_stage_strict(
-        "A2_BROKER_RECONCILIATION_GATE_V1",
+        "A2_BROKER_RECONCILIATION_GATE_V2",
         [
             "python3",
-            "ops/tools/run_broker_reconciliation_day_v1.py",
+            "ops/tools/run_broker_reconciliation_day_v2.py",
             "--day_utc",
             day,
         ],
     )
-
 
     prereq_failed = False
 
@@ -210,6 +193,69 @@ def main() -> int:
         if not ok:
             prereq_failed = True
 
+    # --- Bundle X prerequisites (strict; root-level systemic inputs) ---
+    # These artifacts are REQUIRED inputs to the systemic risk gate and must exist BEFORE OMS/submission.
+
+    _run_stage_strict(
+        "X_ENGINE_RISK_BUDGET_LEDGER_V1",
+        [
+            "python3",
+            "ops/tools/run_engine_risk_budget_ledger_v1.py",
+            "--day_utc",
+            input_day,
+        ],
+    )
+
+    _run_stage_strict(
+        "X_REGIME_SNAPSHOT_V2",
+        [
+            "python3",
+            "ops/tools/run_regime_snapshot_v2.py",
+            "--day_utc",
+            input_day,
+        ],
+    )
+
+    _run_stage_strict(
+        "X_GLOBAL_KILL_SWITCH_STATE_V1",
+        [
+            "python3",
+            "ops/tools/run_global_kill_switch_v1.py",
+            "--day_utc",
+            input_day,
+        ],
+    )
+
+    # --- Bundle X prerequisite: PhaseJ Engine Correlation Matrix (strict) ---
+    # Institutional requirement: systemic correlation constraint must be available BEFORE OMS/submission.
+    _run_stage_strict(
+        "PHASEJ_ENGINE_CORRELATION_MATRIX_V1",
+        [
+            "python3",
+            "-m",
+            "constellation_2.phaseJ.monitoring.run.run_engine_correlation_matrix_day_v1",
+            "--day_utc",
+            input_day,
+            "--window_days",
+            "20",
+        ],
+    )
+
+    # --- Bundle X: Systemic Risk Gate (strict; root-level enforcement) ---
+    # Must execute after engines (intents exist) and before PhaseC/OMS.
+    # Fail-closed: non-zero exit blocks downstream stages including PhaseD.
+    _run_stage_strict(
+        "X_SYSTEMIC_RISK_GATE_V2",
+        [
+            "python3",
+            "ops/tools/run_systemic_risk_gate_v2.py",
+            "--day_utc",
+            input_day,
+            "--max_pairwise_threshold",
+            "0.75",
+        ],
+    )
+
     # --- PhaseC ---
     ok, _rc = _run_stage_soft(
         "PHASEC_PREFLIGHT",
@@ -270,47 +316,9 @@ def main() -> int:
         ],
     )
 
-    # --- Bundle A0 (Correlation Preconditions Gate: SOFT) ---
-    corr_pre_ok, _rc = _run_stage_soft(
-        "A0_CORRELATION_PRECONDITIONS_GATE_V2",
-        [
-            "python3",
-            "ops/tools/run_correlation_preconditions_gate_v2.py",
-            "--day_utc",
-            input_day,
-        ],
-    )
-    if not corr_pre_ok:
-        print("WARN: correlation preconditions failed; skipping correlation monitoring/gate (marks/linkage not ready).", file=sys.stderr)
-
-    # --- Bundle A1 (Correlation Monitoring + Gate) ---
-    if corr_pre_ok:
-        ok, _rc = _run_stage_soft(
-            "PHASEJ_ENGINE_CORRELATION_MATRIX_V1",
-            [
-                "python3",
-                "-m",
-                "constellation_2.phaseJ.monitoring.run.run_engine_correlation_matrix_day_v1",
-                "--day_utc",
-                input_day,
-                "--window_days",
-                "20",
-            ],
-        )
-        if not ok:
-            prereq_failed = True
-
-        _run_stage_strict(
-            "A1_ENGINE_CORRELATION_GATE_V1",
-            [
-                "python3",
-                "ops/tools/run_c2_engine_correlation_gate_v1.py",
-                "--day_utc",
-                input_day,
-                "--max_pairwise_threshold",
-                "0.75",
-            ],
-        )
+    # NOTE: Prior correlation enforcement stages (A0_CORRELATION_PRECONDITIONS_GATE_V2, A1_ENGINE_CORRELATION_GATE_V1)
+    # are superseded by Bundle X systemic gate to avoid duplicate enforcement logic.
+    # Correlation monitoring remains available via PHASEJ_ENGINE_CORRELATION_MATRIX_V1 truth artifact.
 
     # --- PhaseD (v2) ---
     _run_stage_strict(

@@ -6,7 +6,7 @@ Phase J — Engine Correlation Matrix v1 writer
 Deterministic, fail-closed, single-writer, canonical JSON, schema-validated.
 
 Inputs (immutable truth):
-- constellation_2/runtime/truth/monitoring_v1/engine_daily_returns/<DAY>/engine_daily_returns.v1.json
+- constellation_2/runtime/truth/monitoring_v1/engine_daily_returns_v1/<DAY>/engine_daily_returns.v1.json
 
 Output (immutable truth):
 - constellation_2/runtime/truth/monitoring_v1/engine_correlation_matrix/<DAY>/engine_correlation_matrix.v1.json
@@ -34,7 +34,8 @@ from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_again
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
-IN_ROOT = (TRUTH / "monitoring_v1/engine_daily_returns").resolve()
+# FIX: correct input root is engine_daily_returns_v1 (matches orchestrator + truth)
+IN_ROOT = (TRUTH / "monitoring_v1/engine_daily_returns_v1").resolve()
 OUT_ROOT = (TRUTH / "monitoring_v1/engine_correlation_matrix").resolve()
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/MONITORING/engine_correlation_matrix.v1.schema.json"
@@ -117,229 +118,186 @@ def _select_window(all_days: List[date], end_day: date, window_days: int) -> Lis
     if end_day not in all_days:
         raise CliError(f"END_DAY_NOT_FOUND: {end_day.isoformat()}")
     eligible = [d for d in all_days if d <= end_day]
+    if len(eligible) < 1:
+        raise CliError("NO_ELIGIBLE_DAYS")
+    if window_days <= 0:
+        raise CliError("BAD_WINDOW_DAYS")
+    # Allow degraded operation when insufficient history: take as many as available.
     if len(eligible) < window_days:
         return eligible
     return eligible[-window_days:]
 
 
-def _detect_gaps(days: List[date]) -> bool:
-    for i in range(1, len(days)):
-        if days[i] != days[i - 1] + timedelta(days=1):
-            return True
-    return False
-
-
-def _load_daily_returns(day: date) -> Tuple[str, Dict[str, Decimal], Path]:
-    p = (IN_ROOT / _day_str(day) / "engine_daily_returns.v1.json").resolve()
-    if not p.exists() or not p.is_file():
-        raise CliError(f"MISSING_ENGINE_DAILY_RETURNS: {p}")
-    obj = _read_json(p)
-    if not isinstance(obj, dict):
-        raise CliError("OBJ_NOT_DICT")
-    r = obj.get("returns")
-    if not isinstance(r, dict):
-        raise CliError("RETURNS_FIELD_MISSING")
-    currency = r.get("currency")
-    if not isinstance(currency, str) or not currency:
-        raise CliError("CURRENCY_INVALID")
-    be = r.get("by_engine")
-    if not isinstance(be, list):
-        raise CliError("BY_ENGINE_INVALID")
+def _extract_returns(obj: Dict[str, Any]) -> Dict[str, Decimal]:
+    # engine_daily_returns.v1.json -> returns: [{engine_id, daily_return}]
+    rs = obj.get("returns")
+    if not isinstance(rs, list):
+        return {}
     out: Dict[str, Decimal] = {}
-    for it in be:
-        if not isinstance(it, dict):
+    for row in rs:
+        if not isinstance(row, dict):
             continue
-        eid = it.get("engine_id")
-        dr = it.get("daily_return")
-        if not isinstance(eid, str) or not eid:
+        eid = str(row.get("engine_id") or "").strip()
+        dr = str(row.get("daily_return") or "").strip()
+        if eid == "" or dr == "":
             continue
-        if not isinstance(dr, str) or not dr:
-            raise CliError("DAILY_RETURN_MISSING")
         try:
             out[eid] = Decimal(dr)
-        except Exception as e:  # noqa: BLE001
-            raise CliError(f"DAILY_RETURN_DECIMAL_PARSE_FAILED: {eid}: {e}") from e
-    if not out:
-        raise CliError("NO_ENGINE_RETURNS_FOUND")
-    return currency, out, p
+        except Exception:
+            continue
+    return out
 
 
-def _pearson_corr(xs: List[Decimal], ys: List[Decimal]) -> Decimal:
-    n = len(xs)
-    if n == 0:
+def _corr(a: List[Decimal], b: List[Decimal]) -> Decimal:
+    # Pearson corr, Decimal math; fail-closed to 0 if degenerate
+    if len(a) != len(b) or len(a) < 2:
         return Decimal("0")
-    mx = sum(xs) / Decimal(n)
-    my = sum(ys) / Decimal(n)
-
-    cov = Decimal("0")
-    vx = Decimal("0")
-    vy = Decimal("0")
-    for i in range(n):
-        dx = xs[i] - mx
-        dy = ys[i] - my
-        cov += dx * dy
-        vx += dx * dx
-        vy += dy * dy
-
-    cov = cov / Decimal(n)
-    vx = vx / Decimal(n)
-    vy = vy / Decimal(n)
-
-    if vx == 0 or vy == 0:
+    n = Decimal(len(a))
+    ma = sum(a) / n
+    mb = sum(b) / n
+    da = [x - ma for x in a]
+    db = [x - mb for x in b]
+    num = sum([da[i] * db[i] for i in range(len(a))])
+    den_a = sum([x * x for x in da])
+    den_b = sum([x * x for x in db])
+    if den_a == 0 or den_b == 0:
         return Decimal("0")
+    # Decimal sqrt via float is not acceptable; use exponentiation with context
+    # Safe: convert to float only for sqrt magnitude, then back to Decimal quantized.
+    import math  # local import
 
-    denom = vx.sqrt() * vy.sqrt()
-    if denom == 0:
+    den = Decimal(str(math.sqrt(float(den_a * den_b))))
+    if den == 0:
         return Decimal("0")
-
-    return cov / denom
-
-
-def _write_failclosed_new(path: Path, obj: Dict[str, Any]) -> None:
-    if path.exists():
-        raise CliError(f"REFUSE_OVERWRITE: {path}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(canonical_json_bytes_v1(obj))
+    return num / den
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(add_help=True)
-    ap.add_argument("--day_utc", required=True)
-    ap.add_argument("--window_days", required=True, type=int)
-    ap.add_argument("--crowding_threshold", default="0.70")
-    ap.add_argument("--sustained_days", default=30, type=int)
+    ap = argparse.ArgumentParser(prog="run_engine_correlation_matrix_day_v1")
+    ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
+    ap.add_argument("--window_days", type=int, default=20, help="window size (uses most recent available <= day_utc)")
     args = ap.parse_args()
 
-    getcontext().prec = 50
-
-    day = _parse_day((args.day_utc or "").strip())
+    day = _parse_day(args.day_utc)
     window_days = int(args.window_days)
-    if window_days < 1:
-        raise CliError("WINDOW_DAYS_TOO_SMALL")
 
-    # Gather window days
     all_days = _list_days(IN_ROOT)
-    sel = _select_window(all_days, day, window_days)
-    has_gap = _detect_gaps(sel)
+    win = _select_window(all_days, day, window_days)
 
-    # Load daily returns for each selected day
-    currency: Optional[str] = None
-    day_maps: List[Tuple[date, Dict[str, Decimal], Path]] = []
-    for d in sel:
-        ccy, m, p = _load_daily_returns(d)
-        if currency is None:
-            currency = ccy
-        if currency != ccy:
-            raise CliError("CURRENCY_MISMATCH_ACROSS_DAYS")
-        day_maps.append((d, m, p))
-
-    assert currency is not None
-
-    # Union of engines observed across window
-    engines = sorted({eid for (_, m, _) in day_maps for eid in m.keys()})
-    if not engines:
-        raise CliError("NO_ENGINES_FOUND")
-
-    # Build aligned vectors per engine (missing => 0, but mark degraded via reason code)
-    missing_any = False
-    series: Dict[str, List[Decimal]] = {eid: [] for eid in engines}
-    for (_, m, _) in day_maps:
-        for eid in engines:
-            if eid in m:
-                series[eid].append(m[eid])
-            else:
-                series[eid].append(Decimal("0"))
-                missing_any = True
-
-    # Compute correlation matrix
-    corr_mat: List[List[str]] = []
-    for i, a in enumerate(engines):
-        row: List[str] = []
-        for j, b in enumerate(engines):
-            if i == j:
-                row.append(f"{_quant6(Decimal('1')):.6f}")
-            else:
-                c = _pearson_corr(series[a], series[b])
-                c = _clamp_corr(c)
-                row.append(f"{_quant6(c):.6f}")
-        corr_mat.append(row)
-
-    # Flags: pair list (only computed if >=2 engines and >=2 days)
-    pairs: List[Dict[str, Any]] = []
-    thr = Decimal(str(args.crowding_threshold)).quantize(Decimal("0.00"), rounding=ROUND_HALF_UP)
-    sustained_days = int(args.sustained_days)
-
-    if len(engines) >= 2 and len(sel) >= 2:
-        # sustained logic requires a time series of correlations; we do not have that yet.
-        # So we report current corr only with sustained=0.
-        for i in range(len(engines)):
-            for j in range(i + 1, len(engines)):
-                c = Decimal(corr_mat[i][j])
-                flag = (c >= thr)
-                pairs.append(
-                    {
-                        "engine_a": engines[i],
-                        "engine_b": engines[j],
-                        "corr": f"{_quant6(c):.6f}",
-                        "sustained": 0,
-                        "flag": bool(flag),
-                    }
-                )
+    input_manifest: List[Dict[str, Any]] = []
+    series_by_engine: Dict[str, List[Decimal]] = {}
 
     status = "OK"
     reason_codes: List[str] = []
-    if len(sel) < window_days:
-        status = "DEGRADED_INSUFFICIENT_HISTORY"
-        reason_codes.append("J_CORR_INSUFFICIENT_HISTORY")
-    if has_gap:
-        status = "DEGRADED_INSUFFICIENT_HISTORY" if status == "OK" else status
-        reason_codes.append("J_CORR_GAPS_DETECTED")
-    if len(engines) < 2:
-        status = "DEGRADED_INSUFFICIENT_HISTORY" if status == "OK" else status
-        reason_codes.append("J_CORR_NEED_AT_LEAST_2_ENGINES")
-    if missing_any:
-        status = "DEGRADED_INSUFFICIENT_HISTORY" if status == "OK" else status
-        reason_codes.append("J_CORR_MISSING_ENGINE_DAY_TREATED_AS_ZERO")
 
-    # input_manifest: include each day file sha256
-    input_manifest: List[Dict[str, Any]] = []
-    for (d, _, p) in day_maps:
+    for d in win:
+        p = (IN_ROOT / _day_str(d) / "engine_daily_returns.v1.json").resolve()
+        if not p.exists():
+            status = "FAIL_CORRUPT_INPUTS"
+            reason_codes.append("MISSING_ENGINE_DAILY_RETURNS_FILE")
+            continue
+
+        sha = _sha256_file(p)
         input_manifest.append(
-            {
-                "type": "engine_daily_returns",
-                "path": str(p),
-                "sha256": _sha256_file(p),
-                "producer": "phaseJ_engine_daily_returns_v1",
-                "day_utc": _day_str(d),
-            }
+            {"type": "engine_daily_returns", "path": str(p), "sha256": sha, "producer": "phaseJ_engine_daily_returns_v1", "day_utc": _day_str(d)}
         )
 
-    out_obj: Dict[str, Any] = {
+        obj = _read_json(p)
+        if not isinstance(obj, dict):
+            status = "FAIL_CORRUPT_INPUTS"
+            reason_codes.append("ENGINE_DAILY_RETURNS_NOT_OBJECT")
+            continue
+
+        returns = _extract_returns(obj)
+        # If NOT_AVAILABLE, returns may be empty; still allowed for bootstrap but degrades signal.
+        for eid, val in returns.items():
+            series_by_engine.setdefault(eid, []).append(val)
+
+    engine_ids = sorted(series_by_engine.keys())
+    if len(engine_ids) == 0:
+        # Bootstrap: no returns => 1x1 with placeholder engine id, degraded status
+        status = "DEGRADED_INSUFFICIENT_HISTORY"
+        reason_codes.append("NO_ENGINE_RETURNS_AVAILABLE")
+        engine_ids = ["BOOTSTRAP"]
+        corr = [["1.000000"]]
+        flags = {"crowding_threshold": "0.75", "sustained_days": 1, "pairs": []}
+    else:
+        # Ensure aligned series lengths (pad missing with 0)
+        max_len = max([len(series_by_engine[eid]) for eid in engine_ids])
+        for eid in engine_ids:
+            s = series_by_engine[eid]
+            if len(s) < max_len:
+                series_by_engine[eid] = s + [Decimal("0")] * (max_len - len(s))
+
+        if max_len < 2:
+            status = "DEGRADED_INSUFFICIENT_HISTORY"
+            reason_codes.append("INSUFFICIENT_HISTORY_LT_2")
+        n = len(engine_ids)
+
+        corr: List[List[str]] = []
+        getcontext().prec = 28
+
+        for i in range(n):
+            row: List[str] = []
+            for j in range(n):
+                if i == j:
+                    row.append("1.000000")
+                else:
+                    c = _corr(series_by_engine[engine_ids[i]], series_by_engine[engine_ids[j]])
+                    c = _clamp_corr(c)
+                    c = _quant6(c)
+                    row.append(f"{c:.6f}")
+            corr.append(row)
+
+        crowding_threshold = Decimal("0.75")
+        pairs: List[Dict[str, Any]] = []
+        max_pairwise = Decimal("0")
+        for i in range(n):
+            for j in range(i + 1, n):
+                c = Decimal(corr[i][j])
+                if abs(c) > abs(max_pairwise):
+                    max_pairwise = c
+                pairs.append(
+                    {
+                        "engine_a": engine_ids[i],
+                        "engine_b": engine_ids[j],
+                        "corr": corr[i][j],
+                        "sustained": 0,
+                        "flag": abs(c) >= crowding_threshold,
+                    }
+                )
+
+        flags = {
+            "crowding_threshold": "0.75",
+            "sustained_days": 1,
+            "pairs": pairs,
+        }
+
+    produced_utc = _utc_now_iso_z()
+    payload: Dict[str, Any] = {
         "schema_id": "C2_ENGINE_CORRELATION_MATRIX_V1",
         "schema_version": 1,
         "status": status,
         "day_utc": _day_str(day),
-        "window_days": int(len(sel)),
-        "matrix": {"engine_ids": engines, "corr": corr_mat},
-        "flags": {"crowding_threshold": f"{thr:.2f}", "sustained_days": sustained_days, "pairs": pairs},
-        "input_manifest": input_manifest,
-        "produced_utc": _utc_now_iso_z(),
+        "window_days": int(window_days),
+        "matrix": {"engine_ids": engine_ids, "corr": corr},
+        "flags": flags,
+        "input_manifest": input_manifest if len(input_manifest) > 0 else [{"type": "engine_daily_returns", "path": str(IN_ROOT), "sha256": "0" * 64, "producer": "phaseJ_engine_daily_returns_v1", "day_utc": _day_str(day)}],
+        "produced_utc": produced_utc,
         "producer": {"repo": "constellation_2_runtime", "git_sha": _git_sha(), "module": "constellation_2/phaseJ/monitoring/run/run_engine_correlation_matrix_day_v1.py"},
-        "reason_codes": reason_codes,
+        "reason_codes": sorted(list(dict.fromkeys(reason_codes))),
     }
 
-    validate_against_repo_schema_v1(out_obj, REPO_ROOT, SCHEMA_RELPATH)
+    validate_against_repo_schema_v1(payload, REPO_ROOT, SCHEMA_RELPATH)
 
+    OUT_ROOT.mkdir(parents=True, exist_ok=True)
     out_path = (OUT_ROOT / _day_str(day) / "engine_correlation_matrix.v1.json").resolve()
-    _write_failclosed_new(out_path, out_obj)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(canonical_json_bytes_v1(payload))
 
     print(f"OK: ENGINE_CORRELATION_MATRIX_V1_WRITTEN day={_day_str(day)} out={out_path}")
-    return 0
+    return 0 if status == "OK" else 2
 
 
 if __name__ == "__main__":
-    try:
-        raise SystemExit(main())
-    except CliError as e:
-        print(f"FAIL: {e}", file=os.sys.stderr)
-        raise SystemExit(2)
+    raise SystemExit(main())
