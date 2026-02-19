@@ -145,3 +145,6 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - [Correlation Preconditions Gate Schema JSON (V2)](04_DATA/SCHEMAS/C2/REPORTS/correlation_preconditions_gate.v2.schema.json) — id: C2_REPORTS_CORRELATION_PRECONDITIONS_GATE_SCHEMA_V2 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/correlation_preconditions_gate.v2.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/RISK/systemic_risk_gate.v2.schema.json`
 - [Replay Integrity Schema JSON (V2)](04_DATA/SCHEMAS/C2/REPORTS/replay_integrity.v2.schema.json) — id: C2_REPORTS_REPLAY_INTEGRITY_SCHEMA_V2 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/replay_integrity.v2.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/stress_drift_sentinel.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/operator_stress_override.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/RISK/systemic_risk_gate.v3.schema.json`

@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "c2.risk.systemic_risk_gate.v3",
+  "title": "C2 Systemic Risk Gate v3 (Root-Level Fail-Closed Verdict, Audit-Proof)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "regime_ok",
+    "correlation_ok",
+    "kill_switch_ok",
+    "shock_model_output",
+    "cluster_exposure_metrics",
+    "reason_codes",
+    "input_manifest",
+    "gate_sha256"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "systemic_risk_gate" },
+    "schema_version": { "type": "string", "const": "v3" },
+
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "minLength": 1 },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "module": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "git_sha": { "type": "string", "minLength": 7, "maxLength": 64 }
+      }
+    },
+
+    "status": { "type": "string", "enum": ["OK", "FAIL"] },
+
+    "regime_ok": { "type": "boolean" },
+    "correlation_ok": { "type": "boolean" },
+    "kill_switch_ok": { "type": "boolean" },
+
+    "shock_model_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_pairwise", "threshold_max_pairwise", "flagged_pairs_count", "flagged_pairs"],
+      "properties": {
+        "max_pairwise": { "type": "string", "pattern": "^-?[0-1]\\.[0-9]{6}$" },
+        "threshold_max_pairwise": { "type": "string", "pattern": "^[0-1]\\.[0-9]{2}$" },
+        "flagged_pairs_count": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "flagged_pairs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["engine_a", "engine_b", "corr"],
+            "properties": {
+              "engine_a": { "type": "string", "minLength": 1, "maxLength": 64 },
+              "engine_b": { "type": "string", "minLength": 1, "maxLength": 64 },
+              "corr": { "type": "string", "pattern": "^-?[0-1]\\.[0-9]{6}$" }
+            }
+          }
+        }
+      }
+    },
+
+    "cluster_exposure_metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total_intents", "intents_by_engine"],
+      "properties": {
+        "total_intents": { "type": "integer", "minimum": 0, "maximum": 100000000 },
+        "intents_by_engine": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["engine_id", "count"],
+            "properties": {
+              "engine_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "count": { "type": "integer", "minimum": 0, "maximum": 100000000 }
+            }
+          }
+        }
+      }
+    },
+
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+
+    "gate_sha256": {
+      "type": "string",
+      "description": "sha256 of canonical JSON for this document, excluding this field"
+    }
+  }
+}

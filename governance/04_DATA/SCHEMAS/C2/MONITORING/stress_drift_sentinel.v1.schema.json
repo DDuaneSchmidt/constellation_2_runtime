@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_STRESS_DRIFT_SENTINEL_V1_SCHEMA",
+  "title": "C2 Stress & Drift Sentinel v1 (Monitoring-Only, Deterministic Escalation Recommendation)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "stress_ok",
+    "drift_ok",
+    "slippage_ok",
+    "escalation_recommended",
+    "metrics",
+    "reason_codes",
+    "input_manifest",
+    "sentinel_sha256"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "C2_STRESS_DRIFT_SENTINEL_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "minLength": 1 },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "git_sha": { "type": "string", "minLength": 7, "maxLength": 64 },
+        "module": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+
+    "status": { "type": "string", "enum": ["OK", "FAIL"] },
+
+    "stress_ok": { "type": "boolean" },
+    "drift_ok": { "type": "boolean" },
+    "slippage_ok": { "type": "boolean" },
+
+    "escalation_recommended": { "type": "boolean" },
+
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["drift", "slippage", "correlation"],
+      "properties": {
+        "drift": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["engine_daily_returns_status", "notes"],
+          "properties": {
+            "engine_daily_returns_status": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "notes": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
+          }
+        },
+        "slippage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["broker_reconciliation_status", "cash_diff", "notes"],
+          "properties": {
+            "broker_reconciliation_status": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "cash_diff": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "notes": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
+          }
+        },
+        "correlation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["engine_corr_status", "max_pairwise", "threshold_max_pairwise", "notes"],
+          "properties": {
+            "engine_corr_status": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "max_pairwise": { "type": "string", "pattern": "^-?[0-1]\\.[0-9]{6}$" },
+            "threshold_max_pairwise": { "type": "string", "pattern": "^[0-1]\\.[0-9]{2}$" },
+            "notes": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
+          }
+        }
+      }
+    },
+
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+
+    "sentinel_sha256": {
+      "type": "string",
+      "description": "sha256 of canonical JSON for this document, excluding this field",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

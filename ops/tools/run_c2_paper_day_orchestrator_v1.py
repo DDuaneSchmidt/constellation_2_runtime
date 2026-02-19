@@ -241,14 +241,24 @@ def main() -> int:
         ],
     )
 
+    # --- Bundle Z: Stress & Drift Sentinel (strict; monitoring-only, produces escalation recommendation) ---
+    _run_stage_strict(
+        "Z_STRESS_DRIFT_SENTINEL_V1",
+        [
+            "python3",
+            "ops/tools/run_stress_drift_sentinel_day_v1.py",
+            "--day_utc",
+            input_day,
+        ],
+    )
     # --- Bundle X: Systemic Risk Gate (strict; root-level enforcement) ---
     # Must execute after engines (intents exist) and before PhaseC/OMS.
     # Fail-closed: non-zero exit blocks downstream stages including PhaseD.
     _run_stage_strict(
-        "X_SYSTEMIC_RISK_GATE_V2",
+        "X_SYSTEMIC_RISK_GATE_V3",
         [
             "python3",
-            "ops/tools/run_systemic_risk_gate_v2.py",
+            "ops/tools/run_systemic_risk_gate_v3.py",
             "--day_utc",
             input_day,
             "--max_pairwise_threshold",
