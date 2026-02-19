@@ -470,3 +470,11 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v2.schema.json
     class: C2_SCHEMA
     status: DRAFT
+  - id: C2_REPORTS_REPLAY_INTEGRITY_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/replay_integrity.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_REPLAY_INTEGRITY_SCHEMA_V2
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/replay_integrity.v2.schema.json
+    class: C2_SCHEMA
+    status: DRAFT

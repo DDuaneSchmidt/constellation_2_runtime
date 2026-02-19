@@ -98,6 +98,7 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/economic_truth_availability_certificate.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/regime_snapshot.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/regime_snapshot.v2.schema.json`
+- [Replay Integrity Schema JSON (V1)](04_DATA/SCHEMAS/C2/REPORTS/replay_integrity.v1.schema.json) — id: C2_REPORTS_REPLAY_INTEGRITY_SCHEMA_V1 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/replay_integrity.v1.schema.json`
 
 ### Reports schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/operator_daily_gate.v1.schema.json`
@@ -143,3 +144,4 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - [Engine Daily Returns Schema JSON (V1)](04_DATA/SCHEMAS/C2/MONITORING/engine_daily_returns.v1.schema.json) — id: C2_MONITORING_ENGINE_DAILY_RETURNS_SCHEMA_V1 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/MONITORING/engine_daily_returns.v1.schema.json`
 - [Correlation Preconditions Gate Schema JSON (V2)](04_DATA/SCHEMAS/C2/REPORTS/correlation_preconditions_gate.v2.schema.json) — id: C2_REPORTS_CORRELATION_PRECONDITIONS_GATE_SCHEMA_V2 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/correlation_preconditions_gate.v2.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/RISK/systemic_risk_gate.v2.schema.json`
+- [Replay Integrity Schema JSON (V2)](04_DATA/SCHEMAS/C2/REPORTS/replay_integrity.v2.schema.json) — id: C2_REPORTS_REPLAY_INTEGRITY_SCHEMA_V2 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/replay_integrity.v2.schema.json`

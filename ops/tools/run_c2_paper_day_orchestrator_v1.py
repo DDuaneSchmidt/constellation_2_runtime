@@ -509,6 +509,16 @@ def main() -> int:
         ],
     )
 
+    # --- Bundle Y: Replay Integrity (strict; deterministic replay hash sealing) ---
+    _run_stage_strict(
+        "Y_REPLAY_INTEGRITY_V1",
+        [
+            "python3",
+            "ops/tools/run_replay_integrity_day_v2.py",
+            "--day_utc",
+            day,
+        ],
+    )
     print("ORCHESTRATOR_OK")
     return 0
 
