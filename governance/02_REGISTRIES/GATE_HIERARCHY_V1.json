@@ -1,0 +1,87 @@
+{
+  "classes": [
+    {
+      "class_id": "CLASS1_SYSTEM_HARD_STOP",
+      "description": "Blocks all submissions; cannot be overridden by operator.",
+      "precedence": 1
+    },
+    {
+      "class_id": "CLASS2_RISK_HARD_STOP",
+      "description": "Blocks submissions until resolved; operator override requires governed artifact.",
+      "precedence": 2
+    },
+    {
+      "class_id": "CLASS3_CONTROLLED_DEGRADATION",
+      "description": "Allows reduced operation; must emit DEGRADED and reason codes.",
+      "precedence": 3
+    },
+    {
+      "class_id": "CLASS4_ADVISORY",
+      "description": "Non-blocking informational gate.",
+      "precedence": 4
+    }
+  ],
+  "gates": [
+    {
+      "artifact_relpath": "constellation_2/runtime/truth/reports/engine_model_registry_gate_v1/{DAY}/engine_model_registry_gate.v1.json",
+      "blocking": true,
+      "gate_class": "CLASS1_SYSTEM_HARD_STOP",
+      "gate_id": "engine_model_registry_gate_v1",
+      "pass_status_values": [
+        "PASS",
+        "OK"
+      ],
+      "required": true,
+      "status_field": "status"
+    },
+    {
+      "artifact_relpath": "constellation_2/runtime/truth/reports/systemic_risk_gate_v3/{DAY}/systemic_risk_gate.v3.json",
+      "blocking": true,
+      "gate_class": "CLASS2_RISK_HARD_STOP",
+      "gate_id": "systemic_risk_gate_v3",
+      "pass_status_values": [
+        "PASS"
+      ],
+      "required": true,
+      "status_field": "status"
+    },
+    {
+      "artifact_relpath": "constellation_2/runtime/truth/reports/capital_risk_envelope_v1/{DAY}/capital_risk_envelope.v1.json",
+      "blocking": true,
+      "gate_class": "CLASS2_RISK_HARD_STOP",
+      "gate_id": "capital_risk_envelope_gate_v1",
+      "pass_status_values": [
+        "PASS",
+        "OK"
+      ],
+      "required": true,
+      "status_field": "status"
+    },
+    {
+      "artifact_relpath": "constellation_2/runtime/truth/reports/operator_gate_verdict_v3/{DAY}/operator_gate_verdict.v3.json",
+      "blocking": false,
+      "gate_class": "CLASS2_RISK_HARD_STOP",
+      "gate_id": "operator_gate_verdict_v3",
+      "pass_status_values": [
+        "PASS",
+        "OK"
+      ],
+      "required": false,
+      "status_field": "status"
+    },
+    {
+      "artifact_relpath": "constellation_2/runtime/truth/reports/replay_integrity_v2/{DAY}/replay_integrity.v2.json",
+      "blocking": false,
+      "gate_class": "CLASS1_SYSTEM_HARD_STOP",
+      "gate_id": "replay_integrity_v2",
+      "pass_status_values": [
+        "OK",
+        "PASS"
+      ],
+      "required": false,
+      "status_field": "status"
+    }
+  ],
+  "registry_id": "GATE_HIERARCHY_V1",
+  "version": 1
+}

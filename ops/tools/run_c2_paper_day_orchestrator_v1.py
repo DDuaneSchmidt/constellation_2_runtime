@@ -99,6 +99,16 @@ def main() -> int:
     )
 
     prereq_failed = False
+    _run_stage_strict(
+        "A10_TRUTH_SURFACE_AUTHORITY_GATE_V1",
+        [
+            "python3",
+            "ops/tools/run_truth_surface_authority_gate_v1.py",
+            "--day_utc",
+            day,
+        ],
+    )
+
 
     # --- Bundle A3: Broker Marks (strict) ---
     _run_stage_strict(
@@ -329,6 +339,18 @@ def main() -> int:
     # NOTE: Prior correlation enforcement stages (A0_CORRELATION_PRECONDITIONS_GATE_V2, A1_ENGINE_CORRELATION_GATE_V1)
     # are superseded by Bundle X systemic gate to avoid duplicate enforcement logic.
     # Correlation monitoring remains available via PHASEJ_ENGINE_CORRELATION_MATRIX_V1 truth artifact.
+
+    # --- Bundle A8: Gate Stack Verdict (STRICT; consolidated precedence enforcement) ---
+    # This stage converts prior soft prerequisites into a strict, auditable fail-closed boundary.
+    _run_stage_strict(
+        "A8_GATE_STACK_VERDICT_V1",
+        [
+            "python3",
+            "ops/tools/run_gate_stack_verdict_v1.py",
+            "--day_utc",
+            day,
+        ],
+    )
 
     # --- PhaseD (v2) ---
     _run_stage_strict(

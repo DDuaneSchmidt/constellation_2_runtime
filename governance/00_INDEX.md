@@ -34,6 +34,12 @@ This repository is the constitutional root of **Constellation 2.0**.
 ### C) Registries (Enumerations / reason codes / constants)
 - `governance/02_REGISTRIES/`
 
+Additional registries introduced:
+
+- `governance/02_REGISTRIES/GATE_HIERARCHY_V1.json`
+- `governance/02_REGISTRIES/TRUTH_SURFACE_AUTHORITY_V1.json`
+
+
 ### D) Operator docs and runbooks (non-authoritative guidance)
 - `docs/` (informational; not a contract unless also registered in the manifest)
 
@@ -70,6 +76,10 @@ These canonical contracts are governance-controlled and must be explicitly liste
 - `governance/05_CONTRACTS/C2/regime_classification_spine_v1.contract.md`
 - `governance/05_CONTRACTS/C2/regime_classification_spine_v1.deprecation_notice.md`
 - `governance/05_CONTRACTS/C2/regime_classification_spine_v2.contract.md`
+
+- `governance/05_CONTRACTS/C2/gate_hierarchy_v1.contract.md`
+- `governance/05_CONTRACTS/C2/truth_surface_authority_v1.contract.md`
+- `governance/05_CONTRACTS/C2/failure_injection_harness_v1.contract.md`
 
 ## Governed data schemas
 
@@ -112,6 +122,10 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - [Broker Reconciliation Schema JSON (V1)](04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v1.schema.json) — id: C2_REPORTS_BROKER_RECONCILIATION_SCHEMA_V1 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v1.schema.json`
 - [Engine Correlation Gate Schema JSON (V1)](04_DATA/SCHEMAS/C2/REPORTS/engine_correlation_gate.v1.schema.json) — id: C2_REPORTS_ENGINE_CORRELATION_GATE_SCHEMA_V1 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/engine_correlation_gate.v1.schema.json`
 - [Broker Reconciliation Schema JSON (V2)](04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v2.schema.json) — id: C2_REPORTS_BROKER_RECONCILIATION_SCHEMA_V2 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v2.schema.json`
+
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/gate_stack_verdict.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/truth_surface_authority_gate.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/failure_injection_harness.v1.schema.json`
 
 ### Execution evidence schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/submission_index.v1.schema.json`

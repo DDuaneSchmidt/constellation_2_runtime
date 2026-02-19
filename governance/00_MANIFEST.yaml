@@ -490,3 +490,38 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/RISK/systemic_risk_gate.v3.schema.json
     class: C2_SCHEMA
     status: DRAFT
+  # Bundle A8/A9/A10 hardening artifacts
+  - id: C2_GATE_HIERARCHY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/gate_hierarchy_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_TRUTH_SURFACE_AUTHORITY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/truth_surface_authority_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_FAILURE_INJECTION_HARNESS_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/failure_injection_harness_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_REGISTRY_GATE_HIERARCHY_V1
+    path: governance/02_REGISTRIES/GATE_HIERARCHY_V1.json
+    class: C2_REGISTRY
+    status: DRAFT
+  - id: C2_REGISTRY_TRUTH_SURFACE_AUTHORITY_V1
+    path: governance/02_REGISTRIES/TRUTH_SURFACE_AUTHORITY_V1.json
+    class: C2_REGISTRY
+    status: DRAFT
+
+  - id: C2_REPORTS_GATE_STACK_VERDICT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/gate_stack_verdict.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_TRUTH_SURFACE_AUTHORITY_GATE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/truth_surface_authority_gate.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_FAILURE_INJECTION_HARNESS_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/failure_injection_harness.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
