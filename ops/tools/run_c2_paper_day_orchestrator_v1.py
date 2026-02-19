@@ -117,6 +117,32 @@ def main() -> int:
 
     prereq_failed = False
 
+    # --- Bundle A3: Broker Marks (strict) ---
+    _run_stage_strict(
+        "A3_BROKER_MARKS_SNAPSHOT_V1",
+        [
+            "python3",
+            "ops/tools/run_broker_marks_snapshot_day_v1.py",
+            "--day_utc",
+            input_day,
+        ],
+    )
+
+    # --- Bundle A3: Accounting NAV v2 (strict) ---
+    _run_stage_strict(
+        "A3_ACCOUNTING_NAV_V2",
+        [
+            "python3",
+            "ops/tools/run_accounting_nav_v2_day_v1.py",
+            "--day_utc",
+            input_day,
+            "--producer_git_sha",
+            current_git_sha,
+            "--producer_repo",
+            "constellation_2_runtime",
+        ],
+    )
+
     # --- Stage 0 ---
     _run_stage_strict(
         "BUNDLEB_ENGINE_MODEL_REGISTRY_GATE",

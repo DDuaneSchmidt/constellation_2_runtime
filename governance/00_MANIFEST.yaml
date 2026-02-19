@@ -447,3 +447,7 @@ documents:
     path: governance/03_CONTRACTS/C2/EXECUTION_EVIDENCE/execution_reconciliation_spine_v1.md
     class: C2_CONTRACT
     status: DRAFT
+  - id: C2_ACCOUNTING_NAV_SCHEMA_V2
+    path: governance/04_DATA/SCHEMAS/C2/ACCOUNTING/accounting_nav.v2.schema.json
+    class: C2_SCHEMA
+    status: DRAFT

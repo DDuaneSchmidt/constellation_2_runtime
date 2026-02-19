@@ -135,3 +135,5 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/03_CONTRACTS/C2/EXECUTION_EVIDENCE/execution_observer_spine_v1.md` — Execution Observer Spine v1 (pull-based broker snapshot)
 - `governance/03_CONTRACTS/C2/EXECUTION_EVIDENCE/fill_ledger_spine_v1.md` — Fill Ledger Spine v1 (deterministic aggregation)
 - `governance/03_CONTRACTS/C2/EXECUTION_EVIDENCE/execution_reconciliation_spine_v1.md` — Execution Reconciliation Spine v1 (broker vs truth)
+
+- [Accounting NAV Schema JSON (V2)](04_DATA/SCHEMAS/C2/ACCOUNTING/accounting_nav.v2.schema.json) — id: C2_ACCOUNTING_NAV_SCHEMA_V2 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/ACCOUNTING/accounting_nav.v2.schema.json`
