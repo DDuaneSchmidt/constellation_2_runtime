@@ -1,78 +1,53 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "C2_ENGINE_DAILY_RETURNS_V1",
-  "title": "C2 Engine Daily Returns Artifact v1 (Phase J substrate)",
+  "$id": "C2_MONITORING_ENGINE_DAILY_RETURNS_V1",
+  "title": "C2 Engine Daily Returns v1 (derived from accounting_v2 attribution when available)",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema_id",
     "schema_version",
-    "status",
-    "day_utc",
-    "returns",
-    "input_manifest",
     "produced_utc",
+    "day_utc",
     "producer",
-    "reason_codes"
+    "status",
+    "reason_codes",
+    "inputs",
+    "returns"
   ],
   "properties": {
-    "schema_id": { "const": "C2_ENGINE_DAILY_RETURNS_V1" },
-    "schema_version": { "type": "integer", "const": 1 },
-    "status": {
-      "type": "string",
-      "enum": ["OK", "DEGRADED_INSUFFICIENT_HISTORY", "FAIL_CORRUPT_INPUTS"]
-    },
-    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "schema_id": { "const": "C2_MONITORING_ENGINE_DAILY_RETURNS_V1" },
+    "schema_version": { "const": "1.0.0" },
+    "produced_utc": { "type": "string" },
+    "day_utc": { "type": "string" },
+    "producer": { "type": "string", "minLength": 1 },
 
-    "returns": {
+    "status": { "type": "string", "enum": ["ACTIVE", "NOT_AVAILABLE"] },
+    "reason_codes": { "type": "array", "items": { "type": "string" } },
+
+    "inputs": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["currency", "by_engine"],
+      "required": ["attribution_today_path", "attribution_today_sha256", "attribution_prev_path", "attribution_prev_sha256"],
       "properties": {
-        "currency": { "type": "string", "minLength": 1, "maxLength": 8 },
-        "by_engine": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["engine_id", "daily_return"],
-            "properties": {
-              "engine_id": { "type": "string", "minLength": 1, "maxLength": 64 },
-              "daily_return": { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{8}$" }
-            }
-          }
-        }
+        "attribution_today_path": { "type": "string" },
+        "attribution_today_sha256": { "type": "string" },
+        "attribution_prev_path": { "type": "string" },
+        "attribution_prev_sha256": { "type": "string" }
       }
     },
 
-    "input_manifest": {
+    "returns": {
       "type": "array",
-      "minItems": 1,
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["type", "path", "sha256", "producer", "day_utc"],
+        "required": ["engine_id", "daily_return"],
         "properties": {
-          "type": { "type": "string", "minLength": 1 },
-          "path": { "type": "string", "minLength": 1 },
-          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-          "producer": { "type": "string", "minLength": 1 },
-          "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+          "engine_id": { "type": "string" },
+          "daily_return": { "type": "string" }
         }
       }
-    },
-
-    "produced_utc": { "type": "string", "format": "date-time" },
-    "producer": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["repo", "git_sha", "module"],
-      "properties": {
-        "repo": { "type": "string", "minLength": 1 },
-        "git_sha": { "type": "string", "minLength": 7 },
-        "module": { "type": "string", "minLength": 1 }
-      }
-    },
-    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+    }
   }
 }

@@ -157,6 +157,17 @@ def main() -> int:
             "constellation_2_runtime",
         ],
     )
+    # --- Bundle A6: Engine Daily Returns v1 (soft) ---
+    ok, _rc = _run_stage_soft(
+        "A6_ENGINE_DAILY_RETURNS_V1",
+        [
+            "python3",
+            "ops/tools/run_engine_daily_returns_day_v1.py",
+            "--day_utc",
+            day,
+        ],
+    )
+
 
     # --- Bundle A4: Engine Linkage Snapshot (soft) ---
     ok, _rc = _run_stage_soft(

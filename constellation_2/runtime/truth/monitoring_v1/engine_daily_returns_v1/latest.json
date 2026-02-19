@@ -1,0 +1,1 @@
+{"artifact_sha256":"8d46a97c93d1a106e146b527c93165f7af6616cdbea7f50d2cd9daaf73f6696c","path":"monitoring_v1/engine_daily_returns_v1/2026-02-19/engine_daily_returns.v1.json","produced_utc":"2026-02-19T18:56:55Z","producer":"ops/tools/run_engine_daily_returns_day_v1.py","schema_id":"C2_LATEST_POINTER_V1","status":"NOT_AVAILABLE"}
