@@ -455,3 +455,7 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/engine_linkage.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
+  - id: C2_ACCOUNTING_ENGINE_ATTRIBUTION_SCHEMA_V2
+    path: governance/04_DATA/SCHEMAS/C2/ACCOUNTING/engine_attribution.v2.schema.json
+    class: C2_SCHEMA
+    status: DRAFT

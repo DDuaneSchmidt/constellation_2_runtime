@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_ACCOUNTING_ENGINE_ATTRIBUTION_V2",
+  "title": "C2 Accounting Engine Attribution v2 (marks + linkage aware)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "day_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "input_manifest",
+    "attribution"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_ACCOUNTING_ENGINE_ATTRIBUTION_V2" },
+    "schema_version": { "const": 2 },
+    "produced_utc": { "type": "string" },
+    "day_utc": { "type": "string" },
+    "producer": {
+      "type": "object",
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string" },
+        "git_sha": { "type": "string" },
+        "module": { "type": "string" }
+      }
+    },
+    "status": { "type": "string" },
+    "reason_codes": { "type": "array", "items": { "type": "string" } },
+    "input_manifest": { "type": "array", "items": { "type": "object" } },
+    "attribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currency", "by_engine", "notes"],
+      "properties": {
+        "currency": { "type": "string" },
+        "by_engine": { "type": "array", "items": { "type": "object" } },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

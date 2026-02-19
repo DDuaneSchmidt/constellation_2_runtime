@@ -143,6 +143,21 @@ def main() -> int:
         ],
     )
 
+    # --- Bundle A5: Accounting Attribution v2 (strict) ---
+    _run_stage_strict(
+        "A5_ACCOUNTING_ATTRIBUTION_V2",
+        [
+            "python3",
+            "ops/tools/run_accounting_attribution_v2_day_v1.py",
+            "--day_utc",
+            day,
+            "--producer_git_sha",
+            current_git_sha,
+            "--producer_repo",
+            "constellation_2_runtime",
+        ],
+    )
+
     # --- Bundle A4: Engine Linkage Snapshot (soft) ---
     ok, _rc = _run_stage_soft(
         "A4_ENGINE_LINKAGE_SNAPSHOT_V1",

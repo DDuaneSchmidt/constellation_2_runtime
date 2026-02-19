@@ -138,3 +138,4 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 
 - [Accounting NAV Schema JSON (V2)](04_DATA/SCHEMAS/C2/ACCOUNTING/accounting_nav.v2.schema.json) — id: C2_ACCOUNTING_NAV_SCHEMA_V2 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/ACCOUNTING/accounting_nav.v2.schema.json`
 - [Engine Linkage Snapshot Schema JSON (V1)](04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/engine_linkage.v1.schema.json) — id: C2_ENGINE_LINKAGE_SCHEMA_V1 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/engine_linkage.v1.schema.json`
+- [Engine Attribution Schema JSON (V2)](04_DATA/SCHEMAS/C2/ACCOUNTING/engine_attribution.v2.schema.json) — id: C2_ACCOUNTING_ENGINE_ATTRIBUTION_SCHEMA_V2 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/ACCOUNTING/engine_attribution.v2.schema.json`
