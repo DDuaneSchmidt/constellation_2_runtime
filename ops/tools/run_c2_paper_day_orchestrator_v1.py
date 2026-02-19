@@ -272,10 +272,10 @@ def main() -> int:
 
     # --- Bundle A0 (Correlation Preconditions Gate: SOFT) ---
     corr_pre_ok, _rc = _run_stage_soft(
-        "A0_CORRELATION_PRECONDITIONS_GATE_V1",
+        "A0_CORRELATION_PRECONDITIONS_GATE_V2",
         [
             "python3",
-            "ops/tools/run_correlation_preconditions_gate_v1.py",
+            "ops/tools/run_correlation_preconditions_gate_v2.py",
             "--day_utc",
             input_day,
         ],

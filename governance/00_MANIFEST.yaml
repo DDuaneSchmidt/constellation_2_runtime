@@ -459,3 +459,7 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/ACCOUNTING/engine_attribution.v2.schema.json
     class: C2_SCHEMA
     status: DRAFT
+  - id: C2_REPORTS_CORRELATION_PRECONDITIONS_GATE_SCHEMA_V2
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/correlation_preconditions_gate.v2.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
