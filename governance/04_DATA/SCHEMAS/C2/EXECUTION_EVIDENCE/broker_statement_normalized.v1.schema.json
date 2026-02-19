@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_BROKER_STATEMENT_NORMALIZED_V1",
+  "title": "C2 Broker Statement Normalized v1 (broker-of-record daily positions+cash+fees)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "day_utc",
+    "producer",
+    "source",
+    "source_file_sha256",
+    "account_id",
+    "currency",
+    "cash_end",
+    "fees_total",
+    "positions",
+    "notes"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_BROKER_STATEMENT_NORMALIZED_V1" },
+    "schema_version": { "const": "1.0.0" },
+    "produced_utc": { "type": "string" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "producer": { "type": "string", "minLength": 1 },
+
+    "source": { "type": "string", "enum": ["IB_FLEX", "IB_TWS_EXPORT", "IB_PORTAL_EXPORT", "OTHER"] },
+    "source_file_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+
+    "account_id": { "type": "string", "minLength": 2 },
+    "currency": { "type": "string", "minLength": 3, "maxLength": 3 },
+
+    "cash_end": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]{1,8})?$" },
+    "fees_total": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]{1,8})?$" },
+
+    "positions": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["symbol", "sec_type", "qty", "avg_cost", "market_value"],
+        "properties": {
+          "symbol": { "type": "string", "minLength": 1 },
+          "sec_type": { "type": "string", "enum": ["STK", "OPT", "FUT", "CASH", "OTHER"] },
+          "qty": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]{1,8})?$" },
+          "avg_cost": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]{1,8})?$" },
+          "market_value": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]{1,8})?$" },
+          "currency": { "type": "string", "minLength": 3, "maxLength": 3 }
+        }
+      }
+    },
+
+    "notes": { "type": "array", "items": { "type": "string" } }
+  }
+}

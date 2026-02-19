@@ -85,6 +85,19 @@ def main() -> int:
         .strip()
     )
 
+    # --- Bundle A2 (Fail-Closed) ---
+    # Require broker-of-record reconciliation PASS for this day before any trading stages.
+    _run_stage_strict(
+        "A2_BROKER_RECONCILIATION_GATE_V1",
+        [
+            "python3",
+            "ops/tools/run_broker_reconciliation_day_v1.py",
+            "--day_utc",
+            day,
+        ],
+    )
+
+
     prereq_failed = False
 
     # --- Stage 0 ---

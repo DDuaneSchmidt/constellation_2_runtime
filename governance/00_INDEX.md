@@ -108,6 +108,7 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/exposure_reconciliation_report.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/delta_order_plan.v1.schema.json`
+- [Broker Reconciliation Schema JSON (V1)](04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v1.schema.json) — id: C2_REPORTS_BROKER_RECONCILIATION_SCHEMA_V1 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v1.schema.json`
 
 ### Execution evidence schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/submission_index.v1.schema.json`
@@ -117,6 +118,7 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/fill_ledger.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/execution_reconciliation.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/order_lifecycle_event.v1.schema.json`
+- [Broker Statement Normalized Schema JSON (V1)](04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_statement_normalized.v1.schema.json) — id: C2_EXECUTION_EVIDENCE_BROKER_STATEMENT_NORMALIZED_SCHEMA_V1 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_statement_normalized.v1.schema.json`
 
 ### Risk schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/RISK/engine_model_registry.v1.schema.json`

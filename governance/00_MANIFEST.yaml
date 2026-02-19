@@ -186,7 +186,12 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/reconciliation_report.v2.schema.json
     class: C2_SCHEMA
     status: DRAFT
-  - id: C2_REPORTS_CAPITAL_RISK_ENVELOPE_SCHEMA_V1
+  - id: C2_REPORTS_BROKER_RECONCILIATION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+- id: C2_REPORTS_CAPITAL_RISK_ENVELOPE_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
@@ -217,6 +222,10 @@ documents:
 
   - id: C2_EXECUTION_EVIDENCE_BROKER_EVENT_DAY_MANIFEST_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_event_day_manifest.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_EXECUTION_EVIDENCE_BROKER_STATEMENT_NORMALIZED_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_statement_normalized.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
 
