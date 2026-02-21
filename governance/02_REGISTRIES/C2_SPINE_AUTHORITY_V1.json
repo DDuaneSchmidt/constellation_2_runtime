@@ -1,0 +1,32 @@
+{
+  "registry_id": "C2_SPINE_AUTHORITY_V1",
+  "version": 1,
+  "spines": [
+    {
+      "spine": "accounting",
+      "active": "v2",
+      "versions": ["v1", "v2"],
+      "enforce_from_day_utc": "2026-02-20",
+      "exclusive": true,
+      "day_path_patterns": [
+        "constellation_2/runtime/truth/accounting_v1/{DAY}/",
+        "constellation_2/runtime/truth/accounting_v2/{DAY}/",
+        "constellation_2/runtime/truth/accounting_v1/nav/{DAY}/",
+        "constellation_2/runtime/truth/accounting_v2/nav/{DAY}/",
+        "constellation_2/runtime/truth/accounting_v1/attribution/{DAY}/",
+        "constellation_2/runtime/truth/accounting_v2/attribution/{DAY}/"
+      ]
+    },
+    {
+      "spine": "monitoring",
+      "active": "v1",
+      "versions": ["v1", "v2"],
+      "enforce_from_day_utc": "2026-02-20",
+      "exclusive": true,
+      "day_path_patterns": [
+        "constellation_2/runtime/truth/monitoring_v1/{DAY}/",
+        "constellation_2/runtime/truth/monitoring_v2/{DAY}/"
+      ]
+    }
+  ]
+}

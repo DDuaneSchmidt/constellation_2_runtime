@@ -318,3 +318,13 @@ documents:
     path: governance/05_CONTRACTS/C2/latest_pointer_fanout_elimination_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
+
+  - id: C2_SPINE_AUTHORITY_V1
+    path: governance/02_REGISTRIES/C2_SPINE_AUTHORITY_V1.json
+    class: C2_REGISTRY
+    status: ACTIVE
+
+  - id: C2_SPINE_EXCLUSIVITY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/spine_exclusivity_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
