@@ -7,6 +7,11 @@ Bundled C: global_kill_switch_state.v1.json writer (immutable truth artifact).
 Deterministic + audit-grade.
 Fail-closed default: if required inputs are missing or invalid => state=ACTIVE.
 
+BATCH-1 CHANGE (Single Final Verdict Consumption):
+- Kill switch consumes ONLY gate_stack_verdict_v1 as the decision authority.
+- Legacy per-surface inputs (operator_gate_verdict / capital_risk_envelope / reconciliation_report)
+  are NOT consumed for state decisions.
+
 Writes:
   constellation_2/runtime/truth/risk_v1/kill_switch_v1/<DAY>/global_kill_switch_state.v1.json
 
@@ -48,14 +53,8 @@ TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RISK/global_kill_switch_state.v1.schema.json"
 OUT_ROOT = (TRUTH / "risk_v1" / "kill_switch_v1").resolve()
 
-# Prefer v2 when present; fall back to v1.
-PATH_OPERATOR_VERDICT_V1 = (TRUTH / "reports" / "operator_gate_verdict_v1").resolve()
-PATH_OPERATOR_VERDICT_V2 = (TRUTH / "reports" / "operator_gate_verdict_v2").resolve()
-
-PATH_CAPITAL_ENV_V1 = (TRUTH / "reports" / "capital_risk_envelope_v1").resolve()
-PATH_CAPITAL_ENV_V2 = (TRUTH / "reports" / "capital_risk_envelope_v2").resolve()
-
-PATH_RECON_V2 = (TRUTH / "reports" / "reconciliation_report_v2").resolve()
+# Single Final Verdict Consumption (authoritative input)
+PATH_GATE_STACK_VERDICT_V1 = (TRUTH / "reports" / "gate_stack_verdict_v1").resolve()
 
 
 def _git_sha() -> str:
@@ -100,66 +99,42 @@ def _compute_self_sha(obj: Dict[str, Any], field: str) -> str:
     return _sha256_bytes(_canonical_bytes(o2))
 
 
+def _gate_stack_all_required_pass(gs: Dict[str, Any]) -> bool:
+    gates = gs.get("gates", [])
+    if not isinstance(gates, list):
+        return False
+    for g in gates:
+        if not isinstance(g, dict):
+            return False
+        required = bool(g.get("required"))
+        status = str(g.get("status") or "").strip().upper()
+        if required and status != "PASS":
+            return False
+    return True
+
+
 def _load_inputs(day: str) -> Tuple[List[Dict[str, str]], List[str], Dict[str, Any]]:
     input_manifest: List[Dict[str, str]] = []
     rc: List[str] = []
     decisions: Dict[str, Any] = {}
 
-    # --- Prefer v2 artifacts when present; fall back to v1. ---
-    verdict_type = "operator_gate_verdict_v1_missing"
-    verdict_path = (PATH_OPERATOR_VERDICT_V1 / day / "operator_gate_verdict.v1.json").resolve()
-    p_verdict_v2 = (PATH_OPERATOR_VERDICT_V2 / day / "operator_gate_verdict.v2.json").resolve()
-    if p_verdict_v2.exists():
-        verdict_type = "operator_gate_verdict_v2"
-        verdict_path = p_verdict_v2
+    gs_type = "gate_stack_verdict_v1_missing"
+    gs_path = (PATH_GATE_STACK_VERDICT_V1 / day / "gate_stack_verdict.v1.json").resolve()
 
-    cap_type = "capital_risk_envelope_v1"
-    cap_path = (PATH_CAPITAL_ENV_V1 / day / "capital_risk_envelope.v1.json").resolve()
-    p_cap_v2 = (PATH_CAPITAL_ENV_V2 / day / "capital_risk_envelope.v2.json").resolve()
-    if p_cap_v2.exists():
-        cap_type = "capital_risk_envelope_v2"
-        cap_path = p_cap_v2
-
-    recon_type = "reconciliation_report_v2_missing"
-    recon_path = (PATH_RECON_V2 / day / "reconciliation_report.v2.json").resolve()
-    if recon_path.exists():
-        recon_type = "reconciliation_report_v2"
-
-    def add(t: str, p: Path) -> None:
-        if p.exists() and p.is_file():
-            input_manifest.append({"type": t, "path": str(p), "sha256": _sha256_file(p)})
-        else:
-            input_manifest.append({"type": f"{t}_missing", "path": str(p), "sha256": _sha256_bytes(b"")})
-            rc.append("C2_KILL_SWITCH_DEFAULT_ACTIVE_MISSING_INPUTS")
-
-    add(verdict_type, verdict_path)
-    add(cap_type, cap_path)
-    add(recon_type, recon_path)
-
-    if verdict_path.exists():
+    if gs_path.exists() and gs_path.is_file():
+        input_manifest.append({"type": "gate_stack_verdict_v1", "path": str(gs_path), "sha256": _sha256_file(gs_path)})
         try:
-            v = _read_json_obj(verdict_path)
-            decisions["operator_gate_ready"] = bool(v.get("ready"))
+            gs = _read_json_obj(gs_path)
+            decisions["gate_stack_status"] = str(gs.get("status") or "")
+            decisions["gate_stack_required_all_pass"] = bool(_gate_stack_all_required_pass(gs))
         except Exception as e:  # noqa: BLE001
             rc.append("C2_KILL_SWITCH_INPUT_SCHEMA_INVALID")
-            decisions["operator_gate_parse_error"] = str(e)
-
-    if cap_path.exists():
-        try:
-            ce = _read_json_obj(cap_path)
-            decisions["capital_risk_envelope_status"] = str(ce.get("status") or "")
-        except Exception as e:  # noqa: BLE001
-            rc.append("C2_KILL_SWITCH_INPUT_SCHEMA_INVALID")
-            decisions["capital_risk_envelope_parse_error"] = str(e)
-
-    if recon_path.exists():
-        try:
-            rr = _read_json_obj(recon_path)
-            decisions["recon_status"] = str(rr.get("status") or "")
-            decisions["recon_verdict"] = str(rr.get("verdict") or "")
-        except Exception as e:  # noqa: BLE001
-            rc.append("C2_KILL_SWITCH_INPUT_SCHEMA_INVALID")
-            decisions["recon_parse_error"] = str(e)
+            decisions["gate_stack_parse_error"] = str(e)
+    else:
+        input_manifest.append(
+            {"type": gs_type, "path": str(gs_path), "sha256": _sha256_bytes(b"")}
+        )
+        rc.append("C2_KILL_SWITCH_DEFAULT_ACTIVE_MISSING_INPUTS")
 
     return (input_manifest, rc, decisions)
 
@@ -177,7 +152,7 @@ def main() -> int:
     input_manifest, reason_codes, decisions = _load_inputs(day)
 
     # PAPER bootstrap policy:
-    # - If required inputs are missing BUT there are no submissions yet, allow entries (paper trading bootstrap).
+    # - If required inputs are missing/invalid BUT there are no submissions yet, allow entries (paper trading bootstrap).
     # - Once submissions exist, enforce strict fail-closed rules.
     subs_dir = (TRUTH / "execution_evidence_v1" / "submissions" / day).resolve()
     submissions_present = False
@@ -198,19 +173,12 @@ def main() -> int:
     else:
         state = "ACTIVE" if missing_or_invalid else "INACTIVE"
 
+    # Single Final Verdict Consumption:
+    # INACTIVE only if gate_stack_verdict exists AND status==PASS AND all REQUIRED gates are PASS.
     if state == "INACTIVE":
-        if decisions.get("operator_gate_ready") is not True:
-            state = "ACTIVE"
-            reason_codes.append("C2_KILL_SWITCH_ACTIVE")
-
-        st = str(decisions.get("capital_risk_envelope_status") or "").strip().upper()
-        if st != "PASS":
-            state = "ACTIVE"
-            reason_codes.append("C2_KILL_SWITCH_ACTIVE")
-
-        recon_v = str(decisions.get("recon_verdict") or "").strip().upper()
-        recon_s = str(decisions.get("recon_status") or "").strip().upper()
-        if not (recon_v == "PASS" or recon_s == "OK"):
+        st = str(decisions.get("gate_stack_status") or "").strip().upper()
+        all_required_pass = bool(decisions.get("gate_stack_required_all_pass") is True)
+        if not (st == "PASS" and all_required_pass):
             state = "ACTIVE"
             reason_codes.append("C2_KILL_SWITCH_ACTIVE")
 
@@ -238,14 +206,17 @@ def main() -> int:
 
     validate_against_repo_schema_v1(payload, REPO_ROOT, SCHEMA_RELPATH)
 
-    out_path = (OUT_ROOT / day / "global_kill_switch_state.v1.json").resolve()
-    try:
-        wr = write_file_immutable_v1(path=out_path, data=_canonical_bytes(payload), create_dirs=True)
-    except ImmutableWriteError as e:
-        raise SystemExit(f"FAIL: IMMUTABLE_WRITE_ERROR: {e}") from e
+    out_dir = (OUT_ROOT / day).resolve()
+    out_path = (out_dir / "global_kill_switch_state.v1.json").resolve()
 
-    print(f"OK: GLOBAL_KILL_SWITCH_STATE_WRITTEN day_utc={day} state={state} path={wr.path} sha256={wr.sha256} action={wr.action}")
-    return 0 if state == "INACTIVE" else 2
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        write_file_immutable_v1(out_path, _canonical_bytes(payload))
+    except ImmutableWriteError as e:
+        raise SystemExit(f"FAIL_IMMUTABLE_WRITE: {e}") from e
+
+    print(_canonical_bytes(payload).decode("utf-8"), end="")
+    return 0
 
 
 if __name__ == "__main__":
