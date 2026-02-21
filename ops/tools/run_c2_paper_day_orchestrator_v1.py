@@ -95,6 +95,10 @@ def main() -> int:
             "ops/tools/run_broker_reconciliation_day_v2.py",
             "--day_utc",
             day,
+            "--ib_account",
+            ib_account,
+            "--mode",
+            "CHECK",
         ],
     )
 

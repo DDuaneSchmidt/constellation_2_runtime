@@ -133,3 +133,38 @@ It proves only:
 - determinism
 - fail-closed enforcement
 - immutable evidence traceability
+
+## Determinism Proof (Two-Run) day_utc=2026-02-19
+- run1_hashlist_sha256=
+- run2_hashlist_sha256=
+- file_count_run1=
+- file_count_run2=
+- result=SEE_DIFF_OUTPUT_ABOVE
+
+### INVALIDATION NOTICE (Determinism Two-Run Attempt)
+- day_utc=2026-02-19
+- status=INVALID
+- reason=orchestrator_not_executed_missing_required_args(--mode,--ib_account); hashlists_not_created
+- evidence=terminal_error_output_in_chat_log
+
+## Determinism Proof (Two-Run) day_utc=2026-02-19 mode=PAPER ib_account=DUO847203
+- run1_hashlist_sha256=
+- run2_hashlist_sha256=
+- file_count_run1=
+- file_count_run2=
+- diff_empty=NO
+
+### INVALIDATION NOTICE (Determinism Two-Run Attempt)
+- day_utc=2026-02-19
+- mode=PAPER
+- ib_account=DUO847203
+- status=INVALID
+- reason=orchestrator_failed_before_hashing: FAIL A2_BROKER_RECONCILIATION_GATE_V2 rc=2; hashlists_not_created
+- evidence=terminal_error_output_in_chat_log
+
+### STATUS NOTICE (Replay Determinism)
+- day_utc=2026-02-19
+- status=BLOCKED
+- blocker=A2_BROKER_RECONCILIATION_V2_FAIL (CHECK)
+- reason=broker_statement_account_id_mismatch: DU1234567 != expected DUO847203
+- structural_growth=NONE
