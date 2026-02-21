@@ -5,7 +5,7 @@ import json
 import os
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime")
 TRUTH_ROOT = REPO_ROOT / "constellation_2/runtime/truth"
@@ -67,18 +67,65 @@ def _dec_str(d: Decimal) -> str:
     return s
 
 
+def _cents_to_decimal_dollars(cents: int) -> Decimal:
+    return (Decimal(int(cents)) / Decimal(100)).quantize(Decimal("0.00000001"))
+
+
 def _pos_key(p: Dict[str, Any]) -> Tuple[str, str]:
     return (str(p.get("symbol", "")).strip(), str(p.get("sec_type", "")).strip())
+
+
+def _extract_internal_cash_usd(cash_obj: Dict[str, Any], notes: List[str]) -> Optional[Decimal]:
+    """
+    Governed internal cash truth is:
+      cash_ledger_snapshot.v1.json -> snapshot.cash_total_cents (integer cents)
+    """
+    snap = cash_obj.get("snapshot")
+    if not isinstance(snap, dict):
+        notes.append("Internal cash ledger snapshot missing snapshot{} object.")
+        return None
+    if "cash_total_cents" not in snap:
+        notes.append("Internal cash ledger snapshot missing snapshot.cash_total_cents.")
+        return None
+    try:
+        cents = int(snap["cash_total_cents"])
+    except Exception:
+        notes.append("Internal cash ledger snapshot snapshot.cash_total_cents is not an int.")
+        return None
+    return _cents_to_decimal_dollars(cents)
+
+
+def _extract_internal_positions(pos_obj: Dict[str, Any], notes: List[str]) -> Optional[List[Dict[str, Any]]]:
+    """
+    Governed positions truth (v2) is:
+      positions_snapshot.v2.json -> positions.items[] (list of dicts)
+    Some legacy producers may emit positions as a top-level list; support that without expanding surfaces.
+    """
+    p = pos_obj.get("positions")
+    if isinstance(p, list):
+        return p
+    if isinstance(p, dict):
+        items = p.get("items")
+        if isinstance(items, list):
+            return items
+        notes.append("Internal positions snapshot missing positions.items[] list.")
+        return None
+    notes.append("Internal positions snapshot missing positions object.")
+    return None
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_broker_reconciliation_day_v2.py")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD to reconcile (must have broker normalized + internal snapshots)")
+    ap.add_argument("--ib_account", required=True, help="IB account id to bind reconciliation to (fail-closed if mismatch)")
+    ap.add_argument("--mode", default="WRITE", choices=["WRITE", "CHECK"], help="WRITE immutably writes report. CHECK computes only (no write).")
     ap.add_argument("--cash_abs_tol", default="0.01", help="absolute tolerance for cash difference")
     ap.add_argument("--qty_abs_tol", default="0", help="absolute tolerance for quantity difference")
     args = ap.parse_args()
 
     day = str(args.day_utc).strip()
+    ib_account = str(args.ib_account).strip()
+    mode = str(args.mode).strip().upper()
     produced_utc = f"{day}T00:00:00Z"
 
     cash_tol = _dec(args.cash_abs_tol)
@@ -111,26 +158,33 @@ def main() -> int:
     else:
         broker = _load_json(broker_path)
 
-        cash_obj = _load_json(internal_cash_path)
-        if "cash_end" in cash_obj:
-            internal_cash = _dec(cash_obj["cash_end"])
-        elif "cash_balance" in cash_obj:
-            internal_cash = _dec(cash_obj["cash_balance"])
-        else:
+        broker_acct = str(broker.get("account_id") or "").strip()
+        if broker_acct == "":
             status = "MISSING_INPUTS"
             fail_closed = True
-            notes.append("Internal cash ledger snapshot missing cash_end/cash_balance field.")
+            notes.append("Broker normalized statement missing account_id.")
+        elif broker_acct != ib_account:
+            status = "FAIL"
+            fail_closed = True
+            notes.append(f"ACCOUNT_MISMATCH: broker.account_id={broker_acct} != expected_ib_account={ib_account}")
+
+        # Internal cash (governed schema)
+        cash_obj = _load_json(internal_cash_path)
+        internal_cash = _extract_internal_cash_usd(cash_obj, notes)
+        if internal_cash is None:
+            status = "MISSING_INPUTS"
+            fail_closed = True
             internal_cash = Decimal("0")
 
         broker_cash = _dec(broker.get("cash_end", "0"))
         cash_diff = internal_cash - broker_cash
 
+        # Internal positions (governed schema)
         pos_obj = _load_json(internal_pos_path)
-        internal_positions = pos_obj.get("positions", [])
-        if not isinstance(internal_positions, list):
+        internal_positions = _extract_internal_positions(pos_obj, notes)
+        if internal_positions is None:
             status = "MISSING_INPUTS"
             fail_closed = True
-            notes.append("Internal positions snapshot missing positions[] list.")
             internal_positions = []
 
         broker_positions = broker.get("positions", [])
@@ -143,10 +197,21 @@ def main() -> int:
         imap: Dict[Tuple[str, str], Decimal] = {}
         for p in internal_positions:
             if not isinstance(p, dict):
+                status = "MISSING_INPUTS"
+                fail_closed = True
+                notes.append("Internal positions items contain non-object entry.")
                 continue
             sym = str(p.get("symbol", "")).strip()
             sec = str(p.get("sec_type", "")).strip()
             if sym == "" or sec == "":
+                status = "MISSING_INPUTS"
+                fail_closed = True
+                notes.append("Internal positions item missing symbol/sec_type.")
+                continue
+            if "qty" not in p:
+                status = "MISSING_INPUTS"
+                fail_closed = True
+                notes.append(f"Internal positions item missing qty for symbol={sym} sec_type={sec}.")
                 continue
             qty = _dec(p.get("qty", "0"))
             imap[(sym, sec)] = imap.get((sym, sec), Decimal("0")) + qty
@@ -154,10 +219,16 @@ def main() -> int:
         bmap: Dict[Tuple[str, str], Decimal] = {}
         for p in broker_positions:
             if not isinstance(p, dict):
+                status = "MISSING_INPUTS"
+                fail_closed = True
+                notes.append("Broker positions contain non-object entry.")
                 continue
             sym = str(p.get("symbol", "")).strip()
             sec = str(p.get("sec_type", "")).strip()
             if sym == "" or sec == "":
+                status = "MISSING_INPUTS"
+                fail_closed = True
+                notes.append("Broker positions entry missing symbol/sec_type.")
                 continue
             qty = _dec(p.get("qty", "0"))
             bmap[(sym, sec)] = bmap.get((sym, sec), Decimal("0")) + qty
@@ -182,11 +253,11 @@ def main() -> int:
         if abs(cash_diff) > cash_tol:
             notes.append(f"CASH_DIFF_BREACH: internal_cash - broker_cash = {_dec_str(cash_diff)} > tol {_dec_str(cash_tol)}")
 
+        # If we already set FAIL/MISSING_INPUTS above, keep fail_closed true.
         if position_mismatches or abs(cash_diff) > cash_tol:
             status = "FAIL"
             fail_closed = True
-        else:
-            status = "PASS"
+        elif status == "PASS":
             fail_closed = False
 
     out = {
@@ -211,6 +282,20 @@ def main() -> int:
 
     out_dir = TRUTH_ROOT / "reports" / "broker_reconciliation_v2" / day
     out_path = out_dir / "broker_reconciliation.v2.json"
+    if mode == "CHECK":
+        # CHECK mode: compute deterministically but do not write (avoids immutability conflicts).
+        broker_acct = ""
+        try:
+            broker_acct = str(broker.get("account_id") or "").strip()
+        except Exception:
+            broker_acct = ""
+        print(
+            f"OK: BROKER_RECONCILIATION_V2_CHECK day_utc={day} status={status} "
+            f"broker_account_id={broker_acct} expected_ib_account={ib_account} cash_diff={_dec_str(cash_diff)} "
+            f"pos_mismatches={len(position_mismatches)}"
+        )
+        return 0 if status == "PASS" else 2
+
     _immut_write(out_path, _json_dumps_deterministic(out))
 
     print(f"OK: BROKER_RECONCILIATION_V2_WRITTEN day_utc={day} status={status} path={out_path} sha256={_sha256_file(out_path)}")

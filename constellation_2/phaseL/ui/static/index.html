@@ -36,6 +36,45 @@
     <section id="viewToday" class="view">
       <h2>Today / Day Ops</h2>
 
+      <div class="card">
+        <h3>C3 Status (Authoritative)</h3>
+        <div id="c3StatusMeta" class="mono small"></div>
+
+        <div class="grid2" style="margin-top:10px;">
+          <div>
+            <div class="mono small muted">Verdict</div>
+            <div id="c3Verdict"></div>
+          </div>
+          <div>
+            <div class="mono small muted">Broker Reconciliation</div>
+            <div id="c3Broker"></div>
+          </div>
+          <div>
+            <div class="mono small muted">Market Data</div>
+            <div id="c3Market"></div>
+          </div>
+          <div>
+            <div class="mono small muted">Overall</div>
+            <div id="c3Overall"></div>
+          </div>
+        </div>
+
+        <div style="margin-top:12px;">
+          <div class="mono small muted">Gates (Top)</div>
+          <div id="c3Gates"></div>
+        </div>
+
+        <div style="margin-top:12px;">
+          <div class="mono small muted">Broker Mismatches (Top)</div>
+          <div id="c3Mismatches"></div>
+        </div>
+
+        <div style="margin-top:12px;">
+          <div class="mono small muted">Components (Derived from monitoring_*)</div>
+          <div id="c3Components"></div>
+        </div>
+      </div>
+
       <div class="grid2">
         <div class="card">
           <h3>Summary</h3>
@@ -97,6 +136,22 @@
       <div id="footerProvenance"></div>
     </footer>
   </main>
+
+  <!-- Evidence modal -->
+  <div id="evidenceModal" class="modal hidden">
+    <div id="evidenceBackdrop" class="modal-backdrop"></div>
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <div id="evidenceTitle" class="mono"></div>
+          <div id="evidencePath" class="mono small muted"></div>
+        </div>
+        <button id="btnEvidenceClose" class="btn btn-mini">Close</button>
+      </div>
+      <div id="evidenceErrors"></div>
+      <pre id="evidenceBody" class="modal-body"></pre>
+    </div>
+  </div>
 
   <script src="/app.js"></script>
 </body>

@@ -328,3 +328,8 @@ documents:
     path: governance/05_CONTRACTS/C2/spine_exclusivity_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
+
+  - id: C3_UI_STATUS_CONTRACT_V1
+    path: governance/05_CONTRACTS/C3/c3_ui_status_contract_v1.contract.md
+    class: C3_CONTRACT
+    status: DRAFT

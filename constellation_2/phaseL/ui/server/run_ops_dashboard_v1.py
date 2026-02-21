@@ -19,7 +19,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
-
+from constellation_2.phaseL.ui.server.c3_ui_status_collector_v1 import build_c3_ui_status
 # --------------------------
 # Error codes (audit-safe)
 # --------------------------
@@ -931,6 +931,62 @@ class OpsHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/days":
             self._send_json(HTTPStatus.OK, _days_list())
+            return True
+
+        if path == "/api/latest_day":
+            try:
+                p = TRUTH_ROOT / "latest.json"
+                doc = json.loads(p.read_text(encoding="utf-8"))
+                day = doc.get("day_utc", None)
+                if not isinstance(day, str) or not day:
+                    self._send_json(HTTPStatus.OK, {"ok": True, "errors": ["LATEST_DAY_INVALID"], "day_utc": None})
+                    return True
+                self._send_json(HTTPStatus.OK, {"ok": True, "errors": [], "day_utc": day})
+                return True
+            except FileNotFoundError:
+                self._send_json(HTTPStatus.OK, {"ok": True, "errors": ["LATEST_JSON_MISSING"], "day_utc": None})
+                return True
+            except Exception:
+                self._send_json(HTTPStatus.OK, {"ok": True, "errors": ["LATEST_JSON_UNREADABLE"], "day_utc": None})
+                return True
+        if path == "/api/artifact":
+            # truth-only artifact reader for UI drilldown
+            try:
+                raw = (qs.get("path") or [None])[0]
+                if not isinstance(raw, str) or not raw:
+                    self._send_json(HTTPStatus.OK, {"ok": False, "errors": ["MISSING_QUERY_PATH"], "path": None, "content": ""})
+                    return True
+
+                p = Path(raw)
+                if not p.is_absolute():
+                    p = (TRUTH_ROOT / raw).resolve()
+                else:
+                    p = p.resolve()
+
+                truth_root_s = str(TRUTH_ROOT.resolve())
+                if not str(p).startswith(truth_root_s + "/") and str(p) != truth_root_s:
+                    self._send_json(HTTPStatus.OK, {"ok": False, "errors": ["PATH_OUTSIDE_TRUTH_ROOT"], "path": str(p), "content": ""})
+                    return True
+
+                if not p.exists() or not p.is_file():
+                    self._send_json(HTTPStatus.OK, {"ok": False, "errors": ["ARTIFACT_NOT_FOUND"], "path": str(p), "content": ""})
+                    return True
+
+                # Limit read size (prevent huge payloads)
+                data = p.read_text(encoding="utf-8", errors="replace")
+                truncated = False
+                if len(data) > 20000:
+                    data = data[:20000] + "\n\n...TRUNCATED...\n"
+                    truncated = True
+
+                self._send_json(HTTPStatus.OK, {"ok": True, "errors": [], "path": str(p), "content": data, "truncated": truncated})
+                return True
+            except Exception:
+                self._send_json(HTTPStatus.OK, {"ok": False, "errors": ["ARTIFACT_READ_FAILED"], "path": None, "content": ""})
+                return True
+
+        if path == "/api/status":
+            self._send_json(HTTPStatus.OK, build_c3_ui_status(TRUTH_ROOT))
             return True
 
         if path.startswith("/api/day/"):
