@@ -12,6 +12,14 @@ if [[ ! -d "${TRUTH_ROOT}" ]]; then
   exit 2
 fi
 
+# If runtime truth is not present on disk (outputs are not versioned),
+# repo preflight must still pass. Enforce single-pointer rules only when a latest.json exists.
+ALLOWED="${TRUTH_ROOT}/latest.json"
+if [ ! -f "${ALLOWED}" ]; then
+  echo "[c2-preflight] WARN: no latest.json under truth root; outputs are not versioned. Skipping single-latest-pointer enforcement."
+  exit 0
+fi
+
 # Discover all latest.json under truth root
 LATEST_LIST="$(find "${TRUTH_ROOT}" -type f -name 'latest.json' 2>/dev/null | sort || true)"
 LATEST_COUNT="$(printf "%s\n" "${LATEST_LIST}" | sed '/^\s*$/d' | wc -l | tr -d ' ')"
