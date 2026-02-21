@@ -27,13 +27,6 @@ def _immut_write(path: Path, content: bytes):
         return
     _atomic_write(path, content)
 
-def _sha256_file(p: Path) -> str:
-    h = hashlib.sha256()
-    with p.open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
 def main():
     ap = argparse.ArgumentParser(prog="run_engine_linkage_snapshot_day_v1")
     ap.add_argument("--day_utc", required=True)
@@ -41,9 +34,8 @@ def main():
     ap.add_argument("--producer_repo", required=True)
     args = ap.parse_args()
 
-    day = args.day_utc
+    day = str(args.day_utc).strip()
 
-    # For now: no authoritative lifecycle or execution linkage for this day
     linkage = []
 
     out = {
@@ -65,22 +57,7 @@ def main():
     out_path = out_dir / "engine_linkage.v1.json"
     _immut_write(out_path, _json_bytes(out))
 
-    latest_path = TRUTH_ROOT / "engine_linkage_v1" / "latest.json"
-    latest_obj = {
-        "schema_id": "C2_ENGINE_LINKAGE_LATEST_POINTER_V1",
-        "schema_version": 1,
-        "produced_utc": out["produced_utc"],
-        "day_utc": day,
-        "pointers": {
-            "snapshot_path": str(out_path),
-            "snapshot_sha256": _sha256_file(out_path)
-        },
-        "status": "OK"
-    }
-    _atomic_write(latest_path, _json_bytes(latest_obj))
-
     print(f"OK: wrote {out_path}")
-    print(f"OK: updated {latest_path}")
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -67,9 +67,6 @@ def main() -> int:
             status = "NOT_AVAILABLE"
             reason_codes.append("MISSING_ATTRIBUTION_PREV")
 
-    # For now: SAFE_IDLE-compatible default.
-    # We only compute returns once we have a proven per-engine NAV basis in attribution v2.
-    # (At the moment, your attribution v2 is empty because positions are empty.)
     if status == "ACTIVE":
         o_today = _load_json(today_path)
         o_prev = _load_json(prev_path)  # type: ignore[arg-type]
@@ -81,10 +78,8 @@ def main() -> int:
             status = "NOT_AVAILABLE"
             reason_codes.append("NO_ENGINE_DATA_SAFE_IDLE")
         else:
-            # Placeholder-free rule: we fail closed on unknown basis.
             status = "NOT_AVAILABLE"
             reason_codes.append("ENGINE_RETURN_BASIS_NOT_PROVEN_YET")
-            # returns stays empty until we implement a proven basis from non-empty attribution.
 
     out = {
         "schema_id": "C2_MONITORING_ENGINE_DAILY_RETURNS_V1",
@@ -105,26 +100,13 @@ def main() -> int:
 
     out_dir = TRUTH_ROOT / "monitoring_v1" / "engine_daily_returns_v1" / day
     out_path = out_dir / "engine_daily_returns.v1.json"
-    # Idempotency: if the day artifact already exists, do not attempt rewrite.
     if out_path.exists():
         print(f"SKIP: already exists {out_path}")
         return 0
 
     _immut_write(out_path, _json_bytes(out))
 
-    latest = TRUTH_ROOT / "monitoring_v1" / "engine_daily_returns_v1" / "latest.json"
-    latest_obj = {
-        "schema_id": "C2_LATEST_POINTER_V1",
-        "produced_utc": out["produced_utc"],
-        "producer": "ops/tools/run_engine_daily_returns_day_v1.py",
-        "path": str(out_path.relative_to(TRUTH_ROOT)),
-        "artifact_sha256": _sha256_file(out_path),
-        "status": status
-    }
-    _atomic_write(latest, _json_bytes(latest_obj))
-
     print(f"OK: wrote {out_path}")
-    print(f"OK: updated {latest}")
     return 0 if status == "ACTIVE" else 2
 
 if __name__ == "__main__":

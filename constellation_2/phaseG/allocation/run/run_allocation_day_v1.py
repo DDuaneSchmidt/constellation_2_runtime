@@ -3,15 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from constellation_2.phaseD.lib.canon_json_v1 import CanonicalizationError, canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1
+from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import write_file_immutable_v1
-from constellation_2.phaseF.accounting.lib.mutable_write_v1 import write_file_atomic_mutable_v1
 
 
 # Drawdown convention authority (canonical, negative underwater)
@@ -27,11 +25,9 @@ INTENTS_ROOT = (TRUTH_ROOT / "intents_v1" / "snapshots").resolve()
 
 SCHEMA_SUMMARY = "governance/04_DATA/SCHEMAS/C2/ALLOCATION/allocation_summary.v1.schema.json"
 SCHEMA_DECISION = "governance/04_DATA/SCHEMAS/C2/ALLOCATION/allocation_decision.v1.schema.json"
-SCHEMA_LATEST = "governance/04_DATA/SCHEMAS/C2/ALLOCATION/allocation_latest_pointer.v1.schema.json"
 SCHEMA_FAILURE = "governance/04_DATA/SCHEMAS/C2/ALLOCATION/allocation_failure.v1.schema.json"
 
 # Deterministic sleeve caps (capital buckets) — v1 implementation constant map.
-# NOTE: This is the minimum viable capital allocation enforcement until a governed operator_inputs risk_budget spine exists.
 ENGINE_CAP_PCT = {
     "C2_TREND_EQ_PRIMARY_V1": Decimal("0.40"),
     "C2_VOL_INCOME_DEFINED_RISK_V1": Decimal("0.40"),
@@ -182,6 +178,7 @@ def _write_failure(
     validate_against_repo_schema_v1(fail_obj, REPO_ROOT, SCHEMA_FAILURE)
     b = canonical_json_bytes_v1(fail_obj) + b"\n"
     out_path = (ALLOC_ROOT / "failures" / day_utc / "failure.json").resolve()
+    _ = write_file_immutable_v1(path=out_path, data=b, create_dirs=True)
 
 
 def main(argv: List[str] | None = None) -> int:
@@ -238,7 +235,7 @@ def main(argv: List[str] | None = None) -> int:
 
     input_manifest.append({"type": "other", "path": str(nav_path), "sha256": nav_sha, "day_utc": day_utc, "producer": "bundle_f_accounting_v1"})
 
-    # Optional positions effective pointer (schema supports it in input_manifest enum; we keep as other if present)
+    # Optional positions effective pointer (recorded as other if present)
     pos_eff_ptr_path = (TRUTH_ROOT / "positions_v1" / "effective_v1" / "days" / day_utc / "positions_effective_pointer.v1.json").resolve()
     if pos_eff_ptr_path.exists() and pos_eff_ptr_path.is_file():
         try:
@@ -298,17 +295,13 @@ def main(argv: List[str] | None = None) -> int:
 
     try:
         intent_files = _list_intent_files(day_utc)
-        # Add intents_list to input manifest: stable deterministic list file = directory path hash is not allowed,
-        # so we include each intent file as input_manifest entries (type=intent is allowed in allocation_decision schema;
-        # summary input_manifest uses enum 'other'/'intents_list'. We'll record intents_day_dir as intents_list with sha256=0..0 is not allowed.
-        # Instead: include each intent file as type=other for summary, and as type=intent for per-decision.
         for p in intent_files:
             input_manifest.append({"type": "other", "path": str(p.resolve()), "sha256": _sha256_file(p), "day_utc": day_utc, "producer": "intents_v1"})
-    except FileNotFoundError as e:
+    except FileNotFoundError:
         reason_codes.append(RC_INTENTS_DAY_DIR_MISSING)
         notes.append("intents day dir missing: no decisions produced")
         intent_files = []
-    except ValueError as e:
+    except ValueError:
         reason_codes.append(RC_INTENTS_DAY_DIR_EMPTY)
         notes.append("intents day dir empty: no decisions produced")
         intent_files = []
@@ -328,7 +321,6 @@ def main(argv: List[str] | None = None) -> int:
         print(f"FAIL: INTENTS_LIST_INVALID: {e}", file=sys.stderr)
         return 2
 
-    # Decisions dir
     decisions_dir = (ALLOC_ROOT / "decisions" / day_utc).resolve()
 
     for p_intent in intent_files:
@@ -356,28 +348,25 @@ def main(argv: List[str] | None = None) -> int:
             binding_constraints: List[str] = []
             contracts_allowed = 0
 
-            # effective_risk_budget is a JSON number; use integer basis-points (bp) to avoid floats.
+            # integer basis-points (bp)
             effective_risk_budget_bp = 0
 
             if (schema_id, schema_version) not in SUPPORTED_INTENT_SCHEMAS:
-                reason = f"{RC_UNSUPPORTED_INTENT_SCHEMA}: {schema_id}.{schema_version}"
-                binding_constraints.append(reason)
+                binding_constraints.append(f"{RC_UNSUPPORTED_INTENT_SCHEMA}: {schema_id}.{schema_version}")
                 block_ct += 1
             elif not accounting_ok:
                 binding_constraints.append(RC_ACCOUNTING_NOT_OK)
                 block_ct += 1
             else:
-                # ExposureIntent v1 cap enforcement
                 cap = ENGINE_CAP_PCT.get(engine_id)
                 if cap is None:
                     binding_constraints.append(RC_ENGINE_NOT_IN_CAPS)
                     block_ct += 1
                 else:
                     target_pct = _dec01(str(intent_obj.get("target_notional_pct") or ""), "target_notional_pct")
-                    dd_mult = Decimal(mult_s)  # "1.00" etc
+                    dd_mult = Decimal(mult_s)
                     effective_cap = (cap * dd_mult).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
 
-                    # Convert to bp int for schema number field (integer is allowed)
                     effective_risk_budget_bp = int((effective_cap * Decimal("10000")).to_integral_value(rounding=ROUND_HALF_UP))
 
                     binding_constraints.append(f"ENGINE_CAP_PCT={str(cap)}")
@@ -392,7 +381,6 @@ def main(argv: List[str] | None = None) -> int:
                         binding_constraints.append(RC_INTENT_EXCEEDS_CAP)
                         block_ct += 1
 
-            # Build allocation_decision.v1 object (per schema)
             dec_obj: Dict[str, Any] = {
                 "schema_id": "C2_ALLOCATION_DECISION_V1",
                 "schema_version": 1,
@@ -417,13 +405,12 @@ def main(argv: List[str] | None = None) -> int:
             validate_against_repo_schema_v1(dec_obj, REPO_ROOT, SCHEMA_DECISION)
 
             payload = canonical_json_bytes_v1(dec_obj) + b"\n"
-            _ = write_file_atomic_mutable_v1(path=latest_path, data=l_bytes, create_dirs=True)
+            _ = write_file_immutable_v1(path=out_dec_path, data=payload, create_dirs=True)
             dec_sha = _sha256_bytes(payload)
 
             decisions_summary.append({"intent_id": intent_id, "status": status, "path": str(out_dec_path), "sha256": dec_sha})
 
         except Exception as e:  # noqa: BLE001
-            # If decision cannot be produced, fail closed at day level
             _write_failure(
                 day_utc=day_utc,
                 producer_repo=producer_repo,
@@ -460,23 +447,6 @@ def main(argv: List[str] | None = None) -> int:
     validate_against_repo_schema_v1(summary_obj, REPO_ROOT, SCHEMA_SUMMARY)
     s_bytes = canonical_json_bytes_v1(summary_obj) + b"\n"
     _ = write_file_immutable_v1(path=summary_path, data=s_bytes, create_dirs=True)
-    s_sha = _sha256_bytes(s_bytes)
-
-    # ---- Latest pointer (points to summary) ----
-    latest_obj: Dict[str, Any] = {
-        "schema_id": "C2_ALLOCATION_LATEST_POINTER_V1",
-        "schema_version": 1,
-        "produced_utc": produced_utc,
-        "day_utc": day_utc,
-        "producer": {"repo": producer_repo, "git_sha": producer_sha, "module": module},
-        "status": "OK",
-        "reason_codes": list(reason_codes),
-        "pointers": {"summary_path": str(summary_path.resolve()), "summary_sha256": s_sha},
-    }
-    validate_against_repo_schema_v1(latest_obj, REPO_ROOT, SCHEMA_LATEST)
-    l_bytes = canonical_json_bytes_v1(latest_obj) + b"\n"
-    latest_path = (ALLOC_ROOT / "latest.json").resolve()
-    _ = write_file_atomic_mutable_v1(path=latest_path, data=l_bytes, create_dirs=True)
 
     print("OK: ALLOCATION_SUMMARY_AND_DECISIONS_WRITTEN")
     return 0
