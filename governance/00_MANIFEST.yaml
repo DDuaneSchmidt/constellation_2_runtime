@@ -19,7 +19,43 @@ documents:
     path: governance/00_INDEX.md
     class: GOVERNANCE_INDEX
     status: ACTIVE
-
+  # Governed docs/c2 (tracked for traceability; treated as governed only when listed here)
+  - id: C2_DOC_F_ACCOUNTING_SPINE_V1
+    path: docs/c2/F_ACCOUNTING_SPINE_V1.md
+    class: C2_DOC
+    status: ACTIVE
+  - id: C2_DOC_F_ACCOUNTING_SCHEMA_V1
+    path: docs/c2/F_ACCOUNTING_SCHEMA_V1.md
+    class: C2_DOC
+    status: ACTIVE
+  - id: C2_DOC_F_ACCOUNTING_RECONSTRUCTION_GUARANTEE_V1
+    path: docs/c2/F_ACCOUNTING_RECONSTRUCTION_GUARANTEE_V1.md
+    class: C2_DOC
+    status: ACTIVE
+  - id: C2_DOC_F_MARKING_POLICY_CONSERVATIVE_V1
+    path: docs/c2/F_MARKING_POLICY_CONSERVATIVE_V1.md
+    class: C2_DOC
+    status: ACTIVE
+  - id: C2_DOC_G_ALLOCATION_SPINE_V1
+    path: docs/c2/G_ALLOCATION_SPINE_V1.md
+    class: C2_DOC
+    status: ACTIVE
+  - id: C2_DOC_G_THROTTLE_RULES_V1
+    path: docs/c2/G_THROTTLE_RULES_V1.md
+    class: C2_DOC
+    status: ACTIVE
+  - id: C2_DOC_G_RISK_BUDGET_CONTRACT_V1
+    path: docs/c2/G_RISK_BUDGET_CONTRACT_V1.md
+    class: C2_DOC
+    status: ACTIVE
+  - id: C2_DOC_G_REASON_CODES_V1
+    path: docs/c2/G_REASON_CODES_V1.md
+    class: C2_DOC
+    status: ACTIVE
+  - id: C2_DOC_RUNBOOK_FG_PHASE_V1
+    path: docs/c2/RUNBOOK_FG_PHASE_V1.md
+    class: C2_DOC
+    status: ACTIVE
   - id: OPS_GOVERNANCE_PREFLIGHT_SH
     path: ops/governance/preflight.sh
     class: OPS_PREFLIGHT
