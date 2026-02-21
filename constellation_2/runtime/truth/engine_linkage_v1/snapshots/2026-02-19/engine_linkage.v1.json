@@ -1,1 +1,0 @@
-{"day_utc":"2026-02-19","linkage":[],"produced_utc":"2026-02-19T18:37:57Z","producer":{"git_sha":"fdbe7f8a09b6cc94c680f453fde4ae20cc2c4f23","module":"ops/tools/run_engine_linkage_snapshot_day_v1.py","repo":"constellation_2_runtime"},"reason_codes":["NO_EXECUTIONS_OR_LIFECYCLE_DATA"],"schema_id":"C2_ENGINE_LINKAGE_V1","schema_version":1,"status":"NOT_AVAILABLE"}
