@@ -13,6 +13,7 @@ TRUTH_ROOT = REPO_ROOT / "constellation_2/runtime/truth"
 SCHEMA_ID = "C2_BROKER_RECONCILIATION_V1"
 SCHEMA_VERSION = "1.0.0"
 
+
 def _sha256_file(p: Path) -> str:
     h = hashlib.sha256()
     with p.open("rb") as f:
@@ -20,8 +21,10 @@ def _sha256_file(p: Path) -> str:
             h.update(chunk)
     return h.hexdigest()
 
+
 def _json_dumps_deterministic(obj: Any) -> bytes:
     return (json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8")
+
 
 def _atomic_write(path: Path, content_bytes: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -32,6 +35,7 @@ def _atomic_write(path: Path, content_bytes: bytes) -> None:
         os.fsync(f.fileno())
     os.replace(tmp, path)
 
+
 def _immut_write(path: Path, content_bytes: bytes) -> None:
     if path.exists():
         existing = path.read_bytes()
@@ -40,15 +44,18 @@ def _immut_write(path: Path, content_bytes: bytes) -> None:
         return
     _atomic_write(path, content_bytes)
 
+
 def _load_json(p: Path) -> Dict[str, Any]:
     with p.open("r", encoding="utf-8") as f:
         return json.load(f)
+
 
 def _dec(x: Any) -> Decimal:
     try:
         return Decimal(str(x))
     except (InvalidOperation, ValueError):
         raise ValueError(f"invalid decimal: {x!r}")
+
 
 def _dec_str(d: Decimal) -> str:
     q = d.quantize(Decimal("0.00000001"))
@@ -59,8 +66,10 @@ def _dec_str(d: Decimal) -> str:
         s = "0"
     return s
 
+
 def _pos_key(p: Dict[str, Any]) -> Tuple[str, str]:
     return (str(p.get("symbol", "")).strip(), str(p.get("sec_type", "")).strip())
+
 
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -70,6 +79,8 @@ def main() -> int:
     args = ap.parse_args()
 
     day = str(args.day_utc).strip()
+    produced_utc = f"{day}T00:00:00Z"
+
     cash_tol = _dec(args.cash_abs_tol)
     qty_tol = _dec(args.qty_abs_tol)
 
@@ -101,9 +112,7 @@ def main() -> int:
     else:
         broker = _load_json(broker_path)
 
-        # Internal cash: attempt common fields safely
         cash_obj = _load_json(internal_cash_path)
-        # prefer cash_end if present; else allow cash_balance; else fail
         if "cash_end" in cash_obj:
             internal_cash = _dec(cash_obj["cash_end"])
         elif "cash_balance" in cash_obj:
@@ -117,7 +126,6 @@ def main() -> int:
         broker_cash = _dec(broker.get("cash_end", "0"))
         cash_diff = internal_cash - broker_cash
 
-        # Internal positions: use positions[] list if present
         pos_obj = _load_json(internal_pos_path)
         internal_positions = pos_obj.get("positions", [])
         if not isinstance(internal_positions, list):
@@ -133,7 +141,6 @@ def main() -> int:
             notes.append("Broker normalized statement missing positions[] list.")
             broker_positions = []
 
-        # Build maps by (symbol, sec_type)
         imap: Dict[Tuple[str, str], Decimal] = {}
         for p in internal_positions:
             if not isinstance(p, dict):
@@ -163,13 +170,15 @@ def main() -> int:
             bq = bmap.get(k, Decimal("0"))
             diff = iq - bq
             if abs(diff) > qty_tol:
-                position_mismatches.append({
-                    "symbol": k[0],
-                    "sec_type": k[1],
-                    "internal_qty": _dec_str(iq),
-                    "broker_qty": _dec_str(bq),
-                    "qty_diff": _dec_str(diff),
-                })
+                position_mismatches.append(
+                    {
+                        "symbol": k[0],
+                        "sec_type": k[1],
+                        "internal_qty": _dec_str(iq),
+                        "broker_qty": _dec_str(bq),
+                        "qty_diff": _dec_str(diff),
+                    }
+                )
 
         if abs(cash_diff) > cash_tol:
             notes.append(f"CASH_DIFF_BREACH: internal_cash - broker_cash = {_dec_str(cash_diff)} > tol {_dec_str(cash_tol)}")
@@ -184,45 +193,30 @@ def main() -> int:
     out = {
         "schema_id": SCHEMA_ID,
         "schema_version": SCHEMA_VERSION,
-        "produced_utc": __import__("datetime").datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+        "produced_utc": produced_utc,
         "day_utc": day,
         "producer": "ops/tools/run_broker_reconciliation_day_v1.py",
         "status": status,
         "fail_closed": fail_closed,
         "broker_statement_path": str(broker_path.relative_to(TRUTH_ROOT)),
-        "broker_statement_sha256": _sha256_file(broker_path) if broker_path.exists() else "0"*64,
+        "broker_statement_sha256": _sha256_file(broker_path) if broker_path.exists() else "0" * 64,
         "internal_positions_path": str(internal_pos_path.relative_to(TRUTH_ROOT)),
-        "internal_positions_sha256": _sha256_file(internal_pos_path) if internal_pos_path.exists() else "0"*64,
+        "internal_positions_sha256": _sha256_file(internal_pos_path) if internal_pos_path.exists() else "0" * 64,
         "internal_cash_ledger_path": str(internal_cash_path.relative_to(TRUTH_ROOT)),
-        "internal_cash_ledger_sha256": _sha256_file(internal_cash_path) if internal_cash_path.exists() else "0"*64,
+        "internal_cash_ledger_sha256": _sha256_file(internal_cash_path) if internal_cash_path.exists() else "0" * 64,
         "cash_diff": _dec_str(cash_diff),
         "position_mismatches": position_mismatches,
-        "tolerances": {
-            "cash_abs": _dec_str(cash_tol),
-            "qty_abs": _dec_str(qty_tol)
-        },
-        "notes": notes
+        "tolerances": {"cash_abs": _dec_str(cash_tol), "qty_abs": _dec_str(qty_tol)},
+        "notes": notes,
     }
 
     out_dir = TRUTH_ROOT / "reports" / "broker_reconciliation_v1" / day
     out_path = out_dir / "broker_reconciliation.v1.json"
     _immut_write(out_path, _json_dumps_deterministic(out))
 
-    latest_path = TRUTH_ROOT / "reports" / "broker_reconciliation_v1" / "latest.json"
-    latest = {
-        "schema_id": "C2_LATEST_POINTER_V1",
-        "produced_utc": __import__("datetime").datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
-        "producer": "ops/tools/run_broker_reconciliation_day_v1.py",
-        "path": str(out_path.relative_to(TRUTH_ROOT)),
-        "artifact_sha256": _sha256_file(out_path),
-        "status": status,
-        "fail_closed": fail_closed
-    }
-    _atomic_write(latest_path, _json_dumps_deterministic(latest))
-
-    print(f"OK: wrote {out_path}")
-    print(f"OK: updated {latest_path}")
+    print(f"OK: BROKER_RECONCILIATION_V1_WRITTEN day_utc={day} status={status} path={out_path} sha256={_sha256_file(out_path)}")
     return 0 if status == "PASS" else 2
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
