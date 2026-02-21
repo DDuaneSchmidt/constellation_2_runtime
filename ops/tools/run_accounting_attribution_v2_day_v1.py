@@ -77,7 +77,6 @@ def main() -> int:
             reason_codes.append("NO_POSITIONS")
             notes.append("SAFE_IDLE: positions snapshot empty; attribution empty.")
         else:
-            # Non-empty path will be implemented once you have real positions + identity keys.
             status = "DEGRADED_NOT_IMPLEMENTED"
             reason_codes.append("JOIN_KEYS_NOT_PROVEN")
             notes.append("Positions present but join keys for linkage+marks not yet proven in this environment.")
@@ -106,19 +105,7 @@ def main() -> int:
     out_path = out_dir / "engine_attribution.v2.json"
     _immut_write(out_path, _json_bytes(out))
 
-    latest = TRUTH_ROOT / "accounting_v2" / "attribution" / "latest.json"
-    latest_obj = {
-        "schema_id": "C2_LATEST_POINTER_V1",
-        "produced_utc": out["produced_utc"],
-        "producer": "ops/tools/run_accounting_attribution_v2_day_v1.py",
-        "path": str(out_path.relative_to(TRUTH_ROOT)),
-        "artifact_sha256": _sha256_file(out_path),
-        "status": status
-    }
-    _atomic_write(latest, _json_bytes(latest_obj))
-
     print(f"OK: wrote {out_path}")
-    print(f"OK: updated {latest}")
     return 0 if status == "ACTIVE" else 2
 
 if __name__ == "__main__":

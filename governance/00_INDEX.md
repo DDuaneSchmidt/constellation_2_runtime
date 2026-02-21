@@ -81,6 +81,8 @@ These canonical contracts are governance-controlled and must be explicitly liste
 - `governance/05_CONTRACTS/C2/truth_surface_authority_v1.contract.md`
 - `governance/05_CONTRACTS/C2/failure_injection_harness_v1.contract.md`
 
+- `governance/05_CONTRACTS/C2/single_final_verdict_consumption_v1.contract.md`
+
 ## Governed data schemas
 
 These JSON schemas are governance-controlled and must be explicitly listed in `governance/00_MANIFEST.yaml` to be treated as governed artifacts:
@@ -162,3 +164,10 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/stress_drift_sentinel.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/operator_stress_override.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/RISK/systemic_risk_gate.v3.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/day_binding_gate.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/state_surface.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/capital_seed_gate.v1.schema.json`
+- `governance/05_CONTRACTS/C2/latest_pointer_fanout_elimination_v1.contract.md`
+- `governance/05_CONTRACTS/C2/spine_exclusivity_v1.contract.md`
+
+

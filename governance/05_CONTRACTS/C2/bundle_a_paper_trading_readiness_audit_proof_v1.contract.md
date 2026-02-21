@@ -142,17 +142,16 @@ Purpose:
 
 ---
 
-### E) Operator gate verdict (Bundle A readiness, v2)
+### E) Final verdict surface (gate stack verdict, v1)
 
-constellation_2/runtime/truth/reports/operator_gate_verdict_v2/DAY/operator_gate_verdict.v2.json
+constellation_2/runtime/truth/reports/gate_stack_verdict_v1/DAY/gate_stack_verdict.v1.json
 
 
 Purpose:
-- fail-closed readiness verdict,
-- explicitly evaluate submission evidence via B1 or B2,
-- enumerate missing artifacts and sha mismatches,
-- provide committee-readable READY boolean.
-
+- single authoritative final verdict surface,
+- enumerates required gates and their PASS/FAIL,
+- committee-readable PASS/FAIL for readiness gating,
+- prohibits parallel verdict ambiguity.
 ---
 
 ## 5. Forbidden conditions (MUST fail readiness)
@@ -162,7 +161,7 @@ F2. Any submission evidence indicating mode != `REAL_IB_PAPER`
   (either via submission index records OR via pillars decision evidence).  
 F3. Any `SYNTH_` marker anywhere under `execution_evidence_v1/submissions/DAY/**`.  
 F4. Reconciliation verdict != `PASS`.  
-F5. Operator gate verdict v2 `ready != true` or `exit_code != 0`.  
+F5. Gate stack verdict v1 `status != PASS` OR any `gates[]` entry with `required=true` has `status != PASS`.
 F6. Any readiness computation using `latest.json`.  
 
 ---
@@ -173,7 +172,7 @@ Given DAY, an auditor must be able to:
 
 1) Verify existence of A–E artifacts for DAY.  
 2) Verify pipeline manifest v2 enumerates A–E with sha256.  
-3) Verify operator gate verdict v2 is `ready=true` and `exit_code=0`.  
+3) Verify gate stack verdict v1 is `status=PASS` and all REQUIRED gates are `PASS`.
 4) Verify submission evidence indicates only `REAL_IB_PAPER`
    (submission index records OR pillars decisions compiled from broker submission evidence).  
 5) Verify reconciliation report verdict is `PASS`.  

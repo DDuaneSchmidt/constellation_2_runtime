@@ -2,7 +2,7 @@
 """
 gen_nav_history_ledger_v1.py
 
-Generates a deterministic NAV history ledger (day-scoped) and a deterministic latest pointer.
+Generates a deterministic NAV history ledger (day-scoped).
 Derived ONLY from NAV Snapshot Truth v1 artifacts.
 
 Deterministic / audit-grade / fail-closed:
@@ -14,13 +14,14 @@ Deterministic / audit-grade / fail-closed:
 
 Outputs:
   constellation_2/runtime/truth/monitoring_v1/economic_nav_drawdown_v1/nav_history_ledger/<DAY>/nav_history_ledger.v1.json
-  constellation_2/runtime/truth/monitoring_v1/economic_nav_drawdown_v1/nav_history_ledger/latest.json
+
+NOTE:
+- latest.json pointer fan-out is forbidden. This writer does not write latest.json.
 """
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -28,7 +29,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 DAY_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 
@@ -48,7 +49,6 @@ SNAP_ROOT = BUNDLE_ROOT / "nav_snapshot"
 LEDGER_ROOT = BUNDLE_ROOT / "nav_history_ledger"
 
 LEDGER_NAME = "nav_history_ledger.v1.json"
-LATEST_NAME = "latest.json"
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/MONITORING/nav_history_ledger.v1.schema.json"
 CONTRACT_RELPATH = "governance/05_CONTRACTS/C2/nav_history_ledger_v1.contract.md"
@@ -148,12 +148,10 @@ def main() -> int:
     if not DAY_RE.match(day):
         raise SystemExit(f"FAIL: bad --day_utc: {day!r}")
 
-    # Determine available snapshot days deterministically
     days_all = _list_days_under(SNAP_ROOT)
     if not days_all:
         raise SystemExit(f"FAIL: no NAV snapshots found under {str(SNAP_ROOT)}")
 
-    # Ledger as-of day must not be before earliest snapshot day
     days_upto = [d for d in days_all if d <= day]
     if not days_upto:
         raise SystemExit(f"FAIL: no NAV snapshots at or before asof day={day}")
@@ -169,7 +167,6 @@ def main() -> int:
         snap_sha = _sha256_file(snap_path)
         snap = _read_json_obj(snap_path)
 
-        # Required fields (fail-closed)
         end_nav = snap.get("end_nav")
         peak = snap.get("peak_nav_to_date")
         dd = snap.get("drawdown_pct")
@@ -212,22 +209,7 @@ def main() -> int:
     out_path = (LEDGER_ROOT / day / LEDGER_NAME).resolve()
     wr = _write_immutable_canon(out_path, ledger_obj)
 
-    latest_obj: Dict[str, Any] = {
-        "schema_id": "C2_NAV_HISTORY_LEDGER_LATEST_POINTER_V1",
-        "schema_version": 1,
-        "day_utc": day,
-        "pointers": {"ledger_path": str(out_path), "ledger_sha256": wr.sha256},
-        "produced_utc": produced_utc,
-        "producer": {"git_sha": git_sha, "module": "ops/tools/gen_nav_history_ledger_v1.py", "repo": "constellation_2_runtime"},
-        "canonical_json_hash": None,
-    }
-    latest_obj["canonical_json_hash"] = canonical_hash_excluding_fields_v1(latest_obj, fields=("canonical_json_hash",))
-
-    latest_path = (LEDGER_ROOT / LATEST_NAME).resolve()
-    wr2 = _write_immutable_canon(latest_path, latest_obj)
-
     print(f"NAV_HISTORY_LEDGER_V1 asof_day_utc={day} rows={len(rows)} ledger_path={wr.path} ledger_sha256={wr.sha256} ledger_action={wr.action}")
-    print(f"NAV_HISTORY_LEDGER_LATEST_POINTER day_utc={day} path={wr2.path} sha256={wr2.sha256} action={wr2.action}")
     return 0
 
 

@@ -8,6 +8,9 @@ Allocation v2:
   even if accounting status is not OK.
 
 This prevents a pathological “cannot exit because accounting degraded” scenario.
+
+NOTE:
+- latest.json pointer fan-out is forbidden. This writer is day-scoped only.
 """
 
 from __future__ import annotations
@@ -22,7 +25,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import write_file_immutable_v1
-from constellation_2.phaseF.accounting.lib.mutable_write_v1 import write_file_atomic_mutable_v1
 
 C2_DRAWDOWN_CONTRACT_ID = "C2_DRAWDOWN_CONVENTION_V1"
 DRAWDOWN_QUANT = Decimal("0.000001")
@@ -35,7 +37,6 @@ INTENTS_ROOT = (TRUTH_ROOT / "intents_v1" / "snapshots").resolve()
 
 SCHEMA_SUMMARY = "governance/04_DATA/SCHEMAS/C2/ALLOCATION/allocation_summary.v1.schema.json"
 SCHEMA_DECISION = "governance/04_DATA/SCHEMAS/C2/ALLOCATION/allocation_decision.v1.schema.json"
-SCHEMA_LATEST = "governance/04_DATA/SCHEMAS/C2/ALLOCATION/allocation_latest_pointer.v1.schema.json"
 SCHEMA_FAILURE = "governance/04_DATA/SCHEMAS/C2/ALLOCATION/allocation_failure.v1.schema.json"
 
 ENGINE_CAP_PCT = {
@@ -411,22 +412,6 @@ def main(argv: List[str] | None = None) -> int:
     validate_against_repo_schema_v1(summary_obj, REPO_ROOT, SCHEMA_SUMMARY)
     s_bytes = canonical_json_bytes_v1(summary_obj) + b"\n"
     _ = write_file_immutable_v1(path=summary_path, data=s_bytes, create_dirs=True)
-    s_sha = _sha256_bytes(s_bytes)
-
-    latest_obj: Dict[str, Any] = {
-        "schema_id": "C2_ALLOCATION_LATEST_POINTER_V1",
-        "schema_version": 1,
-        "produced_utc": produced_utc,
-        "day_utc": day_utc,
-        "producer": {"repo": producer_repo, "git_sha": producer_sha, "module": module},
-        "status": "OK",
-        "reason_codes": list(reason_codes),
-        "pointers": {"summary_path": str(summary_path.resolve()), "summary_sha256": s_sha},
-    }
-    validate_against_repo_schema_v1(latest_obj, REPO_ROOT, SCHEMA_LATEST)
-    l_bytes = canonical_json_bytes_v1(latest_obj) + b"\n"
-    latest_path = (ALLOC_ROOT / "latest.json").resolve()
-    _ = write_file_atomic_mutable_v1(path=latest_path, data=l_bytes, create_dirs=True)
 
     print("OK: ALLOCATION_V2_SUMMARY_AND_DECISIONS_WRITTEN")
     return 0

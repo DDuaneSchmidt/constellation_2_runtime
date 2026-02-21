@@ -79,19 +79,7 @@ def main() -> int:
     out_path = out_dir / "engine_pnl_proxy.v1.json"
     _immut_write(out_path, _json_dumps(out))
 
-    latest = TRUTH_ROOT / "monitoring_v1" / "engine_pnl_proxy_v1" / "latest.json"
-    latest_obj = {
-        "schema_id": "C2_LATEST_POINTER_V1",
-        "produced_utc": __import__("datetime").datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
-        "producer": "ops/tools/run_engine_pnl_proxy_day_v1.py",
-        "path": str(out_path.relative_to(TRUTH_ROOT)),
-        "artifact_sha256": _sha256_file(out_path),
-        "status": status
-    }
-    _atomic_write(latest, _json_dumps(latest_obj))
-
     print(f"OK: wrote {out_path}")
-    print(f"OK: updated {latest}")
     return 0
 
 if __name__ == "__main__":

@@ -19,6 +19,57 @@ documents:
     path: governance/00_INDEX.md
     class: GOVERNANCE_INDEX
     status: ACTIVE
+  # Governed docs/c2 (tracked for traceability; treated as governed only when listed here)
+  - id: C2_DOC_F_ACCOUNTING_SPINE_V1
+    path: docs/c2/F_ACCOUNTING_SPINE_V1.md
+    class: C2_DOC
+    status: ACTIVE
+  - id: C2_DOC_F_ACCOUNTING_SCHEMA_V1
+    path: docs/c2/F_ACCOUNTING_SCHEMA_V1.md
+    class: C2_DOC
+    status: ACTIVE
+  - id: C2_DOC_F_ACCOUNTING_RECONSTRUCTION_GUARANTEE_V1
+    path: docs/c2/F_ACCOUNTING_RECONSTRUCTION_GUARANTEE_V1.md
+    class: C2_DOC
+    status: ACTIVE
+  - id: C2_DOC_F_MARKING_POLICY_CONSERVATIVE_V1
+    path: docs/c2/F_MARKING_POLICY_CONSERVATIVE_V1.md
+    class: C2_DOC
+    status: ACTIVE
+  - id: C2_DOC_G_ALLOCATION_SPINE_V1
+    path: docs/c2/G_ALLOCATION_SPINE_V1.md
+    class: C2_DOC
+    status: ACTIVE
+  - id: C2_DOC_G_THROTTLE_RULES_V1
+    path: docs/c2/G_THROTTLE_RULES_V1.md
+    class: C2_DOC
+    status: ACTIVE
+  - id: C2_DOC_G_RISK_BUDGET_CONTRACT_V1
+    path: docs/c2/G_RISK_BUDGET_CONTRACT_V1.md
+    class: C2_DOC
+    status: ACTIVE
+  - id: C2_DOC_G_REASON_CODES_V1
+    path: docs/c2/G_REASON_CODES_V1.md
+    class: C2_DOC
+    status: ACTIVE
+  - id: C2_DOC_RUNBOOK_FG_PHASE_V1
+    path: docs/c2/RUNBOOK_FG_PHASE_V1.md
+    class: C2_DOC
+    status: ACTIVE
+  - id: OPS_GOVERNANCE_PREFLIGHT_SH
+    path: ops/governance/preflight.sh
+    class: OPS_PREFLIGHT
+    status: ACTIVE
+
+  - id: OPS_PREFLIGHT_REQUIRE_KILL_SWITCH_USES_GATE_STACK_VERDICT_V1
+    path: ops/governance/preflight_require_kill_switch_uses_gate_stack_verdict_v1.sh
+    class: OPS_PREFLIGHT
+    status: ACTIVE
+
+  - id: C2_SINGLE_FINAL_VERDICT_CONSUMPTION_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/single_final_verdict_consumption_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
 
   # Governed C2 contracts (canonical definitions; runtime code and docs must conform)
   - id: C2_DRAWDOWN_CONVENTION_V1
@@ -258,270 +309,22 @@ documents:
     class: C2_REGISTRY
     status: ACTIVE
 
-  # Bundle H-0 OMS decision truth schema (new governed output)
-  - id: C2_OMS_DECISION_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/oms_decision.v1.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-
-  - id: C2_ENGINE_ACTIVITY_INTENTS_DAY_ROLLUP_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/intents_day_rollup.v1.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-
-  # Prerequisites for Bundle F/G (new C2 truth spines)
-  - id: C2_E_CASH_LEDGER_SPINE_V1
-    path: docs/c2/E_CASH_LEDGER_SPINE_V1.md
-    class: C2_PREREQ_CASH_LEDGER
-    status: DRAFT
-
-  - id: C2_E_EXECUTION_EVIDENCE_TRUTH_SPINE_V1
-    path: docs/c2/E_EXECUTION_EVIDENCE_TRUTH_SPINE_V1.md
-    class: C2_PREREQ_EXECUTION_EVIDENCE_TRUTH
-    status: DRAFT
-
-  - id: C2_E_POSITIONS_SNAPSHOT_TRUTH_V1
-    path: docs/c2/E_POSITIONS_SNAPSHOT_TRUTH_V1.md
-    class: C2_PREREQ_POSITIONS_SNAPSHOT_TRUTH
-    status: DRAFT
-
-  # Bundle F (design docs; docs/ is governed when listed here)
-  - id: C2_F_ACCOUNTING_SPINE_V1
-    path: docs/c2/F_ACCOUNTING_SPINE_V1.md
-    class: C2_BUNDLE_F_DESIGN
-    status: DRAFT
-
-  - id: C2_F_ACCOUNTING_SCHEMA_V1
-    path: docs/c2/F_ACCOUNTING_SCHEMA_V1.md
-    class: C2_BUNDLE_F_SCHEMA_SPEC
-    status: DRAFT
-
-  - id: C2_F_ACCOUNTING_RECONSTRUCTION_GUARANTEE_V1
-    path: docs/c2/F_ACCOUNTING_RECONSTRUCTION_GUARANTEE_V1.md
-    class: C2_BUNDLE_F_RECONSTRUCTION
-    status: DRAFT
-
-  - id: C2_F_MARKING_POLICY_CONSERVATIVE_V1
-    path: docs/c2/F_MARKING_POLICY_CONSERVATIVE_V1.md
-    class: C2_BUNDLE_F_POLICY
-    status: DRAFT
-
-  # Bundle G (design docs)
-  - id: C2_G_ALLOCATION_SPINE_V1
-    path: docs/c2/G_ALLOCATION_SPINE_V1.md
-    class: C2_BUNDLE_G_DESIGN
-    status: DRAFT
-
-  - id: C2_G_THROTTLE_RULES_V1
-    path: docs/c2/G_THROTTLE_RULES_V1.md
-    class: C2_BUNDLE_G_POLICY
-    status: DRAFT
-
-  - id: C2_G_RISK_BUDGET_CONTRACT_V1
-    path: docs/c2/G_ALLOCATION_SPINE_V1.md
-    class: C2_BUNDLE_G_CONTRACT
-    status: DRAFT
-
-  - id: C2_G_REASON_CODES_V1
-    path: docs/c2/G_REASON_CODES_V1.md
-    class: C2_BUNDLE_G_REGISTRY
-    status: DRAFT
-
-  # Operator runbook
-  - id: C2_RUNBOOK_FG_PHASE_V1
-    path: docs/c2/RUNBOOK_FG_PHASE_V1.md
-    class: C2_RUNBOOK
-    status: DRAFT
-
-  # C2 Pillars v1 (new canonical truth infrastructure)
-  - id: C2_PILLARS_V1
-    path: governance/05_CONTRACTS/C2/pillars_v1.contract.md
-    class: C2_CONTRACT
-    status: DRAFT
-
-  - id: C2_DETERMINISM_BUNDLE_V1
-    path: governance/05_CONTRACTS/C2/determinism_bundle_v1.contract.md
-    class: C2_CONTRACT
-    status: DRAFT
-
-  - id: C2_MODEL_GOVERNANCE_BUNDLE_V1
-    path: governance/05_CONTRACTS/C2/model_governance_bundle_v1.contract.md
-    class: C2_CONTRACT
-    status: DRAFT
-
-  - id: C2_EXECUTION_QUALITY_BUNDLE_V1
-    path: governance/05_CONTRACTS/C2/execution_quality_bundle_v1.contract.md
-    class: C2_CONTRACT
-    status: DRAFT
-
-  # C2 Pillars v1 schemas (governed outputs)
-  - id: C2_PILLARS_INPUTS_FROZEN_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/PILLARS/inputs_frozen.v1.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-
-  - id: C2_PILLARS_SUBMISSION_DECISION_RECORD_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/PILLARS/submission_decision_record.v1.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-
-  - id: C2_PILLARS_DAILY_EXECUTION_STATE_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/PILLARS/daily_execution_state.v1.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-
-  - id: C2_PILLARS_DAY_ROOT_ANCHOR_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/PILLARS/day_root_anchor.v1.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-
-  - id: C2_PILLARS_DETERMINISM_BUNDLE_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/PILLARS/determinism_bundle.v1.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-
-  - id: C2_PILLARS_MODEL_GOVERNANCE_BUNDLE_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/PILLARS/model_governance_bundle.v1.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-
-  - id: C2_PILLARS_EXECUTION_QUALITY_BUNDLE_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/PILLARS/execution_quality_bundle.v1.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-
-  # Reports schemas (v2 additions)
-  - id: C2_REPORTS_PIPELINE_MANIFEST_SCHEMA_V2
-    path: governance/04_DATA/SCHEMAS/C2/REPORTS/pipeline_manifest.v2.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-
-  - id: C2_REPORTS_OPERATOR_GATE_VERDICT_SCHEMA_V2
-    path: governance/04_DATA/SCHEMAS/C2/REPORTS/operator_gate_verdict.v2.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-
-  # Deprecations (canonical notices)
-  - id: C2_SUBMISSION_INDEX_V1_DEPRECATION_NOTICE
-    path: governance/05_CONTRACTS/C2/submission_index_v1.deprecation_notice.md
-    class: C2_CONTRACT
+  - id: OPS_PREFLIGHT_FORBID_OPERATOR_GATE_VERDICT_SURFACES_V1
+    path: ops/governance/preflight_forbid_operator_gate_verdict_surfaces_v1.sh
+    class: OPS_PREFLIGHT
     status: ACTIVE
 
-  - id: C2_PILLARS_V1_DEPRECATION_NOTICE
-    path: governance/05_CONTRACTS/C2/pillars_v1.deprecation_notice.md
+  - id: C2_LATEST_POINTER_FANOUT_ELIMINATION_V1
+    path: governance/05_CONTRACTS/C2/latest_pointer_fanout_elimination_v1.contract.md
     class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_SPINE_AUTHORITY_V1
+    path: governance/02_REGISTRIES/C2_SPINE_AUTHORITY_V1.json
+    class: C2_REGISTRY
     status: ACTIVE
-  # Bundle 1 — Execution & Fill Spine (governed outputs + contracts)
-  - id: C2_EXECUTION_EVENT_STREAM_RECORD_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/execution_event_stream_record.v1.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
 
-  - id: C2_FILL_LEDGER_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/fill_ledger.v1.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-
-  - id: C2_EXECUTION_RECONCILIATION_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/REPORTS/execution_reconciliation.v1.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-
-  - id: C2_ORDER_LIFECYCLE_EVENT_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/order_lifecycle_event.v1.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-
-  - id: C2_EXECUTION_OBSERVER_SPINE_V1
-    path: governance/03_CONTRACTS/C2/EXECUTION_EVIDENCE/execution_observer_spine_v1.md
+  - id: C2_SPINE_EXCLUSIVITY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/spine_exclusivity_v1.contract.md
     class: C2_CONTRACT
-    status: DRAFT
-
-  - id: C2_FILL_LEDGER_SPINE_V1
-    path: governance/03_CONTRACTS/C2/EXECUTION_EVIDENCE/fill_ledger_spine_v1.md
-    class: C2_CONTRACT
-    status: DRAFT
-
-  - id: C2_EXECUTION_RECONCILIATION_SPINE_V1
-    path: governance/03_CONTRACTS/C2/EXECUTION_EVIDENCE/execution_reconciliation_spine_v1.md
-    class: C2_CONTRACT
-    status: DRAFT
-  - id: C2_ACCOUNTING_NAV_SCHEMA_V2
-    path: governance/04_DATA/SCHEMAS/C2/ACCOUNTING/accounting_nav.v2.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-  - id: C2_ENGINE_LINKAGE_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/engine_linkage.v1.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-  - id: C2_ACCOUNTING_ENGINE_ATTRIBUTION_SCHEMA_V2
-    path: governance/04_DATA/SCHEMAS/C2/ACCOUNTING/engine_attribution.v2.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-  - id: C2_REPORTS_CORRELATION_PRECONDITIONS_GATE_SCHEMA_V2
-    path: governance/04_DATA/SCHEMAS/C2/REPORTS/correlation_preconditions_gate.v2.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-  - id: C2_RISK_SYSTEMIC_RISK_GATE_SCHEMA_V2
-    path: governance/04_DATA/SCHEMAS/C2/RISK/systemic_risk_gate.v2.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-  - id: C2_REPORTS_BROKER_RECONCILIATION_SCHEMA_V2
-    path: governance/04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v2.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-  - id: C2_REPORTS_REPLAY_INTEGRITY_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/REPORTS/replay_integrity.v1.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-  - id: C2_REPORTS_REPLAY_INTEGRITY_SCHEMA_V2
-    path: governance/04_DATA/SCHEMAS/C2/REPORTS/replay_integrity.v2.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-  - id: C2_MONITORING_STRESS_DRIFT_SENTINEL_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/MONITORING/stress_drift_sentinel.v1.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-  - id: C2_REPORTS_OPERATOR_STRESS_OVERRIDE_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/REPORTS/operator_stress_override.v1.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-  - id: C2_RISK_SYSTEMIC_RISK_GATE_SCHEMA_V3
-    path: governance/04_DATA/SCHEMAS/C2/RISK/systemic_risk_gate.v3.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-  # Bundle A8/A9/A10 hardening artifacts
-  - id: C2_GATE_HIERARCHY_CONTRACT_V1
-    path: governance/05_CONTRACTS/C2/gate_hierarchy_v1.contract.md
-    class: C2_CONTRACT
-    status: DRAFT
-  - id: C2_TRUTH_SURFACE_AUTHORITY_CONTRACT_V1
-    path: governance/05_CONTRACTS/C2/truth_surface_authority_v1.contract.md
-    class: C2_CONTRACT
-    status: DRAFT
-  - id: C2_FAILURE_INJECTION_HARNESS_CONTRACT_V1
-    path: governance/05_CONTRACTS/C2/failure_injection_harness_v1.contract.md
-    class: C2_CONTRACT
-    status: DRAFT
-
-  - id: C2_REGISTRY_GATE_HIERARCHY_V1
-    path: governance/02_REGISTRIES/GATE_HIERARCHY_V1.json
-    class: C2_REGISTRY
-    status: DRAFT
-  - id: C2_REGISTRY_TRUTH_SURFACE_AUTHORITY_V1
-    path: governance/02_REGISTRIES/TRUTH_SURFACE_AUTHORITY_V1.json
-    class: C2_REGISTRY
-    status: DRAFT
-
-  - id: C2_REPORTS_GATE_STACK_VERDICT_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/REPORTS/gate_stack_verdict.v1.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-  - id: C2_REPORTS_TRUTH_SURFACE_AUTHORITY_GATE_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/REPORTS/truth_surface_authority_gate.v1.schema.json
-    class: C2_SCHEMA
-    status: DRAFT
-  - id: C2_REPORTS_FAILURE_INJECTION_HARNESS_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/REPORTS/failure_injection_harness.v1.schema.json
-    class: C2_SCHEMA
     status: DRAFT

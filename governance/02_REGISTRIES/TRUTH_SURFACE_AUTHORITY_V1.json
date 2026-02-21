@@ -5,11 +5,6 @@
       "v2": "constellation_2/runtime/truth/reports/operator_daily_gate_v2/{DAY}/operator_daily_gate.v2.json",
       "v3": "constellation_2/runtime/truth/reports/operator_daily_gate_v3/{DAY}/operator_daily_gate.v3.json"
     },
-    "operator_gate_verdict": {
-      "v1": "constellation_2/runtime/truth/reports/operator_gate_verdict_v1/{DAY}/operator_gate_verdict.v1.json",
-      "v2": "constellation_2/runtime/truth/reports/operator_gate_verdict_v2/{DAY}/operator_gate_verdict.v2.json",
-      "v3": "constellation_2/runtime/truth/reports/operator_gate_verdict_v3/{DAY}/operator_gate_verdict.v3.json"
-    },
     "replay_integrity": {
       "v1": "constellation_2/runtime/truth/reports/replay_integrity_v1/{DAY}/replay_integrity.v1.json",
       "v2": "constellation_2/runtime/truth/reports/replay_integrity_v2/{DAY}/replay_integrity.v2.json"
@@ -27,53 +22,28 @@
       "enforce_from_day_utc": "2026-02-20",
       "exclusive": true,
       "surface": "systemic_risk_gate",
-      "versions": [
-        "v1",
-        "v2",
-        "v3"
-      ]
+      "versions": ["v1", "v2", "v3"]
     },
     {
       "active": "v2",
       "enforce_from_day_utc": "2026-02-20",
       "exclusive": true,
       "surface": "replay_integrity",
-      "versions": [
-        "v1",
-        "v2"
-      ]
+      "versions": ["v1", "v2"]
     },
     {
       "active": "v2",
       "enforce_from_day_utc": "2026-02-20",
       "exclusive": false,
       "surface": "monitoring",
-      "versions": [
-        "v1",
-        "v2"
-      ]
-    },
-    {
-      "active": "v3",
-      "enforce_from_day_utc": "2026-02-20",
-      "exclusive": true,
-      "surface": "operator_gate_verdict",
-      "versions": [
-        "v1",
-        "v2",
-        "v3"
-      ]
+      "versions": ["v1", "v2"]
     },
     {
       "active": "v3",
       "enforce_from_day_utc": "2026-02-20",
       "exclusive": true,
       "surface": "operator_daily_gate",
-      "versions": [
-        "v1",
-        "v2",
-        "v3"
-      ]
+      "versions": ["v1", "v2", "v3"]
     }
   ],
   "version": 1

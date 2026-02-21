@@ -5,7 +5,7 @@ import json
 import os
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime")
 TRUTH_ROOT = REPO_ROOT / "constellation_2/runtime/truth"
@@ -48,10 +48,8 @@ def _dec_str(x: Any) -> str:
         d = Decimal(str(x))
     except (InvalidOperation, ValueError):
         raise ValueError(f"invalid decimal: {x!r}")
-    # Normalize to max 8 dp without exponent
     q = d.quantize(Decimal("0.00000001"))
     s = format(q, "f")
-    # Trim trailing zeros + dot
     if "." in s:
         s = s.rstrip("0").rstrip(".")
         if s == "-0":
@@ -79,13 +77,6 @@ def main() -> int:
     src_sha = _sha256_file(in_path)
     raw = _load_json(in_path)
 
-    # Operator contract for raw JSON (minimal, deterministic):
-    # {
-    #   "cash_end": "123.45",
-    #   "fees_total": "1.23",
-    #   "positions": [{"symbol":"AAPL","sec_type":"STK","qty":"1","avg_cost":"100","market_value":"110","currency":"USD"}, ...],
-    #   "notes": ["..."]
-    # }
     cash_end = _dec_str(raw.get("cash_end"))
     fees_total = _dec_str(raw.get("fees_total", "0"))
     positions_in = raw.get("positions", [])
@@ -135,26 +126,13 @@ def main() -> int:
         "notes": notes,
     }
 
-    # Deterministic artifact path (execution evidence)
     out_dir = TRUTH_ROOT / "execution_evidence_v1" / "broker_statement_normalized_v1" / day
     out_path = out_dir / "broker_statement_normalized.v1.json"
 
     content = _json_dumps_deterministic(out)
     _immut_write(out_path, content)
 
-    # latest.json pointer (mutable, atomic)
-    latest_path = TRUTH_ROOT / "execution_evidence_v1" / "broker_statement_normalized_v1" / "latest.json"
-    latest = {
-        "schema_id": "C2_LATEST_POINTER_V1",
-        "produced_utc": __import__("datetime").datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
-        "producer": "ops/tools/run_broker_statement_normalizer_v1.py",
-        "path": str(out_path.relative_to(TRUTH_ROOT)),
-        "artifact_sha256": _sha256_file(out_path),
-    }
-    _atomic_write(latest_path, _json_dumps_deterministic(latest))
-
     print(f"OK: wrote {out_path}")
-    print(f"OK: updated {latest_path}")
     return 0
 
 if __name__ == "__main__":

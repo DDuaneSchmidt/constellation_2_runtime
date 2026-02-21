@@ -75,22 +75,21 @@ def _read_json_obj(path: Path) -> Dict[str, Any]:
     return obj
 
 
-def _load_nav_usd_from_accounting_latest(repo_root: Path) -> Tuple[int, str]:
+def _parse_day_utc_or_fail(day_utc: str) -> str:
+    d = (day_utc or "").strip()
+    if len(d) != 10 or d[4] != "-" or d[7] != "-":
+        raise TransformerError(f"BAD_DAY_UTC_FORMAT_EXPECTED_YYYY_MM_DD: {d!r}")
+    return d
+
+
+def _load_nav_usd_from_accounting_day(repo_root: Path, day_utc: str) -> Tuple[int, str]:
     """
-    Deterministic: read accounting_v1/latest.json -> pointers.nav_path -> nav.json -> nav.nav_total (int dollars).
+    Deterministic (day-keyed): read accounting_v1/nav/<DAY>/nav.json -> nav.nav_total (int dollars).
     Fail-closed if any field missing or wrong type.
     Returns (nav_total_usd_int, nav_path_str).
     """
-    p_latest = repo_root / "constellation_2/runtime/truth/accounting_v1/latest.json"
-    latest = _read_json_obj(p_latest)
-
-    ptrs = latest.get("pointers")
-    if not isinstance(ptrs, dict):
-        raise TransformerError("ACCOUNTING_LATEST_POINTERS_MISSING")
-    nav_path_s = ptrs.get("nav_path")
-    if not isinstance(nav_path_s, str) or not nav_path_s.strip():
-        raise TransformerError("ACCOUNTING_LATEST_NAV_PATH_MISSING")
-    p_nav = Path(nav_path_s).resolve()
+    day = _parse_day_utc_or_fail(day_utc)
+    p_nav = (repo_root / "constellation_2/runtime/truth/accounting_v1/nav" / day / "nav.json").resolve()
     nav_obj = _read_json_obj(p_nav)
 
     nav = nav_obj.get("nav")
@@ -198,7 +197,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if target_pct > CAPS.per_trade_notional_pct_max:
         raise TransformerError(f"PER_TRADE_NOTIONAL_CAP_EXCEEDED: target={str(target_pct)} cap={str(CAPS.per_trade_notional_pct_max)}")
 
-    nav_total_usd_int, nav_path = _load_nav_usd_from_accounting_latest(repo_root)
+    nav_total_usd_int, nav_path = _load_nav_usd_from_accounting_day(repo_root, args.day_utc)
 
     # Drawdown scaling (strict: fail closed if drawdown missing)
     nav_obj = _read_json_obj(Path(nav_path))

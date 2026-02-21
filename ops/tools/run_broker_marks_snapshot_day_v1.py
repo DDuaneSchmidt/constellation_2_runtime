@@ -82,7 +82,6 @@ def main() -> int:
         mv = _d(p.get("market_value", "0"))
         avg = _d(p.get("avg_cost", "0"))
 
-        # implied price is mv/qty when qty != 0; otherwise 0
         if qty == 0:
             ip = Decimal("0")
         else:
@@ -122,18 +121,7 @@ def main() -> int:
     out_path = out_dir / "broker_marks.v1.json"
     _immut_write(out_path, _json_bytes(out))
 
-    latest = TRUTH_ROOT / "market_data_snapshot_v1" / "broker_marks_v1" / "latest.json"
-    latest_obj = {
-        "schema_id": "C2_LATEST_POINTER_V1",
-        "produced_utc": __import__("datetime").datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
-        "producer": "ops/tools/run_broker_marks_snapshot_day_v1.py",
-        "path": str(out_path.relative_to(TRUTH_ROOT)),
-        "artifact_sha256": _sha256_file(out_path)
-    }
-    _atomic_write(latest, _json_bytes(latest_obj))
-
     print(f"OK: wrote {out_path}")
-    print(f"OK: updated {latest}")
     return 0
 
 if __name__ == "__main__":

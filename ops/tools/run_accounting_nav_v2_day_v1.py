@@ -46,6 +46,15 @@ def _d(x: Any) -> Decimal:
     except (InvalidOperation, ValueError):
         return Decimal("0")
 
+def _ds(d: Decimal) -> str:
+    q = d.quantize(Decimal("0.00000001"))
+    s = format(q, "f")
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    if s == "-0":
+        s = "0"
+    return s
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_accounting_nav_v2_day_v1")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
@@ -70,7 +79,6 @@ def main() -> int:
     cash = _load_json(cash_path)
     marks = _load_json(marks_path)
 
-    # cash ledger uses cents in your repo (from earlier proof)
     cash_total_cents = int(cash["snapshot"]["cash_total_cents"])
     cash_total = int(cash_total_cents // 100)
 
@@ -78,7 +86,7 @@ def main() -> int:
         {
             "kind": "CASH",
             "symbol": "USD",
-            "qty": cash_total,
+            "qty": str(cash_total),
             "mv": cash_total,
             "mark": {"bid": None, "ask": None, "last": None, "source": "CASH_LEDGER", "asof_utc": f"{day}T00:00:00Z"},
         }
@@ -86,6 +94,7 @@ def main() -> int:
 
     gross_mv = 0
     unreal = 0
+
     for m in marks.get("marks", []):
         sym = str(m.get("symbol") or "").strip()
         sec = str(m.get("sec_type") or "").strip()
@@ -95,14 +104,15 @@ def main() -> int:
         avg = _d(m.get("avg_cost"))
         gross_mv += mv
         unreal += int(qty * (ip - avg))
+
         components.append(
             {
                 "kind": "BROKER_MARK",
                 "symbol": sym,
                 "sec_type": sec,
-                "qty": float(qty),
+                "qty": _ds(qty),
                 "mv": mv,
-                "mark": {"bid": None, "ask": None, "last": float(ip), "source": "BROKER_MARKS_V1", "asof_utc": f"{day}T00:00:00Z"},
+                "mark": {"bid": None, "ask": None, "last": _ds(ip), "source": "BROKER_MARKS_V1", "asof_utc": f"{day}T00:00:00Z"},
             }
         )
 
@@ -140,18 +150,7 @@ def main() -> int:
     out_path = out_dir / "nav.v2.json"
     _immut_write(out_path, _json_bytes(out))
 
-    latest = TRUTH_ROOT / "accounting_v2" / "nav" / "latest.json"
-    latest_obj = {
-        "schema_id": "C2_LATEST_POINTER_V1",
-        "produced_utc": __import__("datetime").datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
-        "producer": "ops/tools/run_accounting_nav_v2_day_v1.py",
-        "path": str(out_path.relative_to(TRUTH_ROOT)),
-        "artifact_sha256": _sha256_file(out_path)
-    }
-    _atomic_write(latest, _json_bytes(latest_obj))
-
     print(f"OK: wrote {out_path}")
-    print(f"OK: updated {latest}")
     return 0
 
 if __name__ == "__main__":
