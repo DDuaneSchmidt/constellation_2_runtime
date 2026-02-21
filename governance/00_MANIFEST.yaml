@@ -308,3 +308,8 @@ documents:
     path: governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json
     class: C2_REGISTRY
     status: ACTIVE
+
+  - id: OPS_PREFLIGHT_FORBID_OPERATOR_GATE_VERDICT_SURFACES_V1
+    path: ops/governance/preflight_forbid_operator_gate_verdict_surfaces_v1.sh
+    class: OPS_PREFLIGHT
+    status: ACTIVE

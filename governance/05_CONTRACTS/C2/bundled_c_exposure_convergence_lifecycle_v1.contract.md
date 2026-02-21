@@ -101,14 +101,21 @@ Inputs (all day-keyed; `latest.json` is forbidden for readiness decisions):
 ### 4.4 NAV (optional but constrains numeric convergence)
 - `constellation_2/runtime/truth/accounting_v1/nav/<DAY>/nav.json`
 
-### 4.5 Gates used by kill switch
-- Operator gate verdict:
-  - `constellation_2/runtime/truth/reports/operator_gate_verdict_v1/<DAY>/operator_gate_verdict.v1.json`
-- Capital risk envelope:
-  - `constellation_2/runtime/truth/reports/capital_risk_envelope_v1/<DAY>/capital_risk_envelope.v1.json`
-- Reconciliation report v2 (broker evidence compatibility):
-  - `constellation_2/runtime/truth/reports/reconciliation_report_v2/<DAY>/reconciliation_report.v2.json`
+### 4.5 Gates used by kill switch (Single Final Verdict)
 
+Kill switch consumption is governed by the Single Final Verdict rule.
+
+Authoritative final verdict input:
+- `constellation_2/runtime/truth/reports/gate_stack_verdict_v1/<DAY>/gate_stack_verdict.v1.json`
+
+Prohibited as final-decision inputs (may exist as evidence only during migration):
+- `constellation_2/runtime/truth/reports/operator_gate_verdict_v1/<DAY>/operator_gate_verdict.v1.json`
+- `constellation_2/runtime/truth/reports/operator_gate_verdict_v2/<DAY>/operator_gate_verdict.v2.json`
+- `constellation_2/runtime/truth/reports/operator_gate_verdict_v3/<DAY>/operator_gate_verdict.v3.json`
+- `constellation_2/runtime/truth/reports/capital_risk_envelope_v1/<DAY>/capital_risk_envelope.v1.json`
+- `constellation_2/runtime/truth/reports/capital_risk_envelope_v2/<DAY>/capital_risk_envelope.v2.json`
+- `constellation_2/runtime/truth/reports/reconciliation_report_v2/<DAY>/reconciliation_report.v2.json`
+- `constellation_2/runtime/truth/reports/reconciliation_report_v3/<DAY>/reconciliation_report.v3.json`
 ## 5. Outputs (by DAY)
 
 ### 5.1 Kill switch state (always emitted; fail-closed default)

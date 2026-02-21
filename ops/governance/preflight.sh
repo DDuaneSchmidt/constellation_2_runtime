@@ -61,5 +61,6 @@ fi
 
 # 6) Structural invariant preflights (fail-closed)
 "${REPO_ROOT}/ops/governance/preflight_require_kill_switch_uses_gate_stack_verdict_v1.sh"
+"${REPO_ROOT}/ops/governance/preflight_forbid_operator_gate_verdict_surfaces_v1.sh"
 
 echo "[c2-preflight] PASS"

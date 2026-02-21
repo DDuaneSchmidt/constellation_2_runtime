@@ -39,8 +39,8 @@ Submission evidence and readiness are canonicalized through:
 - Pipeline manifest v2 (pillars-aware pipeline completeness):
   - `constellation_2/runtime/truth/reports/pipeline_manifest_v2/DAY/pipeline_manifest.v2.json`
 
-- Operator gate verdict v2 (pillars-aware readiness verdict):
-  - `constellation_2/runtime/truth/reports/operator_gate_verdict_v2/DAY/operator_gate_verdict.v2.json`
+- Gate stack verdict v1 (single final verdict surface):
+  - `constellation_2/runtime/truth/reports/gate_stack_verdict_v1/DAY/gate_stack_verdict.v1.json`
 
 ### Legacy surface (not required by default)
 - Submission index is legacy and no longer required for readiness if pillars decisions exist.

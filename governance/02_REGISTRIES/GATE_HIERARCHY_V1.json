@@ -52,15 +52,6 @@
       "required": true
     },
     {
-      "gate_id": "operator_gate_verdict_v3",
-      "artifact_relpath": "constellation_2/runtime/truth/reports/operator_gate_verdict_v3/{DAY}/operator_gate_verdict.v3.json",
-      "status_field": "status",
-      "pass_status_values": ["PASS", "OK"],
-      "gate_class": "CLASS2_RISK_HARD_STOP",
-      "blocking": false,
-      "required": false
-    },
-    {
       "gate_id": "replay_integrity_v2",
       "artifact_relpath": "constellation_2/runtime/truth/reports/replay_integrity_v2/{DAY}/replay_integrity.v2.json",
       "status_field": "status",
