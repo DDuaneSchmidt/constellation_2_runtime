@@ -1,1 +1,0 @@
-{"artifact_sha256":"77d7b19a509d968e602998e99aa2a749dc73f180c17dcfe2b17a1ab3bcc17263","path":"market_data_snapshot_v1/broker_marks_v1/2026-02-19/broker_marks.v1.json","produced_utc":"2026-02-19T18:04:00Z","producer":"ops/tools/run_broker_marks_snapshot_day_v1.py","schema_id":"C2_LATEST_POINTER_V1"}
