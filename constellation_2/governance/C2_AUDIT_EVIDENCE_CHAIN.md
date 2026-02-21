@@ -168,3 +168,12 @@ It proves only:
 - blocker=A2_BROKER_RECONCILIATION_V2_FAIL (CHECK)
 - reason=broker_statement_account_id_mismatch: DU1234567 != expected DUO847203
 - structural_growth=NONE
+
+## A2 Broker Reconciliation Deterministic FAIL Certification
+- day_utc=2026-02-13
+- ib_account=DUO847203
+- mode=CHECK
+- run1_stdout_sha256=36193928664003a55be1a91954a44a2a1ab44c7aa3c23d6fa2a2ad7739f85a29
+- run2_stdout_sha256=36193928664003a55be1a91954a44a2a1ab44c7aa3c23d6fa2a2ad7739f85a29
+- diff_empty=YES
+- interpretation=EXPECTED_FAIL (broker positions exist; internal submissions-derived positions empty)
