@@ -54,3 +54,6 @@ constellation_2/phaseD/outputs/
 # C2 runtime outputs (must never be committed)
 constellation_2/runtime/truth/reports/
 constellation_2/runtime/truth/monitoring_v2/
+
+# Constellation runtime truth (authoritative on disk, never committed)
+constellation_2/runtime/
