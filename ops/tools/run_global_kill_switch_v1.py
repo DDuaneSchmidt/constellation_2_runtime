@@ -100,6 +100,15 @@ def _compute_self_sha(obj: Dict[str, Any], field: str) -> str:
 
 
 def _gate_stack_all_required_pass(gs: Dict[str, Any]) -> bool:
+    """
+    Required-gate passing semantics (audit-grade, fail-closed):
+
+    - PASS/FAIL gates pass when status == "PASS"
+    - OK/FAIL gates pass when status == "OK"
+    - Therefore: a required gate is considered passing iff status ∈ {"PASS","OK"}
+
+    Any other status for a required gate => fail-closed.
+    """
     gates = gs.get("gates", [])
     if not isinstance(gates, list):
         return False
@@ -108,7 +117,7 @@ def _gate_stack_all_required_pass(gs: Dict[str, Any]) -> bool:
             return False
         required = bool(g.get("required"))
         status = str(g.get("status") or "").strip().upper()
-        if required and status != "PASS":
+        if required and status not in ("PASS", "OK"):
             return False
     return True
 
@@ -174,7 +183,7 @@ def main() -> int:
         state = "ACTIVE" if missing_or_invalid else "INACTIVE"
 
     # Single Final Verdict Consumption:
-    # INACTIVE only if gate_stack_verdict exists AND status==PASS AND all REQUIRED gates are PASS.
+    # INACTIVE only if gate_stack_verdict exists AND status==PASS AND all REQUIRED gates are PASS/OK (per gate semantics).
     if state == "INACTIVE":
         st = str(decisions.get("gate_stack_status") or "").strip().upper()
         all_required_pass = bool(decisions.get("gate_stack_required_all_pass") is True)
@@ -211,7 +220,7 @@ def main() -> int:
 
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
-        write_file_immutable_v1(out_path, _canonical_bytes(payload))
+        _ = write_file_immutable_v1(path=out_path, data=_canonical_bytes(payload), create_dirs=False)
     except ImmutableWriteError as e:
         raise SystemExit(f"FAIL_IMMUTABLE_WRITE: {e}") from e
 

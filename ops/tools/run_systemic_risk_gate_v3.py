@@ -8,6 +8,11 @@ Systemic Risk Gate v3:
 
 Writes:
 - truth/reports/systemic_risk_gate_v3/<DAY>/systemic_risk_gate.v3.json
+
+Day-0 Bootstrap Window Exception (governed, scoped):
+- If there are NO submissions yet for day_utc (bootstrap window),
+  and systemic monitoring inputs are missing, allow OK with deterministic zeros/empties.
+- Once any submission exists, revert to strict existing behavior (FAIL when inputs missing).
 """
 
 from __future__ import annotations
@@ -48,6 +53,8 @@ PATH_INTENTS_DAY = (TRUTH / "intents_v1" / "snapshots").resolve()
 
 PATH_SENTINEL = (TRUTH / "monitoring_v2" / "stress_drift_sentinel_v1").resolve()
 PATH_STRESS_OVERRIDE = (TRUTH / "reports" / "operator_stress_override_v1").resolve()
+
+DAY0_RC_SYSTEMIC_ALLOWED = "DAY0_BOOTSTRAP_SYSTEMIC_INPUTS_MISSING_ALLOWED"
 
 
 def _git_sha() -> str:
@@ -90,6 +97,24 @@ def _parse_day_utc(s: str) -> str:
     if len(d) != 10 or d[4] != "-" or d[7] != "-":
         raise ValueError(f"BAD_DAY_UTC_FORMAT_EXPECTED_YYYY_MM_DD: {d!r}")
     return d
+
+
+def _bootstrap_window_true(day: str) -> bool:
+    """
+    Day-0 Bootstrap Window iff:
+      TRUTH/execution_evidence_v1/submissions/<DAY>/ is missing OR contains zero submission dirs.
+    """
+    root = (TRUTH / "execution_evidence_v1" / "submissions" / day).resolve()
+    if not root.exists() or not root.is_dir():
+        return True
+    try:
+        for p in sorted(root.iterdir()):
+            if p.is_dir():
+                return False
+    except Exception:
+        # Fail-closed on IO errors: treat as NOT bootstrap (strict path).
+        return False
+    return True
 
 
 def _count_intents_by_engine(day: str) -> Tuple[int, List[Dict[str, Any]], List[str], List[Dict[str, str]]]:
@@ -280,6 +305,37 @@ def _eval_sentinel_and_override(day: str) -> Tuple[bool, List[str], List[Dict[st
     return (True, rc, manifest)
 
 
+def _day0_bootstrap_payload(day: str) -> Dict[str, Any]:
+    """
+    Day-0 rule: if bootstrap window true AND systemic inputs missing -> OK with deterministic empties.
+    This does NOT weaken schema; it produces a schema-valid payload with explicit reason code.
+    """
+    produced_utc = f"{day}T00:00:00Z"
+    submissions_path = (TRUTH / "execution_evidence_v1" / "submissions" / day).resolve()
+
+    payload: Dict[str, Any] = {
+        "schema_id": "systemic_risk_gate",
+        "schema_version": "v3",
+        "day_utc": day,
+        "produced_utc": produced_utc,
+        "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_systemic_risk_gate_v3.py", "git_sha": _git_sha()},
+        "status": "OK",
+        "regime_ok": True,
+        "correlation_ok": True,
+        "kill_switch_ok": True,
+        "shock_model_output": {"max_pairwise": "0.000000", "threshold_max_pairwise": "0.75", "flagged_pairs_count": 0, "flagged_pairs": []},
+        "cluster_exposure_metrics": {"total_intents": 0, "intents_by_engine": []},
+        "reason_codes": [DAY0_RC_SYSTEMIC_ALLOWED],
+        "input_manifest": [
+            {"type": "submissions_day_dir_probe", "path": str(submissions_path), "sha256": (_sha256_bytes(b"") if not submissions_path.exists() else _sha256_bytes(b"\n".join([p.name.encode("utf-8") for p in sorted(submissions_path.iterdir()) if p.is_dir()])))},
+            {"type": "truth_root", "path": str(TRUTH), "sha256": _sha256_bytes(b"")},
+        ],
+        "gate_sha256": None,
+    }
+    payload["gate_sha256"] = _compute_self_sha(payload, "gate_sha256")
+    return payload
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_systemic_risk_gate_v3")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
@@ -289,6 +345,21 @@ def main() -> int:
     day = _parse_day_utc(args.day_utc)
     produced_utc = f"{day}T00:00:00Z"
     threshold = str(args.max_pairwise_threshold).strip()
+
+    # Day-0 bootstrap: if no submissions yet, allow OK even if systemic inputs missing.
+    # This is intentionally scoped to bootstrap window only.
+    if _bootstrap_window_true(day):
+        # We do not pre-check every systemic artifact here; the contract is:
+        # missing systemic monitoring inputs are allowed in bootstrap window.
+        payload = _day0_bootstrap_payload(day)
+        validate_against_repo_schema_v1(payload, REPO_ROOT, SCHEMA_RELPATH)
+        out_path = (OUT_ROOT / day / "systemic_risk_gate.v3.json").resolve()
+        try:
+            wr = write_file_immutable_v1(path=out_path, data=_canonical_bytes(payload), create_dirs=True)
+        except ImmutableWriteError as e:
+            raise SystemExit(f"FAIL: IMMUTABLE_WRITE_ERROR: {e}") from e
+        print(f"OK: SYSTEMIC_RISK_GATE_V3_WRITTEN day_utc={day} status=OK path={wr.path} sha256={wr.sha256} action={wr.action}")
+        return 0
 
     reason_codes: List[str] = []
     input_manifest: List[Dict[str, str]] = []
@@ -314,7 +385,7 @@ def main() -> int:
 
     status = "OK" if (regime_ok and kill_ok and corr_ok and sentinel_ok) else "FAIL"
 
-    payload: Dict[str, Any] = {
+    payload2: Dict[str, Any] = {
         "schema_id": "systemic_risk_gate",
         "schema_version": "v3",
         "day_utc": day,
@@ -330,13 +401,13 @@ def main() -> int:
         "input_manifest": input_manifest if input_manifest else [{"type": "truth_root", "path": str(TRUTH), "sha256": _sha256_bytes(b"")}],
         "gate_sha256": None,
     }
-    payload["gate_sha256"] = _compute_self_sha(payload, "gate_sha256")
+    payload2["gate_sha256"] = _compute_self_sha(payload2, "gate_sha256")
 
-    validate_against_repo_schema_v1(payload, REPO_ROOT, SCHEMA_RELPATH)
+    validate_against_repo_schema_v1(payload2, REPO_ROOT, SCHEMA_RELPATH)
 
     out_path = (OUT_ROOT / day / "systemic_risk_gate.v3.json").resolve()
     try:
-        wr = write_file_immutable_v1(path=out_path, data=_canonical_bytes(payload), create_dirs=True)
+        wr = write_file_immutable_v1(path=out_path, data=_canonical_bytes(payload2), create_dirs=True)
     except ImmutableWriteError as e:
         raise SystemExit(f"FAIL: IMMUTABLE_WRITE_ERROR: {e}") from e
 

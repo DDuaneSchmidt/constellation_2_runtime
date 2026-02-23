@@ -65,6 +65,8 @@ These canonical contracts are governance-controlled and must be explicitly liste
 
 - `governance/05_CONTRACTS/C2/drawdown_convention_v1.contract.md`
 - `governance/05_CONTRACTS/C2/capital_risk_envelope_v1.contract.md`
+- `governance/05_CONTRACTS/C2/capital_risk_envelope_v2.contract.md`
+- `governance/05_CONTRACTS/C2/systemic_risk_gate_v3.contract.md`
 - `governance/05_CONTRACTS/C2/bundle_a_paper_trading_readiness_audit_proof_v1.contract.md`
 - `governance/05_CONTRACTS/C2/bundle_b_risk_blindspot_elimination_v1.contract.md`
 - `governance/05_CONTRACTS/C2/bundled_c_exposure_convergence_lifecycle_v1.contract.md`
@@ -170,5 +172,3 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/05_CONTRACTS/C2/latest_pointer_fanout_elimination_v1.contract.md`
 - `governance/05_CONTRACTS/C2/spine_exclusivity_v1.contract.md`
 - `governance/05_CONTRACTS/C3/c3_ui_status_contract_v1.contract.md`
-
-
