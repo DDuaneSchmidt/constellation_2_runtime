@@ -69,6 +69,37 @@ def _read_json_obj(p: Path) -> Dict[str, Any]:
     return o
 
 
+def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | None:
+    """
+    Immutable truth rule (audit-grade):
+    - If report already exists at the day-keyed immutable path, DO NOT rewrite.
+    - Treat existing report as authoritative for that day.
+    - Return rc based on existing status: PASS->0, FAIL->2.
+
+    This prevents automation from failing when the candidate bytes would differ due to
+    additional artifacts appearing later in the day.
+    """
+    if not out_path.exists():
+        return None
+
+    existing_sha = _sha256_file(out_path)
+    existing = _read_json_obj(out_path)
+
+    schema_id = str(existing.get("schema_id") or "").strip()
+    day_utc = str(existing.get("day_utc") or "").strip()
+    status = str(existing.get("status") or "").strip().upper()
+
+    if schema_id != "truth_surface_authority_gate":
+        raise SystemExit(f"FAIL: EXISTING_REPORT_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
+    if day_utc != expected_day_utc:
+        raise SystemExit(f"FAIL: EXISTING_REPORT_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}")
+    if status not in ("PASS", "FAIL"):
+        raise SystemExit(f"FAIL: EXISTING_REPORT_STATUS_INVALID: status={status!r} path={out_path}")
+
+    print(f"OK: truth_surface_authority_gate_v1: action=EXISTS sha256={existing_sha} path={str(out_path)}")
+    return 0 if status == "PASS" else 2
+
+
 def _write_immutable(path: Path, obj: Dict[str, Any]) -> Tuple[str, str, str]:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = canonical_json_bytes_v1(obj) + b"\n"
@@ -106,6 +137,13 @@ def main() -> int:
     if not REGISTRY_PATH.exists():
         raise SystemExit(f"FATAL: missing truth surface authority registry: {REGISTRY_PATH}")
 
+    out_path = (OUT_ROOT / day / "truth_surface_authority_gate.v1.json").resolve()
+
+    # IMPORTANT: if already exists for the day, treat as authoritative; do not rewrite.
+    existing_rc = _return_if_existing_report(out_path=out_path, expected_day_utc=day)
+    if existing_rc is not None:
+        return int(existing_rc)
+
     reg = _read_json_obj(REGISTRY_PATH)
     mapping = reg.get("mapping") or {}
 
@@ -138,7 +176,6 @@ def main() -> int:
             else:
                 manifest.append({"type": f"{surface}_{v}_missing", "path": str(p), "sha256": _sha256_bytes(b"")})
 
-        # Exclusive surfaces may not have >1 version present (enforced from registry day, otherwise warn-only).
         present_versions = sorted(list(present.keys()))
         ok = True
         enforce = False
@@ -151,20 +188,21 @@ def main() -> int:
             else:
                 reason_codes.append(f"WARN_MULTIPLE_VERSIONS_PRESENT_PRE_ENFORCEMENT:{surface}:{','.join(present_versions)}")
 
-        # Active version should be the only present one when exclusive, or at least present when non-exclusive.
         if active:
             if exclusive and active not in present_versions and len(present_versions) > 0:
                 ok = False
                 reason_codes.append(f"ACTIVE_VERSION_NOT_PRESENT:{surface}:active={active}:present={','.join(present_versions)}")
 
-        findings.append({
-            "surface": surface,
-            "exclusive": exclusive,
-            "active": active,
-            "present_versions": present_versions,
-            "present": present,
-            "status": "OK" if ok else "FAIL",
-        })
+        findings.append(
+            {
+                "surface": surface,
+                "exclusive": exclusive,
+                "active": active,
+                "present_versions": present_versions,
+                "present": present,
+                "status": "OK" if ok else "FAIL",
+            }
+        )
 
     status = "PASS" if len(reason_codes) == 0 else "FAIL"
 
@@ -180,7 +218,6 @@ def main() -> int:
         "input_manifest": manifest,
     }
 
-    out_path = (OUT_ROOT / day / "truth_surface_authority_gate.v1.json").resolve()
     path, sha, action = _write_immutable(out_path, out)
     print(f"OK: truth_surface_authority_gate_v1: action={action} sha256={sha} path={path}")
     if status != "PASS":
