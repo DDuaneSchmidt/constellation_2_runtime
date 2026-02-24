@@ -53,6 +53,8 @@ PATH_BROKER_RECON_V1 = (TRUTH / "reports" / "broker_reconciliation_v1").resolve(
 
 CORR_THRESHOLD = Decimal("0.75")
 
+DAY0_RC_BROKER_RECON_ALLOWED = "DAY0_BOOTSTRAP_BROKER_RECON_MISSING_ALLOWED"
+
 
 def _git_sha() -> str:
     out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
@@ -97,6 +99,24 @@ def _self_sha(obj: Dict[str, Any], field: str) -> str:
     tmp = dict(obj)
     tmp[field] = None
     return _sha256_bytes(_canonical_bytes(tmp))
+
+
+def _bootstrap_window_true(day_utc: str) -> bool:
+    """
+    Day-0 Bootstrap Window iff:
+      TRUTH/execution_evidence_v1/submissions/<DAY>/ is missing OR contains zero submission dirs.
+    """
+    root = (TRUTH / "execution_evidence_v1" / "submissions" / day_utc).resolve()
+    if (not root.exists()) or (not root.is_dir()):
+        return True
+    try:
+        for p in root.iterdir():
+            if p.is_dir():
+                return False
+    except Exception:
+        # Fail-closed: if we cannot enumerate, treat as NOT bootstrap.
+        return False
+    return True
 
 
 def _load_daily_returns(day: str) -> Tuple[str, List[str], List[Dict[str, str]]]:
@@ -172,6 +192,8 @@ def main() -> int:
     day = _parse_day_utc(args.day_utc)
     produced_utc = f"{day}T00:00:00Z"
 
+    bootstrap = _bootstrap_window_true(day)
+
     input_manifest: List[Dict[str, str]] = []
     reason_codes: List[str] = []
 
@@ -188,8 +210,17 @@ def main() -> int:
     broker_status, cash_diff, broker_notes, man_br = _load_broker_recon(day)
     input_manifest.extend(man_br)
 
-    slippage_ok = (broker_status == "PASS")
-    slip_notes: List[str] = []
+    # Day-0 bootstrap exception: missing broker reconciliation is allowed when there are no submissions yet.
+    if bootstrap and broker_status == "MISSING":
+        slippage_ok = True
+        slip_notes: List[str] = [
+            "DAY0_BOOTSTRAP: broker reconciliation v1 missing allowed (no broker statement yet; no submissions).",
+        ]
+        reason_codes.append(DAY0_RC_BROKER_RECON_ALLOWED)
+    else:
+        slippage_ok = (broker_status == "PASS")
+        slip_notes = []
+
     if not slippage_ok:
         reason_codes.append("Z_SLIPPAGE_OR_RECONCILIATION_NOT_PASS")
         slip_notes.append(f"broker_reconciliation_v1_status={broker_status}")

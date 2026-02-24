@@ -40,7 +40,9 @@ TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/MONITORING/regime_snapshot.v2.schema.json"
 
-PATH_ACCOUNTING_NAV = (TRUTH / "accounting_v1/nav").resolve()
+# FIX: accounting_v1 does not exist in this repo; authoritative NAV is accounting_v2/nav/<DAY>/nav.v2.json
+PATH_ACCOUNTING_NAV = (TRUTH / "accounting_v2/nav").resolve()
+
 PATH_ECON_DD_SNAP = (TRUTH / "monitoring_v1/economic_nav_drawdown_v1/nav_snapshot").resolve()
 PATH_RISK_LEDGER = (TRUTH / "risk_v1/engine_budget").resolve()
 
@@ -53,11 +55,10 @@ PATH_BROKER_MANIFEST = (TRUTH / "execution_evidence_v1/broker_events").resolve()
 
 OUT_ROOT = (TRUTH / "monitoring_v1/regime_snapshot_v2").resolve()
 
+DAY0_RC_ALLOWED = "DAY0_BOOTSTRAP_REGIME_INPUTS_MISSING_ALLOWED"
+
 
 def _parse_day_utc(s: str) -> str:
-    """
-    Strict UTC day key validator (institutional hardening).
-    """
     d = (s or "").strip()
     if len(d) != 10 or d[4] != "-" or d[7] != "-":
         raise ValueError(f"BAD_DAY_UTC_FORMAT_EXPECTED_YYYY_MM_DD: {d!r}")
@@ -173,19 +174,68 @@ def main() -> int:
     args = ap.parse_args()
 
     day = _parse_day_utc(args.day_utc)
-
-    # Policy enforcement (fail-closed): refuse future-day truth writes.
     enforce_operational_day_key_invariant_v1(day)
 
-    nav_path = (PATH_ACCOUNTING_NAV / day / "nav.json").resolve()
-    if not nav_path.exists():
-        raise SystemExit(f"FAIL: MISSING_REQUIRED_NAV: {nav_path}")
+    subs_present = _submissions_present(day)
 
+    nav_path = (PATH_ACCOUNTING_NAV / day / "nav.v2.json").resolve()
     dd_path = (PATH_ECON_DD_SNAP / day / "nav_snapshot.v1.json").resolve()
+    risk_path = (PATH_RISK_LEDGER / day / "engine_risk_budget_ledger.v1.json").resolve()
+
+    # Day-0 bootstrap: if no submissions yet, allow missing regime inputs (non-blocking NORMAL).
+    # Once submissions exist, strict fail-closed applies.
+    if (not subs_present) and ((not nav_path.exists()) or (not dd_path.exists()) or (not risk_path.exists())):
+        reason_codes = [DAY0_RC_ALLOWED]
+        input_manifest: List[Dict[str, str]] = [
+            {"type": "accounting_nav_v2", "path": str(nav_path), "sha256": (_sha256_file(nav_path) if nav_path.exists() else _sha256_bytes(b""))},
+            {"type": "economic_drawdown_nav_snapshot", "path": str(dd_path), "sha256": (_sha256_file(dd_path) if dd_path.exists() else _sha256_bytes(b""))},
+            {"type": "engine_risk_budget_ledger_v1", "path": str(risk_path), "sha256": (_sha256_file(risk_path) if risk_path.exists() else _sha256_bytes(b""))},
+        ]
+        evidence = {
+            "drawdown_pct": "0.000000",
+            "engine_risk_budget_ledger_status": "MISSING",
+            "capital_risk_envelope_present": False,
+            "capital_risk_envelope_status": "MISSING",
+            "capital_risk_envelope_severe_failure": False,
+            "submissions_present": False,
+            "broker_manifest_required": False,
+            "broker_manifest_present": False,
+            "broker_manifest_status": "MISSING",
+            "broker_truth_missing_during_submissions": False,
+        }
+
+        out_obj: Dict[str, Any] = {
+            "schema_id": "regime_snapshot",
+            "schema_version": "v2",
+            "day_utc": day,
+            "produced_utc": _produced_utc_for_day(day),
+            "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_regime_snapshot_v2.py", "git_sha": _git_sha()},
+            "status": "OK",
+            "regime_label": "NORMAL",
+            "risk_multiplier": "1.00",
+            "blocking": False,
+            "reason_codes": reason_codes,
+            "input_manifest": input_manifest,
+            "evidence": evidence,
+            "snapshot_sha256": None,
+        }
+        out_obj["snapshot_sha256"] = _compute_self_sha(out_obj, "snapshot_sha256")
+        validate_against_repo_schema_v1(out_obj, REPO_ROOT, SCHEMA_RELPATH)
+
+        out_path = (OUT_ROOT / day / "regime_snapshot.v2.json").resolve()
+        payload = _canonical_bytes(out_obj)
+        try:
+            wr = write_file_immutable_v1(path=out_path, data=payload, create_dirs=True)
+        except ImmutableWriteError as e:
+            raise SystemExit(f"FAIL: IMMUTABLE_WRITE_ERROR: {e}") from e
+        print(f"OK: REGIME_SNAPSHOT_V2_WRITTEN day_utc={day} label=NORMAL blocking=False path={wr.path} sha256={wr.sha256} action={wr.action}")
+        return 0
+
+    # Strict mode from here on.
+    if not nav_path.exists():
+        raise SystemExit(f"FAIL: MISSING_REQUIRED_NAV_V2: {nav_path}")
     if not dd_path.exists():
         raise SystemExit(f"FAIL: MISSING_REQUIRED_DRAWDOWN_SNAPSHOT: {dd_path}")
-
-    risk_path = (PATH_RISK_LEDGER / day / "engine_risk_budget_ledger.v1.json").resolve()
     if not risk_path.exists():
         raise SystemExit(f"FAIL: MISSING_REQUIRED_ENGINE_RISK_BUDGET_LEDGER: {risk_path}")
 
@@ -201,7 +251,7 @@ def main() -> int:
     if risk_status == "":
         risk_status = "MISSING"
 
-    # --- Prefer v2 envelope if present; fall back to v1. ---
+    # Prefer v2 envelope if present; fall back to v1.
     cap_type = "capital_risk_envelope_v1"
     cap_path = (PATH_CAP_ENVELOPE_V1 / day / "capital_risk_envelope.v1.json").resolve()
     p_cap_v2 = (PATH_CAP_ENVELOPE_V2 / day / "capital_risk_envelope.v2.json").resolve()
@@ -220,9 +270,7 @@ def main() -> int:
             cap_status = "MISSING"
         cap_severe = _capital_envelope_severe_failure(cap_obj)
 
-    subs_present = _submissions_present(day)
     broker_required = bool(subs_present)
-
     broker_manifest_path = (PATH_BROKER_MANIFEST / day / "broker_event_day_manifest.v1.json").resolve()
     broker_present, broker_status, _broker_obj = _read_optional_status(broker_manifest_path, "status")
 
@@ -283,7 +331,7 @@ def main() -> int:
     reason_codes = sorted(list(dict.fromkeys(reason_codes)))
 
     input_manifest: List[Dict[str, str]] = [
-        {"type": "accounting_nav", "path": str(nav_path), "sha256": _sha256_file(nav_path)},
+        {"type": "accounting_nav_v2", "path": str(nav_path), "sha256": _sha256_file(nav_path)},
         {"type": "economic_drawdown_nav_snapshot", "path": str(dd_path), "sha256": _sha256_file(dd_path)},
         {"type": "engine_risk_budget_ledger_v1", "path": str(risk_path), "sha256": _sha256_file(risk_path)},
     ]
