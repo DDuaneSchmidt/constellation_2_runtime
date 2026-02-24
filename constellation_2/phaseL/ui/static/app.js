@@ -142,7 +142,6 @@ function renderC3Status(st) {
     `<span class="mono small muted">reason_codes_top=${rc}</span><br/>` +
     `<span class="mono small muted">required_failures_top=${rf}</span>`;
 
-  // Gates expansion table
   const gates = v.gates_top || [];
   if (!gates.length) {
     el("c3Gates").innerHTML = `<div class="mono small muted">No gate rows.</div>`;
@@ -181,7 +180,6 @@ function renderC3Status(st) {
     `${badgeForState(br.state)} <span class="mono small muted">day=${br.day || "n/a"} acct=${br.account || "n/a"}</span> ${brLink}<br/>` +
     `<span class="mono small muted">${brEvidence}</span>`;
 
-  // Broker mismatches expansion table
   const mm = br.mismatches_top || [];
   if (!mm.length) {
     el("c3Mismatches").innerHTML = `<div class="mono small muted">No mismatches.</div>`;
@@ -215,7 +213,6 @@ function renderC3Status(st) {
     el("c3Components").innerHTML = table(["name", "state", "reason_code"], rows);
   }
 
-  // Provenance: clickable sources
   const src = (st.source_paths || []).slice(0, 10);
   const srcLines = src.map(p => {
     const ep = encodeURIComponent(p);
@@ -232,7 +229,6 @@ function renderC3Status(st) {
     `<div style="margin-top:6px;">sources:<br/><span class="mono small">${srcLines || "n/a"}</span></div>` +
     `<div style="margin-top:6px;">mtimes:<br/><span class="mono small">${mtLines || "n/a"}</span></div>`;
 
-  // Wire evidence links inside the rendered HTML
   document.querySelectorAll("[data-artifact]").forEach(a => {
     a.onclick = (ev) => {
       ev.preventDefault();
@@ -303,6 +299,37 @@ function renderSubmissions(subResp) {
   el("submissionsTable").innerHTML = table(["submission_id","engine","broker_status","event_status"], rows);
 }
 
+function renderActivity(a) {
+  if (!a || !a.ok) {
+    el("activityMeta").innerHTML = `<span class="mono small muted">activity=n/a</span>`;
+    el("activityCounts").innerHTML = "";
+    el("activityLinks").innerHTML = "";
+    return;
+  }
+
+  const day = a.day_utc || "n/a";
+  el("activityMeta").innerHTML =
+    `generated_utc=${a.generated_utc || "n/a"}<br/>day=${day}`;
+
+  const i = a.intents_summary?.counts?.intents_total ?? "n/a";
+  const s = a.submissions_summary?.counts?.submissions_total ?? "n/a";
+  const ti = a.rollup_asof?.totals?.intents_total ?? "n/a";
+  const ts = a.rollup_asof?.totals?.submissions_total ?? "n/a";
+
+  el("activityCounts").innerHTML =
+    `<div class="mono small"><span class="muted">intents_today</span> = ${i}</div>` +
+    `<div class="mono small"><span class="muted">submissions_today</span> = ${s}</div>` +
+    `<div class="mono small"><span class="muted">cumulative_intents</span> = ${ti}</div>` +
+    `<div class="mono small"><span class="muted">cumulative_submissions</span> = ${ts}</div>`;
+
+  const sp = (a.source_paths || []).map(p => {
+    const ep = encodeURIComponent(p);
+    return `<a href="#" class="link mono" data-artifact="${ep}" data-title="activity_source">open</a> <span class="muted">${p}</span>`;
+  }).join("<br/>");
+
+  el("activityLinks").innerHTML = sp ? `<div class="muted">sources:</div>${sp}` : "";
+}
+
 function svgLineChart(points) {
   const W = 900, H = 260, pad = 28;
   const vals = points.map(p => Number(p.nav_end)).filter(v => !isNaN(v));
@@ -332,16 +359,8 @@ async function loadDays() {
   state.days = d.days || [];
   state.day = d.default_day_utc;
 
-  // Prefer canonical latest.json day when available
-  try {
-    const ld = await api("/api/latest_day");
-    const latestDay = ld.day_utc;
-    if (latestDay && state.days.includes(latestDay)) {
-      state.day = latestDay;
-    }
-  } catch (_) {
-    // fail closed: keep default
-  }
+  // DO NOT override day using latest.json: it can be stale.
+  // Server /api/days default_day_utc is derived from authoritative truth surfaces.
 
   const sel = el("daySelect");
   sel.innerHTML="";
@@ -362,15 +381,17 @@ async function loadStatus() {
 
 async function loadToday() {
   if(!state.day) return;
-  const [status,sum,plan,subs] = await Promise.all([
+  const [status,sum,plan,subs,act] = await Promise.all([
     loadStatus(),
     api(`/api/day/${state.day}/summary`),
     api(`/api/day/${state.day}/plan`),
-    api(`/api/day/${state.day}/submissions`)
+    api(`/api/day/${state.day}/submissions`),
+    api(`/api/activity/today?day=${state.day}`)
   ]);
-  renderBanners([status,sum,plan,subs]);
+  renderBanners([status,sum,plan,subs,act]);
   renderSummary(sum);
   renderByEngine(sum);
+  renderActivity(act);
   renderPlan(plan);
   renderSubmissions(subs);
 }

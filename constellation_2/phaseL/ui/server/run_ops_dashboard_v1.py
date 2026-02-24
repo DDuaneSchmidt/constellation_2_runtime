@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Constellation 2.0 — Phase L — Live Ops Dashboard (Read-Only)
+
 - Serves static UI + read-only JSON API
 - Reads ONLY canonical truth artifacts under constellation_2/runtime/truth
 - Never talks to IB, never submits orders, never mutates truth
@@ -19,7 +20,9 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
+
 from constellation_2.phaseL.ui.server.c3_ui_status_collector_v1 import build_c3_ui_status
+
 # --------------------------
 # Error codes (audit-safe)
 # --------------------------
@@ -30,8 +33,13 @@ E_NO_DAYS_FOUND = "NO_DAYS_FOUND"
 E_DAY_INVALID = "DAY_INVALID"
 E_NO_SUBMISSIONS_FOUND = "NO_SUBMISSIONS_FOUND"
 E_NO_ORDER_PLAN_PRESENT = "NO_ORDER_PLAN_PRESENT"
-E_NAV_SERIES_MISSING = "NAV_SERIES_MISSING"
+E_NAV_MISSING = "NAV_MISSING"
 E_ENGINE_JOIN_NOT_POSSIBLE_WITHOUT_ENGINE_LINKAGE = "ENGINE_JOIN_NOT_POSSIBLE_WITHOUT_ENGINE_LINKAGE"
+
+# Activity endpoints
+E_ACTIVITY_DAY_NOT_RESOLVED = "ACTIVITY_DAY_NOT_RESOLVED"
+E_ACTIVITY_ARTIFACT_MISSING = "ACTIVITY_ARTIFACT_MISSING"
+E_ACTIVITY_ARTIFACT_UNREADABLE = "ACTIVITY_ARTIFACT_UNREADABLE"
 
 # Submission index (day-level) — preferred for speed when present (legacy path used by this UI)
 SUBMISSION_INDEX_SCHEMA_ID = "C2_SUBMISSION_INDEX_V1"
@@ -53,15 +61,23 @@ THIS_FILE = Path(__file__).resolve()
 REPO_ROOT = THIS_FILE.parents[4]
 TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
-SUBMISSIONS_ROOT = TRUTH_ROOT / "execution_evidence_v1/submissions"
-MONITORING_NAV_SERIES_ROOT = TRUTH_ROOT / "monitoring_v1/nav_series"
-ACCOUNTING_NAV_ROOT = TRUTH_ROOT / "accounting_v1/nav"
-ACCOUNTING_ATTR_ROOT = TRUTH_ROOT / "accounting_v1/attribution"
-ENGINE_LINKAGE_ROOT = TRUTH_ROOT / "engine_linkage_v1"
+# Canonical surfaces (as proven on disk)
+SUBMISSIONS_ROOT = (TRUTH_ROOT / "execution_evidence_v1" / "submissions").resolve()
+INTENTS_ROOT = (TRUTH_ROOT / "intents_v1" / "snapshots").resolve()
+GATE_VERDICT_ROOT = (TRUTH_ROOT / "reports" / "gate_stack_verdict_v1").resolve()
+
+ACCOUNTING_NAV_ROOT = (TRUTH_ROOT / "accounting_v2" / "nav").resolve()
+ACCOUNTING_ATTR_ROOT = (TRUTH_ROOT / "accounting_v2" / "attribution").resolve()
+ENGINE_LINKAGE_ROOT = (TRUTH_ROOT / "engine_linkage_v1").resolve()
 
 # Pillars roots (preferred submission evidence)
-PILLARS_V1_ROOT = TRUTH_ROOT / "pillars_v1"
-PILLARS_V1R1_ROOT = TRUTH_ROOT / "pillars_v1r1"
+PILLARS_V1_ROOT = (TRUTH_ROOT / "pillars_v1").resolve()
+PILLARS_V1R1_ROOT = (TRUTH_ROOT / "pillars_v1r1").resolve()
+
+# Activity monitoring roots (authoritative)
+INTENTS_SUMMARY_ROOT = (TRUTH_ROOT / "monitoring_v1" / "intents_summary_v1").resolve()
+SUBMISSIONS_SUMMARY_ROOT = (TRUTH_ROOT / "monitoring_v1" / "submissions_summary_v1").resolve()
+ACTIVITY_ROLLUP_ROOT = (TRUTH_ROOT / "monitoring_v1" / "activity_ledger_rollup_v1").resolve()
 
 
 def _utc_now_iso() -> str:
@@ -100,23 +116,39 @@ def _list_day_dirs(root: Path) -> List[str]:
         return []
     days: List[str] = []
     for p in root.iterdir():
-        if p.is_dir():
-            name = p.name
-            if _is_day_str(name):
-                days.append(name)
+        if p.is_dir() and _is_day_str(p.name):
+            days.append(p.name)
     days.sort()
     return days
 
 
 def _union_days() -> List[str]:
+    """
+    Authoritative day discovery for UI.
+
+    Includes:
+    - gate_stack_verdict_v1 days (authoritative day spine)
+    - intents snapshot days
+    - accounting_v2 nav/attribution days
+    - submissions days (if submissions root exists)
+    - pillars days
+    - activity monitoring days (if present)
+    """
     days = set()
-    # Existing surfaces
-    for root in [SUBMISSIONS_ROOT, MONITORING_NAV_SERIES_ROOT, ACCOUNTING_NAV_ROOT, ACCOUNTING_ATTR_ROOT]:
+
+    for root in [GATE_VERDICT_ROOT, INTENTS_ROOT, ACCOUNTING_NAV_ROOT, ACCOUNTING_ATTR_ROOT]:
         for d in _list_day_dirs(root):
             days.add(d)
 
-    # Pillars surfaces (so UI can pick days that exist only in pillars)
+    if SUBMISSIONS_ROOT.exists() and SUBMISSIONS_ROOT.is_dir():
+        for d in _list_day_dirs(SUBMISSIONS_ROOT):
+            days.add(d)
+
     for root in [PILLARS_V1R1_ROOT, PILLARS_V1_ROOT]:
+        for d in _list_day_dirs(root):
+            days.add(d)
+
+    for root in [INTENTS_SUMMARY_ROOT, SUBMISSIONS_SUMMARY_ROOT, ACTIVITY_ROLLUP_ROOT]:
         for d in _list_day_dirs(root):
             days.add(d)
 
@@ -128,9 +160,6 @@ def _select_latest_day(days: List[str]) -> Optional[str]:
 
 
 def _pillars_decisions_dir(day: str) -> Optional[Path]:
-    """
-    Prefer pillars_v1r1, then pillars_v1.
-    """
     d1 = (PILLARS_V1R1_ROOT / day / "decisions").resolve()
     if d1.exists() and d1.is_dir():
         return d1
@@ -141,10 +170,6 @@ def _pillars_decisions_dir(day: str) -> Optional[Path]:
 
 
 def _try_load_submission_index(day: str) -> Tuple[Optional[Dict[str, Any]], List[str], List[str], Dict[str, float], List[str]]:
-    """
-    Load submissions/<day>/submission_index.v1.json if present and minimally valid.
-    Returns (index_obj_or_none, missing_paths, source_paths, source_mtimes, warnings)
-    """
     missing: List[str] = []
     source_paths: List[str] = []
     source_mtimes: Dict[str, float] = {}
@@ -181,25 +206,6 @@ def _try_load_submission_index(day: str) -> Tuple[Optional[Dict[str, Any]], List
 
 
 def _try_load_pillars_decisions(day: str) -> Tuple[List[Dict[str, Any]], List[str], List[str], Dict[str, float], List[str]]:
-    """
-    Load pillars decisions for the day if present.
-
-    Returns:
-      (records, missing_paths, source_paths, source_mtimes, warnings)
-
-    Each record is shaped similarly to the output from submission_index fast-path:
-      {
-        "submission_dir": "...",
-        "submission_id": "...",
-        "decision": {...},
-        "decision_status": "...",
-        "decision_reason_codes": [...],
-        "broker_submission_record": {...} | None,
-        "execution_event_record": {...} | None,
-        "order_plan": {...} | None,
-        "missing_paths": [...]
-      }
-    """
     missing: List[str] = []
     source_paths: List[str] = []
     source_mtimes: Dict[str, float] = {}
@@ -324,9 +330,7 @@ def _scan_submissions_for_day(day: str) -> Tuple[List[Dict[str, Any]], List[str]
         missing.append(str(day_root))
         return [], missing, source_paths, source_mtimes
 
-    # Try submission index first (legacy fast path).
     idx, miss_i, sp_i, sm_i, _w_i = _try_load_submission_index(day)
-
     if idx is not None:
         missing.extend(miss_i)
         source_paths.extend(sp_i)
@@ -382,82 +386,22 @@ def _scan_submissions_for_day(day: str) -> Tuple[List[Dict[str, Any]], List[str]
                     mt2 = _mtime(Path(op_path))
                     if mt2 is not None:
                         source_mtimes[op_path] = mt2
-            else:
-                ops = it.get("order_plan") if isinstance(it.get("order_plan"), dict) else None
-                if isinstance(ops, dict):
-                    rec["order_plan"] = ops
 
             out.append(rec)
 
         return out, sorted(set(missing)), sorted(set(source_paths)), source_mtimes
 
-    # Submission index not present/valid: try pillars decisions (preferred).
     pill_records, miss_p, sp_p, sm_p, _w_p = _try_load_pillars_decisions(day)
     if pill_records:
-        # NOTE: do NOT treat submission_index as missing if pillars decisions are present.
         missing.extend(miss_p)
         source_paths.extend(sp_p)
         source_mtimes.update(sm_p)
         return pill_records, sorted(set(missing)), sorted(set(source_paths)), source_mtimes
 
-    # Neither submission index nor pillars decisions available: record submission_index missing.
     missing.extend(miss_i)
     source_paths.extend(sp_i)
     source_mtimes.update(sm_i)
-
-    # Fall back to direct scan of submissions day dir
-    submission_dirs = [p for p in day_root.iterdir() if p.is_dir()]
-    submission_dirs.sort(key=lambda p: p.name)
-
-    if not submission_dirs:
-        return [], missing, source_paths, source_mtimes
-
-    out: List[Dict[str, Any]] = []
-    for sdir in submission_dirs:
-        broker_path = sdir / "broker_submission_record.v2.json"
-        event_path = sdir / "execution_event_record.v1.json"
-        plan_path = sdir / "order_plan.v1.json"  # proven canonical location in your truth tree
-
-        rec: Dict[str, Any] = {
-            "submission_dir": str(sdir),
-            "submission_id": sdir.name,
-            "broker_submission_record": None,
-            "execution_event_record": None,
-            "order_plan": None,
-            "missing_paths": [],
-        }
-
-        obj, _ = _safe_read_json(broker_path)
-        if obj is None:
-            rec["missing_paths"].append(str(broker_path))
-        else:
-            rec["broker_submission_record"] = obj
-            source_paths.append(str(broker_path))
-            mt = _mtime(broker_path)
-            if mt is not None:
-                source_mtimes[str(broker_path)] = mt
-
-        obj, _ = _safe_read_json(event_path)
-        if obj is None:
-            rec["missing_paths"].append(str(event_path))
-        else:
-            rec["execution_event_record"] = obj
-            source_paths.append(str(event_path))
-            mt = _mtime(event_path)
-            if mt is not None:
-                source_mtimes[str(event_path)] = mt
-
-        obj, _ = _safe_read_json(plan_path)
-        if obj is not None:
-            rec["order_plan"] = obj
-            source_paths.append(str(plan_path))
-            mt = _mtime(plan_path)
-            if mt is not None:
-                source_mtimes[str(plan_path)] = mt
-
-        out.append(rec)
-
-    return out, missing, source_paths, source_mtimes
+    return [], sorted(set(missing)), sorted(set(source_paths)), source_mtimes
 
 
 def _load_engine_join_map_for_day(day: str) -> Tuple[Dict[str, str], List[str], List[str], Dict[str, float], List[str]]:
@@ -503,7 +447,7 @@ def _load_engine_join_map_for_day(day: str) -> Tuple[Dict[str, str], List[str], 
                         subid_to_engine.update(tmp)
                         return subid_to_engine, missing, source_paths, source_mtimes, warnings
 
-    attr_path = ACCOUNTING_ATTR_ROOT / day / "engine_attribution.json"
+    attr_path = ACCOUNTING_ATTR_ROOT / day / "engine_attribution.v2.json"
     obj, _ = _safe_read_json(attr_path)
     if obj is None:
         missing.append(str(attr_path))
@@ -513,23 +457,16 @@ def _load_engine_join_map_for_day(day: str) -> Tuple[Dict[str, str], List[str], 
         if mt is not None:
             source_mtimes[str(attr_path)] = mt
 
-        if isinstance(obj, dict):
-            for key in ["submission_id_to_engine", "engine_by_submission_id", "subid_to_engine", "engine_by_subid"]:
-                v = obj.get(key)
-                if isinstance(v, dict) and v:
-                    ok = True
-                    tmp2: Dict[str, str] = {}
-                    for k2, v2 in v.items():
-                        if not isinstance(k2, str) or not isinstance(v2, str):
-                            ok = False
-                            break
-                        tmp2[k2] = v2
-                    if ok and tmp2:
-                        subid_to_engine.update(tmp2)
-                        return subid_to_engine, missing, source_paths, source_mtimes, warnings
-
     warnings.append(E_ENGINE_JOIN_NOT_POSSIBLE_WITHOUT_ENGINE_LINKAGE)
     return {}, missing, source_paths, source_mtimes, warnings
+
+
+def _count_intents_for_day(day: str) -> Tuple[int, List[str]]:
+    d = (INTENTS_ROOT / day).resolve()
+    if not d.exists() or not d.is_dir():
+        return 0, [str(d)]
+    files = sorted([p for p in d.iterdir() if p.is_file()])
+    return len(files), []
 
 
 def _nav_summary_for_day(day: str) -> Tuple[Optional[Dict[str, Any]], List[str], List[str], Dict[str, float], List[str]]:
@@ -538,47 +475,27 @@ def _nav_summary_for_day(day: str) -> Tuple[Optional[Dict[str, Any]], List[str],
     source_mtimes: Dict[str, float] = {}
     warnings: List[str] = []
 
-    series_path = MONITORING_NAV_SERIES_ROOT / day / "portfolio_nav_series.v1.json"
-    obj, _ = _safe_read_json(series_path)
-    if obj is not None:
-        source_paths.append(str(series_path))
-        mt = _mtime(series_path)
-        if mt is not None:
-            source_mtimes[str(series_path)] = mt
+    nav_path = ACCOUNTING_NAV_ROOT / day / "nav.v2.json"
+    obj, _err = _safe_read_json(nav_path)
+    if obj is None:
+        missing.append(str(nav_path))
+        warnings.append(E_NAV_MISSING)
+        return None, missing, source_paths, source_mtimes, warnings
 
-        nav_end = None
-        if isinstance(obj, dict):
-            pts = obj.get("points")
-            if isinstance(pts, list) and pts:
-                last = pts[-1]
-                if isinstance(last, dict):
-                    for k in ["nav", "nav_end", "portfolio_nav", "value"]:
-                        if k in last:
-                            nav_end = last[k]
-                            break
-        return {"source": "monitoring_v1/nav_series", "day_utc": day, "nav_end": nav_end}, missing, source_paths, source_mtimes, warnings
+    source_paths.append(str(nav_path))
+    mt = _mtime(nav_path)
+    if mt is not None:
+        source_mtimes[str(nav_path)] = mt
 
-    missing.append(str(series_path))
-    warnings.append(E_NAV_SERIES_MISSING)
+    nav_end = None
+    if isinstance(obj, dict):
+        nav = obj.get("nav")
+        if isinstance(nav, dict) and "nav_total" in nav:
+            nav_end = nav.get("nav_total")
+        elif "nav_total" in obj:
+            nav_end = obj.get("nav_total")
 
-    nav_path = ACCOUNTING_NAV_ROOT / day / "nav.json"
-    obj, _ = _safe_read_json(nav_path)
-    if obj is not None:
-        source_paths.append(str(nav_path))
-        mt = _mtime(nav_path)
-        if mt is not None:
-            source_mtimes[str(nav_path)] = mt
-
-        nav_end2 = None
-        if isinstance(obj, dict):
-            for k in ["nav_end", "nav", "portfolio_nav", "value"]:
-                if k in obj:
-                    nav_end2 = obj[k]
-                    break
-        return {"source": "accounting_v1/nav", "day_utc": day, "nav_end": nav_end2}, missing, source_paths, source_mtimes, warnings
-
-    missing.append(str(nav_path))
-    return None, missing, source_paths, source_mtimes, warnings
+    return {"source": "accounting_v2/nav", "day_utc": day, "nav_end": nav_end}, missing, source_paths, source_mtimes, warnings
 
 
 def _series_nav_points(last_n_days: int) -> Tuple[List[Dict[str, Any]], List[str], List[str], Dict[str, float], List[str]]:
@@ -607,6 +524,75 @@ def _series_nav_points(last_n_days: int) -> Tuple[List[Dict[str, Any]], List[str
     return pts, sorted(set(missing)), sorted(set(source_paths)), source_mtimes, sorted(set(warnings))
 
 
+def _read_activity_artifact(path: Path, expected_schema_id: str, expected_day_field: str, expected_day_value: str) -> Tuple[Optional[Dict[str, Any]], List[str]]:
+    """
+    Returns (doc_or_none, errors[])
+    """
+    if not path.exists():
+        return None, [E_ACTIVITY_ARTIFACT_MISSING]
+    obj, err = _safe_read_json(path)
+    if obj is None or not isinstance(obj, dict):
+        return None, [f"{E_ACTIVITY_ARTIFACT_UNREADABLE}:{err}"]
+    if str(obj.get("schema_id") or "") != expected_schema_id:
+        return None, [f"ACTIVITY_SCHEMA_MISMATCH:{expected_schema_id}"]
+    if str(obj.get(expected_day_field) or "") != expected_day_value:
+        return None, [f"ACTIVITY_DAY_MISMATCH:{expected_day_value}"]
+    return obj, []
+
+
+def _activity_latest_day() -> Optional[str]:
+    return _select_latest_day(_union_days())
+
+
+def _activity_today(day: str) -> Dict[str, Any]:
+    resp: Dict[str, Any] = {
+        "ok": True,
+        "generated_utc": _utc_now_iso(),
+        "day_utc": day,
+        "errors": [],
+        "warnings": [],
+        "missing_paths": [],
+        "source_paths": [],
+        "intents_summary": None,
+        "submissions_summary": None,
+        "rollup_asof": None,
+    }
+
+    ip = (INTENTS_SUMMARY_ROOT / day / "intents_summary.v1.json").resolve()
+    sp = (SUBMISSIONS_SUMMARY_ROOT / day / "submissions_summary.v1.json").resolve()
+    rp = (ACTIVITY_ROLLUP_ROOT / day / "activity_ledger_rollup.v1.json").resolve()
+
+    doc, errs = _read_activity_artifact(ip, "intents_summary", "day_utc", day)
+    if doc is None:
+        resp["warnings"].extend(errs)
+        resp["missing_paths"].append(str(ip))
+    else:
+        resp["intents_summary"] = doc
+        resp["source_paths"].append(str(ip))
+
+    doc, errs = _read_activity_artifact(sp, "submissions_summary", "day_utc", day)
+    if doc is None:
+        resp["warnings"].extend(errs)
+        resp["missing_paths"].append(str(sp))
+    else:
+        resp["submissions_summary"] = doc
+        resp["source_paths"].append(str(sp))
+
+    doc, errs = _read_activity_artifact(rp, "activity_ledger_rollup", "asof_day_utc", day)
+    if doc is None:
+        resp["warnings"].extend(errs)
+        resp["missing_paths"].append(str(rp))
+    else:
+        resp["rollup_asof"] = doc
+        resp["source_paths"].append(str(rp))
+
+    resp["errors"] = sorted(set(resp["errors"]))
+    resp["warnings"] = sorted(set(resp["warnings"]))
+    resp["missing_paths"] = sorted(set(resp["missing_paths"]))
+    resp["source_paths"] = sorted(set(resp["source_paths"]))
+    return resp
+
+
 def _day_summary(day: str) -> Dict[str, Any]:
     resp: Dict[str, Any] = {
         "ok": True,
@@ -619,6 +605,7 @@ def _day_summary(day: str) -> Dict[str, Any]:
         "missing_paths": [],
         "data_freshness_max_mtime": None,
         "counts": {
+            "intents": 0,
             "planned_actions": None,
             "submissions": 0,
             "fills": 0,
@@ -641,6 +628,10 @@ def _day_summary(day: str) -> Dict[str, Any]:
         resp["errors"].append(E_TRUTH_ROOT_MISSING)
         resp["missing_paths"].append(str(TRUTH_ROOT))
         return resp
+
+    icnt, imiss = _count_intents_for_day(day)
+    resp["counts"]["intents"] = icnt
+    resp["missing_paths"].extend(imiss)
 
     if not SUBMISSIONS_ROOT.exists():
         resp["warnings"].append(E_SUBMISSIONS_ROOT_MISSING)
@@ -671,10 +662,8 @@ def _day_summary(day: str) -> Dict[str, Any]:
         else:
             planned_actions += 1
 
-    if any_plan:
-        resp["counts"]["planned_actions"] = planned_actions
-    else:
-        resp["counts"]["planned_actions"] = 0
+    resp["counts"]["planned_actions"] = planned_actions if any_plan else 0
+    if not any_plan:
         resp["warnings"].append(E_NO_ORDER_PLAN_PRESENT)
 
     subid_to_engine, miss2, sps2, smt2, warns2 = _load_engine_join_map_for_day(day)
@@ -869,7 +858,7 @@ def _days_list() -> Dict[str, Any]:
     if not days:
         resp["warnings"].append(E_NO_DAYS_FOUND)
 
-    for p in [SUBMISSIONS_ROOT, MONITORING_NAV_SERIES_ROOT, ACCOUNTING_NAV_ROOT, ACCOUNTING_ATTR_ROOT, PILLARS_V1R1_ROOT, PILLARS_V1_ROOT]:
+    for p in [GATE_VERDICT_ROOT, INTENTS_ROOT, ACCOUNTING_NAV_ROOT, ACCOUNTING_ATTR_ROOT, SUBMISSIONS_ROOT, PILLARS_V1R1_ROOT, PILLARS_V1_ROOT, INTENTS_SUMMARY_ROOT, SUBMISSIONS_SUMMARY_ROOT, ACTIVITY_ROLLUP_ROOT]:
         resp["source_paths"].append(str(p))
         mt = _mtime(p)
         if mt is not None:
@@ -934,23 +923,41 @@ class OpsHandler(SimpleHTTPRequestHandler):
             return True
 
         if path == "/api/latest_day":
-            try:
-                p = TRUTH_ROOT / "latest.json"
-                doc = json.loads(p.read_text(encoding="utf-8"))
-                day = doc.get("day_utc", None)
-                if not isinstance(day, str) or not day:
-                    self._send_json(HTTPStatus.OK, {"ok": True, "errors": ["LATEST_DAY_INVALID"], "day_utc": None})
-                    return True
+            days = _union_days()
+            self._send_json(HTTPStatus.OK, {"ok": True, "errors": [], "day_utc": _select_latest_day(days)})
+            return True
+
+        if path == "/api/activity/latest":
+            day = _activity_latest_day()
+            if not day:
+                self._send_json(HTTPStatus.OK, {"ok": True, "errors": [E_ACTIVITY_DAY_NOT_RESOLVED], "day_utc": None})
+            else:
                 self._send_json(HTTPStatus.OK, {"ok": True, "errors": [], "day_utc": day})
+            return True
+
+        if path == "/api/activity/today":
+            day = None
+            raw = (qs.get("day") or [None])[0]
+            if isinstance(raw, str) and raw and _is_day_str(raw):
+                day = raw
+            if day is None:
+                day = _activity_latest_day()
+            if not day:
+                self._send_json(HTTPStatus.OK, {"ok": False, "errors": [E_ACTIVITY_DAY_NOT_RESOLVED], "path": path})
                 return True
-            except FileNotFoundError:
-                self._send_json(HTTPStatus.OK, {"ok": True, "errors": ["LATEST_JSON_MISSING"], "day_utc": None})
+            self._send_json(HTTPStatus.OK, _activity_today(day))
+            return True
+
+        if path == "/api/activity/rollup":
+            raw = (qs.get("asof") or [None])[0]
+            asof = raw if isinstance(raw, str) and raw and _is_day_str(raw) else _activity_latest_day()
+            if not asof:
+                self._send_json(HTTPStatus.OK, {"ok": False, "errors": [E_ACTIVITY_DAY_NOT_RESOLVED], "path": path})
                 return True
-            except Exception:
-                self._send_json(HTTPStatus.OK, {"ok": True, "errors": ["LATEST_JSON_UNREADABLE"], "day_utc": None})
-                return True
+            self._send_json(HTTPStatus.OK, _activity_today(asof))
+            return True
+
         if path == "/api/artifact":
-            # truth-only artifact reader for UI drilldown
             try:
                 raw = (qs.get("path") or [None])[0]
                 if not isinstance(raw, str) or not raw:
@@ -972,7 +979,6 @@ class OpsHandler(SimpleHTTPRequestHandler):
                     self._send_json(HTTPStatus.OK, {"ok": False, "errors": ["ARTIFACT_NOT_FOUND"], "path": str(p), "content": ""})
                     return True
 
-                # Limit read size (prevent huge payloads)
                 data = p.read_text(encoding="utf-8", errors="replace")
                 truncated = False
                 if len(data) > 20000:
@@ -1009,22 +1015,6 @@ class OpsHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/series/nav":
             self._send_json(HTTPStatus.OK, _series_nav_endpoint(qs))
-            return True
-
-        if path == "/api/series/engine_returns":
-            self._send_json(
-                HTTPStatus.OK,
-                {
-                    "ok": True,
-                    "generated_utc": _utc_now_iso(),
-                    "errors": [],
-                    "warnings": ["ENGINE_RETURNS_ENDPOINT_NOT_IMPLEMENTED_NO_CANONICAL_PATH_PROVEN"],
-                    "source_paths": [],
-                    "source_mtimes": {},
-                    "missing_paths": [],
-                    "points": [],
-                },
-            )
             return True
 
         self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "errors": ["ENDPOINT_NOT_FOUND"], "path": path})
