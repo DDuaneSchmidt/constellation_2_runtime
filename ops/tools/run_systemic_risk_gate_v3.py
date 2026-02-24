@@ -13,6 +13,10 @@ Day-0 Bootstrap Window Exception (governed, scoped):
 - If there are NO submissions yet for day_utc (bootstrap window),
   and systemic monitoring inputs are missing, allow OK with deterministic zeros/empties.
 - Once any submission exists, revert to strict existing behavior (FAIL when inputs missing).
+
+Rerun-safety (automation requirement):
+- If the day-keyed artifact already exists, treat it as authoritative for that day.
+- DO NOT attempt rewrite (prevents immutable overwrite failure when git_sha or inputs differ across reruns).
 """
 
 from __future__ import annotations
@@ -97,6 +101,43 @@ def _parse_day_utc(s: str) -> str:
     if len(d) != 10 or d[4] != "-" or d[7] != "-":
         raise ValueError(f"BAD_DAY_UTC_FORMAT_EXPECTED_YYYY_MM_DD: {d!r}")
     return d
+
+
+def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | None:
+    """
+    Immutable rerun safety (automation requirement):
+    - If the day-keyed artifact already exists, treat it as authoritative for that day.
+    - DO NOT attempt rewrite.
+
+    Returns:
+      - None if no existing file (caller should compute/write)
+      - 0 if existing status == OK
+      - 2 if existing status != OK
+    """
+    if not out_path.exists():
+        return None
+
+    existing_sha = _sha256_file(out_path)
+    existing = _read_json_obj(out_path)
+
+    schema_id = str(existing.get("schema_id") or "").strip()
+    schema_version = str(existing.get("schema_version") or "").strip()
+    day_utc = str(existing.get("day_utc") or "").strip()
+    status = str(existing.get("status") or "").strip().upper()
+
+    if schema_id != "systemic_risk_gate":
+        raise SystemExit(f"FAIL: EXISTING_SYSTEMIC_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
+    if schema_version != "v3":
+        raise SystemExit(f"FAIL: EXISTING_SYSTEMIC_SCHEMA_VERSION_MISMATCH: schema_version={schema_version!r} path={out_path}")
+    if day_utc != expected_day_utc:
+        raise SystemExit(
+            f"FAIL: EXISTING_SYSTEMIC_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}"
+        )
+    if status == "":
+        raise SystemExit(f"FAIL: EXISTING_SYSTEMIC_STATUS_MISSING: path={out_path}")
+
+    print(f"OK: SYSTEMIC_RISK_GATE_V3_WRITTEN day_utc={expected_day_utc} status={status} path={out_path} sha256={existing_sha} action=EXISTS")
+    return 0 if status == "OK" else 2
 
 
 def _bootstrap_window_true(day: str) -> bool:
@@ -327,7 +368,17 @@ def _day0_bootstrap_payload(day: str) -> Dict[str, Any]:
         "cluster_exposure_metrics": {"total_intents": 0, "intents_by_engine": []},
         "reason_codes": [DAY0_RC_SYSTEMIC_ALLOWED],
         "input_manifest": [
-            {"type": "submissions_day_dir_probe", "path": str(submissions_path), "sha256": (_sha256_bytes(b"") if not submissions_path.exists() else _sha256_bytes(b"\n".join([p.name.encode("utf-8") for p in sorted(submissions_path.iterdir()) if p.is_dir()])))},
+            {
+                "type": "submissions_day_dir_probe",
+                "path": str(submissions_path),
+                "sha256": (
+                    _sha256_bytes(b"")
+                    if not submissions_path.exists()
+                    else _sha256_bytes(
+                        b"\n".join([p.name.encode("utf-8") for p in sorted(submissions_path.iterdir()) if p.is_dir()])
+                    )
+                ),
+            },
             {"type": "truth_root", "path": str(TRUTH), "sha256": _sha256_bytes(b"")},
         ],
         "gate_sha256": None,
@@ -346,6 +397,11 @@ def main() -> int:
     produced_utc = f"{day}T00:00:00Z"
     threshold = str(args.max_pairwise_threshold).strip()
 
+    out_path = (OUT_ROOT / day / "systemic_risk_gate.v3.json").resolve()
+    existing_rc = _return_if_existing_report(out_path=out_path, expected_day_utc=day)
+    if existing_rc is not None:
+        return int(existing_rc)
+
     # Day-0 bootstrap: if no submissions yet, allow OK even if systemic inputs missing.
     # This is intentionally scoped to bootstrap window only.
     if _bootstrap_window_true(day):
@@ -353,7 +409,6 @@ def main() -> int:
         # missing systemic monitoring inputs are allowed in bootstrap window.
         payload = _day0_bootstrap_payload(day)
         validate_against_repo_schema_v1(payload, REPO_ROOT, SCHEMA_RELPATH)
-        out_path = (OUT_ROOT / day / "systemic_risk_gate.v3.json").resolve()
         try:
             wr = write_file_immutable_v1(path=out_path, data=_canonical_bytes(payload), create_dirs=True)
         except ImmutableWriteError as e:
@@ -405,7 +460,6 @@ def main() -> int:
 
     validate_against_repo_schema_v1(payload2, REPO_ROOT, SCHEMA_RELPATH)
 
-    out_path = (OUT_ROOT / day / "systemic_risk_gate.v3.json").resolve()
     try:
         wr = write_file_immutable_v1(path=out_path, data=_canonical_bytes(payload2), create_dirs=True)
     except ImmutableWriteError as e:
