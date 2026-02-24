@@ -45,6 +45,33 @@ def _load_json(p: Path) -> Dict[str, Any]:
     with p.open("r", encoding="utf-8") as f:
         return json.load(f)
 
+def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | None:
+    """
+    Immutable truth rule (audit-grade):
+    - If the report already exists at the day-keyed immutable path, DO NOT rewrite.
+    - Treat existing report as authoritative for that day.
+    - Return 0 if existing looks valid, else fail-closed.
+
+    Rationale:
+    - The service runs with git HEAD; producer_git_sha can change between runs.
+    - That makes candidate bytes differ and triggers immutable rewrite failure.
+    """
+    if not out_path.exists():
+        return None
+
+    existing = _load_json(out_path)
+
+    schema_id = str(existing.get("schema_id") or "").strip()
+    day_utc = str(existing.get("day_utc") or "").strip()
+
+    if schema_id != "C2_ACCOUNTING_NAV_V2":
+        raise SystemExit(f"FAIL: EXISTING_REPORT_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
+    if day_utc != expected_day_utc:
+        raise SystemExit(f"FAIL: EXISTING_REPORT_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}")
+
+    sha = _sha256_file(out_path)
+    print(f"OK: accounting_nav_v2_exists day_utc={expected_day_utc} path={out_path} sha256={sha} action=EXISTS")
+    return 0
 
 def _d(x: Any) -> Decimal:
     try:
@@ -71,6 +98,14 @@ def main() -> int:
     args = ap.parse_args()
 
     day = str(args.day_utc).strip()
+
+    out_dir = TRUTH_ROOT / "accounting_v2" / "nav" / day
+    out_path = out_dir / "nav.v2.json"
+
+    existing_rc = _return_if_existing_report(out_path=out_path, expected_day_utc=day)
+    if existing_rc is not None:
+
+        return int(existing_rc)
 
     cash_path = TRUTH_ROOT / "cash_ledger_v1" / "snapshots" / day / "cash_ledger_snapshot.v1.json"
     pos_path = TRUTH_ROOT / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json"
@@ -154,8 +189,6 @@ def main() -> int:
         "history": {},
     }
 
-    out_dir = TRUTH_ROOT / "accounting_v2" / "nav" / day
-    out_path = out_dir / "nav.v2.json"
     _immut_write(out_path, _json_bytes(out))
 
     print(f"OK: wrote {out_path}")
