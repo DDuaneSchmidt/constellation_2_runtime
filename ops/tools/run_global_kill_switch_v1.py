@@ -12,6 +12,10 @@ BATCH-1 CHANGE (Single Final Verdict Consumption):
 - Legacy per-surface inputs (operator_gate_verdict / capital_risk_envelope / reconciliation_report)
   are NOT consumed for state decisions.
 
+Rerun-safety (automation requirement):
+- If the day-keyed kill switch artifact already exists, treat it as authoritative for that day.
+- DO NOT attempt rewrite (prevents immutable overwrite failure when git_sha changes or inputs differ across reruns).
+
 Writes:
   constellation_2/runtime/truth/risk_v1/kill_switch_v1/<DAY>/global_kill_switch_state.v1.json
 
@@ -99,6 +103,45 @@ def _compute_self_sha(obj: Dict[str, Any], field: str) -> str:
     return _sha256_bytes(_canonical_bytes(o2))
 
 
+def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | None:
+    """
+    Immutable rerun safety (automation requirement):
+    - If the day-keyed artifact already exists, treat it as authoritative for that day.
+    - DO NOT attempt rewrite (prevents immutable overwrite failure when candidate bytes differ).
+
+    Returns:
+      - None if no existing file (caller should compute/write)
+      - 0 if existing file is acceptable and the stage should pass
+    """
+    if not out_path.exists():
+        return None
+
+    existing_sha = _sha256_file(out_path)
+    existing = _read_json_obj(out_path)
+
+    schema_id = str(existing.get("schema_id") or "").strip()
+    schema_version = str(existing.get("schema_version") or "").strip()
+    day_utc = str(existing.get("day_utc") or "").strip()
+
+    if schema_id != "global_kill_switch_state":
+        raise SystemExit(f"FAIL: EXISTING_KILL_SWITCH_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
+    if schema_version != "v1":
+        raise SystemExit(f"FAIL: EXISTING_KILL_SWITCH_SCHEMA_VERSION_MISMATCH: schema_version={schema_version!r} path={out_path}")
+    if day_utc != expected_day_utc:
+        raise SystemExit(
+            f"FAIL: EXISTING_KILL_SWITCH_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}"
+        )
+
+    state = str(existing.get("state") or "").strip().upper()
+    if state == "":
+        raise SystemExit(f"FAIL: EXISTING_KILL_SWITCH_STATE_MISSING: path={out_path}")
+
+    print(
+        f"OK: GLOBAL_KILL_SWITCH_STATE_V1_WRITTEN day_utc={expected_day_utc} state={state} path={out_path} sha256={existing_sha} action=EXISTS"
+    )
+    return 0
+
+
 def _gate_stack_all_required_pass(gs: Dict[str, Any]) -> bool:
     """
     Required-gate passing semantics (audit-grade, fail-closed):
@@ -140,9 +183,7 @@ def _load_inputs(day: str) -> Tuple[List[Dict[str, str]], List[str], Dict[str, A
             rc.append("C2_KILL_SWITCH_INPUT_SCHEMA_INVALID")
             decisions["gate_stack_parse_error"] = str(e)
     else:
-        input_manifest.append(
-            {"type": gs_type, "path": str(gs_path), "sha256": _sha256_bytes(b"")}
-        )
+        input_manifest.append({"type": gs_type, "path": str(gs_path), "sha256": _sha256_bytes(b"")})
         rc.append("C2_KILL_SWITCH_DEFAULT_ACTIVE_MISSING_INPUTS")
 
     return (input_manifest, rc, decisions)
@@ -154,6 +195,13 @@ def main() -> int:
     args = ap.parse_args()
 
     day = _parse_day_utc(args.day_utc)
+
+    out_dir = (OUT_ROOT / day).resolve()
+    out_path = (out_dir / "global_kill_switch_state.v1.json").resolve()
+
+    existing_rc = _return_if_existing_report(out_path=out_path, expected_day_utc=day)
+    if existing_rc is not None:
+        return int(existing_rc)
 
     # Deterministic produced_utc for replay (schema requires non-empty string).
     produced_utc = f"{day}T00:00:00Z"
@@ -214,9 +262,6 @@ def main() -> int:
     payload["state_sha256"] = _compute_self_sha(payload, "state_sha256")
 
     validate_against_repo_schema_v1(payload, REPO_ROOT, SCHEMA_RELPATH)
-
-    out_dir = (OUT_ROOT / day).resolve()
-    out_path = (out_dir / "global_kill_switch_state.v1.json").resolve()
 
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
