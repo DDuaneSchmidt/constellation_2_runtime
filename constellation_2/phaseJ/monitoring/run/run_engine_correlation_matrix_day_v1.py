@@ -15,6 +15,10 @@ Notes:
 - Bootstrap-safe: 1x1 matrix allowed (diagonal=1.000000).
 - Uses Decimal math; quantizes correlations to 6dp.
 - Window uses the most recent N available engine_daily_returns days <= day_utc (no calendar assumptions).
+
+Rerun-safety (automation requirement):
+- If the day-keyed artifact already exists, treat it as authoritative for that day.
+- DO NOT attempt rewrite (prevents immutable overwrite failure when git_sha changes or inputs differ across reruns).
 """
 
 from __future__ import annotations
@@ -83,6 +87,47 @@ def _read_json(p: Path) -> Any:
         return json.loads(p.read_text(encoding="utf-8"))
     except Exception as e:  # noqa: BLE001
         raise CliError(f"JSON_READ_FAILED: {p}: {e}") from e
+
+
+def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | None:
+    """
+    Immutable rerun safety (automation requirement):
+    - If the day-keyed artifact already exists, treat it as authoritative for that day.
+    - DO NOT attempt rewrite, because candidate bytes can differ across reruns (git_sha, inputs, etc).
+
+    Returns:
+      - None if no existing file (caller should compute/write)
+      - 0 if existing status is OK or DEGRADED_INSUFFICIENT_HISTORY
+      - 2 otherwise (fail-closed)
+    """
+    if not out_path.exists():
+        return None
+
+    existing_sha = _sha256_file(out_path)
+    existing = _read_json(out_path)
+    if not isinstance(existing, dict):
+        raise SystemExit(f"FAIL: EXISTING_CORR_NOT_OBJECT: {out_path}")
+
+    schema_id = str(existing.get("schema_id") or "").strip()
+    schema_version = existing.get("schema_version")
+    day_utc = str(existing.get("day_utc") or "").strip()
+    status = str(existing.get("status") or "").strip().upper()
+
+    if schema_id != "C2_ENGINE_CORRELATION_MATRIX_V1":
+        raise SystemExit(f"FAIL: EXISTING_CORR_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
+    if schema_version != 1:
+        raise SystemExit(f"FAIL: EXISTING_CORR_SCHEMA_VERSION_MISMATCH: schema_version={schema_version!r} path={out_path}")
+    if day_utc != expected_day_utc:
+        raise SystemExit(
+            f"FAIL: EXISTING_CORR_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}"
+        )
+    if status == "":
+        raise SystemExit(f"FAIL: EXISTING_CORR_STATUS_MISSING: path={out_path}")
+
+    print(
+        f"OK: ENGINE_CORRELATION_MATRIX_V1_WRITTEN day={expected_day_utc} out={out_path} action=EXISTS sha256={existing_sha} status={status}"
+    )
+    return 0 if status in ("OK", "DEGRADED_INSUFFICIENT_HISTORY") else 2
 
 
 def _quant6(x: Decimal) -> Decimal:
@@ -194,6 +239,11 @@ def main() -> int:
     day_utc = _day_str(day)
     window_days = int(args.window_days)
 
+    out_path = (OUT_ROOT / day_utc / "engine_correlation_matrix.v1.json").resolve()
+    existing_rc = _return_if_existing_report(out_path=out_path, expected_day_utc=day_utc)
+    if existing_rc is not None:
+        return int(existing_rc)
+
     all_days = _list_days(IN_ROOT)
     win = _select_window(all_days, day, window_days)
 
@@ -300,7 +350,6 @@ def main() -> int:
 
     validate_against_repo_schema_v1(payload, REPO_ROOT, SCHEMA_RELPATH)
 
-    out_path = (OUT_ROOT / day_utc / "engine_correlation_matrix.v1.json").resolve()
     payload_bytes = canonical_json_bytes_v1(payload)
 
     try:
