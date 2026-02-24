@@ -24,7 +24,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--day_utc", required=True)
     ap.add_argument("--ib_host", default="127.0.0.1")
-    ap.add_argument("--ib_port", type=int, default=7497)
+    ap.add_argument("--ib_port", type=int, default=4002)
     ap.add_argument("--ib_client_id", type=int, default=7)
     ap.add_argument("--ib_account", required=True)
     ap.add_argument("--phasec_out_dir", default="")
