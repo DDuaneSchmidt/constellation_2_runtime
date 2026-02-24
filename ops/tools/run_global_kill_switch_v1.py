@@ -208,9 +208,9 @@ def main() -> int:
 
     input_manifest, reason_codes, decisions = _load_inputs(day)
 
-    # PAPER bootstrap policy:
-    # - If required inputs are missing/invalid BUT there are no submissions yet, allow entries (paper trading bootstrap).
-    # - Once submissions exist, enforce strict fail-closed rules.
+    # PAPER bootstrap policy (scoped, audit-grade):
+    # - If required inputs are missing/invalid BUT there are no submissions yet, allow entries.
+    # - Once submissions exist, enforce strict fail-closed rules (requires gate_stack_verdict PASS).
     subs_dir = (TRUTH / "execution_evidence_v1" / "submissions" / day).resolve()
     submissions_present = False
     if subs_dir.exists() and subs_dir.is_dir():
@@ -224,15 +224,20 @@ def main() -> int:
         or ("C2_KILL_SWITCH_INPUT_SCHEMA_INVALID" in reason_codes)
     )
 
-    if missing_or_invalid and (not submissions_present):
+    bootstrap_allow_entries = bool(missing_or_invalid and (not submissions_present))
+
+    if bootstrap_allow_entries:
+        # IMPORTANT: In bootstrap, we do NOT require gate_stack_verdict PASS to allow entries.
+        # This is strictly scoped to "no submissions yet" and prevents dead-on-arrival paper trading.
         state = "INACTIVE"
         reason_codes.append("C2_PAPER_BOOTSTRAP_ALLOW_ENTRIES_NO_SUBMISSIONS_YET")
     else:
         state = "ACTIVE" if missing_or_invalid else "INACTIVE"
 
-    # Single Final Verdict Consumption:
-    # INACTIVE only if gate_stack_verdict exists AND status==PASS AND all REQUIRED gates are PASS/OK (per gate semantics).
-    if state == "INACTIVE":
+    # Single Final Verdict Consumption (strict mode only):
+    # INACTIVE only if gate_stack_verdict exists AND status==PASS AND all REQUIRED gates are PASS/OK.
+    # In bootstrap_allow_entries mode, we intentionally skip this enforcement.
+    if (not bootstrap_allow_entries) and (state == "INACTIVE"):
         st = str(decisions.get("gate_stack_status") or "").strip().upper()
         all_required_pass = bool(decisions.get("gate_stack_required_all_pass") is True)
         if not (st == "PASS" and all_required_pass):
