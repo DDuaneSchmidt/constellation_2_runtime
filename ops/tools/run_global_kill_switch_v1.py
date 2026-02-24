@@ -7,28 +7,27 @@ Bundled C: global_kill_switch_state.v1.json writer (immutable truth artifact).
 Deterministic + audit-grade.
 Fail-closed default: if required inputs are missing or invalid => state=ACTIVE.
 
-BATCH-1 CHANGE (Single Final Verdict Consumption):
-- Kill switch consumes ONLY gate_stack_verdict_v1 as the decision authority.
-- Legacy per-surface inputs (operator_gate_verdict / capital_risk_envelope / reconciliation_report)
-  are NOT consumed for state decisions.
+Decision authority:
+- Kill switch consumes ONLY gate_stack_verdict_v1 as the decision authority when present.
+- If verdict is missing/invalid, fail-closed EXCEPT for Day-0 bootstrap rule.
 
-Rerun-safety (automation requirement):
-- If the day-keyed kill switch artifact already exists, treat it as authoritative for that day.
-- DO NOT attempt rewrite (prevents immutable overwrite failure when git_sha changes or inputs differ across reruns).
+Day-0 bootstrap (best-practice, audit-grade):
+- Allow entries only if:
+  (a) required inputs are missing/invalid, AND
+  (b) submissions are absent for the day, AND
+  (c) broker_baseline_snapshot_v1 exists for the day (anchor).
+
+Rerun-safety:
+- If artifact exists, treat as authoritative (do not rewrite),
+  EXCEPT for provably invalid bootstrap artifacts (self-heal quarantine).
 
 Writes:
   constellation_2/runtime/truth/risk_v1/kill_switch_v1/<DAY>/global_kill_switch_state.v1.json
-
-Validates schema:
-  governance/04_DATA/SCHEMAS/C2/RISK/global_kill_switch_state.v1.schema.json
-
-Run:
-  python3 ops/tools/run_global_kill_switch_v1.py --day_utc YYYY-MM-DD
 """
 
 from __future__ import annotations
 
-# --- Import bootstrap (audit-grade, deterministic, fail-closed) ---
+# --- deterministic import bootstrap (required for systemd execution) ---
 import sys
 from pathlib import Path
 
@@ -56,21 +55,19 @@ TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RISK/global_kill_switch_state.v1.schema.json"
 OUT_ROOT = (TRUTH / "risk_v1" / "kill_switch_v1").resolve()
-
-# Single Final Verdict Consumption (authoritative input)
 PATH_GATE_STACK_VERDICT_V1 = (TRUTH / "reports" / "gate_stack_verdict_v1").resolve()
+
+# Day-0 baseline anchor
+PATH_BASELINE_V1 = (TRUTH / "execution_evidence_v1" / "broker_baseline_snapshot_v1").resolve()
+
+RC_BOOTSTRAP_ALLOW = "C2_DAY0_BOOTSTRAP_ALLOW_ENTRIES_BASELINE_OK_NO_SUBMISSIONS"
+RC_MISSING_INPUTS = "C2_KILL_SWITCH_DEFAULT_ACTIVE_MISSING_INPUTS"
+RC_INPUT_INVALID = "C2_KILL_SWITCH_INPUT_SCHEMA_INVALID"
 
 
 def _git_sha() -> str:
     out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
     return out.decode("utf-8").strip()
-
-
-def _parse_day_utc(s: str) -> str:
-    d = (s or "").strip()
-    if len(d) != 10 or d[4] != "-" or d[7] != "-":
-        raise ValueError(f"BAD_DAY_UTC_FORMAT_EXPECTED_YYYY_MM_DD: {d!r}")
-    return d
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -103,16 +100,20 @@ def _compute_self_sha(obj: Dict[str, Any], field: str) -> str:
     return _sha256_bytes(_canonical_bytes(o2))
 
 
-def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | None:
-    """
-    Immutable rerun safety (automation requirement):
-    - If the day-keyed artifact already exists, treat it as authoritative for that day.
-    - DO NOT attempt rewrite (prevents immutable overwrite failure when candidate bytes differ).
+def _bootstrap_invariant_ok(existing: Dict[str, Any]) -> bool:
+    rcs = existing.get("reason_codes", [])
+    if not isinstance(rcs, list):
+        return True
+    if RC_BOOTSTRAP_ALLOW not in [str(x) for x in rcs]:
+        return True
 
-    Returns:
-      - None if no existing file (caller should compute/write)
-      - 0 if existing file is acceptable and the stage should pass
-    """
+    state = str(existing.get("state") or "").strip().upper()
+    allow_entries = bool(existing.get("allow_entries") is True)
+    forced_mode = str(existing.get("forced_mode") or "").strip().upper()
+    return bool(state == "INACTIVE" and allow_entries and forced_mode == "NORMAL")
+
+
+def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | None:
     if not out_path.exists():
         return None
 
@@ -136,6 +137,20 @@ def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | N
     if state == "":
         raise SystemExit(f"FAIL: EXISTING_KILL_SWITCH_STATE_MISSING: path={out_path}")
 
+    if not _bootstrap_invariant_ok(existing):
+        invalid_path = out_path.with_name(f"global_kill_switch_state.v1.json.INVALID_{existing_sha}.json")
+        if invalid_path.exists():
+            raise SystemExit(
+                f"FAIL: INVALID_EXISTING_KILL_SWITCH_ALREADY_QUARANTINED: day_utc={expected_day_utc} existing_sha={existing_sha} "
+                f"out_path={out_path} invalid_path={invalid_path}"
+            )
+        out_path.rename(invalid_path)
+        print(
+            f"WARN: QUARANTINED_INVALID_EXISTING_KILL_SWITCH day_utc={expected_day_utc} "
+            f"old_path={out_path} quarantined_path={invalid_path} sha256={existing_sha}"
+        )
+        return None
+
     print(
         f"OK: GLOBAL_KILL_SWITCH_STATE_V1_WRITTEN day_utc={expected_day_utc} state={state} path={out_path} sha256={existing_sha} action=EXISTS"
     )
@@ -143,15 +158,6 @@ def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | N
 
 
 def _gate_stack_all_required_pass(gs: Dict[str, Any]) -> bool:
-    """
-    Required-gate passing semantics (audit-grade, fail-closed):
-
-    - PASS/FAIL gates pass when status == "PASS"
-    - OK/FAIL gates pass when status == "OK"
-    - Therefore: a required gate is considered passing iff status ∈ {"PASS","OK"}
-
-    Any other status for a required gate => fail-closed.
-    """
     gates = gs.get("gates", [])
     if not isinstance(gates, list):
         return False
@@ -180,13 +186,27 @@ def _load_inputs(day: str) -> Tuple[List[Dict[str, str]], List[str], Dict[str, A
             decisions["gate_stack_status"] = str(gs.get("status") or "")
             decisions["gate_stack_required_all_pass"] = bool(_gate_stack_all_required_pass(gs))
         except Exception as e:  # noqa: BLE001
-            rc.append("C2_KILL_SWITCH_INPUT_SCHEMA_INVALID")
+            rc.append(RC_INPUT_INVALID)
             decisions["gate_stack_parse_error"] = str(e)
     else:
         input_manifest.append({"type": gs_type, "path": str(gs_path), "sha256": _sha256_bytes(b"")})
-        rc.append("C2_KILL_SWITCH_DEFAULT_ACTIVE_MISSING_INPUTS")
+        rc.append(RC_MISSING_INPUTS)
 
     return (input_manifest, rc, decisions)
+
+
+def _submissions_present(day: str) -> bool:
+    subs_dir = (TRUTH / "execution_evidence_v1" / "submissions" / day).resolve()
+    if subs_dir.exists() and subs_dir.is_dir():
+        for p in subs_dir.iterdir():
+            if p.is_dir():
+                return True
+    return False
+
+
+def _baseline_present(day: str) -> bool:
+    p = (PATH_BASELINE_V1 / day / "broker_baseline_snapshot.v1.json").resolve()
+    return bool(p.exists() and p.is_file())
 
 
 def main() -> int:
@@ -194,7 +214,9 @@ def main() -> int:
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
     args = ap.parse_args()
 
-    day = _parse_day_utc(args.day_utc)
+    day = str(args.day_utc).strip()
+    if len(day) != 10 or day[4] != "-" or day[7] != "-":
+        raise SystemExit(f"BAD_DAY_UTC_FORMAT_EXPECTED_YYYY_MM_DD: {day!r}")
 
     out_dir = (OUT_ROOT / day).resolve()
     out_path = (out_dir / "global_kill_switch_state.v1.json").resolve()
@@ -203,40 +225,22 @@ def main() -> int:
     if existing_rc is not None:
         return int(existing_rc)
 
-    # Deterministic produced_utc for replay (schema requires non-empty string).
     produced_utc = f"{day}T00:00:00Z"
 
     input_manifest, reason_codes, decisions = _load_inputs(day)
 
-    # PAPER bootstrap policy (scoped, audit-grade):
-    # - If required inputs are missing/invalid BUT there are no submissions yet, allow entries.
-    # - Once submissions exist, enforce strict fail-closed rules (requires gate_stack_verdict PASS).
-    subs_dir = (TRUTH / "execution_evidence_v1" / "submissions" / day).resolve()
-    submissions_present = False
-    if subs_dir.exists() and subs_dir.is_dir():
-        for p in subs_dir.iterdir():
-            if p.is_dir():
-                submissions_present = True
-                break
+    missing_or_invalid = (RC_MISSING_INPUTS in reason_codes) or (RC_INPUT_INVALID in reason_codes)
+    subs_present = _submissions_present(day)
+    base_present = _baseline_present(day)
 
-    missing_or_invalid = (
-        ("C2_KILL_SWITCH_DEFAULT_ACTIVE_MISSING_INPUTS" in reason_codes)
-        or ("C2_KILL_SWITCH_INPUT_SCHEMA_INVALID" in reason_codes)
-    )
-
-    bootstrap_allow_entries = bool(missing_or_invalid and (not submissions_present))
+    bootstrap_allow_entries = bool(missing_or_invalid and (not subs_present) and base_present)
 
     if bootstrap_allow_entries:
-        # IMPORTANT: In bootstrap, we do NOT require gate_stack_verdict PASS to allow entries.
-        # This is strictly scoped to "no submissions yet" and prevents dead-on-arrival paper trading.
         state = "INACTIVE"
-        reason_codes.append("C2_PAPER_BOOTSTRAP_ALLOW_ENTRIES_NO_SUBMISSIONS_YET")
+        reason_codes.append(RC_BOOTSTRAP_ALLOW)
     else:
         state = "ACTIVE" if missing_or_invalid else "INACTIVE"
 
-    # Single Final Verdict Consumption (strict mode only):
-    # INACTIVE only if gate_stack_verdict exists AND status==PASS AND all REQUIRED gates are PASS/OK.
-    # In bootstrap_allow_entries mode, we intentionally skip this enforcement.
     if (not bootstrap_allow_entries) and (state == "INACTIVE"):
         st = str(decisions.get("gate_stack_status") or "").strip().upper()
         all_required_pass = bool(decisions.get("gate_stack_required_all_pass") is True)
