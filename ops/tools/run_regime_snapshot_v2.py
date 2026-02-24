@@ -100,6 +100,48 @@ def _read_json_obj(path: Path) -> Dict[str, Any]:
     return o
 
 
+def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | None:
+    """
+    Immutable rerun safety (automation requirement):
+    - If the day-keyed artifact already exists, treat it as authoritative for that day.
+    - DO NOT attempt rewrite, because candidate bytes can differ across reruns
+      (e.g., git_sha changes or additional inputs appear later).
+
+    Returns:
+      - None if no existing file (caller should compute/write)
+      - 0 if existing is non-blocking
+      - 2 if existing is blocking
+    """
+    if not out_path.exists():
+        return None
+
+    existing_sha = _sha256_file(out_path)
+    existing = _read_json_obj(out_path)
+
+    schema_id = str(existing.get("schema_id") or "").strip()
+    schema_version = str(existing.get("schema_version") or "").strip()
+    day_utc = str(existing.get("day_utc") or "").strip()
+    status = str(existing.get("status") or "").strip().upper()
+    blocking = bool(existing.get("blocking"))
+
+    if schema_id != "regime_snapshot":
+        raise SystemExit(f"FAIL: EXISTING_REGIME_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
+    if schema_version != "v2":
+        raise SystemExit(f"FAIL: EXISTING_REGIME_SCHEMA_VERSION_MISMATCH: schema_version={schema_version!r} path={out_path}")
+    if day_utc != expected_day_utc:
+        raise SystemExit(
+            f"FAIL: EXISTING_REGIME_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}"
+        )
+    if status != "OK":
+        raise SystemExit(f"FAIL: EXISTING_REGIME_STATUS_NOT_OK: status={status!r} path={out_path}")
+
+    label = str(existing.get("regime_label") or "").strip() or "UNKNOWN"
+    print(
+        f"OK: REGIME_SNAPSHOT_V2_WRITTEN day_utc={expected_day_utc} label={label} blocking={blocking} path={out_path} sha256={existing_sha} action=EXISTS"
+    )
+    return 2 if blocking else 0
+
+
 def _dec6_to_int_micro(s: str) -> int:
     t = (s or "").strip()
     if t == "":
@@ -176,6 +218,11 @@ def main() -> int:
     day = _parse_day_utc(args.day_utc)
     enforce_operational_day_key_invariant_v1(day)
 
+    out_path = (OUT_ROOT / day / "regime_snapshot.v2.json").resolve()
+    existing_rc = _return_if_existing_report(out_path=out_path, expected_day_utc=day)
+    if existing_rc is not None:
+        return int(existing_rc)
+
     subs_present = _submissions_present(day)
 
     nav_path = (PATH_ACCOUNTING_NAV / day / "nav.v2.json").resolve()
@@ -222,7 +269,6 @@ def main() -> int:
         out_obj["snapshot_sha256"] = _compute_self_sha(out_obj, "snapshot_sha256")
         validate_against_repo_schema_v1(out_obj, REPO_ROOT, SCHEMA_RELPATH)
 
-        out_path = (OUT_ROOT / day / "regime_snapshot.v2.json").resolve()
         payload = _canonical_bytes(out_obj)
         try:
             wr = write_file_immutable_v1(path=out_path, data=payload, create_dirs=True)
@@ -339,9 +385,9 @@ def main() -> int:
         input_manifest.append({"type": cap_type, "path": str(cap_path), "sha256": _sha256_file(cap_path)})
     if broker_required:
         if broker_present:
-            input_manifest.append({"type": "broker_event_day_manifest_v1", "path": str(broker_manifest_path), "sha256": _sha256_file(broker_manifest_path)})
+            input_manifest.append({"type": "broker_event_day_manifest.v1", "path": str(broker_manifest_path), "sha256": _sha256_file(broker_manifest_path)})
         else:
-            input_manifest.append({"type": "broker_event_day_manifest_v1_missing", "path": str(broker_manifest_path), "sha256": _sha256_bytes(b"")})
+            input_manifest.append({"type": "broker_event_day_manifest.v1_missing", "path": str(broker_manifest_path), "sha256": _sha256_bytes(b"")})
 
     evidence = {
         "drawdown_pct": drawdown_pct,
@@ -375,7 +421,6 @@ def main() -> int:
 
     validate_against_repo_schema_v1(out_obj, REPO_ROOT, SCHEMA_RELPATH)
 
-    out_path = (OUT_ROOT / day / "regime_snapshot.v2.json").resolve()
     payload = _canonical_bytes(out_obj)
 
     try:
