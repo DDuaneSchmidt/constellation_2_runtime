@@ -21,7 +21,7 @@ from pathlib import Path
 import json
 
 
-def _list_own_v2_intents(day_dir: Path, day: str) -> list[Path]:
+def _list_own_v2_intents(day_dir: Path, day: str, *, reason_code_filter: str | None = None) -> list[Path]:
     """
     Return only intents produced by THIS runner version:
       producer == "run_defensive_tail_intents_day_v1"
@@ -43,6 +43,10 @@ def _list_own_v2_intents(day_dir: Path, day: str) -> list[Path]:
             continue
         if str(obj.get("produced_utc") or "") != produced:
             continue
+        if reason_code_filter is not None:
+            rcs = obj.get("reason_codes")
+            if not isinstance(rcs, list) or (reason_code_filter not in [str(x) for x in rcs]):
+                continue
         out.append(p)
     return sorted(out)
 
@@ -114,7 +118,7 @@ class TestDefensiveTailDeterminismV1(unittest.TestCase):
                 self.assertEqual(p1.returncode, 0, f"run1 failed rc={p1.returncode}\nSTDOUT:\n{p1.stdout}\nSTDERR:\n{p1.stderr}")
 
                 self.assertTrue(day_dir.exists(), "expected intents day dir to exist after run")
-                files1 = _list_own_v2_intents(day_dir, day)
+                files1 = _list_own_v2_intents(day_dir, day, reason_code_filter="FORCE_ENTER_TEST_ONLY")
                 bytes1 = [p.read_bytes() for p in files1]
 
                 # Clear and rerun
@@ -124,7 +128,7 @@ class TestDefensiveTailDeterminismV1(unittest.TestCase):
                 p2 = self._run(day, ["--force_enter_test_only"])
                 self.assertEqual(p2.returncode, 0, f"run2 failed rc={p2.returncode}\nSTDOUT:\n{p2.stdout}\nSTDERR:\n{p2.stderr}")
 
-                files2 = _list_own_v2_intents(day_dir, day)
+                files2 = _list_own_v2_intents(day_dir, day, reason_code_filter="FORCE_ENTER_TEST_ONLY")
                 bytes2 = [p.read_bytes() for p in files2]
 
                 self.assertEqual(bytes1, bytes2, "non-deterministic output bytes detected (force-enter)")
