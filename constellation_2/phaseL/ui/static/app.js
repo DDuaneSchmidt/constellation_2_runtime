@@ -432,7 +432,15 @@ function wire(){
     state.day=el("daySelect").value;
     loadToday();
   });
-  el("btnToday").addEventListener("click",()=>{setView("today");loadToday();});
+  el("btnToday").addEventListener("click",()=>{
+  setView("today");
+  // Today button should jump to the latest selectable day (already loaded by /api/days).
+  if ((state.days || []).length) {
+    state.day = state.days[state.days.length - 1];
+    el("daySelect").value = state.day;
+  }
+  loadToday();
+});
   el("btnHistory").addEventListener("click",()=>{setView("history");loadHistory();});
   el("btnCharts").addEventListener("click",()=>{setView("charts");loadCharts();});
   el("btnReloadCharts").addEventListener("click",loadCharts);
