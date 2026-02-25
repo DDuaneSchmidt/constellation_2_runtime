@@ -49,6 +49,7 @@ TRUTH = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
 
 ROLLUP_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/intents_day_rollup.v1.schema.json"
 EXPOSURE_INTENT_SCHEMA_RELPATH = "constellation_2/schemas/exposure_intent.v1.schema.json"
+EXPOSURE_INTENT_V2_SCHEMA_RELPATH = "constellation_2/schemas/exposure_intent.v2.schema.json"
 
 SNAP_ROOT = (TRUTH / "intents_v1" / "snapshots").resolve()
 OUT_ROOT = (TRUTH / "intents_v1" / "day_rollup").resolve()
@@ -60,6 +61,7 @@ ALLOWED_ENGINE_IDS: List[str] = [
     "C2_MEAN_REVERSION_EQ_V1",
     "C2_TREND_EQ_PRIMARY_V1",
     "C2_VOL_INCOME_DEFINED_RISK_V1",
+    "C2_DEFENSIVE_TAIL_V1",
 ]
 
 
@@ -124,7 +126,9 @@ def _write_immutable_canonical_json(path: Path, obj: Dict[str, Any]) -> _WriteRe
 def _list_intent_files(day_dir: Path) -> List[Path]:
     if not day_dir.exists():
         return []
-    return sorted(day_dir.glob("*.exposure_intent.v1.json"))
+    v1 = sorted(day_dir.glob("*.exposure_intent.v1.json"))
+    v2 = sorted(day_dir.glob("*.exposure_intent.v2.json"))
+    return sorted(v1 + v2)
 
 
 def _validate_intent_file_hash(p: Path) -> str:
@@ -171,7 +175,16 @@ def main() -> int:
         intent = _read_json(p)
 
         # Validate intent schema (governed schema lives in repo at the path below)
-        validate_against_repo_schema_v1(intent, REPO_ROOT, EXPOSURE_INTENT_SCHEMA_RELPATH)
+        schema_id = str(intent.get("schema_id") or "").strip()
+        schema_version = str(intent.get("schema_version") or "").strip()
+        if schema_id != "exposure_intent":
+            raise SystemExit(f"FAIL: unexpected intent schema_id: {schema_id!r} file={p}")
+        if schema_version == "v1":
+            validate_against_repo_schema_v1(intent, REPO_ROOT, EXPOSURE_INTENT_SCHEMA_RELPATH)
+        elif schema_version == "v2":
+            validate_against_repo_schema_v1(intent, REPO_ROOT, EXPOSURE_INTENT_V2_SCHEMA_RELPATH)
+        else:
+            raise SystemExit(f"FAIL: unsupported exposure_intent schema_version: {schema_version!r} file={p}")
 
         eid = _extract_engine_id(intent, p)
         if eid not in grouped:
