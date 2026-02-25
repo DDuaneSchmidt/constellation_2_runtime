@@ -75,6 +75,7 @@ These canonical contracts are governance-controlled and must be explicitly liste
 - `governance/05_CONTRACTS/C2/nav_history_ledger_v1.contract.md`
 - `governance/05_CONTRACTS/C2/drawdown_window_pack_v1.contract.md`
 - `governance/05_CONTRACTS/C2/economic_truth_availability_certificate_v1.contract.md`
+- `governance/05_CONTRACTS/C2/eod_observability_bundle_v1.contract.md`
 - `governance/05_CONTRACTS/C2/regime_classification_spine_v1.contract.md`
 - `governance/05_CONTRACTS/C2/regime_classification_spine_v1.deprecation_notice.md`
 - `governance/05_CONTRACTS/C2/regime_classification_spine_v2.contract.md`
@@ -110,6 +111,7 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/nav_history_ledger.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/drawdown_window_pack.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/economic_truth_availability_certificate.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/eod_slo_sentinel.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/regime_snapshot.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/regime_snapshot.v2.schema.json`
 - [Replay Integrity Schema JSON (V1)](04_DATA/SCHEMAS/C2/REPORTS/replay_integrity.v1.schema.json) — id: C2_REPORTS_REPLAY_INTEGRITY_SCHEMA_V1 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/replay_integrity.v1.schema.json`
@@ -120,6 +122,7 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/reconciliation_report.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/reconciliation_report.v2.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/pipeline_manifest.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/eod_run_certificate.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/exposure_reconciliation_report.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/delta_order_plan.v1.schema.json`

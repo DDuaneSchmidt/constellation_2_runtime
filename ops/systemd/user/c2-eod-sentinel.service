@@ -1,0 +1,9 @@
+[Unit]
+Description=Constellation 2.0 EOD SLO Sentinel (truth-only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/node/constellation_2_runtime
+ExecStart=/usr/bin/bash -lc "DAY_UTC=$(/bin/date -u -d yesterday +%%F); exec /home/node/constellation_2_runtime/.venv_c2/bin/python /home/node/constellation_2_runtime/ops/tools/run_eod_slo_sentinel_v1.py --day_utc $DAY_UTC"

@@ -316,7 +316,51 @@ def build_c3_ui_status(truth_root: Path) -> Dict[str, Any]:
                     )
             broker_obj["mismatches_top"] = mism_top[:8]
 
-    # ---- market data snapshot presence ----
+    
+    # ---- EOD observability (certificate + SLO sentinel) ----
+    eod_obj: Dict[str, Any] = {
+        "state": "UNKNOWN",
+        "day": verdict_day or "n/a",
+        "sentinel_path": None,
+        "certificate_path": None,
+    }
+
+    if verdict_day:
+        eod_path = truth_root / "monitoring_v1" / "eod_slo_sentinel_v1" / verdict_day / "eod_slo_sentinel.v1.json"
+        eod_obj["sentinel_path"] = str(eod_path)
+        eod_doc, eod_err = _read_json(eod_path)
+        if eod_doc is None:
+            warnings.append("EOD_SLO_SENTINEL_MISSING" if eod_err == "MISSING" else "EOD_SLO_SENTINEL_UNREADABLE")
+            missing_paths.append(str(eod_path))
+        else:
+            note_source(eod_path)
+            state = str(eod_doc.get("state") or "").strip().upper() or "UNKNOWN"
+            eod_obj["state"] = state
+
+            det = eod_doc.get("details") if isinstance(eod_doc.get("details"), dict) else {}
+            cert_path = det.get("certificate_path") if isinstance(det, dict) else None
+            if isinstance(cert_path, str) and cert_path:
+                eod_obj["certificate_path"] = cert_path
+
+            if state == "OK":
+                pass
+            elif state == "CERT_FAIL":
+                warnings.append("EOD_CERT_FAIL")
+                if isinstance(cert_path, str) and cert_path:
+                    missing_paths.append(cert_path)
+            elif state == "LATE":
+                warnings.append("EOD_CERT_LATE")
+                if isinstance(cert_path, str) and cert_path:
+                    missing_paths.append(cert_path)
+            elif state == "CERT_MISSING":
+                warnings.append("EOD_CERT_MISSING")
+                if isinstance(cert_path, str) and cert_path:
+                    missing_paths.append(cert_path)
+            else:
+                warnings.append("EOD_CERT_STATUS_UNKNOWN")
+
+
+# ---- market data snapshot presence ----
     md_root = truth_root / "market_data_snapshot_v1" / "broker_marks_v1"
     md_days = [d for d in _list_day_dirs(md_root) if _is_day_str(d)]
     md_latest = _max_day(md_days)

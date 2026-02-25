@@ -1,0 +1,10 @@
+[Unit]
+Description=Constellation 2.0 EOD SLO Sentinel timer (every 5 minutes)
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+Unit=c2-eod-sentinel.service
+
+[Install]
+WantedBy=timers.target
