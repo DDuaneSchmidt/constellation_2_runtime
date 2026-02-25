@@ -43,10 +43,12 @@ ENGINE_CAP_PCT = {
     "C2_TREND_EQ_PRIMARY_V1": Decimal("0.40"),
     "C2_VOL_INCOME_DEFINED_RISK_V1": Decimal("0.40"),
     "C2_MEAN_REVERSION_EQ_V1": Decimal("0.20"),
+    "C2_DEFENSIVE_TAIL_V1": Decimal("0.05"),
 }
 
 SUPPORTED_INTENT_SCHEMAS = {
     ("exposure_intent", "v1"),
+    ("exposure_intent", "v2"),
 }
 
 RC_ACCOUNTING_NOT_OK = "G_BLOCK_ACCOUNTING_NOT_OK"
