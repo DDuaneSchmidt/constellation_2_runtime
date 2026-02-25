@@ -90,6 +90,66 @@ def _ds(d: Decimal) -> str:
     return s
 
 
+DAY0_RC_ALLOWED = "DAY0_BOOTSTRAP_MISSING_CASH_OR_POSITIONS_ALLOWED"
+
+def _bootstrap_window_true(day_utc: str) -> bool:
+    """
+    Day-0 Bootstrap Window iff:
+      TRUTH/execution_evidence_v1/submissions/<DAY>/ is missing OR contains zero submission dirs.
+    """
+    root = (TRUTH_ROOT / "execution_evidence_v1" / "submissions" / day_utc).resolve()
+    if (not root.exists()) or (not root.is_dir()):
+        return True
+    try:
+        for p in root.iterdir():
+            if p.is_dir():
+                return False
+    except Exception:
+        return False
+    return True
+
+def _write_bootstrap_stub(*, out_path: Path, day: str, producer_repo: str, producer_git_sha: str, missing: list[str], marks_path: Path) -> None:
+    # Deterministic stub: all values zero, produced_utc is day-keyed.
+    out_dir = out_path.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    input_manifest = []
+    for rel in missing:
+        input_manifest.append({"type": "missing_required_input", "path": rel, "sha256": "", "day_utc": day, "producer": "UNKNOWN"})
+
+    if marks_path.exists():
+        try:
+            input_manifest.append({"type": "broker_marks", "path": str(marks_path), "sha256": _sha256_file(marks_path), "day_utc": day, "producer": "broker_marks_v1"})
+        except Exception:
+            input_manifest.append({"type": "broker_marks", "path": str(marks_path), "sha256": "", "day_utc": day, "producer": "broker_marks_v1"})
+
+    out = {
+        "schema_id": "C2_ACCOUNTING_NAV_V2",
+        "schema_version": 2,
+        "produced_utc": f"{day}T00:00:00Z",
+        "day_utc": day,
+        "producer": {"repo": str(producer_repo), "git_sha": str(producer_git_sha), "module": "ops/tools/run_accounting_nav_v2_day_v1.py"},
+        "status": "BOOTSTRAP",
+        "reason_codes": [DAY0_RC_ALLOWED],
+        "input_manifest": input_manifest,
+        "nav": {
+            "currency": "USD",
+            "nav_total": 0,
+            "cash_total": 0,
+            "gross_positions_value": 0,
+            "realized_pnl_to_date": 0,
+            "unrealized_pnl": 0,
+            "components": [],
+            "notes": ["DAY0_BOOTSTRAP_STUB_NAV_V2"],
+        },
+        "history": {},
+    }
+
+    _immut_write(out_path, _json_bytes(out))
+    print(f"OK: wrote {out_path} (DAY0_BOOTSTRAP)")
+
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_accounting_nav_v2_day_v1")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
@@ -117,6 +177,16 @@ def main() -> int:
             missing.append(str(p.relative_to(TRUTH_ROOT)))
 
     if missing:
+        if _bootstrap_window_true(day):
+            _write_bootstrap_stub(
+                out_path=out_path,
+                day=day,
+                producer_repo=str(args.producer_repo),
+                producer_git_sha=str(args.producer_git_sha),
+                missing=list(missing),
+                marks_path=marks_path,
+            )
+            return 0
         raise SystemExit("FATAL: missing required inputs: " + ", ".join(missing))
 
     cash = _load_json(cash_path)

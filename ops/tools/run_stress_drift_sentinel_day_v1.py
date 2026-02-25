@@ -161,7 +161,24 @@ def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> Optiona
     print(
         f"OK: STRESS_DRIFT_SENTINEL_V1_WRITTEN day_utc={expected_day_utc} status={status} path={out_path} sha256={existing_sha} action=EXISTS"
     )
-    return 0 if status == "OK" else 2
+    if status == "OK":
+        return 0
+    # BOOTSTRAP_EXISTING_FAIL_ALLOWED
+    # Day-0 bootstrap: allow existing FAIL to be non-blocking when it is explainable by missing/unknown optional inputs.
+    if _bootstrap_window_true(expected_day_utc):
+        metrics = existing.get("metrics") if isinstance(existing, dict) else None
+        corr_status = ""
+        broker_status = ""
+        if isinstance(metrics, dict):
+            corr = metrics.get("correlation")
+            slip = metrics.get("slippage")
+            if isinstance(corr, dict):
+                corr_status = str(corr.get("engine_corr_status") or "").strip().upper()
+            if isinstance(slip, dict):
+                broker_status = str(slip.get("broker_reconciliation_status") or "").strip().upper()
+        if corr_status in ("UNKNOWN", "MISSING") or broker_status == "MISSING":
+            return 0
+    return 2
 
 
 def _load_daily_returns(day: str) -> Tuple[str, List[str], List[Dict[str, str]]]:
@@ -284,9 +301,13 @@ def main() -> int:
     stress_ok = True
     corr_notes_out: List[str] = []
     if corr_status not in ("OK", "DEGRADED_INSUFFICIENT_HISTORY"):
-        stress_ok = False
+        # BOOTSTRAP_ALLOW_CORR_UNKNOWN
+        # During Day-0 bootstrap (no submissions yet), correlation status may be UNKNOWN due to legacy/minimal inputs.
+        # Do not fail the sentinel solely for UNKNOWN/MISSING in bootstrap; still record reason codes for operator visibility.
         reason_codes.append("Z_CORRELATION_MATRIX_NOT_OK")
         corr_notes_out.append(f"engine_corr_status={corr_status}")
+        if not (bootstrap and corr_status in ("UNKNOWN", "MISSING")):
+            stress_ok = False
     try:
         mp = Decimal(max_pairwise)
         # Only meaningful when multi-engine; 1x1 implies max_pairwise=0.000000

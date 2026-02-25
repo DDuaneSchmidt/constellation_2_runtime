@@ -1,0 +1,236 @@
+{
+  "$id": "https://constellation.local/schemas/exposure_intent.v2.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExposureIntent v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "intent_id",
+    "created_at_utc",
+    "produced_utc",
+    "producer",
+    "engine",
+    "underlying",
+    "exposure_type",
+    "target_notional_pct",
+    "expected_holding_days",
+    "risk_class",
+    "reason_codes",
+    "inputs",
+    "manifest",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "exposure_intent" },
+    "schema_version": { "const": "v2" },
+
+    "intent_id": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 128,
+      "description": "Deterministic intent identifier (hash-derived preferred)."
+    },
+
+    "created_at_utc": { "type": "string", "format": "date-time" },
+    "produced_utc": { "type": "string", "format": "date-time" },
+
+    "producer": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Deterministic producer label (module/tool name)."
+    },
+
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine_id", "mode"],
+      "properties": {
+        "engine_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "suite": {
+          "type": "string",
+          "enum": ["C2_HYBRID_V1"],
+          "description": "Canonical field (preferred)."
+        },
+        "suite_id": {
+          "type": "string",
+          "enum": ["C2_HYBRID_V1"],
+          "description": "Legacy-compatible alias (accepted for backward compatibility)."
+        },
+        "mode": { "type": "string", "enum": ["PAPER", "LIVE"] }
+      },
+      "anyOf": [
+        { "required": ["suite"] },
+        { "required": ["suite_id"] }
+      ]
+    },
+
+    "underlying": {
+      "description": "Underlying identity. Canonical form is object {symbol,currency}; legacy accepts string symbol.",
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["symbol", "currency"],
+          "properties": {
+            "symbol": { "type": "string", "minLength": 1, "maxLength": 16 },
+            "currency": { "type": "string", "minLength": 3, "maxLength": 3 }
+          }
+        },
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16
+        }
+      ]
+    },
+
+    "exposure_type": {
+      "type": "string",
+      "enum": ["LONG_EQUITY", "SHORT_VOL_DEFINED"]
+    },
+
+    "target_notional_pct": {
+      "type": "string",
+      "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$",
+      "description": "Target notional as fraction of NAV, decimal string in [0,1]."
+    },
+
+    "expected_holding_days": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 365
+    },
+
+    "risk_class": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+
+    "constraints": {
+      "description": "ENTRY intents require constraints.max_risk_pct > 0. EXIT intents may omit or set null.",
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_risk_pct"],
+          "properties": {
+            "max_risk_pct": {
+              "type": "string",
+              "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$"
+            }
+          }
+        }
+      ]
+    },
+
+    "reason_codes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+    },
+
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "market_data_snapshot_v1",
+        "accounting_nav_snapshot",
+        "positions_snapshot_v2",
+        "engine_correlation_matrix_v1",
+        "regime_snapshot_v2"
+      ],
+      "properties": {
+        "market_data_snapshot_v1": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          }
+        },
+        "accounting_nav_snapshot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          }
+        },
+        "positions_snapshot_v2": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          }
+        },
+        "engine_correlation_matrix_v1": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          }
+        },
+        "regime_snapshot_v2": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          }
+        }
+      }
+    },
+
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inputs"],
+      "properties": {
+        "inputs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "sha256"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+              "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+            }
+          }
+        },
+        "code": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "sha256"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+              "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+            }
+          }
+        }
+      },
+      "description": "Audit manifest: sha256 pointers for all inputs (required) and optional code pointers."
+    },
+
+    "canonical_json_hash": {
+      "description": "Self-hash over canonical JSON with canonical_json_hash set to null (audit chain anchor).",
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

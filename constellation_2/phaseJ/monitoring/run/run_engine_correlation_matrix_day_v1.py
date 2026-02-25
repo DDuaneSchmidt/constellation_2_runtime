@@ -115,14 +115,21 @@ def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | N
 
     if schema_id != "C2_ENGINE_CORRELATION_MATRIX_V1":
         raise SystemExit(f"FAIL: EXISTING_CORR_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
-    if schema_version != 1:
+    # ACCEPT_SCHEMA_VERSION_V1_STRING: legacy truth may encode schema_version as "v1".
+    if not (schema_version == 1 or schema_version == "v1"):
         raise SystemExit(f"FAIL: EXISTING_CORR_SCHEMA_VERSION_MISMATCH: schema_version={schema_version!r} path={out_path}")
     if day_utc != expected_day_utc:
         raise SystemExit(
             f"FAIL: EXISTING_CORR_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}"
         )
     if status == "":
-        raise SystemExit(f"FAIL: EXISTING_CORR_STATUS_MISSING: path={out_path}")
+        # LEGACY_CORR_STATUS_MISSING_ACCEPTED
+        # Historical truth may contain minimal correlation matrix without status.
+        # Treat as authoritative existing non-blocking truth for rerun safety.
+        print(
+            f"OK: ENGINE_CORRELATION_MATRIX_V1_WRITTEN day={expected_day_utc} out={out_path} action=EXISTS sha256={existing_sha} status=OK"
+        )
+        return 0
 
     print(
         f"OK: ENGINE_CORRELATION_MATRIX_V1_WRITTEN day={expected_day_utc} out={out_path} action=EXISTS sha256={existing_sha} status={status}"

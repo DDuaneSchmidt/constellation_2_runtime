@@ -48,6 +48,7 @@ INTENTS_ROOT = (TRUTH_ROOT / "intents_v1" / "snapshots").resolve()
 OUT_ROOT = (TRUTH_ROOT / "phaseC_preflight_v1").resolve()
 
 SCHEMA_EXPOSURE_INTENT = "constellation_2/schemas/exposure_intent.v1.schema.json"
+SCHEMA_EXPOSURE_INTENT_V2 = "constellation_2/schemas/exposure_intent.v2.schema.json"
 SCHEMA_VETO = "constellation_2/schemas/veto_record.v1.schema.json"
 SCHEMA_DECISION = "constellation_2/schemas/submit_preflight_decision.v1.schema.json"
 
@@ -191,6 +192,42 @@ def _evaluate_exposure_intent_v1(intent_obj: Dict[str, Any], *, eval_time_utc: s
     decision = _mk_allow_decision(created_at_utc=eval_time_utc, binding_hash=binding_hash)
     return decision, None
 
+def _evaluate_exposure_intent_v2(intent_obj: Dict[str, Any], *, eval_time_utc: str, intent_hash: str) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    # Validate against governed v2 schema (fail-closed)
+    validate_against_repo_schema_v1(intent_obj, REPO_ROOT, SCHEMA_EXPOSURE_INTENT_V2)
+
+    engine = intent_obj.get("engine")
+    if not isinstance(engine, dict):
+        raise PreflightDayError("EXPOSURE_INTENT_ENGINE_NOT_OBJECT")
+
+    suite = str(engine.get("suite") or "").strip()
+    if suite != "C2_HYBRID_V1":
+        raise PreflightDayError(f"EXPOSURE_INTENT_SUITE_INVALID: {suite!r}")
+
+    exposure_type = str(intent_obj.get("exposure_type") or "").strip()
+    if exposure_type not in SUPPORTED_EXPOSURE_TYPES:
+        raise PreflightDayError(f"EXPOSURE_TYPE_UNSUPPORTED_V2: {exposure_type!r}")
+
+    tgt = _decimal_str_in_0_1(str(intent_obj.get("target_notional_pct") or ""), "target_notional_pct")
+
+    if _is_exit_intent(tgt):
+        # EXIT intent allowed; constraints may be null.
+        binding_hash = canonical_hash_for_c2_artifact_v1({"intent_hash": intent_hash, "binding_mode": "EXPOSURE_INTENT_V2_EXIT"})
+        decision = _mk_allow_decision(created_at_utc=eval_time_utc, binding_hash=binding_hash)
+        return decision, None
+
+    # ENTRY intent: constraints required and max_risk_pct > 0
+    constraints = intent_obj.get("constraints")
+    if not isinstance(constraints, dict):
+        raise PreflightDayError("CONSTRAINTS_REQUIRED_FOR_ENTRY_EXPOSURE_INTENT_V2")
+    mr = _decimal_str_in_0_1(str(constraints.get("max_risk_pct") or ""), "constraints.max_risk_pct")
+    if mr == Decimal("0"):
+        raise PreflightDayError("MAX_RISK_PCT_MUST_BE_GT_ZERO")
+
+    binding_hash = canonical_hash_for_c2_artifact_v1({"intent_hash": intent_hash, "binding_mode": "EXPOSURE_INTENT_V2_ENTRY"})
+    decision = _mk_allow_decision(created_at_utc=eval_time_utc, binding_hash=binding_hash)
+    return decision, None
+
 
 def _mark_exists_for_intent(out_day_dir: Path, intent_hash: str) -> bool:
     p_dec = out_day_dir / f"{intent_hash}.submit_preflight_decision.v1.json"
@@ -249,6 +286,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
             if schema_id == "exposure_intent" and schema_version == "v1":
                 decision, veto = _evaluate_exposure_intent_v1(intent_obj, eval_time_utc=eval_time_utc, intent_hash=intent_hash)
+            elif schema_id == "exposure_intent" and schema_version == "v2":
+                decision, veto = _evaluate_exposure_intent_v2(intent_obj, eval_time_utc=eval_time_utc, intent_hash=intent_hash)
             else:
                 raise PreflightDayError(f"UNSUPPORTED_INTENT_SCHEMA_FOR_THIS_RUNNER: schema_id={schema_id!r} schema_version={schema_version!r}")
 

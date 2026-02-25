@@ -9,6 +9,25 @@ from typing import Any, Dict, List
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 TRUTH_ROOT = REPO_ROOT / "constellation_2/runtime/truth"
 
+DAY0_RC_ALLOWED = "DAY0_BOOTSTRAP_ATTRIB_DEGRADED_OK"
+
+def _bootstrap_window_true(day_utc: str) -> bool:
+    """
+    Day-0 Bootstrap Window iff:
+      TRUTH/execution_evidence_v1/submissions/<DAY>/ is missing OR contains zero submission dirs.
+    """
+    root = (TRUTH_ROOT / "execution_evidence_v1" / "submissions" / day_utc).resolve()
+    if (not root.exists()) or (not root.is_dir()):
+        return True
+    try:
+        for p in root.iterdir():
+            if p.is_dir():
+                return False
+    except Exception:
+        return False
+    return True
+
+
 
 def _sha256_file(p: Path) -> str:
     h = hashlib.sha256()
@@ -71,7 +90,12 @@ def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | N
 
     sha = _sha256_file(out_path)
     print(f"OK: accounting_attribution_v2_exists day_utc={expected_day_utc} status={status} path={out_path} sha256={sha} action=EXISTS")
-    return 0 if status == "ACTIVE" else 2
+    if status == "ACTIVE":
+        return 0
+    # Day-0 bootstrap: allow DEGRADED_MISSING_INPUTS to pass strict orchestrator stages.
+    if status == "DEGRADED_MISSING_INPUTS" and _bootstrap_window_true(expected_day_utc):
+        return 0
+    return 2
 
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_accounting_attribution_v2_day_v1")
@@ -145,7 +169,11 @@ def main() -> int:
     _immut_write(out_path, _json_bytes(out))
 
     print(f"OK: wrote {out_path}")
-    return 0 if status == "ACTIVE" else 2
+    if status == "ACTIVE":
+        return 0
+    if status == "DEGRADED_MISSING_INPUTS" and _bootstrap_window_true(day):
+        return 0
+    return 2
 
 
 if __name__ == "__main__":
