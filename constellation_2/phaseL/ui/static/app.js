@@ -432,15 +432,7 @@ function wire(){
     state.day=el("daySelect").value;
     loadToday();
   });
-  el("btnToday").addEventListener("click",()=>{
-    setView("today");
-    // Today should select the latest authoritative day.
-    if ((state.days || []).length) {
-      state.day = state.days[state.days.length - 1];
-      el("daySelect").value = state.day;
-    }
-    loadToday();
-  });
+  el("btnToday").addEventListener("click",()=>{setView("today");loadToday();});
   el("btnHistory").addEventListener("click",()=>{setView("history");loadHistory();});
   el("btnCharts").addEventListener("click",()=>{setView("charts");loadCharts();});
   el("btnReloadCharts").addEventListener("click",loadCharts);
