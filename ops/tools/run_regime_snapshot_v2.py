@@ -124,6 +124,21 @@ def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | N
     status = str(existing.get("status") or "").strip().upper()
     blocking = bool(existing.get("blocking"))
 
+    # LEGACY_C2_REGIME_SNAPSHOT_V2_ACCEPTED
+    # Historical truth may contain a minimal legacy regime snapshot with:
+    #   schema_id="C2_REGIME_SNAPSHOT_V2", schema_version="v2", fields: day_utc, regime
+    # Treat as authoritative existing non-blocking truth for rerun safety.
+    if schema_id == "C2_REGIME_SNAPSHOT_V2" and schema_version == "v2":
+        if day_utc != expected_day_utc:
+            raise SystemExit(
+                f"FAIL: EXISTING_REGIME_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}"
+            )
+        label = str(existing.get("regime") or "").strip() or "UNKNOWN"
+        print(
+            f"OK: REGIME_SNAPSHOT_V2_WRITTEN day_utc={expected_day_utc} label={label} blocking=False path={out_path} sha256={existing_sha} action=EXISTS"
+        )
+        return 0
+
     if schema_id != "regime_snapshot":
         raise SystemExit(f"FAIL: EXISTING_REGIME_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
     if schema_version != "v2":
