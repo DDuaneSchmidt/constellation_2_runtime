@@ -284,9 +284,13 @@ def main() -> int:
     stress_ok = True
     corr_notes_out: List[str] = []
     if corr_status not in ("OK", "DEGRADED_INSUFFICIENT_HISTORY"):
-        stress_ok = False
+        # BOOTSTRAP_ALLOW_CORR_UNKNOWN
+        # During Day-0 bootstrap (no submissions yet), correlation status may be UNKNOWN due to legacy/minimal inputs.
+        # Do not fail the sentinel solely for UNKNOWN/MISSING in bootstrap; still record reason codes for operator visibility.
         reason_codes.append("Z_CORRELATION_MATRIX_NOT_OK")
         corr_notes_out.append(f"engine_corr_status={corr_status}")
+        if not (bootstrap and corr_status in ("UNKNOWN", "MISSING")):
+            stress_ok = False
     try:
         mp = Decimal(max_pairwise)
         # Only meaningful when multi-engine; 1x1 implies max_pairwise=0.000000
