@@ -331,7 +331,7 @@ def main() -> int:
         [
             "python3",
             "-m",
-            "constellation_2.phaseC.tools.run_phaseC_preflight_day_v1",
+            "constellation_2.phaseC.tools.run_phaseC_preflight_day_v2",
             "--day_utc",
             input_day,
             "--eval_time_utc",
