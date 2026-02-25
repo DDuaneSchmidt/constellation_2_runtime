@@ -104,6 +104,10 @@ def _sha256_file(path: Path) -> str:
 
 def _atomic_write_bytes_refuse_overwrite(path: Path, data: bytes) -> None:
     if path.exists():
+        existing = path.read_bytes()
+        if _sha256_bytes(existing) == _sha256_bytes(data):
+            # EXISTS_IDENTICAL_OK: rerunnable without rewriting immutable truth.
+            return
         raise DefensiveTailError(f"REFUSE_OVERWRITE_EXISTING_FILE: {str(path)}")
     tmp = path.with_name(path.name + ".tmp")
     if tmp.exists():
@@ -266,7 +270,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         mx = _max_pairwise_corr(cor)
 
         reg = _read_json_obj(inputs.reg_path)
-        regime = str(reg.get("regime") or "").strip()
+        regime = str(reg.get("regime") or reg.get("regime_label") or "").strip()
 
         if regime != "NORMAL":
             reason_codes.append(RC_REGIME_NON_NORMAL)
