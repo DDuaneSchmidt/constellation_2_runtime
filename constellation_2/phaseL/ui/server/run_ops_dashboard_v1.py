@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -152,7 +152,13 @@ def _union_days() -> List[str]:
         for d in _list_day_dirs(root):
             days.add(d)
 
-    return sorted(days)
+    # UI safety: exclude future days (e.g. 2199-01-19 bootstrap placeholders).
+    # Selectable days must not exceed today's UTC date.
+    today_utc = date.today().isoformat()
+    days2 = [d for d in days if isinstance(d, str) and d <= today_utc]
+
+    return sorted(days2)
+
 
 
 def _select_latest_day(days: List[str]) -> Optional[str]:
