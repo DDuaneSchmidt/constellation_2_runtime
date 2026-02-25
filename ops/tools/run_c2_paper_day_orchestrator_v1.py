@@ -237,6 +237,7 @@ def main() -> int:
         ("ENGINE_MEAN_REVERSION", "constellation_2.phaseI.mean_reversion.run.run_mean_reversion_intents_day_v1"),
         ("ENGINE_TREND_EQ_PRIMARY", "constellation_2.phaseI.trend_eq_primary.run.run_trend_eq_primary_intents_day_v1"),
         ("ENGINE_VOL_INCOME_DEFINED", "constellation_2.phaseI.vol_income_defined_risk.run.run_vol_income_defined_risk_intents_day_v1"),
+        ("ENGINE_DEFENSIVE_TAIL", "constellation_2.phaseI.defensive_tail.run.run_defensive_tail_intents_day_v1"),
     ]:
         ok, _rc = _run_stage_soft(
             stage_name,
