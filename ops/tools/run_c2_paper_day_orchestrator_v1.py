@@ -231,12 +231,23 @@ def main() -> int:
             current_git_sha,
         ],
     )
-
+    _run_stage_strict(
+        "X_ACTIVE_ENGINE_SET_SNAPSHOT_V1",
+        [
+            "python3",
+            "ops/tools/run_active_engine_set_snapshot_v1.py",
+            "--day_utc",
+            day,
+            "--current_git_sha",
+            current_git_sha,
+        ],
+    )
     # --- Stage 1 Engines ---
     for stage_name, module in [
         ("ENGINE_MEAN_REVERSION", "constellation_2.phaseI.mean_reversion.run.run_mean_reversion_intents_day_v1"),
         ("ENGINE_TREND_EQ_PRIMARY", "constellation_2.phaseI.trend_eq_primary.run.run_trend_eq_primary_intents_day_v1"),
         ("ENGINE_VOL_INCOME_DEFINED", "constellation_2.phaseI.vol_income_defined_risk.run.run_vol_income_defined_risk_intents_day_v1"),
+        ("ENGINE_EVENT_DISLOCATION", "constellation_2.phaseI.event_dislocation.run.run_event_dislocation_intents_day_v1"),
     ]:
         ok, _rc = _run_stage_soft(
             stage_name,

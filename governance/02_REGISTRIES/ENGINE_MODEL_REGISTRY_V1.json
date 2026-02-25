@@ -7,8 +7,8 @@
     "module": "governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json",
     "git_sha": "f4a2b82012213bba7d13a306a050a0733d8f5ab1"
   },
-  "registry_version": 4,
-  "approved_git_sha": "f4a2b82012213bba7d13a306a050a0733d8f5ab1",
+  "registry_version": 5,
+  "approved_git_sha": "2aacaf914b0a6e6c469342342069179d1f206f1c",
   "engines": [
     {
       "engine_id": "C2_MEAN_REVERSION_EQ_V1",
@@ -56,6 +56,22 @@
         "Code-lock enforced via engine_runner_sha256.",
         "Parameter lock is null in v1; will be enforced in v2 after governed param hashing is introduced.",
         "Budget is a hard notional cap as fraction of NAV; Bundle B enforces fail-closed gating on budget breaches."
+      ]
+    },
+    {
+      "engine_id": "C2_EVENT_DISLOCATION_V1",
+      "activation_status": "ACTIVE",
+      "budget_notional_pct": "0.05",
+      "approved_git_sha": "2aacaf914b0a6e6c469342342069179d1f206f1c",
+      "engine_runner_path": "constellation_2/phaseI/event_dislocation/run/run_event_dislocation_intents_day_v1.py",
+      "engine_runner_sha256": "dd2afa71689087fa2654dfed6a8fe7138e85182087f835893d55e4fdcd58f9be",
+      "approved_utc": "2026-02-24T00:00:00Z",
+      "approved_by": "OPERATOR",
+      "parameter_lock": null,
+      "notes": [
+        "Code-lock enforced via engine_runner_sha256.",
+        "Opportunistic sleeve: abnormal volatility spike detector (gap/range).",
+        "Budget is a hard notional cap as fraction of NAV; systemic gates enforce fail-closed budget constraints."
       ]
     }
   ]

@@ -271,7 +271,10 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/delta_order_plan.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
-
+  - id: C2_REPORTS_ACTIVE_ENGINE_SET_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/active_engine_set.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
   - id: C2_EXECUTION_EVIDENCE_SUBMISSION_INDEX_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/submission_index.v1.schema.json
     class: C2_SCHEMA
