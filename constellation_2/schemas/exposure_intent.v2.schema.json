@@ -46,27 +46,45 @@
     "engine": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["engine_id", "suite", "mode"],
+      "required": ["engine_id", "mode"],
       "properties": {
         "engine_id": { "type": "string", "minLength": 1, "maxLength": 64 },
         "suite": {
           "type": "string",
           "enum": ["C2_HYBRID_V1"],
-          "description": "Hybrid suite identifier (exposure-intent authoring)."
+          "description": "Canonical field (preferred)."
+        },
+        "suite_id": {
+          "type": "string",
+          "enum": ["C2_HYBRID_V1"],
+          "description": "Legacy-compatible alias (accepted for backward compatibility)."
         },
         "mode": { "type": "string", "enum": ["PAPER", "LIVE"] }
-      }
+      },
+      "anyOf": [
+        { "required": ["suite"] },
+        { "required": ["suite_id"] }
+      ]
     },
 
     "underlying": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["symbol", "currency"],
-      "properties": {
-        "symbol": { "type": "string", "minLength": 1, "maxLength": 16 },
-        "currency": { "type": "string", "minLength": 3, "maxLength": 3 }
-      },
-      "description": "Underlying instrument identity (v2 stays compatible with v1 conventions)."
+      "description": "Underlying identity. Canonical form is object {symbol,currency}; legacy accepts string symbol.",
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["symbol", "currency"],
+          "properties": {
+            "symbol": { "type": "string", "minLength": 1, "maxLength": 16 },
+            "currency": { "type": "string", "minLength": 3, "maxLength": 3 }
+          }
+        },
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16
+        }
+      ]
     },
 
     "exposure_type": {
