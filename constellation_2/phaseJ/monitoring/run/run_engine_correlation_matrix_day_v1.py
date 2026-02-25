@@ -115,7 +115,8 @@ def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | N
 
     if schema_id != "C2_ENGINE_CORRELATION_MATRIX_V1":
         raise SystemExit(f"FAIL: EXISTING_CORR_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
-    if schema_version != 1:
+    # ACCEPT_SCHEMA_VERSION_V1_STRING: legacy truth may encode schema_version as "v1".
+    if not (schema_version == 1 or schema_version == "v1"):
         raise SystemExit(f"FAIL: EXISTING_CORR_SCHEMA_VERSION_MISMATCH: schema_version={schema_version!r} path={out_path}")
     if day_utc != expected_day_utc:
         raise SystemExit(
