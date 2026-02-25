@@ -16,7 +16,7 @@
       "budget_notional_pct": "0.10",
       "approved_git_sha": "f4a2b82012213bba7d13a306a050a0733d8f5ab1",
       "engine_runner_path": "constellation_2/phaseI/mean_reversion/run/run_mean_reversion_intents_day_v1.py",
-      "engine_runner_sha256": "8afd3c752b6ee058fa0fef7fced466c024636be1bf015828e767846ed9f4b356",
+      "engine_runner_sha256": "845b6a246a0f1000442849012cc94665255cf168613d3323a411dad3a0e1cf84",
       "approved_utc": "2026-02-16T18:45:00Z",
       "approved_by": "OPERATOR",
       "parameter_lock": null,

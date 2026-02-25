@@ -2,6 +2,10 @@
 """
 Bundle B (Component 1): Engine Risk Budget Ledger v1 (immutable truth artifact)
 Deterministic, audit-grade, fail-closed.
+
+Rerun-safety (automation requirement):
+- If the day-keyed output already exists, treat it as authoritative for that day.
+- Do NOT attempt rewrite (prevents immutable overwrite failure when git_sha changes).
 """
 
 from __future__ import annotations
@@ -65,6 +69,7 @@ def _read_json(path: Path) -> Any:
 
 def _validate_against_repo_schema(instance: Any, schema_relpath: str) -> None:
     from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1  # type: ignore
+
     validate_against_repo_schema_v1(instance, REPO_ROOT, schema_relpath)
 
 
@@ -85,6 +90,41 @@ def _write_immutable(path: Path, payload_obj: Dict[str, Any]) -> Tuple[str, str]
     tmp.write_bytes(b)
     os.replace(tmp, path)
     return ("WRITTEN", sha)
+
+
+def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | None:
+    """
+    Immutable rerun safety:
+    - If the day-keyed output exists, DO NOT rewrite.
+    - Treat existing report as authoritative for that day after basic validation.
+    - Return rc based on existing status: OK -> 0, else -> 2.
+    """
+    if not out_path.exists():
+        return None
+
+    existing_sha = _sha256_file(out_path)
+    existing = _read_json(out_path)
+
+    if not isinstance(existing, dict):
+        raise SystemExit(f"FAIL: EXISTING_LEDGER_NOT_OBJECT: {out_path}")
+
+    schema_id = str(existing.get("schema_id") or "").strip()
+    day_utc = str(existing.get("day_utc") or "").strip()
+    status = str(existing.get("status") or "").strip().upper()
+
+    if schema_id != "engine_risk_budget_ledger":
+        raise SystemExit(f"FAIL: EXISTING_LEDGER_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
+    if day_utc != expected_day_utc:
+        raise SystemExit(
+            f"FAIL: EXISTING_LEDGER_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}"
+        )
+    if status == "":
+        raise SystemExit(f"FAIL: EXISTING_LEDGER_STATUS_MISSING: path={out_path}")
+
+    print(
+        f"OK: ENGINE_RISK_BUDGET_LEDGER_WRITTEN day_utc={expected_day_utc} status={status} path={out_path} sha256={existing_sha} action=EXISTS"
+    )
+    return 0 if status == "OK" else 2
 
 
 def _pct_str(x: float) -> str:
@@ -163,11 +203,20 @@ def main() -> int:
 
     produced_utc = f"{day}T00:00:00Z"
 
+    out_path = (OUT_ROOT / day / "engine_risk_budget_ledger.v1.json").resolve()
+    existing_rc = _return_if_existing_report(out_path=out_path, expected_day_utc=day)
+    if existing_rc is not None:
+        return int(existing_rc)
+
     budgets, input_manifest, rc = _load_engine_budgets()
 
     subs_present, subs_dir = _submissions_present(day)
     input_manifest.append(
-        {"type": "exec_evidence_truth_day_dir", "path": subs_dir, "sha256": _sha256_bytes(b"present") if subs_present else _sha256_bytes(b"")}
+        {
+            "type": "exec_evidence_truth_day_dir",
+            "path": subs_dir,
+            "sha256": _sha256_bytes(b"present") if subs_present else _sha256_bytes(b""),
+        }
     )
 
     used: Dict[str, float] = {eid: 0.0 for eid in ALLOWED_ENGINE_IDS}
@@ -214,7 +263,11 @@ def main() -> int:
         "schema_version": "v1",
         "day_utc": day,
         "produced_utc": produced_utc,
-        "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_engine_risk_budget_ledger_v1.py", "git_sha": _git_sha()},
+        "producer": {
+            "repo": "constellation_2_runtime",
+            "module": "ops/tools/run_engine_risk_budget_ledger_v1.py",
+            "git_sha": _git_sha(),
+        },
         "status": status,
         "reason_codes": rc,
         "input_manifest": input_manifest,
@@ -226,7 +279,6 @@ def main() -> int:
 
     _validate_against_repo_schema(payload, SCHEMA_RELPATH)
 
-    out_path = (OUT_ROOT / day / "engine_risk_budget_ledger.v1.json").resolve()
     action, sha = _write_immutable(out_path, payload)
 
     print(f"OK: ENGINE_RISK_BUDGET_LEDGER_WRITTEN day_utc={day} status={status} path={out_path} sha256={sha} action={action}")

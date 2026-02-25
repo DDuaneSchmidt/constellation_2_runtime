@@ -65,6 +65,9 @@ class MRIntentError(Exception):
     pass
 
 
+DAY0_RC_ALLOWED = "DAY0_BOOTSTRAP_MARKET_DATA_MISSING_ALLOWED"
+
+
 def _sha256_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
@@ -105,8 +108,25 @@ def _parse_day_utc(d: str) -> str:
     return s
 
 
+def _bootstrap_window_true(day_utc: str) -> bool:
+    """
+    Day-0 Bootstrap Window iff:
+      TRUTH/execution_evidence_v1/submissions/<DAY>/ is missing OR contains zero submission dirs.
+    """
+    root = (TRUTH_ROOT / "execution_evidence_v1" / "submissions" / day_utc).resolve()
+    if (not root.exists()) or (not root.is_dir()):
+        return True
+    try:
+        for p in root.iterdir():
+            if p.is_dir():
+                return False
+    except Exception:
+        # Fail-closed: if we cannot enumerate, treat as NOT bootstrap.
+        return False
+    return True
+
+
 def _dec_from_floatish(x: Any, field: str) -> Decimal:
-    # Market data JSON contains numbers parsed as Python float -> convert via str() deterministically.
     if isinstance(x, int):
         return Decimal(int(x))
     if isinstance(x, float):
@@ -117,10 +137,6 @@ def _dec_from_floatish(x: Any, field: str) -> Decimal:
 
 
 def _zscore(closes: List[Decimal]) -> Tuple[Decimal, Decimal, Decimal]:
-    """
-    Returns (mean, stdev, z) using the last element as current close.
-    Deterministic Decimal math.
-    """
     if len(closes) < 2:
         raise MRIntentError("NEED_AT_LEAST_2_CLOSES_FOR_ZSCORE")
 
@@ -188,17 +204,11 @@ def _collect_symbol_entries(manifest: Dict[str, Any], symbol: str) -> List[Dict[
             out.append(e)
     if not out:
         raise MRIntentError(f"SYMBOL_NOT_PRESENT_IN_MARKET_DATA_MANIFEST: {sym}")
-    # Deterministic order by year then file path
     out_sorted = sorted(out, key=lambda x: (int(x.get("year")), str(x.get("file"))))
     return out_sorted
 
 
 def _iter_all_bars_for_symbol(manifest: Dict[str, Any], symbol: str) -> List[Dict[str, Any]]:
-    """
-    Load all bars for symbol from sha-verified manifest files.
-    Enforce strict monotonic timestamp_utc within each file (like loader does).
-    Returns list of records (dict) across all years, unsorted (we will sort deterministically).
-    """
     entries = _collect_symbol_entries(manifest, symbol)
     recs: List[Dict[str, Any]] = []
     for e in entries:
@@ -228,18 +238,15 @@ def _load_last_n_session_closes_up_to_day(manifest: Dict[str, Any], symbol: str,
 
     recs = _iter_all_bars_for_symbol(manifest, symbol)
 
-    # Filter to records with day <= day_utc, then sort deterministically by timestamp_utc
     filt = [r for r in recs if isinstance(r.get("timestamp_utc"), str) and r["timestamp_utc"][0:10] <= day_utc]
     if not filt:
         raise MRIntentError(f"NO_MARKET_DATA_AT_OR_BEFORE_DAY: symbol={symbol} day_utc={day_utc}")
 
     filt_sorted = sorted(filt, key=lambda r: str(r["timestamp_utc"]))
 
-    # Ensure the target day exists in truth (fail-closed)
     if not any(r["timestamp_utc"][0:10] == day_utc for r in filt_sorted):
         raise MRIntentError(f"MISSING_BAR_FOR_DAY: symbol={symbol} day_utc={day_utc}")
 
-    # Deduplicate by day (fail-closed on duplicates)
     day_map: Dict[str, Dict[str, Any]] = {}
     for r in filt_sorted:
         day = str(r["timestamp_utc"])[0:10]
@@ -247,9 +254,7 @@ def _load_last_n_session_closes_up_to_day(manifest: Dict[str, Any], symbol: str,
             raise MRIntentError(f"DUPLICATE_DAY_IN_MARKET_DATA: symbol={symbol} day_utc={day}")
         day_map[day] = r
 
-    # Trading sessions are defined as days present in truth; take last N sessions up to day_utc
     days_sorted = sorted(day_map.keys())
-    # keep only up to day_utc
     days_sorted = [d for d in days_sorted if d <= day_utc]
     if len(days_sorted) < n:
         raise MRIntentError(f"INSUFFICIENT_SESSION_BARS: symbol={symbol} have={len(days_sorted)} need={n}")
@@ -323,7 +328,37 @@ def main(argv: Optional[List[str]] = None) -> int:
     created_at_utc = f"{day_utc}T00:00:00Z"
 
     manifest = _load_md_manifest()
-    closes = _load_last_n_session_closes_up_to_day(manifest, symbol, day_utc, cfg.window_days)
+
+    try:
+        closes = _load_last_n_session_closes_up_to_day(manifest, symbol, day_utc, cfg.window_days)
+    except MRIntentError as e:
+        # Day-0 bootstrap: if no submissions yet, missing day bars / insufficient history => NO_INTENT (non-fatal).
+        msg = str(e)
+        if _bootstrap_window_true(day_utc) and (
+            msg.startswith("MISSING_BAR_FOR_DAY:")
+            or msg.startswith("NO_MARKET_DATA_AT_OR_BEFORE_DAY:")
+            or msg.startswith("INSUFFICIENT_SESSION_BARS:")
+        ):
+            print(
+                "OK: MR_NO_INTENT "
+                + json.dumps(
+                    {
+                        "day_utc": day_utc,
+                        "symbol": symbol,
+                        "status": "NO_INTENT",
+                        "reason_codes": [DAY0_RC_ALLOWED, msg],
+                        "rule": "DAY0_BOOTSTRAP_ALLOW_NO_BAR_OR_HISTORY",
+                        "engine_id": ENGINE_ID,
+                        "suite": ENGINE_SUITE,
+                        "mode": mode,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
+            return 0
+        raise
+
     mean, stdev, z = _zscore(closes)
 
     if z > cfg.z_enter:

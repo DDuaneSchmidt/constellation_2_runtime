@@ -18,6 +18,10 @@ Policy (v1, conservative bootstrap):
 - If correlation matrix max_pairwise >= threshold (0.75) AND matrix size > 1 -> correlation stress -> stress_ok = False
 - Drift is OK unless engine_daily_returns status == ACTIVE with anomalies (v1: no anomalies computed; informational only)
 - escalation_recommended = (not stress_ok) or (not slippage_ok) or (not drift_ok)
+
+Rerun-safety (automation requirement):
+- If the day-keyed sentinel already exists, treat it as authoritative for that day.
+- DO NOT attempt rewrite (prevents immutable overwrite failure when git_sha changes or inputs differ across reruns).
 """
 
 from __future__ import annotations
@@ -35,7 +39,7 @@ import hashlib
 import json
 import subprocess
 from decimal import Decimal
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
@@ -52,6 +56,8 @@ PATH_CORR = (TRUTH / "monitoring_v1" / "engine_correlation_matrix").resolve()
 PATH_BROKER_RECON_V1 = (TRUTH / "reports" / "broker_reconciliation_v1").resolve()
 
 CORR_THRESHOLD = Decimal("0.75")
+
+DAY0_RC_BROKER_RECON_ALLOWED = "DAY0_BOOTSTRAP_BROKER_RECON_MISSING_ALLOWED"
 
 
 def _git_sha() -> str:
@@ -97,6 +103,65 @@ def _self_sha(obj: Dict[str, Any], field: str) -> str:
     tmp = dict(obj)
     tmp[field] = None
     return _sha256_bytes(_canonical_bytes(tmp))
+
+
+def _bootstrap_window_true(day_utc: str) -> bool:
+    """
+    Day-0 Bootstrap Window iff:
+      TRUTH/execution_evidence_v1/submissions/<DAY>/ is missing OR contains zero submission dirs.
+    """
+    root = (TRUTH / "execution_evidence_v1" / "submissions" / day_utc).resolve()
+    if (not root.exists()) or (not root.is_dir()):
+        return True
+    try:
+        for p in root.iterdir():
+            if p.is_dir():
+                return False
+    except Exception:
+        # Fail-closed: if we cannot enumerate, treat as NOT bootstrap.
+        return False
+    return True
+
+
+def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> Optional[int]:
+    """
+    Immutable rerun safety (automation requirement):
+    - If the day-keyed artifact already exists, treat it as authoritative for that day.
+    - DO NOT attempt rewrite.
+
+    Returns:
+      - None if no existing file (caller should compute/write)
+      - 0 if existing status OK
+      - 2 if existing status FAIL
+    """
+    if not out_path.exists():
+        return None
+
+    existing_sha = _sha256_file(out_path)
+    existing = _read_json_obj(out_path)
+
+    schema_id = str(existing.get("schema_id") or "").strip()
+    schema_version = existing.get("schema_version")
+    day_utc = str(existing.get("day_utc") or "").strip()
+    status = str(existing.get("status") or "").strip().upper()
+
+    if schema_id != "C2_STRESS_DRIFT_SENTINEL_V1":
+        raise SystemExit(f"FAIL: EXISTING_SENTINEL_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
+    if schema_version != 1:
+        raise SystemExit(
+            f"FAIL: EXISTING_SENTINEL_SCHEMA_VERSION_MISMATCH: schema_version={schema_version!r} path={out_path}"
+        )
+    if day_utc != expected_day_utc:
+        raise SystemExit(
+            f"FAIL: EXISTING_SENTINEL_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}"
+        )
+    if status not in ("OK", "FAIL"):
+        raise SystemExit(f"FAIL: EXISTING_SENTINEL_STATUS_INVALID: status={status!r} path={out_path}")
+
+    print(
+        f"OK: STRESS_DRIFT_SENTINEL_V1_WRITTEN day_utc={expected_day_utc} status={status} path={out_path} sha256={existing_sha} action=EXISTS"
+    )
+    return 0 if status == "OK" else 2
 
 
 def _load_daily_returns(day: str) -> Tuple[str, List[str], List[Dict[str, str]]]:
@@ -172,6 +237,13 @@ def main() -> int:
     day = _parse_day_utc(args.day_utc)
     produced_utc = f"{day}T00:00:00Z"
 
+    out_path = (OUT_ROOT / day / "stress_drift_sentinel.v1.json").resolve()
+    existing_rc = _return_if_existing_report(out_path=out_path, expected_day_utc=day)
+    if existing_rc is not None:
+        return int(existing_rc)
+
+    bootstrap = _bootstrap_window_true(day)
+
     input_manifest: List[Dict[str, str]] = []
     reason_codes: List[str] = []
 
@@ -188,8 +260,17 @@ def main() -> int:
     broker_status, cash_diff, broker_notes, man_br = _load_broker_recon(day)
     input_manifest.extend(man_br)
 
-    slippage_ok = (broker_status == "PASS")
-    slip_notes: List[str] = []
+    # Day-0 bootstrap exception: missing broker reconciliation is allowed when there are no submissions yet.
+    if bootstrap and broker_status == "MISSING":
+        slippage_ok = True
+        slip_notes: List[str] = [
+            "DAY0_BOOTSTRAP: broker reconciliation v1 missing allowed (no broker statement yet; no submissions).",
+        ]
+        reason_codes.append(DAY0_RC_BROKER_RECON_ALLOWED)
+    else:
+        slippage_ok = (broker_status == "PASS")
+        slip_notes = []
+
     if not slippage_ok:
         reason_codes.append("Z_SLIPPAGE_OR_RECONCILIATION_NOT_PASS")
         slip_notes.append(f"broker_reconciliation_v1_status={broker_status}")
@@ -253,7 +334,6 @@ def main() -> int:
 
     validate_against_repo_schema_v1(payload, REPO_ROOT, SCHEMA_RELPATH)
 
-    out_path = (OUT_ROOT / day / "stress_drift_sentinel.v1.json").resolve()
     try:
         wr = write_file_immutable_v1(path=out_path, data=_canonical_bytes(payload), create_dirs=True)
     except ImmutableWriteError as e:

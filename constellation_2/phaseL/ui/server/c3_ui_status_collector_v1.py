@@ -2,11 +2,12 @@
 # C3 UI Status Collector (truth-only, fail-closed)
 #
 # Allowed sources only:
-# - constellation_2/runtime/truth/latest.json
+# - constellation_2/runtime/truth/latest.json   (ONLY if internally consistent)
 # - constellation_2/runtime/truth/reports/gate_stack_verdict_v1/<DAY>/gate_stack_verdict.v1.json
 # - constellation_2/runtime/truth/reports/broker_reconciliation_*
 # - constellation_2/runtime/truth/market_data_snapshot_v1
 # - constellation_2/runtime/truth/monitoring_*
+# - constellation_2/runtime/truth/accounting_v2/nav/<DAY>/nav.v2.json
 #
 # No compatibility layer, no hardcoded components list, no legacy status sources.
 
@@ -25,7 +26,10 @@ def _utc_now_iso() -> str:
 def _read_json(path: Path) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     try:
         with path.open("r", encoding="utf-8") as f:
-            return json.load(f), None
+            obj = json.load(f)
+        if not isinstance(obj, dict):
+            return None, "UNREADABLE_OR_INVALID_JSON"
+        return obj, None
     except FileNotFoundError:
         return None, "MISSING"
     except Exception:
@@ -53,6 +57,70 @@ def _safe_list(x: Any) -> List[Any]:
     return x if isinstance(x, list) else []
 
 
+def _is_day_str(s: str) -> bool:
+    if not isinstance(s, str):
+        return False
+    if len(s) != 10 or s[4] != "-" or s[7] != "-":
+        return False
+    y, m, d = s[0:4], s[5:7], s[8:10]
+    return y.isdigit() and m.isdigit() and d.isdigit()
+
+
+def _resolve_day(truth_root: Path, *, note_source, errors: List[str], warnings: List[str], missing_paths: List[str]) -> Tuple[Optional[str], str]:
+    """
+    Resolve the authoritative day for C3 status.
+
+    Priority:
+      1) latest.json (ONLY if points_to exists and is under truth_root)
+      2) max day among: gate_stack_verdict days, activity rollup days, accounting nav days
+      3) None (degraded)
+    Returns: (day_or_none, day_source_label)
+    """
+    latest_path = truth_root / "latest.json"
+    latest, latest_err = _read_json(latest_path)
+    if latest is not None:
+        note_source(latest_path)
+        day = latest.get("day_utc")
+        points_to = latest.get("points_to")
+        if _is_day_str(day) and isinstance(points_to, str) and points_to:
+            pt = Path(points_to)
+            # points_to is stored as a repo-relative-ish string; allow absolute too but must be under truth_root.
+            if not pt.is_absolute():
+                pt = (truth_root.parent.parent / points_to).resolve() if points_to.startswith("constellation_2/") else (truth_root / points_to).resolve()
+            else:
+                pt = pt.resolve()
+
+            truth_root_s = str(truth_root.resolve())
+            if str(pt).startswith(truth_root_s + "/") and pt.exists() and pt.is_file():
+                return str(day), "latest.json"
+            warnings.append("LATEST_POINTER_STALE_OR_POINTS_TO_MISSING")
+        else:
+            warnings.append("LATEST_POINTER_INVALID_FIELDS")
+    else:
+        if latest_err == "MISSING":
+            warnings.append("LATEST_POINTER_MISSING")
+            missing_paths.append(str(latest_path))
+        else:
+            warnings.append("LATEST_POINTER_UNREADABLE")
+            missing_paths.append(str(latest_path))
+
+    # Fallback union: gate verdict days, activity rollup days, accounting nav days
+    gate_root = truth_root / "reports" / "gate_stack_verdict_v1"
+    activity_root = truth_root / "monitoring_v1" / "activity_ledger_rollup_v1"
+    nav_root = truth_root / "accounting_v2" / "nav"
+
+    gate_days = [d for d in _list_day_dirs(gate_root) if _is_day_str(d)]
+    act_days = [d for d in _list_day_dirs(activity_root) if _is_day_str(d)]
+    nav_days = [d for d in _list_day_dirs(nav_root) if _is_day_str(d)]
+
+    day2 = _max_day(sorted(set(gate_days + act_days + nav_days)))
+    if day2:
+        return day2, "union(gate_stack_verdict,activity_rollup,accounting_nav_v2)"
+
+    errors.append("DAY_NOT_RESOLVED")
+    return None, "none"
+
+
 def build_c3_ui_status(truth_root: Path) -> Dict[str, Any]:
     generated = _utc_now_iso()
 
@@ -69,21 +137,15 @@ def build_c3_ui_status(truth_root: Path) -> Dict[str, Any]:
         except Exception:
             warnings.append("SOURCE_MTIME_UNREADABLE")
 
-    # ---- latest.json ----
-    latest_path = truth_root / "latest.json"
-    latest, latest_err = _read_json(latest_path)
-    if latest is None:
-        errors.append("LATEST_POINTER_MISSING" if latest_err == "MISSING" else "LATEST_POINTER_UNREADABLE")
-        missing_paths.append(str(latest_path))
-        day = None
-    else:
-        note_source(latest_path)
-        day = latest.get("day_utc")
-        if not isinstance(day, str) or not day:
-            errors.append("LATEST_POINTER_DAY_INVALID")
+    verdict_day, verdict_day_source = _resolve_day(
+        truth_root,
+        note_source=note_source,
+        errors=errors,
+        warnings=warnings,
+        missing_paths=missing_paths,
+    )
 
     verdict_source = "gate_stack_verdict_v1"
-    verdict_day = day if isinstance(day, str) else None
 
     # ---- verdict ----
     verdict_state = "UNKNOWN"
@@ -91,12 +153,12 @@ def build_c3_ui_status(truth_root: Path) -> Dict[str, Any]:
         "state": "UNKNOWN",
         "source": verdict_source,
         "day": verdict_day or "n/a",
+        "day_source": verdict_day_source,
         "artifact_path": None,
-        # Evidence fields (truth-only)
         "blocking_class": "n/a",
         "reason_codes_top": [],
-        "required_failures_top": [],  # [{gate_id,status,reason_codes_top,artifact_path}]
-        "gates_top": [],  # [{gate_id,required,blocking,gate_class,status,artifact_path,reason_codes_top}]
+        "required_failures_top": [],
+        "gates_top": [],
     }
 
     if verdict_day:
@@ -130,7 +192,6 @@ def build_c3_ui_status(truth_root: Path) -> Dict[str, Any]:
             verdict_obj["blocking_class"] = blocking_class if isinstance(blocking_class, str) else "n/a"
             verdict_obj["reason_codes_top"] = top_reasons[:3] if isinstance(top_reasons, list) else []
 
-            # Build gates table (stable ordering: required first, then blocking, then non-PASS, then gate_id)
             def gate_rank(g: Dict[str, Any]) -> Tuple[int, int, int, str]:
                 required = 1 if g.get("required") is True else 0
                 blocking = 1 if g.get("blocking") is True else 0
@@ -177,7 +238,6 @@ def build_c3_ui_status(truth_root: Path) -> Dict[str, Any]:
     else:
         verdict_state = "DEGRADED"
         verdict_obj["state"] = "DEGRADED"
-        warnings.append("DAY_NOT_RESOLVED")
 
     # ---- broker reconciliation ----
     broker_obj: Dict[str, Any] = {
@@ -185,11 +245,10 @@ def build_c3_ui_status(truth_root: Path) -> Dict[str, Any]:
         "day": verdict_day or "n/a",
         "account": "n/a",
         "artifact_path": None,
-        # Evidence fields (truth-only)
         "cash_diff": "n/a",
         "notes_count": 0,
         "position_mismatches_count": 0,
-        "mismatches_top": [],  # [{symbol,sec_type,broker_qty,internal_qty,qty_diff}]
+        "mismatches_top": [],
     }
 
     if verdict_day:
@@ -256,12 +315,10 @@ def build_c3_ui_status(truth_root: Path) -> Dict[str, Any]:
                         }
                     )
             broker_obj["mismatches_top"] = mism_top[:8]
-    else:
-        broker_obj["state"] = "UNKNOWN"
 
     # ---- market data snapshot presence ----
     md_root = truth_root / "market_data_snapshot_v1" / "broker_marks_v1"
-    md_days = _list_day_dirs(md_root)
+    md_days = [d for d in _list_day_dirs(md_root) if _is_day_str(d)]
     md_latest = _max_day(md_days)
     if md_latest is None:
         market_obj = {"state": "MISSING", "latest_snapshot_day": "n/a"}
@@ -330,10 +387,10 @@ def build_c3_ui_status(truth_root: Path) -> Dict[str, Any]:
     return {
         "ok": True,
         "generated_utc": generated,
-        "errors": errors,
-        "warnings": warnings,
-        "missing_paths": missing_paths,
-        "source_paths": source_paths,
+        "errors": sorted(set(errors)),
+        "warnings": sorted(set(warnings)),
+        "missing_paths": sorted(set(missing_paths)),
+        "source_paths": sorted(set(source_paths)),
         "source_mtimes": source_mtimes,
         "schema_version": "C3",
         "generated_at_utc": generated,

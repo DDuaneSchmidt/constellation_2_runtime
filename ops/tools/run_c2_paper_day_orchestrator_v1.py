@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
 
 def _require_repo_root_cwd() -> None:
@@ -52,6 +53,43 @@ def _run_stage_soft(name: str, cmd: List[str]) -> Tuple[bool, int]:
         return (False, int(p.returncode))
     print(f"STAGE_OK {name}")
     return (True, 0)
+
+
+def _bootstrap_window_true(day_utc: str) -> bool:
+    """
+    Day-0 Bootstrap Window iff:
+      TRUTH/execution_evidence_v1/submissions/<DAY>/ is missing OR contains zero submission dirs.
+    """
+    root = (TRUTH_ROOT / "execution_evidence_v1" / "submissions" / day_utc).resolve()
+    if (not root.exists()) or (not root.is_dir()):
+        return True
+    try:
+        for p in root.iterdir():
+            if p.is_dir():
+                return False
+    except Exception:
+        # Fail-closed: if we cannot enumerate, treat as NOT bootstrap.
+        return False
+    return True
+
+
+def _intents_day_empty(day_utc: str) -> bool:
+    """
+    Intents are considered empty iff:
+      - intents_v1/snapshots/<DAY>/ does not exist, OR
+      - it exists but contains zero files.
+    """
+    d = (TRUTH_ROOT / "intents_v1" / "snapshots" / day_utc).resolve()
+    if (not d.exists()) or (not d.is_dir()):
+        return True
+    try:
+        for p in d.iterdir():
+            if p.is_file():
+                return False
+    except Exception:
+        # Fail-closed: if we cannot enumerate, do NOT treat as empty.
+        return False
+    return True
 
 
 def main() -> int:
@@ -279,6 +317,12 @@ def main() -> int:
             "0.75",
         ],
     )
+
+    # --- Day-0 bootstrap: STOP CLEANLY when there are no intents and no submissions ---
+    if _bootstrap_window_true(input_day) and _intents_day_empty(input_day):
+        print(f"OK: DAY0_BOOTSTRAP_NO_INTENTS_STOP day_utc={day} input_day_utc={input_day}")
+        print("ORCHESTRATOR_OK")
+        return 0
 
     # --- PhaseC ---
     ok, _rc = _run_stage_soft(

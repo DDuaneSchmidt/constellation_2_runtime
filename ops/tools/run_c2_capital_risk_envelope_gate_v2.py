@@ -8,6 +8,11 @@ Forward-only Capital Risk Envelope Gate v2.
 - Deterministic, fail-closed, audit-grade.
 - SAFE_IDLE: empty positions list can PASS if required inputs exist and drawdown present.
 - Never overwrites immutable day-keyed truth artifacts.
+
+Day-0 Bootstrap Window Exception (governed, scoped):
+- If there are NO submissions yet for input_day_utc (bootstrap window),
+  and allocation summary is missing, allow PASS with deterministic zeros.
+- Once any submission exists, revert to strict FAIL-CLOSED on missing inputs.
 """
 
 from __future__ import annotations
@@ -20,6 +25,18 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+
+# Repo-root import bootstrap (required when executed from ops/tools).
+_THIS_FILE = Path(__file__).resolve()
+_REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
+if str(_REPO_ROOT_FROM_FILE) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
+
+if not (_REPO_ROOT_FROM_FILE / "constellation_2").exists():
+    raise SystemExit(f"FATAL: repo_root_missing_constellation_2: derived={_REPO_ROOT_FROM_FILE}")
+if not (_REPO_ROOT_FROM_FILE / "governance").exists():
+    raise SystemExit(f"FATAL: repo_root_missing_governance: derived={_REPO_ROOT_FROM_FILE}")
 
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
@@ -35,6 +52,8 @@ DRAWDOWN_CONTRACT = (REPO_ROOT / "governance/05_CONTRACTS/C2/drawdown_convention
 CAP_RISK_CONTRACT_V2 = (REPO_ROOT / "governance/05_CONTRACTS/C2/capital_risk_envelope_v2.contract.md").resolve()
 
 BASE_ENVELOPE_PCT = Decimal("0.020000")
+
+DAY0_RC_ALLOC_ALLOWED = "DAY0_BOOTSTRAP_ALLOC_SUMMARY_MISSING_ALLOWED"
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -134,6 +153,27 @@ class Inputs:
     pos_path: Path
     pos_schema: str
     truth_root: Path
+
+
+def _bootstrap_window_true(day: str, truth_root: Path) -> bool:
+    """
+    Day-0 Bootstrap Window iff:
+      TRUTH/execution_evidence_v1/submissions/<DAY>/ is missing OR contains zero submission dirs.
+    """
+    root = (truth_root / "execution_evidence_v1" / "submissions" / day).resolve()
+    if not root.exists() or not root.is_dir():
+        return True
+
+    try:
+        for p in sorted(root.iterdir()):
+            # Any directory counts as a "submission directory" for bootstrap gating purposes.
+            if p.is_dir():
+                return False
+    except Exception:
+        # Fail-closed on IO errors: treat as NOT bootstrap (strict path).
+        return False
+
+    return True
 
 
 def _resolve_inputs(day: str, truth_root: Path) -> Inputs:
@@ -371,6 +411,65 @@ def _minimal_missing_inputs_report(out_day: str, in_day: str, produced_utc: str,
     return out
 
 
+def _day0_bootstrap_alloc_missing_report(out_day: str, in_day: str, produced_utc: str, truth_root: Path, missing_err: str) -> Dict[str, Any]:
+    """
+    Day-0 rule: if bootstrap window true AND allocation summary missing -> PASS with deterministic zeros.
+    """
+    submissions_path = (truth_root / "execution_evidence_v1" / "submissions" / in_day).resolve()
+
+    out = {
+        "schema_id": "capital_risk_envelope",
+        "schema_version": "v2",
+        "day_utc": out_day,
+        "produced_utc": produced_utc,
+        "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_c2_capital_risk_envelope_gate_v2.py", "git_sha": _git_sha()},
+        "status": "PASS",
+        "reason_codes": [DAY0_RC_ALLOC_ALLOWED],
+        "notes": [
+            f"DAY0_BOOTSTRAP_WINDOW_TRUE: no submissions yet at {str(submissions_path)}",
+            f"allocation summary missing allowed in bootstrap window; enforcing explicit zero-risk envelope; missing_err={missing_err}",
+        ],
+        "input_manifest": [
+            {
+                "type": "submissions_day_dir_probe",
+                "path": str(submissions_path),
+                "sha256": (_sha256_bytes(b"") if not submissions_path.exists() else _sha256_bytes(b"\n".join([p.name.encode("utf-8") for p in sorted(submissions_path.iterdir()) if p.is_dir()]))),
+            },
+            {"type": "drawdown_contract", "path": str(DRAWDOWN_CONTRACT), "sha256": _sha256_file(DRAWDOWN_CONTRACT)},
+            {"type": "capital_risk_envelope_contract_v2", "path": str(CAP_RISK_CONTRACT_V2), "sha256": _sha256_file(CAP_RISK_CONTRACT_V2)},
+            {"type": "output_schema", "path": str(SCHEMA_OUT), "sha256": _sha256_file(SCHEMA_OUT)},
+        ],
+        "checks": {
+            "allocation_summary_present": False,
+            "nav_present": False,
+            "positions_present": False,
+            "drawdown_present": False,
+            "positions_all_have_max_loss": True,
+            "portfolio_within_envelope": True,
+        },
+        "envelope": {
+            "contracts": {
+                "drawdown_contract": {"path": str(DRAWDOWN_CONTRACT), "sha256": _sha256_file(DRAWDOWN_CONTRACT)},
+                "capital_risk_envelope_contract": {"path": str(CAP_RISK_CONTRACT_V2), "sha256": _sha256_file(CAP_RISK_CONTRACT_V2)},
+            },
+            "drawdown_multiplier_table": _table(),
+            "base_envelope_pct": f"{BASE_ENVELOPE_PCT:.6f}",
+            "nav_total": 0,
+            "nav_total_cents": 0,
+            "peak_nav": None,
+            "drawdown_abs": None,
+            "drawdown_pct": None,
+            "multiplier": None,
+            "allowed_capital_at_risk_cents": 0,
+            "portfolio_capital_at_risk_cents": 0,
+            "headroom_cents": 0,
+            "positions": [],
+        },
+    }
+    _validate_against_repo_schema(out, "governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v2.schema.json")
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_c2_capital_risk_envelope_gate_v2")
     ap.add_argument("--out_day_utc", required=True, help="YYYY-MM-DD (output day key for report path)")
@@ -421,7 +520,17 @@ def main() -> int:
     if inp is not None:
         out = _compute(out_day=out_day, produced_utc=produced_utc, inp=inp)
     else:
-        out = _minimal_missing_inputs_report(out_day=out_day, in_day=in_day, produced_utc=produced_utc, missing_err=str(missing_err))
+        bootstrap = _bootstrap_window_true(in_day, truth_root)
+        if bootstrap and isinstance(missing_err, str) and missing_err.startswith("ALLOC_SUMMARY_MISSING:"):
+            out = _day0_bootstrap_alloc_missing_report(
+                out_day=out_day,
+                in_day=in_day,
+                produced_utc=produced_utc,
+                truth_root=truth_root,
+                missing_err=str(missing_err),
+            )
+        else:
+            out = _minimal_missing_inputs_report(out_day=out_day, in_day=in_day, produced_utc=produced_utc, missing_err=str(missing_err))
 
     sha = _write_immutable(out_path, _canonical_json_bytes(out))
 

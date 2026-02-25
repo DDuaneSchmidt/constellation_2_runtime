@@ -15,21 +15,25 @@ Notes:
 - Bootstrap-safe: 1x1 matrix allowed (diagonal=1.000000).
 - Uses Decimal math; quantizes correlations to 6dp.
 - Window uses the most recent N available engine_daily_returns days <= day_utc (no calendar assumptions).
+
+Rerun-safety (automation requirement):
+- If the day-keyed artifact already exists, treat it as authoritative for that day.
+- DO NOT attempt rewrite (prevents immutable overwrite failure when git_sha changes or inputs differ across reruns).
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
-from datetime import date, datetime, timezone, timedelta
+from datetime import date
 from decimal import Decimal, ROUND_HALF_UP, getcontext
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
@@ -45,10 +49,6 @@ Q6 = Decimal("0.000000")
 
 class CliError(Exception):
     pass
-
-
-def _utc_now_iso_z() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _git_sha() -> str:
@@ -89,6 +89,47 @@ def _read_json(p: Path) -> Any:
         raise CliError(f"JSON_READ_FAILED: {p}: {e}") from e
 
 
+def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | None:
+    """
+    Immutable rerun safety (automation requirement):
+    - If the day-keyed artifact already exists, treat it as authoritative for that day.
+    - DO NOT attempt rewrite, because candidate bytes can differ across reruns (git_sha, inputs, etc).
+
+    Returns:
+      - None if no existing file (caller should compute/write)
+      - 0 if existing status is OK or DEGRADED_INSUFFICIENT_HISTORY
+      - 2 otherwise (fail-closed)
+    """
+    if not out_path.exists():
+        return None
+
+    existing_sha = _sha256_file(out_path)
+    existing = _read_json(out_path)
+    if not isinstance(existing, dict):
+        raise SystemExit(f"FAIL: EXISTING_CORR_NOT_OBJECT: {out_path}")
+
+    schema_id = str(existing.get("schema_id") or "").strip()
+    schema_version = existing.get("schema_version")
+    day_utc = str(existing.get("day_utc") or "").strip()
+    status = str(existing.get("status") or "").strip().upper()
+
+    if schema_id != "C2_ENGINE_CORRELATION_MATRIX_V1":
+        raise SystemExit(f"FAIL: EXISTING_CORR_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
+    if schema_version != 1:
+        raise SystemExit(f"FAIL: EXISTING_CORR_SCHEMA_VERSION_MISMATCH: schema_version={schema_version!r} path={out_path}")
+    if day_utc != expected_day_utc:
+        raise SystemExit(
+            f"FAIL: EXISTING_CORR_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}"
+        )
+    if status == "":
+        raise SystemExit(f"FAIL: EXISTING_CORR_STATUS_MISSING: path={out_path}")
+
+    print(
+        f"OK: ENGINE_CORRELATION_MATRIX_V1_WRITTEN day={expected_day_utc} out={out_path} action=EXISTS sha256={existing_sha} status={status}"
+    )
+    return 0 if status in ("OK", "DEGRADED_INSUFFICIENT_HISTORY") else 2
+
+
 def _quant6(x: Decimal) -> Decimal:
     return x.quantize(Q6, rounding=ROUND_HALF_UP)
 
@@ -99,6 +140,24 @@ def _clamp_corr(x: Decimal) -> Decimal:
     if x < Decimal("-1"):
         return Decimal("-1")
     return x
+
+
+def _bootstrap_window_true(day_utc: str) -> bool:
+    """
+    Day-0 Bootstrap Window iff:
+      TRUTH/execution_evidence_v1/submissions/<DAY>/ is missing OR contains zero submission dirs.
+    """
+    root = (TRUTH / "execution_evidence_v1" / "submissions" / day_utc).resolve()
+    if (not root.exists()) or (not root.is_dir()):
+        return True
+    try:
+        for p in root.iterdir():
+            if p.is_dir():
+                return False
+    except Exception:
+        # Fail-closed: if we cannot enumerate, treat as NOT bootstrap.
+        return False
+    return True
 
 
 def _list_days(root: Path) -> List[date]:
@@ -162,8 +221,6 @@ def _corr(a: List[Decimal], b: List[Decimal]) -> Decimal:
     den_b = sum([x * x for x in db])
     if den_a == 0 or den_b == 0:
         return Decimal("0")
-    # Decimal sqrt via float is not acceptable; use exponentiation with context
-    # Safe: convert to float only for sqrt magnitude, then back to Decimal quantized.
     import math  # local import
 
     den = Decimal(str(math.sqrt(float(den_a * den_b))))
@@ -179,7 +236,13 @@ def main() -> int:
     args = ap.parse_args()
 
     day = _parse_day(args.day_utc)
+    day_utc = _day_str(day)
     window_days = int(args.window_days)
+
+    out_path = (OUT_ROOT / day_utc / "engine_correlation_matrix.v1.json").resolve()
+    existing_rc = _return_if_existing_report(out_path=out_path, expected_day_utc=day_utc)
+    if existing_rc is not None:
+        return int(existing_rc)
 
     all_days = _list_days(IN_ROOT)
     win = _select_window(all_days, day, window_days)
@@ -209,7 +272,6 @@ def main() -> int:
             continue
 
         returns = _extract_returns(obj)
-        # If NOT_AVAILABLE, returns may be empty; still allowed for bootstrap but degrades signal.
         for eid, val in returns.items():
             series_by_engine.setdefault(eid, []).append(val)
 
@@ -222,7 +284,6 @@ def main() -> int:
         corr = [["1.000000"]]
         flags = {"crowding_threshold": "0.75", "sustained_days": 1, "pairs": []}
     else:
-        # Ensure aligned series lengths (pad missing with 0)
         max_len = max([len(series_by_engine[eid]) for eid in engine_ids])
         for eid in engine_ids:
             s = series_by_engine[eid]
@@ -251,12 +312,9 @@ def main() -> int:
 
         crowding_threshold = Decimal("0.75")
         pairs: List[Dict[str, Any]] = []
-        max_pairwise = Decimal("0")
         for i in range(n):
             for j in range(i + 1, n):
                 c = Decimal(corr[i][j])
-                if abs(c) > abs(max_pairwise):
-                    max_pairwise = c
                 pairs.append(
                     {
                         "engine_a": engine_ids[i],
@@ -273,16 +331,18 @@ def main() -> int:
             "pairs": pairs,
         }
 
-    produced_utc = _utc_now_iso_z()
+    produced_utc = f"{day_utc}T23:59:59Z"
     payload: Dict[str, Any] = {
         "schema_id": "C2_ENGINE_CORRELATION_MATRIX_V1",
         "schema_version": 1,
         "status": status,
-        "day_utc": _day_str(day),
+        "day_utc": day_utc,
         "window_days": int(window_days),
         "matrix": {"engine_ids": engine_ids, "corr": corr},
         "flags": flags,
-        "input_manifest": input_manifest if len(input_manifest) > 0 else [{"type": "engine_daily_returns", "path": str(IN_ROOT), "sha256": "0" * 64, "producer": "phaseJ_engine_daily_returns_v1", "day_utc": _day_str(day)}],
+        "input_manifest": input_manifest
+        if len(input_manifest) > 0
+        else [{"type": "engine_daily_returns", "path": str(IN_ROOT), "sha256": "0" * 64, "producer": "phaseJ_engine_daily_returns_v1", "day_utc": day_utc}],
         "produced_utc": produced_utc,
         "producer": {"repo": "constellation_2_runtime", "git_sha": _git_sha(), "module": "constellation_2/phaseJ/monitoring/run/run_engine_correlation_matrix_day_v1.py"},
         "reason_codes": sorted(list(dict.fromkeys(reason_codes))),
@@ -290,12 +350,19 @@ def main() -> int:
 
     validate_against_repo_schema_v1(payload, REPO_ROOT, SCHEMA_RELPATH)
 
-    OUT_ROOT.mkdir(parents=True, exist_ok=True)
-    out_path = (OUT_ROOT / _day_str(day) / "engine_correlation_matrix.v1.json").resolve()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_bytes(canonical_json_bytes_v1(payload))
+    payload_bytes = canonical_json_bytes_v1(payload)
 
-    print(f"OK: ENGINE_CORRELATION_MATRIX_V1_WRITTEN day={_day_str(day)} out={out_path}")
+    try:
+        wr = write_file_immutable_v1(path=out_path, data=payload_bytes, create_dirs=True)
+    except ImmutableWriteError as e:
+        raise SystemExit(f"FAIL_IMMUTABLE_WRITE: {e}") from e
+
+    print(f"OK: ENGINE_CORRELATION_MATRIX_V1_WRITTEN day={day_utc} out={out_path} action={wr.action} sha256={wr.sha256}")
+
+    # Day-0 bootstrap: degraded correlation is non-blocking when no submissions exist.
+    if status == "DEGRADED_INSUFFICIENT_HISTORY" and _bootstrap_window_true(day_utc):
+        return 0
+
     return 0 if status == "OK" else 2
 
 

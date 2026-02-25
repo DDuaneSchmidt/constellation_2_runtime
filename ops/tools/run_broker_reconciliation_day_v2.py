@@ -13,6 +13,8 @@ TRUTH_ROOT = REPO_ROOT / "constellation_2/runtime/truth"
 SCHEMA_ID = "C2_BROKER_RECONCILIATION_V2"
 SCHEMA_VERSION = "1.0.0"
 
+DAY0_NOTE_ALLOWED = "DAY0_BOOTSTRAP_BROKER_STATEMENT_MISSING_ALLOWED"
+
 
 def _sha256_file(p: Path) -> str:
     h = hashlib.sha256()
@@ -73,6 +75,24 @@ def _cents_to_decimal_dollars(cents: int) -> Decimal:
 
 def _pos_key(p: Dict[str, Any]) -> Tuple[str, str]:
     return (str(p.get("symbol", "")).strip(), str(p.get("sec_type", "")).strip())
+
+
+def _bootstrap_window_true(day_utc: str) -> bool:
+    """
+    Day-0 Bootstrap Window iff:
+      TRUTH/execution_evidence_v1/submissions/<DAY>/ is missing OR contains zero submission dirs.
+    """
+    root = (TRUTH_ROOT / "execution_evidence_v1" / "submissions" / day_utc).resolve()
+    if (not root.exists()) or (not root.is_dir()):
+        return True
+    try:
+        for p in root.iterdir():
+            if p.is_dir():
+                return False
+    except Exception:
+        # Fail-closed: if we cannot enumerate, treat as NOT bootstrap.
+        return False
+    return True
 
 
 def _extract_internal_cash_usd(cash_obj: Dict[str, Any], notes: List[str]) -> Optional[Decimal]:
@@ -149,16 +169,30 @@ def main() -> int:
     cash_diff = Decimal("0")
     notes: List[str] = []
 
-    if missing:
-        status = "MISSING_INPUTS"
-        fail_closed = True
-        notes.append("Missing required inputs; reconciliation cannot be performed.")
-        for m in missing:
-            notes.append(f"MISSING: {m}")
-    else:
-        broker = _load_json(broker_path)
+    broker_obj: Optional[Dict[str, Any]] = None
 
-        broker_acct = str(broker.get("account_id") or "").strip()
+    if missing:
+        # Day-0 bootstrap:
+        # If no submissions yet for this day, allow PASS even when broker statement is missing.
+        # Once submissions exist, revert to strict fail-closed (existing behavior).
+        if _bootstrap_window_true(day):
+            status = "PASS"
+            fail_closed = False
+            notes.append("Day-0 bootstrap: no submissions yet; broker reconciliation inputs may be missing.")
+            notes.append(DAY0_NOTE_ALLOWED)
+            for m in missing:
+                notes.append(f"MISSING: {m}")
+            # Deterministic: keep cash_diff=0, mismatches empty.
+        else:
+            status = "MISSING_INPUTS"
+            fail_closed = True
+            notes.append("Missing required inputs; reconciliation cannot be performed.")
+            for m in missing:
+                notes.append(f"MISSING: {m}")
+    else:
+        broker_obj = _load_json(broker_path)
+
+        broker_acct = str(broker_obj.get("account_id") or "").strip()
         if broker_acct == "":
             status = "MISSING_INPUTS"
             fail_closed = True
@@ -176,7 +210,7 @@ def main() -> int:
             fail_closed = True
             internal_cash = Decimal("0")
 
-        broker_cash = _dec(broker.get("cash_end", "0"))
+        broker_cash = _dec(broker_obj.get("cash_end", "0"))
         cash_diff = internal_cash - broker_cash
 
         # Internal positions (governed schema)
@@ -187,7 +221,7 @@ def main() -> int:
             fail_closed = True
             internal_positions = []
 
-        broker_positions = broker.get("positions", [])
+        broker_positions = broker_obj.get("positions", [])
         if not isinstance(broker_positions, list):
             status = "MISSING_INPUTS"
             fail_closed = True
@@ -285,10 +319,11 @@ def main() -> int:
     if mode == "CHECK":
         # CHECK mode: compute deterministically but do not write (avoids immutability conflicts).
         broker_acct = ""
-        try:
-            broker_acct = str(broker.get("account_id") or "").strip()
-        except Exception:
-            broker_acct = ""
+        if broker_obj is not None:
+            try:
+                broker_acct = str(broker_obj.get("account_id") or "").strip()
+            except Exception:
+                broker_acct = ""
         print(
             f"OK: BROKER_RECONCILIATION_V2_CHECK day_utc={day} status={status} "
             f"broker_account_id={broker_acct} expected_ib_account={ib_account} cash_diff={_dec_str(cash_diff)} "

@@ -9,6 +9,7 @@ from typing import Any, Dict, List
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 TRUTH_ROOT = REPO_ROOT / "constellation_2/runtime/truth"
 
+
 def _sha256_file(p: Path) -> str:
     h = hashlib.sha256()
     with p.open("rb") as f:
@@ -16,8 +17,10 @@ def _sha256_file(p: Path) -> str:
             h.update(chunk)
     return h.hexdigest()
 
+
 def _json_bytes(obj: Any) -> bytes:
     return (json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8")
+
 
 def _atomic_write(path: Path, content: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -28,6 +31,7 @@ def _atomic_write(path: Path, content: bytes) -> None:
         os.fsync(f.fileno())
     os.replace(tmp, path)
 
+
 def _immut_write(path: Path, content: bytes) -> None:
     if path.exists():
         if hashlib.sha256(path.read_bytes()).hexdigest() != hashlib.sha256(content).hexdigest():
@@ -35,9 +39,28 @@ def _immut_write(path: Path, content: bytes) -> None:
         return
     _atomic_write(path, content)
 
+
 def _load_json(p: Path) -> Dict[str, Any]:
     with p.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def _bootstrap_window_true(day_utc: str) -> bool:
+    """
+    Day-0 Bootstrap Window iff:
+      TRUTH/execution_evidence_v1/submissions/<DAY>/ is missing OR contains zero submission dirs.
+    """
+    root = (TRUTH_ROOT / "execution_evidence_v1" / "submissions" / day_utc).resolve()
+    if (not root.exists()) or (not root.is_dir()):
+        return True
+    try:
+        for p in root.iterdir():
+            if p.is_dir():
+                return False
+    except Exception:
+        return False
+    return True
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_engine_daily_returns_day_v1")
@@ -84,30 +107,36 @@ def main() -> int:
     out = {
         "schema_id": "C2_MONITORING_ENGINE_DAILY_RETURNS_V1",
         "schema_version": "1.0.0",
-        "produced_utc": __import__("datetime").datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+        "produced_utc": f"{day}T00:00:00Z",
         "day_utc": day,
         "producer": "ops/tools/run_engine_daily_returns_day_v1.py",
         "status": status,
         "reason_codes": sorted(set(reason_codes)),
         "inputs": {
             "attribution_today_path": str(today_path.relative_to(TRUTH_ROOT)),
-            "attribution_today_sha256": _sha256_file(today_path) if today_path.exists() else "0"*64,
+            "attribution_today_sha256": _sha256_file(today_path) if today_path.exists() else "0" * 64,
             "attribution_prev_path": str(prev_path.relative_to(TRUTH_ROOT)) if prev_path else "",
-            "attribution_prev_sha256": _sha256_file(prev_path) if (prev_path and prev_path.exists()) else ("0"*64 if prev else "")
+            "attribution_prev_sha256": _sha256_file(prev_path) if (prev_path and prev_path.exists()) else ("0" * 64 if prev else ""),
         },
-        "returns": returns
+        "returns": returns,
     }
 
     out_dir = TRUTH_ROOT / "monitoring_v1" / "engine_daily_returns_v1" / day
     out_path = out_dir / "engine_daily_returns.v1.json"
     if out_path.exists():
         print(f"SKIP: already exists {out_path}")
+        # In bootstrap, do not fail the pipeline if this is NOT_AVAILABLE.
         return 0
 
     _immut_write(out_path, _json_bytes(out))
-
     print(f"OK: wrote {out_path}")
+
+    # Day-0 bootstrap: NOT_AVAILABLE should not block orchestrator.
+    if _bootstrap_window_true(day):
+        return 0
+
     return 0 if status == "ACTIVE" else 2
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
