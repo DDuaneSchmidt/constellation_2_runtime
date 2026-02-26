@@ -378,3 +378,12 @@ documents:
     path: constellation_2/phaseJ/tools/build_defensive_tail_required_inputs_day_v1.py
     class: C2_TOOL
     status: ACTIVE
+  - id: C2_CROSS_ASSET_TREND_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/cross_asset_trend_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_MARKET_NEUTRAL_SPREAD_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/market_neutral_spread_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT

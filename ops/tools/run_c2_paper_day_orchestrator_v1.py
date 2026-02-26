@@ -21,13 +21,15 @@ NON-NEGOTIABLE PROPERTIES:
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Tuple
+from typing import Any, Dict, List, Tuple
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+REG_PATH = (REPO_ROOT / "governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json").resolve()
 
 
 def _require_repo_root_cwd() -> None:
@@ -90,6 +92,45 @@ def _intents_day_empty(day_utc: str) -> bool:
         # Fail-closed: if we cannot enumerate, do NOT treat as empty.
         return False
     return True
+
+
+def _read_engine_registry() -> Dict[str, Any]:
+    if not REG_PATH.exists():
+        raise SystemExit(f"FATAL: missing engine registry: {REG_PATH}")
+    obj = json.loads(REG_PATH.read_text(encoding="utf-8"))
+    if not isinstance(obj, dict):
+        raise SystemExit("FATAL: engine registry top-level not object")
+    return obj
+
+
+def _active_engines_sorted(reg: Dict[str, Any]) -> List[Dict[str, str]]:
+    engines = reg.get("engines") or []
+    if not isinstance(engines, list):
+        raise SystemExit("FATAL: registry engines not list")
+
+    active: List[Dict[str, str]] = []
+    for e in engines:
+        if not isinstance(e, dict):
+            continue
+        if str(e.get("activation_status") or "") != "ACTIVE":
+            continue
+
+        engine_id = str(e.get("engine_id") or "").strip()
+        runner_mod = str(e.get("runner_path") or "").strip()
+
+        if not engine_id:
+            raise SystemExit("FATAL: ACTIVE engine missing engine_id")
+        if not runner_mod:
+            raise SystemExit(f"FATAL: ACTIVE engine missing runner_path: engine_id={engine_id}")
+
+        active.append({"engine_id": engine_id, "runner_path": runner_mod})
+
+    return sorted(active, key=lambda r: r["engine_id"])
+
+
+def _stage_name_for_engine(engine_id: str) -> str:
+    s = "".join([c if (c.isalnum() or c == "_") else "_" for c in engine_id.strip().upper()])
+    return f"ENGINE_{s}"
 
 
 def main() -> int:
@@ -242,14 +283,13 @@ def main() -> int:
             current_git_sha,
         ],
     )
-    # --- Stage 1 Engines ---
-    for stage_name, module in [
-        ("ENGINE_MEAN_REVERSION", "constellation_2.phaseI.mean_reversion.run.run_mean_reversion_intents_day_v1"),
-        ("ENGINE_TREND_EQ_PRIMARY", "constellation_2.phaseI.trend_eq_primary.run.run_trend_eq_primary_intents_day_v1"),
-        ("ENGINE_VOL_INCOME_DEFINED", "constellation_2.phaseI.vol_income_defined_risk.run.run_vol_income_defined_risk_intents_day_v1"),
-        ("ENGINE_EVENT_DISLOCATION", "constellation_2.phaseI.event_dislocation.run.run_event_dislocation_intents_day_v1"),
-        ("ENGINE_DEFENSIVE_TAIL", "constellation_2.phaseI.defensive_tail.run.run_defensive_tail_intents_day_v1"),
-    ]:
+
+    # --- Stage 1 Engines (registry-driven; ACTIVE only; deterministic order) ---
+    reg = _read_engine_registry()
+    active_engines = _active_engines_sorted(reg)
+    for e in active_engines:
+        stage_name = _stage_name_for_engine(e["engine_id"])
+        module = str(e["runner_path"])
         ok, _rc = _run_stage_soft(
             stage_name,
             ["python3", "-m", module, "--day_utc", day, "--mode", mode, "--symbol", symbol],

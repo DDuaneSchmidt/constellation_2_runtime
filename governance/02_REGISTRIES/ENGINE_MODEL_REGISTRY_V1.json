@@ -7,12 +7,13 @@
     "module": "governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json",
     "git_sha": "2aacaf914b0a6e6c469342342069179d1f206f1c"
   },
-  "registry_version": 6,
+  "registry_version": 7,
   "approved_git_sha": "2aacaf914b0a6e6c469342342069179d1f206f1c",
   "engines": [
     {
       "engine_id": "C2_MEAN_REVERSION_EQ_V1",
       "activation_status": "ACTIVE",
+      "runner_path": "constellation_2.phaseI.mean_reversion.run.run_mean_reversion_intents_day_v1",
       "budget_notional_pct": "0.10",
       "approved_git_sha": "f4a2b82012213bba7d13a306a050a0733d8f5ab1",
       "engine_runner_path": "constellation_2/phaseI/mean_reversion/run/run_mean_reversion_intents_day_v1.py",
@@ -29,6 +30,7 @@
     {
       "engine_id": "C2_TREND_EQ_PRIMARY_V1",
       "activation_status": "ACTIVE",
+      "runner_path": "constellation_2.phaseI.trend_eq_primary.run.run_trend_eq_primary_intents_day_v1",
       "budget_notional_pct": "0.15",
       "approved_git_sha": "f4a2b82012213bba7d13a306a050a0733d8f5ab1",
       "engine_runner_path": "constellation_2/phaseI/trend_eq_primary/run/run_trend_eq_primary_intents_day_v1.py",
@@ -45,6 +47,7 @@
     {
       "engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1",
       "activation_status": "ACTIVE",
+      "runner_path": "constellation_2.phaseI.vol_income_defined_risk.run.run_vol_income_defined_risk_intents_day_v1",
       "budget_notional_pct": "0.10",
       "approved_git_sha": "f4a2b82012213bba7d13a306a050a0733d8f5ab1",
       "engine_runner_path": "constellation_2/phaseI/vol_income_defined_risk/run/run_vol_income_defined_risk_intents_day_v1.py",
@@ -61,6 +64,7 @@
     {
       "engine_id": "C2_EVENT_DISLOCATION_V1",
       "activation_status": "ACTIVE",
+      "runner_path": "constellation_2.phaseI.event_dislocation.run.run_event_dislocation_intents_day_v1",
       "budget_notional_pct": "0.05",
       "approved_git_sha": "2aacaf914b0a6e6c469342342069179d1f206f1c",
       "engine_runner_path": "constellation_2/phaseI/event_dislocation/run/run_event_dislocation_intents_day_v1.py",
@@ -77,6 +81,7 @@
     {
       "engine_id": "C2_DEFENSIVE_TAIL_V1",
       "activation_status": "ACTIVE",
+      "runner_path": "constellation_2.phaseI.defensive_tail.run.run_defensive_tail_intents_day_v1",
       "budget_notional_pct": "0.05",
       "approved_git_sha": "2aacaf914b0a6e6c469342342069179d1f206f1c",
       "engine_runner_path": "constellation_2/phaseI/defensive_tail/run/run_defensive_tail_intents_day_v1.py",
@@ -89,6 +94,41 @@
         "Parameter lock is null in v1; will be enforced in v2 after governed param hashing is introduced.",
         "Budget is a hard notional cap as fraction of NAV; Bundle B enforces fail-closed gating on budget breaches.",
         "Engine role: defensive stabilizer; emits ExposureIntent v2 with deterministic NO_INTENT when inactive."
+      ]
+    },
+    {
+      "engine_id": "C2_CROSS_ASSET_TREND_V1",
+      "activation_status": "INACTIVE",
+      "runner_path": "constellation_2.phaseI.cross_asset_trend.run.run_cross_asset_trend_intents_day_v1",
+      "budget_notional_pct": "0.10",
+      "approved_git_sha": "2778fc92b3d1e95d6d92c06e1cc888526a302a79",
+      "engine_runner_path": "constellation_2/phaseI/cross_asset_trend/run/run_cross_asset_trend_intents_day_v1.py",
+      "engine_runner_sha256": "267e2742d1fe862522a38dbdaf7712405c41c599a0eeb7cac7c5d2f63d00b40e",
+      "approved_utc": "2026-02-26T00:00:00Z",
+      "approved_by": "OPERATOR",
+      "parameter_lock": null,
+      "notes": [
+        "Code-lock enforced via engine_runner_sha256.",
+        "INACTIVE by default: orchestrator must not select; not scheduled; emits no truth unless explicitly invoked.",
+        "Universe requires ETFs: SPY, QQQ, IWM, TLT, GLD, HYG, IEF, LQD, UUP, DBC.",
+        "Current market_data_snapshot_v1 in-repo does not include IEF/LQD/UUP/DBC; engine will FAIL-CLOSED if invoked until dataset expanded."
+      ]
+    },
+    {
+      "engine_id": "C2_MARKET_NEUTRAL_SPREAD_V1",
+      "activation_status": "INACTIVE",
+      "runner_path": "constellation_2.phaseI.market_neutral_spread.run.run_market_neutral_spread_intents_day_v1",
+      "budget_notional_pct": "0.05",
+      "approved_git_sha": "2778fc92b3d1e95d6d92c06e1cc888526a302a79",
+      "engine_runner_path": "constellation_2/phaseI/market_neutral_spread/run/run_market_neutral_spread_intents_day_v1.py",
+      "engine_runner_sha256": "a10faa04384452b5b08baa6c398f8bb73c527b93b71f16248804eff8f50cbfd8",
+      "approved_utc": "2026-02-26T00:00:00Z",
+      "approved_by": "OPERATOR",
+      "parameter_lock": null,
+      "notes": [
+        "Code-lock enforced via engine_runner_sha256.",
+        "INACTIVE by default: orchestrator must not select; not scheduled; emits no truth unless explicitly invoked.",
+        "Pairs: SPY:QQQ, IWM:SPY, HYG:LQD. Requires LQD market data; engine will FAIL-CLOSED if invoked until dataset expanded."
       ]
     }
   ]
