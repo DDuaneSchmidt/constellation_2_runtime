@@ -85,6 +85,8 @@ These canonical contracts are governance-controlled and must be explicitly liste
 - `governance/05_CONTRACTS/C2/failure_injection_harness_v1.contract.md`
 
 - `governance/05_CONTRACTS/C2/single_final_verdict_consumption_v1.contract.md`
+- `governance/05_CONTRACTS/C2/ib_historical_market_data_snapshot_downloader_v1.contract.md`
+- `governance/05_CONTRACTS/C2/defensive_tail_required_inputs_bridge_v1.contract.md`
 
 ## Governed data schemas
 

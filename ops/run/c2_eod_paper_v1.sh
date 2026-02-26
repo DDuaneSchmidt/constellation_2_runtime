@@ -126,6 +126,18 @@ trap _on_exit EXIT
 
 echo "C2_EOD_V1_START day_utc=${DAY_UTC} produced_utc=${PRODUCED_UTC} git_sha=${GIT_SHA}"
 
+# --- Defensive Tail required inputs bridge (immutable; skip if already present) ---
+DEF_MD="/home/node/constellation_2_runtime/constellation_2/runtime/truth/market_data_snapshot_v1/snapshots/${DAY_UTC}/SPY.market_data_snapshot.v1.json"
+DEF_NAV="/home/node/constellation_2_runtime/constellation_2/runtime/truth/accounting_v1/nav/${DAY_UTC}/nav_snapshot.v1.json"
+DEF_POS="/home/node/constellation_2_runtime/constellation_2/runtime/truth/positions_snapshot_v2/snapshots/${DAY_UTC}/positions_snapshot.v2.json"
+if test -f "$DEF_MD" && test -f "$DEF_NAV" && test -f "$DEF_POS"; then
+  echo "C2_EOD_V1_SKIP def_tail_inputs_bridge: already exists for day_utc=${DAY_UTC}"
+else
+  "$VENV_PY" constellation_2/phaseJ/tools/build_defensive_tail_required_inputs_day_v1.py \
+    --day_utc "$DAY_UTC" \
+    --symbol "SPY"
+fi
+
 # --- Bundle F->G (ONLY if not already completed) ---
 if test -f "$NAV_JSON"; then
   echo "C2_EOD_V1_SKIP bundle_f_to_g: accounting nav already exists for day_utc=${DAY_UTC}"
