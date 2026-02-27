@@ -85,7 +85,6 @@ def _safe_idle_snapshot_obj(
     exec_day_dir: Path,
     exec_manifest_sha: str,
 ) -> Dict[str, Any]:
-    # SAFE_IDLE: no submissions => empty positions, OK.
     return {
         "schema_id": "C2_POSITIONS_SNAPSHOT_V2",
         "schema_version": 2,
@@ -121,9 +120,9 @@ def main(argv: List[str] | None = None) -> int:
         prog="run_positions_snapshot_day_v2",
         description="C2 Positions Snapshot Truth Spine v2 (bootstrap: UNKNOWN instruments).",
     )
-    ap.add_argument("--day_utc", required=True, help="UTC day key YYYY-MM-DD")
-    ap.add_argument("--producer_git_sha", required=True, help="Producing git sha (explicit)")
-    ap.add_argument("--producer_repo", default="constellation_2_runtime", help="Producer repo id")
+    ap.add_argument("--day_utc", required=True)
+    ap.add_argument("--producer_git_sha", required=True)
+    ap.add_argument("--producer_repo", default="constellation_2_runtime")
     args = ap.parse_args(argv)
 
     day_utc = args.day_utc.strip()
@@ -133,28 +132,39 @@ def main(argv: List[str] | None = None) -> int:
     dp_exec = exec_day_paths_v1(day_utc)
     dp_pos = day_paths_v2(day_utc)
 
-    # Fail-closed: if snapshot already exists, lock producer git sha to the original.
+    # Fail-closed: if snapshot already exists, lock producer git sha.
     if dp_pos.snapshot_path.exists() and dp_pos.snapshot_path.is_file():
         try:
             ex = _read_json_obj(dp_pos.snapshot_path)
-            ex_prod = ex.get("producer") if isinstance(ex, dict) else None
-            ex_sha = ex_prod.get("git_sha") if isinstance(ex_prod, dict) else None
-            if isinstance(ex_sha, str) and ex_sha.strip():
-                if ex_sha.strip() != producer_sha:
-                    print(
-                        f"FAIL: PRODUCER_GIT_SHA_MISMATCH_FOR_EXISTING_DAY: existing={ex_sha.strip()} provided={producer_sha}",
-                        file=sys.stderr,
-                    )
-                    return 4
+            ex_sha = ex.get("producer", {}).get("git_sha")
+            if ex_sha and ex_sha.strip() != producer_sha:
+                print(
+                    f"FAIL: PRODUCER_GIT_SHA_MISMATCH_FOR_EXISTING_DAY: existing={ex_sha.strip()} provided={producer_sha}",
+                    file=sys.stderr,
+                )
+                return 4
         except Exception:
             print("FAIL: EXISTING_SNAPSHOT_UNREADABLE_FOR_SHA_LOCK", file=sys.stderr)
             return 4
 
-    # SAFE_IDLE detection:
-    # - If submissions_day_dir missing => treat as no submissions (safe idle)
-    # - If exists but contains no submission directories => safe idle
+    # --- Monotonic latest pointer guard ---
+    skip_latest_update = False
+    if dp_pos.latest_path.exists() and dp_pos.latest_path.is_file():
+        try:
+            latest_existing = _read_json_obj(dp_pos.latest_path)
+            latest_day = str(latest_existing.get("day_utc") or "").strip()
+        except Exception:
+            latest_day = ""
+        if latest_day and day_utc < latest_day:
+            print(
+                f"SKIP_LATEST_UPDATE_BACKFILL day_utc={day_utc} "
+                f"latest_day_utc={latest_day} path={dp_pos.latest_path}"
+            )
+            skip_latest_update = True
+
     exec_dir = dp_exec.submissions_day_dir
-    if (not exec_dir.exists()) or (not exec_dir.is_dir()):
+
+    if not exec_dir.exists() or not exec_dir.is_dir():
         snap_obj = _safe_idle_snapshot_obj(
             day_utc=day_utc,
             producer_sha=producer_sha,
@@ -164,7 +174,7 @@ def main(argv: List[str] | None = None) -> int:
         )
     else:
         sub_dirs = sorted([p for p in exec_dir.iterdir() if p.is_dir()], key=lambda p: p.name)
-        if len(sub_dirs) == 0:
+        if not sub_dirs:
             snap_obj = _safe_idle_snapshot_obj(
                 day_utc=day_utc,
                 producer_sha=producer_sha,
@@ -173,29 +183,21 @@ def main(argv: List[str] | None = None) -> int:
                 exec_manifest_sha="0" * 64,
             )
         else:
-            # Build one position per submission with an execution event.
             items: List[Dict[str, Any]] = []
-            reason_codes: List[str] = ["BOOTSTRAP_UNKNOWN_INSTRUMENT_V2"]
-            status = "DEGRADED_MISSING_INSTRUMENT_IDENTITY"
-
             for sd in sub_dirs:
-                submission_id = sd.name.strip()
                 p_exec = sd / "execution_event_record.v1.json"
                 if not p_exec.exists():
                     continue
                 evt = _read_json_obj(p_exec)
-                validate_against_repo_schema_v1(evt, REPO_ROOT, "constellation_2/schemas/execution_event_record.v1.schema.json")
-
                 qty = int(evt["filled_qty"])
                 avg_cents = _parse_price_to_cents(str(evt["avg_price"]))
-
-                pos_id = str(evt.get("binding_hash") or submission_id)
+                pos_id = str(evt.get("binding_hash") or sd.name).strip()
 
                 items.append(
                     {
                         "position_id": pos_id,
                         "engine_id": "unknown",
-                        "instrument": {"kind": "UNKNOWN", "underlying": None, "expiry": None, "strike": None, "right": None},
+                        "instrument": {"kind": "UNKNOWN"},
                         "qty": qty,
                         "avg_cost_cents": avg_cents,
                         "market_exposure_type": "UNDEFINED_RISK",
@@ -215,20 +217,20 @@ def main(argv: List[str] | None = None) -> int:
                     "git_sha": producer_sha,
                     "module": "constellation_2/phaseF/positions/run/run_positions_snapshot_day_v2.py",
                 },
-                "status": status,
-                "reason_codes": sorted(set(reason_codes)),
+                "status": "DEGRADED_MISSING_INSTRUMENT_IDENTITY",
+                "reason_codes": ["BOOTSTRAP_UNKNOWN_INSTRUMENT_V2"],
                 "input_manifest": [
-                    {"type": "execution_evidence", "path": str(exec_dir), "sha256": "0" * 64, "day_utc": day_utc, "producer": "execution_evidence_v1"}
+                    {"type": "execution_evidence", "path": str(exec_dir), "sha256": "0" * 64}
                 ],
                 "positions": {
                     "currency": "USD",
                     "asof_utc": f"{day_utc}T00:00:00Z",
                     "items": items,
-                    "notes": ["bootstrap: instrument identity unavailable in execution evidence v1; emitting UNKNOWN instruments"],
                 },
             }
 
     validate_against_repo_schema_v1(snap_obj, REPO_ROOT, SCHEMA_POSITIONS_SNAPSHOT_V2)
+
     try:
         snap_bytes = canonical_json_bytes_v1(snap_obj) + b"\n"
     except CanonicalizationError as e:
@@ -241,25 +243,26 @@ def main(argv: List[str] | None = None) -> int:
         print(f"FAIL: {e}", file=sys.stderr)
         return 4
 
-    latest_obj = build_latest_ptr_obj_v2(
-        produced_utc=f"{day_utc}T00:00:00Z",
-        day_utc=day_utc,
-        producer_repo=producer_repo,
-        producer_git_sha=producer_sha,
-        producer_module="constellation_2/phaseF/positions/run/run_positions_snapshot_day_v2.py",
-        status=str(snap_obj.get("status") or "OK"),
-        reason_codes=list(snap_obj.get("reason_codes") or []),
-        snapshot_path=str(dp_pos.snapshot_path),
-        snapshot_sha256=wr_snap.sha256,
-    )
+    if not skip_latest_update:
+        latest_obj = build_latest_ptr_obj_v2(
+            produced_utc=f"{day_utc}T00:00:00Z",
+            day_utc=day_utc,
+            producer_repo=producer_repo,
+            producer_git_sha=producer_sha,
+            producer_module="constellation_2/phaseF/positions/run/run_positions_snapshot_day_v2.py",
+            status=str(snap_obj.get("status") or "OK"),
+            reason_codes=list(snap_obj.get("reason_codes") or []),
+            snapshot_path=str(dp_pos.snapshot_path),
+            snapshot_sha256=wr_snap.sha256,
+        )
 
-    validate_against_repo_schema_v1(latest_obj, REPO_ROOT, SCHEMA_POSITIONS_LATEST_PTR_V2)
-    latest_bytes = canonical_json_bytes_v1(latest_obj) + b"\n"
-    try:
-        _ = write_file_immutable_v1(path=dp_pos.latest_path, data=latest_bytes, create_dirs=True)
-    except ImmutableWriteError as e:
-        print(f"FAIL: {e}", file=sys.stderr)
-        return 4
+        validate_against_repo_schema_v1(latest_obj, REPO_ROOT, SCHEMA_POSITIONS_LATEST_PTR_V2)
+        latest_bytes = canonical_json_bytes_v1(latest_obj) + b"\n"
+        try:
+            _ = write_file_immutable_v1(path=dp_pos.latest_path, data=latest_bytes, create_dirs=True)
+        except ImmutableWriteError as e:
+            print(f"FAIL: {e}", file=sys.stderr)
+            return 4
 
     print("OK: POSITIONS_SNAPSHOT_V2_WRITTEN")
     return 0
