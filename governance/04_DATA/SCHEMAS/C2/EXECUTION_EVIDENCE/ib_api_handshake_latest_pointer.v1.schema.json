@@ -1,0 +1,19 @@
+{
+  "type": "object",
+  "required": ["schema_id", "schema_version", "day_utc", "pointers"],
+  "properties": {
+    "schema_id": { "const": "C2_IB_API_HANDSHAKE_LATEST_POINTER_V1" },
+    "schema_version": { "const": 1 },
+    "day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
+    "pointers": {
+      "type": "object",
+      "required": ["handshake_path", "handshake_sha256"],
+      "properties": {
+        "handshake_path": { "type": "string" },
+        "handshake_sha256": { "type": "string", "minLength": 64, "maxLength": 64 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

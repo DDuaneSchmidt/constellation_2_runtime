@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "required": ["schema_id", "schema_version", "day_utc", "status", "ok", "reason_codes", "inputs", "observations"],
+  "properties": {
+    "schema_id": { "const": "C2_IB_API_HANDSHAKE_V1" },
+    "schema_version": { "const": 1 },
+    "day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
+    "status": { "type": "string" },
+    "ok": { "type": "boolean" },
+    "reason_codes": { "type": "array", "items": { "type": "string" } },
+    "inputs": {
+      "type": "object",
+      "required": ["broker_event_log"],
+      "properties": {
+        "broker_event_log": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "observations": { "type": "object", "additionalProperties": true }
+  },
+  "additionalProperties": false
+}
