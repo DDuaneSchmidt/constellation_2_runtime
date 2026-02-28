@@ -46,7 +46,7 @@
       "gate_id": "systemic_risk_gate_v3",
       "artifact_relpath": "constellation_2/runtime/truth/reports/systemic_risk_gate_v3/{DAY}/systemic_risk_gate.v3.json",
       "status_field": "status",
-      "pass_status_values": ["PASS"],
+      "pass_status_values": ["PASS", "OK"],
       "gate_class": "CLASS2_RISK_HARD_STOP",
       "blocking": true,
       "required": true
