@@ -230,7 +230,7 @@ def main() -> int:
     # --- Bundle A3: Broker Marks (strict) ---
     _run_stage_strict(
         "A3_BROKER_MARKS_SNAPSHOT_V1",
-        ["python3", "ops/tools/run_broker_marks_snapshot_day_v1.py", "--day_utc", input_day],
+        ["python3", "ops/tools/run_lifecycle_monitor_v1.py", "--day_utc", day, "--mode", "CHECK"],
         env=stage_env,
     )
 
