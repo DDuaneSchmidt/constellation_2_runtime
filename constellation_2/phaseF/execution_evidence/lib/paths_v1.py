@@ -32,7 +32,7 @@ def day_paths_v1(day_utc: str) -> ExecEvidenceDayPathsV1:
         day_utc=day,
         submissions_day_dir=(EXEC_EVIDENCE_ROOT / "submissions" / day).resolve(),
         manifests_day_dir=(EXEC_EVIDENCE_ROOT / "manifests" / day).resolve(),
-        latest_path=(EXEC_EVIDENCE_ROOT / "latest.json").resolve(),
+        latest_path=(EXEC_EVIDENCE_ROOT / "latest_pointer.v1.json").resolve(),
         failure_dir=(EXEC_EVIDENCE_ROOT / "failures" / day).resolve(),
         failure_path=(EXEC_EVIDENCE_ROOT / "failures" / day / "failure.json").resolve(),
     )
