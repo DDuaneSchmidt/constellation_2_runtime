@@ -86,4 +86,4 @@ def write_file_immutable_v1(*, path: Path, data: bytes, create_dirs: bool = True
             except Exception:
                 pass
 
-return WriteResultV1(path=str(path), sha256=cand_sha, bytes_written=len(data), action="WROTE")
+    return WriteResultV1(path=str(path), sha256=cand_sha, bytes_written=len(data), action="WROTE")
