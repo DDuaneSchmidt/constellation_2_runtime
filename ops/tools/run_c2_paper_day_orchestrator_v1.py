@@ -129,6 +129,20 @@ def _read_engine_registry() -> Dict[str, Any]:
         raise SystemExit("FATAL: engine registry top-level not object")
     return obj
 
+def _locked_git_sha_for_positions_day(truth_root: Path, day_utc: str, fallback_git_sha: str) -> str:
+    """
+    Day-SHA lock: if the day already has a positions snapshot, reuse its producer.git_sha
+    so immutable/idempotent downstream stages do not fail on reruns.
+    """
+    p = (truth_root / "positions_v1" / "snapshots" / day_utc / "positions_snapshot.v2.json").resolve()
+    if not p.exists() or not p.is_file():
+        return fallback_git_sha
+    try:
+        obj = json.loads(p.read_text(encoding="utf-8"))
+        sha = str(((obj.get("producer") or {}).get("git_sha") or "")).strip()
+        return sha if sha else fallback_git_sha
+    except Exception:
+        return fallback_git_sha
 
 def _active_engines_sorted(reg: Dict[str, Any]) -> List[Dict[str, str]]:
     engines = reg.get("engines") or []
@@ -372,6 +386,9 @@ def main() -> int:
     )
 
     # --- B+2 Positions Effective Pointer (strict; immutable) ---
+
+    positions_day_git_sha = _locked_git_sha_for_positions_day(truth_root, day, current_git_sha)
+
     _run_stage_strict(
         "B2_POSITIONS_EFFECTIVE_POINTER_V1",
         [
@@ -381,7 +398,7 @@ def main() -> int:
             "--day_utc",
             day,
             "--producer_git_sha",
-            current_git_sha,
+            positions_day_git_sha,
         ],
         env=stage_env,
     )
