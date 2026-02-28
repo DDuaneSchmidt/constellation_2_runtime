@@ -14,6 +14,7 @@ Truth root:
 
 Fail-closed:
 - If no positions snapshot found for the day -> FAIL (exit 2).
+- If selected snapshot JSON is missing schema_id or schema_version -> FAIL (exit 2).
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from constellation_2.phaseD.lib.canon_json_v1 import CanonicalizationError, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
@@ -35,14 +36,14 @@ from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteE
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 DEFAULT_TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
-# Output path (this is what your failure showed)
+# Output path
 OUT_ROOT_REL = "positions_v1/effective_v1/days"
 OUT_FILENAME = "positions_effective_pointer.v1.json"
 
 # Best-available positions snapshot for the day
 POS_SNAPSHOT_DIR_REL = "positions_v1/snapshots"
 
-# Schema is optional: validate only if it exists on disk (to avoid false negatives if schema moved)
+# Schema is optional: validate only if it exists on disk
 SCHEMA_CANDIDATES: List[str] = [
     "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_effective_pointer.v1.schema.json",
     "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_effective_pointer.v1.schema.json",
@@ -111,13 +112,12 @@ def _validate_if_schema_present(obj: Dict[str, Any]) -> None:
         if schema_abs.exists() and schema_abs.is_file():
             validate_against_repo_schema_v1(obj, REPO_ROOT, schema_rel)
             return
-    # If no schema file found, skip validation (still deterministic, still canonical JSON)
+    # If no schema file found, skip validation
 
 
 def _best_positions_snapshot_path(truth: Path, day: str) -> Tuple[int, Path]:
     """
     Prefer highest version available: v5 -> v4 -> v3 -> v2.
-    (Your repo currently has v2 and v3 for 2026-02-26.)
     """
     snap_dir = (truth / POS_SNAPSHOT_DIR_REL / day).resolve()
     for v in (5, 4, 3, 2):
@@ -125,6 +125,25 @@ def _best_positions_snapshot_path(truth: Path, day: str) -> Tuple[int, Path]:
         if p.exists() and p.is_file():
             return (v, p)
     raise SystemExit(f"FAIL: MISSING_POSITIONS_SNAPSHOT_ANY_VERSION: dir={snap_dir}")
+
+
+def _extract_selection_from_snapshot(path: Path) -> Dict[str, Any]:
+    """
+    Required by schema:
+      selection.selected_schema_id (string)
+      selection.selected_schema_version (integer)
+    Fail-closed if missing or invalid.
+    """
+    snap = _read_json_obj(path)
+    sid = snap.get("schema_id")
+    sver = snap.get("schema_version")
+
+    if not isinstance(sid, str) or not sid.strip():
+        raise SystemExit(f"FAIL: SELECTED_SNAPSHOT_MISSING_SCHEMA_ID: path={path}")
+    if not isinstance(sver, int):
+        raise SystemExit(f"FAIL: SELECTED_SNAPSHOT_MISSING_SCHEMA_VERSION_INT: path={path} schema_version={sver!r}")
+
+    return {"selected_schema_id": sid.strip(), "selected_schema_version": int(sver)}
 
 
 def _return_if_exists(out_path: Path, expected_day_utc: str) -> int | None:
@@ -143,9 +162,11 @@ def _return_if_exists(out_path: Path, expected_day_utc: str) -> int | None:
     day_utc = str(existing.get("day_utc") or "").strip()
 
     if day_utc != expected_day_utc:
-        raise SystemExit(f"FAIL: EXISTING_REPORT_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}")
+        raise SystemExit(
+            f"FAIL: EXISTING_REPORT_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}"
+        )
 
-    # If schema_id is missing or unexpected, fail closed (someone wrote the wrong file).
+    # Fail-closed if schema_id is missing or unexpected.
     if schema_id not in ("C2_POSITIONS_EFFECTIVE_POINTER_V1", "positions_effective_pointer", "C2_POSITIONS_EFFECTIVE_POINTER"):
         raise SystemExit(f"FAIL: EXISTING_REPORT_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
 
@@ -174,7 +195,7 @@ def main() -> int:
 
     out_path = (truth / OUT_ROOT_REL / day / OUT_FILENAME).resolve()
 
-    # Critical: idempotency short-circuit must happen BEFORE any candidate write.
+    # Idempotency short-circuit before any candidate write.
     ex = _return_if_exists(out_path, expected_day_utc=day)
     if ex is not None:
         return ex
@@ -182,6 +203,9 @@ def main() -> int:
     # Choose best snapshot available
     src_v, snap_path = _best_positions_snapshot_path(truth, day)
     snap_sha = _sha256_file(snap_path)
+
+    # Required selection block (schema-driven, fail-closed)
+    selection = _extract_selection_from_snapshot(snap_path)
 
     produced_utc = f"{day}T00:00:00Z"
     producer_git_sha = (str(args.producer_git_sha).strip() or _git_sha())
@@ -199,21 +223,12 @@ def main() -> int:
         },
         "status": "OK",
         "reason_codes": [f"SELECTED_POSITIONS_SNAPSHOT_V{src_v}"],
+        "selection": selection,
         "pointers": {
-            "positions_snapshot_path": str(snap_path),
-            "positions_snapshot_sha256": snap_sha,
+            "snapshot_path": str(snap_path),
+            "snapshot_sha256": snap_sha,
         },
-        "canonical_json_hash": None,
     }
-
-    # Compute canonical_json_hash deterministically
-    try:
-        payload_nohash = dict(doc)
-        payload_nohash["canonical_json_hash"] = None
-        b = canonical_json_bytes_v1(payload_nohash)
-        doc["canonical_json_hash"] = hashlib.sha256(b).hexdigest()
-    except Exception as e:  # noqa: BLE001
-        raise SystemExit(f"FAIL: CANONICAL_HASH_FAILED: {e!r}") from e
 
     # Optional schema validation (only if schema file exists)
     _validate_if_schema_present(doc)
@@ -224,10 +239,10 @@ def main() -> int:
         print(f"FAIL: CANONICALIZATION_ERROR: {e}", file=sys.stderr)
         return 4
 
-    # Idempotency short-circuit
-    ex = _return_if_exists(out_path, expected_day_utc=day)
-    if ex is not None:
-        return ex
+    # Idempotency short-circuit again (race-safe)
+    ex2 = _return_if_exists(out_path, expected_day_utc=day)
+    if ex2 is not None:
+        return ex2
 
     try:
         wr = write_file_immutable_v1(path=out_path, data=payload, create_dirs=True)
