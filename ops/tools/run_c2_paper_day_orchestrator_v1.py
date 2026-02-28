@@ -179,6 +179,20 @@ def _locked_git_sha_for_positions_day(truth_root: Path, day_utc: str, fallback_g
     except Exception:
         return fallback_git_sha
 
+def _locked_git_sha_for_cash_ledger_day(truth_root: Path, day_utc: str, fallback_git_sha: str) -> str:
+    """
+    Day-SHA lock: if the day already has a cash ledger snapshot, reuse its producer.git_sha
+    so immutable/idempotent downstream stages do not fail on reruns.
+    """
+    p = (truth_root / "cash_ledger_v1" / "snapshots" / day_utc / "cash_ledger_snapshot.v1.json").resolve()
+    if not p.exists() or not p.is_file():
+        return fallback_git_sha
+    try:
+        obj = json.loads(p.read_text(encoding="utf-8"))
+        sha = str(((obj.get("producer") or {}).get("git_sha") or "")).strip()
+        return sha if sha else fallback_git_sha
+    except Exception:
+        return fallback_git_sha
 
 def _active_engines_sorted(reg: Dict[str, Any]) -> List[Dict[str, str]]:
     engines = reg.get("engines") or []
@@ -479,7 +493,8 @@ def main() -> int:
     )
 
     # --- PhaseG ---
-    # --- PhaseG ---
+    cash_ledger_day_git_sha = _locked_git_sha_for_cash_ledger_day(truth_root, day, current_git_sha)
+
     _run_stage_strict(
         "PHASEG_BUNDLE_F_TO_G",
         [
@@ -489,7 +504,7 @@ def main() -> int:
             "--day_utc",
             day,
             "--producer_git_sha",
-            current_git_sha,
+            cash_ledger_day_git_sha,
             "--producer_repo",
             "constellation_2_runtime",
             "--operator_statement_json",
@@ -504,6 +519,7 @@ def main() -> int:
         ],
         env=stage_env,
     )
+
     # --- Economic NAV + Drawdown Truth Spine (soft stages) ---
     for stage_name, cmd in [
         ("ECON_NAV_SNAPSHOT_V1", ["python3", "ops/tools/gen_nav_snapshot_v1.py", "--day_utc", day]),
