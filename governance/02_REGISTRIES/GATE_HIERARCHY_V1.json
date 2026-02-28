@@ -34,6 +34,15 @@
       "required": true
     },
     {
+      "gate_id": "heartbeat_gate_v1",
+      "artifact_relpath": "constellation_2/runtime/truth/reports/heartbeat_gate_v1/{DAY}/heartbeat_gate.v1.json",
+      "status_field": "status",
+      "pass_status_values": ["PASS"],
+      "gate_class": "CLASS1_SYSTEM_HARD_STOP",
+      "blocking": true,
+      "required": true
+    },
+    {
       "gate_id": "systemic_risk_gate_v3",
       "artifact_relpath": "constellation_2/runtime/truth/reports/systemic_risk_gate_v3/{DAY}/systemic_risk_gate.v3.json",
       "status_field": "status",
