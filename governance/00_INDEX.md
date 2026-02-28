@@ -118,7 +118,11 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/eod_slo_sentinel.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/regime_snapshot.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/regime_snapshot.v2.schema.json`
-- [Replay Integrity Schema JSON (V1)](04_DATA/SCHEMAS/C2/REPORTS/replay_integrity.v1.schema.json) — id: C2_REPORTS_REPLAY_INTEGRITY_SCHEMA_V1 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/replay_integrity.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/engine_heartbeat.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/incident_event.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/stress_scenario_result.v1.schema.json`
+- [Replay Integrity Schema JSON (V1)](04_DATA/SCHEMAS/C2/REPORTS/replay_integrity.v1.schema.json) 
+— `governance/04_DATA/SCHEMAS/C2/REPORTS/replay_integrity.v1.schema.json`
 
 ### Reports schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/operator_daily_gate.v1.schema.json`
