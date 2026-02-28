@@ -10,7 +10,7 @@ Paper submission boundary v4:
 
 Deterministic, fail-closed.
 
-AUDIT-GRADE ENFORCEMENT (FIX v3-20260228):
+AUDIT-GRADE ENFORCEMENT (FIX v4-20260228):
 - NO broker call unless ALL are proven true for the submission day:
   - gate_stack_verdict_v1.status == PASS
   - global_kill_switch_state.state == INACTIVE AND allow_entries == true
@@ -21,11 +21,14 @@ AUDIT-GRADE ENFORCEMENT (FIX v3-20260228):
       * environment == PAPER and account_id starts with DU
       * lineage.engine_id is present in allowed_engine_ids
       * if allowed_symbols is a list: plan symbol must be in allowed_symbols
+  - C2-native trade submit readiness exists and is OK:
+      * truth/trade_submit_readiness_c2_v1/status.json exists
+      * schema_id == trade_submit_readiness_c2, schema_version == v1
+      * ok == true AND state == OK
+      * environment == PAPER
+      * ib_account matches submission ib_account
+      * provenance.truth_root == this repo's canonical truth_root
   - phasec_out_dir is under repo_root (reject /tmp and other external dirs)
-
-NOTE: trade_submit_readiness enforcement is intentionally NOT performed here yet because
-the current trade_submit_readiness artifacts in truth are cross-repo (non-authoritative).
-A C2-native readiness writer will be implemented and then enforced in a later change.
 """
 
 from __future__ import annotations
@@ -77,6 +80,9 @@ RC_AUTHZ_NOT_AUTHORIZED = "C2_SUBMIT_AUTHZ_NOT_AUTHORIZED"
 
 RC_IB_ACCOUNT_REGISTRY_INVALID = "C2_SUBMIT_IB_ACCOUNT_REGISTRY_INVALID"
 RC_IB_ACCOUNT_NOT_ALLOWED = "C2_SUBMIT_IB_ACCOUNT_NOT_ALLOWED"
+
+RC_READINESS_C2_NOT_OK = "C2_SUBMIT_READINESS_C2_NOT_OK"
+RC_READINESS_C2_NONAUTHORITATIVE = "C2_SUBMIT_READINESS_C2_NONAUTHORITATIVE"
 
 
 def _parse_utc_z(ts: str) -> None:
@@ -215,13 +221,11 @@ def _extract_symbol_from_plan(plan_obj: Dict[str, Any]) -> Optional[str]:
     if not isinstance(plan_obj, dict):
         return None
 
-    # Common direct fields
     for k in ["symbol", "ticker", "underlying_symbol"]:
         v = plan_obj.get(k)
         if isinstance(v, str) and v.strip():
             return v.strip().upper()
 
-    # Common nested: underlying can be a string or an object with symbol/ticker
     u = plan_obj.get("underlying")
     if isinstance(u, str) and u.strip():
         return u.strip().upper()
@@ -231,7 +235,6 @@ def _extract_symbol_from_plan(plan_obj: Dict[str, Any]) -> Optional[str]:
             if isinstance(v, str) and v.strip():
                 return v.strip().upper()
 
-    # Some equity plan variants may embed instrument object
     inst = plan_obj.get("instrument")
     if isinstance(inst, dict):
         for k in ["symbol", "ticker"]:
@@ -275,7 +278,6 @@ def _enforce_ib_account_registry(
     allowed = entry.get("allowed_engine_ids")
     allowed_list = allowed if isinstance(allowed, list) else []
 
-    # Paper enforcement (boundary is PAPER-only)
     if env != "PAPER":
         raise SubmitBoundaryV4Error(f"{RC_IB_ACCOUNT_NOT_ALLOWED}: environment_not_paper env={env} account={ib_account}")
     if not str(ib_account).startswith("DU"):
@@ -285,14 +287,11 @@ def _enforce_ib_account_registry(
         raise SubmitBoundaryV4Error(f"{RC_IB_ACCOUNT_NOT_ALLOWED}: enabled_for_submission=false account={ib_account}")
 
     if engine_id not in [str(x).strip() for x in allowed_list if isinstance(x, str)]:
-        raise SubmitBoundaryV4Error(
-            f"{RC_IB_ACCOUNT_NOT_ALLOWED}: engine_not_allowed engine_id={engine_id} account={ib_account}"
-        )
+        raise SubmitBoundaryV4Error(f"{RC_IB_ACCOUNT_NOT_ALLOWED}: engine_not_allowed engine_id={engine_id} account={ib_account}")
 
-    # Optional symbol restriction
     allowed_symbols = entry.get("allowed_symbols", None)
     if allowed_symbols is None:
-        return  # no symbol restriction
+        return
     if not isinstance(allowed_symbols, list):
         raise SubmitBoundaryV4Error(f"{RC_IB_ACCOUNT_REGISTRY_INVALID}: allowed_symbols_not_list_or_null account={ib_account}")
 
@@ -307,6 +306,58 @@ def _enforce_ib_account_registry(
         raise SubmitBoundaryV4Error(
             f"{RC_IB_ACCOUNT_NOT_ALLOWED}: symbol_not_allowed symbol={plan_symbol} account={ib_account} allowed_symbols={allowed_norm}"
         )
+
+
+def _read_trade_submit_readiness_c2(truth_root: Path, ib_account: str) -> Tuple[bool, str, str, str, Path]:
+    """
+    Enforce C2-native trade submit readiness (fail-closed).
+
+    Required:
+      truth/trade_submit_readiness_c2_v1/status.json
+        - schema_id == trade_submit_readiness_c2
+        - schema_version == v1
+        - ok == true AND state == OK
+        - environment == PAPER
+        - ib_account matches submission
+        - provenance.truth_root == str(truth_root)
+    """
+    p = (truth_root / "trade_submit_readiness_c2_v1" / "status.json").resolve()
+    obj = _read_json_file(p)
+    if not isinstance(obj, dict):
+        raise SubmitBoundaryV4Error(f"{RC_READINESS_C2_NOT_OK}: invalid_readiness_type path={p}")
+
+    schema_id = str(obj.get("schema_id") or "").strip()
+    schema_ver = str(obj.get("schema_version") or "").strip()
+    if schema_id != "trade_submit_readiness_c2" or schema_ver != "v1":
+        raise SubmitBoundaryV4Error(
+            f"{RC_READINESS_C2_NOT_OK}: schema_mismatch schema_id={schema_id!r} schema_version={schema_ver!r} path={p}"
+        )
+
+    ok = bool(obj.get("ok") is True)
+    state = str(obj.get("state") or "").strip().upper()
+    env = str(obj.get("environment") or "").strip().upper()
+    acct = str(obj.get("ib_account") or "").strip()
+
+    prov = obj.get("provenance")
+    prov_truth = ""
+    if isinstance(prov, dict):
+        prov_truth = str(prov.get("truth_root") or "").strip()
+
+    if prov_truth != str(truth_root):
+        raise SubmitBoundaryV4Error(
+            f"{RC_READINESS_C2_NONAUTHORITATIVE}: provenance_truth_root_mismatch got={prov_truth!r} expected={str(truth_root)!r} path={p}"
+        )
+
+    if env != "PAPER":
+        raise SubmitBoundaryV4Error(f"{RC_READINESS_C2_NOT_OK}: environment_not_paper env={env} path={p}")
+
+    if acct != str(ib_account).strip():
+        raise SubmitBoundaryV4Error(f"{RC_READINESS_C2_NOT_OK}: ib_account_mismatch readiness={acct!r} submission={ib_account!r} path={p}")
+
+    if not ok or state != "OK":
+        raise SubmitBoundaryV4Error(f"{RC_READINESS_C2_NOT_OK}: ok={ok} state={state} path={p}")
+
+    return ok, state, env, acct, p
 
 
 def _load_identity_set(phasec_out_dir: Path) -> Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Any], List[str]]:
@@ -360,10 +411,8 @@ def run_submit_boundary_paper_v4(
     repo_root = repo_root.resolve()
     truth_root = (repo_root / "constellation_2/runtime/truth").resolve()
 
-    # Hard safety: phasec_out_dir must be under repo root (reject /tmp and other bypass dirs)
     _require_path_under_repo(repo_root, phasec_out_dir)
 
-    # Load identity set so we can extract intent_hash and lineage.engine_id for gates
     mode, plan_obj, mapping_obj, binding_obj, pointers = _load_identity_set(phasec_out_dir)
     pointers = list(pointers) + [str(risk_budget_path.resolve())]
 
@@ -373,15 +422,12 @@ def run_submit_boundary_paper_v4(
 
     plan_symbol = _extract_symbol_from_plan(plan_obj)
 
-    # Compute deterministic submission id early so any gate failure can write a veto into a stable location.
     binding_hash = canonical_hash_for_c2_artifact_v1(binding_obj)
     submission_id = derive_submission_id_from_binding_hash_v1(binding_hash)
 
-    # Submission root is truth (append-only under day/submission_id)
     day_dir = (truth_root / "execution_evidence_v1" / "submissions" / day).resolve()
     day_dir.mkdir(parents=True, exist_ok=True)
 
-    # Lineage is required for engine_id (registry enforcement) and schema sanity
     try:
         lineage = assert_required_lineage_fields(plan_obj)
     except LineageViolation as e:
@@ -400,7 +446,6 @@ def run_submit_boundary_paper_v4(
         write_phased_veto_only_v1(subdir, veto_record=veto, order_plan=plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
         return 2
 
-    # Authority gates (fail closed). Any failure writes a veto under submission_id.
     try:
         gs_status, gs_path = _read_gate_stack_verdict_status(truth_root, day)
         pointers.append(str(gs_path))
@@ -427,6 +472,13 @@ def run_submit_boundary_paper_v4(
             pointers=pointers,
         )
 
+        rd_ok, rd_state, rd_env, rd_acct, rd_path = _read_trade_submit_readiness_c2(truth_root, str(ib_account).strip())
+        pointers.append(str(rd_path))
+        if not rd_ok or rd_state != "OK" or rd_env != "PAPER" or rd_acct != str(ib_account).strip():
+            raise SubmitBoundaryV4Error(
+                f"{RC_READINESS_C2_NOT_OK}: ok={rd_ok} state={rd_state} env={rd_env} acct={rd_acct}"
+            )
+
     except Exception as gate_failure:
         subdir = (day_dir / submission_id).resolve()
         subdir.mkdir(parents=True, exist_ok=True)
@@ -443,7 +495,6 @@ def run_submit_boundary_paper_v4(
         write_phased_veto_only_v1(subdir, veto_record=veto, order_plan=plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
         return 2
 
-    # Idempotency check after gates; prevents duplicate broker calls.
     try:
         assert_idempotent_or_raise_v1(submissions_root=day_dir, submission_id=submission_id)
     except IdempotencyError as e:
@@ -467,7 +518,6 @@ def run_submit_boundary_paper_v4(
 
     risk_budget = _read_json_file(risk_budget_path.resolve())
 
-    # Build payload digest (does not drive submission_id)
     if mode == "OPTIONS":
         _payload_obj, _dig = build_binding_digest_for_order_plan_v1(plan_obj)
     else:
@@ -507,7 +557,6 @@ def run_submit_boundary_paper_v4(
         submit_res = adapter.submit_order(order_plan=plan_obj)
         assert_no_synth_status_in_paper("PAPER", submit_res.status)
 
-        # Build broker_submission_record.v2
         bsr: Dict[str, Any] = {
             "schema_id": "broker_submission_record",
             "schema_version": "v2",
@@ -521,14 +570,10 @@ def run_submit_boundary_paper_v4(
             "canonical_json_hash": None,
         }
         if not submit_res.ok:
-            bsr["error"] = {
-                "code": submit_res.error_code or "BROKER_REJECTED",
-                "message": submit_res.error_message or "Rejected",
-            }
+            bsr["error"] = {"code": submit_res.error_code or "BROKER_REJECTED", "message": submit_res.error_message or "Rejected"}
         bsr["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(bsr)
         validate_against_repo_schema_v1(bsr, repo_root, "constellation_2/schemas/broker_submission_record.v2.schema.json")
 
-        # If broker ids absent => broker_submission_record only
         if submit_res.order_id is None or submit_res.perm_id is None:
             write_phased_submission_only_v1(
                 submission_dir,
@@ -539,7 +584,6 @@ def run_submit_boundary_paper_v4(
             )
             return 3
 
-        # Build execution_event_record.v1
         evt: Dict[str, Any] = {
             "schema_id": "execution_event_record",
             "schema_version": "v1",
@@ -549,9 +593,7 @@ def run_submit_boundary_paper_v4(
             "broker_submission_hash": bsr["canonical_json_hash"],
             "broker_order_id": str(submit_res.order_id),
             "perm_id": str(submit_res.perm_id),
-            "status": submit_res.status
-            if submit_res.status
-            in (
+            "status": submit_res.status if submit_res.status in (
                 "SUBMITTED",
                 "ACKNOWLEDGED",
                 "REJECTED",
@@ -559,8 +601,7 @@ def run_submit_boundary_paper_v4(
                 "PARTIALLY_FILLED",
                 "FILLED",
                 "UNKNOWN",
-            )
-            else "UNKNOWN",
+            ) else "UNKNOWN",
             "filled_qty": 0,
             "avg_price": "0",
             "raw_broker_status": None,
