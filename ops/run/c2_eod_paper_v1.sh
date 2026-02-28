@@ -10,10 +10,20 @@ TRUTH_ROOT="${C2_TRUTH_ROOT:-/home/node/constellation_2_runtime/constellation_2/
 
 DAY_UTC="$(/bin/date -u -d "yesterday" +%F)"
 
-# --- NAV bridge: ensure accounting_v1/nav exists using accounting_v2/nav if needed ---
+# --- NAV bridge: provide v1-compatible NAV views WITHOUT violating accounting spine exclusivity ---
+# Governance: accounting spine is exclusive v2 from 2026-02-20 onward (C2_SPINE_AUTHORITY_V1).
+# Therefore: never write accounting_v1 day artifacts for days >= 2026-02-20.
+ENFORCE_ACCOUNTING_V2_FROM_DAY_UTC="2026-02-20"
+
+V2_NAV_JSON="${TRUTH_ROOT}/accounting_v2/nav/${DAY_UTC}/nav.v2.json"
+
+# Compat bridge outputs (non-authoritative; outside accounting spine namespace)
+COMPAT_V1_NAV_JSON="${TRUTH_ROOT}/accounting_compat_v1/nav/${DAY_UTC}/nav.json"
+COMPAT_V1_NAV_SNAP="${TRUTH_ROOT}/accounting_compat_v1/nav/${DAY_UTC}/nav_snapshot.v1.json"
+
+# Legacy v1 (allowed only before enforce window)
 V1_NAV_JSON="${TRUTH_ROOT}/accounting_v1/nav/${DAY_UTC}/nav.json"
 V1_NAV_SNAP="${TRUTH_ROOT}/accounting_v1/nav/${DAY_UTC}/nav_snapshot.v1.json"
-V2_NAV_JSON="${TRUTH_ROOT}/accounting_v2/nav/${DAY_UTC}/nav.v2.json"
 
 # Seed sentinel anchor day once (some consumers expect a historical default day).
 ANCHOR_DAY="2001-01-01"
@@ -57,9 +67,15 @@ print(f"OK: SEEDED_V1_NAV_ANCHOR path={out}")
 '
 fi
 
-# If v1 nav is missing but v2 nav exists, bridge it (write both nav.json and nav_snapshot.v1.json).
-if test ! -f "$V1_NAV_JSON" && test -f "$V2_NAV_JSON"; then
-  V2_NAV_JSON="$V2_NAV_JSON" V1_NAV_JSON="$V1_NAV_JSON" V1_NAV_SNAP="$V1_NAV_SNAP" "$VENV_PY" -c '
+# Bridge policy:
+# - If v2 NAV exists:
+#   - For DAY_UTC < ENFORCE_ACCOUNTING_V2_FROM_DAY_UTC: allow legacy accounting_v1 bridge (if missing).
+#   - For DAY_UTC >= ENFORCE_ACCOUNTING_V2_FROM_DAY_UTC: write compat v1 only (never accounting_v1).
+if test -f "$V2_NAV_JSON"; then
+  if [[ "$DAY_UTC" < "$ENFORCE_ACCOUNTING_V2_FROM_DAY_UTC" ]]; then
+    # legacy pre-enforce: allow accounting_v1 outputs
+    if test ! -f "$V1_NAV_JSON"; then
+      V2_NAV_JSON="$V2_NAV_JSON" V1_NAV_JSON="$V1_NAV_JSON" V1_NAV_SNAP="$V1_NAV_SNAP" "$VENV_PY" -c '
 import json, os
 from pathlib import Path
 
@@ -103,10 +119,67 @@ atomic_write(v1p, doc)
 atomic_write(v1s, doc)
 print(f"OK: BRIDGED_V1_NAV_FROM_V2 v1_nav={v1p} v1_snap={v1s} src_v2={v2p}")
 '
+    fi
+  else
+    # post-enforce: write compat v1 only (never accounting_v1)
+    if test ! -f "$COMPAT_V1_NAV_JSON"; then
+      V2_NAV_JSON="$V2_NAV_JSON" V1_NAV_JSON="$COMPAT_V1_NAV_JSON" V1_NAV_SNAP="$COMPAT_V1_NAV_SNAP" "$VENV_PY" -c '
+import json, os
+from pathlib import Path
+
+v2p = Path(os.environ["V2_NAV_JSON"])
+v1p = Path(os.environ["V1_NAV_JSON"])
+v1s = Path(os.environ["V1_NAV_SNAP"])
+
+v2 = json.loads(v2p.read_text(encoding="utf-8"))
+day = str(v2.get("day_utc") or "").strip()
+nav = v2.get("nav") or {}
+prod = v2.get("producer") or {}
+produced_utc = str(v2.get("produced_utc") or "").strip()
+
+doc = {
+  "day_utc": day,
+  "history": v2.get("history") or {},
+  "input_manifest": [{
+    "day_utc": day,
+    "path": str(v2p),
+    "producer": "accounting_nav_v2",
+    "sha256": "",
+    "type": "bridge_source_nav_v2"
+  }],
+  "nav": nav,
+  "produced_utc": produced_utc,
+  "producer": {"repo": "constellation_2_runtime", "module": "ops/run/c2_eod_paper_v1.sh", "git_sha": str(prod.get("git_sha") or "UNKNOWN")},
+  "reason_codes": ["BRIDGED_FROM_NAV_V2"],
+  "schema_id": "C2_ACCOUNTING_NAV_V1",
+  "schema_version": 1,
+  "status": "BRIDGED_FROM_V2"
+}
+
+def atomic_write(path: Path, obj: dict):
+  path.parent.mkdir(parents=True, exist_ok=True)
+  raw = json.dumps(obj, sort_keys=True, separators=(",",":"), ensure_ascii=False) + "\n"
+  tmp = path.with_suffix(path.suffix + ".tmp")
+  tmp.write_text(raw, encoding="utf-8")
+  os.replace(tmp, path)
+
+atomic_write(v1p, doc)
+atomic_write(v1s, doc)
+print(f"OK: BRIDGED_COMPAT_V1_NAV_FROM_V2 v1_nav={v1p} v1_snap={v1s} src_v2={v2p}")
+'
+    fi
+  fi
 fi
 
 # Bundle completion proof (immutable outputs exist -> DO NOT rerun bundle)
-NAV_JSON="${TRUTH_ROOT}/accounting_v1/nav/${DAY_UTC}/nav.json"
+# Authoritative NAV path selection:
+# - post-enforce: accounting_v2/nav/<DAY>/nav.v2.json
+# - pre-enforce: accounting_v1/nav/<DAY>/nav.json
+if [[ "$DAY_UTC" < "$ENFORCE_ACCOUNTING_V2_FROM_DAY_UTC" ]]; then
+  NAV_JSON="${TRUTH_ROOT}/accounting_v1/nav/${DAY_UTC}/nav.json"
+else
+  NAV_JSON="${TRUTH_ROOT}/accounting_v2/nav/${DAY_UTC}/nav.v2.json"
+fi
 
 # Producer sha: if day outputs exist, lock to the day’s existing cash_ledger producer sha; else use HEAD.
 CASH_LEDGER_SNAP="${TRUTH_ROOT}/cash_ledger_v1/snapshots/${DAY_UTC}/cash_ledger_snapshot.v1.json"
@@ -225,7 +298,12 @@ echo "C2_EOD_V1_START day_utc=${DAY_UTC} produced_utc=${PRODUCED_UTC} git_sha=${
 
 # --- Defensive Tail required inputs bridge (immutable; skip if already present) ---
 DEF_MD="${TRUTH_ROOT}/market_data_snapshot_v1/snapshots/${DAY_UTC}/SPY.market_data_snapshot.v1.json"
-DEF_NAV="${TRUTH_ROOT}/accounting_v1/nav/${DAY_UTC}/nav_snapshot.v1.json"
+# Defensive Tail required inputs must not depend on forbidden accounting_v1 day artifacts post-enforce.
+if [[ "$DAY_UTC" < "$ENFORCE_ACCOUNTING_V2_FROM_DAY_UTC" ]]; then
+  DEF_NAV="${TRUTH_ROOT}/accounting_v1/nav/${DAY_UTC}/nav_snapshot.v1.json"
+else
+  DEF_NAV="${TRUTH_ROOT}/accounting_compat_v1/nav/${DAY_UTC}/nav_snapshot.v1.json"
+fi
 DEF_POS="${TRUTH_ROOT}/positions_snapshot_v2/snapshots/${DAY_UTC}/positions_snapshot.v2.json"
 if test -f "$DEF_MD" && test -f "$DEF_NAV" && test -f "$DEF_POS"; then
   echo "C2_EOD_V1_SKIP def_tail_inputs_bridge: already exists for day_utc=${DAY_UTC}"
