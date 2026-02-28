@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "c2.monitoring.stress_scenario_result.v1",
+  "title": "C2 Stress Scenario Result v1 (deterministic, replayable, hash-locked scenario output)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "scenario_id",
+    "day_utc",
+    "scenario_config",
+    "inputs",
+    "results",
+    "policy_evaluation",
+    "produced_utc",
+    "producer",
+    "result_sha256"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "C2_STRESS_SCENARIO_RESULT_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+
+    "scenario_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Deterministic scenario id (sha256 of canonical scenario_config)."
+    },
+
+    "day_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+
+    "scenario_config": {
+      "type": "object",
+      "additionalProperties": true
+    },
+
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifacts"],
+      "properties": {
+        "artifacts": {
+          "type": "array",
+          "minItems": 0,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "sha256", "type"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+              "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+              "type": { "type": "string", "minLength": 1, "maxLength": 80 }
+            }
+          }
+        }
+      }
+    },
+
+    "results": {
+      "type": "object",
+      "additionalProperties": true
+    },
+
+    "policy_evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "breaches"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["PASS", "FAIL"]
+        },
+        "breaches": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 160 }
+        }
+      }
+    },
+
+    "produced_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "module": { "type": "string", "minLength": 1, "maxLength": 220 },
+        "git_sha": { "type": "string", "minLength": 7, "maxLength": 64 }
+      }
+    },
+
+    "result_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Self-hash of canonical JSON bytes with result_sha256 field set to null/empty during hashing, then populated."
+    }
+  }
+}

@@ -240,7 +240,20 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/MONITORING/regime_snapshot.v2.schema.json
     class: C2_SCHEMA
     status: DRAFT
+  - id: C2_MONITORING_ENGINE_HEARTBEAT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/MONITORING/engine_heartbeat.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
 
+  - id: C2_MONITORING_INCIDENT_EVENT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/MONITORING/incident_event.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_MONITORING_STRESS_SCENARIO_RESULT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/MONITORING/stress_scenario_result.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
   # Bundle 4 — Operator-grade reports (governed outputs)
   - id: C2_REPORTS_OPERATOR_DAILY_GATE_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/operator_daily_gate.v1.schema.json
@@ -429,6 +442,25 @@ documents:
     status: ACTIVE
   - id: C2_OPERATOR_FUTURE_DAY_OVERRIDE_CONTRACT_V1
     path: governance/05_CONTRACTS/C2/operator_future_day_override_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
   - id: C2_REPORTS_OPERATOR_FUTURE_DAY_OVERRIDE_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/operator_future_day_override.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
 
+  - id: C2_REPORTS_HEARTBEAT_GATE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/heartbeat_gate.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TOOL_HEARTBEAT_GATE_V1
+    path: ops/tools/run_heartbeat_gate_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_REGISTRY_GATE_HIERARCHY_V1
+    path: governance/02_REGISTRIES/GATE_HIERARCHY_V1.json
+    class: C2_REGISTRY
+    status: DRAFT

@@ -36,9 +36,10 @@ This repository is the constitutional root of **Constellation 2.0**.
 
 Additional registries introduced:
 
-- `governance/02_REGISTRIES/GATE_HIERARCHY_V1.json`
 - `governance/02_REGISTRIES/TRUTH_SURFACE_AUTHORITY_V1.json`
 
+### Registries (governed)
+- `governance/02_REGISTRIES/GATE_HIERARCHY_V1.json`
 
 ### D) Operator docs and runbooks (non-authoritative guidance)
 - `docs/` (informational; not a contract unless also registered in the manifest)
@@ -103,6 +104,7 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 ### Engine activity schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/oms_decision.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/intents_day_rollup.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/heartbeat_gate.v1.schema.json`
 
 ### Phase J — Monitoring schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/portfolio_nav_series.v1.schema.json`
@@ -119,7 +121,11 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/eod_slo_sentinel.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/regime_snapshot.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/regime_snapshot.v2.schema.json`
-- [Replay Integrity Schema JSON (V1)](04_DATA/SCHEMAS/C2/REPORTS/replay_integrity.v1.schema.json) — id: C2_REPORTS_REPLAY_INTEGRITY_SCHEMA_V1 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/replay_integrity.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/engine_heartbeat.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/incident_event.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/stress_scenario_result.v1.schema.json`
+- [Replay Integrity Schema JSON (V1)](04_DATA/SCHEMAS/C2/REPORTS/replay_integrity.v1.schema.json) 
+— `governance/04_DATA/SCHEMAS/C2/REPORTS/replay_integrity.v1.schema.json`
 
 ### Reports schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/operator_daily_gate.v1.schema.json`
