@@ -481,7 +481,7 @@ def main() -> int:
             "--day_utc",
             day,
             "--produced_utc",
-            produced_utc,
+            f"{day}T00:00:00Z",
             "--seed",
             daily_snapshot_seed,
             "--allow_degraded_report",
