@@ -1,0 +1,81 @@
+{
+  "schema_id": "C2_CAPITAL_AUTHORITY_POLICY_V1",
+  "schema_version": 1,
+  "status": "DRAFT",
+  "created_utc": "2026-02-27T00:00:00Z",
+  "owner": "Constellation",
+  "notes": [
+    "Governance-owned policy manifest for Bundle A (Capital Authority Layer).",
+    "This policy is consumed by deterministic producers: exposure_net_v1 + allocation_authority_v1.",
+    "All numeric values are interpreted as decimal strings or integer cents by runtime code; no floats are authoritative."
+  ],
+  "sleeves": [
+    {
+      "sleeve_id": "E78_TREND_EQ_PRIMARY",
+      "display_name": "Trend Sleeve (Equity Primary)",
+      "engine_ids": ["E78"],
+      "priority_rank": 10,
+      "limits": {
+        "max_gross_notional_usd": "0",
+        "max_net_notional_usd": "0",
+        "max_capital_at_risk_cents": 0,
+        "max_symbols": 25,
+        "max_sector_concentration_pct": "0.25",
+        "max_single_name_notional_pct": "0.10",
+        "max_beta_gross_proxy": "1.50",
+        "max_beta_net_proxy": "0.80"
+      }
+    },
+    {
+      "sleeve_id": "M34_VOL_INCOME_DEFINED_RISK",
+      "display_name": "Volatility Income Sleeve (Defined Risk Options)",
+      "engine_ids": ["M34"],
+      "priority_rank": 20,
+      "limits": {
+        "max_gross_notional_usd": "0",
+        "max_net_notional_usd": "0",
+        "max_capital_at_risk_cents": 0,
+        "max_symbols": 15,
+        "max_sector_concentration_pct": "0.35",
+        "max_single_name_notional_pct": "0.12",
+        "max_beta_gross_proxy": "1.20",
+        "max_beta_net_proxy": "0.60"
+      }
+    }
+  ],
+  "portfolio_limits": {
+    "max_gross_notional_usd": "0",
+    "max_net_notional_usd": "0",
+    "max_capital_at_risk_cents": 0,
+    "max_symbols": 40,
+    "max_sector_concentration_pct": "0.40",
+    "max_single_name_notional_pct": "0.12",
+    "max_pairwise_correlation_proxy": "0.75"
+  },
+  "conflict_policy": {
+    "policy_id": "C2_CONFLICT_POLICY_V1",
+    "rules": [
+      "Deterministic priority: lower priority_rank number wins when limited capital-at-risk headroom exists.",
+      "If both intents can be partially filled without violating limits, allocate deterministically by priority then stable lexicographic intent_hash.",
+      "If an intent is partially authorized, authorization must encode the exact authorized quantity/contract count."
+    ]
+  },
+  "reason_codes": [
+    "CAPAUTH_FAIL_CLOSED_REQUIRED",
+    "CAPAUTH_MISSING_REQUIRED_INPUT",
+    "CAPAUTH_SCHEMA_VIOLATION",
+    "CAPAUTH_POLICY_MISSING",
+    "CAPAUTH_POLICY_SCHEMA_INVALID",
+    "CAPAUTH_POSITIONS_SNAPSHOT_MISSING",
+    "CAPAUTH_CASH_LEDGER_MISSING",
+    "CAPAUTH_INTENTS_MISSING",
+    "CAPAUTH_EXPOSURE_NET_MISSING",
+    "CAPAUTH_PORTFOLIO_LIMIT_BREACH",
+    "CAPAUTH_SLEEVE_LIMIT_BREACH",
+    "CAPAUTH_CONCENTRATION_LIMIT_BREACH",
+    "CAPAUTH_CORRELATION_PROXY_LIMIT_BREACH",
+    "CAPAUTH_CONFLICT_RESOLUTION_BLOCK",
+    "CAPAUTH_AUTHORIZED",
+    "CAPAUTH_REJECTED"
+  ]
+}

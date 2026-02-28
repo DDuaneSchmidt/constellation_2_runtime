@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_EXPOSURE_NET_V1",
+  "title": "C2 Exposure Net v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "day_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "input_manifest",
+    "portfolio",
+    "per_engine"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_EXPOSURE_NET_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+
+    "produced_utc": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "module": { "type": "string", "minLength": 1 },
+        "build": { "type": "object" }
+      }
+    },
+
+    "status": {
+      "type": "string",
+      "enum": [
+        "OK",
+        "FAIL_MISSING_INPUTS",
+        "FAIL_CORRUPT_INPUTS",
+        "FAIL_SCHEMA_VIOLATION"
+      ]
+    },
+
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256", "day_utc", "producer"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "positions_snapshot",
+              "cash_ledger_snapshot",
+              "intents_snapshot",
+              "policy_manifest",
+              "market_data_snapshot",
+              "other"
+            ]
+          },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "day_utc": {
+            "anyOf": [
+              { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+              { "type": "null" }
+            ]
+          },
+          "producer": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+
+    "portfolio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gross_notional_usd",
+        "net_notional_usd",
+        "capital_at_risk_cents",
+        "symbol_count",
+        "by_symbol"
+      ],
+      "properties": {
+        "gross_notional_usd": { "type": "string", "minLength": 1 },
+        "net_notional_usd": { "type": "string", "minLength": 1 },
+        "capital_at_risk_cents": { "type": "integer", "minimum": 0 },
+        "symbol_count": { "type": "integer", "minimum": 0 },
+        "by_symbol": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["symbol", "net_notional_usd", "gross_notional_usd", "capital_at_risk_cents"],
+            "properties": {
+              "symbol": { "type": "string", "minLength": 1, "maxLength": 32 },
+              "net_notional_usd": { "type": "string", "minLength": 1 },
+              "gross_notional_usd": { "type": "string", "minLength": 1 },
+              "capital_at_risk_cents": { "type": "integer", "minimum": 0 },
+              "sector": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+            }
+          }
+        }
+      }
+    },
+
+    "per_engine": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["engine_id", "gross_notional_usd", "net_notional_usd", "capital_at_risk_cents", "by_symbol"],
+        "properties": {
+          "engine_id": { "type": "string", "minLength": 1 },
+          "gross_notional_usd": { "type": "string", "minLength": 1 },
+          "net_notional_usd": { "type": "string", "minLength": 1 },
+          "capital_at_risk_cents": { "type": "integer", "minimum": 0 },
+          "by_symbol": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["symbol", "net_notional_usd", "gross_notional_usd", "capital_at_risk_cents"],
+              "properties": {
+                "symbol": { "type": "string", "minLength": 1, "maxLength": 32 },
+                "net_notional_usd": { "type": "string", "minLength": 1 },
+                "gross_notional_usd": { "type": "string", "minLength": 1 },
+                "capital_at_risk_cents": { "type": "integer", "minimum": 0 },
+                "sector": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

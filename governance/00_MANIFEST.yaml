@@ -387,3 +387,28 @@ documents:
     path: governance/05_CONTRACTS/C2/market_neutral_spread_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
+
+  - id: C2_CAPITAL_AUTHORITY_LAYER_BUNDLE_A_V1
+    path: governance/05_CONTRACTS/C2/capital_authority_layer_bundle_a_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_REGISTRY_CAPITAL_AUTHORITY_POLICY_V1
+    path: governance/02_REGISTRIES/C2_CAPITAL_AUTHORITY_POLICY_V1.json
+    class: C2_REGISTRY
+    status: DRAFT
+
+  - id: C2_RISK_EXPOSURE_NET_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/RISK/exposure_net.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_ALLOCATION_CAPITAL_AUTHORITY_ALLOCATION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ALLOCATION/capital_authority_allocation.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_ENGINE_ACTIVITY_AUTHORIZATION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/authorization.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
