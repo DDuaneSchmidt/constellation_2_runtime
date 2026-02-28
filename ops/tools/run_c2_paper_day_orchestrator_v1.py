@@ -85,7 +85,6 @@ def _validate_produced_utc(produced_utc: str) -> str:
     if "T" not in s:
         raise SystemExit(f"FATAL: produced_utc must be ISO-8601 with 'T': {s}")
 
-    # Strict parse: Python's fromisoformat does not accept 'Z', so normalize to +00:00.
     try:
         dt = _dt.datetime.fromisoformat(s[:-1] + "+00:00")
     except Exception:
@@ -94,7 +93,6 @@ def _validate_produced_utc(produced_utc: str) -> str:
     if dt.tzinfo is None:
         raise SystemExit(f"FATAL: produced_utc must be timezone-aware UTC: {s}")
 
-    # Normalize back to canonical Z form (no microseconds).
     dt = dt.astimezone(_dt.timezone.utc).replace(microsecond=0)
     return dt.isoformat().replace("+00:00", "Z")
 
@@ -116,43 +114,6 @@ def _run_stage_soft(name: str, cmd: List[str], *, env: Dict[str, str]) -> Tuple[
         return (False, int(p.returncode))
     print(f"STAGE_OK {name}")
     return (True, 0)
-
-
-def _bootstrap_window_true(truth_root: Path, day_utc: str) -> bool:
-    """
-    Day-0 Bootstrap Window iff:
-      TRUTH/execution_evidence_v1/submissions/<DAY>/ is missing OR contains zero submission dirs.
-    """
-    root = (truth_root / "execution_evidence_v1" / "submissions" / day_utc).resolve()
-    if (not root.exists()) or (not root.is_dir()):
-        return True
-    try:
-        for p in root.iterdir():
-            if p.is_dir():
-                return False
-    except Exception:
-        # Fail-closed: if we cannot enumerate, treat as NOT bootstrap.
-        return False
-    return True
-
-
-def _intents_day_empty(truth_root: Path, day_utc: str) -> bool:
-    """
-    Intents are considered empty iff:
-      - intents_v1/snapshots/<DAY>/ does not exist, OR
-      - it exists but contains zero files.
-    """
-    d = (truth_root / "intents_v1" / "snapshots" / day_utc).resolve()
-    if (not d.exists()) or (not d.is_dir()):
-        return True
-    try:
-        for p in d.iterdir():
-            if p.is_file():
-                return False
-    except Exception:
-        # Fail-closed: if we cannot enumerate, do NOT treat as empty.
-        return False
-    return True
 
 
 def _read_engine_registry() -> Dict[str, Any]:
@@ -179,6 +140,7 @@ def _locked_git_sha_for_positions_day(truth_root: Path, day_utc: str, fallback_g
     except Exception:
         return fallback_git_sha
 
+
 def _locked_git_sha_for_cash_ledger_day(truth_root: Path, day_utc: str, fallback_git_sha: str) -> str:
     """
     Day-SHA lock: if the day already has a cash ledger snapshot, reuse its producer.git_sha
@@ -193,6 +155,7 @@ def _locked_git_sha_for_cash_ledger_day(truth_root: Path, day_utc: str, fallback
         return sha if sha else fallback_git_sha
     except Exception:
         return fallback_git_sha
+
 
 def _active_engines_sorted(reg: Dict[str, Any]) -> List[Dict[str, str]]:
     engines = reg.get("engines") or []
@@ -257,13 +220,9 @@ def main() -> int:
         print("FATAL: Orchestrator v1 supports PAPER mode only.", file=sys.stderr)
         return 2
 
-    # All stages inherit truth_root via env so tools that honor C2_TRUTH_ROOT write into the correct tree.
-    # Also pin PYTHONPATH to repo root for deterministic imports across all tools.
     stage_env = dict(os.environ)
     stage_env["C2_TRUTH_ROOT"] = str(truth_root)
     stage_env["PYTHONPATH"] = str(REPO_ROOT)
-    # NOTE: produced_utc is deterministic and operator-supplied; orchestrator does not synthesize time.
-    # This is not yet consumed by all tools; it is retained here for audit context and future propagation.
     stage_env["C2_PRODUCED_UTC"] = produced_utc
 
     current_git_sha = (
@@ -272,7 +231,7 @@ def main() -> int:
         .strip()
     )
 
-    # --- Bundle A2 (Fail-Closed) ---
+    # --- Bundle A2 (strict) ---
     _run_stage_strict(
         "A2_BROKER_RECONCILIATION_GATE_V2",
         [
@@ -296,13 +255,12 @@ def main() -> int:
         env=stage_env,
     )
 
-    # --- Bundle A3: Broker Marks (strict) ---
     _run_stage_strict(
         "A3_BROKER_MARKS_SNAPSHOT_V1",
         ["python3", "ops/tools/run_broker_marks_snapshot_day_v1.py", "--day_utc", day],
         env=stage_env,
     )
-    # --- Bundle A3: Accounting NAV v2 (strict) ---
+
     _run_stage_strict(
         "A3_ACCOUNTING_NAV_V2",
         [
@@ -318,7 +276,6 @@ def main() -> int:
         env=stage_env,
     )
 
-    # --- Bundle A5: Accounting Attribution v2 (strict) ---
     _run_stage_strict(
         "A5_ACCOUNTING_ATTRIBUTION_V2",
         [
@@ -334,7 +291,6 @@ def main() -> int:
         env=stage_env,
     )
 
-    # --- Bundle A6: Engine Daily Returns v1 (soft) ---
     ok, _rc = _run_stage_soft(
         "A6_ENGINE_DAILY_RETURNS_V1",
         ["python3", "ops/tools/run_engine_daily_returns_day_v1.py", "--day_utc", day],
@@ -343,7 +299,6 @@ def main() -> int:
     if not ok:
         prereq_failed = True
 
-    # --- Bundle A4: Engine Linkage Snapshot (soft) ---
     ok, _rc = _run_stage_soft(
         "A4_ENGINE_LINKAGE_SNAPSHOT_V1",
         [
@@ -361,19 +316,20 @@ def main() -> int:
     if not ok:
         prereq_failed = True
 
-    # --- Stage 0 ---
+    # --- Stage 0 (strict) ---
     _run_stage_strict(
         "BUNDLEB_ENGINE_MODEL_REGISTRY_GATE",
         ["python3", "ops/tools/run_engine_model_registry_gate_v1.py", "--day_utc", day, "--current_git_sha", current_git_sha],
         env=stage_env,
     )
+
     _run_stage_strict(
         "X_ACTIVE_ENGINE_SET_SNAPSHOT_V1",
         ["python3", "ops/tools/run_active_engine_set_snapshot_v1.py", "--day_utc", day, "--current_git_sha", current_git_sha],
         env=stage_env,
     )
 
-    # --- Stage 1 Engines (registry-driven; ACTIVE only; deterministic order) ---
+    # --- Stage 1 Engines (soft) ---
     reg = _read_engine_registry()
     active_engines = _active_engines_sorted(reg)
     for e in active_engines:
@@ -387,7 +343,7 @@ def main() -> int:
         if not ok:
             prereq_failed = True
 
-    # --- Bundle X prerequisites (strict; root-level systemic inputs) ---
+    # --- Bundle X prerequisites (strict) ---
     _run_stage_strict(
         "X_ENGINE_RISK_BUDGET_LEDGER_V1",
         ["python3", "ops/tools/run_engine_risk_budget_ledger_v1.py", "--day_utc", input_day],
@@ -400,48 +356,38 @@ def main() -> int:
         env=stage_env,
     )
 
-    # --- Bundle F++: Lifecycle Monitor (strict) ---
-    # --- Bundle F prereqs for lifecycle monitor (strict; must exist before monitor) ---
+    # --- Bundle F prereqs (strict) ---
     _run_stage_strict(
         "F_POSITION_LIFECYCLE_SNAPSHOT_V2",
-        [
-            "python3",
-            "ops/tools/run_position_lifecycle_snapshot_v2.py",
-            "--day_utc",
-            day,
-        ],
-        env=stage_env,
-    )
-    _run_stage_strict(
-        "F_EXIT_OBLIGATIONS_V1",
-        [
-            "python3",
-            "ops/tools/run_exit_obligations_v1.py",
-            "--day_utc",
-            day,
-        ],
-        env=stage_env,
-    )
-    _run_stage_strict(
-        "F_EXPOSURE_RECONCILIATION_V2",
-        [
-            "python3",
-            "ops/tools/run_exposure_reconciliation_v2.py",
-            "--day_utc",
-            day,
-        ],
+        ["python3", "ops/tools/run_position_lifecycle_snapshot_v2.py", "--day_utc", day],
         env=stage_env,
     )
 
     _run_stage_strict(
+        "F_EXIT_OBLIGATIONS_V1",
+        ["python3", "ops/tools/run_exit_obligations_v1.py", "--day_utc", day],
+        env=stage_env,
+    )
+
+    ok, _rc = _run_stage_soft(
+        "F_EXPOSURE_RECONCILIATION_V2",
+        ["python3", "ops/tools/run_exposure_reconciliation_v2.py", "--day_utc", day],
+        env=stage_env,
+    )
+    if not ok:
+        prereq_failed = True
+
+    # lifecycle monitor is soft; do NOT abort the run for SAFE_IDLE / day0 situations
+    ok, _rc = _run_stage_soft(
         "BUNDLEF_LIFECYCLE_MONITOR_V1",
         ["python3", "ops/tools/run_lifecycle_monitor_v1.py", "--day_utc", day],
         env=stage_env,
     )
+    if not ok:
+        prereq_failed = True
 
-    # --- B+2 Positions Effective Pointer (strict; immutable) ---
+    # --- Positions Effective Pointer (strict) ---
     positions_day_git_sha = _locked_git_sha_for_positions_day(truth_root, day, current_git_sha)
-
     _run_stage_strict(
         "B2_POSITIONS_EFFECTIVE_POINTER_V1",
         [
@@ -456,14 +402,14 @@ def main() -> int:
         env=stage_env,
     )
 
-    # --- A+3 Paper Readiness Monitor (strict) ---
+    # --- Paper Readiness (strict) ---
     _run_stage_strict(
         "A3_PAPER_READINESS_MONITOR_V2",
         ["python3", "ops/tools/run_paper_readiness_monitor_v2.py", "--day_utc", day],
         env=stage_env,
     )
 
-    # --- PhaseF ---
+    # --- PhaseF (strict) ---
     _run_stage_strict(
         "PHASEF_EXEC_EVIDENCE",
         [
@@ -482,19 +428,12 @@ def main() -> int:
 
     _run_stage_strict(
         "PHASEF_SUBMISSION_INDEX",
-        [
-            "python3",
-            "-m",
-            "constellation_2.phaseF.execution_evidence.run.run_submission_index_day_v1",
-            "--day",
-            day,
-        ],
+        ["python3", "-m", "constellation_2.phaseF.execution_evidence.run.run_submission_index_day_v1", "--day", day],
         env=stage_env,
     )
 
-    # --- PhaseG ---
+    # --- PhaseG (strict) ---
     cash_ledger_day_git_sha = _locked_git_sha_for_cash_ledger_day(truth_root, day, current_git_sha)
-
     _run_stage_strict(
         "PHASEG_BUNDLE_F_TO_G",
         [
@@ -520,7 +459,7 @@ def main() -> int:
         env=stage_env,
     )
 
-    # --- Economic NAV + Drawdown Truth Spine (soft stages) ---
+    # --- Economic truth spine (soft) ---
     for stage_name, cmd in [
         ("ECON_NAV_SNAPSHOT_V1", ["python3", "ops/tools/gen_nav_snapshot_v1.py", "--day_utc", day]),
         ("ECON_NAV_HISTORY_LEDGER_V1", ["python3", "ops/tools/gen_nav_history_ledger_v1.py", "--day_utc", day]),
@@ -530,33 +469,37 @@ def main() -> int:
     ]:
         _run_stage_soft(stage_name, cmd, env=stage_env)
 
-    # --- PhaseJ ---
+    # --- PhaseJ (strict) ---
+    # Deterministic seed material (no randomness; stable across reruns for same day/symbol/mode).
+    daily_snapshot_seed = f"C2_PAPER_DAILY_SNAPSHOT_SEED_V1|day={day}|symbol={symbol}|mode={mode}"
     _run_stage_strict(
         "PHASEJ_DAILY_SNAPSHOT",
-        ["python3", "-m", "constellation_2.phaseJ.reporting.daily_snapshot_v1", "--day_utc", day],
+        [
+            "python3",
+            "-m",
+            "constellation_2.phaseJ.reporting.daily_snapshot_v1",
+            "--day_utc",
+            day,
+            "--produced_utc",
+            produced_utc,
+            "--seed",
+            daily_snapshot_seed,
+            "--allow_degraded_report",
+            "true",
+        ],
         env=stage_env,
     )
-
-    # --- Bundle A ---
+    # --- Bundle A (strict) ---
     _run_stage_strict(
         "BUNDLEA_PIPELINE_MANIFEST",
         ["python3", "ops/tools/run_pipeline_manifest_v1.py", "--day_utc", day],
         env=stage_env,
     )
 
-    # --- Bundle Y: Replay Integrity (strict; deterministic replay hash sealing) ---
+    # --- Replay integrity (strict) ---
     _run_stage_strict(
         "Y_REPLAY_INTEGRITY_V2",
-        [
-            "python3",
-            "ops/tools/run_replay_integrity_day_v2.py",
-            "--day_utc",
-            day,
-            "--mode",
-            "WRITE",
-            "--truth_root",
-            str(truth_root),
-        ],
+        ["python3", "ops/tools/run_replay_integrity_day_v2.py", "--day_utc", day, "--mode", "WRITE", "--truth_root", str(truth_root)],
         env=stage_env,
     )
 
