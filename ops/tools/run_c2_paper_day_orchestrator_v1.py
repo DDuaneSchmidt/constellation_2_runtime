@@ -419,6 +419,10 @@ def main() -> int:
             "constellation_2.phaseF.execution_evidence.run.run_execution_evidence_truth_day_v1",
             "--day_utc",
             day,
+            "--producer_git_sha",
+            current_git_sha,
+            "--producer_repo",
+            "constellation_2_runtime",
         ],
         env=stage_env,
     )
