@@ -37,6 +37,7 @@ This repository is the constitutional root of **Constellation 2.0**.
 Additional registries introduced:
 
 - `governance/02_REGISTRIES/TRUTH_SURFACE_AUTHORITY_V1.json`
+- `governance/02_REGISTRIES/C2_IB_ACCOUNT_REGISTRY_V1.json`
 
 ### Registries (governed)
 - `governance/02_REGISTRIES/GATE_HIERARCHY_V1.json`
@@ -91,6 +92,7 @@ These canonical contracts are governance-controlled and must be explicitly liste
 - `governance/05_CONTRACTS/C2/cross_asset_trend_v1.contract.md`
 - `governance/05_CONTRACTS/C2/market_neutral_spread_v1.contract.md`
 - `governance/05_CONTRACTS/C2/C2_ATTEMPT_SCOPED_WRITE_POLICY_WITH_CANONICAL_POINTERS_V3.contract.md`
+- `governance/05_CONTRACTS/C2/ib_account_registry_v1.contract.md`
 
 ## Governed data schemas
 

@@ -1,0 +1,24 @@
+{
+  "schema_id": "c2_ib_account_registry",
+  "schema_version": "v1",
+  "produced_utc": "2026-02-28T00:00:00Z",
+  "producer": {
+    "repo": "constellation_2_runtime",
+    "module": "governance/02_REGISTRIES/C2_IB_ACCOUNT_REGISTRY_V1.json",
+    "git_sha": "2aa39a49d834d1f39e018ab3497337fbe93cbc83"
+  },
+  "registry_version": 1,
+  "approved_git_sha": "2aa39a49d834d1f39e018ab3497337fbe93cbc83",
+  "accounts": [
+    {
+      "account_id": "DUO847203",
+      "environment": "PAPER",
+      "enabled_for_submission": false,
+      "allowed_engine_ids": [],
+      "notes": [
+        "Discovered from C2 truth: cash_ledger_v1 snapshots embed account_id=DUO847203.",
+        "Fail-closed defaults: enabled_for_submission=false and allowed_engine_ids=[] until governance explicitly enables."
+      ]
+    }
+  ]
+}
