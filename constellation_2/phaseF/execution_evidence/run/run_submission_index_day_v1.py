@@ -18,10 +18,10 @@ Read-only / deterministic / fail-closed:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -37,8 +37,9 @@ SUBMISSIONS_ROOT = TRUTH_ROOT / "execution_evidence_v1/submissions"
 SCHEMA_PATH = (REPO_ROOT / "constellation_2/schemas/submission_index.v1.schema.json").resolve()
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+def _deterministic_generated_utc(day_utc: str) -> str:
+    # Deterministic for replayability/idempotency.
+    return f"{day_utc}T00:00:00Z"
 
 
 def _safe_read_json(path: Path) -> Tuple[Optional[Any], Optional[str]]:
@@ -72,7 +73,7 @@ def _list_manifest_files(day_utc: str) -> List[Path]:
     d = MANIFESTS_ROOT / day_utc
     if not d.exists() or not d.is_dir():
         return []
-    out = []
+    out: List[Path] = []
     for p in d.iterdir():
         if p.is_file() and p.name.endswith(".manifest.json"):
             out.append(p)
@@ -88,7 +89,7 @@ def _canonical_json_bytes(obj: Any) -> bytes:
 def _extract_manifest_sha256(obj: Any) -> Optional[str]:
     if not isinstance(obj, dict):
         return None
-    # sha256 of this manifest file is not embedded; this function is a placeholder for future
+    # sha256 of this manifest file is not embedded; placeholder for future
     return None
 
 
@@ -108,7 +109,7 @@ def build_submission_index(day_utc: str) -> Dict[str, Any]:
         "schema_id": "C2_SUBMISSION_INDEX_V1",
         "schema_version": 1,
         "day_utc": day_utc,
-        "generated_utc": _utc_now_iso(),
+        "generated_utc": _deterministic_generated_utc(day_utc),
         "status": "OK",
         "items": [],
         "source_paths": [],
@@ -200,7 +201,6 @@ def build_submission_index(day_utc: str) -> Dict[str, Any]:
             exec_obj, eerr = _safe_read_json(Path(p_exec))
             if exec_obj is None:
                 item_warnings.append(f"EXECUTION_EVENT_RECORD_UNREADABLE:{eerr}")
-                # treat as missing (optional) but still record
                 resp["missing_paths"].append(p_exec)
 
         # Load order plan (optional)
@@ -305,7 +305,7 @@ def build_submission_index(day_utc: str) -> Dict[str, Any]:
                 "order_plan": h_plan,
                 "binding_record": h_bind,
                 "mapping_ledger_record": h_map,
-                "manifest": None,
+                "manifest": _extract_manifest_sha256(man),
             },
             "execution": exec_summary,
             "order_plan": plan_summary,
@@ -333,14 +333,50 @@ def build_submission_index(day_utc: str) -> Dict[str, Any]:
     return resp
 
 
+def _exists_short_circuit(out_path: Path, expected_day: str) -> int | None:
+    """
+    Idempotency:
+    - If output already exists, do NOT rewrite.
+    - If existing status is OK/DEGRADED, return 0.
+    - If existing status is FAIL, return 2 (fail-closed) but still no rewrite.
+    """
+    if not out_path.exists():
+        return None
+    if not out_path.is_file():
+        raise SystemExit(f"FAIL: EXISTING_OUTPUT_NOT_FILE: path={out_path}")
+
+    existing = json.loads(out_path.read_text(encoding="utf-8"))
+    schema_id = str(existing.get("schema_id") or "").strip()
+    day_utc = str(existing.get("day_utc") or "").strip()
+    status = str(existing.get("status") or "").strip().upper()
+
+    if schema_id != "C2_SUBMISSION_INDEX_V1":
+        raise SystemExit(f"FAIL: EXISTING_REPORT_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
+    if day_utc != expected_day:
+        raise SystemExit(f"FAIL: EXISTING_REPORT_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day!r} path={out_path}")
+    if status not in ("OK", "DEGRADED", "FAIL"):
+        raise SystemExit(f"FAIL: EXISTING_REPORT_STATUS_INVALID: status={status!r} path={out_path}")
+
+    existing_sha = hashlib.sha256(out_path.read_bytes()).hexdigest()
+    sys.stderr.write(
+        f"OK: SUBMISSION_INDEX_V1_EXISTS day={expected_day} status={status} path={out_path} sha256={existing_sha} action=EXISTS\n"
+    )
+    return 0 if status in ("OK", "DEGRADED") else 2
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--day", required=True, help="UTC day YYYY-MM-DD")
     ns = ap.parse_args(argv)
 
-    day = ns.day
+    day = str(ns.day).strip()
     out_dir = SUBMISSIONS_ROOT / day
     out_path = out_dir / "submission_index.v1.json"
+
+    # Idempotency short-circuit FIRST (before computing new bytes).
+    ex = _exists_short_circuit(out_path, expected_day=day)
+    if ex is not None:
+        return ex
 
     obj = build_submission_index(day_utc=day)
     b = _canonical_json_bytes(obj)
@@ -352,7 +388,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
 
     sys.stderr.write(f"OK: SUBMISSION_INDEX_V1_WRITTEN day={day} path={out_path}\n")
-    return 0
+    return 0 if str(obj.get("status") or "").strip().upper() in ("OK", "DEGRADED") else 2
 
 
 if __name__ == "__main__":
