@@ -449,6 +449,22 @@ def main() -> int:
     )
 
     _run_stage_strict(
+        "C_HEARTBEAT_GATE_V1",
+        [
+            "python3",
+            "ops/tools/run_heartbeat_gate_v1.py",
+            "--day_utc",
+            day,
+            "--truth_root",
+            str(truth_root),
+            "--expected_period_seconds",
+            "86400",
+            "--stale_after_seconds",
+            "172800",
+        ],
+        env=stage_env,
+    )
+    _run_stage_strict(
         "X_REGIME_SNAPSHOT_V2",
         ["python3", "ops/tools/run_regime_snapshot_v2.py", "--day_utc", input_day],
         env=stage_env,
@@ -591,6 +607,16 @@ def main() -> int:
         env=stage_env,
     )
 
+    _run_stage_strict(
+        "A8_GATE_STACK_VERDICT_V1",
+        ["python3", "ops/tools/run_gate_stack_verdict_v1.py", "--day_utc", day],
+        env=stage_env,
+    )
+    _run_stage_strict(
+        "C_GLOBAL_KILL_SWITCH_V1",
+        ["python3", "ops/tools/run_global_kill_switch_v1.py", "--day_utc", day],
+        env=stage_env,
+    )
     # Fail-closed posture: if any prereq failed, exit 2 (systemd may treat 2 as degraded if configured).
     if prereq_failed:
         print("FAIL: ORCHESTRATOR_PREREQ_FAILED", file=sys.stderr)
