@@ -11,11 +11,56 @@ Invariant:
 - day_utc MUST NOT be greater than today_utc (UTC).
 - Comparison is lexicographic (YYYY-MM-DD safe).
 - Fail-closed.
+
+PAPER-only governed exception:
+- day_utc may be greater than today_utc ONLY when:
+  - environment variable C2_MODE == "PAPER", AND
+  - an explicit operator override artifact exists and is valid at:
+    constellation_2/runtime/truth/reports/operator_future_day_override_v1/<DAY>/operator_future_day_override.v1.json
 """
 
 from __future__ import annotations
 
+import json
+import os
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict
+
+REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+OVERRIDE_ROOT = (TRUTH / "reports" / "operator_future_day_override_v1").resolve()
+
+
+def _read_json_obj(path: Path) -> Dict[str, Any]:
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise SystemExit(f"FAIL: FUTURE_DAY_OVERRIDE_UNREADABLE path={path} err={e!r}") from e
+    if not isinstance(obj, dict):
+        raise SystemExit(f"FAIL: FUTURE_DAY_OVERRIDE_NOT_OBJECT path={path}")
+    return obj
+
+
+def _paper_override_allows(day_utc: str) -> bool:
+    mode = (os.environ.get("C2_MODE") or "").strip().upper()
+    if mode != "PAPER":
+        return False
+
+    p = (OVERRIDE_ROOT / day_utc / "operator_future_day_override.v1.json").resolve()
+    if not p.exists() or not p.is_file():
+        return False
+
+    obj = _read_json_obj(p)
+    if str(obj.get("schema_id") or "") != "C2_OPERATOR_FUTURE_DAY_OVERRIDE_V1":
+        raise SystemExit(f"FAIL: FUTURE_DAY_OVERRIDE_SCHEMA_ID_MISMATCH path={p}")
+    if int(obj.get("schema_version") or 0) != 1:
+        raise SystemExit(f"FAIL: FUTURE_DAY_OVERRIDE_SCHEMA_VERSION_MISMATCH path={p}")
+    if str(obj.get("override_day_utc") or "") != day_utc:
+        raise SystemExit(f"FAIL: FUTURE_DAY_OVERRIDE_DAY_MISMATCH path={p}")
+    if str(obj.get("mode") or "").strip().upper() != "PAPER":
+        raise SystemExit(f"FAIL: FUTURE_DAY_OVERRIDE_MODE_NOT_PAPER path={p}")
+    return True
 
 
 def enforce_operational_day_key_invariant_v1(day_utc: str) -> None:
@@ -29,6 +74,8 @@ def enforce_operational_day_key_invariant_v1(day_utc: str) -> None:
 
     # Lexicographic compare valid for YYYY-MM-DD
     if day_utc > today_utc:
+        if _paper_override_allows(day_utc):
+            return
         raise SystemExit(
             f"FAIL: FUTURE_DAY_UTC_DISALLOWED day_utc={day_utc} today_utc={today_utc}"
         )

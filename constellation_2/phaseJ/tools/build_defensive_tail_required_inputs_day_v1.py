@@ -18,7 +18,8 @@ Truth root:
 
 FAIL-CLOSED:
 - Missing required source => exit nonzero
-- Any target already exists => exit nonzero (immutable)
+- Target exists with DIFFERENT bytes => exit nonzero (immutable rewrite attempt)
+- Target exists with IDENTICAL bytes => OK (idempotent)
 - Deterministic JSON bytes (sorted keys, minified, trailing newline)
 """
 
@@ -74,17 +75,34 @@ def _parse_day(day: str) -> str:
     s = (day or "").strip()
     if len(s) != 10 or s[4] != "-" or s[7] != "-":
         raise SystemExit(f"FAIL: bad --day_utc (expected YYYY-MM-DD): {day!r}")
-    # no datetime import needed; format check only
     return s
 
 
-def _atomic_write_refuse_overwrite(path: Path, data: bytes) -> None:
+def _atomic_write_idempotent(path: Path, data: bytes) -> str:
+    """
+    Immutable + idempotent write rule:
+      - If absent: write atomically => action=WROTE
+      - If present and identical bytes => action=EXISTS_IDENTICAL
+      - If present and different bytes => FAIL (ATTEMPTED_REWRITE)
+    """
+    cand_sha = _sha256_bytes(data)
+
     if path.exists():
-        raise SystemExit(f"FAIL: refusing to overwrite immutable truth file: {path}")
+        if not path.is_file():
+            raise SystemExit(f"FAIL: target exists but is not a file: {path}")
+        existing = path.read_bytes()
+        ex_sha = _sha256_bytes(existing)
+        if ex_sha == cand_sha:
+            return "EXISTS_IDENTICAL"
+        raise SystemExit(
+            f"FAIL: ATTEMPTED_REWRITE: {path} existing_sha={ex_sha} candidate_sha={cand_sha}"
+        )
+
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_bytes(data)
     os.replace(str(tmp), str(path))
+    return "WROTE"
 
 
 def _read_json_obj(path: Path) -> Dict[str, Any]:
@@ -99,7 +117,6 @@ def _dec_str(v: Any, field: str) -> str:
         d = Decimal(str(v).strip())
     except (InvalidOperation, ValueError) as e:
         raise SystemExit(f"FAIL: decimal_parse_failed field={field} value={v!r}") from e
-    # preserve deterministic string form (no exponent)
     return format(d, "f")
 
 
@@ -137,8 +154,11 @@ def main() -> int:
 
     # --- positions_snapshot_v2: byte-for-byte copy from positions_v1 ---
     pos_bytes = src_pos.read_bytes()
-    _atomic_write_refuse_overwrite(out_pos, pos_bytes)
-    print(f"OK: wrote positions_snapshot_v2 path={out_pos} sha256={_sha256_file(out_pos)} source={src_pos} source_sha256={_sha256_bytes(pos_bytes)}")
+    act_pos = _atomic_write_idempotent(out_pos, pos_bytes)
+    print(
+        f"OK: positions_snapshot_v2 action={act_pos} path={out_pos} sha256={_sha256_file(out_pos) if out_pos.exists() else _sha256_bytes(pos_bytes)} "
+        f"source={src_pos} source_sha256={_sha256_bytes(pos_bytes)}"
+    )
 
     # --- nav_snapshot.v1: minimal schema surface with drawdown_pct ---
     reg = _read_json_obj(src_reg)
@@ -156,8 +176,13 @@ def main() -> int:
         "schema_id": "C2_NAV_SNAPSHOT_V1",
         "schema_version": "v1",
     }
-    _atomic_write_refuse_overwrite(out_nav, _stable_json_bytes(nav_obj))
-    print(f"OK: wrote nav_snapshot_v1 path={out_nav} sha256={_sha256_file(out_nav)} drawdown_pct={dd} source_regime={src_reg} source_regime_sha256={_sha256_file(src_reg)}")
+    nav_bytes = _stable_json_bytes(nav_obj)
+    act_nav = _atomic_write_idempotent(out_nav, nav_bytes)
+    nav_sha = _sha256_file(out_nav) if out_nav.exists() else _sha256_bytes(nav_bytes)
+    print(
+        f"OK: nav_snapshot_v1 action={act_nav} path={out_nav} sha256={nav_sha} drawdown_pct={dd} "
+        f"source_regime={src_reg} source_regime_sha256={_sha256_file(src_reg)}"
+    )
 
     # --- market_data_snapshot_v1 daily snapshot wrapper: minimal bars surface ---
     md_obj = {
@@ -167,8 +192,10 @@ def main() -> int:
         "schema_version": "v1",
         "symbol": sym,
     }
-    _atomic_write_refuse_overwrite(out_md, _stable_json_bytes(md_obj))
-    print(f"OK: wrote market_data_snapshot_v1_snapshot path={out_md} sha256={_sha256_file(out_md)}")
+    md_bytes = _stable_json_bytes(md_obj)
+    act_md = _atomic_write_idempotent(out_md, md_bytes)
+    md_sha = _sha256_file(out_md) if out_md.exists() else _sha256_bytes(md_bytes)
+    print(f"OK: market_data_snapshot_v1_snapshot action={act_md} path={out_md} sha256={md_sha}")
 
     print("OK: done=1")
     return 0
