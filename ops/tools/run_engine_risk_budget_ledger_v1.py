@@ -3,6 +3,11 @@
 Bundle B (Component 1): Engine Risk Budget Ledger v1 (immutable truth artifact)
 Deterministic, audit-grade, fail-closed.
 
+Registry-driven engine inventory:
+- Budgets are required for engines with activation_status == ACTIVE in:
+    governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json
+- INACTIVE/DISABLED/EXPERIMENTAL engines do not require budgets.
+
 Rerun-safety (automation requirement):
 - If the day-keyed output already exists, treat it as authoritative for that day.
 - Do NOT attempt rewrite (prevents immutable overwrite failure when git_sha changes).
@@ -27,16 +32,10 @@ TRUTH = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RISK/engine_risk_budget_ledger.v1.schema.json"
 REGISTRY_RELPATH = "governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json"
+REGISTRY_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RISK/engine_model_registry.v1.schema.json"
 
 OUT_ROOT = (TRUTH / "risk_v1" / "engine_budget").resolve()
 SUBMISSIONS_ROOT = (TRUTH / "execution_evidence_v1" / "submissions").resolve()
-
-ALLOWED_ENGINE_IDS = [
-    "C2_MEAN_REVERSION_EQ_V1",
-    "C2_TREND_EQ_PRIMARY_V1",
-    "C2_VOL_INCOME_DEFINED_RISK_V1",
-    "C2_DEFENSIVE_TAIL_V1",
-]
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -94,12 +93,6 @@ def _write_immutable(path: Path, payload_obj: Dict[str, Any]) -> Tuple[str, str]
 
 
 def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | None:
-    """
-    Immutable rerun safety:
-    - If the day-keyed output exists, DO NOT rewrite.
-    - Treat existing report as authoritative for that day after basic validation.
-    - Return rc based on existing status: OK -> 0, else -> 2.
-    """
     if not out_path.exists():
         return None
 
@@ -137,7 +130,43 @@ def _pct_str(x: float) -> str:
     return s if s else "0"
 
 
-def _load_engine_budgets() -> Tuple[Dict[str, float], List[Dict[str, str]], List[str]]:
+def _active_engine_ids_from_registry() -> Tuple[List[str], List[Dict[str, str]], List[str]]:
+    rc: List[str] = []
+    im: List[Dict[str, str]] = []
+
+    reg_path = (REPO_ROOT / REGISTRY_RELPATH).resolve()
+    if not reg_path.exists():
+        rc.append("MISSING_ENGINE_MODEL_REGISTRY")
+        im.append({"type": "engine_model_registry_missing", "path": str(reg_path), "sha256": _sha256_bytes(b"")})
+        return ([], im, rc)
+
+    reg_sha = _sha256_file(reg_path)
+    im.append({"type": "engine_model_registry_v1", "path": str(reg_path), "sha256": reg_sha})
+
+    reg = _read_json(reg_path)
+    _validate_against_repo_schema(reg, REGISTRY_SCHEMA_RELPATH)
+
+    engines_obj = reg.get("engines")
+    if not isinstance(engines_obj, list):
+        rc.append("ENGINE_MODEL_REGISTRY_MISSING_ENGINES_FIELD")
+        return ([], im, rc)
+
+    active: List[str] = []
+    for e in engines_obj:
+        if not isinstance(e, dict):
+            continue
+        if str(e.get("activation_status") or "").strip() != "ACTIVE":
+            continue
+        eid = str(e.get("engine_id") or "").strip()
+        if not eid:
+            rc.append("ACTIVE_ENGINE_MISSING_ENGINE_ID")
+            continue
+        active.append(eid)
+
+    return (sorted(active), im, rc)
+
+
+def _load_engine_budgets(active_engine_ids: List[str]) -> Tuple[Dict[str, float], List[Dict[str, str]], List[str]]:
     rc: List[str] = []
     im: List[Dict[str, str]] = []
 
@@ -151,34 +180,41 @@ def _load_engine_budgets() -> Tuple[Dict[str, float], List[Dict[str, str]], List
     im.append({"type": "engine_model_registry_v1", "path": str(reg_path), "sha256": reg_sha})
 
     reg = _read_json(reg_path)
+    _validate_against_repo_schema(reg, REGISTRY_SCHEMA_RELPATH)
+
     budgets: Dict[str, float] = {}
-
     engines_obj = reg.get("engines")
-    if isinstance(engines_obj, list):
-        for e in engines_obj:
-            if not isinstance(e, dict):
-                continue
-            eid = str(e.get("engine_id") or "").strip()
-            if eid not in ALLOWED_ENGINE_IDS:
-                continue
-            raw = e.get("budget_notional_pct") or e.get("risk_budget_notional_pct") or e.get("max_notional_pct")
-            if raw is None:
-                continue
-            try:
-                v = float(str(raw))
-            except Exception:
-                rc.append(f"BAD_ENGINE_BUDGET_FIELD: engine_id={eid}")
-                continue
-            if v < 0.0 or v > 1.0:
-                rc.append(f"ENGINE_BUDGET_OUT_OF_RANGE: engine_id={eid}")
-                continue
-            budgets[eid] = v
-    else:
+    if not isinstance(engines_obj, list):
         rc.append("ENGINE_MODEL_REGISTRY_MISSING_ENGINES_FIELD")
+        return ({}, im, rc)
 
-    missing = [eid for eid in ALLOWED_ENGINE_IDS if eid not in budgets]
+    active_set = set(active_engine_ids)
+
+    for e in engines_obj:
+        if not isinstance(e, dict):
+            continue
+        eid = str(e.get("engine_id") or "").strip()
+        if eid not in active_set:
+            continue
+
+        raw = e.get("budget_notional_pct")
+        if raw is None:
+            rc.append(f"MISSING_ENGINE_BUDGET_FIELD: engine_id={eid}")
+            continue
+        try:
+            v = float(str(raw))
+        except Exception:
+            rc.append(f"BAD_ENGINE_BUDGET_FIELD: engine_id={eid}")
+            continue
+        if v < 0.0 or v > 1.0:
+            rc.append(f"ENGINE_BUDGET_OUT_OF_RANGE: engine_id={eid}")
+            continue
+
+        budgets[eid] = v
+
+    missing = [eid for eid in active_engine_ids if eid not in budgets]
     if missing:
-        rc.append("MISSING_ENGINE_BUDGETS_FOR_ALLOWED_ENGINES:" + ",".join(missing))
+        rc.append("MISSING_ENGINE_BUDGETS_FOR_ACTIVE_ENGINES:" + ",".join(missing))
 
     return (budgets, im, rc)
 
@@ -209,7 +245,19 @@ def main() -> int:
     if existing_rc is not None:
         return int(existing_rc)
 
-    budgets, input_manifest, rc = _load_engine_budgets()
+    active_engine_ids, im1, rc1 = _active_engine_ids_from_registry()
+    budgets, im2, rc2 = _load_engine_budgets(active_engine_ids)
+
+    input_manifest: List[Dict[str, str]] = []
+    input_manifest.extend(im1)
+    # Avoid duplicating the registry pointer if both functions added it; keep deterministic dedup by (type,path,sha256)
+    for it in im2:
+        if it not in input_manifest:
+            input_manifest.append(it)
+
+    rc: List[str] = []
+    rc.extend(rc1)
+    rc.extend(rc2)
 
     subs_present, subs_dir = _submissions_present(day)
     input_manifest.append(
@@ -220,13 +268,12 @@ def main() -> int:
         }
     )
 
-    used: Dict[str, float] = {eid: 0.0 for eid in ALLOWED_ENGINE_IDS}
-
+    used: Dict[str, float] = {eid: 0.0 for eid in active_engine_ids}
     if subs_present:
         rc.append("ENGINE_EXPOSURE_ATTRIBUTION_NOT_IMPLEMENTED_FOR_SUBMISSIONS")
 
     engines_out: List[Dict[str, Any]] = []
-    for eid in ALLOWED_ENGINE_IDS:
+    for eid in active_engine_ids:
         bud = budgets.get(eid, 0.0)
         u = float(used.get(eid, 0.0))
         rem = max(0.0, float(bud) - u)

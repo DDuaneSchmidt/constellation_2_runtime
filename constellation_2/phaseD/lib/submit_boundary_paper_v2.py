@@ -50,6 +50,12 @@ RC_KILL_SWITCH_ACTIVE = "C2_KILL_SWITCH_ACTIVE"
 RC_FAIL_CLOSED = "C2_SUBMIT_FAIL_CLOSED_REQUIRED"
 RC_LINEAGE_VIOLATION = "C2_LINEAGE_VIOLATION"
 
+# Bundle A (Capital Authority) hard gate reason codes (fail-closed)
+RC_CAPAUTH_MISSING = "C2_CAPITAL_AUTHORITY_MISSING"
+RC_CAPAUTH_INVALID = "C2_CAPITAL_AUTHORITY_INVALID"
+RC_CAPAUTH_REJECTED = "C2_CAPITAL_AUTHORITY_REJECTED"
+RC_CAPAUTH_MISMATCH = "C2_CAPITAL_AUTHORITY_MISMATCH"
+
 
 def _parse_utc_z(ts: str) -> None:
     if not isinstance(ts, str) or not ts.endswith("Z"):
@@ -212,6 +218,82 @@ def run_submit_boundary_paper_v2(
         )
         write_phased_veto_only_v1(phased_out_dir, veto_record=veto, order_plan=plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
         return 2
+
+    # --- Bundle A hard gate: require AUTHORIZED artifact before any broker call ---
+    # Authorization artifact is day-scoped and keyed by intent_sha256 (sha256 of intent file bytes).
+    auth_path = (truth_root / "engine_activity_v1" / "authorization_v1" / day / f"{lineage.intent_sha256}.authorization.v1.json").resolve()
+    pointers_auth = list(pointers) + [str(auth_path)]
+
+    if not auth_path.exists() or not auth_path.is_file():
+        veto = _mk_veto(
+            eval_time_utc=eval_time_utc,
+            reason_code=RC_CAPAUTH_MISSING,
+            reason_detail=f"CAPITAL_AUTHORITY_AUTH_MISSING: {str(auth_path)}",
+            pointers=pointers_auth,
+            intent_hash=plan_obj.get("intent_hash"),
+            plan_hash=plan_obj.get("plan_hash"),
+            upstream_hash=plan_obj.get("upstream_hash"),
+            repo_root=repo_root,
+        )
+        write_phased_veto_only_v1(phased_out_dir, veto_record=veto, order_plan=plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
+        return 2
+
+    try:
+        auth_obj = _read_json_file(auth_path)
+        validate_against_repo_schema_v1(auth_obj, repo_root, "governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/authorization.v1.schema.json")
+    except Exception as e:  # noqa: BLE001
+        veto = _mk_veto(
+            eval_time_utc=eval_time_utc,
+            reason_code=RC_CAPAUTH_INVALID,
+            reason_detail=f"CAPITAL_AUTHORITY_AUTH_INVALID: {e!r}",
+            pointers=pointers_auth,
+            intent_hash=plan_obj.get("intent_hash"),
+            plan_hash=plan_obj.get("plan_hash"),
+            upstream_hash=plan_obj.get("upstream_hash"),
+            repo_root=repo_root,
+        )
+        write_phased_veto_only_v1(phased_out_dir, veto_record=veto, order_plan=plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
+        return 2
+
+    # Verify linkage to this submission
+    auth_engine = str(auth_obj.get("engine_id") or "").strip()
+    auth_intent_hash = str(auth_obj.get("intent_hash") or "").strip()
+    if auth_engine != lineage.engine_id or auth_intent_hash != lineage.intent_sha256:
+        veto = _mk_veto(
+            eval_time_utc=eval_time_utc,
+            reason_code=RC_CAPAUTH_MISMATCH,
+            reason_detail=f"CAPITAL_AUTHORITY_MISMATCH: auth_engine_id={auth_engine!r} auth_intent_hash={auth_intent_hash!r} expected_engine_id={lineage.engine_id!r} expected_intent_sha256={lineage.intent_sha256!r}",
+            pointers=pointers_auth,
+            intent_hash=plan_obj.get("intent_hash"),
+            plan_hash=plan_obj.get("plan_hash"),
+            upstream_hash=plan_obj.get("upstream_hash"),
+            repo_root=repo_root,
+        )
+        write_phased_veto_only_v1(phased_out_dir, veto_record=veto, order_plan=plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
+        return 2
+
+    auth_status = str(auth_obj.get("status") or "").strip().upper()
+    auth_block = auth_obj.get("authorization") if isinstance(auth_obj, dict) else None
+    auth_qty = None
+    if isinstance(auth_block, dict):
+        q = auth_block.get("authorized_quantity")
+        if isinstance(q, int):
+            auth_qty = q
+
+    if auth_status != "AUTHORIZED" or auth_qty is None or int(auth_qty) <= 0:
+        veto = _mk_veto(
+            eval_time_utc=eval_time_utc,
+            reason_code=RC_CAPAUTH_REJECTED,
+            reason_detail=f"CAPITAL_AUTHORITY_REJECTED: status={auth_status!r} authorized_quantity={auth_qty!r}",
+            pointers=pointers_auth,
+            intent_hash=plan_obj.get("intent_hash"),
+            plan_hash=plan_obj.get("plan_hash"),
+            upstream_hash=plan_obj.get("upstream_hash"),
+            repo_root=repo_root,
+        )
+        write_phased_veto_only_v1(phased_out_dir, veto_record=veto, order_plan=plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
+        return 2
+    # --- end Bundle A hard gate ---
 
     # Adapter connect
     adapter = IBPaperAdapterV1(conn=BrokerConnectionSpec(host=ib_host, port=ib_port, client_id=ib_client_id), env="PAPER", ib_account=ib_account)

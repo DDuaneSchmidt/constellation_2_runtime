@@ -6,11 +6,15 @@ Bundle B: Engine Model Registry Gate v1 (hostile-review safe, satisfiable).
 
 Checks (FAIL-CLOSED):
 - registry JSON validates against governed schema
-- each engine runner file sha256 matches expected sha256 in registry
-- activation_status == ACTIVE
+- each ACTIVE engine runner file sha256 matches expected sha256 in registry
+- each ACTIVE engine has runner_path present and consistent with engine_runner_path
 
 Checks (AUDIT-ONLY, non-blocking):
 - approved_git_sha vs current_git_sha (reported in notes/results)
+
+IMPORTANT SEMANTICS:
+- Only engines with activation_status == ACTIVE are gating-critical.
+- INACTIVE/DISABLED/EXPERIMENTAL engines are recorded as SKIPPED and MUST NOT fail the gate.
 
 Output (immutable report):
 constellation_2/runtime/truth/reports/engine_model_registry_gate_v1/<DAY>/engine_model_registry_gate.v1.json
@@ -51,16 +55,6 @@ OUT_ROOT = (TRUTH / "reports" / "engine_model_registry_gate_v1").resolve()
 
 
 def _parse_day_utc(s: str) -> str:
-    """
-    Strict UTC day key validator (institutional hardening).
-
-    Requirements:
-    - exactly 10 chars: YYYY-MM-DD
-    - positions 4 and 7 are '-'
-    - all other positions MUST be digits
-
-    This rejects templates like "YYYY-MM-DD".
-    """
     d = (s or "").strip()
     if len(d) != 10 or d[4] != "-" or d[7] != "-":
         raise ValueError(f"BAD_DAY_UTC_FORMAT_EXPECTED_YYYY_MM_DD: {d!r}")
@@ -70,14 +64,6 @@ def _parse_day_utc(s: str) -> str:
 
 
 def _produced_utc_deterministic(day_utc: str) -> str:
-    """
-    Deterministic produced_utc for immutable, rerunnable daily truth artifacts.
-
-    Rationale (contract-aligned):
-    - This gate writes immutable truth under a day key.
-    - Wall-clock timestamps would make reruns non-idempotent and trigger immutable rewrite failures.
-    - The contract requires determinism; it does not require wall-clock produced_utc.
-    """
     return f"{day_utc}T00:00:00Z"
 
 
@@ -87,10 +73,6 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
-
-
-def _sha256_bytes(b: bytes) -> str:
-    return hashlib.sha256(b).hexdigest()
 
 
 def _read_json(path: Path) -> Dict[str, Any]:
@@ -106,14 +88,6 @@ def _git_sha_head() -> str:
 
 
 def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | None:
-    """
-    Immutable truth rule (audit-grade):
-    - If the report already exists at the immutable day-keyed path, do NOT attempt rewrite.
-    - Treat the existing file as authoritative for that day.
-    - Return its PASS/FAIL as exit code (PASS->0, FAIL->1).
-
-    This makes the gate rerunnable without mutation, even across historical semantics changes.
-    """
     if not out_path.exists():
         return None
 
@@ -131,20 +105,24 @@ def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | N
     if status not in ("PASS", "FAIL"):
         raise SystemExit(f"FAIL: EXISTING_REPORT_STATUS_INVALID: status={status!r} path={out_path}")
 
-    print(
-        f"OK: ENGINE_MODEL_REGISTRY_GATE_WRITTEN day_utc={expected_day_utc} status={status} path={out_path} sha256={existing_sha} action=EXISTS"
-    )
+    print(f"OK: ENGINE_MODEL_REGISTRY_GATE_WRITTEN day_utc={expected_day_utc} status={status} path={out_path} sha256={existing_sha} action=EXISTS")
     return 0 if status == "PASS" else 1
+
+
+def _derive_module_from_runner_path(runner_rel: str) -> str:
+    s = (runner_rel or "").strip()
+    if not s.endswith(".py"):
+        raise ValueError(f"RUNNER_PATH_NOT_PY: {runner_rel!r}")
+    if "/" not in s:
+        raise ValueError(f"RUNNER_PATH_NOT_RELATIVE: {runner_rel!r}")
+    s2 = s[:-3].replace("/", ".")
+    return s2
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_engine_model_registry_gate_v1")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
-    ap.add_argument(
-        "--current_git_sha",
-        default="",
-        help="Optional (audit-only): explicit git sha; if empty, uses HEAD.",
-    )
+    ap.add_argument("--current_git_sha", default="", help="Optional (audit-only): explicit git sha; if empty, uses HEAD.")
     args = ap.parse_args()
 
     day = _parse_day_utc(args.day_utc)
@@ -152,7 +130,6 @@ def main() -> int:
     out_dir = (OUT_ROOT / day).resolve()
     out_path = (out_dir / "engine_model_registry_gate.v1.json").resolve()
 
-    # Immutable rerun safety: if report exists, treat it as authoritative and do not rewrite.
     existing_rc = _return_if_existing_report(out_path=out_path, expected_day_utc=day)
     if existing_rc is not None:
         return int(existing_rc)
@@ -178,7 +155,6 @@ def main() -> int:
         reason_codes.append("APPROVED_GIT_SHA_MISSING")
         notes.append("approved_git_sha missing/empty in registry (structural)")
     else:
-        # AUDIT-ONLY: do not fail the gate on mismatch (unsatisfiable fixed point in single-repo governance)
         if approved_git_sha != current_sha:
             notes.append(f"approved_git_sha={approved_git_sha} current_git_sha={current_sha} (audit-only mismatch)")
 
@@ -190,19 +166,62 @@ def main() -> int:
         status = str(e.get("activation_status") or "")
         runner_rel = str(e.get("engine_runner_path") or "")
         runner_expected = str(e.get("engine_runner_sha256") or "")
+        runner_mod = str(e.get("runner_path") or "")
         runner_path = (REPO_ROOT / runner_rel).resolve()
 
         ok = True
+        skipped = False
         rc: List[str] = []
 
         if status != "ACTIVE":
+            ok = True
+            skipped = True
+            rc.append("SKIPPED_NOT_ACTIVE")
+
+            if not runner_path.exists():
+                runner_actual = hashlib.sha256(b"").hexdigest()
+            else:
+                runner_actual = _sha256_file(runner_path)
+            input_manifest.append({"type": f"engine_runner:{engine_id}", "path": str(runner_path), "sha256": runner_actual})
+
+            engine_results.append(
+                {
+                    "engine_id": engine_id,
+                    "activation_status": status,
+                    "runner_path": str(runner_path),
+                    "runner_module": runner_mod,
+                    "runner_sha256_expected": runner_expected,
+                    "runner_sha256_actual": runner_actual,
+                    "ok": bool(ok),
+                    "skipped": bool(skipped),
+                    "reason_codes": rc,
+                }
+            )
+            continue
+
+        # ACTIVE engines: require runner_path and verify mapping consistency.
+        if not runner_rel.strip():
             ok = False
-            rc.append("ENGINE_NOT_ACTIVE")
+            rc.append("ACTIVE_ENGINE_MISSING_RUNNER_PATH_FILE")
+
+        if not runner_mod.strip():
+            ok = False
+            rc.append("ACTIVE_ENGINE_MISSING_RUNNER_PATH_MODULE")
+        else:
+            try:
+                derived = _derive_module_from_runner_path(runner_rel)
+            except Exception as ex:
+                ok = False
+                rc.append(f"ACTIVE_ENGINE_RUNNER_PATH_DERIVE_FAILED:{type(ex).__name__}")
+                derived = ""
+            if derived and runner_mod != derived:
+                ok = False
+                rc.append("ACTIVE_ENGINE_RUNNER_MODULE_MISMATCH")
 
         if not runner_path.exists():
             ok = False
             rc.append("MISSING_ENGINE_RUNNER_FILE")
-            runner_actual = _sha256_bytes(b"")
+            runner_actual = hashlib.sha256(b"").hexdigest()
         else:
             runner_actual = _sha256_file(runner_path)
             if runner_actual != runner_expected:
@@ -219,9 +238,11 @@ def main() -> int:
                 "engine_id": engine_id,
                 "activation_status": status,
                 "runner_path": str(runner_path),
+                "runner_module": runner_mod,
                 "runner_sha256_expected": runner_expected,
                 "runner_sha256_actual": runner_actual,
                 "ok": bool(ok),
+                "skipped": bool(skipped),
                 "reason_codes": rc,
             }
         )
@@ -233,11 +254,7 @@ def main() -> int:
         "schema_version": "v1",
         "day_utc": day,
         "produced_utc": produced_utc,
-        "producer": {
-            "repo": "constellation_2_runtime",
-            "module": "ops/tools/run_engine_model_registry_gate_v1.py",
-            "git_sha": current_sha,
-        },
+        "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_engine_model_registry_gate_v1.py", "git_sha": current_sha},
         "status": gate_status,
         "reason_codes": sorted(list(dict.fromkeys(reason_codes))),
         "notes": notes,
@@ -252,9 +269,7 @@ def main() -> int:
     except ImmutableWriteError as e:
         raise SystemExit(f"FAIL: IMMUTABLE_WRITE_ERROR: {e}") from e
 
-    print(
-        f"OK: ENGINE_MODEL_REGISTRY_GATE_WRITTEN day_utc={day} status={gate_status} path={wr.path} sha256={wr.sha256} action={wr.action}"
-    )
+    print(f"OK: ENGINE_MODEL_REGISTRY_GATE_WRITTEN day_utc={day} status={gate_status} path={wr.path} sha256={wr.sha256} action={wr.action}")
     return 0 if gate_status == "PASS" else 1
 
 

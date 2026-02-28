@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_CAPITAL_AUTHORITY_ALLOCATION_V1",
+  "title": "C2 Capital Authority Allocation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "day_utc",
+    "producer",
+    "status",
+    "reason_codes",
+    "input_manifest",
+    "portfolio",
+    "per_sleeve",
+    "per_intent"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_CAPITAL_AUTHORITY_ALLOCATION_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+
+    "produced_utc": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "module": { "type": "string", "minLength": 1 },
+        "build": { "type": "object" }
+      }
+    },
+
+    "status": {
+      "type": "string",
+      "enum": [
+        "OK",
+        "BLOCK",
+        "FAIL_MISSING_INPUTS",
+        "FAIL_CORRUPT_INPUTS",
+        "FAIL_SCHEMA_VIOLATION"
+      ]
+    },
+
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256", "day_utc", "producer"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "exposure_net",
+              "policy_manifest",
+              "intents_snapshot",
+              "positions_snapshot",
+              "cash_ledger_snapshot",
+              "other"
+            ]
+          },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "day_utc": {
+            "anyOf": [
+              { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+              { "type": "null" }
+            ]
+          },
+          "producer": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+
+    "portfolio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed_capital_at_risk_cents", "used_capital_at_risk_cents", "headroom_cents"],
+      "properties": {
+        "allowed_capital_at_risk_cents": { "type": "integer", "minimum": 0 },
+        "used_capital_at_risk_cents": { "type": "integer", "minimum": 0 },
+        "headroom_cents": { "type": "integer" }
+      }
+    },
+
+    "per_sleeve": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sleeve_id", "engine_ids", "allowed_capital_at_risk_cents", "used_capital_at_risk_cents", "headroom_cents"],
+        "properties": {
+          "sleeve_id": { "type": "string", "minLength": 1 },
+          "engine_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "allowed_capital_at_risk_cents": { "type": "integer", "minimum": 0 },
+          "used_capital_at_risk_cents": { "type": "integer", "minimum": 0 },
+          "headroom_cents": { "type": "integer" }
+        }
+      }
+    },
+
+    "per_intent": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "intent_hash",
+          "intent_id",
+          "engine_id",
+          "sleeve_id",
+          "decision",
+          "authorized_quantity",
+          "reason_codes"
+        ],
+        "properties": {
+          "intent_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "intent_id": { "type": "string", "minLength": 1 },
+          "engine_id": { "type": "string", "minLength": 1 },
+          "sleeve_id": { "type": "string", "minLength": 1 },
+          "decision": { "type": "string", "enum": ["AUTHORIZED", "REJECTED", "PARTIAL"] },
+          "authorized_quantity": { "type": "integer", "minimum": 0 },
+          "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    }
+  }
+}

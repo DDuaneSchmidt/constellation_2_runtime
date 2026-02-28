@@ -129,6 +129,27 @@ def main() -> int:
         return 4
 
     out_path = (TRUTH / "monitoring_v1/paper_readiness" / day / "paper_readiness_report.v1.json").resolve()
+
+    # Idempotency: if output already exists, do NOT rewrite.
+    if out_path.exists():
+        if not out_path.is_file():
+            raise SystemExit(f"FAIL: EXISTING_OUTPUT_NOT_FILE: path={out_path}")
+
+        existing = json.loads(out_path.read_text(encoding="utf-8"))
+        schema_id = str(existing.get("schema_id") or "").strip()
+        day_utc_existing = str(existing.get("day_utc") or "").strip()
+
+        if day_utc_existing != day:
+            raise SystemExit(
+                f"FAIL: EXISTING_REPORT_DAY_MISMATCH: day_utc={day_utc_existing!r} expected={day!r} path={out_path}"
+            )
+
+        print(
+            f"OK: PAPER_READINESS_MONITOR_V2_EXISTS "
+            f"day_utc={day} path={out_path} action=EXISTS"
+        )
+        return 0
+
     try:
         _ = write_file_immutable_v1(path=out_path, data=payload, create_dirs=True)
     except ImmutableWriteError as e:

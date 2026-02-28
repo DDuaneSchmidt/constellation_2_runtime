@@ -5,12 +5,17 @@ Bundle A: intents_day_rollup.v1.json writer (immutable truth artifact).
 Institutional posture:
 - Deterministic, audit-grade, fail-closed.
 - Reads intents from:
-    constellation_2/runtime/truth/intents_v1/snapshots/<DAY>/*.exposure_intent.v1.json
+    constellation_2/runtime/truth/intents_v1/snapshots/<DAY>/*.exposure_intent.v*.json
 - Verifies filename hash matches file bytes sha256.
 - Parses each intent JSON, validates against governed exposure intent schema.
 - Uses engine attribution from intent["engine"]["engine_id"] (required by schema).
 - Emits rollup enumerating the configured engines, including explicit zero-intent engines.
 - MUST succeed (emit rollup) even when there are zero intent snapshots for the day.
+
+Engine inventory authority (governed, registry-driven):
+- Engine IDs are derived from:
+    governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json
+- This eliminates hardcoded allowlists and makes new engines submission-ready when activated.
 
 Output:
   constellation_2/runtime/truth/intents_v1/day_rollup/<DAY>/intents_day_rollup.v1.json
@@ -51,18 +56,13 @@ ROLLUP_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/intents_d
 EXPOSURE_INTENT_SCHEMA_RELPATH = "constellation_2/schemas/exposure_intent.v1.schema.json"
 EXPOSURE_INTENT_V2_SCHEMA_RELPATH = "constellation_2/schemas/exposure_intent.v2.schema.json"
 
+REGISTRY_RELPATH = "governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json"
+REGISTRY_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RISK/engine_model_registry.v1.schema.json"
+
 SNAP_ROOT = (TRUTH / "intents_v1" / "snapshots").resolve()
 OUT_ROOT = (TRUTH / "intents_v1" / "day_rollup").resolve()
 
 DAY_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
-
-# Institutional: explicit engine inventory for Bundle A.
-ALLOWED_ENGINE_IDS: List[str] = [
-    "C2_MEAN_REVERSION_EQ_V1",
-    "C2_TREND_EQ_PRIMARY_V1",
-    "C2_VOL_INCOME_DEFINED_RISK_V1",
-    "C2_DEFENSIVE_TAIL_V1",
-]
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -132,7 +132,6 @@ def _list_intent_files(day_dir: Path) -> List[Path]:
 
 
 def _validate_intent_file_hash(p: Path) -> str:
-    # File name begins with sha prefix.
     prefix = p.name.split(".")[0].strip().lower()
     b = p.read_bytes()
     sha = _sha256_bytes(b).lower()
@@ -151,6 +150,31 @@ def _extract_engine_id(intent: Dict[str, Any], p: Path) -> str:
     return eid
 
 
+def _load_registry_engine_ids_sorted() -> List[str]:
+    reg_path = (REPO_ROOT / REGISTRY_RELPATH).resolve()
+    if not reg_path.exists():
+        raise SystemExit(f"FAIL: MISSING_ENGINE_MODEL_REGISTRY: {reg_path}")
+
+    reg = _read_json(reg_path)
+    validate_against_repo_schema_v1(reg, REPO_ROOT, REGISTRY_SCHEMA_RELPATH)
+
+    engines_obj = reg.get("engines")
+    if not isinstance(engines_obj, list):
+        raise SystemExit("FAIL: ENGINE_MODEL_REGISTRY_MISSING_ENGINES_FIELD")
+
+    engine_ids: List[str] = []
+    for e in engines_obj:
+        if not isinstance(e, dict):
+            continue
+        eid = str(e.get("engine_id") or "").strip()
+        if not eid:
+            raise SystemExit("FAIL: ENGINE_MODEL_REGISTRY_ENGINE_MISSING_ENGINE_ID")
+        engine_ids.append(eid)
+
+    # Deterministic ordering: sort by engine_id
+    return sorted(engine_ids)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_intents_day_rollup_v1")
     ap.add_argument("--day_utc", required=True, help="UTC day key YYYY-MM-DD")
@@ -160,21 +184,18 @@ def main() -> int:
     if not DAY_RE.match(day):
         raise SystemExit(f"FAIL: bad --day_utc (expected YYYY-MM-DD): {day!r}")
 
-    # Deterministic produced_utc for audit + replay (schema requires string; not necessarily wall-clock).
     produced_utc = f"{day}T00:00:00Z"
+
+    allowed_engine_ids = _load_registry_engine_ids_sorted()
+    grouped: Dict[str, List[str]] = {eid: [] for eid in allowed_engine_ids}
 
     day_dir = (SNAP_ROOT / day).resolve()
     files = _list_intent_files(day_dir)
 
-    # Engine -> list of intent hashes
-    grouped: Dict[str, List[str]] = {eid: [] for eid in ALLOWED_ENGINE_IDS}
-
-    # Validate and group (if no files, we still emit rollup with explicit zeros)
     for p in files:
         ih = _validate_intent_file_hash(p)
         intent = _read_json(p)
 
-        # Validate intent schema (governed schema lives in repo at the path below)
         schema_id = str(intent.get("schema_id") or "").strip()
         schema_version = str(intent.get("schema_version") or "").strip()
         if schema_id != "exposure_intent":
@@ -188,12 +209,12 @@ def main() -> int:
 
         eid = _extract_engine_id(intent, p)
         if eid not in grouped:
-            raise SystemExit(f"FAIL: intent engine_id not allowed: engine_id={eid!r} file={p}")
+            raise SystemExit(f"FAIL: intent engine_id not in governed registry: engine_id={eid!r} file={p}")
 
         grouped[eid].append(ih)
 
     engines_out: List[Dict[str, Any]] = []
-    for eid in ALLOWED_ENGINE_IDS:
+    for eid in allowed_engine_ids:
         hs = grouped.get(eid, [])
         engines_out.append(
             {
@@ -210,8 +231,6 @@ def main() -> int:
         "produced_utc": produced_utc,
         "producer": {"component": "ops/tools/run_intents_day_rollup_v1.py", "version": "v1", "git_sha": _git_sha()},
         "inputs": {
-            # This rollup is intentionally limited to intent enumeration + attribution.
-            # Market snapshot hashes belong in engine runtime provenance; this contract does not infer them.
             "market_data_snapshot_hashes": [],
             "market_calendar_hash": "",
             "engine_config_hashes": [],
@@ -221,7 +240,6 @@ def main() -> int:
     }
     payload["rollup_sha256"] = _compute_self_sha_field(payload, "rollup_sha256")
 
-    # Validate rollup against governed rollup schema (NOT the exposure intent schema)
     validate_against_repo_schema_v1(payload, REPO_ROOT, ROLLUP_SCHEMA_RELPATH)
 
     out_dir = (OUT_ROOT / day).resolve()

@@ -32,7 +32,7 @@ def day_paths_v2(day_utc: str) -> PositionsDayPathsV2:
         day_utc=day,
         snapshot_dir=snap_dir,
         snapshot_path=snap_dir / "positions_snapshot.v2.json",
-        latest_path=POSITIONS_ROOT / "latest.json",
+        latest_path=POSITIONS_ROOT / "latest_pointer.v2.json",
         failure_dir=failure_dir,
         failure_path=failure_dir / "failure.json",
     )

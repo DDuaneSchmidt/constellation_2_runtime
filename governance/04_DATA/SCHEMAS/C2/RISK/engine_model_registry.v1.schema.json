@@ -43,6 +43,7 @@
         "required": [
           "engine_id",
           "activation_status",
+          "runner_path",
           "approved_git_sha",
           "engine_runner_path",
           "engine_runner_sha256",
@@ -59,7 +60,14 @@
 
           "activation_status": {
             "type": "string",
-            "enum": ["ACTIVE", "DISABLED", "EXPERIMENTAL"]
+            "enum": ["ACTIVE", "INACTIVE", "DISABLED", "EXPERIMENTAL"]
+          },
+
+          "runner_path": {
+            "description": "Python module path used for execution via: python3 -m <runner_path>",
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 512
           },
 
           "budget_notional_pct": {

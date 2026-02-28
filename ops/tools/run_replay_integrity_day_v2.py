@@ -35,6 +35,9 @@ REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 DEFAULT_TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/replay_integrity.v2.schema.json"
 
+# Governance: accounting spine is exclusive v2 from 2026-02-20 onward (C2_SPINE_AUTHORITY_V1).
+ENFORCE_ACCOUNTING_V2_FROM_DAY_UTC = "2026-02-20"
+
 
 def _git_sha() -> str:
     out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
@@ -71,7 +74,10 @@ def _hash_dir_listing(root: Path) -> str:
     if not root.exists() or not root.is_dir():
         return _sha256_bytes(b"")
     rows: List[Dict[str, str]] = []
-    for p in sorted([x for x in root.rglob("*") if x.is_file()], key=lambda x: str(x.relative_to(root)).replace("\\", "/")):
+    for p in sorted(
+        [x for x in root.rglob("*") if x.is_file()],
+        key=lambda x: str(x.relative_to(root)).replace("\\", "/"),
+    ):
         rel = str(p.relative_to(root)).replace("\\", "/")
         rows.append({"rel": rel, "sha256": _sha256_file(p)})
     return _sha256_bytes(canonical_json_bytes_v1(rows))
@@ -130,7 +136,13 @@ def main() -> int:
 
     # Intents
     _add_input(inputs, truth, "intents_day_dir", truth / "intents_v1" / "snapshots" / day, is_dir=True)
-    _add_input(inputs, truth, "intents_day_rollup_v1", truth / "intents_v1" / "day_rollup" / day / "intents_day_rollup.v1.json", is_dir=False)
+    _add_input(
+        inputs,
+        truth,
+        "intents_day_rollup_v1",
+        truth / "intents_v1" / "day_rollup" / day / "intents_day_rollup.v1.json",
+        is_dir=False,
+    )
 
     # Preflight / OMS / Allocation
     _add_input(inputs, truth, "phaseC_preflight_day_dir", truth / "phaseC_preflight_v1" / day, is_dir=True)
@@ -138,18 +150,71 @@ def main() -> int:
     _add_input(inputs, truth, "allocation_day_dir", truth / "allocation_v1" / "summary" / day, is_dir=True)
 
     # Execution evidence / fills
-    _add_input(inputs, truth, "exec_evidence_submissions_day_dir", truth / "execution_evidence_v1" / "submissions" / day, is_dir=True)
-    _add_input(inputs, truth, "submission_index_v1", truth / "execution_evidence_v1" / "submission_index" / day / "submission_index.v1.json", is_dir=False)
+    _add_input(
+        inputs,
+        truth,
+        "exec_evidence_submissions_day_dir",
+        truth / "execution_evidence_v1" / "submissions" / day,
+        is_dir=True,
+    )
+    _add_input(
+        inputs,
+        truth,
+        "submission_index_v1",
+        truth / "execution_evidence_v1" / "submission_index" / day / "submission_index.v1.json",
+        is_dir=False,
+    )
     _add_input(inputs, truth, "fill_ledger_day_dir", truth / "fill_ledger_v1" / day, is_dir=True)
 
     # Positions / cash / accounting
-    _add_input(inputs, truth, "positions_snapshot_v2", truth / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json", is_dir=False)
-    _add_input(inputs, truth, "cash_ledger_snapshot_v1", truth / "cash_ledger_v1" / "snapshots" / day / "cash_ledger_snapshot.v1.json", is_dir=False)
-    _add_input(inputs, truth, "accounting_nav_v1", truth / "accounting_v1" / "nav" / day / "nav.json", is_dir=False)
+    _add_input(
+        inputs,
+        truth,
+        "positions_snapshot_v2",
+        truth / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json",
+        is_dir=False,
+    )
+    _add_input(
+        inputs,
+        truth,
+        "cash_ledger_snapshot_v1",
+        truth / "cash_ledger_v1" / "snapshots" / day / "cash_ledger_snapshot.v1.json",
+        is_dir=False,
+    )
+
+    # Accounting NAV: authoritative v2 post-enforce; legacy v1 pre-enforce.
+    if day >= ENFORCE_ACCOUNTING_V2_FROM_DAY_UTC:
+        _add_input(
+            inputs,
+            truth,
+            "accounting_nav_v2",
+            truth / "accounting_v2" / "nav" / day / "nav.v2.json",
+            is_dir=False,
+        )
+    else:
+        _add_input(
+            inputs,
+            truth,
+            "accounting_nav_v1",
+            truth / "accounting_v1" / "nav" / day / "nav.json",
+            is_dir=False,
+        )
 
     # Reports: broker reconciliation v1 + pipeline manifest v1
-    _add_input(inputs, truth, "broker_reconciliation_v1", truth / "reports" / "broker_reconciliation_v1" / day / "broker_reconciliation.v1.json", is_dir=False)
-    _add_input(inputs, truth, "pipeline_manifest_v1", truth / "reports" / "pipeline_manifest_v1" / day / "pipeline_manifest.v1.json", is_dir=False)
+    _add_input(
+        inputs,
+        truth,
+        "broker_reconciliation_v1",
+        truth / "reports" / "broker_reconciliation_v1" / day / "broker_reconciliation.v1.json",
+        is_dir=False,
+    )
+    _add_input(
+        inputs,
+        truth,
+        "pipeline_manifest_v1",
+        truth / "reports" / "pipeline_manifest_v1" / day / "pipeline_manifest.v1.json",
+        is_dir=False,
+    )
 
     replay_hash = _compute_replay_hash(day, inputs)
 
@@ -203,7 +268,12 @@ def main() -> int:
                             obs_sha = obs_map[k]
                             if exp_sha != obs_sha:
                                 mismatches.append(
-                                    {"type": k[0], "path": k[1], "expected_sha256": exp_sha, "observed_sha256": obs_sha}
+                                    {
+                                        "type": k[0],
+                                        "path": k[1],
+                                        "expected_sha256": exp_sha,
+                                        "observed_sha256": obs_sha,
+                                    }
                                 )
                     mismatch_diff["sha_mismatches"] = mismatches
                 else:
@@ -249,10 +319,16 @@ def main() -> int:
             wr = write_file_immutable_v1(path=out_path, data=_canonical_report_bytes(report), create_dirs=True)
         except ImmutableWriteError as e:
             raise SystemExit(f"FAIL: IMMUTABLE_WRITE_ERROR: {e}") from e
-        print(f"OK: REPLAY_INTEGRITY_V2_WRITTEN day_utc={day} status={status} path={wr.path} sha256={wr.sha256} action={wr.action}")
+        print(
+            f"OK: REPLAY_INTEGRITY_V2_WRITTEN day_utc={day} status={status} "
+            f"path={wr.path} sha256={wr.sha256} action={wr.action}"
+        )
         return 0 if status == "OK" else 2
 
-    print(f"OK: REPLAY_INTEGRITY_V2_CHECK day_utc={day} status={status} replay_hash={replay_hash} pass={report['reproducibility_check']['pass']}")
+    print(
+        f"OK: REPLAY_INTEGRITY_V2_CHECK day_utc={day} status={status} replay_hash={replay_hash} "
+        f"pass={report['reproducibility_check']['pass']}"
+    )
     return 0 if report["reproducibility_check"]["pass"] else 2
 
 
