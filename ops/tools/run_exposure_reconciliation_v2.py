@@ -39,7 +39,24 @@ def main() -> int:
     args = ap.parse_args()
     day = args.day_utc.strip()
 
-    p_pos = (TRUTH / "positions_v1/snapshots" / day / "positions_snapshot.v5.json").resolve()
+    # Accept highest available positions snapshot version (v3 -> v2 fallback)
+    snap_dir = (TRUTH / "positions_v1" / "snapshots" / day).resolve()
+
+    p_pos_v3 = snap_dir / "positions_snapshot.v3.json"
+    p_pos_v2 = snap_dir / "positions_snapshot.v2.json"
+
+    if p_pos_v3.exists():
+        p_pos = p_pos_v3
+        src_version = "v3"
+    elif p_pos_v2.exists():
+        p_pos = p_pos_v2
+        src_version = "v2"
+    else:
+        print(
+            f"FAIL: MISSING_POSITIONS_SNAPSHOT_V2_OR_V3: {snap_dir}",
+            file=sys.stderr,
+        )
+        return 2
     p_obl = (TRUTH / "exit_obligations_v1" / day / "exit_obligations.v1.json").resolve()
 
     if not p_pos.exists():
