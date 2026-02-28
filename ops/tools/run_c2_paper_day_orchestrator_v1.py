@@ -21,12 +21,14 @@ NON-NEGOTIABLE PROPERTIES:
 - Deterministic produced_utc (operator supplied; orchestrator MUST NOT synthesize time)
 - Fail-closed for submission (PhaseD blocked on prereq failure)
 - Fail-closed for paper readiness (broker evidence + linkage + attribution + monitor)
+- Bundle C: Emit per-engine heartbeat artifacts (authoritative) after each engine runner attempt
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import hashlib
 import json
 import os
 import subprocess
@@ -43,6 +45,14 @@ def _require_repo_root_cwd() -> None:
     cwd = Path.cwd().resolve()
     if cwd != REPO_ROOT:
         raise SystemExit(f"FATAL: must run from repo root cwd={cwd} expected={REPO_ROOT}")
+
+
+def _sha256_file(p: Path) -> str:
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def _resolve_truth_root(args_truth_root: str) -> Path:
@@ -194,13 +204,26 @@ def _active_engines_sorted(reg: Dict[str, Any]) -> List[Dict[str, str]]:
 
         engine_id = str(e.get("engine_id") or "").strip()
         runner_mod = str(e.get("runner_path") or "").strip()
+        runner_file = str(e.get("engine_runner_path") or "").strip()
+        runner_sha = str(e.get("engine_runner_sha256") or "").strip()
 
         if not engine_id:
             raise SystemExit("FATAL: ACTIVE engine missing engine_id")
         if not runner_mod:
             raise SystemExit(f"FATAL: ACTIVE engine missing runner_path: engine_id={engine_id}")
+        if not runner_file:
+            raise SystemExit(f"FATAL: ACTIVE engine missing engine_runner_path: engine_id={engine_id}")
+        if (len(runner_sha) != 64) or any(c not in "0123456789abcdef" for c in runner_sha.lower()):
+            raise SystemExit(f"FATAL: ACTIVE engine missing/invalid engine_runner_sha256: engine_id={engine_id} sha={runner_sha!r}")
 
-        active.append({"engine_id": engine_id, "runner_path": runner_mod})
+        active.append(
+            {
+                "engine_id": engine_id,
+                "runner_path": runner_mod,
+                "engine_runner_path": runner_file,
+                "engine_runner_sha256": runner_sha.lower(),
+            }
+        )
 
     return sorted(active, key=lambda r: r["engine_id"])
 
@@ -208,6 +231,11 @@ def _active_engines_sorted(reg: Dict[str, Any]) -> List[Dict[str, str]]:
 def _stage_name_for_engine(engine_id: str) -> str:
     s = "".join([c if (c.isalnum() or c == "_") else "_" for c in engine_id.strip().upper()])
     return f"ENGINE_{s}"
+
+
+def _stage_name_for_heartbeat(engine_id: str) -> str:
+    s = "".join([c if (c.isalnum() or c == "_") else "_" for c in engine_id.strip().upper()])
+    return f"HB_{s}"
 
 
 def main() -> int:
@@ -248,8 +276,7 @@ def main() -> int:
     stage_env = dict(os.environ)
     stage_env["C2_TRUTH_ROOT"] = str(truth_root)
     stage_env["PYTHONPATH"] = str(REPO_ROOT)
-    # NOTE: produced_utc is deterministic and operator-supplied; orchestrator does not synthesize time.
-    # This is not yet consumed by all tools; it is retained here for audit context and future propagation.
+    # Deterministic produced_utc is operator-supplied; orchestrator does not synthesize time.
     stage_env["C2_PRODUCED_UTC"] = produced_utc
 
     current_git_sha = (
@@ -362,9 +389,12 @@ def main() -> int:
     # --- Stage 1 Engines (registry-driven; ACTIVE only; deterministic order) ---
     reg = _read_engine_registry()
     active_engines = _active_engines_sorted(reg)
+    registry_sha = _sha256_file(REG_PATH)
+
     for e in active_engines:
         stage_name = _stage_name_for_engine(e["engine_id"])
         module = str(e["runner_path"])
+
         ok, _rc = _run_stage_soft(
             stage_name,
             ["python3", "-m", module, "--day_utc", day, "--mode", mode, "--symbol", symbol],
@@ -372,6 +402,44 @@ def main() -> int:
         )
         if not ok:
             prereq_failed = True
+
+        # Bundle C heartbeat (strict; must be emitted even if the engine failed)
+        hb_status = "OK" if ok else "FAIL"
+        hb_reason = "ENGINE_RUN_OK" if ok else "ENGINE_RUN_FAIL"
+
+        hb_stage = _stage_name_for_heartbeat(e["engine_id"])
+        _run_stage_strict(
+            hb_stage,
+            [
+                "python3",
+                "ops/tools/run_engine_heartbeat_emit_v1.py",
+                "--day_utc",
+                day,
+                "--engine_id",
+                e["engine_id"],
+                "--status",
+                hb_status,
+                "--reason_code",
+                hb_reason,
+                "--last_run_utc",
+                produced_utc,
+                "--expected_period_seconds",
+                "86400",
+                "--stale_after_seconds",
+                "172800",
+                "--fingerprint",
+                f"engine_registry|governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json|{registry_sha}|true",
+                "--fingerprint",
+                f"engine_runner|{e['engine_runner_path']}|{e['engine_runner_sha256']}|true",
+                "--producer_repo",
+                "constellation_2_runtime",
+                "--producer_module",
+                "ops/tools/run_engine_heartbeat_emit_v1.py",
+                "--producer_git_sha",
+                current_git_sha,
+            ],
+            env=stage_env,
+        )
 
     # --- Bundle X prerequisites (strict; root-level systemic inputs) ---
     _run_stage_strict(
@@ -519,17 +587,16 @@ def main() -> int:
             day,
             "--mode",
             "WRITE",
-            "--truth_root",
-            str(truth_root),
         ],
         env=stage_env,
     )
 
+    # Fail-closed posture: if any prereq failed, exit 2 (systemd may treat 2 as degraded if configured).
     if prereq_failed:
-        print("ORCHESTRATOR_OK_WITH_SOFT_STAGE_FAILURES")
-    else:
-        print("ORCHESTRATOR_OK")
+        print("FAIL: ORCHESTRATOR_PREREQ_FAILED", file=sys.stderr)
+        return 2
 
+    print("OK: C2_PAPER_DAY_ORCHESTRATOR_V1")
     return 0
 
 
