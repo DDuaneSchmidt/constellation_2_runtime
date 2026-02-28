@@ -10,6 +10,7 @@ canonical_truth_root: /home/node/constellation_2_runtime/constellation_2/runtime
 scope:
   - "Defines the governed allowlist of Interactive Brokers account IDs usable by Constellation 2.0."
   - "Provides account-level safety defaults (fail-closed) and required enforcement semantics."
+  - "Optionally constrains symbol universe per IB account."
 non_goals:
   - "Does not define per-engine sizing or strategy parameters."
   - "Does not authorize live trading unless explicitly enabled by governance."
@@ -31,6 +32,14 @@ Each entry MUST include:
 - `allowed_engine_ids` (list of engine_id strings)
 - `notes` (list of strings)
 
+# 2.1) Optional field: allowed_symbols
+
+Each entry MAY include:
+
+- `allowed_symbols`:
+  - If `allowed_symbols` is a list of strings, it is a hard allowlist of tradable symbols for that account.
+  - If `allowed_symbols` is `null` or missing, the registry does not restrict symbols for that account.
+
 # 3) Fail-closed defaults
 
 Unless governance explicitly enables an account:
@@ -48,6 +57,9 @@ Any code path that can submit an order to IB MUST enforce:
    - `environment` MUST be `PAPER`
    - `account_id` MUST start with `DU`
 4) The engine attempting to submit MUST be present in `allowed_engine_ids`.
+5) If `allowed_symbols` is a list:
+   - the order plan symbol MUST be present in `allowed_symbols`.
+   - otherwise FAIL CLOSED and emit a veto (no broker call).
 
 If any check fails, submission MUST FAIL CLOSED and emit a veto artifact (no broker call).
 

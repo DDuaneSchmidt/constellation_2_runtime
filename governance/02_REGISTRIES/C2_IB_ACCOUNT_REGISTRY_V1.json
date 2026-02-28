@@ -5,19 +5,47 @@
   "producer": {
     "repo": "constellation_2_runtime",
     "module": "governance/02_REGISTRIES/C2_IB_ACCOUNT_REGISTRY_V1.json",
-    "git_sha": "2aa39a49d834d1f39e018ab3497337fbe93cbc83"
+    "git_sha": "9b7a2842e8e1c156b7c45b6b6a23ae73ee4e4a83"
   },
-  "registry_version": 1,
-  "approved_git_sha": "2aa39a49d834d1f39e018ab3497337fbe93cbc83",
+  "registry_version": 2,
+  "approved_git_sha": "9b7a2842e8e1c156b7c45b6b6a23ae73ee4e4a83",
   "accounts": [
     {
       "account_id": "DUO847203",
       "environment": "PAPER",
-      "enabled_for_submission": false,
-      "allowed_engine_ids": [],
+      "enabled_for_submission": true,
+      "allowed_engine_ids": [
+        "C2_MEAN_REVERSION_EQ_V1",
+        "C2_TREND_EQ_PRIMARY_V1",
+        "C2_VOL_INCOME_DEFINED_RISK_V1",
+        "C2_EVENT_DISLOCATION_V1",
+        "C2_DEFENSIVE_TAIL_V1"
+      ],
+      "allowed_symbols": [
+        "SPY"
+      ],
       "notes": [
         "Discovered from C2 truth: cash_ledger_v1 snapshots embed account_id=DUO847203.",
-        "Fail-closed defaults: enabled_for_submission=false and allowed_engine_ids=[] until governance explicitly enables."
+        "Policy: DUO847203 is restricted to SPY only via allowed_symbols=[SPY].",
+        "enabled_for_submission=true; allowed_engine_ids enumerates the currently ACTIVE engines in ENGINE_MODEL_REGISTRY_V1."
+      ]
+    },
+    {
+      "account_id": "DUQ154892",
+      "environment": "PAPER",
+      "enabled_for_submission": true,
+      "allowed_engine_ids": [
+        "C2_MEAN_REVERSION_EQ_V1",
+        "C2_TREND_EQ_PRIMARY_V1",
+        "C2_VOL_INCOME_DEFINED_RISK_V1",
+        "C2_EVENT_DISLOCATION_V1",
+        "C2_DEFENSIVE_TAIL_V1"
+      ],
+      "allowed_symbols": null,
+      "notes": [
+        "Proven in C2 truth via execution_evidence_v1/broker_baseline_snapshot_v1 (account_id=DUQ154892).",
+        "Policy: DUQ154892 may trade multiple symbols; allowed_symbols=null means no symbol restriction from the registry.",
+        "enabled_for_submission=true; allowed_engine_ids enumerates the currently ACTIVE engines in ENGINE_MODEL_REGISTRY_V1."
       ]
     }
   ]
