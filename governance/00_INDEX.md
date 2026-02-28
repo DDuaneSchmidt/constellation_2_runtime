@@ -179,3 +179,5 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/05_CONTRACTS/C2/latest_pointer_fanout_elimination_v1.contract.md`
 - `governance/05_CONTRACTS/C2/spine_exclusivity_v1.contract.md`
 - `governance/05_CONTRACTS/C3/c3_ui_status_contract_v1.contract.md`
+- `governance/05_CONTRACTS/C2/operator_future_day_override_v1.contract.md`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/operator_future_day_override.v1.schema.json`
