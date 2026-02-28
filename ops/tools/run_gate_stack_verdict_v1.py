@@ -10,7 +10,7 @@ Purpose:
 - Emit a single immutable verdict artifact.
 
 Writes:
-  truth/reports/gate_stack_verdict_v1/<DAY>/gate_stack_verdict.v1.json
+  constellation_2/runtime/truth/reports/gate_stack_verdict_v1/<DAY>/gate_stack_verdict.v1.json
 
 Run:
   python3 ops/tools/run_gate_stack_verdict_v1.py --day_utc YYYY-MM-DD
@@ -19,6 +19,9 @@ Non-negotiable:
 - Pure evaluation (no mutation of inputs)
 - Fail-closed for required gates
 - Immutable write
+- SELF-HEAL (Bundle C stability):
+    If canonical verdict exists and is FAIL, but recomputation is PASS,
+    quarantine the old canonical as *.INVALID_<sha>.json and write new canonical PASS.
 """
 
 from __future__ import annotations
@@ -26,11 +29,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
-
 
 _THIS_FILE = Path(__file__).resolve()
 _REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
@@ -38,6 +41,8 @@ if str(_REPO_ROOT_FROM_FILE) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
 
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1  # type: ignore
+from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1  # type: ignore
+from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1  # type: ignore
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
@@ -76,29 +81,11 @@ def _read_json_obj(p: Path) -> Dict[str, Any]:
     return o
 
 
-def _write_immutable(path: Path, obj: Dict[str, Any]) -> Tuple[str, str, str]:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = canonical_json_bytes_v1(obj) + b"\n"
-    sha = _sha256_bytes(payload)
-
-    if path.exists():
-        existing = path.read_bytes()
-        if _sha256_bytes(existing) == sha:
-            return (str(path), sha, "EXISTS_IDENTICAL")
-        raise SystemExit(f"FAIL: refusing overwrite (different bytes): {path}")
-
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    if tmp.exists():
-        tmp.unlink()
-    tmp.write_bytes(payload)
-    import os
-    os.replace(tmp, path)
-    return (str(path), sha, "WRITTEN")
-
-
 def _class_precedence(reg: Dict[str, Any]) -> Dict[str, int]:
     out: Dict[str, int] = {}
     for c in reg.get("classes") or []:
+        if not isinstance(c, dict):
+            continue
         cid = str(c.get("class_id") or "").strip()
         prec = int(c.get("precedence") or 9999)
         if cid:
@@ -160,7 +147,6 @@ def _eval_gate(day: str, gate: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dic
         if status_upper == "MISSING":
             eff = "MISSING"
 
-    # Keep actual observed status for transparency.
     out = {
         "gate_id": gate_id,
         "gate_class": gclass,
@@ -175,16 +161,7 @@ def _eval_gate(day: str, gate: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dic
     return out, manifest
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(prog="run_gate_stack_verdict_v1")
-    ap.add_argument("--day_utc", required=True, help="UTC day key YYYY-MM-DD")
-    args = ap.parse_args()
-
-    day = str(args.day_utc).strip()
-    import re
-    if not re.match(DAY_RE, day):
-        raise SystemExit(f"FAIL: bad --day_utc (expected YYYY-MM-DD): {day!r}")
-
+def _compute_verdict(day: str) -> Dict[str, Any]:
     if not REGISTRY_PATH.exists():
         raise SystemExit(f"FATAL: missing gate hierarchy registry: {REGISTRY_PATH}")
 
@@ -219,13 +196,13 @@ def main() -> int:
         cid = str(g.get("gate_class") or "")
         required = bool(g.get("required"))
         blocking = bool(g.get("blocking"))
-        observed = str(g.get("status") or "")
-        pass_vals = None
+        observed = str(g.get("status") or "").strip().upper()
 
-        # A required non-pass is a fail.
         is_missing = (observed == "MISSING")
-        is_failish = (observed not in ("PASS", "OK"))
+        is_pass = (observed in ("PASS", "OK"))
+        is_failish = (not is_pass)
 
+        # Required non-pass is a fail.
         if required and is_failish:
             status = "FAIL"
             blocking_class = cid
@@ -234,8 +211,8 @@ def main() -> int:
                 reason_codes.append(f"GATE_MISSING:{g.get('gate_id')}")
             break
 
-        # Non-required but blocking gates can still fail closed.
-        if (not required) and blocking and is_failish and not is_missing:
+        # Non-required but blocking gates can still fail closed if present and not passing.
+        if (not required) and blocking and is_failish and (not is_missing):
             status = "FAIL"
             blocking_class = cid
             reason_codes.append(f"GATE_BLOCKING_NOT_PASS:{g.get('gate_id')}:{observed}")
@@ -260,20 +237,102 @@ def main() -> int:
                 "status": str(g.get("status")),
                 "artifact_path": str(g.get("artifact_path")),
                 "artifact_sha256": str(g.get("artifact_sha256")),
-                "reason_codes": list(g.get("reason_codes") or []),
+                "reason_codes": g.get("reason_codes") if isinstance(g.get("reason_codes"), list) else [],
             }
             for g in gates_sorted
         ],
     }
 
-    # Schema validation is intentionally not enforced here to avoid introducing a dependency loop.
-    out_path = (OUT_ROOT / day / "gate_stack_verdict.v1.json").resolve()
-    path, sha, action = _write_immutable(out_path, out)
+    validate_against_repo_schema_v1(out, REPO_ROOT, SCHEMA_RELPATH)
+    return out
 
-    print(f"OK: gate_stack_verdict_v1: action={action} sha256={sha} path={path}")
-    if status != "PASS":
-        return 2
-    return 0
+
+def _self_heal_if_needed(day: str, out_path: Path, new_obj: Dict[str, Any]) -> Tuple[bool, str]:
+    """
+    Returns (self_heal_performed, action_string)
+    action_string is one of: EXISTS, WROTE, EXISTS_IDENTICAL
+    """
+    if not out_path.exists():
+        return (False, "WROTE")
+
+    existing_sha = _sha256_file(out_path)
+    existing = _read_json_obj(out_path)
+
+    schema_id = str(existing.get("schema_id") or "").strip()
+    schema_version = str(existing.get("schema_version") or "").strip()
+    day_utc = str(existing.get("day_utc") or "").strip()
+    status = str(existing.get("status") or "").strip().upper()
+
+    if schema_id != "gate_stack_verdict":
+        raise SystemExit(f"FAIL: EXISTING_GATE_STACK_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
+    if schema_version != "v1":
+        raise SystemExit(f"FAIL: EXISTING_GATE_STACK_SCHEMA_VERSION_MISMATCH: schema_version={schema_version!r} path={out_path}")
+    if day_utc != day:
+        raise SystemExit(f"FAIL: EXISTING_GATE_STACK_DAY_MISMATCH: day_utc={day_utc!r} expected={day!r} path={out_path}")
+    if status not in ("PASS", "FAIL"):
+        raise SystemExit(f"FAIL: EXISTING_GATE_STACK_STATUS_INVALID: status={status!r} path={out_path}")
+
+    new_bytes = canonical_json_bytes_v1(new_obj) + b"\n"
+    new_sha = _sha256_bytes(new_bytes)
+    if new_sha == existing_sha:
+        return (False, "EXISTS_IDENTICAL")
+
+    # If canonical is PASS, never replace it.
+    if status == "PASS":
+        return (False, "EXISTS")
+
+    # Canonical is FAIL. Only heal if recomputed is PASS.
+    new_status = str(new_obj.get("status") or "").strip().upper()
+    if new_status != "PASS":
+        return (False, "EXISTS")
+
+    invalid_path = out_path.with_name(f"gate_stack_verdict.v1.json.INVALID_{existing_sha}.json")
+    if invalid_path.exists():
+        raise SystemExit(
+            f"FAIL: INVALID_EXISTING_GATE_STACK_ALREADY_QUARANTINED: day_utc={day} existing_sha={existing_sha} "
+            f"out_path={out_path} invalid_path={invalid_path}"
+        )
+
+    out_path.rename(invalid_path)
+    print(
+        f"WARN: QUARANTINED_INVALID_EXISTING_GATE_STACK_VERDICT day_utc={day} "
+        f"old_path={out_path} quarantined_path={invalid_path} sha256={existing_sha}"
+    )
+    return (True, "WROTE")
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="run_gate_stack_verdict_v1")
+    ap.add_argument("--day_utc", required=True, help="UTC day key YYYY-MM-DD")
+    args = ap.parse_args()
+
+    day = str(args.day_utc).strip()
+    import re
+    if not re.match(DAY_RE, day):
+        raise SystemExit(f"FAIL: bad --day_utc (expected YYYY-MM-DD): {day!r}")
+
+    out_dir = (OUT_ROOT / day).resolve()
+    out_path = (out_dir / "gate_stack_verdict.v1.json").resolve()
+
+    out_obj = _compute_verdict(day)
+    self_heal, intended_action = _self_heal_if_needed(day, out_path, out_obj)
+
+    payload = canonical_json_bytes_v1(out_obj) + b"\n"
+
+    if intended_action in ("EXISTS", "EXISTS_IDENTICAL"):
+        sha = _sha256_file(out_path)
+        action = intended_action
+    else:
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            wr = write_file_immutable_v1(path=out_path, data=payload, create_dirs=False)
+            sha = wr.sha256
+            action = "WRITTEN" if wr.action == "WROTE" else str(wr.action)
+        except ImmutableWriteError as e:
+            raise SystemExit(f"FAIL_IMMUTABLE_WRITE: {e}") from e
+
+    print(f"OK: gate_stack_verdict_v1: action={action} sha256={sha} path={out_path}" + (f" self_heal=1" if self_heal else ""))
+    return 0 if str(out_obj.get("status") or "").strip().upper() == "PASS" else 1
 
 
 if __name__ == "__main__":
