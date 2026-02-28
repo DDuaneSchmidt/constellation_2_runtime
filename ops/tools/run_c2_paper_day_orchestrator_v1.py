@@ -333,6 +333,38 @@ def main() -> int:
     )
 
     # --- Bundle F++: Lifecycle Monitor (strict) ---
+    # --- Bundle F prereqs for lifecycle monitor (strict; must exist before monitor) ---
+    _run_stage_strict(
+        "F_POSITION_LIFECYCLE_SNAPSHOT_V2",
+        [
+            "python3",
+            "ops/tools/run_position_lifecycle_snapshot_v2.py",
+            "--day_utc",
+            day,
+        ],
+        env=stage_env,
+    )
+    _run_stage_strict(
+        "F_EXIT_OBLIGATIONS_V1",
+        [
+            "python3",
+            "ops/tools/run_exit_obligations_v1.py",
+            "--day_utc",
+            day,
+        ],
+        env=stage_env,
+    )
+    _run_stage_strict(
+        "F_EXPOSURE_RECONCILIATION_V2",
+        [
+            "python3",
+            "ops/tools/run_exposure_reconciliation_v2.py",
+            "--day_utc",
+            day,
+        ],
+        env=stage_env,
+    )
+
     _run_stage_strict(
         "BUNDLEF_LIFECYCLE_MONITOR_V1",
         ["python3", "ops/tools/run_lifecycle_monitor_v1.py", "--day_utc", day],
