@@ -2,8 +2,13 @@
 """
 Phase F — Execution Evidence — Submission Index v1
 
-Writes:
+Writes (canonical):
   constellation_2/runtime/truth/execution_evidence_v1/submissions/YYYY-MM-DD/submission_index.v1.json
+
+Writes (attempts, append-only; only when canonical exists with status=FAIL):
+  constellation_2/runtime/truth/execution_evidence_v1/submissions/YYYY-MM-DD/submission_index.v1.attempt_0001.json
+  constellation_2/runtime/truth/execution_evidence_v1/submissions/YYYY-MM-DD/submission_index.v1.attempt_0002.json
+  ...
 
 Inputs (canonical truth only):
   - manifests: constellation_2/runtime/truth/execution_evidence_v1/manifests/YYYY-MM-DD/*.manifest.json
@@ -13,6 +18,13 @@ Read-only / deterministic / fail-closed:
   - never talks to broker
   - never mutates existing truth
   - emits missing_paths + warnings instead of guessing
+
+Rerun safety (PAPER mode):
+  - canonical submission_index.v1.json is immutable historical fact
+  - if canonical exists with status=FAIL, do NOT brick reruns:
+      - if a latest attempt artifact is OK/DEGRADED -> return 0
+      - else write a new immutable attempt artifact (next attempt_XXXX)
+      - return based on the new attempt's status (0 for OK/DEGRADED; 2 for FAIL)
 """
 
 from __future__ import annotations
@@ -35,6 +47,10 @@ TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 MANIFESTS_ROOT = TRUTH_ROOT / "execution_evidence_v1/manifests"
 SUBMISSIONS_ROOT = TRUTH_ROOT / "execution_evidence_v1/submissions"
 SCHEMA_PATH = (REPO_ROOT / "constellation_2/schemas/submission_index.v1.schema.json").resolve()
+
+ATTEMPT_GLOB = "submission_index.v1.attempt_*.json"
+ATTEMPT_PREFIX = "submission_index.v1.attempt_"
+ATTEMPT_SUFFIX = ".json"
 
 
 def _deterministic_generated_utc(day_utc: str) -> str:
@@ -333,35 +349,83 @@ def build_submission_index(day_utc: str) -> Dict[str, Any]:
     return resp
 
 
-def _exists_short_circuit(out_path: Path, expected_day: str) -> int | None:
+def _read_existing_report_status(path: Path, expected_day: str) -> Tuple[str, str]:
     """
-    Idempotency:
-    - If output already exists, do NOT rewrite.
-    - If existing status is OK/DEGRADED, return 0.
-    - If existing status is FAIL, return 2 (fail-closed) but still no rewrite.
-    """
-    if not out_path.exists():
-        return None
-    if not out_path.is_file():
-        raise SystemExit(f"FAIL: EXISTING_OUTPUT_NOT_FILE: path={out_path}")
+    Read + validate an existing submission index report.
 
-    existing = json.loads(out_path.read_text(encoding="utf-8"))
+    Returns: (status_upper, sha256_hex)
+
+    Fail-closed:
+      - schema mismatch, day mismatch, invalid status -> SystemExit
+    """
+    if not path.exists():
+        raise SystemExit(f"FAIL: EXPECTED_EXISTING_REPORT_MISSING: path={path}")
+    if not path.is_file():
+        raise SystemExit(f"FAIL: EXISTING_OUTPUT_NOT_FILE: path={path}")
+
+    existing = json.loads(path.read_text(encoding="utf-8"))
     schema_id = str(existing.get("schema_id") or "").strip()
     day_utc = str(existing.get("day_utc") or "").strip()
     status = str(existing.get("status") or "").strip().upper()
 
     if schema_id != "C2_SUBMISSION_INDEX_V1":
-        raise SystemExit(f"FAIL: EXISTING_REPORT_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
+        raise SystemExit(f"FAIL: EXISTING_REPORT_SCHEMA_MISMATCH: schema_id={schema_id!r} path={path}")
     if day_utc != expected_day:
-        raise SystemExit(f"FAIL: EXISTING_REPORT_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day!r} path={out_path}")
+        raise SystemExit(f"FAIL: EXISTING_REPORT_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day!r} path={path}")
     if status not in ("OK", "DEGRADED", "FAIL"):
-        raise SystemExit(f"FAIL: EXISTING_REPORT_STATUS_INVALID: status={status!r} path={out_path}")
+        raise SystemExit(f"FAIL: EXISTING_REPORT_STATUS_INVALID: status={status!r} path={path}")
 
-    existing_sha = hashlib.sha256(out_path.read_bytes()).hexdigest()
-    sys.stderr.write(
-        f"OK: SUBMISSION_INDEX_V1_EXISTS day={expected_day} status={status} path={out_path} sha256={existing_sha} action=EXISTS\n"
-    )
-    return 0 if status in ("OK", "DEGRADED") else 2
+    existing_sha = hashlib.sha256(path.read_bytes()).hexdigest()
+    return status, existing_sha
+
+
+def _parse_attempt_seq(filename: str) -> Optional[int]:
+    """
+    submission_index.v1.attempt_0001.json -> 1
+    """
+    if not (filename.startswith(ATTEMPT_PREFIX) and filename.endswith(ATTEMPT_SUFFIX)):
+        return None
+    mid = filename[len(ATTEMPT_PREFIX) : -len(ATTEMPT_SUFFIX)]
+    if not mid.isdigit():
+        return None
+    try:
+        n = int(mid, 10)
+    except Exception:
+        return None
+    return n if n >= 1 else None
+
+
+def _latest_attempt_path(out_dir: Path) -> Optional[Path]:
+    """
+    Deterministic: choose max attempt seq present in out_dir.
+    """
+    if not out_dir.exists() or not out_dir.is_dir():
+        return None
+    best_n: Optional[int] = None
+    best_p: Optional[Path] = None
+    for p in out_dir.glob(ATTEMPT_GLOB):
+        if not p.is_file():
+            continue
+        n = _parse_attempt_seq(p.name)
+        if n is None:
+            continue
+        if best_n is None or n > best_n:
+            best_n = n
+            best_p = p
+    return best_p
+
+
+def _next_attempt_path(out_dir: Path) -> Path:
+    """
+    Deterministic: next attempt seq is 1 + max(existing seq).
+    """
+    last = _latest_attempt_path(out_dir)
+    if last is None:
+        n = 1
+    else:
+        last_n = _parse_attempt_seq(last.name)
+        n = (last_n + 1) if last_n is not None else 1
+    return out_dir / f"{ATTEMPT_PREFIX}{n:04d}{ATTEMPT_SUFFIX}"
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -371,23 +435,58 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     day = str(ns.day).strip()
     out_dir = SUBMISSIONS_ROOT / day
-    out_path = out_dir / "submission_index.v1.json"
+    canonical_path = out_dir / "submission_index.v1.json"
 
-    # Idempotency short-circuit FIRST (before computing new bytes).
-    ex = _exists_short_circuit(out_path, expected_day=day)
-    if ex is not None:
-        return ex
+    # Canonical idempotency:
+    # - If canonical exists and is OK/DEGRADED -> return 0
+    # - If canonical exists and is FAIL:
+    #     - if latest attempt exists and is OK/DEGRADED -> return 0
+    #     - else write a new attempt artifact (append-only) and return based on attempt status
+    # - If canonical does not exist -> write canonical as before and return based on its status
 
+    if canonical_path.exists():
+        status, sha = _read_existing_report_status(canonical_path, expected_day=day)
+        sys.stderr.write(
+            f"OK: SUBMISSION_INDEX_V1_EXISTS day={day} status={status} path={canonical_path} sha256={sha} action=EXISTS\n"
+        )
+        if status in ("OK", "DEGRADED"):
+            return 0
+
+        # status == FAIL -> check for existing attempt that already remediated the failure
+        latest = _latest_attempt_path(out_dir)
+        if latest is not None:
+            a_status, a_sha = _read_existing_report_status(latest, expected_day=day)
+            sys.stderr.write(
+                f"OK: SUBMISSION_INDEX_V1_ATTEMPT_EXISTS day={day} status={a_status} path={latest} sha256={a_sha} action=EXISTS\n"
+            )
+            if a_status in ("OK", "DEGRADED"):
+                return 0
+
+        # Need a new attempt artifact (append-only)
+        out_path = _next_attempt_path(out_dir)
+        obj = build_submission_index(day_utc=day)
+        b = _canonical_json_bytes(obj)
+
+        try:
+            _ = write_file_immutable_v1(path=out_path, data=b, create_dirs=True)
+        except ImmutableWriteError as e:
+            sys.stderr.write(f"FAIL: IMMUTABLE_WRITE_ERROR: {e}\n")
+            return 2
+
+        sys.stderr.write(f"OK: SUBMISSION_INDEX_V1_ATTEMPT_WRITTEN day={day} path={out_path}\n")
+        return 0 if str(obj.get("status") or "").strip().upper() in ("OK", "DEGRADED") else 2
+
+    # No canonical exists -> write canonical (original behavior)
     obj = build_submission_index(day_utc=day)
     b = _canonical_json_bytes(obj)
 
     try:
-        _ = write_file_immutable_v1(path=out_path, data=b, create_dirs=True)
+        _ = write_file_immutable_v1(path=canonical_path, data=b, create_dirs=True)
     except ImmutableWriteError as e:
         sys.stderr.write(f"FAIL: IMMUTABLE_WRITE_ERROR: {e}\n")
         return 2
 
-    sys.stderr.write(f"OK: SUBMISSION_INDEX_V1_WRITTEN day={day} path={out_path}\n")
+    sys.stderr.write(f"OK: SUBMISSION_INDEX_V1_WRITTEN day={day} path={canonical_path}\n")
     return 0 if str(obj.get("status") or "").strip().upper() in ("OK", "DEGRADED") else 2
 
 
