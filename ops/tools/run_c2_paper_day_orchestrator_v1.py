@@ -479,12 +479,31 @@ def main() -> int:
     )
 
     # --- PhaseG ---
+    # --- PhaseG ---
     _run_stage_strict(
         "PHASEG_BUNDLE_F_TO_G",
-        ["python3", "-m", "constellation_2.phaseG.bundles.run.run_bundle_f_to_g_day_v1", "--day_utc", day],
+        [
+            "python3",
+            "-m",
+            "constellation_2.phaseG.bundles.run.run_bundle_f_to_g_day_v1",
+            "--day_utc",
+            day,
+            "--producer_git_sha",
+            current_git_sha,
+            "--producer_repo",
+            "constellation_2_runtime",
+            "--operator_statement_json",
+            str(
+                REPO_ROOT
+                / "constellation_2"
+                / "operator_inputs"
+                / "cash_ledger_operator_statements"
+                / day
+                / "operator_statement.v1.json"
+            ),
+        ],
         env=stage_env,
     )
-
     # --- Economic NAV + Drawdown Truth Spine (soft stages) ---
     for stage_name, cmd in [
         ("ECON_NAV_SNAPSHOT_V1", ["python3", "ops/tools/gen_nav_snapshot_v1.py", "--day_utc", day]),
