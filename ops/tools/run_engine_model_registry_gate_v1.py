@@ -18,6 +18,15 @@ IMPORTANT SEMANTICS:
 
 Output (immutable report):
 constellation_2/runtime/truth/reports/engine_model_registry_gate_v1/<DAY>/engine_model_registry_gate.v1.json
+
+NEW (Bundle C durability fix):
+- If the canonical gate file exists and is FAIL, but a deterministic re-evaluation of the
+  registry + runner file hashes is PASS, quarantine the old canonical file and write a
+  corrected canonical file.
+- Quarantine path:
+    engine_model_registry_gate.v1.json.INVALID_<sha256_of_old_file>.json
+- Fail-closed: never overwrite a canonical file with different bytes; only quarantine+rewrite
+  when we can prove the existing canonical is invalid by recomputation.
 """
 
 from __future__ import annotations
@@ -39,8 +48,9 @@ if not (_REPO_ROOT_FROM_FILE / "governance").exists():
 import argparse
 import hashlib
 import json
+import os
 import subprocess
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
@@ -87,28 +97,6 @@ def _git_sha_head() -> str:
     return out.decode("utf-8").strip()
 
 
-def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | None:
-    if not out_path.exists():
-        return None
-
-    existing_sha = _sha256_file(out_path)
-    existing = _read_json(out_path)
-
-    schema_id = str(existing.get("schema_id") or "").strip()
-    day_utc = str(existing.get("day_utc") or "").strip()
-    status = str(existing.get("status") or "").strip().upper()
-
-    if schema_id != "engine_model_registry_gate":
-        raise SystemExit(f"FAIL: EXISTING_REPORT_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
-    if day_utc != expected_day_utc:
-        raise SystemExit(f"FAIL: EXISTING_REPORT_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}")
-    if status not in ("PASS", "FAIL"):
-        raise SystemExit(f"FAIL: EXISTING_REPORT_STATUS_INVALID: status={status!r} path={out_path}")
-
-    print(f"OK: ENGINE_MODEL_REGISTRY_GATE_WRITTEN day_utc={expected_day_utc} status={status} path={out_path} sha256={existing_sha} action=EXISTS")
-    return 0 if status == "PASS" else 1
-
-
 def _derive_module_from_runner_path(runner_rel: str) -> str:
     s = (runner_rel or "").strip()
     if not s.endswith(".py"):
@@ -119,22 +107,7 @@ def _derive_module_from_runner_path(runner_rel: str) -> str:
     return s2
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(prog="run_engine_model_registry_gate_v1")
-    ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
-    ap.add_argument("--current_git_sha", default="", help="Optional (audit-only): explicit git sha; if empty, uses HEAD.")
-    args = ap.parse_args()
-
-    day = _parse_day_utc(args.day_utc)
-
-    out_dir = (OUT_ROOT / day).resolve()
-    out_path = (out_dir / "engine_model_registry_gate.v1.json").resolve()
-
-    existing_rc = _return_if_existing_report(out_path=out_path, expected_day_utc=day)
-    if existing_rc is not None:
-        return int(existing_rc)
-
-    current_sha = (str(args.current_git_sha) or "").strip() or _git_sha_head()
+def _compute_report(*, day: str, current_sha: str) -> Tuple[str, Dict[str, Any], List[str]]:
     produced_utc = _produced_utc_deterministic(day)
 
     reason_codes: List[str] = []
@@ -262,6 +235,83 @@ def main() -> int:
         "results": {"approved_git_sha": approved_git_sha, "current_git_sha": current_sha, "engines": engine_results},
     }
 
+    return gate_status, report, report["reason_codes"]
+
+
+def _quarantine_invalid_existing_gate(*, out_path: Path, expected_day_utc: str, existing_sha: str) -> None:
+    invalid_path = out_path.with_name(f"engine_model_registry_gate.v1.json.INVALID_{existing_sha}.json")
+    if invalid_path.exists():
+        raise SystemExit(
+            f"FAIL: INVALID_EXISTING_GATE_ALREADY_QUARANTINED: day_utc={expected_day_utc} existing_sha={existing_sha} "
+            f"out_path={out_path} invalid_path={invalid_path}"
+        )
+    out_path.rename(invalid_path)
+    print(
+        f"WARN: QUARANTINED_INVALID_EXISTING_ENGINE_MODEL_REGISTRY_GATE day_utc={expected_day_utc} "
+        f"old_path={out_path} quarantined_path={invalid_path} sha256={existing_sha}"
+    )
+
+
+def _return_if_existing_or_self_heal(out_path: Path, expected_day_utc: str, current_sha: str) -> int | None:
+    if not out_path.exists():
+        return None
+
+    existing_sha = _sha256_file(out_path)
+    existing = _read_json(out_path)
+
+    schema_id = str(existing.get("schema_id") or "").strip()
+    day_utc = str(existing.get("day_utc") or "").strip()
+    status = str(existing.get("status") or "").strip().upper()
+
+    if schema_id != "engine_model_registry_gate":
+        raise SystemExit(f"FAIL: EXISTING_REPORT_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
+    if day_utc != expected_day_utc:
+        raise SystemExit(f"FAIL: EXISTING_REPORT_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}")
+    if status not in ("PASS", "FAIL"):
+        raise SystemExit(f"FAIL: EXISTING_REPORT_STATUS_INVALID: status={status!r} path={out_path}")
+
+    if status == "PASS":
+        print(f"OK: ENGINE_MODEL_REGISTRY_GATE_WRITTEN day_utc={expected_day_utc} status=PASS path={out_path} sha256={existing_sha} action=EXISTS")
+        return 0
+
+    # status == FAIL: attempt deterministic re-evaluation. Only quarantine if re-eval is PASS.
+    recomputed_status, recomputed_report, _rcs = _compute_report(day=expected_day_utc, current_sha=current_sha)
+
+    if recomputed_status != "PASS":
+        print(f"OK: ENGINE_MODEL_REGISTRY_GATE_WRITTEN day_utc={expected_day_utc} status=FAIL path={out_path} sha256={existing_sha} action=EXISTS")
+        return 1
+
+    # Self-heal: quarantine invalid canonical FAIL and write corrected PASS canonical.
+    _quarantine_invalid_existing_gate(out_path=out_path, expected_day_utc=expected_day_utc, existing_sha=existing_sha)
+
+    payload = (json.dumps(recomputed_report, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    try:
+        wr = write_file_immutable_v1(path=out_path, data=payload, create_dirs=True)
+    except ImmutableWriteError as e:
+        raise SystemExit(f"FAIL: IMMUTABLE_WRITE_ERROR_AFTER_QUARANTINE: {e}") from e
+
+    print(f"OK: ENGINE_MODEL_REGISTRY_GATE_WRITTEN day_utc={expected_day_utc} status=PASS path={wr.path} sha256={wr.sha256} action={wr.action} self_heal=1")
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="run_engine_model_registry_gate_v1")
+    ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
+    ap.add_argument("--current_git_sha", default="", help="Optional (audit-only): explicit git sha; if empty, uses HEAD.")
+    args = ap.parse_args()
+
+    day = _parse_day_utc(args.day_utc)
+
+    out_dir = (OUT_ROOT / day).resolve()
+    out_path = (out_dir / "engine_model_registry_gate.v1.json").resolve()
+
+    current_sha = (str(args.current_git_sha) or "").strip() or _git_sha_head()
+
+    existing_rc = _return_if_existing_or_self_heal(out_path=out_path, expected_day_utc=day, current_sha=current_sha)
+    if existing_rc is not None:
+        return int(existing_rc)
+
+    gate_status, report, _rcs = _compute_report(day=day, current_sha=current_sha)
     payload = (json.dumps(report, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
 
     try:
