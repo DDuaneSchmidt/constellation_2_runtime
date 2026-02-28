@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from constellation_2.phaseD.lib.canon_json_v1 import (
     CanonicalizationError,
@@ -34,6 +35,14 @@ POS_SNAPSHOT_SCHEMA_BY_VERSION: Dict[int, str] = {
 def _git_sha() -> str:
     out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
     return out.decode("utf-8").strip()
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def _read_json_obj(path: Path) -> Dict[str, Any]:
@@ -143,6 +152,40 @@ def _safe_sha256_or_zeros(v: Any) -> str:
     return "0" * 64
 
 
+def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | None:
+    """
+    Idempotency: if the immutable output already exists for this day, return without rewriting.
+    This avoids ATTEMPTED_REWRITE when the pipeline reruns.
+    """
+    if not out_path.exists():
+        return None
+
+    if not out_path.is_file():
+        raise SystemExit(f"FAIL: EXISTING_OUTPUT_NOT_FILE: path={out_path}")
+
+    existing = _read_json_obj(out_path)
+    existing_sha = _sha256_file(out_path)
+
+    schema_id = str(existing.get("schema_id") or "").strip()
+    day_utc = str(existing.get("day_utc") or "").strip()
+    status = str(existing.get("status") or "").strip().upper()
+
+    if schema_id != "C2_POSITION_LIFECYCLE_SNAPSHOT":
+        raise SystemExit(f"FAIL: EXISTING_REPORT_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
+    if day_utc != expected_day_utc:
+        raise SystemExit(
+            f"FAIL: EXISTING_REPORT_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}"
+        )
+    if status != "OK":
+        raise SystemExit(f"FAIL: EXISTING_REPORT_STATUS_INVALID: status={status!r} path={out_path}")
+
+    print(
+        f"OK: POSITION_LIFECYCLE_SNAPSHOT_V2_WRITTEN day_utc={expected_day_utc} "
+        f"status={status} path={out_path} sha256={existing_sha} action=EXISTS"
+    )
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_position_lifecycle_snapshot_v2")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
@@ -163,7 +206,6 @@ def main() -> int:
     pos = _read_json_obj(p_pos)
 
     reason_codes: List[str] = [f"DERIVED_FROM_POSITIONS_SNAPSHOT_V{ver}"]
-    # Validate snapshot only if schema file exists
     reason_codes.extend(_validate_positions_snapshot_if_schema_present(pos, ver))
 
     items_in = _extract_items_from_positions_snapshot(pos)
@@ -179,7 +221,6 @@ def main() -> int:
         intent_sha256 = _safe_sha256_or_zeros(it.get("intent_sha256") or it.get("intentSha256") or "")
 
         if not position_id:
-            # fail-closed: cannot build lifecycle state without a stable position_id
             raise SystemExit("FAIL: POSITION_ID_MISSING_IN_POSITIONS_SNAPSHOT")
 
         if not source_intent_id:
@@ -239,13 +280,22 @@ def main() -> int:
         return 4
 
     out_path = (truth / "position_lifecycle_v2" / day / "position_lifecycle_snapshot.v2.json").resolve()
+
+    # Idempotency: if output exists, do not rewrite.
+    ex = _return_if_existing_report(out_path, expected_day_utc=day)
+    if ex is not None:
+        return ex
+
     try:
         _ = write_file_immutable_v1(path=out_path, data=payload, create_dirs=True)
     except ImmutableWriteError as e:
         print(f"FAIL: IMMUTABLE_WRITE_FAILED: {e}", file=sys.stderr)
         return 4
 
-    print(f"OK: POSITION_LIFECYCLE_SNAPSHOT_V2_WRITTEN day_utc={day} src_v={ver} src_path={p_pos} out={out_path}")
+    print(
+        f"OK: POSITION_LIFECYCLE_SNAPSHOT_V2_WRITTEN day_utc={day} src_v={ver} "
+        f"src_path={p_pos} out={out_path}"
+    )
     return 0
 
 
