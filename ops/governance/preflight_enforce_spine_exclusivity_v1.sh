@@ -3,15 +3,14 @@ set -euo pipefail
 
 REPO_ROOT="/home/node/constellation_2_runtime"
 TRUTH_ROOT="${REPO_ROOT}/constellation_2/runtime/truth"
-RUN_PTR="${TRUTH_ROOT}/latest.json"
+RUNPTR_IDX="${TRUTH_ROOT}/run_pointer_v1/canonical_pointer_index.v1.jsonl"
 REG="${REPO_ROOT}/governance/02_REGISTRIES/C2_SPINE_AUTHORITY_V1.json"
 PY_CHECK="${REPO_ROOT}/ops/governance/preflight_enforce_spine_exclusivity_v1.py"
 
 echo "[c2-preflight] enforcing spine exclusivity (day-scoped) via ${REG}"
 
-RUN_PTR="${TRUTH_ROOT}/latest.json"
-if [ ! -f "${RUN_PTR}" ]; then
-  echo "[c2-preflight] WARN: missing run pointer on disk (${RUN_PTR}); outputs are not versioned. Skipping spine exclusivity enforcement."
+if [[ ! -f "${RUNPTR_IDX}" ]]; then
+  echo "[c2-preflight] WARN: missing run pointer index (${RUNPTR_IDX}); skipping spine exclusivity enforcement."
   exit 0
 fi
 if [[ ! -f "${REG}" ]]; then

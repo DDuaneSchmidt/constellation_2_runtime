@@ -1,15 +1,12 @@
 # constellation_2/phaseL/ui/server/c3_ui_status_collector_v1.py
 # C3 UI Status Collector (truth-only, fail-closed)
 #
-# Allowed sources only:
-# - constellation_2/runtime/truth/latest.json   (ONLY if internally consistent)
-# - constellation_2/runtime/truth/reports/gate_stack_verdict_v1/<DAY>/gate_stack_verdict.v1.json
-# - constellation_2/runtime/truth/reports/broker_reconciliation_*
-# - constellation_2/runtime/truth/market_data_snapshot_v1
-# - constellation_2/runtime/truth/monitoring_*
-# - constellation_2/runtime/truth/accounting_v2/nav/<DAY>/nav.v2.json
+# Day resolution priority (DISPLAY, non-authoritative):
+#  1) run_pointer_v1 display head (canonical_pointer_index.v1.jsonl highest pointer_seq)
+#  2) legacy truth/latest.json (NON-authoritative fallback; only if internally consistent)
+#  3) union(max day among: gate_stack_verdict days, activity rollup days, accounting nav v2 days)
 #
-# No compatibility layer, no hardcoded components list, no legacy status sources.
+# NOTE: Trading / authority MUST NOT use this display resolver.
 
 from __future__ import annotations
 
@@ -57,7 +54,7 @@ def _safe_list(x: Any) -> List[Any]:
     return x if isinstance(x, list) else []
 
 
-def _is_day_str(s: str) -> bool:
+def _is_day_str(s: Any) -> bool:
     if not isinstance(s, str):
         return False
     if len(s) != 10 or s[4] != "-" or s[7] != "-":
@@ -66,16 +63,89 @@ def _is_day_str(s: str) -> bool:
     return y.isdigit() and m.isdigit() and d.isdigit()
 
 
-def _resolve_day(truth_root: Path, *, note_source, errors: List[str], warnings: List[str], missing_paths: List[str]) -> Tuple[Optional[str], str]:
+def _read_run_pointer_v1_display_day(
+    truth_root: Path, *, note_source, warnings: List[str]
+) -> Tuple[Optional[str], str]:
     """
-    Resolve the authoritative day for C3 status.
+    Display head: highest pointer_seq in run_pointer_v1/canonical_pointer_index.v1.jsonl.
+    This is NOT an authority head. UI uses display head only.
+    """
+    idx = (truth_root / "run_pointer_v1" / "canonical_pointer_index.v1.jsonl").resolve()
+    if not idx.exists() or not idx.is_file():
+        return None, "run_pointer_v1_missing"
+
+    note_source(idx)
+
+    try:
+        lines = [x.strip() for x in idx.read_text(encoding="utf-8").splitlines() if x.strip()]
+    except Exception:
+        warnings.append("RUN_POINTER_V1_INDEX_UNREADABLE")
+        return None, "run_pointer_v1_unreadable"
+
+    if not lines:
+        warnings.append("RUN_POINTER_V1_INDEX_EMPTY")
+        return None, "run_pointer_v1_empty"
+
+    best_seq = -1
+    best_day: Optional[str] = None
+
+    for ln in lines:
+        try:
+            o = json.loads(ln)
+        except Exception:
+            warnings.append("RUN_POINTER_V1_INDEX_HAS_INVALID_JSONL_LINE")
+            return None, "run_pointer_v1_invalid_jsonl"
+        if not isinstance(o, dict):
+            continue
+
+        try:
+            seq = int(o.get("pointer_seq"))
+        except Exception:
+            continue
+
+        day = o.get("day_utc")
+        points_to = str(o.get("points_to") or "")
+        if not _is_day_str(day):
+            continue
+        if "gate_stack_verdict_v1" not in points_to:
+            continue
+
+        if seq > best_seq:
+            best_seq = seq
+            best_day = str(day)
+
+    if best_day is None:
+        warnings.append("RUN_POINTER_V1_NO_VALID_DISPLAY_HEAD")
+        return None, "run_pointer_v1_no_head"
+
+    return best_day, "run_pointer_v1_display_head"
+
+
+def _resolve_day(
+    truth_root: Path,
+    *,
+    note_source,
+    errors: List[str],
+    warnings: List[str],
+    missing_paths: List[str],
+) -> Tuple[Optional[str], str]:
+    """
+    Resolve the DISPLAY day for C3 status.
 
     Priority:
-      1) latest.json (ONLY if points_to exists and is under truth_root)
-      2) max day among: gate_stack_verdict days, activity rollup days, accounting nav days
-      3) None (degraded)
+      1) run_pointer_v1 display head (preferred)
+      2) legacy latest.json (NON-authoritative fallback)
+      3) max day among: gate_stack_verdict days, activity rollup days, accounting nav days
+      4) None (degraded)
+
     Returns: (day_or_none, day_source_label)
     """
+    # 1) run_pointer_v1 display head
+    day_rp, src_rp = _read_run_pointer_v1_display_day(truth_root, note_source=note_source, warnings=warnings)
+    if day_rp:
+        return day_rp, src_rp
+
+    # 2) legacy latest.json (non-authoritative; allow UI fallback only)
     latest_path = truth_root / "latest.json"
     latest, latest_err = _read_json(latest_path)
     if latest is not None:
@@ -84,7 +154,7 @@ def _resolve_day(truth_root: Path, *, note_source, errors: List[str], warnings: 
         points_to = latest.get("points_to")
         if _is_day_str(day) and isinstance(points_to, str) and points_to:
             pt = Path(points_to)
-            # points_to is stored as a repo-relative-ish string; allow absolute too but must be under truth_root.
+            # points_to may be repo-relative-ish; allow absolute too but must be under truth_root.
             if not pt.is_absolute():
                 pt = (truth_root.parent.parent / points_to).resolve() if points_to.startswith("constellation_2/") else (truth_root / points_to).resolve()
             else:
@@ -92,7 +162,8 @@ def _resolve_day(truth_root: Path, *, note_source, errors: List[str], warnings: 
 
             truth_root_s = str(truth_root.resolve())
             if str(pt).startswith(truth_root_s + "/") and pt.exists() and pt.is_file():
-                return str(day), "latest.json"
+                warnings.append("LATEST_JSON_USED_NONAUTHORITATIVE_FALLBACK")
+                return str(day), "latest.json(non_authoritative_fallback)"
             warnings.append("LATEST_POINTER_STALE_OR_POINTS_TO_MISSING")
         else:
             warnings.append("LATEST_POINTER_INVALID_FIELDS")
@@ -104,7 +175,7 @@ def _resolve_day(truth_root: Path, *, note_source, errors: List[str], warnings: 
             warnings.append("LATEST_POINTER_UNREADABLE")
             missing_paths.append(str(latest_path))
 
-    # Fallback union: gate verdict days, activity rollup days, accounting nav days
+    # 3) Fallback union: gate verdict days, activity rollup days, accounting nav days
     gate_root = truth_root / "reports" / "gate_stack_verdict_v1"
     activity_root = truth_root / "monitoring_v1" / "activity_ledger_rollup_v1"
     nav_root = truth_root / "accounting_v2" / "nav"
@@ -255,9 +326,7 @@ def build_c3_ui_status(truth_root: Path) -> Dict[str, Any]:
         reports_root = truth_root / "reports"
         candidates: List[Tuple[int, Path]] = []
         for v in (3, 2, 1):
-            candidates.append(
-                (v, reports_root / f"broker_reconciliation_v{v}" / verdict_day / f"broker_reconciliation.v{v}.json")
-            )
+            candidates.append((v, reports_root / f"broker_reconciliation_v{v}" / verdict_day / f"broker_reconciliation.v{v}.json"))
 
         chosen_doc: Optional[Dict[str, Any]] = None
         chosen_path: Optional[Path] = None
@@ -316,51 +385,7 @@ def build_c3_ui_status(truth_root: Path) -> Dict[str, Any]:
                     )
             broker_obj["mismatches_top"] = mism_top[:8]
 
-    
-    # ---- EOD observability (certificate + SLO sentinel) ----
-    eod_obj: Dict[str, Any] = {
-        "state": "UNKNOWN",
-        "day": verdict_day or "n/a",
-        "sentinel_path": None,
-        "certificate_path": None,
-    }
-
-    if verdict_day:
-        eod_path = truth_root / "monitoring_v1" / "eod_slo_sentinel_v1" / verdict_day / "eod_slo_sentinel.v1.json"
-        eod_obj["sentinel_path"] = str(eod_path)
-        eod_doc, eod_err = _read_json(eod_path)
-        if eod_doc is None:
-            warnings.append("EOD_SLO_SENTINEL_MISSING" if eod_err == "MISSING" else "EOD_SLO_SENTINEL_UNREADABLE")
-            missing_paths.append(str(eod_path))
-        else:
-            note_source(eod_path)
-            state = str(eod_doc.get("state") or "").strip().upper() or "UNKNOWN"
-            eod_obj["state"] = state
-
-            det = eod_doc.get("details") if isinstance(eod_doc.get("details"), dict) else {}
-            cert_path = det.get("certificate_path") if isinstance(det, dict) else None
-            if isinstance(cert_path, str) and cert_path:
-                eod_obj["certificate_path"] = cert_path
-
-            if state == "OK":
-                pass
-            elif state == "CERT_FAIL":
-                warnings.append("EOD_CERT_FAIL")
-                if isinstance(cert_path, str) and cert_path:
-                    missing_paths.append(cert_path)
-            elif state == "LATE":
-                warnings.append("EOD_CERT_LATE")
-                if isinstance(cert_path, str) and cert_path:
-                    missing_paths.append(cert_path)
-            elif state == "CERT_MISSING":
-                warnings.append("EOD_CERT_MISSING")
-                if isinstance(cert_path, str) and cert_path:
-                    missing_paths.append(cert_path)
-            else:
-                warnings.append("EOD_CERT_STATUS_UNKNOWN")
-
-
-# ---- market data snapshot presence ----
+    # ---- market data snapshot presence ----
     md_root = truth_root / "market_data_snapshot_v1" / "broker_marks_v1"
     md_days = [d for d in _list_day_dirs(md_root) if _is_day_str(d)]
     md_latest = _max_day(md_days)

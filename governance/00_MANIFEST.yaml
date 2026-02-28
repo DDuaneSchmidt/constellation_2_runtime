@@ -71,6 +71,11 @@ documents:
     class: C2_CONTRACT
     status: DRAFT
 
+  - id: C2_ATTEMPT_SCOPED_WRITE_POLICY_WITH_CANONICAL_POINTERS_V3
+    path: governance/05_CONTRACTS/C2/C2_ATTEMPT_SCOPED_WRITE_POLICY_WITH_CANONICAL_POINTERS_V3.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
   # Governed C2 contracts (canonical definitions; runtime code and docs must conform)
   - id: C2_DRAWDOWN_CONVENTION_V1
     path: governance/05_CONTRACTS/C2/drawdown_convention_v1.contract.md
@@ -426,3 +431,4 @@ documents:
     path: governance/05_CONTRACTS/C2/operator_future_day_override_v1.contract.md
   - id: C2_REPORTS_OPERATOR_FUTURE_DAY_OVERRIDE_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/operator_future_day_override.v1.schema.json
+

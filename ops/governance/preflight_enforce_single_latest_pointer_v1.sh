@@ -3,8 +3,10 @@ set -euo pipefail
 
 REPO_ROOT="/home/node/constellation_2_runtime"
 TRUTH_ROOT="${REPO_ROOT}/constellation_2/runtime/truth"
+RUNPTR_ROOT="${TRUTH_ROOT}/run_pointer_v1"
+IDX="${RUNPTR_ROOT}/canonical_pointer_index.v1.jsonl"
 
-echo "[c2-preflight] enforcing single latest.json pointer under truth root"
+echo "[c2-preflight] enforcing single canonical run pointer (run_pointer_v1) when present"
 
 # PROOF: truth root exists
 if [[ ! -d "${TRUTH_ROOT}" ]]; then
@@ -12,42 +14,37 @@ if [[ ! -d "${TRUTH_ROOT}" ]]; then
   exit 2
 fi
 
-# If runtime truth is not present on disk (outputs are not versioned),
-# repo preflight must still pass. Enforce single-pointer rules only when a latest.json exists.
-ALLOWED="${TRUTH_ROOT}/latest.json"
-if [ ! -f "${ALLOWED}" ]; then
-  echo "[c2-preflight] WARN: no latest.json under truth root; outputs are not versioned. Skipping single-latest-pointer enforcement."
+# If outputs not present on disk, repo preflight must still pass.
+if [[ ! -f "${IDX}" ]]; then
+  echo "[c2-preflight] WARN: missing ${IDX}; run pointer not present on disk. Skipping run-pointer enforcement."
   exit 0
 fi
 
-# Discover all latest.json under truth root
-LATEST_LIST="$(find "${TRUTH_ROOT}" -type f -name 'latest.json' 2>/dev/null | sort || true)"
-LATEST_COUNT="$(printf "%s\n" "${LATEST_LIST}" | sed '/^\s*$/d' | wc -l | tr -d ' ')"
+# Validate pointer index is readable and has at least one entry referencing gate_stack_verdict_v1.
+python3 -c '
+import json,sys
+from pathlib import Path
+p=Path(sys.argv[1]).resolve()
+lines=[x.strip() for x in p.read_text(encoding="utf-8").splitlines() if x.strip()]
+if not lines:
+  raise SystemExit(f"FAIL: empty canonical_pointer_index: {p}")
+ok=False
+for ln in lines:
+  try:
+    o=json.loads(ln)
+  except Exception:
+    raise SystemExit(f"FAIL: invalid JSONL line in canonical_pointer_index: {p}")
+  if isinstance(o,dict) and "gate_stack_verdict_v1" in str(o.get("points_to") or ""):
+    ok=True
+if not ok:
+  raise SystemExit(f"FAIL: canonical_pointer_index has no points_to referencing gate_stack_verdict_v1: {p}")
+print("OK")
+' "${IDX}"
 
-ALLOWED="${TRUTH_ROOT}/latest.json"
-
-if [[ "${LATEST_COUNT}" -eq 0 ]]; then
-  echo "FAIL: no latest.json exists under truth root; expected exactly 1 at ${ALLOWED}" >&2
-  exit 2
+# Legacy: latest.json may exist, but is NOT authoritative for this preflight.
+LEGACY="${TRUTH_ROOT}/latest.json"
+if [[ -f "${LEGACY}" ]]; then
+  echo "[c2-preflight] WARN: legacy latest.json present (non-authoritative): ${LEGACY}"
 fi
 
-if [[ "${LATEST_COUNT}" -ne 1 ]]; then
-  echo "FAIL: latest.json fan-out detected under truth root (count=${LATEST_COUNT}); expected exactly 1" >&2
-  echo "${LATEST_LIST}" >&2
-  exit 2
-fi
-
-if [[ "${LATEST_LIST}" != "${ALLOWED}" ]]; then
-  echo "FAIL: only allowed latest.json path is ${ALLOWED}; found: ${LATEST_LIST}" >&2
-  exit 2
-fi
-
-# Validate pointer content shape minimally (no jq required):
-# Must reference gate_stack_verdict_v1 artifact path somewhere in the file.
-if ! grep -q "gate_stack_verdict_v1" "${ALLOWED}"; then
-  echo "FAIL: run pointer does not reference gate_stack_verdict_v1: ${ALLOWED}" >&2
-  echo "HINT: ${ALLOWED} must point to reports/gate_stack_verdict_v1/<DAY>/gate_stack_verdict.v1.json" >&2
-  exit 2
-fi
-
-echo "[c2-preflight] PASS: single latest.json run pointer enforced"
+echo "[c2-preflight] PASS: run pointer index present + minimally valid"
