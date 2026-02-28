@@ -16,8 +16,18 @@ IMPORTANT SEMANTICS:
 - Only engines with activation_status == ACTIVE are gating-critical.
 - INACTIVE/DISABLED/EXPERIMENTAL engines are recorded as SKIPPED and MUST NOT fail the gate.
 
-Output (immutable report):
+Output (immutable report, canonical):
 constellation_2/runtime/truth/reports/engine_model_registry_gate_v1/<DAY>/engine_model_registry_gate.v1.json
+
+Rerun safety (append-only attempts when canonical is FAIL):
+- canonical file is immutable historical fact
+- if canonical exists with status=FAIL, do NOT brick reruns:
+    - if latest attempt exists and is PASS -> return 0
+    - else write a new immutable attempt file:
+        engine_model_registry_gate.v1.attempt_0001.json
+        engine_model_registry_gate.v1.attempt_0002.json
+        ...
+    - return based on the attempt status
 """
 
 from __future__ import annotations
@@ -40,7 +50,7 @@ import argparse
 import hashlib
 import json
 import subprocess
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
@@ -52,6 +62,10 @@ REG_PATH = (REPO_ROOT / "governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json"
 REG_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RISK/engine_model_registry.v1.schema.json"
 
 OUT_ROOT = (TRUTH / "reports" / "engine_model_registry_gate_v1").resolve()
+
+ATTEMPT_GLOB = "engine_model_registry_gate.v1.attempt_*.json"
+ATTEMPT_PREFIX = "engine_model_registry_gate.v1.attempt_"
+ATTEMPT_SUFFIX = ".json"
 
 
 def _parse_day_utc(s: str) -> str:
@@ -87,26 +101,84 @@ def _git_sha_head() -> str:
     return out.decode("utf-8").strip()
 
 
-def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | None:
-    if not out_path.exists():
-        return None
+def _read_existing_report_status(path: Path, expected_day_utc: str) -> Tuple[str, str]:
+    """
+    Read + validate an existing gate report.
 
-    existing_sha = _sha256_file(out_path)
-    existing = _read_json(out_path)
+    Returns: (status_upper, sha256_hex)
+
+    Fail-closed:
+      - schema mismatch, day mismatch, invalid status -> SystemExit
+    """
+    if not path.exists():
+        raise SystemExit(f"FAIL: EXPECTED_EXISTING_REPORT_MISSING: path={path}")
+    if not path.is_file():
+        raise SystemExit(f"FAIL: EXISTING_OUTPUT_NOT_FILE: path={path}")
+
+    existing_sha = _sha256_file(path)
+    existing = _read_json(path)
 
     schema_id = str(existing.get("schema_id") or "").strip()
     day_utc = str(existing.get("day_utc") or "").strip()
     status = str(existing.get("status") or "").strip().upper()
 
     if schema_id != "engine_model_registry_gate":
-        raise SystemExit(f"FAIL: EXISTING_REPORT_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
+        raise SystemExit(f"FAIL: EXISTING_REPORT_SCHEMA_MISMATCH: schema_id={schema_id!r} path={path}")
     if day_utc != expected_day_utc:
-        raise SystemExit(f"FAIL: EXISTING_REPORT_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}")
+        raise SystemExit(f"FAIL: EXISTING_REPORT_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={path}")
     if status not in ("PASS", "FAIL"):
-        raise SystemExit(f"FAIL: EXISTING_REPORT_STATUS_INVALID: status={status!r} path={out_path}")
+        raise SystemExit(f"FAIL: EXISTING_REPORT_STATUS_INVALID: status={status!r} path={path}")
 
-    print(f"OK: ENGINE_MODEL_REGISTRY_GATE_WRITTEN day_utc={expected_day_utc} status={status} path={out_path} sha256={existing_sha} action=EXISTS")
-    return 0 if status == "PASS" else 1
+    return status, existing_sha
+
+
+def _parse_attempt_seq(filename: str) -> Optional[int]:
+    """
+    engine_model_registry_gate.v1.attempt_0001.json -> 1
+    """
+    if not (filename.startswith(ATTEMPT_PREFIX) and filename.endswith(ATTEMPT_SUFFIX)):
+        return None
+    mid = filename[len(ATTEMPT_PREFIX) : -len(ATTEMPT_SUFFIX)]
+    if not mid.isdigit():
+        return None
+    try:
+        n = int(mid, 10)
+    except Exception:
+        return None
+    return n if n >= 1 else None
+
+
+def _latest_attempt_path(out_dir: Path) -> Optional[Path]:
+    """
+    Deterministic: choose max attempt seq present in out_dir.
+    """
+    if not out_dir.exists() or not out_dir.is_dir():
+        return None
+    best_n: Optional[int] = None
+    best_p: Optional[Path] = None
+    for p in out_dir.glob(ATTEMPT_GLOB):
+        if not p.is_file():
+            continue
+        n = _parse_attempt_seq(p.name)
+        if n is None:
+            continue
+        if best_n is None or n > best_n:
+            best_n = n
+            best_p = p
+    return best_p
+
+
+def _next_attempt_path(out_dir: Path) -> Path:
+    """
+    Deterministic: next attempt seq is 1 + max(existing seq).
+    """
+    last = _latest_attempt_path(out_dir)
+    if last is None:
+        n = 1
+    else:
+        last_n = _parse_attempt_seq(last.name)
+        n = (last_n + 1) if last_n is not None else 1
+    return out_dir / f"{ATTEMPT_PREFIX}{n:04d}{ATTEMPT_SUFFIX}"
 
 
 def _derive_module_from_runner_path(runner_rel: str) -> str:
@@ -128,11 +200,35 @@ def main() -> int:
     day = _parse_day_utc(args.day_utc)
 
     out_dir = (OUT_ROOT / day).resolve()
-    out_path = (out_dir / "engine_model_registry_gate.v1.json").resolve()
+    canonical_path = (out_dir / "engine_model_registry_gate.v1.json").resolve()
 
-    existing_rc = _return_if_existing_report(out_path=out_path, expected_day_utc=day)
-    if existing_rc is not None:
-        return int(existing_rc)
+    # Canonical idempotency:
+    # - If canonical exists and is PASS -> return 0
+    # - If canonical exists and is FAIL:
+    #     - if latest attempt exists and is PASS -> return 0
+    #     - else write a new attempt artifact (append-only) and return based on attempt status
+    # - If canonical does not exist -> write canonical and return based on its status
+
+    if canonical_path.exists():
+        status, sha = _read_existing_report_status(canonical_path, expected_day_utc=day)
+        print(
+            f"OK: ENGINE_MODEL_REGISTRY_GATE_WRITTEN day_utc={day} status={status} path={canonical_path} sha256={sha} action=EXISTS"
+        )
+        if status == "PASS":
+            return 0
+
+        latest = _latest_attempt_path(out_dir)
+        if latest is not None:
+            a_status, a_sha = _read_existing_report_status(latest, expected_day_utc=day)
+            print(
+                f"OK: ENGINE_MODEL_REGISTRY_GATE_ATTEMPT_EXISTS day_utc={day} status={a_status} path={latest} sha256={a_sha} action=EXISTS"
+            )
+            if a_status == "PASS":
+                return 0
+
+        out_path = _next_attempt_path(out_dir)
+    else:
+        out_path = canonical_path
 
     current_sha = (str(args.current_git_sha) or "").strip() or _git_sha_head()
     produced_utc = _produced_utc_deterministic(day)
@@ -269,7 +365,10 @@ def main() -> int:
     except ImmutableWriteError as e:
         raise SystemExit(f"FAIL: IMMUTABLE_WRITE_ERROR: {e}") from e
 
-    print(f"OK: ENGINE_MODEL_REGISTRY_GATE_WRITTEN day_utc={day} status={gate_status} path={wr.path} sha256={wr.sha256} action={wr.action}")
+    if out_path == canonical_path:
+        print(f"OK: ENGINE_MODEL_REGISTRY_GATE_WRITTEN day_utc={day} status={gate_status} path={wr.path} sha256={wr.sha256} action={wr.action}")
+    else:
+        print(f"OK: ENGINE_MODEL_REGISTRY_GATE_ATTEMPT_WRITTEN day_utc={day} status={gate_status} path={wr.path} sha256={wr.sha256} action={wr.action}")
     return 0 if gate_status == "PASS" else 1
 
 
