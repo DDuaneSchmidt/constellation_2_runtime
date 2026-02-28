@@ -617,6 +617,156 @@ def main() -> int:
         ["python3", "ops/tools/run_global_kill_switch_v1.py", "--day_utc", day],
         env=stage_env,
     )
+
+    # --- Bundle C2: Heartbeat gate + gate stack verdict + kill switch + run pointer spine (fail-closed) ---
+    # Long-term stability rule:
+    # - authoritative=YES only if gate_stack_verdict.status == PASS AND heartbeat_gate.status == PASS AND kill_switch.state == INACTIVE
+    # - otherwise authoritative=NO (fail-closed)
+    if truth_root != DEFAULT_TRUTH_ROOT:
+        print(
+            f"FATAL: Bundle C run-pointer integration requires canonical truth_root={DEFAULT_TRUTH_ROOT} got={truth_root}",
+            file=sys.stderr,
+        )
+        return 2
+
+    cfg_hash = (os.environ.get("C2_ORCHESTRATOR_CONFIG_HASH") or "").strip().lower()
+    if (len(cfg_hash) != 64) or any(c not in "0123456789abcdef" for c in cfg_hash):
+        print(
+            "FATAL: missing/invalid env C2_ORCHESTRATOR_CONFIG_HASH (must be sha256 hex of the systemd .service file)",
+            file=sys.stderr,
+        )
+        return 2
+
+    # C2_HEARTBEAT_GATE_V1 (writes truth/reports/heartbeat_gate_v1/<DAY>/heartbeat_gate.v1.json)
+    _run_stage_strict(
+        "C2_HEARTBEAT_GATE_V1",
+        [
+            "python3",
+            "ops/tools/run_heartbeat_gate_v1.py",
+            "--day_utc",
+            day,
+            "--truth_root",
+            str(truth_root),
+            "--expected_period_seconds",
+            "86400",
+            "--stale_after_seconds",
+            "172800",
+        ],
+        env=stage_env,
+    )
+
+    # C2_GATE_STACK_VERDICT_V1 (writes truth/reports/gate_stack_verdict_v1/<DAY>/gate_stack_verdict.v1.json)
+    _run_stage_strict(
+        "C2_GATE_STACK_VERDICT_V1",
+        ["python3", "ops/tools/run_gate_stack_verdict_v1.py", "--day_utc", day],
+        env=stage_env,
+    )
+
+    # C2_GLOBAL_KILL_SWITCH_V1 (writes truth/risk_v1/kill_switch_v1/<DAY>/global_kill_switch_state.v1.json)
+    _run_stage_strict(
+        "C2_GLOBAL_KILL_SWITCH_V1",
+        ["python3", "ops/tools/run_global_kill_switch_v1.py", "--day_utc", day],
+        env=stage_env,
+    )
+
+    # Run-pointer policy hash = sha256(governance/02_REGISTRIES/GATE_HIERARCHY_V1.json)
+    policy_path = (REPO_ROOT / "governance/02_REGISTRIES/GATE_HIERARCHY_V1.json").resolve()
+    policy_hash = _sha256_file(policy_path)
+
+    # Allocate attempt (append-only)
+    alloc_raw = subprocess.check_output(
+        [
+            "python3",
+            "ops/tools/run_pointer_attempt_alloc_v1.py",
+            "--day_utc",
+            day,
+            "--mode",
+            "PAPER",
+            "--orchestrator_config_hash",
+            cfg_hash,
+            "--git_sha",
+            current_git_sha,
+        ],
+        env=stage_env,
+        text=True,
+    ).strip()
+    alloc = json.loads(alloc_raw)
+    attempt_id = str(alloc.get("attempt_id") or "").strip()
+    attempt_seq = int(alloc.get("attempt_seq") or 0)
+    if not attempt_id or attempt_seq <= 0:
+        print(f"FATAL: run_pointer_attempt_alloc_v1 returned invalid payload: {alloc_raw}", file=sys.stderr)
+        return 2
+
+    # Determine authoritative/fail-closed state from artifacts we just wrote.
+    hb_gate_path = (truth_root / "reports" / "heartbeat_gate_v1" / day / "heartbeat_gate.v1.json").resolve()
+    gs_path = (truth_root / "reports" / "gate_stack_verdict_v1" / day / "gate_stack_verdict.v1.json").resolve()
+    ks_path = (truth_root / "risk_v1" / "kill_switch_v1" / day / "global_kill_switch_state.v1.json").resolve()
+
+    def _read_status(p: Path) -> str:
+        try:
+            o = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(o, dict):
+                return str(o.get("status") or "").strip().upper()
+        except Exception:
+            return ""
+        return ""
+
+    def _read_kill_state(p: Path) -> str:
+        try:
+            o = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(o, dict):
+                return str(o.get("state") or "").strip().upper()
+        except Exception:
+            return ""
+        return ""
+
+    hb_status = _read_status(hb_gate_path)
+    gs_status = _read_status(gs_path)
+    ks_state = _read_kill_state(ks_path)
+
+    ok_authoritative = (hb_status == "PASS") and (gs_status == "PASS") and (ks_state == "INACTIVE")
+
+    ptr_authoritative = "YES" if ok_authoritative else "NO"
+    if ok_authoritative:
+        ptr_status = "PASS"
+    else:
+        ptr_status = "OK_WITH_SOFT_FAILS" if prereq_failed else "FAIL"
+
+    points_to = f"constellation_2/runtime/truth/reports/gate_stack_verdict_v1/{day}/gate_stack_verdict.v1.json"
+    ptr_produced_utc = f"{day}T00:00:00Z"
+
+    _run_stage_strict(
+        "C2_RUN_POINTER_APPEND_V1",
+        [
+            "python3",
+            "ops/tools/run_pointer_append_v1.py",
+            "--day_utc",
+            day,
+            "--attempt_id",
+            attempt_id,
+            "--attempt_seq",
+            str(attempt_seq),
+            "--mode",
+            "PAPER",
+            "--status",
+            ptr_status,
+            "--authoritative",
+            ptr_authoritative,
+            "--policy_hash",
+            policy_hash,
+            "--orchestrator_config_hash",
+            cfg_hash,
+            "--produced_utc",
+            ptr_produced_utc,
+            "--points_to",
+            points_to,
+            "--git_sha",
+            current_git_sha,
+        ],
+        env=stage_env,
+    )
+    # --- end Bundle C2 ---
+
     # Fail-closed posture: if any prereq failed, exit 2 (systemd may treat 2 as degraded if configured).
     if prereq_failed:
         print("FAIL: ORCHESTRATOR_PREREQ_FAILED", file=sys.stderr)
