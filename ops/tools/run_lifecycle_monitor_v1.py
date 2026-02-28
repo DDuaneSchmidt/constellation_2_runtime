@@ -172,10 +172,21 @@ def main() -> int:
 
     # WRITE mode: immutable publish IF missing; if already exists, return based on existing status.
     if out_path.exists():
-        existing = _read_json_obj(out_path)
-        status = str(existing.get("status") or "").strip().upper()
-        print(f"OK: LIFECYCLE_MONITOR_V1_EXISTS day_utc={day} status={status} path={out_path} action=EXISTS")
-        return 0 if status == "OK" else 2
+        # Evaluate CURRENT truth instead of trusting stale immutable report.
+        rep_live = _build_report(truth=truth, day=day, produced_utc=produced_utc)
+
+        if rep_live["status"] == "OK":
+            print(
+                f"OK: LIFECYCLE_MONITOR_V1_EXISTS_BUT_LIVE_OK "
+                f"day_utc={day} path={out_path} action=EXISTS_LIVE_OK"
+            )
+            return 0
+
+        print(
+            f"FAIL: LIFECYCLE_MONITOR_V1_EXISTS_AND_LIVE_FAIL "
+            f"day_utc={day} reason_codes={rep_live.get('reason_codes')}"
+        )
+        return 2
 
     rep2 = _build_report(truth=truth, day=day, produced_utc=produced_utc)
     try:
