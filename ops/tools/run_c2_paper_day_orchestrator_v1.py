@@ -433,7 +433,7 @@ def main() -> int:
             "python3",
             "-m",
             "constellation_2.phaseF.execution_evidence.run.run_submission_index_day_v1",
-            "--day_utc",
+            "--day",
             day,
         ],
         env=stage_env,
