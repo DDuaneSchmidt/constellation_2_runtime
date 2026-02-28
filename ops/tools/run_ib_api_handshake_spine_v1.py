@@ -13,7 +13,7 @@ Fail-closed semantics:
 
 Writes:
 - truth/ib_api_handshake/<DAY_UTC>/ib_api_handshake.v1.json (immutable)
-- truth/ib_api_handshake/latest.json (immutable pointer; monotonic day only)
+- truth/ib_api_handshake/latest_pointer.v1.json (immutable pointer; monotonic day only)
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from constellation_2.phaseD.lib.canon_json_v1 import CanonicalizationError, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
@@ -86,8 +86,10 @@ def _extract_order_id_from_next_valid_id(evt: Dict[str, Any]) -> Optional[int]:
 def _paths_for_day(day_utc: str) -> Paths:
     day_dir = (TRUTH_ROOT / "ib_api_handshake" / day_utc).resolve()
     out_path = (day_dir / "ib_api_handshake.v1.json").resolve()
-    latest_path = (TRUTH_ROOT / "ib_api_handshake" / "latest.json").resolve()
-    broker_events_path = (TRUTH_ROOT / "execution_evidence_v2/broker_events" / day_utc / "broker_event_log.v1.jsonl").resolve()
+    latest_path = (TRUTH_ROOT / "ib_api_handshake" / "latest_pointer.v1.json").resolve()
+    broker_events_path = (
+        TRUTH_ROOT / "execution_evidence_v2/broker_events" / day_utc / "broker_event_log.v1.jsonl"
+    ).resolve()
     return Paths(day_dir=day_dir, out_path=out_path, latest_path=latest_path, broker_events_path=broker_events_path)
 
 
@@ -137,12 +139,10 @@ def main(argv: List[str] | None = None) -> int:
     last_next_valid_idx: Optional[int] = None
     last_next_valid_order_id: Optional[int] = None
 
-    parsed: List[Dict[str, Any]] = []
     for i, line in enumerate(lines):
         evt = _parse_broker_event_line(line)
         if evt is None:
             continue
-        parsed.append(evt)
         if _event_is_next_valid_id(evt):
             last_next_valid_idx = i
             last_next_valid_order_id = _extract_order_id_from_next_valid_id(evt)

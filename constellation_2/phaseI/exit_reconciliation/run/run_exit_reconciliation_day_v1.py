@@ -22,7 +22,6 @@ import argparse
 import hashlib
 import json
 import os
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -95,21 +94,30 @@ def load_json(path: Path) -> Dict[str, Any]:
 
 
 def read_positions_snapshot_from_latest(repo_root: Path) -> Tuple[Path, Dict[str, Any], str]:
-    latest = repo_root / "constellation_2" / "runtime" / "truth" / "positions_v1" / "latest.json"
-    if not latest.exists():
-        raise ExitReconError(f"positions latest pointer missing: {latest}")
-    latest_obj = load_json(latest)
+    latest_ptr = (
+        repo_root
+        / "constellation_2"
+        / "runtime"
+        / "truth"
+        / "positions_v1"
+        / "latest_pointer.v2.json"
+    )
+    if not latest_ptr.exists():
+        raise ExitReconError(f"positions latest pointer missing: {latest_ptr}")
+    latest_obj = load_json(latest_ptr)
     pointers = latest_obj.get("pointers") or {}
     snap_path = pointers.get("snapshot_path")
     snap_sha = pointers.get("snapshot_sha256")
     if not isinstance(snap_path, str) or snap_path.strip() == "":
-        raise ExitReconError(f"positions latest pointer missing snapshot_path: {latest}")
+        raise ExitReconError(f"positions latest pointer missing snapshot_path: {latest_ptr}")
     p = Path(snap_path)
     if not p.exists():
         raise ExitReconError(f"positions snapshot path does not exist: {p}")
     actual_sha = sha256_file(p)
     if isinstance(snap_sha, str) and snap_sha and actual_sha != snap_sha:
-        raise ExitReconError(f"positions snapshot sha256 mismatch: expected={snap_sha} actual={actual_sha} path={p}")
+        raise ExitReconError(
+            f"positions snapshot sha256 mismatch: expected={snap_sha} actual={actual_sha} path={p}"
+        )
     return p, load_json(p), actual_sha
 
 
@@ -312,7 +320,12 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--day_utc", required=True, help="Day in UTC YYYY-MM-DD")
     ap.add_argument("--intents_day_dir", required=False, default="", help="Path to intents day directory (optional)")
-    ap.add_argument("--positions_snapshot_path", required=False, default="", help="Explicit positions snapshot path (optional)")
+    ap.add_argument(
+        "--positions_snapshot_path",
+        required=False,
+        default="",
+        help="Explicit positions snapshot path (optional)",
+    )
     ap.add_argument("--out_path", required=False, default="", help="Output path override (optional)")
     args = ap.parse_args()
 
@@ -336,7 +349,9 @@ def main() -> int:
         intents_day_dir = Path(str(args.intents_day_dir).strip())
     else:
         # Default to standard intents snapshots location
-        intents_day_dir = repo_root / "constellation_2" / "runtime" / "truth" / "intents_v1" / "snapshots" / day_utc
+        intents_day_dir = (
+            repo_root / "constellation_2" / "runtime" / "truth" / "intents_v1" / "snapshots" / day_utc
+        )
 
     out_obj = build_exit_reconciliation(
         repo_root=repo_root,
@@ -350,7 +365,15 @@ def main() -> int:
     if str(args.out_path).strip():
         out_path = Path(str(args.out_path).strip())
     else:
-        out_path = repo_root / "constellation_2" / "runtime" / "truth" / "exit_reconciliation_v1" / day_utc / "exit_reconciliation.v1.json"
+        out_path = (
+            repo_root
+            / "constellation_2"
+            / "runtime"
+            / "truth"
+            / "exit_reconciliation_v1"
+            / day_utc
+            / "exit_reconciliation.v1.json"
+        )
 
     atomic_write_json(out_path, out_obj)
     print(str(out_path))
