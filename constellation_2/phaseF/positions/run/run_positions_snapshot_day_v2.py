@@ -5,7 +5,7 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
 from constellation_2.phaseD.lib.canon_json_v1 import CanonicalizationError, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
@@ -147,7 +147,8 @@ def main(argv: List[str] | None = None) -> int:
             print("FAIL: EXISTING_SNAPSHOT_UNREADABLE_FOR_SHA_LOCK", file=sys.stderr)
             return 4
 
-    # --- Monotonic latest pointer guard ---
+    # --- Monotonic latest pointer guard (backfill protection only) ---
+    # NOTE: This runner MUST NOT rewrite any global pointer. It may only create it if absent.
     skip_latest_update = False
     if dp_pos.latest_path.exists() and dp_pos.latest_path.is_file():
         try:
@@ -243,26 +244,32 @@ def main(argv: List[str] | None = None) -> int:
         print(f"FAIL: {e}", file=sys.stderr)
         return 4
 
+    # --- Latest pointer policy (STRICT IMMUTABILITY) ---
+    # This runner MUST NOT rewrite dp_pos.latest_path.
+    # Write-once only: if it exists, leave it untouched.
     if not skip_latest_update:
-        latest_obj = build_latest_ptr_obj_v2(
-            produced_utc=f"{day_utc}T00:00:00Z",
-            day_utc=day_utc,
-            producer_repo=producer_repo,
-            producer_git_sha=producer_sha,
-            producer_module="constellation_2/phaseF/positions/run/run_positions_snapshot_day_v2.py",
-            status=str(snap_obj.get("status") or "OK"),
-            reason_codes=list(snap_obj.get("reason_codes") or []),
-            snapshot_path=str(dp_pos.snapshot_path),
-            snapshot_sha256=wr_snap.sha256,
-        )
+        if dp_pos.latest_path.exists():
+            print(f"SKIP_LATEST_PTR_EXISTS day_utc={day_utc} path={dp_pos.latest_path}")
+        else:
+            latest_obj = build_latest_ptr_obj_v2(
+                produced_utc=f"{day_utc}T00:00:00Z",
+                day_utc=day_utc,
+                producer_repo=producer_repo,
+                producer_git_sha=producer_sha,
+                producer_module="constellation_2/phaseF/positions/run/run_positions_snapshot_day_v2.py",
+                status=str(snap_obj.get("status") or "OK"),
+                reason_codes=list(snap_obj.get("reason_codes") or []),
+                snapshot_path=str(dp_pos.snapshot_path),
+                snapshot_sha256=wr_snap.sha256,
+            )
 
-        validate_against_repo_schema_v1(latest_obj, REPO_ROOT, SCHEMA_POSITIONS_LATEST_PTR_V2)
-        latest_bytes = canonical_json_bytes_v1(latest_obj) + b"\n"
-        try:
-            _ = write_file_immutable_v1(path=dp_pos.latest_path, data=latest_bytes, create_dirs=True)
-        except ImmutableWriteError as e:
-            print(f"FAIL: {e}", file=sys.stderr)
-            return 4
+            validate_against_repo_schema_v1(latest_obj, REPO_ROOT, SCHEMA_POSITIONS_LATEST_PTR_V2)
+            latest_bytes = canonical_json_bytes_v1(latest_obj) + b"\n"
+            try:
+                _ = write_file_immutable_v1(path=dp_pos.latest_path, data=latest_bytes, create_dirs=True)
+            except ImmutableWriteError as e:
+                print(f"FAIL: {e}", file=sys.stderr)
+                return 4
 
     print("OK: POSITIONS_SNAPSHOT_V2_WRITTEN")
     return 0

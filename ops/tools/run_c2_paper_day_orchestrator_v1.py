@@ -7,13 +7,18 @@ Institutional-grade PAPER day orchestrator.
 
 USAGE (authoritative, proven safe):
   cd /home/node/constellation_2_runtime
-  python3 ops/tools/run_c2_paper_day_orchestrator_v1.py --day_utc YYYY-MM-DD --mode PAPER --ib_account DUXXXXXXX
+  python3 ops/tools/run_c2_paper_day_orchestrator_v1.py \
+    --day_utc YYYY-MM-DD \
+    --mode PAPER \
+    --ib_account DUXXXXXXX \
+    --produced_utc YYYY-MM-DDTHH:MM:SSZ
 
 NON-NEGOTIABLE PROPERTIES:
 - Deterministic stage order
 - PAPER mode only
 - No implicit deletion or mutation
 - Structured audit logging
+- Deterministic produced_utc (operator supplied; orchestrator MUST NOT synthesize time)
 - Fail-closed for submission (PhaseD blocked on prereq failure)
 - Fail-closed for paper readiness (broker evidence + linkage + attribution + monitor)
 """
@@ -21,6 +26,7 @@ NON-NEGOTIABLE PROPERTIES:
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import json
 import os
 import subprocess
@@ -63,6 +69,34 @@ def _resolve_truth_root(args_truth_root: str) -> Path:
         raise SystemExit(f"FATAL: truth_root not under repo root: truth_root={truth_root} repo_root={REPO_ROOT}")
 
     return truth_root
+
+
+def _validate_produced_utc(produced_utc: str) -> str:
+    """
+    Fail-closed deterministic produced_utc validation.
+    Required format: ISO-8601 UTC with 'Z' suffix, e.g. 2026-02-26T04:54:33Z
+    Orchestrator MUST NOT synthesize time.
+    """
+    s = (produced_utc or "").strip()
+    if not s:
+        raise SystemExit("FATAL: produced_utc required")
+    if not s.endswith("Z"):
+        raise SystemExit(f"FATAL: produced_utc must end with 'Z' (UTC): {s}")
+    if "T" not in s:
+        raise SystemExit(f"FATAL: produced_utc must be ISO-8601 with 'T': {s}")
+
+    # Strict parse: Python's fromisoformat does not accept 'Z', so normalize to +00:00.
+    try:
+        dt = _dt.datetime.fromisoformat(s[:-1] + "+00:00")
+    except Exception:
+        raise SystemExit(f"FATAL: produced_utc not parseable ISO-8601 UTC: {s}")
+
+    if dt.tzinfo is None:
+        raise SystemExit(f"FATAL: produced_utc must be timezone-aware UTC: {s}")
+
+    # Normalize back to canonical Z form (no microseconds).
+    dt = dt.astimezone(_dt.timezone.utc).replace(microsecond=0)
+    return dt.isoformat().replace("+00:00", "Z")
 
 
 def _run_stage_strict(name: str, cmd: List[str], *, env: Dict[str, str]) -> None:
@@ -129,6 +163,7 @@ def _read_engine_registry() -> Dict[str, Any]:
         raise SystemExit("FATAL: engine registry top-level not object")
     return obj
 
+
 def _locked_git_sha_for_positions_day(truth_root: Path, day_utc: str, fallback_git_sha: str) -> str:
     """
     Day-SHA lock: if the day already has a positions snapshot, reuse its producer.git_sha
@@ -143,6 +178,7 @@ def _locked_git_sha_for_positions_day(truth_root: Path, day_utc: str, fallback_g
         return sha if sha else fallback_git_sha
     except Exception:
         return fallback_git_sha
+
 
 def _active_engines_sorted(reg: Dict[str, Any]) -> List[Dict[str, str]]:
     engines = reg.get("engines") or []
@@ -188,6 +224,11 @@ def main() -> int:
         default="",
         help="Override truth root (must be under repo root). If omitted, uses env C2_TRUTH_ROOT, else canonical.",
     )
+    ap.add_argument(
+        "--produced_utc",
+        required=True,
+        help="UTC ISO-8601 Z timestamp (deterministic; operator/orchestrator provided). Example: 2026-02-26T04:54:33Z",
+    )
     args = ap.parse_args()
 
     day = args.day_utc.strip()
@@ -196,6 +237,7 @@ def main() -> int:
     symbol = str(args.symbol).strip().upper()
     ib_account = str(args.ib_account).strip()
     truth_root = _resolve_truth_root(str(args.truth_root))
+    produced_utc = _validate_produced_utc(str(args.produced_utc))
 
     if mode != "PAPER":
         print("FATAL: Orchestrator v1 supports PAPER mode only.", file=sys.stderr)
@@ -206,10 +248,9 @@ def main() -> int:
     stage_env = dict(os.environ)
     stage_env["C2_TRUTH_ROOT"] = str(truth_root)
     stage_env["PYTHONPATH"] = str(REPO_ROOT)
-
-    import datetime as _dt
-
-    produced_utc = _dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    # NOTE: produced_utc is deterministic and operator-supplied; orchestrator does not synthesize time.
+    # This is not yet consumed by all tools; it is retained here for audit context and future propagation.
+    stage_env["C2_PRODUCED_UTC"] = produced_utc
 
     current_git_sha = (
         subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(Path.cwd()))
@@ -244,10 +285,9 @@ def main() -> int:
     # --- Bundle A3: Broker Marks (strict) ---
     _run_stage_strict(
         "A3_BROKER_MARKS_SNAPSHOT_V1",
-        ["python3", "ops/tools/run_lifecycle_monitor_v1.py", "--day_utc", day, "--mode", "CHECK"],
+        ["python3", "ops/tools/run_broker_marks_snapshot_day_v1.py", "--day_utc", day],
         env=stage_env,
     )
-
     # --- Bundle A3: Accounting NAV v2 (strict) ---
     _run_stage_strict(
         "A3_ACCOUNTING_NAV_V2",
@@ -386,7 +426,6 @@ def main() -> int:
     )
 
     # --- B+2 Positions Effective Pointer (strict; immutable) ---
-
     positions_day_git_sha = _locked_git_sha_for_positions_day(truth_root, day, current_git_sha)
 
     _run_stage_strict(
