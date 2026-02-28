@@ -171,6 +171,17 @@ documents:
     class: C2_SCHEMA
     status: DRAFT
 
+  # READINESS schemas (new governed outputs)
+  - id: C2_READINESS_TRADE_SUBMIT_READINESS_STATUS_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/READINESS/trade_submit_readiness.status.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_READINESS_TRADE_SUBMIT_READINESS_LATEST_POINTER_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/READINESS/trade_submit_readiness.latest_pointer.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
   # Phase J Monitoring schemas (new governed outputs)
   - id: C2_MONITORING_PORTFOLIO_NAV_SERIES_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/MONITORING/portfolio_nav_series.v1.schema.json
@@ -362,6 +373,16 @@ documents:
     path: governance/05_CONTRACTS/C2/ib_account_registry_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
+
+  - id: C2_TRADE_SUBMIT_READINESS_C2_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/trade_submit_readiness_c2_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_TOOL_TRADE_SUBMIT_READINESS_C2_V1
+    path: ops/tools/run_trade_submit_readiness_c2_v1.py
+    class: C2_TOOL
+    status: ACTIVE
 
   - id: OPS_PREFLIGHT_FORBID_OPERATOR_GATE_VERDICT_SURFACES_V1
     path: ops/governance/preflight_forbid_operator_gate_verdict_surfaces_v1.sh

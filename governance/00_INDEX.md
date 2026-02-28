@@ -93,6 +93,7 @@ These canonical contracts are governance-controlled and must be explicitly liste
 - `governance/05_CONTRACTS/C2/market_neutral_spread_v1.contract.md`
 - `governance/05_CONTRACTS/C2/C2_ATTEMPT_SCOPED_WRITE_POLICY_WITH_CANONICAL_POINTERS_V3.contract.md`
 - `governance/05_CONTRACTS/C2/ib_account_registry_v1.contract.md`
+- `governance/05_CONTRACTS/C2/trade_submit_readiness_c2_v1.contract.md`
 
 ## Governed data schemas
 
@@ -102,6 +103,10 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_snapshot.v4.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MARKET_DATA/market_data_snapshot.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MARKET_DATA/market_calendar.v1.schema.json`
+
+### READINESS schemas (governed outputs)
+- `governance/04_DATA/SCHEMAS/C2/READINESS/trade_submit_readiness.status.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/READINESS/trade_submit_readiness.latest_pointer.v1.schema.json`
 
 ### Engine activity schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/oms_decision.v1.schema.json`

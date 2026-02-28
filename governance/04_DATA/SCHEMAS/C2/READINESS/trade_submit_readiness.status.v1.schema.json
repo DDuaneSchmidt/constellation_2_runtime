@@ -1,0 +1,73 @@
+{
+  "$id": "C2_READINESS_TRADE_SUBMIT_READINESS_STATUS_SCHEMA_V1",
+  "title": "C2 Trade Submit Readiness (C2-native) — status.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "as_of_utc",
+    "expires_utc",
+    "ok",
+    "state",
+    "environment",
+    "ib_account",
+    "reasons",
+    "input_manifest",
+    "producer",
+    "provenance"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "trade_submit_readiness_c2" },
+    "schema_version": { "type": "string", "const": "v1" },
+
+    "as_of_utc": { "type": "string" },
+    "expires_utc": { "type": "string" },
+
+    "ok": { "type": "boolean" },
+    "state": { "type": "string", "enum": ["OK", "FAIL"] },
+
+    "environment": { "type": "string", "enum": ["PAPER", "LIVE"] },
+    "ib_account": { "type": "string", "minLength": 1 },
+
+    "reasons": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+
+    "input_manifest": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256"],
+        "properties": {
+          "type": { "type": "string" },
+          "path": { "type": "string" },
+          "sha256": { "type": ["string", "null"] }
+        }
+      }
+    },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string" },
+        "module": { "type": "string" },
+        "git_sha": { "type": "string" }
+      }
+    },
+
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["truth_root", "registry_sha256"],
+      "properties": {
+        "truth_root": { "type": "string" },
+        "registry_sha256": { "type": "string" }
+      }
+    }
+  }
+}
