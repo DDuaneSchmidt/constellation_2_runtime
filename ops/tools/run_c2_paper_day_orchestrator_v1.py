@@ -187,9 +187,11 @@ def main() -> int:
         print("FATAL: Orchestrator v1 supports PAPER mode only.", file=sys.stderr)
         return 2
 
-    # All stages inherit truth_root via env so tools that honor C2_TRUTH_ROOT write into the correct tree.
-    stage_env = dict(os.environ)
-    stage_env["C2_TRUTH_ROOT"] = str(truth_root)
+# All stages inherit truth_root via env so tools that honor C2_TRUTH_ROOT write into the correct tree.
+# Also pin PYTHONPATH to repo root for deterministic imports across all tools.
+stage_env = dict(os.environ)
+stage_env["C2_TRUTH_ROOT"] = str(truth_root)
+stage_env["PYTHONPATH"] = str(REPO_ROOT)
 
     import datetime as _dt
 
