@@ -402,6 +402,7 @@ def _write_auth_binding_record(
     az_path: Path,
     az_sha: str,
 ) -> None:
+    import json
     rec: Dict[str, Any] = {
         "schema_id": "authorization_binding_record",
         "schema_version": "v1",
@@ -458,6 +459,7 @@ def run_submit_boundary_paper_v4(
     ib_client_id: int,
     ib_account: str,
     dry_run: bool,
+    submissions_root_override: Optional[Path] = None,
 ) -> int:
     import json
 
@@ -483,7 +485,10 @@ def run_submit_boundary_paper_v4(
     binding_hash = canonical_hash_for_c2_artifact_v1(binding_obj)
     submission_id = derive_submission_id_from_binding_hash_v1(binding_hash)
 
-    day_dir = (truth_root / "execution_evidence_v1" / "submissions" / day).resolve()
+    if submissions_root_override is not None:
+        day_dir = (submissions_root_override / day).resolve()
+    else:
+        day_dir = (truth_root / "execution_evidence_v1" / "submissions" / day).resolve()
     day_dir.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -574,44 +579,12 @@ def run_submit_boundary_paper_v4(
     try:
         assert_idempotent_or_raise_v1(submissions_root=day_dir, submission_id=submission_id)
     except IdempotencyError as e:
-        subdir = (day_dir / submission_id).resolve()
-        subdir.mkdir(parents=True, exist_ok=True)
-        veto = _mk_veto(
-            eval_time_utc=eval_time_utc,
-            reason_code=RC_FAIL_CLOSED,
-            reason_detail=f"IDEMPOTENCY_FAILURE: {e!r}",
-            pointers=pointers,
-            intent_hash=plan_obj.get("intent_hash"),
-            plan_hash=plan_obj.get("plan_hash"),
-            upstream_hash=binding_hash,
-            repo_root=repo_root,
-        )
-        write_phased_veto_only_v1(subdir, veto_record=veto, order_plan=plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
-        if az_sha and str(az_path) != ".":
-            _write_auth_binding_record(
-                repo_root=repo_root,
-                out_dir=subdir,
-                eval_time_utc=eval_time_utc,
-                submission_id=submission_id,
-                intent_hash=intent_hash,
-                az_path=az_path,
-                az_sha=az_sha,
-            )
-        return 2
+        # FAIL-CLOSED: submission_id already exists. Do NOT attempt any writes,
+        # because the out_dir is guaranteed to be non-empty.
+        raise SubmitBoundaryV4Error(f"IDEMPOTENCY_FAILURE: {e!r}")
 
     submission_dir = (day_dir / submission_id).resolve()
     submission_dir.mkdir(parents=True, exist_ok=False)
-
-    # Always write the binding proof record
-    _write_auth_binding_record(
-        repo_root=repo_root,
-        out_dir=submission_dir,
-        eval_time_utc=eval_time_utc,
-        submission_id=submission_id,
-        intent_hash=intent_hash,
-        az_path=az_path,
-        az_sha=az_sha,
-    )
 
     risk_budget = _read_json_file(risk_budget_path.resolve())
 
