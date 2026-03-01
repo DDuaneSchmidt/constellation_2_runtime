@@ -1,0 +1,32 @@
+{
+  "artifacts": {
+    "expected_outputs": [
+      "/home/node/constellation_2_runtime/constellation_2/runtime/truth_B/accounting_v1/nav/2026-02-27/nav.json",
+      "/home/node/constellation_2_runtime/constellation_2/runtime/truth_B/monitoring_v1/nav_series/2026-02-27/portfolio_nav_series.v1.json",
+      "/home/node/constellation_2_runtime/constellation_2/runtime/truth_B/reports/daily_portfolio_snapshot_v2_20260227.json"
+    ],
+    "missing_outputs": [
+      "/home/node/constellation_2_runtime/constellation_2/runtime/truth_B/accounting_v1/nav/2026-02-27/nav.json",
+      "/home/node/constellation_2_runtime/constellation_2/runtime/truth_B/monitoring_v1/nav_series/2026-02-27/portfolio_nav_series.v1.json",
+      "/home/node/constellation_2_runtime/constellation_2/runtime/truth_B/reports/daily_portfolio_snapshot_v2_20260227.json"
+    ],
+    "observed_outputs": []
+  },
+  "day_utc": "2026-02-27",
+  "produced_utc": "2026-02-28T00:31:09Z",
+  "producer": {
+    "git_sha": "c55727a16be7d8ec0583240968f1305d6e473a00",
+    "module": "ops/run/c2_eod_paper_v1.sh",
+    "repo": "constellation_2_runtime"
+  },
+  "run": {
+    "ended_utc": "2026-02-28T00:31:09Z",
+    "error_summary": "rc=1 last_cmd=\"$VENV_PY\" constellation_2/phaseJ/tools/build_defensive_tail_required_inputs_day_v1.py --day_utc \"$DAY_UTC\" --symbol \"SPY\"",
+    "exit_code": 1,
+    "seed": "C2_EOD_V1|day_utc=2026-02-27|git_sha=c55727a16be7d8ec0583240968f1305d6e473a00",
+    "started_utc": "2026-02-28T00:31:09Z"
+  },
+  "schema_id": "eod_run_certificate",
+  "schema_version": 1,
+  "status": "FAIL"
+}

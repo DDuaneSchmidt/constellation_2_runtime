@@ -1,0 +1,23 @@
+{
+  "day_utc": "2026-02-24",
+  "details": {
+    "certificate_path": "/home/node/constellation_2_runtime/constellation_2/runtime/truth_B/reports/eod_run_certificate_v1/2026-02-24/eod_run_certificate.v1.json",
+    "certificate_present": true,
+    "certificate_status": "FAIL",
+    "deadline_utc": "2026-02-25T01:30:00Z",
+    "expected_day_utc": "2026-02-24",
+    "notes": [
+      "cert.status=FAIL"
+    ]
+  },
+  "produced_utc": "2026-02-25T21:37:11Z",
+  "producer": {
+    "git_sha": "90b80d86c48349a3bd9bc1481e2204491f9fe662",
+    "module": "ops/tools/run_eod_slo_sentinel_v1.py",
+    "repo": "constellation_2_runtime"
+  },
+  "schema_id": "eod_slo_sentinel",
+  "schema_version": 1,
+  "state": "CERT_FAIL",
+  "status": "FAIL"
+}
