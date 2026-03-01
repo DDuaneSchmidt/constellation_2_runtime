@@ -149,6 +149,8 @@ def _run_identity_set_dry_submit(day: str, phasec_out_dir: Path, ib_host: str, i
         str(int(ib_client_id)),
         "--ib_account",
         str(ib_account).strip(),
+        "--submissions_root_override",
+        "/tmp/c2_dry_submit_proof_submissions_v1",
         "--dry_run",
         "YES",
     ]

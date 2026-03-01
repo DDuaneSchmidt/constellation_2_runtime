@@ -38,6 +38,7 @@ def main() -> int:
     ap.add_argument("--ib_client_id", required=True, type=int)
     ap.add_argument("--ib_account", required=True)
     ap.add_argument("--dry_run", required=True, choices=["YES", "NO"], help="YES writes artifacts but does not connect/submit to IB")
+    ap.add_argument("--submissions_root_override", default="", help="Optional override for submissions root (proof sandbox). If set, submissions are written under <override>/<day_utc>/")
     args = ap.parse_args()
 
     rc = run_submit_boundary_paper_v4(
@@ -50,6 +51,7 @@ def main() -> int:
         ib_client_id=int(args.ib_client_id),
         ib_account=str(args.ib_account).strip(),
         dry_run=(str(args.dry_run).strip().upper() == "YES"),
+        submissions_root_override=(Path(args.submissions_root_override).resolve() if str(args.submissions_root_override).strip() else None),
     )
     return int(rc)
 
