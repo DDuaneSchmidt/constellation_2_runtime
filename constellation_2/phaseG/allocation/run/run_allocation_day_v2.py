@@ -10,7 +10,7 @@ Allocation v2:
 This prevents a pathological “cannot exit because accounting degraded” scenario.
 
 NOTE:
-- latest.json pointer fan-out is forbidden. This writer is day-scoped only.
+- legacy pointer fan-out is forbidden. This writer is day-scoped only.
 
 2026-03-01 PATCH (Audit Fix):
 - Prefer accounting_v2/nav/<DAY>/nav.v2.json when present.

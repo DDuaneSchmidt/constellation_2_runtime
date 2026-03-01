@@ -175,7 +175,7 @@ def main(argv: List[str] | None = None) -> int:
 
     dp = day_paths_v1(day_utc)
 
-    # Producer sha lock on reruns: DAY-SCOPED (manifests/<day>/), not global latest.json.
+    # Producer sha lock on reruns: DAY-SCOPED (manifests/<day>/), not global legacy pointer file.
     ex_sha = _day_scoped_sha_lock_from_manifests_dir(dp.manifests_day_dir, producer_sha)
     if ex_sha is not None:
         print(f"FAIL: PRODUCER_GIT_SHA_MISMATCH_FOR_EXISTING_DAY: existing={ex_sha} provided={producer_sha}", file=sys.stderr)

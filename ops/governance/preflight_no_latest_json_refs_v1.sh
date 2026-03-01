@@ -1,31 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /home/node/constellation_2_runtime
+echo "[c2-preflight] check: forbid legacy latest pointer references in executable code"
 
-echo "[c2-preflight] check: forbid latest.json references in executable code"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$REPO_ROOT"
 
-# Strictly executable code only; exclude documentation.
-# Targets:
-#  - python under constellation_2/ and ops/
-#  - shell under ops/
-#  - js under constellation_2/ and ops/
-if rg -n "latest\.json" -S \
-  --glob "constellation_2/**/*.py" \
-  --glob "ops/**/*.py" \
-  --glob "ops/**/*.sh" \
-  --glob "constellation_2/**/*.js" \
-  --glob "ops/**/*.js" \
-  >/dev/null; then
-  echo "[c2-preflight] FAIL: latest.json references found in executable code:"
-  rg -n "latest\.json" -S \
-    --glob "constellation_2/**/*.py" \
-    --glob "ops/**/*.py" \
-    --glob "ops/**/*.sh" \
-    --glob "constellation_2/**/*.js" \
-    --glob "ops/**/*.js" | sed -n '1,200p'
-  exit 1
+# Build the forbidden filename pattern without embedding the literal string in this file.
+PATTERN="latest""\.json"
+
+# Check only executable code surfaces (not docs)
+HITS="$(rg -n "$PATTERN" -S constellation_2 ops || true)"
+
+if [ -n "${HITS}" ]; then
+  echo "[c2-preflight] FAIL: legacy latest pointer references found in executable code:"
+  echo "${HITS}"
+  exit 2
 fi
 
-echo "[c2-preflight] OK: no latest.json references in executable code"
-exit 0
+echo "[c2-preflight] OK: no legacy latest pointer references in executable code"

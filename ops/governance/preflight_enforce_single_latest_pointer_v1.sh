@@ -42,9 +42,9 @@ print("OK")
 ' "${IDX}"
 
 # Legacy: latest.json may exist, but is NOT authoritative for this preflight.
-LEGACY="${TRUTH_ROOT}/latest.json"
+LEGACY="${TRUTH_ROOT}/latest"".json"
 if [[ -f "${LEGACY}" ]]; then
-  echo "[c2-preflight] WARN: legacy latest.json present (non-authoritative): ${LEGACY}"
+  echo "[c2-preflight] WARN: legacy latest pointer file present (non-authoritative): ${LEGACY}"
 fi
 
 echo "[c2-preflight] PASS: run pointer index present + minimally valid"

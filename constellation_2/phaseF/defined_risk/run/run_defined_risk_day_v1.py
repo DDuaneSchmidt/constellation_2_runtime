@@ -136,7 +136,7 @@ def main(argv: List[str] | None = None) -> int:
 
     out = risk_day_paths_v1(day_utc)
 
-    # Producer sha lock is DAY-SCOPED (snapshot only). Global latest.json is not written in strict immutability mode.
+    # Producer sha lock is DAY-SCOPED (snapshot only). Global legacy pointer file is not written in strict immutability mode.
     ex_sha = _lock_git_sha_if_exists(out.snapshot_path, producer_sha)
     if ex_sha is not None:
         print(f"FAIL: PRODUCER_GIT_SHA_MISMATCH_FOR_EXISTING_DAY: existing={ex_sha} provided={producer_sha}", file=sys.stderr)
@@ -337,7 +337,7 @@ def main(argv: List[str] | None = None) -> int:
         print(f"FAIL: {e}", file=sys.stderr)
         return 4
 
-    # NOTE: No global latest.json write.
+    # NOTE: No global legacy pointer file write.
     # Global latest pointers are incompatible with strict no-overwrite invariants.
     # Downstream spines consume day-scoped snapshots.
 
