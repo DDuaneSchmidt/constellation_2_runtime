@@ -32,7 +32,7 @@ def day_paths_v1(day_utc: str) -> LifecycleDayPathsV1:
         day_utc=day,
         snapshot_dir=snap_dir,
         snapshot_path=(snap_dir / "position_lifecycle_snapshot.v1.json").resolve(),
-        latest_path=(LIFECYCLE_ROOT / "latest.json").resolve(),
+        latest_path=(LIFECYCLE_ROOT / "latest_pointer.v1.json").resolve(),
         failure_dir=fail_dir,
         failure_path=(fail_dir / "failure.json").resolve(),
     )

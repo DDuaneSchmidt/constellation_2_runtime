@@ -16,7 +16,7 @@ Outputs:
   constellation_2/runtime/truth/monitoring_v1/economic_nav_drawdown_v1/nav_history_ledger/<DAY>/nav_history_ledger.v1.json
 
 NOTE:
-- latest.json pointer fan-out is forbidden. This writer does not write latest.json.
+- legacy pointer fan-out is forbidden. This writer does not write legacy pointer files.
 """
 
 from __future__ import annotations

@@ -425,9 +425,6 @@ def _load_engine_join_map_for_day(day: str) -> Tuple[Dict[str, str], List[str], 
     to_try: List[Path] = []
     if candidates:
         to_try.extend(candidates)
-    latest_path = ENGINE_LINKAGE_ROOT / "latest.json"
-    if latest_path.exists():
-        to_try.append(latest_path)
 
     for p in to_try:
         obj, _ = _safe_read_json(p)

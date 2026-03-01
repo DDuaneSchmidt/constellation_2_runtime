@@ -64,5 +64,5 @@ fi
 "${REPO_ROOT}/ops/governance/preflight_forbid_operator_gate_verdict_surfaces_v1.sh"
 bash "${REPO_ROOT}/ops/governance/preflight_enforce_spine_exclusivity_v1.sh"
 bash "${REPO_ROOT}/ops/governance/preflight_enforce_single_latest_pointer_v1.sh"
-
+bash "${REPO_ROOT}/ops/governance/preflight_forbid_alt_truth_roots_v1.sh"
 echo "[c2-preflight] PASS"

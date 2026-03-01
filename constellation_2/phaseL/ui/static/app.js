@@ -359,7 +359,7 @@ async function loadDays() {
   state.days = d.days || [];
   state.day = d.default_day_utc;
 
-  // DO NOT override day using latest.json: it can be stale.
+  // DO NOT override day using legacy pointer files: they can be stale.
   // Server /api/days default_day_utc is derived from authoritative truth surfaces.
 
   const sel = el("daySelect");

@@ -32,7 +32,7 @@ def day_paths_v1(day_utc: str) -> CashLedgerDayPathsV1:
         day_utc=day,
         snapshot_dir=snap_dir,
         snapshot_path=snap_dir / "cash_ledger_snapshot.v1.json",
-        latest_path=CASH_LEDGER_ROOT / "latest.json",
+        latest_path=CASH_LEDGER_ROOT / "latest_pointer.v1.json",
         failure_dir=failure_dir,
         failure_path=failure_dir / "failure.json",
     )

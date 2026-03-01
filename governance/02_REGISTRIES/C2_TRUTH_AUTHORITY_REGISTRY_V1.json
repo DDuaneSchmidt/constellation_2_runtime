@@ -27,7 +27,8 @@
       "family": "positions_snapshot",
       "authoritative_root": "constellation_2/runtime/truth/positions_v1/snapshots",
       "non_authoritative_roots": [
-        "constellation_2/runtime/truth/positions_snapshot_v2"
+        "constellation_2/runtime/truth/positions_snapshot_v2",
+        "constellation_2/runtime/__quarantine_non_authoritative_truth_B__/positions_v1"
       ]
     }
   ]

@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP, getcontext
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 # Determinism
 getcontext().prec = 50
@@ -131,6 +131,7 @@ def _write_immutable_canon(path: Path, obj: Dict[str, Any]) -> _WriteResult:
 
 def _git_sha_failclosed() -> str:
     import subprocess
+
     try:
         out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
         return out.decode("utf-8").strip()
@@ -142,39 +143,54 @@ def _quant6(x: Decimal) -> Decimal:
     return x.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
 
 
-def _load_prior_peak_from_latest_pointer() -> Optional[Decimal]:
+def _parse_day_or_fail(s: str, *, ctx: str) -> str:
+    ss = str(s).strip()
+    if not DAY_RE.match(ss):
+        raise SystemExit(f"FAIL: bad day key: {ss!r} ctx={ctx}")
+    return ss
+
+
+def _load_prior_peak_from_nav_snapshot_history(*, asof_day_utc: str) -> Optional[Decimal]:
     """
-    Reads the latest ledger pointer if present and returns the last day's peak_nav_to_date.
-    Fail-closed on parse errors; returns None if pointer missing.
+    Deterministic prior-peak derivation with NO legacy pointer files:
+    - Scan nav_snapshot/<DAY>/nav_snapshot.v1.json directories
+    - Choose max day strictly < asof_day_utc
+    - Read peak_nav_to_date from that snapshot
+    Fail-closed on parse errors; returns None if no prior snapshot exists.
     """
-    p_latest = (BUNDLE_ROOT / "nav_history_ledger" / "latest.json").resolve()
-    if not p_latest.exists():
+    asof = _parse_day_or_fail(asof_day_utc, ctx="asof_day_utc")
+    snap_root = (BUNDLE_ROOT / "nav_snapshot").resolve()
+
+    if not snap_root.exists() or not snap_root.is_dir():
         return None
 
+    days: List[str] = []
+    for child in sorted(snap_root.iterdir(), key=lambda p: p.name):
+        if not child.is_dir():
+            continue
+        d = child.name
+        if not DAY_RE.match(d):
+            continue
+        if d < asof:
+            days.append(d)
+
+    if not days:
+        return None
+
+    prior_day = days[-1]
+    p = (snap_root / prior_day / "nav_snapshot.v1.json").resolve()
+    if not p.exists() or not p.is_file():
+        raise SystemExit(f"FAIL: prior nav_snapshot missing: {str(p)}")
+
+    obj = _read_json_obj(p)
+    peak_s = obj.get("peak_nav_to_date")
+    if not isinstance(peak_s, str) or peak_s.strip() == "":
+        raise SystemExit(f"FAIL: prior nav_snapshot peak_nav_to_date missing/invalid: {str(p)}")
+
     try:
-        latest = _read_json_obj(p_latest)
-        pointers = latest.get("pointers") if isinstance(latest.get("pointers"), dict) else {}
-        ledger_path = pointers.get("ledger_path")
-        if not isinstance(ledger_path, str) or ledger_path.strip() == "":
-            raise SystemExit(f"FAIL: latest pointer missing ledger_path: {str(p_latest)}")
-        p_ledger = Path(ledger_path).resolve()
-        if not p_ledger.exists():
-            raise SystemExit(f"FAIL: latest pointer ledger missing: {ledger_path}")
-        ledger = _read_json_obj(p_ledger)
-        days = ledger.get("days")
-        if not isinstance(days, list) or len(days) < 1:
-            raise SystemExit(f"FAIL: ledger days missing/empty: {ledger_path}")
-        last = days[-1]
-        if not isinstance(last, dict):
-            raise SystemExit(f"FAIL: ledger days[-1] not object: {ledger_path}")
-        peak_s = last.get("peak_nav_to_date")
-        if not isinstance(peak_s, str) or peak_s.strip() == "":
-            raise SystemExit(f"FAIL: ledger peak_nav_to_date missing: {ledger_path}")
         return Decimal(peak_s)
-    except SystemExit:
-        raise
     except Exception as e:
-        raise SystemExit(f"FAIL: cannot parse prior peak from latest pointer: {e!r}")
+        raise SystemExit(f"FAIL: prior peak_nav_to_date not parseable decimal: value={peak_s!r} path={str(p)} err={e!r}")
 
 
 def _compute_drawdown_pct(end_nav: Decimal, peak_nav: Decimal) -> Decimal:
@@ -208,8 +224,11 @@ def main() -> int:
 
     end_nav_dec = Decimal(str(nav_total))
 
-    prior_peak = _load_prior_peak_from_latest_pointer()
+    prior_peak = _load_prior_peak_from_nav_snapshot_history(asof_day_utc=day)
     if prior_peak is None:
+        # Fail-closed: drawdown requires a positive peak. A genesis day with nav_total==0 has no definable peak.
+        if end_nav_dec <= Decimal("0"):
+            raise SystemExit("FAIL: NO_POSITIVE_PEAK_AVAILABLE_FOR_DRAWDOWN")
         peak_dec = end_nav_dec
         dd_dec = Decimal("0.000000")
         genesis = True
@@ -218,7 +237,6 @@ def main() -> int:
         dd_dec = _compute_drawdown_pct(end_nav_dec, peak_dec)
         genesis = False
 
-    # Construct output object (no floats; decimals as strings)
     produced_utc = _now_utc_iso()
     git_sha = _git_sha_failclosed()
 
