@@ -28,6 +28,9 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+NO_INTENTS_MARKER = lambda day: (INTENTS_DIR(day) / "no_intents_day.v1.json").resolve()
+NO_INTENTS_SCHEMA = "governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/no_intents_day.v1.schema.json"
+
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
@@ -136,8 +139,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not intents_dir.exists() or not intents_dir.is_dir():
         raise SystemExit(f"FAIL: INTENTS_DIR_MISSING: {str(intents_dir)}")
     intent_files = sorted([p for p in intents_dir.iterdir() if p.is_file() and p.name.endswith(".json")], key=lambda p: p.name)
+
     if not intent_files:
-        raise SystemExit("FAIL: NO_INTENTS_FOR_DAY")
+        m = NO_INTENTS_MARKER(day)
+        if m.exists() and m.is_file():
+            obj = _read_json_obj(m)
+            validate_against_repo_schema_v1(obj, REPO_ROOT, NO_INTENTS_SCHEMA)
+            print(f"OK: NO_INTENTS_FOR_DAY_MARKER_PRESENT day_utc={day} path={str(m)}")
+            return 0
+        raise SystemExit("FAIL: NO_INTENTS_FOR_DAY (no marker)")
 
     pol_sha = _sha256_file(POLICY_PATH) if POLICY_PATH.exists() else "0" * 64
 

@@ -112,6 +112,7 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/oms_decision.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/intents_day_rollup.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/heartbeat_gate.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/no_intents_day.v1.schema.json`
 
 ### Phase J — Monitoring schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/portfolio_nav_series.v1.schema.json`
