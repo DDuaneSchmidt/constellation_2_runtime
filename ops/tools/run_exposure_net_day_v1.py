@@ -108,6 +108,36 @@ def _parse_day(day: str) -> str:
         raise SystemExit(f"FAIL: BAD_DAY_UTC_FORMAT_EXPECTED_YYYY_MM_DD: {s!r}")
     return s
 
+def _policy_engine_ids_fallback() -> List[str]:
+    """
+    Deterministic fallback: derive engine_ids from governance policy when no intents exist.
+    This prevents empty per_engine (schema requires minItems >= 1).
+    """
+    try:
+        pol = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+    sleeves = pol.get("sleeves")
+    if not isinstance(sleeves, list):
+        return []
+
+    out: List[str] = []
+    for s in sleeves:
+        if not isinstance(s, dict):
+            continue
+        eids = s.get("engine_ids")
+        if not isinstance(eids, list):
+            continue
+        for eid in eids:
+            t = str(eid).strip()
+            if t:
+                out.append(t)
+
+    # unique + deterministic order
+    return sorted(set(out))
+
+
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="run_exposure_net_day_v1")
@@ -177,6 +207,25 @@ def main(argv: Optional[List[str]] = None) -> int:
         "portfolio": portfolio,
         "per_engine": [per_engine[k] for k in sorted(per_engine.keys())],
     }
+
+    # Schema requires per_engine minItems >= 1. If there were no intents, per_engine may be empty.
+    if not per_engine:
+        eids = _policy_engine_ids_fallback()
+        if not eids:
+            # fail-closed but schema-compliant fallback: single unknown engine
+            eids = ["UNKNOWN_ENGINE"]
+
+        per_engine = []
+        for eid in eids:
+            per_engine.append(
+                {
+                    "engine_id": eid,
+                    "gross_notional_usd": "0",
+                    "net_notional_usd": "0",
+                    "capital_at_risk_cents": 0,
+                    "by_symbol": [],
+                }
+            )
 
     validate_against_repo_schema_v1(out_obj, REPO_ROOT, SCHEMA_RELPATH)
 
