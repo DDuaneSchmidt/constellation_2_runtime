@@ -226,6 +226,9 @@ def main() -> int:
 
     prior_peak = _load_prior_peak_from_nav_snapshot_history(asof_day_utc=day)
     if prior_peak is None:
+        # Fail-closed: drawdown requires a positive peak. A genesis day with nav_total==0 has no definable peak.
+        if end_nav_dec <= Decimal("0"):
+            raise SystemExit("FAIL: NO_POSITIVE_PEAK_AVAILABLE_FOR_DRAWDOWN")
         peak_dec = end_nav_dec
         dd_dec = Decimal("0.000000")
         genesis = True
