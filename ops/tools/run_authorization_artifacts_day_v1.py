@@ -31,6 +31,30 @@ from typing import Any, Dict, List, Optional
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
+AUTHORITY_HEAD_PATH = (TRUTH / "run_pointer_v2" / "canonical_authority_head.v1.json").resolve()
+
+
+def _require_authority_head_pass_authoritative(day: str) -> Dict[str, Any]:
+    p = AUTHORITY_HEAD_PATH
+    if not p.exists() or not p.is_file():
+        raise SystemExit(f"FAIL: AUTHORITY_HEAD_MISSING: {str(p)}")
+    ah = _read_json_obj(p)
+    schema_id = str(ah.get("schema_id") or "").strip()
+    schema_ver = str(ah.get("schema_version") or "").strip()
+    status = str(ah.get("status") or "").strip().upper()
+    authoritative = bool(ah.get("authoritative") is True)
+    day_utc = str(ah.get("day_utc") or "").strip()
+
+    if schema_id != "c2_run_pointer_canonical_authority_head" or schema_ver != "v1":
+        raise SystemExit("FAIL: AUTHORITY_HEAD_SCHEMA_MISMATCH")
+    if day_utc != day:
+        raise SystemExit(f"FAIL: AUTHORITY_HEAD_DAY_MISMATCH head_day={day_utc!r} expected_day={day!r}")
+    if status != "PASS":
+        raise SystemExit(f"FAIL: AUTHORITY_HEAD_NOT_PASS status={status!r}")
+    if not authoritative:
+        raise SystemExit("FAIL: AUTHORITY_HEAD_NOT_AUTHORITATIVE")
+    return ah
+
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -100,6 +124,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     day = _parse_day(args.day_utc)
     produced_utc = f"{day}T00:00:00Z"
 
+    # Fail-closed: authorization artifacts only exist on authority PASS+authoritative days.
+    _require_authority_head_pass_authoritative(day)
     p_alloc = ALLOC_PATH(day)
     if not p_alloc.exists():
         raise SystemExit(f"FAIL: ALLOCATION_AUTHORITY_MISSING: {str(p_alloc)}")
@@ -135,15 +161,12 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         intent_sha = _sha256_file(p)
         dec = decisions.get(intent_sha, None)
+        if not isinstance(dec, dict):
+            raise SystemExit(f"FAIL: ALLOCATION_MISSING_INTENT_HASH: {intent_sha} file={str(p)}")
 
-        decision = "REJECTED"
-        auth_qty = 0
-        rc = ["CAPAUTH_REJECTED", "CAPAUTH_FAIL_CLOSED_REQUIRED"]
-        if isinstance(dec, dict):
-            decision = str(dec.get("decision") or "REJECTED").strip().upper()
-            auth_qty = int(dec.get("authorized_quantity") or 0)
-            rc = list(dec.get("reason_codes") or rc)
-
+        decision = str(dec.get("decision") or "REJECTED").strip().upper()
+        auth_qty = int(dec.get("authorized_quantity") or 0)
+        rc = list(dec.get("reason_codes") or ["CAPAUTH_REJECTED", "CAPAUTH_FAIL_CLOSED_REQUIRED"])
         status = "AUTHORIZED" if decision == "AUTHORIZED" and auth_qty > 0 else "REJECTED"
 
         auth_block: Dict[str, Any] = {

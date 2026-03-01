@@ -456,20 +456,21 @@ def main() -> int:
         ["python3", "ops/tools/run_pointer_heads_materialize_v1.py", "--fail_if_no_authority_head", "YES" if ok_authoritative else "NO"],
         env=stage_env,
     )
-    _run_stage_strict(
-        "A1_CAPAUTH_ALLOCATION_V1",
-        ["python3", "ops/tools/run_capital_authority_allocation_day_v1.py", "--day_utc", day],
-        env=stage_env,
-    )
-
-    _run_stage_strict(
-        "A1_AUTHORIZATION_ARTIFACTS_V1",
-        ["python3", "ops/tools/run_authorization_artifacts_day_v1.py", "--day_utc", day],
-        env=stage_env,
-    )
-
-    # If authoritative, prove binding chain exists (dry-run submission proof)
+    # Authority-complete ordering:
+    # If authoritative, allocation + authorization MUST exist before any submit-proof/boundary activity.
     if ok_authoritative:
+        _run_stage_strict(
+            "A1_CAPAUTH_ALLOCATION_V1",
+            ["python3", "ops/tools/run_capital_authority_allocation_day_v1.py", "--day_utc", day],
+            env=stage_env,
+        )
+
+        _run_stage_strict(
+            "A1_AUTHORIZATION_ARTIFACTS_V1",
+            ["python3", "ops/tools/run_authorization_artifacts_day_v1.py", "--day_utc", day],
+            env=stage_env,
+        )
+
         _run_stage_strict(
             "PHASED_DRY_SUBMIT_PROOF_V1",
             [
@@ -482,7 +483,6 @@ def main() -> int:
             ],
             env=stage_env,
         )
-
     if prereq_failed:
         print("FAIL: ORCHESTRATOR_PREREQ_FAILED", file=sys.stderr)
         return 2

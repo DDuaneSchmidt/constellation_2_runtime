@@ -43,6 +43,29 @@ SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/ALLOCATION/capital_authority_all
 
 OUT_ROOT = (TRUTH_ROOT / "allocation_v1" / "capital_authority_allocation_v1").resolve()
 
+AUTHORITY_HEAD_PATH = (TRUTH_ROOT / "run_pointer_v2" / "canonical_authority_head.v1.json").resolve()
+
+
+def _require_authority_head_pass_authoritative(day: str) -> Dict[str, Any]:
+    p = AUTHORITY_HEAD_PATH
+    ah = _read_json_obj(p)
+    schema_id = str(ah.get("schema_id") or "").strip()
+    schema_ver = str(ah.get("schema_version") or "").strip()
+    status = str(ah.get("status") or "").strip().upper()
+    authoritative = bool(ah.get("authoritative") is True)
+    day_utc = str(ah.get("day_utc") or "").strip()
+
+    if schema_id != "c2_run_pointer_canonical_authority_head" or schema_ver != "v1":
+        raise SystemExit("FAIL: AUTHORITY_HEAD_SCHEMA_MISMATCH")
+    if day_utc != day:
+        raise SystemExit(f"FAIL: AUTHORITY_HEAD_DAY_MISMATCH head_day={day_utc!r} expected_day={day!r}")
+    if status != "PASS":
+        raise SystemExit(f"FAIL: AUTHORITY_HEAD_NOT_PASS status={status!r}")
+    if not authoritative:
+        raise SystemExit("FAIL: AUTHORITY_HEAD_NOT_AUTHORITATIVE")
+    return ah
+
+
 
 def _parse_day(day_utc: str) -> str:
     d = str(day_utc).strip()
@@ -208,6 +231,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     day = _parse_day(args.day_utc)
     produced_utc = f"{day}T00:00:00Z"
+
+    # Fail-closed: allocation can only be produced on authority PASS+authoritative days.
+    _require_authority_head_pass_authoritative(day)
 
     # Required inputs
     p_ex = EXPOSURE_NET_PATH(day)
