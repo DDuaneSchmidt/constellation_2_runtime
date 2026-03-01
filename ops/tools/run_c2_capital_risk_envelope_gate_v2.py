@@ -446,7 +446,7 @@ def _minimal_missing_inputs_report(out_day: str, in_day: str, produced_utc: str,
             "multiplier": None,
             "allowed_capital_at_risk_cents": None,
             "portfolio_capital_at_risk_cents": None,
-            "headroom_cents": None,
+            "headroom_cents": 0,
             "positions": [],
         },
     }
