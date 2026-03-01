@@ -109,7 +109,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     validate_against_repo_schema_v1(out_obj, REPO_ROOT, SCHEMA_RELPATH)
     _atomic_write_refuse_overwrite(out_path, canonical_json_bytes_v1(out_obj) + b"\n")
-    print(f"OK: NO_INTENTS_DAY_MARKER_V1_WRITTEN day_utc={day} path={out_path} sha256={_sha256_bytes((canonical_json_bytes_v1(out_obj) + b\"\\n\"))}")
+    print(f"OK: NO_INTENTS_DAY_MARKER_V1_WRITTEN day_utc={day} path={out_path} sha256={_sha256_bytes(canonical_json_bytes_v1(out_obj) + b'\\n')}")
     return 0
 
 
