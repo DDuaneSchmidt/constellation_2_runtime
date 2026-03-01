@@ -136,9 +136,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     alloc_obj = _read_json_obj(p_alloc)
 
     intents_dir = INTENTS_DIR(day)
-    if not intents_dir.exists() or not intents_dir.is_dir():
-        raise SystemExit(f"FAIL: INTENTS_DIR_MISSING: {str(intents_dir)}")
-    intent_files = sorted([p for p in intents_dir.iterdir() if p.is_file() and p.name.endswith(".json")], key=lambda p: p.name)
+
+    intent_files = sorted(
+        [
+            p for p in intents_dir.iterdir()
+            if p.is_file()
+            and p.name.endswith(".json")
+            and p.name != "no_intents_day.v1.json"
+        ],
+        key=lambda p: p.name,
+    )
+
+    marker_path = (intents_dir / "no_intents_day.v1.json").resolve()
+
+    if not intent_files:
+        if marker_path.exists():
+            print(f"OK: NO_INTENTS_FOR_DAY_MARKER_PRESENT day_utc={day}")
+            return 0
+        raise SystemExit("FAIL: NO_INTENTS_FOR_DAY")
 
     if not intent_files:
         m = NO_INTENTS_MARKER(day)
