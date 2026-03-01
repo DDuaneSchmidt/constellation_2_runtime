@@ -382,10 +382,27 @@ def _compute(out_day: str, produced_utc: str, inp: Inputs) -> Dict[str, Any]:
             "multiplier": (f"{multiplier:.2f}" if multiplier is not None else None),
             "allowed_capital_at_risk_cents": (int(allowed) if isinstance(allowed, int) else None),
             "portfolio_capital_at_risk_cents": (int(risk_sum) if isinstance(risk_sum, int) else None),
-            "headroom_cents": (int(headroom) if isinstance(headroom, int) else None),
+            "headroom_cents": (int(headroom) if isinstance(headroom, int) else 0),
             "positions": breakdown,
         },
     }
+
+    # FAIL-CLOSED SCHEMA PATCH:
+    # Downstream consumers require envelope.headroom_cents to be an int.
+    # If upstream inputs are missing, set headroom_cents=0 deterministically.
+    try:
+        env = out.get("envelope")
+        if not isinstance(env, dict):
+            out["envelope"] = {}
+            env = out["envelope"]
+        hc = env.get("headroom_cents")
+        if not isinstance(hc, int):
+            env["headroom_cents"] = 0
+    except Exception:
+        # Absolute fail-closed: still enforce schema field as int
+        out.setdefault("envelope", {})
+        if isinstance(out["envelope"], dict):
+            out["envelope"]["headroom_cents"] = 0
 
     _validate_against_repo_schema(out, "governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v2.schema.json")
     return out
