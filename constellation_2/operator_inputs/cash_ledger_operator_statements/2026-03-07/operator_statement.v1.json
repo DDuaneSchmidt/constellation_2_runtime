@@ -1,0 +1,12 @@
+{
+  "observed_at_utc": "2026-03-07T00:00:00Z",
+  "currency": "USD",
+  "cash_total": "100000.00",
+  "nlv_total": "100000.00",
+  "available_funds": null,
+  "excess_liquidity": null,
+  "account_id": null,
+  "notes": [
+    "CAPITAL_SEED_V1: deterministic 100k USD initial funding for paper bootstrap"
+  ]
+}
