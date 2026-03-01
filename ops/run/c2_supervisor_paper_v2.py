@@ -162,6 +162,11 @@ def _days_touched_by_phased_root() -> Set[str]:
     return days
 
 
+def _truth_submissions_dir_exists(day_utc: str) -> bool:
+    d = (TRUTH / "execution_evidence_v1" / "submissions" / day_utc).resolve()
+    return bool(d.exists() and d.is_dir())
+
+
 def _lock_producer_sha_for_day(day_utc: str) -> str:
     mdir = (TRUTH / "execution_evidence_v1/manifests" / day_utc).resolve()
     if mdir.exists() and mdir.is_dir():
@@ -238,6 +243,17 @@ def _cycle_once(*, day_override: str, write_submission_index: bool, write_pillar
             )
         days_to_run = [day_override]
 
+    fp_changed = bool(phasd_fp and phasd_fp != phasd_prev)
+
+    # Self-heal: if fp did not change, only reconcile the latest day if canonical truth is missing.
+    if not fp_changed and not day_override and days_to_run:
+        latest = days_to_run[-1]
+        if not _truth_submissions_dir_exists(latest):
+            days_to_run = [latest]
+
+    missing_truth_days = [d for d in days_to_run if not _truth_submissions_dir_exists(d)]
+    need_reconcile = bool(phasd_fp) and (fp_changed or bool(day_override) or bool(missing_truth_days))
+
     ran_exec: List[str] = []
     ran_pillars: List[str] = []
     skipped_pillars: List[str] = []
@@ -247,7 +263,7 @@ def _cycle_once(*, day_override: str, write_submission_index: bool, write_pillar
     skipped_idx: List[str] = []
     sha_by_day: Dict[str, str] = {}
 
-    if phasd_fp and phasd_fp != phasd_prev:
+    if need_reconcile:
         for day_utc in days_to_run:
             producer_sha = _lock_producer_sha_for_day(day_utc)
             sha_by_day[day_utc] = producer_sha
@@ -377,13 +393,23 @@ def main() -> int:
     ap.add_argument("--day_utc", default="", help="Optional override day_utc to run when PhaseD changes.")
 
     # Legacy submission_index writer toggle (default OFF)
-    ap.add_argument("--write_submission_index", default="NO", choices=["YES", "NO"], help="Legacy: write submission_index.v1.json (default NO).")
+    ap.add_argument(
+        "--write_submission_index",
+        default="NO",
+        choices=["YES", "NO"],
+        help="Legacy: write submission_index.v1.json (default NO).",
+    )
 
     # Pillars bootstrap toggle (default ON)
     ap.add_argument("--write_pillars", default="YES", choices=["YES", "NO"], help="Write pillars decision records (default YES).")
 
     # Pillars failure mode (default SOFT)
-    ap.add_argument("--pillars_fail_mode", default="SOFT", choices=["SOFT", "HARD"], help="SOFT: record pillars failure but keep running. HARD: fail supervisor on pillars failure.")
+    ap.add_argument(
+        "--pillars_fail_mode",
+        default="SOFT",
+        choices=["SOFT", "HARD"],
+        help="SOFT: record pillars failure but keep running. HARD: fail supervisor on pillars failure.",
+    )
 
     args = ap.parse_args()
 
