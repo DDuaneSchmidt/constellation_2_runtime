@@ -208,25 +208,26 @@ def main(argv: Optional[List[str]] = None) -> int:
         "per_engine": [per_engine[k] for k in sorted(per_engine.keys())],
     }
 
-# Schema requires per_engine minItems >= 1.
-# If there were no intents, out_obj["per_engine"] may be empty. Use policy fallback.
-if not out_obj.get("per_engine"):
-    eids = _policy_engine_ids_fallback()
-    if not eids:
-        # fail-closed but schema-compliant fallback: single unknown engine
-        eids = ["UNKNOWN_ENGINE"]
+    # Schema requires per_engine minItems >= 1.
+    # If there were no intents, out_obj["per_engine"] may be empty. Use policy fallback.
+    if not out_obj.get("per_engine"):
+        eids = _policy_engine_ids_fallback()
+        if not eids:
+            # fail-closed but schema-compliant fallback: single unknown engine
+            eids = ["UNKNOWN_ENGINE"]
 
-    fallback = []
-    for eid in eids:
-        fallback.append(
-            {
-                "engine_id": eid,
-                "gross_notional_usd": "0",
-                "net_notional_usd": "0",
-                "capital_at_risk_cents": 0,
-                "by_symbol": [],
-            }
-        )
+        fallback = []
+        for eid in eids:
+            fallback.append(
+                {
+                    "engine_id": eid,
+                    "gross_notional_usd": "0",
+                    "net_notional_usd": "0",
+                    "capital_at_risk_cents": 0,
+                    "by_symbol": [],
+                }
+            )
+
     out_obj["per_engine"] = fallback
     validate_against_repo_schema_v1(out_obj, REPO_ROOT, SCHEMA_RELPATH)
 
