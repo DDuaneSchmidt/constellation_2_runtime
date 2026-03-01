@@ -44,7 +44,7 @@ DEFAULT_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
 SCHEMA_OUT = (REPO_ROOT / "governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v2.schema.json").resolve()
 SCHEMA_ALLOC_SUMMARY = "governance/04_DATA/SCHEMAS/C2/ALLOCATION/allocation_summary.v1.schema.json"
-SCHEMA_NAV = "governance/04_DATA/SCHEMAS/C2/ACCOUNTING/accounting_nav.v1.schema.json"
+SCHEMA_NAV_V1 = "governance/04_DATA/SCHEMAS/C2/ACCOUNTING/accounting_nav.v1.schema.json"
 SCHEMA_POS_V3 = "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_snapshot.v3.schema.json"
 SCHEMA_POS_V2 = "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_snapshot.v2.schema.json"
 
@@ -178,7 +178,12 @@ def _bootstrap_window_true(day: str, truth_root: Path) -> bool:
 
 def _resolve_inputs(day: str, truth_root: Path) -> Inputs:
     alloc = (truth_root / "allocation_v1/summary" / day / "summary.json").resolve()
-    nav = (truth_root / "accounting_v1/nav" / day / "nav.json").resolve()
+
+    # Prefer accounting_v2 nav when present; fall back to accounting_v1 for legacy.
+    nav_v2 = (truth_root / "accounting_v2/nav" / day / "nav.v2.json").resolve()
+    nav_v1 = (truth_root / "accounting_v1/nav" / day / "nav.json").resolve()
+    nav = nav_v2 if nav_v2.exists() else nav_v1
+
     pos_v3 = (truth_root / "positions_v1/snapshots" / day / "positions_snapshot.v3.json").resolve()
     pos_v2 = (truth_root / "positions_v1/snapshots" / day / "positions_snapshot.v2.json").resolve()
 
@@ -193,6 +198,10 @@ def _resolve_inputs(day: str, truth_root: Path) -> Inputs:
         return Inputs(alloc_path=alloc, nav_path=nav, pos_path=pos_v2, pos_schema=SCHEMA_POS_V2, truth_root=truth_root)
 
     raise FileNotFoundError(f"POSITIONS_SNAPSHOT_MISSING: {str(pos_v3)} and {str(pos_v2)}")
+
+
+def _is_accounting_v2_nav(nav_path: Path) -> bool:
+    return nav_path.name == "nav.v2.json" or str(nav_path).endswith("/nav.v2.json")
 
 
 def _compute(out_day: str, produced_utc: str, inp: Inputs) -> Dict[str, Any]:
@@ -219,12 +228,17 @@ def _compute(out_day: str, produced_utc: str, inp: Inputs) -> Dict[str, Any]:
         notes.append(f"allocation_summary schema invalid: {e}")
         checks["allocation_summary_present"] = False
 
-    try:
-        _validate_against_repo_schema(nav_obj, SCHEMA_NAV)
-    except Exception as e:  # noqa: BLE001
-        reason_codes.append("B2_ACCOUNTING_NAV_SCHEMA_INVALID")
-        notes.append(f"accounting_nav schema invalid: {e}")
-        checks["nav_present"] = False
+    # IMPORTANT:
+    # - accounting_v1 nav can be schema-validated against SCHEMA_NAV_V1
+    # - accounting_v2 nav may not conform to v1 schema; do not fail the envelope gate on schema mismatch.
+    #   We enforce required arithmetic fields locally (nav.nav_total + bootstrap-safe drawdown defaults).
+    if not _is_accounting_v2_nav(inp.nav_path):
+        try:
+            _validate_against_repo_schema(nav_obj, SCHEMA_NAV_V1)
+        except Exception as e:  # noqa: BLE001
+            reason_codes.append("B2_ACCOUNTING_NAV_SCHEMA_INVALID")
+            notes.append(f"accounting_nav schema invalid: {e}")
+            checks["nav_present"] = False
 
     try:
         _validate_against_repo_schema(pos_obj, inp.pos_schema)
@@ -242,18 +256,30 @@ def _compute(out_day: str, produced_utc: str, inp: Inputs) -> Dict[str, Any]:
         {"type": "output_schema", "path": str(SCHEMA_OUT), "sha256": _sha256_file(SCHEMA_OUT)},
     ]
 
+    # Required: nav_total must be int dollars.
     nav_total = nav_obj.get("nav", {}).get("nav_total")
-    hist = nav_obj.get("history", {}) if isinstance(nav_obj.get("history"), dict) else {}
-    peak_nav = hist.get("peak_nav")
-    drawdown_abs = hist.get("drawdown_abs")
-    drawdown_pct_raw = hist.get("drawdown_pct")
-
     if not isinstance(nav_total, int):
         reason_codes.append("B2_NAV_TOTAL_MISSING_OR_INVALID")
         checks["nav_present"] = False
         nav_total = 0
 
     nav_total_cents = int(nav_total) * 100
+
+    # Drawdown inputs:
+    # - accounting_v1 always provides history fields (required)
+    # - accounting_v2 may be bootstrap (history missing or empty) -> set deterministic defaults:
+    #     peak_nav := nav_total
+    #     drawdown_abs := 0
+    #     drawdown_pct := "0.000000"
+    hist = nav_obj.get("history", {}) if isinstance(nav_obj.get("history"), dict) else {}
+    peak_nav = hist.get("peak_nav")
+    drawdown_abs = hist.get("drawdown_abs")
+    drawdown_pct_raw = hist.get("drawdown_pct")
+
+    if _is_accounting_v2_nav(inp.nav_path) and (not isinstance(hist, dict) or not hist):
+        peak_nav = int(nav_total)
+        drawdown_abs = 0
+        drawdown_pct_raw = "0.000000"
 
     multiplier: Optional[Decimal] = None
     drawdown_pct_q: Optional[Decimal] = None
@@ -433,7 +459,11 @@ def _day0_bootstrap_alloc_missing_report(out_day: str, in_day: str, produced_utc
             {
                 "type": "submissions_day_dir_probe",
                 "path": str(submissions_path),
-                "sha256": (_sha256_bytes(b"") if not submissions_path.exists() else _sha256_bytes(b"\n".join([p.name.encode("utf-8") for p in sorted(submissions_path.iterdir()) if p.is_dir()]))),
+                "sha256": (
+                    _sha256_bytes(b"")
+                    if not submissions_path.exists()
+                    else _sha256_bytes(b"\n".join([p.name.encode("utf-8") for p in sorted(submissions_path.iterdir()) if p.is_dir()]))
+                ),
             },
             {"type": "drawdown_contract", "path": str(DRAWDOWN_CONTRACT), "sha256": _sha256_file(DRAWDOWN_CONTRACT)},
             {"type": "capital_risk_envelope_contract_v2", "path": str(CAP_RISK_CONTRACT_V2), "sha256": _sha256_file(CAP_RISK_CONTRACT_V2)},

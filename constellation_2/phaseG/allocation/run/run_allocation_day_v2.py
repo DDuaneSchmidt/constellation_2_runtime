@@ -11,6 +11,11 @@ This prevents a pathological “cannot exit because accounting degraded” scena
 
 NOTE:
 - latest.json pointer fan-out is forbidden. This writer is day-scoped only.
+
+2026-03-01 PATCH (Audit Fix):
+- Prefer accounting_v2/nav/<DAY>/nav.v2.json when present.
+- Fall back to accounting_v1/nav/<DAY>/nav.json for legacy compatibility.
+- Bootstrap-safe drawdown defaults for accounting_v2 when history is missing.
 """
 
 from __future__ import annotations
@@ -91,7 +96,14 @@ def _lock_git_sha_if_exists(existing_path: Path, provided_sha: str) -> Optional[
     return None
 
 
-def _parse_dd_pct_str_or_fail(nav_obj: Dict[str, Any]) -> Tuple[int, int, int, str]:
+def _parse_dd_pct_str_or_fail_accounting_v1(nav_obj: Dict[str, Any]) -> Tuple[int, int, int, str]:
+    """
+    Accounting v1 expected shape:
+      nav_obj["nav"]["nav_total"] -> int
+      nav_obj["history"]["peak_nav"] -> int
+      nav_obj["history"]["drawdown_abs"] -> int
+      nav_obj["history"]["drawdown_pct"] -> str
+    """
     nav = nav_obj.get("nav")
     if not isinstance(nav, dict):
         raise ValueError("ACCOUNTING_NAV_OBJECT_MISSING")
@@ -111,6 +123,43 @@ def _parse_dd_pct_str_or_fail(nav_obj: Dict[str, Any]) -> Tuple[int, int, int, s
         raise ValueError("ACCOUNTING_DRAWDOWN_ABS_NOT_INT")
     if not isinstance(dd_pct, str) or not dd_pct.strip():
         raise ValueError("ACCOUNTING_DRAWDOWN_PCT_MISSING_OR_NOT_STRING")
+
+    d = Decimal(dd_pct).quantize(DRAWDOWN_QUANT, rounding=ROUND_HALF_UP)
+    dd_pct_s = f"{d:.6f}"
+    return int(nav_total), int(peak_nav), int(dd_abs), dd_pct_s
+
+
+def _parse_dd_pct_str_or_bootstrap_accounting_v2(nav_obj: Dict[str, Any]) -> Tuple[int, int, int, str]:
+    """
+    Accounting v2 expected minimum:
+      nav_obj["nav"]["nav_total"] -> int (USD dollars)
+    history may be {} or missing for bootstrap. In that case:
+      peak_nav := nav_total
+      drawdown_abs := 0
+      drawdown_pct := "0.000000"
+    """
+    nav = nav_obj.get("nav")
+    if not isinstance(nav, dict):
+        raise ValueError("ACCOUNTING_V2_NAV_OBJECT_MISSING")
+    nav_total = nav.get("nav_total")
+    if not isinstance(nav_total, int):
+        raise ValueError("ACCOUNTING_V2_NAV_TOTAL_NOT_INT")
+
+    hist = nav_obj.get("history")
+    if not isinstance(hist, dict) or not hist:
+        return int(nav_total), int(nav_total), 0, "0.000000"
+
+    peak_nav = hist.get("peak_nav")
+    dd_abs = hist.get("drawdown_abs")
+    dd_pct = hist.get("drawdown_pct")
+
+    # If history exists but is incomplete, fail closed: this is not a bootstrap {} case.
+    if not isinstance(peak_nav, int):
+        raise ValueError("ACCOUNTING_V2_PEAK_NAV_NOT_INT")
+    if not isinstance(dd_abs, int):
+        raise ValueError("ACCOUNTING_V2_DRAWDOWN_ABS_NOT_INT")
+    if not isinstance(dd_pct, str) or not dd_pct.strip():
+        raise ValueError("ACCOUNTING_V2_DRAWDOWN_PCT_MISSING_OR_NOT_STRING")
 
     d = Decimal(dd_pct).quantize(DRAWDOWN_QUANT, rounding=ROUND_HALF_UP)
     dd_pct_s = f"{d:.6f}"
@@ -148,6 +197,15 @@ def _list_intent_files(day_utc: str) -> List[Path]:
     if not files:
         raise ValueError(f"INTENTS_DAY_DIR_EMPTY: {str(d)}")
     return files
+
+
+def _resolve_accounting_nav_paths(day_utc: str) -> Tuple[Path, Path]:
+    """
+    Prefer accounting_v2 nav, fall back to accounting_v1 nav.
+    """
+    v2 = (TRUTH_ROOT / "accounting_v2" / "nav" / day_utc / "nav.v2.json").resolve()
+    v1 = (TRUTH_ROOT / "accounting_v1" / "nav" / day_utc / "nav.json").resolve()
+    return v2, v1
 
 
 def _write_failure(
@@ -203,15 +261,28 @@ def main(argv: List[str] | None = None) -> int:
 
     produced_utc = f"{day_utc}T00:00:00Z"
 
-    nav_path = (TRUTH_ROOT / "accounting_v1" / "nav" / day_utc / "nav.json").resolve()
+    nav_v2_path, nav_v1_path = _resolve_accounting_nav_paths(day_utc)
     input_manifest: List[Dict[str, Any]] = []
     attempted_outputs: List[Dict[str, Any]] = []
+
+    # Resolve accounting input (prefer v2)
+    nav_path: Path
+    nav_mode: str  # "v2" or "v1"
+    if nav_v2_path.exists():
+        nav_path = nav_v2_path
+        nav_mode = "v2"
+    else:
+        nav_path = nav_v1_path
+        nav_mode = "v1"
 
     try:
         nav_obj = _read_json_obj(nav_path)
         nav_status = str(nav_obj.get("status") or "").strip() or "UNKNOWN"
         nav_sha = _sha256_file(nav_path)
-        nav_total, peak_nav, dd_abs, dd_pct_s = _parse_dd_pct_str_or_fail(nav_obj)
+        if nav_mode == "v2":
+            nav_total, peak_nav, dd_abs, dd_pct_s = _parse_dd_pct_str_or_bootstrap_accounting_v2(nav_obj)
+        else:
+            nav_total, peak_nav, dd_abs, dd_pct_s = _parse_dd_pct_str_or_fail_accounting_v1(nav_obj)
     except Exception as e:
         _write_failure(
             day_utc=day_utc,
@@ -222,13 +293,23 @@ def main(argv: List[str] | None = None) -> int:
             input_manifest=[],
             code="ACCOUNTING_DAY_NAV_MISSING_OR_INVALID",
             message="Accounting nav missing or invalid",
-            details={"error": str(e), "nav_path": str(nav_path)},
+            details={"error": str(e), "nav_path": str(nav_path), "nav_mode": nav_mode},
             attempted_outputs=[],
         )
         print(f"FAIL: ACCOUNTING_DAY_NAV_MISSING_OR_INVALID: {e}", file=sys.stderr)
         return 2
 
-    input_manifest.append({"type": "other", "path": str(nav_path), "sha256": nav_sha, "day_utc": day_utc, "producer": "bundle_f_accounting_v1"})
+    # Accounting producer label for audit clarity
+    if nav_mode == "v2":
+        nav_producer = "ops/tools/run_accounting_nav_v2_day_v1.py"
+    else:
+        nav_producer = "bundle_f_accounting_v1"
+
+    # Schema only allows specific input_manifest types.
+    # Accounting inputs must remain "other" for schema compliance.
+    nav_type = "other"
+
+    input_manifest.append({"type": nav_type, "path": str(nav_path), "sha256": nav_sha, "day_utc": day_utc, "producer": nav_producer})
 
     mult_s = drawdown_multiplier_v1(dd_pct_s)
     thresholds = [
@@ -253,7 +334,10 @@ def main(argv: List[str] | None = None) -> int:
     reason_codes: List[str] = []
     notes: List[str] = []
 
-    accounting_ok = (nav_status == "OK")
+    # Accounting OK policy:
+    # - v1 used "OK"
+    # - v2 uses "ACTIVE" / "BOOTSTRAP"
+    accounting_ok = nav_status in {"OK", "ACTIVE"}
     if not accounting_ok:
         reason_codes.append(RC_ACCOUNTING_NOT_OK)
         notes.append("accounting not OK: block all ENTRY intents; EXIT intents still allowed (v2)")
@@ -365,7 +449,7 @@ def main(argv: List[str] | None = None) -> int:
                 "reason_codes": [],
                 "input_manifest": [
                     {"type": "intent", "path": str(p_intent.resolve()), "sha256": _sha256_file(p_intent), "day_utc": day_utc, "producer": "intents_v1"},
-                    {"type": "other", "path": str(nav_path), "sha256": nav_sha, "day_utc": day_utc, "producer": "bundle_f_accounting_v1"},
+                    {"type": nav_type, "path": str(nav_path), "sha256": nav_sha, "day_utc": day_utc, "producer": nav_producer},
                 ],
                 "decision": {
                     "intent_id": intent_id,
@@ -407,7 +491,7 @@ def main(argv: List[str] | None = None) -> int:
         "producer": {"repo": producer_repo, "git_sha": producer_sha, "module": module},
         "status": "OK",
         "reason_codes": list(reason_codes),
-        "input_manifest": list(input_manifest) if input_manifest else [{"type": "other", "path": str(nav_path), "sha256": nav_sha, "day_utc": day_utc, "producer": "bundle_f_accounting_v1"}],
+        "input_manifest": list(input_manifest) if input_manifest else [{"type": nav_type, "path": str(nav_path), "sha256": nav_sha, "day_utc": day_utc, "producer": nav_producer}],
         "summary": {"decisions": list(decisions_summary), "counts": {"allow": int(allow_ct), "block": int(block_ct)}, "notes": list(notes), "drawdown_enforcement": dd_block},
     }
 

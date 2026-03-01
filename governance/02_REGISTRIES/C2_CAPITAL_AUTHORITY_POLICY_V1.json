@@ -1,24 +1,26 @@
 {
   "schema_id": "C2_CAPITAL_AUTHORITY_POLICY_V1",
   "schema_version": 1,
-  "status": "DRAFT",
+  "status": "ACTIVE",
   "created_utc": "2026-02-27T00:00:00Z",
-  "owner": "Constellation",
+  "owner": "Constellation_2",
   "notes": [
     "Governance-owned policy manifest for Bundle A (Capital Authority Layer).",
-    "This policy is consumed by deterministic producers: exposure_net_v1 + allocation_authority_v1.",
+    "Constellation 2.0 canonical engine_ids ONLY (no legacy sleeve codes).",
+    "5 engines ACTIVE, 2 engines INACTIVE per ENGINE_MODEL_REGISTRY_V1.",
+    "Inactive engines are hard-capped (max_capital_at_risk_cents=0; notional caps=0).",
     "All numeric values are interpreted as decimal strings or integer cents by runtime code; no floats are authoritative."
   ],
   "sleeves": [
     {
-      "sleeve_id": "E78_TREND_EQ_PRIMARY",
+      "sleeve_id": "C2_TREND_EQ_PRIMARY",
       "display_name": "Trend Sleeve (Equity Primary)",
-      "engine_ids": ["E78"],
+      "engine_ids": ["C2_TREND_EQ_PRIMARY_V1"],
       "priority_rank": 10,
       "limits": {
         "max_gross_notional_usd": "0",
         "max_net_notional_usd": "0",
-        "max_capital_at_risk_cents": 0,
+        "max_capital_at_risk_cents": 80000,
         "max_symbols": 25,
         "max_sector_concentration_pct": "0.25",
         "max_single_name_notional_pct": "0.10",
@@ -27,26 +29,106 @@
       }
     },
     {
-      "sleeve_id": "M34_VOL_INCOME_DEFINED_RISK",
+      "sleeve_id": "C2_VOL_INCOME_DEFINED_RISK",
       "display_name": "Volatility Income Sleeve (Defined Risk Options)",
-      "engine_ids": ["M34"],
+      "engine_ids": ["C2_VOL_INCOME_DEFINED_RISK_V1"],
       "priority_rank": 20,
       "limits": {
         "max_gross_notional_usd": "0",
         "max_net_notional_usd": "0",
-        "max_capital_at_risk_cents": 0,
+        "max_capital_at_risk_cents": 80000,
         "max_symbols": 15,
         "max_sector_concentration_pct": "0.35",
         "max_single_name_notional_pct": "0.12",
         "max_beta_gross_proxy": "1.20",
         "max_beta_net_proxy": "0.60"
       }
+    },
+    {
+      "sleeve_id": "C2_MEAN_REVERSION_EQ",
+      "display_name": "Mean Reversion Sleeve (Equity)",
+      "engine_ids": ["C2_MEAN_REVERSION_EQ_V1"],
+      "priority_rank": 30,
+      "limits": {
+        "max_gross_notional_usd": "0",
+        "max_net_notional_usd": "0",
+        "max_capital_at_risk_cents": 30000,
+        "max_symbols": 20,
+        "max_sector_concentration_pct": "0.30",
+        "max_single_name_notional_pct": "0.10",
+        "max_beta_gross_proxy": "1.50",
+        "max_beta_net_proxy": "0.80"
+      }
+    },
+    {
+      "sleeve_id": "C2_EVENT_DISLOCATION",
+      "display_name": "Event Dislocation Sleeve",
+      "engine_ids": ["C2_EVENT_DISLOCATION_V1"],
+      "priority_rank": 40,
+      "limits": {
+        "max_gross_notional_usd": "0",
+        "max_net_notional_usd": "0",
+        "max_capital_at_risk_cents": 7000,
+        "max_symbols": 10,
+        "max_sector_concentration_pct": "0.35",
+        "max_single_name_notional_pct": "0.10",
+        "max_beta_gross_proxy": "1.20",
+        "max_beta_net_proxy": "0.70"
+      }
+    },
+    {
+      "sleeve_id": "C2_DEFENSIVE_TAIL",
+      "display_name": "Defensive Tail Sleeve",
+      "engine_ids": ["C2_DEFENSIVE_TAIL_V1"],
+      "priority_rank": 50,
+      "limits": {
+        "max_gross_notional_usd": "0",
+        "max_net_notional_usd": "0",
+        "max_capital_at_risk_cents": 3000,
+        "max_symbols": 5,
+        "max_sector_concentration_pct": "0.50",
+        "max_single_name_notional_pct": "0.10",
+        "max_beta_gross_proxy": "1.00",
+        "max_beta_net_proxy": "0.50"
+      }
+    },
+    {
+      "sleeve_id": "C2_CROSS_ASSET_TREND",
+      "display_name": "Cross-Asset Trend (INACTIVE)",
+      "engine_ids": ["C2_CROSS_ASSET_TREND_V1"],
+      "priority_rank": 60,
+      "limits": {
+        "max_gross_notional_usd": "0",
+        "max_net_notional_usd": "0",
+        "max_capital_at_risk_cents": 0,
+        "max_symbols": 0,
+        "max_sector_concentration_pct": "0.00",
+        "max_single_name_notional_pct": "0.00",
+        "max_beta_gross_proxy": "0.00",
+        "max_beta_net_proxy": "0.00"
+      }
+    },
+    {
+      "sleeve_id": "C2_MARKET_NEUTRAL_SPREAD",
+      "display_name": "Market Neutral Spread (INACTIVE)",
+      "engine_ids": ["C2_MARKET_NEUTRAL_SPREAD_V1"],
+      "priority_rank": 70,
+      "limits": {
+        "max_gross_notional_usd": "0",
+        "max_net_notional_usd": "0",
+        "max_capital_at_risk_cents": 0,
+        "max_symbols": 0,
+        "max_sector_concentration_pct": "0.00",
+        "max_single_name_notional_pct": "0.00",
+        "max_beta_gross_proxy": "0.00",
+        "max_beta_net_proxy": "0.00"
+      }
     }
   ],
   "portfolio_limits": {
     "max_gross_notional_usd": "0",
     "max_net_notional_usd": "0",
-    "max_capital_at_risk_cents": 0,
+    "max_capital_at_risk_cents": 200000,
     "max_symbols": 40,
     "max_sector_concentration_pct": "0.40",
     "max_single_name_notional_pct": "0.12",
