@@ -1,0 +1,13 @@
+{
+  "account_id": "DUO847203",
+  "available_funds": null,
+  "cash_total": "0.00",
+  "currency": "USD",
+  "excess_liquidity": null,
+  "nlv_total": "0.00",
+  "notes": [
+    "BOOTSTRAP_OPERATOR_STATEMENT_V1: values set to 0.00 pending IB account snapshot capture",
+    "SAFE_IDLE bootstrap for paper day orchestration"
+  ],
+  "observed_at_utc": "2026-03-09T00:00:00Z"
+}

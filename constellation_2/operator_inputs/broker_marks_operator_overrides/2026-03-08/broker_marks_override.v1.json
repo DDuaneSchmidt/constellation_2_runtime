@@ -1,0 +1,21 @@
+{
+  "schema_id": "c2_broker_marks_override",
+  "schema_version": "v1",
+  "day_utc": "2026-03-08",
+  "currency": "USD",
+  "cash_end": "0",
+  "marks": [
+    {
+      "symbol": "SPY",
+      "sec_type": "STK",
+      "qty": "0",
+      "avg_cost": "0",
+      "market_value": "0",
+      "implied_price": "100",
+      "currency": "USD"
+    }
+  ],
+  "notes": [
+    "CAPITAL_SEED_TEST_ONLY: deterministic SPY implied_price=100 for entry sizing proof"
+  ]
+}

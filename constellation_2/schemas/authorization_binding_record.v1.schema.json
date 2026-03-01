@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "authorization_binding_record.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "observed_at_utc",
+    "submission_id",
+    "intent_hash",
+    "authorization_path",
+    "authorization_sha256",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "authorization_binding_record" },
+    "schema_version": { "type": "string", "const": "v1" },
+    "observed_at_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "submission_id": { "type": "string", "minLength": 8 },
+    "intent_hash": { "type": "string", "minLength": 16 },
+    "authorization_path": { "type": "string", "minLength": 10 },
+    "authorization_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "notes": { "type": "array", "items": { "type": "string" } },
+    "canonical_json_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

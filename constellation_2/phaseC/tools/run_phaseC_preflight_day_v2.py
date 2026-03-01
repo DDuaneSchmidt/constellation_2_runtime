@@ -29,13 +29,22 @@ NOTE: This v2 runner writes into phaseC_preflight_v1 to preserve downstream comp
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# ---- BOOTSTRAP REPO ROOT INTO PYTHONPATH ----
+_THIS_FILE = Path(__file__).resolve()
+_REPO_ROOT_FROM_FILE = _THIS_FILE.parents[3]  # constellation_2/phaseC/tools -> repo root
+if str(_REPO_ROOT_FROM_FILE) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
+if not (_REPO_ROOT_FROM_FILE / "constellation_2").exists():
+    raise SystemExit(f"FATAL: repo_root_missing_constellation_2: derived={_REPO_ROOT_FROM_FILE}")
+
 import argparse
 import hashlib
 import json
 import os
-import sys
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1
@@ -175,12 +184,10 @@ def _evaluate_exposure_intent_v1(intent_obj: Dict[str, Any], *, eval_time_utc: s
     tgt = _decimal_str_in_0_1(str(intent_obj.get("target_notional_pct") or ""), "target_notional_pct")
 
     if _is_exit_intent(tgt):
-        # EXIT intent allowed for any supported exposure type; constraints may be null.
         binding_hash = canonical_hash_for_c2_artifact_v1({"intent_hash": intent_hash, "binding_mode": "EXPOSURE_INTENT_V1_EXIT"})
         decision = _mk_allow_decision(created_at_utc=eval_time_utc, binding_hash=binding_hash)
         return decision, None
 
-    # ENTRY intent: constraints required and max_risk_pct > 0
     constraints = intent_obj.get("constraints")
     if not isinstance(constraints, dict):
         raise PreflightDayError("CONSTRAINTS_REQUIRED_FOR_ENTRY_EXPOSURE_INTENT_V1")
@@ -192,8 +199,8 @@ def _evaluate_exposure_intent_v1(intent_obj: Dict[str, Any], *, eval_time_utc: s
     decision = _mk_allow_decision(created_at_utc=eval_time_utc, binding_hash=binding_hash)
     return decision, None
 
+
 def _evaluate_exposure_intent_v2(intent_obj: Dict[str, Any], *, eval_time_utc: str, intent_hash: str) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
-    # Validate against governed v2 schema (fail-closed)
     validate_against_repo_schema_v1(intent_obj, REPO_ROOT, SCHEMA_EXPOSURE_INTENT_V2)
 
     engine = intent_obj.get("engine")
@@ -211,12 +218,10 @@ def _evaluate_exposure_intent_v2(intent_obj: Dict[str, Any], *, eval_time_utc: s
     tgt = _decimal_str_in_0_1(str(intent_obj.get("target_notional_pct") or ""), "target_notional_pct")
 
     if _is_exit_intent(tgt):
-        # EXIT intent allowed; constraints may be null.
         binding_hash = canonical_hash_for_c2_artifact_v1({"intent_hash": intent_hash, "binding_mode": "EXPOSURE_INTENT_V2_EXIT"})
         decision = _mk_allow_decision(created_at_utc=eval_time_utc, binding_hash=binding_hash)
         return decision, None
 
-    # ENTRY intent: constraints required and max_risk_pct > 0
     constraints = intent_obj.get("constraints")
     if not isinstance(constraints, dict):
         raise PreflightDayError("CONSTRAINTS_REQUIRED_FOR_ENTRY_EXPOSURE_INTENT_V2")

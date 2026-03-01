@@ -29,11 +29,15 @@ def main() -> int:
     ap = argparse.ArgumentParser(prog="c2_submit_paper_v5")
     ap.add_argument("--eval_time_utc", required=True)
     ap.add_argument("--phasec_out_dir", required=True)
-    ap.add_argument("--risk_budget", default=str(_REPO_ROOT_FROM_FILE / "constellation_2/phaseD/inputs/sample_risk_budget.v1.json"))
+    ap.add_argument(
+        "--risk_budget",
+        default=str(_REPO_ROOT_FROM_FILE / "constellation_2/phaseD/inputs/sample_risk_budget.v1.json"),
+    )
     ap.add_argument("--ib_host", required=True)
     ap.add_argument("--ib_port", required=True, type=int)
     ap.add_argument("--ib_client_id", required=True, type=int)
     ap.add_argument("--ib_account", required=True)
+    ap.add_argument("--dry_run", required=True, choices=["YES", "NO"], help="YES writes artifacts but does not connect/submit to IB")
     args = ap.parse_args()
 
     rc = run_submit_boundary_paper_v4(
@@ -45,6 +49,7 @@ def main() -> int:
         ib_port=int(args.ib_port),
         ib_client_id=int(args.ib_client_id),
         ib_account=str(args.ib_account).strip(),
+        dry_run=(str(args.dry_run).strip().upper() == "YES"),
     )
     return int(rc)
 

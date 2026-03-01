@@ -10,8 +10,9 @@ Paper submission boundary v4:
 
 Deterministic, fail-closed.
 
-AUDIT-GRADE ENFORCEMENT (FIX v4-20260228):
+AUDIT-GRADE ENFORCEMENT (v4):
 - NO broker call unless ALL are proven true for the submission day:
+  - canonical_authority_head exists and matches the submission day (PASS-only head)
   - gate_stack_verdict_v1.status == PASS
   - global_kill_switch_state.state == INACTIVE AND allow_entries == true
   - authorization artifact exists for intent_hash and is AUTHORIZED (status+decision) with authorized_quantity > 0
@@ -29,6 +30,10 @@ AUDIT-GRADE ENFORCEMENT (FIX v4-20260228):
       * ib_account matches submission ib_account
       * provenance.truth_root == this repo's canonical truth_root
   - phasec_out_dir is under repo_root (reject /tmp and other external dirs)
+
+DRY RUN:
+- If dry_run=True, all gates are enforced and all artifacts are written,
+  but the broker adapter is NOT connected and no order is submitted.
 """
 
 from __future__ import annotations
@@ -60,7 +65,7 @@ from constellation_2.phaseD.lib.lineage_assert_v1 import (
     assert_required_lineage_fields,
 )
 from constellation_2.phaseD.lib.risk_budget_gate_v1 import enforce_risk_budget_against_whatif_v1
-from constellation_2.phaseD.lib.validate_against_schema_v1 import SchemaValidationError, validate_against_repo_schema_v1
+from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
 
 class SubmitBoundaryV4Error(Exception):
@@ -83,6 +88,9 @@ RC_IB_ACCOUNT_NOT_ALLOWED = "C2_SUBMIT_IB_ACCOUNT_NOT_ALLOWED"
 
 RC_READINESS_C2_NOT_OK = "C2_SUBMIT_READINESS_C2_NOT_OK"
 RC_READINESS_C2_NONAUTHORITATIVE = "C2_SUBMIT_READINESS_C2_NONAUTHORITATIVE"
+
+RC_AUTHORITY_HEAD_MISSING = "C2_SUBMIT_AUTHORITY_HEAD_MISSING"
+RC_AUTHORITY_HEAD_INVALID = "C2_SUBMIT_AUTHORITY_HEAD_INVALID"
 
 
 def _parse_utc_z(ts: str) -> None:
@@ -110,32 +118,14 @@ def _read_json_file(path: Path) -> Any:
         return json.load(f)
 
 
-def _mk_veto(
-    *,
-    eval_time_utc: str,
-    reason_code: str,
-    reason_detail: str,
-    pointers: List[str],
-    intent_hash: Optional[str],
-    plan_hash: Optional[str],
-    upstream_hash: Optional[str],
-    repo_root: Path,
-) -> Dict[str, Any]:
-    veto = {
-        "schema_id": "veto_record",
-        "schema_version": "v1",
-        "observed_at_utc": eval_time_utc,
-        "boundary": "SUBMIT",
-        "reason_code": reason_code,
-        "reason_detail": reason_detail,
-        "inputs": {"intent_hash": intent_hash, "plan_hash": plan_hash, "chain_snapshot_hash": None, "freshness_cert_hash": None},
-        "pointers": list(pointers) if pointers else ["<none>"],
-        "canonical_json_hash": None,
-        "upstream_hash": upstream_hash,
-    }
-    veto["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(veto)
-    validate_against_repo_schema_v1(veto, repo_root, "constellation_2/schemas/veto_record.v1.schema.json")
-    return veto
+def _sha256_file(path: Path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def _require_paper(env: str) -> None:
@@ -150,6 +140,39 @@ def _require_path_under_repo(repo_root: Path, p: Path) -> None:
         pp.relative_to(rr)
     except Exception:
         raise SubmitBoundaryV4Error(f"{RC_PHASEC_OUT_DIR_UNSAFE}: path_not_under_repo_root: path={pp} repo_root={rr}")
+
+
+def _read_authority_head(truth_root: Path, day: str) -> Path:
+    """
+    Trading submission requires canonical_authority_head for the submission day.
+    This enforces: trading reads authority head only.
+    """
+    p = (truth_root / "run_pointer_v2" / "canonical_authority_head.v1.json").resolve()
+    obj = _read_json_file(p)
+    if not isinstance(obj, dict):
+        raise SubmitBoundaryV4Error(f"{RC_AUTHORITY_HEAD_INVALID}: not_object path={p}")
+
+    schema_id = str(obj.get("schema_id") or "").strip()
+    schema_ver = str(obj.get("schema_version") or "").strip()
+
+    # "missing marker" written by materializer has schema_id=c2_run_pointer_canonical_authority_head and ok=false
+    if schema_id != "c2_run_pointer_canonical_authority_head" or schema_ver != "v1":
+        raise SubmitBoundaryV4Error(f"{RC_AUTHORITY_HEAD_INVALID}: schema_mismatch path={p}")
+
+    ok = obj.get("ok")
+    if ok is False:
+        raise SubmitBoundaryV4Error(f"{RC_AUTHORITY_HEAD_MISSING}: {obj.get('error')}")
+
+    head_day = str(obj.get("day_utc") or "").strip()
+    head_status = str(obj.get("status") or "").strip().upper()
+    head_authoritative = bool(obj.get("authoritative"))
+
+    if head_day != day or head_status != "PASS" or (not head_authoritative):
+        raise SubmitBoundaryV4Error(
+            f"{RC_AUTHORITY_HEAD_INVALID}: head_mismatch day={head_day} status={head_status} authoritative={head_authoritative} expected_day={day}"
+        )
+
+    return p
 
 
 def _read_gate_stack_verdict_status(truth_root: Path, day: str) -> Tuple[str, Path]:
@@ -171,12 +194,13 @@ def _read_kill_switch_state(truth_root: Path, day: str) -> Tuple[str, bool, Path
     return state, allow_entries, p
 
 
-def _read_authorization(truth_root: Path, day: str, intent_hash: str) -> Tuple[str, str, int, Path]:
+def _read_authorization(truth_root: Path, day: str, intent_hash: str) -> Tuple[str, str, int, str, Path]:
     """
     Authorization path is deterministic and intent_hash-addressed:
       truth/engine_activity_v1/authorization_v1/<DAY>/<INTENT_HASH>.authorization.v1.json
 
     Must be AUTHORIZED with authorized_quantity > 0 to submit.
+    Returns (status, decision, qty, sha256, path)
     """
     p = (truth_root / "engine_activity_v1" / "authorization_v1" / day / f"{intent_hash}.authorization.v1.json").resolve()
     obj = _read_json_file(p)
@@ -198,7 +222,7 @@ def _read_authorization(truth_root: Path, day: str, intent_hash: str) -> Tuple[s
     except Exception:
         qty = 0
 
-    return status, decision, qty, p
+    return status, decision, qty, _sha256_file(p), p
 
 
 def _read_ib_account_registry(repo_root: Path) -> Dict[str, Any]:
@@ -214,18 +238,12 @@ def _read_ib_account_registry(repo_root: Path) -> Dict[str, Any]:
 
 
 def _extract_symbol_from_plan(plan_obj: Dict[str, Any]) -> Optional[str]:
-    """
-    Extract a trade symbol from the order plan in a conservative, schema-agnostic way.
-    Returns uppercase symbol if found, else None.
-    """
     if not isinstance(plan_obj, dict):
         return None
-
     for k in ["symbol", "ticker", "underlying_symbol"]:
         v = plan_obj.get(k)
         if isinstance(v, str) and v.strip():
             return v.strip().upper()
-
     u = plan_obj.get("underlying")
     if isinstance(u, str) and u.strip():
         return u.strip().upper()
@@ -234,14 +252,12 @@ def _extract_symbol_from_plan(plan_obj: Dict[str, Any]) -> Optional[str]:
             v = u.get(k)
             if isinstance(v, str) and v.strip():
                 return v.strip().upper()
-
     inst = plan_obj.get("instrument")
     if isinstance(inst, dict):
         for k in ["symbol", "ticker"]:
             v = inst.get(k)
             if isinstance(v, str) and v.strip():
                 return v.strip().upper()
-
     return None
 
 
@@ -253,9 +269,6 @@ def _enforce_ib_account_registry(
     plan_symbol: Optional[str],
     pointers: List[str],
 ) -> None:
-    """
-    Enforce governed IB account allowlist (fail-closed) + optional symbol constraint.
-    """
     reg = _read_ib_account_registry(repo_root)
     reg_path = (repo_root / "governance/02_REGISTRIES/C2_IB_ACCOUNT_REGISTRY_V1.json").resolve()
     pointers.append(str(reg_path))
@@ -282,7 +295,6 @@ def _enforce_ib_account_registry(
         raise SubmitBoundaryV4Error(f"{RC_IB_ACCOUNT_NOT_ALLOWED}: environment_not_paper env={env} account={ib_account}")
     if not str(ib_account).startswith("DU"):
         raise SubmitBoundaryV4Error(f"{RC_IB_ACCOUNT_NOT_ALLOWED}: paper_account_id_must_start_with_DU account={ib_account}")
-
     if not enabled:
         raise SubmitBoundaryV4Error(f"{RC_IB_ACCOUNT_NOT_ALLOWED}: enabled_for_submission=false account={ib_account}")
 
@@ -309,18 +321,6 @@ def _enforce_ib_account_registry(
 
 
 def _read_trade_submit_readiness_c2(truth_root: Path, ib_account: str) -> Tuple[bool, str, str, str, Path]:
-    """
-    Enforce C2-native trade submit readiness (fail-closed).
-
-    Required:
-      truth/trade_submit_readiness_c2_v1/status.json
-        - schema_id == trade_submit_readiness_c2
-        - schema_version == v1
-        - ok == true AND state == OK
-        - environment == PAPER
-        - ib_account matches submission
-        - provenance.truth_root == str(truth_root)
-    """
     p = (truth_root / "trade_submit_readiness_c2_v1" / "status.json").resolve()
     obj = _read_json_file(p)
     if not isinstance(obj, dict):
@@ -392,6 +392,61 @@ def _load_identity_set(phasec_out_dir: Path) -> Tuple[str, Dict[str, Any], Dict[
     raise SubmitBoundaryV4Error("PHASEC_OUT_DIR_MISSING_IDENTITY_SET")
 
 
+def _write_auth_binding_record(
+    *,
+    repo_root: Path,
+    out_dir: Path,
+    eval_time_utc: str,
+    submission_id: str,
+    intent_hash: str,
+    az_path: Path,
+    az_sha: str,
+) -> None:
+    rec: Dict[str, Any] = {
+        "schema_id": "authorization_binding_record",
+        "schema_version": "v1",
+        "observed_at_utc": eval_time_utc,
+        "submission_id": submission_id,
+        "intent_hash": intent_hash,
+        "authorization_path": str(az_path),
+        "authorization_sha256": str(az_sha),
+        "notes": [],
+        "canonical_json_hash": None,
+    }
+    rec["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(rec)
+    validate_against_repo_schema_v1(rec, repo_root, "constellation_2/schemas/authorization_binding_record.v1.schema.json")
+    p = (out_dir / "authorization_binding_record.v1.json").resolve()
+    p.write_text(json.dumps(rec, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+
+
+def _mk_veto(
+    *,
+    eval_time_utc: str,
+    reason_code: str,
+    reason_detail: str,
+    pointers: List[str],
+    intent_hash: Optional[str],
+    plan_hash: Optional[str],
+    upstream_hash: Optional[str],
+    repo_root: Path,
+) -> Dict[str, Any]:
+    veto = {
+        "schema_id": "veto_record",
+        "schema_version": "v1",
+        "observed_at_utc": eval_time_utc,
+        "boundary": "SUBMIT",
+        "reason_code": reason_code,
+        "reason_detail": reason_detail,
+        "inputs": {"intent_hash": intent_hash, "plan_hash": plan_hash, "chain_snapshot_hash": None, "freshness_cert_hash": None},
+        "pointers": list(pointers) if pointers else ["<none>"],
+        "canonical_json_hash": None,
+        "upstream_hash": upstream_hash,
+    }
+    veto["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(veto)
+    validate_against_repo_schema_v1(veto, repo_root, "constellation_2/schemas/veto_record.v1.schema.json")
+    return veto
+
+
 def run_submit_boundary_paper_v4(
     *,
     repo_root: Path,
@@ -402,7 +457,10 @@ def run_submit_boundary_paper_v4(
     ib_port: int,
     ib_client_id: int,
     ib_account: str,
+    dry_run: bool,
 ) -> int:
+    import json
+
     _parse_utc_z(eval_time_utc)
     day = _day_from_eval_time_utc(eval_time_utc)
 
@@ -446,7 +504,14 @@ def run_submit_boundary_paper_v4(
         write_phased_veto_only_v1(subdir, veto_record=veto, order_plan=plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
         return 2
 
+    az_sha = ""
+    az_path = Path(".")
+
     try:
+        # Authority head is required for trading submission
+        head_path = _read_authority_head(truth_root, day)
+        pointers.append(str(head_path))
+
         gs_status, gs_path = _read_gate_stack_verdict_status(truth_root, day)
         pointers.append(str(gs_path))
         if gs_status != "PASS":
@@ -457,7 +522,7 @@ def run_submit_boundary_paper_v4(
         if ks_state != "INACTIVE" or not ks_allow_entries:
             raise SubmitBoundaryV4Error(f"{RC_KILL_SWITCH_ACTIVE}: state={ks_state} allow_entries={ks_allow_entries}")
 
-        az_status, az_decision, az_qty, az_path = _read_authorization(truth_root, day, intent_hash)
+        az_status, az_decision, az_qty, az_sha, az_path = _read_authorization(truth_root, day, intent_hash)
         pointers.append(str(az_path))
         if az_status != "AUTHORIZED" or az_decision != "AUTHORIZED" or az_qty <= 0:
             raise SubmitBoundaryV4Error(
@@ -493,6 +558,17 @@ def run_submit_boundary_paper_v4(
             repo_root=repo_root,
         )
         write_phased_veto_only_v1(subdir, veto_record=veto, order_plan=plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
+        # Write binding record if we have the authorization hash (best-effort)
+        if az_sha and str(az_path) != ".":
+            _write_auth_binding_record(
+                repo_root=repo_root,
+                out_dir=subdir,
+                eval_time_utc=eval_time_utc,
+                submission_id=submission_id,
+                intent_hash=intent_hash,
+                az_path=az_path,
+                az_sha=az_sha,
+            )
         return 2
 
     try:
@@ -511,10 +587,31 @@ def run_submit_boundary_paper_v4(
             repo_root=repo_root,
         )
         write_phased_veto_only_v1(subdir, veto_record=veto, order_plan=plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
+        if az_sha and str(az_path) != ".":
+            _write_auth_binding_record(
+                repo_root=repo_root,
+                out_dir=subdir,
+                eval_time_utc=eval_time_utc,
+                submission_id=submission_id,
+                intent_hash=intent_hash,
+                az_path=az_path,
+                az_sha=az_sha,
+            )
         return 2
 
     submission_dir = (day_dir / submission_id).resolve()
     submission_dir.mkdir(parents=True, exist_ok=False)
+
+    # Always write the binding proof record
+    _write_auth_binding_record(
+        repo_root=repo_root,
+        out_dir=submission_dir,
+        eval_time_utc=eval_time_utc,
+        submission_id=submission_id,
+        intent_hash=intent_hash,
+        az_path=az_path,
+        az_sha=az_sha,
+    )
 
     risk_budget = _read_json_file(risk_budget_path.resolve())
 
@@ -525,6 +622,32 @@ def run_submit_boundary_paper_v4(
             _payload_obj, _dig = build_binding_digest_for_equity_order_plan_v2(plan_obj)
         else:
             _payload_obj, _dig = build_binding_digest_for_equity_order_plan_v1(plan_obj)
+
+    # DRY RUN: no broker connection; still record submission-only artifact
+    if dry_run:
+        bsr: Dict[str, Any] = {
+            "schema_id": "broker_submission_record",
+            "schema_version": "v2",
+            "submission_id": submission_id,
+            "submitted_at_utc": eval_time_utc,
+            "binding_hash": binding_hash,
+            "broker": {"name": "INTERACTIVE_BROKERS", "environment": "PAPER"},
+            "status": "SUBMITTED",
+            "broker_ids": {"order_id": None, "perm_id": None},
+            "error": None,
+            "canonical_json_hash": None,
+        }
+        bsr["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(bsr)
+        validate_against_repo_schema_v1(bsr, repo_root, "constellation_2/schemas/broker_submission_record.v2.schema.json")
+
+        write_phased_submission_only_v1(
+            submission_dir,
+            broker_submission_record=bsr,
+            order_plan=plan_obj,
+            binding_record=binding_obj,
+            mapping_ledger_record=mapping_obj,
+        )
+        return 0
 
     adapter = IBPaperAdapterV2(conn=BrokerConnectionSpec(host=ib_host, port=ib_port, client_id=ib_client_id), env="PAPER")
 
@@ -557,7 +680,7 @@ def run_submit_boundary_paper_v4(
         submit_res = adapter.submit_order(order_plan=plan_obj)
         assert_no_synth_status_in_paper("PAPER", submit_res.status)
 
-        bsr: Dict[str, Any] = {
+        bsr2: Dict[str, Any] = {
             "schema_id": "broker_submission_record",
             "schema_version": "v2",
             "submission_id": submission_id,
@@ -570,14 +693,14 @@ def run_submit_boundary_paper_v4(
             "canonical_json_hash": None,
         }
         if not submit_res.ok:
-            bsr["error"] = {"code": submit_res.error_code or "BROKER_REJECTED", "message": submit_res.error_message or "Rejected"}
-        bsr["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(bsr)
-        validate_against_repo_schema_v1(bsr, repo_root, "constellation_2/schemas/broker_submission_record.v2.schema.json")
+            bsr2["error"] = {"code": submit_res.error_code or "BROKER_REJECTED", "message": submit_res.error_message or "Rejected"}
+        bsr2["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(bsr2)
+        validate_against_repo_schema_v1(bsr2, repo_root, "constellation_2/schemas/broker_submission_record.v2.schema.json")
 
         if submit_res.order_id is None or submit_res.perm_id is None:
             write_phased_submission_only_v1(
                 submission_dir,
-                broker_submission_record=bsr,
+                broker_submission_record=bsr2,
                 order_plan=plan_obj,
                 binding_record=binding_obj,
                 mapping_ledger_record=mapping_obj,
@@ -590,7 +713,7 @@ def run_submit_boundary_paper_v4(
             "created_at_utc": eval_time_utc,
             "event_time_utc": eval_time_utc,
             "binding_hash": binding_hash,
-            "broker_submission_hash": bsr["canonical_json_hash"],
+            "broker_submission_hash": bsr2["canonical_json_hash"],
             "broker_order_id": str(submit_res.order_id),
             "perm_id": str(submit_res.perm_id),
             "status": submit_res.status if submit_res.status in (
@@ -615,7 +738,7 @@ def run_submit_boundary_paper_v4(
 
         write_phased_success_outputs_v1(
             submission_dir,
-            broker_submission_record=bsr,
+            broker_submission_record=bsr2,
             execution_event_record=evt,
             order_plan=plan_obj,
             binding_record=binding_obj,
