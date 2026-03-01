@@ -323,6 +323,10 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/submission_index.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
+  - id: C2_EXECUTION_EVIDENCE_SUBMISSION_MANIFEST_SCHEMA_V3
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/execution_evidence_submission_manifest.v3.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
 
   - id: C2_EXECUTION_EVIDENCE_BROKER_EVENT_RAW_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_event_raw.v1.schema.json
@@ -335,6 +339,15 @@ documents:
     status: DRAFT
   - id: C2_EXECUTION_EVIDENCE_BROKER_STATEMENT_NORMALIZED_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_statement_normalized.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_EXECUTION_EVIDENCE_QUARANTINE_TOMBSTONE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/execution_evidence_quarantine_tombstone.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_EXECUTION_EVIDENCE_NO_EXECUTION_EVENT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/execution_evidence_no_execution_event.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
 

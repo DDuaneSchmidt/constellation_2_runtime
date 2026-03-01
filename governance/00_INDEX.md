@@ -161,8 +161,13 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/execution_reconciliation.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/order_lifecycle_event.v1.schema.json`
 - [Broker Statement Normalized Schema JSON (V1)](04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_statement_normalized.v1.schema.json) — id: C2_EXECUTION_EVIDENCE_BROKER_STATEMENT_NORMALIZED_SCHEMA_V1 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_statement_normalized.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/execution_evidence_quarantine_tombstone.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/execution_evidence_no_execution_event.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/execution_evidence_submission_manifest.v3.schema.json`
+
 
 ### Risk schemas (governed outputs)
+
 - `governance/04_DATA/SCHEMAS/C2/RISK/engine_model_registry.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/RISK/engine_risk_budget_ledger.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/RISK/global_kill_switch_state.v1.schema.json`
