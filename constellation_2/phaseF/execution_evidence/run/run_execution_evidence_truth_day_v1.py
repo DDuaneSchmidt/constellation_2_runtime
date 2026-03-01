@@ -185,12 +185,18 @@ def _write_quarantine_tombstone(
         "submission_id": submission_id,
         "quarantine_reason": quarantine_reason,
         "original_hash": original_hash,
-        "timestamp": _utc_now_iso(),
+        "timestamp": f"{day_utc}T00:00:00Z",
         "authoritative": False,
         "details": details,
     }
     validate_against_repo_schema_v1(obj, REPO_ROOT, SCHEMA_TOMBSTONE_V1)
     b = canonical_json_bytes_v1(obj) + b"\n"
+    tpath = _tombstone_path_for(dp, submission_id)
+    if tpath.exists() and tpath.is_file():
+        # Idempotent tombstone: never rewrite immutable truth.
+        ex = _read_json_obj(tpath)
+        validate_against_repo_schema_v1(ex, REPO_ROOT, SCHEMA_TOMBSTONE_V1)
+        return _sha256_file(tpath)
     wr = write_file_immutable_v1(path=_tombstone_path_for(dp, submission_id), data=b, create_dirs=True)
     return wr.sha256
 
