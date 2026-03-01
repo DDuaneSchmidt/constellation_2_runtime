@@ -15,7 +15,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(
         description="Validate C2 accounting latest pointer artifact v1 against governed schema."
     )
-    ap.add_argument("--path", required=True, help="Path to latest.json")
+    ap.add_argument("--path", required=True, help="Path to accounting_v1/latest_pointer.v1.json")
     args = ap.parse_args()
 
     p = Path(args.path).resolve()

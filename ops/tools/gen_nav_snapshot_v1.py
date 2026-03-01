@@ -152,7 +152,7 @@ def _parse_day_or_fail(s: str, *, ctx: str) -> str:
 
 def _load_prior_peak_from_nav_snapshot_history(*, asof_day_utc: str) -> Optional[Decimal]:
     """
-    Deterministic prior-peak derivation with NO latest.json:
+    Deterministic prior-peak derivation with NO legacy pointer files:
     - Scan nav_snapshot/<DAY>/nav_snapshot.v1.json directories
     - Choose max day strictly < asof_day_utc
     - Read peak_nav_to_date from that snapshot

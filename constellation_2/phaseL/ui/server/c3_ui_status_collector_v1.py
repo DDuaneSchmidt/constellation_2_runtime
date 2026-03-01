@@ -1,10 +1,6 @@
-# constellation_2/phaseL/ui/server/c3_ui_status_collector_v1.py
-# C3 UI Status Collector (truth-only, fail-closed)
-#
 # Day resolution priority (DISPLAY, non-authoritative):
 #  1) run_pointer_v1 display head (canonical_pointer_index.v1.jsonl highest pointer_seq)
-#  2) legacy truth/latest.json (NON-authoritative fallback; only if internally consistent)
-#  3) union(max day among: gate_stack_verdict days, activity rollup days, accounting nav v2 days)
+#  2) union(max day among: gate_stack_verdict days, activity rollup days, accounting nav v2 days)
 #
 # NOTE: Trading / authority MUST NOT use this display resolver.
 
@@ -134,46 +130,12 @@ def _resolve_day(
 
     Priority:
       1) run_pointer_v1 display head (preferred)
-      2) legacy latest.json (NON-authoritative fallback)
-      3) max day among: gate_stack_verdict days, activity rollup days, accounting nav days
-      4) None (degraded)
 
-    Returns: (day_or_none, day_source_label)
-    """
     # 1) run_pointer_v1 display head
     day_rp, src_rp = _read_run_pointer_v1_display_day(truth_root, note_source=note_source, warnings=warnings)
     if day_rp:
         return day_rp, src_rp
 
-    # 2) legacy latest.json (non-authoritative; allow UI fallback only)
-    latest_path = truth_root / "latest.json"
-    latest, latest_err = _read_json(latest_path)
-    if latest is not None:
-        note_source(latest_path)
-        day = latest.get("day_utc")
-        points_to = latest.get("points_to")
-        if _is_day_str(day) and isinstance(points_to, str) and points_to:
-            pt = Path(points_to)
-            # points_to may be repo-relative-ish; allow absolute too but must be under truth_root.
-            if not pt.is_absolute():
-                pt = (truth_root.parent.parent / points_to).resolve() if points_to.startswith("constellation_2/") else (truth_root / points_to).resolve()
-            else:
-                pt = pt.resolve()
-
-            truth_root_s = str(truth_root.resolve())
-            if str(pt).startswith(truth_root_s + "/") and pt.exists() and pt.is_file():
-                warnings.append("LATEST_JSON_USED_NONAUTHORITATIVE_FALLBACK")
-                return str(day), "latest.json(non_authoritative_fallback)"
-            warnings.append("LATEST_POINTER_STALE_OR_POINTS_TO_MISSING")
-        else:
-            warnings.append("LATEST_POINTER_INVALID_FIELDS")
-    else:
-        if latest_err == "MISSING":
-            warnings.append("LATEST_POINTER_MISSING")
-            missing_paths.append(str(latest_path))
-        else:
-            warnings.append("LATEST_POINTER_UNREADABLE")
-            missing_paths.append(str(latest_path))
 
     # 3) Fallback union: gate verdict days, activity rollup days, accounting nav days
     gate_root = truth_root / "reports" / "gate_stack_verdict_v1"

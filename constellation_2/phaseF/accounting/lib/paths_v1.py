@@ -48,5 +48,5 @@ def day_paths_v1(day_utc: str) -> AccountingDayPathsV1:
         exposure_path=exposure_dir / "exposure.json",
         attribution_path=attribution_dir / "engine_attribution.json",
         failure_path=failure_dir / "failure.json",
-        latest_path=ACCOUNTING_ROOT / "latest.json",
+        latest_path=ACCOUNTING_ROOT / "latest_pointer.v1.json",
     )

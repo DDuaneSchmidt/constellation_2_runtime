@@ -12,7 +12,8 @@ SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/CASH_LEDGER/cash_ledger_latest_p
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Validate C2 cash ledger latest pointer v1 against governed schema.")
-    ap.add_argument("--path", required=True, help="Path to cash_ledger_v1/latest.json")
+    ap.add_argument("--path", required=True, help="Path to cash_ledger_v1/latest_pointer.v1.json")
+
     args = ap.parse_args()
 
     validate_file_against_repo_schema_or_exit(Path(args.path).resolve(), SCHEMA_RELPATH)
