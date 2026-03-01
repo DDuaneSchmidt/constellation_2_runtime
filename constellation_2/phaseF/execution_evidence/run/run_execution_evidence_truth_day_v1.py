@@ -197,7 +197,7 @@ def _write_quarantine_tombstone(
         ex = _read_json_obj(tpath)
         validate_against_repo_schema_v1(ex, REPO_ROOT, SCHEMA_TOMBSTONE_V1)
         return _sha256_file(tpath)
-    wr = write_file_immutable_v1(path=_tombstone_path_for(dp, submission_id), data=b, create_dirs=True)
+    wr = write_file_immutable_v1(path=tpath, data=b, create_dirs=True)
     return wr.sha256
 
 
