@@ -1,0 +1,49 @@
+{
+  "schema_id": "C2_LIQUIDITY_SLIPPAGE_POLICY_V1",
+  "schema_version": 1,
+  "status": "ACTIVE",
+  "created_utc": "2026-03-02T00:00:00Z",
+  "owner": "Constellation_2",
+  "notes": [
+    "Governance-owned policy manifest for Liquidity+Slippage Envelope Gate (pre-trade hard gate).",
+    "Deterministic v1: uses daily-bar volume from market_data_snapshot_v1/<SYMBOL>/<YEAR>.jsonl to derive ADV proxies.",
+    "Fail-closed: missing liquidity data rejects unless symbol is explicitly allow-listed by policy."
+  ],
+  "defaults": {
+    "lookback_days": 20,
+    "min_history_days": 10,
+    "min_adv_shares": 1000000,
+    "max_participation_pct_adv": "0.010000",
+    "max_est_slippage_bps": "25.00",
+    "base_slippage_bps": "2.00",
+    "slippage_bps_per_1pct_adv": "8.00",
+    "max_notional_per_symbol_usd": "25000",
+    "max_orders_per_symbol_per_day": 2,
+    "require_regime_snapshot_v2": false,
+    "non_normal_regime_caps_multiplier": "0.50",
+    "allow_missing_symbols": [],
+    "allow_zero_intents_pass": true
+  },
+  "symbol_overrides": [],
+  "reason_codes": [
+    "LIQPOL_POLICY_MISSING",
+    "LIQPOL_POLICY_SCHEMA_INVALID",
+    "LIQPOL_MISSING_NAV",
+    "LIQPOL_MISSING_INTENTS_DIR",
+    "LIQPOL_INTENT_PARSE_ERROR",
+    "LIQPOL_SYMBOL_MISSING",
+    "LIQPOL_MARKET_DATA_FILE_MISSING",
+    "LIQPOL_MARKET_DATA_PARSE_ERROR",
+    "LIQPOL_INSUFFICIENT_HISTORY",
+    "LIQPOL_ADV_BELOW_MIN",
+    "LIQPOL_CLOSE_MISSING",
+    "LIQPOL_NOTIONAL_ZERO",
+    "LIQPOL_PARTICIPATION_EXCEEDS_CAP",
+    "LIQPOL_SLIPPAGE_EXCEEDS_CAP",
+    "LIQPOL_NOTIONAL_EXCEEDS_CAP",
+    "LIQPOL_ORDERS_PER_SYMBOL_EXCEEDS_CAP",
+    "LIQPOL_REGIME_NON_NORMAL_CAPS_APPLIED",
+    "LIQPOL_PASS",
+    "LIQPOL_FAIL_CLOSED_REQUIRED"
+  ]
+}

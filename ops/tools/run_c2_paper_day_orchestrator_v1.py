@@ -294,7 +294,6 @@ def main() -> int:
 
     for e in active_engines:
         if e["engine_id"] == "C2_INTENT_SIMULATOR_V1":
-            # Simulator is an orchestrator stage (requires --produced_utc + --engine_registry_sha256), not a generic engine runner.
             continue
 
         stage_name = _stage_name_for_engine(e["engine_id"])
@@ -424,10 +423,11 @@ def main() -> int:
     if not ok:
         prereq_failed = True
 
+    _run_stage_strict("A7_LIQUIDITY_SLIPPAGE_GATE_V1", ["python3", "ops/tools/run_liquidity_slippage_gate_v1.py", "--day_utc", day], env=stage_env)
+
     _run_stage_strict("A8_GATE_STACK_VERDICT_V1", ["python3", "ops/tools/run_gate_stack_verdict_v1.py", "--day_utc", day], env=stage_env)
     _run_stage_strict("C_GLOBAL_KILL_SWITCH_V1", ["python3", "ops/tools/run_global_kill_switch_v1.py", "--day_utc", day], env=stage_env)
 
-    # --- Bundle C2: Heartbeat gate + gate stack verdict + kill switch + run pointer spine (fail-closed) ---
     if truth_root != DEFAULT_TRUTH_ROOT:
         print(f"FATAL: run-pointer integration requires canonical truth_root={DEFAULT_TRUTH_ROOT} got={truth_root}", file=sys.stderr)
         return 2
@@ -529,13 +529,9 @@ def main() -> int:
         env=stage_env,
     )
 
-    # --- Authority-complete ordering ---
-    # Production authority: ok_authoritative (PASS/PASS/INACTIVE).
-    # Structural authority: simulator ACTIVE in registry (PAPER only). This does not claim production authority.
     run_structural_chain = (mode == "PAPER") and sim_active
 
     if ok_authoritative or run_structural_chain:
-        # Phase H: deterministic structural intent wave (time-locked inside sleeve; FAIL-CLOSED).
         _run_stage_strict(
             "H_INTENT_SIMULATOR_V1",
             [
@@ -550,7 +546,6 @@ def main() -> int:
             env=stage_env,
         )
 
-        # Emit simulator heartbeat when simulator is ACTIVE (so heartbeat gate matches active engine set).
         sim_entry = None
         for _e in active_engines:
             if _e["engine_id"] == "C2_INTENT_SIMULATOR_V1":

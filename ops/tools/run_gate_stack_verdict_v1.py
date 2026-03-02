@@ -19,9 +19,16 @@ Non-negotiable:
 - Pure evaluation (no mutation of inputs)
 - Fail-closed for required gates
 - Immutable write
-- SELF-HEAL (Bundle C stability):
-    If canonical verdict exists and is FAIL, but recomputation is PASS,
-    quarantine the old canonical as *.INVALID_<sha>.json and write new canonical PASS.
+
+SELF-HEAL (governed correctness under registry changes):
+- If canonical verdict exists and is PASS: never replace it.
+- If canonical verdict exists and is FAIL:
+    - If recomputation is byte-identical: no-op.
+    - If recomputation differs (e.g., registry/gate set changed), quarantine old canonical
+      as gate_stack_verdict.v1.json.INVALID_<old_sha>.json and write the new canonical,
+      even if the new status is still FAIL.
+This ensures the canonical verdict always reflects the current governed registry while preserving
+audit history of prior canonicals.
 """
 
 from __future__ import annotations
@@ -29,7 +36,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -281,11 +287,7 @@ def _self_heal_if_needed(day: str, out_path: Path, new_obj: Dict[str, Any]) -> T
     if status == "PASS":
         return (False, "EXISTS")
 
-    # Canonical is FAIL. Only heal if recomputed is PASS.
-    new_status = str(new_obj.get("status") or "").strip().upper()
-    if new_status != "PASS":
-        return (False, "EXISTS")
-
+    # Canonical is FAIL and differs from recomputation: quarantine old and write new (even if new is FAIL).
     invalid_path = out_path.with_name(f"gate_stack_verdict.v1.json.INVALID_{existing_sha}.json")
     if invalid_path.exists():
         raise SystemExit(
@@ -295,7 +297,7 @@ def _self_heal_if_needed(day: str, out_path: Path, new_obj: Dict[str, Any]) -> T
 
     out_path.rename(invalid_path)
     print(
-        f"WARN: QUARANTINED_INVALID_EXISTING_GATE_STACK_VERDICT day_utc={day} "
+        f"WARN: QUARANTINED_STALE_GATE_STACK_VERDICT day_utc={day} "
         f"old_path={out_path} quarantined_path={invalid_path} sha256={existing_sha}"
     )
     return (True, "WROTE")

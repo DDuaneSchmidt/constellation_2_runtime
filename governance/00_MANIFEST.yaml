@@ -93,6 +93,12 @@ documents:
     path: governance/05_CONTRACTS/C2/systemic_risk_gate_v3.contract.md
     class: C2_CONTRACT
     status: DRAFT
+
+  - id: C2_LIQUIDITY_SLIPPAGE_GATE_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/liquidity_slippage_gate_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
   - id: C2_BUNDLE_A_PAPER_TRADING_READINESS_AUDIT_PROOF_V1
     path: governance/05_CONTRACTS/C2/bundle_a_paper_trading_readiness_audit_proof_v1.contract.md
     class: C2_CONTRACT
@@ -305,6 +311,16 @@ documents:
     class: C2_SCHEMA
     status: DRAFT
 
+  - id: C2_REPORTS_LIQUIDITY_SLIPPAGE_GATE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/liquidity_slippage_gate.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_RISK_LIQUIDITY_SLIPPAGE_POLICY_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/RISK/liquidity_slippage_policy.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
   - id: C2_REPORTS_EOD_RUN_CERTIFICATE_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/eod_run_certificate.v1.schema.json
     class: C2_SCHEMA
@@ -464,6 +480,11 @@ documents:
     class: C2_REGISTRY
     status: DRAFT
 
+  - id: C2_REGISTRY_LIQUIDITY_SLIPPAGE_POLICY_V1
+    path: governance/02_REGISTRIES/C2_LIQUIDITY_SLIPPAGE_POLICY_V1.json
+    class: C2_REGISTRY
+    status: DRAFT
+
   - id: C2_RISK_EXPOSURE_NET_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/RISK/exposure_net.v1.schema.json
     class: C2_SCHEMA
@@ -505,6 +526,11 @@ documents:
 
   - id: C2_TOOL_HEARTBEAT_GATE_V1
     path: ops/tools/run_heartbeat_gate_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_TOOL_LIQUIDITY_SLIPPAGE_GATE_V1
+    path: ops/tools/run_liquidity_slippage_gate_v1.py
     class: C2_TOOL
     status: ACTIVE
 

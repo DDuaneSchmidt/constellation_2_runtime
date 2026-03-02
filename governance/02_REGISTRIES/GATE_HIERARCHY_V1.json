@@ -61,6 +61,15 @@
       "required": true
     },
     {
+      "gate_id": "liquidity_slippage_gate_v1",
+      "artifact_relpath": "constellation_2/runtime/truth/reports/liquidity_slippage_gate_v1/{DAY}/liquidity_slippage_gate.v1.json",
+      "status_field": "status",
+      "pass_status_values": ["PASS", "OK"],
+      "gate_class": "CLASS2_RISK_HARD_STOP",
+      "blocking": true,
+      "required": true
+    },
+    {
       "gate_id": "replay_integrity_v2",
       "artifact_relpath": "constellation_2/runtime/truth/reports/replay_integrity_v2/{DAY}/replay_integrity.v2.json",
       "status_field": "status",
