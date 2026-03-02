@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "C2_DEPTH_LIQUIDITY_STRESS_V1_SCHEMA",
-  "title": "C2 Depth Liquidity Stress v1 (Depth-aware spread + nonlinear impact under stress)",
+  "title": "C2 Depth Liquidity Stress v1 (single selected regime + flattened per-symbol results)",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -15,7 +15,6 @@
     "policy",
     "inputs",
     "regime_used",
-    "regimes",
     "aggregation",
     "enforcement",
     "violations"
@@ -25,18 +24,21 @@
     "schema_version": { "type": "integer", "const": 1 },
     "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
     "produced_utc": { "type": "string", "minLength": 1 },
+
     "producer": {
       "type": "object",
       "additionalProperties": false,
       "required": [ "repo", "git_sha", "module" ],
       "properties": {
         "repo": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "git_sha": { "type": "string", "minLength": 7, "maxLength": 64 },
+        "git_sha": { "type": "string", "minLength": 1, "maxLength": 64 },
         "module": { "type": "string", "minLength": 1, "maxLength": 256 }
       }
     },
+
     "status": { "type": "string", "enum": [ "PASS", "SCALE", "BLOCK_ALL", "MISSING_INPUTS", "FAIL" ] },
     "fail_closed": { "type": "boolean" },
+
     "policy": {
       "type": "object",
       "additionalProperties": false,
@@ -47,64 +49,28 @@
         "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
       }
     },
+
     "inputs": {
       "type": "object",
       "additionalProperties": false,
       "required": [
         "intents_root",
         "liquidity_dataset_manifest_path",
-        "liquidity_dataset_manifest_sha256"
+        "liquidity_dataset_manifest_sha256",
+        "nav_snapshot_path",
+        "nav_snapshot_sha256"
       ],
       "properties": {
         "intents_root": { "type": "string", "minLength": 1 },
         "liquidity_dataset_manifest_path": { "type": "string", "minLength": 1 },
-        "liquidity_dataset_manifest_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        "liquidity_dataset_manifest_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "nav_snapshot_path": { "type": "string", "minLength": 1 },
+        "nav_snapshot_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
       }
     },
+
     "regime_used": { "type": "string", "enum": [ "NORMAL", "VOL_EXPANSION", "LIQ_CONTRACTION" ] },
-    "regimes": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [ "NORMAL", "VOL_EXPANSION", "LIQ_CONTRACTION" ],
-      "properties": {
-        "NORMAL": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [ "depth_fraction_of_adv", "depth_removal_pct", "spread_widen_multiplier", "impact_k_bps", "impact_alpha" ],
-          "properties": {
-            "depth_fraction_of_adv": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-            "depth_removal_pct": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-            "spread_widen_multiplier": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-            "impact_k_bps": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-            "impact_alpha": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" }
-          }
-        },
-        "VOL_EXPANSION": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [ "depth_fraction_of_adv", "depth_removal_pct", "spread_widen_multiplier", "impact_k_bps", "impact_alpha" ],
-          "properties": {
-            "depth_fraction_of_adv": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-            "depth_removal_pct": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-            "spread_widen_multiplier": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-            "impact_k_bps": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-            "impact_alpha": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" }
-          }
-        },
-        "LIQ_CONTRACTION": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [ "depth_fraction_of_adv", "depth_removal_pct", "spread_widen_multiplier", "impact_k_bps", "impact_alpha" ],
-          "properties": {
-            "depth_fraction_of_adv": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-            "depth_removal_pct": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-            "spread_widen_multiplier": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-            "impact_k_bps": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-            "impact_alpha": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" }
-          }
-        }
-      }
-    },
+
     "aggregation": {
       "type": "object",
       "additionalProperties": false,
@@ -115,107 +81,56 @@
           "additionalProperties": {
             "type": "object",
             "additionalProperties": false,
-            "required": [ "intent_notional_dollar", "price_close", "adv_shares", "adv_dollar", "regimes" ],
+            "required": [
+              "intent_notional_dollar",
+              "price_close",
+              "adv_shares",
+              "adv_dollar",
+              "depth_dollar_normal",
+              "depth_dollar_stressed",
+              "spread_bps_stressed",
+              "impact_bps",
+              "total_cost_bps",
+              "total_cost_dollar"
+            ],
             "properties": {
               "intent_notional_dollar": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]+)?$" },
               "price_close": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
               "adv_shares": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
               "adv_dollar": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-              "regimes": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [ "NORMAL", "VOL_EXPANSION", "LIQ_CONTRACTION" ],
-                "properties": {
-                  "NORMAL": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [ "depth_dollar_normal", "depth_dollar_stressed", "spread_bps_stressed", "impact_bps", "total_cost_bps", "total_cost_dollar" ],
-                    "properties": {
-                      "depth_dollar_normal": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-                      "depth_dollar_stressed": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-                      "spread_bps_stressed": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-                      "impact_bps": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-                      "total_cost_bps": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-                      "total_cost_dollar": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
-                    }
-                  },
-                  "VOL_EXPANSION": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [ "depth_dollar_normal", "depth_dollar_stressed", "spread_bps_stressed", "impact_bps", "total_cost_bps", "total_cost_dollar" ],
-                    "properties": {
-                      "depth_dollar_normal": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-                      "depth_dollar_stressed": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-                      "spread_bps_stressed": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-                      "impact_bps": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-                      "total_cost_bps": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-                      "total_cost_dollar": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
-                    }
-                  },
-                  "LIQ_CONTRACTION": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [ "depth_dollar_normal", "depth_dollar_stressed", "spread_bps_stressed", "impact_bps", "total_cost_bps", "total_cost_dollar" ],
-                    "properties": {
-                      "depth_dollar_normal": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-                      "depth_dollar_stressed": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-                      "spread_bps_stressed": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-                      "impact_bps": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-                      "total_cost_bps": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-                      "total_cost_dollar": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
-                    }
-                  }
-                }
-              }
+
+              "depth_dollar_normal": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+              "depth_dollar_stressed": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+
+              "spread_bps_stressed": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+              "impact_bps": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+              "total_cost_bps": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+              "total_cost_dollar": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]+)?$" }
             }
           }
         },
+
         "portfolio": {
           "type": "object",
           "additionalProperties": false,
-          "required": [ "total_intent_notional_dollar", "regimes", "max_symbol", "max_symbol_cost_bps" ],
+          "required": [
+            "total_intent_notional_dollar",
+            "total_cost_dollar",
+            "portfolio_cost_bps",
+            "max_symbol",
+            "max_symbol_cost_bps"
+          ],
           "properties": {
             "total_intent_notional_dollar": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]+)?$" },
+            "total_cost_dollar": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]+)?$" },
+            "portfolio_cost_bps": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
             "max_symbol": { "type": "string", "minLength": 1 },
-            "max_symbol_cost_bps": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-            "regimes": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [ "NORMAL", "VOL_EXPANSION", "LIQ_CONTRACTION" ],
-              "properties": {
-                "NORMAL": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [ "total_cost_dollar", "portfolio_cost_bps" ],
-                  "properties": {
-                    "total_cost_dollar": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]+)?$" },
-                    "portfolio_cost_bps": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" }
-                  }
-                },
-                "VOL_EXPANSION": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [ "total_cost_dollar", "portfolio_cost_bps" ],
-                  "properties": {
-                    "total_cost_dollar": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]+)?$" },
-                    "portfolio_cost_bps": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" }
-                  }
-                },
-                "LIQ_CONTRACTION": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [ "total_cost_dollar", "portfolio_cost_bps" ],
-                  "properties": {
-                    "total_cost_dollar": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]+)?$" },
-                    "portfolio_cost_bps": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" }
-                  }
-                }
-              }
-            }
+            "max_symbol_cost_bps": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" }
           }
         }
       }
     },
+
     "enforcement": {
       "type": "object",
       "additionalProperties": false,
@@ -236,6 +151,7 @@
         "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
       }
     },
+
     "violations": { "type": "array", "items": { "type": "string", "minLength": 1 } }
   }
 }
