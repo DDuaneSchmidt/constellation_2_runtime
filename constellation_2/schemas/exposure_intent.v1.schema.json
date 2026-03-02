@@ -17,47 +17,74 @@
     "risk_class"
   ],
   "properties": {
-    "schema_id": { "const": "exposure_intent" },
-    "schema_version": { "const": "v1" },
-
+    "schema_id": {
+      "const": "exposure_intent"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
     "intent_id": {
       "type": "string",
       "minLength": 16,
       "maxLength": 128,
       "description": "Deterministic intent identifier (hash-derived preferred)."
     },
-
     "created_at_utc": {
       "type": "string",
       "format": "date-time",
       "description": "UTC timestamp in ISO-8601 Z form."
     },
-
     "engine": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["engine_id", "suite", "mode"],
+      "required": [
+        "engine_id",
+        "suite",
+        "mode"
+      ],
       "properties": {
-        "engine_id": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "engine_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
         "suite": {
           "type": "string",
-          "enum": ["C2_HYBRID_V1"],
-          "description": "Hybrid suite identifier (exposure-intent authoring)."
+          "enum": [
+            "C2_HYBRID_V1",
+            "C2_SYSTEM_VALIDATION_V1"
+          ],
+          "description": "Suite identifier (exposure-intent authoring)."
         },
-        "mode": { "type": "string", "enum": ["PAPER", "LIVE"] }
+        "mode": {
+          "type": "string",
+          "enum": [
+            "PAPER",
+            "LIVE"
+          ]
+        }
       }
     },
-
     "underlying": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["symbol", "currency"],
+      "required": [
+        "symbol",
+        "currency"
+      ],
       "properties": {
-        "symbol": { "type": "string", "minLength": 1, "maxLength": 16 },
-        "currency": { "type": "string", "minLength": 3, "maxLength": 3 }
+        "symbol": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16
+        },
+        "currency": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 3
+        }
       }
     },
-
     "exposure_type": {
       "type": "string",
       "enum": [
@@ -66,30 +93,31 @@
       ],
       "description": "Exposure primitive type. v1 keeps the enum small; expand only via new schema version."
     },
-
     "target_notional_pct": {
       "type": "string",
       "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$",
       "description": "Target notional as fraction of NAV, decimal string in [0,1]."
     },
-
     "expected_holding_days": {
       "type": "integer",
       "minimum": 0,
       "maximum": 365
     },
-
     "risk_class": {
       "type": "string",
       "minLength": 1,
       "maxLength": 64,
       "description": "Risk class label (e.g. TREND, VRP_DEFINED, MEAN_REVERSION)."
     },
-
     "constraints": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "additionalProperties": false,
-      "required": ["max_risk_pct"],
+      "required": [
+        "max_risk_pct"
+      ],
       "properties": {
         "max_risk_pct": {
           "type": "string",
@@ -98,10 +126,38 @@
         }
       }
     },
-
+    "option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "structure",
+        "direction"
+      ],
+      "properties": {
+        "structure": {
+          "type": "string",
+          "enum": [
+            "PUT",
+            "CALL"
+          ]
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "BUY",
+            "SELL"
+          ]
+        }
+      },
+      "description": "Optional option-structure metadata (informational for v1)."
+    },
     "canonical_json_hash": {
-      "type": ["string", "null"],
-      "pattern": "^[a-f0-9]{64}$"
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Self-hash over canonical JSON with canonical_json_hash forced to null (C2 convention)."
     }
   }
 }

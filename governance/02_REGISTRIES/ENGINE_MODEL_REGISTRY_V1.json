@@ -7,9 +7,27 @@
     "module": "governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json",
     "git_sha": "2aacaf914b0a6e6c469342342069179d1f206f1c"
   },
-  "registry_version": 7,
+  "registry_version": 8,
   "approved_git_sha": "2aacaf914b0a6e6c469342342069179d1f206f1c",
   "engines": [
+    {
+      "engine_id": "C2_INTENT_SIMULATOR_V1",
+      "activation_status": "ACTIVE",
+      "runner_path": "constellation_2.phaseH.intent_simulator.run.run_intent_simulator_day_v1",
+      "budget_notional_pct": "0.00",
+      "approved_git_sha": "2aacaf914b0a6e6c469342342069179d1f206f1c",
+      "engine_runner_path": "constellation_2/phaseH/intent_simulator/run/run_intent_simulator_day_v1.py",
+      "engine_runner_sha256": "d3fe257d1018f152f963176cc6b89ece4034800e7240fe2d7bff8b093fddd8e5",
+      "approved_utc": "2026-02-25T00:00:00Z",
+      "approved_by": "OPERATOR",
+      "parameter_lock": null,
+      "notes": [
+        "Structural validation sleeve (NOT alpha).",
+        "Daily deterministic exposure_intent.v1.json wave at exactly 10:00:00 America/New_York (time-locked; FAIL-CLOSED).",
+        "Idempotent: refuses overwrite if intents already exist for day_utc.",
+        "Writes only under runtime/truth/intents_v1/snapshots/<DAY_UTC>/ with filenames as sha256(file bytes)."
+      ]
+    },
     {
       "engine_id": "C2_MEAN_REVERSION_EQ_V1",
       "activation_status": "ACTIVE",

@@ -459,6 +459,21 @@ def main() -> int:
     # Authority-complete ordering:
     # If authoritative, allocation + authorization MUST exist before any submit-proof/boundary activity.
     if ok_authoritative:
+        # Phase H: deterministic structural intent wave (time-locked inside sleeve; FAIL-CLOSED).
+        _run_stage_strict(
+            "H_INTENT_SIMULATOR_V1",
+            [
+                "python3",
+                "-m",
+                "constellation_2.phaseH.intent_simulator.run.run_intent_simulator_day_v1",
+                "--produced_utc",
+                str(args.produced_utc).strip(),
+                "--engine_registry_sha256",
+                registry_sha,
+            ],
+            env=stage_env,
+        )
+
         _run_stage_strict(
             "A1_CAPAUTH_ALLOCATION_V1",
             ["python3", "ops/tools/run_capital_authority_allocation_day_v1.py", "--day_utc", day],
