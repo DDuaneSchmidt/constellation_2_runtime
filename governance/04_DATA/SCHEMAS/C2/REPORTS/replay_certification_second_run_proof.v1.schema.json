@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_REPLAY_CERTIFICATION_SECOND_RUN_PROOF_V1_SCHEMA",
+  "title": "C2 Replay Certification Second Run Proof v1 (Two-run equality)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "two_run_equality",
+    "stored_candidate_bundle_sha256",
+    "recomputed_candidate_bundle_sha256",
+    "reason_codes",
+    "proof_sha256"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "C2_REPLAY_CERTIFICATION_SECOND_RUN_PROOF_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "minLength": 1 },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 7 },
+        "module": { "type": "string", "minLength": 1 }
+      }
+    },
+    "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+    "two_run_equality": { "type": "boolean" },
+    "stored_candidate_bundle_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "recomputed_candidate_bundle_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "proof_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}
