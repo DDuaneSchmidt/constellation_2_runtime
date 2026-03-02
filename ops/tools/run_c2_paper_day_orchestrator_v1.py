@@ -275,6 +275,9 @@ def main() -> int:
     registry_sha = _sha256_file(REG_PATH)
 
     for e in active_engines:
+        if e["engine_id"] == "C2_INTENT_SIMULATOR_V1":
+            # Simulator is an orchestrator stage (requires --produced_utc + --engine_registry_sha256), not an engine runner.
+            continue
         stage_name = _stage_name_for_engine(e["engine_id"])
         module = str(e["runner_path"])
 
@@ -500,6 +503,9 @@ def main() -> int:
             ],
             env=stage_env,
         )
+    if prereq_failed:
+        print("WARN: ORCHESTRATOR_PREREQ_FAILED (continuing to authority-complete block)", file=sys.stderr)
+
     if prereq_failed:
         print("FAIL: ORCHESTRATOR_PREREQ_FAILED", file=sys.stderr)
         return 2
