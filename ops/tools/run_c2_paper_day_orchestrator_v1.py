@@ -247,11 +247,13 @@ def main() -> int:
         ["python3", "ops/tools/run_accounting_nav_v2_day_v1.py", "--day_utc", input_day, "--producer_git_sha", current_git_sha, "--producer_repo", "constellation_2_runtime"],
         env=stage_env,
     )
-    _run_stage_strict(
+    ok, _rc = _run_stage_soft(
         "A5_ACCOUNTING_ATTRIBUTION_V2",
         ["python3", "ops/tools/run_accounting_attribution_v2_day_v1.py", "--day_utc", day, "--producer_git_sha", current_git_sha, "--producer_repo", "constellation_2_runtime"],
         env=stage_env,
     )
+    if not ok:
+        prereq_failed = True
 
     ok, _rc = _run_stage_soft("A6_ENGINE_DAILY_RETURNS_V1", ["python3", "ops/tools/run_engine_daily_returns_day_v1.py", "--day_utc", day], env=stage_env)
     if not ok:
