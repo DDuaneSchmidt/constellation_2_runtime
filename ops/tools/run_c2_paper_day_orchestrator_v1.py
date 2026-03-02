@@ -11,6 +11,15 @@ Key properties:
 - Deterministic produced_utc (operator supplied; orchestrator MUST NOT synthesize time)
 - Fail-closed for submission proof: if authority head is required but missing → FAIL
 - Run pointer v1 append-only + v2 materialized heads
+
+REDESIGN (registry-gated activation only):
+- Each sleeve/engine is controlled solely by activation_status in ENGINE_MODEL_REGISTRY_V1.json.
+- INACTIVE sleeves are not run.
+- C2_INTENT_SIMULATOR_V1 is a special orchestrator stage (not run via the generic engine loop).
+- If simulator is ACTIVE (and mode==PAPER), the orchestrator executes a structural chain:
+    H_INTENT_SIMULATOR_V1 → A1_CAPAUTH_ALLOCATION_V1 → A1_AUTHORIZATION_ARTIFACTS_V1 → PHASED_DRY_SUBMIT_PROOF_V1
+  even if systemic risk gates fail (this is structural validation, not production authority).
+- Production authority semantics remain unchanged (ok_authoritative uses PASS/PASS/INACTIVE).
 """
 
 from __future__ import annotations
@@ -184,6 +193,13 @@ def _stage_name_for_heartbeat(engine_id: str) -> str:
     return f"HB_{s}"
 
 
+def _is_simulator_active(active_engines: List[Dict[str, str]]) -> bool:
+    for e in active_engines:
+        if str(e.get("engine_id") or "").strip() == "C2_INTENT_SIMULATOR_V1":
+            return True
+    return False
+
+
 def main() -> int:
     _require_repo_root_cwd()
 
@@ -274,10 +290,13 @@ def main() -> int:
     active_engines = _active_engines_sorted(reg)
     registry_sha = _sha256_file(REG_PATH)
 
+    sim_active = _is_simulator_active(active_engines)
+
     for e in active_engines:
         if e["engine_id"] == "C2_INTENT_SIMULATOR_V1":
-            # Simulator is an orchestrator stage (requires --produced_utc + --engine_registry_sha256), not an engine runner.
+            # Simulator is an orchestrator stage (requires --produced_utc + --engine_registry_sha256), not a generic engine runner.
             continue
+
         stage_name = _stage_name_for_engine(e["engine_id"])
         module = str(e["runner_path"])
 
@@ -455,15 +474,18 @@ def main() -> int:
         env=stage_env,
     )
 
-    # Materialize v2 heads from v1 pointer index.
     _run_stage_strict(
         "C2_RUN_POINTER_HEADS_MATERIALIZE_V1",
         ["python3", "ops/tools/run_pointer_heads_materialize_v1.py", "--fail_if_no_authority_head", "YES" if ok_authoritative else "NO"],
         env=stage_env,
     )
-    # Authority-complete ordering:
-    # If authoritative, allocation + authorization MUST exist before any submit-proof/boundary activity.
-    if ok_authoritative:
+
+    # --- Authority-complete ordering ---
+    # Production authority: ok_authoritative (PASS/PASS/INACTIVE).
+    # Structural authority: simulator ACTIVE in registry (PAPER only). This does not claim production authority.
+    run_structural_chain = (mode == "PAPER") and sim_active
+
+    if ok_authoritative or run_structural_chain:
         # Phase H: deterministic structural intent wave (time-locked inside sleeve; FAIL-CLOSED).
         _run_stage_strict(
             "H_INTENT_SIMULATOR_V1",
@@ -503,8 +525,6 @@ def main() -> int:
             ],
             env=stage_env,
         )
-    if prereq_failed:
-        print("WARN: ORCHESTRATOR_PREREQ_FAILED (continuing to authority-complete block)", file=sys.stderr)
 
     if prereq_failed:
         print("FAIL: ORCHESTRATOR_PREREQ_FAILED", file=sys.stderr)

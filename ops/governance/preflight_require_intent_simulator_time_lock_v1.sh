@@ -12,6 +12,23 @@ test -f "${ORCH}" || { echo "FAIL: missing orchestrator: ${ORCH}" >&2; exit 2; }
 test -f "${REG}"  || { echo "FAIL: missing engine registry: ${REG}" >&2; exit 2; }
 test -f "${SIM}"  || { echo "FAIL: missing intent simulator: ${SIM}" >&2; exit 2; }
 
+SIM_STATUS="$(python3 - <<'PY'
+import json, sys
+p="governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json"
+j=json.load(open(p,"r",encoding="utf-8"))
+e=[x for x in j.get("engines",[]) if x.get("engine_id")=="C2_INTENT_SIMULATOR_V1"]
+if len(e)!=1:
+    print("MISSING")
+    sys.exit(0)
+print(str(e[0].get("activation_status") or "").strip())
+PY
+)"
+
+if [ "${SIM_STATUS}" != "ACTIVE" ]; then
+  echo "[preflight] simulator not ACTIVE (status=${SIM_STATUS}); skipping simulator invariants"
+  exit 0
+fi
+
 # Orchestrator must call the simulator stage.
 rg -n 'H_INTENT_SIMULATOR_V1' "${ORCH}" >/dev/null || { echo "FAIL: orchestrator missing H_INTENT_SIMULATOR_V1" >&2; exit 2; }
 rg -n 'constellation_2\.phaseH\.intent_simulator\.run\.run_intent_simulator_day_v1' "${ORCH}" >/dev/null || { echo "FAIL: orchestrator missing simulator module invocation" >&2; exit 2; }
