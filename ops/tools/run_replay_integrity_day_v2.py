@@ -324,6 +324,33 @@ def main() -> int:
     validate_against_repo_schema_v1(report, REPO_ROOT, SCHEMA_RELPATH)
 
     if mode == "WRITE":
+        # Idempotent WRITE: never rewrite an existing immutable report.
+        # If the existing report's replay_hash matches, treat as success.
+        if out_path.exists():
+            try:
+                existing = _load_existing_report(out_path)
+                existing_hash = existing.get("replay_hash")
+                existing_status = str(existing.get("status") or "").strip().upper()
+            except Exception as e:
+                raise SystemExit(f"FAIL: EXISTING_REPLAY_INTEGRITY_REPORT_UNREADABLE: {e}") from e
+
+            if isinstance(existing_hash, str) and (len(existing_hash) == 64) and (existing_hash == replay_hash):
+                existing_sha = _sha256_file(out_path)
+                print(
+                    f"OK: REPLAY_INTEGRITY_V2_EXISTS day_utc={day} status={existing_status} "
+                    f"path={out_path} sha256={existing_sha}"
+                )
+                return 0 if existing_status == "OK" else 2
+
+            existing_sha = _sha256_file(out_path)
+            print(
+                f"FAIL: REPLAY_INTEGRITY_V2_EXISTING_MISMATCH day_utc={day} "
+                f"path={out_path} existing_sha={existing_sha} "
+                f"existing_replay_hash={existing_hash!r} observed_replay_hash={replay_hash}",
+                file=sys.stderr,
+            )
+            return 2
+
         try:
             wr = write_file_immutable_v1(path=out_path, data=_canonical_report_bytes(report), create_dirs=True)
         except ImmutableWriteError as e:
@@ -333,13 +360,6 @@ def main() -> int:
             f"path={wr.path} sha256={wr.sha256} action={wr.action}"
         )
         return 0 if status == "OK" else 2
-
-    print(
-        f"OK: REPLAY_INTEGRITY_V2_CHECK day_utc={day} status={status} replay_hash={replay_hash} "
-        f"pass={report['reproducibility_check']['pass']}"
-    )
-    return 0 if report["reproducibility_check"]["pass"] else 2
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
