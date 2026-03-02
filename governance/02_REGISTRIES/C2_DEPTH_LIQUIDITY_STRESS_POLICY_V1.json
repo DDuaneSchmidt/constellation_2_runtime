@@ -1,73 +1,84 @@
 {
-  "schema_id": "C2_DEPTH_LIQUIDITY_STRESS_POLICY_V1",
-  "schema_version": 1,
-  "status": "ACTIVE",
   "created_utc": "2026-03-02T00:00:00Z",
-  "owner": "Constellation_2",
-  "notes": [
-    "Governance-owned policy for deterministic Depth-Aware Liquidity Stress Model (DALSM).",
-    "Uses existing liquidity artifacts (bars + dataset_manifest) and day intents only; no external depth feed.",
-    "Produces a single new report artifact depth_liquidity_stress_v1 and binds caps via convex risk assessment."
-  ],
   "lookbacks": {
     "adv_lookback_days": 20
   },
-  "spread_proxy": {
-    "method": "ADV_DOLLAR_BUCKET_TABLE_V1",
-    "buckets": [
-      { "min_adv_dollar": "0", "max_adv_dollar": "5000000", "spread_bps": "25" },
-      { "min_adv_dollar": "5000000", "max_adv_dollar": "20000000", "spread_bps": "15" },
-      { "min_adv_dollar": "20000000", "max_adv_dollar": "100000000", "spread_bps": "10" },
-      { "min_adv_dollar": "100000000", "max_adv_dollar": "1000000000000", "spread_bps": "6" }
-    ]
-  },
-  "regime_selection": {
-    "method": "FIXED_REGIME",
-    "fixed_regime": "LIQ_CONTRACTION",
+  "nav_fallback": {
+    "method": "PRIOR_DAY_WITHIN_DAYS",
+    "max_staleness_days": 2,
     "notes": [
-      "Hostile institutional default: always evaluate in LIQ_CONTRACTION regime for pre-trade enforcement.",
-      "This prevents regime gaming and guarantees stress-dominant caps under scaling."
+      "If nav_snapshot for DAY is missing, select latest available nav_snapshot.v1.json for a day <= DAY within max_staleness_days.",
+      "Deterministic selection: lexical sort of day directories."
     ]
   },
-  "regimes": {
-    "NORMAL": {
-      "depth_fraction_of_adv": "0.0050",
-      "depth_removal_pct": "0.10",
-      "spread_widen_multiplier": "1.00",
-      "impact_k_bps": "20.0",
-      "impact_alpha": "1.30"
-    },
-    "VOL_EXPANSION": {
-      "depth_fraction_of_adv": "0.0030",
-      "depth_removal_pct": "0.30",
-      "spread_widen_multiplier": "1.60",
-      "impact_k_bps": "35.0",
-      "impact_alpha": "1.50"
-    },
-    "LIQ_CONTRACTION": {
-      "depth_fraction_of_adv": "0.0015",
-      "depth_removal_pct": "0.50",
-      "spread_widen_multiplier": "2.20",
-      "impact_k_bps": "55.0",
-      "impact_alpha": "1.70"
-    }
-  },
-  "thresholds": {
-    "max_depth_portfolio_cost_bps": "25.0",
-    "max_depth_symbol_cost_bps": "60.0",
-    "min_scale_bp": 500
-  },
+  "notes": [
+    "Deterministic Depth-Aware Liquidity Stress Model (DALSM) policy.",
+    "Uses existing artifacts: intents_v1 snapshots, market_data_snapshot_v1 bars+dataset_manifest, accounting_compat_v1 nav snapshot.",
+    "Impact curvature alpha is required to be an integer to preserve deterministic exponentiation."
+  ],
+  "owner": "Constellation_2",
   "reason_codes": [
     "DEPTH_POLICY_MISSING",
     "DEPTH_POLICY_SCHEMA_INVALID",
     "DEPTH_INPUTS_MISSING",
     "DEPTH_LIQUIDITY_MANIFEST_MISSING",
     "DEPTH_LIQUIDITY_MANIFEST_STALE",
-    "DEPTH_INTENTS_MISSING",
+    "DEPTH_INTENTS_ROOT_MISSING",
     "DEPTH_INTENT_PARSE_ERROR",
+    "DEPTH_INTENT_MISSING_TARGET_NOTIONAL_PCT",
+    "DEPTH_NAV_TOTAL_NONPOSITIVE",
+    "DEPTH_NAV_SNAPSHOT_MISSING",
+    "DEPTH_NAV_SNAPSHOT_TOO_STALE",
     "DEPTH_MISSING_SYMBOL_BARS",
-    "DEPTH_COMPUTE_FAIL",
+    "DEPTH_NONPOSITIVE_STRESSED_DEPTH",
     "DEPTH_COST_EXCEEDS_THRESHOLD",
     "DEPTH_SCALE_BELOW_MIN_BLOCK"
-  ]
+  ],
+  "regime_selection": {
+    "fixed_regime": "LIQ_CONTRACTION",
+    "method": "FIXED_REGIME",
+    "notes": [
+      "Hostile institutional default: always evaluate LIQ_CONTRACTION for binding pre-trade enforcement."
+    ]
+  },
+  "regimes": {
+    "LIQ_CONTRACTION": {
+      "depth_fraction_of_adv": "0.0015",
+      "depth_removal_pct": "0.50",
+      "impact_alpha": "2",
+      "impact_k_bps": "55.0",
+      "spread_widen_multiplier": "2.20"
+    },
+    "NORMAL": {
+      "depth_fraction_of_adv": "0.0050",
+      "depth_removal_pct": "0.10",
+      "impact_alpha": "2",
+      "impact_k_bps": "20.0",
+      "spread_widen_multiplier": "1.00"
+    },
+    "VOL_EXPANSION": {
+      "depth_fraction_of_adv": "0.0030",
+      "depth_removal_pct": "0.30",
+      "impact_alpha": "2",
+      "impact_k_bps": "35.0",
+      "spread_widen_multiplier": "1.60"
+    }
+  },
+  "schema_id": "C2_DEPTH_LIQUIDITY_STRESS_POLICY_V1",
+  "schema_version": 1,
+  "spread_proxy": {
+    "buckets": [
+      { "max_adv_dollar": "5000000", "min_adv_dollar": "0", "spread_bps": "25" },
+      { "max_adv_dollar": "20000000", "min_adv_dollar": "5000000", "spread_bps": "15" },
+      { "max_adv_dollar": "100000000", "min_adv_dollar": "20000000", "spread_bps": "10" },
+      { "max_adv_dollar": "1000000000000", "min_adv_dollar": "100000000", "spread_bps": "6" }
+    ],
+    "method": "ADV_DOLLAR_BUCKET_TABLE_V1"
+  },
+  "status": "ACTIVE",
+  "thresholds": {
+    "max_depth_portfolio_cost_bps": "25.0",
+    "max_depth_symbol_cost_bps": "60.0",
+    "min_scale_bp": 500
+  }
 }

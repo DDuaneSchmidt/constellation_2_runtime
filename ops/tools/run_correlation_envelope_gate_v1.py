@@ -212,10 +212,50 @@ def _scan_intents(day: str) -> Tuple[List[str], Dict[str, int]]:
     return (engine_ids, sym_counts)
 
 
-def _load_nav_snapshot(day: str) -> Tuple[Decimal, Path]:
-    p = (NAV_ROOT / day / "nav_snapshot.v1.json").resolve()
-    if not p.exists() or not p.is_file():
-        raise SystemExit(f"FAIL: DEPTH_NAV_SNAPSHOT_MISSING: {str(p)}")
+def _load_nav_snapshot(day: str, max_staleness_days: int) -> Tuple[Decimal, Path]:
+    # Prefer same-day nav snapshot. If missing, deterministically fall back to latest prior day within max_staleness_days.
+    def _nav_path_for(d: str) -> Path:
+        return (NAV_ROOT / d / "nav_snapshot.v1.json").resolve()
+
+    p = _nav_path_for(day)
+    chosen_day = day
+
+    if not (p.exists() and p.is_file()):
+        # deterministic scan of available days
+        if not NAV_ROOT.exists() or not NAV_ROOT.is_dir():
+            raise SystemExit(f"FAIL: DEPTH_NAV_SNAPSHOT_MISSING: {str(p)}")
+
+        candidates = sorted([x.name for x in NAV_ROOT.iterdir() if x.is_dir()])
+        # keep only <= day (lexical safe for YYYY-MM-DD)
+        candidates = [d for d in candidates if d <= day]
+
+        # walk backwards to find a candidate within staleness window
+        found = None
+        for d in reversed(candidates):
+            # staleness in days using simple YYYY-MM-DD arithmetic via python stdlib
+            try:
+                from datetime import date
+                y1, m1, d1 = [int(x) for x in day.split("-")]
+                y2, m2, d2 = [int(x) for x in d.split("-")]
+                delta = (date(y1, m1, d1) - date(y2, m2, d2)).days
+            except Exception:
+                continue
+
+            if delta < 0:
+                continue
+            if delta > int(max_staleness_days):
+                break
+
+            pp = _nav_path_for(d)
+            if pp.exists() and pp.is_file():
+                found = (d, pp)
+                break
+
+        if not found:
+            raise SystemExit(f"FAIL: DEPTH_NAV_SNAPSHOT_TOO_STALE day={day} max_staleness_days={max_staleness_days}")
+
+        chosen_day, p = found
+
     o = _read_json_obj(p)
     nav = o.get("nav") if isinstance(o.get("nav"), dict) else {}
     total = nav.get("nav_total", None)
@@ -224,8 +264,9 @@ def _load_nav_snapshot(day: str) -> Tuple[Decimal, Path]:
     nav_total = _dec(total)
     if nav_total <= Decimal("0"):
         raise SystemExit(f"FAIL: DEPTH_NAV_TOTAL_NONPOSITIVE: {str(nav_total)}")
-    return (nav_total, p)
 
+    # NOTE: caller may record p path+sha; chosen_day is implicit in path
+    return (nav_total, p)
 
 def _spread_proxy_bps_from_adv_dollar(policy: Dict[str, Any], adv_dollar: Decimal) -> Decimal:
     sp = policy.get("spread_proxy")
@@ -501,7 +542,8 @@ def main() -> int:
         depth_policy = _read_json_obj(DEPTH_POLICY_PATH)
         depth_policy_sha = _sha256_file(DEPTH_POLICY_PATH)
 
-        nav_total, nav_path = _load_nav_snapshot(day)
+        max_stale = int(depth_policy.get("nav_fallback", {}).get("max_staleness_days", 0))
+        nav_total, nav_path = _load_nav_snapshot(day, max_stale)
         notional_by_symbol = _scan_intents_notional_by_symbol(day, nav_total)
 
         rs = depth_policy.get("regime_selection")
