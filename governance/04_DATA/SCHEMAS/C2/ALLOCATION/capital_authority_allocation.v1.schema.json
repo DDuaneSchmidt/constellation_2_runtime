@@ -137,6 +137,20 @@
           "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
         }
       }
+    },
+
+    "correlation_gate_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gate_artifact_path", "gate_artifact_sha256", "policy_id", "policy_sha256", "binding_mode", "applied"],
+      "properties": {
+        "gate_artifact_path": { "type": "string", "minLength": 1 },
+        "gate_artifact_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "policy_id": { "type": "string", "minLength": 1 },
+        "policy_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "binding_mode": { "type": "string", "enum": ["ALLOCATION_CAP_CONSTRAINT"] },
+        "applied": { "type": "boolean" }
+      }
     }
   }
 }

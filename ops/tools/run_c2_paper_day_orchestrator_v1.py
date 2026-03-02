@@ -576,6 +576,26 @@ def main() -> int:
         )
 
         _run_stage_strict(
+            "RISK_ENGINE_CORRELATION_MATRIX_SNAPSHOT_V1",
+            [
+                "python3",
+                "constellation_2/phaseJ/monitoring/run/run_engine_correlation_matrix_day_v1.py",
+                "--day_utc", day,
+            ],
+            env=stage_env,
+        )
+
+        _run_stage_strict(
+            "RISK_CORRELATION_ENVELOPE_GATE_V1",
+            [
+                "python3",
+                "ops/tools/run_correlation_envelope_gate_v1.py",
+                "--day_utc", day,
+            ],
+            env=stage_env,
+        )
+
+        _run_stage_strict(
             "A1_CAPAUTH_ALLOCATION_V1",
             ["python3", "ops/tools/run_capital_authority_allocation_day_v1.py", "--day_utc", day],
             env=stage_env,

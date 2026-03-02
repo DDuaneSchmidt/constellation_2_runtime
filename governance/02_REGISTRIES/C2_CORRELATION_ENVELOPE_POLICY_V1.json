@@ -1,0 +1,22 @@
+{
+  "schema_id": "C2_CORRELATION_ENVELOPE_POLICY_V1",
+  "schema_version": 1,
+  "policy_id": "C2_CORRELATION_ENVELOPE_POLICY_V1",
+  "description": "Correlation Envelope Gate policy. Hard pre-trade deterministic enforcement. Allocation-binding caps emitted as sleeve multipliers (bp).",
+  "thresholds": {
+    "engine_pairwise_corr_scale_start": "0.75",
+    "engine_pairwise_corr_max_fail": "0.95",
+    "same_symbol_engine_count_scale_start": 2,
+    "hard_block_same_symbol_engine_count": 4
+  },
+  "scaling": {
+    "scale_step_bp": 25,
+    "min_scale_bp": 1000
+  },
+  "caps": {
+    "max_same_symbol_capital_at_risk_multiplier_bp": 6000
+  },
+  "engine_priority": {
+    "mode": "LEXICAL_ENGINE_ID_V1"
+  }
+}

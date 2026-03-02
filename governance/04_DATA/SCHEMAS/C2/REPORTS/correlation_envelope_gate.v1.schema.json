@@ -1,0 +1,87 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "correlation_envelope_gate.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "fail_closed",
+    "policy",
+    "inputs",
+    "caps",
+    "violations"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_CORRELATION_ENVELOPE_GATE_V1" },
+    "schema_version": { "type": "integer", "minimum": 1, "maximum": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string" },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string" },
+        "git_sha": { "type": "string" },
+        "module": { "type": "string" }
+      }
+    },
+    "status": {
+      "type": "string",
+      "enum": ["PASS", "SCALE", "BLOCK_ALL", "MISSING_INPUTS", "FAIL"]
+    },
+    "fail_closed": { "type": "boolean" },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "policy_id"],
+      "properties": {
+        "path": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "policy_id": { "type": "string" }
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine_correlation_matrix_path", "engine_correlation_matrix_sha256", "intents_root"],
+      "properties": {
+        "engine_correlation_matrix_path": { "type": "string" },
+        "engine_correlation_matrix_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "intents_root": { "type": "string" }
+      }
+    },
+    "caps": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["multiplier_bp_by_sleeve", "blocked_sleeves"],
+      "properties": {
+        "multiplier_bp_by_sleeve": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 10000 }
+        },
+        "blocked_sleeves": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "violations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "detail"],
+        "properties": {
+          "code": { "type": "string" },
+          "detail": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -134,6 +134,8 @@ def ENVELOPE_V2_PATH(day: str) -> Path:
 def INTENTS_DAY_DIR(day: str) -> Path:
     return (TRUTH_ROOT / "intents_v1" / "snapshots" / day).resolve()
 
+def CORRELATION_ENVELOPE_GATE_PATH(day: str) -> Path:
+    return (TRUTH_ROOT / "reports" / "correlation_envelope_gate_v1" / day / "correlation_envelope_gate.v1.json").resolve()
 
 @dataclass(frozen=True)
 class SleeveLimit:
@@ -246,6 +248,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         raise SystemExit(f"FAIL: ENVELOPE_V2_MISSING: {str(envp)}")
     env_sha = _sha256_file(envp)
 
+    cegp = CORRELATION_ENVELOPE_GATE_PATH(day)
+    if not cegp.exists():
+        raise SystemExit(f"FAIL: CORRELATION_ENVELOPE_GATE_MISSING: {str(cegp)}")
+    ceg_sha = _sha256_file(cegp)
+    ceg_obj = _read_json_obj(cegp)
+    caps = ceg_obj.get("caps")
+    if not isinstance(caps, dict):
+        raise SystemExit("FAIL: CORRELATION_ENVELOPE_GATE_MISSING_caps_OBJECT")
+    mult = caps.get("multiplier_bp_by_sleeve")
+    if not isinstance(mult, dict):
+        raise SystemExit("FAIL: CORRELATION_ENVELOPE_GATE_MISSING_multiplier_bp_by_sleeve_OBJECT")
+
     intents_dir = INTENTS_DAY_DIR(day)
     if not intents_dir.exists() or not intents_dir.is_dir():
         raise SystemExit(f"FAIL: INTENTS_DIR_MISSING: {str(intents_dir)}")
@@ -258,7 +272,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     engine_to_sleeve = _build_engine_to_sleeve(sleeves)
 
     portfolio_headroom_cents = _headroom_from_envelope_v2(day)
-    allowed_by_sleeve = _allocate_sleeve_headroom(portfolio_headroom_cents, sleeves)
+    allowed_by_sleeve_raw = _allocate_sleeve_headroom(portfolio_headroom_cents, sleeves)
+
+    # HARD BINDING: apply correlation envelope cap multipliers (basis points) per sleeve
+    allowed_by_sleeve: Dict[str, int] = {}
+    for sid, allow in sorted(allowed_by_sleeve_raw.items(), key=lambda kv: kv[0]):
+        bp_any = mult.get(sid)
+        if not isinstance(bp_any, int):
+            raise SystemExit(f"FAIL: CORRELATION_GATE_MISSING_MULTIPLIER_FOR_SLEEVE: {sid}")
+        bp = int(bp_any)
+        if bp < 0 or bp > 10000:
+            raise SystemExit(f"FAIL: CORRELATION_GATE_MULTIPLIER_OUT_OF_RANGE sleeve={sid} bp={bp}")
+        allowed_by_sleeve[sid] = (int(allow) * bp) // 10000
+
 
     # Deterministic per-intent decisions (v1 sizing intentionally fail-closed)
     per_intent: List[Dict[str, Any]] = []
@@ -316,15 +342,30 @@ def main(argv: Optional[List[str]] = None) -> int:
         },
         "status": "OK",
         "reason_codes": [],
-        "input_manifest": [
-            {"type": "exposure_net", "path": str(p_ex), "sha256": ex_sha, "day_utc": day, "producer": "risk_v1"},
-            {"type": "policy_manifest", "path": str(POLICY_PATH), "sha256": pol_sha, "day_utc": None, "producer": "governance"},
-            {"type": "other", "path": str(envp), "sha256": env_sha, "day_utc": day, "producer": "capital_risk_envelope_v2"},
-        ],
+        "input_manifest": (
+            [
+                {"type": "exposure_net", "path": str(p_ex), "sha256": ex_sha, "day_utc": day, "producer": "risk_v1"},
+                {"type": "policy_manifest", "path": str(POLICY_PATH), "sha256": pol_sha, "day_utc": None, "producer": "governance"},
+                {"type": "other", "path": str(envp), "sha256": env_sha, "day_utc": day, "producer": "capital_risk_envelope_v2"},
+                {"type": "other", "path": str(cegp), "sha256": ceg_sha, "day_utc": day, "producer": "correlation_envelope_gate_v1"},
+            ]
+            + [
+                {"type": "intents_snapshot", "path": str(p), "sha256": _sha256_file(p), "day_utc": day, "producer": "intents_v1"}
+                for p in intents
+            ]
+        ),
         "portfolio": {
             "allowed_capital_at_risk_cents": int(max(portfolio_headroom_cents, 0)),
             "used_capital_at_risk_cents": 0,
             "headroom_cents": int(portfolio_headroom_cents),
+        },
+        "correlation_gate_binding": {
+            "gate_artifact_path": str(cegp),
+            "gate_artifact_sha256": ceg_sha,
+            "policy_id": "C2_CORRELATION_ENVELOPE_POLICY_V1",
+            "policy_sha256": _sha256_file(REPO_ROOT / "governance/02_REGISTRIES/C2_CORRELATION_ENVELOPE_POLICY_V1.json"),
+            "binding_mode": "ALLOCATION_CAP_CONSTRAINT",
+            "applied": True
         },
         "per_sleeve": per_sleeve,
         "per_intent": per_intent,
