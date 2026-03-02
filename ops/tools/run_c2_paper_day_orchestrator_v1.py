@@ -550,6 +550,36 @@ def main() -> int:
             env=stage_env,
         )
 
+        # Emit simulator heartbeat when simulator is ACTIVE (so heartbeat gate matches active engine set).
+        sim_entry = None
+        for _e in active_engines:
+            if _e["engine_id"] == "C2_INTENT_SIMULATOR_V1":
+                sim_entry = _e
+                break
+        if sim_entry is None:
+            raise SystemExit("FATAL: simulator ACTIVE but missing from active_engines list")
+
+        _run_stage_strict(
+            "HB_C2_INTENT_SIMULATOR_V1",
+            [
+                "python3",
+                "ops/tools/run_engine_heartbeat_emit_v1.py",
+                "--day_utc", day,
+                "--engine_id", "C2_INTENT_SIMULATOR_V1",
+                "--status", "OK",
+                "--reason_code", "ENGINE_RUN_OK",
+                "--last_run_utc", produced_utc,
+                "--expected_period_seconds", "86400",
+                "--stale_after_seconds", "172800",
+                "--fingerprint", f"engine_registry|governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json|{registry_sha}|true",
+                "--fingerprint", f"engine_runner|{sim_entry['engine_runner_path']}|{sim_entry['engine_runner_sha256']}|true",
+                "--producer_repo", "constellation_2_runtime",
+                "--producer_module", "ops/tools/run_engine_heartbeat_emit_v1.py",
+                "--producer_git_sha", current_git_sha,
+            ],
+            env=stage_env,
+        )
+
         _run_stage_strict(
             "A1_CAPAUTH_ALLOCATION_V1",
             ["python3", "ops/tools/run_capital_authority_allocation_day_v1.py", "--day_utc", day],
