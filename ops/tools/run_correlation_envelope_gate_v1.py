@@ -211,35 +211,30 @@ def _scan_intents(day: str) -> Tuple[List[str], Dict[str, int]]:
     sym_counts = {sym: len(eids) for sym, eids in sym_engine_ids.items()}
     return (engine_ids, sym_counts)
 
-
-def _load_nav_snapshot(day: str, max_staleness_days: int) -> Tuple[Decimal, Path]:
+def _load_nav_snapshot(day: str, max_staleness_days: int, depth_policy: Dict[str, Any]) -> Tuple[Decimal, Path]:
     # Prefer same-day nav snapshot. If missing, deterministically fall back to latest prior day within max_staleness_days.
+
     def _nav_path_for(d: str) -> Path:
         return (NAV_ROOT / d / "nav_snapshot.v1.json").resolve()
 
     p = _nav_path_for(day)
-    chosen_day = day
 
+    # Fallback to prior day if missing
     if not (p.exists() and p.is_file()):
-        # deterministic scan of available days
         if not NAV_ROOT.exists() or not NAV_ROOT.is_dir():
             raise SystemExit(f"FAIL: DEPTH_NAV_SNAPSHOT_MISSING: {str(p)}")
 
         candidates = sorted([x.name for x in NAV_ROOT.iterdir() if x.is_dir()])
-        # keep only <= day (lexical safe for YYYY-MM-DD)
         candidates = [d for d in candidates if d <= day]
 
-        # walk backwards to find a candidate within staleness window
         found = None
+
+        from datetime import date
+        y1, m1, d1 = [int(x) for x in day.split("-")]
+
         for d in reversed(candidates):
-            # staleness in days using simple YYYY-MM-DD arithmetic via python stdlib
-            try:
-                from datetime import date
-                y1, m1, d1 = [int(x) for x in day.split("-")]
-                y2, m2, d2 = [int(x) for x in d.split("-")]
-                delta = (date(y1, m1, d1) - date(y2, m2, d2)).days
-            except Exception:
-                continue
+            y2, m2, d2 = [int(x) for x in d.split("-")]
+            delta = (date(y1, m1, d1) - date(y2, m2, d2)).days
 
             if delta < 0:
                 continue
@@ -248,24 +243,39 @@ def _load_nav_snapshot(day: str, max_staleness_days: int) -> Tuple[Decimal, Path
 
             pp = _nav_path_for(d)
             if pp.exists() and pp.is_file():
-                found = (d, pp)
+                found = pp
                 break
 
         if not found:
             raise SystemExit(f"FAIL: DEPTH_NAV_SNAPSHOT_TOO_STALE day={day} max_staleness_days={max_staleness_days}")
 
-        chosen_day, p = found
+        p = found
 
     o = _read_json_obj(p)
     nav = o.get("nav") if isinstance(o.get("nav"), dict) else {}
     total = nav.get("nav_total", None)
+
     if total is None:
         raise SystemExit("FAIL: DEPTH_NAV_TOTAL_MISSING")
-    nav_total = _dec(total)
-    if nav_total <= Decimal("0"):
-        raise SystemExit(f"FAIL: DEPTH_NAV_TOTAL_NONPOSITIVE: {str(nav_total)}")
 
-    # NOTE: caller may record p path+sha; chosen_day is implicit in path
+    nav_total = _dec(total)
+
+    # If NAV <= 0, attempt deterministic override
+    if nav_total <= Decimal("0"):
+        ov = depth_policy.get("nav_override") if isinstance(depth_policy, dict) else None
+
+        if not isinstance(ov, dict) or ov.get("enabled") is not True:
+            raise SystemExit(f"FAIL: DEPTH_NAV_OVERRIDE_DISABLED nav_total={str(nav_total)}")
+
+        v = ov.get("nav_total_dollar", None)
+        if v is None:
+            raise SystemExit("FAIL: DEPTH_NAV_OVERRIDE_INVALID missing nav_total_dollar")
+
+        nav_total = _dec(v)
+
+        if nav_total <= Decimal("0"):
+            raise SystemExit("FAIL: DEPTH_NAV_OVERRIDE_INVALID nonpositive nav_total_dollar")
+
     return (nav_total, p)
 
 def _spread_proxy_bps_from_adv_dollar(policy: Dict[str, Any], adv_dollar: Decimal) -> Decimal:
@@ -543,7 +553,7 @@ def main() -> int:
         depth_policy_sha = _sha256_file(DEPTH_POLICY_PATH)
 
         max_stale = int(depth_policy.get("nav_fallback", {}).get("max_staleness_days", 0))
-        nav_total, nav_path = _load_nav_snapshot(day, max_stale)
+        nav_total, nav_path = _load_nav_snapshot(day, max_stale, depth_policy)
         notional_by_symbol = _scan_intents_notional_by_symbol(day, nav_total)
 
         rs = depth_policy.get("regime_selection")
@@ -775,9 +785,9 @@ def main() -> int:
                 "scale_bp_final": int(cse_scale_bp_final),
             },
             "caps": {
-                "multiplier_bp_by_sleeve": {k: int(cse_caps_by_sleeve[k]) for k in sorted(cse_caps_by_sleeve.keys())},
-                "blocked_sleeves": [s for s in sorted(set(cse_blocked))],
+                "scale_bp_by_sleeve": {k: int(cse_caps_by_sleeve[k]) for k in sorted(cse_caps_by_sleeve.keys())}
             },
+
             "violations": [],
         }
 
