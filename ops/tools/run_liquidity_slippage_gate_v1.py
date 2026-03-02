@@ -315,16 +315,25 @@ def main() -> int:
         sha = _sha256_file(ip)
         input_manifest.append({"type": "intent", "path": str(ip), "sha256": sha})
 
+        # Preserve attribution across failures
+        engine_id = "UNKNOWN"
+        symbol = "UNKNOWN"
+        tnp_str = ""
+
         try:
             intent_obj = _read_json_obj(ip)
+
             engine_id = ""
             if "engine" in intent_obj and isinstance(intent_obj.get("engine"), dict):
                 engine_id = str((intent_obj["engine"].get("engine_id") or "")).strip()
             if not engine_id:
                 engine_id = str(intent_obj.get("engine_id") or "").strip()
+            if not engine_id:
+                engine_id = "UNKNOWN"
 
             symbol, tnp_str = _extract_intent_symbol_and_pct(intent_obj)
             if not symbol:
+                symbol = "UNKNOWN"
                 raise ValueError("SYMBOL_MISSING")
 
             eff = _policy_effective(pol, symbol)
@@ -467,15 +476,19 @@ def main() -> int:
             )
         except SystemExit:
             raise
-        except Exception:
+        except Exception as e:
             failed += 1
             per_intent.append(
                 {
                     "intent_hash": sha,
-                    "engine_id": "UNKNOWN",
-                    "symbol": "UNKNOWN",
+                    "engine_id": engine_id or "UNKNOWN",
+                    "symbol": symbol or "UNKNOWN",
                     "decision": "FAIL",
-                    "reason_codes": ["LIQPOL_INTENT_PARSE_ERROR", "LIQPOL_FAIL_CLOSED_REQUIRED"],
+                    "reason_codes": [
+                        "LIQPOL_INTENT_PARSE_ERROR",
+                        f"LIQPOL_EXC:{type(e).__name__}",
+                        "LIQPOL_FAIL_CLOSED_REQUIRED",
+                    ],
                     "metrics": {
                         "nav_total_cents": nav_cents,
                         "target_notional_pct": "0.000000",
