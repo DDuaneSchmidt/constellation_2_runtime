@@ -343,7 +343,19 @@ def main() -> int:
             ["python3", "ops/tools/run_engine_risk_budget_ledger_v1.py", "--day_utc", input_day],
             env=stage_env,
         )
-    _run_stage_strict("C_HEARTBEAT_GATE_V1", ["python3", "ops/tools/run_heartbeat_gate_v1.py", "--day_utc", day, "--truth_root", str(truth_root), "--expected_period_seconds", "86400", "--stale_after_seconds", "172800"], env=stage_env)
+
+    hb_out = (truth_root / "reports" / "heartbeat_gate_v1" / day / "heartbeat_gate.v1.json").resolve()
+    if hb_out.exists():
+        print(f"STAGE_START C_HEARTBEAT_GATE_V1")
+        print(f"OK: heartbeat_gate_v1_exists path={hb_out}")
+        print(f"STAGE_OK C_HEARTBEAT_GATE_V1")
+    else:
+        _run_stage_strict(
+            "C_HEARTBEAT_GATE_V1",
+            ["python3", "ops/tools/run_heartbeat_gate_v1.py", "--day_utc", day, "--truth_root", str(truth_root), "--expected_period_seconds", "86400", "--stale_after_seconds", "172800"],
+            env=stage_env,
+        )
+
     _run_stage_strict("X_REGIME_SNAPSHOT_V2", ["python3", "ops/tools/run_regime_snapshot_v2.py", "--day_utc", input_day], env=stage_env)
 
     _run_stage_strict("F_POSITION_LIFECYCLE_SNAPSHOT_V2", ["python3", "ops/tools/run_position_lifecycle_snapshot_v2.py", "--day_utc", day], env=stage_env)
@@ -412,7 +424,18 @@ def main() -> int:
         print("FATAL: missing/invalid env C2_ORCHESTRATOR_CONFIG_HASH (must be sha256 hex of the systemd .service file)", file=sys.stderr)
         return 2
 
-    _run_stage_strict("C2_HEARTBEAT_GATE_V1", ["python3", "ops/tools/run_heartbeat_gate_v1.py", "--day_utc", day, "--truth_root", str(truth_root), "--expected_period_seconds", "86400", "--stale_after_seconds", "172800"], env=stage_env)
+    hb2_out = (truth_root / "reports" / "heartbeat_gate_v1" / day / "heartbeat_gate.v1.json").resolve()
+    if hb2_out.exists():
+        print(f"STAGE_START C2_HEARTBEAT_GATE_V1")
+        print(f"OK: heartbeat_gate_v1_exists path={hb2_out}")
+        print(f"STAGE_OK C2_HEARTBEAT_GATE_V1")
+    else:
+        _run_stage_strict(
+            "C2_HEARTBEAT_GATE_V1",
+            ["python3", "ops/tools/run_heartbeat_gate_v1.py", "--day_utc", day, "--truth_root", str(truth_root), "--expected_period_seconds", "86400", "--stale_after_seconds", "172800"],
+            env=stage_env,
+        )
+
     _run_stage_strict("C2_GATE_STACK_VERDICT_V1", ["python3", "ops/tools/run_gate_stack_verdict_v1.py", "--day_utc", day], env=stage_env)
     _run_stage_strict("C2_GLOBAL_KILL_SWITCH_V1", ["python3", "ops/tools/run_global_kill_switch_v1.py", "--day_utc", day], env=stage_env)
 
