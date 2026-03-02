@@ -356,7 +356,20 @@ def main() -> int:
             env=stage_env,
         )
 
-    _run_stage_strict("X_REGIME_SNAPSHOT_V2", ["python3", "ops/tools/run_regime_snapshot_v2.py", "--day_utc", input_day], env=stage_env)
+    if sim_active:
+        ok, _rc = _run_stage_soft(
+            "X_REGIME_SNAPSHOT_V2",
+            ["python3", "ops/tools/run_regime_snapshot_v2.py", "--day_utc", input_day],
+            env=stage_env,
+        )
+        if not ok:
+            prereq_failed = True
+    else:
+        _run_stage_strict(
+            "X_REGIME_SNAPSHOT_V2",
+            ["python3", "ops/tools/run_regime_snapshot_v2.py", "--day_utc", input_day],
+            env=stage_env,
+        )
 
     _run_stage_strict("F_POSITION_LIFECYCLE_SNAPSHOT_V2", ["python3", "ops/tools/run_position_lifecycle_snapshot_v2.py", "--day_utc", day], env=stage_env)
     _run_stage_strict("F_EXIT_OBLIGATIONS_V1", ["python3", "ops/tools/run_exit_obligations_v1.py", "--day_utc", day], env=stage_env)
