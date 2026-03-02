@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_REPLAY_CERTIFICATION_GATE_V1_SCHEMA",
+  "title": "C2 Replay Certification Gate v1 (Two-run equality fail-closed)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "first_run",
+    "two_run_equality",
+    "existing_bundle_sha256",
+    "candidate_bundle_sha256",
+    "reason_codes",
+    "gate_sha256"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "C2_REPLAY_CERTIFICATION_GATE_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "minLength": 1 },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "git_sha": { "type": "string", "minLength": 7, "maxLength": 64 },
+        "module": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+
+    "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+    "first_run": { "type": "boolean" },
+    "two_run_equality": { "type": ["boolean", "null"] },
+
+    "existing_bundle_sha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "candidate_bundle_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+
+    "gate_sha256": {
+      "type": "string",
+      "description": "sha256 of canonical JSON for this document, excluding this field",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

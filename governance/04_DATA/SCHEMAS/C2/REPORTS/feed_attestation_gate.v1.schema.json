@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_FEED_ATTESTATION_GATE_V1_SCHEMA",
+  "title": "C2 Feed Attestation Gate v1 (Fail-Closed)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "fail_closed",
+    "policy",
+    "checks",
+    "gate_sha256"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "C2_FEED_ATTESTATION_GATE_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "minLength": 1 },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "git_sha": { "type": "string", "minLength": 7, "maxLength": 64 },
+        "module": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+
+    "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+    "fail_closed": { "type": "boolean" },
+
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "policy_id"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "policy_id": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifact_id",
+          "target_relpath",
+          "target_sha256",
+          "attestation_relpath",
+          "attestation_sha256",
+          "sequence_id",
+          "previous_attestation_sha256",
+          "source_snapshot_utc",
+          "max_staleness_seconds",
+          "staleness_seconds",
+          "upstream_source_hash",
+          "pass",
+          "reason_codes"
+        ],
+        "properties": {
+          "artifact_id": { "type": "string", "minLength": 1 },
+          "target_relpath": { "type": "string", "minLength": 1 },
+          "target_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+
+          "attestation_relpath": { "type": "string", "minLength": 1 },
+          "attestation_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+
+          "sequence_id": { "type": "integer", "minimum": 1 },
+          "previous_attestation_sha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+
+          "source_snapshot_utc": { "type": "string", "minLength": 1 },
+          "max_staleness_seconds": { "type": "integer", "minimum": 0 },
+          "staleness_seconds": { "type": "integer", "minimum": 0 },
+
+          "upstream_source_hash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+
+          "pass": { "type": "boolean" },
+          "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+
+    "gate_sha256": {
+      "type": "string",
+      "description": "sha256 of canonical JSON for this document, excluding this field",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

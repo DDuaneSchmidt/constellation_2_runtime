@@ -1,0 +1,48 @@
+{
+  "schema_id": "C2_FEED_ATTESTATION_POLICY_V1",
+  "schema_version": 1,
+  "status": "ACTIVE",
+  "created_utc": "2026-03-02T00:00:00Z",
+  "owner": "Constellation_2",
+  "notes": [
+    "Governance-owned policy for Feed Attestation Layer (FAL).",
+    "Fail-closed: requires attestation record hash-chain + monotonic sequence + staleness thresholds.",
+    "Targets are evaluated pre-trade; any failure blocks downstream allocation/authorization."
+  ],
+  "targets": [
+    {
+      "artifact_id": "liquidity_dataset_manifest",
+      "target_relpath": "constellation_2/runtime/truth/market_data_snapshot_v1/dataset_manifest.json",
+      "source_snapshot_field": "created_utc",
+      "max_staleness_seconds": 86400,
+      "require_upstream_source_hash": true,
+      "upstream_source_hash_field": "global_hash"
+    },
+    {
+      "artifact_id": "engine_correlation_matrix",
+      "target_relpath_template": "constellation_2/runtime/truth/monitoring_v1/engine_correlation_matrix/{DAY}/engine_correlation_matrix.v1.json",
+      "source_snapshot_field": "produced_utc",
+      "max_staleness_seconds": 86400,
+      "require_upstream_source_hash": false
+    }
+  ],
+  "reason_codes": [
+    "FAL_POLICY_MISSING",
+    "FAL_POLICY_SCHEMA_INVALID",
+    "FAL_TARGET_NOT_FOUND",
+    "FAL_TARGET_JSON_PARSE_ERROR",
+    "FAL_TARGET_SHA_MISMATCH",
+    "FAL_UPSTREAM_HASH_REQUIRED_MISSING",
+    "FAL_UPSTREAM_HASH_INVALID",
+    "FAL_SNAPSHOT_FIELD_MISSING",
+    "FAL_SNAPSHOT_UTC_PARSE_FAIL",
+    "FAL_STALE_SNAPSHOT_EXCEEDED_THRESHOLD",
+    "FAL_ATTESTATION_RECORD_MISSING",
+    "FAL_ATTESTATION_RECORD_PARSE_ERROR",
+    "FAL_HASH_CHAIN_BROKEN",
+    "FAL_SEQUENCE_NON_MONOTONIC",
+    "FAL_REFUSE_OVERWRITE",
+    "FAL_PASS",
+    "FAL_FAIL_CLOSED_REQUIRED"
+  ]
+}

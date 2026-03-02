@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_REPLAY_CERTIFICATION_BUNDLE_V1_SCHEMA",
+  "title": "C2 Replay Certification Bundle v1 (Regulator-grade hash tree digest)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "producer",
+    "status",
+    "fail_closed",
+    "inputs",
+    "hashes",
+    "sha256_tree_digest",
+    "overall_run_hash"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "C2_REPLAY_CERTIFICATION_BUNDLE_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "minLength": 1 },
+
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "git_sha": { "type": "string", "minLength": 7, "maxLength": 64 },
+        "module": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+
+    "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+    "fail_closed": { "type": "boolean" },
+
+    "inputs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256", "present"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "present": { "type": "boolean" }
+        }
+      }
+    },
+
+    "hashes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_manifest_hash",
+        "allocation_summary_hash",
+        "liquidity_artifact_hash",
+        "correlation_artifact_hash",
+        "convex_shock_artifact_hash",
+        "submission_bundle_hashes",
+        "reconciliation_hash",
+        "nav_hash"
+      ],
+      "properties": {
+        "input_manifest_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "allocation_summary_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "liquidity_artifact_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "correlation_artifact_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "convex_shock_artifact_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "submission_bundle_hashes": { "type": "array", "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" } },
+        "reconciliation_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "nav_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+
+    "sha256_tree_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "overall_run_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

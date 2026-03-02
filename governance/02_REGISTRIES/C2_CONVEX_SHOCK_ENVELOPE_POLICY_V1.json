@@ -1,0 +1,33 @@
+{
+  "schema_id": "C2_CONVEX_SHOCK_ENVELOPE_POLICY_V1",
+  "schema_version": 1,
+  "status": "ACTIVE",
+  "created_utc": "2026-03-02T00:00:00Z",
+  "owner": "Constellation_2",
+  "notes": [
+    "Governance-owned policy for deterministic Convex Shock Envelope (CSE).",
+    "Enforced by tightening correlation_envelope_gate caps (min of linear and convex caps).",
+    "No allocation logic changes; caps are upstream hard ceilings."
+  ],
+  "shock": {
+    "correlation_spike_multiplier": "1.30",
+    "volatility_expansion_multiplier": "1.25",
+    "liquidity_contraction_multiplier": "1.20"
+  },
+  "thresholds": {
+    "max_shocked_portfolio_risk": "2.25",
+    "min_scale_bp": 1000
+  },
+  "reason_codes": [
+    "CSE_POLICY_MISSING",
+    "CSE_POLICY_SCHEMA_INVALID",
+    "CSE_MISSING_ENGINE_CORRELATION_MATRIX",
+    "CSE_MISSING_INTENTS_DIR",
+    "CSE_INTENT_PARSE_ERROR",
+    "CSE_ENGINE_ID_TO_SLEEVE_MISSING",
+    "CSE_COMPUTE_FAIL",
+    "CSE_PASS",
+    "CSE_SCALE",
+    "CSE_BLOCK_ALL"
+  ]
+}
