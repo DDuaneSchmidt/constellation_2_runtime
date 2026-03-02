@@ -216,6 +216,15 @@ def main() -> int:
         is_dir=False,
     )
 
+    # NEW (Bundle L): Liquidity + Slippage Gate v1 (hard pre-trade)
+    _add_input(
+        inputs,
+        truth,
+        "liquidity_slippage_gate_v1",
+        truth / "reports" / "liquidity_slippage_gate_v1" / day / "liquidity_slippage_gate.v1.json",
+        is_dir=False,
+    )
+
     replay_hash = _compute_replay_hash(day, inputs)
 
     out_dir = (truth / "reports" / "replay_integrity_v2" / day).resolve()

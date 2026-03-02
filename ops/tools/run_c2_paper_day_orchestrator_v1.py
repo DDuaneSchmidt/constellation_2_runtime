@@ -11,6 +11,15 @@ Key properties:
 - Deterministic produced_utc (operator supplied; orchestrator MUST NOT synthesize time)
 - Fail-closed for submission proof: if authority head is required but missing → FAIL
 - Run pointer v1 append-only + v2 materialized heads
+
+REDESIGN (registry-gated activation only):
+- Each sleeve/engine is controlled solely by activation_status in ENGINE_MODEL_REGISTRY_V1.json.
+- INACTIVE sleeves are not run.
+- C2_INTENT_SIMULATOR_V1 is a special orchestrator stage (not run via the generic engine loop).
+- If simulator is ACTIVE (and mode==PAPER), the orchestrator executes a structural chain:
+    H_INTENT_SIMULATOR_V1 → A1_CAPAUTH_ALLOCATION_V1 → A1_AUTHORIZATION_ARTIFACTS_V1 → PHASED_DRY_SUBMIT_PROOF_V1
+  even if systemic risk gates fail (this is structural validation, not production authority).
+- Production authority semantics remain unchanged (ok_authoritative uses PASS/PASS/INACTIVE).
 """
 
 from __future__ import annotations
@@ -184,6 +193,13 @@ def _stage_name_for_heartbeat(engine_id: str) -> str:
     return f"HB_{s}"
 
 
+def _is_simulator_active(active_engines: List[Dict[str, str]]) -> bool:
+    for e in active_engines:
+        if str(e.get("engine_id") or "").strip() == "C2_INTENT_SIMULATOR_V1":
+            return True
+    return False
+
+
 def main() -> int:
     _require_repo_root_cwd()
 
@@ -247,11 +263,13 @@ def main() -> int:
         ["python3", "ops/tools/run_accounting_nav_v2_day_v1.py", "--day_utc", input_day, "--producer_git_sha", current_git_sha, "--producer_repo", "constellation_2_runtime"],
         env=stage_env,
     )
-    _run_stage_strict(
+    ok, _rc = _run_stage_soft(
         "A5_ACCOUNTING_ATTRIBUTION_V2",
         ["python3", "ops/tools/run_accounting_attribution_v2_day_v1.py", "--day_utc", day, "--producer_git_sha", current_git_sha, "--producer_repo", "constellation_2_runtime"],
         env=stage_env,
     )
+    if not ok:
+        prereq_failed = True
 
     ok, _rc = _run_stage_soft("A6_ENGINE_DAILY_RETURNS_V1", ["python3", "ops/tools/run_engine_daily_returns_day_v1.py", "--day_utc", day], env=stage_env)
     if not ok:
@@ -272,7 +290,12 @@ def main() -> int:
     active_engines = _active_engines_sorted(reg)
     registry_sha = _sha256_file(REG_PATH)
 
+    sim_active = _is_simulator_active(active_engines)
+
     for e in active_engines:
+        if e["engine_id"] == "C2_INTENT_SIMULATOR_V1":
+            continue
+
         stage_name = _stage_name_for_engine(e["engine_id"])
         module = str(e["runner_path"])
 
@@ -305,9 +328,47 @@ def main() -> int:
             env=stage_env,
         )
 
-    _run_stage_strict("X_ENGINE_RISK_BUDGET_LEDGER_V1", ["python3", "ops/tools/run_engine_risk_budget_ledger_v1.py", "--day_utc", input_day], env=stage_env)
-    _run_stage_strict("C_HEARTBEAT_GATE_V1", ["python3", "ops/tools/run_heartbeat_gate_v1.py", "--day_utc", day, "--truth_root", str(truth_root), "--expected_period_seconds", "86400", "--stale_after_seconds", "172800"], env=stage_env)
-    _run_stage_strict("X_REGIME_SNAPSHOT_V2", ["python3", "ops/tools/run_regime_snapshot_v2.py", "--day_utc", input_day], env=stage_env)
+    if sim_active:
+        ok, _rc = _run_stage_soft(
+            "X_ENGINE_RISK_BUDGET_LEDGER_V1",
+            ["python3", "ops/tools/run_engine_risk_budget_ledger_v1.py", "--day_utc", input_day],
+            env=stage_env,
+        )
+        if not ok:
+            prereq_failed = True
+    else:
+        _run_stage_strict(
+            "X_ENGINE_RISK_BUDGET_LEDGER_V1",
+            ["python3", "ops/tools/run_engine_risk_budget_ledger_v1.py", "--day_utc", input_day],
+            env=stage_env,
+        )
+
+    hb_out = (truth_root / "reports" / "heartbeat_gate_v1" / day / "heartbeat_gate.v1.json").resolve()
+    if hb_out.exists():
+        print(f"STAGE_START C_HEARTBEAT_GATE_V1")
+        print(f"OK: heartbeat_gate_v1_exists path={hb_out}")
+        print(f"STAGE_OK C_HEARTBEAT_GATE_V1")
+    else:
+        _run_stage_strict(
+            "C_HEARTBEAT_GATE_V1",
+            ["python3", "ops/tools/run_heartbeat_gate_v1.py", "--day_utc", day, "--truth_root", str(truth_root), "--expected_period_seconds", "86400", "--stale_after_seconds", "172800"],
+            env=stage_env,
+        )
+
+    if sim_active:
+        ok, _rc = _run_stage_soft(
+            "X_REGIME_SNAPSHOT_V2",
+            ["python3", "ops/tools/run_regime_snapshot_v2.py", "--day_utc", input_day],
+            env=stage_env,
+        )
+        if not ok:
+            prereq_failed = True
+    else:
+        _run_stage_strict(
+            "X_REGIME_SNAPSHOT_V2",
+            ["python3", "ops/tools/run_regime_snapshot_v2.py", "--day_utc", input_day],
+            env=stage_env,
+        )
 
     _run_stage_strict("F_POSITION_LIFECYCLE_SNAPSHOT_V2", ["python3", "ops/tools/run_position_lifecycle_snapshot_v2.py", "--day_utc", day], env=stage_env)
     _run_stage_strict("F_EXIT_OBLIGATIONS_V1", ["python3", "ops/tools/run_exit_obligations_v1.py", "--day_utc", day], env=stage_env)
@@ -362,10 +423,11 @@ def main() -> int:
     if not ok:
         prereq_failed = True
 
+    _run_stage_strict("A7_LIQUIDITY_SLIPPAGE_GATE_V1", ["python3", "ops/tools/run_liquidity_slippage_gate_v1.py", "--day_utc", day], env=stage_env)
+
     _run_stage_strict("A8_GATE_STACK_VERDICT_V1", ["python3", "ops/tools/run_gate_stack_verdict_v1.py", "--day_utc", day], env=stage_env)
     _run_stage_strict("C_GLOBAL_KILL_SWITCH_V1", ["python3", "ops/tools/run_global_kill_switch_v1.py", "--day_utc", day], env=stage_env)
 
-    # --- Bundle C2: Heartbeat gate + gate stack verdict + kill switch + run pointer spine (fail-closed) ---
     if truth_root != DEFAULT_TRUTH_ROOT:
         print(f"FATAL: run-pointer integration requires canonical truth_root={DEFAULT_TRUTH_ROOT} got={truth_root}", file=sys.stderr)
         return 2
@@ -375,7 +437,18 @@ def main() -> int:
         print("FATAL: missing/invalid env C2_ORCHESTRATOR_CONFIG_HASH (must be sha256 hex of the systemd .service file)", file=sys.stderr)
         return 2
 
-    _run_stage_strict("C2_HEARTBEAT_GATE_V1", ["python3", "ops/tools/run_heartbeat_gate_v1.py", "--day_utc", day, "--truth_root", str(truth_root), "--expected_period_seconds", "86400", "--stale_after_seconds", "172800"], env=stage_env)
+    hb2_out = (truth_root / "reports" / "heartbeat_gate_v1" / day / "heartbeat_gate.v1.json").resolve()
+    if hb2_out.exists():
+        print(f"STAGE_START C2_HEARTBEAT_GATE_V1")
+        print(f"OK: heartbeat_gate_v1_exists path={hb2_out}")
+        print(f"STAGE_OK C2_HEARTBEAT_GATE_V1")
+    else:
+        _run_stage_strict(
+            "C2_HEARTBEAT_GATE_V1",
+            ["python3", "ops/tools/run_heartbeat_gate_v1.py", "--day_utc", day, "--truth_root", str(truth_root), "--expected_period_seconds", "86400", "--stale_after_seconds", "172800"],
+            env=stage_env,
+        )
+
     _run_stage_strict("C2_GATE_STACK_VERDICT_V1", ["python3", "ops/tools/run_gate_stack_verdict_v1.py", "--day_utc", day], env=stage_env)
     _run_stage_strict("C2_GLOBAL_KILL_SWITCH_V1", ["python3", "ops/tools/run_global_kill_switch_v1.py", "--day_utc", day], env=stage_env)
 
@@ -450,15 +523,58 @@ def main() -> int:
         env=stage_env,
     )
 
-    # Materialize v2 heads from v1 pointer index.
     _run_stage_strict(
         "C2_RUN_POINTER_HEADS_MATERIALIZE_V1",
         ["python3", "ops/tools/run_pointer_heads_materialize_v1.py", "--fail_if_no_authority_head", "YES" if ok_authoritative else "NO"],
         env=stage_env,
     )
-    # Authority-complete ordering:
-    # If authoritative, allocation + authorization MUST exist before any submit-proof/boundary activity.
-    if ok_authoritative:
+
+    run_structural_chain = (mode == "PAPER") and sim_active
+
+    if ok_authoritative or run_structural_chain:
+        _run_stage_strict(
+            "H_INTENT_SIMULATOR_V1",
+            [
+                "python3",
+                "-m",
+                "constellation_2.phaseH.intent_simulator.run.run_intent_simulator_day_v1",
+                "--produced_utc",
+                str(args.produced_utc).strip(),
+                "--engine_registry_sha256",
+                registry_sha,
+            ],
+            env=stage_env,
+        )
+
+        sim_entry = None
+        for _e in active_engines:
+            if _e["engine_id"] == "C2_INTENT_SIMULATOR_V1":
+                sim_entry = _e
+                break
+        if sim_entry is None:
+            raise SystemExit("FATAL: simulator ACTIVE but missing from active_engines list")
+
+        _run_stage_strict(
+            "HB_C2_INTENT_SIMULATOR_V1",
+            [
+                "python3",
+                "ops/tools/run_engine_heartbeat_emit_v1.py",
+                "--day_utc", day,
+                "--engine_id", "C2_INTENT_SIMULATOR_V1",
+                "--status", "OK",
+                "--reason_code", "ENGINE_RUN_OK",
+                "--last_run_utc", produced_utc,
+                "--expected_period_seconds", "86400",
+                "--stale_after_seconds", "172800",
+                "--fingerprint", f"engine_registry|governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json|{registry_sha}|true",
+                "--fingerprint", f"engine_runner|{sim_entry['engine_runner_path']}|{sim_entry['engine_runner_sha256']}|true",
+                "--producer_repo", "constellation_2_runtime",
+                "--producer_module", "ops/tools/run_engine_heartbeat_emit_v1.py",
+                "--producer_git_sha", current_git_sha,
+            ],
+            env=stage_env,
+        )
+
         _run_stage_strict(
             "A1_CAPAUTH_ALLOCATION_V1",
             ["python3", "ops/tools/run_capital_authority_allocation_day_v1.py", "--day_utc", day],
@@ -483,6 +599,7 @@ def main() -> int:
             ],
             env=stage_env,
         )
+
     if prereq_failed:
         print("FAIL: ORCHESTRATOR_PREREQ_FAILED", file=sys.stderr)
         return 2

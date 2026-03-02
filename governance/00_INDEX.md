@@ -38,6 +38,7 @@ Additional registries introduced:
 
 - `governance/02_REGISTRIES/TRUTH_SURFACE_AUTHORITY_V1.json`
 - `governance/02_REGISTRIES/C2_IB_ACCOUNT_REGISTRY_V1.json`
+- `governance/02_REGISTRIES/C2_LIQUIDITY_SLIPPAGE_POLICY_V1.json`
 
 ### Registries (governed)
 - `governance/02_REGISTRIES/GATE_HIERARCHY_V1.json`
@@ -69,6 +70,7 @@ These canonical contracts are governance-controlled and must be explicitly liste
 - `governance/05_CONTRACTS/C2/capital_risk_envelope_v1.contract.md`
 - `governance/05_CONTRACTS/C2/capital_risk_envelope_v2.contract.md`
 - `governance/05_CONTRACTS/C2/systemic_risk_gate_v3.contract.md`
+- `governance/05_CONTRACTS/C2/liquidity_slippage_gate_v1.contract.md`
 - `governance/05_CONTRACTS/C2/bundle_a_paper_trading_readiness_audit_proof_v1.contract.md`
 - `governance/05_CONTRACTS/C2/bundle_b_risk_blindspot_elimination_v1.contract.md`
 - `governance/05_CONTRACTS/C2/bundled_c_exposure_convergence_lifecycle_v1.contract.md`
@@ -87,6 +89,7 @@ These canonical contracts are governance-controlled and must be explicitly liste
 - `governance/05_CONTRACTS/C2/failure_injection_harness_v1.contract.md`
 
 - `governance/05_CONTRACTS/C2/single_final_verdict_consumption_v1.contract.md`
+- `governance/05_CONTRACTS/C2/intent_simulator_v1.contract.md`
 - `governance/05_CONTRACTS/C2/ib_historical_market_data_snapshot_downloader_v1.contract.md`
 - `governance/05_CONTRACTS/C2/defensive_tail_required_inputs_bridge_v1.contract.md`
 - `governance/05_CONTRACTS/C2/cross_asset_trend_v1.contract.md`
@@ -143,6 +146,9 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/pipeline_manifest.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/eod_run_certificate.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v2.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/liquidity_slippage_gate.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/RISK/liquidity_slippage_policy.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/exposure_reconciliation_report.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/delta_order_plan.v1.schema.json`
 - [Broker Reconciliation Schema JSON (V1)](04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v1.schema.json) — id: C2_REPORTS_BROKER_RECONCILIATION_SCHEMA_V1 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v1.schema.json`
@@ -172,6 +178,8 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/RISK/engine_model_registry.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/RISK/engine_risk_budget_ledger.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/RISK/global_kill_switch_state.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/RISK/systemic_risk_gate.v3.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/RISK/exposure_net.v1.schema.json`
 
 ### Positions schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/POSITIONS/position_lifecycle_ledger.v1.schema.json`
