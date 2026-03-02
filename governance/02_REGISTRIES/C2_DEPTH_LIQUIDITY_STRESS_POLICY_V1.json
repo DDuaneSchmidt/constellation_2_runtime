@@ -5,15 +5,24 @@
   },
   "nav_fallback": {
     "method": "PRIOR_DAY_WITHIN_DAYS",
-    "max_staleness_days": 2,
+    "max_staleness_days": 10,
     "notes": [
       "If nav_snapshot for DAY is missing, select latest available nav_snapshot.v1.json for a day <= DAY within max_staleness_days.",
       "Deterministic selection: lexical sort of day directories."
     ]
   },
+  "nav_override": {
+    "enabled": true,
+    "nav_total_dollar": "1000000",
+    "notes": [
+      "Used only when nav_snapshot is missing or nav_total <= 0.",
+      "Deterministic conversion base for target_notional_pct -> intent_notional_dollar.",
+      "This is not a strategy change; it is a deterministic bridge while accounting is bootstrapped."
+    ]
+  },
   "notes": [
     "Deterministic Depth-Aware Liquidity Stress Model (DALSM) policy.",
-    "Uses existing artifacts: intents_v1 snapshots, market_data_snapshot_v1 bars+dataset_manifest, accounting_compat_v1 nav snapshot.",
+    "Uses existing artifacts: intents_v1 snapshots, market_data_snapshot_v1 bars+dataset_manifest, accounting_compat_v1 nav snapshot (or governed override when nav_total is non-positive).",
     "Impact curvature alpha is required to be an integer to preserve deterministic exponentiation."
   ],
   "owner": "Constellation_2",
@@ -29,6 +38,8 @@
     "DEPTH_NAV_TOTAL_NONPOSITIVE",
     "DEPTH_NAV_SNAPSHOT_MISSING",
     "DEPTH_NAV_SNAPSHOT_TOO_STALE",
+    "DEPTH_NAV_OVERRIDE_DISABLED",
+    "DEPTH_NAV_OVERRIDE_INVALID",
     "DEPTH_MISSING_SYMBOL_BARS",
     "DEPTH_NONPOSITIVE_STRESSED_DEPTH",
     "DEPTH_COST_EXCEEDS_THRESHOLD",
