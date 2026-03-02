@@ -204,6 +204,12 @@ def main() -> int:
     ap = argparse.ArgumentParser(prog="run_intent_simulator_day_v1")
     ap.add_argument("--produced_utc", required=True, help="UTC timestamp YYYY-MM-DDTHH:MM:SSZ (exact Z)")
     ap.add_argument(
+        "--override_time_lock",
+        default="NO",
+        choices=["YES", "NO"],
+        help="YES bypasses exact 10:00:00 America/New_York time-lock (manual structural testing only). Default NO.",
+    )
+    ap.add_argument(
         "--engine_registry_sha256",
         required=True,
         help="Expected sha256 of governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json",
@@ -212,8 +218,11 @@ def main() -> int:
 
     produced_utc = str(args.produced_utc).strip()
     dt_utc = _parse_produced_utc(produced_utc)
-    _require_exact_time_lock(dt_utc)
-
+    override = str(args.override_time_lock).strip().upper()
+    if override not in ("YES", "NO"):
+        raise IntentSimulatorError(f"BAD_OVERRIDE_TIME_LOCK: {override!r} (expected YES|NO)")
+    if override != "YES":
+        _require_exact_time_lock(dt_utc)
     day_utc = dt_utc.strftime("%Y-%m-%d")
 
     reg = _load_engine_registry(str(args.engine_registry_sha256).strip())

@@ -17,7 +17,7 @@
       "budget_notional_pct": "0.00",
       "approved_git_sha": "2aacaf914b0a6e6c469342342069179d1f206f1c",
       "engine_runner_path": "constellation_2/phaseH/intent_simulator/run/run_intent_simulator_day_v1.py",
-      "engine_runner_sha256": "d3fe257d1018f152f963176cc6b89ece4034800e7240fe2d7bff8b093fddd8e5",
+      "engine_runner_sha256": "4f65866543173100d4f3b913220b57d9679d8e66c712bb627b8a97644cedf68c",
       "approved_utc": "2026-02-25T00:00:00Z",
       "approved_by": "OPERATOR",
       "parameter_lock": null,
