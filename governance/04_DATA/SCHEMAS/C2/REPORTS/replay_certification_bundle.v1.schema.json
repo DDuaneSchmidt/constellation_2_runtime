@@ -13,6 +13,7 @@
     "status",
     "fail_closed",
     "inputs",
+    "input_entries",
     "hashes",
     "sha256_tree_digest",
     "overall_run_hash"
@@ -20,34 +21,48 @@
   "properties": {
     "schema_id": { "type": "string", "const": "C2_REPLAY_CERTIFICATION_BUNDLE_V1" },
     "schema_version": { "type": "integer", "const": 1 },
-
     "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
     "produced_utc": { "type": "string", "minLength": 1 },
-
     "producer": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["repo", "git_sha", "module"],
+      "required": [ "repo", "git_sha", "module" ],
       "properties": {
         "repo": { "type": "string", "minLength": 1, "maxLength": 128 },
         "git_sha": { "type": "string", "minLength": 7, "maxLength": 64 },
         "module": { "type": "string", "minLength": 1, "maxLength": 256 }
       }
     },
-
-    "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+    "status": { "type": "string", "enum": [ "PASS", "FAIL", "MISSING_INPUTS" ] },
     "fail_closed": { "type": "boolean" },
 
     "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [ "manifest_path", "manifest_sha256", "present_types", "missing_types" ],
+      "properties": {
+        "manifest_path": { "type": "string", "minLength": 1 },
+        "manifest_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "present_types": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "missing_types": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+
+    "input_entries": {
       "type": "array",
-      "minItems": 1,
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["type", "path", "sha256", "present"],
+        "required": [ "type", "path", "sha256", "present" ],
         "properties": {
-          "type": { "type": "string", "minLength": 1, "maxLength": 128 },
-          "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "type": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
           "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
           "present": { "type": "boolean" }
         }
@@ -63,6 +78,7 @@
         "liquidity_artifact_hash",
         "correlation_artifact_hash",
         "convex_shock_artifact_hash",
+        "depth_stress_artifact_hash",
         "submission_bundle_hashes",
         "reconciliation_hash",
         "nav_hash"
@@ -73,7 +89,11 @@
         "liquidity_artifact_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
         "correlation_artifact_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
         "convex_shock_artifact_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-        "submission_bundle_hashes": { "type": "array", "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" } },
+        "depth_stress_artifact_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "submission_bundle_hashes": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        },
         "reconciliation_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
         "nav_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
       }

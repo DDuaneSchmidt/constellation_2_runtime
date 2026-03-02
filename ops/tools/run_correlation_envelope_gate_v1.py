@@ -10,6 +10,12 @@ Escalation additions (2026-03-02):
   - Writes convex_risk_assessment.v1.json (artifact-backed)
   - Tightens CEG caps: final_caps = min(linear_caps, convex_caps)
 
+Depth-aware liquidity stress upgrade (DALSM, 2026-03-02):
+- Writes depth_liquidity_stress.v1.json (artifact-backed)
+- Computes binding depth_scale_bp (basis points)
+- Tightens CSE caps: cse_scale_bp_final = min(scale_after_liquidity, depth_scale_bp)
+- Convex assessment hash-links depth artifact (path+sha)
+
 Determinism + immutability:
 - No wall clock dependency (produced_utc is day marker)
 - Canonical JSON bytes
@@ -46,6 +52,12 @@ OUT_ROOT = TRUTH / "reports/correlation_envelope_gate_v1"
 CSE_OUT_ROOT = TRUTH / "reports/convex_risk_assessment_v1"
 
 LIQ_DATASET_MANIFEST = (TRUTH / "market_data_snapshot_v1" / "dataset_manifest.json").resolve()
+
+DEPTH_POLICY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/C2_DEPTH_LIQUIDITY_STRESS_POLICY_V1.json").resolve()
+DEPTH_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/depth_liquidity_stress.v1.schema.json"
+DEPTH_OUT_ROOT = TRUTH / "reports/depth_liquidity_stress_v1"
+NAV_ROOT = (TRUTH / "accounting_compat_v1" / "nav").resolve()
+DATASET_ROOT = (TRUTH / "market_data_snapshot_v1").resolve()
 
 
 def _parse_day(d: str) -> str:
@@ -95,6 +107,7 @@ def _dec(x: Any) -> Decimal:
 def _canonical_json_bytes_v1(obj: Any) -> bytes:
     try:
         from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1  # type: ignore
+
         return canonical_json_bytes_v1(obj)
     except Exception:
         return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
@@ -102,6 +115,7 @@ def _canonical_json_bytes_v1(obj: Any) -> bytes:
 
 def _validate_against_repo_schema_v1(repo_root: Path, schema_relpath: str, obj: Any) -> None:
     from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1  # type: ignore
+
     validate_against_repo_schema_v1(obj, repo_root, schema_relpath)
 
 
@@ -118,7 +132,6 @@ def _write_immutable_or_compare(path: Path, candidate_bytes: bytes, mismatch_cod
     exist_sha = _sha256_bytes(existing)
 
     if exist_sha == cand_sha:
-        # idempotent rerun: identical bytes
         return
 
     raise SystemExit(f"FAIL: {mismatch_code}: existing_sha={exist_sha} candidate_sha={cand_sha} path={str(path)}")
@@ -197,6 +210,128 @@ def _scan_intents(day: str) -> Tuple[List[str], Dict[str, int]]:
     engine_ids = sorted(set([e for e in engine_ids if e]))
     sym_counts = {sym: len(eids) for sym, eids in sym_engine_ids.items()}
     return (engine_ids, sym_counts)
+
+
+def _load_nav_snapshot(day: str) -> Tuple[Decimal, Path]:
+    p = (NAV_ROOT / day / "nav_snapshot.v1.json").resolve()
+    if not p.exists() or not p.is_file():
+        raise SystemExit(f"FAIL: DEPTH_NAV_SNAPSHOT_MISSING: {str(p)}")
+    o = _read_json_obj(p)
+    nav = o.get("nav") if isinstance(o.get("nav"), dict) else {}
+    total = nav.get("nav_total", None)
+    if total is None:
+        raise SystemExit("FAIL: DEPTH_NAV_TOTAL_MISSING")
+    nav_total = _dec(total)
+    if nav_total <= Decimal("0"):
+        raise SystemExit(f"FAIL: DEPTH_NAV_TOTAL_NONPOSITIVE: {str(nav_total)}")
+    return (nav_total, p)
+
+
+def _spread_proxy_bps_from_adv_dollar(policy: Dict[str, Any], adv_dollar: Decimal) -> Decimal:
+    sp = policy.get("spread_proxy")
+    if not isinstance(sp, dict):
+        raise SystemExit("FAIL: DEPTH_POLICY_BAD_SPREAD_PROXY")
+    method = str(sp.get("method") or "").strip()
+    if method != "ADV_DOLLAR_BUCKET_TABLE_V1":
+        raise SystemExit("FAIL: DEPTH_POLICY_UNSUPPORTED_SPREAD_PROXY_METHOD")
+
+    buckets = sp.get("buckets")
+    if not isinstance(buckets, list) or not buckets:
+        raise SystemExit("FAIL: DEPTH_POLICY_SPREAD_BUCKETS_EMPTY")
+
+    for b in buckets:
+        if not isinstance(b, dict):
+            continue
+        lo = _dec(b.get("min_adv_dollar"))
+        hi = _dec(b.get("max_adv_dollar"))
+        sbps = _dec(b.get("spread_bps"))
+        if adv_dollar >= lo and adv_dollar < hi:
+            return sbps
+
+    raise SystemExit("FAIL: DEPTH_POLICY_SPREAD_BUCKET_NO_MATCH")
+
+
+def _load_bars_for_symbol_year(symbol: str, year: int) -> List[Dict[str, Any]]:
+    p = (DATASET_ROOT / symbol.upper() / f"{int(year)}.jsonl").resolve()
+    if not p.exists():
+        return []
+    out: List[Dict[str, Any]] = []
+    try:
+        for line in p.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            o = json.loads(line)
+            if isinstance(o, dict):
+                out.append(o)
+    except Exception as e:
+        raise SystemExit(f"FAIL: DEPTH_MARKET_DATA_PARSE_ERROR symbol={symbol} year={year} path={p} err={e!r}")
+    return out
+
+
+def _bars_upto_day(symbol: str, day: str) -> List[Tuple[str, Decimal, int]]:
+    year = int(day[:4])
+    raw = _load_bars_for_symbol_year(symbol, year)
+    cutoff = f"{day}T23:59:59Z"
+    rows: List[Tuple[str, Decimal, int]] = []
+    for o in raw:
+        ts = str(o.get("timestamp_utc") or "").strip()
+        if not ts or ts > cutoff:
+            continue
+        close = _dec(o.get("close"))
+        vol = int(o.get("volume") or 0)
+        rows.append((ts, close, vol))
+    rows.sort(key=lambda r: r[0])
+    return rows
+
+
+def _latest_close_and_adv(symbol: str, day: str, lookback_days: int) -> Tuple[Decimal, Decimal, Decimal]:
+    bars = _bars_upto_day(symbol, day)
+    if not bars:
+        raise SystemExit(f"FAIL: DEPTH_MISSING_SYMBOL_BARS symbol={symbol} day={day}")
+    last_close = bars[-1][1]
+
+    window = bars[-lookback_days:] if len(bars) >= lookback_days else bars[:]
+    n = len(window)
+    if n <= 0:
+        raise SystemExit(f"FAIL: DEPTH_ADV_WINDOW_EMPTY symbol={symbol} day={day}")
+
+    sum_vol = sum(int(v) for _, _, v in window)
+    sum_dol = sum((c * Decimal(int(v))) for _, c, v in window)
+
+    adv_shares = (Decimal(sum_vol) / Decimal(n)) if n > 0 else Decimal("0")
+    adv_dollar = (sum_dol / Decimal(n)) if n > 0 else Decimal("0")
+    return (last_close, adv_shares, adv_dollar)
+
+
+def _scan_intents_notional_by_symbol(day: str, nav_total: Decimal) -> Dict[str, Decimal]:
+    d = (IN_INTENTS / day).resolve()
+    if not d.exists() or not d.is_dir():
+        raise SystemExit(f"FAIL: DEPTH_INTENTS_ROOT_MISSING: {str(d)}")
+
+    out: Dict[str, Decimal] = {}
+    files = sorted([p for p in d.iterdir() if p.is_file() and p.name.endswith(".json")], key=lambda p: p.name)
+    for p in files:
+        o = _read_json_obj(p)
+
+        underlying = o.get("underlying")
+        sym = ""
+        if isinstance(underlying, dict):
+            sym = str(underlying.get("symbol") or "").strip().upper()
+        elif isinstance(underlying, str):
+            sym = str(underlying).strip().upper()
+        if not sym:
+            raise SystemExit("FAIL: DEPTH_INTENT_MISSING_SYMBOL")
+
+        if "target_notional_pct" not in o:
+            raise SystemExit("FAIL: DEPTH_INTENT_MISSING_TARGET_NOTIONAL_PCT")
+        pct = _dec(o.get("target_notional_pct"))
+        if pct < Decimal("0"):
+            raise SystemExit("FAIL: DEPTH_INTENT_NEGATIVE_TARGET_PCT")
+
+        notional = nav_total * pct
+        out[sym] = out.get(sym, Decimal("0")) + notional
+
+    return out
 
 
 def _max_offdiag_subset(all_eids: List[str], corr: List[List[Decimal]], subset: List[str]) -> Decimal:
@@ -300,6 +435,8 @@ def main() -> int:
             raise RuntimeError("MISSING_INTENTS_DIR")
         if not LIQ_DATASET_MANIFEST.exists():
             raise RuntimeError("MISSING_LIQUIDITY_DATASET_MANIFEST")
+        if not DEPTH_POLICY_PATH.exists():
+            raise RuntimeError("MISSING_DEPTH_POLICY")
 
         all_eids, corr, _ = _load_engine_corr(day)
         active_eids, sym_counts = _scan_intents(day)
@@ -360,6 +497,172 @@ def main() -> int:
         baseline_risk = _portfolio_risk_from_corr(active_eids, all_eids, corr, Decimal("1.0"), Decimal("1.0"))
         shocked_risk = _portfolio_risk_from_corr(active_eids, all_eids, corr, corr_mult, vol_mult)
 
+        # -------- depth-aware liquidity stress (DALSM) --------
+        depth_policy = _read_json_obj(DEPTH_POLICY_PATH)
+        depth_policy_sha = _sha256_file(DEPTH_POLICY_PATH)
+
+        nav_total, nav_path = _load_nav_snapshot(day)
+        notional_by_symbol = _scan_intents_notional_by_symbol(day, nav_total)
+
+        rs = depth_policy.get("regime_selection")
+        if not isinstance(rs, dict):
+            raise RuntimeError("DEPTH_POLICY_MISSING_REGIME_SELECTION")
+        rsm = str(rs.get("method") or "").strip()
+        if rsm != "FIXED_REGIME":
+            raise RuntimeError("DEPTH_POLICY_UNSUPPORTED_REGIME_SELECTION")
+        regime_used = str(rs.get("fixed_regime") or "").strip()
+        if regime_used not in ("NORMAL", "VOL_EXPANSION", "LIQ_CONTRACTION"):
+            raise RuntimeError("DEPTH_POLICY_BAD_FIXED_REGIME")
+
+        regime = depth_policy.get("regimes", {}).get(regime_used)
+        if not isinstance(regime, dict):
+            raise RuntimeError("DEPTH_POLICY_MISSING_REGIME_PARAMS")
+
+        lookback = int(depth_policy.get("lookbacks", {}).get("adv_lookback_days", 20))
+
+        depth_fraction_of_adv = _dec(regime.get("depth_fraction_of_adv"))
+        depth_removal_pct = _dec(regime.get("depth_removal_pct"))
+        spread_widen_mult = _dec(regime.get("spread_widen_multiplier"))
+        impact_k_bps = _dec(regime.get("impact_k_bps"))
+        impact_alpha = int(str(regime.get("impact_alpha")))
+
+        if depth_removal_pct < Decimal("0") or depth_removal_pct >= Decimal("1"):
+            raise RuntimeError("DEPTH_POLICY_BAD_DEPTH_REMOVAL_PCT")
+        if depth_fraction_of_adv <= Decimal("0"):
+            raise RuntimeError("DEPTH_POLICY_BAD_DEPTH_FRACTION")
+        if spread_widen_mult <= Decimal("0"):
+            raise RuntimeError("DEPTH_POLICY_BAD_SPREAD_WIDEN_MULT")
+        if impact_k_bps < Decimal("0") or impact_alpha < 1:
+            raise RuntimeError("DEPTH_POLICY_BAD_IMPACT_PARAMS")
+
+        by_symbol: Dict[str, Any] = {}
+        total_notional = Decimal("0")
+        total_cost_dol = Decimal("0")
+        max_sym = ""
+        max_sym_cost_bps = Decimal("0")
+
+        for sym in sorted(notional_by_symbol.keys()):
+            intent_notional = notional_by_symbol[sym]
+            total_notional += intent_notional
+
+            price_close, adv_shares, adv_dollar = _latest_close_and_adv(sym, day, lookback)
+            spread_bps_norm = _spread_proxy_bps_from_adv_dollar(depth_policy, adv_dollar)
+
+            depth_dol_norm = adv_dollar * depth_fraction_of_adv
+            depth_dol_stressed = depth_dol_norm * (Decimal("1") - depth_removal_pct)
+            if depth_dol_stressed <= Decimal("0"):
+                raise RuntimeError("DEPTH_NONPOSITIVE_STRESSED_DEPTH")
+
+            spread_bps_stressed = spread_bps_norm * spread_widen_mult
+
+            if intent_notional <= Decimal("0"):
+                impact_bps = Decimal("0")
+            else:
+                q = intent_notional / depth_dol_stressed
+                impact_bps = impact_k_bps * (q ** impact_alpha)
+
+            total_cost_bps = spread_bps_stressed + impact_bps
+            cost_dol = (intent_notional * total_cost_bps) / Decimal("10000")
+            total_cost_dol += cost_dol
+
+            if total_cost_bps > max_sym_cost_bps:
+                max_sym_cost_bps = total_cost_bps
+                max_sym = sym
+
+            by_symbol[sym] = {
+                "intent_notional_dollar": str(intent_notional),
+                "price_close": str(price_close),
+                "adv_shares": str(adv_shares),
+                "adv_dollar": str(adv_dollar),
+                "depth_dollar_normal": str(depth_dol_norm),
+                "depth_dollar_stressed": str(depth_dol_stressed),
+                "spread_bps_stressed": str(spread_bps_stressed),
+                "impact_bps": str(impact_bps),
+                "total_cost_bps": str(total_cost_bps),
+                "total_cost_dollar": str(cost_dol),
+            }
+
+        if total_notional <= Decimal("0"):
+            portfolio_cost_bps = Decimal("0")
+        else:
+            portfolio_cost_bps = (total_cost_dol / total_notional) * Decimal("10000")
+
+        thr = depth_policy.get("thresholds")
+        if not isinstance(thr, dict):
+            raise RuntimeError("DEPTH_POLICY_MISSING_THRESHOLDS")
+        max_port_bps = _dec(thr.get("max_depth_portfolio_cost_bps"))
+        max_sym_bps = _dec(thr.get("max_depth_symbol_cost_bps"))
+        min_scale_bp = int(thr.get("min_scale_bp"))
+
+        scale_port = Decimal("10000")
+        if portfolio_cost_bps > max_port_bps and portfolio_cost_bps > Decimal("0"):
+            scale_port = (max_port_bps / portfolio_cost_bps) * Decimal("10000")
+
+        scale_sym = Decimal("10000")
+        if max_sym_cost_bps > max_sym_bps and max_sym_cost_bps > Decimal("0"):
+            scale_sym = (max_sym_bps / max_sym_cost_bps) * Decimal("10000")
+
+        depth_scale_bp = int(min(scale_port, scale_sym).to_integral_value(rounding="ROUND_FLOOR"))
+        if depth_scale_bp > 10000:
+            depth_scale_bp = 10000
+        if depth_scale_bp < 0:
+            depth_scale_bp = 0
+
+        depth_reason_codes: List[str] = []
+        depth_violations: List[str] = []
+        if (portfolio_cost_bps > max_port_bps) or (max_sym_cost_bps > max_sym_bps):
+            depth_reason_codes.append("DEPTH_COST_EXCEEDS_THRESHOLD")
+        if depth_scale_bp < min_scale_bp:
+            depth_scale_bp = 0
+            depth_reason_codes.append("DEPTH_SCALE_BELOW_MIN_BLOCK")
+            depth_violations.append("DEPTH_SCALE_BELOW_MIN_BLOCK")
+
+        depth_out: Dict[str, Any] = {
+            "schema_id": "C2_DEPTH_LIQUIDITY_STRESS_V1",
+            "schema_version": 1,
+            "day_utc": day,
+            "produced_utc": produced_utc,
+            "producer": {"repo": "constellation_2_runtime", "git_sha": _git_sha(), "module": "ops/tools/run_correlation_envelope_gate_v1.py"},
+            "status": "BLOCK_ALL" if depth_scale_bp == 0 else ("SCALE" if depth_scale_bp < 10000 else "PASS"),
+            "fail_closed": False,
+            "policy": {"path": str(DEPTH_POLICY_PATH.relative_to(REPO_ROOT)), "sha256": depth_policy_sha, "policy_id": "C2_DEPTH_LIQUIDITY_STRESS_POLICY_V1"},
+            "inputs": {
+                "intents_root": str(intents_root.relative_to(REPO_ROOT)),
+                "liquidity_dataset_manifest_path": str(LIQ_DATASET_MANIFEST.relative_to(REPO_ROOT)),
+                "liquidity_dataset_manifest_sha256": _sha256_file(LIQ_DATASET_MANIFEST),
+                "nav_snapshot_path": str(nav_path.relative_to(REPO_ROOT)),
+                "nav_snapshot_sha256": _sha256_file(nav_path),
+            },
+            "regime_used": regime_used,
+            "aggregation": {
+                "by_symbol": by_symbol,
+                "portfolio": {
+                    "total_intent_notional_dollar": str(total_notional),
+                    "total_cost_dollar": str(total_cost_dol),
+                    "portfolio_cost_bps": str(portfolio_cost_bps),
+                    "max_symbol": max_sym if max_sym else ("NONE"),
+                    "max_symbol_cost_bps": str(max_sym_cost_bps),
+                },
+            },
+            "enforcement": {
+                "depth_scale_bp": int(depth_scale_bp),
+                "max_depth_portfolio_cost_bps": str(max_port_bps),
+                "max_depth_symbol_cost_bps": str(max_sym_bps),
+                "portfolio_cost_bps_used": str(portfolio_cost_bps),
+                "max_symbol_cost_bps_used": str(max_sym_cost_bps),
+                "reason_codes": depth_reason_codes,
+            },
+            "violations": depth_violations,
+        }
+
+        _validate_against_repo_schema_v1(REPO_ROOT, DEPTH_SCHEMA_RELPATH, depth_out)
+
+        depth_out_path = (DEPTH_OUT_ROOT / day / "depth_liquidity_stress.v1.json").resolve()
+        _write_immutable_or_compare(depth_out_path, _canonical_json_bytes_v1(depth_out), "DEPTH_OUTPUT_MISMATCH")
+
+        depth_out_rel = str(depth_out_path.relative_to(REPO_ROOT))
+        depth_out_sha = _sha256_file(depth_out_path)
+
         if shocked_risk <= max_risk or shocked_risk == Decimal("0"):
             cse_scale_bp_before = 10000
             cse_status = "PASS"
@@ -380,20 +683,20 @@ def main() -> int:
         if cse_scale_bp_after > 10000:
             cse_scale_bp_after = 10000
 
+        cse_scale_bp_final = min(int(cse_scale_bp_after), int(depth_scale_bp))
+
         cse_caps_by_sleeve: Dict[str, int] = {}
         cse_blocked: List[str] = []
         for s in sleeves:
-            cse_caps_by_sleeve[s] = int(cse_scale_bp_after)
+            cse_caps_by_sleeve[s] = int(cse_scale_bp_final)
             if cse_caps_by_sleeve[s] == 0:
                 cse_blocked.append(s)
 
-        # tighten final caps
         for s in sleeves:
             multiplier_by_sleeve[s] = min(multiplier_by_sleeve[s], cse_caps_by_sleeve[s])
             if multiplier_by_sleeve[s] == 0 and s not in blocked_sleeves:
                 blocked_sleeves.append(s)
 
-        # write convex assessment (idempotent compare)
         cse_out: Dict[str, Any] = {
             "schema_id": "C2_CONVEX_RISK_ASSESSMENT_V1",
             "schema_version": 1,
@@ -408,12 +711,14 @@ def main() -> int:
                 "engine_correlation_matrix_sha256": _sha256_file(corr_path),
                 "intents_root": str(intents_root.relative_to(REPO_ROOT)),
                 "liquidity_dataset_manifest_path": str(LIQ_DATASET_MANIFEST.relative_to(REPO_ROOT)),
-                "liquidity_dataset_manifest_sha256": _sha256_file(LIQ_DATASET_MANIFEST)
+                "liquidity_dataset_manifest_sha256": _sha256_file(LIQ_DATASET_MANIFEST),
+                "depth_stress_path": depth_out_rel,
+                "depth_stress_sha256": depth_out_sha,
             },
             "shock": {
                 "correlation_spike_multiplier": str(cse_policy["shock"]["correlation_spike_multiplier"]),
                 "volatility_expansion_multiplier": str(cse_policy["shock"]["volatility_expansion_multiplier"]),
-                "liquidity_contraction_multiplier": str(cse_policy["shock"]["liquidity_contraction_multiplier"])
+                "liquidity_contraction_multiplier": str(cse_policy["shock"]["liquidity_contraction_multiplier"]),
             },
             "results": {
                 "active_engine_ids": active_eids,
@@ -422,13 +727,16 @@ def main() -> int:
                 "shocked_portfolio_risk": str(shocked_risk),
                 "max_shocked_portfolio_risk": str(max_risk),
                 "scale_bp_before_liquidity": int(cse_scale_bp_before),
-                "scale_bp_after_liquidity": int(cse_scale_bp_after)
+                "scale_bp_after_liquidity": int(cse_scale_bp_after),
+                "depth_regime_used": regime_used,
+                "depth_scale_bp": int(depth_scale_bp),
+                "scale_bp_final": int(cse_scale_bp_final),
             },
             "caps": {
                 "multiplier_bp_by_sleeve": {k: int(cse_caps_by_sleeve[k]) for k in sorted(cse_caps_by_sleeve.keys())},
-                "blocked_sleeves": [s for s in sorted(set(cse_blocked))]
+                "blocked_sleeves": [s for s in sorted(set(cse_blocked))],
             },
-            "violations": []
+            "violations": [],
         }
 
         _validate_against_repo_schema_v1(REPO_ROOT, CSE_SCHEMA_RELPATH, cse_out)
@@ -456,13 +764,13 @@ def main() -> int:
         "inputs": {
             "engine_correlation_matrix_path": str(corr_path.relative_to(REPO_ROOT)),
             "engine_correlation_matrix_sha256": _sha256_file(corr_path) if corr_path.exists() else "0" * 64,
-            "intents_root": str(intents_root.relative_to(REPO_ROOT))
+            "intents_root": str(intents_root.relative_to(REPO_ROOT)),
         },
         "caps": {
             "multiplier_bp_by_sleeve": {k: int(multiplier_by_sleeve[k]) for k in sorted(multiplier_by_sleeve.keys())},
-            "blocked_sleeves": [s for s in sorted(set(blocked_sleeves))]
+            "blocked_sleeves": [s for s in sorted(set(blocked_sleeves))],
         },
-        "violations": violations
+        "violations": violations,
     }
 
     _validate_against_repo_schema_v1(REPO_ROOT, SCHEMA_RELPATH, out_obj)

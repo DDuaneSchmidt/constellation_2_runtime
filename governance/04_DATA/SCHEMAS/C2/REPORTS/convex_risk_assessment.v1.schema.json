@@ -22,35 +22,30 @@
   "properties": {
     "schema_id": { "type": "string", "const": "C2_CONVEX_RISK_ASSESSMENT_V1" },
     "schema_version": { "type": "integer", "const": 1 },
-
     "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
     "produced_utc": { "type": "string", "minLength": 1 },
-
     "producer": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["repo", "git_sha", "module"],
+      "required": [ "repo", "git_sha", "module" ],
       "properties": {
         "repo": { "type": "string", "minLength": 1, "maxLength": 128 },
         "git_sha": { "type": "string", "minLength": 7, "maxLength": 64 },
         "module": { "type": "string", "minLength": 1, "maxLength": 256 }
       }
     },
-
-    "status": { "type": "string", "enum": ["PASS", "SCALE", "BLOCK_ALL", "MISSING_INPUTS", "FAIL"] },
+    "status": { "type": "string", "enum": [ "PASS", "SCALE", "BLOCK_ALL", "MISSING_INPUTS", "FAIL" ] },
     "fail_closed": { "type": "boolean" },
-
     "policy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["path", "sha256", "policy_id"],
+      "required": [ "policy_id", "path", "sha256" ],
       "properties": {
+        "policy_id": { "type": "string", "const": "C2_CONVEX_SHOCK_ENVELOPE_POLICY_V1" },
         "path": { "type": "string", "minLength": 1 },
-        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-        "policy_id": { "type": "string", "minLength": 1 }
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
       }
     },
-
     "inputs": {
       "type": "object",
       "additionalProperties": false,
@@ -59,32 +54,30 @@
         "engine_correlation_matrix_sha256",
         "intents_root",
         "liquidity_dataset_manifest_path",
-        "liquidity_dataset_manifest_sha256"
+        "liquidity_dataset_manifest_sha256",
+        "depth_stress_path",
+        "depth_stress_sha256"
       ],
       "properties": {
         "engine_correlation_matrix_path": { "type": "string", "minLength": 1 },
         "engine_correlation_matrix_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
         "intents_root": { "type": "string", "minLength": 1 },
         "liquidity_dataset_manifest_path": { "type": "string", "minLength": 1 },
-        "liquidity_dataset_manifest_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        "liquidity_dataset_manifest_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "depth_stress_path": { "type": "string", "minLength": 1 },
+        "depth_stress_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
       }
     },
-
     "shock": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "correlation_spike_multiplier",
-        "volatility_expansion_multiplier",
-        "liquidity_contraction_multiplier"
-      ],
+      "required": [ "correlation_spike_multiplier", "volatility_expansion_multiplier", "liquidity_contraction_multiplier" ],
       "properties": {
-        "correlation_spike_multiplier": { "type": "string", "minLength": 1 },
-        "volatility_expansion_multiplier": { "type": "string", "minLength": 1 },
-        "liquidity_contraction_multiplier": { "type": "string", "minLength": 1 }
+        "correlation_spike_multiplier": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+        "volatility_expansion_multiplier": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+        "liquidity_contraction_multiplier": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" }
       }
     },
-
     "results": {
       "type": "object",
       "additionalProperties": false,
@@ -95,45 +88,35 @@
         "shocked_portfolio_risk",
         "max_shocked_portfolio_risk",
         "scale_bp_before_liquidity",
-        "scale_bp_after_liquidity"
+        "scale_bp_after_liquidity",
+        "depth_regime_used",
+        "depth_scale_bp",
+        "scale_bp_final"
       ],
       "properties": {
         "active_engine_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
         "active_sleeve_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-
-        "baseline_portfolio_risk": { "type": "string", "minLength": 1 },
-        "shocked_portfolio_risk": { "type": "string", "minLength": 1 },
-        "max_shocked_portfolio_risk": { "type": "string", "minLength": 1 },
-
+        "baseline_portfolio_risk": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+        "shocked_portfolio_risk": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+        "max_shocked_portfolio_risk": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
         "scale_bp_before_liquidity": { "type": "integer", "minimum": 0, "maximum": 10000 },
-        "scale_bp_after_liquidity": { "type": "integer", "minimum": 0, "maximum": 10000 }
+        "scale_bp_after_liquidity": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "depth_regime_used": { "type": "string", "enum": [ "NORMAL", "VOL_EXPANSION", "LIQ_CONTRACTION" ] },
+        "depth_scale_bp": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "scale_bp_final": { "type": "integer", "minimum": 0, "maximum": 10000 }
       }
     },
-
     "caps": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["multiplier_bp_by_sleeve", "blocked_sleeves"],
+      "required": [ "scale_bp_by_sleeve" ],
       "properties": {
-        "multiplier_bp_by_sleeve": {
+        "scale_bp_by_sleeve": {
           "type": "object",
           "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 10000 }
-        },
-        "blocked_sleeves": { "type": "array", "items": { "type": "string", "minLength": 1 } }
-      }
-    },
-
-    "violations": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["code", "detail"],
-        "properties": {
-          "code": { "type": "string", "minLength": 1 },
-          "detail": { "type": "string", "minLength": 1 }
         }
       }
-    }
+    },
+    "violations": { "type": "array", "items": { "type": "string", "minLength": 1 } }
   }
 }
