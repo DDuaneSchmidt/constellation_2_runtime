@@ -13,6 +13,7 @@
     {
       "engine_id": "C2_INTENT_SIMULATOR_V1",
       "activation_status": "ACTIVE",
+      "allowed_symbols": ["SPY"],
       "runner_path": "constellation_2.phaseH.intent_simulator.run.run_intent_simulator_day_v1",
       "budget_notional_pct": "0.00",
       "approved_git_sha": "2aacaf914b0a6e6c469342342069179d1f206f1c",
@@ -31,6 +32,7 @@
     {
       "engine_id": "C2_MEAN_REVERSION_EQ_V1",
       "activation_status": "ACTIVE",
+      "allowed_symbols": ["QQQ"],
       "runner_path": "constellation_2.phaseI.mean_reversion.run.run_mean_reversion_intents_day_v1",
       "budget_notional_pct": "0.10",
       "approved_git_sha": "f4a2b82012213bba7d13a306a050a0733d8f5ab1",
@@ -48,6 +50,7 @@
     {
       "engine_id": "C2_TREND_EQ_PRIMARY_V1",
       "activation_status": "ACTIVE",
+      "allowed_symbols": ["SPY"],
       "runner_path": "constellation_2.phaseI.trend_eq_primary.run.run_trend_eq_primary_intents_day_v1",
       "budget_notional_pct": "0.15",
       "approved_git_sha": "f4a2b82012213bba7d13a306a050a0733d8f5ab1",
@@ -65,6 +68,7 @@
     {
       "engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1",
       "activation_status": "ACTIVE",
+      "allowed_symbols": ["IWM"],
       "runner_path": "constellation_2.phaseI.vol_income_defined_risk.run.run_vol_income_defined_risk_intents_day_v1",
       "budget_notional_pct": "0.10",
       "approved_git_sha": "f4a2b82012213bba7d13a306a050a0733d8f5ab1",
@@ -82,6 +86,7 @@
     {
       "engine_id": "C2_EVENT_DISLOCATION_V1",
       "activation_status": "ACTIVE",
+      "allowed_symbols": ["GLD"],
       "runner_path": "constellation_2.phaseI.event_dislocation.run.run_event_dislocation_intents_day_v1",
       "budget_notional_pct": "0.05",
       "approved_git_sha": "2aacaf914b0a6e6c469342342069179d1f206f1c",
@@ -99,6 +104,7 @@
     {
       "engine_id": "C2_DEFENSIVE_TAIL_V1",
       "activation_status": "ACTIVE",
+      "allowed_symbols": ["TLT"],
       "runner_path": "constellation_2.phaseI.defensive_tail.run.run_defensive_tail_intents_day_v1",
       "budget_notional_pct": "0.05",
       "approved_git_sha": "2aacaf914b0a6e6c469342342069179d1f206f1c",
@@ -117,6 +123,7 @@
     {
       "engine_id": "C2_CROSS_ASSET_TREND_V1",
       "activation_status": "INACTIVE",
+      "allowed_symbols": ["SPY"],
       "runner_path": "constellation_2.phaseI.cross_asset_trend.run.run_cross_asset_trend_intents_day_v1",
       "budget_notional_pct": "0.10",
       "approved_git_sha": "2778fc92b3d1e95d6d92c06e1cc888526a302a79",
@@ -135,6 +142,7 @@
     {
       "engine_id": "C2_MARKET_NEUTRAL_SPREAD_V1",
       "activation_status": "INACTIVE",
+      "allowed_symbols": ["SPY"],
       "runner_path": "constellation_2.phaseI.market_neutral_spread.run.run_market_neutral_spread_intents_day_v1",
       "budget_notional_pct": "0.05",
       "approved_git_sha": "2778fc92b3d1e95d6d92c06e1cc888526a302a79",
