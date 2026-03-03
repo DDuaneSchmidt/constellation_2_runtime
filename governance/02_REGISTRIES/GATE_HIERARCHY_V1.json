@@ -6,47 +6,55 @@
   "owner": "Constellation_2",
   "notes": [
     "Defines canonical hard gate ordering and required-ness for authoritative verdict.",
-    "Escalation additions: Feed Attestation Gate (FAL) and Replay Certification Gate."
+    "Escalation additions: Feed Attestation Gate (FAL) and Replay Certification Gate.",
+    "Registry remediation 2026-03-02: enforce file-backed artifact_relpath for every gate (never directories)."
   ],
   "gates": [
     {
       "gate_id": "operator_daily_gate_v3",
+      "artifact_relpath": "operator_daily_gate.v3.json",
       "class": "CLASS1_SYSTEM_HARD_STOP",
       "required": true,
       "blocking": true
     },
     {
       "gate_id": "feed_attestation_gate_v1",
+      "artifact_relpath": "feed_attestation_gate.v1.json",
       "class": "CLASS1_SYSTEM_HARD_STOP",
       "required": true,
       "blocking": true
     },
     {
       "gate_id": "heartbeat_gate_v1",
+      "artifact_relpath": "heartbeat_gate.v1.json",
       "class": "CLASS1_SYSTEM_HARD_STOP",
       "required": true,
       "blocking": true
     },
     {
       "gate_id": "capital_risk_envelope_v2",
+      "artifact_relpath": "capital_risk_envelope.v2.json",
       "class": "CLASS1_SYSTEM_HARD_STOP",
       "required": true,
       "blocking": true
     },
     {
       "gate_id": "correlation_envelope_gate_v1",
+      "artifact_relpath": "correlation_envelope_gate.v1.json",
       "class": "CLASS1_SYSTEM_HARD_STOP",
       "required": true,
       "blocking": true
     },
     {
       "gate_id": "liquidity_slippage_gate_v1",
+      "artifact_relpath": "liquidity_slippage_gate.v1.json",
       "class": "CLASS1_SYSTEM_HARD_STOP",
       "required": true,
       "blocking": true
     },
     {
       "gate_id": "replay_certification_gate_v1",
+      "artifact_relpath": "replay_certification_gate.v1.json",
       "class": "CLASS1_SYSTEM_HARD_STOP",
       "required": true,
       "blocking": true

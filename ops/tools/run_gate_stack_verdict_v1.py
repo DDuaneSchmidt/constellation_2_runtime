@@ -59,12 +59,24 @@ OUT_ROOT = (TRUTH / "reports" / "gate_stack_verdict_v1").resolve()
 
 DAY_RE = r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
 
+# Must match schema enum for top-level blocking_class.
+_ALLOWED_BLOCKING_CLASSES = {
+    "CLASS1_SYSTEM_HARD_STOP",
+    "CLASS2_RISK_HARD_STOP",
+    "CLASS3_CONTROLLED_DEGRADATION",
+    "CLASS4_ADVISORY",
+    "NONE",
+}
+
 
 def _sha256_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
 def _sha256_file(p: Path) -> str:
+    # Gate stack registry must point to a FILE artifact, never a directory.
+    if p.exists() and p.is_dir():
+        raise ValueError(f"GATE_STACK_BAD_ARTIFACT_PATH_IS_DIRECTORY: {str(p)}")
     h = hashlib.sha256()
     with p.open("rb") as f:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
@@ -102,44 +114,64 @@ def _class_precedence(reg: Dict[str, Any]) -> Dict[str, int]:
 def _eval_gate(day: str, gate: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
     # Returns (gate_result, input_manifest_entries)
     gate_id = str(gate.get("gate_id") or "").strip()
-    gclass = str(gate.get("gate_class") or "").strip()
+
+    # GOVERNANCE: registry uses key "class" (authoritative). Support "gate_class" for backward compatibility.
+    gclass = str(gate.get("class") or gate.get("gate_class") or "").strip()
+
     required = bool(gate.get("required"))
     blocking = bool(gate.get("blocking"))
     rel = str(gate.get("artifact_relpath") or "").replace("{DAY}", day)
     status_field = str(gate.get("status_field") or "status")
     pass_vals = [str(x).strip().upper() for x in (gate.get("pass_status_values") or [])]
 
-    path = (REPO_ROOT / rel).resolve()
+    # IMPORTANT: empty relpath must be treated as invalid/missing (fail-closed).
+    path = (REPO_ROOT / rel).resolve() if rel else REPO_ROOT
+
     manifest: List[Dict[str, str]] = []
 
-    if not path.exists():
+    if not rel:
+        # Empty relpath is a governance breach; represent as MISSING (schema-safe) and fail-closed via required logic.
+        manifest.append({"type": f"{gate_id}_missing", "path": str(path), "sha256": _sha256_bytes(b"")})
+        status = "MISSING"
+        rc = ["MISSING_GATE_ARTIFACT_RELPATH_EMPTY"]
+        sha = _sha256_bytes(b"")
+    elif not path.exists():
         manifest.append({"type": f"{gate_id}_missing", "path": str(path), "sha256": _sha256_bytes(b"")})
         status = "MISSING"
         rc = ["MISSING_GATE_ARTIFACT"]
         sha = _sha256_bytes(b"")
     else:
-        sha = _sha256_file(path)
-        manifest.append({"type": gate_id, "path": str(path), "sha256": sha})
         rc = []
         try:
-            o = _read_json_obj(path)
-            raw = str(o.get(status_field) or "").strip().upper()
-            status = raw if raw else "UNKNOWN"
-            # Normalize common patterns
-            if raw in ("OK", "PASS"):
-                status_norm = raw
-            elif raw in ("FAIL", "BLOCK", "BLOCKED"):
-                status_norm = "FAIL"
-            else:
-                status_norm = raw
-            status = status_norm
-            # Collect reason codes if present
-            rcs = o.get("reason_codes")
-            if isinstance(rcs, list):
-                rc = [str(x) for x in rcs]
-        except Exception:
-            status = "UNKNOWN"
-            rc = ["PARSE_ERROR"]
+            sha = _sha256_file(path)
+        except ValueError as e:
+            # Deterministic fail-closed: a directory is never a valid artifact file.
+            # Schema-safe status: treat as MISSING (do not emit ungoverned enums like INVALID_PATH).
+            manifest.append({"type": f"{gate_id}_bad_path", "path": str(path), "sha256": _sha256_bytes(b"")})
+            status = "MISSING"
+            rc = [str(e)]
+            sha = _sha256_bytes(b"")
+        else:
+            manifest.append({"type": gate_id, "path": str(path), "sha256": sha})
+            try:
+                o = _read_json_obj(path)
+                raw = str(o.get(status_field) or "").strip().upper()
+                status = raw if raw else "UNKNOWN"
+                # Normalize common patterns
+                if raw in ("OK", "PASS"):
+                    status_norm = raw
+                elif raw in ("FAIL", "BLOCK", "BLOCKED"):
+                    status_norm = "FAIL"
+                else:
+                    status_norm = raw
+                status = status_norm
+
+                rcs = o.get("reason_codes")
+                if isinstance(rcs, list):
+                    rc = [str(x) for x in rcs]
+            except Exception:
+                status = "UNKNOWN"
+                rc = ["PARSE_ERROR"]
 
     # Compute pass/fail using pass status values
     status_upper = str(status).strip().upper()
@@ -199,7 +231,7 @@ def _compute_verdict(day: str) -> Dict[str, Any]:
     # Evaluate fail-closed with precedence.
     status = "PASS"
     for g in gates_sorted:
-        cid = str(g.get("gate_class") or "")
+        cid = str(g.get("gate_class") or "").strip()
         required = bool(g.get("required"))
         blocking = bool(g.get("blocking"))
         observed = str(g.get("status") or "").strip().upper()
@@ -208,10 +240,17 @@ def _compute_verdict(day: str) -> Dict[str, Any]:
         is_pass = (observed in ("PASS", "OK"))
         is_failish = (not is_pass)
 
+        def _clamp_blocking_class(x: str) -> str:
+            x2 = str(x or "").strip()
+            if x2 in _ALLOWED_BLOCKING_CLASSES:
+                return x2
+            # Fail-closed: if we are failing due to a gate, use the strictest allowed enum.
+            return "CLASS1_SYSTEM_HARD_STOP"
+
         # Required non-pass is a fail.
         if required and is_failish:
             status = "FAIL"
-            blocking_class = cid
+            blocking_class = _clamp_blocking_class(cid)
             reason_codes.append(f"GATE_REQUIRED_NOT_PASS:{g.get('gate_id')}:{observed}")
             if is_missing:
                 reason_codes.append(f"GATE_MISSING:{g.get('gate_id')}")
@@ -220,7 +259,7 @@ def _compute_verdict(day: str) -> Dict[str, Any]:
         # Non-required but blocking gates can still fail closed if present and not passing.
         if (not required) and blocking and is_failish and (not is_missing):
             status = "FAIL"
-            blocking_class = cid
+            blocking_class = _clamp_blocking_class(cid)
             reason_codes.append(f"GATE_BLOCKING_NOT_PASS:{g.get('gate_id')}:{observed}")
             break
 
