@@ -97,6 +97,8 @@ These canonical contracts are governance-controlled and must be explicitly liste
 - `governance/05_CONTRACTS/C2/C2_ATTEMPT_SCOPED_WRITE_POLICY_WITH_CANONICAL_POINTERS_V3.contract.md`
 - `governance/05_CONTRACTS/C2/ib_account_registry_v1.contract.md`
 - `governance/05_CONTRACTS/C2/trade_submit_readiness_c2_v1.contract.md`
+- `governance/05_CONTRACTS/C2/single_ib_account_mode_v1.contract.md`
+
 
 ## Governed data schemas
 
