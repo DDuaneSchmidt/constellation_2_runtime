@@ -18,7 +18,7 @@
     "base_slippage_bps": "2.00",
     "slippage_bps_per_1pct_adv": "8.00",
     "max_notional_per_symbol_usd": "25000",
-    "max_orders_per_symbol_per_day": 2,
+    "max_orders_per_symbol_per_day": 10,
     "require_regime_snapshot_v2": false,
     "non_normal_regime_caps_multiplier": "0.50",
     "allow_missing_symbols": [],

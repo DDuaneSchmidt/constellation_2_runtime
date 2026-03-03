@@ -9,15 +9,14 @@ Writes:
 
 Determinism:
 - Uses only day-keyed truth inputs and governed policy.
-- No wall-clock reads (except deterministic git sha for producer metadata).
+- No wall-clock reads.
 - Canonical JSON hashing.
 
 Fail-closed:
 - Missing policy, policy schema invalid, missing market data (unless allow-listed) => FAIL.
-- Missing/zero NAV => FAIL (explicit).
 
 Scope:
-- v1 evaluates exposure_intent snapshots as a pre-trade capacity control.
+- v1 evaluates exposure_intent snapshots (equity-style notionals) as a pre-trade capacity control.
 """
 
 from __future__ import annotations
@@ -118,159 +117,56 @@ def _parse_decimal_strict(s: Any, field: str) -> Decimal:
     return Decimal(t)
 
 
-def _as_int_or_none(v: Any) -> Optional[int]:
-    if v is None:
-        return None
-    if isinstance(v, bool):
-        return None
-    try:
-        if isinstance(v, int):
-            return v
-        if isinstance(v, str):
-            t = v.strip()
-            if not t:
-                return None
-            return int(t)
-        if isinstance(v, float):
-            # disallow float to avoid nondeterminism; require int/str
-            return None
-    except Exception:
-        return None
-    return None
-
-
-def _as_cents_from_decimal_str_or_none(v: Any) -> Optional[int]:
-    """
-    Accept a decimal string dollars (e.g. "1000.00") and convert to cents deterministically.
-    Reject floats.
-    """
-    if v is None or isinstance(v, bool):
-        return None
-    if isinstance(v, str):
-        t = v.strip()
-        if not t:
-            return None
+def _nav_total_cents_from_nav_v2(o: Dict[str, Any]) -> int:
+    # Deterministic extraction for accounting_nav_v2.
+    # Prefer explicit cents if present; else use nav.nav_total (dollars); else history.end_nav (dollars).
+    v = o.get("nav_total_cents")
+    if v is not None:
         try:
-            d = Decimal(t)
+            return int(v)
         except Exception:
-            return None
-        cents = int((d * Decimal(100)).to_integral_value(rounding=ROUND_DOWN))
-        return cents
-    return None
+            raise ValueError("NAV_TOTAL_CENTS_NOT_INT")
 
+    nav = o.get("nav")
+    if isinstance(nav, dict):
+        nt = nav.get("nav_total")
+        if nt is not None:
+            try:
+                # nav_total is dollars
+                return int(Decimal(str(nt)) * Decimal("100"))
+            except Exception:
+                raise ValueError("NAV_NAV_TOTAL_NOT_NUMERIC")
 
-def _deterministic_find_nav_cents(obj: Dict[str, Any]) -> Optional[int]:
-    """
-    Deterministically search for a NAV-in-cents field inside a v2 NAV artifact.
+    hist = o.get("history")
+    if isinstance(hist, dict):
+        end_nav = hist.get("end_nav")
+        if end_nav is not None:
+            try:
+                return int(Decimal(str(end_nav)) * Decimal("100"))
+            except Exception:
+                raise ValueError("HISTORY_END_NAV_NOT_NUMERIC")
 
-    Priority:
-    1) Explicit cents fields (nav_total_cents / nlv_total_cents / end_nav_cents / cash_total_cents)
-    2) Decimal-dollar strings for end_nav / nlv_total / nav_total (converted to cents)
-    3) Integer-dollar fields nav_total / nlv_total / end_nav (converted to cents)
-
-    Search is deterministic: depth-first over sorted keys.
-    """
-    # direct top-level candidates
-    direct_keys_int = [
-        "nav_total_cents",
-        "nlv_total_cents",
-        "end_nav_cents",
-        "cash_total_cents",
-    ]
-    for k in direct_keys_int:
-        if k in obj:
-            iv = _as_int_or_none(obj.get(k))
-            if iv is not None and iv > 0:
-                return iv
-
-    # common nested container
-    if "nav" in obj and isinstance(obj.get("nav"), dict):
-        nav = obj["nav"]
-        for k in direct_keys_int:
-            if k in nav:
-                iv = _as_int_or_none(nav.get(k))
-                if iv is not None and iv > 0:
-                    return iv
-
-        # dollars-as-decimal-string candidates in nav
-        dollar_keys = ["end_nav", "nlv_total", "nav_total", "cash_total"]
-        for k in dollar_keys:
-            if k in nav:
-                cents = _as_cents_from_decimal_str_or_none(nav.get(k))
-                if cents is not None and cents > 0:
-                    return cents
-
-        # integer-dollar candidates in nav (converted)
-        for k in dollar_keys:
-            if k in nav:
-                iv = _as_int_or_none(nav.get(k))
-                if iv is not None and iv > 0:
-                    return iv * 100
-
-    # generic deterministic walk (sorted keys)
-    def walk(x: Any) -> Optional[int]:
-        if isinstance(x, dict):
-            # first try cents keys at this level
-            for k in direct_keys_int:
-                if k in x:
-                    iv = _as_int_or_none(x.get(k))
-                    if iv is not None and iv > 0:
-                        return iv
-            # then try dollar-string keys at this level
-            for k in ["end_nav", "nlv_total", "nav_total", "cash_total"]:
-                if k in x:
-                    cents = _as_cents_from_decimal_str_or_none(x.get(k))
-                    if cents is not None and cents > 0:
-                        return cents
-            # then integer-dollar keys at this level
-            for k in ["end_nav", "nlv_total", "nav_total", "cash_total"]:
-                if k in x:
-                    iv = _as_int_or_none(x.get(k))
-                    if iv is not None and iv > 0:
-                        return iv * 100
-
-            for k in sorted(x.keys()):
-                v = x[k]
-                got = walk(v)
-                if got is not None and got > 0:
-                    return got
-            return None
-        if isinstance(x, list):
-            for item in x:
-                got = walk(item)
-                if got is not None and got > 0:
-                    return got
-            return None
-        return None
-
-    return walk(obj)
+    raise ValueError("NAV_TOTAL_MISSING")
 
 
 def _read_nav_total_cents(day: str) -> Tuple[int, Path, str]:
-    """
-    Returns:
-      (nav_total_cents:int, nav_path:Path, nav_sha256:str)
-
-    Fail-closed:
-      - If v2 exists but nav cents cannot be deterministically extracted or is <= 0, we FAIL.
-      - If v2 missing, we fall back to v1 (nav_total dollars int) and convert to cents.
-    """
     p2 = (NAV_V2_ROOT / day / "nav.v2.json").resolve()
     if p2.exists():
         o = _read_json_obj(p2)
-
-        nav_cents = _deterministic_find_nav_cents(o)
-        if nav_cents is None or int(nav_cents) <= 0:
-            raise SystemExit(f"FAIL: LIQPOL_NAV_TOTAL_CENTS_MISSING_OR_ZERO day={day} path={p2}")
-        return int(nav_cents), p2, _sha256_file(p2)
+        nav_cents = _nav_total_cents_from_nav_v2(o)
+        if nav_cents <= 0:
+            # fail-closed: zero NAV makes capacity model meaningless
+            raise SystemExit(f"FAIL: LIQPOL_NAV_TOTAL_CENTS_NONPOSITIVE day={day} nav_total_cents={nav_cents}")
+        return nav_cents, p2, _sha256_file(p2)
 
     p1 = (NAV_V1_ROOT / day / "nav.json").resolve()
     if p1.exists():
         o = _read_json_obj(p1)
-        nav_dollars = _as_int_or_none(o.get("nav_total"))
-        if nav_dollars is None or nav_dollars <= 0:
-            raise SystemExit(f"FAIL: LIQPOL_NAV_TOTAL_MISSING_OR_ZERO day={day} path={p1}")
-        return int(nav_dollars) * 100, p1, _sha256_file(p1)
+        nav = int((o.get("nav_total") or 0))
+        nav_cents = nav * 100
+        if nav_cents <= 0:
+            raise SystemExit(f"FAIL: LIQPOL_NAV_TOTAL_CENTS_NONPOSITIVE day={day} nav_total_cents={nav_cents}")
+        return nav_cents, p1, _sha256_file(p1)
 
     raise SystemExit(f"FAIL: LIQPOL_MISSING_NAV day={day}")
 
@@ -352,12 +248,10 @@ def _read_intents_for_day(day: str) -> List[Path]:
     d = (INTENTS_DIR_ROOT / day).resolve()
     if not d.exists() or not d.is_dir():
         return []
-    files = sorted([p for p in d.glob("*.json") if p.is_file()])
-    return files
+    return sorted([p for p in d.glob("*.json") if p.is_file()])
 
 
 def _extract_intent_symbol_and_pct(intent_obj: Dict[str, Any]) -> Tuple[str, str]:
-    # symbol: under "underlying" or "underlying.symbol" or "symbol"
     sym = ""
     if "underlying" in intent_obj:
         u = intent_obj.get("underlying")
@@ -370,7 +264,7 @@ def _extract_intent_symbol_and_pct(intent_obj: Dict[str, Any]) -> Tuple[str, str
     sym = sym.strip().upper()
 
     tnp = str(intent_obj.get("target_notional_pct") or "").strip()
-    if not tnp:
+    if tnp == "":
         raise ValueError("TARGET_NOTIONAL_PCT_MISSING")
     return sym, tnp
 
@@ -421,12 +315,7 @@ def main() -> int:
             "status": status,
             "reason_codes": reason_codes,
             "input_manifest": input_manifest,
-            "policy": {
-                "path": str(POLICY_PATH),
-                "sha256": pol_sha,
-                "schema_path": str(pol_schema_path),
-                "schema_sha256": pol_schema_sha,
-            },
+            "policy": {"path": str(POLICY_PATH), "sha256": pol_sha, "schema_path": str(pol_schema_path), "schema_sha256": pol_schema_sha},
             "results": {"per_intent": [], "totals": {"intents_total": 0, "intents_failed": 0, "intents_passed": 0, "intents_skipped": 0}},
             "gate_sha256": "0" * 64,
         }
@@ -434,7 +323,6 @@ def main() -> int:
         tmp = dict(out_obj)
         tmp["gate_sha256"] = None
         out_obj["gate_sha256"] = _sha256_bytes(canonical_json_bytes_v1(tmp))
-
         validate_against_repo_schema_v1(out_obj, REPO_ROOT, OUT_SCHEMA_RELPATH)
 
         out_dir = (OUT_ROOT / day).resolve()
@@ -495,20 +383,48 @@ def main() -> int:
             est_notional = (Decimal(nav_cents) / Decimal(100)) * tnp
             est_notional_2dp = Decimal(_decimal_str_2dp(est_notional))
 
+            # IMPORTANT: zero-notional intents are SKIP (not parse failure)
+            if est_notional_2dp <= Decimal("0"):
+                skipped += 1
+                per_intent.append(
+                    {
+                        "intent_hash": sha,
+                        "engine_id": engine_id,
+                        "symbol": symbol,
+                        "decision": "SKIP",
+                        "reason_codes": ["LIQPOL_NOTIONAL_ZERO"],
+                        "metrics": {
+                            "nav_total_cents": nav_cents,
+                            "target_notional_pct": _decimal_str_6dp(tnp),
+                            "est_notional_usd": _decimal_str_2dp(est_notional_2dp),
+                            "close": "0.00",
+                            "est_shares": 0,
+                            "adv_shares": 0,
+                            "adv_dollar": "0.00",
+                            "participation_pct_adv": "0.000000",
+                            "est_slippage_bps": "0.00",
+                            "caps": {
+                                "max_participation_pct_adv": _decimal_str_6dp(cap_part),
+                                "max_est_slippage_bps": _decimal_str_2dp(cap_slip),
+                                "max_notional_per_symbol_usd": str(cap_notional.quantize(Decimal("1"), rounding=ROUND_DOWN)),
+                            },
+                        },
+                    }
+                )
+                continue
+
             year = int(day[0:4])
             data_path, data_sha, bars = _load_bars_for_symbol_year(symbol, year)
             if not bars:
                 if symbol in allow_missing:
-                    decision = "SKIP"
-                    rc = ["LIQPOL_MARKET_DATA_FILE_MISSING"]
                     skipped += 1
                     per_intent.append(
                         {
                             "intent_hash": sha,
                             "engine_id": engine_id,
                             "symbol": symbol,
-                            "decision": decision,
-                            "reason_codes": rc,
+                            "decision": "SKIP",
+                            "reason_codes": ["LIQPOL_MARKET_DATA_FILE_MISSING"],
                             "metrics": {
                                 "nav_total_cents": nav_cents,
                                 "target_notional_pct": _decimal_str_6dp(tnp),
@@ -543,22 +459,16 @@ def main() -> int:
             if adv_sh < min_adv:
                 raise ValueError("ADV_BELOW_MIN")
 
-            if est_notional_2dp <= Decimal("0"):
-                raise ValueError("NOTIONAL_ZERO")
-
             est_shares = int((est_notional_2dp / close).to_integral_value(rounding=ROUND_DOWN))
             part = (Decimal(est_shares) / Decimal(adv_sh)) if adv_sh > 0 else Decimal("0")
             part_6 = Decimal(_decimal_str_6dp(part))
 
-            # Slippage model (deterministic):
-            # est_slip_bps = base_bps + slope_bps_per_1pct_adv * (participation_pct_adv * 100)
             est_slip = base_bps + (slope_bps * (part * Decimal("100")))
             est_slip_2 = Decimal(_decimal_str_2dp(est_slip))
 
             rc: List[str] = []
             decision = "PASS"
 
-            # Max orders per symbol per day (v1: count intents for symbol)
             sym_count = 0
             for pth in intents:
                 try:
@@ -620,29 +530,16 @@ def main() -> int:
             raise
         except Exception as e:
             failed += 1
-            exc_name = type(e).__name__
-            exc_detail = ""
-            try:
-                if isinstance(e, ValueError) and e.args:
-                    exc_detail = str(e.args[0])
-            except Exception:
-                exc_detail = ""
-
-            rc = ["LIQPOL_INTENT_PARSE_ERROR", f"LIQPOL_EXC:{exc_name}", "LIQPOL_FAIL_CLOSED_REQUIRED"]
-            if exc_detail:
-                # keep deterministic: only include the first token up to 80 chars
-                rc.insert(2, f"LIQPOL_ERR:{exc_detail[:80]}")
-
             per_intent.append(
                 {
                     "intent_hash": sha,
                     "engine_id": engine_id,
                     "symbol": symbol,
                     "decision": "FAIL",
-                    "reason_codes": rc,
+                    "reason_codes": ["LIQPOL_INTENT_PARSE_ERROR", f"LIQPOL_EXC:{type(e).__name__}", "LIQPOL_FAIL_CLOSED_REQUIRED"],
                     "metrics": {
                         "nav_total_cents": nav_cents,
-                        "target_notional_pct": _decimal_str_6dp(tnp) if tnp != Decimal("0") else "0.000000",
+                        "target_notional_pct": _decimal_str_6dp(tnp) if isinstance(tnp, Decimal) else "0.000000",
                         "est_notional_usd": "0.00",
                         "close": "0.00",
                         "est_shares": 0,
@@ -659,12 +556,7 @@ def main() -> int:
                 }
             )
 
-    totals = {
-        "intents_total": len(per_intent),
-        "intents_failed": failed,
-        "intents_passed": passed,
-        "intents_skipped": skipped,
-    }
+    totals = {"intents_total": len(per_intent), "intents_failed": failed, "intents_passed": passed, "intents_skipped": skipped}
 
     status = "PASS" if failed == 0 else "FAIL"
     reason_codes = ["LIQPOL_PASS"] if status == "PASS" else ["LIQPOL_FAIL_CLOSED_REQUIRED"]
@@ -678,12 +570,7 @@ def main() -> int:
         "status": status,
         "reason_codes": reason_codes,
         "input_manifest": input_manifest,
-        "policy": {
-            "path": str(POLICY_PATH),
-            "sha256": pol_sha,
-            "schema_path": str(pol_schema_path),
-            "schema_sha256": pol_schema_sha,
-        },
+        "policy": {"path": str(POLICY_PATH), "sha256": pol_sha, "schema_path": str(pol_schema_path), "schema_sha256": pol_schema_sha},
         "results": {"per_intent": per_intent, "totals": totals},
         "gate_sha256": "0" * 64,
     }
