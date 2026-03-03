@@ -99,6 +99,8 @@ These canonical contracts are governance-controlled and must be explicitly liste
 - `governance/05_CONTRACTS/C2/trade_submit_readiness_c2_v1.contract.md`
 - `governance/05_CONTRACTS/C2/single_ib_account_mode_v1.contract.md`
 
+- `governance/05_CONTRACTS/ORCHESTRATION/C2_ORCHESTRATOR_V2_CONTRACT.md`
+
 
 ## Governed data schemas
 

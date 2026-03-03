@@ -1,0 +1,101 @@
+{
+  "schema_id": "C2_REPORTS_PIPELINE_MANIFEST_SCHEMA_V3",
+  "title": "C2 Pipeline Manifest V3 (Mode-Aware, Attempt-Derived)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "day_utc",
+    "mode",
+    "attempt_id",
+    "attempt_seq",
+    "produced_utc",
+    "producer",
+    "status",
+    "summary",
+    "reason_codes",
+    "inputs",
+    "stages",
+    "artifacts"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "pipeline_manifest.v3" },
+    "day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
+    "mode": { "type": "string", "enum": ["PAPER", "LIVE"] },
+    "attempt_id": { "type": "string", "minLength": 1 },
+    "attempt_seq": { "type": "integer", "minimum": 1 },
+    "produced_utc": { "type": "string", "minLength": 11 },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 7 }
+      }
+    },
+    "status": { "type": "string", "enum": ["PASS", "DEGRADED", "FAIL", "ABORTED"] },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["blocking_failures", "required_failures", "nonblocking_degradations", "stages_total"],
+      "properties": {
+        "blocking_failures": { "type": "integer", "minimum": 0 },
+        "required_failures": { "type": "integer", "minimum": 0 },
+        "nonblocking_degradations": { "type": "integer", "minimum": 0 },
+        "stages_total": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "reason_codes": { "type": "array", "items": { "type": "string" } },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256"],
+        "properties": {
+          "type": { "type": "string" },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "minLength": 64, "maxLength": 64 }
+        }
+      }
+    },
+    "stages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "stage_id",
+          "status",
+          "executed",
+          "effective_required",
+          "effective_blocking",
+          "rc",
+          "reason_codes",
+          "outputs_present"
+        ],
+        "properties": {
+          "stage_id": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "enum": ["OK", "SKIP", "FAIL"] },
+          "executed": { "type": "boolean" },
+          "effective_required": { "type": "boolean" },
+          "effective_blocking": { "type": "boolean" },
+          "rc": { "type": "integer" },
+          "reason_codes": { "type": "array", "items": { "type": "string" } },
+          "outputs_present": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempt_manifest_path", "path"],
+      "properties": {
+        "attempt_manifest_path": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

@@ -79,6 +79,40 @@ documents:
     class: C2_CONTRACT
     status: DRAFT
 
+  - id: C2_ORCHESTRATOR_V2_CONTRACT
+    path: governance/05_CONTRACTS/ORCHESTRATION/C2_ORCHESTRATOR_V2_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_ORCHESTRATOR_SYSTEMD_SINGLE_UNIT_V1
+    path: governance/05_CONTRACTS/ORCHESTRATION/C2_ORCHESTRATOR_SYSTEMD_SINGLE_UNIT_V1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_TOOL_PAPER_DAY_ORCHESTRATOR_V2
+    path: ops/tools/run_c2_paper_day_orchestrator_v2.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_PIPELINE_MANIFEST_V3_MODE_AWARE
+    path: governance/05_CONTRACTS/ORCHESTRATION/C2_PIPELINE_MANIFEST_V3_MODE_AWARE.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_TOOL_PIPELINE_MANIFEST_V2_COMPAT_FROM_ATTEMPT_V1
+    path: ops/tools/run_pipeline_manifest_v2_compat_from_attempt_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_TOOL_PIPELINE_MANIFEST_V1_COMPAT_FROM_ATTEMPT_V1
+    path: ops/tools/run_pipeline_manifest_v1_compat_from_attempt_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_REPORTS_PIPELINE_MANIFEST_SCHEMA_V3
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/pipeline_manifest.v3.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TOOL_PIPELINE_MANIFEST_V3_MODE_AWARE
+    path: ops/tools/run_pipeline_manifest_v3_mode_aware.py
+    class: C2_TOOL
+    status: ACTIVE
   # Governed C2 contracts (canonical definitions; runtime code and docs must conform)
   - id: C2_DRAWDOWN_CONVENTION_V1
     path: governance/05_CONTRACTS/C2/drawdown_convention_v1.contract.md
