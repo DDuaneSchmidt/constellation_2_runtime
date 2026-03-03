@@ -70,10 +70,7 @@ documents:
     path: governance/05_CONTRACTS/C2/single_final_verdict_consumption_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
-  - id: C2_ENGINE_SYMBOL_UNIVERSE_CONTRACT_V1
-    path: governance/05_CONTRACTS/C2/engine_symbol_universe_v1.contract.md
-    class: C2_CONTRACT
-    status: DRAFT
+
   - id: C2_ATTEMPT_SCOPED_WRITE_POLICY_WITH_CANONICAL_POINTERS_V3
     path: governance/05_CONTRACTS/C2/C2_ATTEMPT_SCOPED_WRITE_POLICY_WITH_CANONICAL_POINTERS_V3.contract.md
     class: C2_CONTRACT

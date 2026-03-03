@@ -20,13 +20,6 @@ REDESIGN (registry-gated activation only):
     H_INTENT_SIMULATOR_V1 → A1_CAPAUTH_ALLOCATION_V1 → A1_AUTHORIZATION_ARTIFACTS_V1 → PHASED_DRY_SUBMIT_PROOF_V1
   even if systemic risk gates fail (this is structural validation, not production authority).
 - Production authority semantics remain unchanged (ok_authoritative uses PASS/PASS/INACTIVE).
-
-ENGINE SYMBOL UNIVERSE ENFORCEMENT (v1):
-- Each engine entry MUST include allowed_symbols (null or list[str]).
-- Orchestrator enforces: for run_symbol, only engines with allowed_symbols==null or containing run_symbol are eligible.
-- Unexpected types / missing allowed_symbols => FAIL-CLOSED.
-- Deterministic skip logging:
-  SKIP_ENGINE_SYMBOL_UNIVERSE engine_id=<...> symbol=<...> allowed_symbols=<...>
 """
 
 from __future__ import annotations
@@ -200,45 +193,11 @@ def _stage_name_for_heartbeat(engine_id: str) -> str:
     return f"HB_{s}"
 
 
-def _build_allowed_symbols_map_fail_closed(reg: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Contract enforcement:
-    - Every engine entry MUST include allowed_symbols.
-    - allowed_symbols must be null or list[str].
-    Returns: map engine_id -> None or list[str] (normalized uppercase, stripped).
-    """
-    engines = reg.get("engines") or []
-    if not isinstance(engines, list):
-        raise SystemExit("FATAL: registry engines not list (cannot validate allowed_symbols)")
-
-    allowed_map: Dict[str, Any] = {}
-    for e in engines:
-        if not isinstance(e, dict):
-            raise SystemExit("FATAL: engine entry not object (cannot validate allowed_symbols)")
-
-        engine_id = str(e.get("engine_id") or "").strip()
-        if not engine_id:
-            raise SystemExit("FATAL: engine entry missing engine_id (cannot validate allowed_symbols)")
-
-        if "allowed_symbols" not in e:
-            raise SystemExit(f"FATAL: engine_id={engine_id} missing required field allowed_symbols")
-
-        allowed = e.get("allowed_symbols", None)
-        if allowed is None:
-            allowed_map[engine_id] = None
-            continue
-
-        if isinstance(allowed, list) and all(isinstance(x, str) for x in allowed):
-            allowed_norm = [x.strip().upper() for x in allowed]
-            # Preserve order deterministically but remove empty strings fail-closed
-            if any(not s for s in allowed_norm):
-                raise SystemExit(f"FATAL: engine_id={engine_id} has empty symbol in allowed_symbols={allowed!r}")
-            allowed_map[engine_id] = allowed_norm
-            continue
-
-        raise SystemExit(f"FATAL: engine_id={engine_id} has invalid allowed_symbols type/value: {repr(allowed)}")
-
-    return allowed_map
+def _is_simulator_active(active_engines: List[Dict[str, str]]) -> bool:
+    for e in active_engines:
+        if str(e.get("engine_id") or "").strip() == "C2_INTENT_SIMULATOR_V1":
+            return True
+    return False
 
 
 def main() -> int:
@@ -265,17 +224,10 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    run_symbol = getattr(args, "symbol", None)
-    if not run_symbol or not isinstance(run_symbol, str):
-        raise SystemExit("FAIL: --symbol is required and must be a string")
-    run_symbol = run_symbol.strip().upper()
-    if not run_symbol:
-        raise SystemExit("FAIL: --symbol resolved to empty string")
-
     day = args.day_utc.strip()
     input_day = (args.input_day_utc or "").strip() or day
     mode = args.mode.strip().upper()
-    symbol = run_symbol  # single source of truth
+    symbol = str(args.symbol).strip().upper()
     ib_account = str(args.ib_account).strip()
     truth_root = _resolve_truth_root(str(args.truth_root))
     produced_utc = _validate_produced_utc(str(args.produced_utc))
@@ -335,47 +287,16 @@ def main() -> int:
     _run_stage_strict("X_ACTIVE_ENGINE_SET_SNAPSHOT_V1", ["python3", "ops/tools/run_active_engine_set_snapshot_v1.py", "--day_utc", day, "--current_git_sha", current_git_sha], env=stage_env)
 
     reg = _read_engine_registry()
-    # FAIL-CLOSED: validate allowed_symbols for ALL engine entries (not just ACTIVE).
-    allowed_map = _build_allowed_symbols_map_fail_closed(reg)
-
     active_engines = _active_engines_sorted(reg)
     registry_sha = _sha256_file(REG_PATH)
 
-    # Simulator eligibility: ACTIVE + allowed_symbols permit run_symbol
-    sim_active = False
-    if any(e.get("engine_id") == "C2_INTENT_SIMULATOR_V1" for e in active_engines):
-        sim_allowed = allowed_map.get("C2_INTENT_SIMULATOR_V1", None)
-        if (sim_allowed is None) or (isinstance(sim_allowed, list) and (run_symbol in sim_allowed)):
-            sim_active = True
-        else:
-            print(
-                "SKIP_ENGINE_SYMBOL_UNIVERSE "
-                f"engine_id=C2_INTENT_SIMULATOR_V1 symbol={run_symbol} allowed_symbols={sim_allowed}"
-            )
-            sim_active = False
+    sim_active = _is_simulator_active(active_engines)
 
     for e in active_engines:
-        engine_id = e["engine_id"]
-
-        if engine_id == "C2_INTENT_SIMULATOR_V1":
-            # Simulator is run in special structural chain (if eligible); do not run via generic loop.
+        if e["engine_id"] == "C2_INTENT_SIMULATOR_V1":
             continue
 
-        allowed = allowed_map.get(engine_id, None)
-        if allowed is None:
-            pass
-        elif isinstance(allowed, list):
-            if run_symbol not in allowed:
-                print(
-                    "SKIP_ENGINE_SYMBOL_UNIVERSE "
-                    f"engine_id={engine_id} symbol={run_symbol} allowed_symbols={allowed}"
-                )
-                continue
-        else:
-            # Should be unreachable due to earlier fail-closed validation.
-            raise SystemExit(f"FATAL: engine_id={engine_id} invalid allowed_symbols internal_state={repr(allowed)}")
-
-        stage_name = _stage_name_for_engine(engine_id)
+        stage_name = _stage_name_for_engine(e["engine_id"])
         module = str(e["runner_path"])
 
         ok, _rc = _run_stage_soft(stage_name, ["python3", "-m", module, "--day_utc", day, "--mode", mode, "--symbol", symbol], env=stage_env)
@@ -385,14 +306,14 @@ def main() -> int:
         hb_status = "OK" if ok else "FAIL"
         hb_reason = "ENGINE_RUN_OK" if ok else "ENGINE_RUN_FAIL"
 
-        hb_stage = _stage_name_for_heartbeat(engine_id)
+        hb_stage = _stage_name_for_heartbeat(e["engine_id"])
         _run_stage_strict(
             hb_stage,
             [
                 "python3",
                 "ops/tools/run_engine_heartbeat_emit_v1.py",
                 "--day_utc", day,
-                "--engine_id", engine_id,
+                "--engine_id", e["engine_id"],
                 "--status", hb_status,
                 "--reason_code", hb_reason,
                 "--last_run_utc", produced_utc,

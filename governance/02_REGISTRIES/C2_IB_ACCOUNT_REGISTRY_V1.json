@@ -25,9 +25,9 @@
         "SPY"
       ],
       "notes": [
-        "Primary PAPER account.",
-        "Restricted to SPY only via allowed_symbols.",
-        "Enabled for submission."
+        "Discovered from C2 truth: cash_ledger_v1 snapshots embed account_id=DUO847203.",
+        "Policy: DUO847203 is restricted to SPY only via allowed_symbols=[SPY].",
+        "enabled_for_submission=true; allowed_engine_ids enumerates the currently ACTIVE engines in ENGINE_MODEL_REGISTRY_V1."
       ]
     },
     {
@@ -41,18 +41,11 @@
         "C2_EVENT_DISLOCATION_V1",
         "C2_DEFENSIVE_TAIL_V1"
       ],
-      "allowed_symbols": [
-        "SPY",
-        "QQQ",
-        "IWM",
-        "TLT",
-        "GLD",
-        "HYG"
-      ],
+      "allowed_symbols": null,
       "notes": [
-        "Secondary PAPER account.",
-        "Explicitly restricted to: SPY, QQQ, IWM, TLT, GLD, HYG.",
-        "Enabled for submission."
+        "Proven in C2 truth via execution_evidence_v1/broker_baseline_snapshot_v1 (account_id=DUQ154892).",
+        "Policy: DUQ154892 may trade multiple symbols; allowed_symbols=null means no symbol restriction from the registry.",
+        "enabled_for_submission=true; allowed_engine_ids enumerates the currently ACTIVE engines in ENGINE_MODEL_REGISTRY_V1."
       ]
     }
   ]
