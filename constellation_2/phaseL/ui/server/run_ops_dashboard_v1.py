@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from constellation_2.phaseL.ui.server.c3_ui_status_collector_v1 import build_c3_ui_status
-
+from constellation_2.phaseL.ui.server.c2_ops_cockpit_status_v2_collector_v1 import build_status_v2, discover_attempts
 # --------------------------
 # Error codes (audit-safe)
 # --------------------------
@@ -61,6 +61,7 @@ THIS_FILE = Path(__file__).resolve()
 REPO_ROOT = THIS_FILE.parents[4]
 TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
+
 # Canonical surfaces (as proven on disk)
 SUBMISSIONS_ROOT = (TRUTH_ROOT / "execution_evidence_v1" / "submissions").resolve()
 INTENTS_ROOT = (TRUTH_ROOT / "intents_v1" / "snapshots").resolve()
@@ -79,6 +80,13 @@ INTENTS_SUMMARY_ROOT = (TRUTH_ROOT / "monitoring_v1" / "intents_summary_v1").res
 SUBMISSIONS_SUMMARY_ROOT = (TRUTH_ROOT / "monitoring_v1" / "submissions_summary_v1").resolve()
 ACTIVITY_ROLLUP_ROOT = (TRUTH_ROOT / "monitoring_v1" / "activity_ledger_rollup_v1").resolve()
 
+# Instance config (service provides path via env; fail-closed if missing)
+def _instance_config_path() -> Path:
+    # C2_INSTANCE_CONFIG is set by systemd unit; if absent, use a non-existent sentinel to surface MISSING deterministically.
+    import os
+    raw = os.environ.get("C2_INSTANCE_CONFIG") or ""
+    p = Path(raw) if raw else (REPO_ROOT / "__MISSING_INSTANCE_CONFIG__").resolve()
+    return p.resolve()
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -998,6 +1006,44 @@ class OpsHandler(SimpleHTTPRequestHandler):
             self._send_json(HTTPStatus.OK, build_c3_ui_status(TRUTH_ROOT))
             return True
 
+        if path == "/api/attempts":
+            raw_day = (qs.get("day") or [None])[0]
+            day = raw_day if isinstance(raw_day, str) and raw_day and _is_day_str(raw_day) else _select_latest_day(_union_days())
+            if not day:
+                self._send_json(HTTPStatus.OK, {"ok": False, "errors": ["DAY_NOT_RESOLVED"], "attempts": []})
+                return True
+            attempts, missing, source_paths, source_mtimes, warnings = discover_attempts(TRUTH_ROOT, day)
+            self._send_json(HTTPStatus.OK, {
+                "ok": True,
+                "generated_utc": _utc_now_iso(),
+                "day_utc": day,
+                "attempts": attempts,
+                "warnings": warnings,
+                "missing_paths": missing,
+                "source_paths": source_paths,
+                "source_mtimes": source_mtimes,
+            })
+            return True
+
+        if path == "/api/status_v2":
+            # Consolidated payload for Ops Cockpit UI V2.
+            raw_day = (qs.get("day") or [None])[0]
+            day = raw_day if isinstance(raw_day, str) and raw_day and _is_day_str(raw_day) else _select_latest_day(_union_days())
+            if not day:
+                self._send_json(HTTPStatus.OK, {"ok": False, "errors": ["DAY_NOT_RESOLVED"]})
+                return True
+            raw_attempt = (qs.get("attempt_id") or [None])[0]
+            attempt_id = raw_attempt if isinstance(raw_attempt, str) and raw_attempt else None
+
+            # C3 status used only as an informational truth-derived surface for some gate tiles.
+            c3 = build_c3_ui_status(TRUTH_ROOT)
+            inst = _instance_config_path()
+
+            payload = build_status_v2(TRUTH_ROOT, inst, day, attempt_id, c3)
+            payload["ok"] = True
+            payload["errors"] = []
+            self._send_json(HTTPStatus.OK, payload)
+            return True
         if path.startswith("/api/day/"):
             parts = path.strip("/").split("/")
             if len(parts) != 4:

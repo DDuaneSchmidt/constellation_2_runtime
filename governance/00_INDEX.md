@@ -213,3 +213,7 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/05_CONTRACTS/C3/c3_ui_status_contract_v1.contract.md`
 - `governance/05_CONTRACTS/C2/operator_future_day_override_v1.contract.md`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/operator_future_day_override.v1.schema.json`
+- `governance/05_CONTRACTS/C2/economic_truth_spine_v1.contract.md`
+- `governance/05_CONTRACTS/C2/nav_v2_conditional_inputs_v1.contract.md`
+- `governance/05_CONTRACTS/C2/orchestrator_abort_policy_v1.contract.md`
+- `governance/05_CONTRACTS/C2/baseline_readiness_v1.contract.md`

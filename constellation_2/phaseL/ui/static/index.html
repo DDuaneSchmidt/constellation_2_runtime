@@ -3,162 +3,148 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Constellation 2.0 — Ops Dashboard (Read-Only)</title>
+  <title>Constellation 2.0 — Ops Cockpit UI V2 (Read-Only)</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <div class="title">Constellation 2.0 — Ops Dashboard</div>
-      <div class="subtitle">Read-only • Deterministic • Fail-closed</div>
+      <div class="title">C2 Ops Cockpit UI V2</div>
+      <div class="subtitle">Read-only • Deterministic • Orchestrator V2 aware</div>
     </div>
-    <div class="controls">
-      <label class="control">
-        <span>Refresh</span>
-        <select id="refreshSelect">
-          <option value="60">60s</option>
+
+    <div class="top-controls">
+      <div class="ctrl">
+        <div class="ctrl-label">Refresh</div>
+        <select id="refreshSelect" class="ctrl-input">
+          <option value="15">15s</option>
+          <option value="60" selected>60s</option>
           <option value="300">300s</option>
         </select>
-      </label>
-      <label class="control">
-        <span>Day (UTC)</span>
-        <select id="daySelect"></select>
-      </label>
-      <button id="btnToday" class="btn">Today</button>
-      <button id="btnHistory" class="btn">By Day</button>
-      <button id="btnCharts" class="btn">Charts</button>
+      </div>
+
+      <div class="ctrl">
+        <div class="ctrl-label">Day (UTC)</div>
+        <select id="daySelect" class="ctrl-input"></select>
+      </div>
+
+      <div class="ctrl">
+        <div class="ctrl-label">Attempt</div>
+        <select id="attemptSelect" class="ctrl-input"></select>
+      </div>
+
+      <button id="btnLatest" class="btn">Latest</button>
     </div>
   </header>
 
+  <nav class="tabs">
+    <button class="tab active" id="tabOperations">Operations</button>
+    <button class="tab" id="tabEngines">Engines</button>
+    <button class="tab" id="tabPortfolio">Portfolio</button>
+    <button class="tab" id="tabHistory">History</button>
+    <button class="tab" id="tabTechnical">Technical</button>
+
+    <div class="tabs-right">
+      <div id="lastRefresh" class="mono tiny muted"></div>
+      <div id="whatChangedBadge" class="badge badge-warn hidden"></div>
+    </div>
+  </nav>
+
   <main class="main">
-    <section id="banners" class="banners"></section>
+    <!-- OPERATIONS -->
+    <section id="viewOperations" class="view">
+      <div class="ops-grid">
+        <div class="tile-grid" id="tileGrid"></div>
 
-    <section id="viewToday" class="view">
-      <h2>Today / Day Ops</h2>
-
-      <div class="card">
-        <h3>C3 Status (Authoritative)</h3>
-        <div id="c3StatusMeta" class="mono small"></div>
-
-        <div class="grid2" style="margin-top:10px;">
-          <div>
-            <div class="mono small muted">Verdict</div>
-            <div id="c3Verdict"></div>
-          </div>
-          <div>
-            <div class="mono small muted">Broker Reconciliation</div>
-            <div id="c3Broker"></div>
-          </div>
-          <div>
-            <div class="mono small muted">Market Data</div>
-            <div id="c3Market"></div>
-          </div>
-          <div>
-            <div class="mono small muted">Overall</div>
-            <div id="c3Overall"></div>
+        <div class="ops-row2">
+          <div class="strip card" id="sleeveStrip"></div>
+          <div class="funnel card">
+            <div class="card-head">
+              <div class="card-title">Trade Flow Funnel (Today)</div>
+            </div>
+            <div id="funnelRow" class="funnel-row"></div>
+            <div id="blockedRow" class="blocked-row"></div>
           </div>
         </div>
 
-        <div style="margin-top:12px;">
-          <div class="mono small muted">Gates (Top)</div>
-          <div id="c3Gates"></div>
+        <div class="changed card">
+          <div class="card-head">
+            <div class="card-title">What changed</div>
+            <div class="mono tiny muted" id="whatChangedHash"></div>
+          </div>
+          <div id="whatChangedList" class="changed-list"></div>
         </div>
-
-        <div style="margin-top:12px;">
-          <div class="mono small muted">Broker Mismatches (Top)</div>
-          <div id="c3Mismatches"></div>
-        </div>
-
-        <div style="margin-top:12px;">
-          <div class="mono small muted">Components (Derived from monitoring_*)</div>
-          <div id="c3Components"></div>
-        </div>
-      </div>
-
-      <div class="grid2">
-        <div class="card">
-          <h3>Summary</h3>
-          <div id="summaryMeta" class="mono small"></div>
-          <div id="summaryCounts"></div>
-        </div>
-
-        <div class="card">
-          <h3>By Engine</h3>
-          <div id="byEngine"></div>
-          <div class="small mono muted" id="engineJoinNote"></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>Activity Monitor (Authoritative)</h3>
-        <div id="activityMeta" class="mono small"></div>
-        <div id="activityCounts"></div>
-        <div id="activityLinks" class="mono small" style="margin-top:8px;"></div>
-      </div>
-
-      <div class="card">
-        <h3>Planned Actions (Order Plan)</h3>
-        <div id="planTable"></div>
-      </div>
-
-      <div class="card">
-        <h3>Submissions + Execution Events</h3>
-        <div id="submissionsTable"></div>
       </div>
     </section>
 
-    <section id="viewHistory" class="view hidden">
-      <h2>By Day History</h2>
-      <div class="card">
-        <div id="historyTable"></div>
-      </div>
+    <!-- ENGINES -->
+    <section id="viewEngines" class="view hidden">
+      <div class="engine-grid" id="engineGrid"></div>
     </section>
 
-    <section id="viewCharts" class="view hidden">
-      <h2>Charts</h2>
-      <div class="grid2">
+    <!-- PORTFOLIO -->
+    <section id="viewPortfolio" class="view hidden">
+      <div class="portfolio-top card">
+        <div class="card-head">
+          <div class="card-title">Portfolio Summary</div>
+          <div id="portfolioAsOf" class="mono tiny muted"></div>
+        </div>
+        <div class="metrics-row" id="portfolioMetrics"></div>
+        <div id="portfolioNote" class="mono tiny muted" style="margin-top:8px;"></div>
+      </div>
+
+      <div class="grid2" style="margin-top:12px;">
         <div class="card">
-          <h3>Daily NAV (last N days)</h3>
+          <div class="card-head"><div class="card-title">Equity Curve (NAV)</div></div>
           <div class="row">
-            <label class="control">
-              <span>N</span>
-              <input id="navDays" type="number" min="5" max="365" value="60" />
-            </label>
+            <div class="ctrl">
+              <div class="ctrl-label">Days</div>
+              <input id="navDays" type="number" min="5" max="365" value="60" class="ctrl-input" />
+            </div>
             <button id="btnReloadCharts" class="btn">Reload</button>
           </div>
           <div id="chartDailyNav"></div>
         </div>
-
         <div class="card">
-          <h3>Cumulative (derived from daily NAV)</h3>
-          <div id="chartCumulative"></div>
+          <div class="card-head"><div class="card-title">Exposure / PnL (available truth only)</div></div>
+          <div id="chartExposureStub" class="mono small muted">Charts shown only when data is available via canonical truth.</div>
         </div>
-      </div>
-      <div class="small mono muted">
-        Charts are derived only from canonical truth artifacts returned by <span class="mono">/api/series/nav</span>.
       </div>
     </section>
 
-    <footer class="footer mono small muted">
-      <div id="footerProvenance"></div>
-    </footer>
-  </main>
-
-  <!-- Evidence modal -->
-  <div id="evidenceModal" class="modal hidden">
-    <div id="evidenceBackdrop" class="modal-backdrop"></div>
-    <div class="modal-card">
-      <div class="modal-head">
-        <div>
-          <div id="evidenceTitle" class="mono"></div>
-          <div id="evidencePath" class="mono small muted"></div>
-        </div>
-        <button id="btnEvidenceClose" class="btn btn-mini">Close</button>
+    <!-- HISTORY -->
+    <section id="viewHistory" class="view hidden">
+      <div class="card">
+        <div class="card-head"><div class="card-title">Attempts (Day)</div></div>
+        <div id="historyAttempts" class="mono small"></div>
       </div>
-      <div id="evidenceErrors"></div>
-      <pre id="evidenceBody" class="modal-body"></pre>
+    </section>
+
+    <!-- TECHNICAL -->
+    <section id="viewTechnical" class="view hidden">
+      <div class="card">
+        <div class="card-head"><div class="card-title">Technical (collapsed details)</div></div>
+        <div id="techSummary" class="mono small"></div>
+        <div id="techPaths" class="mono tiny muted" style="margin-top:10px;"></div>
+      </div>
+    </section>
+
+    <!-- Evidence modal (raw JSON only via modal) -->
+    <div id="evidenceModal" class="modal hidden">
+      <div id="evidenceBackdrop" class="modal-backdrop"></div>
+      <div class="modal-card">
+        <div class="modal-head">
+          <div>
+            <div id="evidenceTitle" class="mono"></div>
+            <div id="evidencePath" class="mono tiny muted"></div>
+          </div>
+          <button id="btnEvidenceClose" class="btn btn-mini">Close</button>
+        </div>
+        <div id="evidenceErrors" class="mono tiny"></div>
+        <pre id="evidenceBody" class="modal-body"></pre>
+      </div>
     </div>
-  </div>
+  </main>
 
   <script src="/app.js"></script>
 </body>

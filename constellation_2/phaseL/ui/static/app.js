@@ -3,26 +3,15 @@
 const el = (id) => document.getElementById(id);
 
 const state = {
-  view: "today",
+  view: "operations",
   refreshSec: 60,
   timer: null,
   days: [],
   day: null,
-  c3Status: null,
-  missingExpanded: false,
-  evidence: { title: "", path: "", content: "", ok: false, errors: [] },
+  attempts: [],
+  attempt_id: null,
+  statusV2: null,
 };
-
-function fmtMtimeSecToIso(mtimeSec) {
-  if (mtimeSec == null) return "n/a";
-  const ms = Math.floor(mtimeSec * 1000);
-  const d = new Date(ms);
-  return d.toISOString();
-}
-
-function uniq(arr) {
-  return Array.from(new Set(arr || []));
-}
 
 async function api(path) {
   const r = await fetch(path, { cache: "no-store" });
@@ -31,37 +20,336 @@ async function api(path) {
 
 function setView(v) {
   state.view = v;
-  el("viewToday").classList.toggle("hidden", v !== "today");
+  el("viewOperations").classList.toggle("hidden", v !== "operations");
+  el("viewEngines").classList.toggle("hidden", v !== "engines");
+  el("viewPortfolio").classList.toggle("hidden", v !== "portfolio");
   el("viewHistory").classList.toggle("hidden", v !== "history");
-  el("viewCharts").classList.toggle("hidden", v !== "charts");
+  el("viewTechnical").classList.toggle("hidden", v !== "technical");
+
+  const tabs = [
+    ["tabOperations", "operations"],
+    ["tabEngines", "engines"],
+    ["tabPortfolio", "portfolio"],
+    ["tabHistory", "history"],
+    ["tabTechnical", "technical"],
+  ];
+  tabs.forEach(([id, vv]) => el(id).classList.toggle("active", vv === v));
 }
 
-function table(headers, rows) {
-  const h = headers.map(x => `<th>${x}</th>`).join("");
-  const b = rows.map(r => `<tr>${r.map(x => `<td>${x}</td>`).join("")}</tr>`).join("");
-  return `<table class="table"><thead><tr>${h}</tr></thead><tbody>${b}</tbody></table>`;
+function fmt(v) {
+  if (v === null || v === undefined) return "n/a";
+  if (typeof v === "number") {
+    // compact
+    if (Math.abs(v) >= 1000000) return v.toFixed(0);
+    if (Math.abs(v) >= 1000) return v.toFixed(2);
+    return v.toFixed(2);
+  }
+  return String(v);
 }
 
-function badge(text, kind) {
-  const k = kind || "warn";
-  return `<span class="badge ${k}">${text}</span>`;
+function stateClass(st) {
+  const u = String(st || "UNKNOWN").toUpperCase();
+  if (u === "PASS") return "state-pass";
+  if (u === "DEGRADED") return "state-degraded";
+  if (u === "FAIL") return "state-fail";
+  if (u === "ABORTED") return "state-aborted";
+  if (u === "MISSING") return "state-missing";
+  return "state-unknown";
 }
 
-function badgeForState(st) {
-  if (st === "PASS" || st === "OK" || st === "PRESENT") return badge(st, "ok");
-  if (st === "FAIL" || st === "MISSING") return badge(st, "err");
-  if (st === "DEGRADED" || st === "UNKNOWN") return badge(st, "warn");
-  return badge(st ?? "n/a", "warn");
+function modeClass(mode, flattenOnly) {
+  const m = String(mode || "UNKNOWN").toUpperCase();
+  if (flattenOnly === true) return "mode-flatten";
+  if (m === "PAPER") return "mode-paper";
+  if (m === "LIVE") return "mode-live";
+  if (m === "DISABLED") return "mode-disabled";
+  return "mode-disabled";
 }
 
-function openEvidence(title, path, content, ok, errors) {
-  state.evidence = { title, path, content, ok, errors: errors || [] };
+function renderTiles(payload) {
+  const tiles = (payload?.ops_health?.tiles || []);
+  const grid = el("tileGrid");
+  grid.innerHTML = "";
+
+  const titleMap = {
+    "orchestrator_run_verdict_v2": "Orchestrator Run Verdict (V2)",
+    "safety_breach": "Safety Breach / Hard Gate",
+    "broker_connection_observer": "Broker Connection / Observer",
+    "feed_attestation": "Feed Attestation",
+    "liquidity_gate": "Liquidity Gate",
+    "correlation_gate": "Correlation Gate",
+    "convex_gate": "Convex Gate",
+    "replay_certification": "Replay Certification",
+    "gate_stack_verdict_v1": "Gate Stack Verdict",
+  };
+
+  tiles.forEach(t => {
+    const st = String(t.state || "UNKNOWN").toUpperCase();
+    const stop = (st === "ABORTED");
+    const last = t.last_updated_utc || "n/a";
+    const rc = (t.reason_codes || []).slice(0,2).join(", ") || "n/a";
+    const path = t.artifact_ref?.path;
+
+    const human = (st === "PASS") ? "COMPLETED — PASS"
+      : (st === "DEGRADED") ? "COMPLETED — DEGRADED"
+      : (st === "FAIL") ? "RUN COMPLETED — FAIL"
+      : (st === "ABORTED") ? "SAFETY BREACH — STOP"
+      : st;
+
+    const open = path ? `<button class="btn btn-mini" data-open="${encodeURIComponent(path)}" data-title="${t.tile_id}">Evidence</button>` : "";
+
+    const div = document.createElement("div");
+    div.className = `tile ${stop ? "stop" : ""}`;
+    div.innerHTML = `
+      <div class="tile-head">
+        <div class="tile-title">${titleMap[t.tile_id] || t.tile_id}</div>
+        <div>${open}</div>
+      </div>
+      <div class="tile-state ${stateClass(st)}">${human}</div>
+      <div class="tile-meta">
+        <div class="mono tiny muted">updated=${last}</div>
+        <div class="mono tiny muted">reason=${rc}</div>
+      </div>
+    `;
+    grid.appendChild(div);
+  });
+
+  document.querySelectorAll("[data-open]").forEach(b => {
+    b.onclick = async () => {
+      const p = decodeURIComponent(b.getAttribute("data-open") || "");
+      const title = b.getAttribute("data-title") || "evidence";
+      await openEvidence(title, p);
+    };
+  });
+}
+
+function renderSleeveStrip(payload) {
+  const sleeves = (payload?.sleeves || []);
+  const container = el("sleeveStrip");
+  container.innerHTML = `
+    <div class="card-head">
+      <div class="card-title">Sleeve Mode Strip (PAPER/LIVE per sleeve)</div>
+      <div class="mono tiny muted">IB account shown per sleeve</div>
+    </div>
+    <div class="strip-row" id="stripRow"></div>
+  `;
+  const row = document.getElementById("stripRow");
+  sleeves.forEach(s => {
+    const mode = s.mode || "UNKNOWN";
+    const acct = s.ib_account_id || "n/a";
+    const ea = (s.entries_allowed === true) ? "ENTRIES: YES"
+      : (s.entries_allowed === false) ? "ENTRIES: NO"
+      : "ENTRIES: UNKNOWN";
+    const fl = (s.flatten_only === true) ? "FLATTEN_ONLY" : "";
+    const pill = document.createElement("div");
+    pill.className = "sleeve-pill";
+    pill.innerHTML = `
+      <span class="mono">${s.sleeve_id}</span>
+      <span class="${modeClass(mode, s.flatten_only)} mono">${String(mode).toUpperCase()}</span>
+      <span class="mono tiny muted">${acct}</span>
+      <span class="mono tiny muted">${ea}</span>
+      ${fl ? `<span class="mono tiny muted">${fl}</span>` : ""}
+    `;
+    row.appendChild(pill);
+  });
+}
+
+function renderFunnel(payload) {
+  const c = payload?.trade_flow_today?.counts || {};
+  const b = payload?.trade_flow_today?.blocked_by_gate || {};
+
+  const steps = [
+    ["Intents", c.intents],
+    ["Authorized", c.authorized],
+    ["Submitted", c.submitted],
+    ["Filled", c.filled],
+    ["Reconciled", c.reconciled],
+  ];
+
+  el("funnelRow").innerHTML = steps.map(([k,v]) => `
+    <div class="funnel-step">
+      <div class="k">${k}</div>
+      <div class="v">${v === null || v === undefined ? "n/a" : v}</div>
+    </div>
+  `).join("");
+
+  const blocked = [
+    ["Liquidity", b.liquidity],
+    ["Correlation", b.correlation],
+    ["Attestation", b.attestation],
+    ["Convex", b.convex],
+    ["Capital", b.capital],
+  ];
+  el("blockedRow").innerHTML = blocked.map(([k,v]) =>
+    `<div class="blocked-pill">${k}: ${v === null || v === undefined ? "n/a" : v}</div>`
+  ).join("");
+}
+
+function renderWhatChanged(payload) {
+  const diffs = payload?.meta?.what_changed?.diff_from_prev_poll || [];
+  const hash = payload?.meta?.what_changed?.key_fields_sha256 || "n/a";
+
+  el("whatChangedHash").textContent = `key_fields_sha256=${hash}`;
+  el("whatChangedList").innerHTML = diffs.map(d =>
+    `<div class="changed-item"><span class="code">${d.code}</span> — ${d.summary}</div>`
+  ).join("");
+
+  // badge count (excluding NO_CHANGE)
+  const actionable = diffs.filter(d => d.code !== "NO_CHANGE" && d.code !== "FIRST_LOAD").length;
+  const badge = el("whatChangedBadge");
+  if (actionable > 0) {
+    badge.classList.remove("hidden");
+    badge.textContent = `Δ ${actionable}`;
+  } else {
+    badge.classList.add("hidden");
+    badge.textContent = "";
+  }
+}
+
+function renderEngines(payload) {
+  const engines = (payload?.engines || []);
+  const grid = el("engineGrid");
+  grid.innerHTML = "";
+
+  engines.forEach(e => {
+    const mode = e.mode || "UNKNOWN";
+    const acct = e.ib_account_id || "n/a";
+    const ea = (e.entries_allowed === true) ? "YES" : (e.entries_allowed === false) ? "NO" : "UNKNOWN";
+    const fl = (e.flatten_only === true) ? "FLATTEN_ONLY" : "";
+    const st = e.status || "UNKNOWN";
+
+    const card = document.createElement("div");
+    card.className = "engine-card";
+    card.innerHTML = `
+      <div class="engine-head">
+        <div>
+          <div class="engine-title">${e.engine_name} <span class="mono tiny muted">${e.engine_id}</span></div>
+          <div class="engine-sub">
+            <span class="${modeClass(mode, e.flatten_only)} mono">${String(mode).toUpperCase()}</span>
+            <span class="mono tiny muted">acct=${acct}</span>
+            <span class="mono tiny muted">entries=${ea}</span>
+            ${fl ? `<span class="mono tiny muted">${fl}</span>` : ""}
+          </div>
+        </div>
+        <div class="engine-status ${stateClass(st)}">${st}</div>
+      </div>
+
+      <div class="engine-body">
+        <div class="kv"><div class="k">Intents today</div><div class="v">${e.today?.intents ?? "n/a"}</div></div>
+        <div class="kv"><div class="k">Authorized today</div><div class="v">${e.today?.authorized ?? "n/a"}</div></div>
+        <div class="kv"><div class="k">Submitted today</div><div class="v">${e.today?.submitted ?? "n/a"}</div></div>
+        <div class="kv"><div class="k">Filled today</div><div class="v">${e.today?.filled ?? "n/a"}</div></div>
+
+        <div class="kv"><div class="k">Open positions</div><div class="v">${e.positions?.open_count ?? "n/a"}</div></div>
+        <div class="kv"><div class="k">Exposure net/gross</div><div class="v">${e.exposure?.net_pct ?? "n/a"} / ${e.exposure?.gross_pct ?? "n/a"}</div></div>
+
+        <div class="kv"><div class="k">PnL today</div><div class="v">${e.pnl?.today ?? "n/a"}</div></div>
+        <div class="kv"><div class="k">PnL cumulative</div><div class="v">${e.pnl?.cumulative ?? "n/a"}</div></div>
+
+        <div class="kv"><div class="k">Applied Risk base%</div><div class="v">${e.applied_risk?.base_risk_pct ?? "n/a"}</div></div>
+        <div class="kv"><div class="k">Vol-adjusted weight</div><div class="v">${e.applied_risk?.vol_adjusted_weight ?? "n/a"}</div></div>
+        <div class="kv"><div class="k">Liquidity scalar</div><div class="v">${e.applied_risk?.liquidity_scalar ?? "n/a"}</div></div>
+        <div class="kv"><div class="k">Correlation scalar</div><div class="v">${e.applied_risk?.correlation_scalar ?? "n/a"}</div></div>
+        <div class="kv"><div class="k">Convex scalar</div><div class="v">${e.applied_risk?.convex_scalar ?? "n/a"}</div></div>
+        <div class="kv"><div class="k">Final authorized weight/cap</div><div class="v">${e.applied_risk?.final_authorized_weight ?? "n/a"}</div></div>
+        <div class="kv"><div class="k">Cash authority cap</div><div class="v">${e.applied_risk?.cash_authority_cap ?? "n/a"}</div></div>
+
+        <details class="accordion">
+          <summary>Details</summary>
+          <pre>${JSON.stringify(e.details_collapsed || {}, null, 2)}</pre>
+        </details>
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+function renderPortfolio(payload) {
+  const p = payload?.portfolio || {};
+  el("portfolioAsOf").textContent = p.asof_utc ? `asof=${p.asof_utc}` : "";
+  const note = p.note_if_missing || "";
+  el("portfolioNote").textContent = note;
+
+  const items = [
+    ["NAV total", p.nav_total],
+    ["PnL today", p.pnl_today],
+    ["PnL cumulative", p.pnl_cumulative],
+    ["Drawdown %", p.drawdown_pct],
+    ["Cash %", p.cash_pct],
+    ["Net exposure %", p.net_exposure_pct],
+    ["Gross exposure %", p.gross_exposure_pct],
+    ["NAV artifact", p.nav_path || "n/a"],
+  ];
+
+  el("portfolioMetrics").innerHTML = items.map(([k,v]) => `
+    <div class="metric">
+      <div class="k">${k}</div>
+      <div class="v">${fmt(v)}</div>
+    </div>
+  `).join("");
+}
+
+function renderHistory(payload) {
+  const day = payload?.meta?.selected_day || "n/a";
+  const attempts = payload?.meta?.attempts || [];
+  const sel = payload?.meta?.selected_attempt_id || "n/a";
+  el("historyAttempts").innerHTML = `
+    <div class="mono small">day=${day}</div>
+    <div class="mono small">selected_attempt=${sel}</div>
+    <div class="mono small" style="margin-top:8px;">attempts:</div>
+    <div class="mono small">${attempts.length ? attempts.map(a => `- ${a}`).join("<br/>") : "ATTEMPTS_NOT_FOUND"}</div>
+  `;
+}
+
+function renderTechnical(payload) {
+  const prov = payload?.provenance || {};
+  const warn = (prov.warnings || []).slice(0, 20);
+  const miss = (prov.missing_paths || []).slice(0, 30);
+  const src = (prov.source_paths || []).slice(0, 30);
+
+  el("techSummary").innerHTML = `
+    warnings=${warn.length}<br/>
+    missing_paths=${(prov.missing_paths || []).length}<br/>
+    source_paths=${(prov.source_paths || []).length}<br/>
+  `;
+
+  const mk = (arr, label) => {
+    const rows = (arr || []).map(p => {
+      const ep = encodeURIComponent(p);
+      return `- <a href="#" class="mono" data-artifact="${ep}" data-title="${label}">${p}</a>`;
+    }).join("<br/>");
+    return rows || "n/a";
+  };
+
+  el("techPaths").innerHTML = `
+    <div class="mono tiny muted">warnings:</div>
+    <div class="mono tiny">${(warn || []).map(x => `- ${x}`).join("<br/>") || "n/a"}</div>
+    <div class="mono tiny muted" style="margin-top:10px;">missing_paths (top):</div>
+    <div class="mono tiny">${mk(miss, "missing_path")}</div>
+    <div class="mono tiny muted" style="margin-top:10px;">source_paths (top):</div>
+    <div class="mono tiny">${mk(src, "source_path")}</div>
+  `;
+
+  document.querySelectorAll("[data-artifact]").forEach(a => {
+    a.onclick = async (ev) => {
+      ev.preventDefault();
+      const p = decodeURIComponent(a.getAttribute("data-artifact") || "");
+      const title = a.getAttribute("data-title") || "artifact";
+      await openEvidence(title, p);
+    };
+  });
+}
+
+async function openEvidence(title, path) {
+  // Raw JSON only via modal (explicit click).
+  const q = encodeURIComponent(path);
+  const r = await api(`/api/artifact?path=${q}`);
   el("evidenceTitle").textContent = title || "Evidence";
-  el("evidencePath").textContent = path || "n/a";
-  el("evidenceErrors").innerHTML = (errors || []).length
-    ? `<div class="mono small">${errors.map(e => `ERROR: ${e}`).join("<br/>")}</div>`
+  el("evidencePath").textContent = r.path || path || "n/a";
+  el("evidenceErrors").innerHTML = (r.errors || []).length
+    ? (r.errors || []).map(e => `ERROR: ${e}`).join("<br/>")
     : "";
-  el("evidenceBody").textContent = content || "";
+  el("evidenceBody").textContent = r.content || "";
   el("evidenceModal").classList.remove("hidden");
 }
 
@@ -69,391 +357,147 @@ function closeEvidence() {
   el("evidenceModal").classList.add("hidden");
 }
 
-async function fetchArtifact(path, title) {
-  if (!path) {
-    openEvidence(title || "Artifact", "n/a", "", false, ["NO_PATH"]);
-    return;
-  }
-  const q = encodeURIComponent(path);
-  const r = await api(`/api/artifact?path=${q}`);
-  openEvidence(title || "Artifact", r.path || path, r.content || "", !!r.ok, r.errors || []);
+function resetTimer() {
+  if (state.timer) clearInterval(state.timer);
+  state.timer = setInterval(async () => {
+    await loadAndRender();
+  }, state.refreshSec * 1000);
 }
 
-function renderBanners(objs) {
-  const banners = el("banners");
-  banners.innerHTML = "";
+async function loadDays() {
+  const d = await api("/api/days");
+  state.days = d.days || [];
+  state.day = d.default_day_utc || (state.days.length ? state.days[state.days.length - 1] : null);
 
-  const deny = (objs || []).some(o => o && o.overall_state === "FAIL");
-  if (deny) {
-    banners.innerHTML += `<div class="banner err"><div class="code">ENTRIES DENIED (FAIL-CLOSED)</div></div>`;
-  }
-
-  const errors = uniq((objs || []).flatMap(o => o.errors || []));
-  const warnings = uniq((objs || []).flatMap(o => o.warnings || []));
-  const missing = uniq((objs || []).flatMap(o => o.missing_paths || []));
-
-  errors.forEach(code => {
-    banners.innerHTML += `<div class="banner err"><div class="code">ERROR: ${code}</div></div>`;
-  });
-  warnings.forEach(code => {
-    banners.innerHTML += `<div class="banner warn"><div class="code">WARN: ${code}</div></div>`;
-  });
-
-  if (missing.length) {
-    const top = missing.slice(0, 6);
-    const rest = missing.slice(6);
-    const btn = `<button class="btn btn-mini" id="btnToggleMissing">${state.missingExpanded ? "Hide" : "Show"} missing paths</button>`;
-    const body = state.missingExpanded
-      ? missing.join("<br/>")
-      : top.join("<br/>") + (rest.length ? `<br/><span class="muted mono small">(+${rest.length} more)</span>` : "");
-    banners.innerHTML += `<div class="banner warn">
-      <div class="code">MISSING PATHS ${btn}</div>
-      <div class="small mono muted" style="margin-top:6px;">${body}</div>
-    </div>`;
-    const b = document.getElementById("btnToggleMissing");
-    if (b) {
-      b.onclick = () => { state.missingExpanded = !state.missingExpanded; renderBanners(objs); };
-    }
-  }
-
-  if (!deny && !errors.length && !warnings.length && !missing.length) {
-    banners.innerHTML = `<div class="banner ok"><div class="code">OK</div></div>`;
-  }
-}
-
-function renderC3Status(st) {
-  if (!st) return;
-
-  el("c3StatusMeta").innerHTML =
-    `schema_version=${st.schema_version || "n/a"}<br/>` +
-    `generated_at_utc=${st.generated_at_utc || st.generated_utc || "n/a"}<br/>` +
-    `day=${st.verdict?.day || "n/a"} source=${st.verdict?.source || "n/a"}`;
-
-  const v = st.verdict || {};
-  const rc = (v.reason_codes_top || []).join(", ") || "n/a";
-  const rf = (v.required_failures_top || []).map(x => `${x.gate_id}:${x.status}`).join(", ") || "n/a";
-  const verdictLink = v.artifact_path
-    ? `<a href="#" class="link mono" data-artifact="${encodeURIComponent(v.artifact_path)}" data-title="gate_stack_verdict">open verdict</a>`
-    : "";
-
-  el("c3Verdict").innerHTML =
-    `${badgeForState(v.state)} <span class="mono small muted">${v.source || ""}</span> ${verdictLink}<br/>` +
-    `<span class="mono small muted">blocking_class=${v.blocking_class || "n/a"}</span><br/>` +
-    `<span class="mono small muted">reason_codes_top=${rc}</span><br/>` +
-    `<span class="mono small muted">required_failures_top=${rf}</span>`;
-
-  const gates = v.gates_top || [];
-  if (!gates.length) {
-    el("c3Gates").innerHTML = `<div class="mono small muted">No gate rows.</div>`;
-  } else {
-    const rows = gates.map(g => {
-      const link = g.artifact_path
-        ? `<a href="#" class="link mono" data-artifact="${encodeURIComponent(g.artifact_path)}" data-title="${g.gate_id}">open</a>`
-        : "";
-      const rcg = (g.reason_codes_top || []).join(", ");
-      return [
-        g.gate_id,
-        g.required ? badge("required", "warn") : `<span class="mono small muted">optional</span>`,
-        g.blocking ? badge("blocking", "err") : `<span class="mono small muted">non-blocking</span>`,
-        `<span class="mono small muted">${g.gate_class || "n/a"}</span>`,
-        badgeForState(g.status),
-        `<span class="mono small muted">${rcg || ""}</span>`,
-        link,
-      ];
-    });
-    el("c3Gates").innerHTML = table(
-      ["gate_id", "required", "blocking", "class", "status", "reason_codes_top", "artifact"],
-      rows
-    );
-  }
-
-  const br = st.broker_reconciliation || {};
-  const brEvidence =
-    `cash_diff=${br.cash_diff ?? "n/a"} ` +
-    `mismatches=${br.position_mismatches_count ?? "n/a"} ` +
-    `notes=${br.notes_count ?? "n/a"}`;
-  const brLink = br.artifact_path
-    ? `<a href="#" class="link mono" data-artifact="${encodeURIComponent(br.artifact_path)}" data-title="broker_reconciliation">open reconciliation</a>`
-    : "";
-
-  el("c3Broker").innerHTML =
-    `${badgeForState(br.state)} <span class="mono small muted">day=${br.day || "n/a"} acct=${br.account || "n/a"}</span> ${brLink}<br/>` +
-    `<span class="mono small muted">${brEvidence}</span>`;
-
-  const mm = br.mismatches_top || [];
-  if (!mm.length) {
-    el("c3Mismatches").innerHTML = `<div class="mono small muted">No mismatches.</div>`;
-  } else {
-    const rows = mm.map(m => ([
-      m.symbol,
-      `<span class="mono small muted">${m.sec_type}</span>`,
-      m.broker_qty,
-      m.internal_qty,
-      m.qty_diff,
-    ]));
-    el("c3Mismatches").innerHTML = table(["symbol", "sec_type", "broker_qty", "internal_qty", "qty_diff"], rows);
-  }
-
-  el("c3Market").innerHTML =
-    `${badgeForState(st.market_data?.state)} ` +
-    `<span class="mono small muted">latest=${st.market_data?.latest_snapshot_day || "n/a"}</span>`;
-
-  el("c3Overall").innerHTML =
-    `${badgeForState(st.overall_state)} <span class="mono small muted">fail-closed</span>`;
-
-  const comps = st.components || [];
-  if (!comps.length) {
-    el("c3Components").innerHTML = `<div class="mono small muted">No derived components.</div>`;
-  } else {
-    const rows = comps.map(c => ([
-      c.name,
-      badgeForState(c.state),
-      `<span class="mono small muted">${c.reason_code || ""}</span>`,
-    ]));
-    el("c3Components").innerHTML = table(["name", "state", "reason_code"], rows);
-  }
-
-  const src = (st.source_paths || []).slice(0, 10);
-  const srcLines = src.map(p => {
-    const ep = encodeURIComponent(p);
-    return `- <a href="#" class="link mono" data-artifact="${ep}" data-title="source">${p}</a>`;
-  }).join("<br/>");
-
-  const mt = st.source_mtimes || {};
-  const mtLines = Object.keys(mt).slice(0, 10)
-    .map(k => `- ${k} mtime=${fmtMtimeSecToIso(mt[k])}`)
-    .join("<br/>");
-
-  el("footerProvenance").innerHTML =
-    `<div>status_endpoint=/api/status</div>` +
-    `<div style="margin-top:6px;">sources:<br/><span class="mono small">${srcLines || "n/a"}</span></div>` +
-    `<div style="margin-top:6px;">mtimes:<br/><span class="mono small">${mtLines || "n/a"}</span></div>`;
-
-  document.querySelectorAll("[data-artifact]").forEach(a => {
-    a.onclick = (ev) => {
-      ev.preventDefault();
-      const path = decodeURIComponent(a.getAttribute("data-artifact") || "");
-      const title = a.getAttribute("data-title") || "artifact";
-      fetchArtifact(path, title);
-    };
+  const sel = el("daySelect");
+  sel.innerHTML = "";
+  state.days.forEach(day => {
+    const o = document.createElement("option");
+    o.value = day;
+    o.textContent = day;
+    if (day === state.day) o.selected = true;
+    sel.appendChild(o);
   });
 }
 
-function renderSummary(sum) {
-  el("summaryMeta").innerHTML =
-    `generated_utc=${sum.generated_utc || "n/a"}<br/>` +
-    `freshness=${fmtMtimeSecToIso(sum.data_freshness_max_mtime)}<br/>` +
-    `day=${sum.day_utc || "n/a"}`;
+async function loadAttemptsForDay(day) {
+  if (!day) return;
+  const a = await api(`/api/attempts?day=${encodeURIComponent(day)}`);
+  state.attempts = a.attempts || [];
+  state.attempt_id = state.attempts.length ? state.attempts[state.attempts.length - 1] : null;
 
-  const c = sum.counts || {};
-  const rows = Object.entries(c).map(([k, v]) =>
-    `<div class="mono small"><span class="muted">${k}</span> = ${v ?? "n/a"}</div>`
-  ).join("");
+  const sel = el("attemptSelect");
+  sel.innerHTML = "";
+  // Allow empty attempt (latest on server)
+  const o0 = document.createElement("option");
+  o0.value = "";
+  o0.textContent = "latest (auto)";
+  sel.appendChild(o0);
 
-  const nav = sum.nav ? `nav_end=${sum.nav.nav_end ?? "n/a"}` : "nav=n/a";
-  el("summaryCounts").innerHTML = rows + `<div class="mono small muted">${nav}</div>`;
-}
-
-function renderByEngine(sum) {
-  const rows = (sum.by_engine || []).map(e => ([
-    e.engine,
-    e.submissions,
-    e.fills,
-    e.rejects,
-    e.errors
-  ]));
-  el("byEngine").innerHTML = rows.length
-    ? table(["engine","subs","fills","rejects","errors"], rows)
-    : `<div class="mono small muted">No data.</div>`;
-
-  if ((sum.warnings || []).includes("ENGINE_JOIN_NOT_POSSIBLE_WITHOUT_ENGINE_LINKAGE")) {
-    el("engineJoinNote").innerText = "ENGINE_JOIN_NOT_POSSIBLE_WITHOUT_ENGINE_LINKAGE";
-  } else {
-    el("engineJoinNote").innerText = "";
-  }
-}
-
-function renderPlan(planResp) {
-  if (!(planResp.plans || []).length) {
-    el("planTable").innerHTML = `<div class="mono small muted">NO_ORDER_PLAN_PRESENT</div>`;
-    return;
-  }
-  const rows = planResp.plans.map(p => {
-    const keys = Object.keys(p.order_plan || {}).slice(0,10).join(",");
-    return [p.submission_id, keys];
+  state.attempts.forEach(id => {
+    const o = document.createElement("option");
+    o.value = id;
+    o.textContent = id;
+    if (id === state.attempt_id) o.selected = true;
+    sel.appendChild(o);
   });
-  el("planTable").innerHTML = table(["submission_id","order_plan_top_keys"], rows);
 }
 
-function renderSubmissions(subResp) {
-  const subs = subResp.submissions || [];
-  if (!subs.length) {
-    el("submissionsTable").innerHTML = `<div class="mono small muted">NO_SUBMISSIONS_FOUND</div>`;
-    return;
-  }
-  const rows = subs.map(s => {
-    const b = s.broker_submission_record || {};
-    const e = s.execution_event_record || {};
-    return [s.submission_id, s.engine, b.status ?? "n/a", e.status ?? "NONE"];
-  });
-  el("submissionsTable").innerHTML = table(["submission_id","engine","broker_status","event_status"], rows);
-}
+async function loadAndRender() {
+  if (!state.day) return;
 
-function renderActivity(a) {
-  if (!a || !a.ok) {
-    el("activityMeta").innerHTML = `<span class="mono small muted">activity=n/a</span>`;
-    el("activityCounts").innerHTML = "";
-    el("activityLinks").innerHTML = "";
-    return;
-  }
+  const attemptParam = (state.attempt_id && el("attemptSelect").value) ? `&attempt_id=${encodeURIComponent(el("attemptSelect").value)}` : "";
+  const payload = await api(`/api/status_v2?day=${encodeURIComponent(state.day)}${attemptParam}`);
+  state.statusV2 = payload;
 
-  const day = a.day_utc || "n/a";
-  el("activityMeta").innerHTML =
-    `generated_utc=${a.generated_utc || "n/a"}<br/>day=${day}`;
+  el("lastRefresh").textContent = `refreshed=${payload?.meta?.server_time_utc || "n/a"}`;
 
-  const i = a.intents_summary?.counts?.intents_total ?? "n/a";
-  const s = a.submissions_summary?.counts?.submissions_total ?? "n/a";
-  const ti = a.rollup_asof?.totals?.intents_total ?? "n/a";
-  const ts = a.rollup_asof?.totals?.submissions_total ?? "n/a";
+  renderTiles(payload);
+  renderSleeveStrip(payload);
+  renderFunnel(payload);
+  renderWhatChanged(payload);
 
-  el("activityCounts").innerHTML =
-    `<div class="mono small"><span class="muted">intents_today</span> = ${i}</div>` +
-    `<div class="mono small"><span class="muted">submissions_today</span> = ${s}</div>` +
-    `<div class="mono small"><span class="muted">cumulative_intents</span> = ${ti}</div>` +
-    `<div class="mono small"><span class="muted">cumulative_submissions</span> = ${ts}</div>`;
-
-  const sp = (a.source_paths || []).map(p => {
-    const ep = encodeURIComponent(p);
-    return `<a href="#" class="link mono" data-artifact="${ep}" data-title="activity_source">open</a> <span class="muted">${p}</span>`;
-  }).join("<br/>");
-
-  el("activityLinks").innerHTML = sp ? `<div class="muted">sources:</div>${sp}` : "";
+  renderEngines(payload);
+  renderPortfolio(payload);
+  renderHistory(payload);
+  renderTechnical(payload);
 }
 
 function svgLineChart(points) {
   const W = 900, H = 260, pad = 28;
-  const vals = points.map(p => Number(p.nav_end)).filter(v => !isNaN(v));
-  if (vals.length < 2) return `<div class="mono small muted">Insufficient data</div>`;
+  const vals = (points || []).map(p => Number(p.nav_end)).filter(v => !isNaN(v));
+  if (vals.length < 2) return `<div class="mono small muted">Insufficient NAV data</div>`;
   const min = Math.min(...vals);
   const max = Math.max(...vals);
   const span = (max - min) || 1;
-  const xs = points.map((_, i) => pad + (i * (W - 2*pad) / Math.max(1, points.length-1)));
-  const ys = points.map(p => {
+  const xs = (points || []).map((_, i) => pad + (i * (W - 2*pad) / Math.max(1, (points || []).length-1)));
+  const ys = (points || []).map(p => {
     const v = Number(p.nav_end);
     if (isNaN(v)) return null;
     return (H-pad) - ((v-min)/span)*(H-2*pad);
   });
   let d="";
-  for (let i=0;i<points.length;i++){
+  for (let i=0;i<(points || []).length;i++){
     if (ys[i]==null) continue;
-    d += (d?" L ":"M ") + xs[i] + " " + ys[i];
+    d += (d ? " L " : "M ") + xs[i] + " " + ys[i];
   }
   return `<svg viewBox="0 0 ${W} ${H}">
     <path d="${d}" fill="none" stroke="#7ee787" stroke-width="2"></path>
   </svg>`;
 }
 
-async function loadDays() {
-  const d = await api("/api/days");
-  renderBanners([d]);
-  state.days = d.days || [];
-  state.day = d.default_day_utc;
-
-  // DO NOT override day using legacy pointer files: they can be stale.
-  // Server /api/days default_day_utc is derived from authoritative truth surfaces.
-
-  const sel = el("daySelect");
-  sel.innerHTML="";
-  state.days.forEach(day=>{
-    const o=document.createElement("option");
-    o.value=day; o.textContent=day;
-    if(day===state.day) o.selected=true;
-    sel.appendChild(o);
-  });
-}
-
-async function loadStatus() {
-  const st = await api("/api/status");
-  state.c3Status = st;
-  renderC3Status(st);
-  return st;
-}
-
-async function loadToday() {
-  if(!state.day) return;
-  const [status,sum,plan,subs,act] = await Promise.all([
-    loadStatus(),
-    api(`/api/day/${state.day}/summary`),
-    api(`/api/day/${state.day}/plan`),
-    api(`/api/day/${state.day}/submissions`),
-    api(`/api/activity/today?day=${state.day}`)
-  ]);
-  renderBanners([status,sum,plan,subs,act]);
-  renderSummary(sum);
-  renderByEngine(sum);
-  renderActivity(act);
-  renderPlan(plan);
-  renderSubmissions(subs);
-}
-
-async function loadHistory() {
-  const rows=[];
-  for(const d of state.days.slice(-20)){
-    const s=await api(`/api/day/${d}/summary`);
-    rows.push([d, s.nav?.nav_end ?? "n/a", s.counts?.submissions ?? 0]);
-  }
-  el("historyTable").innerHTML = table(["day","nav_end","subs"], rows);
-}
-
 async function loadCharts() {
-  const n = Number(el("navDays").value)||60;
+  const n = Number(el("navDays").value) || 60;
   const nav = await api(`/api/series/nav?days=${n}`);
-  renderBanners([nav]);
-  el("chartDailyNav").innerHTML = svgLineChart(nav.points||[]);
-  el("chartCumulative").innerHTML = svgLineChart(nav.points||[]);
+  el("chartDailyNav").innerHTML = svgLineChart(nav.points || []);
 }
 
-function resetTimer(){
-  if(state.timer) clearInterval(state.timer);
-  state.timer=setInterval(()=>{
-    loadStatus();
-    if(state.view==="today") loadToday();
-    if(state.view==="history") loadHistory();
-    if(state.view==="charts") loadCharts();
-  }, state.refreshSec*1000);
-}
-
-function wire(){
-  el("refreshSelect").addEventListener("change",()=>{
-    state.refreshSec=Number(el("refreshSelect").value)||60;
+function wire() {
+  el("refreshSelect").addEventListener("change", () => {
+    state.refreshSec = Number(el("refreshSelect").value) || 60;
     resetTimer();
   });
-  el("daySelect").addEventListener("change",()=>{
-    state.day=el("daySelect").value;
-    loadToday();
+
+  el("daySelect").addEventListener("change", async () => {
+    state.day = el("daySelect").value;
+    await loadAttemptsForDay(state.day);
+    await loadAndRender();
   });
-  el("btnToday").addEventListener("click",()=>{
-  setView("today");
-  // Today button should jump to the latest selectable day (already loaded by /api/days).
-  if ((state.days || []).length) {
-    state.day = state.days[state.days.length - 1];
-    el("daySelect").value = state.day;
-  }
-  loadToday();
-});
-  el("btnHistory").addEventListener("click",()=>{setView("history");loadHistory();});
-  el("btnCharts").addEventListener("click",()=>{setView("charts");loadCharts();});
-  el("btnReloadCharts").addEventListener("click",loadCharts);
+
+  el("attemptSelect").addEventListener("change", async () => {
+    state.attempt_id = el("attemptSelect").value || null;
+    await loadAndRender();
+  });
+
+  el("btnLatest").addEventListener("click", async () => {
+    if ((state.days || []).length) {
+      state.day = state.days[state.days.length - 1];
+      el("daySelect").value = state.day;
+    }
+    await loadAttemptsForDay(state.day);
+    el("attemptSelect").value = "";
+    state.attempt_id = null;
+    await loadAndRender();
+  });
+
+  el("tabOperations").addEventListener("click", () => setView("operations"));
+  el("tabEngines").addEventListener("click", () => setView("engines"));
+  el("tabPortfolio").addEventListener("click", () => setView("portfolio"));
+  el("tabHistory").addEventListener("click", () => setView("history"));
+  el("tabTechnical").addEventListener("click", () => setView("technical"));
 
   el("btnEvidenceClose").addEventListener("click", closeEvidence);
   el("evidenceBackdrop").addEventListener("click", closeEvidence);
+
+  el("btnReloadCharts").addEventListener("click", loadCharts);
 }
 
-(async function boot(){
+(async function boot() {
   wire();
   await loadDays();
-  await loadStatus();
-  setView("today");
-  await loadToday();
+  await loadAttemptsForDay(state.day);
+  setView("operations");
+  await loadAndRender();
+  await loadCharts();
   resetTimer();
 })();

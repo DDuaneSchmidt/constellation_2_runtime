@@ -171,12 +171,56 @@ def main() -> int:
     pos_path = TRUTH_ROOT / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json"
     marks_path = TRUTH_ROOT / "market_data_snapshot_v1" / "broker_marks_v1" / day / "broker_marks.v1.json"
 
-    missing = []
-    for p in [cash_path, pos_path, marks_path]:
+    # Required inputs for all days:
+    missing_required: list[str] = []
+    for p in [cash_path, pos_path]:
         if not p.exists():
-            missing.append(str(p.relative_to(TRUTH_ROOT)))
+            missing_required.append(str(p.relative_to(TRUTH_ROOT)))
 
-    if missing:
+    if missing_required:
+        if _bootstrap_window_true(day):
+            _write_bootstrap_stub(
+                out_path=out_path,
+                day=day,
+                producer_repo=str(args.producer_repo),
+                producer_git_sha=str(args.producer_git_sha),
+                missing=list(missing_required),
+                marks_path=marks_path,
+            )
+            return 0
+        raise SystemExit("FATAL: missing required inputs: " + ", ".join(missing_required))
+
+    cash = _load_json(cash_path)
+    pos = _load_json(pos_path)
+
+    def _extract_position_items(pos_obj: Dict[str, Any]) -> list[Any] | None:
+        """
+        Return the list of positions items if we can locate it.
+        Fail-closed if unknown shape by returning None.
+        """
+        # Common: {"positions": {"items": [...]}}
+        p = pos_obj.get("positions")
+        if isinstance(p, dict):
+            it = p.get("items")
+            if isinstance(it, list):
+                return it
+        # Alternate: {"items": [...]}
+        it2 = pos_obj.get("items")
+        if isinstance(it2, list):
+            return it2
+        return None
+
+    items = _extract_position_items(pos)
+    if items is None:
+        # Fail-closed: schema unknown → require broker marks (treat as positions potentially present)
+        has_positions = True
+    else:
+        has_positions = len(items) > 0
+
+    # Broker marks are required ONLY if positions exist.
+    if has_positions and (not marks_path.exists()):
+        # If we have positions but marks are missing, allow DAY0 bootstrap only in bootstrap window.
+        missing = [str(marks_path.relative_to(TRUTH_ROOT))]
         if _bootstrap_window_true(day):
             _write_bootstrap_stub(
                 out_path=out_path,
@@ -189,8 +233,11 @@ def main() -> int:
             return 0
         raise SystemExit("FATAL: missing required inputs: " + ", ".join(missing))
 
-    cash = _load_json(cash_path)
-    marks = _load_json(marks_path)
+    # If no positions, marks are optional; synthesize an empty marks payload.
+    if marks_path.exists():
+        marks = _load_json(marks_path)
+    else:
+        marks = {"currency": str(cash.get("snapshot", {}).get("currency") or "USD"), "marks": []}
 
     cash_total_cents = int(cash["snapshot"]["cash_total_cents"])
     cash_total = int(cash_total_cents // 100)
