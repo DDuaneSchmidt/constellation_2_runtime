@@ -28,6 +28,7 @@ if not (_REPO_ROOT_FROM_FILE / "governance").exists():
     raise SystemExit(f"FATAL: repo_root_missing_governance: derived={_REPO_ROOT_FROM_FILE}")
 
 import argparse
+import os
 import hashlib
 import json
 import subprocess
@@ -36,8 +37,29 @@ from typing import Any, Dict, List, Optional, Tuple
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
+
+def _truth_root_from_args_or_env(truth_root_arg: str | None) -> Path:
+    if truth_root_arg is not None and str(truth_root_arg).strip():
+        p = Path(str(truth_root_arg).strip()).expanduser().resolve()
+        if not p.is_absolute():
+            raise SystemExit(f"FAIL: --truth_root must be absolute: {p}")
+        if not p.exists() or (not p.is_dir()):
+            raise SystemExit(f"FAIL: --truth_root must exist and be a directory: {p}")
+        return p
+
+    env = (os.environ.get("C2_TRUTH_ROOT") or "").strip()
+    if env:
+        p = Path(env).expanduser().resolve()
+        if not p.is_absolute():
+            raise SystemExit(f"FAIL: C2_TRUTH_ROOT must be absolute: {p}")
+        if not p.exists() or (not p.is_dir()):
+            raise SystemExit(f"FAIL: C2_TRUTH_ROOT must exist and be a directory: {p}")
+        return p
+
+    return (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+
+TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()  # placeholder; overwritten in main()
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/operator_daily_gate.v3.schema.json"
 OUT_ROOT = (TRUTH / "reports" / "operator_daily_gate_v3").resolve()
@@ -139,10 +161,29 @@ def _scan_exit_intents(day: str) -> Dict[str, int]:
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_operator_daily_gate_v3")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
+    ap.add_argument("--truth_root", default=None, help="Absolute truth root directory (optional). If omitted, uses env C2_TRUTH_ROOT, else global truth.")
+    ap.add_argument("--produced_utc", required=True, help="Must equal <DAY>T00:00:00Z")
+    ap.add_argument("--mode", required=True, choices=["PAPER", "LIVE"])
     args = ap.parse_args()
 
     day = _parse_day_utc(args.day_utc)
-    produced_utc = f"{day}T00:00:00Z"
+    expected = f"{day}T00:00:00Z"
+    if str(args.produced_utc).strip() != expected:
+        raise SystemExit(f"FAIL: produced_utc_must_equal_day_marker expected={expected!r} got={str(args.produced_utc).strip()!r}")
+    produced_utc = expected
+
+    global TRUTH, OUT_ROOT, RECON_ROOT_V3, POS_SNAP_ROOT, ALLOC_SUM_ROOT, CAP_ENV_ROOT_V2, CASH_SNAP_ROOT, CASH_FAIL_ROOT, EXIT_RECON_ROOT, INTENTS_ROOT
+    TRUTH = _truth_root_from_args_or_env(args.truth_root)
+    OUT_ROOT = (TRUTH / "reports" / "operator_daily_gate_v3").resolve()
+
+    RECON_ROOT_V3 = (TRUTH / "reports" / "reconciliation_report_v3").resolve()
+    POS_SNAP_ROOT = (TRUTH / "positions_v1/snapshots").resolve()
+    ALLOC_SUM_ROOT = (TRUTH / "allocation_v1/summary").resolve()
+    CAP_ENV_ROOT_V2 = (TRUTH / "reports" / "capital_risk_envelope_v2").resolve()
+    CASH_SNAP_ROOT = (TRUTH / "cash_ledger_v1/snapshots").resolve()
+    CASH_FAIL_ROOT = (TRUTH / "cash_ledger_v1/failures").resolve()
+    EXIT_RECON_ROOT = (TRUTH / "exit_reconciliation_v1").resolve()
+    INTENTS_ROOT = (TRUTH / "intents_v1/snapshots").resolve()
 
     input_manifest: List[Dict[str, str]] = []
     reason_codes: List[str] = []

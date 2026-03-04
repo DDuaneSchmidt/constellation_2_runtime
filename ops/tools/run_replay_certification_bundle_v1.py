@@ -25,9 +25,31 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List
 
+_THIS_FILE = Path(__file__).resolve()
+_REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
+REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+def _truth_root_from_args_or_env(truth_root_arg: str | None) -> Path:
+    if truth_root_arg is not None and str(truth_root_arg).strip():
+        p = Path(str(truth_root_arg).strip()).expanduser().resolve()
+        if not p.is_absolute():
+            raise SystemExit(f"FAIL: --truth_root must be absolute: {p}")
+        if not p.exists() or (not p.is_dir()):
+            raise SystemExit(f"FAIL: --truth_root must exist and be a directory: {p}")
+        return p
+
+    env = (os.environ.get("C2_TRUTH_ROOT") or "").strip()
+    if env:
+        p = Path(env).expanduser().resolve()
+        if not p.is_absolute():
+            raise SystemExit(f"FAIL: C2_TRUTH_ROOT must be absolute: {p}")
+        if not p.exists() or (not p.is_dir()):
+            raise SystemExit(f"FAIL: C2_TRUTH_ROOT must exist and be a directory: {p}")
+        return p
+
+    return (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+
+TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()  # placeholder; set in main()
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/replay_certification_bundle.v1.schema.json"
 
@@ -86,8 +108,8 @@ def _write_immutable(path: Path, obj: Dict[str, Any]) -> str:
     return sha
 
 
-def _input_entry(type_: str, relpath: str) -> Dict[str, Any]:
-    p = (REPO_ROOT / relpath).resolve()
+def _input_entry(truth_root: Path, type_: str, relpath: str) -> Dict[str, Any]:
+    p = (truth_root / relpath).resolve()
     if p.exists() and p.is_file():
         return {"type": type_, "path": relpath, "sha256": _sha256_file(p), "present": True}
     return {"type": type_, "path": relpath, "sha256": "0" * 64, "present": False}
@@ -96,36 +118,39 @@ def _input_entry(type_: str, relpath: str) -> Dict[str, Any]:
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_replay_certification_bundle_v1")
     ap.add_argument("--day_utc", required=True)
+    ap.add_argument("--truth_root", default=None)
     args = ap.parse_args()
 
     day = str(args.day_utc).strip()
     if len(day) != 10 or day[4] != "-" or day[7] != "-":
         raise SystemExit(f"FAIL: bad --day_utc: {day!r}")
     produced_utc = f"{day}T00:00:00Z"
+    global TRUTH_ROOT
+    TRUTH_ROOT = _truth_root_from_args_or_env(args.truth_root)
 
     # Canonical required inputs (repo-relative)
-    input_manifest = f"constellation_2/runtime/truth/reports/pipeline_manifest_v1/{day}/pipeline_manifest.v1.json"
-    allocation = f"constellation_2/runtime/truth/allocation_v1/capital_authority_allocation_v1/{day}/capital_authority_allocation.v1.json"
-    liquidity = "constellation_2/runtime/truth/market_data_snapshot_v1/dataset_manifest.json"
-    corr = f"constellation_2/runtime/truth/monitoring_v1/engine_correlation_matrix/{day}/engine_correlation_matrix.v1.json"
-    convex = f"constellation_2/runtime/truth/reports/convex_risk_assessment_v1/{day}/convex_risk_assessment.v1.json"
-    depth = f"constellation_2/runtime/truth/reports/depth_liquidity_stress_v1/{day}/depth_liquidity_stress.v1.json"
-    reconciliation = f"constellation_2/runtime/truth/reports/broker_reconciliation_v2/{day}/broker_reconciliation.v2.json"
-    nav = f"constellation_2/runtime/truth/accounting_compat_v1/nav/{day}/nav_snapshot.v1.json"
-    submission_index = f"constellation_2/runtime/truth/execution_evidence_v1/submissions/{day}/submission_index.v1.json"
-    gate_stack = f"constellation_2/runtime/truth/reports/gate_stack_verdict_v1/{day}/gate_stack_verdict.v1.json"
+    input_manifest = f"reports/pipeline_manifest_v1/{day}/pipeline_manifest.v1.json"
+    allocation = f"allocation_v1/capital_authority_allocation_v1/{day}/capital_authority_allocation.v1.json"
+    liquidity = "market_data_snapshot_v1/dataset_manifest.json"
+    corr = f"monitoring_v1/engine_correlation_matrix/{day}/engine_correlation_matrix.v1.json"
+    convex = f"reports/convex_risk_assessment_v1/{day}/convex_risk_assessment.v1.json"
+    depth = f"reports/depth_liquidity_stress_v1/{day}/depth_liquidity_stress.v1.json"
+    reconciliation = f"reports/broker_reconciliation_v2/{day}/broker_reconciliation.v2.json"
+    nav = f"accounting_compat_v1/nav/{day}/nav_snapshot.v1.json"
+    submission_index = f"execution_evidence_v1/submissions/{day}/submission_index.v1.json"
+    gate_stack = f"reports/gate_stack_verdict_v1/{day}/gate_stack_verdict.v1.json"
 
     input_entries: List[Dict[str, Any]] = [
-        _input_entry("input_manifest", input_manifest),
-        _input_entry("allocation_summary", allocation),
-        _input_entry("liquidity_artifact", liquidity),
-        _input_entry("correlation_artifact", corr),
-        _input_entry("convex_shock_artifact", convex),
-        _input_entry("depth_stress_artifact", depth),
-        _input_entry("submission_index", submission_index),
-        _input_entry("reconciliation", reconciliation),
-        _input_entry("nav", nav),
-        _input_entry("gate_stack_verdict", gate_stack),
+        _input_entry(TRUTH_ROOT, "input_manifest", input_manifest),
+        _input_entry(TRUTH_ROOT, "allocation_summary", allocation),
+        _input_entry(TRUTH_ROOT, "liquidity_artifact", liquidity),
+        _input_entry(TRUTH_ROOT, "correlation_artifact", corr),
+        _input_entry(TRUTH_ROOT, "convex_shock_artifact", convex),
+        _input_entry(TRUTH_ROOT, "depth_stress_artifact", depth),
+        _input_entry(TRUTH_ROOT, "submission_index", submission_index),
+        _input_entry(TRUTH_ROOT, "reconciliation", reconciliation),
+        _input_entry(TRUTH_ROOT, "nav", nav),
+        _input_entry(TRUTH_ROOT, "gate_stack_verdict", gate_stack),
     ]
 
     present_types = [e["type"] for e in input_entries if e["present"]]

@@ -271,6 +271,10 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str)
     liq_gate_out = str(truth / "reports" / "liquidity_slippage_gate_v1" / day / "liquidity_slippage_gate.v1.json")
     sys_gate_out = str(truth / "reports" / "systemic_risk_gate_v3" / day / "systemic_risk_gate.v3.json")
     cap_gate_out = str(truth / "reports" / "capital_risk_envelope_v2" / day / "capital_risk_envelope.v2.json")
+    op_daily_out = str(truth / "reports" / "operator_daily_gate_v3" / day / "operator_daily_gate.v3.json")
+    hb_gate_out = str(truth / "reports" / "heartbeat_gate_v1" / day / "heartbeat_gate.v1.json")
+    corr_gate_out = str(truth / "reports" / "correlation_envelope_gate_v1" / day / "correlation_envelope_gate.v1.json")
+    replay_gate_out = str(truth / "reports" / "replay_certification_gate_v1" / day / "replay_certification_gate.v1.json")
     gate_stack_out = str(truth / "reports" / "gate_stack_verdict_v1" / day / "gate_stack_verdict.v1.json")
     kill_switch_out = str(truth / "risk_v1" / "kill_switch_v1" / day / "global_kill_switch_state.v1.json")
     broker_recon_out = str(truth / "reports" / "broker_reconciliation_v2" / day / "broker_reconciliation.v2.json")
@@ -431,6 +435,82 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str)
             skip_if_exists_paths=[cap_gate_out],
         ),
         StageDef(
+            stage_id="A5A_OPERATOR_DAILY_GATE_V3",
+            cmd=[
+                "python3",
+                "ops/tools/run_operator_daily_gate_v3.py",
+                "--day_utc",
+                day,
+                "--truth_root",
+                str(truth),
+                "--produced_utc",
+                f"{day}T00:00:00Z",
+                "--mode",
+                "PAPER",
+            ],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=True,
+            blocking=True,
+            skip_if_exists_paths=[op_daily_out],
+        ),
+        StageDef(
+            stage_id="A5B_HEARTBEAT_GATE_V1",
+            cmd=[
+                "python3",
+                "ops/tools/run_heartbeat_gate_v1.py",
+                "--day_utc",
+                day,
+                "--truth_root",
+                str(truth),
+            ],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=True,
+            blocking=True,
+            skip_if_exists_paths=[hb_gate_out],
+        ),
+        StageDef(
+            stage_id="A5C_CORRELATION_ENVELOPE_GATE_V1",
+            cmd=[
+                "python3",
+                "ops/tools/run_correlation_envelope_gate_v1.py",
+                "--day_utc",
+                day,
+                "--truth_root",
+                str(truth),
+                "--produced_utc",
+                f"{day}T00:00:00Z",
+                "--mode",
+                "PAPER",
+            ],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=True,
+            blocking=True,
+            skip_if_exists_paths=[corr_gate_out],
+        ),
+        StageDef(
+            stage_id="A5D_REPLAY_CERTIFICATION_GATE_V1",
+            cmd=[
+                "python3",
+                "ops/tools/run_replay_certification_gate_v1.py",
+                "--day_utc",
+                day,
+                "--truth_root",
+                str(truth),
+                "--produced_utc",
+                f"{day}T00:00:00Z",
+                "--mode",
+                "PAPER",
+            ],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=True,
+            blocking=True,
+            skip_if_exists_paths=[replay_gate_out],
+        ),
+        StageDef(
             stage_id="A5X_GATE_COMPLETENESS_GATE_V1",
             cmd=["python3", "ops/tools/run_gate_completeness_gate_v1.py", "--day_utc", day],
             required_for_paper=True,
@@ -443,12 +523,23 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str)
         ),
         StageDef(
             stage_id="A6_GATE_STACK_VERDICT_V1",
-            cmd=["python3", "ops/tools/run_gate_stack_verdict_v1.py", "--day_utc", day],
-            required_for_paper=True,
-            required_for_live=True,
-            required_if_activity=True,
-            blocking=True,
-            skip_if_exists_paths=[gate_stack_out],
+            cmd=[
+                "python3",
+                "ops/tools/run_gate_stack_verdict_v1.py",
+                "--day_utc",
+                day,
+                "--truth_root",
+                str(truth),
+                "--produced_utc",
+                f"{day}T00:00:00Z",
+                "--mode",
+                "PAPER",
+            ],
+           required_for_paper=True,
+           required_for_live=True,
+           required_if_activity=True,
+           blocking=True,
+           skip_if_exists_paths=[gate_stack_out],
         ),
         StageDef(
             stage_id="A7_GLOBAL_KILL_SWITCH_V1",

@@ -30,14 +30,37 @@ import argparse
 import hashlib
 import json
 import subprocess
+import os
 from decimal import Decimal, InvalidOperation
 from math import sqrt
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+_THIS_FILE = Path(__file__).resolve()
+_REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
+REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+def _truth_root_from_args_or_env(truth_root_arg: str | None) -> Path:
+    if truth_root_arg is not None and str(truth_root_arg).strip():
+        p = Path(str(truth_root_arg).strip()).expanduser().resolve()
+        if not p.is_absolute():
+            raise SystemExit(f"FAIL: --truth_root must be absolute: {p}")
+        if not p.exists() or (not p.is_dir()):
+            raise SystemExit(f"FAIL: --truth_root must exist and be a directory: {p}")
+        return p
+
+    env = (os.environ.get("C2_TRUTH_ROOT") or "").strip()
+    if env:
+        p = Path(env).expanduser().resolve()
+        if not p.is_absolute():
+            raise SystemExit(f"FAIL: C2_TRUTH_ROOT must be absolute: {p}")
+        if not p.exists() or (not p.is_dir()):
+            raise SystemExit(f"FAIL: C2_TRUTH_ROOT must exist and be a directory: {p}")
+        return p
+
+    return (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+
+TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()  # placeholder; overwritten in main()
 
 POLICY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/C2_CORRELATION_ENVELOPE_POLICY_V1.json").resolve()
 CAPAUTH_POLICY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/C2_CAPITAL_AUTHORITY_POLICY_V1.json").resolve()
@@ -46,18 +69,18 @@ CSE_POLICY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/C2_CONVEX_SHOCK_ENVELOP
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/correlation_envelope_gate.v1.schema.json"
 CSE_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/convex_risk_assessment.v1.schema.json"
 
-IN_CORR = TRUTH / "monitoring_v1/engine_correlation_matrix"
-IN_INTENTS = TRUTH / "intents_v1/snapshots"
-OUT_ROOT = TRUTH / "reports/correlation_envelope_gate_v1"
-CSE_OUT_ROOT = TRUTH / "reports/convex_risk_assessment_v1"
+IN_CORR = (REPO_ROOT / "constellation_2/runtime/truth" / "monitoring_v1/engine_correlation_matrix").resolve()
+IN_INTENTS = (REPO_ROOT / "constellation_2/runtime/truth" / "intents_v1/snapshots").resolve()
+OUT_ROOT = (REPO_ROOT / "constellation_2/runtime/truth" / "reports/correlation_envelope_gate_v1").resolve()
+CSE_OUT_ROOT = (REPO_ROOT / "constellation_2/runtime/truth" / "reports/convex_risk_assessment_v1").resolve()
 
-LIQ_DATASET_MANIFEST = (TRUTH / "market_data_snapshot_v1" / "dataset_manifest.json").resolve()
+LIQ_DATASET_MANIFEST = (REPO_ROOT / "constellation_2/runtime/truth" / "market_data_snapshot_v1" / "dataset_manifest.json").resolve()
 
 DEPTH_POLICY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/C2_DEPTH_LIQUIDITY_STRESS_POLICY_V1.json").resolve()
 DEPTH_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/depth_liquidity_stress.v1.schema.json"
-DEPTH_OUT_ROOT = TRUTH / "reports/depth_liquidity_stress_v1"
-NAV_ROOT = (TRUTH / "accounting_compat_v1" / "nav").resolve()
-DATASET_ROOT = (TRUTH / "market_data_snapshot_v1").resolve()
+DEPTH_OUT_ROOT = (REPO_ROOT / "constellation_2/runtime/truth" / "reports/depth_liquidity_stress_v1").resolve()
+NAV_ROOT = (REPO_ROOT / "constellation_2/runtime/truth" / "accounting_compat_v1" / "nav").resolve()
+DATASET_ROOT = (REPO_ROOT / "constellation_2/runtime/truth" / "market_data_snapshot_v1").resolve()
 
 
 def _parse_day(d: str) -> str:
@@ -457,11 +480,31 @@ def _portfolio_risk_from_corr(active_ids: List[str], all_ids: List[str], corr: L
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_correlation_envelope_gate_v1")
     ap.add_argument("--day_utc", required=True)
+    ap.add_argument("--truth_root", default=None)
+    ap.add_argument("--produced_utc", required=True)
+    ap.add_argument("--mode", required=True, choices=["PAPER", "LIVE"])
     args = ap.parse_args()
 
     day = _parse_day(args.day_utc)
-    produced_utc = f"{day}T00:00:00Z"
+    expected = f"{day}T00:00:00Z"
+    if str(args.produced_utc).strip() != expected:
+        raise SystemExit(
+            f"FAIL: produced_utc_must_equal_day_marker expected={expected!r} got={str(args.produced_utc).strip()!r}"
+        )
+    produced_utc = expected
+    _ = str(args.mode).strip().upper()
 
+    global TRUTH, IN_CORR, IN_INTENTS, OUT_ROOT, CSE_OUT_ROOT, LIQ_DATASET_MANIFEST, DEPTH_OUT_ROOT, NAV_ROOT, DATASET_ROOT
+    TRUTH = _truth_root_from_args_or_env(args.truth_root)
+
+    IN_CORR = (TRUTH / "monitoring_v1/engine_correlation_matrix").resolve()
+    IN_INTENTS = (TRUTH / "intents_v1/snapshots").resolve()
+    OUT_ROOT = (TRUTH / "reports/correlation_envelope_gate_v1").resolve()
+    CSE_OUT_ROOT = (TRUTH / "reports/convex_risk_assessment_v1").resolve()
+    LIQ_DATASET_MANIFEST = (TRUTH / "market_data_snapshot_v1" / "dataset_manifest.json").resolve()
+    DEPTH_OUT_ROOT = (TRUTH / "reports/depth_liquidity_stress_v1").resolve()
+    NAV_ROOT = (TRUTH / "accounting_compat_v1" / "nav").resolve()
+    DATASET_ROOT = (TRUTH / "market_data_snapshot_v1").resolve()
     policy = _read_json_obj(POLICY_PATH)
     policy_sha = _sha256_file(POLICY_PATH)
     engine_to_sleeve = _load_capauth_engine_to_sleeve()

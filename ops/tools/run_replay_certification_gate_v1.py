@@ -19,15 +19,27 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import sys
 import json
 import os
 import subprocess
 from pathlib import Path
 from typing import Any, Dict
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+_THIS_FILE = Path(__file__).resolve()
+_REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
+REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
 
+def _require_truth_root(p: str) -> Path:
+    s = (p or "").strip()
+    if not s:
+        raise SystemExit("FAIL: --truth_root empty")
+    pr = Path(s).expanduser().resolve()
+    if not pr.is_absolute():
+        raise SystemExit(f"FAIL: --truth_root must be absolute: {pr}")
+    if not pr.exists() or (not pr.is_dir()):
+        raise SystemExit(f"FAIL: --truth_root must exist and be a directory: {pr}")
+    return pr
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/replay_certification_gate.v1.schema.json"
 
 
@@ -91,18 +103,36 @@ def _read_json_obj(p: Path) -> Dict[str, Any]:
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_replay_certification_gate_v1")
     ap.add_argument("--day_utc", required=True)
+    ap.add_argument("--truth_root", required=True)
+    ap.add_argument("--produced_utc", required=True)
+    ap.add_argument("--mode", required=True, choices=["PAPER", "LIVE"])
     args = ap.parse_args()
 
     day = str(args.day_utc).strip()
     if len(day) != 10 or day[4] != "-" or day[7] != "-":
         raise SystemExit(f"FAIL: bad --day_utc: {day!r}")
-    produced_utc = f"{day}T00:00:00Z"
 
+    expected = f"{day}T00:00:00Z"
+    if str(args.produced_utc).strip() != expected:
+        raise SystemExit(
+            f"FAIL: produced_utc_must_equal_day_marker expected={expected!r} got={str(args.produced_utc).strip()!r}"
+        )
+    produced_utc = expected
+    _ = str(args.mode).strip().upper()
+
+    TRUTH_ROOT = _require_truth_root(str(args.truth_root))
     bundle_path = (TRUTH_ROOT / "reports" / "replay_certification_bundle_v1" / day / "replay_certification_bundle.v1.json").resolve()
     gate_path = (TRUTH_ROOT / "reports" / "replay_certification_gate_v1" / day / "replay_certification_gate.v1.json").resolve()
 
     # Ensure bundle exists (writer is immutable/idempotent)
-    subprocess.check_call(["python3", "ops/tools/run_replay_certification_bundle_v1.py", "--day_utc", day], cwd=str(REPO_ROOT))
+    env = dict(os.environ)
+    env["C2_TRUTH_ROOT"] = str(TRUTH_ROOT)
+    env["C2_PRODUCED_UTC"] = produced_utc
+    subprocess.check_call(
+        ["python3", "ops/tools/run_replay_certification_bundle_v1.py", "--day_utc", day],
+        cwd=str(REPO_ROOT),
+        env=env,
+    )
     candidate_sha = _sha256_file(bundle_path)
 
     if gate_path.exists():

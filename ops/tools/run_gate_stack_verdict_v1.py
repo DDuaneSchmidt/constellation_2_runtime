@@ -10,15 +10,16 @@ Purpose:
 - Emit a single immutable verdict artifact.
 
 Writes:
-  constellation_2/runtime/truth/reports/gate_stack_verdict_v1/<DAY>/gate_stack_verdict.v1.json
+  <truth_root>/reports/gate_stack_verdict_v1/<DAY>/gate_stack_verdict.v1.json
 
 Run:
-  python3 ops/tools/run_gate_stack_verdict_v1.py --day_utc YYYY-MM-DD
+  python3 ops/tools/run_gate_stack_verdict_v1.py --day_utc YYYY-MM-DD --truth_root /abs/path --produced_utc YYYY-MM-DDT00:00:00Z --mode PAPER
 
 Non-negotiable:
 - Pure evaluation (no mutation of inputs)
 - Fail-closed for required gates
 - Immutable write
+- Deterministic: NO wall clock. produced_utc must be supplied and must equal <DAY>T00:00:00Z.
 
 SELF-HEAL (governed correctness under registry changes):
 - If canonical verdict exists and is PASS: never replace it.
@@ -49,14 +50,11 @@ if str(_REPO_ROOT_FROM_FILE) not in sys.path:
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1  # type: ignore
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1  # type: ignore
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1  # type: ignore
-from constellation_2.common.truth_root_v1 import resolve_truth_root  # type: ignore
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH = resolve_truth_root(repo_root=REPO_ROOT)
+REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
 
 REGISTRY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/GATE_HIERARCHY_V1.json").resolve()
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/gate_stack_verdict.v1.schema.json"
-OUT_ROOT = (TRUTH / "reports" / "gate_stack_verdict_v1").resolve()
 
 DAY_RE = r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
 
@@ -112,7 +110,27 @@ def _class_precedence(reg: Dict[str, Any]) -> Dict[str, int]:
     return out
 
 
-def _eval_gate(day: str, gate: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
+def _require_truth_root(p: str) -> Path:
+    s = (p or "").strip()
+    if not s:
+        raise SystemExit("FAIL: --truth_root empty")
+    pr = Path(s).expanduser().resolve()
+    if not pr.is_absolute():
+        raise SystemExit(f"FAIL: --truth_root must be absolute: {pr}")
+    if not pr.exists() or (not pr.is_dir()):
+        raise SystemExit(f"FAIL: --truth_root must exist and be a directory: {pr}")
+    return pr
+
+
+def _require_produced_utc_for_day(day: str, produced_utc: str) -> str:
+    v = (produced_utc or "").strip()
+    expected = f"{day}T00:00:00Z"
+    if v != expected:
+        raise SystemExit(f"FAIL: produced_utc_must_equal_day_marker expected={expected!r} got={v!r}")
+    return v
+
+
+def _eval_gate(*, truth_root: Path, day: str, gate: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
     # Returns (gate_result, input_manifest_entries)
     gate_id = str(gate.get("gate_id") or "").strip()
 
@@ -126,7 +144,33 @@ def _eval_gate(day: str, gate: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dic
     pass_vals = [str(x).strip().upper() for x in (gate.get("pass_status_values") or [])]
 
     # IMPORTANT: empty relpath must be treated as invalid/missing (fail-closed).
-    path = (REPO_ROOT / rel).resolve() if rel else REPO_ROOT
+    #
+    # Registry remediation 2026-03-02: artifact_relpath is file-backed and NOT a directory.
+    # Resolve artifact paths under truth_root, NOT repo root.
+    #
+    # Supported patterns:
+    # - If rel starts with "reports/" or "risk_v1/" or "monitoring_v1/" etc -> treat as truth_root-relative.
+    # - Otherwise, default to canonical reports layout:
+    #     truth_root/reports/<gate_id>/<DAY>/<rel>
+    if not rel:
+        path = REPO_ROOT  # deterministic sentinel path (schema-safe), triggers fail-closed
+    else:
+        rel_norm = rel.lstrip("/")
+
+        if rel_norm.startswith(
+            (
+                "reports/",
+                "risk_v1/",
+                "monitoring_v1/",
+                "monitoring_v2/",
+                "execution_evidence_v1/",
+                "accounting_v1/",
+                "accounting_v2/",
+            )
+        ):
+            path = (truth_root / rel_norm).resolve()
+        else:
+            path = (truth_root / "reports" / gate_id / day / rel_norm).resolve()
 
     manifest: List[Dict[str, str]] = []
 
@@ -200,14 +244,12 @@ def _eval_gate(day: str, gate: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dic
     return out, manifest
 
 
-def _compute_verdict(day: str) -> Dict[str, Any]:
+def _compute_verdict(*, truth_root: Path, day: str, produced_utc: str) -> Dict[str, Any]:
     if not REGISTRY_PATH.exists():
         raise SystemExit(f"FATAL: missing gate hierarchy registry: {REGISTRY_PATH}")
 
     reg = _read_json_obj(REGISTRY_PATH)
     prec = _class_precedence(reg)
-
-    produced_utc = f"{day}T00:00:00Z"
 
     gates: List[Dict[str, Any]] = []
     manifest: List[Dict[str, str]] = []
@@ -215,7 +257,7 @@ def _compute_verdict(day: str) -> Dict[str, Any]:
     for g in (reg.get("gates") or []):
         if not isinstance(g, dict):
             continue
-        gr, man = _eval_gate(day, g)
+        gr, man = _eval_gate(truth_root=truth_root, day=day, gate=g)
         gates.append(gr)
         manifest.extend(man)
 
@@ -346,6 +388,9 @@ def _self_heal_if_needed(day: str, out_path: Path, new_obj: Dict[str, Any]) -> T
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_gate_stack_verdict_v1")
     ap.add_argument("--day_utc", required=True, help="UTC day key YYYY-MM-DD")
+    ap.add_argument("--truth_root", required=True, help="Absolute truth root directory (sleeve truth root)")
+    ap.add_argument("--produced_utc", required=True, help="Must equal <DAY>T00:00:00Z")
+    ap.add_argument("--mode", required=True, choices=["PAPER", "LIVE"])  # accepted for wiring determinism (not emitted unless schema allows)
     args = ap.parse_args()
 
     day = str(args.day_utc).strip()
@@ -353,10 +398,14 @@ def main() -> int:
     if not re.match(DAY_RE, day):
         raise SystemExit(f"FAIL: bad --day_utc (expected YYYY-MM-DD): {day!r}")
 
-    out_dir = (OUT_ROOT / day).resolve()
+    truth_root = _require_truth_root(args.truth_root)
+    produced_utc = _require_produced_utc_for_day(day, str(args.produced_utc))
+    _ = str(args.mode).strip().upper()  # validated by argparse choices
+
+    out_dir = (truth_root / "reports" / "gate_stack_verdict_v1" / day).resolve()
     out_path = (out_dir / "gate_stack_verdict.v1.json").resolve()
 
-    out_obj = _compute_verdict(day)
+    out_obj = _compute_verdict(truth_root=truth_root, day=day, produced_utc=produced_utc)
     self_heal, intended_action = _self_heal_if_needed(day, out_path, out_obj)
 
     payload = canonical_json_bytes_v1(out_obj) + b"\n"
