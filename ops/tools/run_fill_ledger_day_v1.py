@@ -35,10 +35,11 @@ from typing import Any, Dict, List, Tuple
 
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+from constellation_2.common.truth_root_v1 import resolve_truth_root
 
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH = resolve_truth_root(repo_root=REPO_ROOT)
 
 STREAM_ROOT = (TRUTH / "execution_stream_v1").resolve()
 SUB_ROOT = (TRUTH / "execution_evidence_v1/submissions").resolve()
