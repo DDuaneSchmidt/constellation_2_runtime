@@ -268,6 +268,11 @@ def _build_stage_defs(day: str, input_day: str, ib_account: str) -> List[StageDe
 
     exec_recon_out = str(truth / "reports" / "execution_reconciliation_v1" / day / "execution_reconciliation.v1.json")
     fills_out = str(truth / "fill_ledger_v1" / day / "fill_ledger.v1.json")
+    nav_out = str(truth / "accounting_v2" / "nav" / day / "nav.v2.json")
+    exec_submissions_day_dir = str(truth / "execution_evidence_v1" / "submissions" / day)
+    pos_out = str(truth / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json")
+    cash_out = str(truth / "cash_ledger_v1" / "snapshots" / day / "cash_ledger_snapshot.v1.json")
+    op_stmt = str(REPO_ROOT / "constellation_2" / "operator_inputs" / "cash_ledger_operator_statements" / day / "operator_statement.v1.json")
 
     return [
         StageDef(
@@ -278,6 +283,55 @@ def _build_stage_defs(day: str, input_day: str, ib_account: str) -> List[StageDe
             required_if_activity=False,
             blocking=True,
             skip_if_exists_paths=[],
+        ),
+        StageDef(
+            stage_id="B0_POSITIONS_SNAPSHOT_V2",
+            cmd=[
+                "python3",
+                "-m",
+                "constellation_2.phaseF.positions.run.run_positions_snapshot_day_v2",
+                "--day_utc",
+                day,
+                "--producer_git_sha",
+                _git_sha(),
+                "--producer_repo",
+                "constellation_2_runtime",
+            ],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=False,
+            blocking=True,
+            skip_if_exists_paths=[pos_out],
+        ),
+        StageDef(
+            stage_id="B0_CASH_LEDGER_SNAPSHOT_V1",
+            cmd=[
+                "python3",
+                "-m",
+                "constellation_2.phaseF.cash_ledger.run.run_cash_ledger_snapshot_day_v1",
+                "--day_utc",
+                day,
+                "--operator_statement_json",
+                op_stmt,
+                "--producer_repo",
+                "constellation_2_runtime",
+                "--producer_git_sha",
+                _git_sha(),
+            ],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=False,
+            blocking=True,
+            skip_if_exists_paths=[cash_out],
+        ),
+        StageDef(
+            stage_id="B0_ENSURE_EXECUTION_SUBMISSIONS_DIR_V1",
+            cmd=["/usr/bin/bash", "-lc", f"set -euo pipefail; mkdir -p '{exec_submissions_day_dir}'"],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=False,
+            blocking=True,
+            skip_if_exists_paths=[exec_submissions_day_dir],
         ),
         StageDef(
             stage_id="A1_BROKER_RECONCILIATION_GATE_V2_CHECK",
@@ -302,7 +356,7 @@ def _build_stage_defs(day: str, input_day: str, ib_account: str) -> List[StageDe
             cmd=["python3", "ops/tools/run_feed_attestation_gate_v1.py", "--day_utc", day],
             required_for_paper=True,
             required_for_live=True,
-            required_if_activity=False,
+            required_if_activity=True,
             blocking=True,
             skip_if_exists_paths=[feed_gate_out],
         ),
@@ -311,7 +365,7 @@ def _build_stage_defs(day: str, input_day: str, ib_account: str) -> List[StageDe
             cmd=["python3", "ops/tools/run_liquidity_slippage_gate_v1.py", "--day_utc", day],
             required_for_paper=True,
             required_for_live=True,
-            required_if_activity=False,
+            required_if_activity=True,
             blocking=True,
             skip_if_exists_paths=[liq_gate_out],
         ),
@@ -320,11 +374,29 @@ def _build_stage_defs(day: str, input_day: str, ib_account: str) -> List[StageDe
             cmd=["python3", "ops/tools/run_systemic_risk_gate_v3.py", "--day_utc", day],
             required_for_paper=True,
             required_for_live=True,
-            required_if_activity=False,
+            required_if_activity=True,
             blocking=True,
             skip_if_exists_paths=[sys_gate_out],
         ),
         StageDef(
+            stage_id="B0_ACCOUNTING_NAV_V2",
+            cmd=[
+                "python3",
+                "ops/tools/run_accounting_nav_v2_day_v1.py",
+                "--day_utc",
+                day,
+                "--producer_git_sha",
+                _git_sha(),
+                "--producer_repo",
+                "constellation_2_runtime",
+            ],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=False,
+            blocking=True,
+            skip_if_exists_paths=[nav_out],
+        ),
+       StageDef(
             stage_id="A5_CAPITAL_RISK_ENVELOPE_GATE_V2",
             cmd=[
                 "python3",
@@ -338,7 +410,7 @@ def _build_stage_defs(day: str, input_day: str, ib_account: str) -> List[StageDe
             ],
             required_for_paper=True,
             required_for_live=True,
-            required_if_activity=False,
+            required_if_activity=True,
             blocking=True,
             skip_if_exists_paths=[cap_gate_out],
         ),
@@ -347,7 +419,7 @@ def _build_stage_defs(day: str, input_day: str, ib_account: str) -> List[StageDe
             cmd=["python3", "ops/tools/run_gate_stack_verdict_v1.py", "--day_utc", day],
             required_for_paper=True,
             required_for_live=True,
-            required_if_activity=False,
+            required_if_activity=True,
             blocking=True,
             skip_if_exists_paths=[gate_stack_out],
         ),
@@ -356,7 +428,7 @@ def _build_stage_defs(day: str, input_day: str, ib_account: str) -> List[StageDe
             cmd=["python3", "ops/tools/run_global_kill_switch_v1.py", "--day_utc", day],
             required_for_paper=True,
             required_for_live=True,
-            required_if_activity=False,
+            required_if_activity=True,
             blocking=True,
             skip_if_exists_paths=[kill_switch_out],
         ),

@@ -130,7 +130,7 @@ def _resolve_day(
 
     Priority:
       1) run_pointer_v1 display head (preferred)
-
+    """
     # 1) run_pointer_v1 display head
     day_rp, src_rp = _read_run_pointer_v1_display_day(truth_root, note_source=note_source, warnings=warnings)
     if day_rp:

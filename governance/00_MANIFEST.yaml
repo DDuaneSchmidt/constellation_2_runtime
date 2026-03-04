@@ -223,7 +223,25 @@ documents:
     path: constellation_2/schemas/exposure_intent.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
+  - id: C2_ECONOMIC_TRUTH_SPINE_V1
+    path: governance/05_CONTRACTS/C2/economic_truth_spine_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
 
+  - id: C2_ACCOUNTING_NAV_V2_CONDITIONAL_INPUTS_V1
+    path: governance/05_CONTRACTS/C2/nav_v2_conditional_inputs_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_ORCHESTRATOR_ABORT_POLICY_V1
+    path: governance/05_CONTRACTS/C2/orchestrator_abort_policy_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_BASELINE_READINESS_V1
+    path: governance/05_CONTRACTS/C2/baseline_readiness_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
   # READINESS schemas (new governed outputs)
   - id: C2_READINESS_TRADE_SUBMIT_READINESS_STATUS_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/READINESS/trade_submit_readiness.status.v1.schema.json
