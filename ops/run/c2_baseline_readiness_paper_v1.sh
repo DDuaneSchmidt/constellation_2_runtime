@@ -65,25 +65,14 @@ assert st=='ACTIVE', 'NAV_NOT_ACTIVE'; \
 assert isinstance(nt,int) and nt>0, 'NAV_TOTAL_NOT_POSITIVE'; \
 assert isinstance(ct,int) and ct>0, 'CASH_TOTAL_NOT_POSITIVE'"
 
-echo "=== STEP: write readiness sentinel ==="
-mkdir -p "${READY_DIR}"
-python3 -c "import json,hashlib,os; \
-day='${DAY}'; nav_path='${NAV_PATH}'; ready_path='${READY_PATH}'; \
-b=open(nav_path,'rb').read(); nav_sha=hashlib.sha256(b).hexdigest(); \
-nav=json.loads(b.decode('utf-8')); nav_total=(nav.get('nav') or {}).get('nav_total'); \
-out={ \
-  'schema_id':'C2_BASELINE_READY_V1', \
-  'schema_version':1, \
-  'day_utc':day, \
-  'ib_account':'DUO847203', \
-  'produced_utc':f'{day}T00:00:00Z', \
-  'nav':{'path':nav_path,'sha256':nav_sha,'nav_total':nav_total}, \
-  'producer':{'repo':'constellation_2_runtime','git_sha':'${SHA}','module':'ops/run/c2_baseline_readiness_paper_v1.sh'} \
-}; \
-s=json.dumps(out,sort_keys=True,separators=(',',':'))+'\n'; \
-tmp=ready_path+'.tmp'; \
-open(tmp,'w',encoding='utf-8').write(s); \
-os.replace(tmp,ready_path); \
-print('OK: baseline_ready_written path='+ready_path)"
+echo "=== STEP: publish readiness (attempt + pointer index + canonical) ==="
+ATTEMPT_ID="${DAY}__R$(date -u +%H%M%S)__${SHA:0:7}__${RANDOM}${RANDOM}"
+
+"${PY}" /home/node/constellation_2_runtime/ops/run/c2_baseline_readiness_publish_v1.py \
+  --day_utc "${DAY}" \
+  --attempt_id "${ATTEMPT_ID}" \
+  --ib_account DUO847203 \
+  --nav_path "/home/node/constellation_2_runtime/${NAV_PATH}" \
+  --producer_git_sha "${SHA}"
 
 echo "BASELINE_READINESS_OK day=${DAY}"
