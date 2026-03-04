@@ -466,6 +466,17 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str)
             blocking=False,
             skip_if_exists_paths=[exec_recon_out],
         ),
+        StageDef(
+            stage_id="A8_EXECUTION_READINESS_GATE_V1",
+            cmd=["python3", "ops/tools/run_execution_readiness_gate_v1.py", "--day_utc", day],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=False,
+            blocking=False,
+            skip_if_exists_paths=[
+                str(truth / "reports" / "execution_readiness_gate_v1" / day / "execution_readiness_gate.v1.json")
+            ],
+        ),
     ]
 
 
@@ -515,6 +526,56 @@ def _publish_pipeline_manifest_v1_compat(*, day: str, attempt_manifest_path: Pat
     rc = _run_cmd("PUBLISH_PIPELINE_MANIFEST_V1_COMPAT", cmd, env=env)
     return (rc == 0, int(rc))
 
+def _enforce_fail_closed_from_stage_results(stage_results: List[Dict[str, Any]]) -> Tuple[str | None, List[str]]:
+    """
+    Fail-closed enforcement layer.
+
+    This enforces that orchestrator status cannot be PASS when required or blocking stages failed.
+
+    Returns:
+      (override_status, extra_reason_codes)
+    """
+    override_status: str | None = None
+    extra: List[str]
+
+
+def _enforce_gate_stack_verdict(*, truth_root: Path, day: str, current_status: str, reason_codes: List[str]) -> str:
+    """
+    Enforce fail-closed using gate_stack_verdict_v1.
+
+    - If gate stack is missing: FAIL (fail-closed) because it is a canonical pretrade spine.
+    - If blocking_class == CLASS1_SYSTEM_HARD_STOP: ABORTED.
+    - If status != PASS: FAIL.
+    - If PASS: no change.
+    """
+    p = (truth_root / "reports" / "gate_stack_verdict_v1" / day / "gate_stack_verdict.v1.json").resolve()
+
+    if not p.exists():
+        if "GATE_STACK_VERDICT_MISSING" not in reason_codes:
+            reason_codes.append("GATE_STACK_VERDICT_MISSING")
+        return "FAIL" if current_status != "ABORTED" else current_status
+
+    try:
+        o = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        if "GATE_STACK_VERDICT_PARSE_ERROR" not in reason_codes:
+            reason_codes.append("GATE_STACK_VERDICT_PARSE_ERROR")
+        return "ABORTED"
+
+    status = str(o.get("status") or "").strip().upper()
+    blocking = str(o.get("blocking_class") or "").strip().upper()
+
+    if blocking == "CLASS1_SYSTEM_HARD_STOP":
+        if "CLASS1_SYSTEM_HARD_STOP" not in reason_codes:
+            reason_codes.append("CLASS1_SYSTEM_HARD_STOP")
+        return "ABORTED"
+
+    if status and status != "PASS":
+        if "GATE_STACK_VERDICT_NOT_PASS" not in reason_codes:
+            reason_codes.append("GATE_STACK_VERDICT_NOT_PASS")
+        return "FAIL" if current_status != "ABORTED" else current_status
+
+    return current_status
 
 def main() -> int:
     _require_repo_root_cwd()
@@ -722,6 +783,9 @@ def main() -> int:
         else:
             status = "PASS"
 
+    # Fail-closed: gate stack verdict must be PASS for status PASS/DEGRADED
+    status = _enforce_gate_stack_verdict(truth_root=truth_root, day=day, current_status=status, reason_codes=reason_codes)
+
     out_dir = (verdict_root / day / attempt_id).resolve()
     man_wr = _write_attempt_file(out_dir / "orchestrator_attempt_manifest.v2.json", _json_dumps(attempt_manifest))
     attempt_manifest_path = (out_dir / "orchestrator_attempt_manifest.v2.json").resolve()
@@ -749,6 +813,9 @@ def main() -> int:
         reason_codes.append(f"PIPELINE_MANIFEST_V1_COMPAT_PUBLISH_RC={pub1_rc}")
         if status == "PASS":
             status = "DEGRADED"
+
+    # Re-enforce gate stack after publishers (prevents accidental PASS)
+    status = _enforce_gate_stack_verdict(truth_root=truth_root, day=day, current_status=status, reason_codes=reason_codes)
 
     replay_hashes: Dict[str, str] = {"attempt_manifest_sha256": str(man_wr["sha256"])}
 
