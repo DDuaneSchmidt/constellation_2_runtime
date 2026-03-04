@@ -431,6 +431,17 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str)
             skip_if_exists_paths=[cap_gate_out],
         ),
         StageDef(
+            stage_id="A5X_GATE_COMPLETENESS_GATE_V1",
+            cmd=["python3", "ops/tools/run_gate_completeness_gate_v1.py", "--day_utc", day],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=True,
+            blocking=True,
+            skip_if_exists_paths=[
+                str(truth / "reports" / "gate_completeness_gate_v1" / day / "gate_completeness_gate.v1.json")
+            ],
+        ),
+        StageDef(
             stage_id="A6_GATE_STACK_VERDICT_V1",
             cmd=["python3", "ops/tools/run_gate_stack_verdict_v1.py", "--day_utc", day],
             required_for_paper=True,
