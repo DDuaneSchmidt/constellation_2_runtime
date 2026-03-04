@@ -113,6 +113,67 @@ def resolve_sleeve_truth_root(sleeve: Dict[str, Any]) -> Tuple[str, str, str, Pa
 
     return (sleeve_id, mode, ib_account, abs_root)
 
+def sha256_file(p: Path) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with p.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def read_json_obj(p: Path) -> Dict[str, Any]:
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception as e:
+        die(f"json_parse_failed path={p} err={type(e).__name__}:{e}")
+
+
+def resolve_latest_verdict_pointer(*, verdict_root: Path, day: str, mode: str) -> Tuple[Path, Path, int]:
+    """
+    Returns:
+      (pointer_index_path, points_to_path, pointer_seq)
+
+    Fail-closed if pointer index missing or invalid.
+    """
+    idx = (verdict_root / day / "canonical_pointer_index.v1.jsonl").resolve()
+    if not idx.exists():
+        die(f"missing_pointer_index path={idx}")
+
+    best_seq = -1
+    best_points_to: Path | None = None
+
+    for line in idx.read_text(encoding="utf-8").splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        try:
+            o = json.loads(s)
+        except Exception:
+            die(f"invalid_pointer_index_jsonl path={idx}")
+        if not isinstance(o, dict):
+            continue
+        if str(o.get("mode") or "").strip().upper() != mode:
+            continue
+        try:
+            ps = int(o.get("pointer_seq"))
+        except Exception:
+            continue
+        if ps <= best_seq:
+            continue
+        pt = str(o.get("points_to") or "").strip()
+        if not pt:
+            continue
+        best_seq = ps
+        best_points_to = Path(pt).resolve()
+
+    if best_points_to is None or best_seq < 0:
+        die(f"no_pointer_for_mode path={idx} mode={mode}")
+
+    if not best_points_to.exists():
+        die(f"pointer_points_to_missing points_to={best_points_to} idx={idx}")
+
+    return idx, best_points_to, best_seq
 
 def run_orchestrator_v2(*, day: str, input_day: str, mode: str, symbol: str, ib_account: str, produced_utc: str, truth_root: Path) -> Tuple[int, str]:
     cmd = [
@@ -188,22 +249,47 @@ def main() -> int:
         )
 
         # Orchestrator v2 policy: rc!=0 implies ABORTED (safety breach)
-        if rc != 0:
-            any_abort = True
-            per_sleeve.append(
-                {
-                    "sleeve_id": sleeve_id,
-                    "enabled": True,
-                    "mode": mode,
-                    "ib_account": ib_account,
-                    "truth_root": str(truth_root),
-                    "orchestrator_rc": int(rc),
-                    "status": "ABORTED",
-                    "cmd": cmd_str,
-                }
-            )
-            continue
+        # rc == 0 => orchestrator v2 completed and wrote verdict + pointer index in the sleeve truth root.
+        verdict_root = (truth_root / "reports" / "orchestrator_run_verdict_v2").resolve()
+        idx_path, points_to_path, pointer_seq = resolve_latest_verdict_pointer(
+            verdict_root=verdict_root, day=day, mode=mode
+        )
 
+        verdict_obj = read_json_obj(points_to_path)
+        v_status = str(verdict_obj.get("status") or "").strip().upper()
+        v_reasons = verdict_obj.get("reason_codes") if isinstance(verdict_obj.get("reason_codes"), list) else []
+        v_breaches = verdict_obj.get("safety_breaches") if isinstance(verdict_obj.get("safety_breaches"), list) else []
+
+        # Fail-closed if status missing/unknown
+        if v_status not in ("PASS", "DEGRADED", "FAIL", "ABORTED"):
+            die(f"verdict_status_invalid sleeve_id={sleeve_id} status={v_status!r} points_to={points_to_path}")
+
+        # Aggregate global status
+        if v_status == "ABORTED":
+            any_abort = True
+        elif v_status == "FAIL":
+            any_fail = True
+        elif v_status == "DEGRADED":
+            any_degraded = True
+
+        per_sleeve.append(
+            {
+                "sleeve_id": sleeve_id,
+                "enabled": True,
+                "mode": mode,
+                "ib_account": ib_account,
+                "truth_root": str(truth_root),
+                "orchestrator_rc": int(rc),
+                "verdict_status": v_status,
+                "verdict_reason_codes": [str(x) for x in v_reasons],
+                "verdict_safety_breaches": [str(x) for x in v_breaches],
+                "verdict_pointer_seq": int(pointer_seq),
+                "verdict_pointer_index_path": str(idx_path),
+                "verdict_points_to": str(points_to_path),
+                "verdict_points_to_sha256": sha256_file(points_to_path),
+                "cmd": cmd_str,
+            }
+        )
         # rc == 0 => PASS/DEGRADED/FAIL (non-abort). We cannot safely parse verdict file paths without schema
         # guarantees here, so we record rc=0 and classify as DEGRADED (conservative) unless later enhanced.
         any_degraded = True
