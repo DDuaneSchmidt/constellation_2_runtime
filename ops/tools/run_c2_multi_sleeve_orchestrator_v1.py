@@ -43,6 +43,9 @@ REGISTRY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/C2_SLEEVE_REGISTRY_V1.jso
 CANONICAL_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 ROLLOUP_ROOT = (CANONICAL_TRUTH_ROOT / "reports" / "sleeve_rollup_v1").resolve()
 
+POINTER_INDEX_NAME = "canonical_pointer_index.v1.jsonl"
+POINTER_LOCK_NAME = ".canonical_pointer_index.v1.lock"
+
 ORCH_V2 = (REPO_ROOT / "ops/tools/run_c2_paper_day_orchestrator_v2.py").resolve()
 
 
@@ -197,6 +200,74 @@ def run_orchestrator_v2(*, day: str, input_day: str, mode: str, symbol: str, ib_
     rc = subprocess.call(cmd, cwd=str(REPO_ROOT))
     return (int(rc), " ".join(cmd))
 
+def lock_acquire(lock_path: Path) -> int:
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        die(f"pointer_lock_busy path={lock_path}")
+    os.write(fd, f"pid={os.getpid()}\n".encode("utf-8"))
+    os.fsync(fd)
+    return fd
+
+
+def lock_release(fd: int, lock_path: Path) -> None:
+    try:
+        os.close(fd)
+    finally:
+        try:
+            os.unlink(str(lock_path))
+        except FileNotFoundError:
+            pass
+
+
+def read_last_pointer_seq(idx_path: Path) -> int:
+    if not idx_path.exists():
+        return 0
+    last = 0
+    for line in idx_path.read_text(encoding="utf-8").splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        try:
+            o = json.loads(s)
+        except Exception:
+            die(f"invalid_pointer_index_jsonl path={idx_path}")
+        if not isinstance(o, dict):
+            continue
+        try:
+            ps = int(o.get("pointer_seq"))
+        except Exception:
+            continue
+        if ps > last:
+            last = ps
+    return last
+
+
+def atomic_append_jsonl(idx_path: Path, obj: Dict[str, Any]) -> str:
+    idx_path.parent.mkdir(parents=True, exist_ok=True)
+    line = (json.dumps(obj, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    line_sha = sha256_file_bytes(line)
+
+    fd = os.open(str(idx_path), os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
+    try:
+        os.write(fd, line)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+    dfd = os.open(str(idx_path.parent), os.O_RDONLY)
+    try:
+        os.fsync(dfd)
+    finally:
+        os.close(dfd)
+
+    return line_sha
+
+
+def sha256_file_bytes(b: bytes) -> str:
+    import hashlib
+    return hashlib.sha256(b).hexdigest()
 
 def write_rollup(day: str, payload: Dict[str, Any]) -> Path:
     out_dir = (ROLLOUP_ROOT / day).resolve()
@@ -314,6 +385,31 @@ def main() -> int:
 
     out_path = write_rollup(day, rollup)
     print(f"OK: wrote_rollup path={out_path}")
+
+    # Append canonical pointer index for the rollup (day-scoped, append-only)
+    day_dir = (ROLLOUP_ROOT / day).resolve()
+    idx_path = (day_dir / POINTER_INDEX_NAME).resolve()
+    lock_path = (day_dir / POINTER_LOCK_NAME).resolve()
+
+    lock_fd = lock_acquire(lock_path)
+    try:
+        last_seq = read_last_pointer_seq(idx_path)
+        pointer_seq = last_seq + 1
+        entry = {
+            "schema_id": "C2_SLEEVE_ROLLUP_POINTER_INDEX_V1",
+            "pointer_seq": int(pointer_seq),
+            "day_utc": day,
+            "status": global_status,
+            "produced_utc": produced_utc,
+            "points_to": str(out_path),
+            "points_to_sha256": sha256_file(out_path),
+            "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_c2_multi_sleeve_orchestrator_v1.py"},
+        }
+        line_sha = atomic_append_jsonl(idx_path, entry)
+    finally:
+        lock_release(lock_fd, lock_path)
+
+    print(f"OK: rollup_pointer_appended seq={pointer_seq} line_sha256={line_sha} idx={idx_path}")
     # Always exit 0 except on ABORTED (safety breach)
     if global_status == "ABORTED":
         return 9
