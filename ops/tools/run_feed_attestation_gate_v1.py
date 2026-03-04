@@ -36,9 +36,8 @@ POLICY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/C2_FEED_ATTESTATION_POLICY_
 RECORD_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/FEED_ATTESTATION/feed_attestation_record.v1.schema.json"
 GATE_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/feed_attestation_gate.v1.schema.json"
 
-RECORDS_ROOT_RELPATH = "constellation_2/runtime/truth/feed_attestation_v1/records"
-GATE_OUT_RELPATH = "constellation_2/runtime/truth/reports/feed_attestation_gate_v1"
-
+RECORDS_ROOT_RELPATH = "feed_attestation_v1/records"
+GATE_OUT_RELPATH = "reports/feed_attestation_gate_v1"
 
 def _sha256_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
@@ -109,8 +108,11 @@ def _resolve_truth_root(arg_truth_root: str) -> Path:
     if not tr:
         tr = (os.environ.get("C2_TRUTH_ROOT") or "").strip()
     if not tr:
-        tr = str(DEFAULT_TRUTH_ROOT)
+        # Default (backward compatible): env-aware helper chooses C2_TRUTH_ROOT if set, else DEFAULT_TRUTH_ROOT.
+        return resolve_truth_root(repo_root=REPO_ROOT)
     truth_root = Path(tr).resolve()
+    if not truth_root.is_absolute():
+        raise SystemExit(f"FAIL: truth_root must be absolute: {truth_root}")
     if not truth_root.exists() or not truth_root.is_dir():
         raise SystemExit(f"FAIL: truth_root missing or not dir: {truth_root}")
     try:
