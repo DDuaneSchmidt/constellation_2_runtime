@@ -40,7 +40,8 @@ Additional registries introduced:
 - `governance/02_REGISTRIES/C2_IB_ACCOUNT_REGISTRY_V1.json`
 - `governance/02_REGISTRIES/C2_LIQUIDITY_SLIPPAGE_POLICY_V1.json`
 - `governance/02_REGISTRIES/C2_SLEEVE_REGISTRY_V1.json`
-
+- `governance/05_CONTRACTS/C2/multi_sleeve_rollup_pointer_index_v1.contract.md`
+- `governance/05_CONTRACTS/C2/preopen_requires_multi_sleeve_rollup_verification_v1.contract.md`
 
 ### Registries (governed)
 - `governance/02_REGISTRIES/GATE_HIERARCHY_V1.json`
