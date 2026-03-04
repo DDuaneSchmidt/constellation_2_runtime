@@ -92,4 +92,6 @@ if [ "$fail" -ne 0 ]; then
   exit 2
 fi
 
+bash /home/node/constellation_2_runtime/ops/run/c2_verify_multi_sleeve_rollup_v1.sh
+
 echo "OK: PREOPEN_PREFLIGHT_PASS"
