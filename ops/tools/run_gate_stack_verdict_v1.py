@@ -142,7 +142,9 @@ def _eval_gate(*, truth_root: Path, day: str, gate: Dict[str, Any]) -> Tuple[Dic
     rel = str(gate.get("artifact_relpath") or "").replace("{DAY}", day)
     status_field = str(gate.get("status_field") or "status")
     pass_vals = [str(x).strip().upper() for x in (gate.get("pass_status_values") or [])]
-
+    if not pass_vals:
+        # Governance default: PASS/OK are the canonical passing values.
+        pass_vals = ["PASS", "OK"]
     # IMPORTANT: empty relpath must be treated as invalid/missing (fail-closed).
     #
     # Registry remediation 2026-03-02: artifact_relpath is file-backed and NOT a directory.
@@ -153,7 +155,8 @@ def _eval_gate(*, truth_root: Path, day: str, gate: Dict[str, Any]) -> Tuple[Dic
     # - Otherwise, default to canonical reports layout:
     #     truth_root/reports/<gate_id>/<DAY>/<rel>
     if not rel:
-        path = REPO_ROOT  # deterministic sentinel path (schema-safe), triggers fail-closed
+        # Deterministic sentinel under truth root (do NOT point at repo root).
+        path = (truth_root / "reports" / gate_id / day / "__MISSING_RELPATH__").resolve()
     else:
         rel_norm = rel.lstrip("/")
 
@@ -202,13 +205,18 @@ def _eval_gate(*, truth_root: Path, day: str, gate: Dict[str, Any]) -> Tuple[Dic
                 o = _read_json_obj(path)
                 raw = str(o.get(status_field) or "").strip().upper()
                 status = raw if raw else "UNKNOWN"
-                # Normalize common patterns
+                # Normalize to schema-safe status enums:
+                # allowed: PASS, FAIL, OK, DEGRADED, MISSING, UNKNOWN
                 if raw in ("OK", "PASS"):
                     status_norm = raw
-                elif raw in ("FAIL", "BLOCK", "BLOCKED"):
+                elif raw in ("FAIL", "BLOCK", "BLOCKED", "BLOCK_ALL", "MISSING_INPUTS"):
                     status_norm = "FAIL"
+                elif raw in ("SCALE", "DEGRADED"):
+                    status_norm = "DEGRADED"
+                elif raw in ("MISSING",):
+                    status_norm = "MISSING"
                 else:
-                    status_norm = raw
+                    status_norm = "UNKNOWN"
                 status = status_norm
 
                 rcs = o.get("reason_codes")
