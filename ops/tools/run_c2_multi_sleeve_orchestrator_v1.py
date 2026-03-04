@@ -290,21 +290,6 @@ def main() -> int:
                 "cmd": cmd_str,
             }
         )
-        # rc == 0 => PASS/DEGRADED/FAIL (non-abort). We cannot safely parse verdict file paths without schema
-        # guarantees here, so we record rc=0 and classify as DEGRADED (conservative) unless later enhanced.
-        any_degraded = True
-        per_sleeve.append(
-            {
-                "sleeve_id": sleeve_id,
-                "enabled": True,
-                "mode": mode,
-                "ib_account": ib_account,
-                "truth_root": str(truth_root),
-                "orchestrator_rc": int(rc),
-                "status": "COMPLETED_RC0",
-                "cmd": cmd_str,
-            }
-        )
 
     # Global verdict (fail-closed conservative)
     if any_abort:
