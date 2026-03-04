@@ -156,6 +156,12 @@ def _read_nav_total_cents(day: str) -> Tuple[int, Path, str]:
         o = _read_json_obj(p2)
         nav_cents = _nav_total_cents_from_nav_v2(o)
         if nav_cents <= 0:
+            # Allow explicit bootstrap stub NAV v2 (day0) to pass with nav_cents=0.
+            nav = o.get("nav") if isinstance(o, dict) else None
+            notes = nav.get("notes") if isinstance(nav, dict) else None
+            if isinstance(notes, list) and ("DAY0_BOOTSTRAP_STUB_NAV_V2" in notes):
+                return 0, p2, _sha256_file(p2)
+
             # fail-closed: zero NAV makes capacity model meaningless
             raise SystemExit(f"FAIL: LIQPOL_NAV_TOTAL_CENTS_NONPOSITIVE day={day} nav_total_cents={nav_cents}")
         return nav_cents, p2, _sha256_file(p2)
