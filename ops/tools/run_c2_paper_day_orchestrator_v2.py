@@ -36,7 +36,6 @@ DEFAULT_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
 SINGLE_ACCOUNT_ID = "DUO847203"
 
-VERDICT_ROOT = (DEFAULT_TRUTH_ROOT / "reports" / "orchestrator_run_verdict_v2").resolve()
 POINTER_INDEX_NAME = "canonical_pointer_index.v1.jsonl"
 POINTER_LOCK_NAME = ".canonical_pointer_index.v1.lock"
 
@@ -53,6 +52,18 @@ def _require_repo_root_cwd() -> None:
     cwd = Path.cwd().resolve()
     if cwd != REPO_ROOT:
         raise SystemExit(f"FATAL: must run with cwd={REPO_ROOT} got={cwd}")
+
+
+def _require_truth_root(p: str) -> Path:
+    s = (p or "").strip()
+    if not s:
+        raise SystemExit("FAIL: --truth_root resolved to empty string")
+    pr = Path(s).expanduser().resolve()
+    if not pr.is_absolute():
+        raise SystemExit(f"FAIL: --truth_root must be absolute: {pr}")
+    if not pr.exists() or (not pr.is_dir()):
+        raise SystemExit(f"FAIL: --truth_root must exist and be a directory: {pr}")
+    return pr
 
 
 def _require_day(day: str) -> str:
@@ -255,9 +266,7 @@ def _write_attempt_file(path: Path, data: bytes) -> Dict[str, Any]:
     return {"ok": True, "action": "WROTE", "path": str(path), "sha256": cand_sha}
 
 
-def _build_stage_defs(day: str, input_day: str, ib_account: str) -> List[StageDef]:
-    truth = DEFAULT_TRUTH_ROOT
-
+def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str) -> List[StageDef]:
     feed_gate_out = str(truth / "reports" / "feed_attestation_gate_v1" / day / "feed_attestation_gate.v1.json")
     liq_gate_out = str(truth / "reports" / "liquidity_slippage_gate_v1" / day / "liquidity_slippage_gate.v1.json")
     sys_gate_out = str(truth / "reports" / "systemic_risk_gate_v3" / day / "systemic_risk_gate.v3.json")
@@ -272,7 +281,14 @@ def _build_stage_defs(day: str, input_day: str, ib_account: str) -> List[StageDe
     exec_submissions_day_dir = str(truth / "execution_evidence_v1" / "submissions" / day)
     pos_out = str(truth / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json")
     cash_out = str(truth / "cash_ledger_v1" / "snapshots" / day / "cash_ledger_snapshot.v1.json")
-    op_stmt = str(REPO_ROOT / "constellation_2" / "operator_inputs" / "cash_ledger_operator_statements" / day / "operator_statement.v1.json")
+    op_stmt = str(
+        REPO_ROOT
+        / "constellation_2"
+        / "operator_inputs"
+        / "cash_ledger_operator_statements"
+        / day
+        / "operator_statement.v1.json"
+    )
 
     return [
         StageDef(
@@ -396,7 +412,7 @@ def _build_stage_defs(day: str, input_day: str, ib_account: str) -> List[StageDe
             blocking=True,
             skip_if_exists_paths=[nav_out],
         ),
-       StageDef(
+        StageDef(
             stage_id="A5_CAPITAL_RISK_ENVELOPE_GATE_V2",
             cmd=[
                 "python3",
@@ -453,7 +469,9 @@ def _build_stage_defs(day: str, input_day: str, ib_account: str) -> List[StageDe
     ]
 
 
-def _publish_pipeline_manifest_v3(*, day: str, mode: str, attempt_id: str, attempt_seq: int, attempt_manifest_path: Path, env: Dict[str, str]) -> Tuple[bool, int]:
+def _publish_pipeline_manifest_v3(
+    *, day: str, mode: str, attempt_id: str, attempt_seq: int, attempt_manifest_path: Path, env: Dict[str, str]
+) -> Tuple[bool, int]:
     cmd = [
         "python3",
         "ops/tools/run_pipeline_manifest_v3_mode_aware.py",
@@ -508,7 +526,15 @@ def main() -> int:
     ap.add_argument("--symbol", default="SPY")
     ap.add_argument("--ib_account", required=True, help="IB account id (single-account mode enforced)")
     ap.add_argument("--produced_utc", required=True, help="UTC ISO-8601 Z timestamp (operator supplied)")
+    ap.add_argument(
+        "--truth_root",
+        default=None,
+        help="Absolute truth root directory. If omitted, uses the default constellation_2/runtime/truth",
+    )
     args = ap.parse_args()
+
+    truth_root = DEFAULT_TRUTH_ROOT if (args.truth_root is None) else _require_truth_root(args.truth_root)
+    verdict_root = (truth_root / "reports" / "orchestrator_run_verdict_v2").resolve()
 
     day = _require_day(args.day_utc)
     input_day = _require_day((args.input_day_utc or "").strip() or day)
@@ -539,11 +565,10 @@ def main() -> int:
             "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_c2_paper_day_orchestrator_v2.py", "git_sha": git_sha},
         }
         attempt_id = f"{day}__{produced_utc}__{git_sha}__{mode}__{symbol}__{ib_account}"
-        out_dir = (VERDICT_ROOT / day / attempt_id).resolve()
+        out_dir = (verdict_root / day / attempt_id).resolve()
         _write_attempt_file(out_dir / "orchestrator_run_verdict.v2.json", _json_dumps(verdict))
         return 7
 
-    truth_root = DEFAULT_TRUTH_ROOT
     git_sha = _git_sha()
 
     cfg_hash = (os.environ.get("C2_ORCHESTRATOR_CONFIG_HASH") or "").strip().lower()
@@ -580,7 +605,7 @@ def main() -> int:
     stage_env["C2_TRUTH_ROOT"] = str(truth_root)
     stage_env["C2_PRODUCED_UTC"] = produced_utc
 
-    stages = _build_stage_defs(day=day, input_day=input_day, ib_account=ib_account)
+    stages = _build_stage_defs(truth=truth_root, day=day, input_day=input_day, ib_account=ib_account)
 
     stage_results: List[Dict[str, Any]] = []
     safety_breaches: List[str] = []
@@ -697,7 +722,7 @@ def main() -> int:
         else:
             status = "PASS"
 
-    out_dir = (VERDICT_ROOT / day / attempt_id).resolve()
+    out_dir = (verdict_root / day / attempt_id).resolve()
     man_wr = _write_attempt_file(out_dir / "orchestrator_attempt_manifest.v2.json", _json_dumps(attempt_manifest))
     attempt_manifest_path = (out_dir / "orchestrator_attempt_manifest.v2.json").resolve()
 
@@ -747,7 +772,7 @@ def main() -> int:
 
     _write_attempt_file(out_dir / "orchestrator_run_verdict.v2.json", _json_dumps(verdict))
 
-    day_root = (VERDICT_ROOT / day).resolve()
+    day_root = (verdict_root / day).resolve()
     idx_path = (day_root / POINTER_INDEX_NAME).resolve()
     lock_path = (day_root / POINTER_LOCK_NAME).resolve()
 
