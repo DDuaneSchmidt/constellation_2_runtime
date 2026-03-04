@@ -134,14 +134,41 @@ documents:
     path: governance/05_CONTRACTS/C2/single_ib_account_mode_v1.contract.md
     class: C2_CONTRACT
     status: ACTIVE
+  - id: C2_MULTI_ACCOUNT_TOPOLOGY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/multi_account_topology_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_SLEEVE_REGISTRY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/sleeve_registry_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_TRUTH_PARTITIONING_BY_SLEEVE_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/truth_partitioning_by_sleeve_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_PER_SLEEVE_READINESS_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/per_sleeve_readiness_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_PER_SLEEVE_ORCHESTRATOR_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/per_sleeve_orchestrator_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_SLEEVE_REGISTRY_V1
+    path: governance/02_REGISTRIES/C2_SLEEVE_REGISTRY_V1.json
+    class: C2_REGISTRY
+    status: ACTIVE
+
   - id: C2_LIQUIDITY_SLIPPAGE_GATE_CONTRACT_V1
     path: governance/05_CONTRACTS/C2/liquidity_slippage_gate_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
-  - id: C2_LIQUIDITY_SLIPPAGE_GATE_CONTRACT_V1
-    path: governance/05_CONTRACTS/C2/liquidity_slippage_gate_v1.contract.md
-    class: C2_CONTRACT
-    status: DRAFT
+
   - id: C2_BUNDLE_A_PAPER_TRADING_READINESS_AUDIT_PROOF_V1
     path: governance/05_CONTRACTS/C2/bundle_a_paper_trading_readiness_audit_proof_v1.contract.md
     class: C2_CONTRACT

@@ -39,6 +39,8 @@ Additional registries introduced:
 - `governance/02_REGISTRIES/TRUTH_SURFACE_AUTHORITY_V1.json`
 - `governance/02_REGISTRIES/C2_IB_ACCOUNT_REGISTRY_V1.json`
 - `governance/02_REGISTRIES/C2_LIQUIDITY_SLIPPAGE_POLICY_V1.json`
+- `governance/02_REGISTRIES/C2_SLEEVE_REGISTRY_V1.json`
+
 
 ### Registries (governed)
 - `governance/02_REGISTRIES/GATE_HIERARCHY_V1.json`
@@ -98,7 +100,11 @@ These canonical contracts are governance-controlled and must be explicitly liste
 - `governance/05_CONTRACTS/C2/ib_account_registry_v1.contract.md`
 - `governance/05_CONTRACTS/C2/trade_submit_readiness_c2_v1.contract.md`
 - `governance/05_CONTRACTS/C2/single_ib_account_mode_v1.contract.md`
-
+- `governance/05_CONTRACTS/C2/multi_account_topology_v1.contract.md`
+- `governance/05_CONTRACTS/C2/sleeve_registry_v1.contract.md`
+- `governance/05_CONTRACTS/C2/truth_partitioning_by_sleeve_v1.contract.md`
+- `governance/05_CONTRACTS/C2/per_sleeve_readiness_v1.contract.md`
+- `governance/05_CONTRACTS/C2/per_sleeve_orchestrator_v1.contract.md`
 - `governance/05_CONTRACTS/ORCHESTRATION/C2_ORCHESTRATOR_V2_CONTRACT.md`
 
 
