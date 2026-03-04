@@ -25,12 +25,12 @@ import os
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
-
+from constellation_2.common.truth_root_v1 import resolve_truth_root
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH_ROOT = resolve_truth_root(repo_root=REPO_ROOT)
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/pipeline_manifest.v3.schema.json"
 OUT_ROOT = (TRUTH_ROOT / "reports" / "pipeline_manifest_v3").resolve()

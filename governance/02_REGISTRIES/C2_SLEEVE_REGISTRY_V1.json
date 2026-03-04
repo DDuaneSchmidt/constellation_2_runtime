@@ -1,0 +1,35 @@
+{
+  "schema_id": "c2_sleeve_registry",
+  "schema_version": "v1",
+  "produced_utc": "2026-03-04T01:08:28Z",
+  "producer": {
+    "repo": "constellation_2_runtime",
+    "module": "governance/02_REGISTRIES/C2_SLEEVE_REGISTRY_V1.json",
+    "git_sha": "c352388274483600bf7b5c8454bda9c97f01fa25"
+  },
+  "registry_version": 1,
+  "approved_git_sha": "c352388274483600bf7b5c8454bda9c97f01fa25",
+  "sleeves": [
+    {
+      "sleeve_id": "PRIMARY",
+      "enabled": true,
+      "mode": "PAPER",
+      "ib_account": "DUO847203",
+      "symbols": [
+        "SPY"
+      ],
+      "truth_partition": "truth_sleeves/PRIMARY/PAPER",
+      "ib_gateway_profile": {
+        "host": "127.0.0.1",
+        "port": 7497,
+        "client_id_market_data": 1101,
+        "client_id_orders": 1102,
+        "client_id_observer": 1103
+      },
+      "notes": [
+        "Initial migration sleeve: preserves single-account PAPER topology while enabling per-sleeve truth partitioning.",
+        "Truth partition is canonical: truth_sleeves/<sleeve_id>/<mode>."
+      ]
+    }
+  ]
+}

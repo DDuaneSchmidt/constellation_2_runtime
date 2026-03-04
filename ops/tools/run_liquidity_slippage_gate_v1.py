@@ -33,9 +33,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
+from constellation_2.common.truth_root_v1 import resolve_truth_root
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH_ROOT = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
+TRUTH_ROOT = resolve_truth_root(repo_root=REPO_ROOT)
 
 POLICY_PATH = (REPO_ROOT / "governance" / "02_REGISTRIES" / "C2_LIQUIDITY_SLIPPAGE_POLICY_V1.json").resolve()
 POLICY_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RISK/liquidity_slippage_policy.v1.schema.json"
@@ -155,6 +156,12 @@ def _read_nav_total_cents(day: str) -> Tuple[int, Path, str]:
         o = _read_json_obj(p2)
         nav_cents = _nav_total_cents_from_nav_v2(o)
         if nav_cents <= 0:
+            # Allow explicit bootstrap stub NAV v2 (day0) to pass with nav_cents=0.
+            nav = o.get("nav") if isinstance(o, dict) else None
+            notes = nav.get("notes") if isinstance(nav, dict) else None
+            if isinstance(notes, list) and ("DAY0_BOOTSTRAP_STUB_NAV_V2" in notes):
+                return 0, p2, _sha256_file(p2)
+
             # fail-closed: zero NAV makes capacity model meaningless
             raise SystemExit(f"FAIL: LIQPOL_NAV_TOTAL_CENTS_NONPOSITIVE day={day} nav_total_cents={nav_cents}")
         return nav_cents, p2, _sha256_file(p2)

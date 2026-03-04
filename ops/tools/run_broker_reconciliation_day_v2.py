@@ -6,9 +6,10 @@ import os
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
+from constellation_2.common.truth_root_v1 import resolve_truth_root
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime")
-TRUTH_ROOT = REPO_ROOT / "constellation_2/runtime/truth"
+TRUTH_ROOT = resolve_truth_root(repo_root=REPO_ROOT)
 
 SCHEMA_ID = "C2_BROKER_RECONCILIATION_V2"
 SCHEMA_VERSION = "1.0.0"
