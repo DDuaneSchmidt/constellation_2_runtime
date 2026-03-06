@@ -108,10 +108,22 @@ def _write_immutable(path: Path, obj: Dict[str, Any]) -> str:
     return sha
 
 
+def _hash_dir_listing(root: Path) -> str:
+    if not root.exists() or not root.is_dir():
+        return "0" * 64
+    rows = []
+    for p in sorted([x for x in root.rglob("*") if x.is_file()], key=lambda x: str(x.relative_to(root)).replace("\\", "/")):
+        rel = str(p.relative_to(root)).replace("\\", "/")
+        rows.append({"rel": rel, "sha256": _sha256_file(p)})
+    return _sha256_bytes(_canonical_json_bytes_v1(rows))
+
+
 def _input_entry(truth_root: Path, type_: str, relpath: str) -> Dict[str, Any]:
     p = (truth_root / relpath).resolve()
     if p.exists() and p.is_file():
         return {"type": type_, "path": relpath, "sha256": _sha256_file(p), "present": True}
+    if p.exists() and p.is_dir():
+        return {"type": type_, "path": relpath, "sha256": _hash_dir_listing(p), "present": True}
     return {"type": type_, "path": relpath, "sha256": "0" * 64, "present": False}
 
 
@@ -130,14 +142,14 @@ def main() -> int:
 
     # Canonical required inputs (repo-relative)
     input_manifest = f"reports/pipeline_manifest_v1/{day}/pipeline_manifest.v1.json"
-    allocation = f"allocation_v1/capital_authority_allocation_v1/{day}/capital_authority_allocation.v1.json"
+    allocation = f"allocation_v1/summary/{day}"
     liquidity = "market_data_snapshot_v1/dataset_manifest.json"
     corr = f"monitoring_v1/engine_correlation_matrix/{day}/engine_correlation_matrix.v1.json"
     convex = f"reports/convex_risk_assessment_v1/{day}/convex_risk_assessment.v1.json"
     depth = f"reports/depth_liquidity_stress_v1/{day}/depth_liquidity_stress.v1.json"
     reconciliation = f"reports/broker_reconciliation_v2/{day}/broker_reconciliation.v2.json"
-    nav = f"accounting_compat_v1/nav/{day}/nav_snapshot.v1.json"
-    submission_index = f"execution_evidence_v1/submissions/{day}/submission_index.v1.json"
+    nav = f"accounting_v2/nav/{day}/nav.v2.json"
+    submission_index = f"execution_evidence_v1/submission_index/{day}/submission_index.v1.json"
     gate_stack = f"reports/gate_stack_verdict_v1/{day}/gate_stack_verdict.v1.json"
 
     input_entries: List[Dict[str, Any]] = [

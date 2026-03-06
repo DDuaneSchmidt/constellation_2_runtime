@@ -136,17 +136,9 @@ def main() -> int:
 
     # Intents
     _add_input(inputs, truth, "intents_day_dir", truth / "intents_v1" / "snapshots" / day, is_dir=True)
-    _add_input(
-        inputs,
-        truth,
-        "intents_day_rollup_v1",
-        truth / "intents_v1" / "day_rollup" / day / "intents_day_rollup.v1.json",
-        is_dir=False,
-    )
 
     # Preflight / OMS / Allocation
     _add_input(inputs, truth, "phaseC_preflight_day_dir", truth / "phaseC_preflight_v1" / day, is_dir=True)
-    _add_input(inputs, truth, "oms_day_dir", truth / "oms_decisions_v1" / "decisions" / day, is_dir=True)
     _add_input(inputs, truth, "allocation_day_dir", truth / "allocation_v1" / "summary" / day, is_dir=True)
 
     # Execution evidence / fills
@@ -200,12 +192,12 @@ def main() -> int:
             is_dir=False,
         )
 
-    # Reports: broker reconciliation v1 + pipeline manifest v1
+    # Reports: broker reconciliation v2 + pipeline manifest v1
     _add_input(
         inputs,
         truth,
-        "broker_reconciliation_v1",
-        truth / "reports" / "broker_reconciliation_v1" / day / "broker_reconciliation.v1.json",
+        "broker_reconciliation_v2",
+        truth / "reports" / "broker_reconciliation_v2" / day / "broker_reconciliation.v2.json",
         is_dir=False,
     )
     _add_input(
