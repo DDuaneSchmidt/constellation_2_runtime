@@ -844,12 +844,13 @@ def build_status_v2(
     # Gate tiles (authoritative artifacts you proved exist)
     attest_path = (truth_root / "reports" / "feed_attestation_gate_v1" / day / "feed_attestation_gate.v1.json").resolve()
     liquidity_path = (truth_root / "reports" / "liquidity_slippage_gate_v1" / day / "liquidity_slippage_gate.v1.json").resolve()
-    systemic_path = (truth_root / "reports" / "systemic_risk_gate_v3" / day / "systemic_risk_gate.v3.json").resolve()
+    correlation_path = (truth_root / "reports" / "correlation_envelope_gate_v1" / day / "correlation_envelope_gate.v1.json").resolve()
+    convex_path = (truth_root / "reports" / "convex_risk_assessment_v1" / day / "convex_risk_assessment.v1.json").resolve()
 
     attest_tile, warn_att, miss_att = _parse_simple_gate_tile(attest_path, "feed_attestation")
     liquidity_tile, warn_liq, miss_liq = _parse_simple_gate_tile(liquidity_path, "liquidity_gate")
-    corr_tile, warn_cor, miss_cor = _parse_simple_gate_tile(systemic_path, "correlation_gate")
-    convex_tile, warn_cvx, miss_cvx = _parse_simple_gate_tile(systemic_path, "convex_gate")
+    corr_tile, warn_cor, miss_cor = _parse_simple_gate_tile(correlation_path, "correlation_gate")
+    convex_tile, warn_cvx, miss_cvx = _parse_simple_gate_tile(convex_path, "convex_gate")
 
     # Replay
     replay_tile, miss_rep, sp_rep, sm_rep, warn_rep = _parse_replay_tile(truth_root, day, sel_attempt)
@@ -886,24 +887,34 @@ def build_status_v2(
         artifact_sha256=safety_sha,
     )
 
-    # Broker connection/observer (informational from c3_status if present)
-    broker_state = "UNKNOWN"
-    broker_last = None
-    if isinstance(c3_status, dict):
-        br = c3_status.get("broker_reconciliation") if isinstance(c3_status.get("broker_reconciliation"), dict) else None
-        if isinstance(br, dict):
-            broker_state = _coerce_state(str(br.get("state") or "UNKNOWN"))
-            broker_last = br.get("generated_at_utc") or br.get("generated_utc") or None
+    # Broker connection/observer
+    broker_path_v2 = (truth_root / "reports" / "broker_reconciliation_v2" / day / "broker_reconciliation.v2.json").resolve()
+    broker_path_v1 = (truth_root / "reports" / "broker_reconciliation_v1" / day / "broker_reconciliation.v1.json").resolve()
 
-    broker_tile = Tile(
-        tile_id="broker_connection_observer",
-        state=_coerce_state(broker_state),
-        last_updated_utc=str(broker_last) if isinstance(broker_last, str) and broker_last else None,
-        reason_codes=[],
-        reason_human=[],
-        artifact_path=None,
-        artifact_sha256=None,
-    )
+    if broker_path_v2.exists():
+        broker_tile, warn_broker, miss_broker = _parse_simple_gate_tile(broker_path_v2, "broker_connection_observer")
+    elif broker_path_v1.exists():
+        broker_tile, warn_broker, miss_broker = _parse_simple_gate_tile(broker_path_v1, "broker_connection_observer")
+    else:
+        broker_state = "UNKNOWN"
+        broker_last = None
+        if isinstance(c3_status, dict):
+            br = c3_status.get("broker_reconciliation") if isinstance(c3_status.get("broker_reconciliation"), dict) else None
+            if isinstance(br, dict):
+                broker_state = _coerce_state(str(br.get("state") or "UNKNOWN"))
+                broker_last = br.get("generated_at_utc") or br.get("generated_utc") or None
+
+        broker_tile = Tile(
+            tile_id="broker_connection_observer",
+            state=_coerce_state(broker_state),
+            last_updated_utc=str(broker_last) if isinstance(broker_last, str) and broker_last else None,
+            reason_codes=[],
+            reason_human=[],
+            artifact_path=None,
+            artifact_sha256=None,
+        )
+        warn_broker = []
+        miss_broker = [str(broker_path_v2), str(broker_path_v1)]
 
     # Flow
     rollup_doc, miss_roll = _load_activity_rollup(truth_root, day)
@@ -1044,6 +1055,7 @@ def build_status_v2(
             + miss_cvx
             + miss_eng
             + miss_ma
+            + miss_broker
         )
     )
 
@@ -1072,6 +1084,7 @@ def build_status_v2(
             + warn_liq
             + warn_cor
             + warn_cvx
+            + warn_broker
             + warn_ma
             + warn_eng
             + (["NAV_UNREADABLE"] if nav_err else [])
@@ -1085,10 +1098,10 @@ def build_status_v2(
             "selected_attempt_id": sel_attempt,
             "attempts": attempts,
             "canonical_pointer": {
-                "exists": False,
+                "exists": (truth_root / "run_pointer_v2" / "canonical_authority_head.v1.json").resolve().exists(),
                 "points_to_attempt_id": None,
                 "last_updated_utc": None,
-                "note": "Canonical pointer surface not located by this UI (fail-closed).",
+                "note": "Canonical authority head presence only; attempt linkage not yet derived by this collector.",
             },
         },
         "ops_health": {"tiles": [_tile_dict(t) for t in tiles]},
