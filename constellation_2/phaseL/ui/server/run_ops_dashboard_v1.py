@@ -954,6 +954,11 @@ def _series_nav_endpoint(qs: Dict[str, List[str]]) -> Dict[str, Any]:
 class OpsHandler(SimpleHTTPRequestHandler):
     STATIC_DIR = (Path(__file__).resolve().parents[1] / "static").resolve()
 
+    def end_headers(self) -> None:
+        # Prevent stale browser assets; dashboard is operational truth UI.
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
     def _send_json(self, code: int, obj: Any) -> None:
         b = json.dumps(obj, indent=2, sort_keys=True).encode("utf-8")
         self.send_response(code)
