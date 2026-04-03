@@ -15,6 +15,14 @@ canonical:
   truth_root: /home/node/constellation_2_runtime/constellation_2/runtime/truth
 
 documents:
+  - id: C2_WEEKLY_ENGINE_DIAGNOSTIC_REPORT_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/weekly_engine_diagnostic_report_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_TOOL_WEEKLY_ENGINE_DIAGNOSTIC_REPORT_V1
+    path: ops/tools/run_weekly_engine_diagnostic_report_v1.py
+    class: C2_TOOL
+    status: ACTIVE
   - id: C2_WEEKLY_ENGINE_DIAGNOSTIC_REVIEW_PROTOCOL_V1
     path: governance/weekly_engine_diagnostic_review_protocol_v1.md
     class: C2_RESEARCH_PROTOCOL
