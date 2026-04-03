@@ -25,6 +25,10 @@ This repository is the constitutional root of **Constellation 2.0**.
 
 ## Document classes
 
+### Weekly research protocols
+- `governance/weekly_engine_diagnostic_review_protocol_v1.md`
+
+
 ### A) C2 Bundle Contracts (Design Authority)
 - `governance/01_CONTRACTS/C2/`
 

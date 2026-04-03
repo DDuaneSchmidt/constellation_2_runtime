@@ -15,6 +15,10 @@ canonical:
   truth_root: /home/node/constellation_2_runtime/constellation_2/runtime/truth
 
 documents:
+  - id: C2_WEEKLY_ENGINE_DIAGNOSTIC_REVIEW_PROTOCOL_V1
+    path: governance/weekly_engine_diagnostic_review_protocol_v1.md
+    class: C2_RESEARCH_PROTOCOL
+    status: ACTIVE
   - id: GOVERNANCE_INDEX_C2_V1
     path: governance/00_INDEX.md
     class: GOVERNANCE_INDEX
