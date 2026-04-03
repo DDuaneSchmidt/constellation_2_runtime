@@ -506,6 +506,63 @@ def _load_platform_readiness(truth_root: Path, day: str) -> Dict[str, Any]:
     }
 
 
+def _load_platform_readiness_history(truth_root: Path) -> Dict[str, Any]:
+    _ = truth_root  # Platform readiness artifacts are governed under global runtime truth.
+    root = (
+        REPO_ROOT
+        / "constellation_2/runtime/truth"
+        / "readiness_v1"
+        / "constellation_platform_readiness_v1"
+    ).resolve()
+    history: List[Dict[str, Any]] = []
+    missing_paths: List[str] = []
+    warnings: List[str] = []
+
+    if not root.exists():
+        return {
+            "present": False,
+            "root": str(root),
+            "history": [],
+            "date_range": None,
+            "missing_paths": [str(root)],
+            "warnings": ["PLATFORM_READINESS_HISTORY_ROOT_MISSING"],
+        }
+
+    for day_dir in sorted((p for p in root.iterdir() if p.is_dir() and _is_day_str(p.name)), key=lambda p: p.name):
+        artifact_path = (day_dir / "constellation_platform_readiness.v1.json").resolve()
+        obj, err = _safe_read_json(artifact_path)
+        if not isinstance(obj, dict):
+            missing_paths.append(str(artifact_path))
+            warnings.append(
+                f"PLATFORM_READINESS_HISTORY_ARTIFACT_{'MISSING' if err == 'FILE_NOT_FOUND' else 'UNREADABLE'}:{day_dir.name}"
+            )
+            continue
+        history.append(
+            {
+                "day": str(obj.get("day_utc") or day_dir.name),
+                "score": obj.get("platform_readiness_score"),
+                "grade": str(obj.get("platform_readiness_grade") or ""),
+                "state": str(obj.get("platform_readiness_state") or "UNKNOWN"),
+                "threshold": obj.get("score_threshold_ready"),
+                "path": str(artifact_path),
+                "produced_utc": str(obj.get("produced_utc") or ""),
+            }
+        )
+
+    date_range = None
+    if history:
+        date_range = {"start": history[0]["day"], "end": history[-1]["day"]}
+
+    return {
+        "present": bool(history),
+        "root": str(root),
+        "history": history,
+        "date_range": date_range,
+        "missing_paths": missing_paths,
+        "warnings": warnings,
+    }
+
+
 # -------------------------
 # Tile readers
 # -------------------------
@@ -1942,6 +1999,7 @@ def build_status_v2(
         "sleeve_live_readiness": _load_sleeve_live_readiness(truth_root, day),
         "platform_bug_metrics": _load_platform_bug_metrics(truth_root, day),
         "platform_readiness": _load_platform_readiness(truth_root, day),
+        "platform_readiness_history": _load_platform_readiness_history(truth_root),
         "sleeves": sleeves_out,
         "trade_flow_today": {
             "counts": counts,

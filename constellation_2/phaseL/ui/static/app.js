@@ -133,18 +133,20 @@ function renderScopeHealth(payload) {
   const src = sh?.source || {};
   const liveReady = payload?.sleeve_live_readiness || {};
 
+  const execState = String(exec.status || "UNKNOWN").toUpperCase();
+  const monState = String(mon.status || "UNKNOWN").toUpperCase();
+  const overallState = String(overall.status || "UNKNOWN").toUpperCase();
   const rows = [
-    ["Sleeve Execution Health", String(exec.status || "UNKNOWN").toUpperCase(), (exec.reason_codes || []).slice(0, 2).join(", ") || "n/a"],
-    ["System Monitoring Health", String(mon.status || "UNKNOWN").toUpperCase(), ((mon.freshness || {}).reason_codes || []).slice(0, 2).join(", ") || "n/a"],
-    ["Overall Status", String(overall.status || "UNKNOWN").toUpperCase(), (overall.reason_codes || []).slice(0, 2).join(", ") || "n/a"],
+    ["Sleeve Execution Health", execState],
+    ["System Monitoring Health", monState],
+    ["Overall Status", overallState],
   ];
 
   el("scopeHealthMeta").textContent = `runtime_state=${src?.present ? "present" : "missing"} • source=${src?.path || "n/a"}`;
-  el("scopeHealthRow").innerHTML = rows.map(([k, st, reason]) => `
+  el("scopeHealthRow").innerHTML = rows.map(([k, st]) => `
     <div class="metric">
       <div class="k">${k}</div>
       <div class="v ${stateClass(st)}">${st}</div>
-      <div class="mono tiny muted">reason=${reason}</div>
     </div>
   `).join("");
 
@@ -183,33 +185,45 @@ function renderScopeHealth(payload) {
   const cvSummary = `pass_history=${histCv.current ?? "n/a"}/${histCv.required ?? "n/a"} freshness_ok=${freshCv.ok ?? "n/a"} lifecycle_status=${lifeCv.current_status ?? "n/a"} score=${scoreCv.current ?? "n/a"}/${scoreCv.required ?? "n/a"}`;
 
   const lifecycleSurface = (((mon?.freshness || {}).surface_results || []).find(s => (s?.surface_id || "") === "lifecycle_monitor")) || {};
+  const freshness = mon?.freshness || {};
+  const monitoringReasonCodes = (freshness?.reason_codes || []).join(", ") || "none";
   const lifecycleReasons = (lifecycleSurface?.source_reason_codes || []).slice(0, 3).join(", ") || "n/a";
   const lifecycleFails = (lifecycleSurface?.source_check_failures || []).slice(0, 3).join(", ") || "n/a";
   const lifecycleFailClass = (lifecycleSurface?.fail_reasons || []).join(", ") || "n/a";
   const lifecycleCauseClass = lifecycleSurface?.lifecycle_cause_class || "n/a";
   const lifecycleGov = lifecycleSurface?.lifecycle_governance_summary || {};
   const lifecycleGovSummary = `exec_required_blocked=${lifecycleGov?.blocked_by_classification?.REQUIRED_FOR_EXECUTION ?? "n/a"} readiness_required_blocked=${lifecycleGov?.blocked_by_classification?.REQUIRED_FOR_READINESS ?? "n/a"} optional_blocked=${lifecycleGov?.blocked_by_classification?.OPTIONAL_MONITORING ?? "n/a"}`;
+  const liveEvidencePaths = (liveReady?.evidence_paths || []).join(" | ") || "none";
+  const freshnessSurfaces = (freshness?.surface_results || []).map(s => `${s?.surface_id || "unknown"}:${s?.status || "UNKNOWN"}`).join(", ") || "none";
+  const overallSummary = `execution=${execState} • monitoring=${monState} • overall=${overallState}`;
+  const sleeveSummary = `Sleeve Live Readiness: ${state} • score=${score}/${threshold} • grade=${grade} • promotion_candidate=${candidate}`;
 
   el("sleeveReadinessRow").innerHTML = `
-    <div class="mono tiny">Sleeve Live Readiness: state=${state} score=${score} threshold=${threshold} grade=${grade} promotion_candidate=${candidate}</div>
-    <div class="mono tiny">readiness_summary=${readinessSummary}</div>
-    <div class="mono tiny">promotion_decision_basis=${decisionBasis}</div>
-    <div class="mono tiny">top_blockers=${blockers}</div>
-    <div class="mono tiny">root_blockers=${rootBlockers}</div>
-    <div class="mono tiny">derived_blockers=${derivedBlockers}</div>
-    <div class="mono tiny">aggregate_blocker_summary=root=${agg.root_blocker_count ?? "n/a"} derived=${agg.derived_blocker_count ?? "n/a"} total=${agg.total_blocker_count ?? "n/a"}</div>
-    <div class="mono tiny">minimum_conditions_summary=${minimumSummary}</div>
-    <div class="mono tiny">pass_conditions_remaining=${remaining}</div>
-    <div class="mono tiny">smallest_clearance_set=${smallestClearanceSet}</div>
-    <div class="mono tiny">blocker_dependency_order=${blockerOrder}</div>
-    <div class="mono tiny">estimated_promotion_gate_sequence=${gateSequence}</div>
-    <div class="mono tiny">current_vs_required=${cvSummary}</div>
-    <div class="mono tiny">calibration_failed_checks=${failedChecks}</div>
-    <div class="mono tiny">promotion_checklist.currently_false=${checklistFalse}</div>
-    <div class="mono tiny">recommended_next_actions=${nextActions}</div>
-    <div class="mono tiny">lifecycle_monitor: cause_class=${lifecycleCauseClass} fail_class=${lifecycleFailClass} reason_codes=${lifecycleReasons} failing_checks=${lifecycleFails}</div>
-    <div class="mono tiny">lifecycle_governance=${lifecycleGovSummary}</div>
-    <div class="mono tiny muted">promotion_note=PASS_today_is_execution_only_not_live_readiness • path=${readyPath}</div>
+    <div class="mono tiny">${overallSummary}</div>
+    <div class="mono tiny">${sleeveSummary}</div>
+    <details class="evidence-details" style="margin-top:8px;">
+      <summary class="mono tiny">Evidence</summary>
+      <div class="mono tiny" style="margin-top:6px;">readiness_summary=${readinessSummary}</div>
+      <div class="mono tiny">promotion_decision_basis=${decisionBasis}</div>
+      <div class="mono tiny">top_blockers=${blockers}</div>
+      <div class="mono tiny">root_blockers=${rootBlockers}</div>
+      <div class="mono tiny">derived_blockers=${derivedBlockers}</div>
+      <div class="mono tiny">aggregate_blocker_summary=root=${agg.root_blocker_count ?? "n/a"} derived=${agg.derived_blocker_count ?? "n/a"} total=${agg.total_blocker_count ?? "n/a"}</div>
+      <div class="mono tiny">minimum_conditions_summary=${minimumSummary}</div>
+      <div class="mono tiny">pass_conditions_remaining=${remaining}</div>
+      <div class="mono tiny">smallest_clearance_set=${smallestClearanceSet}</div>
+      <div class="mono tiny">blocker_dependency_order=${blockerOrder}</div>
+      <div class="mono tiny">estimated_promotion_gate_sequence=${gateSequence}</div>
+      <div class="mono tiny">current_vs_required=${cvSummary}</div>
+      <div class="mono tiny">calibration_failed_checks=${failedChecks}</div>
+      <div class="mono tiny">promotion_checklist.currently_false=${checklistFalse}</div>
+      <div class="mono tiny">recommended_next_actions=${nextActions}</div>
+      <div class="mono tiny">freshness_status=${freshness?.status ?? "UNKNOWN"} reason_codes=${monitoringReasonCodes} surfaces=${freshnessSurfaces}</div>
+      <div class="mono tiny">lifecycle_monitor: cause_class=${lifecycleCauseClass} fail_class=${lifecycleFailClass} reason_codes=${lifecycleReasons} failing_checks=${lifecycleFails}</div>
+      <div class="mono tiny">lifecycle_governance=${lifecycleGovSummary}</div>
+      <div class="mono tiny">evidence_paths=${liveEvidencePaths}</div>
+      <div class="mono tiny muted">promotion_note=PASS_today_is_execution_only_not_live_readiness • path=${readyPath}</div>
+    </details>
   `;
 }
 
@@ -218,6 +232,10 @@ function renderPlatformReadiness(payload) {
   const bug = payload?.platform_bug_metrics || {};
   const pm = platform?.metric_views || {};
   const bm = bug?.metric_views || {};
+  const scope = payload?.scope_health || {};
+  const mon = scope?.system_monitoring_health || {};
+  const freshness = mon?.freshness || {};
+  const lifecycleSurface = ((freshness?.surface_results || []).find(s => (s?.surface_id || "") === "lifecycle_monitor")) || {};
 
   const state = String(platform?.platform_readiness_state || "UNKNOWN").toUpperCase();
   const grade = platform?.platform_readiness_grade ?? "n/a";
@@ -242,6 +260,19 @@ function renderPlatformReadiness(payload) {
     || `events_today=${bug?.new_bug_events_today ?? "n/a"} velocity_7d=${velocityDisplay} recurrence=${recurrenceDisplay} diagnostics_stability=${stabilityDisplay} trend=${bug?.bug_velocity_trend ?? "UNKNOWN"}`;
   const checklist = platform?.promotion_checklist || {};
   const checklistFalse = (checklist?.currently_false || []).slice(0, 4).join(" | ") || "none";
+  const rootBlockers = (platform?.root_blockers || []).join(", ") || "none";
+  const derivedBlockers = (platform?.derived_blockers || []).join(", ") || "none";
+  const minimumSummary = (platform?.minimum_conditions_summary || []).join(" | ") || "none";
+  const smallestClearance = (platform?.smallest_clearance_set || []).join(" | ") || "none";
+  const blockerOrder = (platform?.blocker_dependency_order || []).join(" -> ") || "none";
+  const currentVsRequired = platform?.current_vs_required || {};
+  const aggregate = platform?.aggregate_blocker_summary || {};
+  const bugCalc = bug?.calculation_summary || {};
+  const bugUnknown = (bug?.unknown_fields || []).join(", ") || "none";
+  const evidencePaths = [
+    ...(Array.isArray(platform?.evidence_paths) ? platform.evidence_paths : []),
+    ...(Array.isArray(bug?.evidence_paths) ? bug.evidence_paths : []),
+  ].filter(Boolean);
   const path = platform?.path || "n/a";
 
   el("platformReadinessMeta").textContent = `artifact=${platform?.present ? "present" : "missing"} • path=${path}`;
@@ -264,12 +295,145 @@ function renderPlatformReadiness(payload) {
     </div>
   `;
   el("platformSummaryRow").innerHTML = `
-    <div class="mono tiny">top_blockers=${blockers}</div>
     <div class="mono tiny">readiness_summary=${summary}</div>
-    <div class="mono tiny">promotion_decision_basis=${decision}</div>
     <div class="mono tiny">bug_stability_summary=${bugSummary}</div>
-    <div class="mono tiny">bug_metrics_display: velocity_7d=${velocityDisplay} recurrence=${recurrenceDisplay} diagnostics_stability=${stabilityDisplay}</div>
-    <div class="mono tiny">promotion_checklist.currently_false=${checklistFalse}</div>
+    <details class="evidence-details" style="margin-top:8px;">
+      <summary class="mono tiny">Evidence</summary>
+      <div class="mono tiny" style="margin-top:6px;">promotion_decision_basis=${decision}</div>
+      <div class="mono tiny">top_blockers=${blockers}</div>
+      <div class="mono tiny">root_blockers=${rootBlockers}</div>
+      <div class="mono tiny">derived_blockers=${derivedBlockers}</div>
+      <div class="mono tiny">aggregate_blocker_summary=root=${aggregate?.root_blocker_count ?? "n/a"} derived=${aggregate?.derived_blocker_count ?? "n/a"} total=${aggregate?.total_blocker_count ?? "n/a"}</div>
+      <div class="mono tiny">minimum_conditions_summary=${minimumSummary}</div>
+      <div class="mono tiny">current_vs_required=${JSON.stringify(currentVsRequired)}</div>
+      <div class="mono tiny">promotion_checklist.currently_false=${checklistFalse}</div>
+      <div class="mono tiny">smallest_clearance_set=${smallestClearance}</div>
+      <div class="mono tiny">blocker_dependency_order=${blockerOrder}</div>
+      <div class="mono tiny">bug_metrics_display: velocity_7d=${velocityDisplay} recurrence=${recurrenceDisplay} diagnostics_stability=${stabilityDisplay}</div>
+      <div class="mono tiny">bug_metrics_calculation_summary=${JSON.stringify(bugCalc)}</div>
+      <div class="mono tiny">bug_metrics_unknown_fields=${bugUnknown}</div>
+      <div class="mono tiny">monitoring_freshness_status=${freshness?.status ?? "UNKNOWN"} reason_codes=${(freshness?.reason_codes || []).join(", ") || "none"}</div>
+      <div class="mono tiny">lifecycle_monitor_surface_status=${lifecycleSurface?.status ?? "UNKNOWN"} fail_reasons=${(lifecycleSurface?.fail_reasons || []).join(", ") || "none"} checks_failed=${(lifecycleSurface?.source_check_failures || []).join(", ") || "none"}</div>
+      <div class="mono tiny">evidence_paths=${evidencePaths.join(" | ") || "none"}</div>
+    </details>
+  `;
+}
+
+function escapeHtml(v) {
+  return String(v ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function svgPlatformReadinessHistory(points) {
+  const history = Array.isArray(points) ? points : [];
+  if (!history.length) {
+    return `<div class="mono small muted">No canonical platform readiness history found.</div>`;
+  }
+
+  const W = 920;
+  const H = 260;
+  const padL = 44;
+  const padR = 18;
+  const padT = 16;
+  const padB = 34;
+  const xSpan = Math.max(1, history.length - 1);
+  const yMin = 0;
+  const yMax = 100;
+  const ySpan = yMax - yMin;
+  const thresholds = history.map((p) => Number(p.threshold)).filter((v) => Number.isFinite(v));
+  const threshold = thresholds.length ? thresholds[thresholds.length - 1] : null;
+  const scoreToY = (score) => {
+    const v = Number.isFinite(Number(score)) ? Number(score) : 0;
+    return H - padB - ((v - yMin) / ySpan) * (H - padT - padB);
+  };
+  const indexToX = (idx) => padL + (idx * (W - padL - padR) / xSpan);
+  const yTicks = [0, 25, 50, 75, 100];
+
+  let path = "";
+  const circles = [];
+  const labels = [];
+  history.forEach((point, idx) => {
+    const score = Number(point.score);
+    if (!Number.isFinite(score)) return;
+    const x = indexToX(idx);
+    const y = scoreToY(score);
+    path += `${path ? " L " : "M "}${x} ${y}`;
+    circles.push(`<circle class="history-point" cx="${x}" cy="${y}" r="4"></circle>`);
+    labels.push(`<text class="history-axis-label" x="${x}" y="${H - 12}" text-anchor="middle">${escapeHtml(point.day.slice(5))}</text>`);
+  });
+
+  const grid = yTicks.map((tick) => {
+    const y = scoreToY(tick);
+    return `
+      <line class="history-grid-line" x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}"></line>
+      <text class="history-axis-label" x="${padL - 8}" y="${y + 4}" text-anchor="end">${tick}</text>
+    `;
+  }).join("");
+
+  const thresholdSvg = Number.isFinite(threshold)
+    ? `<line class="history-threshold-line" x1="${padL}" y1="${scoreToY(threshold)}" x2="${W - padR}" y2="${scoreToY(threshold)}"></line>
+       <text class="history-axis-label" x="${W - padR}" y="${scoreToY(threshold) - 6}" text-anchor="end">threshold ${threshold}</text>`
+    : "";
+
+  return `
+    <svg class="history-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Platform readiness score history">
+      ${grid}
+      ${thresholdSvg}
+      <path class="history-score-line" d="${path}"></path>
+      ${circles.join("")}
+      ${labels.join("")}
+    </svg>
+  `;
+}
+
+function renderPlatformReadinessHistory(payload) {
+  const host = el("platformReadinessHistory");
+  if (!host) return;
+  const historyPayload = payload?.platform_readiness_history || {};
+  const history = Array.isArray(historyPayload?.history) ? historyPayload.history : [];
+  const dateRange = historyPayload?.date_range || null;
+  const meta = historyPayload?.present
+    ? `canonical_days=${history.length} • range=${dateRange?.start || "n/a"}..${dateRange?.end || "n/a"} • root=${historyPayload?.root || "n/a"}`
+    : `canonical_days=0 • root=${historyPayload?.root || "n/a"}`;
+
+  const rows = history.length
+    ? history.map((row) => `
+        <tr>
+          <td>${escapeHtml(row.day)}</td>
+          <td>${escapeHtml(row.score)}</td>
+          <td>${escapeHtml(row.grade || "n/a")}</td>
+          <td class="${stateClass(row.state)}">${escapeHtml(row.state || "UNKNOWN")}</td>
+          <td>${escapeHtml(row.threshold)}</td>
+        </tr>
+      `).join("")
+    : `<tr><td colspan="5" class="muted">No canonical platform readiness history artifacts found.</td></tr>`;
+
+  host.innerHTML = `
+    <div class="history-card">
+      <div class="card-head">
+        <div class="card-title">Platform Readiness History</div>
+        <div class="mono tiny muted">${meta}</div>
+      </div>
+      <div class="history-chart-wrap">
+        ${svgPlatformReadinessHistory(history)}
+      </div>
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th>Day</th>
+            <th>Score</th>
+            <th>Grade</th>
+            <th>Status</th>
+            <th>Threshold</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
   `;
 }
 
@@ -791,6 +955,7 @@ async function loadAndRender() {
   el("lastRefresh").textContent = `refreshed=${payload?.meta?.server_time_utc || "n/a"}`;
 
   renderPlatformReadiness(payload);
+  renderPlatformReadinessHistory(payload);
   renderScopeHealth(payload);
   renderTiles(payload);
   renderSleeveStrip(payload);
