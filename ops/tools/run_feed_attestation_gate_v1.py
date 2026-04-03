@@ -24,9 +24,17 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+_THIS_FILE = Path(__file__).resolve()
+_REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
+if str(_REPO_ROOT_FROM_FILE) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
+
+from constellation_2.common.truth_root_v1 import resolve_truth_root  # noqa: E402
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 DEFAULT_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
@@ -38,6 +46,7 @@ GATE_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/feed_attestation_ga
 
 RECORDS_ROOT_RELPATH = "feed_attestation_v1/records"
 GATE_OUT_RELPATH = "reports/feed_attestation_gate_v1"
+
 
 def _sha256_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
@@ -72,7 +81,6 @@ def _read_json_obj(p: Path) -> Dict[str, Any]:
 
 
 def _canonical_json_bytes_v1(obj: Any) -> bytes:
-    # Use repo canonicalizer if present (preferred), else deterministic json.dumps.
     try:
         from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1  # type: ignore
         return canonical_json_bytes_v1(obj)
@@ -82,7 +90,6 @@ def _canonical_json_bytes_v1(obj: Any) -> bytes:
 
 def _validate(repo_root: Path, schema_relpath: str, obj: Any) -> None:
     from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1  # type: ignore
-
     validate_against_repo_schema_v1(obj, repo_root, schema_relpath)
 
 
@@ -99,27 +106,31 @@ def _parse_utc_any(s: str) -> datetime:
         raise ValueError("EMPTY_TIMESTAMP")
     if t.endswith("Z"):
         return datetime.fromisoformat(t[:-1] + "+00:00").astimezone(timezone.utc).replace(microsecond=0)
-    # accept offset iso
     return datetime.fromisoformat(t).astimezone(timezone.utc).replace(microsecond=0)
+
+
+def _require_truth_root_under_repo(truth_root: Path) -> Path:
+    pr = truth_root.expanduser().resolve()
+    if not pr.is_absolute():
+        raise SystemExit(f"FAIL: truth_root must be absolute: {pr}")
+    if not pr.exists() or not pr.is_dir():
+        raise SystemExit(f"FAIL: truth_root missing or not dir: {pr}")
+    try:
+        pr.relative_to(REPO_ROOT)
+    except Exception:
+        raise SystemExit(f"FAIL: truth_root not under repo_root: truth_root={pr} repo_root={REPO_ROOT}")
+    return pr
 
 
 def _resolve_truth_root(arg_truth_root: str) -> Path:
     tr = (arg_truth_root or "").strip()
-    if not tr:
-        tr = (os.environ.get("C2_TRUTH_ROOT") or "").strip()
-    if not tr:
-        # Default (backward compatible): env-aware helper chooses C2_TRUTH_ROOT if set, else DEFAULT_TRUTH_ROOT.
-        return resolve_truth_root(repo_root=REPO_ROOT)
-    truth_root = Path(tr).resolve()
-    if not truth_root.is_absolute():
-        raise SystemExit(f"FAIL: truth_root must be absolute: {truth_root}")
-    if not truth_root.exists() or not truth_root.is_dir():
-        raise SystemExit(f"FAIL: truth_root missing or not dir: {truth_root}")
-    try:
-        truth_root.relative_to(REPO_ROOT)
-    except Exception:
-        raise SystemExit(f"FAIL: truth_root not under repo_root: truth_root={truth_root} repo_root={REPO_ROOT}")
-    return truth_root
+    if tr:
+        return _require_truth_root_under_repo(Path(tr))
+    env_root = (os.environ.get("C2_TRUTH_ROOT") or "").strip()
+    if env_root:
+        return _require_truth_root_under_repo(Path(env_root))
+    resolved = resolve_truth_root(repo_root=REPO_ROOT)
+    return _require_truth_root_under_repo(resolved)
 
 
 def _latest_prior_day_record_dir(records_root: Path, artifact_id: str, day: str) -> Optional[Path]:
@@ -153,6 +164,36 @@ def _write_immutable(path: Path, obj: Dict[str, Any]) -> str:
     tmp.write_bytes(payload)
     os.replace(tmp, path)
     return sha
+
+
+def _resolve_target_path(truth_root: Path, target_rel: str) -> Path:
+    rel = target_rel.strip().lstrip("/")
+    if not rel:
+        raise SystemExit("FAIL: empty target_relpath")
+
+    # Policy compatibility: some governed target relpaths are rooted at
+    # "constellation_2/runtime/truth/...". When running on a sleeve truth root,
+    # normalize these to truth-root-relative paths.
+    prefixes = (
+        "constellation_2/runtime/truth/",
+        "constellation_2\\runtime\\truth\\",
+    )
+    rel_norm = rel
+    for pref in prefixes:
+        if rel_norm.startswith(pref):
+            rel_norm = rel_norm[len(pref):]
+            break
+
+    p = (truth_root / rel_norm).resolve()
+    try:
+        p.relative_to(REPO_ROOT)
+    except Exception:
+        raise SystemExit(f"FAIL: target path escapes repo_root: {p}")
+    return p
+
+
+def _relpath_from_truth_root(truth_root: Path, path: Path) -> str:
+    return str(path.resolve().relative_to(truth_root.resolve())).replace("\\", "/")
 
 
 def main() -> int:
@@ -191,7 +232,6 @@ def main() -> int:
         max_stale = int(t.get("max_staleness_seconds"))
         require_upstream = bool(t.get("require_upstream_source_hash"))
 
-        # target relpath resolution
         if "target_relpath" in t:
             target_rel = str(t.get("target_relpath") or "").strip()
         else:
@@ -201,52 +241,55 @@ def main() -> int:
         if not target_rel:
             raise SystemExit("FAIL: FAL_POLICY_SCHEMA_INVALID: target_relpath missing")
 
-        target_path = (REPO_ROOT / target_rel).resolve()
+        target_path = _resolve_target_path(truth_root, target_rel)
+        target_rel_from_truth = _relpath_from_truth_root(truth_root, target_path)
+        expected_rec_rel = f"{RECORDS_ROOT_RELPATH}/{artifact_id}/{day}/feed_attestation_record.v1.json"
         rcodes: List[str] = []
 
         if not target_path.exists():
             any_fail = True
             rcodes.append("FAL_TARGET_NOT_FOUND")
-            expected_rec_rel = f"{RECORDS_ROOT_RELPATH}/{artifact_id}/{day}/feed_attestation_record.v1.json"
-
-            gate_checks.append({
-              "artifact_id": artifact_id,
-                "target_relpath": target_rel,
-                "target_sha256": "0" * 64,
-                "attestation_relpath": expected_rec_rel,
-                "attestation_sha256": "0" * 64,
-                "sequence_id": 1,
-                "previous_attestation_sha256": None,
-                "source_snapshot_utc": "INVALID",
-                "max_staleness_seconds": max_stale,
-                "staleness_seconds": 0,
-                "upstream_source_hash": None,
-                "pass": False,
-                "reason_codes": rcodes
-            })
+            gate_checks.append(
+                {
+                    "artifact_id": artifact_id,
+                    "target_relpath": target_rel_from_truth,
+                    "target_sha256": "0" * 64,
+                    "attestation_relpath": expected_rec_rel,
+                    "attestation_sha256": "0" * 64,
+                    "sequence_id": 1,
+                    "previous_attestation_sha256": None,
+                    "source_snapshot_utc": "INVALID",
+                    "max_staleness_seconds": max_stale,
+                    "staleness_seconds": 0,
+                    "upstream_source_hash": None,
+                    "pass": False,
+                    "reason_codes": rcodes,
+                }
+            )
             continue
 
-        # read target json
         try:
             target_obj = _read_json_obj(target_path)
         except Exception:
             any_fail = True
             rcodes.append("FAL_TARGET_JSON_PARSE_ERROR")
-            gate_checks.append({
-                "artifact_id": artifact_id,
-                "target_relpath": target_rel,
-                "target_sha256": _sha256_file(target_path),
-                "attestation_relpath": expected_rec_rel,
-                "attestation_sha256": "0" * 64,
-                "sequence_id": 1,
-                "previous_attestation_sha256": None,
-                "source_snapshot_utc": "INVALID",
-                "max_staleness_seconds": max_stale,
-                "staleness_seconds": 0,
-                "upstream_source_hash": None,
-                "pass": False,
-                "reason_codes": rcodes
-            })
+            gate_checks.append(
+                {
+                    "artifact_id": artifact_id,
+                    "target_relpath": target_rel_from_truth,
+                    "target_sha256": _sha256_file(target_path),
+                    "attestation_relpath": expected_rec_rel,
+                    "attestation_sha256": "0" * 64,
+                    "sequence_id": 1,
+                    "previous_attestation_sha256": None,
+                    "source_snapshot_utc": "INVALID",
+                    "max_staleness_seconds": max_stale,
+                    "staleness_seconds": 0,
+                    "upstream_source_hash": None,
+                    "pass": False,
+                    "reason_codes": rcodes,
+                }
+            )
             continue
 
         target_sha = _sha256_file(target_path)
@@ -258,163 +301,171 @@ def main() -> int:
         snap_val = str(target_obj.get(snap_field) or "").strip()
         if not snap_val:
             any_fail = True
-            rcodes.append("FAL_SNAPSHOT_FIELD_MISSING")
-            snap_utc = ""
-            staleness_s = 0
-        else:
-            try:
-                snap_dt = _parse_utc_any(snap_val)
-                produced_dt = _parse_utc_any(produced_utc)
-                staleness_s = int(max(0, (produced_dt - snap_dt).total_seconds()))
-                snap_utc = snap_dt.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
-                if staleness_s > max_stale:
-                    any_fail = True
-                    rcodes.append("FAL_STALE_SNAPSHOT_EXCEEDED_THRESHOLD")
-            except Exception:
-                any_fail = True
-                rcodes.append("FAL_SNAPSHOT_UTC_PARSE_FAIL")
-                snap_utc = ""
-                staleness_s = 0
+            rcodes.append("FAL_SOURCE_SNAPSHOT_MISSING")
+            gate_checks.append(
+                {
+                    "artifact_id": artifact_id,
+                    "target_relpath": target_rel_from_truth,
+                    "target_sha256": target_sha,
+                    "attestation_relpath": expected_rec_rel,
+                    "attestation_sha256": "0" * 64,
+                    "sequence_id": 1,
+                    "previous_attestation_sha256": None,
+                    "source_snapshot_utc": "INVALID",
+                    "max_staleness_seconds": max_stale,
+                    "staleness_seconds": 0,
+                    "upstream_source_hash": None,
+                    "pass": False,
+                    "reason_codes": rcodes,
+                }
+            )
+            continue
 
-        upstream_hash: Optional[str] = None
+        try:
+            snap_dt = _parse_utc_any(snap_val)
+        except Exception:
+            any_fail = True
+            rcodes.append("FAL_SOURCE_SNAPSHOT_INVALID")
+            gate_checks.append(
+                {
+                    "artifact_id": artifact_id,
+                    "target_relpath": target_rel_from_truth,
+                    "target_sha256": target_sha,
+                    "attestation_relpath": expected_rec_rel,
+                    "attestation_sha256": "0" * 64,
+                    "sequence_id": 1,
+                    "previous_attestation_sha256": None,
+                    "source_snapshot_utc": "INVALID",
+                    "max_staleness_seconds": max_stale,
+                    "staleness_seconds": 0,
+                    "upstream_source_hash": None,
+                    "pass": False,
+                    "reason_codes": rcodes,
+                }
+            )
+            continue
+
+        produced_dt = _parse_utc_any(produced_utc)
+        stale_seconds = int((produced_dt - snap_dt).total_seconds())
+        if stale_seconds < 0:
+            stale_seconds = 0
+
+        upstream_source_hash = None
         if require_upstream:
-            up_field = str(t.get("upstream_source_hash_field") or "").strip()
-            if not up_field:
+            field = str(t.get("upstream_source_hash_field") or "").strip()
+            if not field:
                 raise SystemExit("FAIL: FAL_POLICY_SCHEMA_INVALID: upstream_source_hash_field missing")
-            u = str(target_obj.get(up_field) or "").strip()
-            if not u:
-                any_fail = True
-                rcodes.append("FAL_UPSTREAM_HASH_REQUIRED_MISSING")
-            else:
-                u2 = u.lower()
-                if len(u2) != 64 or any(c not in "0123456789abcdef" for c in u2):
-                    any_fail = True
-                    rcodes.append("FAL_UPSTREAM_HASH_INVALID")
-                else:
-                    upstream_hash = u2
+            upstream_source_hash = str(target_obj.get(field) or "").strip() or None
+            if upstream_source_hash is None:
+                rcodes.append("FAL_UPSTREAM_SOURCE_HASH_MISSING")
 
-        # prior record (for seq + hash chain)
+        if stale_seconds > max_stale:
+            rcodes.append("FAL_STALE")
+
         prior_dir = _latest_prior_day_record_dir(records_root, artifact_id, day)
-        prev_sha: Optional[str] = None
-        prev_seq: int = 0
+        prev_sha = None
+        sequence_id = 1
         if prior_dir is not None:
-            prior_path = (prior_dir / "feed_attestation_record.v1.json").resolve()
+            prev_path = (prior_dir / "feed_attestation_record.v1.json").resolve()
+            prev_sha = _sha256_file(prev_path)
+            prev_obj = _read_json_obj(prev_path)
             try:
-                prior_obj = _read_json_obj(prior_path)
-                prev_sha = str(prior_obj.get("attestation_sha256") or "").strip() or None
-                prev_seq = int(prior_obj.get("sequence_id") or 0)
+                sequence_id = int(prev_obj.get("sequence_id") or 0) + 1
             except Exception:
-                any_fail = True
-                rcodes.append("FAL_ATTESTATION_RECORD_PARSE_ERROR")
+                raise SystemExit(f"FAIL: FAL_PRIOR_SEQUENCE_INVALID: {prev_path}")
 
-        seq_id = prev_seq + 1
+        record_rel = f"{RECORDS_ROOT_RELPATH}/{artifact_id}/{day}/feed_attestation_record.v1.json"
+        record_path = (truth_root / record_rel).resolve()
 
-        # record path for today
-        rec_rel = f"{RECORDS_ROOT_RELPATH}/{artifact_id}/{day}/feed_attestation_record.v1.json"
-        rec_path = (truth_root / rec_rel).resolve()
-
-        rec_obj: Dict[str, Any] = {
+        record_obj: Dict[str, Any] = {
             "schema_id": "C2_FEED_ATTESTATION_RECORD_V1",
             "schema_version": 1,
-            "artifact_id": artifact_id,
             "day_utc": day,
+            "artifact_id": artifact_id,
+            "target_relpath": target_rel_from_truth,
+            "target_sha256": target_sha,
+            "sequence_id": sequence_id,
+            "previous_attestation_sha256": prev_sha,
+            "source_snapshot_utc": snap_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "upstream_source_hash": upstream_source_hash,
             "produced_utc": produced_utc,
             "producer": {
                 "repo": "constellation_2_runtime",
+                "module": "ops/tools/run_feed_attestation_gate_v1.py",
                 "git_sha": _git_sha(),
-                "module": "ops/tools/run_feed_attestation_gate_v1.py"
             },
-            "sequence_id": seq_id,
-            "target_relpath": target_rel,
-            "target_sha256": target_sha,
-            "source_snapshot_utc": snap_utc,
-            "upstream_source_hash": upstream_hash,
-            "previous_attestation_sha256": prev_sha,
-            "attestation_sha256": None
+            "attestation_sha256": None,
         }
 
-        # self-hash
-        unsigned = dict(rec_obj)
+        unsigned = dict(record_obj)
         unsigned["attestation_sha256"] = None
-        rec_obj["attestation_sha256"] = _sha256_bytes(_canonical_json_bytes_v1(unsigned) + b"\n")
+        record_obj["attestation_sha256"] = _sha256_bytes(_canonical_json_bytes_v1(unsigned) + b"\n")
 
-        # schema validate record
-        _validate(REPO_ROOT, RECORD_SCHEMA_RELPATH, rec_obj)
+        _validate(REPO_ROOT, RECORD_SCHEMA_RELPATH, record_obj)
+        rec_sha = _write_immutable(record_path, record_obj)
 
-        # enforce chain validity if prior exists
-        if prev_sha is not None:
-            if rec_obj["previous_attestation_sha256"] != prev_sha:
-                any_fail = True
-                rcodes.append("FAL_HASH_CHAIN_BROKEN")
-            if rec_obj["sequence_id"] != prev_seq + 1:
-                any_fail = True
-                rcodes.append("FAL_SEQUENCE_NON_MONOTONIC")
-
-        # write record immutably (or require identical)
-        rec_sha = _write_immutable(rec_path, rec_obj)
-
-        # verify written file bytes are stable and match the immutable writer result
-        if _sha256_file(rec_path) != rec_sha:
+        passed = len(rcodes) == 0
+        if not passed:
             any_fail = True
-            rcodes.append("FAL_TARGET_SHA_MISMATCH")
 
-        gate_checks.append({
-            "artifact_id": artifact_id,
-            "target_relpath": target_rel,
-            "target_sha256": target_sha,
-            "attestation_relpath": rec_rel,
-            "attestation_sha256": rec_sha,
-            "sequence_id": seq_id,
-            "previous_attestation_sha256": prev_sha,
-            "source_snapshot_utc": snap_utc,
-            "max_staleness_seconds": max_stale,
-            "staleness_seconds": int(staleness_s),
-            "upstream_source_hash": upstream_hash,
-            "pass": (len(rcodes) == 0),
-            "reason_codes": rcodes
-        })
+        gate_checks.append(
+            {
+                "artifact_id": artifact_id,
+                "target_relpath": target_rel_from_truth,
+                "target_sha256": target_sha,
+                "attestation_relpath": record_rel,
+                "attestation_sha256": rec_sha,
+                "sequence_id": sequence_id,
+                "previous_attestation_sha256": prev_sha,
+                "source_snapshot_utc": snap_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "max_staleness_seconds": max_stale,
+                "staleness_seconds": stale_seconds,
+                "upstream_source_hash": upstream_source_hash,
+                "pass": passed,
+                "reason_codes": rcodes,
+            }
+        )
 
-    status = "PASS" if not any_fail else "FAIL"
-    fail_closed = bool(any_fail)
+    for chk in gate_checks:
+        if not bool(chk.get("pass")):
+            gate_reason_codes.extend([str(x) for x in chk.get("reason_codes") or []])
 
-    if status == "PASS":
-        gate_reason_codes.append("FAL_PASS")
-    else:
-        gate_reason_codes.append("FAL_FAIL_CLOSED_REQUIRED")
+    gate_reason_codes = sorted(set(gate_reason_codes))
+    status = "FAIL" if any_fail else "PASS"
 
-    out: Dict[str, Any] = {
+    gate_obj: Dict[str, Any] = {
         "schema_id": "C2_FEED_ATTESTATION_GATE_V1",
         "schema_version": 1,
         "day_utc": day,
         "produced_utc": produced_utc,
         "producer": {
             "repo": "constellation_2_runtime",
+            "module": "ops/tools/run_feed_attestation_gate_v1.py",
             "git_sha": _git_sha(),
-            "module": "ops/tools/run_feed_attestation_gate_v1.py"
         },
-        "status": status,
-        "fail_closed": fail_closed,
         "policy": {
-            "path": str(POLICY_PATH.relative_to(REPO_ROOT)),
+            "path": str(POLICY_PATH.relative_to(REPO_ROOT)).replace("\\", "/"),
             "sha256": policy_sha,
-            "policy_id": "C2_FEED_ATTESTATION_POLICY_V1"
+            "policy_id": "C2_FEED_ATTESTATION_POLICY_V1",
         },
+        "fail_closed": True,
         "checks": gate_checks,
-        "gate_sha256": None
+        "status": status,
+        "gate_sha256": None,
     }
 
-    unsigned_gate = dict(out)
+    unsigned_gate = dict(gate_obj)
     unsigned_gate["gate_sha256"] = None
-    out["gate_sha256"] = _sha256_bytes(_canonical_json_bytes_v1(unsigned_gate) + b"\n")
+    gate_obj["gate_sha256"] = _sha256_bytes(_canonical_json_bytes_v1(unsigned_gate) + b"\n")
 
-    _validate(REPO_ROOT, GATE_SCHEMA_RELPATH, out)
+    _validate(REPO_ROOT, GATE_SCHEMA_RELPATH, gate_obj)
+    gate_sha = _write_immutable(gate_out_path, gate_obj)
 
-    # immutable write
-    gate_out_dir.mkdir(parents=True, exist_ok=True)
-    _ = _write_immutable(gate_out_path, out)
-
-    print(out["gate_sha256"])
-    return 0
+    print(
+        f"OK: FEED_ATTESTATION_GATE_V1_WRITTEN day_utc={day} "
+        f"status={status} path={gate_out_path} sha256={gate_sha} truth_root={truth_root}"
+    )
+    return 0 if status == "PASS" else 2
 
 
 if __name__ == "__main__":

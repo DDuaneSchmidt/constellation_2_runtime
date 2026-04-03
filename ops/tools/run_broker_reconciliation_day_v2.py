@@ -81,14 +81,14 @@ def _pos_key(p: Dict[str, Any]) -> Tuple[str, str]:
 def _bootstrap_window_true(day_utc: str) -> bool:
     """
     Day-0 Bootstrap Window iff:
-      TRUTH/execution_evidence_v1/submissions/<DAY>/ is missing OR contains zero submission dirs.
+      TRUTH/execution_evidence_v1/submissions/<DAY>/ is missing OR contains zero broker submission records.
     """
     root = (TRUTH_ROOT / "execution_evidence_v1" / "submissions" / day_utc).resolve()
     if (not root.exists()) or (not root.is_dir()):
         return True
     try:
-        for p in root.iterdir():
-            if p.is_dir():
+        for p in root.glob("*/broker_submission_record.v2.json"):
+            if p.is_file():
                 return False
     except Exception:
         # Fail-closed: if we cannot enumerate, treat as NOT bootstrap.
