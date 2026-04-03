@@ -114,7 +114,8 @@ The tool MUST NOT embed wall-clock timestamps into truth bytes.
 ### 4.1 Manifest shape (existing spine)
 
 `dataset_manifest.json` has:
-- `created_utc` (string UTC Z)
+- `created_utc` (string UTC Z; manifest origin timestamp, preserved across append-only rewrites)
+- `source_snapshot_utc` (string UTC Z; freshness timestamp for the represented dataset contents)
 - `dataset_version` (string)
 - `date_range` (object with `start`, `end` as `YYYY-MM-DD`)
 - `files` (list of `{symbol, year, file, sha256}`)
@@ -147,6 +148,21 @@ When adding new entries:
 - the tool MUST refuse duplicates of `(symbol, year)` in the manifest
 - the tool MUST never delete entries
 - the tool MUST never rewrite existing JSONL year files
+
+### 4.5 Timestamp semantics
+
+The manifest timestamp fields have distinct meanings:
+
+- `created_utc`
+  - manifest origin timestamp
+  - MUST be set on first manifest creation
+  - MUST be preserved on later append-only manifest rewrites
+  - MUST NOT be used as the freshness clock for Feed Attestation Layer decisions
+
+- `source_snapshot_utc`
+  - freshness timestamp for the dataset contents represented by the current manifest
+  - MUST advance when the represented source snapshot advances
+  - MUST be the field used by Feed Attestation Layer freshness checks for the liquidity dataset manifest
 
 ---
 

@@ -416,6 +416,7 @@ def main() -> int:
         "files": merged_files_sorted,
         "global_hash": _stable_global_hash(merged_files_sorted),
         "created_utc": manifest.get("created_utc") or run_utc,
+        "source_snapshot_utc": run_utc,
     }
 
     _write_manifest(MANIFEST_PATH, manifest_out)

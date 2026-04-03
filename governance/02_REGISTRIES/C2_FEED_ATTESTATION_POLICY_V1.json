@@ -13,7 +13,7 @@
     {
       "artifact_id": "liquidity_dataset_manifest",
       "target_relpath": "constellation_2/runtime/truth/market_data_snapshot_v1/dataset_manifest.json",
-      "source_snapshot_field": "created_utc",
+      "source_snapshot_field": "source_snapshot_utc",
       "max_staleness_seconds": 86400,
       "require_upstream_source_hash": true,
       "upstream_source_hash_field": "global_hash"
