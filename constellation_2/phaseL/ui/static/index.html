@@ -54,48 +54,142 @@
   <main class="main">
     <!-- OPERATIONS -->
     <section id="viewOperations" class="view">
-      <div class="ops-grid">
-        <div class="card platform-hero" id="platformReadinessCard">
-          <div class="card-head">
-            <div class="card-title">Platform Readiness</div>
-            <div id="platformReadinessMeta" class="mono tiny muted"></div>
-          </div>
-          <div id="platformHeroRow" class="metrics-row"></div>
-          <div id="platformSummaryRow" class="mono tiny muted" style="margin-top:8px;"></div>
-          <div id="platformReadinessHistory" style="margin-top:10px;"></div>
+      <div class="cockpit-shell">
+        <div class="cockpit-nav-bar">
+          <button class="cockpit-nav-pill active" id="cockpitViewCockpit" type="button">Cockpit</button>
+          <button class="cockpit-nav-pill" id="cockpitViewDiagnostics" type="button">Diagnostics</button>
+          <button class="cockpit-nav-pill" id="cockpitViewRepair" type="button">Repair</button>
+          <button class="cockpit-nav-pill" id="cockpitViewGovernance" type="button">Governance</button>
         </div>
-        <div class="card signal-activity-card" id="signalActivityCard"></div>
-        <div class="card" id="scopeHealthCard">
-          <div class="card-head">
-            <div class="card-title">Scope Health</div>
-            <div id="scopeHealthMeta" class="mono tiny muted"></div>
-          </div>
-          <div id="scopeHealthRow" class="metrics-row"></div>
-          <div id="sleeveReadinessRow" class="mono tiny muted" style="margin-top:8px;"></div>
+
+        <div class="cockpit-section cockpit-primary-grid" data-cockpit-view="cockpit">
+          <div class="cockpit-hero trading-day-outcome-card cockpit-primary-card" id="tradingDayOutcomeCard"></div>
+          <div class="cockpit-panel signal-activity-card cockpit-primary-card" id="signalActivityCard"></div>
         </div>
-        <div class="tile-grid" id="tileGrid"></div>
-        <div class="ops-row2">
-          <div class="ops-left-col">
-            <div class="strip card" id="sleeveStrip"></div>
-            <div class="card bond-sleeve-card" id="bondSleeveCard"></div>
-          </div>
-          <div class="funnel card">
+
+        <div class="cockpit-section cockpit-ops-grid" data-cockpit-view="cockpit">
+          <div class="cockpit-panel cockpit-compact-panel" id="executionHealthCard">
             <div class="card-head">
-              <div class="card-title">Trade Flow Funnel (Today)</div>
+              <div class="card-title">Execution Path Health</div>
+              <div id="executionHealthMeta" class="mono tiny muted"></div>
             </div>
-            <div id="funnelExplain" class="mono tiny muted" style="margin-bottom:8px;"></div>
-            <div id="funnelRow" class="funnel-row"></div>
-            <div id="blockedRow" class="blocked-row"></div>
-            <div id="funnelDrilldown" style="margin-top:8px;"></div>
+            <div id="executionHealthBody"></div>
+          </div>
+          <div class="cockpit-panel cockpit-compact-panel" id="systemMonitoringCard">
+            <div class="card-head">
+              <div class="card-title">System Monitoring</div>
+              <div id="systemMonitoringMeta" class="mono tiny muted"></div>
+            </div>
+            <div id="systemMonitoringBody"></div>
+          </div>
+          <div class="cockpit-panel cockpit-compact-panel cockpit-ops-grid-span-2" id="governedRiskCard">
+            <div class="card-head">
+              <div>
+                <div class="card-title">Governed Risk / Authority</div>
+                <div class="mono tiny muted">Authoritative gate and authority surfaces promoted from diagnostics for operator scanning.</div>
+              </div>
+              <div id="governedRiskMeta" class="mono tiny muted"></div>
+            </div>
+            <div id="governedRiskBody"></div>
+          </div>
+          <details class="cockpit-panel cockpit-compact-panel cockpit-collapsible" id="opsPortfolioSummaryCard">
+            <div class="card-head">
+              <div class="card-title">Portfolio Summary</div>
+              <div id="opsPortfolioSummaryMeta" class="mono tiny muted"></div>
+            </div>
+            <summary>Portfolio Summary</summary>
+            <div id="opsPortfolioSummaryBody"></div>
+          </details>
+          <div class="cockpit-panel cockpit-compact-panel" id="platformReadinessSummaryCard">
+            <div class="card-head">
+              <div class="card-title">Structural Readiness Summary</div>
+              <div id="platformReadinessSummaryMeta" class="mono tiny muted"></div>
+            </div>
+            <div id="platformReadinessSummaryBody"></div>
           </div>
         </div>
 
-        <div class="changed card">
-          <div class="card-head">
-            <div class="card-title">What changed</div>
-            <div class="mono tiny muted" id="whatChangedHash"></div>
+        <div class="cockpit-section hidden" data-cockpit-view="diagnostics">
+          <div class="cockpit-panel" id="diagnosticsOverviewCard">
+            <div class="card-head">
+              <div class="card-title">Diagnostics Overview</div>
+              <div id="diagnosticsOverviewMeta" class="mono tiny muted"></div>
+            </div>
+            <div id="diagnosticsOverviewBody"></div>
           </div>
-          <div id="whatChangedList" class="changed-list"></div>
+        </div>
+
+        <div class="cockpit-section hidden" data-cockpit-view="diagnostics">
+          <div class="cockpit-subtle-panel">
+            <div class="card-head">
+              <div class="card-title">Readiness Details</div>
+              <div class="mono tiny muted">Operator-facing diagnostic surfaces</div>
+            </div>
+            <div class="tile-grid" id="tileGrid"></div>
+          </div>
+        </div>
+
+        <div class="cockpit-section hidden" data-cockpit-view="diagnostics">
+          <div class="cockpit-panel" id="lowLevelDiagnosticsCard">
+            <div class="card-head">
+              <div>
+                <div class="card-title">Low-Level Diagnostics</div>
+                <div class="mono tiny muted">For debugging and audit use. Normal operators usually do not need to act on this section.</div>
+              </div>
+              <div id="techSummary" class="mono tiny muted"></div>
+            </div>
+            <div id="techPaths" class="mono tiny"></div>
+          </div>
+        </div>
+
+        <div class="cockpit-section hidden" data-cockpit-view="diagnostics">
+          <div class="changed cockpit-subtle-panel">
+            <div class="card-head">
+              <div class="card-title">What Changed</div>
+              <div class="mono tiny muted" id="whatChangedHash"></div>
+            </div>
+            <div id="whatChangedList" class="changed-list"></div>
+          </div>
+        </div>
+
+        <div class="cockpit-section hidden" data-cockpit-view="governance">
+          <div class="cockpit-panel" id="platformReadinessCard">
+            <div class="card-head">
+              <div class="card-title">Structural Readiness / Diagnostics</div>
+              <div id="platformReadinessMeta" class="mono tiny muted"></div>
+            </div>
+            <div id="platformHeroRow" class="metrics-row"></div>
+            <div id="platformSummaryRow" class="mono tiny muted" style="margin-top:8px;"></div>
+            <div id="platformReadinessHistory" class="cockpit-chart" style="margin-top:10px;"></div>
+          </div>
+        </div>
+
+        <div class="cockpit-section hidden" data-cockpit-view="repair">
+          <div class="cockpit-panel" id="repairSignalsCard">
+            <div class="card-head">
+              <div class="card-title">Self-Heal / Repair Signals</div>
+              <div id="repairSignalsMeta" class="mono tiny muted"></div>
+            </div>
+            <div id="repairSignalsBody"></div>
+          </div>
+        </div>
+
+        <div class="cockpit-section" data-cockpit-view="cockpit">
+          <div class="ops-row2">
+            <div class="ops-left-col">
+              <div class="strip cockpit-subtle-panel" id="sleeveStrip"></div>
+              <div class="cockpit-subtle-panel bond-sleeve-card" id="bondSleeveCard"></div>
+            </div>
+            <div class="funnel cockpit-subtle-panel">
+              <div class="card-head">
+                <div class="card-title">Trade Flow Funnel</div>
+              </div>
+              <div id="funnelExplain" class="mono tiny muted" style="margin-bottom:8px;"></div>
+              <div id="funnelRow" class="funnel-row"></div>
+              <div id="blockedRow" class="blocked-row"></div>
+              <div id="funnelDrilldown" style="margin-top:8px;"></div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -181,9 +275,14 @@
     <!-- TECHNICAL -->
     <section id="viewTechnical" class="view hidden">
       <div class="card">
-        <div class="card-head"><div class="card-title">Diagnostics (advanced)</div></div>
-        <div id="techSummary" class="mono small"></div>
-        <div id="techPaths" class="mono tiny muted" style="margin-top:10px;"></div>
+        <div class="card-head">
+          <div>
+            <div class="card-title">Low-Level Diagnostics (Developer / Audit)</div>
+            <div class="mono tiny muted">These diagnostics are primarily for debugging and system audit. Normal operators usually do not need to take action here.</div>
+          </div>
+        </div>
+        <div id="techSummaryStandalone" class="mono small"></div>
+        <div id="techPathsStandalone" class="mono tiny muted" style="margin-top:10px;"></div>
       </div>
     </section>
 

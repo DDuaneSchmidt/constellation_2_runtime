@@ -4,6 +4,7 @@ const el = (id) => document.getElementById(id);
 
 const state = {
   view: "operations",
+  operationsSubView: "cockpit",
   refreshSec: 60,
   timer: null,
   days: [],
@@ -48,6 +49,24 @@ function setView(v) {
   tabs.forEach(([id, vv]) => el(id).classList.toggle("active", vv === v));
 }
 
+function setOperationsSubView(v) {
+  state.operationsSubView = v;
+  document.querySelectorAll("[data-cockpit-view]").forEach((node) => {
+    const matches = node.getAttribute("data-cockpit-view") === v;
+    node.classList.toggle("hidden", !matches);
+  });
+  const nav = [
+    ["cockpitViewCockpit", "cockpit"],
+    ["cockpitViewDiagnostics", "diagnostics"],
+    ["cockpitViewRepair", "repair"],
+    ["cockpitViewGovernance", "governance"],
+  ];
+  nav.forEach(([id, viewName]) => {
+    const node = el(id);
+    if (node) node.classList.toggle("active", viewName === v);
+  });
+}
+
 function fmt(v) {
   if (v === null || v === undefined) return "n/a";
   if (typeof v === "number") {
@@ -87,6 +106,20 @@ function toneClass(tone) {
   return "tone-neutral";
 }
 
+function semanticTone(value, fallback = "info") {
+  const normalized = String(value || "").toUpperCase();
+  if (["PASS", "READY", "HEALTHY", "OK"].includes(normalized)) return "positive";
+  if (["FAIL", "BLOCKED", "ABORTED", "MISSING"].includes(normalized)) return "negative";
+  if (["DEGRADED", "WARNING", "WARN"].includes(normalized)) return "warning";
+  if (["SKIP", "SKIPPED", "INFO", "NOT REQUIRED"].includes(normalized)) return "info";
+  return fallback;
+}
+
+function isHealthyNoSignalReasonCodes(reasonCodes) {
+  const codes = Array.isArray(reasonCodes) ? reasonCodes.filter(Boolean) : [];
+  return codes.length === 1 && String(codes[0]).toUpperCase() === "NO_ACTIVITY_DAY";
+}
+
 function renderTiles(payload) {
   const tiles = (payload?.ops_health?.tiles || []);
   const scope = payload?.scope_health || {};
@@ -115,12 +148,16 @@ function renderTiles(payload) {
     const last = t.last_updated_utc || "n/a";
     const rc = (t.reason_codes || []).slice(0,2).join(", ") || "n/a";
     const path = t.artifact_ref?.path;
+    const noSignalVerdict = rawState === "DEGRADED" && t.tile_id === "orchestrator_run_verdict_v2" && isHealthyNoSignalReasonCodes(t.reason_codes);
     const normalizedAbort = rawState === "ABORTED" && execState === "PASS" &&
       (t.tile_id === "orchestrator_run_verdict_v2" || t.tile_id === "safety_breach");
 
     let human;
     let note = "";
-    if (normalizedAbort && t.tile_id === "orchestrator_run_verdict_v2") {
+    if (noSignalVerdict) {
+      human = "COMPLETED — NO SIGNAL DAY";
+      note = `raw_verdict=${rawState} - reason=NO_ACTIVITY_DAY - execution=${execState}`;
+    } else if (normalizedAbort && t.tile_id === "orchestrator_run_verdict_v2") {
       st = "DEGRADED";
       stop = false;
       human = "GOVERNED ABORT — EXECUTION PASS";
@@ -173,100 +210,124 @@ function renderScopeHealth(payload) {
   const mon = sh?.system_monitoring_health || {};
   const overall = sh?.overall || {};
   const src = sh?.source || {};
-  const liveReady = payload?.sleeve_live_readiness || {};
+  const readiness = payload?.platform_readiness || {};
+  const selfDiags = payload?.self_diagnostics || sh?.self_diagnostics || {};
+  const execHost = el("executionHealthBody");
+  const monHost = el("systemMonitoringBody");
+  const repairHost = el("repairSignalsBody");
 
   const execState = String(exec.status || "UNKNOWN").toUpperCase();
   const monState = String(mon.status || "UNKNOWN").toUpperCase();
   const overallState = String(overall.status || "UNKNOWN").toUpperCase();
-  const rows = [
-    ["Sleeve Execution Health", execState],
-    ["System Monitoring Health", monState],
-    ["Overall Status", overallState],
-  ];
-
-  el("scopeHealthMeta").textContent = `runtime_state=${src?.present ? "present" : "missing"} • source=${src?.path || "n/a"}`;
-  el("scopeHealthRow").innerHTML = rows.map(([k, st]) => `
-    <div class="metric">
-      <div class="k">${k}</div>
-      <div class="v ${stateClass(st)}">${st}</div>
-    </div>
-  `).join("");
-
-  const grade = liveReady?.readiness_grade ?? liveReady?.grade_band ?? "n/a";
-  const score = (liveReady?.readiness_score ?? "n/a");
-  const threshold = (liveReady?.score_threshold ?? "n/a");
-  const state = String(liveReady?.state || "UNKNOWN").toUpperCase();
-  const readinessSummary = liveReady?.readiness_summary || "n/a";
-  const decisionBasis = liveReady?.promotion_decision_basis || "n/a";
-  const blockersList = (liveReady?.top_blockers_ordered || liveReady?.promotion_blockers || []).slice(0, 3);
-  const blockers = blockersList.join(", ")
-    || (liveReady?.reason_codes || []).slice(0, 3).join(", ")
-    || "n/a";
-  const readyPath = liveReady?.path || "n/a";
-  const candidate = (liveReady?.promotion_candidate === true) ? "YES"
-    : (liveReady?.promotion_candidate === false) ? "NO"
-    : "UNKNOWN";
-  const remaining = (liveReady?.pass_conditions_remaining || []).slice(0, 3).join(" | ") || "n/a";
-  const minimumSummary = (liveReady?.minimum_conditions_summary || []).slice(0, 3).join(" | ") || "n/a";
-  const nextActions = (liveReady?.recommended_next_actions || []).slice(0, 3).join(" | ") || "n/a";
-  const rootBlockers = (liveReady?.root_blockers || []).slice(0, 3).join(", ") || "n/a";
-  const derivedBlockers = (liveReady?.derived_blockers || []).slice(0, 3).join(", ") || "n/a";
-  const smallestClearanceSet = (liveReady?.smallest_clearance_set || []).slice(0, 3).join(" | ") || "n/a";
-  const blockerOrder = (liveReady?.blocker_dependency_order || []).join(" -> ") || "n/a";
-  const gateSequence = (liveReady?.estimated_promotion_gate_sequence || []).join(" -> ") || "n/a";
-  const agg = liveReady?.aggregate_blocker_summary || {};
-  const calib = liveReady?.calibration_support || {};
-  const failedChecks = (calib?.failed_checks || []).map(x => `${x.check_id}:${x.score_awarded}/${x.weight}`).slice(0, 4).join(", ") || "n/a";
-  const checklist = liveReady?.promotion_checklist || {};
-  const checklistFalse = (checklist?.currently_false || []).slice(0, 3).join(" | ") || "none";
-  const cv = liveReady?.current_vs_required || {};
-  const histCv = cv?.pass_history || {};
-  const freshCv = cv?.freshness || {};
-  const lifeCv = cv?.lifecycle_monitor || {};
-  const scoreCv = cv?.score || {};
-  const cvSummary = `pass_history=${histCv.current ?? "n/a"}/${histCv.required ?? "n/a"} freshness_ok=${freshCv.ok ?? "n/a"} lifecycle_status=${lifeCv.current_status ?? "n/a"} score=${scoreCv.current ?? "n/a"}/${scoreCv.required ?? "n/a"}`;
-
+  el("executionHealthMeta").textContent = `runtime_state=${src?.present ? "present" : "missing"} • overall=${overallState}`;
+  el("systemMonitoringMeta").textContent = `monitoring=${monState} • source=${src?.path || "n/a"}`;
   const lifecycleSurface = (((mon?.freshness || {}).surface_results || []).find(s => (s?.surface_id || "") === "lifecycle_monitor")) || {};
   const freshness = mon?.freshness || {};
-  const monitoringReasonCodes = (freshness?.reason_codes || []).join(", ") || "none";
-  const lifecycleReasons = (lifecycleSurface?.source_reason_codes || []).slice(0, 3).join(", ") || "n/a";
-  const lifecycleFails = (lifecycleSurface?.source_check_failures || []).slice(0, 3).join(", ") || "n/a";
-  const lifecycleFailClass = (lifecycleSurface?.fail_reasons || []).join(", ") || "n/a";
-  const lifecycleCauseClass = lifecycleSurface?.lifecycle_cause_class || "n/a";
   const lifecycleGov = lifecycleSurface?.lifecycle_governance_summary || {};
-  const lifecycleGovSummary = `exec_required_blocked=${lifecycleGov?.blocked_by_classification?.REQUIRED_FOR_EXECUTION ?? "n/a"} readiness_required_blocked=${lifecycleGov?.blocked_by_classification?.REQUIRED_FOR_READINESS ?? "n/a"} optional_blocked=${lifecycleGov?.blocked_by_classification?.OPTIONAL_MONITORING ?? "n/a"}`;
-  const liveEvidencePaths = (liveReady?.evidence_paths || []).join(" | ") || "none";
-  const freshnessSurfaces = (freshness?.surface_results || []).map(s => `${s?.surface_id || "unknown"}:${s?.status || "UNKNOWN"}`).join(", ") || "none";
-  const overallSummary = `execution=${execState} • monitoring=${monState} • overall=${overallState}`;
-  const sleeveSummary = `Sleeve Live Readiness: ${state} • score=${score}/${threshold} • grade=${grade} • promotion_candidate=${candidate}`;
+  const diagList = Array.isArray(selfDiags?.diagnostics) ? selfDiags.diagnostics : [];
+  const selfHealRows = diagList.filter((d) => String(d?.code || "").startsWith("MONITORING_SELF_HEAL"));
+  const repairRows = [
+    ...(Array.isArray(readiness?.derived_blockers) ? readiness.derived_blockers.map((x) => ({code: x, summary: "Derived warning still present."})) : []),
+    ...selfHealRows.map((x) => ({code: x.code, summary: x.summary || "Self-heal signal observed."}))
+  ].slice(0, 5);
 
-  el("sleeveReadinessRow").innerHTML = `
-    <div class="mono tiny">${overallSummary}</div>
-    <div class="mono tiny">${sleeveSummary}</div>
-    <details class="evidence-details" style="margin-top:8px;">
-      <summary class="mono tiny">Evidence</summary>
-      <div class="mono tiny" style="margin-top:6px;">readiness_summary=${readinessSummary}</div>
-      <div class="mono tiny">promotion_decision_basis=${decisionBasis}</div>
-      <div class="mono tiny">top_blockers=${blockers}</div>
-      <div class="mono tiny">root_blockers=${rootBlockers}</div>
-      <div class="mono tiny">derived_blockers=${derivedBlockers}</div>
-      <div class="mono tiny">aggregate_blocker_summary=root=${agg.root_blocker_count ?? "n/a"} derived=${agg.derived_blocker_count ?? "n/a"} total=${agg.total_blocker_count ?? "n/a"}</div>
-      <div class="mono tiny">minimum_conditions_summary=${minimumSummary}</div>
-      <div class="mono tiny">pass_conditions_remaining=${remaining}</div>
-      <div class="mono tiny">smallest_clearance_set=${smallestClearanceSet}</div>
-      <div class="mono tiny">blocker_dependency_order=${blockerOrder}</div>
-      <div class="mono tiny">estimated_promotion_gate_sequence=${gateSequence}</div>
-      <div class="mono tiny">current_vs_required=${cvSummary}</div>
-      <div class="mono tiny">calibration_failed_checks=${failedChecks}</div>
-      <div class="mono tiny">promotion_checklist.currently_false=${checklistFalse}</div>
-      <div class="mono tiny">recommended_next_actions=${nextActions}</div>
-      <div class="mono tiny">freshness_status=${freshness?.status ?? "UNKNOWN"} reason_codes=${monitoringReasonCodes} surfaces=${freshnessSurfaces}</div>
-      <div class="mono tiny">lifecycle_monitor: cause_class=${lifecycleCauseClass} fail_class=${lifecycleFailClass} reason_codes=${lifecycleReasons} failing_checks=${lifecycleFails}</div>
-      <div class="mono tiny">lifecycle_governance=${lifecycleGovSummary}</div>
-      <div class="mono tiny">evidence_paths=${liveEvidencePaths}</div>
-      <div class="mono tiny muted">promotion_note=PASS_today_is_execution_only_not_live_readiness • path=${readyPath}</div>
-    </details>
+  const indicator = (label, value, tone, detail) => `
+    <div class="health-line">
+      <div class="health-line-main">
+        <span class="health-indicator ${tone}"></span>
+        <span class="health-label">${escapeHtml(label)}</span>
+      </div>
+      <div class="health-value ${toneClass(tone)}">${escapeHtml(value)}</div>
+      ${detail ? `<div class="health-detail">${escapeHtml(detail)}</div>` : ""}
+    </div>
   `;
+
+  if (execHost) {
+    const sleeves = Array.isArray(exec?.sleeves) ? exec.sleeves : [];
+    const latest = sleeves[0] || {};
+    execHost.innerHTML = `
+      <div class="cockpit-kv-grid">
+        ${indicator("Execution status", execState, execState === "PASS" ? "positive" : execState === "DEGRADED" ? "warning" : "negative", "Derived execution authority for the active sleeve")}
+        ${indicator("Raw orchestrator verdict", latest?.verdict_status_raw || "UNKNOWN", latest?.verdict_status_raw === "DEGRADED" ? "warning" : latest?.verdict_status_raw === "PASS" ? "positive" : "negative", "Raw verdict remains preserved as evidence")}
+        ${indicator("Latest execution day", latest?.latest_day || "n/a", "info", latest?.attempt_id ? `attempt=${latest.attempt_id}` : "")}
+      </div>
+    `;
+  }
+
+  if (monHost) {
+    const surfaceResults = Array.isArray(freshness?.surface_results) ? freshness.surface_results : [];
+    const keySurfaces = surfaceResults.filter((row) => ["paper_readiness", "lifecycle_monitor", "capital_authority_allocation"].includes(String(row?.surface_id || "")));
+    monHost.innerHTML = `
+      <div class="cockpit-kv-grid">
+        ${indicator("Monitoring status", monState, monState === "PASS" ? "positive" : monState === "DEGRADED" ? "warning" : "negative", `reference_day=${freshness?.reference_day || "n/a"}`)}
+        ${indicator("Paper readiness", String((keySurfaces.find((x) => x.surface_id === "paper_readiness") || {}).status || "UNKNOWN").toUpperCase(), String((keySurfaces.find((x) => x.surface_id === "paper_readiness") || {}).status || "").toUpperCase() === "PASS" ? "positive" : "warning", "Global readiness surface")}
+        ${indicator("Lifecycle monitor", String((keySurfaces.find((x) => x.surface_id === "lifecycle_monitor") || {}).status || "UNKNOWN").toUpperCase(), String((keySurfaces.find((x) => x.surface_id === "lifecycle_monitor") || {}).status || "").toUpperCase() === "PASS" ? "positive" : "warning", `readiness_required=${lifecycleGov?.counts_by_classification?.REQUIRED_FOR_READINESS ?? "n/a"}`)}
+        ${indicator("Capital authority", String((keySurfaces.find((x) => x.surface_id === "capital_authority_allocation") || {}).status || "UNKNOWN").toUpperCase(), String((keySurfaces.find((x) => x.surface_id === "capital_authority_allocation") || {}).status || "").toUpperCase() === "PASS" ? "positive" : "warning", "Attested global monitoring surface")}
+      </div>
+    `;
+  }
+
+  if (repairHost) {
+    el("repairSignalsMeta").textContent = `readiness=${String(readiness?.platform_readiness_state || "UNKNOWN").toUpperCase()} • diagnostics=${diagList.length}`;
+    repairHost.innerHTML = repairRows.length ? `
+      <div class="repair-list">
+        ${repairRows.map((row) => `
+          <div class="repair-item">
+            <div class="repair-code">${escapeHtml(row.code || "UNKNOWN")}</div>
+            <div class="repair-summary">${escapeHtml(row.summary || "No detail provided.")}</div>
+          </div>
+        `).join("")}
+      </div>
+    ` : `<div class="cockpit-alert cockpit-success">No active repair signals. Monitoring and readiness are current.</div>`;
+  }
+}
+
+function renderGovernedRiskSurfaces(payload) {
+  const host = el("governedRiskBody");
+  const meta = el("governedRiskMeta");
+  if (!host || !meta) return;
+  const groups = payload?.governed_risk_surfaces || {};
+  const entries = [
+    ["Authority & Data Integrity", Array.isArray(groups?.authority_and_data) ? groups.authority_and_data : []],
+    ["Broker & Execution Readiness", Array.isArray(groups?.broker_and_execution) ? groups.broker_and_execution : []],
+    ["Risk Envelope", Array.isArray(groups?.risk_envelope) ? groups.risk_envelope : []],
+  ];
+  const total = entries.reduce((sum, [, rows]) => sum + rows.length, 0);
+  const attention = entries.reduce((sum, [, rows]) => sum + rows.filter((row) => ["negative", "warning"].includes(String(row?.tone || ""))).length, 0);
+  meta.textContent = `surfaces=${total} • attention=${attention}`;
+  host.innerHTML = `
+    <div class="governed-risk-grid">
+      ${entries.map(([title, rows]) => `
+        <div class="governed-risk-group">
+          <div class="governed-risk-group-title">${escapeHtml(title)}</div>
+          <div class="governed-risk-list">
+            ${rows.map((row) => `
+              <div class="governed-risk-item">
+                <div class="governed-risk-main">
+                  <div class="governed-risk-label-row">
+                    <span class="governed-risk-label">${escapeHtml(row?.label || "Unknown surface")}</span>
+                    <span class="status-chip-compact ${toneClass(row?.tone)}">${escapeHtml(String(row?.state || "UNKNOWN").toUpperCase())}</span>
+                  </div>
+                  <div class="governed-risk-detail">${escapeHtml(row?.detail || "No governed detail available.")}</div>
+                </div>
+                <div class="governed-risk-actions">
+                  <div class="mono tiny muted">${row?.authoritative === false ? "derived" : "authoritative"}</div>
+                  ${row?.artifact_path ? `<button class="btn btn-mini" data-open="${encodeURIComponent(row.artifact_path)}" data-title="${escapeHtml(row?.label || "governed_surface")}">Evidence</button>` : ""}
+                </div>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+  host.querySelectorAll("[data-open]").forEach((button) => {
+    button.onclick = async () => {
+      const path = decodeURIComponent(button.getAttribute("data-open") || "");
+      const title = button.getAttribute("data-title") || "evidence";
+      await openEvidence(title, path);
+    };
+  });
 }
 
 function numOrNull(v) {
@@ -297,67 +358,74 @@ function titleizeCheckId(v) {
 }
 
 function renderPlatformReadiness(payload) {
-  const platform = payload?.platform_readiness && typeof payload.platform_readiness === "object" ? payload.platform_readiness : {};
-  const bug = payload?.platform_bug_metrics && typeof payload.platform_bug_metrics === "object" ? payload.platform_bug_metrics : {};
-  const policy = payload?.platform_readiness_policy && typeof payload.platform_readiness_policy === "object" ? payload.platform_readiness_policy : {};
-  const pm = platform?.metric_views || {};
-  const bm = bug?.metric_views || {};
-  const hasReadinessPayload = platform?.present === true;
-  const hasBugPayload = bug?.present === true;
-  const hasPolicyPayload = policy?.present === true;
+  const platformPayload = payload?.platform_readiness && typeof payload.platform_readiness === "object" ? payload.platform_readiness : {};
+  const operationalPayload = payload?.operational_readiness && typeof payload.operational_readiness === "object" ? payload.operational_readiness : {};
+  const bugPayload = payload?.platform_bug_metrics && typeof payload.platform_bug_metrics === "object" ? payload.platform_bug_metrics : {};
+  const policyPayload = payload?.platform_readiness_policy && typeof payload.platform_readiness_policy === "object" ? payload.platform_readiness_policy : {};
+  const hasReadinessPayload = platformPayload?.present === true;
+  const hasBugPayload = bugPayload?.present === true;
+  const hasPolicyPayload = policyPayload?.present === true;
+  const readiness = hasReadinessPayload ? platformPayload : {};
+  const metrics = hasBugPayload ? bugPayload : {};
+  const policy = hasPolicyPayload ? policyPayload : {};
+  const pm = readiness?.metric_views || {};
+  const bm = metrics?.metric_views || {};
 
-  const state = String(platform?.platform_readiness_state || "UNKNOWN").toUpperCase();
-  const grade = platform?.platform_readiness_grade ?? "n/a";
-  const score = numOrNull(platform?.platform_readiness_score);
-  const threshold = numOrNull(platform?.score_threshold_ready);
-  const candidate = platform?.platform_promotion_candidate === true ? "YES"
-    : platform?.platform_promotion_candidate === false ? "NO"
+  const state = hasReadinessPayload ? String(readiness?.platform_readiness_state || "UNKNOWN").toUpperCase() : "UNKNOWN";
+  const grade = hasReadinessPayload ? (readiness?.platform_readiness_grade ?? "n/a") : "n/a";
+  const score = hasReadinessPayload ? numOrNull(readiness?.platform_readiness_score) : null;
+  const threshold = hasReadinessPayload ? numOrNull(readiness?.score_threshold_ready) : null;
+  const candidate = hasReadinessPayload && readiness?.platform_promotion_candidate === true ? "YES"
+    : hasReadinessPayload && readiness?.platform_promotion_candidate === false ? "NO"
     : "UNKNOWN";
-  const summary = platform?.readiness_summary || "n/a";
-  const decision = platform?.promotion_decision_basis || "n/a";
-  const rootBlockers = Array.isArray(platform?.root_blockers) ? platform.root_blockers : [];
-  const derivedBlockers = Array.isArray(platform?.derived_blockers) ? platform.derived_blockers : [];
-  const contributionRows = Array.isArray(platform?.score_contribution) ? platform.score_contribution : [];
+  const summary = readiness?.readiness_summary || "n/a";
+  const decision = readiness?.promotion_decision_basis || "n/a";
+  const rootBlockers = Array.isArray(readiness?.root_blockers) ? readiness.root_blockers : [];
+  const derivedBlockers = Array.isArray(readiness?.derived_blockers) ? readiness.derived_blockers : [];
+  const contributionRows = Array.isArray(readiness?.score_contribution) ? readiness.score_contribution : [];
   const gradeBands = Array.isArray(policy?.grade_bands) ? policy.grade_bands : [];
-  const thresholdPolicy = platform?.policy_values || {};
+  const thresholdPolicy = readiness?.policy_values || {};
   const hardBlockers = thresholdPolicy?.hard_blockers || {};
   const maxVelocity = numOrNull(hardBlockers?.max_bug_velocity_7d_avg_for_candidate);
   const maxRecurrence = numOrNull(hardBlockers?.max_recurrence_rate_for_candidate);
-  const producedUtc = platform?.produced_utc || "n/a";
-  const bugProducedUtc = bug?.produced_utc || "n/a";
-  const readinessPath = platform?.path || "n/a";
-  const bugPath = bug?.path || "n/a";
+  const producedUtc = readiness?.produced_utc || "n/a";
+  const bugProducedUtc = metrics?.produced_utc || "n/a";
+  const readinessPath = readiness?.path || "n/a";
+  const bugPath = metrics?.path || "n/a";
   const policyPath = policy?.path || thresholdPolicy?.policy_path || "n/a";
   const scoreDisplay = formatPointsOutOf100(score);
   const thresholdDisplay = threshold === null ? "n/a" : String(threshold);
-  const velocityValue = numOrNull(bug?.bug_velocity_7d_avg);
-  const recurrenceValue = numOrNull(bug?.recurrence_rate);
-  const stabilityValue = numOrNull(bug?.diagnostic_stability_rate);
-  const newBugsValue = numOrNull(bug?.new_bug_events_today);
-  const velocityDisplay = formatMetricDisplay(pm?.bug_velocity_7d_avg || bm?.bug_velocity_7d_avg, bug?.bug_velocity_7d_avg, "rate_x100");
-  const recurrenceDisplay = formatMetricDisplay(pm?.recurrence_rate || bm?.recurrence_rate, bug?.recurrence_rate, "percent_bp");
-  const stabilityDisplay = formatMetricDisplay(pm?.diagnostic_stability_rate || bm?.diagnostic_stability_rate, bug?.diagnostic_stability_rate, "percent_bp");
-  const newBugsDisplay = formatMetricDisplay(bm?.new_bug_events_today, bug?.new_bug_events_today, null);
-  const bugTrend = String(bug?.bug_velocity_trend || "UNKNOWN");
-  const recurringKeys = Array.isArray(bug?.recurring_bug_events) ? bug.recurring_bug_events : [];
+  const velocityValue = numOrNull(metrics?.bug_velocity_7d_avg);
+  const recurrenceValue = numOrNull(metrics?.recurrence_rate);
+  const stabilityValue = numOrNull(metrics?.diagnostic_stability_rate);
+  const newBugsValue = numOrNull(metrics?.new_bug_events_today);
+  const velocityDisplay = formatMetricDisplay(pm?.bug_velocity_7d_avg || bm?.bug_velocity_7d_avg, metrics?.bug_velocity_7d_avg, "rate_x100");
+  const recurrenceDisplay = formatMetricDisplay(pm?.recurrence_rate || bm?.recurrence_rate, metrics?.recurrence_rate, "percent_bp");
+  const stabilityDisplay = formatMetricDisplay(pm?.diagnostic_stability_rate || bm?.diagnostic_stability_rate, metrics?.diagnostic_stability_rate, "percent_bp");
+  const newBugsDisplay = formatMetricDisplay(bm?.new_bug_events_today, metrics?.new_bug_events_today, null);
+  const bugTrend = String(metrics?.bug_velocity_trend || "UNKNOWN");
+  const recurringKeys = Array.isArray(metrics?.recurring_bug_events) ? metrics.recurring_bug_events : [];
   const evidencePaths = [...new Set([
-    ...(Array.isArray(platform?.evidence_paths) ? platform.evidence_paths : []),
-    ...(Array.isArray(bug?.evidence_paths) ? bug.evidence_paths : []),
+    ...(Array.isArray(readiness?.evidence_paths) ? readiness.evidence_paths : []),
+    ...(Array.isArray(metrics?.evidence_paths) ? metrics.evidence_paths : []),
   ].filter(Boolean))];
   const readinessSourceNote = hasReadinessPayload
-    ? (platform?.requested_day_present === true
-      ? `readiness_day=${platform?.resolved_day || payload?.meta?.selected_day || "n/a"}`
-      : platform?.resolved_via_latest_pointer
-        ? `readiness_fallback=${platform?.resolved_day || "latest"}`
+    ? (readiness?.requested_day_present === true
+      ? `readiness_day=${readiness?.resolved_day || payload?.meta?.selected_day || "n/a"}`
+      : readiness?.resolved_via_latest_pointer
+        ? `readiness_fallback=${readiness?.resolved_day || "latest"}`
         : "readiness_day=missing")
     : "readiness=missing";
   const bugSourceNote = hasBugPayload
-    ? (bug?.requested_day_present === true
-      ? `bug_metrics_day=${bug?.resolved_day || payload?.meta?.selected_day || "n/a"}`
-      : bug?.resolved_via_latest_pointer
-        ? `bug_metrics_fallback=${bug?.resolved_day || "latest"}`
+    ? (metrics?.requested_day_present === true
+      ? `bug_metrics_day=${metrics?.resolved_day || payload?.meta?.selected_day || "n/a"}`
+      : metrics?.resolved_via_latest_pointer
+        ? `bug_metrics_fallback=${metrics?.resolved_day || "latest"}`
         : "bug_metrics_day=missing")
     : "bug_metrics=missing";
+  const fallbackBanner = hasReadinessPayload && readiness?.resolved_via_latest_pointer
+    ? `<div class="platform-fallback-banner">Structural readiness is using the latest canonical artifact (${escapeHtml(readiness?.resolved_day || "latest")}), not the selected day.</div>`
+    : "";
   const note = threshold !== null ? "READY when score >= threshold" : "Threshold rule unavailable";
   const velocityBand = velocityValue === null
     ? "Unavailable"
@@ -454,10 +522,11 @@ function renderPlatformReadiness(payload) {
     : `partial readiness payload • ${readinessSourceNote} • ${bugSourceNote} • produced=${producedUtc}`;
   el("platformHeroRow").className = "platform-kpi-grid";
   el("platformHeroRow").innerHTML = `
+    ${fallbackBanner}
     <div class="metric platform-kpi-card platform-kpi-status">
-      <div class="k">Status</div>
+      <div class="k">Structural Status</div>
       <div class="v platform-kpi-value ${stateClass(state)}">${state}</div>
-      <div class="platform-kpi-note">Platform readiness state</div>
+      <div class="platform-kpi-note">Structural readiness artifact state</div>
     </div>
     <div class="metric metric-hero platform-kpi-card">
       <div class="k">Platform Score</div>
@@ -484,7 +553,7 @@ function renderPlatformReadiness(payload) {
   el("platformSummaryRow").innerHTML = `
     <div class="platform-section-grid">
       <div class="platform-section section-positive">
-        <div class="section-title">Why Ready</div>
+        <div class="section-title">Structural Readiness</div>
         <div class="section-body">${escapeHtml(summary)}</div>
         <div class="section-subnote">${escapeHtml(decision)}</div>
       </div>
@@ -542,9 +611,9 @@ function renderPlatformReadiness(payload) {
         <div class="info-row"><span>Max recurrence rate</span><span class="mono tone-info">${escapeHtml(formatThresholdMetric(maxRecurrence, "percent"))}</span></div>
       </div>
       <div class="platform-section section-warning">
-        <div class="section-title">Derived Warnings</div>
-        <div class="info-pills">${derivedHtml}</div>
-        <div class="section-subnote">READY can coexist with derived warnings when root blockers are clear.</div>
+        <div class="section-title">Operational Guardrail</div>
+        <div class="info-pills"><div class="info-pill ${stateClass(operationalPayload?.state)}">${escapeHtml(String(operationalPayload?.state || "UNKNOWN").replaceAll("_", " "))}</div></div>
+        <div class="section-subnote">${escapeHtml(operationalPayload?.summary || "Selected-day operational readiness unavailable.")}</div>
       </div>
     </div>
     <details class="evidence-details">
@@ -590,6 +659,199 @@ function renderPlatformReadiness(payload) {
   `;
 }
 
+function renderPortfolioSummary(payload) {
+  const host = el("opsPortfolioSummaryBody");
+  const meta = el("opsPortfolioSummaryMeta");
+  if (!host || !meta) return;
+  const p = payload?.portfolio || {};
+  meta.textContent = p.asof_utc ? `asof=${p.asof_utc}` : "selected day portfolio view";
+  const items = [
+    ["NAV total", p.nav_total],
+    ["PnL today", p.pnl_today],
+    ["PnL cumulative", p.pnl_cumulative],
+    ["Drawdown %", p.drawdown_pct],
+    ["Cash %", p.cash_pct],
+    ["Net exposure %", p.net_exposure_pct],
+    ["Gross exposure %", p.gross_exposure_pct],
+  ];
+  host.innerHTML = `
+    <div class="portfolio-summary-grid">
+      ${items.map(([label, value]) => `
+        <div class="metric">
+          <div class="k">${escapeHtml(label)}</div>
+          <div class="v">${escapeHtml(fmt(value))}</div>
+        </div>
+      `).join("")}
+    </div>
+    <div class="mono tiny muted" style="margin-top:10px;">${escapeHtml(p.note_if_missing || "Canonical portfolio summary loaded from current status payload.")}</div>
+  `;
+}
+
+function renderPlatformReadinessSummary(payload) {
+  const host = el("platformReadinessSummaryBody");
+  const meta = el("platformReadinessSummaryMeta");
+  if (!host || !meta) return;
+  const readiness = payload?.platform_readiness || {};
+  const rootBlockers = Array.isArray(readiness?.root_blockers) ? readiness.root_blockers : [];
+  const derivedBlockers = Array.isArray(readiness?.derived_blockers) ? readiness.derived_blockers : [];
+  const score = readiness?.platform_readiness_score ?? "n/a";
+  const threshold = readiness?.score_threshold_ready ?? "n/a";
+  meta.textContent = `score=${score}/${threshold} • state=${String(readiness?.platform_readiness_state || "UNKNOWN").toUpperCase()}`;
+  host.innerHTML = `
+    <div class="platform-summary-grid">
+      <div class="metric">
+        <div class="k">Structural state</div>
+        <div class="v ${stateClass(readiness?.platform_readiness_state)}">${escapeHtml(String(readiness?.platform_readiness_state || "UNKNOWN").toUpperCase())}</div>
+      </div>
+      <div class="metric">
+        <div class="k">Structural score</div>
+        <div class="v">${escapeHtml(String(score))}</div>
+      </div>
+      <div class="metric">
+        <div class="k">Threshold</div>
+        <div class="v">${escapeHtml(String(threshold))}</div>
+      </div>
+      <div class="metric">
+        <div class="k">Structural grade</div>
+        <div class="v">${escapeHtml(String(readiness?.platform_readiness_grade || "n/a"))}</div>
+      </div>
+    </div>
+    <div class="cockpit-alert cockpit-info" style="margin-top:12px;">${escapeHtml(readiness?.readiness_summary || "No structural readiness summary available.")}</div>
+    <div class="platform-summary-operator-grid">
+      <div class="platform-summary-operator-card">
+        <div class="platform-summary-operator-title">Root blockers</div>
+        <div class="platform-summary-operator-value">${escapeHtml(rootBlockers.length ? rootBlockers.join(", ") : "none")}</div>
+      </div>
+      <div class="platform-summary-operator-card">
+        <div class="platform-summary-operator-title">Derived warnings</div>
+        <div class="platform-summary-operator-value">${escapeHtml(derivedBlockers.length ? derivedBlockers.join(", ") : "none")}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderDiagnosticsOverview(payload) {
+  const host = el("diagnosticsOverviewBody");
+  const meta = el("diagnosticsOverviewMeta");
+  if (!host || !meta) return;
+  const readiness = payload?.platform_readiness || {};
+  const prov = payload?.provenance || {};
+  const activity = payload?.activity_flow_diagnostics || {};
+  const blockedDay = payload?.day_start_blocked || {};
+  const tradingDay = payload?.trading_day_state || {};
+  const dispositions = payload?.intent_terminal_dispositions || {};
+  const rootBlockers = Array.isArray(readiness?.root_blockers) ? readiness.root_blockers : [];
+  const derivedBlockers = Array.isArray(readiness?.derived_blockers) ? readiness.derived_blockers : [];
+  const warnings = Array.isArray(prov?.warnings) ? prov.warnings : [];
+  const missingPaths = Array.isArray(prov?.missing_paths) ? prov.missing_paths : [];
+  const flags = Array.isArray(activity?.suspicion_flags) ? activity.suspicion_flags : [];
+  const breakdown = Array.isArray(activity?.rejection_breakdown) ? activity.rejection_breakdown.slice(0, 3) : [];
+  const terminalCounts = Array.isArray(dispositions?.terminal_state_counts) ? dispositions.terminal_state_counts.slice(0, 4) : [];
+  const stageCounts = Array.isArray(dispositions?.stage_counts) ? dispositions.stage_counts.slice(0, 4) : [];
+  const reasonCounts = Array.isArray(dispositions?.dominant_reason_codes) ? dispositions.dominant_reason_codes.slice(0, 4) : [];
+  const byEngine = Array.isArray(dispositions?.by_engine) ? dispositions.by_engine.slice(0, 3) : [];
+  const counts = activity?.counts || {};
+  const dayDeps = Array.isArray(tradingDay?.dependency_statuses) ? tradingDay.dependency_statuses : [];
+  const freshness = Array.isArray(tradingDay?.freshness_checks) ? tradingDay.freshness_checks : [];
+  meta.textContent = `day_state=${String(tradingDay?.state || "UNKNOWN")} • heartbeat=${String(tradingDay?.heartbeat_status || "UNKNOWN")} • terminal=${String(activity?.terminal_state || "UNKNOWN")} • intent_dispositions=${String(dispositions?.intent_count || 0)} • blocked=${blockedDay?.blocked === true ? "yes" : "no"} • warnings=${warnings.length} • flags=${flags.length} • missing_paths=${missingPaths.length}`;
+  const blockedBanner = blockedDay?.blocked === true ? `
+    <div class="cockpit-alert cockpit-danger">
+      <strong>Day Start Blocked</strong><br>
+      ${escapeHtml(String(blockedDay?.blocked_stage || "UNKNOWN"))} • ${escapeHtml(String(blockedDay?.first_failing_prerequisite || "UNKNOWN"))}<br>
+      ${escapeHtml(String(blockedDay?.first_failing_reason_code || "UNKNOWN"))}<br>
+      ${escapeHtml(String(blockedDay?.first_failing_path || "no failing path recorded"))}
+    </div>
+  ` : "";
+  const tradingDayBanner = `
+    <div class="cockpit-alert ${String(tradingDay?.heartbeat_status || "UNKNOWN") === "PASS" ? "cockpit-info" : "cockpit-danger"}">
+      <strong>Trading Day State</strong><br>
+      ${escapeHtml(String(tradingDay?.state || "UNKNOWN"))} • heartbeat=${escapeHtml(String(tradingDay?.heartbeat_status || "UNKNOWN"))}<br>
+      ${escapeHtml(String(tradingDay?.first_failing_prerequisite || "no failing prerequisite recorded"))}
+    </div>
+  `;
+  host.innerHTML = `
+    ${tradingDayBanner}
+    ${blockedBanner}
+    <div class="diagnostics-overview-grid">
+      <div class="cockpit-alert ${String(tradingDay?.heartbeat_status || "UNKNOWN") === "PASS" ? "cockpit-success" : "cockpit-danger"}">
+        <strong>09:35 heartbeat</strong><br>
+        ${escapeHtml(String(tradingDay?.heartbeat_status || "UNKNOWN"))}
+      </div>
+      <div class="cockpit-alert cockpit-info">
+        <strong>Dependency stages</strong><br>
+        ${escapeHtml(dayDeps.length ? dayDeps.map((row) => `${row.stage}:${row.status}`).join(", ") : "none")}
+      </div>
+      <div class="cockpit-alert cockpit-warning">
+        <strong>Expected outputs</strong><br>
+        ${escapeHtml(freshness.length ? freshness.map((row) => `${row.artifact_id}:${row.status}`).join(", ") : "none")}
+      </div>
+      <div class="cockpit-alert cockpit-info">
+        <strong>Activity terminal state</strong><br>
+        ${escapeHtml(activity?.terminal_state || "UNKNOWN")}
+      </div>
+      <div class="cockpit-alert ${blockedDay?.blocked === true ? "cockpit-danger" : "cockpit-info"}">
+        <strong>Blocked-day state</strong><br>
+        ${escapeHtml(blockedDay?.blocked === true ? `BLOCKED • ${String(blockedDay?.blocked_stage || "UNKNOWN")}` : "not blocked")}
+      </div>
+      <div class="cockpit-alert cockpit-info">
+        <strong>Funnel counts</strong><br>
+        ${escapeHtml(`universe=${counts?.universe_size ?? 0} • signals=${counts?.signal_candidate_count ?? 0} • intents=${counts?.intent_count ?? 0} • plans=${counts?.order_plan_count ?? 0}`)}
+      </div>
+      <div class="cockpit-alert cockpit-info">
+        <strong>Intent terminal states</strong><br>
+        ${escapeHtml(terminalCounts.length ? terminalCounts.map((row) => `${row.terminal_disposition}:${row.count}`).join(", ") : "none")}
+      </div>
+      <div class="cockpit-alert cockpit-warning">
+        <strong>Intent loss stages</strong><br>
+        ${escapeHtml(stageCounts.length ? stageCounts.map((row) => `${row.terminal_stage}:${row.count}`).join(", ") : "none")}
+      </div>
+      <div class="cockpit-alert cockpit-warning">
+        <strong>Top rejection reasons</strong><br>
+        ${escapeHtml(breakdown.length ? breakdown.map((row) => `${row.reason_code}:${row.count}`).join(", ") : "none")}
+      </div>
+      <div class="cockpit-alert cockpit-info">
+        <strong>Disposition reasons</strong><br>
+        ${escapeHtml(reasonCounts.length ? reasonCounts.map((row) => `${row.reason_code}:${row.count}`).join(", ") : "none")}
+      </div>
+      <div class="cockpit-alert ${flags.length ? "cockpit-warning" : "cockpit-success"}">
+        <strong>Suspicion flags</strong><br>
+        ${escapeHtml(flags.length ? flags.join(", ") : "none")}
+      </div>
+      <div class="cockpit-alert cockpit-info">
+        <strong>Readiness details</strong><br>
+        ${escapeHtml(readiness?.promotion_decision_basis || readiness?.readiness_summary || "No readiness detail available.")}
+      </div>
+      <div class="cockpit-alert cockpit-warning">
+        <strong>Missing paths</strong><br>
+        ${escapeHtml(missingPaths.length ? String(missingPaths.length) : "0")}
+      </div>
+      <div class="cockpit-alert cockpit-warning">
+        <strong>Warnings</strong><br>
+        ${escapeHtml(warnings.length ? String(warnings.length) : "0")}
+      </div>
+      <div class="cockpit-alert ${blockedDay?.blocked === true ? "cockpit-warning" : "cockpit-info"}">
+        <strong>Dependency chain</strong><br>
+        ${escapeHtml(Array.isArray(blockedDay?.dependency_chain) && blockedDay.dependency_chain.length ? blockedDay.dependency_chain.join(" -> ") : "none")}
+      </div>
+      <div class="cockpit-alert cockpit-success">
+        <strong>Root blockers</strong><br>
+        ${escapeHtml(rootBlockers.length ? rootBlockers.join(", ") : "none")}
+      </div>
+      <div class="cockpit-alert cockpit-info">
+        <strong>Derived blockers</strong><br>
+        ${escapeHtml(derivedBlockers.length ? derivedBlockers.join(", ") : "none")}
+      </div>
+      <div class="cockpit-alert cockpit-info">
+        <strong>Disposition by engine</strong><br>
+        ${escapeHtml(byEngine.length ? byEngine.map((row) => {
+          const states = Array.isArray(row?.terminal_state_counts) ? row.terminal_state_counts.map((stateRow) => `${stateRow.terminal_disposition}:${stateRow.count}`).join("/") : "none";
+          return `${row.engine_id}:${states}`;
+        }).join(", ") : "none")}
+      </div>
+    </div>
+  `;
+}
+
 function renderSignalActivity(payload) {
   const host = el("signalActivityCard");
   if (!host) return;
@@ -606,34 +868,47 @@ function renderSignalActivity(payload) {
   const vetoCount = numOrNull(phasec?.veto_count) ?? 0;
   const releasedCount = numOrNull(phasec?.released_identity_dir_count) ?? 0;
   const upstreamSymbols = Array.isArray(upstream?.symbols) ? upstream.symbols : [];
+  const submitDisplay = submit?.stage_status === "SKIP" ? "NOT REQUIRED" : (submit?.stage_status || "NOT REACHED");
+  const missingSummary = missingEngines.length
+    ? `
+      <details class="signal-inline-details">
+        <summary>Missing engines (${missingEngines.length})</summary>
+        <div class="signal-missing-engines">${missingEngines.map((engineId) => `<span class="signal-missing-engine mono">${escapeHtml(engineId)}</span>`).join("")}</div>
+      </details>
+    `
+    : `<div class="signal-subnote signal-subnote-compact">Missing engines: none</div>`;
 
   host.innerHTML = `
     <div class="card-head">
       <div class="card-title">Signal Activity</div>
       <div class="mono tiny muted">day=${escapeHtml(signal?.day_utc || payload?.meta?.selected_day || "n/a")}</div>
     </div>
-    <div class="signal-grid">
-      <div class="signal-card">
-        <div class="signal-label">Engine Heartbeats</div>
-        <div class="signal-value ${present >= expected && expected > 0 ? "tone-positive" : present > 0 ? "tone-warning" : "tone-negative"}">${escapeHtml(`${present} / ${expected}`)}</div>
-        <div class="signal-subnote">${missingEngines.length ? `missing=${escapeHtml(missingEngines.join(", "))}` : "all expected engines present"}</div>
+    <div class="signal-activity-layout">
+      <div class="signal-activity-column">
+        <div class="signal-row">
+          <div class="signal-label">Trade intents</div>
+          <div class="signal-value ${intentCount > 0 ? "tone-positive" : "tone-warning"}">${escapeHtml(String(intentCount))}</div>
+          <div class="signal-subnote">${escapeHtml(intents?.label || "No real intents produced")}</div>
+        </div>
+        <div class="signal-row">
+          <div class="signal-label">Engine heartbeats</div>
+          <div class="signal-value ${present >= expected && expected > 0 ? "tone-positive" : present > 0 ? "tone-warning" : "tone-negative"}">${escapeHtml(`${present} / ${expected}`)}</div>
+          ${missingSummary}
+        </div>
       </div>
-      <div class="signal-card">
-        <div class="signal-label">Intents</div>
-        <div class="signal-value ${intentCount > 0 ? "tone-positive" : "tone-warning"}">${escapeHtml(String(intentCount))}</div>
-        <div class="signal-subnote">${escapeHtml(intents?.label || "No real intents produced")}</div>
+      <div class="signal-activity-column">
+        <div class="signal-row">
+          <div class="signal-label">Orders released</div>
+          <div class="signal-value ${toneClass(phasec?.tone)}">${escapeHtml(String(releasedCount))}</div>
+          <div class="signal-subnote">vetoes=${escapeHtml(String(vetoCount))} • ${escapeHtml(phasec?.label || "no phaseC outputs")}</div>
+        </div>
+        <div class="signal-row">
+          <div class="signal-label">Submit stage</div>
+          <div class="signal-value ${toneClass(submit?.tone)}">${escapeHtml(submitDisplay)}</div>
+          <div class="signal-subnote">${escapeHtml(submit?.label || "governed submit not reached")}</div>
+        </div>
       </div>
-      <div class="signal-card">
-        <div class="signal-label">Phase C Outcomes</div>
-        <div class="signal-value ${toneClass(phasec?.tone)}">${escapeHtml(phasec?.label || "no phaseC outputs")}</div>
-        <div class="signal-subnote">vetoes=${escapeHtml(String(vetoCount))} • released_identities=${escapeHtml(String(releasedCount))}</div>
-      </div>
-      <div class="signal-card">
-        <div class="signal-label">Governed Submit</div>
-        <div class="signal-value ${toneClass(submit?.tone)}">${escapeHtml(submit?.stage_status || "NOT_REACHED")}</div>
-        <div class="signal-subnote">${escapeHtml(submit?.label || "governed submit not reached")}</div>
-      </div>
-      <div class="signal-card signal-card-wide">
+      <div class="signal-row signal-row-wide">
         <div class="signal-label">Upstream Data Status</div>
         <div class="signal-value ${toneClass(upstream?.tone)}">${escapeHtml(upstream?.label || "upstream data incomplete")}</div>
         <div class="signal-symbol-grid">
@@ -645,6 +920,146 @@ function renderSignalActivity(payload) {
           `).join("") || `<div class="mono tiny muted">No symbol readiness rows found.</div>`}
         </div>
       </div>
+    </div>
+  `;
+}
+
+function renderTradingDayOutcome(payload) {
+  const host = el("tradingDayOutcomeCard");
+  if (!host) return;
+  const signal = payload?.signal_activity && typeof payload.signal_activity === "object" ? payload.signal_activity : {};
+  const outcome = signal?.trading_day_outcome && typeof signal.trading_day_outcome === "object" ? signal.trading_day_outcome : {};
+  const frequency = signal?.signal_frequency_30d && typeof signal.signal_frequency_30d === "object" ? signal.signal_frequency_30d : {};
+  const hb = signal?.engine_heartbeats || {};
+  const readiness = payload?.platform_readiness || {};
+  const operationalReadiness = payload?.operational_readiness || {};
+  const submit = signal?.governed_submit || {};
+  const upstream = signal?.upstream_data_status || {};
+  const upstreamRows = Array.isArray(upstream?.symbols) ? upstream.symbols : [];
+  const expected = numOrNull(hb?.expected_count) ?? 0;
+  const present = numOrNull(hb?.present_count) ?? 0;
+  const readinessState = String(readiness?.platform_readiness_state || "UNKNOWN").toUpperCase();
+  const operationalReadinessState = String(operationalReadiness?.state || "UNKNOWN").toUpperCase();
+  const upstreamReady = upstreamRows.length > 0 && upstreamRows.every((row) => row?.same_day_present === true);
+  const executionPath = String(outcome?.execution_path || "UNKNOWN").toUpperCase();
+  const submitLabel = submit?.stage_status === "SKIP" ? "SKIPPED" : String(submit?.stage_status || "NOT REACHED").toUpperCase();
+  const signalBand = frequency?.label || "Signal frequency unavailable";
+  const dailyCounts = Array.isArray(frequency?.daily_counts) ? frequency.daily_counts : [];
+  const facts = Array.isArray(outcome?.facts) ? outcome.facts.slice(0, 6) : [];
+  const tone = String(outcome?.tone || "neutral").toLowerCase();
+  const chipGate = outcome?.gate_stack || {};
+  const chipKill = outcome?.kill_switch || {};
+  const statusChips = [
+    ["Gates", chipGate?.status || "UNKNOWN"],
+    ["Data", upstreamReady ? "READY" : "MISSING"],
+    ["Engines", `${present} / ${expected}`],
+    ["Submit", submitLabel],
+    ["Execution", executionPath],
+    ["Readiness", operationalReadinessState],
+  ];
+  const flowSteps = [
+    ["Market Data", upstreamReady ? "READY" : "MISSING"],
+    ["Engines", `${present} / ${expected}`],
+    ["Phase C", `${signal?.phasec_outcomes?.released_identity_dir_count ?? 0} identities`],
+    ["Submit", submitLabel],
+  ];
+  const sparkline = dailyCounts.length
+    ? `
+      <div class="signal-cadence-sparkline" aria-label="Recent 30 day signal cadence">
+        ${dailyCounts.map((value, idx) => {
+          const numeric = Math.max(0, Number(value) || 0);
+          const height = Math.max(10, Math.min(100, numeric === 0 ? 10 : numeric * 18));
+          return `<span class="signal-cadence-bar" style="height:${height}%;" title="day_${idx + 1}: ${numeric}"></span>`;
+        }).join("")}
+      </div>
+    `
+    : `
+      <div class="signal-cadence-summary-row">
+        <span class="signal-cadence-summary-chip">Avg Signals / Day <strong>${escapeHtml(
+          frequency?.avg_signals_per_day === null || frequency?.avg_signals_per_day === undefined
+            ? "n/a"
+            : Number(frequency.avg_signals_per_day).toFixed(2)
+        )}</strong></span>
+        <span class="signal-cadence-summary-chip">Last Signal <strong>${escapeHtml(frequency?.last_signal_date || "n/a")}</strong></span>
+        <span class="signal-cadence-summary-chip">Last Submit <strong>${escapeHtml(frequency?.last_submit_date || "n/a")}</strong></span>
+        <span class="signal-cadence-summary-chip">Signal Band <strong>${escapeHtml(signalBand)}</strong></span>
+      </div>
+    `;
+  host.className = `card trading-day-outcome-card outcome-${tone}`;
+  host.innerHTML = `
+    <div class="card-head">
+      <div class="card-title">Trading Day Outcome</div>
+      <div class="mono tiny muted">day=${escapeHtml(outcome?.day_utc || signal?.day_utc || payload?.meta?.selected_day || "n/a")}</div>
+    </div>
+    <div class="outcome-layout">
+      <div class="outcome-hero">
+        <div class="outcome-label ${toneClass(tone)}">${escapeHtml(outcome?.label || "UNKNOWN DAY")}</div>
+        <div class="outcome-subtitle">${escapeHtml(outcome?.subtitle || "No derived operator summary available.")}</div>
+        <div class="outcome-strip">
+          <div class="outcome-chip">Classification: <strong>${escapeHtml(outcome?.classification || "UNKNOWN")}</strong></div>
+          <div class="outcome-chip">Execution Path: <strong>${escapeHtml(outcome?.execution_path || "UNKNOWN")}</strong></div>
+          <div class="outcome-chip">Gate stack: <strong>${escapeHtml(chipGate?.status || "UNKNOWN")}</strong></div>
+          <div class="outcome-chip">Kill switch: <strong>${escapeHtml(chipKill?.state || "UNKNOWN")}</strong></div>
+          <div class="outcome-chip">Structural readiness: <strong>${escapeHtml(readinessState)}</strong></div>
+        </div>
+        <div class="outcome-status-chip-row">
+          ${statusChips.map(([label, value]) => `
+            <span class="status-chip status-chip-compact status-chip-${semanticTone(label === "Engines" ? (present >= expected && expected > 0 ? "HEALTHY" : present > 0 ? "DEGRADED" : "FAIL") : value, "info")}">
+              ${escapeHtml(label)}: ${escapeHtml(String(value))}
+            </span>
+          `).join("")}
+        </div>
+      </div>
+      <div class="outcome-facts">
+        ${facts.slice(0, 6).map((fact) => `
+          <div class="outcome-fact">
+            <div class="outcome-fact-label">${escapeHtml(fact?.label || "Fact")}</div>
+            <div class="outcome-fact-value ${toneClass(
+              String(fact?.value || "").toUpperCase() === "PASS" || String(fact?.value || "").toUpperCase() === "READY" || String(fact?.value || "").toUpperCase() === "HEALTHY"
+                ? "positive"
+                : String(fact?.value || "").toUpperCase().includes("SKIP") || String(fact?.value || "").toUpperCase().includes("NOT REACHED")
+                  ? "warning"
+                  : String(fact?.value || "").toUpperCase() === "FAIL" || String(fact?.value || "").toUpperCase() === "BLOCKED" || String(fact?.value || "").toUpperCase() === "MISSING"
+                    ? "negative"
+                    : "info"
+            )}">${escapeHtml(fact?.value || "n/a")}</div>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+    <div class="execution-flow-strip">
+      ${flowSteps.map(([label, value], idx) => `
+        <div class="execution-flow-step">
+          <div class="execution-flow-label">${escapeHtml(label)}</div>
+          <div class="execution-flow-value status-chip status-chip-compact status-chip-${semanticTone(label === "Engines" ? (present >= expected && expected > 0 ? "HEALTHY" : present > 0 ? "DEGRADED" : "FAIL") : value, "info")}">${escapeHtml(String(value))}</div>
+        </div>
+        ${idx < flowSteps.length - 1 ? `<div class="execution-flow-divider" aria-hidden="true"></div>` : ""}
+      `).join("")}
+    </div>
+    <div class="signal-frequency-band cockpit-${frequency?.status === "warning" ? "warning" : frequency?.status === "negative" ? "danger" : "success"}">
+      <div class="signal-frequency-head">
+        <div class="signal-frequency-title">Signal Frequency (30d)</div>
+        <div class="signal-frequency-label ${toneClass(frequency?.status || "neutral")}">${escapeHtml(frequency?.label || "Signal frequency unavailable")}</div>
+      </div>
+      <div class="signal-frequency-grid">
+        <div class="signal-frequency-item">
+          <div class="signal-frequency-k">Avg Signals / Day</div>
+          <div class="signal-frequency-v">${escapeHtml(
+            frequency?.avg_signals_per_day === null || frequency?.avg_signals_per_day === undefined
+              ? "n/a"
+              : Number(frequency.avg_signals_per_day).toFixed(2)
+          )}</div>
+        </div>
+        <div class="signal-frequency-item">
+          <div class="signal-frequency-k">Last Signal</div>
+          <div class="signal-frequency-v">${escapeHtml(frequency?.last_signal_date || "n/a")}</div>
+        </div>
+        <div class="signal-frequency-item">
+          <div class="signal-frequency-k">Last Submit</div>
+          <div class="signal-frequency-v">${escapeHtml(frequency?.last_submit_date || "n/a")}</div>
+        </div>
+      </div>
+      ${sparkline}
     </div>
   `;
 }
@@ -1158,6 +1573,126 @@ function renderBondSleeve(payload) {
     NO_ACTION: "NO_ACTION",
   }[purchaseAction] || "NO_ACTION";
   const actionChip = purchaseAction === "BUY" ? "status-amber" : "status-blue";
+  const overlayAction = String(sum?.action_state || "HOLD").toUpperCase();
+  const macroFallbackUsed = Boolean(sum?.macro_fallback_used);
+  const macroFallbackMessage = String(sum?.macro_fallback_message || "Macro overlay active.");
+  const macroRegimeLabel = String(sum?.macro_regime_label || "BASELINE_POLICY_FALLBACK");
+  const strategyLabel = String(sum?.bond_strategy_label || "Baseline Ladder Reserve");
+  const portfolioRole = String(sum?.portfolio_role || "Balanced Reserve");
+  const durationTargetMin = sum?.duration_target_years_min ?? "n/a";
+  const durationTargetMax = sum?.duration_target_years_max ?? "n/a";
+  const treasuryTarget = sum?.treasury_target_weight ?? "n/a";
+  const igTarget = sum?.ig_target_weight ?? "n/a";
+  const liquidityHorizon = sum?.liquidity_reserve_horizon_years ?? "n/a";
+  const fallbackChip = macroFallbackUsed ? "status-amber" : "status-green";
+  const overlayActionChip = overlayAction === "BUILD" ? "status-amber" : overlayAction === "REBALANCE" ? "status-blue" : "status-green";
+  const ladderShapeLabel = String(sum?.ladder_shape_label || "Baseline ladder");
+  const explanationHeadline = String(sum?.explanation_headline || `${overlayAction}: ${strategyLabel}`);
+  const explanationSummary = String(sum?.explanation_summary || macroFallbackMessage);
+  const operatorNextStep = String(sum?.operator_next_step || nextStep);
+  const whyNowList = Array.isArray(sum?.why_now) ? sum.why_now : [];
+  const mismatchSummary = Array.isArray(sum?.mismatch_summary) ? sum.mismatch_summary : [];
+  const topMismatchReasons = Array.isArray(sum?.top_mismatch_reasons) ? sum.top_mismatch_reasons : [];
+  const mismatchSeverity = String(sum?.mismatch_severity || "NONE");
+  const durationMismatch = String(sum?.duration_mismatch || "duration_within_band");
+  const creditMixMismatch = Array.isArray(sum?.credit_mix_mismatch) ? sum.credit_mix_mismatch : [];
+  const liquidityMismatch = String(sum?.liquidity_mismatch || "reserve_coverage_within_tolerance");
+  const rolloverMismatch = String(sum?.rollover_concentration_mismatch || "bucket_weight_within_tolerance");
+  const ladderShapeMismatch = Array.isArray(sum?.ladder_shape_mismatch) ? sum.ladder_shape_mismatch : [];
+  const proxyMetrics = (sum?.proxy_metrics && typeof sum.proxy_metrics === "object") ? sum.proxy_metrics : {};
+  const currentVsTarget = (sum?.current_vs_target && typeof sum.current_vs_target === "object") ? sum.current_vs_target : {};
+  const currentLadder = Array.isArray(sum?.current_ladder) ? sum.current_ladder : [];
+  const recommendedLadder = Array.isArray(sum?.recommended_ladder) ? sum.recommended_ladder : [];
+  const ladderDeltas = Array.isArray(sum?.ladder_bucket_deltas) ? sum.ladder_bucket_deltas : [];
+  const inputQuality = (sum?.input_quality && typeof sum.input_quality === "object") ? sum.input_quality : {};
+  const candidateCoverageQuality = inputQuality?.candidate_coverage || {};
+  const yieldCurveQuality = inputQuality?.yield_curve_coverage || {};
+  const creditProxyQuality = inputQuality?.credit_proxy || {};
+  const classificationQuality = inputQuality?.classification_coverage || {};
+  const fallbackQuality = inputQuality?.fallback || {};
+  const fmtWeightPct = (value) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? `${(n * 100).toFixed(0)}%` : "n/a";
+  };
+  const formatBucketLabel = (bucketId) => String(bucketId || "n/a").replace("_", "-");
+  const ladderRow = (label, rows, valueKey) => `
+    <div class="bond-ladder-block">
+      <div class="bond-ladder-title">${escapeHtml(label)}</div>
+      <div class="bond-ladder-grid">
+        ${(rows || []).map((row) => `
+          <div class="bond-ladder-item">
+            <span class="mono tiny muted">${escapeHtml(formatBucketLabel(row?.bucket_id))}</span>
+            <strong>${escapeHtml(fmtWeightPct(row?.[valueKey]))}</strong>
+          </div>
+        `).join("") || `<div class="mono tiny muted">No ladder data available.</div>`}
+      </div>
+    </div>
+  `;
+  const mismatchBadgeClass = mismatchSeverity === "HIGH"
+    ? "status-red"
+    : mismatchSeverity === "MEDIUM"
+      ? "status-amber"
+      : mismatchSeverity === "LOW"
+        ? "status-blue"
+        : "status-green";
+  const mismatchLine = (label, value) => `
+    <div class="bond-overlay-metric">
+      <span class="muted">${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </div>
+  `;
+  const formatMismatchLabel = (value) => String(value || "n/a").replaceAll("_", " ");
+  const ladderDeltaRows = ladderDeltas.length
+    ? ladderDeltas.map((row) => `
+      <div class="bond-ladder-item">
+        <span class="mono tiny muted">${escapeHtml(formatBucketLabel(row?.bucket_id))}</span>
+        <strong>${escapeHtml(fmtWeightPct(row?.gap_weight))}</strong>
+      </div>
+    `).join("")
+    : `<div class="mono tiny muted">No ladder delta diagnostics available.</div>`;
+  const qualityChipClass = (label) => {
+    const normalized = String(label || "").toUpperCase();
+    if (["GOOD", "AVAILABLE", "NONE"].includes(normalized)) return "status-green";
+    if (["PARTIAL"].includes(normalized)) return "status-amber";
+    if (["NOT AVAILABLE", "BASELINE POLICY ACTIVE"].includes(normalized)) return "status-amber";
+    return "status-blue";
+  };
+  const qualityMissingText = (values, prefix) => {
+    if (!Array.isArray(values) || !values.length) return "";
+    return `${prefix}: ${values.join(", ")}`;
+  };
+  const inputQualityBlock = `
+    <div class="bond-input-quality">
+      <div class="bond-ladder-title">Bond Input Quality</div>
+      <div class="bond-input-quality-grid">
+        <div class="bond-input-quality-item">
+          <span class="muted">Candidate coverage</span>
+          <span class="status-chip ${qualityChipClass(candidateCoverageQuality?.label)}">${escapeHtml(candidateCoverageQuality?.label || "NOT AVAILABLE")}</span>
+          <div class="mono tiny muted">${escapeHtml(qualityMissingText(candidateCoverageQuality?.missing_buckets, "Missing buckets") || `Eligible candidates: ${candidateCoverageQuality?.eligible_count ?? "n/a"}`)}</div>
+        </div>
+        <div class="bond-input-quality-item">
+          <span class="muted">Curve coverage</span>
+          <span class="status-chip ${qualityChipClass(yieldCurveQuality?.label)}">${escapeHtml(yieldCurveQuality?.label || "NOT AVAILABLE")}</span>
+          <div class="mono tiny muted">${escapeHtml(qualityMissingText(yieldCurveQuality?.missing_buckets, "Missing buckets") || `Coverage: ${yieldCurveQuality?.coverage_status || "n/a"}`)}</div>
+        </div>
+        <div class="bond-input-quality-item">
+          <span class="muted">Credit proxy</span>
+          <span class="status-chip ${qualityChipClass(creditProxyQuality?.label)}">${escapeHtml(creditProxyQuality?.label || "NOT AVAILABLE")}</span>
+          <div class="mono tiny muted">${escapeHtml(`Spread regime: ${creditProxyQuality?.spread_regime || "n/a"}`)}</div>
+        </div>
+        <div class="bond-input-quality-item">
+          <span class="muted">Classification coverage</span>
+          <span class="status-chip ${qualityChipClass(classificationQuality?.label)}">${escapeHtml(classificationQuality?.label || "NOT AVAILABLE")}</span>
+          <div class="mono tiny muted">${escapeHtml(qualityMissingText(classificationQuality?.missing_dimensions, "Missing") || "All supported dimensions available.")}</div>
+        </div>
+        <div class="bond-input-quality-item">
+          <span class="muted">Fallback</span>
+          <span class="status-chip ${qualityChipClass(fallbackQuality?.label)}">${escapeHtml(fallbackQuality?.label || "NONE")}</span>
+          <div class="mono tiny muted">${escapeHtml(fallbackQuality?.message || "Macro overlay active.")}</div>
+        </div>
+      </div>
+    </div>
+  `;
   const whySelected = Array.isArray(trade?.why_selected) ? trade.why_selected : [];
   const whyNow = Array.isArray(trade?.why_now) ? trade.why_now : [];
   const altRows = alternatives.slice(0, 3).map((row) => `
@@ -1201,18 +1736,81 @@ function renderBondSleeve(payload) {
     <div class="sleeve-readiness-row">
       <span class="mode-chip mode-paper mono">${String((b?.run_metadata?.truth_root_used || "").includes("/LIVE/") ? "LIVE" : "PAPER")}</span>
       <span class="status-chip status-blue">Allocation ${sum?.bond_sleeve_allocation_pct ?? "n/a"}%</span>
-      <span class="status-chip status-blue">Duration ${sum?.weighted_duration ?? "n/a"}</span>
+      <span class="status-chip status-blue">Duration ${sum?.weighted_duration ?? "n/a"}y</span>
       <span class="status-chip status-blue">Yield ${sum?.weighted_yield ?? "n/a"}</span>
-      <span class="status-chip ${actionChip}">Action ${actionText}</span>
+      <span class="status-chip ${overlayActionChip}">Action ${overlayAction}</span>
+      <span class="status-chip ${mismatchBadgeClass}">Mismatch ${escapeHtml(mismatchSeverity)}</span>
       <span class="status-chip ${authorityState === "AUTHORITY_HEAD_AVAILABLE" ? "status-green" : "status-amber"}">${authorityState === "AUTHORITY_HEAD_AVAILABLE" ? "Authoritative ladder available" : "Preliminary ladder available"}</span>
-      <span class="status-chip status-blue">Readiness grade n/a</span>
+      <span class="status-chip ${fallbackChip}">${macroFallbackUsed ? "Baseline fallback active" : "Macro overlay active"}</span>
+    </div>
+    <div class="bond-overlay-summary">
+      <div class="bond-overlay-hero">
+        <div class="bond-overlay-label-row">
+          <span class="status-chip status-blue">Bond Strategy ${escapeHtml(strategyLabel)}</span>
+          <span class="status-chip status-blue">Portfolio Role ${escapeHtml(portfolioRole)}</span>
+          <span class="status-chip ${fallbackChip}">${escapeHtml(macroRegimeLabel)}</span>
+        </div>
+        <div class="bond-overlay-headline">${escapeHtml(explanationHeadline)}</div>
+        <div class="bond-overlay-summary-text">${escapeHtml(explanationSummary)}</div>
+        <div class="bond-ladder-title">Targets</div>
+        <div class="bond-overlay-grid">
+          <div class="bond-overlay-metric"><span class="muted">Duration Target</span><strong>${escapeHtml(String(durationTargetMin))} to ${escapeHtml(String(durationTargetMax))}y</strong></div>
+          <div class="bond-overlay-metric"><span class="muted">Treasury vs IG Mix</span><strong>${escapeHtml(fmtWeightPct(treasuryTarget))} / ${escapeHtml(fmtWeightPct(igTarget))}</strong></div>
+          <div class="bond-overlay-metric"><span class="muted">Liquidity Horizon</span><strong>${escapeHtml(String(liquidityHorizon))} years</strong></div>
+          <div class="bond-overlay-metric"><span class="muted">Ladder Shape</span><strong>${escapeHtml(ladderShapeLabel)}</strong></div>
+        </div>
+        <div class="bond-ladder-title">Action</div>
+        <div class="bond-overlay-grid">
+          <div class="bond-overlay-metric"><span class="muted">Action</span><strong>${escapeHtml(overlayAction)}</strong></div>
+          <div class="bond-overlay-metric"><span class="muted">Mismatch Severity</span><strong>${escapeHtml(mismatchSeverity)}</strong></div>
+          <div class="bond-overlay-metric"><span class="muted">Bond Strategy / Regime</span><strong>${escapeHtml(strategyLabel)}</strong></div>
+          <div class="bond-overlay-metric"><span class="muted">Portfolio Role</span><strong>${escapeHtml(portfolioRole)}</strong></div>
+        </div>
+        <div class="bond-fallback-note ${macroFallbackUsed ? "bond-fallback-active" : "bond-fallback-clear"}">${escapeHtml(macroFallbackMessage)}</div>
+        ${inputQualityBlock}
+      </div>
+      <div class="bond-ladder-compare">
+        <div class="bond-ladder-title">Ladder Comparison</div>
+        ${ladderRow("Current Ladder", currentLadder, "current_weight")}
+        ${ladderRow("Recommended Ladder", recommendedLadder, "target_weight")}
+        <div class="bond-ladder-block">
+          <div class="bond-ladder-title">Bucket Deltas</div>
+          <div class="bond-ladder-grid">${ladderDeltaRows}</div>
+        </div>
+      </div>
+      <div class="bond-why-grid">
+        <div class="bond-why-block">
+          <div class="bond-ladder-title">Why Action</div>
+          <div class="mono tiny">${whyNowList.length ? whyNowList.map(x => `• ${escapeHtml(x)}`).join("<br/>") : "• No overlay explanation available."}</div>
+        </div>
+        <div class="bond-why-block">
+          <div class="bond-ladder-title">Mismatch Summary</div>
+          <div class="mono tiny">${mismatchSummary.length ? mismatchSummary.map(x => `• ${escapeHtml(x)}`).join("<br/>") : "• Current holdings are close to target."}</div>
+        </div>
+      </div>
+      <div class="bond-why-grid">
+        <div class="bond-why-block">
+          <div class="bond-ladder-title">Top Mismatch Reasons</div>
+          <div class="mono tiny">${topMismatchReasons.length ? topMismatchReasons.map(x => `• ${escapeHtml(x)}`).join("<br/>") : "• No major mismatch reasons."}</div>
+        </div>
+        <div class="bond-why-block">
+          <div class="bond-ladder-title">Deterministic Mismatch Classes</div>
+          <div class="bond-overlay-grid">
+            ${mismatchLine("Duration", formatMismatchLabel(durationMismatch))}
+            ${mismatchLine("Credit Mix", creditMixMismatch.join(", ") || "credit mix within tolerance")}
+            ${mismatchLine("Liquidity", formatMismatchLabel(liquidityMismatch))}
+            ${mismatchLine("Rollover", formatMismatchLabel(rolloverMismatch))}
+            ${mismatchLine("Ladder Shape", ladderShapeMismatch.join(", ") || "ladder shape within tolerance")}
+          </div>
+        </div>
+      </div>
     </div>
     <div class="mono tiny muted" style="margin-top:6px;">Ladder status: ${ladderStatusText} • selected day ${selectedDay} • used day ${usedDay}</div>
     <details class="bond-drill sleeve-drill" style="margin-top:8px;">
       <summary class="mono tiny">Open bond advisory details</summary>
       <div class="mono tiny sleeve-drill-section" style="margin-top:6px;"><strong>Status:</strong> ${statusHeadline}</div>
       <div class="mono tiny sleeve-drill-section"><strong>Reason:</strong> ${reasonText}</div>
-      <div class="mono tiny sleeve-drill-section"><strong>Next Step:</strong> ${nextStep}</div>
+      <div class="mono tiny sleeve-drill-section"><strong>Next Step:</strong> ${escapeHtml(operatorNextStep)}</div>
       ${recommendationBlock}
       <div class="mono tiny sleeve-drill-section"><strong>Ladder summary:</strong> ${ladderSummary}</div>
       <div class="mono tiny">${ladderRecs.length ? ladderRecs.map(x => `• ${x}`).join("<br/>") : "Review will populate once a ladder recommendation is produced."}</div>
@@ -1222,6 +1820,15 @@ function renderBondSleeve(payload) {
         <tbody>${holdingsRows}</tbody>
       </table>
       <div class="mono tiny sleeve-drill-section"><strong>What to review next:</strong><br/>${reviewNext.map(x => `• ${x}`).join("<br/>")}</div>
+      <div class="mono tiny sleeve-drill-section"><strong>Overlay trace:</strong><br/>
+        regime=${escapeHtml(macroRegimeLabel)} • fallback_used=${macroFallbackUsed ? "true" : "false"}<br/>
+        treasury_curve_slope_proxy=${escapeHtml(String(proxyMetrics?.treasury_curve_slope_proxy ?? "n/a"))} •
+        ig_minus_treasury_candidate_spread_proxy=${escapeHtml(String(proxyMetrics?.ig_minus_treasury_candidate_spread_proxy ?? "n/a"))}
+      </div>
+      <details class="evidence-details" style="margin-top:6px;">
+        <summary class="mono tiny">Overlay current vs target</summary>
+        <div class="mono tiny muted" style="margin-top:6px;">${escapeHtml(JSON.stringify(currentVsTarget, null, 2))}</div>
+      </details>
       <details class="evidence-details" style="margin-top:6px;">
         <summary class="mono tiny">Traceability labels</summary>
         <div class="mono tiny muted" style="margin-top:6px;">recommendation_state_label=${recommendationState}</div>
@@ -1388,8 +1995,7 @@ function renderTechnical(payload) {
   const warn = (prov.warnings || []).slice(0, 20);
   const miss = (prov.missing_paths || []).slice(0, 30);
   const src = (prov.source_paths || []).slice(0, 30);
-
-  el("techSummary").innerHTML = `
+  const summaryHtml = `
     warnings=${warn.length}<br/>
     missing_paths=${(prov.missing_paths || []).length}<br/>
     source_paths=${(prov.source_paths || []).length}<br/>
@@ -1403,7 +2009,7 @@ function renderTechnical(payload) {
     return rows || "n/a";
   };
 
-  el("techPaths").innerHTML = `
+  const pathsHtml = `
     <div class="mono tiny muted">warnings:</div>
     <div class="mono tiny">${(warn || []).map(x => `- ${x}`).join("<br/>") || "n/a"}</div>
     <div class="mono tiny muted" style="margin-top:10px;">missing_paths (top):</div>
@@ -1411,6 +2017,16 @@ function renderTechnical(payload) {
     <div class="mono tiny muted" style="margin-top:10px;">source_paths (top):</div>
     <div class="mono tiny">${mk(src, "source_path")}</div>
   `;
+  const summaryTargets = ["techSummary", "techSummaryStandalone"];
+  const pathsTargets = ["techPaths", "techPathsStandalone"];
+  summaryTargets.forEach((id) => {
+    const node = el(id);
+    if (node) node.innerHTML = summaryHtml;
+  });
+  pathsTargets.forEach((id) => {
+    const node = el(id);
+    if (node) node.innerHTML = pathsHtml;
+  });
 
   document.querySelectorAll("[data-artifact]").forEach(a => {
     a.onclick = async (ev) => {
@@ -1593,28 +2209,53 @@ async function loadAttemptsForDay(day) {
 
 async function loadAndRender() {
   if (!state.day) return;
+  setRefreshState(true);
+  try {
+    const attemptParam = (state.attempt_id && el("attemptSelect").value) ? `&attempt_id=${encodeURIComponent(el("attemptSelect").value)}` : "";
+    const payload = await api(`/api/status_v2?day=${encodeURIComponent(state.day)}${attemptParam}`);
+    state.statusV2 = payload;
 
-  const attemptParam = (state.attempt_id && el("attemptSelect").value) ? `&attempt_id=${encodeURIComponent(el("attemptSelect").value)}` : "";
-  const payload = await api(`/api/status_v2?day=${encodeURIComponent(state.day)}${attemptParam}`);
-  state.statusV2 = payload;
+    el("lastRefresh").textContent = `refreshed=${payload?.meta?.server_time_utc || "n/a"}`;
 
-  el("lastRefresh").textContent = `refreshed=${payload?.meta?.server_time_utc || "n/a"}`;
+    renderPlatformReadiness(payload);
+    renderPlatformReadinessHistory(payload);
+    renderPlatformReadinessSummary(payload);
+    renderDiagnosticsOverview(payload);
+    renderTradingDayOutcome(payload);
+    renderSignalActivity(payload);
+    renderScopeHealth(payload);
+    renderGovernedRiskSurfaces(payload);
+    renderPortfolioSummary(payload);
+    renderTiles(payload);
+    renderSleeveStrip(payload);
+    renderFunnel(payload);
+    renderBondSleeve(payload);
+    renderWhatChanged(payload);
 
-  renderPlatformReadiness(payload);
-  renderPlatformReadinessHistory(payload);
-  renderSignalActivity(payload);
-  renderScopeHealth(payload);
-  renderTiles(payload);
-  renderSleeveStrip(payload);
-  renderFunnel(payload);
-  renderBondSleeve(payload);
-  renderWhatChanged(payload);
+    renderEngines(payload);
+    renderPortfolio(payload);
+    renderPositions(payload);
+    renderHistory(payload);
+    renderTechnical(payload);
+    pulseUpdatedPanels();
+  } finally {
+    setRefreshState(false);
+  }
+}
 
-  renderEngines(payload);
-  renderPortfolio(payload);
-  renderPositions(payload);
-  renderHistory(payload);
-  renderTechnical(payload);
+function setRefreshState(isRefreshing) {
+  document.body.classList.toggle("is-refreshing", isRefreshing === true);
+}
+
+function pulseUpdatedPanels() {
+  document.querySelectorAll(".cockpit-panel, .cockpit-hero, .cockpit-subtle-panel").forEach((node) => {
+    node.classList.remove("was-updated");
+    void node.offsetWidth;
+    node.classList.add("was-updated");
+  });
+  window.setTimeout(() => {
+    document.querySelectorAll(".was-updated").forEach((node) => node.classList.remove("was-updated"));
+  }, 180);
 }
 
 function svgLineChart(points) {
@@ -1680,6 +2321,10 @@ function wire() {
   el("tabPositions").addEventListener("click", () => setView("positions"));
   el("tabHistory").addEventListener("click", () => setView("history"));
   el("tabTechnical").addEventListener("click", () => setView("technical"));
+  el("cockpitViewCockpit").addEventListener("click", () => setOperationsSubView("cockpit"));
+  el("cockpitViewDiagnostics").addEventListener("click", () => setOperationsSubView("diagnostics"));
+  el("cockpitViewRepair").addEventListener("click", () => setOperationsSubView("repair"));
+  el("cockpitViewGovernance").addEventListener("click", () => setOperationsSubView("governance"));
 
   el("btnEvidenceClose").addEventListener("click", closeEvidence);
   el("evidenceBackdrop").addEventListener("click", closeEvidence);
@@ -1692,6 +2337,7 @@ function wire() {
   await loadDays();
   await loadAttemptsForDay(state.day);
   setView("operations");
+  setOperationsSubView("cockpit");
   await loadAndRender();
   await loadCharts();
   resetTimer();

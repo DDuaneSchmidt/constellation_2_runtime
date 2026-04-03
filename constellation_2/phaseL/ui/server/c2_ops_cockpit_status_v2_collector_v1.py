@@ -15,11 +15,13 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from constellation_2.common.accounting_authority_v1 import read_accounting_authority_state
+from constellation_2.common.execution_day_authority_v1 import read_execution_day_authority_state
 
 # -------------------------
 # Deterministic helpers
@@ -100,7 +102,12 @@ RUNTIME_STATE_PATH = (GLOBAL_RUNTIME_TRUTH_ROOT / "system_snapshot/constellation
 BOND_OPERATOR_INPUT_ROOT = (REPO_ROOT / "constellation_2/operator_inputs/bond_sleeve").resolve()
 BOND_POSITIONS_INPUT_PATH = (BOND_OPERATOR_INPUT_ROOT / "bond_positions_v1.json").resolve()
 BOND_POLICY_INPUT_PATH = (BOND_OPERATOR_INPUT_ROOT / "bond_sleeve_policy_v1.json").resolve()
+BOND_MACRO_POLICY_INPUT_PATH = (BOND_OPERATOR_INPUT_ROOT / "bond_macro_policy_v1.json").resolve()
 BOND_FAMILY_SPECS: List[Tuple[str, str]] = [
+    ("bond_candidate_coverage_v1", "bond_candidate_coverage.v1.json"),
+    ("bond_yield_curve_snapshot_v1", "bond_yield_curve_snapshot.v1.json"),
+    ("bond_credit_stress_proxy_v1", "bond_credit_stress_proxy.v1.json"),
+    ("bond_candidate_classification_v1", "bond_candidate_classification.v1.json"),
     ("bond_sleeve_policy_snapshot_v1", "bond_sleeve_policy_snapshot.v1.json"),
     ("bond_ladder_recommendation_v1", "bond_ladder_recommendation.v1.json"),
     ("bond_duration_report_v1", "bond_duration_report.v1.json"),
@@ -108,6 +115,10 @@ BOND_FAMILY_SPECS: List[Tuple[str, str]] = [
     ("bond_withdrawal_coverage_report_v1", "bond_withdrawal_coverage_report.v1.json"),
     ("bond_sleeve_capital_posture_v1", "bond_sleeve_capital_posture.v1.json"),
     ("bond_purchase_recommendation_v1", "bond_purchase_recommendation.v1.json"),
+    ("bond_macro_regime_snapshot_v1", "bond_macro_regime_snapshot.v1.json"),
+    ("bond_sleeve_recommendation_v2", "bond_sleeve_recommendation.v2.json"),
+    ("bond_ladder_shape_v2", "bond_ladder_shape.v2.json"),
+    ("bond_sleeve_explanation_v1", "bond_sleeve_explanation.v1.json"),
 ]
 STANDARD_TRADING_SLEEVE_IDS = {
     "C2_CROSS_ASSET_TREND",
@@ -146,6 +157,34 @@ def _tile_dict(t: Tile) -> Dict[str, Any]:
             "path": t.artifact_path,
             "sha256": t.artifact_sha256,
         },
+    }
+
+
+def _tone_from_state(state: str) -> str:
+    st = _coerce_state(str(state or "UNKNOWN"))
+    if st in {"PASS", "OK"}:
+        return "positive"
+    if st in {"DEGRADED", "MISSING_INPUTS", "WARN", "WARNING"}:
+        return "warning"
+    if st in {"FAIL", "ABORTED", "MISSING"}:
+        return "negative"
+    return "info"
+
+
+def _governed_surface_row(
+    label: str,
+    state: str,
+    detail: str,
+    artifact_path: Optional[str],
+    authoritative: bool = True,
+) -> Dict[str, Any]:
+    return {
+        "label": label,
+        "state": _coerce_state(state),
+        "tone": _tone_from_state(state),
+        "detail": detail,
+        "artifact_path": artifact_path,
+        "authoritative": authoritative,
     }
 
 
@@ -192,6 +231,8 @@ def _collect_operator_holdings_view() -> Tuple[Dict[str, Any], List[str], List[s
         "positions_sha256": _sha256_file(BOND_POSITIONS_INPUT_PATH),
         "policy_path": str(BOND_POLICY_INPUT_PATH),
         "policy_sha256": _sha256_file(BOND_POLICY_INPUT_PATH),
+        "macro_policy_path": str(BOND_MACRO_POLICY_INPUT_PATH),
+        "macro_policy_sha256": _sha256_file(BOND_MACRO_POLICY_INPUT_PATH),
         "positions_count": 0,
         "market_value_total": None,
         "positions": [],
@@ -353,8 +394,8 @@ def _collect_bond_sleeve_view(selected_day: str) -> Tuple[Dict[str, Any], List[s
     operator_holdings, warn_holdings, miss_holdings = _collect_operator_holdings_view()
     warnings.extend(warn_holdings)
     missing_paths.extend(miss_holdings)
-    source_paths.extend([str(BOND_POSITIONS_INPUT_PATH), str(BOND_POLICY_INPUT_PATH)])
-    for p in [BOND_POSITIONS_INPUT_PATH, BOND_POLICY_INPUT_PATH]:
+    source_paths.extend([str(BOND_POSITIONS_INPUT_PATH), str(BOND_POLICY_INPUT_PATH), str(BOND_MACRO_POLICY_INPUT_PATH)])
+    for p in [BOND_POSITIONS_INPUT_PATH, BOND_POLICY_INPUT_PATH, BOND_MACRO_POLICY_INPUT_PATH]:
         mt = _mtime(p)
         if mt is not None:
             source_mtimes[str(p)] = mt
@@ -448,6 +489,10 @@ def _collect_bond_sleeve_view(selected_day: str) -> Tuple[Dict[str, Any], List[s
         if isinstance(art, dict):
             merged_artifacts[family] = art
 
+    candidate_coverage = merged_artifacts.get("bond_candidate_coverage_v1", {})
+    yield_curve = merged_artifacts.get("bond_yield_curve_snapshot_v1", {})
+    credit_proxy = merged_artifacts.get("bond_credit_stress_proxy_v1", {})
+    classification = merged_artifacts.get("bond_candidate_classification_v1", {})
     policy = merged_artifacts.get("bond_sleeve_policy_snapshot_v1", {})
     ladder = merged_artifacts.get("bond_ladder_recommendation_v1", {})
     duration = merged_artifacts.get("bond_duration_report_v1", {})
@@ -455,6 +500,80 @@ def _collect_bond_sleeve_view(selected_day: str) -> Tuple[Dict[str, Any], List[s
     withdrawal = merged_artifacts.get("bond_withdrawal_coverage_report_v1", {})
     posture = merged_artifacts.get("bond_sleeve_capital_posture_v1", {})
     purchase = merged_artifacts.get("bond_purchase_recommendation_v1", {})
+    macro_regime = merged_artifacts.get("bond_macro_regime_snapshot_v1", {})
+    overlay = merged_artifacts.get("bond_sleeve_recommendation_v2", {})
+    ladder_shape = merged_artifacts.get("bond_ladder_shape_v2", {})
+    explanation = merged_artifacts.get("bond_sleeve_explanation_v1", {})
+
+    coverage_missing_buckets = (
+        candidate_coverage.get("missing_buckets")
+        if isinstance(candidate_coverage.get("missing_buckets"), list)
+        else []
+    )
+    curve_missing_buckets = (
+        yield_curve.get("missing_buckets")
+        if isinstance(yield_curve.get("missing_buckets"), list)
+        else []
+    )
+    classification_missing_dims = (
+        classification.get("classification_dimensions_missing")
+        if isinstance(classification.get("classification_dimensions_missing"), list)
+        else []
+    )
+    candidate_eligible = candidate_coverage.get("eligible_count")
+    candidate_quality_label = "NOT AVAILABLE"
+    if isinstance(candidate_eligible, int) and candidate_eligible > 0:
+        candidate_quality_label = "GOOD" if not coverage_missing_buckets else "PARTIAL"
+
+    curve_status = str(yield_curve.get("coverage_status") or "UNAVAILABLE").upper()
+    curve_quality_label = {
+        "COMPLETE": "GOOD",
+        "PARTIAL": "PARTIAL",
+        "INSUFFICIENT": "NOT AVAILABLE",
+    }.get(curve_status, "NOT AVAILABLE")
+
+    credit_status = str(credit_proxy.get("coverage_quality") or "UNAVAILABLE").upper()
+    credit_quality_label = "AVAILABLE" if credit_status == "AVAILABLE" else "NOT AVAILABLE"
+
+    classified_count = classification.get("classified_count")
+    classification_quality_label = "NOT AVAILABLE"
+    if isinstance(classified_count, int) and classified_count > 0:
+        classification_quality_label = "PARTIAL" if classification_missing_dims else "GOOD"
+
+    input_quality = {
+        "candidate_coverage": {
+            "label": candidate_quality_label,
+            "status": candidate_coverage.get("status"),
+            "eligible_count": candidate_eligible,
+            "missing_buckets": coverage_missing_buckets,
+            "reason_codes": candidate_coverage.get("reason_codes") if isinstance(candidate_coverage.get("reason_codes"), list) else [],
+        },
+        "yield_curve_coverage": {
+            "label": curve_quality_label,
+            "coverage_status": curve_status,
+            "missing_buckets": curve_missing_buckets,
+            "fallback_used": bool(yield_curve.get("fallback_used")),
+            "reason_codes": yield_curve.get("reason_codes") if isinstance(yield_curve.get("reason_codes"), list) else [],
+        },
+        "credit_proxy": {
+            "label": credit_quality_label,
+            "coverage_quality": credit_status,
+            "spread_regime": credit_proxy.get("spread_regime"),
+            "fallback_used": bool(credit_proxy.get("fallback_used")),
+            "reason_codes": credit_proxy.get("reason_codes") if isinstance(credit_proxy.get("reason_codes"), list) else [],
+        },
+        "classification_coverage": {
+            "label": classification_quality_label,
+            "status": classification.get("status"),
+            "available_dimensions": classification.get("classification_dimensions_available") if isinstance(classification.get("classification_dimensions_available"), list) else [],
+            "missing_dimensions": classification_missing_dims,
+            "reason_codes": classification.get("reason_codes") if isinstance(classification.get("reason_codes"), list) else [],
+        },
+        "fallback": {
+            "label": "BASELINE POLICY ACTIVE" if bool(macro_regime.get("fallback_used")) else "NONE",
+            "message": str(macro_regime.get("fallback_message") or "Macro overlay active."),
+        },
+    }
 
     summary = {
         "bond_sleeve_allocation_pct": policy.get("bond_sleeve_allocation_pct"),
@@ -480,6 +599,38 @@ def _collect_bond_sleeve_view(selected_day: str) -> Tuple[Dict[str, Any], List[s
         "candidate_rankings": purchase.get("candidate_rankings") if isinstance(purchase.get("candidate_rankings"), list) else [],
         "purchase_warnings": purchase.get("warnings") if isinstance(purchase.get("warnings"), list) else [],
         "purchase_portfolio_context": purchase.get("portfolio_context") if isinstance(purchase.get("portfolio_context"), dict) else {},
+        "macro_regime_label": macro_regime.get("regime_label"),
+        "bond_strategy_label": macro_regime.get("bond_strategy_label") or overlay.get("bond_strategy_label"),
+        "portfolio_role": macro_regime.get("portfolio_role") or overlay.get("portfolio_role"),
+        "macro_fallback_used": macro_regime.get("fallback_used"),
+        "macro_fallback_message": macro_regime.get("fallback_message"),
+        "macro_reason_codes": macro_regime.get("reason_codes") if isinstance(macro_regime.get("reason_codes"), list) else [],
+        "proxy_metrics": macro_regime.get("proxy_metrics") if isinstance(macro_regime.get("proxy_metrics"), dict) else {},
+        "action_state": overlay.get("action_state"),
+        "mismatch_severity": overlay.get("mismatch_severity"),
+        "duration_target_years_min": overlay.get("duration_target_years_min"),
+        "duration_target_years_max": overlay.get("duration_target_years_max"),
+        "treasury_target_weight": overlay.get("treasury_target_weight"),
+        "ig_target_weight": overlay.get("ig_target_weight"),
+        "liquidity_reserve_horizon_years": overlay.get("liquidity_reserve_horizon_years"),
+        "rollover_cap_target_pct": overlay.get("rollover_cap_target_pct"),
+        "duration_mismatch": overlay.get("duration_mismatch"),
+        "credit_mix_mismatch": overlay.get("credit_mix_mismatch") if isinstance(overlay.get("credit_mix_mismatch"), list) else [],
+        "liquidity_mismatch": overlay.get("liquidity_mismatch"),
+        "rollover_concentration_mismatch": overlay.get("rollover_concentration_mismatch"),
+        "ladder_shape_mismatch": overlay.get("ladder_shape_mismatch") if isinstance(overlay.get("ladder_shape_mismatch"), list) else [],
+        "top_mismatch_reasons": overlay.get("top_mismatch_reasons") if isinstance(overlay.get("top_mismatch_reasons"), list) else [],
+        "mismatch_summary": overlay.get("mismatch_summary") if isinstance(overlay.get("mismatch_summary"), list) else [],
+        "why_now": overlay.get("why_now") if isinstance(overlay.get("why_now"), list) else [],
+        "current_vs_target": overlay.get("current_vs_target") if isinstance(overlay.get("current_vs_target"), dict) else {},
+        "ladder_shape_label": ladder_shape.get("ladder_shape_label"),
+        "current_ladder": ladder_shape.get("current_maturity_buckets") if isinstance(ladder_shape.get("current_maturity_buckets"), list) else [],
+        "recommended_ladder": ladder_shape.get("target_maturity_buckets") if isinstance(ladder_shape.get("target_maturity_buckets"), list) else [],
+        "ladder_bucket_deltas": ladder_shape.get("bucket_deltas") if isinstance(ladder_shape.get("bucket_deltas"), list) else [],
+        "explanation_headline": explanation.get("headline"),
+        "explanation_summary": explanation.get("plain_language_summary"),
+        "operator_next_step": explanation.get("operator_next_step"),
+        "input_quality": input_quality,
     }
 
     family_statuses = [str(v.get("status") or "MISSING") for v in families_out.values() if isinstance(v, dict)]
@@ -710,6 +861,163 @@ def _load_scope_health_summary() -> Dict[str, Any]:
     }
 
 
+def _load_activity_flow_diagnostics(
+    truth_root: Path,
+    day: str,
+) -> Tuple[Optional[Dict[str, Any]], List[str], List[str], Dict[str, float], List[str]]:
+    path = (truth_root / "reports" / "activity_flow_diagnostics_v1" / day / "activity_flow_diagnostics.v1.json").resolve()
+    obj, err = _safe_read_json(path)
+    if not isinstance(obj, dict):
+        mt = _mtime(path)
+        return (
+            None,
+            ([str(path)] if err == "FILE_NOT_FOUND" else []),
+            ([] if err == "FILE_NOT_FOUND" else [str(path)]),
+            ({str(path): mt} if mt is not None else {}),
+            ([] if err == "FILE_NOT_FOUND" else [f"ACTIVITY_FLOW_DIAGNOSTICS_UNREADABLE:{err}"]),
+        )
+    mt = _mtime(path)
+    return obj, [], [str(path)], ({str(path): mt} if mt is not None else {}), []
+
+
+def _load_oms_terminal_dispositions(
+    truth_root: Path,
+    day: str,
+) -> Tuple[List[Dict[str, Any]], List[str], List[str], Dict[str, float], List[str]]:
+    root = (truth_root / "oms_decisions_v1" / "decisions" / day).resolve()
+    if not root.exists() or not root.is_dir():
+        return [], [str(root)], [], {}, []
+
+    docs: List[Dict[str, Any]] = []
+    source_paths: List[str] = []
+    source_mtimes: Dict[str, float] = {}
+    warnings: List[str] = []
+    for path in sorted(root.glob("*.oms_decision.v2.json"), key=lambda p: p.name):
+        obj, err = _safe_read_json(path)
+        if not isinstance(obj, dict):
+            warnings.append(f"OMS_DECISION_UNREADABLE:{path.name}:{err}")
+            continue
+        if str(obj.get("schema_id") or "") != "C2_OMS_DECISION_V2":
+            warnings.append(f"OMS_DECISION_SCHEMA_MISMATCH:{path.name}")
+            continue
+        if str(obj.get("day_utc") or "") != day:
+            warnings.append(f"OMS_DECISION_DAY_MISMATCH:{path.name}")
+            continue
+        docs.append(obj)
+        source_paths.append(str(path))
+        mt = _mtime(path)
+        if mt is not None:
+            source_mtimes[str(path)] = mt
+    return docs, [], source_paths, source_mtimes, sorted(set(warnings))
+
+
+def _summarize_oms_terminal_dispositions(docs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    summary: Dict[str, Any] = {
+        "present": bool(docs),
+        "intent_count": len(docs),
+        "terminal_state_counts": [],
+        "stage_counts": [],
+        "dominant_reason_codes": [],
+        "by_engine": [],
+    }
+    if not docs:
+        return summary
+
+    term_counts: Dict[str, int] = {}
+    stage_counts: Dict[str, int] = {}
+    reason_counts: Dict[str, int] = {}
+    by_engine: Dict[str, Dict[str, Any]] = {}
+
+    for doc in docs:
+        term = str(doc.get("terminal_disposition") or "UNKNOWN_TERMINAL_STATE")
+        stage = str(doc.get("terminal_stage") or "UNKNOWN")
+        term_counts[term] = term_counts.get(term, 0) + 1
+        stage_counts[stage] = stage_counts.get(stage, 0) + 1
+
+        for code in doc.get("reason_codes", []):
+            if not isinstance(code, str) or not code.strip():
+                continue
+            reason_counts[code] = reason_counts.get(code, 0) + 1
+
+        engine = doc.get("engine") if isinstance(doc.get("engine"), dict) else {}
+        engine_id = str(engine.get("engine_id") or "UNKNOWN_ENGINE")
+        row = by_engine.setdefault(
+            engine_id,
+            {
+                "engine_id": engine_id,
+                "intent_count": 0,
+                "terminal_state_counts": {},
+                "dominant_reason_codes": {},
+            },
+        )
+        row["intent_count"] += 1
+        row["terminal_state_counts"][term] = row["terminal_state_counts"].get(term, 0) + 1
+        for code in doc.get("reason_codes", []):
+            if isinstance(code, str) and code.strip():
+                row["dominant_reason_codes"][code] = row["dominant_reason_codes"].get(code, 0) + 1
+
+    summary["terminal_state_counts"] = [
+        {"terminal_disposition": key, "count": term_counts[key]}
+        for key in sorted(term_counts.keys())
+    ]
+    summary["stage_counts"] = [
+        {"terminal_stage": key, "count": stage_counts[key]}
+        for key in sorted(stage_counts.keys())
+    ]
+    summary["dominant_reason_codes"] = [
+        {"reason_code": key, "count": reason_counts[key]}
+        for key in sorted(reason_counts.keys(), key=lambda item: (-reason_counts[item], item))[:5]
+    ]
+    summary["by_engine"] = [
+        {
+            "engine_id": engine_id,
+            "intent_count": row["intent_count"],
+            "terminal_state_counts": [
+                {"terminal_disposition": key, "count": row["terminal_state_counts"][key]}
+                for key in sorted(row["terminal_state_counts"].keys())
+            ],
+            "dominant_reason_codes": [
+                {"reason_code": key, "count": row["dominant_reason_codes"][key]}
+                for key in sorted(row["dominant_reason_codes"].keys(), key=lambda item: (-row["dominant_reason_codes"][item], item))[:3]
+            ],
+        }
+        for engine_id, row in sorted(by_engine.items())
+    ]
+    return summary
+
+
+def _load_day_start_blocked(day: str) -> Tuple[Optional[Dict[str, Any]], List[str], List[str], Dict[str, float], List[str]]:
+    path = (GLOBAL_RUNTIME_TRUTH_ROOT / "reports" / "day_start_blocked_v1" / day / "day_start_blocked.v1.json").resolve()
+    obj, err = _safe_read_json(path)
+    if not isinstance(obj, dict):
+        mt = _mtime(path)
+        return (
+            None,
+            ([str(path)] if err == "FILE_NOT_FOUND" else []),
+            ([] if err == "FILE_NOT_FOUND" else [str(path)]),
+            ({str(path): mt} if mt is not None else {}),
+            ([] if err == "FILE_NOT_FOUND" else [f"DAY_START_BLOCKED_UNREADABLE:{err}"]),
+        )
+    mt = _mtime(path)
+    return obj, [], [str(path)], ({str(path): mt} if mt is not None else {}), []
+
+
+def _load_trading_day_state(day: str) -> Tuple[Optional[Dict[str, Any]], List[str], List[str], Dict[str, float], List[str]]:
+    path = (GLOBAL_RUNTIME_TRUTH_ROOT / "reports" / "trading_day_state_v1" / day / "trading_day_state.v1.json").resolve()
+    obj, err = _safe_read_json(path)
+    if not isinstance(obj, dict):
+        mt = _mtime(path)
+        return (
+            None,
+            ([str(path)] if err == "FILE_NOT_FOUND" else []),
+            ([] if err == "FILE_NOT_FOUND" else [str(path)]),
+            ({str(path): mt} if mt is not None else {}),
+            ([] if err == "FILE_NOT_FOUND" else [f"TRADING_DAY_STATE_UNREADABLE:{err}"]),
+        )
+    mt = _mtime(path)
+    return obj, [], [str(path)], ({str(path): mt} if mt is not None else {}), []
+
+
 def _load_sleeve_live_readiness(truth_root: Path, day: str) -> Dict[str, Any]:
     p = (
         truth_root
@@ -792,6 +1100,9 @@ def _load_platform_bug_metrics(truth_root: Path, day: str) -> Dict[str, Any]:
         "unknown_fields": [],
         "evidence_paths": [],
         "reason_codes": [],
+        "authoritative_for_family": False,
+        "diagnostic_family_classification": "FALLBACK_OR_MISSING",
+        "resolution_mode": "MISSING",
     }
     if not isinstance(obj, dict):
         pointer_path = (root / "latest_pointer.v1.json").resolve()
@@ -835,6 +1146,9 @@ def _load_platform_bug_metrics(truth_root: Path, day: str) -> Dict[str, Any]:
                         "evidence_paths": target_obj.get("evidence_paths") if isinstance(target_obj.get("evidence_paths"), list) else [],
                         "reason_codes": ["FALLBACK_TO_LATEST_POINTER"],
                         "fallback_source_reason_codes": ["ARTIFACT_MISSING" if err == "FILE_NOT_FOUND" else "ARTIFACT_UNREADABLE"],
+                        "authoritative_for_family": False,
+                        "diagnostic_family_classification": "LATEST_POINTER_FALLBACK_NON_AUTHORITATIVE",
+                        "resolution_mode": "LATEST_POINTER_FALLBACK",
                     }
                 return {
                     **base,
@@ -870,6 +1184,9 @@ def _load_platform_bug_metrics(truth_root: Path, day: str) -> Dict[str, Any]:
         "calculation_summary": obj.get("calculation_summary") if isinstance(obj.get("calculation_summary"), dict) else {},
         "unknown_fields": obj.get("unknown_fields") if isinstance(obj.get("unknown_fields"), list) else [],
         "evidence_paths": obj.get("evidence_paths") if isinstance(obj.get("evidence_paths"), list) else [],
+        "authoritative_for_family": True,
+        "diagnostic_family_classification": "REQUESTED_DAY_ARTIFACT",
+        "resolution_mode": "REQUESTED_DAY_ARTIFACT",
     }
 
 
@@ -941,6 +1258,175 @@ def _jsonl_same_day_presence(path: Path, day: str) -> bool:
     return False
 
 
+def _compute_signal_frequency_30d(truth_root: Path, day: str) -> Dict[str, Any]:
+    try:
+        ref_day = datetime.strptime(day, "%Y-%m-%d").date()
+    except Exception:
+        return {
+            "window_days": 30,
+            "avg_signals_per_day": None,
+            "last_signal_date": None,
+            "last_submit_date": None,
+            "status": "UNKNOWN",
+            "label": "Signal frequency unavailable",
+        }
+
+    window_days: List[str] = []
+    for offset in range(29, -1, -1):
+        window_days.append((ref_day - timedelta(days=offset)).isoformat())
+
+    total_signals = 0
+    last_signal_date: Optional[str] = None
+    last_submit_date: Optional[str] = None
+    for day_key in window_days:
+        intents_count, _ = _count_intents(truth_root, day_key)
+        sub_counts, _ = _count_submissions_and_fills(truth_root, day_key)
+        total_signals += intents_count
+        if intents_count > 0:
+            last_signal_date = day_key
+        if isinstance(sub_counts, dict) and int(sub_counts.get("submitted", 0) or 0) > 0:
+            last_submit_date = day_key
+
+    avg_signals = total_signals / 30.0
+    days_since_signal: Optional[int] = None
+    if isinstance(last_signal_date, str):
+        days_since_signal = (ref_day - datetime.strptime(last_signal_date, "%Y-%m-%d").date()).days
+
+    status = "positive"
+    label = "Within expected signal band"
+    if last_signal_date is None or days_since_signal is None or days_since_signal > 14:
+        status = "negative"
+        label = "No recent signals in the last two weeks"
+    elif avg_signals < 0.20 or days_since_signal > 7:
+        status = "warning"
+        label = "Signals are light but still within tolerance"
+
+    return {
+        "window_days": 30,
+        "avg_signals_per_day": round(avg_signals, 2),
+        "last_signal_date": last_signal_date,
+        "last_submit_date": last_submit_date,
+        "status": status,
+        "label": label,
+    }
+
+
+def _load_gate_stack_day_state(truth_root: Path, day: str) -> Dict[str, Any]:
+    path = (truth_root / "reports" / "gate_stack_verdict_v1" / day / "gate_stack_verdict.v1.json").resolve()
+    obj, err = _safe_read_json(path)
+    if not isinstance(obj, dict):
+        return {
+            "status": "UNKNOWN",
+            "reason_codes": ["ARTIFACT_MISSING" if err == "FILE_NOT_FOUND" else "ARTIFACT_UNREADABLE"],
+            "path": str(path),
+        }
+    return {
+        "status": _coerce_state(str(obj.get("status") or "UNKNOWN")),
+        "reason_codes": _top2_reason_codes(obj.get("reason_codes")),
+        "path": str(path),
+    }
+
+
+def _load_kill_switch_day_state(truth_root: Path, day: str) -> Dict[str, Any]:
+    path = (truth_root / "risk_v1" / "kill_switch_v1" / day / "global_kill_switch_state.v1.json").resolve()
+    obj, err = _safe_read_json(path)
+    if not isinstance(obj, dict):
+        return {
+            "state": "UNKNOWN",
+            "allow_entries": None,
+            "allow_exits": None,
+            "reason_codes": ["ARTIFACT_MISSING" if err == "FILE_NOT_FOUND" else "ARTIFACT_UNREADABLE"],
+            "path": str(path),
+        }
+    return {
+        "state": str(obj.get("state") or "UNKNOWN").upper(),
+        "allow_entries": obj.get("allow_entries") if isinstance(obj.get("allow_entries"), bool) else None,
+        "allow_exits": obj.get("allow_exits") if isinstance(obj.get("allow_exits"), bool) else None,
+        "reason_codes": _top2_reason_codes(obj.get("reason_codes")),
+        "path": str(path),
+    }
+
+
+def _derive_trading_day_outcome(
+    *,
+    day: str,
+    run_doc: Optional[Dict[str, Any]],
+    gate_stack: Dict[str, Any],
+    kill_switch: Dict[str, Any],
+    intent_count: int,
+    veto_count: int,
+    released_identity_dir_count: int,
+    submit_stage: Dict[str, Any],
+    upstream_rows: List[Dict[str, Any]],
+    expected_heartbeat_count: int,
+    present_heartbeat_count: int,
+) -> Dict[str, Any]:
+    gate_status = str(gate_stack.get("status") or "UNKNOWN").upper()
+    gate_pass = gate_status == "PASS"
+    kill_state = str(kill_switch.get("state") or "UNKNOWN").upper()
+    allow_entries = kill_switch.get("allow_entries") is True
+    upstream_ready = all(bool(row.get("same_day_present")) for row in upstream_rows) if upstream_rows else False
+    submit_status = str(submit_stage.get("status") or "UNKNOWN").upper()
+    submit_reason_codes = [str(x).upper() for x in (submit_stage.get("reason_codes") if isinstance(submit_stage.get("reason_codes"), list) else [])]
+    orchestrator_status = str((run_doc or {}).get("status") or "UNKNOWN").upper()
+    execution_path = "HEALTHY" if orchestrator_status in {"PASS", "DEGRADED"} and gate_pass and kill_state == "INACTIVE" and allow_entries else "BLOCKED"
+
+    classification = "EXECUTION_FAILURE_DAY"
+    label = "EXECUTION BLOCKED"
+    subtitle = "See active blocker below"
+    tone = "negative"
+
+    if gate_pass and kill_state == "INACTIVE" and allow_entries and upstream_ready and intent_count == 0 and released_identity_dir_count == 0 and submit_status == "SKIP" and submit_reason_codes == ["SKIP_NOT_REQUIRED_NO_ACTIVITY"]:
+        classification = "HEALTHY_NO_SIGNAL_DAY"
+        label = "NO SIGNAL DAY"
+        subtitle = "Healthy execution path; no submit was required"
+        tone = "positive"
+    elif intent_count > 0 and veto_count > 0 and released_identity_dir_count == 0:
+        classification = "VETO_ONLY_DAY"
+        label = "VETO-ONLY DAY"
+        subtitle = "Signals were produced but filtered by governed preflight"
+        tone = "warning"
+    elif released_identity_dir_count > 0 and submit_stage.get("present"):
+        classification = "SUBMITTABLE_DAY"
+        label = "SUBMIT PATH REACHED"
+        subtitle = "Identities were released and governed submit was reached"
+        tone = "info"
+    elif gate_status == "FAIL" or kill_state == "ACTIVE" or (kill_switch.get("allow_entries") is False) or not upstream_ready or orchestrator_status in {"ABORTED", "FAIL"}:
+        classification = "EXECUTION_FAILURE_DAY"
+        label = "EXECUTION BLOCKED"
+        subtitle = "See active blocker below"
+        tone = "negative"
+
+    if classification == "VETO_ONLY_DAY" and submit_status == "FAIL":
+        tone = "negative"
+    facts = [
+        {"label": "Gates", "value": gate_status},
+        {"label": "Data", "value": "READY" if upstream_ready else "MISSING"},
+        {"label": "Heartbeats", "value": f"{present_heartbeat_count} / {expected_heartbeat_count}"},
+        {"label": "Intents", "value": str(intent_count)},
+        {"label": "Phase C identities", "value": str(released_identity_dir_count)},
+        {"label": "Submit", "value": submit_status if submit_status != "UNKNOWN" else "NOT_REACHED"},
+    ]
+    if classification == "HEALTHY_NO_SIGNAL_DAY":
+        facts[5]["value"] = "SKIPPED"
+    elif classification == "VETO_ONLY_DAY":
+        facts[5]["value"] = "NOT REACHED"
+
+    return {
+        "day_utc": day,
+        "classification": classification,
+        "label": label,
+        "subtitle": subtitle,
+        "tone": tone,
+        "execution_path": execution_path,
+        "facts": facts,
+        "gate_stack": gate_stack,
+        "kill_switch": kill_switch,
+        "orchestrator_status": orchestrator_status,
+        "submit_reason_codes": submit_reason_codes,
+    }
+
+
 def _load_signal_activity(truth_root: Path, day: str, run_doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     expected_engine_ids, _miss_expected, _warn_expected = _engine_ids_from_active_engine_set(truth_root, day)
     if not expected_engine_ids:
@@ -955,6 +1441,9 @@ def _load_signal_activity(truth_root: Path, day: str, run_doc: Optional[Dict[str
     expected_set = sorted(set(expected_engine_ids))
     present_set = sorted(set(present_engine_ids))
     missing_engine_ids = [eid for eid in expected_set if eid not in set(present_set)]
+    gate_stack = _load_gate_stack_day_state(truth_root, day)
+    kill_switch = _load_kill_switch_day_state(truth_root, day)
+    signal_frequency = _compute_signal_frequency_30d(truth_root, day)
 
     intents_root = (truth_root / "intents_v1" / "snapshots" / day).resolve()
     intent_paths = sorted(intents_root.glob("*.exposure_intent.v1.json")) if intents_root.exists() and intents_root.is_dir() else []
@@ -1018,8 +1507,24 @@ def _load_signal_activity(truth_root: Path, day: str, run_doc: Optional[Dict[str
         submit_label = "blocked upstream before governed submit"
         submit_tone = "negative"
 
+    outcome = _derive_trading_day_outcome(
+        day=day,
+        run_doc=run_doc,
+        gate_stack=gate_stack,
+        kill_switch=kill_switch,
+        intent_count=intent_count,
+        veto_count=veto_count,
+        released_identity_dir_count=released_identity_dir_count,
+        submit_stage=submit_stage,
+        upstream_rows=upstream_rows,
+        expected_heartbeat_count=len(expected_set),
+        present_heartbeat_count=len(present_set),
+    )
+
     return {
         "day_utc": day,
+        "trading_day_outcome": outcome,
+        "signal_frequency_30d": signal_frequency,
         "engine_heartbeats": {
             "expected_count": len(expected_set),
             "present_count": len(present_set),
@@ -1050,6 +1555,8 @@ def _load_signal_activity(truth_root: Path, day: str, run_doc: Optional[Dict[str
             "tone": upstream_tone,
             "symbols": upstream_rows,
         },
+        "gate_stack": gate_stack,
+        "kill_switch": kill_switch,
     }
 
 
@@ -1125,6 +1632,9 @@ def _load_platform_readiness(truth_root: Path, day: str) -> Dict[str, Any]:
         "calibration_support": {},
         "evidence_paths": [],
         "reason_codes": [],
+        "authoritative_for_family": False,
+        "diagnostic_family_classification": "FALLBACK_OR_MISSING",
+        "resolution_mode": "MISSING",
     }
     obj, err = _safe_read_json(p)
     if not isinstance(obj, dict):
@@ -1178,6 +1688,9 @@ def _load_platform_readiness(truth_root: Path, day: str) -> Dict[str, Any]:
                         "evidence_paths": target_obj.get("evidence_paths") if isinstance(target_obj.get("evidence_paths"), list) else [],
                         "reason_codes": ["FALLBACK_TO_LATEST_POINTER"],
                         "fallback_source_reason_codes": ["ARTIFACT_MISSING" if err == "FILE_NOT_FOUND" else "ARTIFACT_UNREADABLE"],
+                        "authoritative_for_family": False,
+                        "diagnostic_family_classification": "LATEST_POINTER_FALLBACK_NON_AUTHORITATIVE",
+                        "resolution_mode": "LATEST_POINTER_FALLBACK",
                     }
                 return {
                     **base,
@@ -1221,7 +1734,95 @@ def _load_platform_readiness(truth_root: Path, day: str) -> Dict[str, Any]:
         "aggregate_blocker_summary": obj.get("aggregate_blocker_summary") if isinstance(obj.get("aggregate_blocker_summary"), dict) else {},
         "calibration_support": obj.get("calibration_support") if isinstance(obj.get("calibration_support"), dict) else {},
         "evidence_paths": obj.get("evidence_paths") if isinstance(obj.get("evidence_paths"), list) else [],
+        "authoritative_for_family": True,
+        "diagnostic_family_classification": "REQUESTED_DAY_ARTIFACT",
+        "resolution_mode": "REQUESTED_DAY_ARTIFACT",
         "reason_codes": [],
+    }
+
+
+def _derive_operational_readiness(
+    day: str,
+    platform_readiness: Dict[str, Any],
+    signal_activity: Dict[str, Any],
+    trading_day_state: Dict[str, Any],
+    day_start_blocked: Dict[str, Any],
+) -> Dict[str, Any]:
+    readiness = platform_readiness if isinstance(platform_readiness, dict) else {}
+    signal = signal_activity if isinstance(signal_activity, dict) else {}
+    trading = trading_day_state if isinstance(trading_day_state, dict) else {}
+    blocked = day_start_blocked if isinstance(day_start_blocked, dict) else {}
+
+    heartbeats = signal.get("engine_heartbeats") if isinstance(signal.get("engine_heartbeats"), dict) else {}
+    upstream = signal.get("upstream_data_status") if isinstance(signal.get("upstream_data_status"), dict) else {}
+    outcome = signal.get("trading_day_outcome") if isinstance(signal.get("trading_day_outcome"), dict) else {}
+    gate_stack = outcome.get("gate_stack") if isinstance(outcome.get("gate_stack"), dict) else {}
+    kill_switch = outcome.get("kill_switch") if isinstance(outcome.get("kill_switch"), dict) else {}
+
+    expected_heartbeats = int(heartbeats.get("expected_count") or 0)
+    present_heartbeats = int(heartbeats.get("present_count") or 0)
+    upstream_rows = upstream.get("symbols") if isinstance(upstream.get("symbols"), list) else []
+    upstream_ready = bool(upstream_rows) and all(bool(row.get("same_day_present")) for row in upstream_rows if isinstance(row, dict))
+    same_day_structural_artifact = (
+        readiness.get("requested_day_present") is True
+        and readiness.get("authoritative_for_family") is True
+        and str(readiness.get("resolved_day") or "") == day
+    )
+    gate_pass = str(gate_stack.get("status") or "UNKNOWN").upper() == "PASS"
+    kill_switch_inactive = str(kill_switch.get("state") or "UNKNOWN").upper() == "INACTIVE"
+    allow_entries = kill_switch.get("allow_entries") is True
+    trading_heartbeat_pass = str(trading.get("heartbeat_status") or "UNKNOWN").upper() == "PASS"
+    day_blocked = blocked.get("blocked") is True
+
+    reasons: List[str] = []
+    if not same_day_structural_artifact:
+        if readiness.get("resolved_via_latest_pointer") is True:
+            reasons.append("STRUCTURAL_READINESS_STALE_LATEST_POINTER")
+        else:
+            reasons.append("STRUCTURAL_READINESS_SELECTED_DAY_MISSING")
+    if not upstream_ready:
+        reasons.append("UPSTREAM_DATA_SELECTED_DAY_MISSING")
+    if expected_heartbeats <= 0:
+        reasons.append("ENGINE_HEARTBEAT_EXPECTATION_MISSING")
+    elif present_heartbeats != expected_heartbeats:
+        reasons.append(f"ENGINE_HEARTBEATS_INCOMPLETE:{present_heartbeats}/{expected_heartbeats}")
+    if not gate_pass:
+        reasons.append(f"GATE_STACK_{str(gate_stack.get('status') or 'UNKNOWN').upper()}")
+    if not kill_switch_inactive:
+        reasons.append(f"KILL_SWITCH_{str(kill_switch.get('state') or 'UNKNOWN').upper()}")
+    if not allow_entries:
+        reasons.append("KILL_SWITCH_ENTRIES_NOT_ALLOWED")
+    if not trading_heartbeat_pass:
+        reasons.append(f"TRADING_DAY_HEARTBEAT_{str(trading.get('heartbeat_status') or 'UNKNOWN').upper()}")
+    if day_blocked:
+        reasons.append("DAY_START_BLOCKED")
+
+    state = "READY" if not reasons else "NOT_READY"
+    summary = (
+        "Selected-day operational readiness confirmed from same-day authoritative inputs."
+        if state == "READY"
+        else "Selected-day operational readiness failed closed because one or more same-day authoritative inputs are missing or failing."
+    )
+    return {
+        "day_utc": day,
+        "state": state,
+        "label": "Operational Readiness",
+        "summary": summary,
+        "same_day_authoritative_inputs_only": True,
+        "checks": {
+            "selected_day_structural_artifact_present": same_day_structural_artifact,
+            "selected_day_structural_artifact_requested_day_present": readiness.get("requested_day_present") is True,
+            "selected_day_structural_artifact_resolved_day": readiness.get("resolved_day"),
+            "selected_day_structural_artifact_resolution_mode": readiness.get("resolution_mode"),
+            "selected_day_upstream_ready": upstream_ready,
+            "selected_day_heartbeat_complete": expected_heartbeats > 0 and present_heartbeats == expected_heartbeats,
+            "selected_day_gate_stack_pass": gate_pass,
+            "selected_day_kill_switch_inactive": kill_switch_inactive,
+            "selected_day_entries_allowed": allow_entries,
+            "selected_day_trading_heartbeat_pass": trading_heartbeat_pass,
+            "selected_day_blocked": day_blocked,
+        },
+        "reason_codes": reasons,
     }
 
 
@@ -1245,6 +1846,8 @@ def _load_platform_readiness_history(truth_root: Path) -> Dict[str, Any]:
             "date_range": None,
             "missing_paths": [str(root)],
             "warnings": ["PLATFORM_READINESS_HISTORY_ROOT_MISSING"],
+            "authoritative_for_current_truth": False,
+            "diagnostic_family_classification": "DIAGNOSTIC_ONLY_HISTORY_SERIES",
         }
 
     for day_dir in sorted((p for p in root.iterdir() if p.is_dir() and _is_day_str(p.name)), key=lambda p: p.name):
@@ -1309,6 +1912,8 @@ def _load_platform_readiness_history(truth_root: Path) -> Dict[str, Any]:
         "comparison": comparison,
         "missing_paths": missing_paths,
         "warnings": warnings,
+        "authoritative_for_current_truth": False,
+        "diagnostic_family_classification": "DIAGNOSTIC_ONLY_HISTORY_SERIES",
     }
 
 
@@ -1917,6 +2522,10 @@ def _extract_portfolio_metrics(nav_doc: Optional[Dict[str, Any]]) -> Dict[str, A
         "net_exposure_pct": None,
         "gross_exposure_pct": None,
         "asof_utc": None,
+        "authority_basis": None,
+        "authoritative": None,
+        "authority_reason_codes": [],
+        "nav_status": None,
     }
     if not isinstance(nav_doc, dict):
         return out
@@ -1940,6 +2549,7 @@ def _extract_portfolio_metrics(nav_doc: Optional[Dict[str, Any]]) -> Dict[str, A
     out["cash_pct"] = _get_num(["cash_pct"])
     out["net_exposure_pct"] = _get_num(["net_exposure_pct", "net_pct"])
     out["gross_exposure_pct"] = _get_num(["gross_exposure_pct", "gross_pct"])
+    out["nav_status"] = str(nav_doc.get("status") or "UNKNOWN").upper()
     return out
 
 
@@ -2211,30 +2821,6 @@ def _load_sleeve_policy() -> List[Dict[str, Any]]:
     return out
 
 
-def _resolve_secondary_paper_account(primary_account: Optional[str]) -> Optional[str]:
-    obj, _err = _safe_read_json(IB_ACCOUNT_REGISTRY)
-    if not isinstance(obj, dict):
-        return None
-    accts = obj.get("accounts")
-    if not isinstance(accts, list):
-        return None
-    primary = str(primary_account or "").strip()
-    cands: List[str] = []
-    for a in accts:
-        if not isinstance(a, dict):
-            continue
-        env = str(a.get("environment") or "").strip().upper()
-        enabled = bool(a.get("enabled_for_submission"))
-        aid = str(a.get("account_id") or "").strip()
-        if env == "PAPER" and enabled and aid:
-            cands.append(aid)
-    cands = sorted(set(cands))
-    for aid in cands:
-        if aid != primary:
-            return aid
-    return None
-
-
 def _build_sleeve_strip_rows(
     *,
     truth_root: Path,
@@ -2254,24 +2840,40 @@ def _build_sleeve_strip_rows(
         return filtered_fallback, warnings
 
     active_engines = set(_active_engine_ids_for_day(truth_root, day))
-    secondary_account = _resolve_secondary_paper_account(primary_account)
-    primary = str(primary_account or "").strip() or None
-    mode = (mode_from_attempt or "UNKNOWN")
+    _ = primary_account
+    default_mode = (mode_from_attempt or "UNKNOWN")
+
+    reg_obj, reg_err = _safe_read_json(SLEEVE_REGISTRY)
+    registry_rows_by_id: Dict[str, Dict[str, Any]] = {}
+    if not isinstance(reg_obj, dict):
+        warnings.append(f"SLEEVE_REGISTRY_UNREADABLE:{reg_err}")
+    else:
+        reg_sleeves = reg_obj.get("sleeves")
+        if not isinstance(reg_sleeves, list):
+            warnings.append("SLEEVE_REGISTRY_INVALID")
+        else:
+            for row in reg_sleeves:
+                if not isinstance(row, dict):
+                    continue
+                sleeve_id = str(row.get("sleeve_id") or "").strip()
+                if not sleeve_id:
+                    continue
+                registry_rows_by_id[sleeve_id] = row
 
     out: List[Dict[str, Any]] = []
     for s in sleeves:
         engine_ids = s.get("engine_ids") or []
         is_active = any(e in active_engines for e in engine_ids)
-        acct: Optional[str]
-        if is_active:
-            acct = primary
-        else:
-            acct = secondary_account or primary
+        sleeve_id = str(s.get("sleeve_id") or "").strip()
+        registry_row = registry_rows_by_id.get(sleeve_id, {})
+        acct = str(registry_row.get("ib_account") or "").strip() or None
+        mode = str(registry_row.get("mode") or default_mode).strip().upper() or default_mode
+        enabled = bool(registry_row.get("enabled")) if registry_row else None
         if acct is None:
-            warnings.append(f"SLEEVE_ACCOUNT_UNRESOLVED:{s.get('sleeve_id')}")
+            warnings.append(f"SLEEVE_ACCOUNT_UNRESOLVED:{sleeve_id}")
         out.append(
             {
-                "sleeve_id": s.get("sleeve_id"),
+                "sleeve_id": sleeve_id,
                 "name": s.get("display_name"),
                 "mode": mode,
                 "ib_account_id": acct,
@@ -2279,23 +2881,20 @@ def _build_sleeve_strip_rows(
                 "flatten_only": None,
                 "engine_ids": engine_ids,
                 "active_today": bool(is_active),
+                "enabled": enabled,
+                "registry_source": "C2_SLEEVE_REGISTRY_V1" if registry_row else "C2_CAPITAL_AUTHORITY_POLICY_V1",
             }
         )
     out.sort(key=lambda x: (x.get("sleeve_id") or "", x.get("name") or ""))
 
     # Include only canonical standard trading sleeves that are not already engine-mapped.
     # Bond is not a trading sleeve and must never enter the generic sleeve payload path.
-    reg_obj, reg_err = _safe_read_json(SLEEVE_REGISTRY)
-    if not isinstance(reg_obj, dict):
-        warnings.append(f"SLEEVE_REGISTRY_UNREADABLE:{reg_err}")
-        return out, warnings
-    reg_sleeves = reg_obj.get("sleeves")
-    if not isinstance(reg_sleeves, list):
-        warnings.append("SLEEVE_REGISTRY_INVALID")
+    reg_rows = list(registry_rows_by_id.values())
+    if not reg_rows:
         return out, warnings
 
     existing_ids = {str(r.get("sleeve_id") or "").strip() for r in out}
-    for rs in reg_sleeves:
+    for rs in reg_rows:
         if not isinstance(rs, dict):
             continue
         sid = str(rs.get("sleeve_id") or "").strip()
@@ -2397,11 +2996,14 @@ def _compute_key_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
         "tiles": tile_k,
         "flow": flow.get("counts"),
         "blocked": flow.get("blocked_by_gate"),
+        "execution_authority": flow.get("execution_authority"),
         "portfolio": {
             "nav_total": port.get("nav_total"),
             "pnl_today": port.get("pnl_today"),
             "pnl_cumulative": port.get("pnl_cumulative"),
             "asof_utc": port.get("asof_utc"),
+            "authority_basis": port.get("authority_basis"),
+            "authoritative": port.get("authoritative"),
         },
         "platform_readiness": {
             "state": platform.get("platform_readiness_state"),
@@ -2479,11 +3081,13 @@ def build_status_v2(
     liquidity_path = (truth_root / "reports" / "liquidity_slippage_gate_v1" / day / "liquidity_slippage_gate.v1.json").resolve()
     correlation_path = (truth_root / "reports" / "correlation_envelope_gate_v1" / day / "correlation_envelope_gate.v1.json").resolve()
     convex_path = (truth_root / "reports" / "convex_risk_assessment_v1" / day / "convex_risk_assessment.v1.json").resolve()
+    capital_path = (truth_root / "reports" / "capital_risk_envelope_v2" / day / "capital_risk_envelope.v2.json").resolve()
 
     attest_tile, warn_att, miss_att = _parse_simple_gate_tile(attest_path, "feed_attestation")
     liquidity_tile, warn_liq, miss_liq = _parse_simple_gate_tile(liquidity_path, "liquidity_gate")
     corr_tile, warn_cor, miss_cor = _parse_simple_gate_tile(correlation_path, "correlation_gate")
     convex_tile, warn_cvx, miss_cvx = _parse_simple_gate_tile(convex_path, "convex_gate")
+    capital_tile, warn_cap, miss_cap = _parse_simple_gate_tile(capital_path, "capital_risk_envelope")
 
     # Replay
     replay_tile, miss_rep, sp_rep, sm_rep, warn_rep = _parse_replay_tile(truth_root, day, sel_attempt)
@@ -2558,6 +3162,11 @@ def build_status_v2(
 
     # Flow
     rollup_doc, miss_roll = _load_activity_rollup(truth_root, day)
+    activity_flow_doc, miss_afd, sp_afd, sm_afd, warn_afd = _load_activity_flow_diagnostics(truth_root, day)
+    oms_docs, miss_oms, sp_oms, sm_oms, warn_oms = _load_oms_terminal_dispositions(truth_root, day)
+    oms_summary = _summarize_oms_terminal_dispositions(oms_docs)
+    day_start_blocked_doc, miss_dsb, sp_dsb, sm_dsb, warn_dsb = _load_day_start_blocked(day)
+    trading_day_state_doc, miss_tds, sp_tds, sm_tds, warn_tds = _load_trading_day_state(day)
     flow = _extract_flow_from_activity_rollup(rollup_doc)
     intents_cnt, miss_int = _count_intents(truth_root, day)
     subs_cnt, miss_sub = _count_submissions_and_fills(truth_root, day)
@@ -2587,10 +3196,21 @@ def build_status_v2(
         "convex": flow.get("blocked_convex"),
         "capital": flow.get("blocked_capital"),
     }
+    execution_authority = read_execution_day_authority_state(
+        repo_root=REPO_ROOT,
+        truth_root=truth_root,
+        day_utc=day,
+        mode="PAPER",
+    )
 
     # Portfolio
     nav_doc, miss_nav, nav_err, nav_path = _load_nav(truth_root, day)
     portfolio = _extract_portfolio_metrics(nav_doc)
+    accounting_authority = read_accounting_authority_state(truth_root=truth_root, day_utc=day)
+    portfolio["authority_basis"] = accounting_authority.get("basis_class")
+    portfolio["authoritative"] = accounting_authority.get("authoritative")
+    portfolio["authority_reason_codes"] = accounting_authority.get("reason_codes")
+    portfolio["cash_authority_basis"] = accounting_authority.get("cash_authority_basis")
     if nav_doc is None:
         portfolio["note_if_missing"] = "PnL unavailable (missing accounting/nav)"
         portfolio["missing"] = True
@@ -2715,6 +3335,78 @@ def build_status_v2(
     tiles.append(convex_tile)
     tiles.append(replay_tile if replay_tile else Tile("replay_certification", "MISSING", None, ["REPLAY_NOT_FOUND"], [], None, None))
 
+    canonical_pointer_path = (truth_root / "run_pointer_v2" / "canonical_authority_head.v1.json").resolve()
+    kill_switch_state = _load_kill_switch_day_state(truth_root, day)
+    governed_risk_surfaces = {
+        "authority_and_data": [
+            _governed_surface_row(
+                "Feed Attestation",
+                attest_tile.state,
+                (attest_tile.reason_codes or ["No attestation detail"])[0],
+                attest_tile.artifact_path,
+            ),
+            _governed_surface_row(
+                "Replay Certification",
+                replay_tile.state if replay_tile else "MISSING",
+                ((replay_tile.reason_codes if replay_tile else []) or ["Replay proof unavailable"])[0],
+                replay_tile.artifact_path if replay_tile else None,
+            ),
+            _governed_surface_row(
+                "Canonical Authority Head",
+                "PASS" if canonical_pointer_path.exists() else "MISSING",
+                "Canonical authority pointer present" if canonical_pointer_path.exists() else "Canonical authority pointer missing",
+                str(canonical_pointer_path),
+            ),
+        ],
+        "broker_and_execution": [
+            _governed_surface_row(
+                "Broker Connection / Observer",
+                broker_tile.state,
+                (broker_tile.reason_codes or ["Broker observer state available"])[0],
+                broker_tile.artifact_path,
+            ),
+            _governed_surface_row(
+                "Gate Stack Verdict",
+                gate_tile.state if gate_tile else "MISSING",
+                ((gate_tile.reason_codes if gate_tile else []) or ["Gate stack verdict unavailable"])[0],
+                gate_tile.artifact_path if gate_tile else None,
+            ),
+            _governed_surface_row(
+                "Kill Switch",
+                "PASS" if kill_switch_state.get("state") == "INACTIVE" else str(kill_switch_state.get("state") or "UNKNOWN"),
+                ((kill_switch_state.get("reason_codes") or ["Entries allowed" if kill_switch_state.get("allow_entries") is True else "Kill-switch state not confirmed"]))[0],
+                kill_switch_state.get("path"),
+                authoritative=False,
+            ),
+        ],
+        "risk_envelope": [
+            _governed_surface_row(
+                "Capital Risk Envelope",
+                capital_tile.state,
+                (capital_tile.reason_codes or ["Capital risk envelope available"])[0],
+                capital_tile.artifact_path,
+            ),
+            _governed_surface_row(
+                "Liquidity Gate",
+                liquidity_tile.state,
+                (liquidity_tile.reason_codes or ["Liquidity gate available"])[0],
+                liquidity_tile.artifact_path,
+            ),
+            _governed_surface_row(
+                "Correlation Gate",
+                corr_tile.state,
+                (corr_tile.reason_codes or ["Correlation gate available"])[0],
+                corr_tile.artifact_path,
+            ),
+            _governed_surface_row(
+                "Convex Risk",
+                convex_tile.state,
+                (convex_tile.reason_codes or ["Convex risk surface available"])[0],
+                convex_tile.artifact_path,
+            ),
+        ],
+    }
+
     # Provenance aggregation
     missing_paths = sorted(
         set(
@@ -2722,6 +3414,10 @@ def build_status_v2(
             + miss_rv
             + miss_gs
             + miss_rep
+            + miss_afd
+            + miss_oms
+            + miss_dsb
+            + miss_tds
             + miss_roll
             + miss_int
             + miss_sub
@@ -2735,6 +3431,7 @@ def build_status_v2(
             + miss_liq
             + miss_cor
             + miss_cvx
+            + miss_cap
             + miss_eng
             + miss_ma
             + miss_broker
@@ -2748,6 +3445,10 @@ def build_status_v2(
             + sp_rv
             + sp_gs
             + sp_rep
+            + sp_afd
+            + sp_oms
+            + sp_dsb
+            + sp_tds
             + ([nav_path] if isinstance(nav_path, str) and nav_path else [])
             + sp_bond
             + [str(instance_config_path)]
@@ -2755,7 +3456,7 @@ def build_status_v2(
     )
 
     source_mtimes: Dict[str, float] = {}
-    for dct in (sm_a, sm_rv, sm_gs, sm_rep, sm_bond):
+    for dct in (sm_a, sm_rv, sm_gs, sm_rep, sm_afd, sm_oms, sm_dsb, sm_tds, sm_bond):
         source_mtimes.update({k: v for k, v in dct.items() if isinstance(v, (int, float))})
 
     warnings = sorted(
@@ -2764,10 +3465,15 @@ def build_status_v2(
             + warn_rv
             + warn_gs
             + warn_rep
+            + warn_afd
+            + warn_oms
+            + warn_dsb
+            + warn_tds
             + warn_att
             + warn_liq
             + warn_cor
             + warn_cvx
+            + warn_cap
             + warn_broker
             + warn_ma
             + warn_eng
@@ -2783,6 +3489,14 @@ def build_status_v2(
     platform_bug_metrics = _load_platform_bug_metrics(truth_root, day)
     platform_readiness = _load_platform_readiness(truth_root, day)
     platform_readiness_policy = _load_platform_readiness_policy_view()
+    signal_activity = _load_signal_activity(truth_root, day, run_doc)
+    operational_readiness = _derive_operational_readiness(
+        day=day,
+        platform_readiness=platform_readiness,
+        signal_activity=signal_activity,
+        trading_day_state=trading_day_state_doc if isinstance(trading_day_state_doc, dict) else {},
+        day_start_blocked=day_start_blocked_doc if isinstance(day_start_blocked_doc, dict) else {},
+    )
 
     payload: Dict[str, Any] = {
         "meta": {
@@ -2803,13 +3517,16 @@ def build_status_v2(
         "sleeve_live_readiness": _load_sleeve_live_readiness(truth_root, day),
         "platform_bug_metrics": platform_bug_metrics,
         "platform_readiness": platform_readiness,
+        "operational_readiness": operational_readiness,
         "platform_readiness_policy": platform_readiness_policy,
         "platform_readiness_history": _load_platform_readiness_history(truth_root),
-        "signal_activity": _load_signal_activity(truth_root, day, run_doc),
+        "signal_activity": signal_activity,
+        "governed_risk_surfaces": governed_risk_surfaces,
         "sleeves": sleeves_out,
         "trade_flow_today": {
             "counts": counts,
             "blocked_by_gate": blocked_by_gate,
+            "execution_authority": execution_authority,
             "semantics": {
                 "intents": "Intents emitted for selected day.",
                 "rejected": "Authorization records with status REJECTED.",
@@ -2820,6 +3537,26 @@ def build_status_v2(
                 "vetoed": "PhaseC submit veto records observed for day.",
             },
             "drilldown": _flow_drilldown(truth_root, day, counts),
+        },
+        "activity_flow_diagnostics": activity_flow_doc if isinstance(activity_flow_doc, dict) else {
+            "present": False,
+            "terminal_state": "INTERNAL_INCONSISTENCY",
+            "suspicion_flags": [],
+            "counts": {},
+            "rejection_breakdown": [],
+        },
+        "intent_terminal_dispositions": oms_summary,
+        "day_start_blocked": day_start_blocked_doc if isinstance(day_start_blocked_doc, dict) else {
+            "present": False,
+            "blocked": False,
+            "status": "UNKNOWN",
+        },
+        "trading_day_state": trading_day_state_doc if isinstance(trading_day_state_doc, dict) else {
+            "present": False,
+            "state": "UNKNOWN_FAILURE",
+            "heartbeat_status": "FAIL",
+            "dependency_statuses": [],
+            "freshness_checks": [],
         },
         "engines": engines_out,
         "portfolio": portfolio,
@@ -2896,11 +3633,34 @@ def build_status_v2(
     }
     payload["signal_activity"] = payload.get("signal_activity") if isinstance(payload.get("signal_activity"), dict) else {
         "day_utc": day,
+        "trading_day_outcome": {
+            "day_utc": day,
+            "classification": "EXECUTION_FAILURE_DAY",
+            "label": "EXECUTION BLOCKED",
+            "subtitle": "See active blocker below",
+            "tone": "negative",
+            "execution_path": "BLOCKED",
+            "facts": [],
+            "gate_stack": {"status": "UNKNOWN", "reason_codes": [], "path": None},
+            "kill_switch": {"state": "UNKNOWN", "allow_entries": None, "allow_exits": None, "reason_codes": [], "path": None},
+            "orchestrator_status": "UNKNOWN",
+            "submit_reason_codes": [],
+        },
+        "signal_frequency_30d": {
+            "window_days": 30,
+            "avg_signals_per_day": None,
+            "last_signal_date": None,
+            "last_submit_date": None,
+            "status": "unknown",
+            "label": "Signal frequency unavailable",
+        },
         "engine_heartbeats": {"expected_count": 0, "present_count": 0, "expected_engine_ids": [], "present_engine_ids": [], "missing_engine_ids": []},
         "intents": {"count": 0, "label": "No real intents produced", "path": None},
         "phasec_outcomes": {"veto_count": 0, "released_identity_dir_count": 0, "label": "no phaseC outputs", "tone": "neutral", "path": None},
         "governed_submit": {"stage_status": None, "label": "governed submit not reached", "tone": "neutral", "reason_codes": []},
         "upstream_data_status": {"label": "upstream data incomplete", "tone": "negative", "symbols": []},
+        "gate_stack": {"status": "UNKNOWN", "reason_codes": [], "path": None},
+        "kill_switch": {"state": "UNKNOWN", "allow_entries": None, "allow_exits": None, "reason_codes": [], "path": None},
     }
     td = payload.get("trade_flow_today")
     if isinstance(td, dict):
