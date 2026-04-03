@@ -138,7 +138,7 @@ function renderSleeveStrip(payload) {
   container.innerHTML = `
     <div class="card-head">
       <div class="card-title">Sleeve Mode Strip (PAPER/LIVE per sleeve)</div>
-      <div class="mono tiny muted">rows=${sleeves.length} • with_account=${withAcct} • ${split || "no_accounts"}</div>
+      <div class="mono tiny muted">rows=${sleeves.length} • rendered=${sleeves.length} • with_account=${withAcct} • ${split || "no_accounts"}</div>
     </div>
     <div class="strip-row" id="stripRow"></div>
   `;
@@ -153,20 +153,35 @@ function renderSleeveStrip(payload) {
     const pill = document.createElement("div");
     pill.className = "sleeve-pill";
     pill.innerHTML = `
-      <span class="mono">${s.sleeve_id}</span>
-      <span class="${modeClass(mode, s.flatten_only)} mono">${String(mode).toUpperCase()}</span>
-      <span class="mono tiny muted">${acct}</span>
-      <span class="mono tiny muted">${ea}</span>
+      <span class="mono sleeve-name">${s.sleeve_id}</span>
+      <span class="acct-chip mono">IB ${acct}</span>
+      <span class="mode-chip ${modeClass(mode, s.flatten_only)} mono">${String(mode).toUpperCase()}</span>
+      <span class="entry-chip mono tiny muted">${ea}</span>
       ${fl ? `<span class="mono tiny muted">${fl}</span>` : ""}
     `;
     row.appendChild(pill);
   });
 }
 
+function toCount(v) {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "number") return v;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function stageTone(stageKey, count) {
+  const c = toCount(count);
+  if (c === null) return "stage-fail";
+  if ((stageKey === "intents")) return c > 0 ? "stage-info" : "stage-idle";
+  if ((stageKey === "rejected_or_vetoed") || (stageKey === "vetoed")) return c > 0 ? "stage-warn" : "stage-idle";
+  if (["authorized", "submitted", "filled", "reconciled"].includes(stageKey)) return c > 0 ? "stage-pass" : "stage-idle";
+  return c > 0 ? "stage-info" : "stage-idle";
+}
+
 function renderFunnel(payload) {
   const c = payload?.trade_flow_today?.counts || {};
   const b = payload?.trade_flow_today?.blocked_by_gate || {};
-  const s = payload?.trade_flow_today?.semantics || {};
   const d = payload?.trade_flow_today?.drilldown || {};
 
   const steps = [
@@ -179,8 +194,11 @@ function renderFunnel(payload) {
   ];
 
   el("funnelRow").innerHTML = steps.map(([k,v,key]) => `
-    <div class="funnel-step" data-funnel-stage="${key}" style="cursor:pointer;">
-      <div class="k">${k}</div>
+    <div class="funnel-step ${stageTone(key, v)}" data-funnel-stage="${key}">
+      <div class="step-head">
+        <div class="k">${k}</div>
+        <span class="stage-chip mono">${stageTone(key, v).replace("stage-", "").toUpperCase()}</span>
+      </div>
       <div class="v">${v === null || v === undefined ? "n/a" : v}</div>
     </div>
   `).join("");
@@ -193,31 +211,68 @@ function renderFunnel(payload) {
     ["Capital", b.capital],
   ];
   el("blockedRow").innerHTML = blocked.map(([k,v]) =>
-    `<div class="blocked-pill">${k}: ${v === null || v === undefined ? "n/a" : v}</div>`
+    `<div class="blocked-pill ${toCount(v) > 0 ? "blocked-active" : "blocked-none"}">${k}: ${v === null || v === undefined ? "n/a" : v}</div>`
   ).join("");
 
   el("funnelExplain").textContent =
-    `Intents are candidate trades. Rejected/Vetoed are blocked before submission. Authorized can proceed to broker submission. Filled and Reconciled are downstream execution states.`;
+    `Color workflow: blue=informational candidates, amber=blocked or vetoed, green=completed progress, gray=zero/not yet, red=error or missing proof.`;
 
   const drill = el("funnelDrilldown");
+  const humanStage = {
+    intents: "Intents",
+    rejected_or_vetoed: "Rejected or Vetoed",
+    authorized: "Authorized",
+    submitted: "Submitted",
+    filled: "Filled",
+    reconciled: "Reconciled",
+    vetoed: "Vetoed",
+  };
+  const stageHelp = {
+    intents: "Candidate trading intents generated for this day.",
+    rejected_or_vetoed: "Records blocked before broker submission by authorization rules or submit veto.",
+    authorized: "Records that passed risk/governance and were allowed to submit.",
+    submitted: "Orders sent to broker routing.",
+    filled: "Submitted orders that reached filled state.",
+    reconciled: "Filled records that completed reconciliation checks.",
+    vetoed: "PhaseC veto records found for this day.",
+  };
   const renderDrill = (key) => {
     const z = d?.[key] || {};
     const paths = z.evidence_paths || [];
-    const pathsHtml = paths.length
-      ? paths.map(p => `<a href="#" class="mono" data-funnel-evidence="${encodeURIComponent(p)}">${p}</a>`).join("<br/>")
-      : "n/a";
+    const rows = paths.length
+      ? paths.map((p, i) => {
+        const leaf = (String(p).split("/").pop() || p);
+        return `
+          <tr>
+            <td class="mono tiny">${i + 1}</td>
+            <td class="mono tiny">${leaf}</td>
+            <td><button class="btn btn-mini" data-funnel-evidence="${encodeURIComponent(p)}" data-funnel-stage-open="${key}">Open evidence</button></td>
+          </tr>
+        `;
+      }).join("")
+      : `<tr><td colspan="3" class="mono tiny muted">No evidence paths recorded for this stage.</td></tr>`;
     drill.innerHTML = `
-      <div><b>${key}</b> count=${z.count ?? "n/a"}</div>
-      <div>${z.summary || "No detail."}</div>
-      <div style="margin-top:6px;">evidence:</div>
-      <div>${pathsHtml}</div>
+      <div class="drill-panel">
+        <div class="drill-head">
+          <div class="drill-title">${humanStage[key] || key}</div>
+          <div class="mono tiny">count=${z.count ?? "n/a"}</div>
+        </div>
+        <div class="drill-summary mono tiny muted">${z.summary || stageHelp[key] || "No detail available."}</div>
+        <table class="drill-table">
+          <thead><tr><th>#</th><th>Evidence record</th><th>Action</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
     `;
-    document.querySelectorAll("[data-funnel-evidence]").forEach(a => {
-      a.onclick = async (ev) => {
+    document.querySelectorAll("[data-funnel-evidence]").forEach(btn => {
+      btn.onclick = async (ev) => {
         ev.preventDefault();
-        const p = decodeURIComponent(a.getAttribute("data-funnel-evidence") || "");
+        const p = decodeURIComponent(btn.getAttribute("data-funnel-evidence") || "");
         await openEvidence(`funnel:${key}`, p);
       };
+    });
+    document.querySelectorAll("[data-funnel-stage]").forEach(x => {
+      x.classList.toggle("is-selected", x.getAttribute("data-funnel-stage") === key);
     });
   };
 

@@ -9,6 +9,13 @@
   --warn: #f6c177;
   --err: #f28b82;
   --ok: #7ee787;
+  --info: #7ab7ff;
+  --idle: #93a4bb;
+  --amber-bg: rgba(246, 193, 119, 0.12);
+  --green-bg: rgba(126, 231, 135, 0.12);
+  --blue-bg: rgba(122, 183, 255, 0.12);
+  --gray-bg: rgba(147, 164, 187, 0.12);
+  --red-bg: rgba(242, 139, 130, 0.12);
 
   --paper: #7ee787;
   --live: #f28b82;
@@ -171,25 +178,55 @@ body {
   gap: 6px;
 }
 .strip-row {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 6px;
+  max-height: 228px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 .sleeve-pill {
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 12px;
   padding: 6px 8px;
   background: var(--panel2);
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   font-family: var(--mono);
   font-size: 12px;
+  min-height: 36px;
+}
+.sleeve-pill .sleeve-name {
+  flex: 1 1 100%;
+  font-weight: 800;
+}
+.acct-chip, .mode-chip, .entry-chip, .stage-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.stage-chip { color: var(--muted); }
+.funnel-step.stage-info .stage-chip { border-color: rgba(122, 183, 255, 0.45); color: var(--info); background: var(--blue-bg); }
+.funnel-step.stage-warn .stage-chip { border-color: rgba(246, 193, 119, 0.45); color: var(--warn); background: var(--amber-bg); }
+.funnel-step.stage-pass .stage-chip { border-color: rgba(126, 231, 135, 0.45); color: var(--ok); background: var(--green-bg); }
+.funnel-step.stage-idle .stage-chip { border-color: rgba(147, 164, 187, 0.45); color: var(--muted); background: var(--gray-bg); }
+.funnel-step.stage-fail .stage-chip { border-color: rgba(242, 139, 130, 0.45); color: var(--err); background: var(--red-bg); }
+.acct-chip {
+  background: rgba(255,255,255,0.03);
+  color: var(--text);
 }
 .mode-paper { color: var(--paper); }
 .mode-live { color: var(--live); }
 .mode-disabled { color: var(--disabled); }
 .mode-flatten { color: var(--flatten); }
+.mode-chip.mode-paper { border-color: rgba(126, 231, 135, 0.35); background: var(--green-bg); }
+.mode-chip.mode-live { border-color: rgba(242, 139, 130, 0.35); background: var(--red-bg); }
+.mode-chip.mode-disabled { border-color: rgba(147, 164, 187, 0.35); background: var(--gray-bg); }
+.mode-chip.mode-flatten { border-color: rgba(246, 193, 119, 0.35); background: var(--amber-bg); }
 
 .funnel-row {
   display: flex;
@@ -203,6 +240,20 @@ body {
   border-radius: 12px;
   padding: 6px 8px;
   min-width: 150px;
+  cursor: pointer;
+}
+.funnel-step.stage-info { border-color: rgba(122, 183, 255, 0.35); background: var(--blue-bg); }
+.funnel-step.stage-warn { border-color: rgba(246, 193, 119, 0.35); background: var(--amber-bg); }
+.funnel-step.stage-pass { border-color: rgba(126, 231, 135, 0.35); background: var(--green-bg); }
+.funnel-step.stage-idle { border-color: rgba(147, 164, 187, 0.35); background: var(--gray-bg); }
+.funnel-step.stage-fail { border-color: rgba(242, 139, 130, 0.45); background: var(--red-bg); }
+.funnel-step.is-selected { outline: 2px solid #2f425d; }
+.funnel-step:hover { border-color: #2f425d; }
+.funnel-step .step-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
 }
 .funnel-step .k { font-size: 12px; color: var(--muted); font-family: var(--mono); }
 .funnel-step .v { font-size: 16px; font-weight: 900; font-family: var(--mono); }
@@ -221,6 +272,44 @@ body {
   font-family: var(--mono);
   font-size: 11px;
   color: var(--muted);
+}
+.blocked-pill.blocked-active { border-color: rgba(246, 193, 119, 0.35); background: var(--amber-bg); color: var(--warn); }
+.blocked-pill.blocked-none { border-color: rgba(147, 164, 187, 0.35); background: var(--gray-bg); color: var(--muted); }
+
+.drill-panel {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel2);
+  padding: 8px;
+}
+.drill-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+.drill-title {
+  font-size: 12px;
+  font-weight: 800;
+}
+.drill-summary {
+  margin-top: 6px;
+  font-size: 12px;
+}
+.drill-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+.drill-table th, .drill-table td {
+  text-align: left;
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.drill-table th {
+  color: var(--muted);
+  font-size: 11px;
 }
 
 /* What changed band */
