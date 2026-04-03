@@ -343,7 +343,8 @@ function renderTechnical(payload) {
 async function openEvidence(title, path) {
   // Raw JSON only via modal (explicit click).
   const q = encodeURIComponent(path);
-  const r = await api(`/api/artifact?path=${q}`);
+  const d = encodeURIComponent(state.day || "");
+  const r = await api(`/api/artifact?path=${q}&day=${d}`);
   el("evidenceTitle").textContent = title || "Evidence";
   el("evidencePath").textContent = r.path || path || "n/a";
   el("evidenceErrors").innerHTML = (r.errors || []).length
@@ -384,7 +385,7 @@ async function loadAttemptsForDay(day) {
   if (!day) return;
   const a = await api(`/api/attempts?day=${encodeURIComponent(day)}`);
   state.attempts = a.attempts || [];
-  state.attempt_id = state.attempts.length ? state.attempts[state.attempts.length - 1] : null;
+  state.attempt_id = a.recommended_attempt_id || (state.attempts.length ? state.attempts[state.attempts.length - 1] : null);
 
   const sel = el("attemptSelect");
   sel.innerHTML = "";

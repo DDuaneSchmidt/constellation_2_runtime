@@ -21,8 +21,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
+from constellation_2.common.truth_root_v1 import resolve_truth_root
 from constellation_2.phaseL.ui.server.c3_ui_status_collector_v1 import build_c3_ui_status
-from constellation_2.phaseL.ui.server.c2_ops_cockpit_status_v2_collector_v1 import build_status_v2, discover_attempts
+from constellation_2.phaseL.ui.server.c2_ops_cockpit_status_v2_collector_v1 import build_status_v2, discover_attempts, select_preferred_attempt
 # --------------------------
 # Error codes (audit-safe)
 # --------------------------
@@ -59,7 +60,43 @@ THIS_FILE = Path(__file__).resolve()
 # .../constellation_2/phaseL/ui/server/run_ops_dashboard_v1.py
 # parents: [server, ui, phaseL, constellation_2, <repo_root>, ...]
 REPO_ROOT = THIS_FILE.parents[4]
-TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH_ROOT = resolve_truth_root(repo_root=REPO_ROOT)
+SLEEVE_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth_sleeves/PRIMARY/PAPER").resolve()
+
+
+def _known_truth_roots() -> List[Path]:
+    roots: List[Path] = []
+    for r in [TRUTH_ROOT, SLEEVE_TRUTH_ROOT]:
+        if isinstance(r, Path) and r.exists() and r.is_dir():
+            roots.append(r.resolve())
+    uniq: List[Path] = []
+    seen = set()
+    for r in roots:
+        s = str(r)
+        if s in seen:
+            continue
+        seen.add(s)
+        uniq.append(r)
+    return uniq
+
+
+def _has_orchestrator_day(truth_root: Path, day: str) -> bool:
+    p = (truth_root / "reports" / "orchestrator_run_verdict_v2" / day).resolve()
+    return p.exists() and p.is_dir()
+
+
+def _truth_root_for_day(day: Optional[str]) -> Path:
+    if not isinstance(day, str) or not _is_day_str(day):
+        return TRUTH_ROOT
+
+    roots = _known_truth_roots()
+    if not roots:
+        return TRUTH_ROOT
+
+    for r in roots:
+        if _has_orchestrator_day(r, day):
+            return r
+    return roots[0]
 
 
 # Canonical surfaces (as proven on disk)
@@ -144,21 +181,36 @@ def _union_days() -> List[str]:
     """
     days = set()
 
-    for root in [GATE_VERDICT_ROOT, INTENTS_ROOT, ACCOUNTING_NAV_ROOT, ACCOUNTING_ATTR_ROOT]:
-        for d in _list_day_dirs(root):
-            days.add(d)
+    roots = _known_truth_roots()
+    if not roots:
+        roots = [TRUTH_ROOT]
+    for troot in roots:
+        submissions_root = (troot / "execution_evidence_v1" / "submissions").resolve()
+        intents_root = (troot / "intents_v1" / "snapshots").resolve()
+        gate_root = (troot / "reports" / "gate_stack_verdict_v1").resolve()
+        nav_root = (troot / "accounting_v2" / "nav").resolve()
+        attr_root = (troot / "accounting_v2" / "attribution").resolve()
+        pillars_v1 = (troot / "pillars_v1").resolve()
+        pillars_v1r1 = (troot / "pillars_v1r1").resolve()
+        intents_summary_root = (troot / "monitoring_v1" / "intents_summary_v1").resolve()
+        submissions_summary_root = (troot / "monitoring_v1" / "submissions_summary_v1").resolve()
+        activity_rollup_root = (troot / "monitoring_v1" / "activity_ledger_rollup_v1").resolve()
 
-    if SUBMISSIONS_ROOT.exists() and SUBMISSIONS_ROOT.is_dir():
-        for d in _list_day_dirs(SUBMISSIONS_ROOT):
-            days.add(d)
+        for root in [gate_root, intents_root, nav_root, attr_root]:
+            for d in _list_day_dirs(root):
+                days.add(d)
 
-    for root in [PILLARS_V1R1_ROOT, PILLARS_V1_ROOT]:
-        for d in _list_day_dirs(root):
-            days.add(d)
+        if submissions_root.exists() and submissions_root.is_dir():
+            for d in _list_day_dirs(submissions_root):
+                days.add(d)
 
-    for root in [INTENTS_SUMMARY_ROOT, SUBMISSIONS_SUMMARY_ROOT, ACTIVITY_ROLLUP_ROOT]:
-        for d in _list_day_dirs(root):
-            days.add(d)
+        for root in [pillars_v1r1, pillars_v1]:
+            for d in _list_day_dirs(root):
+                days.add(d)
+
+        for root in [intents_summary_root, submissions_summary_root, activity_rollup_root]:
+            for d in _list_day_dirs(root):
+                days.add(d)
 
     # UI safety: exclude future days (e.g. 2199-01-19 bootstrap placeholders).
     # Selectable days must not exceed today's UTC date.
@@ -975,14 +1027,24 @@ class OpsHandler(SimpleHTTPRequestHandler):
                     self._send_json(HTTPStatus.OK, {"ok": False, "errors": ["MISSING_QUERY_PATH"], "path": None, "content": ""})
                     return True
 
+                day_raw = (qs.get("day") or [None])[0]
+                day = day_raw if isinstance(day_raw, str) and day_raw and _is_day_str(day_raw) else None
+                selected_root = _truth_root_for_day(day)
+                allowed_roots = _known_truth_roots() or [selected_root]
+
                 p = Path(raw)
                 if not p.is_absolute():
-                    p = (TRUTH_ROOT / raw).resolve()
+                    p = (selected_root / raw).resolve()
                 else:
                     p = p.resolve()
 
-                truth_root_s = str(TRUTH_ROOT.resolve())
-                if not str(p).startswith(truth_root_s + "/") and str(p) != truth_root_s:
+                allowed = False
+                for root in allowed_roots:
+                    root_s = str(root.resolve())
+                    if str(p).startswith(root_s + "/") or str(p) == root_s:
+                        allowed = True
+                        break
+                if not allowed:
                     self._send_json(HTTPStatus.OK, {"ok": False, "errors": ["PATH_OUTSIDE_TRUTH_ROOT"], "path": str(p), "content": ""})
                     return True
 
@@ -1012,12 +1074,16 @@ class OpsHandler(SimpleHTTPRequestHandler):
             if not day:
                 self._send_json(HTTPStatus.OK, {"ok": False, "errors": ["DAY_NOT_RESOLVED"], "attempts": []})
                 return True
-            attempts, missing, source_paths, source_mtimes, warnings = discover_attempts(TRUTH_ROOT, day)
+            selected_root = _truth_root_for_day(day)
+            attempts, missing, source_paths, source_mtimes, warnings = discover_attempts(selected_root, day)
+            preferred_attempt = select_preferred_attempt(selected_root, day, attempts)
             self._send_json(HTTPStatus.OK, {
                 "ok": True,
                 "generated_utc": _utc_now_iso(),
                 "day_utc": day,
                 "attempts": attempts,
+                "recommended_attempt_id": preferred_attempt,
+                "truth_root": str(selected_root),
                 "warnings": warnings,
                 "missing_paths": missing,
                 "source_paths": source_paths,
@@ -1032,14 +1098,17 @@ class OpsHandler(SimpleHTTPRequestHandler):
             if not day:
                 self._send_json(HTTPStatus.OK, {"ok": False, "errors": ["DAY_NOT_RESOLVED"]})
                 return True
+            selected_root = _truth_root_for_day(day)
             raw_attempt = (qs.get("attempt_id") or [None])[0]
             attempt_id = raw_attempt if isinstance(raw_attempt, str) and raw_attempt else None
 
             # C3 status used only as an informational truth-derived surface for some gate tiles.
-            c3 = build_c3_ui_status(TRUTH_ROOT)
+            c3 = build_c3_ui_status(selected_root)
             inst = _instance_config_path()
 
-            payload = build_status_v2(TRUTH_ROOT, inst, day, attempt_id, c3)
+            payload = build_status_v2(selected_root, inst, day, attempt_id, c3)
+            if isinstance(payload.get("meta"), dict):
+                payload["meta"]["truth_root"] = str(selected_root)
             payload["ok"] = True
             payload["errors"] = []
             self._send_json(HTTPStatus.OK, payload)

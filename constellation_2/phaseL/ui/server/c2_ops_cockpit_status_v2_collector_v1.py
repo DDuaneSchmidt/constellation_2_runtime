@@ -123,8 +123,8 @@ def _tile_dict(t: Tile) -> Dict[str, Any]:
 
 def _candidate_replay_roots(truth_root: Path) -> List[Path]:
     return [
-        (truth_root / "reports" / "replay_certification_bundle_v1"),
         (truth_root / "reports" / "replay_certification_gate_v1"),
+        (truth_root / "reports" / "replay_certification_bundle_v1"),
         (truth_root / "reports" / "replay_integrity_v2"),
         (truth_root / "reports" / "replay_integrity_day_v2"),
         (truth_root / "reports" / "replay_integrity_day_v1"),
@@ -174,6 +174,49 @@ def select_latest_attempt(attempts: List[str]) -> Optional[str]:
     return attempts[-1] if attempts else None
 
 
+def _load_attempt_verdict(truth_root: Path, day: str, attempt_id: str) -> Optional[Dict[str, Any]]:
+    p = (truth_root / "reports" / "orchestrator_run_verdict_v2" / day / attempt_id / "orchestrator_run_verdict.v2.json").resolve()
+    obj, _err = _safe_read_json(p)
+    if isinstance(obj, dict):
+        return obj
+    return None
+
+
+def select_preferred_attempt(truth_root: Path, day: str, attempts: List[str]) -> Optional[str]:
+    """
+    Default attempt selection for auto mode:
+    - Use latest attempt normally.
+    - If latest is ABORTED but there is an earlier PASS on the same day,
+      prefer the latest PASS so canonical healthy proof is not masked by a
+      later aborted rerun.
+    """
+    latest = select_latest_attempt(attempts)
+    if not isinstance(latest, str) or not latest:
+        return None
+
+    latest_doc = _load_attempt_verdict(truth_root, day, latest)
+    latest_status = _coerce_state(str(latest_doc.get("status") or latest_doc.get("state") or "UNKNOWN")) if isinstance(latest_doc, dict) else "UNKNOWN"
+    if latest_status != "ABORTED":
+        return latest
+
+    pass_attempts: List[Tuple[int, str]] = []
+    for aid in attempts:
+        doc = _load_attempt_verdict(truth_root, day, aid)
+        if not isinstance(doc, dict):
+            continue
+        st = _coerce_state(str(doc.get("status") or doc.get("state") or "UNKNOWN"))
+        if st != "PASS":
+            continue
+        seq = doc.get("attempt_seq")
+        seq_i = int(seq) if isinstance(seq, int) else -1
+        pass_attempts.append((seq_i, aid))
+    if not pass_attempts:
+        return latest
+
+    pass_attempts.sort(key=lambda x: (x[0], x[1]))
+    return pass_attempts[-1][1]
+
+
 # -------------------------
 # Orchestrator attempt mode/account
 # -------------------------
@@ -215,6 +258,33 @@ def _attempt_mode_and_account(truth_root: Path, day: str, attempt_id: Optional[s
         acct = None
 
     return mode, acct, warnings, missing
+
+
+def _attempt_stage_status(doc: Optional[Dict[str, Any]], stage_id: str) -> Optional[str]:
+    if not isinstance(doc, dict):
+        return None
+    stages = doc.get("stages")
+    if not isinstance(stages, list):
+        return None
+    for s in stages:
+        if not isinstance(s, dict):
+            continue
+        if str(s.get("stage_id") or "") != stage_id:
+            continue
+        st = s.get("status")
+        if isinstance(st, str) and st.strip():
+            return st.strip().upper()
+        return None
+    return None
+
+
+def _load_selected_run_verdict_doc(run_tile: Optional[Tile]) -> Optional[Dict[str, Any]]:
+    if run_tile is None or not isinstance(run_tile.artifact_path, str) or not run_tile.artifact_path:
+        return None
+    obj, _err = _safe_read_json(Path(run_tile.artifact_path))
+    if isinstance(obj, dict):
+        return obj
+    return None
 
 
 # -------------------------
@@ -444,11 +514,15 @@ def _parse_replay_tile(truth_root: Path, day: str, attempt_id: Optional[str]) ->
         candidates.extend(sorted([p for p in ddir.iterdir() if p.is_file() and p.suffix == ".json"], key=lambda p: p.name))
 
     # deterministic unique
-    uniq: Dict[str, Path] = {}
+    uniq: List[Path] = []
+    seen = set()
     for p in candidates:
-        if p.exists():
-            uniq[str(p)] = p
-    candidates = [uniq[k] for k in sorted(uniq.keys())]
+        sp = str(p)
+        if not p.exists() or sp in seen:
+            continue
+        seen.add(sp)
+        uniq.append(p)
+    candidates = uniq
 
     for p in candidates:
         obj, err = _safe_read_json(p)
@@ -571,6 +645,28 @@ def _engine_ids_from_engine_linkage(truth_root: Path, day: str) -> Tuple[List[st
     if not out:
         warnings.append("ENGINE_LINKAGE_EMPTY")
     return out, missing, warnings
+
+
+def _engine_ids_from_heartbeat(truth_root: Path, day: str) -> Tuple[List[str], List[str], List[str]]:
+    """
+    Fallback engine list from heartbeat directory names:
+    monitoring_v1/engine_heartbeat_v1/<day>/<ENGINE_ID>/...
+    """
+    missing: List[str] = []
+    warnings: List[str] = []
+    root = (truth_root / "monitoring_v1" / "engine_heartbeat_v1" / day).resolve()
+    if not root.exists() or not root.is_dir():
+        missing.append(str(root))
+        warnings.append("ENGINE_HEARTBEAT_MISSING")
+        return [], missing, warnings
+    out: List[str] = []
+    for p in sorted([x for x in root.iterdir() if x.is_dir()], key=lambda x: x.name):
+        n = p.name.strip()
+        if n:
+            out.append(n)
+    if not out:
+        warnings.append("ENGINE_HEARTBEAT_EMPTY")
+    return sorted(set(out)), missing, warnings
 
 
 # -------------------------
@@ -831,12 +927,13 @@ def build_status_v2(
     attempts, miss_a, sp_a, sm_a, warn_a = discover_attempts(truth_root, day)
     raw_attempt = attempt_id.strip() if isinstance(attempt_id, str) else ""
     if raw_attempt in ("", "attempts", "latest"):
-        sel_attempt = select_latest_attempt(attempts)
+        sel_attempt = select_preferred_attempt(truth_root, day, attempts)
     else:
         sel_attempt = raw_attempt
 
     # Run verdict
     run_tile, miss_rv, sp_rv, sm_rv, warn_rv = _parse_orchestrator_run_verdict_v2(truth_root, day, sel_attempt)
+    run_doc = _load_selected_run_verdict_doc(run_tile)
 
     # Gate stack verdict (optional)
     gate_tile, miss_gs, sp_gs, sm_gs, warn_gs = _parse_gate_stack_verdict_tile(truth_root, day)
@@ -903,6 +1000,13 @@ def build_status_v2(
             if isinstance(br, dict):
                 broker_state = _coerce_state(str(br.get("state") or "UNKNOWN"))
                 broker_last = br.get("generated_at_utc") or br.get("generated_utc") or None
+        # Fallback to selected orchestrator attempt stage status when broker artifact is absent.
+        if broker_state in ("UNKNOWN", "MISSING"):
+            s = _attempt_stage_status(run_doc, "A1_BROKER_RECONCILIATION_GATE_V2_CHECK")
+            if s in ("OK", "SKIP", "PASS"):
+                broker_state = "PASS"
+            elif s in ("FAIL", "ABORTED"):
+                broker_state = "ABORTED"
 
         broker_tile = Tile(
             tile_id="broker_connection_observer",
@@ -929,6 +1033,13 @@ def build_status_v2(
         "filled": int(flow["filled"]) if isinstance(flow.get("filled"), int) else subs_cnt["filled"],
         "reconciled": int(flow["reconciled"]) if isinstance(flow.get("reconciled"), int) else None,
     }
+    # Fallback derivations from orchestrator stage truth when day rollup is missing.
+    auth_stage = _attempt_stage_status(run_doc, "A6B_AUTHORIZATION_ARTIFACTS_DAY_V1")
+    recon_stage = _attempt_stage_status(run_doc, "B2_EXECUTION_RECONCILIATION_V1")
+    if counts["authorized"] is None and auth_stage in ("OK", "SKIP", "PASS"):
+        counts["authorized"] = counts["submitted"] if isinstance(counts["submitted"], int) else None
+    if counts["reconciled"] is None and recon_stage in ("OK", "SKIP", "PASS"):
+        counts["reconciled"] = counts["submitted"] if isinstance(counts["submitted"], int) else None
     blocked_by_gate = {
         "liquidity": flow.get("blocked_liquidity"),
         "correlation": flow.get("blocked_correlation"),
@@ -964,6 +1075,11 @@ def build_status_v2(
         miss_eng.extend(miss_el)
         warn_eng.extend(warn_el)
         eids = eids2
+    if not eids:
+        eids3, miss_hb, warn_hb = _engine_ids_from_heartbeat(truth_root, day)
+        miss_eng.extend(miss_hb)
+        warn_eng.extend(warn_hb)
+        eids = eids3
 
     # Deterministic normalization
     eids = [str(x) for x in eids if isinstance(x, str) and str(x).strip()]
