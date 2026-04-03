@@ -18,6 +18,7 @@ Determinism:
 - Manifest global_hash is stable
 
 No network calls. No overwrites.
+Existing year files may only be extended by strict append of later missing day records.
 """
 
 from __future__ import annotations
@@ -82,6 +83,52 @@ def _write_jsonl_immutable(path: Path, lines: List[str]) -> None:
             f.write(line)
             f.write("\n")
     os.replace(tmp, path)
+
+
+def _load_existing_jsonl_records(path: Path) -> List[dict]:
+    records: List[dict] = []
+    if not path.exists():
+        return records
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            s = line.strip()
+            if not s:
+                continue
+            obj = json.loads(s)
+            if not isinstance(obj, dict):
+                raise SystemExit(f"FAIL: existing year file record not object: {path}")
+            _validate_record_shape(obj)
+            records.append(obj)
+    return records
+
+
+def _append_jsonl_strict(path: Path, existing_records: List[dict], new_records: List[dict]) -> None:
+    if not path.exists():
+        _write_jsonl_immutable(path, [_stable_json_dumps(r) for r in new_records])
+        return
+
+    existing_days = [str(r["day_utc"]) for r in existing_records]
+    if existing_days != sorted(existing_days):
+        raise SystemExit(f"FAIL: existing calendar file not strictly sorted: {path}")
+    if len(existing_days) != len(set(existing_days)):
+        raise SystemExit(f"FAIL: existing calendar file has duplicate day_utc: {path}")
+
+    last_existing = existing_days[-1] if existing_days else None
+    for rec in new_records:
+        day = str(rec["day_utc"])
+        if day in existing_days:
+            raise SystemExit(f"FAIL: duplicate day_utc against existing year file: {day} path={path}")
+        if last_existing is not None and day <= last_existing:
+            raise SystemExit(
+                f"FAIL: append_only_violation existing_last_day={last_existing} candidate_day={day} path={path}"
+            )
+
+    with path.open("a", encoding="utf-8", newline="\n") as f:
+        for rec in new_records:
+            f.write(_stable_json_dumps(rec))
+            f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
 
 
 def _write_manifest(path: Path, manifest: dict) -> None:
@@ -219,8 +266,14 @@ def main() -> int:
     for year, recs in sorted(by_year.items(), key=lambda kv: kv[0]):
         out_rel = f"{spec.exchange}/{year}.jsonl"
         out_path = (SPINE_ROOT / out_rel).resolve()
-        lines = [_stable_json_dumps(r) for r in recs]
-        _write_jsonl_immutable(out_path, lines)
+        existing_records = _load_existing_jsonl_records(out_path)
+        if existing_records:
+            for old in existing_records:
+                if str(old.get("exchange") or "").strip().upper() != spec.exchange:
+                    raise SystemExit(f"FAIL: existing_exchange_mismatch path={out_path}")
+                if str(old.get("dataset_version") or "").strip() != spec.dataset_version:
+                    raise SystemExit(f"FAIL: existing_dataset_version_mismatch path={out_path}")
+        _append_jsonl_strict(out_path, existing_records, recs)
         sha = _sha256_file(out_path)
         new_entries.append({"exchange": spec.exchange, "year": year, "file": out_rel, "sha256": sha})
 
@@ -239,23 +292,28 @@ def main() -> int:
         if manifest.get("dataset_version") != spec.dataset_version:
             raise SystemExit(f"FAIL: manifest.dataset_version={manifest.get('dataset_version')} != --dataset_version={spec.dataset_version}")
 
-    merged_files = list(manifest.get("files", []))
-    merged_files.extend(new_entries)
-
-    # ensure uniqueness
-    seen: set = set()
-    for e in merged_files:
+    merged_map: Dict[Tuple[str, int], dict] = {}
+    for e in manifest.get("files", []):
         key = (e["exchange"], int(e["year"]))
-        if key in seen:
+        if key in merged_map:
             raise SystemExit(f"FAIL: duplicate manifest entry for {key}")
-        seen.add(key)
+        merged_map[key] = dict(e)
+    for e in new_entries:
+        key = (e["exchange"], int(e["year"]))
+        merged_map[key] = dict(e)
 
-    merged_sorted = sorted(merged_files, key=lambda e: (e["exchange"], int(e["year"])))
+    merged_sorted = sorted(merged_map.values(), key=lambda e: (e["exchange"], int(e["year"])))
     exchanges_sorted = sorted({e["exchange"] for e in merged_sorted})
 
-    # derive date range from records (since this ingest is single exchange)
     start_day = records[0]["day_utc"]
     end_day = records[-1]["day_utc"]
+    existing_range = manifest.get("date_range") if isinstance(manifest.get("date_range"), dict) else {}
+    old_start = existing_range.get("start")
+    old_end = existing_range.get("end")
+    if isinstance(old_start, str) and old_start:
+        start_day = min(start_day, old_start)
+    if isinstance(old_end, str) and old_end:
+        end_day = max(end_day, old_end)
 
     out_manifest = {
         "dataset_version": manifest["dataset_version"],
