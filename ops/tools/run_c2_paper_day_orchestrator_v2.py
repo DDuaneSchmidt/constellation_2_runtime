@@ -45,6 +45,11 @@ ENGINE_REGISTRY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/ENGINE_MODEL_REGIS
 
 POINTER_INDEX_NAME = "canonical_pointer_index.v1.jsonl"
 POINTER_LOCK_NAME = ".canonical_pointer_index.v1.lock"
+REFRESHABLE_GATE_STAGE_IDS = {
+    "A5AAA_FEED_ATTESTATION_GATE_V1",
+    "A5B_HEARTBEAT_GATE_V1",
+    "A5C_CORRELATION_ENVELOPE_GATE_V1",
+}
 
 
 def _json_dumps(obj: Any) -> bytes:
@@ -615,6 +620,24 @@ def _read_json_obj(p: Path) -> Dict[str, Any]:
     return o
 
 
+def _should_skip_existing_outputs(sd: "StageDef", outputs_present: List[str]) -> bool:
+    if not outputs_present:
+        return False
+    if sd.stage_id not in REFRESHABLE_GATE_STAGE_IDS:
+        return True
+    if len(outputs_present) != 1:
+        return False
+    path = Path(outputs_present[0]).resolve()
+    if not path.exists() or not path.is_file():
+        return False
+    try:
+        obj = _read_json_obj(path)
+    except Exception:
+        return False
+    status = str(obj.get("status") or "").strip().upper()
+    return status in ("PASS", "OK")
+
+
 def _discover_short_vol_symbols(truth_root: Path, day: str) -> List[str]:
     intents_day = (truth_root / "intents_v1" / "snapshots" / day).resolve()
     if not intents_day.exists() or not intents_day.is_dir():
@@ -1049,6 +1072,43 @@ def _discover_same_day_identity_dirs(truth_root: Path, day: str) -> List[Path]:
     return out
 
 
+def _phasec_veto_only_summary(truth_root: Path, day: str) -> Dict[str, Any]:
+    root = (truth_root / "phaseC_preflight_v1" / day).resolve()
+    if not root.exists() or not root.is_dir():
+        return {
+            "present": False,
+            "identity_dir_count": 0,
+            "veto_count": 0,
+            "allow_count": 0,
+            "detail_codes": [],
+        }
+
+    identity_dirs = _discover_same_day_identity_dirs(truth_root, day)
+    veto_files = sorted(root.glob("*.veto_record.v1.json"))
+    allow_files = sorted(root.glob("*.submit_preflight_decision.v1.json"))
+    detail_codes: List[str] = []
+
+    for veto_path in veto_files:
+        try:
+            obj = _read_json_obj(veto_path)
+        except Exception:
+            continue
+        reason_code = str(obj.get("reason_code") or "").strip()
+        if reason_code:
+            detail_codes.append(f"PHASEC_VETO_REASON_CODE:{reason_code}")
+        reason_detail = str(obj.get("reason_detail") or "").strip()
+        if reason_detail:
+            detail_codes.append(f"PHASEC_VETO_DETAIL:{reason_detail.split(':', 1)[0]}")
+
+    return {
+        "present": True,
+        "identity_dir_count": len(identity_dirs),
+        "veto_count": len(veto_files),
+        "allow_count": len(allow_files),
+        "detail_codes": sorted(set(detail_codes)),
+    }
+
+
 def _is_64hex(s: str) -> bool:
     t = str(s or "").strip().lower()
     return len(t) == 64 and all(c in "0123456789abcdef" for c in t)
@@ -1272,6 +1332,29 @@ def _run_governed_submit_stage(
         return (1, ["GOV_SUBMIT_NO_SUBMISSION_EVIDENCE"])
 
     return (0, [f"GOV_SUBMIT_SUBMISSION_COUNT={sub_count}"])
+
+
+def _governed_abort_reason_codes(*, truth_root: Path, day: str, gov_reason_codes: List[str]) -> List[str]:
+    codes = [str(x).strip() for x in gov_reason_codes if str(x).strip()]
+    if codes != ["GOV_SUBMIT_NO_SAME_DAY_IDENTITY_SET"]:
+        return []
+    summary = _phasec_veto_only_summary(truth_root, day)
+    if not summary.get("present"):
+        return []
+    if int(summary.get("identity_dir_count") or 0) != 0:
+        return []
+    if int(summary.get("allow_count") or 0) != 0:
+        return []
+    veto_count = int(summary.get("veto_count") or 0)
+    if veto_count <= 0:
+        return []
+    out = [
+        "GOVERNED_ABORT_NO_IDENTITY",
+        "PHASEC_VETO_ONLY",
+        f"PHASEC_VETO_COUNT:{veto_count}",
+    ]
+    out.extend(summary.get("detail_codes") or [])
+    return out
 
 
 def _stage_required_for_mode(sd: StageDef, mode: str, has_activity: bool) -> Tuple[bool, bool]:
@@ -2254,6 +2337,7 @@ def main() -> int:
 
     stage_results: List[Dict[str, Any]] = []
     safety_breaches: List[str] = []
+    governed_abort_reasons: List[str] = []
     reason_codes: List[str] = []
 
     any_required_fail = False
@@ -2357,8 +2441,31 @@ def main() -> int:
             attempt_manifest["stages"].append(sr.__dict__)
 
             if not gov_ok:
-                safety_breaches.append(f"{sd.stage_id}_BLOCKING_FAIL")
+                governed_abort_codes = _governed_abort_reason_codes(
+                    truth_root=truth_root,
+                    day=day,
+                    gov_reason_codes=gov_reason_codes,
+                )
+                if governed_abort_codes:
+                    governed_abort_reasons.extend(governed_abort_codes)
+                else:
+                    safety_breaches.append(f"{sd.stage_id}_BLOCKING_FAIL")
             continue
+
+        if sd.stage_id == "A6B_AUTHORIZATION_ARTIFACTS_DAY_V1":
+            if not required:
+                sr = StageResult(
+                    stage_id=sd.stage_id,
+                    classification=classification,
+                    executed=False,
+                    rc=0,
+                    status="SKIP",
+                    reason_codes=["SKIP_NOT_REQUIRED_NO_ACTIVITY"],
+                    outputs_present=[],
+                )
+                stage_results.append(sr.__dict__)
+                attempt_manifest["stages"].append(sr.__dict__)
+                continue
 
         if sd.stage_id == "A6C_OPTIONS_CHAIN_CAPTURE_IB_DAY_V1":
             if not required:
@@ -2576,7 +2683,7 @@ def main() -> int:
                 continue
         else:
             outputs_present = [p for p in sd.skip_if_exists_paths if _path_exists(p)]
-            if outputs_present:
+            if _should_skip_existing_outputs(sd, outputs_present):
                 sr = StageResult(
                     stage_id=sd.stage_id,
                     classification=classification,
@@ -2633,6 +2740,9 @@ def main() -> int:
     if safety_breaches:
         status = "ABORTED"
         reason_codes.append("SAFETY_BREACH")
+    elif governed_abort_reasons:
+        status = "ABORTED"
+        reason_codes.extend(governed_abort_reasons)
     else:
         if session_state == "UNKNOWN_SESSION":
             status = "FAIL"
