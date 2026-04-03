@@ -1,0 +1,13 @@
+[Unit]
+Description=Constellation 2.0 Baseline Readiness (PAPER) (economic truth spine + READY sentinel)
+Wants=network-online.target
+After=network-online.target
+OnFailure=c2-kill-switch-engage.service
+Requires=c2-preopen-preflight.service
+After=c2-preopen-preflight.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/node/constellation_2_runtime
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/bash -lc 'set -euo pipefail; exec /home/node/constellation_2_runtime/ops/run/c2_baseline_readiness_paper_v1.sh'

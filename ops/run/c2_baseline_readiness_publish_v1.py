@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict
 
+from ops.tools.c2_account_resolution_v1 import resolve_single_paper_ib_account_from_sleeve_registry
+
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
@@ -90,8 +92,9 @@ def main() -> int:
     nav_path = Path(str(args.nav_path)).resolve()
     sha = str(args.producer_git_sha).strip()
 
-    if acct != "DUO847203":
-        raise SystemExit(f"FAIL: BASELINE_READY_ACCOUNT_MISMATCH: {acct}")
+    expected_account = resolve_single_paper_ib_account_from_sleeve_registry(REPO_ROOT)
+    if acct != expected_account:
+        raise SystemExit(f"FAIL: BASELINE_READY_ACCOUNT_MISMATCH: expected={expected_account} got={acct}")
 
     if not nav_path.exists():
         raise SystemExit(f"FAIL: NAV_MISSING: {nav_path}")

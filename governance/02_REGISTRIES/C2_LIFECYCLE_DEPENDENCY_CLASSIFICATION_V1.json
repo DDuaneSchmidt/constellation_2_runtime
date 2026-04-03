@@ -1,0 +1,31 @@
+{
+  "schema_id": "C2_LIFECYCLE_DEPENDENCY_CLASSIFICATION",
+  "schema_version": 1,
+  "status": "ACTIVE",
+  "owner": "Constellation_2",
+  "scope": "PAPER_LIFECYCLE_DEPENDENCIES",
+  "mode": "PAPER",
+  "dependencies": [
+    {
+      "dep_id": "position_lifecycle_v2",
+      "classification": "REQUIRED_FOR_READINESS",
+      "producer_tool": "ops/tools/run_position_lifecycle_snapshot_v2.py",
+      "producer_stage_id_v2": null,
+      "legacy_stage_id_v1": "F_POSITION_LIFECYCLE_SNAPSHOT_V2"
+    },
+    {
+      "dep_id": "exit_obligations_v1",
+      "classification": "REQUIRED_FOR_READINESS",
+      "producer_tool": "ops/tools/run_exit_obligations_v1.py",
+      "producer_stage_id_v2": null,
+      "legacy_stage_id_v1": "F_EXIT_OBLIGATIONS_V1"
+    },
+    {
+      "dep_id": "exposure_reconciliation_v2",
+      "classification": "REQUIRED_FOR_READINESS",
+      "producer_tool": "ops/tools/run_exposure_reconciliation_v2.py",
+      "producer_stage_id_v2": null,
+      "legacy_stage_id_v1": "F_EXPOSURE_RECONCILIATION_V2"
+    }
+  ]
+}

@@ -3,17 +3,19 @@ import argparse
 import json
 from pathlib import Path
 
+from ops.tools.c2_account_resolution_v1 import resolve_single_paper_ib_account_from_sleeve_registry
+
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
 def main() -> int:
     ap = argparse.ArgumentParser(prog="c2_check_baseline_ready_v1")
     ap.add_argument("--day_utc", required=True)
-    ap.add_argument("--ib_account", required=True)
+    ap.add_argument("--ib_account", required=False)
     args = ap.parse_args()
 
     day = str(args.day_utc).strip()
-    acct = str(args.ib_account).strip()
+    acct = str(args.ib_account or "").strip() or resolve_single_paper_ib_account_from_sleeve_registry(REPO_ROOT)
 
     p = (TRUTH_ROOT / "readiness_v1" / "baseline_ready" / day / "baseline_ready.v1.json").resolve()
     if not p.exists():

@@ -1,0 +1,70 @@
+{
+  "schema_id": "C2_DIAGNOSTICS_FRESHNESS_POLICY",
+  "schema_version": 1,
+  "status": "ACTIVE",
+  "owner": "Constellation_2",
+  "purpose": "Governed freshness policy for scope-aware diagnostics in PAPER mode.",
+  "authority_model": {
+    "paper_mode_execution_authority": "sleeve_truth",
+    "paper_mode_monitoring_authority": "global_truth"
+  },
+  "surfaces": [
+    {
+      "surface_id": "paper_readiness",
+      "scope": "monitoring_global",
+      "surface_type": "DAY_STREAM",
+      "path": "constellation_2/runtime/truth/monitoring_v1/paper_readiness",
+      "status_field": "status",
+      "freshness_policy": "SAME_DAY_REQUIRED",
+      "violation_status": "DEGRADED"
+    },
+    {
+      "surface_id": "lifecycle_monitor",
+      "scope": "monitoring_global",
+      "surface_type": "DAY_STREAM",
+      "path": "constellation_2/runtime/truth/monitoring_v1/lifecycle_monitor",
+      "status_field": "status",
+      "freshness_policy": "SAME_DAY_REQUIRED",
+      "violation_status": "DEGRADED"
+    },
+    {
+      "surface_id": "capital_authority_allocation",
+      "scope": "monitoring_global",
+      "surface_type": "DAY_STREAM",
+      "path": "constellation_2/runtime/truth/allocation_v1/capital_authority_allocation_v1",
+      "status_field": "status",
+      "freshness_policy": "SAME_DAY_REQUIRED",
+      "violation_status": "DEGRADED"
+    },
+    {
+      "surface_id": "system_snapshot_architecture",
+      "scope": "control_panel_input",
+      "surface_type": "FILE_GENERATED_UTC",
+      "path": "constellation_2/runtime/truth/system_snapshot/constellation_system_snapshot.v1.json",
+      "timestamp_field": "generated_utc",
+      "status_field": "artifact_id",
+      "freshness_policy": "PREVIOUS_DAY_ACCEPTABLE",
+      "violation_status": "DEGRADED"
+    },
+    {
+      "surface_id": "system_snapshot_architecture_index",
+      "scope": "control_panel_input",
+      "surface_type": "FILE_GENERATED_UTC",
+      "path": "constellation_2/runtime/truth/system_snapshot/constellation_ai_architecture_index.v1.json",
+      "timestamp_field": "generated_utc",
+      "status_field": "artifact_id",
+      "freshness_policy": "PREVIOUS_DAY_ACCEPTABLE",
+      "violation_status": "DEGRADED"
+    },
+    {
+      "surface_id": "system_snapshot_capability_manifest",
+      "scope": "control_panel_input",
+      "surface_type": "FILE_GENERATED_UTC",
+      "path": "constellation_2/runtime/truth/system_snapshot/constellation_capability_manifest.v1.json",
+      "timestamp_field": "generated_utc",
+      "status_field": "artifact_id",
+      "freshness_policy": "PREVIOUS_DAY_ACCEPTABLE",
+      "violation_status": "DEGRADED"
+    }
+  ]
+}

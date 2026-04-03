@@ -6,6 +6,7 @@ cd /home/node/constellation_2_runtime
 DAY="$(TZ=America/New_York date +%F)"
 PY="/home/node/constellation_2_runtime/.venv_c2/bin/python"
 SHA="$(/usr/bin/git rev-parse HEAD)"
+IB_ACCOUNT="$("${PY}" -c 'from pathlib import Path; import sys; sys.path.insert(0, "/home/node/constellation_2_runtime"); from ops.tools.c2_account_resolution_v1 import resolve_single_paper_ib_account_from_sleeve_registry; print(resolve_single_paper_ib_account_from_sleeve_registry(Path("/home/node/constellation_2_runtime").resolve()))')"
 
 TRUTH="constellation_2/runtime/truth"
 OP_STMT="constellation_2/operator_inputs/cash_ledger_operator_statements/${DAY}/operator_statement.v1.json"
@@ -19,10 +20,10 @@ CASH_OUT="${TRUTH}/cash_ledger_v1/snapshots/${DAY}/cash_ledger_snapshot.v1.json"
 echo "DAY_UTC=${DAY}"
 echo "PRODUCER_GIT_SHA=${SHA}"
 
-echo "=== STEP: ensure operator statement (DUO847203) ==="
+echo "=== STEP: ensure operator statement (${IB_ACCOUNT}) ==="
 "${PY}" ops/tools/ensure_cash_ledger_operator_statement_v1.py \
   --day_utc "${DAY}" \
-  --ib_account DUO847203 \
+  --ib_account "${IB_ACCOUNT}" \
   --mode SEED_100K \
   --allow_create YES
 test -f "${OP_STMT}"
@@ -71,7 +72,7 @@ ATTEMPT_ID="${DAY}__R$(date -u +%H%M%S)__${SHA:0:7}__${RANDOM}${RANDOM}"
 "${PY}" /home/node/constellation_2_runtime/ops/run/c2_baseline_readiness_publish_v1.py \
   --day_utc "${DAY}" \
   --attempt_id "${ATTEMPT_ID}" \
-  --ib_account DUO847203 \
+  --ib_account "${IB_ACCOUNT}" \
   --nav_path "/home/node/constellation_2_runtime/${NAV_PATH}" \
   --producer_git_sha "${SHA}"
 

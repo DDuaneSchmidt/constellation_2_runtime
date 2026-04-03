@@ -1,0 +1,39 @@
+{
+  "schema_id": "C2_SLEEVE_LIVE_READINESS_POLICY",
+  "schema_version": 1,
+  "status": "ACTIVE",
+  "owner": "Constellation_2",
+  "created_utc": "2026-03-09T00:00:00Z",
+  "scope": "PAPER_TO_LIVE_PROMOTION",
+  "scoring": {
+    "score_threshold_ready": 85,
+    "grade_bands": [
+      {"grade": "A", "min_score": 95},
+      {"grade": "B", "min_score": 85},
+      {"grade": "C", "min_score": 70},
+      {"grade": "D", "min_score": 0}
+    ]
+  },
+  "history": {
+    "lookback_days": 15,
+    "min_pass_days": 5,
+    "count_statuses": ["PASS"]
+  },
+  "hard_gate_requirements": {
+    "gate_stack_status": "PASS",
+    "execution_readiness_status": "PASS"
+  },
+  "freshness_requirements": {
+    "monitoring_health_required": "PASS",
+    "diagnostics_policy_path": "governance/02_REGISTRIES/C2_DIAGNOSTICS_FRESHNESS_POLICY_V1.json"
+  },
+  "safety_control_requirements": {
+    "require_no_safety_breaches": true
+  },
+  "weights": {
+    "history_window": 30,
+    "hard_gates": 30,
+    "freshness_compliance": 20,
+    "safety_control_clear": 20
+  }
+}

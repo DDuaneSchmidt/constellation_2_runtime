@@ -1,0 +1,322 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/readiness/sleeve_live_readiness.v1.schema.json",
+  "title": "C2 Sleeve Live Readiness v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "sleeve_id",
+    "mode",
+    "day_utc",
+    "produced_utc",
+    "readiness_state",
+    "readiness_summary",
+    "promotion_decision_basis",
+    "readiness_score",
+    "readiness_grade",
+    "score_threshold",
+    "promotion_candidate",
+    "promotion_blockers",
+    "root_blockers",
+    "derived_blockers",
+    "aggregate_blocker_summary",
+    "promotion_blockers_detail",
+    "minimum_conditions_summary",
+    "current_vs_required",
+    "smallest_clearance_set",
+    "blocker_dependency_order",
+    "estimated_promotion_gate_sequence",
+    "top_blockers_ordered",
+    "pass_conditions_remaining",
+    "recommended_next_actions",
+    "calibration_support",
+    "promotion_checklist",
+    "policy_ref",
+    "checks",
+    "reason_codes",
+    "evidence_paths",
+    "evidence"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "C2_SLEEVE_LIVE_READINESS_V1"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "sleeve_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["PAPER", "LIVE"]
+    },
+    "day_utc": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "produced_utc": {
+      "type": "string",
+      "minLength": 20
+    },
+    "readiness_state": {
+      "type": "string",
+      "enum": ["READY", "NOT_READY", "UNKNOWN"]
+    },
+    "readiness_summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "promotion_decision_basis": {
+      "type": "string",
+      "minLength": 1
+    },
+    "readiness_score": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "readiness_grade": {
+      "type": "string",
+      "enum": ["A", "B", "C", "D", "UNKNOWN"]
+    },
+    "score_threshold": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "grade_band": {
+      "type": ["string", "null"],
+      "enum": ["A", "B", "C", "D", "UNKNOWN", null]
+    },
+    "promotion_candidate": {
+      "type": "boolean"
+    },
+    "promotion_blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "root_blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "derived_blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "aggregate_blocker_summary": {
+      "type": "object"
+    },
+    "promotion_blockers_detail": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "blocker_code",
+          "blocker_class",
+          "severity",
+          "affected_surface",
+          "exact_evidence_path",
+          "clearance_condition"
+        ],
+        "properties": {
+          "blocker_code": {
+            "type": "string"
+          },
+          "blocker_class": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["INFO", "WARN", "ERROR", "BLOCKING"]
+          },
+          "affected_surface": {
+            "type": "string"
+          },
+          "exact_evidence_path": {
+            "type": ["string", "null"]
+          },
+          "clearance_condition": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "minimum_conditions_summary": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "current_vs_required": {
+      "type": "object"
+    },
+    "smallest_clearance_set": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "blocker_dependency_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "estimated_promotion_gate_sequence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "top_blockers_ordered": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "pass_conditions_remaining": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "recommended_next_actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "calibration_support": {
+      "type": "object"
+    },
+    "promotion_checklist": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "must_be_true",
+        "currently_false",
+        "gating_conditions",
+        "informational_conditions"
+      ],
+      "properties": {
+        "must_be_true": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "currently_false": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "gating_conditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "informational_conditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "policy_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["check_id", "required", "status", "weight", "score_awarded", "details"],
+        "properties": {
+          "check_id": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["PASS", "FAIL", "UNKNOWN"]
+          },
+          "weight": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "score_awarded": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "details": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": ["string", "null"]
+    },
+    "reason_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidence_paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path"],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": ["string", "null"],
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "note": {
+            "type": ["string", "null"]
+          }
+        }
+      }
+    }
+  }
+}
