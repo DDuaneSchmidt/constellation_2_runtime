@@ -579,6 +579,34 @@ def _discover_short_vol_symbols(truth_root: Path, day: str) -> List[str]:
     return sorted(set(out))
 
 
+def _discover_equity_entry_symbols(truth_root: Path, day: str) -> List[str]:
+    intents_day = (truth_root / "intents_v1" / "snapshots" / day).resolve()
+    if not intents_day.exists() or not intents_day.is_dir():
+        return []
+
+    out: List[str] = []
+    for p in sorted(intents_day.iterdir()):
+        if not p.is_file() or not p.name.endswith(".json"):
+            continue
+        try:
+            obj = _read_json_obj(p)
+        except Exception:
+            continue
+        if str(obj.get("exposure_type") or "").strip().upper() != "LONG_EQUITY":
+            continue
+        try:
+            target_pct = Decimal(str(obj.get("target_notional_pct") or "").strip())
+        except (InvalidOperation, ValueError):
+            continue
+        if target_pct <= Decimal("0"):
+            continue
+        underlying = obj.get("underlying") if isinstance(obj.get("underlying"), dict) else {}
+        symbol = str(underlying.get("symbol") or "").strip().upper()
+        if symbol:
+            out.append(symbol)
+    return sorted(set(out))
+
+
 def _options_raw_exists_for_symbol(truth_root: Path, day: str, symbol: str) -> bool:
     root = (truth_root / "options_chain_raw_v1" / day).resolve()
     if not root.exists() or not root.is_dir():
@@ -782,6 +810,58 @@ def _run_options_promotion_stage(*, truth_root: Path, day: str, env: Dict[str, s
             return (True, int(rc), [f"OPTIONS_PROMOTION_FAILED:{symbol}"], outputs)
         reason_codes.append(f"OPTIONS_PROMOTION_OK:{symbol}")
     return (executed, 0, reason_codes or ["SKIP_NO_OPTIONS_PROMOTION_NEEDED"], outputs)
+
+
+def _run_market_data_refresh_stage(*, truth_root: Path, day: str, produced_utc: str, env: Dict[str, str]) -> Tuple[bool, int, List[str], List[str]]:
+    equity_symbols = _discover_equity_entry_symbols(truth_root, day)
+    if not equity_symbols:
+        return (False, 0, ["SKIP_NO_EQUITY_ENTRY_INTENTS"], [])
+
+    outputs: List[str] = []
+    reason_codes: List[str] = []
+    executed = False
+    for symbol in equity_symbols:
+        md_year = str((truth_root / "market_data_snapshot_v1" / symbol.upper() / f"{day[:4]}.jsonl").resolve())
+        outputs.append(md_year)
+        if _market_data_close_for_same_day(truth_root, day, symbol):
+            reason_codes.append(f"SKIP_MARKET_DATA_SAME_DAY_ALREADY_PRESENT:{symbol}")
+            continue
+        executed = True
+        rc = _run_cmd(
+            f"A6E_MARKET_DATA_SNAPSHOT_REFRESH_V1_{symbol}",
+            [
+                "python3",
+                "constellation_2/phaseJ/tools/ib_historical_market_data_snapshot_downloader_v1.py",
+                "--run_utc",
+                produced_utc,
+                "--dataset_version",
+                "v1",
+                "--symbol",
+                symbol,
+                "--start_year",
+                day[:4],
+                "--end_year",
+                day[:4],
+                "--host",
+                str(env.get("C2_IB_HOST") or "127.0.0.1").strip(),
+                "--port",
+                str(env.get("C2_IB_PORT") or "4002").strip(),
+                "--client_id",
+                str(env.get("C2_IB_CLIENT_ID") or "7").strip(),
+                "--sleep_sec",
+                str(env.get("C2_IB_SLEEP_SEC") or "0.1").strip(),
+                "--use_rth",
+                "1",
+            ],
+            env=env,
+        )
+        if rc != 0:
+            return (True, int(rc), [f"MARKET_DATA_REFRESH_FAILED:{symbol}"], outputs)
+        if _market_data_close_for_same_day(truth_root, day, symbol):
+            reason_codes.append(f"MARKET_DATA_SAME_DAY_OK:{symbol}")
+        else:
+            reason_codes.append(f"MARKET_DATA_SAME_DAY_STILL_ABSENT:{symbol}")
+    return (executed, 0, reason_codes or ["SKIP_NO_MARKET_DATA_REFRESH_NEEDED"], outputs)
 
 def _positions_snapshot_v2_skip_safe(truth_root: Path, day: str) -> bool:
     snap_path = (truth_root / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json").resolve()
@@ -1760,6 +1840,15 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
             skip_if_exists_paths=[],
         ),
         StageDef(
+            stage_id="A6E_MARKET_DATA_SNAPSHOT_REFRESH_V1",
+            cmd=["/bin/true"],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=True,
+            blocking=True,
+            skip_if_exists_paths=[],
+        ),
+        StageDef(
             stage_id="A7_PHASEC_IDENTITY_MATERIALIZER_DAY_V1",
             cmd=[
                 "/bin/true",
@@ -2233,6 +2322,41 @@ def main() -> int:
             executed, rc, stage_reason_codes, outputs_present = _run_options_promotion_stage(
                 truth_root=truth_root,
                 day=day,
+                env=stage_env,
+            )
+            sr = StageResult(
+                stage_id=sd.stage_id,
+                classification=classification,
+                executed=executed,
+                rc=int(rc),
+                status=("SKIP" if (not executed and rc == 0) else ("OK" if rc == 0 else "FAIL")),
+                reason_codes=list(stage_reason_codes),
+                outputs_present=outputs_present,
+            )
+            stage_results.append(sr.__dict__)
+            attempt_manifest["stages"].append(sr.__dict__)
+            if rc != 0:
+                safety_breaches.append(f"{sd.stage_id}_BLOCKING_FAIL")
+            continue
+
+        if sd.stage_id == "A6E_MARKET_DATA_SNAPSHOT_REFRESH_V1":
+            if not required:
+                sr = StageResult(
+                    stage_id=sd.stage_id,
+                    classification=classification,
+                    executed=False,
+                    rc=0,
+                    status="SKIP",
+                    reason_codes=["SKIP_NOT_REQUIRED_NO_ACTIVITY"],
+                    outputs_present=[],
+                )
+                stage_results.append(sr.__dict__)
+                attempt_manifest["stages"].append(sr.__dict__)
+                continue
+            executed, rc, stage_reason_codes, outputs_present = _run_market_data_refresh_stage(
+                truth_root=truth_root,
+                day=day,
+                produced_utc=produced_utc,
                 env=stage_env,
             )
             sr = StageResult(

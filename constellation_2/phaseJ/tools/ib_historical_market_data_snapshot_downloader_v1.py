@@ -98,6 +98,74 @@ def _write_manifest(path: Path, manifest: dict) -> None:
     os.replace(tmp, path)
 
 
+def _read_jsonl_records(path: Path) -> List[dict]:
+    out: List[dict] = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            s = line.strip()
+            if not s:
+                continue
+            out.append(json.loads(s))
+    return out
+
+
+def _quarantine_existing_file(path: Path) -> Path:
+    old_sha = _sha256_file(path)
+    qdir = (path.parent / "__quarantine__").resolve()
+    _ensure_dir(qdir)
+    qpath = (qdir / f"{path.name}.INVALID_{old_sha}.json").resolve()
+    os.replace(path, qpath)
+    return qpath
+
+
+def _write_jsonl_append_refresh(path: Path, new_records: List[dict]) -> Tuple[str, int]:
+    if not path.exists():
+        lines = [_stable_json_dumps(r) for r in new_records]
+        _write_jsonl_immutable(path, lines)
+        return ("CREATED", len(new_records))
+
+    existing_records = _read_jsonl_records(path)
+    if not existing_records:
+        raise SystemExit(f"FAIL: existing_market_data_year_file_empty: {path}")
+
+    merged: List[dict] = []
+    existing_by_ts: Dict[str, dict] = {}
+    for rec in existing_records:
+        _validate_market_record(rec)
+        ts = str(rec["timestamp_utc"])
+        if ts in existing_by_ts:
+            raise SystemExit(f"FAIL: duplicate_existing_timestamp file={path} ts={ts}")
+        existing_by_ts[ts] = rec
+        merged.append(rec)
+
+    latest_existing_ts = max(existing_by_ts.keys())
+
+    appended = 0
+    for rec in new_records:
+        _validate_market_record(rec)
+        ts = str(rec["timestamp_utc"])
+        if ts <= latest_existing_ts:
+            continue
+        merged.append(rec)
+        appended += 1
+
+    merged.sort(key=lambda r: (r["timestamp_utc"], _stable_json_dumps(r)))
+    last_ts = None
+    for rec in merged:
+        ts = str(rec["timestamp_utc"])
+        if last_ts is not None and ts <= last_ts:
+            raise SystemExit(f"FAIL: non_increasing_market_data_timestamp_after_merge file={path} ts={ts} prev={last_ts}")
+        last_ts = ts
+
+    if appended == 0:
+        return ("SKIP_IDENTICAL_OR_OLDER", 0)
+
+    _quarantine_existing_file(path)
+    lines = [_stable_json_dumps(r) for r in merged]
+    _write_jsonl_immutable(path, lines)
+    return ("REFRESH_APPEND", appended)
+
+
 def _stable_global_hash(file_entries: List[dict]) -> str:
     items = sorted([(e["symbol"], int(e["year"]), e["sha256"]) for e in file_entries], key=lambda x: (x[0], x[1]))
     payload = "".join([f"{sym}|{year}|{sha}\n" for sym, year, sha in items]).encode("utf-8")
@@ -158,6 +226,25 @@ def _utc_midnight_z_from_bar_date(d) -> str:
         return datetime(y, m, day, 0, 0, 0, tzinfo=timezone.utc).strftime(ISO_Z)
 
     raise SystemExit(f"FAIL: unsupported bar.date format: {d!r}")
+
+
+def _validate_market_record(rec: dict) -> None:
+    req = [
+        "dataset_version",
+        "symbol",
+        "timestamp_utc",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "source_name",
+        "source_hash",
+        "ingested_utc",
+    ]
+    for k in req:
+        if k not in rec:
+            raise SystemExit(f"FAIL: market_data_record_missing_field={k}")
 
 
 @dataclass(frozen=True)
@@ -322,16 +409,6 @@ def main() -> int:
             out_rel = f"{sym}/{year}.jsonl"
             out_path = (spine_root / out_rel).resolve()
 
-            if out_path.exists():
-                # Immutable: do not overwrite. If manifest missing entry, we will add it after sha verify.
-                sha = _sha256_file(out_path)
-                if key not in existing_keys:
-                    new_entries.append({"symbol": sym, "year": int(year), "file": out_rel, "sha256": sha})
-                    print(f"OK: manifest_add_existing_on_disk symbol={sym} year={year} sha256={sha}")
-                else:
-                    print(f"OK: already_present symbol={sym} year={year} (file exists + manifest has entry)")
-                continue
-
             end_dt = datetime(int(year) + 1, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
             end_utc = end_dt.strftime(ISO_Z)
 
@@ -423,13 +500,12 @@ def main() -> int:
                     raise SystemExit(f"FAIL: conflicting_duplicate_bar symbol={sym} year={year} ts={ts}")
                 # exact duplicate: ignore
 
-            lines = [_stable_json_dumps(r) for r in deduped]
             _ensure_dir((spine_root / sym).resolve())
-            _write_jsonl_immutable(out_path, lines)
+            action, appended = _write_jsonl_append_refresh(out_path, deduped)
             sha = _sha256_file(out_path)
 
             new_entries.append({"symbol": sym, "year": int(year), "file": out_rel, "sha256": sha})
-            print(f"OK: wrote symbol={sym} year={year} path={out_path} sha256={sha}")
+            print(f"OK: market_data_year_file action={action} symbol={sym} year={year} appended={appended} path={out_path} sha256={sha}")
 
     try:
         ib.disconnect()
@@ -437,17 +513,13 @@ def main() -> int:
         pass
 
     # Merge manifest entries append-only, fail on duplicates
-    merged_files = list(manifest.get("files", []))
-    merged_files.extend(new_entries)
+    merged_files_map: Dict[Tuple[str, int], dict] = {}
+    for e in manifest.get("files", []):
+        merged_files_map[(e["symbol"], int(e["year"]))] = e
+    for e in new_entries:
+        merged_files_map[(e["symbol"], int(e["year"]))] = e
 
-    seen: set[Tuple[str, int]] = set()
-    for e in merged_files:
-        k = (e["symbol"], int(e["year"]))
-        if k in seen:
-            raise SystemExit(f"FAIL: duplicate_manifest_entry {k}")
-        seen.add(k)
-
-    merged_files_sorted = sorted(merged_files, key=lambda e: (e["symbol"], int(e["year"])))
+    merged_files_sorted = sorted(merged_files_map.values(), key=lambda e: (e["symbol"], int(e["year"])))
     symbols_sorted = sorted({e["symbol"] for e in merged_files_sorted})
 
     # Derive date_range and verify sha for every referenced file

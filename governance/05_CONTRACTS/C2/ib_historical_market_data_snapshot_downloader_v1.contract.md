@@ -68,7 +68,14 @@ and MUST update:
 
 `{TRUTH_ROOT}/market_data_snapshot_v1/dataset_manifest.json`
 
-The tool MUST NOT overwrite any existing truth JSONL file.
+The tool MUST NOT overwrite any existing truth JSONL file in place.
+
+For an existing `<SYMBOL>/<YYYY>.jsonl`, the tool MAY perform a governed same-year refresh only if:
+
+- existing rows remain byte-stable in canonical order
+- newly fetched rows are strictly later missing timestamps or exact timestamp duplicates with identical market fields
+- conflicting rows for an existing timestamp fail closed
+- the prior canonical file is quarantined before the refreshed canonical file is published
 
 ---
 
@@ -144,10 +151,11 @@ If any check fails: exit nonzero with a clear `FAIL:` reason.
 
 ### 4.4 Append-only semantics (no duplicates)
 
-When adding new entries:
+When adding new entries or refreshing an existing `(symbol, year)`:
 - the tool MUST refuse duplicates of `(symbol, year)` in the manifest
 - the tool MUST never delete entries
-- the tool MUST never rewrite existing JSONL year files
+- the tool MUST never rewrite an existing JSONL year file in place
+- if a same-year refresh updates file bytes, the manifest entry for that `(symbol, year)` MUST be updated to the new sha256 after the refreshed canonical file is published
 
 ### 4.5 Timestamp semantics
 
