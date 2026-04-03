@@ -23,6 +23,7 @@ function setView(v) {
   el("viewOperations").classList.toggle("hidden", v !== "operations");
   el("viewEngines").classList.toggle("hidden", v !== "engines");
   el("viewPortfolio").classList.toggle("hidden", v !== "portfolio");
+  el("viewPositions").classList.toggle("hidden", v !== "positions");
   el("viewHistory").classList.toggle("hidden", v !== "history");
   el("viewTechnical").classList.toggle("hidden", v !== "technical");
 
@@ -30,6 +31,7 @@ function setView(v) {
     ["tabOperations", "operations"],
     ["tabEngines", "engines"],
     ["tabPortfolio", "portfolio"],
+    ["tabPositions", "positions"],
     ["tabHistory", "history"],
     ["tabTechnical", "technical"],
   ];
@@ -165,18 +167,19 @@ function renderFunnel(payload) {
   const c = payload?.trade_flow_today?.counts || {};
   const b = payload?.trade_flow_today?.blocked_by_gate || {};
   const s = payload?.trade_flow_today?.semantics || {};
+  const d = payload?.trade_flow_today?.drilldown || {};
 
   const steps = [
-    ["Intents", c.intents],
-    ["Rejected/Vetoed", (c.rejected ?? c.vetoed)],
-    ["Authorized", c.authorized],
-    ["Submitted", c.submitted],
-    ["Filled", c.filled],
-    ["Reconciled", c.reconciled],
+    ["Intents", c.intents, "intents"],
+    ["Rejected/Vetoed", (c.rejected ?? c.vetoed), "rejected_or_vetoed"],
+    ["Authorized", c.authorized, "authorized"],
+    ["Submitted", c.submitted, "submitted"],
+    ["Filled", c.filled, "filled"],
+    ["Reconciled", c.reconciled, "reconciled"],
   ];
 
-  el("funnelRow").innerHTML = steps.map(([k,v]) => `
-    <div class="funnel-step">
+  el("funnelRow").innerHTML = steps.map(([k,v,key]) => `
+    <div class="funnel-step" data-funnel-stage="${key}" style="cursor:pointer;">
       <div class="k">${k}</div>
       <div class="v">${v === null || v === undefined ? "n/a" : v}</div>
     </div>
@@ -195,6 +198,33 @@ function renderFunnel(payload) {
 
   el("funnelExplain").textContent =
     `Intents are candidate trades. Rejected/Vetoed are blocked before submission. Authorized can proceed to broker submission. Filled and Reconciled are downstream execution states.`;
+
+  const drill = el("funnelDrilldown");
+  const renderDrill = (key) => {
+    const z = d?.[key] || {};
+    const paths = z.evidence_paths || [];
+    const pathsHtml = paths.length
+      ? paths.map(p => `<a href="#" class="mono" data-funnel-evidence="${encodeURIComponent(p)}">${p}</a>`).join("<br/>")
+      : "n/a";
+    drill.innerHTML = `
+      <div><b>${key}</b> count=${z.count ?? "n/a"}</div>
+      <div>${z.summary || "No detail."}</div>
+      <div style="margin-top:6px;">evidence:</div>
+      <div>${pathsHtml}</div>
+    `;
+    document.querySelectorAll("[data-funnel-evidence]").forEach(a => {
+      a.onclick = async (ev) => {
+        ev.preventDefault();
+        const p = decodeURIComponent(a.getAttribute("data-funnel-evidence") || "");
+        await openEvidence(`funnel:${key}`, p);
+      };
+    });
+  };
+
+  renderDrill("intents");
+  document.querySelectorAll("[data-funnel-stage]").forEach(x => {
+    x.onclick = () => renderDrill(x.getAttribute("data-funnel-stage") || "intents");
+  });
 }
 
 function renderWhatChanged(payload) {
@@ -378,6 +408,57 @@ function renderTechnical(payload) {
   });
 }
 
+function renderPositions(payload) {
+  const pe = payload?.positions_exposure || {};
+  const sum = pe?.summary || {};
+  const positions = pe?.positions || [];
+  const exp = pe?.exposure_by_engine || [];
+  const src = pe?.sources || {};
+
+  el("positionsAsOf").textContent = pe?.asof_utc ? `asof=${pe.asof_utc}` : "";
+  el("positionsExplain").textContent = "Read-only positions and exposure for the selected day from canonical truth artifacts.";
+
+  const metrics = [
+    ["Positions total", sum.positions_total],
+    ["Open positions", sum.open_positions],
+    ["Net notional USD", sum.portfolio_net_notional_usd],
+    ["Gross notional USD", sum.portfolio_gross_notional_usd],
+    ["Capital at risk (cents)", sum.capital_at_risk_cents],
+    ["Symbols", sum.symbol_count],
+  ];
+  el("positionsSummary").innerHTML = metrics.map(([k,v]) => `
+    <div class="metric"><div class="k">${k}</div><div class="v">${v ?? "n/a"}</div></div>
+  `).join("");
+
+  const posRows = positions.length ? positions.map(p => `
+    <tr>
+      <td class="mono tiny">${p.position_id || "n/a"}</td>
+      <td class="mono tiny">${p.engine_id || "n/a"}</td>
+      <td class="mono tiny">${p.qty ?? "n/a"}</td>
+      <td class="mono tiny">${p.status || "n/a"}</td>
+      <td class="mono tiny">${p.market_exposure_type || "n/a"}</td>
+    </tr>
+  `).join("") : `<tr><td colspan="5" class="mono tiny">No position rows for selected day.</td></tr>`;
+  el("positionsTable").innerHTML = `
+    <table style="width:100%; border-collapse:collapse;">
+      <thead><tr><th style="text-align:left;">Position ID</th><th style="text-align:left;">Engine</th><th style="text-align:left;">Qty</th><th style="text-align:left;">Status</th><th style="text-align:left;">Exposure Type</th></tr></thead>
+      <tbody>${posRows}</tbody>
+    </table>
+    <div class="mono tiny muted" style="margin-top:6px;">positions_source=${src.positions_path || "n/a"}</div>
+  `;
+
+  el("exposureSummary").innerHTML = `
+    <div>portfolio net=${sum.portfolio_net_notional_usd ?? "n/a"} gross=${sum.portfolio_gross_notional_usd ?? "n/a"} capital_at_risk_cents=${sum.capital_at_risk_cents ?? "n/a"}</div>
+    <div class="mono tiny muted">exposure_source=${src.exposure_path || "n/a"}</div>
+  `;
+  el("exposureBars").innerHTML = exp.length ? exp.map(r => `
+    <div style="display:flex;justify-content:space-between;gap:8px;">
+      <span class="mono tiny">${r.engine_id || "n/a"}</span>
+      <span class="mono tiny">net=${r.net_notional_usd ?? "n/a"} gross=${r.gross_notional_usd ?? "n/a"} risk=${r.capital_at_risk_cents ?? "n/a"}</span>
+    </div>
+  `).join("") : `<div class="mono tiny muted">No per-engine exposure rows for selected day.</div>`;
+}
+
 async function openEvidence(title, path) {
   // Raw JSON only via modal (explicit click).
   const q = encodeURIComponent(path);
@@ -458,6 +539,7 @@ async function loadAndRender() {
 
   renderEngines(payload);
   renderPortfolio(payload);
+  renderPositions(payload);
   renderHistory(payload);
   renderTechnical(payload);
 }
@@ -522,6 +604,7 @@ function wire() {
   el("tabOperations").addEventListener("click", () => setView("operations"));
   el("tabEngines").addEventListener("click", () => setView("engines"));
   el("tabPortfolio").addEventListener("click", () => setView("portfolio"));
+  el("tabPositions").addEventListener("click", () => setView("positions"));
   el("tabHistory").addEventListener("click", () => setView("history"));
   el("tabTechnical").addEventListener("click", () => setView("technical"));
 

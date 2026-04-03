@@ -833,6 +833,174 @@ def _extract_portfolio_metrics(nav_doc: Optional[Dict[str, Any]]) -> Dict[str, A
     return out
 
 
+def _load_positions_snapshot(truth_root: Path, day: str) -> Tuple[Optional[Dict[str, Any]], List[str], Optional[str], Optional[str]]:
+    p = (truth_root / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json").resolve()
+    if not p.exists():
+        return None, [str(p)], None, None
+    obj, err = _safe_read_json(p)
+    if not isinstance(obj, dict):
+        return None, [str(p)], str(err), str(p)
+    return obj, [], None, str(p)
+
+
+def _load_exposure_net(truth_root: Path, day: str) -> Tuple[Optional[Dict[str, Any]], List[str], Optional[str], Optional[str]]:
+    p = (truth_root / "risk_v1" / "exposure_net_v1" / day / "exposure_net.v1.json").resolve()
+    if not p.exists():
+        return None, [str(p)], None, None
+    obj, err = _safe_read_json(p)
+    if not isinstance(obj, dict):
+        return None, [str(p)], str(err), str(p)
+    return obj, [], None, str(p)
+
+
+def _extract_positions_exposure(positions_doc: Optional[Dict[str, Any]], exposure_doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {
+        "asof_utc": None,
+        "summary": {
+            "positions_total": 0,
+            "open_positions": 0,
+            "portfolio_net_notional_usd": None,
+            "portfolio_gross_notional_usd": None,
+            "capital_at_risk_cents": None,
+            "symbol_count": None,
+        },
+        "positions": [],
+        "exposure_by_engine": [],
+        "sources": {"positions_path": None, "exposure_path": None},
+    }
+
+    if isinstance(positions_doc, dict):
+        out["asof_utc"] = positions_doc.get("produced_utc") if isinstance(positions_doc.get("produced_utc"), str) else None
+        pos = positions_doc.get("positions") if isinstance(positions_doc.get("positions"), dict) else {}
+        items = pos.get("items") if isinstance(pos.get("items"), list) else []
+        rows: List[Dict[str, Any]] = []
+        open_cnt = 0
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            status = str(it.get("status") or "UNKNOWN")
+            qty = it.get("qty")
+            if status.upper() == "OPEN":
+                open_cnt += 1
+            rows.append(
+                {
+                    "position_id": it.get("position_id"),
+                    "engine_id": it.get("engine_id"),
+                    "qty": qty if isinstance(qty, (int, float)) else None,
+                    "status": status,
+                    "market_exposure_type": it.get("market_exposure_type"),
+                }
+            )
+        out["positions"] = rows
+        out["summary"]["positions_total"] = len(rows)
+        out["summary"]["open_positions"] = open_cnt
+
+    if isinstance(exposure_doc, dict):
+        portfolio = exposure_doc.get("portfolio") if isinstance(exposure_doc.get("portfolio"), dict) else {}
+        out["summary"]["portfolio_net_notional_usd"] = portfolio.get("net_notional_usd")
+        out["summary"]["portfolio_gross_notional_usd"] = portfolio.get("gross_notional_usd")
+        out["summary"]["capital_at_risk_cents"] = portfolio.get("capital_at_risk_cents")
+        out["summary"]["symbol_count"] = portfolio.get("symbol_count")
+
+        per_engine = exposure_doc.get("per_engine") if isinstance(exposure_doc.get("per_engine"), list) else []
+        e_rows: List[Dict[str, Any]] = []
+        for it in per_engine:
+            if not isinstance(it, dict):
+                continue
+            e_rows.append(
+                {
+                    "engine_id": it.get("engine_id"),
+                    "net_notional_usd": it.get("net_notional_usd"),
+                    "gross_notional_usd": it.get("gross_notional_usd"),
+                    "capital_at_risk_cents": it.get("capital_at_risk_cents"),
+                }
+            )
+        e_rows.sort(key=lambda x: str(x.get("engine_id") or ""))
+        out["exposure_by_engine"] = e_rows
+
+    return out
+
+
+def _flow_drilldown(truth_root: Path, day: str, counts: Dict[str, Any]) -> Dict[str, Any]:
+    intents_dir = (truth_root / "intents_v1" / "snapshots" / day).resolve()
+    auth_dir = (truth_root / "engine_activity_v1" / "authorization_v1" / day).resolve()
+    veto_dir = (truth_root / "phaseC_preflight_v1" / day).resolve()
+    sub_dir = (truth_root / "execution_evidence_v1" / "submissions" / day).resolve()
+    recon_path = (truth_root / "reports" / "execution_reconciliation_v1" / day / "execution_reconciliation.v1.json").resolve()
+
+    def top_paths(paths: List[str]) -> List[str]:
+        return sorted(paths)[:20]
+
+    intent_paths = top_paths([str(p) for p in intents_dir.glob("*.json")]) if intents_dir.exists() else []
+    auth_paths = top_paths([str(p) for p in auth_dir.glob("*.authorization.v1.json")]) if auth_dir.exists() else []
+    rejected_paths: List[str] = []
+    authorized_paths: List[str] = []
+    for p in sorted([Path(x) for x in auth_paths], key=lambda x: str(x)):
+        obj, _err = _safe_read_json(p)
+        if not isinstance(obj, dict):
+            continue
+        st = str(obj.get("status") or obj.get("decision") or "").upper()
+        if st == "REJECTED":
+            rejected_paths.append(str(p))
+        elif st == "AUTHORIZED":
+            authorized_paths.append(str(p))
+
+    veto_paths = top_paths([str(p) for p in veto_dir.rglob("*.veto_record.v1.json")]) if veto_dir.exists() else []
+
+    submitted_paths: List[str] = []
+    filled_paths: List[str] = []
+    if sub_dir.exists():
+        for p in sorted(sub_dir.rglob("*.json"), key=lambda x: str(x)):
+            obj, _err = _safe_read_json(p)
+            if not isinstance(obj, dict):
+                continue
+            sid = str(obj.get("schema_id") or "")
+            if "broker_submission_record" in sid:
+                submitted_paths.append(str(p))
+            if "execution_event_record" in sid:
+                st = str(obj.get("status") or "").upper()
+                if "FILL" in st:
+                    filled_paths.append(str(p))
+
+    return {
+        "intents": {
+            "count": counts.get("intents"),
+            "summary": "Intent artifacts emitted for selected day.",
+            "evidence_paths": top_paths(intent_paths),
+        },
+        "rejected_or_vetoed": {
+            "count": counts.get("rejected"),
+            "summary": "Rejected authorizations and/or submit vetoes blocked before broker submission.",
+            "evidence_paths": top_paths(rejected_paths + veto_paths),
+        },
+        "authorized": {
+            "count": counts.get("authorized"),
+            "summary": "Authorization records allowed by capital authority.",
+            "evidence_paths": top_paths(authorized_paths),
+        },
+        "submitted": {
+            "count": counts.get("submitted"),
+            "summary": "Broker submission records written.",
+            "evidence_paths": top_paths(submitted_paths),
+        },
+        "filled": {
+            "count": counts.get("filled"),
+            "summary": "Execution records with fill state.",
+            "evidence_paths": top_paths(filled_paths),
+        },
+        "reconciled": {
+            "count": counts.get("reconciled"),
+            "summary": "Execution reconciliation status for day.",
+            "evidence_paths": [str(recon_path)] if recon_path.exists() else [],
+        },
+        "vetoed": {
+            "count": counts.get("vetoed"),
+            "summary": "PhaseC submit veto records observed for day.",
+            "evidence_paths": top_paths(veto_paths),
+        },
+    }
+
+
 def _count_authorization_rejected(truth_root: Path, day: str) -> Tuple[int, List[str]]:
     root = (truth_root / "engine_activity_v1" / "authorization_v1" / day).resolve()
     if not root.exists() or not root.is_dir():
@@ -1267,6 +1435,13 @@ def build_status_v2(
         portfolio["missing"] = False
     portfolio["nav_path"] = nav_path
 
+    # Positions / Exposure
+    positions_doc, miss_pos, pos_err, pos_path = _load_positions_snapshot(truth_root, day)
+    exposure_doc, miss_exp, exp_err, exp_path = _load_exposure_net(truth_root, day)
+    positions_exposure = _extract_positions_exposure(positions_doc, exposure_doc)
+    positions_exposure["sources"]["positions_path"] = pos_path
+    positions_exposure["sources"]["exposure_path"] = exp_path
+
     # Engine mode/account defaults from attempt manifest
     mode_from_attempt, acct_from_attempt, warn_ma, miss_ma = _attempt_mode_and_account(truth_root, day, sel_attempt)
 
@@ -1384,6 +1559,8 @@ def build_status_v2(
             + miss_sub
             + miss_auth
             + miss_veto
+            + miss_pos
+            + miss_exp
             + miss_nav
             + miss_att
             + miss_liq
@@ -1424,6 +1601,8 @@ def build_status_v2(
             + warn_ma
             + warn_eng
             + warn_sleeves
+            + (["POSITIONS_UNREADABLE"] if pos_err else [])
+            + (["EXPOSURE_UNREADABLE"] if exp_err else [])
             + (["NAV_UNREADABLE"] if nav_err else [])
         )
     )
@@ -1456,9 +1635,11 @@ def build_status_v2(
                 "reconciled": "Execution reconciliation completed for day.",
                 "vetoed": "PhaseC submit veto records observed for day.",
             },
+            "drilldown": _flow_drilldown(truth_root, day, counts),
         },
         "engines": engines_out,
         "portfolio": portfolio,
+        "positions_exposure": positions_exposure,
         "provenance": {
             "warnings": warnings,
             "missing_paths": missing_paths,

@@ -41,6 +41,7 @@
     <button class="tab active" id="tabOperations">Operations</button>
     <button class="tab" id="tabEngines">Engines</button>
     <button class="tab" id="tabPortfolio">Portfolio</button>
+    <button class="tab" id="tabPositions">Positions</button>
     <button class="tab" id="tabHistory">History</button>
     <button class="tab" id="tabTechnical">Advanced</button>
 
@@ -65,6 +66,7 @@
             <div id="funnelExplain" class="mono tiny muted" style="margin-bottom:8px;"></div>
             <div id="funnelRow" class="funnel-row"></div>
             <div id="blockedRow" class="blocked-row"></div>
+            <div id="funnelDrilldown" class="mono tiny muted" style="margin-top:8px;"></div>
           </div>
         </div>
 
@@ -109,6 +111,30 @@
         <div class="card">
           <div class="card-head"><div class="card-title">Exposure / PnL (available truth only)</div></div>
           <div id="chartExposureStub" class="mono small muted">Charts shown only when data is available via canonical truth.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- POSITIONS -->
+    <section id="viewPositions" class="view hidden">
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">Positions & Exposure (Selected Day)</div>
+          <div id="positionsAsOf" class="mono tiny muted"></div>
+        </div>
+        <div id="positionsExplain" class="mono tiny muted" style="margin-bottom:8px;"></div>
+        <div id="positionsSummary" class="metrics-row"></div>
+      </div>
+
+      <div class="grid2" style="margin-top:12px;">
+        <div class="card">
+          <div class="card-head"><div class="card-title">Open Positions</div></div>
+          <div id="positionsTable" class="mono tiny"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="card-title">Exposure by Engine</div></div>
+          <div id="exposureSummary" class="mono tiny muted"></div>
+          <div id="exposureBars" class="mono tiny" style="margin-top:8px;"></div>
         </div>
       </div>
     </section>
