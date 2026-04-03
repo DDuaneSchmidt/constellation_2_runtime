@@ -13,6 +13,16 @@ const state = {
   statusV2: null,
 };
 
+const STANDARD_TRADING_SLEEVE_IDS = [
+  "C2_CROSS_ASSET_TREND",
+  "C2_DEFENSIVE_TAIL",
+  "C2_EVENT_DISLOCATION",
+  "C2_MARKET_NEUTRAL_SPREAD",
+  "C2_MEAN_REVERSION_EQ",
+  "C2_TREND_EQ_PRIMARY",
+  "C2_VOL_INCOME_DEFINED_RISK",
+];
+
 async function api(path) {
   const r = await fetch(path, { cache: "no-store" });
   return await r.json();
@@ -51,9 +61,9 @@ function fmt(v) {
 
 function stateClass(st) {
   const u = String(st || "UNKNOWN").toUpperCase();
-  if (u === "PASS") return "state-pass";
+  if (u === "PASS" || u === "READY" || u === "OK") return "state-pass";
   if (u === "DEGRADED") return "state-degraded";
-  if (u === "FAIL") return "state-fail";
+  if (u === "FAIL" || u === "BLOCKED") return "state-fail";
   if (u === "ABORTED") return "state-aborted";
   if (u === "MISSING") return "state-missing";
   return "state-unknown";
@@ -68,8 +78,21 @@ function modeClass(mode, flattenOnly) {
   return "mode-disabled";
 }
 
+function toneClass(tone) {
+  const t = String(tone || "neutral").toLowerCase();
+  if (t === "positive" || t === "pass" || t === "ready") return "tone-positive";
+  if (t === "warning" || t === "warn" || t === "partial") return "tone-warning";
+  if (t === "negative" || t === "fail" || t === "missing") return "tone-negative";
+  if (t === "info") return "tone-info";
+  return "tone-neutral";
+}
+
 function renderTiles(payload) {
   const tiles = (payload?.ops_health?.tiles || []);
+  const scope = payload?.scope_health || {};
+  const execState = String(scope?.sleeve_execution_health?.status || "UNKNOWN").toUpperCase();
+  const monState = String(scope?.system_monitoring_health?.status || "UNKNOWN").toUpperCase();
+  const overallState = String(scope?.overall?.status || "UNKNOWN").toUpperCase();
   const grid = el("tileGrid");
   grid.innerHTML = "";
 
@@ -86,17 +109,35 @@ function renderTiles(payload) {
   };
 
   tiles.forEach(t => {
-    const st = String(t.state || "UNKNOWN").toUpperCase();
-    const stop = (st === "ABORTED");
+    const rawState = String(t.state || "UNKNOWN").toUpperCase();
+    let st = rawState;
+    let stop = (rawState === "ABORTED");
     const last = t.last_updated_utc || "n/a";
     const rc = (t.reason_codes || []).slice(0,2).join(", ") || "n/a";
     const path = t.artifact_ref?.path;
+    const normalizedAbort = rawState === "ABORTED" && execState === "PASS" &&
+      (t.tile_id === "orchestrator_run_verdict_v2" || t.tile_id === "safety_breach");
 
-    const human = (st === "PASS") ? "COMPLETED — PASS"
-      : (st === "DEGRADED") ? "COMPLETED — DEGRADED"
-      : (st === "FAIL") ? "RUN COMPLETED — FAIL"
-      : (st === "ABORTED") ? "SAFETY BREACH — STOP"
-      : st;
+    let human;
+    let note = "";
+    if (normalizedAbort && t.tile_id === "orchestrator_run_verdict_v2") {
+      st = "DEGRADED";
+      stop = false;
+      human = "GOVERNED ABORT — EXECUTION PASS";
+      note = `raw_verdict=ABORTED - execution=${execState} - monitoring=${monState} - overall=${overallState}`;
+    } else if (normalizedAbort && t.tile_id === "safety_breach") {
+      st = "DEGRADED";
+      stop = false;
+      human = "NO EXECUTION HARD STOP";
+      note = `raw_abort preserved as evidence - normalized execution=${execState}`;
+    } else {
+      human = (st === "PASS") ? "COMPLETED — PASS"
+        : (st === "DEGRADED") ? "COMPLETED — DEGRADED"
+        : (st === "FAIL") ? "RUN COMPLETED — FAIL"
+        : (st === "ABORTED") ? "SAFETY BREACH — STOP"
+        : st;
+    }
+
 
     const open = path ? `<button class="btn btn-mini" data-open="${encodeURIComponent(path)}" data-title="${t.tile_id}">Evidence</button>` : "";
 
@@ -109,6 +150,7 @@ function renderTiles(payload) {
       </div>
       <div class="tile-state ${stateClass(st)}">${human}</div>
       <div class="tile-meta">
+        ${note ? `<div class="mono tiny muted">normalized=${note}</div>` : ""}
         <div class="mono tiny muted">updated=${last}</div>
         <div class="mono tiny muted">reason=${rc}</div>
       </div>
@@ -227,95 +269,383 @@ function renderScopeHealth(payload) {
   `;
 }
 
+function numOrNull(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function formatPointsOutOf100(v) {
+  const n = numOrNull(v);
+  return n === null ? "n/a" : `${n} / 100`;
+}
+
+function formatMetricDisplay(view, fallback, unitHint) {
+  if (view && typeof view.display_value === "string" && view.display_value.trim()) return view.display_value;
+  const n = numOrNull(fallback);
+  if (n === null) return "n/a";
+  if (unitHint === "percent_bp") return `${(n / 100).toFixed(2)}%`;
+  if (unitHint === "rate_x100") return `${(n / 100).toFixed(2)}/day`;
+  return String(n);
+}
+
+function titleizeCheckId(v) {
+  return String(v || "")
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 function renderPlatformReadiness(payload) {
-  const platform = payload?.platform_readiness || {};
-  const bug = payload?.platform_bug_metrics || {};
+  const platform = payload?.platform_readiness && typeof payload.platform_readiness === "object" ? payload.platform_readiness : {};
+  const bug = payload?.platform_bug_metrics && typeof payload.platform_bug_metrics === "object" ? payload.platform_bug_metrics : {};
+  const policy = payload?.platform_readiness_policy && typeof payload.platform_readiness_policy === "object" ? payload.platform_readiness_policy : {};
   const pm = platform?.metric_views || {};
   const bm = bug?.metric_views || {};
-  const scope = payload?.scope_health || {};
-  const mon = scope?.system_monitoring_health || {};
-  const freshness = mon?.freshness || {};
-  const lifecycleSurface = ((freshness?.surface_results || []).find(s => (s?.surface_id || "") === "lifecycle_monitor")) || {};
+  const hasReadinessPayload = platform?.present === true;
+  const hasBugPayload = bug?.present === true;
+  const hasPolicyPayload = policy?.present === true;
 
   const state = String(platform?.platform_readiness_state || "UNKNOWN").toUpperCase();
   const grade = platform?.platform_readiness_grade ?? "n/a";
-  const score = platform?.platform_readiness_score ?? "n/a";
-  const threshold = platform?.score_threshold_ready ?? "n/a";
-  const candidate = (platform?.platform_promotion_candidate === true) ? "YES"
-    : (platform?.platform_promotion_candidate === false) ? "NO"
+  const score = numOrNull(platform?.platform_readiness_score);
+  const threshold = numOrNull(platform?.score_threshold_ready);
+  const candidate = platform?.platform_promotion_candidate === true ? "YES"
+    : platform?.platform_promotion_candidate === false ? "NO"
     : "UNKNOWN";
-  const blockers = (platform?.top_blockers_ordered || []).slice(0, 4).join(", ") || "none";
   const summary = platform?.readiness_summary || "n/a";
   const decision = platform?.promotion_decision_basis || "n/a";
-  const velocityDisplay = pm?.bug_velocity_7d_avg?.display_value
-    || bm?.bug_velocity_7d_avg?.display_value
-    || "UNKNOWN";
-  const recurrenceDisplay = pm?.recurrence_rate?.display_value
-    || bm?.recurrence_rate?.display_value
-    || "UNKNOWN";
-  const stabilityDisplay = pm?.diagnostic_stability_rate?.display_value
-    || bm?.diagnostic_stability_rate?.display_value
-    || "UNKNOWN";
-  const bugSummary = platform?.bug_stability_summary
-    || `events_today=${bug?.new_bug_events_today ?? "n/a"} velocity_7d=${velocityDisplay} recurrence=${recurrenceDisplay} diagnostics_stability=${stabilityDisplay} trend=${bug?.bug_velocity_trend ?? "UNKNOWN"}`;
-  const checklist = platform?.promotion_checklist || {};
-  const checklistFalse = (checklist?.currently_false || []).slice(0, 4).join(" | ") || "none";
-  const rootBlockers = (platform?.root_blockers || []).join(", ") || "none";
-  const derivedBlockers = (platform?.derived_blockers || []).join(", ") || "none";
-  const minimumSummary = (platform?.minimum_conditions_summary || []).join(" | ") || "none";
-  const smallestClearance = (platform?.smallest_clearance_set || []).join(" | ") || "none";
-  const blockerOrder = (platform?.blocker_dependency_order || []).join(" -> ") || "none";
-  const currentVsRequired = platform?.current_vs_required || {};
-  const aggregate = platform?.aggregate_blocker_summary || {};
-  const bugCalc = bug?.calculation_summary || {};
-  const bugUnknown = (bug?.unknown_fields || []).join(", ") || "none";
-  const evidencePaths = [
+  const rootBlockers = Array.isArray(platform?.root_blockers) ? platform.root_blockers : [];
+  const derivedBlockers = Array.isArray(platform?.derived_blockers) ? platform.derived_blockers : [];
+  const contributionRows = Array.isArray(platform?.score_contribution) ? platform.score_contribution : [];
+  const gradeBands = Array.isArray(policy?.grade_bands) ? policy.grade_bands : [];
+  const thresholdPolicy = platform?.policy_values || {};
+  const hardBlockers = thresholdPolicy?.hard_blockers || {};
+  const maxVelocity = numOrNull(hardBlockers?.max_bug_velocity_7d_avg_for_candidate);
+  const maxRecurrence = numOrNull(hardBlockers?.max_recurrence_rate_for_candidate);
+  const producedUtc = platform?.produced_utc || "n/a";
+  const bugProducedUtc = bug?.produced_utc || "n/a";
+  const readinessPath = platform?.path || "n/a";
+  const bugPath = bug?.path || "n/a";
+  const policyPath = policy?.path || thresholdPolicy?.policy_path || "n/a";
+  const scoreDisplay = formatPointsOutOf100(score);
+  const thresholdDisplay = threshold === null ? "n/a" : String(threshold);
+  const velocityValue = numOrNull(bug?.bug_velocity_7d_avg);
+  const recurrenceValue = numOrNull(bug?.recurrence_rate);
+  const stabilityValue = numOrNull(bug?.diagnostic_stability_rate);
+  const newBugsValue = numOrNull(bug?.new_bug_events_today);
+  const velocityDisplay = formatMetricDisplay(pm?.bug_velocity_7d_avg || bm?.bug_velocity_7d_avg, bug?.bug_velocity_7d_avg, "rate_x100");
+  const recurrenceDisplay = formatMetricDisplay(pm?.recurrence_rate || bm?.recurrence_rate, bug?.recurrence_rate, "percent_bp");
+  const stabilityDisplay = formatMetricDisplay(pm?.diagnostic_stability_rate || bm?.diagnostic_stability_rate, bug?.diagnostic_stability_rate, "percent_bp");
+  const newBugsDisplay = formatMetricDisplay(bm?.new_bug_events_today, bug?.new_bug_events_today, null);
+  const bugTrend = String(bug?.bug_velocity_trend || "UNKNOWN");
+  const recurringKeys = Array.isArray(bug?.recurring_bug_events) ? bug.recurring_bug_events : [];
+  const evidencePaths = [...new Set([
     ...(Array.isArray(platform?.evidence_paths) ? platform.evidence_paths : []),
     ...(Array.isArray(bug?.evidence_paths) ? bug.evidence_paths : []),
-  ].filter(Boolean);
-  const path = platform?.path || "n/a";
+  ].filter(Boolean))];
+  const readinessSourceNote = hasReadinessPayload
+    ? (platform?.requested_day_present === true
+      ? `readiness_day=${platform?.resolved_day || payload?.meta?.selected_day || "n/a"}`
+      : platform?.resolved_via_latest_pointer
+        ? `readiness_fallback=${platform?.resolved_day || "latest"}`
+        : "readiness_day=missing")
+    : "readiness=missing";
+  const bugSourceNote = hasBugPayload
+    ? (bug?.requested_day_present === true
+      ? `bug_metrics_day=${bug?.resolved_day || payload?.meta?.selected_day || "n/a"}`
+      : bug?.resolved_via_latest_pointer
+        ? `bug_metrics_fallback=${bug?.resolved_day || "latest"}`
+        : "bug_metrics_day=missing")
+    : "bug_metrics=missing";
+  const note = threshold !== null ? "READY when score >= threshold" : "Threshold rule unavailable";
+  const velocityBand = velocityValue === null
+    ? "Unavailable"
+    : velocityValue < 100
+      ? "Stable"
+      : velocityValue <= 300
+        ? "Watch"
+        : "Unstable";
+  const velocityBandClass = velocityBand === "Stable"
+    ? "tone-positive"
+    : velocityBand === "Watch"
+      ? "tone-warning"
+      : velocityBand === "Unstable"
+        ? "tone-negative"
+        : "tone-neutral";
+  const recentDirection = bugTrend === "WORSENING"
+    ? (velocityBand === "Stable" ? "Slight uptick" : "Higher vs prior window")
+    : bugTrend === "IMPROVING"
+      ? "Lower vs prior window"
+      : bugTrend === "STABLE"
+        ? "Flat vs prior window"
+        : "Current window only";
+  const metricToneClass = (awarded, weight) => {
+    if (awarded === null || weight === null) return "tone-neutral";
+    if (awarded <= 0) return "tone-negative";
+    if (awarded >= weight) return "tone-positive";
+    return "tone-warning";
+  };
+  const formatThresholdMetric = (value, kind) => {
+    if (value === null) return "Missing from payload";
+    if (kind === "rate") return `${(value / 100).toFixed(2)} bugs/day`;
+    if (kind === "percent") return `${(value / 100).toFixed(2)}%`;
+    return String(value);
+  };
+  const gradeClass = `platform-grade-tone-${String(grade || "unknown").toLowerCase().replace(/[^a-z0-9_-]+/g, "-")}`;
+  const candidateClass = candidate === "YES" ? "state-pass" : candidate === "NO" ? "state-fail" : "state-unknown";
 
-  el("platformReadinessMeta").textContent = `artifact=${platform?.present ? "present" : "missing"} • path=${path}`;
+  const gradeLegend = gradeBands.length
+    ? gradeBands.map((band, idx) => {
+        const currentMin = numOrNull(band?.min_score);
+        const priorMin = idx > 0 ? numOrNull(gradeBands[idx - 1]?.min_score) : null;
+        let range = "n/a";
+        if (currentMin !== null && priorMin !== null) range = `${currentMin}-${priorMin - 1}`;
+        else if (currentMin !== null) range = `${currentMin}-100`;
+        const isCurrentBand = String(band?.grade || "").toUpperCase() === String(grade || "").toUpperCase();
+        return `
+          <div class="legend-row ${isCurrentBand ? "is-active" : ""}">
+            <span class="legend-grade">${escapeHtml(band?.grade || "n/a")}</span>
+            <span class="legend-range">${escapeHtml(range)}</span>
+          </div>
+        `;
+      }).join("")
+    : `<div class="mono tiny muted">Grade is sourced from the platform readiness model.</div>`;
+
+  const breakdown = contributionRows.length
+    ? contributionRows.map((row) => {
+        const checkId = String(row?.check_id || "unknown");
+        const weight = numOrNull(row?.weight);
+        const awarded = numOrNull(row?.score_awarded);
+        const checkState = String(row?.status || "UNKNOWN").toUpperCase();
+        return `
+          <div class="breakdown-row">
+            <div class="breakdown-main">
+              <div class="breakdown-title">${escapeHtml(titleizeCheckId(checkId))}</div>
+              <div class="mono tiny muted">${escapeHtml(checkId)}</div>
+              <div class="breakdown-bar-track">
+                <div class="breakdown-bar-fill ${metricToneClass(awarded, weight)}" style="width:${escapeHtml(weight && awarded !== null ? `${Math.max(0, Math.min(100, (awarded / weight) * 100)).toFixed(0)}` : "0")}%"></div>
+              </div>
+            </div>
+            <div class="breakdown-score">
+              <div class="mono breakdown-points ${metricToneClass(awarded, weight)}">${escapeHtml(awarded === null || weight === null ? "n/a" : `${awarded} / ${weight}`)}</div>
+              <div class="tiny breakdown-status ${stateClass(checkState)}">${escapeHtml(checkState)}</div>
+            </div>
+          </div>
+        `;
+      }).join("")
+    : `<div class="mono tiny muted">No score contribution rows found.</div>`;
+
+  const derivedHtml = derivedBlockers.length
+    ? derivedBlockers.map((item) => `<div class="info-pill info-pill-warn">${escapeHtml(item.replaceAll("_", " "))}</div>`).join("")
+    : `<div class="mono tiny muted">No derived warnings.</div>`;
+
+  const recurringHtml = recurringKeys.length
+    ? recurringKeys.map((row) => `
+        <div class="info-row">
+          <span class="mono tiny">${escapeHtml(row?.recurrence_key || "UNKNOWN")}</span>
+          <span class="mono tiny muted">count=${escapeHtml(row?.count ?? "n/a")}</span>
+        </div>
+      `).join("")
+    : `<div class="mono tiny muted">No recurring bug keys in current artifact.</div>`;
+
+  el("platformReadinessMeta").textContent = hasReadinessPayload && hasBugPayload
+    ? `readiness=present • bug_metrics=present • policy=${hasPolicyPayload ? "present" : "partial"} • ${readinessSourceNote} • ${bugSourceNote} • produced=${producedUtc}`
+    : `partial readiness payload • ${readinessSourceNote} • ${bugSourceNote} • produced=${producedUtc}`;
+  el("platformHeroRow").className = "platform-kpi-grid";
   el("platformHeroRow").innerHTML = `
-    <div class="metric">
-      <div class="k">Platform Grade</div>
-      <div class="v platform-grade">${grade}</div>
+    <div class="metric platform-kpi-card platform-kpi-status">
+      <div class="k">Status</div>
+      <div class="v platform-kpi-value ${stateClass(state)}">${state}</div>
+      <div class="platform-kpi-note">Platform readiness state</div>
     </div>
-    <div class="metric">
+    <div class="metric metric-hero platform-kpi-card">
       <div class="k">Platform Score</div>
-      <div class="v">${pm?.platform_readiness_score?.display_value || score} / ${pm?.score_threshold_ready?.display_value || threshold}</div>
+      <div class="v platform-kpi-value platform-score">${scoreDisplay}</div>
+      <div class="platform-kpi-note">${note}</div>
     </div>
-    <div class="metric">
-      <div class="k">Platform State</div>
-      <div class="v ${stateClass(state)}">${state}</div>
+    <div class="metric platform-kpi-card platform-kpi-threshold">
+      <div class="k">Readiness Threshold</div>
+      <div class="v platform-kpi-value">${thresholdDisplay}</div>
+      <div class="platform-kpi-note">Governed policy threshold</div>
     </div>
-    <div class="metric">
+    <div class="metric platform-kpi-card">
+      <div class="k">Platform Grade</div>
+      <div class="v platform-kpi-value platform-grade ${gradeClass}">${grade}</div>
+      <div class="platform-kpi-note">Governed score band</div>
+    </div>
+    <div class="metric platform-kpi-card platform-kpi-candidate">
       <div class="k">Promotion Candidate</div>
-      <div class="v">${candidate}</div>
+      <div class="v platform-kpi-value ${candidateClass}">${candidate}</div>
+      <div class="platform-kpi-note">Current operator recommendation</div>
     </div>
   `;
+  el("platformSummaryRow").className = "platform-summary-stack";
   el("platformSummaryRow").innerHTML = `
-    <div class="mono tiny">readiness_summary=${summary}</div>
-    <div class="mono tiny">bug_stability_summary=${bugSummary}</div>
-    <details class="evidence-details" style="margin-top:8px;">
-      <summary class="mono tiny">Evidence</summary>
-      <div class="mono tiny" style="margin-top:6px;">promotion_decision_basis=${decision}</div>
-      <div class="mono tiny">top_blockers=${blockers}</div>
-      <div class="mono tiny">root_blockers=${rootBlockers}</div>
-      <div class="mono tiny">derived_blockers=${derivedBlockers}</div>
-      <div class="mono tiny">aggregate_blocker_summary=root=${aggregate?.root_blocker_count ?? "n/a"} derived=${aggregate?.derived_blocker_count ?? "n/a"} total=${aggregate?.total_blocker_count ?? "n/a"}</div>
-      <div class="mono tiny">minimum_conditions_summary=${minimumSummary}</div>
-      <div class="mono tiny">current_vs_required=${JSON.stringify(currentVsRequired)}</div>
-      <div class="mono tiny">promotion_checklist.currently_false=${checklistFalse}</div>
-      <div class="mono tiny">smallest_clearance_set=${smallestClearance}</div>
-      <div class="mono tiny">blocker_dependency_order=${blockerOrder}</div>
-      <div class="mono tiny">bug_metrics_display: velocity_7d=${velocityDisplay} recurrence=${recurrenceDisplay} diagnostics_stability=${stabilityDisplay}</div>
-      <div class="mono tiny">bug_metrics_calculation_summary=${JSON.stringify(bugCalc)}</div>
-      <div class="mono tiny">bug_metrics_unknown_fields=${bugUnknown}</div>
-      <div class="mono tiny">monitoring_freshness_status=${freshness?.status ?? "UNKNOWN"} reason_codes=${(freshness?.reason_codes || []).join(", ") || "none"}</div>
-      <div class="mono tiny">lifecycle_monitor_surface_status=${lifecycleSurface?.status ?? "UNKNOWN"} fail_reasons=${(lifecycleSurface?.fail_reasons || []).join(", ") || "none"} checks_failed=${(lifecycleSurface?.source_check_failures || []).join(", ") || "none"}</div>
-      <div class="mono tiny">evidence_paths=${evidencePaths.join(" | ") || "none"}</div>
+    <div class="platform-section-grid">
+      <div class="platform-section section-positive">
+        <div class="section-title">Why Ready</div>
+        <div class="section-body">${escapeHtml(summary)}</div>
+        <div class="section-subnote">${escapeHtml(decision)}</div>
+      </div>
+      <div class="platform-section section-info">
+        <div class="section-title">Grade Scale</div>
+        <div class="legend-grid">${gradeLegend}</div>
+        <div class="section-subnote">source=${escapeHtml(policyPath)}</div>
+      </div>
+    </div>
+    <div class="platform-section-grid">
+      <div class="platform-section section-accent">
+        <div class="section-title">Score Breakdown</div>
+        <div class="breakdown-list">${breakdown}</div>
+        <div class="breakdown-total mono">Total: ${escapeHtml(scoreDisplay)}</div>
+      </div>
+      <div class="platform-section section-info">
+        <div class="section-title">Bug Stability Metrics</div>
+        <div class="bug-metrics-grid">
+          <div class="bug-metric-card">
+            <div class="bug-metric-label">7-day bug velocity</div>
+            <div class="bug-metric-value ${velocityBandClass}">${escapeHtml(velocityDisplay)}</div>
+            <div class="bug-metric-unit">bugs/day</div>
+          </div>
+          <div class="bug-metric-card">
+            <div class="bug-metric-label">Recurrence rate</div>
+            <div class="bug-metric-value ${recurrenceValue !== null && recurrenceValue <= (maxRecurrence ?? recurrenceValue) ? "tone-positive" : "tone-warning"}">${escapeHtml(recurrenceDisplay)}</div>
+            <div class="bug-metric-unit">%</div>
+          </div>
+          <div class="bug-metric-card">
+            <div class="bug-metric-label">Diagnostic stability rate</div>
+            <div class="bug-metric-value ${stabilityValue !== null && stabilityValue >= 5000 ? "tone-warning" : "tone-neutral"}">${escapeHtml(stabilityDisplay)}</div>
+            <div class="bug-metric-unit">%</div>
+          </div>
+          <div class="bug-metric-card">
+            <div class="bug-metric-label">New bugs today</div>
+            <div class="bug-metric-value ${newBugsValue !== null && newBugsValue > 0 ? "tone-warning" : "tone-positive"}">${escapeHtml(newBugsDisplay)}</div>
+            <div class="bug-metric-unit">events</div>
+          </div>
+        </div>
+        <div class="info-row info-row-emphasis">
+          <span>Velocity band</span>
+          <span class="mono ${velocityBandClass}">${escapeHtml(velocityBand)}</span>
+        </div>
+        <div class="info-row">
+          <span>Recent direction</span>
+          <span class="mono">${escapeHtml(recentDirection)}</span>
+        </div>
+      </div>
+    </div>
+    <div class="platform-section-grid">
+      <div class="platform-section section-info">
+        <div class="section-title">Policy Thresholds</div>
+        <div class="info-row"><span>Readiness score threshold</span><span class="mono tone-info">${escapeHtml(thresholdDisplay === "n/a" ? "Missing from payload" : thresholdDisplay)}</span></div>
+        <div class="info-row"><span>Max 7-day bug velocity</span><span class="mono tone-info">${escapeHtml(formatThresholdMetric(maxVelocity, "rate"))}</span></div>
+        <div class="info-row"><span>Max recurrence rate</span><span class="mono tone-info">${escapeHtml(formatThresholdMetric(maxRecurrence, "percent"))}</span></div>
+      </div>
+      <div class="platform-section section-warning">
+        <div class="section-title">Derived Warnings</div>
+        <div class="info-pills">${derivedHtml}</div>
+        <div class="section-subnote">READY can coexist with derived warnings when root blockers are clear.</div>
+      </div>
+    </div>
+    <details class="evidence-details">
+      <summary>Evidence</summary>
+      <div class="evidence-grid">
+        <div class="evidence-item">
+          <div class="evidence-label">Readiness artifact</div>
+          <div class="evidence-value mono">${escapeHtml(readinessPath)}</div>
+        </div>
+        <div class="evidence-item">
+          <div class="evidence-label">Readiness produced UTC</div>
+          <div class="evidence-value mono muted">${escapeHtml(producedUtc)}</div>
+        </div>
+        <div class="evidence-item">
+          <div class="evidence-label">Bug metrics artifact</div>
+          <div class="evidence-value mono">${escapeHtml(bugPath)}</div>
+        </div>
+        <div class="evidence-item">
+          <div class="evidence-label">Bug metrics produced UTC</div>
+          <div class="evidence-value mono muted">${escapeHtml(bugProducedUtc)}</div>
+        </div>
+        <div class="evidence-item">
+          <div class="evidence-label">Artifact Resolution</div>
+          <div class="evidence-value mono">${escapeHtml(readinessSourceNote)}<br>${escapeHtml(bugSourceNote)}</div>
+        </div>
+        <div class="evidence-item">
+          <div class="evidence-label">Root blockers</div>
+          <div class="evidence-value mono">${escapeHtml(rootBlockers.length ? rootBlockers.join(", ") : "none")}</div>
+        </div>
+        <div class="evidence-item">
+          <div class="evidence-label">Derived blockers</div>
+          <div class="evidence-value mono">${escapeHtml(derivedBlockers.length ? derivedBlockers.join(", ") : "none")}</div>
+        </div>
+        <div class="evidence-item">
+          <div class="evidence-label">Policy path</div>
+          <div class="evidence-value mono">${escapeHtml(policyPath)}</div>
+        </div>
+      </div>
+      <div class="evidence-path-list mono tiny">${evidencePaths.map((p) => `<div>${escapeHtml(p)}</div>`).join("") || "<div>none</div>"}</div>
+      <div class="section-title" style="margin-top:8px;">Recurring Bug Keys</div>
+      <div>${recurringHtml}</div>
     </details>
+  `;
+}
+
+function renderSignalActivity(payload) {
+  const host = el("signalActivityCard");
+  if (!host) return;
+  const signal = payload?.signal_activity && typeof payload.signal_activity === "object" ? payload.signal_activity : {};
+  const hb = signal?.engine_heartbeats || {};
+  const intents = signal?.intents || {};
+  const phasec = signal?.phasec_outcomes || {};
+  const submit = signal?.governed_submit || {};
+  const upstream = signal?.upstream_data_status || {};
+  const expected = numOrNull(hb?.expected_count) ?? 0;
+  const present = numOrNull(hb?.present_count) ?? 0;
+  const missingEngines = Array.isArray(hb?.missing_engine_ids) ? hb.missing_engine_ids : [];
+  const intentCount = numOrNull(intents?.count) ?? 0;
+  const vetoCount = numOrNull(phasec?.veto_count) ?? 0;
+  const releasedCount = numOrNull(phasec?.released_identity_dir_count) ?? 0;
+  const upstreamSymbols = Array.isArray(upstream?.symbols) ? upstream.symbols : [];
+
+  host.innerHTML = `
+    <div class="card-head">
+      <div class="card-title">Signal Activity</div>
+      <div class="mono tiny muted">day=${escapeHtml(signal?.day_utc || payload?.meta?.selected_day || "n/a")}</div>
+    </div>
+    <div class="signal-grid">
+      <div class="signal-card">
+        <div class="signal-label">Engine Heartbeats</div>
+        <div class="signal-value ${present >= expected && expected > 0 ? "tone-positive" : present > 0 ? "tone-warning" : "tone-negative"}">${escapeHtml(`${present} / ${expected}`)}</div>
+        <div class="signal-subnote">${missingEngines.length ? `missing=${escapeHtml(missingEngines.join(", "))}` : "all expected engines present"}</div>
+      </div>
+      <div class="signal-card">
+        <div class="signal-label">Intents</div>
+        <div class="signal-value ${intentCount > 0 ? "tone-positive" : "tone-warning"}">${escapeHtml(String(intentCount))}</div>
+        <div class="signal-subnote">${escapeHtml(intents?.label || "No real intents produced")}</div>
+      </div>
+      <div class="signal-card">
+        <div class="signal-label">Phase C Outcomes</div>
+        <div class="signal-value ${toneClass(phasec?.tone)}">${escapeHtml(phasec?.label || "no phaseC outputs")}</div>
+        <div class="signal-subnote">vetoes=${escapeHtml(String(vetoCount))} • released_identities=${escapeHtml(String(releasedCount))}</div>
+      </div>
+      <div class="signal-card">
+        <div class="signal-label">Governed Submit</div>
+        <div class="signal-value ${toneClass(submit?.tone)}">${escapeHtml(submit?.stage_status || "NOT_REACHED")}</div>
+        <div class="signal-subnote">${escapeHtml(submit?.label || "governed submit not reached")}</div>
+      </div>
+      <div class="signal-card signal-card-wide">
+        <div class="signal-label">Upstream Data Status</div>
+        <div class="signal-value ${toneClass(upstream?.tone)}">${escapeHtml(upstream?.label || "upstream data incomplete")}</div>
+        <div class="signal-symbol-grid">
+          ${upstreamSymbols.map((row) => `
+            <div class="signal-symbol-row">
+              <span class="mono">${escapeHtml(row?.symbol || "n/a")}</span>
+              <span class="${toneClass(row?.tone)}">${escapeHtml(row?.same_day_present ? "same-day row present" : "same-day row missing")}</span>
+            </div>
+          `).join("") || `<div class="mono tiny muted">No symbol readiness rows found.</div>`}
+        </div>
+      </div>
+    </div>
   `;
 }
 
@@ -378,11 +708,15 @@ function svgPlatformReadinessHistory(points) {
     ? `<line class="history-threshold-line" x1="${padL}" y1="${scoreToY(threshold)}" x2="${W - padR}" y2="${scoreToY(threshold)}"></line>
        <text class="history-axis-label" x="${W - padR}" y="${scoreToY(threshold) - 6}" text-anchor="end">threshold ${threshold}</text>`
     : "";
+  const areaPath = path
+    ? `${path} L ${indexToX(history.length - 1)} ${H - padB} L ${indexToX(0)} ${H - padB} Z`
+    : "";
 
   return `
     <svg class="history-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Platform readiness score history">
       ${grid}
       ${thresholdSvg}
+      <path class="history-score-area" d="${areaPath}"></path>
       <path class="history-score-line" d="${path}"></path>
       ${circles.join("")}
       ${labels.join("")}
@@ -409,18 +743,40 @@ function renderPlatformReadinessHistory(payload) {
     : "history-change-neutral";
   const comparisonHtml = comparison?.present
     ? `
+      <div class="history-summary-grid">
+        <div class="history-summary-card">
+          <div class="history-summary-label">Canonical Days</div>
+          <div class="history-summary-value">${escapeHtml(String(history.length))}</div>
+          <div class="mono tiny muted">${escapeHtml(dateRange?.start || "n/a")} to ${escapeHtml(dateRange?.end || "n/a")}</div>
+        </div>
+        <div class="history-summary-card">
+          <div class="history-summary-label">Score Change</div>
+          <div class="history-summary-value ${scoreChangeClass}">${escapeHtml(scoreChangeDisplay)}</div>
+          <div class="mono tiny muted">latest vs prior canonical day</div>
+        </div>
+        <div class="history-summary-card">
+          <div class="history-summary-label">Grade Change</div>
+          <div class="history-summary-value">${escapeHtml(comparison?.grade_change?.from || "n/a")} → ${escapeHtml(comparison?.grade_change?.to || "n/a")}</div>
+          <div class="mono tiny muted">governed score bands</div>
+        </div>
+        <div class="history-summary-card">
+          <div class="history-summary-label">State Change</div>
+          <div class="history-summary-value">${escapeHtml(comparison?.state_change?.from || "UNKNOWN")} → ${escapeHtml(comparison?.state_change?.to || "UNKNOWN")}</div>
+          <div class="mono tiny muted">${escapeHtml(comparison?.previous_day || "n/a")} to ${escapeHtml(comparison?.latest_day || "n/a")}</div>
+        </div>
+      </div>
       <div class="history-comparison-grid">
-        <div class="metric">
+        <div class="metric platform-kpi-card">
           <div class="k">Score Change</div>
           <div class="v ${scoreChangeClass}">${escapeHtml(scoreChangeDisplay)}</div>
           <div class="mono tiny muted">vs ${escapeHtml(comparison?.previous_day || "n/a")} → ${escapeHtml(comparison?.latest_day || "n/a")}</div>
         </div>
-        <div class="metric">
+        <div class="metric platform-kpi-card">
           <div class="k">Grade Change</div>
           <div class="v">${escapeHtml(comparison?.grade_change?.from || "n/a")} → ${escapeHtml(comparison?.grade_change?.to || "n/a")}</div>
           <div class="mono tiny muted">adjacent canonical days</div>
         </div>
-        <div class="metric">
+        <div class="metric platform-kpi-card">
           <div class="k">State Change</div>
           <div class="v">${escapeHtml(comparison?.state_change?.from || "UNKNOWN")} → ${escapeHtml(comparison?.state_change?.to || "UNKNOWN")}</div>
           <div class="mono tiny muted">${escapeHtml(comparison?.previous_day || "n/a")} to ${escapeHtml(comparison?.latest_day || "n/a")}</div>
@@ -441,9 +797,10 @@ function renderPlatformReadinessHistory(payload) {
           <td>${escapeHtml(row.grade || "n/a")}</td>
           <td class="${stateClass(row.state)}">${escapeHtml(row.state || "UNKNOWN")}</td>
           <td>${escapeHtml(row.threshold)}</td>
+          <td>${escapeHtml(row.produced_utc || "n/a")}</td>
         </tr>
       `).join("")
-    : `<tr><td colspan="5" class="muted">No canonical platform readiness history artifacts found.</td></tr>`;
+    : `<tr><td colspan="6" class="muted">No canonical platform readiness history artifacts found.</td></tr>`;
 
   host.innerHTML = `
     <div class="history-card">
@@ -463,6 +820,7 @@ function renderPlatformReadinessHistory(payload) {
             <th>Grade</th>
             <th>Status</th>
             <th>Threshold</th>
+            <th>Produced UTC</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -472,41 +830,118 @@ function renderPlatformReadinessHistory(payload) {
 }
 
 function renderSleeveStrip(payload) {
-  const sleeves = (payload?.sleeves || []);
+  const sleeves = [...(payload?.sleeves || [])];
+  const liveReady = payload?.sleeve_live_readiness || {};
   const container = el("sleeveStrip");
-  const withAcct = sleeves.filter(s => s && s.ib_account_id).length;
+  const standardSleeveIds = new Set(STANDARD_TRADING_SLEEVE_IDS);
+  const standardSleeves = STANDARD_TRADING_SLEEVE_IDS
+    .map((sleeveId) => sleeves.find((s) => String(s?.sleeve_id || "").toUpperCase() === sleeveId))
+    .filter(Boolean);
+  const blockerCount = liveReady?.aggregate_blocker_summary?.total_blocker_count;
+  const withAcct = standardSleeves.filter(s => s && s.ib_account_id).length;
+  const unexpectedSleeves = sleeves
+    .map(s => String(s?.sleeve_id || "").toUpperCase())
+    .filter(sleeveId => sleeveId && !standardSleeveIds.has(sleeveId));
   const byAcct = {};
-  sleeves.forEach(s => {
+  standardSleeves.forEach(s => {
     const acct = s?.ib_account_id || "n/a";
     byAcct[acct] = (byAcct[acct] || 0) + 1;
   });
   const split = Object.entries(byAcct).map(([k,v]) => `${k}:${v}`).join(" | ");
+
   container.innerHTML = `
     <div class="card-head">
-      <div class="card-title">Sleeve Mode Strip (PAPER/LIVE per sleeve)</div>
-      <div class="mono tiny muted">rows=${sleeves.length} • rendered=${sleeves.length} • with_account=${withAcct} • ${split || "no_accounts"}</div>
+      <div class="card-title">Sleeve Inventory</div>
+      <div class="mono tiny muted">rows=${standardSleeves.length} • rendered=${standardSleeves.length} • with_account=${withAcct} • ${split || "no_accounts"}</div>
     </div>
-    <div class="strip-row" id="stripRow"></div>
+    <div class="mono tiny muted" style="margin-bottom:6px;">Standard sleeve roster only (7 sleeves). Bond sleeve is shown in its own first-class section.</div>
+    ${unexpectedSleeves.length ? `<div class="mono tiny muted" style="margin-bottom:6px;">Excluded non-trading sleeves: ${unexpectedSleeves.join(", ")}</div>` : ""}
+    <div class="strip-row" id="stripRowStandard"></div>
   `;
-  const row = document.getElementById("stripRow");
-  sleeves.forEach(s => {
+  const rowStandard = document.getElementById("stripRowStandard");
+  const gradeChipClass = (g) => {
+    const u = String(g || "").toUpperCase();
+    if (u === "A") return "grade-chip-a";
+    if (u === "B") return "grade-chip-b";
+    if (u === "C") return "grade-chip-c";
+    if (u === "D") return "grade-chip-d";
+    if (u === "F") return "grade-chip-f";
+    return "grade-chip-unknown";
+  };
+  const statusChipClass = (readyVal) => {
+    if (readyVal === "READY") return "ready-chip-yes";
+    if (readyVal === "NOT READY") return "ready-chip-no";
+    return "ready-chip-unknown";
+  };
+  const scoreToneClass = (g) => {
+    const u = String(g || "").toUpperCase();
+    if (u === "A") return "score-tone-a";
+    if (u === "B") return "score-tone-b";
+    if (u === "C") return "score-tone-c";
+    if (u === "D") return "score-tone-d";
+    if (u === "F") return "score-tone-f";
+    return "score-tone-unknown";
+  };
+  standardSleeves.forEach(s => {
     const mode = s.mode || "UNKNOWN";
     const acct = s.ib_account_id || "n/a";
+    const sleeveReady = (s?.sleeve_live_readiness && typeof s.sleeve_live_readiness === "object")
+      ? s.sleeve_live_readiness
+      : liveReady;
+    const grade = sleeveReady?.readiness_grade ?? sleeveReady?.grade_band ?? "n/a";
+    const score = sleeveReady?.readiness_score ?? "n/a";
+    const threshold = sleeveReady?.score_threshold ?? "n/a";
+    const ready = (sleeveReady?.promotion_candidate === true) ? "READY"
+      : (sleeveReady?.promotion_candidate === false) ? "NOT READY"
+      : "UNKNOWN";
+    const gradeCls = gradeChipClass(grade);
+    const statusCls = statusChipClass(ready);
+    const scoreCls = scoreToneClass(grade);
     const ea = (s.entries_allowed === true) ? "ENTRIES: YES"
       : (s.entries_allowed === false) ? "ENTRIES: NO"
       : "ENTRIES: UNKNOWN";
     const fl = (s.flatten_only === true) ? "FLATTEN_ONLY" : "";
+    const healthStatus = "UNKNOWN";
+    const healthChip = "status-gray";
+    const blockerText = Number.isFinite(Number(blockerCount)) ? String(blockerCount) : "n/a";
     const pill = document.createElement("div");
-    pill.className = "sleeve-pill";
+    pill.className = "sleeve-shell";
     pill.innerHTML = `
-      <span class="mono sleeve-name">${s.sleeve_id}</span>
-      <span class="acct-chip mono">IB ${acct}</span>
-      <span class="mode-chip ${modeClass(mode, s.flatten_only)} mono">${String(mode).toUpperCase()}</span>
-      <span class="entry-chip mono tiny muted">${ea}</span>
-      ${fl ? `<span class="mono tiny muted">${fl}</span>` : ""}
+      <div class="sleeve-shell-head">
+        <span class="mono sleeve-name">${s.sleeve_id}</span>
+        <span class="status-chip ${healthChip}">Health ${healthStatus}</span>
+      </div>
+      <div class="sleeve-readiness-row">
+        <span class="mode-chip ${modeClass(mode, s.flatten_only)} mono">${String(mode).toUpperCase()}</span>
+        <span class="acct-chip mono">IB ${acct}</span>
+        <span class="readiness-chip grade-chip ${gradeCls} mono">Grade ${grade}</span>
+        <span class="mono tiny score-tone ${scoreCls}">Score ${score}/${threshold}</span>
+        <span class="readiness-chip ready-chip ${statusCls} mono">${ready}</span>
+        <span class="status-chip status-blue">Blockers ${blockerText}</span>
+      </div>
+      <div class="sleeve-meta-row">
+        <span class="entry-chip mono tiny muted">${ea}</span>
+        ${fl ? `<span class="mono tiny muted">${fl}</span>` : ""}
+      </div>
+      <details class="sleeve-drill">
+        <summary class="mono tiny">Open drill-down</summary>
+        <div class="mono tiny muted" style="margin-top:6px;">Operational health: ${healthStatus}</div>
+        <div class="mono tiny muted">Readiness / promotion: grade ${grade}, score ${score}/${threshold}, status ${ready}</div>
+        <div class="mono tiny muted">Recent changes: mode=${String(mode).toUpperCase()} entries=${ea}</div>
+      </details>
     `;
-    row.appendChild(pill);
+    rowStandard.appendChild(pill);
   });
+
+  if (!standardSleeves.length) {
+    rowStandard.innerHTML = `<div class="mono tiny muted">No standard sleeves available for selected day.</div>`;
+  }
+
+  const autoOpenBond = new URLSearchParams(window.location.search).get("open_bond") === "1";
+  if (autoOpenBond) {
+    const bondDrill = document.querySelector("#bondSleeveCard details.bond-drill");
+    if (bondDrill) bondDrill.open = true;
+  }
 }
 
 function toCount(v) {
@@ -627,6 +1062,183 @@ function renderFunnel(payload) {
   document.querySelectorAll("[data-funnel-stage]").forEach(x => {
     x.onclick = () => renderDrill(x.getAttribute("data-funnel-stage") || "intents");
   });
+}
+
+function renderBondSleeve(payload) {
+  const card = el("bondSleeveCard");
+  if (!card) return;
+  card.classList.remove("hidden");
+  const b = payload?.bond_sleeve || {};
+  const sum = b?.summary || {};
+  const holdings = b?.operator_holdings || {};
+  const recommendationState = String(b?.recommendation_state_label || "NO_CURRENT_ARTIFACT");
+  const authorityState = String(b?.authority_state_label || "DISPLAY_HEAD_AVAILABLE_ONLY");
+  const holdingsState = String(b?.holdings_state_label || "OPERATOR_HOLDINGS_MISSING");
+  const currentDayReason = String(b?.current_day_unavailable_reason || "CURRENT_DAY_AVAILABLE");
+  const runState = String(b?.run_metadata?.status || "NO_BOND_RUN_METADATA").toUpperCase();
+  const runReasons = (b?.run_metadata?.reason_codes || []).join(", ") || "No reason codes";
+  const selectedDay = b?.selected_day || "n/a";
+  const usedDay = b?.used_day || "n/a";
+  const hasRecommendation = recommendationState === "CURRENT_DAY_RECOMMENDATION_AVAILABLE"
+    || recommendationState === "USING_LAST_AVAILABLE_RECOMMENDATION";
+  const ladder = b?.families?.bond_ladder_recommendation_v1?.artifact || {};
+  const purchase = b?.families?.bond_purchase_recommendation_v1?.artifact || {};
+  const purchaseAction = String(purchase?.action_required || sum?.purchase_action_required || "NO_ACTION").toUpperCase();
+  const purchaseState = String(purchase?.recommendation_state || sum?.purchase_recommendation_state || "NO_RECOMMENDATION");
+  const trade = purchase?.recommended_trade || sum?.recommended_trade || null;
+  const alternatives = Array.isArray(purchase?.candidate_rankings)
+    ? purchase.candidate_rankings
+    : (Array.isArray(sum?.candidate_rankings) ? sum.candidate_rankings : []);
+  const purchaseReasonCodes = Array.isArray(purchase?.reason_codes)
+    ? purchase.reason_codes
+    : (Array.isArray(sum?.purchase_reason_codes) ? sum.purchase_reason_codes : []);
+  const ladderBuckets = (ladder?.maturity_buckets || []).slice(0, 6);
+  const ladderSummary = ladderBuckets.length
+    ? `Ladder buckets loaded: ${ladderBuckets.length} buckets from ${usedDay}.`
+    : "No ladder recommendation available yet.";
+  const ladderRecs = (sum?.top_policy_recommendations || []).slice(0, 3);
+  const statusHeadline = hasRecommendation
+    ? (recommendationState === "USING_LAST_AVAILABLE_RECOMMENDATION"
+      ? "Ladder recommendation available (fallback day)"
+      : "Current-day ladder recommendation available")
+    : "No bond ladder recommendation available";
+  const reasonText = {
+    CURRENT_DAY_AVAILABLE: "Current-day ladder recommendation is available.",
+    NO_CURRENT_ARTIFACT: "No current-day ladder recommendation artifact is available.",
+    BOND_RUN_SKIPPED: "Bond sleeve has not run for the current day.",
+    BOND_RUN_FAILED: "Bond sleeve run failed for the current day.",
+  }[currentDayReason] || `Current-day recommendation unavailable (${currentDayReason}).`;
+  const nextStep = hasRecommendation
+    ? (holdingsState === "OPERATOR_HOLDINGS_MISSING"
+      ? "Record current bond positions in constellation_2/operator_inputs/bond_sleeve/bond_positions_v1.json."
+      : purchaseAction === "BUY"
+        ? "Review the next recommended purchase, execute manually in IB if approved, then record the filled bond in operator holdings."
+        : "Compare holdings maturity mix against the recommended ladder buckets.")
+    : (runState === "SKIP" || runState === "NO_BOND_RUN_METADATA")
+      ? "Run bond sleeve once NAV and allocation artifacts exist for the selected day."
+      : runState === "FAIL"
+        ? "Review bond sleeve failure reason codes, resolve the issue, and rerun for the selected day."
+        : "Run bond sleeve for the selected day.";
+  const reviewNext = [];
+  if (recommendationState === "USING_LAST_AVAILABLE_RECOMMENDATION") {
+    reviewNext.push("Review fallback ladder recommendation and rerun the daily bond sleeve process for the selected day.");
+  }
+  if (holdingsState === "OPERATOR_HOLDINGS_MISSING") {
+    reviewNext.push("Populate governed operator holdings input at constellation_2/operator_inputs/bond_sleeve/bond_positions_v1.json.");
+  }
+  if (hasRecommendation && holdingsState === "OPERATOR_HOLDINGS_LOADED") {
+    if (purchaseAction === "BUY" && trade) {
+      reviewNext.push(`Validate recommended bond ${trade.instrument_id || "N/A"} for rung ${trade.target_rung || "N/A"} and execute manually if approved.`);
+      reviewNext.push("After execution, update bond_positions_v1.json so recommendation status can move to HOLD or next rung.");
+    } else {
+      reviewNext.push("Compare current holdings maturity distribution to the recommended ladder buckets and resolve concentration gaps.");
+    }
+  }
+  if (!reviewNext.length) reviewNext.push("No additional review required right now.");
+  const rows = holdings?.positions || [];
+  const holdingsRows = rows.length
+    ? rows.map((r, idx) => `
+      <tr>
+        <td class="mono tiny">${idx + 1}</td>
+        <td class="mono tiny">${r.instrument_id || "NOT_PROVIDED"}</td>
+        <td class="mono tiny">${r.maturity_date || "NOT_PROVIDED"}</td>
+        <td class="mono tiny">${r.market_value || "NOT_PROVIDED"}</td>
+      </tr>
+    `).join("")
+    : `<tr><td colspan="4" class="mono tiny muted">No bond positions have been recorded yet.</td></tr>`;
+  const traceStates = (b?.state_labels || []).join(" • ") || "none";
+  const ladderStatusText = {
+    CURRENT_DAY_RECOMMENDATION_AVAILABLE: "Current-day ladder available",
+    USING_LAST_AVAILABLE_RECOMMENDATION: "Showing last available ladder",
+    NO_CURRENT_ARTIFACT: "No recommendation available",
+  }[recommendationState] || "No recommendation available";
+  const actionText = {
+    BUY: "BUY",
+    HOLD: "HOLD",
+    NO_ACTION: "NO_ACTION",
+  }[purchaseAction] || "NO_ACTION";
+  const actionChip = purchaseAction === "BUY" ? "status-amber" : "status-blue";
+  const whySelected = Array.isArray(trade?.why_selected) ? trade.why_selected : [];
+  const whyNow = Array.isArray(trade?.why_now) ? trade.why_now : [];
+  const altRows = alternatives.slice(0, 3).map((row) => `
+    <tr>
+      <td class="mono tiny">${row.rank ?? "n/a"}</td>
+      <td class="mono tiny">${row.instrument_id || "NOT_PROVIDED"}</td>
+      <td class="mono tiny">${row.maturity_date || "NOT_PROVIDED"}</td>
+      <td class="mono tiny">${row.yield_to_maturity || "NOT_PROVIDED"}</td>
+      <td class="mono tiny">${row.score_total || "NOT_PROVIDED"}</td>
+    </tr>
+  `).join("");
+  const recommendationBlock = (hasRecommendation && trade && purchaseAction === "BUY")
+    ? `
+      <div class="mono tiny sleeve-drill-section"><strong>Next Recommended Purchase:</strong></div>
+      <div class="mono tiny">Action: ${actionText}</div>
+      <div class="mono tiny">Description: Buy ${trade.instrument_id || "N/A"} for target rung ${trade.target_rung || sum?.purchase_target_rung || "N/A"}.</div>
+      <div class="mono tiny">Target rung: ${trade.target_rung || sum?.purchase_target_rung || "N/A"}</div>
+      <div class="mono tiny">Maturity: ${trade.maturity_date || "N/A"} (${trade.years_to_maturity || "N/A"} years)</div>
+      <div class="mono tiny">Yield: ${trade.yield_to_maturity || "N/A"} • Duration: ${trade.duration || "N/A"}</div>
+      <div class="mono tiny">Face value target: ${trade.face_value_target || "N/A"} • Estimated cost: ${trade.estimated_cost || "N/A"}</div>
+      <div class="mono tiny" style="margin-top:4px;"><strong>Why selected:</strong><br/>${whySelected.length ? whySelected.map(x => `• ${x}`).join("<br/>") : "• Deterministic score leader for the target rung."}</div>
+      <div class="mono tiny" style="margin-top:4px;"><strong>Why now:</strong><br/>${whyNow.length ? whyNow.map(x => `• ${x}`).join("<br/>") : "• Target rung underweight and purchase budget available."}</div>
+      <div class="mono tiny" style="margin-top:6px;"><strong>Top alternatives:</strong></div>
+      <table class="bond-table" style="margin-top:4px;">
+        <thead><tr><th>Rank</th><th>Instrument</th><th>Maturity</th><th>Yield</th><th>Score</th></tr></thead>
+        <tbody>${altRows || `<tr><td colspan="5" class="mono tiny muted">No alternatives available.</td></tr>`}</tbody>
+      </table>
+    `
+    : `
+      <div class="mono tiny sleeve-drill-section"><strong>Next Recommended Purchase:</strong></div>
+      <div class="mono tiny">${purchaseAction === "HOLD" ? "No Action Needed: target rung is currently filled from recorded holdings." : "No Action Needed: no policy-eligible buy candidate is available right now."}</div>
+      <div class="mono tiny muted" style="margin-top:4px;">action=${actionText} • recommendation_state=${purchaseState}</div>
+      <div class="mono tiny muted">reason_codes=${purchaseReasonCodes.join(", ") || "none"}</div>
+    `;
+
+  card.innerHTML = `
+    <div class="card-head">
+      <div class="card-title">Bond Sleeve (Fixed Income)</div>
+      <span class="status-chip ${String(b?.status || "").toUpperCase() === "PASS" ? "status-green" : "status-amber"}">${statusHeadline}</span>
+    </div>
+    <div class="sleeve-readiness-row">
+      <span class="mode-chip mode-paper mono">${String((b?.run_metadata?.truth_root_used || "").includes("/LIVE/") ? "LIVE" : "PAPER")}</span>
+      <span class="status-chip status-blue">Allocation ${sum?.bond_sleeve_allocation_pct ?? "n/a"}%</span>
+      <span class="status-chip status-blue">Duration ${sum?.weighted_duration ?? "n/a"}</span>
+      <span class="status-chip status-blue">Yield ${sum?.weighted_yield ?? "n/a"}</span>
+      <span class="status-chip ${actionChip}">Action ${actionText}</span>
+      <span class="status-chip ${authorityState === "AUTHORITY_HEAD_AVAILABLE" ? "status-green" : "status-amber"}">${authorityState === "AUTHORITY_HEAD_AVAILABLE" ? "Authoritative ladder available" : "Preliminary ladder available"}</span>
+      <span class="status-chip status-blue">Readiness grade n/a</span>
+    </div>
+    <div class="mono tiny muted" style="margin-top:6px;">Ladder status: ${ladderStatusText} • selected day ${selectedDay} • used day ${usedDay}</div>
+    <details class="bond-drill sleeve-drill" style="margin-top:8px;">
+      <summary class="mono tiny">Open bond advisory details</summary>
+      <div class="mono tiny sleeve-drill-section" style="margin-top:6px;"><strong>Status:</strong> ${statusHeadline}</div>
+      <div class="mono tiny sleeve-drill-section"><strong>Reason:</strong> ${reasonText}</div>
+      <div class="mono tiny sleeve-drill-section"><strong>Next Step:</strong> ${nextStep}</div>
+      ${recommendationBlock}
+      <div class="mono tiny sleeve-drill-section"><strong>Ladder summary:</strong> ${ladderSummary}</div>
+      <div class="mono tiny">${ladderRecs.length ? ladderRecs.map(x => `• ${x}`).join("<br/>") : "Review will populate once a ladder recommendation is produced."}</div>
+      <div class="mono tiny sleeve-drill-section"><strong>Current holdings:</strong> ${holdingsState === "OPERATOR_HOLDINGS_MISSING" ? "No bond positions have been recorded yet." : `Rows loaded: ${holdings?.positions_count ?? 0} • market value total: ${holdings?.market_value_total ?? "n/a"}`}</div>
+      <table class="bond-table" style="margin-top:4px;">
+        <thead><tr><th>#</th><th>Instrument</th><th>Maturity</th><th>Market Value</th></tr></thead>
+        <tbody>${holdingsRows}</tbody>
+      </table>
+      <div class="mono tiny sleeve-drill-section"><strong>What to review next:</strong><br/>${reviewNext.map(x => `• ${x}`).join("<br/>")}</div>
+      <details class="evidence-details" style="margin-top:6px;">
+        <summary class="mono tiny">Traceability labels</summary>
+        <div class="mono tiny muted" style="margin-top:6px;">recommendation_state_label=${recommendationState}</div>
+        <div class="mono tiny muted">authority_state_label=${authorityState}</div>
+        <div class="mono tiny muted">holdings_state_label=${holdingsState}</div>
+        <div class="mono tiny muted">current_day_unavailable_reason=${currentDayReason}</div>
+        <div class="mono tiny muted">bond_run_status=${runState}</div>
+        <div class="mono tiny muted">bond_run_reason_codes=${runReasons}</div>
+        <div class="mono tiny muted">state_labels=${traceStates}</div>
+      </details>
+    </details>
+  `;
+  const autoOpenBond = new URLSearchParams(window.location.search).get("open_bond") === "1";
+  if (autoOpenBond) {
+    const bondDrill = card.querySelector("details.bond-drill");
+    if (bondDrill) bondDrill.open = true;
+  }
 }
 
 function renderWhatChanged(payload) {
@@ -990,10 +1602,12 @@ async function loadAndRender() {
 
   renderPlatformReadiness(payload);
   renderPlatformReadinessHistory(payload);
+  renderSignalActivity(payload);
   renderScopeHealth(payload);
   renderTiles(payload);
   renderSleeveStrip(payload);
   renderFunnel(payload);
+  renderBondSleeve(payload);
   renderWhatChanged(payload);
 
   renderEngines(payload);

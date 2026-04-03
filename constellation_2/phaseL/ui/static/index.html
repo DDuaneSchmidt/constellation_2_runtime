@@ -64,6 +64,7 @@
           <div id="platformSummaryRow" class="mono tiny muted" style="margin-top:8px;"></div>
           <div id="platformReadinessHistory" style="margin-top:10px;"></div>
         </div>
+        <div class="card signal-activity-card" id="signalActivityCard"></div>
         <div class="card" id="scopeHealthCard">
           <div class="card-head">
             <div class="card-title">Scope Health</div>
@@ -73,9 +74,11 @@
           <div id="sleeveReadinessRow" class="mono tiny muted" style="margin-top:8px;"></div>
         </div>
         <div class="tile-grid" id="tileGrid"></div>
-
         <div class="ops-row2">
-          <div class="strip card" id="sleeveStrip"></div>
+          <div class="ops-left-col">
+            <div class="strip card" id="sleeveStrip"></div>
+            <div class="card bond-sleeve-card" id="bondSleeveCard"></div>
+          </div>
           <div class="funnel card">
             <div class="card-head">
               <div class="card-title">Trade Flow Funnel (Today)</div>

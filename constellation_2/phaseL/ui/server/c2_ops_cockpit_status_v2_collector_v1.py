@@ -16,6 +16,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -91,8 +92,32 @@ def _top2_reason_codes(x: Any) -> List[str]:
 THIS_FILE = Path(__file__).resolve()
 REPO_ROOT = THIS_FILE.parents[4]
 SLEEVE_POLICY_REGISTRY = (REPO_ROOT / "governance/02_REGISTRIES/C2_CAPITAL_AUTHORITY_POLICY_V1.json").resolve()
+SLEEVE_REGISTRY = (REPO_ROOT / "governance/02_REGISTRIES/C2_SLEEVE_REGISTRY_V1.json").resolve()
 IB_ACCOUNT_REGISTRY = (REPO_ROOT / "governance/02_REGISTRIES/C2_IB_ACCOUNT_REGISTRY_V1.json").resolve()
-RUNTIME_STATE_PATH = (REPO_ROOT / "constellation_2/runtime/truth/system_snapshot/constellation_runtime_state.v1.json").resolve()
+PLATFORM_READINESS_POLICY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/C2_PLATFORM_READINESS_POLICY_V1.json").resolve()
+GLOBAL_RUNTIME_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+RUNTIME_STATE_PATH = (GLOBAL_RUNTIME_TRUTH_ROOT / "system_snapshot/constellation_runtime_state.v1.json").resolve()
+BOND_OPERATOR_INPUT_ROOT = (REPO_ROOT / "constellation_2/operator_inputs/bond_sleeve").resolve()
+BOND_POSITIONS_INPUT_PATH = (BOND_OPERATOR_INPUT_ROOT / "bond_positions_v1.json").resolve()
+BOND_POLICY_INPUT_PATH = (BOND_OPERATOR_INPUT_ROOT / "bond_sleeve_policy_v1.json").resolve()
+BOND_FAMILY_SPECS: List[Tuple[str, str]] = [
+    ("bond_sleeve_policy_snapshot_v1", "bond_sleeve_policy_snapshot.v1.json"),
+    ("bond_ladder_recommendation_v1", "bond_ladder_recommendation.v1.json"),
+    ("bond_duration_report_v1", "bond_duration_report.v1.json"),
+    ("bond_yield_report_v1", "bond_yield_report.v1.json"),
+    ("bond_withdrawal_coverage_report_v1", "bond_withdrawal_coverage_report.v1.json"),
+    ("bond_sleeve_capital_posture_v1", "bond_sleeve_capital_posture.v1.json"),
+    ("bond_purchase_recommendation_v1", "bond_purchase_recommendation.v1.json"),
+]
+STANDARD_TRADING_SLEEVE_IDS = {
+    "C2_CROSS_ASSET_TREND",
+    "C2_DEFENSIVE_TAIL",
+    "C2_EVENT_DISLOCATION",
+    "C2_MARKET_NEUTRAL_SPREAD",
+    "C2_MEAN_REVERSION_EQ",
+    "C2_TREND_EQ_PRIMARY",
+    "C2_VOL_INCOME_DEFINED_RISK",
+}
 
 
 # -------------------------
@@ -136,6 +161,379 @@ def _candidate_replay_roots(truth_root: Path) -> List[Path]:
         (truth_root / "reports" / "replay_integrity_day_v2"),
         (truth_root / "reports" / "replay_integrity_day_v1"),
     ]
+
+
+def _day_dirs(root: Path) -> List[str]:
+    if not root.exists() or not root.is_dir():
+        return []
+    out: List[str] = []
+    for p in root.iterdir():
+        if p.is_dir() and _is_day_str(p.name):
+            out.append(p.name)
+    return sorted(set(out))
+
+
+def _parse_decimal_text(v: Any) -> Optional[Decimal]:
+    if isinstance(v, (int, float)):
+        return Decimal(str(v))
+    if isinstance(v, str) and v.strip():
+        try:
+            return Decimal(v.strip())
+        except InvalidOperation:
+            return None
+    return None
+
+
+def _collect_operator_holdings_view() -> Tuple[Dict[str, Any], List[str], List[str]]:
+    warnings: List[str] = []
+    missing_paths: List[str] = []
+    out: Dict[str, Any] = {
+        "positions_path": str(BOND_POSITIONS_INPUT_PATH),
+        "positions_sha256": _sha256_file(BOND_POSITIONS_INPUT_PATH),
+        "policy_path": str(BOND_POLICY_INPUT_PATH),
+        "policy_sha256": _sha256_file(BOND_POLICY_INPUT_PATH),
+        "positions_count": 0,
+        "market_value_total": None,
+        "positions": [],
+        "present": False,
+    }
+
+    positions_obj, p_err = _safe_read_json(BOND_POSITIONS_INPUT_PATH)
+    if not isinstance(positions_obj, dict):
+        missing_paths.append(str(BOND_POSITIONS_INPUT_PATH))
+        warnings.append(f"BOND_POSITIONS_INPUT_UNREADABLE:{p_err}")
+        return out, sorted(set(warnings)), sorted(set(missing_paths))
+
+    policy_obj, pol_err = _safe_read_json(BOND_POLICY_INPUT_PATH)
+    if not isinstance(policy_obj, dict):
+        missing_paths.append(str(BOND_POLICY_INPUT_PATH))
+        warnings.append(f"BOND_POLICY_INPUT_UNREADABLE:{pol_err}")
+
+    items = positions_obj.get("positions") if isinstance(positions_obj.get("positions"), list) else []
+    rows: List[Dict[str, Any]] = []
+    total_mv = Decimal("0")
+    for idx, raw in enumerate(items):
+        if not isinstance(raw, dict):
+            warnings.append(f"BOND_POSITION_ROW_INVALID:{idx}")
+            continue
+        mv = _parse_decimal_text(raw.get("market_value"))
+        if mv is None:
+            warnings.append(f"BOND_POSITION_MARKET_VALUE_INVALID:{idx}")
+            continue
+        total_mv += mv
+        rows.append(
+            {
+                "instrument_id": raw.get("instrument_id"),
+                "maturity_date": raw.get("maturity_date"),
+                "issuer_type": raw.get("issuer_type"),
+                "credit_type": raw.get("credit_type"),
+                "market_value": str(mv),
+                "yield_to_maturity": raw.get("yield_to_maturity"),
+                "duration": raw.get("duration"),
+            }
+        )
+    rows.sort(key=lambda x: str(x.get("instrument_id") or ""))
+
+    out["positions_count"] = len(rows)
+    out["positions"] = rows
+    out["present"] = len(rows) > 0
+    if rows:
+        out["market_value_total"] = str(total_mv)
+
+    return out, sorted(set(warnings)), sorted(set(missing_paths))
+
+
+def _read_bond_family_head(*, day_utc: str, family: str, artifact_name: str) -> Tuple[Dict[str, Any], List[str], List[str], List[str], Dict[str, float]]:
+    warnings: List[str] = []
+    missing_paths: List[str] = []
+    source_paths: List[str] = []
+    source_mtimes: Dict[str, float] = {}
+
+    day_root = (GLOBAL_RUNTIME_TRUTH_ROOT / "reports" / family / day_utc).resolve()
+    display_path = (day_root / "display_head_pointer.v1.json").resolve()
+    authority_path = (day_root / "authority_head_pointer.v1.json").resolve()
+    pointer_index_path = (day_root / "canonical_pointer_index.v1.jsonl").resolve()
+
+    out: Dict[str, Any] = {
+        "family": family,
+        "artifact_name": artifact_name,
+        "day_utc": day_utc,
+        "day_root": str(day_root),
+        "display_head_path": str(display_path),
+        "authority_head_path": str(authority_path),
+        "pointer_index_path": str(pointer_index_path),
+        "present": False,
+        "status": "MISSING",
+        "state_label": "NO_CURRENT_ARTIFACT",
+        "head_mode_label": "NO_CURRENT_ARTIFACT",
+        "points_to": None,
+        "points_to_sha256": None,
+        "produced_utc": None,
+        "artifact": None,
+    }
+
+    if not pointer_index_path.exists():
+        missing_paths.append(str(pointer_index_path))
+    else:
+        source_paths.append(str(pointer_index_path))
+        mt = _mtime(pointer_index_path)
+        if mt is not None:
+            source_mtimes[str(pointer_index_path)] = mt
+
+    if authority_path.exists():
+        source_paths.append(str(authority_path))
+        mt = _mtime(authority_path)
+        if mt is not None:
+            source_mtimes[str(authority_path)] = mt
+
+    if not display_path.exists():
+        missing_paths.append(str(display_path))
+        out["state_label"] = "NO_CURRENT_ARTIFACT"
+        out["head_mode_label"] = "NO_CURRENT_ARTIFACT"
+        return out, sorted(set(warnings)), sorted(set(missing_paths)), sorted(set(source_paths)), source_mtimes
+
+    source_paths.append(str(display_path))
+    mt = _mtime(display_path)
+    if mt is not None:
+        source_mtimes[str(display_path)] = mt
+
+    head_obj, head_err = _safe_read_json(display_path)
+    if not isinstance(head_obj, dict):
+        warnings.append(f"BOND_DISPLAY_HEAD_UNREADABLE:{family}:{head_err}")
+        out["state_label"] = "NO_CURRENT_ARTIFACT"
+        out["head_mode_label"] = "NO_CURRENT_ARTIFACT"
+        return out, sorted(set(warnings)), sorted(set(missing_paths)), sorted(set(source_paths)), source_mtimes
+
+    points_to = head_obj.get("points_to")
+    out["status"] = _coerce_state(str(head_obj.get("status") or "UNKNOWN"))
+    out["points_to"] = points_to if isinstance(points_to, str) and points_to.strip() else None
+    out["points_to_sha256"] = head_obj.get("points_to_sha256") if isinstance(head_obj.get("points_to_sha256"), str) else None
+    out["produced_utc"] = head_obj.get("produced_utc") if isinstance(head_obj.get("produced_utc"), str) else None
+
+    authority_exists = authority_path.exists()
+    out["head_mode_label"] = "DISPLAY_HEAD_AVAILABLE_ONLY" if not authority_exists else "AUTHORITY_HEAD_AVAILABLE"
+    if not authority_exists:
+        warnings.append(f"AUTHORITY_HEAD_MISSING:{family}")
+
+    if not isinstance(points_to, str) or not points_to.strip():
+        warnings.append(f"BOND_DISPLAY_HEAD_POINTS_TO_MISSING:{family}")
+        out["state_label"] = "NO_CURRENT_ARTIFACT"
+        return out, sorted(set(warnings)), sorted(set(missing_paths)), sorted(set(source_paths)), source_mtimes
+
+    artifact_path = Path(points_to).resolve()
+    if not artifact_path.exists():
+        missing_paths.append(str(artifact_path))
+        warnings.append(f"BOND_ARTIFACT_MISSING:{family}")
+        out["state_label"] = "NO_CURRENT_ARTIFACT"
+        return out, sorted(set(warnings)), sorted(set(missing_paths)), sorted(set(source_paths)), source_mtimes
+
+    source_paths.append(str(artifact_path))
+    mt = _mtime(artifact_path)
+    if mt is not None:
+        source_mtimes[str(artifact_path)] = mt
+
+    artifact_obj, art_err = _safe_read_json(artifact_path)
+    if not isinstance(artifact_obj, dict):
+        warnings.append(f"BOND_ARTIFACT_UNREADABLE:{family}:{art_err}")
+        out["state_label"] = "NO_CURRENT_ARTIFACT"
+        return out, sorted(set(warnings)), sorted(set(missing_paths)), sorted(set(source_paths)), source_mtimes
+
+    out["present"] = True
+    out["state_label"] = "DISPLAY_HEAD_AVAILABLE_ONLY" if not authority_exists else "AUTHORITY_HEAD_AVAILABLE"
+    out["artifact"] = artifact_obj
+    return out, sorted(set(warnings)), sorted(set(missing_paths)), sorted(set(source_paths)), source_mtimes
+
+
+def _collect_bond_sleeve_view(selected_day: str) -> Tuple[Dict[str, Any], List[str], List[str], List[str], Dict[str, float]]:
+    warnings: List[str] = []
+    missing_paths: List[str] = []
+    source_paths: List[str] = []
+    source_mtimes: Dict[str, float] = {}
+
+    operator_holdings, warn_holdings, miss_holdings = _collect_operator_holdings_view()
+    warnings.extend(warn_holdings)
+    missing_paths.extend(miss_holdings)
+    source_paths.extend([str(BOND_POSITIONS_INPUT_PATH), str(BOND_POLICY_INPUT_PATH)])
+    for p in [BOND_POSITIONS_INPUT_PATH, BOND_POLICY_INPUT_PATH]:
+        mt = _mtime(p)
+        if mt is not None:
+            source_mtimes[str(p)] = mt
+
+    rollup_path = (GLOBAL_RUNTIME_TRUTH_ROOT / "reports" / "sleeve_rollup_v1" / selected_day / "sleeve_rollup.v1.json").resolve()
+    run_metadata: Dict[str, Any] = {
+        "day_utc": selected_day,
+        "rollup_path": str(rollup_path),
+        "present": False,
+        "status": "UNKNOWN",
+        "reason_codes": [],
+        "truth_root_used": None,
+        "runner": None,
+        "rc": None,
+    }
+    if not rollup_path.exists():
+        missing_paths.append(str(rollup_path))
+        warnings.append("BOND_ROLLUP_MISSING")
+    else:
+        source_paths.append(str(rollup_path))
+        mt = _mtime(rollup_path)
+        if mt is not None:
+            source_mtimes[str(rollup_path)] = mt
+        rollup_obj, roll_err = _safe_read_json(rollup_path)
+        if not isinstance(rollup_obj, dict):
+            warnings.append(f"BOND_ROLLUP_UNREADABLE:{roll_err}")
+        else:
+            bond_run = rollup_obj.get("bond_sleeve_run")
+            if not isinstance(bond_run, dict):
+                warnings.append("BOND_ROLLUP_BOND_RUN_MISSING")
+            else:
+                run_metadata["present"] = True
+                run_metadata["status"] = str(bond_run.get("status") or "UNKNOWN").upper()
+                run_metadata["reason_codes"] = [str(x) for x in (bond_run.get("reason_codes") or []) if isinstance(x, str)]
+                run_metadata["truth_root_used"] = (
+                    str(bond_run.get("truth_root_used"))
+                    if isinstance(bond_run.get("truth_root_used"), str)
+                    else None
+                )
+                run_metadata["runner"] = str(bond_run.get("runner")) if isinstance(bond_run.get("runner"), str) else None
+                run_metadata["rc"] = int(bond_run.get("rc")) if isinstance(bond_run.get("rc"), int) else None
+
+    selected_has_any = False
+    for family, _artifact in BOND_FAMILY_SPECS:
+        d = (GLOBAL_RUNTIME_TRUTH_ROOT / "reports" / family / selected_day).resolve()
+        if d.exists() and d.is_dir():
+            selected_has_any = True
+            break
+
+    used_day = selected_day
+    last_available_day: Optional[str] = None
+    current_day_unavailable_reason = "CURRENT_DAY_AVAILABLE"
+    if not selected_has_any:
+        latest_days: List[str] = []
+        for family, _artifact in BOND_FAMILY_SPECS:
+            latest_days.extend(_day_dirs((GLOBAL_RUNTIME_TRUTH_ROOT / "reports" / family).resolve()))
+        if latest_days:
+            last_available_day = sorted(set(latest_days))[-1]
+            used_day = last_available_day
+            warnings.append("BOND_USING_LATEST_AVAILABLE_DAY")
+            if run_metadata.get("present") is True:
+                run_status = str(run_metadata.get("status") or "UNKNOWN").upper()
+                if run_status == "SKIP":
+                    current_day_unavailable_reason = "BOND_RUN_SKIPPED"
+                elif run_status == "FAIL":
+                    current_day_unavailable_reason = "BOND_RUN_FAILED"
+                else:
+                    current_day_unavailable_reason = "NO_CURRENT_ARTIFACT"
+            else:
+                current_day_unavailable_reason = "NO_CURRENT_ARTIFACT"
+        else:
+            warnings.append("BOND_REPORTS_NOT_FOUND")
+            current_day_unavailable_reason = "NO_CURRENT_ARTIFACT"
+    else:
+        last_available_day = selected_day
+
+    families_out: Dict[str, Any] = {}
+    merged_artifacts: Dict[str, Any] = {}
+    for family, artifact_name in BOND_FAMILY_SPECS:
+        fam_obj, warn_f, miss_f, sp_f, sm_f = _read_bond_family_head(
+            day_utc=used_day,
+            family=family,
+            artifact_name=artifact_name,
+        )
+        families_out[family] = fam_obj
+        warnings.extend(warn_f)
+        missing_paths.extend(miss_f)
+        source_paths.extend(sp_f)
+        source_mtimes.update(sm_f)
+        art = fam_obj.get("artifact")
+        if isinstance(art, dict):
+            merged_artifacts[family] = art
+
+    policy = merged_artifacts.get("bond_sleeve_policy_snapshot_v1", {})
+    ladder = merged_artifacts.get("bond_ladder_recommendation_v1", {})
+    duration = merged_artifacts.get("bond_duration_report_v1", {})
+    yld = merged_artifacts.get("bond_yield_report_v1", {})
+    withdrawal = merged_artifacts.get("bond_withdrawal_coverage_report_v1", {})
+    posture = merged_artifacts.get("bond_sleeve_capital_posture_v1", {})
+    purchase = merged_artifacts.get("bond_purchase_recommendation_v1", {})
+
+    summary = {
+        "bond_sleeve_allocation_pct": policy.get("bond_sleeve_allocation_pct"),
+        "bond_sleeve_target_pct": policy.get("bond_sleeve_target_pct"),
+        "bond_sleeve_capital": posture.get("bond_sleeve_capital"),
+        "trading_sleeve_allocation_pct": posture.get("trading_sleeve_allocation_pct"),
+        "gap_to_target_pct": posture.get("gap_to_target_pct"),
+        "weighted_duration": duration.get("weighted_duration"),
+        "weighted_yield": yld.get("weighted_yield"),
+        "treasury_pct": yld.get("treasury_pct"),
+        "credit_pct": yld.get("credit_pct"),
+        "years_of_withdrawal_coverage": withdrawal.get("years_of_withdrawal_coverage"),
+        "coverage_shortfall_amount": withdrawal.get("coverage_shortfall_amount"),
+        "first_uncovered_year": withdrawal.get("first_uncovered_year"),
+        "rollover_concentration_max_pct": ladder.get("rollover_concentration_max_pct"),
+        "top_policy_recommendations": ladder.get("top_policy_recommendations") if isinstance(ladder.get("top_policy_recommendations"), list) else [],
+        "warnings": policy.get("warnings") if isinstance(policy.get("warnings"), list) else [],
+        "purchase_action_required": purchase.get("action_required"),
+        "purchase_recommendation_state": purchase.get("recommendation_state"),
+        "purchase_target_rung": purchase.get("target_rung"),
+        "purchase_reason_codes": purchase.get("reason_codes") if isinstance(purchase.get("reason_codes"), list) else [],
+        "recommended_trade": purchase.get("recommended_trade") if isinstance(purchase.get("recommended_trade"), dict) else None,
+        "candidate_rankings": purchase.get("candidate_rankings") if isinstance(purchase.get("candidate_rankings"), list) else [],
+        "purchase_warnings": purchase.get("warnings") if isinstance(purchase.get("warnings"), list) else [],
+        "purchase_portfolio_context": purchase.get("portfolio_context") if isinstance(purchase.get("portfolio_context"), dict) else {},
+    }
+
+    family_statuses = [str(v.get("status") or "MISSING") for v in families_out.values() if isinstance(v, dict)]
+    authority_head_present = all(
+        isinstance(v, dict) and Path(str(v.get("authority_head_path") or "")).exists()
+        for v in families_out.values()
+    ) if families_out else False
+    overall_state = "MISSING"
+    if family_statuses:
+        if any(s in ("FAIL", "ABORTED") for s in family_statuses):
+            overall_state = "FAIL"
+        elif any(s in ("UNKNOWN", "MISSING") for s in family_statuses):
+            overall_state = "DEGRADED"
+        else:
+            overall_state = "PASS"
+
+    holdings_state_label = "OPERATOR_HOLDINGS_LOADED" if bool(operator_holdings.get("present")) else "OPERATOR_HOLDINGS_MISSING"
+    recommendation_state_label = "NO_CURRENT_ARTIFACT"
+    if bool(merged_artifacts):
+        recommendation_state_label = "CURRENT_DAY_RECOMMENDATION_AVAILABLE" if used_day == selected_day else "USING_LAST_AVAILABLE_RECOMMENDATION"
+    authority_state_label = "AUTHORITY_HEAD_AVAILABLE" if authority_head_present else "DISPLAY_HEAD_AVAILABLE_ONLY"
+    authority_missing_label = "AUTHORITY_HEAD_PRESENT" if authority_head_present else "AUTHORITY_HEAD_MISSING"
+    if not authority_head_present:
+        warnings.append("AUTHORITY_HEAD_MISSING")
+
+    out: Dict[str, Any] = {
+        "selected_day": selected_day,
+        "last_available_day": last_available_day,
+        "used_day": used_day,
+        "used_selected_day": used_day == selected_day,
+        "using_fallback_day": used_day != selected_day,
+        "current_day_unavailable_reason": current_day_unavailable_reason,
+        "status": overall_state,
+        "state_labels": sorted(
+            set(
+                [
+                    recommendation_state_label,
+                    holdings_state_label,
+                    authority_state_label,
+                    authority_missing_label,
+                    "OPERATOR_HOLDINGS_LOADED" if holdings_state_label == "OPERATOR_HOLDINGS_LOADED" else "OPERATOR_HOLDINGS_MISSING",
+                ]
+            )
+        ),
+        "recommendation_state_label": recommendation_state_label,
+        "holdings_state_label": holdings_state_label,
+        "authority_state_label": authority_state_label,
+        "operator_holdings": operator_holdings,
+        "run_metadata": run_metadata,
+        "families": families_out,
+        "summary": summary,
+        "available": bool(merged_artifacts),
+    }
+    return out, sorted(set(warnings)), sorted(set(missing_paths)), sorted(set(source_paths)), source_mtimes
 
 
 # -------------------------
@@ -360,33 +758,325 @@ def _load_sleeve_live_readiness(truth_root: Path, day: str) -> Dict[str, Any]:
 
 
 def _load_platform_bug_metrics(truth_root: Path, day: str) -> Dict[str, Any]:
-    p = (
-        truth_root
+    _ = truth_root  # Platform readiness artifacts are governed under global runtime truth.
+    root = (
+        GLOBAL_RUNTIME_TRUTH_ROOT
         / "readiness_v1"
         / "constellation_bug_metrics_v1"
+    ).resolve()
+    p = (
+        root
         / day
         / "constellation_bug_metrics.v1.json"
     ).resolve()
     obj, err = _safe_read_json(p)
-    if not isinstance(obj, dict):
-        return {
-            "present": False,
-            "path": str(p),
-            "reason_codes": ["ARTIFACT_MISSING" if err == "FILE_NOT_FOUND" else "ARTIFACT_UNREADABLE"],
-        }
-    return {
-        "present": True,
+    base = {
+        "present": False,
         "path": str(p),
+        "requested_day_path": str(p),
+        "requested_day_present": False,
+        "resolved_via_latest_pointer": False,
+        "latest_pointer_path": str((root / "latest_pointer.v1.json").resolve()),
+        "resolved_day": "",
+        "produced_utc": None,
+        "new_bug_events_today": None,
+        "bug_velocity_7d_avg": None,
+        "bug_velocity_14d_avg": None,
+        "recurrence_rate": None,
+        "diagnostic_stability_rate": None,
+        "bug_velocity_trend": None,
+        "recurring_bug_events": [],
+        "event_counts_by_day": {},
+        "metric_views": {},
+        "calculation_summary": {},
+        "unknown_fields": [],
+        "evidence_paths": [],
+        "reason_codes": [],
+    }
+    if not isinstance(obj, dict):
+        pointer_path = (root / "latest_pointer.v1.json").resolve()
+        pointer_obj, pointer_err = _safe_read_json(pointer_path)
+        if isinstance(pointer_obj, dict):
+            target_path_raw = str(pointer_obj.get("target_path") or "").strip()
+            target_sha = str(pointer_obj.get("target_sha256") or "").strip().lower()
+            if target_path_raw:
+                target_path = Path(target_path_raw).expanduser().resolve()
+                target_obj, target_err = _safe_read_json(target_path)
+                if isinstance(target_obj, dict):
+                    path_sha = ""
+                    sha_ok = False
+                    if target_path.exists() and target_path.is_file():
+                        path_sha = (_sha256_file(target_path) or "").lower()
+                        sha_ok = bool(target_sha and path_sha == target_sha)
+                    event_counts = target_obj.get("event_counts_by_day")
+                    return {
+                        **base,
+                        "present": True,
+                        "path": str(target_path),
+                        "requested_day_path": str(p),
+                        "requested_day_present": False,
+                        "resolved_via_latest_pointer": True,
+                        "latest_pointer_path": str(pointer_path),
+                        "latest_pointer_target_sha256": target_sha,
+                        "latest_pointer_target_sha256_verified": sha_ok,
+                        "resolved_day": str(target_obj.get("day_utc") or ""),
+                        "produced_utc": target_obj.get("produced_utc"),
+                        "new_bug_events_today": target_obj.get("new_bug_events_today"),
+                        "bug_velocity_7d_avg": target_obj.get("bug_velocity_7d_avg"),
+                        "bug_velocity_14d_avg": target_obj.get("bug_velocity_14d_avg"),
+                        "recurrence_rate": target_obj.get("recurrence_rate"),
+                        "diagnostic_stability_rate": target_obj.get("diagnostic_stability_rate"),
+                        "bug_velocity_trend": target_obj.get("bug_velocity_trend"),
+                        "recurring_bug_events": target_obj.get("recurring_bug_events") if isinstance(target_obj.get("recurring_bug_events"), list) else [],
+                        "event_counts_by_day": event_counts if isinstance(event_counts, (dict, list)) else {},
+                        "metric_views": target_obj.get("metric_views") if isinstance(target_obj.get("metric_views"), dict) else {},
+                        "calculation_summary": target_obj.get("calculation_summary") if isinstance(target_obj.get("calculation_summary"), dict) else {},
+                        "unknown_fields": target_obj.get("unknown_fields") if isinstance(target_obj.get("unknown_fields"), list) else [],
+                        "evidence_paths": target_obj.get("evidence_paths") if isinstance(target_obj.get("evidence_paths"), list) else [],
+                        "reason_codes": ["FALLBACK_TO_LATEST_POINTER"],
+                        "fallback_source_reason_codes": ["ARTIFACT_MISSING" if err == "FILE_NOT_FOUND" else "ARTIFACT_UNREADABLE"],
+                    }
+                return {
+                    **base,
+                    "reason_codes": [
+                        "ARTIFACT_MISSING" if err == "FILE_NOT_FOUND" else "ARTIFACT_UNREADABLE",
+                        "LATEST_POINTER_TARGET_MISSING" if target_err == "FILE_NOT_FOUND" else "LATEST_POINTER_TARGET_UNREADABLE",
+                    ],
+                }
+        return {
+            **base,
+            "reason_codes": [
+                "ARTIFACT_MISSING" if err == "FILE_NOT_FOUND" else "ARTIFACT_UNREADABLE",
+                "LATEST_POINTER_MISSING" if pointer_err == "FILE_NOT_FOUND" else "LATEST_POINTER_UNREADABLE",
+            ],
+        }
+    event_counts = obj.get("event_counts_by_day")
+    return {
+        **base,
+        "present": True,
+        "requested_day_present": True,
+        "resolved_day": str(obj.get("day_utc") or day),
+        "reason_codes": [],
+        "produced_utc": obj.get("produced_utc"),
         "new_bug_events_today": obj.get("new_bug_events_today"),
         "bug_velocity_7d_avg": obj.get("bug_velocity_7d_avg"),
         "bug_velocity_14d_avg": obj.get("bug_velocity_14d_avg"),
         "recurrence_rate": obj.get("recurrence_rate"),
         "diagnostic_stability_rate": obj.get("diagnostic_stability_rate"),
         "bug_velocity_trend": obj.get("bug_velocity_trend"),
+        "recurring_bug_events": obj.get("recurring_bug_events") if isinstance(obj.get("recurring_bug_events"), list) else [],
+        "event_counts_by_day": event_counts if isinstance(event_counts, (dict, list)) else {},
         "metric_views": obj.get("metric_views") if isinstance(obj.get("metric_views"), dict) else {},
         "calculation_summary": obj.get("calculation_summary") if isinstance(obj.get("calculation_summary"), dict) else {},
         "unknown_fields": obj.get("unknown_fields") if isinstance(obj.get("unknown_fields"), list) else [],
         "evidence_paths": obj.get("evidence_paths") if isinstance(obj.get("evidence_paths"), list) else [],
+    }
+
+
+def _attempt_stage_view(doc: Optional[Dict[str, Any]], stage_id: str) -> Dict[str, Any]:
+    if not isinstance(doc, dict):
+        return {"present": False, "status": None, "reason_codes": []}
+    stages = doc.get("stages")
+    if not isinstance(stages, list):
+        return {"present": False, "status": None, "reason_codes": []}
+    for s in stages:
+        if not isinstance(s, dict):
+            continue
+        if str(s.get("stage_id") or "") != stage_id:
+            continue
+        status = s.get("status")
+        return {
+            "present": True,
+            "status": str(status).upper() if isinstance(status, str) and status.strip() else None,
+            "reason_codes": s.get("reason_codes") if isinstance(s.get("reason_codes"), list) else [],
+        }
+    return {"present": False, "status": None, "reason_codes": []}
+
+
+def _discover_phasec_identity_dirs(truth_root: Path, day: str) -> List[Path]:
+    root = (truth_root / "phaseC_preflight_v1" / day).resolve()
+    if not root.exists() or not root.is_dir():
+        return []
+    out: List[Path] = []
+    for p in sorted(root.iterdir(), key=lambda x: x.name):
+        if not p.is_dir():
+            continue
+        supported = (
+            ((p / "equity_order_plan.v2.json").exists() and (p / "mapping_ledger_record.v2.json").exists() and (p / "binding_record.v2.json").exists())
+            or ((p / "equity_order_plan.v1.json").exists() and (p / "mapping_ledger_record.v2.json").exists() and (p / "binding_record.v2.json").exists())
+            or ((p / "order_plan.v1.json").exists() and (p / "mapping_ledger_record.v1.json").exists() and (p / "binding_record.v1.json").exists())
+        )
+        if supported:
+            out.append(p.resolve())
+    return out
+
+
+def _jsonl_same_day_presence(path: Path, day: str) -> bool:
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    obj = json.loads(raw)
+                except Exception:
+                    continue
+                row_day = str(
+                    obj.get("day_utc")
+                    or obj.get("date")
+                    or obj.get("date_utc")
+                    or obj.get("session_date")
+                    or obj.get("timestamp_utc")
+                    or ""
+                ).strip()
+                if row_day == day:
+                    return True
+                if len(row_day) >= 10 and row_day[:10] == day:
+                    return True
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return False
+    return False
+
+
+def _load_signal_activity(truth_root: Path, day: str, run_doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    expected_engine_ids, _miss_expected, _warn_expected = _engine_ids_from_active_engine_set(truth_root, day)
+    if not expected_engine_ids:
+        expected_engine_ids, _miss_linkage, _warn_linkage = _engine_ids_from_engine_linkage(truth_root, day)
+    if not expected_engine_ids:
+        policy_rows = _load_sleeve_policy()
+        policy_engine_ids: List[str] = []
+        for row in policy_rows:
+            policy_engine_ids.extend(row.get("engine_ids") if isinstance(row.get("engine_ids"), list) else [])
+        expected_engine_ids = sorted({str(eid).strip() for eid in policy_engine_ids if isinstance(eid, str) and str(eid).strip()})
+    present_engine_ids, _miss_hb, _warn_hb = _engine_ids_from_heartbeat(truth_root, day)
+    expected_set = sorted(set(expected_engine_ids))
+    present_set = sorted(set(present_engine_ids))
+    missing_engine_ids = [eid for eid in expected_set if eid not in set(present_set)]
+
+    intents_root = (truth_root / "intents_v1" / "snapshots" / day).resolve()
+    intent_paths = sorted(intents_root.glob("*.exposure_intent.v1.json")) if intents_root.exists() and intents_root.is_dir() else []
+    intent_count = len(intent_paths)
+
+    veto_count, _ = _count_phasec_veto_records(truth_root, day)
+    identity_dirs = _discover_phasec_identity_dirs(truth_root, day)
+    released_identity_dir_count = len(identity_dirs)
+    if released_identity_dir_count > 0 and veto_count > 0:
+        phasec_label = "mixed"
+        phasec_tone = "warning"
+    elif released_identity_dir_count > 0:
+        phasec_label = "released identities present"
+        phasec_tone = "positive"
+    elif veto_count > 0:
+        phasec_label = "veto-only"
+        phasec_tone = "warning"
+    else:
+        phasec_label = "no phaseC outputs"
+        phasec_tone = "neutral"
+
+    submit_stage = _attempt_stage_view(run_doc, "A7A_GOVERNED_SUBMIT_V5")
+    submit_status = submit_stage.get("status")
+    if released_identity_dir_count == 0 and veto_count > 0:
+        submit_label = "governed abort / no identity"
+        submit_tone = "warning"
+    elif released_identity_dir_count == 0 and not submit_stage.get("present"):
+        submit_label = "blocked upstream before governed submit"
+        submit_tone = "negative"
+    elif submit_status in ("OK", "PASS"):
+        submit_label = "governed submit passed"
+        submit_tone = "positive"
+    elif submit_status == "SKIP":
+        submit_label = "governed abort / no identity"
+        submit_tone = "warning"
+    elif submit_status in ("FAIL", "ABORTED"):
+        submit_label = "governed submit failed"
+        submit_tone = "negative"
+    else:
+        submit_label = "governed submit not reached"
+        submit_tone = "neutral"
+
+    symbols = ["IWM", "SPY", "QQQ"]
+    upstream_rows: List[Dict[str, Any]] = []
+    for symbol in symbols:
+        md_path = (truth_root / "market_data_snapshot_v1" / symbol / f"{day[:4]}.jsonl").resolve()
+        same_day_present = _jsonl_same_day_presence(md_path, day) if md_path.exists() and md_path.is_file() else False
+        upstream_rows.append(
+            {
+                "symbol": symbol,
+                "same_day_present": same_day_present,
+                "path": str(md_path),
+                "status": "PRESENT" if same_day_present else "MISSING",
+                "tone": "positive" if same_day_present else "negative",
+            }
+        )
+
+    upstream_summary = "upstream data ready" if all(row["same_day_present"] for row in upstream_rows) else "upstream data incomplete"
+    upstream_tone = "positive" if all(row["same_day_present"] for row in upstream_rows) else "negative"
+    if released_identity_dir_count == 0 and veto_count == 0 and intent_count == 0 and upstream_tone == "negative":
+        submit_label = "blocked upstream before governed submit"
+        submit_tone = "negative"
+
+    return {
+        "day_utc": day,
+        "engine_heartbeats": {
+            "expected_count": len(expected_set),
+            "present_count": len(present_set),
+            "expected_engine_ids": expected_set,
+            "present_engine_ids": present_set,
+            "missing_engine_ids": missing_engine_ids,
+        },
+        "intents": {
+            "count": intent_count,
+            "label": "No real intents produced" if intent_count == 0 else f"{intent_count} real intents produced",
+            "path": str(intents_root),
+        },
+        "phasec_outcomes": {
+            "veto_count": veto_count,
+            "released_identity_dir_count": released_identity_dir_count,
+            "label": phasec_label,
+            "tone": phasec_tone,
+            "path": str((truth_root / 'phaseC_preflight_v1' / day).resolve()),
+        },
+        "governed_submit": {
+            "stage_status": submit_status,
+            "label": submit_label,
+            "tone": submit_tone,
+            "reason_codes": submit_stage.get("reason_codes") if isinstance(submit_stage.get("reason_codes"), list) else [],
+        },
+        "upstream_data_status": {
+            "label": upstream_summary,
+            "tone": upstream_tone,
+            "symbols": upstream_rows,
+        },
+    }
+
+
+def _load_platform_readiness_policy_view() -> Dict[str, Any]:
+    obj, err = _safe_read_json(PLATFORM_READINESS_POLICY_PATH)
+    base = {
+        "present": False,
+        "path": str(PLATFORM_READINESS_POLICY_PATH),
+        "score_threshold_ready": None,
+        "grade_bands": [],
+        "weights": {},
+        "hard_blockers": {},
+        "reason_codes": ["ARTIFACT_MISSING" if err == "FILE_NOT_FOUND" else "ARTIFACT_UNREADABLE"],
+    }
+    if not isinstance(obj, dict):
+        return base
+    scoring = obj.get("scoring") if isinstance(obj.get("scoring"), dict) else {}
+    hard_blockers = obj.get("hard_blockers") if isinstance(obj.get("hard_blockers"), dict) else {}
+    weights = obj.get("weights") if isinstance(obj.get("weights"), dict) else {}
+    return {
+        **base,
+        "present": True,
+        "reason_codes": [],
+        "score_threshold_ready": scoring.get("score_threshold_ready"),
+        "grade_bands": scoring.get("grade_bands") if isinstance(scoring.get("grade_bands"), list) else [],
+        "weights": weights,
+        "hard_blockers": hard_blockers,
     }
 
 
@@ -403,6 +1093,39 @@ def _load_platform_readiness(truth_root: Path, day: str) -> Dict[str, Any]:
         / day
         / "constellation_platform_readiness.v1.json"
     ).resolve()
+    base = {
+        "present": False,
+        "path": str(p),
+        "requested_day_path": str(p),
+        "requested_day_present": False,
+        "resolved_via_latest_pointer": False,
+        "latest_pointer_path": str((root / "latest_pointer.v1.json").resolve()),
+        "resolved_day": "",
+        "platform_readiness_state": "UNKNOWN",
+        "platform_readiness_score": None,
+        "platform_readiness_grade": None,
+        "score_threshold_ready": None,
+        "produced_utc": None,
+        "metric_views": {},
+        "policy_values": {},
+        "score_contribution": [],
+        "platform_promotion_candidate": None,
+        "readiness_summary": "",
+        "promotion_decision_basis": "",
+        "root_blockers": [],
+        "derived_blockers": [],
+        "top_blockers_ordered": [],
+        "minimum_conditions_summary": [],
+        "current_vs_required": {},
+        "promotion_checklist": {},
+        "smallest_clearance_set": [],
+        "blocker_dependency_order": [],
+        "bug_stability_summary": "",
+        "aggregate_blocker_summary": {},
+        "calibration_support": {},
+        "evidence_paths": [],
+        "reason_codes": [],
+    }
     obj, err = _safe_read_json(p)
     if not isinstance(obj, dict):
         pointer_path = (root / "latest_pointer.v1.json").resolve()
@@ -420,6 +1143,7 @@ def _load_platform_readiness(truth_root: Path, day: str) -> Dict[str, Any]:
                         path_sha = _sha256_file(target_path).lower()
                         sha_ok = bool(target_sha and path_sha == target_sha)
                     return {
+                        **base,
                         "present": True,
                         "path": str(target_path),
                         "requested_day_path": str(p),
@@ -433,7 +1157,10 @@ def _load_platform_readiness(truth_root: Path, day: str) -> Dict[str, Any]:
                         "platform_readiness_score": target_obj.get("platform_readiness_score"),
                         "platform_readiness_grade": target_obj.get("platform_readiness_grade"),
                         "score_threshold_ready": target_obj.get("score_threshold_ready"),
+                        "produced_utc": target_obj.get("produced_utc"),
                         "metric_views": target_obj.get("metric_views") if isinstance(target_obj.get("metric_views"), dict) else {},
+                        "policy_values": target_obj.get("policy_values") if isinstance(target_obj.get("policy_values"), dict) else {},
+                        "score_contribution": target_obj.get("score_contribution") if isinstance(target_obj.get("score_contribution"), list) else [],
                         "platform_promotion_candidate": target_obj.get("platform_promotion_candidate"),
                         "readiness_summary": str(target_obj.get("readiness_summary") or ""),
                         "promotion_decision_basis": str(target_obj.get("promotion_decision_basis") or ""),
@@ -447,48 +1174,38 @@ def _load_platform_readiness(truth_root: Path, day: str) -> Dict[str, Any]:
                         "blocker_dependency_order": target_obj.get("blocker_dependency_order") if isinstance(target_obj.get("blocker_dependency_order"), list) else [],
                         "bug_stability_summary": str(target_obj.get("bug_stability_summary") or ""),
                         "aggregate_blocker_summary": target_obj.get("aggregate_blocker_summary") if isinstance(target_obj.get("aggregate_blocker_summary"), dict) else {},
+                        "calibration_support": target_obj.get("calibration_support") if isinstance(target_obj.get("calibration_support"), dict) else {},
                         "evidence_paths": target_obj.get("evidence_paths") if isinstance(target_obj.get("evidence_paths"), list) else [],
                         "reason_codes": ["FALLBACK_TO_LATEST_POINTER"],
                         "fallback_source_reason_codes": ["ARTIFACT_MISSING" if err == "FILE_NOT_FOUND" else "ARTIFACT_UNREADABLE"],
                     }
                 return {
-                    "present": False,
-                    "path": str(p),
-                    "requested_day_path": str(p),
-                    "requested_day_present": False,
-                    "resolved_via_latest_pointer": False,
-                    "latest_pointer_path": str(pointer_path),
-                    "platform_readiness_state": "UNKNOWN",
+                    **base,
                     "reason_codes": [
                         "ARTIFACT_MISSING" if err == "FILE_NOT_FOUND" else "ARTIFACT_UNREADABLE",
                         "LATEST_POINTER_TARGET_MISSING" if target_err == "FILE_NOT_FOUND" else "LATEST_POINTER_TARGET_UNREADABLE",
                     ],
                 }
         return {
-            "present": False,
-            "path": str(p),
-            "requested_day_path": str(p),
-            "requested_day_present": False,
-            "resolved_via_latest_pointer": False,
-            "latest_pointer_path": str(pointer_path),
-            "platform_readiness_state": "UNKNOWN",
+            **base,
             "reason_codes": [
                 "ARTIFACT_MISSING" if err == "FILE_NOT_FOUND" else "ARTIFACT_UNREADABLE",
                 "LATEST_POINTER_MISSING" if pointer_err == "FILE_NOT_FOUND" else "LATEST_POINTER_UNREADABLE",
             ],
         }
     return {
+        **base,
         "present": True,
-        "path": str(p),
-        "requested_day_path": str(p),
         "requested_day_present": True,
-        "resolved_via_latest_pointer": False,
         "resolved_day": str(obj.get("day_utc") or day),
         "platform_readiness_state": str(obj.get("platform_readiness_state") or "UNKNOWN"),
         "platform_readiness_score": obj.get("platform_readiness_score"),
         "platform_readiness_grade": obj.get("platform_readiness_grade"),
         "score_threshold_ready": obj.get("score_threshold_ready"),
+        "produced_utc": obj.get("produced_utc"),
         "metric_views": obj.get("metric_views") if isinstance(obj.get("metric_views"), dict) else {},
+        "policy_values": obj.get("policy_values") if isinstance(obj.get("policy_values"), dict) else {},
+        "score_contribution": obj.get("score_contribution") if isinstance(obj.get("score_contribution"), list) else [],
         "platform_promotion_candidate": obj.get("platform_promotion_candidate"),
         "readiness_summary": str(obj.get("readiness_summary") or ""),
         "promotion_decision_basis": str(obj.get("promotion_decision_basis") or ""),
@@ -502,7 +1219,9 @@ def _load_platform_readiness(truth_root: Path, day: str) -> Dict[str, Any]:
         "blocker_dependency_order": obj.get("blocker_dependency_order") if isinstance(obj.get("blocker_dependency_order"), list) else [],
         "bug_stability_summary": str(obj.get("bug_stability_summary") or ""),
         "aggregate_blocker_summary": obj.get("aggregate_blocker_summary") if isinstance(obj.get("aggregate_blocker_summary"), dict) else {},
+        "calibration_support": obj.get("calibration_support") if isinstance(obj.get("calibration_support"), dict) else {},
         "evidence_paths": obj.get("evidence_paths") if isinstance(obj.get("evidence_paths"), list) else [],
+        "reason_codes": [],
     }
 
 
@@ -1528,7 +2247,11 @@ def _build_sleeve_strip_rows(
     sleeves = _load_sleeve_policy()
     if not sleeves:
         warnings.append("SLEEVE_POLICY_MISSING")
-        return fallback_rows, warnings
+        filtered_fallback = [
+            row for row in fallback_rows
+            if str(row.get("sleeve_id") or "").strip().upper() in STANDARD_TRADING_SLEEVE_IDS
+        ]
+        return filtered_fallback, warnings
 
     active_engines = set(_active_engine_ids_for_day(truth_root, day))
     secondary_account = _resolve_secondary_paper_account(primary_account)
@@ -1558,6 +2281,48 @@ def _build_sleeve_strip_rows(
                 "active_today": bool(is_active),
             }
         )
+    out.sort(key=lambda x: (x.get("sleeve_id") or "", x.get("name") or ""))
+
+    # Include only canonical standard trading sleeves that are not already engine-mapped.
+    # Bond is not a trading sleeve and must never enter the generic sleeve payload path.
+    reg_obj, reg_err = _safe_read_json(SLEEVE_REGISTRY)
+    if not isinstance(reg_obj, dict):
+        warnings.append(f"SLEEVE_REGISTRY_UNREADABLE:{reg_err}")
+        return out, warnings
+    reg_sleeves = reg_obj.get("sleeves")
+    if not isinstance(reg_sleeves, list):
+        warnings.append("SLEEVE_REGISTRY_INVALID")
+        return out, warnings
+
+    existing_ids = {str(r.get("sleeve_id") or "").strip() for r in out}
+    for rs in reg_sleeves:
+        if not isinstance(rs, dict):
+            continue
+        sid = str(rs.get("sleeve_id") or "").strip()
+        if not sid or sid in existing_ids:
+            continue
+        if sid.upper() not in STANDARD_TRADING_SLEEVE_IDS:
+            continue
+        disp = sid
+        mode_rs = str(rs.get("mode") or "UNKNOWN").strip().upper()
+        acct_rs = str(rs.get("ib_account") or "").strip() or None
+        enabled_rs = bool(rs.get("enabled"))
+        out.append(
+            {
+                "sleeve_id": sid,
+                "name": disp,
+                "mode": mode_rs,
+                "ib_account_id": acct_rs,
+                "entries_allowed": None,
+                "flatten_only": None,
+                "engine_ids": [],
+                "active_today": False,
+                "enabled": enabled_rs,
+                "registry_source": "C2_SLEEVE_REGISTRY_V1",
+            }
+        )
+        existing_ids.add(sid)
+
     out.sort(key=lambda x: (x.get("sleeve_id") or "", x.get("name") or ""))
     return out, warnings
 
@@ -1843,6 +2608,9 @@ def build_status_v2(
     positions_exposure["sources"]["exposure_path"] = exp_path
     positions_exposure["sources"]["submissions_root"] = order_flow.get("sources", {}).get("submissions_root")
 
+    # Bond sleeve advisory truth + operator-confirmed holdings evidence
+    bond_sleeve, warn_bond, miss_bond, sp_bond, sm_bond = _collect_bond_sleeve_view(day)
+
     # Engine mode/account defaults from attempt manifest
     mode_from_attempt, acct_from_attempt, warn_ma, miss_ma = _attempt_mode_and_account(truth_root, day, sel_attempt)
 
@@ -1934,7 +2702,6 @@ def build_status_v2(
         primary_account=acct_from_attempt,
         fallback_rows=fallback_sleeves,
     )
-
     attempt_summaries = _build_attempt_summaries(truth_root, day, attempts)
 
     # Tiles (fixed layout)
@@ -1971,6 +2738,7 @@ def build_status_v2(
             + miss_eng
             + miss_ma
             + miss_broker
+            + miss_bond
         )
     )
 
@@ -1981,12 +2749,13 @@ def build_status_v2(
             + sp_gs
             + sp_rep
             + ([nav_path] if isinstance(nav_path, str) and nav_path else [])
+            + sp_bond
             + [str(instance_config_path)]
         )
     )
 
     source_mtimes: Dict[str, float] = {}
-    for dct in (sm_a, sm_rv, sm_gs, sm_rep):
+    for dct in (sm_a, sm_rv, sm_gs, sm_rep, sm_bond):
         source_mtimes.update({k: v for k, v in dct.items() if isinstance(v, (int, float))})
 
     warnings = sorted(
@@ -2003,12 +2772,17 @@ def build_status_v2(
             + warn_ma
             + warn_eng
             + warn_sleeves
+            + warn_bond
             + (["POSITIONS_UNREADABLE"] if pos_err else [])
             + (["EXPOSURE_UNREADABLE"] if exp_err else [])
             + (["NAV_UNREADABLE"] if nav_err else [])
             + (["SUBMISSION_ORDER_FLOW_MISSING"] if order_flow.get("missing_paths") else [])
         )
     )
+
+    platform_bug_metrics = _load_platform_bug_metrics(truth_root, day)
+    platform_readiness = _load_platform_readiness(truth_root, day)
+    platform_readiness_policy = _load_platform_readiness_policy_view()
 
     payload: Dict[str, Any] = {
         "meta": {
@@ -2027,9 +2801,11 @@ def build_status_v2(
         "ops_health": {"tiles": [_tile_dict(t) for t in tiles]},
         "scope_health": _load_scope_health_summary(),
         "sleeve_live_readiness": _load_sleeve_live_readiness(truth_root, day),
-        "platform_bug_metrics": _load_platform_bug_metrics(truth_root, day),
-        "platform_readiness": _load_platform_readiness(truth_root, day),
+        "platform_bug_metrics": platform_bug_metrics,
+        "platform_readiness": platform_readiness,
+        "platform_readiness_policy": platform_readiness_policy,
         "platform_readiness_history": _load_platform_readiness_history(truth_root),
+        "signal_activity": _load_signal_activity(truth_root, day, run_doc),
         "sleeves": sleeves_out,
         "trade_flow_today": {
             "counts": counts,
@@ -2048,6 +2824,7 @@ def build_status_v2(
         "engines": engines_out,
         "portfolio": portfolio,
         "positions_exposure": positions_exposure,
+        "bond_sleeve": bond_sleeve,
         "provenance": {
             "warnings": warnings,
             "missing_paths": missing_paths,
@@ -2056,6 +2833,74 @@ def build_status_v2(
         },
         "errors": [],
         "ok": True,
+    }
+    payload["platform_bug_metrics"] = platform_bug_metrics if isinstance(platform_bug_metrics, dict) else {
+        "present": False,
+        "path": None,
+        "produced_utc": None,
+        "bug_velocity_7d_avg": None,
+        "bug_velocity_14d_avg": None,
+        "recurrence_rate": None,
+        "diagnostic_stability_rate": None,
+        "new_bug_events_today": None,
+        "bug_velocity_trend": None,
+        "recurring_bug_events": [],
+        "event_counts_by_day": {},
+        "metric_views": {},
+        "calculation_summary": {},
+        "unknown_fields": [],
+        "evidence_paths": [],
+        "reason_codes": ["ARTIFACT_UNREADABLE"],
+    }
+    payload["platform_readiness"] = platform_readiness if isinstance(platform_readiness, dict) else {
+        "present": False,
+        "path": None,
+        "requested_day_path": None,
+        "requested_day_present": False,
+        "resolved_via_latest_pointer": False,
+        "latest_pointer_path": None,
+        "resolved_day": "",
+        "platform_readiness_state": "UNKNOWN",
+        "platform_readiness_score": None,
+        "platform_readiness_grade": None,
+        "score_threshold_ready": None,
+        "produced_utc": None,
+        "metric_views": {},
+        "policy_values": {},
+        "score_contribution": [],
+        "platform_promotion_candidate": None,
+        "readiness_summary": "",
+        "promotion_decision_basis": "",
+        "root_blockers": [],
+        "derived_blockers": [],
+        "top_blockers_ordered": [],
+        "minimum_conditions_summary": [],
+        "current_vs_required": {},
+        "promotion_checklist": {},
+        "smallest_clearance_set": [],
+        "blocker_dependency_order": [],
+        "bug_stability_summary": "",
+        "aggregate_blocker_summary": {},
+        "calibration_support": {},
+        "evidence_paths": [],
+        "reason_codes": ["ARTIFACT_UNREADABLE"],
+    }
+    payload["platform_readiness_policy"] = platform_readiness_policy if isinstance(platform_readiness_policy, dict) else {
+        "present": False,
+        "path": None,
+        "score_threshold_ready": None,
+        "grade_bands": [],
+        "weights": {},
+        "hard_blockers": {},
+        "reason_codes": ["ARTIFACT_UNREADABLE"],
+    }
+    payload["signal_activity"] = payload.get("signal_activity") if isinstance(payload.get("signal_activity"), dict) else {
+        "day_utc": day,
+        "engine_heartbeats": {"expected_count": 0, "present_count": 0, "expected_engine_ids": [], "present_engine_ids": [], "missing_engine_ids": []},
+        "intents": {"count": 0, "label": "No real intents produced", "path": None},
+        "phasec_outcomes": {"veto_count": 0, "released_identity_dir_count": 0, "label": "no phaseC outputs", "tone": "neutral", "path": None},
+        "governed_submit": {"stage_status": None, "label": "governed submit not reached", "tone": "neutral", "reason_codes": []},
+        "upstream_data_status": {"label": "upstream data incomplete", "tone": "negative", "symbols": []},
     }
     td = payload.get("trade_flow_today")
     if isinstance(td, dict):
