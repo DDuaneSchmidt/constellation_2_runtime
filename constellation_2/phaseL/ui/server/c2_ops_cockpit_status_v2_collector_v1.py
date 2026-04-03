@@ -391,24 +391,99 @@ def _load_platform_bug_metrics(truth_root: Path, day: str) -> Dict[str, Any]:
 
 
 def _load_platform_readiness(truth_root: Path, day: str) -> Dict[str, Any]:
-    p = (
-        truth_root
+    _ = truth_root  # Platform readiness artifacts are governed under global runtime truth.
+    root = (
+        REPO_ROOT
+        / "constellation_2/runtime/truth"
         / "readiness_v1"
         / "constellation_platform_readiness_v1"
+    ).resolve()
+    p = (
+        root
         / day
         / "constellation_platform_readiness.v1.json"
     ).resolve()
     obj, err = _safe_read_json(p)
     if not isinstance(obj, dict):
+        pointer_path = (root / "latest_pointer.v1.json").resolve()
+        pointer_obj, pointer_err = _safe_read_json(pointer_path)
+        if isinstance(pointer_obj, dict):
+            target_path_raw = str(pointer_obj.get("target_path") or "").strip()
+            target_sha = str(pointer_obj.get("target_sha256") or "").strip().lower()
+            if target_path_raw:
+                target_path = Path(target_path_raw).expanduser().resolve()
+                target_obj, target_err = _safe_read_json(target_path)
+                if isinstance(target_obj, dict):
+                    path_sha = ""
+                    sha_ok = False
+                    if target_path.exists() and target_path.is_file():
+                        path_sha = _sha256_file(target_path).lower()
+                        sha_ok = bool(target_sha and path_sha == target_sha)
+                    return {
+                        "present": True,
+                        "path": str(target_path),
+                        "requested_day_path": str(p),
+                        "requested_day_present": False,
+                        "resolved_via_latest_pointer": True,
+                        "latest_pointer_path": str(pointer_path),
+                        "latest_pointer_target_sha256": target_sha,
+                        "latest_pointer_target_sha256_verified": sha_ok,
+                        "resolved_day": str(target_obj.get("day_utc") or ""),
+                        "platform_readiness_state": str(target_obj.get("platform_readiness_state") or "UNKNOWN"),
+                        "platform_readiness_score": target_obj.get("platform_readiness_score"),
+                        "platform_readiness_grade": target_obj.get("platform_readiness_grade"),
+                        "score_threshold_ready": target_obj.get("score_threshold_ready"),
+                        "metric_views": target_obj.get("metric_views") if isinstance(target_obj.get("metric_views"), dict) else {},
+                        "platform_promotion_candidate": target_obj.get("platform_promotion_candidate"),
+                        "readiness_summary": str(target_obj.get("readiness_summary") or ""),
+                        "promotion_decision_basis": str(target_obj.get("promotion_decision_basis") or ""),
+                        "root_blockers": target_obj.get("root_blockers") if isinstance(target_obj.get("root_blockers"), list) else [],
+                        "derived_blockers": target_obj.get("derived_blockers") if isinstance(target_obj.get("derived_blockers"), list) else [],
+                        "top_blockers_ordered": target_obj.get("top_blockers_ordered") if isinstance(target_obj.get("top_blockers_ordered"), list) else [],
+                        "minimum_conditions_summary": target_obj.get("minimum_conditions_summary") if isinstance(target_obj.get("minimum_conditions_summary"), list) else [],
+                        "current_vs_required": target_obj.get("current_vs_required") if isinstance(target_obj.get("current_vs_required"), dict) else {},
+                        "promotion_checklist": target_obj.get("promotion_checklist") if isinstance(target_obj.get("promotion_checklist"), dict) else {},
+                        "smallest_clearance_set": target_obj.get("smallest_clearance_set") if isinstance(target_obj.get("smallest_clearance_set"), list) else [],
+                        "blocker_dependency_order": target_obj.get("blocker_dependency_order") if isinstance(target_obj.get("blocker_dependency_order"), list) else [],
+                        "bug_stability_summary": str(target_obj.get("bug_stability_summary") or ""),
+                        "aggregate_blocker_summary": target_obj.get("aggregate_blocker_summary") if isinstance(target_obj.get("aggregate_blocker_summary"), dict) else {},
+                        "evidence_paths": target_obj.get("evidence_paths") if isinstance(target_obj.get("evidence_paths"), list) else [],
+                        "reason_codes": ["FALLBACK_TO_LATEST_POINTER"],
+                        "fallback_source_reason_codes": ["ARTIFACT_MISSING" if err == "FILE_NOT_FOUND" else "ARTIFACT_UNREADABLE"],
+                    }
+                return {
+                    "present": False,
+                    "path": str(p),
+                    "requested_day_path": str(p),
+                    "requested_day_present": False,
+                    "resolved_via_latest_pointer": False,
+                    "latest_pointer_path": str(pointer_path),
+                    "platform_readiness_state": "UNKNOWN",
+                    "reason_codes": [
+                        "ARTIFACT_MISSING" if err == "FILE_NOT_FOUND" else "ARTIFACT_UNREADABLE",
+                        "LATEST_POINTER_TARGET_MISSING" if target_err == "FILE_NOT_FOUND" else "LATEST_POINTER_TARGET_UNREADABLE",
+                    ],
+                }
         return {
             "present": False,
             "path": str(p),
+            "requested_day_path": str(p),
+            "requested_day_present": False,
+            "resolved_via_latest_pointer": False,
+            "latest_pointer_path": str(pointer_path),
             "platform_readiness_state": "UNKNOWN",
-            "reason_codes": ["ARTIFACT_MISSING" if err == "FILE_NOT_FOUND" else "ARTIFACT_UNREADABLE"],
+            "reason_codes": [
+                "ARTIFACT_MISSING" if err == "FILE_NOT_FOUND" else "ARTIFACT_UNREADABLE",
+                "LATEST_POINTER_MISSING" if pointer_err == "FILE_NOT_FOUND" else "LATEST_POINTER_UNREADABLE",
+            ],
         }
     return {
         "present": True,
         "path": str(p),
+        "requested_day_path": str(p),
+        "requested_day_present": True,
+        "resolved_via_latest_pointer": False,
+        "resolved_day": str(obj.get("day_utc") or day),
         "platform_readiness_state": str(obj.get("platform_readiness_state") or "UNKNOWN"),
         "platform_readiness_score": obj.get("platform_readiness_score"),
         "platform_readiness_grade": obj.get("platform_readiness_grade"),

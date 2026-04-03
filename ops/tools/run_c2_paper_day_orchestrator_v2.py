@@ -30,6 +30,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -554,6 +555,233 @@ def _read_json_obj(p: Path) -> Dict[str, Any]:
     if not isinstance(o, dict):
         raise RuntimeError(f"TOP_LEVEL_NOT_OBJECT: {p}")
     return o
+
+
+def _discover_short_vol_symbols(truth_root: Path, day: str) -> List[str]:
+    intents_day = (truth_root / "intents_v1" / "snapshots" / day).resolve()
+    if not intents_day.exists() or not intents_day.is_dir():
+        return []
+
+    out: List[str] = []
+    for p in sorted(intents_day.iterdir()):
+        if not p.is_file() or not p.name.endswith(".json"):
+            continue
+        try:
+            obj = _read_json_obj(p)
+        except Exception:
+            continue
+        if str(obj.get("exposure_type") or "").strip().upper() != "SHORT_VOL_DEFINED":
+            continue
+        underlying = obj.get("underlying") if isinstance(obj.get("underlying"), dict) else {}
+        symbol = str(underlying.get("symbol") or "").strip().upper()
+        if symbol:
+            out.append(symbol)
+    return sorted(set(out))
+
+
+def _options_raw_exists_for_symbol(truth_root: Path, day: str, symbol: str) -> bool:
+    root = (truth_root / "options_chain_raw_v1" / day).resolve()
+    if not root.exists() or not root.is_dir():
+        return False
+    for d in sorted(root.iterdir()):
+        raw = (d / "raw_chain.json").resolve()
+        if not raw.exists() or not raw.is_file():
+            continue
+        try:
+            obj = _read_json_obj(raw)
+        except Exception:
+            continue
+        underlying = obj.get("underlying") if isinstance(obj.get("underlying"), dict) else {}
+        if str(underlying.get("symbol") or "").strip().upper() == symbol.upper():
+            return True
+    return False
+
+
+def _options_snapshot_exists_for_symbol(truth_root: Path, day: str, symbol: str) -> bool:
+    root = (truth_root / "options_chain_snapshot_v1" / day).resolve()
+    if not root.exists() or not root.is_dir():
+        return False
+    for d in sorted(root.iterdir()):
+        snap = (d / "options_chain_snapshot.v1.json").resolve()
+        cert = (d / "freshness_certificate.v1.json").resolve()
+        if not snap.exists() or not snap.is_file() or not cert.exists() or not cert.is_file():
+            continue
+        try:
+            obj = _read_json_obj(snap)
+        except Exception:
+            continue
+        underlying = obj.get("underlying") if isinstance(obj.get("underlying"), dict) else {}
+        if str(underlying.get("symbol") or "").strip().upper() == symbol.upper():
+            return True
+    return False
+
+
+def _market_data_close_for_same_day(truth_root: Path, day: str, symbol: str) -> Optional[str]:
+    md_root = (truth_root / "market_data_snapshot_v1").resolve()
+    manifest = (md_root / "dataset_manifest.json").resolve()
+    if not manifest.exists() or not manifest.is_file():
+        return None
+
+    try:
+        manifest_obj = _read_json_obj(manifest)
+    except Exception:
+        return None
+
+    files = manifest_obj.get("files")
+    if not isinstance(files, list):
+        return None
+
+    year = int(day[0:4])
+    target_rel: Optional[str] = None
+    target_sha: Optional[str] = None
+    for entry in files:
+        if not isinstance(entry, dict):
+            continue
+        if int(entry.get("year", -1)) != year:
+            continue
+        if str(entry.get("symbol") or "").strip().upper() != symbol.upper():
+            continue
+        target_rel = str(entry.get("file") or "").strip()
+        target_sha = str(entry.get("sha256") or "").strip().lower()
+        break
+    if not target_rel or not target_sha:
+        return None
+
+    year_path = (md_root / target_rel).resolve()
+    if not year_path.exists() or not year_path.is_file():
+        return None
+    if _sha256_file(year_path).lower() != target_sha:
+        return None
+
+    for line in year_path.read_text(encoding="utf-8").splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        try:
+            row = json.loads(s)
+        except Exception:
+            return None
+        if not isinstance(row, dict):
+            return None
+        ts = str(row.get("timestamp_utc") or "").strip()
+        if ts[:10] != day:
+            continue
+        raw_close = row.get("close")
+        try:
+            close = Decimal(str(raw_close).strip())
+        except (InvalidOperation, ValueError):
+            return None
+        if not close.is_finite() or close <= Decimal("0"):
+            return None
+        return format(close.normalize(), "f")
+    return None
+
+
+def _build_phasec_materializer_cmd(*, truth_root: Path, day: str, produced_utc: str) -> Tuple[List[str], List[str]]:
+    cmd = [
+        "python3",
+        "ops/tools/run_phasec_identity_materializer_day_v1.py",
+        "--day_utc",
+        day,
+        "--eval_time_utc",
+        f"{day}T00:00:00Z",
+        "--truth_root",
+        str(truth_root),
+    ]
+    reason_codes: List[str] = []
+    price = _market_data_close_for_same_day(truth_root, day, "SPY")
+    if price:
+        cmd.extend(["--default_equity_reference_price", price])
+        reason_codes.append(f"DEFAULT_EQUITY_REFERENCE_PRICE_FROM_MARKET_DATA:{price}")
+    else:
+        reason_codes.append("DEFAULT_EQUITY_REFERENCE_PRICE_ABSENT_PRESERVE_VETO")
+    return cmd, reason_codes
+
+
+def _run_options_capture_stage(*, truth_root: Path, day: str, env: Dict[str, str]) -> Tuple[bool, int, List[str], List[str]]:
+    option_symbols = _discover_short_vol_symbols(truth_root, day)
+    if not option_symbols:
+        return (False, 0, ["SKIP_NO_SHORT_VOL_INTENTS"], [])
+
+    outputs: List[str] = []
+    reason_codes: List[str] = []
+    executed = False
+    for symbol in option_symbols:
+        raw_root = str((truth_root / "options_chain_raw_v1" / day).resolve())
+        outputs.append(raw_root)
+        if _options_snapshot_exists_for_symbol(truth_root, day, symbol):
+            reason_codes.append(f"SKIP_OPTIONS_SNAPSHOT_ALREADY_PRESENT:{symbol}")
+            continue
+        if _options_raw_exists_for_symbol(truth_root, day, symbol):
+            reason_codes.append(f"SKIP_OPTIONS_RAW_ALREADY_PRESENT:{symbol}")
+            continue
+        executed = True
+        rc = _run_cmd(
+            f"A6C_OPTIONS_CHAIN_CAPTURE_IB_DAY_V1_{symbol}",
+            [
+                "python3",
+                "ops/tools/run_options_chain_capture_ib_day_v1.py",
+                "--day_utc",
+                day,
+                "--eval_time_utc",
+                f"{day}T00:00:00Z",
+                "--symbol",
+                symbol,
+                "--truth_root",
+                str(truth_root),
+                "--ib_host",
+                str(env.get("C2_IB_HOST") or "127.0.0.1").strip(),
+                "--ib_port",
+                str(env.get("C2_IB_PORT") or "4002").strip(),
+                "--ib_client_id",
+                str(env.get("C2_IB_CLIENT_ID") or "7").strip(),
+            ],
+            env=env,
+        )
+        if rc != 0:
+            return (True, int(rc), [f"OPTIONS_CAPTURE_FAILED:{symbol}"], outputs)
+        reason_codes.append(f"OPTIONS_CAPTURE_OK:{symbol}")
+    return (executed, 0, reason_codes or ["SKIP_NO_OPTIONS_CAPTURE_NEEDED"], outputs)
+
+
+def _run_options_promotion_stage(*, truth_root: Path, day: str, env: Dict[str, str]) -> Tuple[bool, int, List[str], List[str]]:
+    option_symbols = _discover_short_vol_symbols(truth_root, day)
+    if not option_symbols:
+        return (False, 0, ["SKIP_NO_SHORT_VOL_INTENTS"], [])
+
+    outputs: List[str] = []
+    reason_codes: List[str] = []
+    executed = False
+    for symbol in option_symbols:
+        snap_root = str((truth_root / "options_chain_snapshot_v1" / day).resolve())
+        outputs.append(snap_root)
+        if _options_snapshot_exists_for_symbol(truth_root, day, symbol):
+            reason_codes.append(f"SKIP_OPTIONS_PROMOTION_ALREADY_PRESENT:{symbol}")
+            continue
+        if not _options_raw_exists_for_symbol(truth_root, day, symbol):
+            reason_codes.append(f"SKIP_OPTIONS_PROMOTION_RAW_MISSING:{symbol}")
+            continue
+        executed = True
+        rc = _run_cmd(
+            f"A6D_OPTIONS_CHAIN_TRUTH_PROMOTION_DAY_V1_{symbol}",
+            [
+                "python3",
+                "ops/tools/run_options_chain_truth_promotion_day_v1.py",
+                "--day_utc",
+                day,
+                "--eval_time_utc",
+                f"{day}T00:00:00Z",
+                "--symbol",
+                symbol,
+                "--truth_root",
+                str(truth_root),
+            ],
+            env=env,
+        )
+        if rc != 0:
+            return (True, int(rc), [f"OPTIONS_PROMOTION_FAILED:{symbol}"], outputs)
+        reason_codes.append(f"OPTIONS_PROMOTION_OK:{symbol}")
+    return (executed, 0, reason_codes or ["SKIP_NO_OPTIONS_PROMOTION_NEEDED"], outputs)
 
 def _positions_snapshot_v2_skip_safe(truth_root: Path, day: str) -> bool:
     snap_path = (truth_root / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json").resolve()
@@ -1514,16 +1742,27 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
             skip_if_exists_paths=[],
         ),
         StageDef(
+            stage_id="A6C_OPTIONS_CHAIN_CAPTURE_IB_DAY_V1",
+            cmd=["/bin/true"],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=True,
+            blocking=True,
+            skip_if_exists_paths=[],
+        ),
+        StageDef(
+            stage_id="A6D_OPTIONS_CHAIN_TRUTH_PROMOTION_DAY_V1",
+            cmd=["/bin/true"],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=True,
+            blocking=True,
+            skip_if_exists_paths=[],
+        ),
+        StageDef(
             stage_id="A7_PHASEC_IDENTITY_MATERIALIZER_DAY_V1",
             cmd=[
-                "python3",
-                "ops/tools/run_phasec_identity_materializer_day_v1.py",
-                "--day_utc",
-                day,
-                "--eval_time_utc",
-                f"{day}T00:00:00Z",
-                "--truth_root",
-                str(truth),
+                "/bin/true",
             ],
             required_for_paper=True,
             required_for_live=True,
@@ -1943,6 +2182,74 @@ def main() -> int:
                 safety_breaches.append(f"{sd.stage_id}_BLOCKING_FAIL")
             continue
 
+        if sd.stage_id == "A6C_OPTIONS_CHAIN_CAPTURE_IB_DAY_V1":
+            if not required:
+                sr = StageResult(
+                    stage_id=sd.stage_id,
+                    classification=classification,
+                    executed=False,
+                    rc=0,
+                    status="SKIP",
+                    reason_codes=["SKIP_NOT_REQUIRED_NO_ACTIVITY"],
+                    outputs_present=[],
+                )
+                stage_results.append(sr.__dict__)
+                attempt_manifest["stages"].append(sr.__dict__)
+                continue
+            executed, rc, stage_reason_codes, outputs_present = _run_options_capture_stage(
+                truth_root=truth_root,
+                day=day,
+                env=stage_env,
+            )
+            sr = StageResult(
+                stage_id=sd.stage_id,
+                classification=classification,
+                executed=executed,
+                rc=int(rc),
+                status=("SKIP" if (not executed and rc == 0) else ("OK" if rc == 0 else "FAIL")),
+                reason_codes=list(stage_reason_codes),
+                outputs_present=outputs_present,
+            )
+            stage_results.append(sr.__dict__)
+            attempt_manifest["stages"].append(sr.__dict__)
+            if rc != 0:
+                safety_breaches.append(f"{sd.stage_id}_BLOCKING_FAIL")
+            continue
+
+        if sd.stage_id == "A6D_OPTIONS_CHAIN_TRUTH_PROMOTION_DAY_V1":
+            if not required:
+                sr = StageResult(
+                    stage_id=sd.stage_id,
+                    classification=classification,
+                    executed=False,
+                    rc=0,
+                    status="SKIP",
+                    reason_codes=["SKIP_NOT_REQUIRED_NO_ACTIVITY"],
+                    outputs_present=[],
+                )
+                stage_results.append(sr.__dict__)
+                attempt_manifest["stages"].append(sr.__dict__)
+                continue
+            executed, rc, stage_reason_codes, outputs_present = _run_options_promotion_stage(
+                truth_root=truth_root,
+                day=day,
+                env=stage_env,
+            )
+            sr = StageResult(
+                stage_id=sd.stage_id,
+                classification=classification,
+                executed=executed,
+                rc=int(rc),
+                status=("SKIP" if (not executed and rc == 0) else ("OK" if rc == 0 else "FAIL")),
+                reason_codes=list(stage_reason_codes),
+                outputs_present=outputs_present,
+            )
+            stage_results.append(sr.__dict__)
+            attempt_manifest["stages"].append(sr.__dict__)
+            if rc != 0:
+                safety_breaches.append(f"{sd.stage_id}_BLOCKING_FAIL")
+            continue
+
         if sd.stage_id == "A6A_RUN_POINTER_APPEND_V1":
             rp_rc, rp_reason_codes = _append_run_pointer_v1(
                 truth_root=truth_root,
@@ -1966,6 +2273,42 @@ def main() -> int:
             stage_results.append(sr.__dict__)
             attempt_manifest["stages"].append(sr.__dict__)
             if not rp_ok:
+                safety_breaches.append(f"{sd.stage_id}_BLOCKING_FAIL")
+            continue
+
+        if sd.stage_id == "A7_PHASEC_IDENTITY_MATERIALIZER_DAY_V1":
+            if not required:
+                sr = StageResult(
+                    stage_id=sd.stage_id,
+                    classification=classification,
+                    executed=False,
+                    rc=0,
+                    status="SKIP",
+                    reason_codes=["SKIP_NOT_REQUIRED_NO_ACTIVITY"],
+                    outputs_present=[],
+                )
+                stage_results.append(sr.__dict__)
+                attempt_manifest["stages"].append(sr.__dict__)
+                continue
+            cmd, stage_reason_codes = _build_phasec_materializer_cmd(
+                truth_root=truth_root,
+                day=day,
+                produced_utc=produced_utc,
+            )
+            rc = _run_cmd(sd.stage_id, cmd, env=stage_env)
+            ok = (rc == 0)
+            sr = StageResult(
+                stage_id=sd.stage_id,
+                classification=classification,
+                executed=True,
+                rc=int(rc),
+                status="OK" if ok else "FAIL",
+                reason_codes=list(stage_reason_codes),
+                outputs_present=[],
+            )
+            stage_results.append(sr.__dict__)
+            attempt_manifest["stages"].append(sr.__dict__)
+            if not ok:
                 safety_breaches.append(f"{sd.stage_id}_BLOCKING_FAIL")
             continue
 
