@@ -617,7 +617,12 @@ def run_submit_boundary_paper_v4(
             upstream_hash=binding_hash,
             repo_root=repo_root,
         )
-        write_phased_veto_only_v1(subdir, veto_record=veto, order_plan=plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
+        try:
+            write_phased_veto_only_v1(subdir, veto_record=veto, order_plan=plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
+        except EvidenceWriteError as e:
+            # Deterministic re-entry: if the submission dir already has evidence, keep fail-closed outcome (rc=2).
+            if "OUT_DIR_NOT_EMPTY" not in str(e):
+                raise
         # Write binding record if we have the authorization hash (best-effort)
         if az_sha and str(az_path) != ".":
             _write_auth_binding_record(
