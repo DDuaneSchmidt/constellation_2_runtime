@@ -311,7 +311,7 @@ def main() -> int:
 
         # record path for today
         rec_rel = f"{RECORDS_ROOT_RELPATH}/{artifact_id}/{day}/feed_attestation_record.v1.json"
-        rec_path = (REPO_ROOT / rec_rel).resolve()
+        rec_path = (truth_root / rec_rel).resolve()
 
         rec_obj: Dict[str, Any] = {
             "schema_id": "C2_FEED_ATTESTATION_RECORD_V1",
@@ -353,8 +353,8 @@ def main() -> int:
         # write record immutably (or require identical)
         rec_sha = _write_immutable(rec_path, rec_obj)
 
-        # verify record sha matches expected attestation sha
-        if rec_obj["attestation_sha256"] != rec_sha:
+        # verify written file bytes are stable and match the immutable writer result
+        if _sha256_file(rec_path) != rec_sha:
             any_fail = True
             rcodes.append("FAL_TARGET_SHA_MISMATCH")
 
