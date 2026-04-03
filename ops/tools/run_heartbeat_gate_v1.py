@@ -31,6 +31,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1
+
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 DEFAULT_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
@@ -87,23 +89,22 @@ def _validate_against_repo_schema_v1(obj: Dict[str, Any]) -> None:
     validate_against_repo_schema_v1(obj, REPO_ROOT, SCHEMA_RELPATH)
 
 
-def _write_immutable(path: Path, obj: Dict[str, Any]) -> Tuple[str, str, str]:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def _write_refreshable(path: Path, obj: Dict[str, Any], expected_day_utc: str) -> Tuple[str, str, str]:
     payload = _canonical_json_bytes_v1(obj) + b"\n"
-    sha = _sha256_bytes(payload)
-
-    if path.exists():
-        existing = path.read_bytes()
-        if _sha256_bytes(existing) == sha:
-            return (str(path), sha, "EXISTS_IDENTICAL")
-        raise SystemExit(f"FAIL: refusing overwrite (different bytes): {path}")
-
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    if tmp.exists():
-        tmp.unlink()
-    tmp.write_bytes(payload)
-    os.replace(tmp, path)
-    return (str(path), sha, "WRITTEN")
+    wr = write_day_artifact_refreshable_v1(
+        path=path,
+        data=payload,
+        expected_day_utc=expected_day_utc,
+        expected_schema_id="C2_HEARTBEAT_GATE_V1",
+        expected_schema_version=1,
+        preserve_statuses=("PASS",),
+    )
+    if wr.action == "REFRESHED":
+        print(
+            f"WARN: HEARTBEAT_GATE_REFRESHED_STALE_ARTIFACT day_utc={expected_day_utc} "
+            f"path={path} prior_sha256={wr.prior_sha256} quarantined_path={wr.quarantined_path}"
+        )
+    return (str(path), wr.sha256, wr.action)
 
 
 def _resolve_truth_root(arg_truth_root: str) -> Path:
@@ -277,7 +278,7 @@ def main() -> int:
     _validate_against_repo_schema_v1(out)
 
     out_path = (out_root / day / "heartbeat_gate.v1.json").resolve()
-    path_s, sha, action = _write_immutable(out_path, out)
+    path_s, sha, action = _write_refreshable(out_path, out, day)
 
     if status == "PASS":
         print(f"OK: HEARTBEAT_GATE_V1_WRITTEN day_utc={day} status={status} path={path_s} sha256={sha} action={action}")

@@ -35,6 +35,7 @@ if str(_REPO_ROOT_FROM_FILE) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
 
 from constellation_2.common.truth_root_v1 import resolve_truth_root  # noqa: E402
+from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1  # noqa: E402
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 DEFAULT_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
@@ -147,23 +148,30 @@ def _latest_prior_day_record_dir(records_root: Path, artifact_id: str, day: str)
     return None
 
 
-def _write_immutable(path: Path, obj: Dict[str, Any]) -> str:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def _write_refreshable_day_artifact(
+    path: Path,
+    obj: Dict[str, Any],
+    *,
+    expected_schema_id: str,
+    expected_schema_version: Any,
+    expected_day_utc: str,
+    preserve_statuses: Tuple[str, ...] = ("PASS",),
+) -> str:
     payload = _canonical_json_bytes_v1(obj) + b"\n"
-    sha = _sha256_bytes(payload)
-
-    if path.exists():
-        existing = path.read_bytes()
-        if _sha256_bytes(existing) == sha:
-            return sha
-        raise SystemExit(f"FAIL: FAL_REFUSE_OVERWRITE: {path}")
-
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    if tmp.exists():
-        tmp.unlink()
-    tmp.write_bytes(payload)
-    os.replace(tmp, path)
-    return sha
+    wr = write_day_artifact_refreshable_v1(
+        path=path,
+        data=payload,
+        expected_day_utc=expected_day_utc,
+        expected_schema_id=expected_schema_id,
+        expected_schema_version=expected_schema_version,
+        preserve_statuses=preserve_statuses,
+    )
+    if wr.action == "REFRESHED":
+        print(
+            f"WARN: FAL_REFRESHED_STALE_ARTIFACT day_utc={expected_day_utc} "
+            f"path={path} prior_sha256={wr.prior_sha256} quarantined_path={wr.quarantined_path}"
+        )
+    return wr.sha256
 
 
 def _resolve_target_path(truth_root: Path, target_rel: str) -> Path:
@@ -402,7 +410,14 @@ def main() -> int:
         record_obj["attestation_sha256"] = _sha256_bytes(_canonical_json_bytes_v1(unsigned) + b"\n")
 
         _validate(REPO_ROOT, RECORD_SCHEMA_RELPATH, record_obj)
-        rec_sha = _write_immutable(record_path, record_obj)
+        rec_sha = _write_refreshable_day_artifact(
+            record_path,
+            record_obj,
+            expected_schema_id="C2_FEED_ATTESTATION_RECORD_V1",
+            expected_schema_version=1,
+            expected_day_utc=day,
+            preserve_statuses=(),
+        )
 
         passed = len(rcodes) == 0
         if not passed:
@@ -459,7 +474,14 @@ def main() -> int:
     gate_obj["gate_sha256"] = _sha256_bytes(_canonical_json_bytes_v1(unsigned_gate) + b"\n")
 
     _validate(REPO_ROOT, GATE_SCHEMA_RELPATH, gate_obj)
-    gate_sha = _write_immutable(gate_out_path, gate_obj)
+    gate_sha = _write_refreshable_day_artifact(
+        gate_out_path,
+        gate_obj,
+        expected_schema_id="C2_FEED_ATTESTATION_GATE_V1",
+        expected_schema_version=1,
+        expected_day_utc=day,
+        preserve_statuses=("PASS",),
+    )
 
     print(
         f"OK: FEED_ATTESTATION_GATE_V1_WRITTEN day_utc={day} "

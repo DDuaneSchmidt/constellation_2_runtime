@@ -36,6 +36,8 @@ from math import sqrt
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1
+
 _THIS_FILE = Path(__file__).resolve()
 _REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
 REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
@@ -158,6 +160,48 @@ def _write_immutable_or_compare(path: Path, candidate_bytes: bytes, mismatch_cod
         return
 
     raise SystemExit(f"FAIL: {mismatch_code}: existing_sha={exist_sha} candidate_sha={cand_sha} path={str(path)}")
+
+
+def _write_refreshable_gate(path: Path, obj: Dict[str, Any], day: str) -> None:
+    payload = _canonical_json_bytes_v1(obj) + b"\n"
+    wr = write_day_artifact_refreshable_v1(
+        path=path,
+        data=payload,
+        expected_day_utc=day,
+        expected_schema_id="C2_CORRELATION_ENVELOPE_GATE_V1",
+        expected_schema_version=1,
+        preserve_statuses=("PASS",),
+    )
+    if wr.action == "REFRESHED":
+        print(
+            f"WARN: CORRELATION_GATE_REFRESHED_STALE_ARTIFACT day_utc={day} "
+            f"path={path} prior_sha256={wr.prior_sha256} quarantined_path={wr.quarantined_path}"
+        )
+
+
+def _write_refreshable_supporting_artifact(
+    *,
+    path: Path,
+    obj: Dict[str, Any],
+    day: str,
+    expected_schema_id: str,
+    expected_schema_version: int,
+    log_prefix: str,
+) -> None:
+    payload = _canonical_json_bytes_v1(obj) + b"\n"
+    wr = write_day_artifact_refreshable_v1(
+        path=path,
+        data=payload,
+        expected_day_utc=day,
+        expected_schema_id=expected_schema_id,
+        expected_schema_version=expected_schema_version,
+        preserve_statuses=("PASS",),
+    )
+    if wr.action == "REFRESHED":
+        print(
+            f"WARN: {log_prefix} day_utc={day} "
+            f"path={path} prior_sha256={wr.prior_sha256} quarantined_path={wr.quarantined_path}"
+        )
 
 
 def _load_engine_corr(day: str) -> Tuple[List[str], List[List[Decimal]], Path]:
@@ -753,7 +797,14 @@ def main() -> int:
         _validate_against_repo_schema_v1(REPO_ROOT, DEPTH_SCHEMA_RELPATH, depth_out)
 
         depth_out_path = (DEPTH_OUT_ROOT / day / "depth_liquidity_stress.v1.json").resolve()
-        _write_immutable_or_compare(depth_out_path, _canonical_json_bytes_v1(depth_out), "DEPTH_OUTPUT_MISMATCH")
+        _write_refreshable_supporting_artifact(
+            path=depth_out_path,
+            obj=depth_out,
+            day=day,
+            expected_schema_id="C2_DEPTH_LIQUIDITY_STRESS_V1",
+            expected_schema_version=1,
+            log_prefix="DEPTH_STRESS_REFRESHED_STALE_ARTIFACT",
+        )
 
         depth_out_rel = str(depth_out_path.relative_to(REPO_ROOT))
         depth_out_sha = _sha256_file(depth_out_path)
@@ -837,7 +888,14 @@ def main() -> int:
         _validate_against_repo_schema_v1(REPO_ROOT, CSE_SCHEMA_RELPATH, cse_out)
 
         cse_out_path = (CSE_OUT_ROOT / day / "convex_risk_assessment.v1.json").resolve()
-        _write_immutable_or_compare(cse_out_path, _canonical_json_bytes_v1(cse_out), "CSE_OUTPUT_MISMATCH")
+        _write_refreshable_supporting_artifact(
+            path=cse_out_path,
+            obj=cse_out,
+            day=day,
+            expected_schema_id="C2_CONVEX_RISK_ASSESSMENT_V1",
+            expected_schema_version=1,
+            log_prefix="CONVEX_RISK_REFRESHED_STALE_ARTIFACT",
+        )
 
     except Exception as e:
         status = "MISSING_INPUTS"
@@ -871,7 +929,7 @@ def main() -> int:
     _validate_against_repo_schema_v1(REPO_ROOT, SCHEMA_RELPATH, out_obj)
 
     out_path = (OUT_ROOT / day / "correlation_envelope_gate.v1.json").resolve()
-    _write_immutable_or_compare(out_path, _canonical_json_bytes_v1(out_obj), "CEG_OUTPUT_MISMATCH")
+    _write_refreshable_gate(out_path, out_obj, day)
 
     print(_sha256_file(out_path))
     return 0
