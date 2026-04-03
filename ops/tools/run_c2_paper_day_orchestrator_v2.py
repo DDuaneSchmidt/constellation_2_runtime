@@ -705,6 +705,11 @@ def main() -> int:
     symbol = _require_symbol(args.symbol)
     produced_utc = _validate_produced_utc_isoz(args.produced_utc)
 
+    if day != input_day:
+        raise SystemExit(
+            f"FAIL: FUTURE_DAY_OR_SPLIT_DAY_RUN_NOT_ALLOWED day_utc={day!r} input_day_utc={input_day!r}"
+        )
+
     ib_account = str(args.ib_account or "").strip()
     if not ib_account:
         raise SystemExit("FAIL: --ib_account empty")
