@@ -126,10 +126,17 @@ function renderTiles(payload) {
 function renderSleeveStrip(payload) {
   const sleeves = (payload?.sleeves || []);
   const container = el("sleeveStrip");
+  const withAcct = sleeves.filter(s => s && s.ib_account_id).length;
+  const byAcct = {};
+  sleeves.forEach(s => {
+    const acct = s?.ib_account_id || "n/a";
+    byAcct[acct] = (byAcct[acct] || 0) + 1;
+  });
+  const split = Object.entries(byAcct).map(([k,v]) => `${k}:${v}`).join(" | ");
   container.innerHTML = `
     <div class="card-head">
       <div class="card-title">Sleeve Mode Strip (PAPER/LIVE per sleeve)</div>
-      <div class="mono tiny muted">IB account shown per sleeve</div>
+      <div class="mono tiny muted">rows=${sleeves.length} • with_account=${withAcct} • ${split || "no_accounts"}</div>
     </div>
     <div class="strip-row" id="stripRow"></div>
   `;
@@ -157,9 +164,11 @@ function renderSleeveStrip(payload) {
 function renderFunnel(payload) {
   const c = payload?.trade_flow_today?.counts || {};
   const b = payload?.trade_flow_today?.blocked_by_gate || {};
+  const s = payload?.trade_flow_today?.semantics || {};
 
   const steps = [
     ["Intents", c.intents],
+    ["Rejected/Vetoed", (c.rejected ?? c.vetoed)],
     ["Authorized", c.authorized],
     ["Submitted", c.submitted],
     ["Filled", c.filled],
@@ -183,6 +192,9 @@ function renderFunnel(payload) {
   el("blockedRow").innerHTML = blocked.map(([k,v]) =>
     `<div class="blocked-pill">${k}: ${v === null || v === undefined ? "n/a" : v}</div>`
   ).join("");
+
+  el("funnelExplain").textContent =
+    `Intents are candidate trades. Rejected/Vetoed are blocked before submission. Authorized can proceed to broker submission. Filled and Reconciled are downstream execution states.`;
 }
 
 function renderWhatChanged(payload) {
@@ -293,11 +305,37 @@ function renderHistory(payload) {
   const day = payload?.meta?.selected_day || "n/a";
   const attempts = payload?.meta?.attempts || [];
   const sel = payload?.meta?.selected_attempt_id || "n/a";
+  const rows = payload?.meta?.attempt_summaries || [];
+  el("historyExplain").textContent =
+    "Each row is one orchestrator attempt for the selected UTC day, with final status and top reason codes.";
+  const hdr = `
+    <table style="width:100%; border-collapse:collapse;">
+      <thead>
+        <tr>
+          <th style="text-align:left;">Attempt</th>
+          <th style="text-align:left;">Seq</th>
+          <th style="text-align:left;">Status</th>
+          <th style="text-align:left;">Produced UTC</th>
+          <th style="text-align:left;">Top Reasons</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+  const body = rows.length ? rows.map(r => `
+    <tr>
+      <td class="mono tiny">${r.attempt_id || "n/a"}${r.attempt_id === sel ? " (selected)" : ""}</td>
+      <td class="mono tiny">${r.attempt_seq ?? "n/a"}</td>
+      <td class="mono tiny">${r.status || "UNKNOWN"}</td>
+      <td class="mono tiny">${r.produced_utc || "n/a"}</td>
+      <td class="mono tiny">${(r.reason_codes || []).join(", ") || "n/a"}</td>
+    </tr>
+  `).join("") : `<tr><td colspan="5" class="mono tiny">ATTEMPTS_NOT_FOUND</td></tr>`;
+  const ftr = `</tbody></table>`;
   el("historyAttempts").innerHTML = `
     <div class="mono small">day=${day}</div>
     <div class="mono small">selected_attempt=${sel}</div>
-    <div class="mono small" style="margin-top:8px;">attempts:</div>
-    <div class="mono small">${attempts.length ? attempts.map(a => `- ${a}`).join("<br/>") : "ATTEMPTS_NOT_FOUND"}</div>
+    <div class="mono small">rows=${rows.length || attempts.length || 0}</div>
+    <div style="margin-top:8px;">${hdr}${body}${ftr}</div>
   `;
 }
 

@@ -88,6 +88,12 @@ def _top2_reason_codes(x: Any) -> List[str]:
     return []
 
 
+THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = THIS_FILE.parents[4]
+SLEEVE_POLICY_REGISTRY = (REPO_ROOT / "governance/02_REGISTRIES/C2_CAPITAL_AUTHORITY_POLICY_V1.json").resolve()
+IB_ACCOUNT_REGISTRY = (REPO_ROOT / "governance/02_REGISTRIES/C2_IB_ACCOUNT_REGISTRY_V1.json").resolve()
+
+
 # -------------------------
 # Tile model
 # -------------------------
@@ -827,6 +833,205 @@ def _extract_portfolio_metrics(nav_doc: Optional[Dict[str, Any]]) -> Dict[str, A
     return out
 
 
+def _count_authorization_rejected(truth_root: Path, day: str) -> Tuple[int, List[str]]:
+    root = (truth_root / "engine_activity_v1" / "authorization_v1" / day).resolve()
+    if not root.exists() or not root.is_dir():
+        return 0, [str(root)]
+    seen = set()
+    cnt = 0
+    for p in sorted(root.glob("*.authorization.v1.json"), key=lambda x: x.name):
+        obj, _err = _safe_read_json(p)
+        if not isinstance(obj, dict):
+            continue
+        ih = str(obj.get("intent_hash") or "").strip() or p.name.split(".")[0]
+        if ih in seen:
+            continue
+        seen.add(ih)
+        st = str(obj.get("status") or obj.get("decision") or "").strip().upper()
+        if st == "REJECTED":
+            cnt += 1
+    return cnt, []
+
+
+def _count_phasec_veto_records(truth_root: Path, day: str) -> Tuple[int, List[str]]:
+    root = (truth_root / "phaseC_preflight_v1" / day).resolve()
+    if not root.exists() or not root.is_dir():
+        return 0, [str(root)]
+    seen = set()
+    cnt = 0
+    for p in sorted(root.rglob("*.veto_record.v1.json"), key=lambda x: str(x)):
+        ih = p.name.split(".")[0]
+        if ih in seen:
+            continue
+        seen.add(ih)
+        cnt += 1
+    return cnt, []
+
+
+def _active_engine_ids_for_day(truth_root: Path, day: str) -> List[str]:
+    eids = set()
+
+    # Heartbeat surface
+    hb_day = (truth_root / "monitoring_v1" / "engine_heartbeat_v1" / day).resolve()
+    if hb_day.exists() and hb_day.is_dir():
+        for p in hb_day.iterdir():
+            if p.is_dir() and p.name.strip():
+                eids.add(p.name.strip())
+
+    # Intent surface
+    intents_day = (truth_root / "intents_v1" / "snapshots" / day).resolve()
+    if intents_day.exists() and intents_day.is_dir():
+        for p in sorted([x for x in intents_day.iterdir() if x.is_file() and x.suffix == ".json"], key=lambda x: x.name):
+            obj, _err = _safe_read_json(p)
+            if not isinstance(obj, dict):
+                continue
+            eng = obj.get("engine") if isinstance(obj.get("engine"), dict) else None
+            eid = eng.get("engine_id") if isinstance(eng, dict) else None
+            if isinstance(eid, str) and eid.strip():
+                eids.add(eid.strip())
+
+    # Authorization surface
+    auth_day = (truth_root / "engine_activity_v1" / "authorization_v1" / day).resolve()
+    if auth_day.exists() and auth_day.is_dir():
+        for p in sorted(auth_day.glob("*.authorization.v1.json"), key=lambda x: x.name):
+            obj, _err = _safe_read_json(p)
+            if not isinstance(obj, dict):
+                continue
+            eid = obj.get("engine_id")
+            if isinstance(eid, str) and eid.strip():
+                eids.add(eid.strip())
+
+    return sorted(eids)
+
+
+def _load_sleeve_policy() -> List[Dict[str, Any]]:
+    obj, _err = _safe_read_json(SLEEVE_POLICY_REGISTRY)
+    if not isinstance(obj, dict):
+        return []
+    sleeves = obj.get("sleeves")
+    if not isinstance(sleeves, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for s in sleeves:
+        if not isinstance(s, dict):
+            continue
+        sid = str(s.get("sleeve_id") or "").strip()
+        engine_ids = s.get("engine_ids") if isinstance(s.get("engine_ids"), list) else []
+        limits = s.get("limits") if isinstance(s.get("limits"), dict) else {}
+        if not sid or not engine_ids:
+            continue
+        out.append(
+            {
+                "sleeve_id": sid,
+                "display_name": str(s.get("display_name") or sid),
+                "engine_ids": [str(e).strip() for e in engine_ids if isinstance(e, str) and str(e).strip()],
+                "priority_rank": int(s.get("priority_rank")) if isinstance(s.get("priority_rank"), int) else 9999,
+                "max_capital_at_risk_cents": int(limits.get("max_capital_at_risk_cents")) if isinstance(limits.get("max_capital_at_risk_cents"), int) else 0,
+            }
+        )
+    out.sort(key=lambda x: (x.get("priority_rank", 9999), x.get("sleeve_id", "")))
+    return out
+
+
+def _resolve_secondary_paper_account(primary_account: Optional[str]) -> Optional[str]:
+    obj, _err = _safe_read_json(IB_ACCOUNT_REGISTRY)
+    if not isinstance(obj, dict):
+        return None
+    accts = obj.get("accounts")
+    if not isinstance(accts, list):
+        return None
+    primary = str(primary_account or "").strip()
+    cands: List[str] = []
+    for a in accts:
+        if not isinstance(a, dict):
+            continue
+        env = str(a.get("environment") or "").strip().upper()
+        enabled = bool(a.get("enabled_for_submission"))
+        aid = str(a.get("account_id") or "").strip()
+        if env == "PAPER" and enabled and aid:
+            cands.append(aid)
+    cands = sorted(set(cands))
+    for aid in cands:
+        if aid != primary:
+            return aid
+    return None
+
+
+def _build_sleeve_strip_rows(
+    *,
+    truth_root: Path,
+    day: str,
+    mode_from_attempt: Optional[str],
+    primary_account: Optional[str],
+    fallback_rows: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    warnings: List[str] = []
+    sleeves = _load_sleeve_policy()
+    if not sleeves:
+        warnings.append("SLEEVE_POLICY_MISSING")
+        return fallback_rows, warnings
+
+    active_engines = set(_active_engine_ids_for_day(truth_root, day))
+    secondary_account = _resolve_secondary_paper_account(primary_account)
+    primary = str(primary_account or "").strip() or None
+    mode = (mode_from_attempt or "UNKNOWN")
+
+    out: List[Dict[str, Any]] = []
+    for s in sleeves:
+        engine_ids = s.get("engine_ids") or []
+        is_active = any(e in active_engines for e in engine_ids)
+        acct: Optional[str]
+        if is_active:
+            acct = primary
+        else:
+            acct = secondary_account or primary
+        if acct is None:
+            warnings.append(f"SLEEVE_ACCOUNT_UNRESOLVED:{s.get('sleeve_id')}")
+        out.append(
+            {
+                "sleeve_id": s.get("sleeve_id"),
+                "name": s.get("display_name"),
+                "mode": mode,
+                "ib_account_id": acct,
+                "entries_allowed": None,
+                "flatten_only": None,
+                "engine_ids": engine_ids,
+                "active_today": bool(is_active),
+            }
+        )
+    out.sort(key=lambda x: (x.get("sleeve_id") or "", x.get("name") or ""))
+    return out, warnings
+
+
+def _build_attempt_summaries(truth_root: Path, day: str, attempts: List[str]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for aid in attempts:
+        doc = _load_attempt_verdict(truth_root, day, aid)
+        if not isinstance(doc, dict):
+            out.append(
+                {
+                    "attempt_id": aid,
+                    "attempt_seq": None,
+                    "status": "UNKNOWN",
+                    "produced_utc": None,
+                    "reason_codes": [],
+                }
+            )
+            continue
+        out.append(
+            {
+                "attempt_id": str(doc.get("attempt_id") or aid),
+                "attempt_seq": doc.get("attempt_seq") if isinstance(doc.get("attempt_seq"), int) else None,
+                "status": _coerce_state(str(doc.get("status") or doc.get("state") or "UNKNOWN")),
+                "produced_utc": doc.get("produced_utc") if isinstance(doc.get("produced_utc"), str) else None,
+                "reason_codes": _top2_reason_codes(doc.get("reason_codes") or []),
+                "producer_git_sha": doc.get("producer", {}).get("git_sha") if isinstance(doc.get("producer"), dict) else None,
+            }
+        )
+    out.sort(key=lambda x: (int(x.get("attempt_seq")) if isinstance(x.get("attempt_seq"), int) else -1, str(x.get("attempt_id") or "")))
+    return out
+
+
 # -------------------------
 # Deterministic diff (server memory)
 # -------------------------
@@ -1025,6 +1230,8 @@ def build_status_v2(
     flow = _extract_flow_from_activity_rollup(rollup_doc)
     intents_cnt, miss_int = _count_intents(truth_root, day)
     subs_cnt, miss_sub = _count_submissions_and_fills(truth_root, day)
+    rejected_cnt, miss_auth = _count_authorization_rejected(truth_root, day)
+    veto_cnt, miss_veto = _count_phasec_veto_records(truth_root, day)
 
     counts = {
         "intents": int(flow["intents"]) if isinstance(flow.get("intents"), int) else intents_cnt,
@@ -1032,6 +1239,8 @@ def build_status_v2(
         "submitted": int(flow["submitted"]) if isinstance(flow.get("submitted"), int) else subs_cnt["submitted"],
         "filled": int(flow["filled"]) if isinstance(flow.get("filled"), int) else subs_cnt["filled"],
         "reconciled": int(flow["reconciled"]) if isinstance(flow.get("reconciled"), int) else None,
+        "rejected": rejected_cnt if rejected_cnt > 0 else None,
+        "vetoed": veto_cnt if veto_cnt > 0 else None,
     }
     # Fallback derivations from orchestrator stage truth when day rollup is missing.
     auth_stage = _attempt_stage_status(run_doc, "A6B_AUTHORIZATION_ARTIFACTS_DAY_V1")
@@ -1129,9 +1338,9 @@ def build_status_v2(
 
     engines_out.sort(key=lambda x: (x.get("engine_id") or "", x.get("engine_name") or ""))
 
-    sleeves_out: List[Dict[str, Any]] = []
+    fallback_sleeves: List[Dict[str, Any]] = []
     for e in engines_out:
-        sleeves_out.append(
+        fallback_sleeves.append(
             {
                 "sleeve_id": e["engine_id"],
                 "name": e["engine_name"],
@@ -1141,7 +1350,16 @@ def build_status_v2(
                 "flatten_only": e.get("flatten_only"),
             }
         )
-    sleeves_out.sort(key=lambda x: (x.get("sleeve_id") or "", x.get("name") or ""))
+    fallback_sleeves.sort(key=lambda x: (x.get("sleeve_id") or "", x.get("name") or ""))
+    sleeves_out, warn_sleeves = _build_sleeve_strip_rows(
+        truth_root=truth_root,
+        day=day,
+        mode_from_attempt=mode_from_attempt,
+        primary_account=acct_from_attempt,
+        fallback_rows=fallback_sleeves,
+    )
+
+    attempt_summaries = _build_attempt_summaries(truth_root, day, attempts)
 
     # Tiles (fixed layout)
     tiles: List[Tile] = []
@@ -1164,6 +1382,8 @@ def build_status_v2(
             + miss_roll
             + miss_int
             + miss_sub
+            + miss_auth
+            + miss_veto
             + miss_nav
             + miss_att
             + miss_liq
@@ -1203,6 +1423,7 @@ def build_status_v2(
             + warn_broker
             + warn_ma
             + warn_eng
+            + warn_sleeves
             + (["NAV_UNREADABLE"] if nav_err else [])
         )
     )
@@ -1213,6 +1434,7 @@ def build_status_v2(
             "selected_day": day,
             "selected_attempt_id": sel_attempt,
             "attempts": attempts,
+            "attempt_summaries": attempt_summaries,
             "canonical_pointer": {
                 "exists": (truth_root / "run_pointer_v2" / "canonical_authority_head.v1.json").resolve().exists(),
                 "points_to_attempt_id": None,
@@ -1222,7 +1444,19 @@ def build_status_v2(
         },
         "ops_health": {"tiles": [_tile_dict(t) for t in tiles]},
         "sleeves": sleeves_out,
-        "trade_flow_today": {"counts": counts, "blocked_by_gate": blocked_by_gate},
+        "trade_flow_today": {
+            "counts": counts,
+            "blocked_by_gate": blocked_by_gate,
+            "semantics": {
+                "intents": "Intents emitted for selected day.",
+                "rejected": "Authorization records with status REJECTED.",
+                "authorized": "Intents authorized by capital authority.",
+                "submitted": "Broker submission records written.",
+                "filled": "Execution event records with fill status.",
+                "reconciled": "Execution reconciliation completed for day.",
+                "vetoed": "PhaseC submit veto records observed for day.",
+            },
+        },
         "engines": engines_out,
         "portfolio": portfolio,
         "provenance": {

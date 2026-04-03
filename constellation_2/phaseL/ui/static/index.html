@@ -42,7 +42,7 @@
     <button class="tab" id="tabEngines">Engines</button>
     <button class="tab" id="tabPortfolio">Portfolio</button>
     <button class="tab" id="tabHistory">History</button>
-    <button class="tab" id="tabTechnical">Technical</button>
+    <button class="tab" id="tabTechnical">Advanced</button>
 
     <div class="tabs-right">
       <div id="lastRefresh" class="mono tiny muted"></div>
@@ -62,6 +62,7 @@
             <div class="card-head">
               <div class="card-title">Trade Flow Funnel (Today)</div>
             </div>
+            <div id="funnelExplain" class="mono tiny muted" style="margin-bottom:8px;"></div>
             <div id="funnelRow" class="funnel-row"></div>
             <div id="blockedRow" class="blocked-row"></div>
           </div>
@@ -116,6 +117,7 @@
     <section id="viewHistory" class="view hidden">
       <div class="card">
         <div class="card-head"><div class="card-title">Attempts (Day)</div></div>
+        <div id="historyExplain" class="mono tiny muted" style="margin-bottom:8px;"></div>
         <div id="historyAttempts" class="mono small"></div>
       </div>
     </section>
@@ -123,7 +125,7 @@
     <!-- TECHNICAL -->
     <section id="viewTechnical" class="view hidden">
       <div class="card">
-        <div class="card-head"><div class="card-title">Technical (collapsed details)</div></div>
+        <div class="card-head"><div class="card-title">Diagnostics (advanced)</div></div>
         <div id="techSummary" class="mono small"></div>
         <div id="techPaths" class="mono tiny muted" style="margin-top:10px;"></div>
       </div>
