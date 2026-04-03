@@ -1,0 +1,11 @@
+[Unit]
+Description=C2 Global Monitoring/Readiness Refresh (authoritative global truth)
+After=network-online.target
+Wants=network-online.target
+After=c2-paper-day-orchestrator.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/node/constellation_2_runtime
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/bash -lc 'set -euo pipefail; cd /home/node/constellation_2_runtime; DAY="$$(TZ=America/New_York date +%%F)"; exec /usr/bin/python3 ops/tools/run_c2_global_monitoring_refresh_v1.py --day_utc "$$DAY" --with-diagnostics'
