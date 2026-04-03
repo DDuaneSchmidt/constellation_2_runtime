@@ -28,6 +28,7 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -185,6 +186,68 @@ def _detect_activity(truth_root: Path, day: str) -> Dict[str, Any]:
             "fills_day": str(fills_day),
         },
     }
+
+def _resolve_session_state(day: str) -> Dict[str, Any]:
+    cal_root = (DEFAULT_TRUTH_ROOT / "market_calendar_v1").resolve()
+    manifest = (cal_root / "dataset_manifest.json").resolve()
+    info: Dict[str, Any] = {
+        "session_state": "UNKNOWN_SESSION",
+        "source": {
+            "path": str(manifest),
+            "sha256": "",
+            "resolution_reason": "",
+        },
+    }
+
+    try:
+        wk = date.fromisoformat(day).weekday()  # Mon=0 ... Sun=6
+    except Exception:
+        wk = -1
+
+    is_weekend = wk in (5, 6)
+    if manifest.exists() and manifest.is_file():
+        info["source"]["sha256"] = _sha256_file(manifest)
+        try:
+            obj = json.loads(manifest.read_text(encoding="utf-8"))
+            files = obj.get("files")
+            if isinstance(files, list):
+                year = int(day[0:4])
+                for ent in files:
+                    if not isinstance(ent, dict):
+                        continue
+                    if int(ent.get("year", -1)) != year:
+                        continue
+                    rel = str(ent.get("file") or "").strip()
+                    if not rel:
+                        continue
+                    fp = (cal_root / rel).resolve()
+                    if not fp.exists() or not fp.is_file():
+                        continue
+                    for line in fp.read_text(encoding="utf-8").splitlines():
+                        if not line.strip():
+                            continue
+                        rec = json.loads(line)
+                        if str(rec.get("day_utc") or "").strip() != day:
+                            continue
+                        if bool(rec.get("is_trading_session")):
+                            info["session_state"] = "TRADING_SESSION"
+                            info["source"]["resolution_reason"] = "CALENDAR_EXPLICIT_TRUE"
+                        else:
+                            info["session_state"] = "NON_TRADING_SESSION"
+                            info["source"]["resolution_reason"] = "CALENDAR_EXPLICIT_FALSE"
+                        info["source"]["path"] = str(fp)
+                        info["source"]["sha256"] = _sha256_file(fp)
+                        return info
+        except Exception:
+            pass
+
+    if is_weekend:
+        info["session_state"] = "NON_TRADING_SESSION"
+        info["source"]["resolution_reason"] = "WEEKEND_FALLBACK_NO_CALENDAR_RECORD"
+        return info
+
+    info["source"]["resolution_reason"] = "CALENDAR_RECORD_MISSING"
+    return info
 
 
 def _read_json_obj(p: Path) -> Dict[str, Any]:
@@ -1151,6 +1214,9 @@ def main() -> int:
 
     act = _detect_activity(truth_root, day)
     has_activity = bool(act["activity"])
+    session_info = _resolve_session_state(day)
+    session_state = str(session_info.get("session_state") or "UNKNOWN_SESSION").strip().upper()
+    effective_activity = bool(has_activity and session_state == "TRADING_SESSION")
 
     stage_env = dict(os.environ)
     stage_env["PYTHONPATH"] = str(REPO_ROOT)
@@ -1178,12 +1244,14 @@ def main() -> int:
         "produced_utc": produced_utc,
         "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_c2_paper_day_orchestrator_v2.py", "git_sha": git_sha},
         "activity": act,
+        "effective_activity": bool(effective_activity),
+        "session": session_info,
         "stages": [],
         "outputs": [],
     }
 
     for sd in stages:
-        required, blocking = _stage_required_for_mode(sd, mode, has_activity)
+        required, blocking = _stage_required_for_mode(sd, mode, effective_activity)
         classification = {
             "required_for_mode": {"PAPER": bool(sd.required_for_paper), "LIVE": bool(sd.required_for_live)},
             "required_if_activity": bool(sd.required_if_activity),
@@ -1207,6 +1275,25 @@ def main() -> int:
             continue
 
         if sd.stage_id == "A7A_GOVERNED_SUBMIT_V5":
+            if session_state != "TRADING_SESSION":
+                reason = (
+                    "SKIP_NON_TRADING_SESSION"
+                    if session_state == "NON_TRADING_SESSION"
+                    else "SKIP_UNKNOWN_SESSION_FAIL_CLOSED"
+                )
+                sr = StageResult(
+                    stage_id=sd.stage_id,
+                    classification=classification,
+                    executed=False,
+                    rc=0,
+                    status="SKIP",
+                    reason_codes=[reason],
+                    outputs_present=[],
+                )
+                stage_results.append(sr.__dict__)
+                attempt_manifest["stages"].append(sr.__dict__)
+                continue
+
             if not required:
                 sr = StageResult(
                     stage_id=sd.stage_id,
@@ -1257,7 +1344,7 @@ def main() -> int:
                     status="SKIP",
                     reason_codes=[
                         "SKIP_SAFE_IDLE_NO_GOVERNED_SUBMISSIONS"
-                        if not has_activity
+                        if not effective_activity
                         else "SKIP_NO_GOVERNED_SUBMISSIONS"
                     ],
                     outputs_present=[],
@@ -1341,17 +1428,26 @@ def main() -> int:
         status = "ABORTED"
         reason_codes.append("SAFETY_BREACH")
     else:
-        if any_required_fail:
+        if session_state == "UNKNOWN_SESSION":
+            status = "FAIL"
+            if "UNKNOWN_SESSION" not in reason_codes:
+                reason_codes.append("UNKNOWN_SESSION")
+        elif session_state == "NON_TRADING_SESSION":
+            status = "DEGRADED"
+            if "NON_TRADING_SESSION" not in reason_codes:
+                reason_codes.append("NON_TRADING_SESSION")
+        elif any_required_fail:
             status = "FAIL"
             reason_codes.append("REQUIRED_FAILURE")
-        elif any_optional_fail or not has_activity:
+        elif any_optional_fail or not effective_activity:
             status = "DEGRADED"
-            if not has_activity:
+            if not effective_activity:
                 reason_codes.append("NO_ACTIVITY_DAY")
         else:
             status = "PASS"
 
-    status = _enforce_gate_stack_verdict(truth_root=truth_root, day=day, current_status=status, reason_codes=reason_codes)
+    if session_state == "TRADING_SESSION":
+        status = _enforce_gate_stack_verdict(truth_root=truth_root, day=day, current_status=status, reason_codes=reason_codes)
 
     out_dir = (verdict_root / day / attempt_id).resolve()
     man_wr = _write_attempt_file(out_dir / "orchestrator_attempt_manifest.v2.json", _json_dumps(attempt_manifest))
@@ -1385,7 +1481,8 @@ def main() -> int:
         if status == "PASS":
             status = "DEGRADED"
 
-    status = _enforce_gate_stack_verdict(truth_root=truth_root, day=day, current_status=status, reason_codes=reason_codes)
+    if session_state == "TRADING_SESSION":
+        status = _enforce_gate_stack_verdict(truth_root=truth_root, day=day, current_status=status, reason_codes=reason_codes)
 
     verdict = {
         "schema_id": "C2_ORCHESTRATOR_RUN_VERDICT_V2",
