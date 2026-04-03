@@ -48,7 +48,7 @@ import subprocess
 from typing import Any, Dict, List, Tuple
 
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
-from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
+from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1
 from constellation_2.common.truth_root_v1 import resolve_truth_root
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
@@ -114,9 +114,9 @@ def _bootstrap_invariant_ok(existing: Dict[str, Any]) -> bool:
     return bool(state == "INACTIVE" and allow_entries and forced_mode == "NORMAL")
 
 
-def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | None:
+def _validate_or_quarantine_existing_report(out_path: Path, expected_day_utc: str) -> None:
     if not out_path.exists():
-        return None
+        return
 
     existing_sha = _sha256_file(out_path)
     existing = _read_json_obj(out_path)
@@ -150,12 +150,7 @@ def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | N
             f"WARN: QUARANTINED_INVALID_EXISTING_KILL_SWITCH day_utc={expected_day_utc} "
             f"old_path={out_path} quarantined_path={invalid_path} sha256={existing_sha}"
         )
-        return None
-
-    print(
-        f"OK: GLOBAL_KILL_SWITCH_STATE_V1_WRITTEN day_utc={expected_day_utc} state={state} path={out_path} sha256={existing_sha} action=EXISTS"
-    )
-    return 0
+        return
 
 
 def _gate_stack_all_required_pass(gs: Dict[str, Any]) -> bool:
@@ -222,9 +217,7 @@ def main() -> int:
     out_dir = (OUT_ROOT / day).resolve()
     out_path = (out_dir / "global_kill_switch_state.v1.json").resolve()
 
-    existing_rc = _return_if_existing_report(out_path=out_path, expected_day_utc=day)
-    if existing_rc is not None:
-        return int(existing_rc)
+    _validate_or_quarantine_existing_report(out_path=out_path, expected_day_utc=day)
 
     produced_utc = f"{day}T00:00:00Z"
 
@@ -273,11 +266,19 @@ def main() -> int:
 
     validate_against_repo_schema_v1(payload, REPO_ROOT, SCHEMA_RELPATH)
 
-    try:
-        out_dir.mkdir(parents=True, exist_ok=True)
-        _ = write_file_immutable_v1(path=out_path, data=_canonical_bytes(payload), create_dirs=False)
-    except ImmutableWriteError as e:
-        raise SystemExit(f"FAIL_IMMUTABLE_WRITE: {e}") from e
+    out_dir.mkdir(parents=True, exist_ok=True)
+    wr = write_day_artifact_refreshable_v1(
+        path=out_path,
+        data=_canonical_bytes(payload),
+        expected_day_utc=day,
+        expected_schema_id="global_kill_switch_state",
+        expected_schema_version="v1",
+    )
+    if wr.action == "REFRESHED":
+        print(
+            f"WARN: REFRESHED_STALE_KILL_SWITCH day_utc={day} old_sha256={wr.prior_sha256} "
+            f"new_sha256={wr.sha256} quarantine={wr.quarantined_path}"
+        )
 
     print(_canonical_bytes(payload).decode("utf-8"), end="")
     return 0
