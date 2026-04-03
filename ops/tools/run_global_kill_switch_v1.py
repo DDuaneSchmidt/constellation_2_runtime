@@ -114,6 +114,20 @@ def _bootstrap_invariant_ok(existing: Dict[str, Any]) -> bool:
     return bool(state == "INACTIVE" and allow_entries and forced_mode == "NORMAL")
 
 
+def _quarantine_invalid_existing_report(out_path: Path, existing_sha: str, reason: str) -> None:
+    invalid_path = out_path.with_name(f"global_kill_switch_state.v1.json.INVALID_{existing_sha}.json")
+    if invalid_path.exists():
+        raise SystemExit(
+            f"FAIL: INVALID_EXISTING_KILL_SWITCH_ALREADY_QUARANTINED: out_path={out_path} "
+            f"invalid_path={invalid_path} existing_sha={existing_sha} reason={reason}"
+        )
+    out_path.rename(invalid_path)
+    print(
+        f"WARN: QUARANTINED_INVALID_EXISTING_KILL_SWITCH old_path={out_path} "
+        f"quarantined_path={invalid_path} sha256={existing_sha} reason={reason}"
+    )
+
+
 def _validate_or_quarantine_existing_report(out_path: Path, expected_day_utc: str) -> None:
     if not out_path.exists():
         return
@@ -126,29 +140,41 @@ def _validate_or_quarantine_existing_report(out_path: Path, expected_day_utc: st
     day_utc = str(existing.get("day_utc") or "").strip()
 
     if schema_id != "global_kill_switch_state":
-        raise SystemExit(f"FAIL: EXISTING_KILL_SWITCH_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
-    if schema_version != "v1":
-        raise SystemExit(f"FAIL: EXISTING_KILL_SWITCH_SCHEMA_VERSION_MISMATCH: schema_version={schema_version!r} path={out_path}")
-    if day_utc != expected_day_utc:
-        raise SystemExit(
-            f"FAIL: EXISTING_KILL_SWITCH_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}"
+        _quarantine_invalid_existing_report(
+            out_path,
+            existing_sha,
+            f"EXISTING_KILL_SWITCH_SCHEMA_MISMATCH:schema_id={schema_id!r}",
         )
+        return
+    if schema_version != "v1":
+        _quarantine_invalid_existing_report(
+            out_path,
+            existing_sha,
+            f"EXISTING_KILL_SWITCH_SCHEMA_VERSION_MISMATCH:schema_version={schema_version!r}",
+        )
+        return
+    if day_utc != expected_day_utc:
+        _quarantine_invalid_existing_report(
+            out_path,
+            existing_sha,
+            f"EXISTING_KILL_SWITCH_DAY_MISMATCH:day_utc={day_utc!r}:expected={expected_day_utc!r}",
+        )
+        return
 
     state = str(existing.get("state") or "").strip().upper()
     if state == "":
-        raise SystemExit(f"FAIL: EXISTING_KILL_SWITCH_STATE_MISSING: path={out_path}")
+        _quarantine_invalid_existing_report(
+            out_path,
+            existing_sha,
+            "EXISTING_KILL_SWITCH_STATE_MISSING",
+        )
+        return
 
     if not _bootstrap_invariant_ok(existing):
-        invalid_path = out_path.with_name(f"global_kill_switch_state.v1.json.INVALID_{existing_sha}.json")
-        if invalid_path.exists():
-            raise SystemExit(
-                f"FAIL: INVALID_EXISTING_KILL_SWITCH_ALREADY_QUARANTINED: day_utc={expected_day_utc} existing_sha={existing_sha} "
-                f"out_path={out_path} invalid_path={invalid_path}"
-            )
-        out_path.rename(invalid_path)
-        print(
-            f"WARN: QUARANTINED_INVALID_EXISTING_KILL_SWITCH day_utc={expected_day_utc} "
-            f"old_path={out_path} quarantined_path={invalid_path} sha256={existing_sha}"
+        _quarantine_invalid_existing_report(
+            out_path,
+            existing_sha,
+            f"BOOTSTRAP_INVARIANT_FAIL:day_utc={expected_day_utc}",
         )
         return
 
