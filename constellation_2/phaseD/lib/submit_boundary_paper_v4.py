@@ -392,6 +392,54 @@ def _load_identity_set(phasec_out_dir: Path) -> Tuple[str, Dict[str, Any], Dict[
     raise SubmitBoundaryV4Error("PHASEC_OUT_DIR_MISSING_IDENTITY_SET")
 
 
+def _missing_lineage_fields(payload: Dict[str, Any]) -> bool:
+    for k in ("engine_id", "source_intent_id", "intent_sha256"):
+        v = payload.get(k)
+        if not isinstance(v, str) or not v.strip():
+            return True
+    return False
+
+
+def _inject_options_lineage_from_identity_set(*, repo_root: Path, phasec_out_dir: Path, plan_obj: Dict[str, Any], pointers: List[str]) -> Dict[str, Any]:
+    # Options identity sets may carry lineage on options_intent/adaptation evidence rather than order_plan.
+    if not _missing_lineage_fields(plan_obj):
+        return plan_obj
+
+    out = dict(plan_obj)
+    p_opt = (phasec_out_dir / "options_intent.v2.json").resolve()
+    if p_opt.exists() and p_opt.is_file():
+        opt = _read_json_file(p_opt)
+        validate_against_repo_schema_v1(opt, repo_root, "constellation_2/schemas/options_intent.v2.schema.json")
+        pointers.append(str(p_opt))
+
+        eng = opt.get("engine")
+        if isinstance(eng, dict):
+            eng_id = str(eng.get("engine_id") or "").strip()
+            if eng_id and (not isinstance(out.get("engine_id"), str) or not str(out.get("engine_id")).strip()):
+                out["engine_id"] = eng_id
+
+        src_intent = str(opt.get("intent_id") or "").strip()
+        if src_intent and (not isinstance(out.get("source_intent_id"), str) or not str(out.get("source_intent_id")).strip()):
+            out["source_intent_id"] = src_intent
+
+    p_adapter = (phasec_out_dir / "exposure_to_options_adapter_record.v1.json").resolve()
+    if p_adapter.exists() and p_adapter.is_file():
+        rec = _read_json_file(p_adapter)
+        pointers.append(str(p_adapter))
+        ie = rec.get("input_exposure_intent")
+        if isinstance(ie, dict):
+            src_sha = str(ie.get("sha256") or "").strip()
+            if src_sha and (not isinstance(out.get("intent_sha256"), str) or not str(out.get("intent_sha256")).strip()):
+                out["intent_sha256"] = src_sha
+
+    if (not isinstance(out.get("intent_sha256"), str) or not str(out.get("intent_sha256")).strip()):
+        fallback = str(out.get("intent_hash") or "").strip()
+        if fallback:
+            out["intent_sha256"] = fallback
+
+    return out
+
+
 def _write_auth_binding_record(
     *,
     repo_root: Path,
@@ -474,6 +522,13 @@ def run_submit_boundary_paper_v4(
     _require_path_under_repo(repo_root, phasec_out_dir)
 
     mode, plan_obj, mapping_obj, binding_obj, pointers = _load_identity_set(phasec_out_dir)
+    if mode == "OPTIONS":
+        plan_obj = _inject_options_lineage_from_identity_set(
+            repo_root=repo_root,
+            phasec_out_dir=phasec_out_dir,
+            plan_obj=plan_obj,
+            pointers=pointers,
+        )
     pointers = list(pointers) + [str(risk_budget_path.resolve())]
 
     intent_hash = str(plan_obj.get("intent_hash") or "").strip()
