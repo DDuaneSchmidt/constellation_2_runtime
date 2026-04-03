@@ -193,6 +193,11 @@ documents:
     class: C2_REGISTRY
     status: ACTIVE
 
+  - id: C2_EXPOSURE_TO_OPTIONS_INTENT_POLICY_V1
+    path: governance/02_REGISTRIES/C2_EXPOSURE_TO_OPTIONS_INTENT_POLICY_V1.json
+    class: C2_REGISTRY
+    status: DRAFT
+
   - id: C2_LIQUIDITY_SLIPPAGE_GATE_CONTRACT_V1
     path: governance/05_CONTRACTS/C2/liquidity_slippage_gate_v1.contract.md
     class: C2_CONTRACT
@@ -278,6 +283,21 @@ documents:
   - id: C2_EXPOSURE_INTENT_SCHEMA_V1
     path: constellation_2/schemas/exposure_intent.v1.schema.json
     class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_EXPOSURE_TO_OPTIONS_ADAPTER_RECORD_SCHEMA_V1
+    path: constellation_2/schemas/exposure_to_options_adapter_record.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_EXPOSURE_TO_OPTIONS_INTENT_POLICY_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/OPTIONS/exposure_to_options_intent_policy.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_EXPOSURE_TO_OPTIONS_INTENT_ADAPTER_CONTRACT_V1
+    path: governance/03_CONTRACTS/C2_EXPOSURE_TO_OPTIONS_INTENT_ADAPTER_V1.md
+    class: C2_CONTRACT
     status: DRAFT
   - id: C2_ECONOMIC_TRUTH_SPINE_V1
     path: governance/05_CONTRACTS/C2/economic_truth_spine_v1.contract.md

@@ -1,0 +1,78 @@
+{
+  "schema_id": "c2_exposure_to_options_intent_policy",
+  "schema_version": "v1",
+  "engine_policies": [
+    {
+      "engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1",
+      "exposure_requirements": {
+        "exposure_type": "SHORT_VOL_DEFINED",
+        "required_engine_suite": "C2_HYBRID_V1",
+        "required_option_structure": "PUT",
+        "required_option_direction": "SELL",
+        "allowed_target_notional_pct": [
+          "0.01"
+        ],
+        "allowed_expected_holding_days": [
+          7
+        ],
+        "allowed_risk_class": [
+          "VOL_INCOME_DEFINED"
+        ]
+      },
+      "options_template": {
+        "suite": "C2_OPTIONS_7",
+        "strategy": {
+          "structure": "VERTICAL_SPREAD",
+          "right": "PUT",
+          "direction": "CREDIT"
+        },
+        "risk": {
+          "max_risk_usd": "250.00",
+          "max_contracts": 1,
+          "multiplier": 100
+        },
+        "exit_policy": {
+          "policy_id": "c2_exit_policy_tp50_sl200_time14d_v1",
+          "profit_target": {
+            "enabled": true,
+            "take_profit_pct": 50
+          },
+          "stop_loss": {
+            "enabled": true,
+            "stop_loss_pct": 200
+          },
+          "time_exit": {
+            "enabled": true,
+            "max_holding_days": 14
+          },
+          "regime_exit": {
+            "enabled": false,
+            "regime_blocklist": [
+              "REGIME_UNKNOWN"
+            ]
+          }
+        },
+        "selection_policy": {
+          "expiry_policy": {
+            "mode": "DTE_WINDOW",
+            "target_dte_min": 1,
+            "target_dte_max": 7
+          },
+          "width_policy": {
+            "width_points": "5.00"
+          },
+          "liquidity_policy": {
+            "min_open_interest": 0,
+            "min_volume": 1,
+            "max_bid_ask_spread": "0.10"
+          },
+          "pricing_policy": {
+            "limit_offset": "0.02",
+            "tick_rounding": "ROUND_DOWN"
+          }
+        }
+      }
+    }
+  ],
+  "canonical_json_hash": null
+}

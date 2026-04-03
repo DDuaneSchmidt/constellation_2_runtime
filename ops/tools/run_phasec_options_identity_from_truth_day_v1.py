@@ -55,6 +55,10 @@ def _resolve_truth_root(truth_root_arg: str) -> Path:
 
 MAP_VERTICAL_V1 = (REPO_ROOT / "constellation_2" / "phaseA" / "tools" / "c2_map_vertical_v1.py").resolve()
 PREFLIGHT_OPTIONS_V1 = (REPO_ROOT / "constellation_2" / "phaseC" / "tools" / "c2_submit_preflight_offline_v1.py").resolve()
+EXPOSURE_TO_OPTIONS_ADAPTER_V1 = (REPO_ROOT / "ops" / "tools" / "run_exposure_to_options_intent_adapter_v1.py").resolve()
+EXPOSURE_TO_OPTIONS_POLICY_V1 = (
+    REPO_ROOT / "governance" / "02_REGISTRIES" / "C2_EXPOSURE_TO_OPTIONS_INTENT_POLICY_V1.json"
+).resolve()
 
 SOURCE_REASON_FAIL_CLOSED = "C2_SUBMIT_FAIL_CLOSED_REQUIRED"
 
@@ -266,15 +270,59 @@ def _materialize(
         run_id = f"phasec_options_{day_utc}_{intent_hash}"
         run_dir = (map_out / run_id).resolve()
         preflight_out = (temp_root / "preflight_out").resolve()
+        adapter_out = (temp_root / "adapter_out").resolve()
 
         map_out.mkdir(parents=True, exist_ok=True)
+        adapter_out.mkdir(parents=True, exist_ok=True)
+
+        adapter_cmd = [
+            "python3",
+            str(EXPOSURE_TO_OPTIONS_ADAPTER_V1),
+            "--exposure_intent_path",
+            str(intent_path.resolve()),
+            "--policy_path",
+            str(EXPOSURE_TO_OPTIONS_POLICY_V1),
+            "--out_dir",
+            str(adapter_out),
+            "--produced_utc",
+            str(eval_time_utc),
+        ]
+        res_adapter = _run(adapter_cmd, cwd=REPO_ROOT)
+        if res_adapter.returncode != 0:
+            veto_path = _write_failclosed_veto(
+                out_day_dir=out_day_dir,
+                day_utc=day_utc,
+                eval_time_utc=eval_time_utc,
+                intent_hash=intent_hash,
+                intent_path=intent_path,
+                reason_detail=(
+                    "EXPOSURE_TO_OPTIONS_ADAPTER_FAILED:"
+                    f"rc={res_adapter.returncode};"
+                    f"stdout={res_adapter.stdout.strip()!r};"
+                    f"stderr={res_adapter.stderr.strip()!r}"
+                ),
+            )
+            return ("BLOCKED", str(veto_path))
+
+        options_intent_path = (adapter_out / "options_intent.v2.json").resolve()
+        adapter_record_path = (adapter_out / "exposure_to_options_adapter_record.v1.json").resolve()
+        if not options_intent_path.exists() or not adapter_record_path.exists():
+            veto_path = _write_failclosed_veto(
+                out_day_dir=out_day_dir,
+                day_utc=day_utc,
+                eval_time_utc=eval_time_utc,
+                intent_hash=intent_hash,
+                intent_path=intent_path,
+                reason_detail="EXPOSURE_TO_OPTIONS_ADAPTER_OUTPUT_MISSING",
+            )
+            return ("BLOCKED", str(veto_path))
 
         map_cmd = [
             "python3",
             "-m",
             "constellation_2.phaseA.tools.c2_map_vertical_v1",
             "--intent",
-            str(intent_path.resolve()),
+            str(options_intent_path),
             "--chain",
             str(snap_path.resolve()),
             "--freshness",
@@ -321,15 +369,13 @@ def _materialize(
             "python3",
             str(PREFLIGHT_OPTIONS_V1),
             "--intent",
-            str(intent_path.resolve()),
-            "--order_plan",
-            str(order_plan),
-            "--mapping_ledger_record",
-            str(mapping),
+            str(options_intent_path),
             "--chain_snapshot",
             str(snap_path.resolve()),
             "--freshness_cert",
             str(cert_path.resolve()),
+            "--tick_size",
+            tick_size,
             "--eval_time_utc",
             str(eval_time_utc),
             "--out_dir",
@@ -379,6 +425,8 @@ def _materialize(
         _immutable_copy(mapping, final_identity_dir / "mapping_ledger_record.v1.json")
         _immutable_copy(binding_v1, final_identity_dir / "binding_record.v1.json")
         _immutable_copy(allow, final_identity_dir / "submit_preflight_decision.v1.json")
+        _immutable_copy(options_intent_path, final_identity_dir / "options_intent.v2.json")
+        _immutable_copy(adapter_record_path, final_identity_dir / "exposure_to_options_adapter_record.v1.json")
 
         allow_dst = (out_day_dir / f"{intent_hash}.submit_preflight_decision.v1.json").resolve()
         _immutable_copy(allow, allow_dst)

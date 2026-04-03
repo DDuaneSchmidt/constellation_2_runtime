@@ -98,12 +98,95 @@
 
     "exit_policy": {
       "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": ["policy_id", "profit_target", "stop_loss", "time_exit", "regime_exit"],
+      "properties": {
+        "policy_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "profit_target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "take_profit_pct"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "take_profit_pct": { "type": "integer", "minimum": 0, "maximum": 1000 }
+          }
+        },
+        "stop_loss": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "stop_loss_pct"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "stop_loss_pct": { "type": "integer", "minimum": 0, "maximum": 10000 }
+          }
+        },
+        "time_exit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "max_holding_days"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "max_holding_days": { "type": "integer", "minimum": 0, "maximum": 365 }
+          }
+        },
+        "regime_exit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "regime_blocklist"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "regime_blocklist": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+            }
+          }
+        }
+      }
     },
 
     "selection_policy": {
       "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": ["expiry_policy", "width_policy", "liquidity_policy", "pricing_policy"],
+      "properties": {
+        "expiry_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "target_dte_min", "target_dte_max"],
+          "properties": {
+            "mode": { "type": "string", "enum": ["DTE_WINDOW"] },
+            "target_dte_min": { "type": "integer", "minimum": 0, "maximum": 3650 },
+            "target_dte_max": { "type": "integer", "minimum": 0, "maximum": 3650 }
+          }
+        },
+        "width_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width_points"],
+          "properties": {
+            "width_points": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" }
+          }
+        },
+        "liquidity_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["min_open_interest", "min_volume", "max_bid_ask_spread"],
+          "properties": {
+            "min_open_interest": { "type": "integer", "minimum": 0 },
+            "min_volume": { "type": "integer", "minimum": 0 },
+            "max_bid_ask_spread": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" }
+          }
+        },
+        "pricing_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["limit_offset", "tick_rounding"],
+          "properties": {
+            "limit_offset": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+            "tick_rounding": { "type": "string", "enum": ["ROUND_DOWN", "ROUND_UP", "ROUND_NEAREST"] }
+          }
+        }
+      }
     },
 
     "canonical_json_hash": {
