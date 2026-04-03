@@ -55,6 +55,22 @@
     <!-- OPERATIONS -->
     <section id="viewOperations" class="view">
       <div class="ops-grid">
+        <div class="card platform-hero" id="platformReadinessCard">
+          <div class="card-head">
+            <div class="card-title">Platform Readiness</div>
+            <div id="platformReadinessMeta" class="mono tiny muted"></div>
+          </div>
+          <div id="platformHeroRow" class="metrics-row"></div>
+          <div id="platformSummaryRow" class="mono tiny muted" style="margin-top:8px;"></div>
+        </div>
+        <div class="card" id="scopeHealthCard">
+          <div class="card-head">
+            <div class="card-title">Scope Health</div>
+            <div id="scopeHealthMeta" class="mono tiny muted"></div>
+          </div>
+          <div id="scopeHealthRow" class="metrics-row"></div>
+          <div id="sleeveReadinessRow" class="mono tiny muted" style="margin-top:8px;"></div>
+        </div>
         <div class="tile-grid" id="tileGrid"></div>
 
         <div class="ops-row2">
@@ -123,7 +139,17 @@
           <div id="positionsAsOf" class="mono tiny muted"></div>
         </div>
         <div id="positionsExplain" class="mono tiny muted" style="margin-bottom:8px;"></div>
+        <div id="positionsLifecycleBanner" class="mono tiny muted" style="margin-bottom:8px;"></div>
         <div id="positionsSummary" class="metrics-row"></div>
+      </div>
+
+      <div class="card" style="margin-top:12px;">
+        <div class="card-head">
+          <div class="card-title">Pending Orders (Submitted, Unfilled)</div>
+          <div id="pendingOrdersMeta" class="mono tiny muted"></div>
+        </div>
+        <div id="pendingOrdersExplain" class="mono tiny muted" style="margin-bottom:8px;"></div>
+        <div id="pendingOrdersTable" class="mono tiny"></div>
       </div>
 
       <div class="grid2" style="margin-top:12px;">

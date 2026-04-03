@@ -227,9 +227,49 @@ documents:
     path: governance/05_CONTRACTS/C2/per_sleeve_orchestrator_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
+  - id: C2_DIAGNOSTICS_SCOPE_HEALTH_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/diagnostics_scope_health_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_SLEEVE_LIVE_READINESS_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/sleeve_live_readiness_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_BUG_METRICS_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/bug_metrics_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_PLATFORM_READINESS_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/platform_readiness_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_V2_READINESS_DEPENDENCY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/v2_readiness_dependency_contract_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_CAPITAL_MONITORING_ATTESTATION_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/capital_monitoring_attestation_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
 
   - id: C2_SLEEVE_REGISTRY_V1
     path: governance/02_REGISTRIES/C2_SLEEVE_REGISTRY_V1.json
+    class: C2_REGISTRY
+    status: ACTIVE
+  - id: C2_DIAGNOSTICS_FRESHNESS_POLICY_V1
+    path: governance/02_REGISTRIES/C2_DIAGNOSTICS_FRESHNESS_POLICY_V1.json
+    class: C2_REGISTRY
+    status: ACTIVE
+  - id: C2_SLEEVE_LIVE_READINESS_POLICY_V1
+    path: governance/02_REGISTRIES/C2_SLEEVE_LIVE_READINESS_POLICY_V1.json
+    class: C2_REGISTRY
+    status: ACTIVE
+  - id: C2_PLATFORM_READINESS_POLICY_V1
+    path: governance/02_REGISTRIES/C2_PLATFORM_READINESS_POLICY_V1.json
+    class: C2_REGISTRY
+    status: ACTIVE
+  - id: C2_LIFECYCLE_DEPENDENCY_CLASSIFICATION_V1
+    path: governance/02_REGISTRIES/C2_LIFECYCLE_DEPENDENCY_CLASSIFICATION_V1.json
     class: C2_REGISTRY
     status: ACTIVE
 
@@ -368,6 +408,18 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/READINESS/trade_submit_readiness.latest_pointer.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
+  - id: C2_READINESS_SLEEVE_LIVE_READINESS_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/READINESS/sleeve_live_readiness.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_READINESS_BUG_METRICS_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/READINESS/bug_metrics.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_READINESS_PLATFORM_READINESS_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/READINESS/platform_readiness.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
 
   # Phase J Monitoring schemas (new governed outputs)
   - id: C2_MONITORING_PORTFOLIO_NAV_SERIES_SCHEMA_V1
@@ -397,6 +449,10 @@ documents:
 
   - id: C2_MONITORING_DEGRADATION_SENTINEL_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/MONITORING/degradation_sentinel.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_MONITORING_CAPITAL_AUTHORITY_MONITORING_ATTESTATION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/MONITORING/capital_authority_monitoring_attestation.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
 
@@ -594,6 +650,22 @@ documents:
 
   - id: C2_TOOL_TRADE_SUBMIT_READINESS_C2_V1
     path: ops/tools/run_trade_submit_readiness_c2_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_SLEEVE_LIVE_READINESS_V1
+    path: ops/tools/run_sleeve_live_readiness_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_CONSTELLATION_BUG_METRICS_V1
+    path: ops/tools/run_constellation_bug_metrics_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_CONSTELLATION_PLATFORM_READINESS_V1
+    path: ops/tools/run_constellation_platform_readiness_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_CAPITAL_MONITORING_ATTESTATION_V1
+    path: ops/tools/run_capital_monitoring_attestation_v1.py
     class: C2_TOOL
     status: ACTIVE
 

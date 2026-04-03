@@ -125,6 +125,154 @@ function renderTiles(payload) {
   });
 }
 
+function renderScopeHealth(payload) {
+  const sh = payload?.scope_health || {};
+  const exec = sh?.sleeve_execution_health || {};
+  const mon = sh?.system_monitoring_health || {};
+  const overall = sh?.overall || {};
+  const src = sh?.source || {};
+  const liveReady = payload?.sleeve_live_readiness || {};
+
+  const rows = [
+    ["Sleeve Execution Health", String(exec.status || "UNKNOWN").toUpperCase(), (exec.reason_codes || []).slice(0, 2).join(", ") || "n/a"],
+    ["System Monitoring Health", String(mon.status || "UNKNOWN").toUpperCase(), ((mon.freshness || {}).reason_codes || []).slice(0, 2).join(", ") || "n/a"],
+    ["Overall Status", String(overall.status || "UNKNOWN").toUpperCase(), (overall.reason_codes || []).slice(0, 2).join(", ") || "n/a"],
+  ];
+
+  el("scopeHealthMeta").textContent = `runtime_state=${src?.present ? "present" : "missing"} • source=${src?.path || "n/a"}`;
+  el("scopeHealthRow").innerHTML = rows.map(([k, st, reason]) => `
+    <div class="metric">
+      <div class="k">${k}</div>
+      <div class="v ${stateClass(st)}">${st}</div>
+      <div class="mono tiny muted">reason=${reason}</div>
+    </div>
+  `).join("");
+
+  const grade = liveReady?.readiness_grade ?? liveReady?.grade_band ?? "n/a";
+  const score = (liveReady?.readiness_score ?? "n/a");
+  const threshold = (liveReady?.score_threshold ?? "n/a");
+  const state = String(liveReady?.state || "UNKNOWN").toUpperCase();
+  const readinessSummary = liveReady?.readiness_summary || "n/a";
+  const decisionBasis = liveReady?.promotion_decision_basis || "n/a";
+  const blockersList = (liveReady?.top_blockers_ordered || liveReady?.promotion_blockers || []).slice(0, 3);
+  const blockers = blockersList.join(", ")
+    || (liveReady?.reason_codes || []).slice(0, 3).join(", ")
+    || "n/a";
+  const readyPath = liveReady?.path || "n/a";
+  const candidate = (liveReady?.promotion_candidate === true) ? "YES"
+    : (liveReady?.promotion_candidate === false) ? "NO"
+    : "UNKNOWN";
+  const remaining = (liveReady?.pass_conditions_remaining || []).slice(0, 3).join(" | ") || "n/a";
+  const minimumSummary = (liveReady?.minimum_conditions_summary || []).slice(0, 3).join(" | ") || "n/a";
+  const nextActions = (liveReady?.recommended_next_actions || []).slice(0, 3).join(" | ") || "n/a";
+  const rootBlockers = (liveReady?.root_blockers || []).slice(0, 3).join(", ") || "n/a";
+  const derivedBlockers = (liveReady?.derived_blockers || []).slice(0, 3).join(", ") || "n/a";
+  const smallestClearanceSet = (liveReady?.smallest_clearance_set || []).slice(0, 3).join(" | ") || "n/a";
+  const blockerOrder = (liveReady?.blocker_dependency_order || []).join(" -> ") || "n/a";
+  const gateSequence = (liveReady?.estimated_promotion_gate_sequence || []).join(" -> ") || "n/a";
+  const agg = liveReady?.aggregate_blocker_summary || {};
+  const calib = liveReady?.calibration_support || {};
+  const failedChecks = (calib?.failed_checks || []).map(x => `${x.check_id}:${x.score_awarded}/${x.weight}`).slice(0, 4).join(", ") || "n/a";
+  const checklist = liveReady?.promotion_checklist || {};
+  const checklistFalse = (checklist?.currently_false || []).slice(0, 3).join(" | ") || "none";
+  const cv = liveReady?.current_vs_required || {};
+  const histCv = cv?.pass_history || {};
+  const freshCv = cv?.freshness || {};
+  const lifeCv = cv?.lifecycle_monitor || {};
+  const scoreCv = cv?.score || {};
+  const cvSummary = `pass_history=${histCv.current ?? "n/a"}/${histCv.required ?? "n/a"} freshness_ok=${freshCv.ok ?? "n/a"} lifecycle_status=${lifeCv.current_status ?? "n/a"} score=${scoreCv.current ?? "n/a"}/${scoreCv.required ?? "n/a"}`;
+
+  const lifecycleSurface = (((mon?.freshness || {}).surface_results || []).find(s => (s?.surface_id || "") === "lifecycle_monitor")) || {};
+  const lifecycleReasons = (lifecycleSurface?.source_reason_codes || []).slice(0, 3).join(", ") || "n/a";
+  const lifecycleFails = (lifecycleSurface?.source_check_failures || []).slice(0, 3).join(", ") || "n/a";
+  const lifecycleFailClass = (lifecycleSurface?.fail_reasons || []).join(", ") || "n/a";
+  const lifecycleCauseClass = lifecycleSurface?.lifecycle_cause_class || "n/a";
+  const lifecycleGov = lifecycleSurface?.lifecycle_governance_summary || {};
+  const lifecycleGovSummary = `exec_required_blocked=${lifecycleGov?.blocked_by_classification?.REQUIRED_FOR_EXECUTION ?? "n/a"} readiness_required_blocked=${lifecycleGov?.blocked_by_classification?.REQUIRED_FOR_READINESS ?? "n/a"} optional_blocked=${lifecycleGov?.blocked_by_classification?.OPTIONAL_MONITORING ?? "n/a"}`;
+
+  el("sleeveReadinessRow").innerHTML = `
+    <div class="mono tiny">Sleeve Live Readiness: state=${state} score=${score} threshold=${threshold} grade=${grade} promotion_candidate=${candidate}</div>
+    <div class="mono tiny">readiness_summary=${readinessSummary}</div>
+    <div class="mono tiny">promotion_decision_basis=${decisionBasis}</div>
+    <div class="mono tiny">top_blockers=${blockers}</div>
+    <div class="mono tiny">root_blockers=${rootBlockers}</div>
+    <div class="mono tiny">derived_blockers=${derivedBlockers}</div>
+    <div class="mono tiny">aggregate_blocker_summary=root=${agg.root_blocker_count ?? "n/a"} derived=${agg.derived_blocker_count ?? "n/a"} total=${agg.total_blocker_count ?? "n/a"}</div>
+    <div class="mono tiny">minimum_conditions_summary=${minimumSummary}</div>
+    <div class="mono tiny">pass_conditions_remaining=${remaining}</div>
+    <div class="mono tiny">smallest_clearance_set=${smallestClearanceSet}</div>
+    <div class="mono tiny">blocker_dependency_order=${blockerOrder}</div>
+    <div class="mono tiny">estimated_promotion_gate_sequence=${gateSequence}</div>
+    <div class="mono tiny">current_vs_required=${cvSummary}</div>
+    <div class="mono tiny">calibration_failed_checks=${failedChecks}</div>
+    <div class="mono tiny">promotion_checklist.currently_false=${checklistFalse}</div>
+    <div class="mono tiny">recommended_next_actions=${nextActions}</div>
+    <div class="mono tiny">lifecycle_monitor: cause_class=${lifecycleCauseClass} fail_class=${lifecycleFailClass} reason_codes=${lifecycleReasons} failing_checks=${lifecycleFails}</div>
+    <div class="mono tiny">lifecycle_governance=${lifecycleGovSummary}</div>
+    <div class="mono tiny muted">promotion_note=PASS_today_is_execution_only_not_live_readiness • path=${readyPath}</div>
+  `;
+}
+
+function renderPlatformReadiness(payload) {
+  const platform = payload?.platform_readiness || {};
+  const bug = payload?.platform_bug_metrics || {};
+  const pm = platform?.metric_views || {};
+  const bm = bug?.metric_views || {};
+
+  const state = String(platform?.platform_readiness_state || "UNKNOWN").toUpperCase();
+  const grade = platform?.platform_readiness_grade ?? "n/a";
+  const score = platform?.platform_readiness_score ?? "n/a";
+  const threshold = platform?.score_threshold_ready ?? "n/a";
+  const candidate = (platform?.platform_promotion_candidate === true) ? "YES"
+    : (platform?.platform_promotion_candidate === false) ? "NO"
+    : "UNKNOWN";
+  const blockers = (platform?.top_blockers_ordered || []).slice(0, 4).join(", ") || "none";
+  const summary = platform?.readiness_summary || "n/a";
+  const decision = platform?.promotion_decision_basis || "n/a";
+  const velocityDisplay = pm?.bug_velocity_7d_avg?.display_value
+    || bm?.bug_velocity_7d_avg?.display_value
+    || "UNKNOWN";
+  const recurrenceDisplay = pm?.recurrence_rate?.display_value
+    || bm?.recurrence_rate?.display_value
+    || "UNKNOWN";
+  const stabilityDisplay = pm?.diagnostic_stability_rate?.display_value
+    || bm?.diagnostic_stability_rate?.display_value
+    || "UNKNOWN";
+  const bugSummary = platform?.bug_stability_summary
+    || `events_today=${bug?.new_bug_events_today ?? "n/a"} velocity_7d=${velocityDisplay} recurrence=${recurrenceDisplay} diagnostics_stability=${stabilityDisplay} trend=${bug?.bug_velocity_trend ?? "UNKNOWN"}`;
+  const checklist = platform?.promotion_checklist || {};
+  const checklistFalse = (checklist?.currently_false || []).slice(0, 4).join(" | ") || "none";
+  const path = platform?.path || "n/a";
+
+  el("platformReadinessMeta").textContent = `artifact=${platform?.present ? "present" : "missing"} • path=${path}`;
+  el("platformHeroRow").innerHTML = `
+    <div class="metric">
+      <div class="k">Platform Grade</div>
+      <div class="v platform-grade">${grade}</div>
+    </div>
+    <div class="metric">
+      <div class="k">Platform Score</div>
+      <div class="v">${pm?.platform_readiness_score?.display_value || score} / ${pm?.score_threshold_ready?.display_value || threshold}</div>
+    </div>
+    <div class="metric">
+      <div class="k">Platform State</div>
+      <div class="v ${stateClass(state)}">${state}</div>
+    </div>
+    <div class="metric">
+      <div class="k">Promotion Candidate</div>
+      <div class="v">${candidate}</div>
+    </div>
+  `;
+  el("platformSummaryRow").innerHTML = `
+    <div class="mono tiny">top_blockers=${blockers}</div>
+    <div class="mono tiny">readiness_summary=${summary}</div>
+    <div class="mono tiny">promotion_decision_basis=${decision}</div>
+    <div class="mono tiny">bug_stability_summary=${bugSummary}</div>
+    <div class="mono tiny">bug_metrics_display: velocity_7d=${velocityDisplay} recurrence=${recurrenceDisplay} diagnostics_stability=${stabilityDisplay}</div>
+    <div class="mono tiny">promotion_checklist.currently_false=${checklistFalse}</div>
+  `;
+}
+
 function renderSleeveStrip(payload) {
   const sleeves = (payload?.sleeves || []);
   const container = el("sleeveStrip");
@@ -258,6 +406,7 @@ function renderFunnel(payload) {
           <div class="mono tiny">count=${z.count ?? "n/a"}</div>
         </div>
         <div class="drill-summary mono tiny muted">${z.summary || stageHelp[key] || "No detail available."}</div>
+        ${key === "submitted" ? `<div class="mono tiny muted" style="margin-top:4px;">pending_unfilled=${z.pending_count ?? "n/a"} (same evidence family as Positions → Pending Orders)</div>` : ""}
         <table class="drill-table">
           <thead><tr><th>#</th><th>Evidence record</th><th>Action</th></tr></thead>
           <tbody>${rows}</tbody>
@@ -469,13 +618,37 @@ function renderPositions(payload) {
   const positions = pe?.positions || [];
   const exp = pe?.exposure_by_engine || [];
   const src = pe?.sources || {};
+  const of = pe?.order_flow || {};
+  const ofSummary = of?.summary || {};
+  const pendingOrders = of?.pending_orders || [];
+  const orderRecords = of?.records || [];
 
   el("positionsAsOf").textContent = pe?.asof_utc ? `asof=${pe.asof_utc}` : "";
   el("positionsExplain").textContent = "Read-only positions and exposure for the selected day from canonical truth artifacts.";
 
+  const pendingCnt = pendingOrders.length;
+  const filledCnt = ofSummary.filled_orders ?? 0;
+  const rejectedCnt = ofSummary.rejected_orders ?? 0;
+  const notExecutedCnt = ofSummary.not_executed_orders ?? 0;
+  if (pendingCnt > 0) {
+    el("positionsLifecycleBanner").innerHTML = `<span class="status-chip status-amber">PENDING</span> ${pendingCnt} submitted order(s) are not filled yet.`;
+  } else if (filledCnt > 0) {
+    el("positionsLifecycleBanner").innerHTML = `<span class="status-chip status-green">FILLED</span> ${filledCnt} order(s) have fill evidence.`;
+  } else if (rejectedCnt > 0) {
+    el("positionsLifecycleBanner").innerHTML = `<span class="status-chip status-amber">REJECTED</span> ${rejectedCnt} order(s) were rejected.`;
+  } else if (notExecutedCnt > 0) {
+    el("positionsLifecycleBanner").innerHTML = `<span class="status-chip status-gray">NOT_EXECUTED</span> ${notExecutedCnt} submitted record(s) were not executed.`;
+  } else {
+    el("positionsLifecycleBanner").innerHTML = `<span class="status-chip status-blue">INFO</span> No submitted order records for selected day.`;
+  }
+
   const metrics = [
     ["Positions total", sum.positions_total],
     ["Open positions", sum.open_positions],
+    ["Pending orders", ofSummary.pending_orders],
+    ["Filled orders", ofSummary.filled_orders],
+    ["Rejected orders", ofSummary.rejected_orders],
+    ["Not executed", ofSummary.not_executed_orders],
     ["Net notional USD", sum.portfolio_net_notional_usd],
     ["Gross notional USD", sum.portfolio_gross_notional_usd],
     ["Capital at risk (cents)", sum.capital_at_risk_cents],
@@ -485,21 +658,51 @@ function renderPositions(payload) {
     <div class="metric"><div class="k">${k}</div><div class="v">${v ?? "n/a"}</div></div>
   `).join("");
 
-  const posRows = positions.length ? positions.map(p => `
+  const posRows = positions.length ? positions.map(p => {
+    const qty = p.qty ?? "n/a";
+    const pstate = (p.status || "UNKNOWN").toUpperCase();
+    const hint = (pstate === "OPEN" && Number(p.qty || 0) === 0)
+      ? `<span class="status-chip status-amber">PENDING_OR_UNFILLED</span>`
+      : (pstate === "OPEN" ? `<span class="status-chip status-green">ACTIVE</span>` : `<span class="status-chip status-gray">${pstate}</span>`);
+    return `
     <tr>
       <td class="mono tiny">${p.position_id || "n/a"}</td>
       <td class="mono tiny">${p.engine_id || "n/a"}</td>
-      <td class="mono tiny">${p.qty ?? "n/a"}</td>
+      <td class="mono tiny">${qty}</td>
       <td class="mono tiny">${p.status || "n/a"}</td>
       <td class="mono tiny">${p.market_exposure_type || "n/a"}</td>
+      <td class="mono tiny">${hint}</td>
     </tr>
-  `).join("") : `<tr><td colspan="5" class="mono tiny">No position rows for selected day.</td></tr>`;
+  `;
+  }).join("") : `<tr><td colspan="6" class="mono tiny">No position rows for selected day.</td></tr>`;
   el("positionsTable").innerHTML = `
     <table style="width:100%; border-collapse:collapse;">
-      <thead><tr><th style="text-align:left;">Position ID</th><th style="text-align:left;">Engine</th><th style="text-align:left;">Qty</th><th style="text-align:left;">Status</th><th style="text-align:left;">Exposure Type</th></tr></thead>
+      <thead><tr><th style="text-align:left;">Position ID</th><th style="text-align:left;">Engine</th><th style="text-align:left;">Qty</th><th style="text-align:left;">Status</th><th style="text-align:left;">Exposure Type</th><th style="text-align:left;">Operator State</th></tr></thead>
       <tbody>${posRows}</tbody>
     </table>
     <div class="mono tiny muted" style="margin-top:6px;">positions_source=${src.positions_path || "n/a"}</div>
+  `;
+
+  el("pendingOrdersMeta").textContent = `pending=${pendingCnt} • submitted_total=${ofSummary.submitted_records ?? 0}`;
+  el("pendingOrdersExplain").textContent = "Subset of funnel Submitted stage: records with submission evidence but no fill evidence yet.";
+  const pendingRows = pendingOrders.length ? pendingOrders.map((r, i) => `
+    <tr>
+      <td class="mono tiny">${i + 1}</td>
+      <td class="mono tiny">${r.engine_id || "n/a"}</td>
+      <td class="mono tiny">${r.symbol || "n/a"}</td>
+      <td class="mono tiny">${r.side || "n/a"}</td>
+      <td class="mono tiny">${r.qty ?? "n/a"}</td>
+      <td class="mono tiny">${r.submitted_status || "n/a"}</td>
+      <td class="mono tiny">${r.submitted_at_utc || "n/a"}</td>
+      <td class="mono tiny"><span class="status-chip status-amber">PENDING</span></td>
+    </tr>
+  `).join("") : `<tr><td colspan="8" class="mono tiny muted">No submitted-unfilled records for selected day.</td></tr>`;
+  el("pendingOrdersTable").innerHTML = `
+    <table style="width:100%; border-collapse:collapse;">
+      <thead><tr><th style="text-align:left;">#</th><th style="text-align:left;">Engine</th><th style="text-align:left;">Symbol</th><th style="text-align:left;">Side</th><th style="text-align:left;">Planned Qty</th><th style="text-align:left;">Submit Status</th><th style="text-align:left;">Submitted UTC</th><th style="text-align:left;">State</th></tr></thead>
+      <tbody>${pendingRows}</tbody>
+    </table>
+    <div class="mono tiny muted" style="margin-top:6px;">submissions_source=${src.submissions_root || "n/a"} • records=${orderRecords.length}</div>
   `;
 
   el("exposureSummary").innerHTML = `
@@ -587,6 +790,8 @@ async function loadAndRender() {
 
   el("lastRefresh").textContent = `refreshed=${payload?.meta?.server_time_utc || "n/a"}`;
 
+  renderPlatformReadiness(payload);
+  renderScopeHealth(payload);
   renderTiles(payload);
   renderSleeveStrip(payload);
   renderFunnel(payload);

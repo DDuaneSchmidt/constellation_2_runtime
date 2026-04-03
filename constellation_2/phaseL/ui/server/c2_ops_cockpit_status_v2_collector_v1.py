@@ -92,6 +92,7 @@ THIS_FILE = Path(__file__).resolve()
 REPO_ROOT = THIS_FILE.parents[4]
 SLEEVE_POLICY_REGISTRY = (REPO_ROOT / "governance/02_REGISTRIES/C2_CAPITAL_AUTHORITY_POLICY_V1.json").resolve()
 IB_ACCOUNT_REGISTRY = (REPO_ROOT / "governance/02_REGISTRIES/C2_IB_ACCOUNT_REGISTRY_V1.json").resolve()
+RUNTIME_STATE_PATH = (REPO_ROOT / "constellation_2/runtime/truth/system_snapshot/constellation_runtime_state.v1.json").resolve()
 
 
 # -------------------------
@@ -291,6 +292,143 @@ def _load_selected_run_verdict_doc(run_tile: Optional[Tile]) -> Optional[Dict[st
     if isinstance(obj, dict):
         return obj
     return None
+
+
+def _load_scope_health_summary() -> Dict[str, Any]:
+    obj, _err = _safe_read_json(RUNTIME_STATE_PATH)
+    if not isinstance(obj, dict):
+        return {
+            "sleeve_execution_health": {"status": "UNKNOWN", "reason_codes": ["RUNTIME_STATE_MISSING"]},
+            "system_monitoring_health": {"status": "UNKNOWN", "reason_codes": ["RUNTIME_STATE_MISSING"]},
+            "overall": {"status": "UNKNOWN", "reason_codes": ["RUNTIME_STATE_MISSING"]},
+            "source": {"path": str(RUNTIME_STATE_PATH), "present": False},
+        }
+    scope = obj.get("scope_health") if isinstance(obj.get("scope_health"), dict) else {}
+    return {
+        "sleeve_execution_health": scope.get("sleeve_execution_health", {"status": "UNKNOWN"}),
+        "system_monitoring_health": scope.get("system_monitoring_health", {"status": "UNKNOWN"}),
+        "overall": scope.get("overall", {"status": "UNKNOWN"}),
+        "source": {"path": str(RUNTIME_STATE_PATH), "present": True},
+    }
+
+
+def _load_sleeve_live_readiness(truth_root: Path, day: str) -> Dict[str, Any]:
+    p = (
+        truth_root
+        / "readiness_v1"
+        / "sleeve_live_readiness_v1"
+        / day
+        / "sleeve_live_readiness.v1.json"
+    ).resolve()
+    obj, err = _safe_read_json(p)
+    if not isinstance(obj, dict):
+        return {
+            "state": "UNKNOWN",
+            "reason_codes": ["ARTIFACT_MISSING" if err == "FILE_NOT_FOUND" else "ARTIFACT_UNREADABLE"],
+            "path": str(p),
+            "present": False,
+        }
+    return {
+        "state": str(obj.get("readiness_state") or "UNKNOWN"),
+        "readiness_summary": str(obj.get("readiness_summary") or ""),
+        "promotion_decision_basis": str(obj.get("promotion_decision_basis") or ""),
+        "readiness_score": obj.get("readiness_score"),
+        "score_threshold": obj.get("score_threshold"),
+        "readiness_grade": obj.get("readiness_grade", obj.get("grade_band")),
+        "grade_band": obj.get("grade_band", obj.get("readiness_grade")),
+        "promotion_candidate": obj.get("promotion_candidate"),
+        "promotion_blockers": obj.get("promotion_blockers") if isinstance(obj.get("promotion_blockers"), list) else [],
+        "root_blockers": obj.get("root_blockers") if isinstance(obj.get("root_blockers"), list) else [],
+        "derived_blockers": obj.get("derived_blockers") if isinstance(obj.get("derived_blockers"), list) else [],
+        "aggregate_blocker_summary": obj.get("aggregate_blocker_summary") if isinstance(obj.get("aggregate_blocker_summary"), dict) else {},
+        "promotion_blockers_detail": obj.get("promotion_blockers_detail") if isinstance(obj.get("promotion_blockers_detail"), list) else [],
+        "minimum_conditions_summary": obj.get("minimum_conditions_summary") if isinstance(obj.get("minimum_conditions_summary"), list) else [],
+        "current_vs_required": obj.get("current_vs_required") if isinstance(obj.get("current_vs_required"), dict) else {},
+        "smallest_clearance_set": obj.get("smallest_clearance_set") if isinstance(obj.get("smallest_clearance_set"), list) else [],
+        "blocker_dependency_order": obj.get("blocker_dependency_order") if isinstance(obj.get("blocker_dependency_order"), list) else [],
+        "estimated_promotion_gate_sequence": obj.get("estimated_promotion_gate_sequence") if isinstance(obj.get("estimated_promotion_gate_sequence"), list) else [],
+        "top_blockers_ordered": obj.get("top_blockers_ordered") if isinstance(obj.get("top_blockers_ordered"), list) else [],
+        "pass_conditions_remaining": obj.get("pass_conditions_remaining") if isinstance(obj.get("pass_conditions_remaining"), list) else [],
+        "recommended_next_actions": obj.get("recommended_next_actions") if isinstance(obj.get("recommended_next_actions"), list) else [],
+        "calibration_support": obj.get("calibration_support") if isinstance(obj.get("calibration_support"), dict) else {},
+        "promotion_checklist": obj.get("promotion_checklist") if isinstance(obj.get("promotion_checklist"), dict) else {},
+        "reason_codes": obj.get("reason_codes") if isinstance(obj.get("reason_codes"), list) else [],
+        "evidence_paths": obj.get("evidence_paths") if isinstance(obj.get("evidence_paths"), list) else [],
+        "path": str(p),
+        "present": True,
+    }
+
+
+def _load_platform_bug_metrics(truth_root: Path, day: str) -> Dict[str, Any]:
+    p = (
+        truth_root
+        / "readiness_v1"
+        / "constellation_bug_metrics_v1"
+        / day
+        / "constellation_bug_metrics.v1.json"
+    ).resolve()
+    obj, err = _safe_read_json(p)
+    if not isinstance(obj, dict):
+        return {
+            "present": False,
+            "path": str(p),
+            "reason_codes": ["ARTIFACT_MISSING" if err == "FILE_NOT_FOUND" else "ARTIFACT_UNREADABLE"],
+        }
+    return {
+        "present": True,
+        "path": str(p),
+        "new_bug_events_today": obj.get("new_bug_events_today"),
+        "bug_velocity_7d_avg": obj.get("bug_velocity_7d_avg"),
+        "bug_velocity_14d_avg": obj.get("bug_velocity_14d_avg"),
+        "recurrence_rate": obj.get("recurrence_rate"),
+        "diagnostic_stability_rate": obj.get("diagnostic_stability_rate"),
+        "bug_velocity_trend": obj.get("bug_velocity_trend"),
+        "metric_views": obj.get("metric_views") if isinstance(obj.get("metric_views"), dict) else {},
+        "calculation_summary": obj.get("calculation_summary") if isinstance(obj.get("calculation_summary"), dict) else {},
+        "unknown_fields": obj.get("unknown_fields") if isinstance(obj.get("unknown_fields"), list) else [],
+        "evidence_paths": obj.get("evidence_paths") if isinstance(obj.get("evidence_paths"), list) else [],
+    }
+
+
+def _load_platform_readiness(truth_root: Path, day: str) -> Dict[str, Any]:
+    p = (
+        truth_root
+        / "readiness_v1"
+        / "constellation_platform_readiness_v1"
+        / day
+        / "constellation_platform_readiness.v1.json"
+    ).resolve()
+    obj, err = _safe_read_json(p)
+    if not isinstance(obj, dict):
+        return {
+            "present": False,
+            "path": str(p),
+            "platform_readiness_state": "UNKNOWN",
+            "reason_codes": ["ARTIFACT_MISSING" if err == "FILE_NOT_FOUND" else "ARTIFACT_UNREADABLE"],
+        }
+    return {
+        "present": True,
+        "path": str(p),
+        "platform_readiness_state": str(obj.get("platform_readiness_state") or "UNKNOWN"),
+        "platform_readiness_score": obj.get("platform_readiness_score"),
+        "platform_readiness_grade": obj.get("platform_readiness_grade"),
+        "score_threshold_ready": obj.get("score_threshold_ready"),
+        "metric_views": obj.get("metric_views") if isinstance(obj.get("metric_views"), dict) else {},
+        "platform_promotion_candidate": obj.get("platform_promotion_candidate"),
+        "readiness_summary": str(obj.get("readiness_summary") or ""),
+        "promotion_decision_basis": str(obj.get("promotion_decision_basis") or ""),
+        "root_blockers": obj.get("root_blockers") if isinstance(obj.get("root_blockers"), list) else [],
+        "derived_blockers": obj.get("derived_blockers") if isinstance(obj.get("derived_blockers"), list) else [],
+        "top_blockers_ordered": obj.get("top_blockers_ordered") if isinstance(obj.get("top_blockers_ordered"), list) else [],
+        "minimum_conditions_summary": obj.get("minimum_conditions_summary") if isinstance(obj.get("minimum_conditions_summary"), list) else [],
+        "current_vs_required": obj.get("current_vs_required") if isinstance(obj.get("current_vs_required"), dict) else {},
+        "promotion_checklist": obj.get("promotion_checklist") if isinstance(obj.get("promotion_checklist"), dict) else {},
+        "smallest_clearance_set": obj.get("smallest_clearance_set") if isinstance(obj.get("smallest_clearance_set"), list) else [],
+        "blocker_dependency_order": obj.get("blocker_dependency_order") if isinstance(obj.get("blocker_dependency_order"), list) else [],
+        "bug_stability_summary": str(obj.get("bug_stability_summary") or ""),
+        "aggregate_blocker_summary": obj.get("aggregate_blocker_summary") if isinstance(obj.get("aggregate_blocker_summary"), dict) else {},
+        "evidence_paths": obj.get("evidence_paths") if isinstance(obj.get("evidence_paths"), list) else [],
+    }
 
 
 # -------------------------
@@ -719,6 +857,97 @@ def _count_submissions_and_fills(truth_root: Path, day: str) -> Tuple[Dict[str, 
                 filled += 1
 
     return {"submitted": submitted, "filled": filled}, miss
+
+
+def _collect_submission_order_flow(truth_root: Path, day: str) -> Dict[str, Any]:
+    root = (_submissions_root(truth_root) / day).resolve()
+    out: Dict[str, Any] = {
+        "summary": {
+            "submitted_records": 0,
+            "pending_orders": 0,
+            "filled_orders": 0,
+            "rejected_orders": 0,
+            "not_executed_orders": 0,
+        },
+        "records": [],
+        "pending_orders": [],
+        "sources": {"submissions_root": str(root)},
+        "missing_paths": [],
+    }
+    if not root.exists() or not root.is_dir():
+        out["missing_paths"] = [str(root)]
+        return out
+
+    def _load(path: Path) -> Optional[Dict[str, Any]]:
+        if not path.exists():
+            return None
+        obj, _err = _safe_read_json(path)
+        return obj if isinstance(obj, dict) else None
+
+    recs: List[Dict[str, Any]] = []
+    for intent_dir in sorted([p for p in root.iterdir() if p.is_dir()], key=lambda p: p.name):
+        plan_path = (intent_dir / "equity_order_plan.v1.json").resolve()
+        sub_path = (intent_dir / "broker_submission_record.v2.json").resolve()
+        evt_path = (intent_dir / "execution_event_record.v1.json").resolve()
+        plan = _load(plan_path)
+        sub = _load(sub_path)
+        evt = _load(evt_path)
+        if plan is None and sub is None and evt is None:
+            continue
+
+        status_sub = str((sub or {}).get("status") or "").upper()
+        status_evt = str((evt or {}).get("status") or "").upper()
+        filled_qty_raw = (evt or {}).get("filled_qty")
+        filled_qty = float(filled_qty_raw) if isinstance(filled_qty_raw, (int, float)) else 0.0
+        qty_raw = (plan or {}).get("qty_shares")
+        qty = float(qty_raw) if isinstance(qty_raw, (int, float)) else None
+
+        if "FILL" in status_evt or filled_qty > 0:
+            lifecycle = "FILLED"
+        elif status_sub in {"PRESUBMITTED", "SUBMITTED", "PENDING", "API_PENDING"}:
+            lifecycle = "PENDING"
+        elif "REJECT" in status_sub or "REJECT" in status_evt:
+            lifecycle = "REJECTED"
+        elif any(x in status_sub for x in ("CANCEL", "INACTIVE", "EXPIRE")) or any(
+            x in status_evt for x in ("CANCEL", "INACTIVE", "EXPIRE")
+        ):
+            lifecycle = "NOT_EXECUTED"
+        elif sub is not None:
+            lifecycle = "PENDING"
+        else:
+            lifecycle = "NOT_EXECUTED"
+
+        rec = {
+            "intent_hash": (plan or {}).get("intent_hash") or intent_dir.name,
+            "engine_id": (plan or {}).get("engine_id"),
+            "symbol": (plan or {}).get("symbol"),
+            "side": (plan or {}).get("action"),
+            "qty": qty,
+            "submitted_status": status_sub or None,
+            "execution_status": status_evt or None,
+            "filled_qty": filled_qty,
+            "submitted_at_utc": (sub or {}).get("submitted_at_utc"),
+            "event_time_utc": (evt or {}).get("event_time_utc"),
+            "lifecycle_state": lifecycle,
+            "evidence_paths": [str(x) for x in [plan_path, sub_path, evt_path] if x.exists()],
+        }
+        recs.append(rec)
+
+    for rec in recs:
+        if rec.get("submitted_status"):
+            out["summary"]["submitted_records"] += 1
+        st = str(rec.get("lifecycle_state") or "")
+        if st == "PENDING":
+            out["summary"]["pending_orders"] += 1
+            out["pending_orders"].append(rec)
+        elif st == "FILLED":
+            out["summary"]["filled_orders"] += 1
+        elif st == "REJECTED":
+            out["summary"]["rejected_orders"] += 1
+        elif st == "NOT_EXECUTED":
+            out["summary"]["not_executed_orders"] += 1
+    out["records"] = recs
+    return out
 
 
 def _candidate_activity_rollup_path(truth_root: Path, day: str) -> Path:
@@ -1213,6 +1442,7 @@ def _compute_key_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
     ops = payload.get("ops_health") if isinstance(payload.get("ops_health"), dict) else {}
     flow = payload.get("trade_flow_today") if isinstance(payload.get("trade_flow_today"), dict) else {}
     port = payload.get("portfolio") if isinstance(payload.get("portfolio"), dict) else {}
+    platform = payload.get("platform_readiness") if isinstance(payload.get("platform_readiness"), dict) else {}
 
     tiles = ops.get("tiles") if isinstance(ops.get("tiles"), list) else []
     tile_k: List[Dict[str, Any]] = []
@@ -1245,6 +1475,12 @@ def _compute_key_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
             "pnl_today": port.get("pnl_today"),
             "pnl_cumulative": port.get("pnl_cumulative"),
             "asof_utc": port.get("asof_utc"),
+        },
+        "platform_readiness": {
+            "state": platform.get("platform_readiness_state"),
+            "grade": platform.get("platform_readiness_grade"),
+            "score": platform.get("platform_readiness_score"),
+            "candidate": platform.get("platform_promotion_candidate"),
         },
         "engines": eng_k,
     }
@@ -1439,8 +1675,11 @@ def build_status_v2(
     positions_doc, miss_pos, pos_err, pos_path = _load_positions_snapshot(truth_root, day)
     exposure_doc, miss_exp, exp_err, exp_path = _load_exposure_net(truth_root, day)
     positions_exposure = _extract_positions_exposure(positions_doc, exposure_doc)
+    order_flow = _collect_submission_order_flow(truth_root, day)
+    positions_exposure["order_flow"] = order_flow
     positions_exposure["sources"]["positions_path"] = pos_path
     positions_exposure["sources"]["exposure_path"] = exp_path
+    positions_exposure["sources"]["submissions_root"] = order_flow.get("sources", {}).get("submissions_root")
 
     # Engine mode/account defaults from attempt manifest
     mode_from_attempt, acct_from_attempt, warn_ma, miss_ma = _attempt_mode_and_account(truth_root, day, sel_attempt)
@@ -1561,6 +1800,7 @@ def build_status_v2(
             + miss_veto
             + miss_pos
             + miss_exp
+            + [str(x) for x in (order_flow.get("missing_paths") or []) if isinstance(x, str)]
             + miss_nav
             + miss_att
             + miss_liq
@@ -1604,6 +1844,7 @@ def build_status_v2(
             + (["POSITIONS_UNREADABLE"] if pos_err else [])
             + (["EXPOSURE_UNREADABLE"] if exp_err else [])
             + (["NAV_UNREADABLE"] if nav_err else [])
+            + (["SUBMISSION_ORDER_FLOW_MISSING"] if order_flow.get("missing_paths") else [])
         )
     )
 
@@ -1622,6 +1863,10 @@ def build_status_v2(
             },
         },
         "ops_health": {"tiles": [_tile_dict(t) for t in tiles]},
+        "scope_health": _load_scope_health_summary(),
+        "sleeve_live_readiness": _load_sleeve_live_readiness(truth_root, day),
+        "platform_bug_metrics": _load_platform_bug_metrics(truth_root, day),
+        "platform_readiness": _load_platform_readiness(truth_root, day),
         "sleeves": sleeves_out,
         "trade_flow_today": {
             "counts": counts,
@@ -1649,6 +1894,22 @@ def build_status_v2(
         "errors": [],
         "ok": True,
     }
+    td = payload.get("trade_flow_today")
+    if isinstance(td, dict):
+        dd = td.get("drilldown")
+        if isinstance(dd, dict):
+            sub = dd.get("submitted")
+            if isinstance(sub, dict):
+                sub["pending_count"] = (
+                    order_flow.get("summary", {}).get("pending_orders")
+                    if isinstance(order_flow.get("summary"), dict)
+                    else None
+                )
+                sub["pending_records"] = (
+                    order_flow.get("pending_orders", [])[:20]
+                    if isinstance(order_flow.get("pending_orders"), list)
+                    else []
+                )
 
     # Server-side deterministic diff summary
     key_fields = _compute_key_fields(payload)

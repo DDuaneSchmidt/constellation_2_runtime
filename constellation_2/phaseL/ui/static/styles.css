@@ -138,6 +138,17 @@ body {
   gap: 10px;
 }
 
+.platform-hero {
+  border-color: #2f425d;
+  background: linear-gradient(180deg, rgba(15, 29, 43, 0.9), rgba(17, 24, 35, 0.9));
+}
+
+.platform-grade {
+  color: var(--info);
+  font-size: 18px;
+  font-weight: 900;
+}
+
 /* 2 rows x 4 cols */
 .tile-grid {
   display: grid;
@@ -209,6 +220,19 @@ body {
   font-size: 11px;
   font-weight: 700;
 }
+.status-chip {
+  display: inline-block;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 800;
+}
+.status-blue { border-color: rgba(122, 183, 255, 0.45); color: var(--info); background: var(--blue-bg); }
+.status-amber { border-color: rgba(246, 193, 119, 0.45); color: var(--warn); background: var(--amber-bg); }
+.status-green { border-color: rgba(126, 231, 135, 0.45); color: var(--ok); background: var(--green-bg); }
+.status-gray { border-color: rgba(147, 164, 187, 0.45); color: var(--muted); background: var(--gray-bg); }
+.status-red { border-color: rgba(242, 139, 130, 0.45); color: var(--err); background: var(--red-bg); }
 .stage-chip { color: var(--muted); }
 .funnel-step.stage-info .stage-chip { border-color: rgba(122, 183, 255, 0.45); color: var(--info); background: var(--blue-bg); }
 .funnel-step.stage-warn .stage-chip { border-color: rgba(246, 193, 119, 0.45); color: var(--warn); background: var(--amber-bg); }

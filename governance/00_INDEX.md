@@ -48,8 +48,14 @@ Additional registries introduced:
 - `governance/02_REGISTRIES/C2_IB_ACCOUNT_REGISTRY_V1.json`
 - `governance/02_REGISTRIES/C2_LIQUIDITY_SLIPPAGE_POLICY_V1.json`
 - `governance/02_REGISTRIES/C2_SLEEVE_REGISTRY_V1.json`
+- `governance/02_REGISTRIES/C2_DIAGNOSTICS_FRESHNESS_POLICY_V1.json`
+- `governance/02_REGISTRIES/C2_SLEEVE_LIVE_READINESS_POLICY_V1.json`
+- `governance/02_REGISTRIES/C2_PLATFORM_READINESS_POLICY_V1.json`
+- `governance/02_REGISTRIES/C2_LIFECYCLE_DEPENDENCY_CLASSIFICATION_V1.json`
 - `governance/05_CONTRACTS/C2/multi_sleeve_rollup_pointer_index_v1.contract.md`
 - `governance/05_CONTRACTS/C2/preopen_requires_multi_sleeve_rollup_verification_v1.contract.md`
+- `governance/05_CONTRACTS/C2/v2_readiness_dependency_contract_v1.contract.md`
+- `governance/05_CONTRACTS/C2/capital_monitoring_attestation_v1.contract.md`
 
 ### Registries (governed)
 - `governance/02_REGISTRIES/GATE_HIERARCHY_V1.json`
@@ -114,6 +120,11 @@ These canonical contracts are governance-controlled and must be explicitly liste
 - `governance/05_CONTRACTS/C2/truth_partitioning_by_sleeve_v1.contract.md`
 - `governance/05_CONTRACTS/C2/per_sleeve_readiness_v1.contract.md`
 - `governance/05_CONTRACTS/C2/per_sleeve_orchestrator_v1.contract.md`
+- `governance/05_CONTRACTS/C2/diagnostics_scope_health_v1.contract.md`
+- `governance/05_CONTRACTS/C2/sleeve_live_readiness_v1.contract.md`
+- `governance/05_CONTRACTS/C2/bug_metrics_v1.contract.md`
+- `governance/05_CONTRACTS/C2/platform_readiness_v1.contract.md`
+- `governance/05_CONTRACTS/C2/capital_monitoring_attestation_v1.contract.md`
 - `governance/05_CONTRACTS/ORCHESTRATION/C2_ORCHESTRATOR_V2_CONTRACT.md`
 - `governance/05_CONTRACTS/C2/auto_repair_controller_v1.contract.md`
 
@@ -130,6 +141,16 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 ### READINESS schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/READINESS/trade_submit_readiness.status.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/READINESS/trade_submit_readiness.latest_pointer.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/READINESS/sleeve_live_readiness.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/READINESS/bug_metrics.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/READINESS/platform_readiness.v1.schema.json`
+
+### READINESS tools (governed writers)
+- `ops/tools/run_trade_submit_readiness_c2_v1.py`
+- `ops/tools/run_sleeve_live_readiness_v1.py`
+- `ops/tools/run_constellation_bug_metrics_v1.py`
+- `ops/tools/run_constellation_platform_readiness_v1.py`
+- `ops/tools/run_capital_monitoring_attestation_v1.py`
 
 ### Engine activity schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/oms_decision.v1.schema.json`
@@ -144,6 +165,7 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/engine_correlation_matrix.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/stress_replay_report.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/degradation_sentinel.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/MONITORING/capital_authority_monitoring_attestation.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/capital_efficiency.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/nav_snapshot.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/MONITORING/nav_history_ledger.v1.schema.json`

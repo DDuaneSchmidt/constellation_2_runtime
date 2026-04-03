@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/readiness/platform_readiness.v1.schema.json",
+  "title": "C2 Platform Readiness v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "platform_readiness_state",
+    "platform_readiness_score",
+    "platform_readiness_grade",
+    "score_threshold_ready",
+    "platform_promotion_candidate",
+    "root_blockers",
+    "derived_blockers",
+    "aggregate_blocker_summary",
+    "readiness_summary",
+    "promotion_decision_basis",
+    "top_blockers_ordered",
+    "minimum_conditions_summary",
+    "current_vs_required",
+    "promotion_checklist",
+    "smallest_clearance_set",
+    "blocker_dependency_order",
+    "score_contribution",
+    "metric_views",
+    "policy_values",
+    "evidence_paths",
+    "bug_stability_summary",
+    "calibration_support"
+  ],
+  "properties": {
+    "schema_id": {"const": "C2_PLATFORM_READINESS_V1"},
+    "schema_version": {"const": 1},
+    "day_utc": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+    "produced_utc": {"type": "string", "minLength": 20},
+    "platform_readiness_state": {"type": "string", "enum": ["READY", "NOT_READY", "BLOCKED", "UNKNOWN"]},
+    "platform_readiness_score": {"type": "integer", "minimum": 0, "maximum": 100},
+    "platform_readiness_grade": {"type": "string", "enum": ["A", "B", "C", "D", "UNKNOWN"]},
+    "score_threshold_ready": {"type": "integer", "minimum": 0, "maximum": 100},
+    "platform_promotion_candidate": {"type": "boolean"},
+    "root_blockers": {"type": "array", "items": {"type": "string"}},
+    "derived_blockers": {"type": "array", "items": {"type": "string"}},
+    "aggregate_blocker_summary": {"type": "object"},
+    "readiness_summary": {"type": "string", "minLength": 1},
+    "promotion_decision_basis": {"type": "string", "minLength": 1},
+    "top_blockers_ordered": {"type": "array", "items": {"type": "string"}},
+    "minimum_conditions_summary": {"type": "array", "items": {"type": "string"}},
+    "current_vs_required": {"type": "object"},
+    "promotion_checklist": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["must_be_true", "currently_false", "gating_conditions", "informational_conditions"],
+      "properties": {
+        "must_be_true": {"type": "array", "items": {"type": "string"}},
+        "currently_false": {"type": "array", "items": {"type": "string"}},
+        "gating_conditions": {"type": "array", "items": {"type": "string"}},
+        "informational_conditions": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "smallest_clearance_set": {"type": "array", "items": {"type": "string"}},
+    "blocker_dependency_order": {"type": "array", "items": {"type": "string"}},
+    "score_contribution": {"type": "array", "items": {"type": "object"}},
+    "metric_views": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "platform_readiness_score",
+        "score_threshold_ready",
+        "bug_velocity_7d_avg",
+        "recurrence_rate",
+        "diagnostic_stability_rate"
+      ],
+      "properties": {
+        "platform_readiness_score": {"$ref": "#/$defs/metric_view"},
+        "score_threshold_ready": {"$ref": "#/$defs/metric_view"},
+        "bug_velocity_7d_avg": {"$ref": "#/$defs/metric_view"},
+        "recurrence_rate": {"$ref": "#/$defs/metric_view"},
+        "diagnostic_stability_rate": {"$ref": "#/$defs/metric_view"}
+      }
+    },
+    "policy_values": {"type": "object"},
+    "evidence_paths": {"type": "array", "items": {"type": "string"}},
+    "bug_stability_summary": {"type": "string", "minLength": 1},
+    "calibration_support": {"type": "object"}
+  },
+  "$defs": {
+    "metric_view": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["raw_value", "unit", "display_value"],
+      "properties": {
+        "raw_value": {"type": ["integer", "null"]},
+        "unit": {"type": "string", "minLength": 1},
+        "display_value": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}
