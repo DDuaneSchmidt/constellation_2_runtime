@@ -31,6 +31,15 @@ documents:
     path: governance/00_INDEX.md
     class: GOVERNANCE_INDEX
     status: ACTIVE
+
+  - id: C2_CONSTELLATION_AI_REASONING_CONTRACT_V1
+    path: governance/contracts/constellation_ai_reasoning_contract.v1.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_CONSTELLATION_SYSTEM_INVARIANTS_V1
+    path: governance/contracts/constellation_system_invariants.v1.md
+    class: C2_CONTRACT
+    status: DRAFT
   # Governed docs/c2 (tracked for traceability; treated as governed only when listed here)
   - id: C2_DOC_F_ACCOUNTING_SPINE_V1
     path: docs/c2/F_ACCOUNTING_SPINE_V1.md
@@ -145,11 +154,11 @@ documents:
   - id: C2_SINGLE_IB_ACCOUNT_MODE_CONTRACT_V1
     path: governance/05_CONTRACTS/C2/single_ib_account_mode_v1.contract.md
     class: C2_CONTRACT
-    status: ACTIVE
+    status: TOMBSTONED
   - id: C2_MULTI_ACCOUNT_TOPOLOGY_CONTRACT_V1
     path: governance/05_CONTRACTS/C2/multi_account_topology_v1.contract.md
     class: C2_CONTRACT
-    status: DRAFT
+    status: ACTIVE
 
   - id: C2_SLEEVE_REGISTRY_CONTRACT_V1
     path: governance/05_CONTRACTS/C2/sleeve_registry_v1.contract.md

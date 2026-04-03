@@ -28,6 +28,10 @@ This repository is the constitutional root of **Constellation 2.0**.
 ### Weekly research protocols
 - `governance/weekly_engine_diagnostic_review_protocol_v1.md`
 
+### AI governance contracts
+- `governance/contracts/constellation_ai_reasoning_contract.v1.md`
+- `governance/contracts/constellation_system_invariants.v1.md`
+
 
 ### A) C2 Bundle Contracts (Design Authority)
 - `governance/01_CONTRACTS/C2/`
