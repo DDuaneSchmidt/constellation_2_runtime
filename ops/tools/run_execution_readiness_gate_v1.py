@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+from datetime import datetime, timezone
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 
@@ -52,10 +53,18 @@ def main() -> int:
     b = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
 
     if out_path.exists():
-        if out_path.read_bytes() == b:
+        existing = out_path.read_bytes()
+        if existing == b:
             print(f"OK: execution_readiness_gate_exists day_utc={day} path={out_path}")
             return 0
-        raise SystemExit(f"FAIL: REFUSE_OVERWRITE_DIFFERENT_BYTES: {out_path}")
+        quarantine_dir = (out_dir / "__quarantine__").resolve()
+        quarantine_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        quarantine_path = (
+            quarantine_dir / f"{out_path.name}.stale_pre_refresh_{stamp}.json"
+        ).resolve()
+        quarantine_path.write_bytes(existing)
+        out_path.unlink()
 
     tmp = out_path.with_suffix(out_path.suffix + ".tmp")
     tmp.write_bytes(b)
