@@ -51,6 +51,80 @@ Submission evidence and readiness are canonicalized through:
 Legacy submission index path (if enabled):
 - `constellation_2/runtime/truth/execution_evidence_v1/submission_index/DAY/submission_index.v1.json`
 
+## Next Paper Attempt Checklist
+
+Use this checklist for the next governed paper attempt. Check in order and stop at the first real defect.
+
+### 1) Same-day governed market data landed
+
+- Inspect:
+  - `constellation_2/runtime/truth_sleeves/PRIMARY/PAPER/market_data_snapshot_v1/dataset_manifest.json`
+  - `constellation_2/runtime/truth_sleeves/PRIMARY/PAPER/market_data_snapshot_v1/IWM/2026.jsonl`
+  - `constellation_2/runtime/truth_sleeves/PRIMARY/PAPER/market_data_snapshot_v1/SPY/2026.jsonl`
+  - `constellation_2/runtime/truth_sleeves/PRIMARY/PAPER/market_data_snapshot_v1/QQQ/2026.jsonl`
+- Good:
+  - manifest includes `IWM`, `SPY`, `QQQ`
+  - each symbol has an exact same-day row
+- No signal:
+  - rows exist, engines later return `NO_INTENT`
+- Real defect:
+  - manifest missing a required symbol
+  - same-day row missing for a governed symbol
+
+### 2) Real engine execution confirmed
+
+- Inspect:
+  - `constellation_2/runtime/truth_sleeves/PRIMARY/PAPER/monitoring_v1/engine_heartbeat_v1/<DAY>/C2_VOL_INCOME_DEFINED_RISK_V1/engine_heartbeat.v1.json`
+  - `constellation_2/runtime/truth_sleeves/PRIMARY/PAPER/monitoring_v1/engine_heartbeat_v1/<DAY>/C2_TREND_EQ_PRIMARY_V1/engine_heartbeat.v1.json`
+  - `constellation_2/runtime/truth_sleeves/PRIMARY/PAPER/monitoring_v1/engine_heartbeat_v1/<DAY>/C2_MEAN_REVERSION_EQ_V1/engine_heartbeat.v1.json`
+- Good:
+  - same-day heartbeat exists for all 3 engines
+- No signal:
+  - heartbeats exist, but no intent files are emitted
+- Real defect:
+  - missing heartbeat for a required engine after orchestrator run
+
+### 3) Any real intent files created
+
+- Inspect:
+  - `constellation_2/runtime/truth_sleeves/PRIMARY/PAPER/intents_v1/snapshots/<DAY>/`
+- Good:
+  - one or more `*.exposure_intent.v1.json` files from real engines
+- No signal:
+  - day directory exists and is empty or absent because all engines returned `NO_INTENT`
+- Real defect:
+  - real engine heartbeat exists but intent path shows simulator-shaped artifacts or other non-governed output
+
+### 4) Any Phase C identity directories released
+
+- Inspect:
+  - `constellation_2/runtime/truth_sleeves/PRIMARY/PAPER/phaseC_preflight_v1/<DAY>/`
+- Good:
+  - at least one identity subdirectory exists
+- No signal:
+  - no identity subdirectories because no real intents existed
+- Real defect:
+  - real intent exists, but only veto files appear and the veto reason indicates a missing governed dependency
+
+### 5) Governed submit result
+
+- Inspect:
+  - `constellation_2/runtime/truth_sleeves/PRIMARY/PAPER/reports/orchestrator_run_verdict_v2/<DAY>/.../orchestrator_run_verdict.v2.json`
+  - `constellation_2/runtime/truth/reports/sleeve_rollup_v1/<DAY>/sleeve_rollup.v1.json`
+- Good:
+  - `A7A_GOVERNED_SUBMIT_V5` is `OK` and rollup advances beyond `ABORTED`
+- No signal:
+  - `A7A_GOVERNED_SUBMIT_V5_BLOCKING_FAIL` with no identity directories because no real intents existed
+- Real defect:
+  - identity directories exist, but governed submit still fail-closes on a narrower downstream reason
+
+### Note on 2026-03-10
+
+- `2026-03-10` was a legitimate no-signal day under the repaired governed path.
+- No real entry intents should have existed.
+- No Phase C identity directories should have existed.
+- No governed submit should have been expected.
+
 ## Install / Update unit files (authoritative definitions are in repo)
 
 Authoritative unit files live in:
