@@ -9,8 +9,8 @@ FAIL-CLOSED CONTRACTS
 - Requires --produced_utc YYYY-MM-DDTHH:MM:SSZ (UTC, exact Z)
 - Convert produced_utc to America/New_York and REQUIRE exact 10:00:00
 - Exactly one run per day_utc: refuse if day output dir already exists
-- Writes only under canonical truth:
-    constellation_2/runtime/truth/intents_v1/snapshots/<DAY_UTC>/
+- Writes only under resolved truth root:
+    <truth_root>/intents_v1/snapshots/<DAY_UTC>/
 - One file per scenario:
     <INTENT_HASH>.exposure_intent.v1.json
   where INTENT_HASH = sha256(file bytes)
@@ -38,6 +38,7 @@ try:
 except Exception as e:  # noqa: BLE001
     raise RuntimeError(f"ZONEINFO_UNAVAILABLE: {e}") from e
 
+from constellation_2.common.truth_root_v1 import resolve_truth_root
 from constellation_2.phaseD.lib.canon_json_v1 import (
     CanonicalizationError,
     canonical_hash_for_c2_artifact_v1,
@@ -51,7 +52,7 @@ ENGINE_SUITE = "C2_SYSTEM_VALIDATION_V1"
 MODE = "PAPER"
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH_ROOT = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
+TRUTH_ROOT = resolve_truth_root(repo_root=REPO_ROOT)
 INTENTS_ROOT = (TRUTH_ROOT / "intents_v1" / "snapshots").resolve()
 
 ENGINE_REGISTRY_PATH = (REPO_ROOT / "governance" / "02_REGISTRIES" / "ENGINE_MODEL_REGISTRY_V1.json").resolve()
