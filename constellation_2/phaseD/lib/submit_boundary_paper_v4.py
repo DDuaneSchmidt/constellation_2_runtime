@@ -142,6 +142,24 @@ def _require_path_under_repo(repo_root: Path, p: Path) -> None:
         raise SubmitBoundaryV4Error(f"{RC_PHASEC_OUT_DIR_UNSAFE}: path_not_under_repo_root: path={pp} repo_root={rr}")
 
 
+def _resolve_truth_root_for_phasec_out_dir(repo_root: Path, phasec_out_dir: Path) -> Path:
+    rr = repo_root.resolve()
+    p = phasec_out_dir.resolve()
+
+    sleeves_root = (rr / "constellation_2/runtime/truth_sleeves").resolve()
+    try:
+        rel = p.relative_to(sleeves_root)
+        parts = rel.parts
+        # truth_sleeves/<sleeve_id>/<mode>/phaseC_preflight_v1/<day_utc>/<intent_hash>
+        if len(parts) >= 5 and parts[2] == "phaseC_preflight_v1":
+            candidate = (sleeves_root / parts[0] / parts[1]).resolve()
+            return candidate
+    except Exception:
+        pass
+
+    return (rr / "constellation_2/runtime/truth").resolve()
+
+
 def _read_authority_head(truth_root: Path, day: str) -> Path:
     """
     Trading submission requires canonical_authority_head for the submission day.
@@ -517,7 +535,7 @@ def run_submit_boundary_paper_v4(
     _require_paper("PAPER")
 
     repo_root = repo_root.resolve()
-    truth_root = (repo_root / "constellation_2/runtime/truth").resolve()
+    truth_root = _resolve_truth_root_for_phasec_out_dir(repo_root, phasec_out_dir)
 
     _require_path_under_repo(repo_root, phasec_out_dir)
 
