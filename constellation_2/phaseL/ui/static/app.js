@@ -396,9 +396,42 @@ function renderPlatformReadinessHistory(payload) {
   const historyPayload = payload?.platform_readiness_history || {};
   const history = Array.isArray(historyPayload?.history) ? historyPayload.history : [];
   const dateRange = historyPayload?.date_range || null;
+  const comparison = historyPayload?.comparison || {};
   const meta = historyPayload?.present
     ? `canonical_days=${history.length} • range=${dateRange?.start || "n/a"}..${dateRange?.end || "n/a"} • root=${historyPayload?.root || "n/a"}`
     : `canonical_days=0 • root=${historyPayload?.root || "n/a"}`;
+  const scoreChange = Number(comparison?.score_change);
+  const scoreChangeDisplay = Number.isFinite(scoreChange)
+    ? `${scoreChange > 0 ? "+" : ""}${scoreChange}`
+    : "n/a";
+  const scoreChangeClass = Number.isFinite(scoreChange)
+    ? (scoreChange > 0 ? "history-change-positive" : scoreChange < 0 ? "history-change-negative" : "history-change-neutral")
+    : "history-change-neutral";
+  const comparisonHtml = comparison?.present
+    ? `
+      <div class="history-comparison-grid">
+        <div class="metric">
+          <div class="k">Score Change</div>
+          <div class="v ${scoreChangeClass}">${escapeHtml(scoreChangeDisplay)}</div>
+          <div class="mono tiny muted">vs ${escapeHtml(comparison?.previous_day || "n/a")} → ${escapeHtml(comparison?.latest_day || "n/a")}</div>
+        </div>
+        <div class="metric">
+          <div class="k">Grade Change</div>
+          <div class="v">${escapeHtml(comparison?.grade_change?.from || "n/a")} → ${escapeHtml(comparison?.grade_change?.to || "n/a")}</div>
+          <div class="mono tiny muted">adjacent canonical days</div>
+        </div>
+        <div class="metric">
+          <div class="k">State Change</div>
+          <div class="v">${escapeHtml(comparison?.state_change?.from || "UNKNOWN")} → ${escapeHtml(comparison?.state_change?.to || "UNKNOWN")}</div>
+          <div class="mono tiny muted">${escapeHtml(comparison?.previous_day || "n/a")} to ${escapeHtml(comparison?.latest_day || "n/a")}</div>
+        </div>
+      </div>
+    `
+    : `
+      <div class="history-comparison-empty mono tiny muted">
+        Improvement Trend: waiting for additional canonical days
+      </div>
+    `;
 
   const rows = history.length
     ? history.map((row) => `
@@ -418,6 +451,7 @@ function renderPlatformReadinessHistory(payload) {
         <div class="card-title">Platform Readiness History</div>
         <div class="mono tiny muted">${meta}</div>
       </div>
+      ${comparisonHtml}
       <div class="history-chart-wrap">
         ${svgPlatformReadinessHistory(history)}
       </div>

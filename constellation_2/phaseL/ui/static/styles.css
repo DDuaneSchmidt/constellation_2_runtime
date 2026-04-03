@@ -176,6 +176,19 @@ body {
   padding: 8px;
 }
 
+.history-comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.history-comparison-empty {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel2);
+  padding: 8px 10px;
+}
+
 .history-chart {
   width: 100%;
   height: auto;
@@ -209,6 +222,18 @@ body {
   fill: var(--muted);
   font-size: 11px;
   font-family: var(--mono);
+}
+
+.history-change-positive {
+  color: var(--ok);
+}
+
+.history-change-negative {
+  color: var(--err);
+}
+
+.history-change-neutral {
+  color: var(--muted);
 }
 
 .history-table {

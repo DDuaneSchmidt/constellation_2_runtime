@@ -553,11 +553,41 @@ def _load_platform_readiness_history(truth_root: Path) -> Dict[str, Any]:
     if history:
         date_range = {"start": history[0]["day"], "end": history[-1]["day"]}
 
+    comparison: Dict[str, Any]
+    if len(history) >= 2:
+        previous = history[-2]
+        latest = history[-1]
+        latest_score = latest.get("score")
+        previous_score = previous.get("score")
+        score_change = None
+        if isinstance(latest_score, (int, float)) and isinstance(previous_score, (int, float)):
+            score_change = latest_score - previous_score
+        comparison = {
+            "present": True,
+            "latest_day": latest["day"],
+            "previous_day": previous["day"],
+            "score_change": score_change,
+            "grade_change": {
+                "from": previous.get("grade"),
+                "to": latest.get("grade"),
+            },
+            "state_change": {
+                "from": previous.get("state"),
+                "to": latest.get("state"),
+            },
+        }
+    else:
+        comparison = {
+            "present": False,
+            "reason": "NOT_ENOUGH_HISTORY",
+        }
+
     return {
         "present": bool(history),
         "root": str(root),
         "history": history,
         "date_range": date_range,
+        "comparison": comparison,
         "missing_paths": missing_paths,
         "warnings": warnings,
     }
