@@ -48,11 +48,12 @@ from decimal import Decimal, InvalidOperation, getcontext
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
+from constellation_2.common.truth_root_v1 import resolve_truth_root
 from constellation_2.phaseD.lib.canon_json_v1 import CanonicalizationError, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH_ROOT = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
+TRUTH_ROOT = resolve_truth_root(repo_root=REPO_ROOT)
 
 INTENTS_ROOT = (TRUTH_ROOT / "intents_v1" / "snapshots").resolve()
 

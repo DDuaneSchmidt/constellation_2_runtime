@@ -357,42 +357,100 @@ def _run_structural_pre_activity_producers(
     registry_sha = _sha256_file(ENGINE_REGISTRY_PATH)
 
     intents_day = (truth_root / "intents_v1" / "snapshots" / day).resolve()
-    sim_engine = next((row for row in active_engines if row["engine_id"] == "C2_INTENT_SIMULATOR_V1"), None)
-    sim_allowed = False
-    if sim_engine is not None:
-        allowed = allowed_map.get("C2_INTENT_SIMULATOR_V1")
-        sim_allowed = bool(allowed is None or (isinstance(allowed, list) and symbol in allowed))
-
-    simulator_ok = intents_day.exists() and intents_day.is_dir()
-    if not simulator_ok:
-        if sim_engine is None:
-            raise SystemExit("FAIL: structural intent producer missing ACTIVE C2_INTENT_SIMULATOR_V1")
-        if not sim_allowed:
-            raise SystemExit(f"FAIL: structural intent producer symbol blocked engine_id=C2_INTENT_SIMULATOR_V1 symbol={symbol}")
-        rc = _run_cmd(
-            "A0A_INTENT_SIMULATOR_V1",
+    producer_specs: List[Tuple[str, str, List[str]]] = [
+        (
+            "C2_VOL_INCOME_DEFINED_RISK_V1",
+            "A0A_VOL_INCOME_DEFINED_RISK_INTENTS_DAY_V1",
             [
                 "python3",
-                "-m",
-                "constellation_2.phaseH.intent_simulator.run.run_intent_simulator_day_v1",
-                "--produced_utc",
-                _intent_simulator_produced_utc_for_day(day),
-                "--engine_registry_sha256",
-                registry_sha,
+                "constellation_2/phaseI/vol_income_defined_risk/run/run_vol_income_defined_risk_intents_day_v1.py",
+                "--day_utc",
+                day,
+                "--mode",
+                mode,
+                "--target_notional_pct",
+                "0.01",
             ],
+        ),
+        (
+            "C2_TREND_EQ_PRIMARY_V1",
+            "A0B_TREND_EQ_PRIMARY_INTENTS_DAY_V1",
+            [
+                "python3",
+                "constellation_2/phaseI/trend_eq_primary/run/run_trend_eq_primary_intents_day_v1.py",
+                "--day_utc",
+                day,
+                "--mode",
+                mode,
+            ],
+        ),
+        (
+            "C2_MEAN_REVERSION_EQ_V1",
+            "A0C_MEAN_REVERSION_INTENTS_DAY_V1",
+            [
+                "python3",
+                "constellation_2/phaseI/mean_reversion/run/run_mean_reversion_intents_day_v1.py",
+                "--day_utc",
+                day,
+                "--mode",
+                mode,
+            ],
+        ),
+    ]
+    producer_status: Dict[str, Tuple[str, str]] = {}
+
+    if not (intents_day.exists() and intents_day.is_dir()):
+        structural_symbols: List[str] = []
+        for engine_id, _, _ in producer_specs:
+            allowed = allowed_map.get(engine_id)
+            if isinstance(allowed, list):
+                structural_symbols.extend([str(sym).strip().upper() for sym in allowed if str(sym).strip()])
+        md_executed, md_rc, md_reason_codes, _ = _run_market_data_refresh_for_symbols(
+            truth_root=truth_root,
+            day=day,
+            produced_utc=produced_utc,
             env=env,
+            symbols=structural_symbols,
+            empty_reason="SKIP_NO_STRUCTURAL_ENGINE_SYMBOLS",
         )
-        if rc != 0:
-            raise SystemExit(f"FAIL: structural intent producer failed stage=A0A_INTENT_SIMULATOR_V1 rc={rc}")
-        simulator_ok = intents_day.exists() and intents_day.is_dir()
-        if not simulator_ok:
-            raise SystemExit(f"FAIL: structural intent producer missing output path={intents_day}")
+        if md_rc != 0:
+            raise SystemExit(
+                "FAIL: structural market data refresh failed "
+                + json.dumps({"rc": md_rc, "reason_codes": md_reason_codes}, sort_keys=True)
+            )
+        for engine_id, stage_id, cmd in producer_specs:
+            engine = next((row for row in active_engines if row["engine_id"] == engine_id), None)
+            if engine is None:
+                producer_status[engine_id] = ("WARN", "ENGINE_NOT_ACTIVE_IN_REGISTRY")
+                continue
+            allowed = allowed_map.get(engine_id)
+            symbols = [symbol]
+            if isinstance(allowed, list) and allowed:
+                symbols = sorted(set(str(sym).strip().upper() for sym in allowed if str(sym).strip()))
+            if not symbols:
+                producer_status[engine_id] = ("WARN", "ENGINE_SKIPPED_SYMBOL_UNIVERSE")
+                continue
+            engine_executed = False
+            for producer_symbol in symbols:
+                rc = _run_cmd(stage_id + "_" + producer_symbol, cmd + ["--symbol", producer_symbol], env=env)
+                if rc != 0:
+                    raise SystemExit(
+                        f"FAIL: structural intent producer failed stage={stage_id}_{producer_symbol} rc={rc}"
+                    )
+                engine_executed = True
+            if engine_executed:
+                hb_reason = "ENGINE_DIRECT_RUN_PRESENT_V2_STRUCTURAL_PREPASS"
+                if md_executed:
+                    hb_reason = "ENGINE_DIRECT_RUN_PRESENT_V2_STRUCTURAL_PREPASS_WITH_MD_REFRESH"
+                producer_status[engine_id] = ("OK", hb_reason)
 
     for engine in active_engines:
         engine_id = str(engine["engine_id"])
-        if engine_id == "C2_INTENT_SIMULATOR_V1":
-            hb_status = "OK" if simulator_ok else "FAIL"
-            hb_reason = "STRUCTURAL_INTENT_WAVE_PRESENT" if simulator_ok else "STRUCTURAL_INTENT_WAVE_MISSING"
+        if engine_id in producer_status:
+            hb_status, hb_reason = producer_status[engine_id]
+        elif engine_id == "C2_INTENT_SIMULATOR_V1":
+            hb_status = "WARN"
+            hb_reason = "ENGINE_DIRECT_RUN_NOT_PRESENT_V2_STRUCTURAL_PREPASS"
         else:
             allowed = allowed_map.get(engine_id)
             if allowed is None or (isinstance(allowed, list) and symbol in allowed):
@@ -717,12 +775,21 @@ def _build_phasec_materializer_cmd(*, truth_root: Path, day: str, produced_utc: 
         str(truth_root),
     ]
     reason_codes: List[str] = []
-    price = _market_data_close_for_same_day(truth_root, day, "SPY")
-    if price:
-        cmd.extend(["--default_equity_reference_price", price])
-        reason_codes.append(f"DEFAULT_EQUITY_REFERENCE_PRICE_FROM_MARKET_DATA:{price}")
+    equity_symbols = _discover_equity_entry_symbols(truth_root, day)
+    if len(equity_symbols) == 1:
+        price_symbol = equity_symbols[0]
+        price = _market_data_close_for_same_day(truth_root, day, price_symbol)
+        if price:
+            cmd.extend(["--default_equity_reference_price", price])
+            reason_codes.append(f"DEFAULT_EQUITY_REFERENCE_PRICE_FROM_MARKET_DATA:{price_symbol}:{price}")
+        else:
+            reason_codes.append(f"DEFAULT_EQUITY_REFERENCE_PRICE_ABSENT_PRESERVE_VETO:{price_symbol}")
+    elif len(equity_symbols) > 1:
+        reason_codes.append(
+            "DEFAULT_EQUITY_REFERENCE_PRICE_MULTI_SYMBOL_PRESERVE_VETO:" + ",".join(sorted(equity_symbols))
+        )
     else:
-        reason_codes.append("DEFAULT_EQUITY_REFERENCE_PRICE_ABSENT_PRESERVE_VETO")
+        reason_codes.append("DEFAULT_EQUITY_REFERENCE_PRICE_NO_EQUITY_ENTRY_INTENTS")
     return cmd, reason_codes
 
 
@@ -747,7 +814,7 @@ def _run_options_capture_stage(*, truth_root: Path, day: str, env: Dict[str, str
         rc = _run_cmd(
             f"A6C_OPTIONS_CHAIN_CAPTURE_IB_DAY_V1_{symbol}",
             [
-                "python3",
+                ".venv_c2/bin/python",
                 "ops/tools/run_options_chain_capture_ib_day_v1.py",
                 "--day_utc",
                 day,
@@ -817,10 +884,32 @@ def _run_market_data_refresh_stage(*, truth_root: Path, day: str, produced_utc: 
     if not equity_symbols:
         return (False, 0, ["SKIP_NO_EQUITY_ENTRY_INTENTS"], [])
 
+    return _run_market_data_refresh_for_symbols(
+        truth_root=truth_root,
+        day=day,
+        produced_utc=produced_utc,
+        env=env,
+        symbols=equity_symbols,
+        empty_reason="SKIP_NO_EQUITY_ENTRY_INTENTS",
+    )
+
+
+def _run_market_data_refresh_for_symbols(
+    *,
+    truth_root: Path,
+    day: str,
+    produced_utc: str,
+    env: Dict[str, str],
+    symbols: List[str],
+    empty_reason: str,
+) -> Tuple[bool, int, List[str], List[str]]:
+    if not symbols:
+        return (False, 0, [empty_reason], [])
+
     outputs: List[str] = []
     reason_codes: List[str] = []
     executed = False
-    for symbol in equity_symbols:
+    for symbol in sorted(set(symbols)):
         md_year = str((truth_root / "market_data_snapshot_v1" / symbol.upper() / f"{day[:4]}.jsonl").resolve())
         outputs.append(md_year)
         if _market_data_close_for_same_day(truth_root, day, symbol):
@@ -830,7 +919,7 @@ def _run_market_data_refresh_stage(*, truth_root: Path, day: str, produced_utc: 
         rc = _run_cmd(
             f"A6E_MARKET_DATA_SNAPSHOT_REFRESH_V1_{symbol}",
             [
-                "python3",
+                ".venv_c2/bin/python",
                 "constellation_2/phaseJ/tools/ib_historical_market_data_snapshot_downloader_v1.py",
                 "--run_utc",
                 produced_utc,
