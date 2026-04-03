@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "C2 Auto Repair Trigger Decision v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "evaluated_at_utc",
+    "target_day_utc",
+    "health_state",
+    "blocker_fingerprint",
+    "trigger_decision",
+    "reason_codes",
+    "operator_summary",
+    "active_session",
+    "cooldown_seconds",
+    "max_relaunch_per_blocker_per_day",
+    "launch_mode",
+    "producer"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_AUTO_REPAIR_TRIGGER_DECISION_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "evaluated_at_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T" },
+    "target_day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "health_state": { "type": "string", "enum": ["READY", "DEGRADED", "REPAIR_REQUIRED"] },
+    "blocker_fingerprint": { "type": "string", "minLength": 16 },
+    "trigger_decision": { "type": "string", "enum": ["TRIGGERED", "SUPPRESSED", "NO_TRIGGER"] },
+    "reason_codes": { "type": "array", "items": { "type": "string" } },
+    "operator_summary": { "type": "string", "minLength": 1 },
+    "active_session": { "type": ["object", "null"] },
+    "cooldown_seconds": { "type": "integer", "minimum": 0 },
+    "max_relaunch_per_blocker_per_day": { "type": "integer", "minimum": 1 },
+    "launch_mode": { "type": "string", "enum": ["LIVE", "DRY_RUN"] },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string" },
+        "module": { "type": "string" },
+        "git_sha": { "type": "string" }
+      }
+    }
+  }
+}

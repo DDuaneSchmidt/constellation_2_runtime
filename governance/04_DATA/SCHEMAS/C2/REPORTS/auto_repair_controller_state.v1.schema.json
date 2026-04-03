@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "C2 Auto Repair Controller State v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "updated_at_utc",
+    "active_session",
+    "blockers",
+    "latest_outcome_by_day"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_AUTO_REPAIR_CONTROLLER_STATE_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "updated_at_utc": { "type": "string" },
+    "active_session": { "type": ["object", "null"] },
+    "blockers": { "type": "object" },
+    "latest_outcome_by_day": { "type": "object" }
+  }
+}

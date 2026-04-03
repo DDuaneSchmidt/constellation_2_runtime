@@ -115,6 +115,7 @@ These canonical contracts are governance-controlled and must be explicitly liste
 - `governance/05_CONTRACTS/C2/per_sleeve_readiness_v1.contract.md`
 - `governance/05_CONTRACTS/C2/per_sleeve_orchestrator_v1.contract.md`
 - `governance/05_CONTRACTS/ORCHESTRATION/C2_ORCHESTRATOR_V2_CONTRACT.md`
+- `governance/05_CONTRACTS/C2/auto_repair_controller_v1.contract.md`
 
 
 ## Governed data schemas
@@ -173,6 +174,9 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - [Broker Reconciliation Schema JSON (V1)](04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v1.schema.json) — id: C2_REPORTS_BROKER_RECONCILIATION_SCHEMA_V1 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v1.schema.json`
 - [Engine Correlation Gate Schema JSON (V1)](04_DATA/SCHEMAS/C2/REPORTS/engine_correlation_gate.v1.schema.json) — id: C2_REPORTS_ENGINE_CORRELATION_GATE_SCHEMA_V1 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/engine_correlation_gate.v1.schema.json`
 - [Broker Reconciliation Schema JSON (V2)](04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v2.schema.json) — id: C2_REPORTS_BROKER_RECONCILIATION_SCHEMA_V2 — status: DRAFT — `governance/04_DATA/SCHEMAS/C2/REPORTS/broker_reconciliation.v2.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/auto_repair_health_supervisor.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/auto_repair_trigger_decision.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/auto_repair_controller_state.v1.schema.json`
 
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/gate_stack_verdict.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/truth_surface_authority_gate.v1.schema.json`

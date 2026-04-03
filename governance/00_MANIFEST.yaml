@@ -112,6 +112,46 @@ documents:
     path: ops/tools/run_c2_paper_day_orchestrator_v2.py
     class: C2_TOOL
     status: ACTIVE
+  - id: C2_AUTO_REPAIR_CONTROLLER_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/auto_repair_controller_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_TOOL_AUTO_REPAIR_CONTROLLER_V1
+    path: ops/tools/run_c2_auto_repair_controller_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_RUN_PAPER_AUTO_REPAIR_CONTROLLER_V1
+    path: ops/run/c2_paper_auto_repair_controller_run_v1.sh
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_SYSTEMD_PAPER_AUTO_REPAIR_CONTROLLER_SERVICE_V1
+    path: ops/systemd/user/c2-paper-auto-repair-controller.service
+    class: C2_SERVICE
+    status: ACTIVE
+  - id: C2_SYSTEMD_PAPER_AUTO_REPAIR_CONTROLLER_TIMER_V1
+    path: ops/systemd/user/c2-paper-auto-repair-controller.timer
+    class: C2_SERVICE
+    status: ACTIVE
+  - id: C2_SYSTEMD_PAPER_AUTO_REPAIR_EOD_FINAL_SERVICE_V1
+    path: ops/systemd/user/c2-paper-auto-repair-eod-final.service
+    class: C2_SERVICE
+    status: ACTIVE
+  - id: C2_SYSTEMD_PAPER_AUTO_REPAIR_EOD_FINAL_TIMER_V1
+    path: ops/systemd/user/c2-paper-auto-repair-eod-final.timer
+    class: C2_SERVICE
+    status: ACTIVE
+  - id: C2_REPORTS_AUTO_REPAIR_HEALTH_SUPERVISOR_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/auto_repair_health_supervisor.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_AUTO_REPAIR_TRIGGER_DECISION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/auto_repair_trigger_decision.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_AUTO_REPAIR_CONTROLLER_STATE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/auto_repair_controller_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
   - id: C2_PIPELINE_MANIFEST_V3_MODE_AWARE
     path: governance/05_CONTRACTS/ORCHESTRATION/C2_PIPELINE_MANIFEST_V3_MODE_AWARE.contract.md
     class: C2_CONTRACT

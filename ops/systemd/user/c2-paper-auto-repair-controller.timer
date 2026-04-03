@@ -1,0 +1,10 @@
+[Unit]
+Description=Constellation 2.0 Paper Auto Repair Controller Timer (paper hours every 5 minutes)
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 13..20:0/5:00 UTC
+Persistent=true
+Unit=c2-paper-auto-repair-controller.service
+
+[Install]
+WantedBy=timers.target
