@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "c2.reports.economic_finalization_status.v1",
+  "title": "C2 Economic Finalization Status v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "execution_completion_ruleset_id",
+    "execution_completion_ruleset_version",
+    "run_scope",
+    "economic_finalization_status",
+    "stage_statuses",
+    "integrity_status",
+    "evidence_refs"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "economic_finalization_status_v1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "minLength": 1 },
+    "execution_completion_ruleset_id": { "type": "string", "const": "EXECUTION_COMPLETION_RULESET_V1" },
+    "execution_completion_ruleset_version": { "type": "integer", "const": 1 },
+    "run_scope": { "$ref": "#/$defs/run_scope" },
+    "economic_finalization_status": {
+      "type": "string",
+      "enum": [
+        "NOT_READY_FOR_ECONOMIC_FINALIZATION",
+        "READY_FOR_POSITIONS",
+        "READY_FOR_CASH",
+        "READY_FOR_MARKS",
+        "READY_FOR_ACCOUNTING",
+        "READY_FOR_EXIT_RECONCILIATION",
+        "ECONOMIC_FINALIZATION_INCOMPLETE",
+        "ECONOMIC_FINALIZATION_COMPLETE",
+        "INTERNAL_FAILURE"
+      ]
+    },
+    "stage_statuses": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["stage_name", "stage_status", "blocking_reasons", "blocked_writers"],
+        "properties": {
+          "stage_name": { "type": "string", "enum": ["POSITIONS", "CASH", "MARKS", "ACCOUNTING", "EXIT_RECONCILIATION"] },
+          "stage_status": { "type": "string", "enum": ["COMPLETE", "BLOCKED_UPSTREAM", "BLOCKED_MISSING_ARTIFACT", "INTERNAL_FAILURE"] },
+          "blocking_reasons": { "type": "array", "items": { "type": "string" } },
+          "blocked_writers": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "integrity_status": { "type": "string", "enum": ["OK", "ECONOMIC_FINALIZATION_INCOMPLETE", "INTERNAL_FAILURE"] },
+    "evidence_refs": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "run_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["day_utc", "mode", "sleeve_id", "engine_id", "attempt_id", "attempt_seq", "truth_partition"],
+      "properties": {
+        "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "mode": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "sleeve_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "engine_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "attempt_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "attempt_seq": { "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }] },
+        "truth_partition": { "type": "string" }
+      }
+    }
+  }
+}

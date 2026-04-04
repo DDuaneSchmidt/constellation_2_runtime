@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "c2.reports.execution_evidence_normalization.v1",
+  "title": "C2 Execution Evidence Normalization v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "execution_completion_ruleset_id",
+    "execution_completion_ruleset_version",
+    "dependency_registry_id",
+    "dependency_registry_version",
+    "payload_contracts_id",
+    "payload_contracts_version",
+    "run_scope",
+    "normalized_evidence",
+    "evidence_refs",
+    "integrity_status"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "execution_evidence_normalization_v1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "minLength": 1 },
+    "execution_completion_ruleset_id": { "type": "string", "const": "EXECUTION_COMPLETION_RULESET_V1" },
+    "execution_completion_ruleset_version": { "type": "integer", "const": 1 },
+    "dependency_registry_id": { "type": "string", "const": "C2_EXECUTION_DEPENDENCY_REGISTRY_V1" },
+    "dependency_registry_version": { "type": "integer", "const": 1 },
+    "payload_contracts_id": { "type": "string", "const": "C2_EXECUTION_PAYLOAD_COMPLETENESS_CONTRACTS_V1" },
+    "payload_contracts_version": { "type": "integer", "const": 1 },
+    "run_scope": { "$ref": "#/$defs/run_scope" },
+    "normalized_evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifact_family",
+          "observed_paths",
+          "record_count",
+          "dependency_status",
+          "schema_validation_status",
+          "completeness_status",
+          "missing_required_fields",
+          "missing_join_critical_fields",
+          "downstream_stage_blockers",
+          "notes"
+        ],
+        "properties": {
+          "artifact_family": { "type": "string" },
+          "observed_paths": { "type": "array", "items": { "type": "string" } },
+          "record_count": { "type": "integer", "minimum": 0 },
+          "dependency_status": {
+            "anyOf": [
+              { "type": "null" },
+              { "type": "string", "enum": ["READY", "MISSING_BLOCKING_DEPENDENCY", "STALE_DEPENDENCY", "WRONG_DAY_DEPENDENCY", "PARTIAL_DEPENDENCY_SET"] }
+            ]
+          },
+          "schema_validation_status": { "type": "string" },
+          "completeness_status": {
+            "type": "string",
+            "enum": [
+              "COMPLETE",
+              "MISSING_ARTIFACT",
+              "SCHEMA_MISMATCH",
+              "MISSING_REQUIRED_FIELDS",
+              "MISSING_JOIN_CRITICAL_FIELDS",
+              "AGGREGATE_ONLY_NO_LINKAGE",
+              "INPUTS_TOO_SPARSE"
+            ]
+          },
+          "missing_required_fields": { "type": "array", "items": { "type": "string" } },
+          "missing_join_critical_fields": { "type": "array", "items": { "type": "string" } },
+          "downstream_stage_blockers": { "type": "array", "items": { "type": "string" } },
+          "notes": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "evidence_refs": { "type": "array", "items": { "type": "string" } },
+    "integrity_status": {
+      "type": "string",
+      "enum": ["OK", "DEPENDENCY_BLOCKED", "PAYLOAD_INCOMPLETE", "INTERNAL_FAILURE"]
+    }
+  },
+  "$defs": {
+    "run_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["day_utc", "mode", "sleeve_id", "engine_id", "attempt_id", "attempt_seq", "truth_partition"],
+      "properties": {
+        "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "mode": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "sleeve_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "engine_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "attempt_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "attempt_seq": { "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }] },
+        "truth_partition": { "type": "string" }
+      }
+    }
+  }
+}

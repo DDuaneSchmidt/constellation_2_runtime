@@ -1,0 +1,101 @@
+{
+  "schema_id": "C2_EXECUTION_PAYLOAD_COMPLETENESS_CONTRACTS_V1",
+  "schema_version": 1,
+  "execution_completion_ruleset_id": "EXECUTION_COMPLETION_RULESET_V1",
+  "execution_completion_ruleset_version": 1,
+  "payload_contracts_id": "C2_EXECUTION_PAYLOAD_COMPLETENESS_CONTRACTS_V1",
+  "payload_contracts_version": 1,
+  "contracts": [
+    {
+      "contract_id": "intents_day_rollup_linkage_v1",
+      "contract_version": 1,
+      "artifact_family": "intents_v1/day_rollup",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/intents_day_rollup.v1.schema.json",
+      "required_fields": ["engines"],
+      "optional_fields": ["inputs.market_data_snapshot_hashes", "inputs.engine_config_hashes"],
+      "join_critical_fields": ["engines.intent_hashes"],
+      "downstream_stages_blocked_if_absent": ["INTENT_EMITTED"]
+    },
+    {
+      "contract_id": "intent_snapshot_payload_completeness_v1",
+      "contract_version": 1,
+      "artifact_family": "intents_v1/snapshots",
+      "schema_relpath": "constellation_2/schemas/exposure_intent.v1.schema.json",
+      "required_fields": ["intent_id", "created_at_utc", "engine.engine_id", "engine.mode", "underlying.symbol"],
+      "optional_fields": ["constraints.max_risk_pct", "canonical_json_hash"],
+      "join_critical_fields": ["intent_id", "engine.engine_id", "underlying.symbol"],
+      "downstream_stages_blocked_if_absent": ["INTENT_EMITTED"]
+    },
+    {
+      "contract_id": "authorization_payload_completeness_v1",
+      "contract_version": 1,
+      "artifact_family": "engine_activity_v1/authorization_v1",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/authorization.v1.schema.json",
+      "required_fields": ["schema_id", "schema_version", "day_utc", "engine_id", "intent_id", "intent_hash", "authorization.decision_hash"],
+      "optional_fields": ["reason_codes", "input_manifest"],
+      "join_critical_fields": ["engine_id", "intent_id", "intent_hash", "authorization.decision_hash"],
+      "downstream_stages_blocked_if_absent": ["AUTHORIZATION_COMPLETE"]
+    },
+    {
+      "contract_id": "broker_submission_record_completeness_v1",
+      "contract_version": 1,
+      "artifact_family": "execution_evidence_v1/submissions/broker_submission_record.v2",
+      "schema_relpath": "constellation_2/schemas/broker_submission_record.v2.schema.json",
+      "required_fields": ["submission_id", "submitted_at_utc", "binding_hash", "broker_ids.order_id", "broker_ids.perm_id"],
+      "optional_fields": ["canonical_json_hash", "error"],
+      "join_critical_fields": ["submission_id", "binding_hash", "broker_ids.order_id", "broker_ids.perm_id"],
+      "downstream_stages_blocked_if_absent": ["SUBMISSION_COMPLETE", "EXECUTION_STREAM_COMPLETE", "FILL_COMPLETE"]
+    },
+    {
+      "contract_id": "execution_event_record_completeness_v1",
+      "contract_version": 1,
+      "artifact_family": "execution_evidence_v1/submissions/execution_event_record.v1",
+      "schema_relpath": "constellation_2/schemas/execution_event_record.v1.schema.json",
+      "required_fields": ["created_at_utc", "event_time_utc", "binding_hash", "broker_submission_hash", "broker_order_id", "perm_id", "filled_qty", "avg_price"],
+      "optional_fields": ["raw_broker_status", "canonical_json_hash", "upstream_hash"],
+      "join_critical_fields": ["binding_hash", "broker_submission_hash", "broker_order_id", "perm_id"],
+      "downstream_stages_blocked_if_absent": ["EXECUTION_STREAM_COMPLETE", "FILL_COMPLETE", "POSITIONS"]
+    },
+    {
+      "contract_id": "execution_stream_payload_completeness_v1",
+      "contract_version": 1,
+      "artifact_family": "execution_stream_v1",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/execution_event_stream_record.v1.schema.json",
+      "required_fields": ["submission_id", "binding_hash", "engine_id", "source_intent_id", "intent_sha256", "event_time_utc", "fill.fill_qty", "fill.fill_price"],
+      "optional_fields": ["broker_ids.order_id", "broker_ids.perm_id", "canonical_json_hash"],
+      "join_critical_fields": ["submission_id", "binding_hash", "intent_sha256", "broker_ids.order_id", "broker_ids.perm_id"],
+      "downstream_stages_blocked_if_absent": ["EXECUTION_STREAM_COMPLETE", "FILL_COMPLETE"]
+    },
+    {
+      "contract_id": "fill_ledger_input_completeness_v1",
+      "contract_version": 1,
+      "artifact_family": "fill_ledger_input_bundle",
+      "schema_relpath": null,
+      "required_fields": [
+        "broker_submission_record.submission_id",
+        "broker_submission_record.binding_hash",
+        "execution_event_record.broker_submission_hash",
+        "execution_event_record.filled_qty",
+        "execution_event_record.avg_price",
+        "equity_order_plan.intent_hash",
+        "equity_order_plan.qty_shares",
+        "execution_stream.submission_id",
+        "execution_stream.binding_hash",
+        "execution_stream.intent_sha256",
+        "execution_stream.fill.fill_qty",
+        "execution_stream.fill.fill_price"
+      ],
+      "optional_fields": ["execution_event_record.raw_payload_digest", "equity_order_plan.canonical_json_hash"],
+      "join_critical_fields": [
+        "broker_submission_record.submission_id",
+        "broker_submission_record.binding_hash",
+        "execution_event_record.broker_submission_hash",
+        "equity_order_plan.intent_hash",
+        "execution_stream.submission_id",
+        "execution_stream.binding_hash",
+        "execution_stream.intent_sha256"
+      ],
+      "downstream_stages_blocked_if_absent": ["FILL_COMPLETE"]
+    }
+  ]
+}

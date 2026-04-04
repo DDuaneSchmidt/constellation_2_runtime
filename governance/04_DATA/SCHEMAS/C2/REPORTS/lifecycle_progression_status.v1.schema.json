@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "c2.reports.lifecycle_progression_status.v1",
+  "title": "C2 Lifecycle Progression Status v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "execution_completion_ruleset_id",
+    "execution_completion_ruleset_version",
+    "run_scope",
+    "stages",
+    "first_break_stage",
+    "integrity_status",
+    "evidence_refs"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "lifecycle_progression_status_v1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "minLength": 1 },
+    "execution_completion_ruleset_id": { "type": "string", "const": "EXECUTION_COMPLETION_RULESET_V1" },
+    "execution_completion_ruleset_version": { "type": "integer", "const": 1 },
+    "run_scope": { "$ref": "#/$defs/run_scope" },
+    "stages": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["stage_name", "stage_status", "dependency_failures", "missing_fields", "blocked_writers"],
+        "properties": {
+          "stage_name": { "type": "string", "enum": ["INTENT_EMITTED", "AUTHORIZATION_COMPLETE", "SUBMISSION_COMPLETE", "EXECUTION_STREAM_COMPLETE", "FILL_COMPLETE"] },
+          "stage_status": { "type": "string", "enum": ["COMPLETE", "BLOCKED_MISSING_DEPENDENCY", "BLOCKED_PAYLOAD_INCOMPLETE", "BLOCKED_MISSING_ARTIFACT", "BLOCKED_UPSTREAM", "INTERNAL_FAILURE"] },
+          "dependency_failures": { "type": "array", "items": { "type": "string" } },
+          "missing_fields": { "type": "array", "items": { "type": "string" } },
+          "blocked_writers": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "first_break_stage": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string", "enum": ["INTENT_EMITTED", "AUTHORIZATION_COMPLETE", "SUBMISSION_COMPLETE", "EXECUTION_STREAM_COMPLETE", "FILL_COMPLETE", "INTERNAL_FAILURE"] }
+      ]
+    },
+    "integrity_status": { "type": "string", "enum": ["OK", "PAYLOAD_INCOMPLETE", "INTERNAL_FAILURE"] },
+    "evidence_refs": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "run_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["day_utc", "mode", "sleeve_id", "engine_id", "attempt_id", "attempt_seq", "truth_partition"],
+      "properties": {
+        "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "mode": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "sleeve_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "engine_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "attempt_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "attempt_seq": { "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }] },
+        "truth_partition": { "type": "string" }
+      }
+    }
+  }
+}

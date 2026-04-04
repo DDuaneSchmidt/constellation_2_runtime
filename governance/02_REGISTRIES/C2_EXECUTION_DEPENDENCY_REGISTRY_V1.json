@@ -1,0 +1,82 @@
+{
+  "schema_id": "C2_EXECUTION_DEPENDENCY_REGISTRY_V1",
+  "schema_version": 1,
+  "execution_completion_ruleset_id": "EXECUTION_COMPLETION_RULESET_V1",
+  "execution_completion_ruleset_version": 1,
+  "dependency_registry_id": "C2_EXECUTION_DEPENDENCY_REGISTRY_V1",
+  "dependency_registry_version": 1,
+  "dependencies": [
+    {
+      "dependency_id": "market_data_snapshot_for_real_intent_generation",
+      "dependency_version": 1,
+      "dependency_type": "runtime_truth",
+      "owner": "phaseI_engine_emitters",
+      "expected_source_path": "market_data_snapshot_v1/dataset_manifest.json",
+      "generation_path": "constellation_2/phaseI/trend_eq_primary/run/run_trend_eq_primary_intents_day_v1.py --day_utc <DAY> --mode <MODE>",
+      "day_alignment_rule": "dataset manifest and referenced bars must cover target day",
+      "freshness_rule": "same_day_or_governed_dataset",
+      "blocking": true,
+      "downstream_consumers": ["intents_v1/snapshots"]
+    },
+    {
+      "dependency_id": "operator_statement_input",
+      "dependency_version": 1,
+      "dependency_type": "operator_input",
+      "owner": "operator",
+      "expected_source_path": "constellation_2/operator_inputs/cash_ledger_operator_statements/<DAY>/operator_statement.v1.json",
+      "generation_path": "constellation_2/phaseF/cash_ledger/run/run_cash_ledger_snapshot_day_v1.py --day_utc <DAY> --operator_statement_json <PATH>",
+      "day_alignment_rule": "operator statement day must equal target day",
+      "freshness_rule": "same_day_only",
+      "blocking": true,
+      "downstream_consumers": ["cash_ledger_v1/snapshots", "accounting_v2/nav"]
+    },
+    {
+      "dependency_id": "raw_broker_statement_input",
+      "dependency_version": 1,
+      "dependency_type": "operator_input",
+      "owner": "operator",
+      "expected_source_path": null,
+      "generation_path": "ops/tools/run_broker_statement_normalizer_v1.py --day_utc <DAY> --input_json <RAW_STATEMENT_JSON>",
+      "day_alignment_rule": "raw broker statement input must correspond to target day",
+      "freshness_rule": "same_day_only",
+      "blocking": true,
+      "downstream_consumers": ["execution_evidence_v1/broker_statement_normalized_v1", "market_data_snapshot_v1/broker_marks_v1", "accounting_v2/nav"]
+    },
+    {
+      "dependency_id": "broker_marks_override_input",
+      "dependency_version": 1,
+      "dependency_type": "operator_input",
+      "owner": "operator",
+      "expected_source_path": "constellation_2/operator_inputs/broker_marks_operator_overrides/<DAY>/broker_marks_override.v1.json",
+      "generation_path": "ops/tools/run_broker_marks_snapshot_day_v1.py --day_utc <DAY>",
+      "day_alignment_rule": "override day must equal target day",
+      "freshness_rule": "same_day_only",
+      "blocking": false,
+      "downstream_consumers": ["market_data_snapshot_v1/broker_marks_v1"]
+    },
+    {
+      "dependency_id": "submission_identity_bundle",
+      "dependency_version": 1,
+      "dependency_type": "runtime_truth",
+      "owner": "phaseD_and_phaseF_execution_evidence",
+      "expected_source_path": "execution_evidence_v1/submissions/<DAY>/<SUBMISSION_DIR>/{broker_submission_record.v2.json,execution_event_record.v1.json,equity_order_plan.v1.json}",
+      "generation_path": "constellation_2/phaseF/execution_evidence/run/run_execution_evidence_truth_day_v1.py --day_utc <DAY>",
+      "day_alignment_rule": "submission evidence day dir must equal target day",
+      "freshness_rule": "same_day_only",
+      "blocking": true,
+      "downstream_consumers": ["execution_stream_v1", "fill_ledger_v1", "positions_v1/snapshots"]
+    },
+    {
+      "dependency_id": "execution_stream_prerequisites",
+      "dependency_version": 1,
+      "dependency_type": "runtime_truth_and_live_boundary",
+      "owner": "execution_observer",
+      "expected_source_path": "execution_stream_v1/<DAY>/*.execution_event_stream_record.v1.json",
+      "generation_path": "ops/tools/run_execution_stream_snapshot_day_v1.py --day_utc <DAY>",
+      "day_alignment_rule": "execution stream day must equal target day",
+      "freshness_rule": "same_day_only",
+      "blocking": true,
+      "downstream_consumers": ["fill_ledger_v1"]
+    }
+  ]
+}
