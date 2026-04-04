@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "c2.reports.root_cause.v1",
+  "title": "C2 Root Cause v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "diagnostic_ruleset_id",
+    "diagnostic_ruleset_version",
+    "day_utc",
+    "selected_attempt_id",
+    "diagnosis_status",
+    "first_break_cause",
+    "contributing_causes",
+    "downstream_effects",
+    "decision_ledger_ref",
+    "severity",
+    "evidence_refs",
+    "deterministic_classification"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "root_cause_v1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "diagnostic_ruleset_id": { "type": "string", "minLength": 1 },
+    "diagnostic_ruleset_version": { "type": "integer", "minimum": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "selected_attempt_id": { "type": "string" },
+    "diagnosis_status": { "type": "string", "enum": ["DIAGNOSED", "NO_ROOT_CAUSE"] },
+    "first_break_cause": { "type": "string", "minLength": 1 },
+    "contributing_causes": { "type": "array", "items": { "type": "string" } },
+    "downstream_effects": { "type": "array", "items": { "type": "string" } },
+    "failing_stage": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "failing_artifact_or_dependency": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "violated_invariant": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "decision_ledger_ref": { "type": "string", "minLength": 1 },
+    "severity": { "type": "string", "enum": ["INFO", "WARN", "ERROR"] },
+    "evidence_refs": { "type": "array", "items": { "type": "string" } },
+    "deterministic_classification": {
+      "type": "string",
+      "enum": [
+        "READINESS_BLOCKED",
+        "INVARIANT_VIOLATION",
+        "MISSING_REQUIRED_ARTIFACT",
+        "NO_ROOT_CAUSE_IDENTIFIED"
+      ]
+    }
+  }
+}

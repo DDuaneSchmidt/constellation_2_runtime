@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "c2.reports.activity_flow_diagnostics.v1",
+  "title": "C2 Activity Flow Diagnostics v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "diagnostic_ruleset_id",
+    "diagnostic_ruleset_version",
+    "day_utc",
+    "produced_utc",
+    "selected_attempt_id",
+    "present",
+    "terminal_state",
+    "integrity_status",
+    "suspicion_flags",
+    "counts",
+    "stage_metrics",
+    "rejection_breakdown",
+    "evidence_paths",
+    "producer"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "activity_flow_diagnostics_v1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "diagnostic_ruleset_id": { "type": "string", "minLength": 1 },
+    "diagnostic_ruleset_version": { "type": "integer", "minimum": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "minLength": 1 },
+    "selected_attempt_id": { "type": "string" },
+    "present": { "type": "boolean" },
+    "terminal_state": { "type": "string", "enum": ["FLOW_COMPLETED", "NO_ACTIVITY_DAY", "UPSTREAM_BLOCKED", "PARTIAL_OR_UNKNOWN"] },
+    "integrity_status": { "type": "string", "enum": ["OK", "EVIDENCE_INCONSISTENT"] },
+    "suspicion_flags": { "type": "array", "items": { "type": "string" } },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intents", "authorized", "submitted", "filled", "reconciled", "rejected", "vetoed"],
+      "properties": {
+        "intents": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "authorized": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "submitted": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "filled": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "reconciled": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "rejected": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "vetoed": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] }
+      }
+    },
+    "stage_metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "stage_name",
+          "input_count",
+          "passed_count",
+          "rejected_count",
+          "emitted_count",
+          "availability_status"
+        ],
+        "properties": {
+          "stage_name": { "type": "string" },
+          "input_count": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+          "passed_count": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+          "rejected_count": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+          "emitted_count": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+          "availability_status": { "type": "string", "enum": ["PRESENT", "UNAVAILABLE"] }
+        }
+      }
+    },
+    "rejection_breakdown": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["stage_name", "reason_classification", "count"],
+        "properties": {
+          "stage_name": { "type": "string" },
+          "reason_classification": { "type": "string" },
+          "count": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "evidence_paths": { "type": "array", "items": { "type": "string" } },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string" },
+        "module": { "type": "string" },
+        "git_sha": { "type": "string" }
+      }
+    }
+  }
+}

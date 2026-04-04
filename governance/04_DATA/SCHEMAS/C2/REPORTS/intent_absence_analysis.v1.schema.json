@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "c2.reports.intent_absence_analysis.v1",
+  "title": "C2 Intent Absence Analysis v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "diagnostic_ruleset_id",
+    "diagnostic_ruleset_version",
+    "day_utc",
+    "selected_attempt_id",
+    "final_intent_count",
+    "zero_intent_classification",
+    "decision_ledger_ref",
+    "evidence_refs",
+    "deterministic_classification"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "intent_absence_analysis_v1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "diagnostic_ruleset_id": { "type": "string", "minLength": 1 },
+    "diagnostic_ruleset_version": { "type": "integer", "minimum": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "selected_attempt_id": { "type": "string" },
+    "final_intent_count": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+    "dominant_elimination_stage": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "dominant_elimination_reason": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "zero_intent_classification": {
+      "type": "string",
+      "enum": [
+        "NON_ZERO_INTENTS",
+        "UPSTREAM_BLOCKED_NO_INTENT_PATH",
+        "ZERO_INTENTS_EXPECTED",
+        "DETERMINISTICALLY_UNRESOLVED_DUE_TO_MISSING_EVIDENCE"
+      ]
+    },
+    "decision_ledger_ref": { "type": "string", "minLength": 1 },
+    "evidence_refs": { "type": "array", "items": { "type": "string" } },
+    "deterministic_classification": {
+      "type": "string",
+      "enum": [
+        "NON_ZERO_INTENTS",
+        "UPSTREAM_BLOCKED_NO_INTENT_PATH",
+        "ZERO_INTENTS_EXPECTED",
+        "DETERMINISTICALLY_UNRESOLVED_DUE_TO_MISSING_EVIDENCE"
+      ]
+    }
+  }
+}
