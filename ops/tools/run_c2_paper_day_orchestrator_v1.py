@@ -568,11 +568,10 @@ def main() -> int:
             return ""
         return ""
 
-    hb_status = _read_status(hb_gate_path)
-    gs_status = _read_status(gs_path)
-    ks_state = _read_kill_state(ks_path)
+    auth_gate_path = (truth_root / "reports" / "authorization_gate_verdict_v1" / day / "authorization_gate_verdict.v1.json").resolve()
+    auth_status = _read_status(auth_gate_path)
 
-    ok_authoritative = (hb_status == "PASS") and (gs_status == "PASS") and (ks_state == "INACTIVE")
+    ok_authoritative = auth_status == "PASS"
 
     ptr_authoritative = "YES" if ok_authoritative else "NO"
     if ok_authoritative:
@@ -580,7 +579,7 @@ def main() -> int:
     else:
         ptr_status = "OK_WITH_SOFT_FAILS" if prereq_failed else "FAIL"
 
-    points_to = f"constellation_2/runtime/truth/reports/gate_stack_verdict_v1/{day}/gate_stack_verdict.v1.json"
+    points_to = f"constellation_2/runtime/truth/reports/authorization_gate_verdict_v1/{day}/authorization_gate_verdict.v1.json"
     ptr_produced_utc = f"{day}T00:00:00Z"
 
     _run_stage_strict(

@@ -13,7 +13,7 @@ Deterministic, fail-closed.
 AUDIT-GRADE ENFORCEMENT (v4):
 - NO broker call unless ALL are proven true for the submission day:
   - canonical_authority_head exists and matches the submission day (PASS-only head)
-  - gate_stack_verdict_v1.status == PASS
+  - authorization_gate_verdict_v1.status == PASS
   - global_kill_switch_state.state == INACTIVE AND allow_entries == true
   - authorization artifact exists for intent_hash and is AUTHORIZED (status+decision) with authorized_quantity > 0
   - ib_account is allowed by governed registry C2_IB_ACCOUNT_REGISTRY_V1:
@@ -78,6 +78,7 @@ RC_LINEAGE_VIOLATION = "C2_LINEAGE_VIOLATION"
 
 RC_PHASEC_OUT_DIR_UNSAFE = "C2_SUBMIT_PHASEC_OUT_DIR_UNSAFE"
 RC_GATE_STACK_NOT_PASS = "C2_SUBMIT_GATE_STACK_NOT_PASS"
+RC_AUTHORIZATION_VERDICT_NOT_PASS = "C2_SUBMIT_AUTHORIZATION_VERDICT_NOT_PASS"
 RC_KILL_SWITCH_ACTIVE = "C2_SUBMIT_KILL_SWITCH_ACTIVE"
 
 RC_AUTHZ_MISSING = "C2_SUBMIT_AUTHZ_MISSING"
@@ -193,11 +194,13 @@ def _read_authority_head(truth_root: Path, day: str) -> Path:
     return p
 
 
-def _read_gate_stack_verdict_status(truth_root: Path, day: str) -> Tuple[str, Path]:
-    p = (truth_root / "reports" / "gate_stack_verdict_v1" / day / "gate_stack_verdict.v1.json").resolve()
+def _read_authorization_gate_verdict_status(truth_root: Path, day: str) -> Tuple[str, Path]:
+    p = (truth_root / "reports" / "authorization_gate_verdict_v1" / day / "authorization_gate_verdict.v1.json").resolve()
     obj = _read_json_file(p)
     if not isinstance(obj, dict):
-        raise SubmitBoundaryV4Error(f"{RC_GATE_STACK_NOT_PASS}: invalid gate_stack_verdict type: path={p}")
+        raise SubmitBoundaryV4Error(f"{RC_AUTHORIZATION_VERDICT_NOT_PASS}: invalid authorization_gate_verdict type: path={p}")
+    if str(obj.get("schema_id") or "").strip() != "authorization_gate_verdict_v1":
+        raise SubmitBoundaryV4Error(f"{RC_AUTHORIZATION_VERDICT_NOT_PASS}: schema_mismatch path={p}")
     status = str(obj.get("status") or "").strip().upper()
     return status, p
 
@@ -590,10 +593,10 @@ def run_submit_boundary_paper_v4(
         head_path = _read_authority_head(truth_root, day)
         pointers.append(str(head_path))
 
-        gs_status, gs_path = _read_gate_stack_verdict_status(truth_root, day)
-        pointers.append(str(gs_path))
-        if gs_status != "PASS":
-            raise SubmitBoundaryV4Error(f"{RC_GATE_STACK_NOT_PASS}: status={gs_status}")
+        auth_gate_status, auth_gate_path = _read_authorization_gate_verdict_status(truth_root, day)
+        pointers.append(str(auth_gate_path))
+        if auth_gate_status != "PASS":
+            raise SubmitBoundaryV4Error(f"{RC_AUTHORIZATION_VERDICT_NOT_PASS}: status={auth_gate_status}")
 
         ks_state, ks_allow_entries, ks_path = _read_kill_switch_state(truth_root, day)
         pointers.append(str(ks_path))

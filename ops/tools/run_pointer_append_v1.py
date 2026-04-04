@@ -182,7 +182,11 @@ def main() -> int:
     ap.add_argument("--policy_hash", required=True, help="Hex policy hash (>=12 chars)")
     ap.add_argument("--orchestrator_config_hash", required=True, help="Hex config hash (>=12 chars)")
     ap.add_argument("--produced_utc", required=True, help="Must equal <DAY>T00:00:00Z")
-    ap.add_argument("--points_to", required=True, help="Path to gate_stack_verdict_v1 artifact (must contain gate_stack_verdict_v1)")
+    ap.add_argument(
+        "--points_to",
+        required=True,
+        help="Path to authorization_gate_verdict_v1 artifact (must contain authorization_gate_verdict_v1)",
+    )
     ap.add_argument("--git_sha", default="", help="Optional override; defaults to HEAD")
     ap.add_argument("--truth_root", default="", help="Absolute truth root; defaults to C2_TRUTH_ROOT or repo resolver")
     args = ap.parse_args()
@@ -199,8 +203,8 @@ def main() -> int:
     runptr_root, idx_path, lock_path = _runptr_paths(truth_root)
 
     points_to = str(args.points_to).strip()
-    if "gate_stack_verdict_v1" not in points_to:
-        raise SystemExit("FAIL: points_to must reference gate_stack_verdict_v1 (path must contain token)")
+    if "authorization_gate_verdict_v1" not in points_to:
+        raise SystemExit("FAIL: points_to must reference authorization_gate_verdict_v1 (path must contain token)")
 
     lock_fd = _lock_acquire(runptr_root, lock_path)
     try:

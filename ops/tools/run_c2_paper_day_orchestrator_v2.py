@@ -2842,6 +2842,12 @@ def main() -> int:
         last_seq = _read_last_pointer_seq(idx_path, mode)
         pointer_seq = last_seq + 1
 
+        auth_verdict_path = (truth / "reports" / "authorization_gate_verdict_v1" / day / "authorization_gate_verdict.v1.json").resolve()
+        auth_verdict_obj = _read_json_obj(auth_verdict_path)
+        auth_verdict_status = str(auth_verdict_obj.get("status") or "").strip().upper()
+        if auth_verdict_status not in ("PASS", "FAIL"):
+            raise SystemExit(f"FAIL: AUTHORIZATION_GATE_VERDICT_STATUS_INVALID: {auth_verdict_status!r} path={auth_verdict_path}")
+
         entry = {
             "schema_id": "C2_ORCHESTRATOR_RUN_VERDICT_V2_POINTER_INDEX_V1",
             "pointer_seq": int(pointer_seq),
@@ -2849,11 +2855,11 @@ def main() -> int:
             "mode": mode,
             "attempt_id": attempt_id,
             "attempt_seq": int(attempt_seq),
-            "status": status,
-            "authoritative": bool(status == "PASS"),
+            "status": auth_verdict_status,
+            "authoritative": bool(auth_verdict_status == "PASS"),
             "producer_git_sha": git_sha,
             "produced_utc": f"{day}T00:00:00Z",
-            "points_to": str(out_dir / "orchestrator_run_verdict.v2.json"),
+            "points_to": str(auth_verdict_path),
             "attempt_manifest_path": str(attempt_manifest_path),
         }
         line_sha, _ = _atomic_append_jsonl(idx_path, entry)

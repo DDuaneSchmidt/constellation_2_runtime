@@ -1,0 +1,87 @@
+{
+  "schema_id": "GATE_CLASSIFICATION_REGISTRY_V1",
+  "schema_version": 1,
+  "gate_classification_registry_id": "GATE_CLASSIFICATION_REGISTRY_V1",
+  "gate_classification_registry_version": 1,
+  "legacy_gate_hierarchy_id": "GATE_HIERARCHY_V1",
+  "legacy_gate_hierarchy_version": 1,
+  "gates": [
+    {
+      "gate_id": "feed_attestation_gate_v1",
+      "gate_version": 1,
+      "bundle_membership": ["legacy_blended_gate_stack", "authorization_gate_verdict_v1"],
+      "earliest_valid_lifecycle_state": "PRE_TRADE",
+      "blocking_domain": "PRE_TRADE_AUTHORIZATION",
+      "action_domain": "AUTHORIZATION",
+      "operator_meaning": "Market-data and upstream source attestation must be present before authorization may proceed.",
+      "required_in_authorization_verdict": true,
+      "required_in_economic_health_verdict": false
+    },
+    {
+      "gate_id": "heartbeat_gate_v1",
+      "gate_version": 1,
+      "bundle_membership": ["legacy_blended_gate_stack", "authorization_gate_verdict_v1"],
+      "earliest_valid_lifecycle_state": "PRE_TRADE",
+      "blocking_domain": "PRE_TRADE_AUTHORIZATION",
+      "action_domain": "AUTHORIZATION",
+      "operator_meaning": "Active engine heartbeats are a pre-trade monitoring requirement.",
+      "required_in_authorization_verdict": true,
+      "required_in_economic_health_verdict": false
+    },
+    {
+      "gate_id": "correlation_envelope_gate_v1",
+      "gate_version": 1,
+      "bundle_membership": ["legacy_blended_gate_stack", "authorization_gate_verdict_v1"],
+      "earliest_valid_lifecycle_state": "PRE_TRADE",
+      "blocking_domain": "PRE_TRADE_AUTHORIZATION",
+      "action_domain": "AUTHORIZATION",
+      "operator_meaning": "Cross-engine correlation caps are a pre-trade allocation constraint.",
+      "required_in_authorization_verdict": true,
+      "required_in_economic_health_verdict": false
+    },
+    {
+      "gate_id": "replay_certification_gate_v1",
+      "gate_version": 1,
+      "bundle_membership": ["legacy_blended_gate_stack", "authorization_gate_verdict_v1"],
+      "earliest_valid_lifecycle_state": "PRE_TRADE",
+      "blocking_domain": "PRE_TRADE_AUTHORIZATION",
+      "action_domain": "AUTHORIZATION",
+      "operator_meaning": "Replay reproducibility is tracked before authorization and may fail closed if the certification gate itself is not passing.",
+      "required_in_authorization_verdict": true,
+      "required_in_economic_health_verdict": false
+    },
+    {
+      "gate_id": "capital_risk_envelope_v2",
+      "gate_version": 2,
+      "bundle_membership": ["legacy_blended_gate_stack", "economic_health_gate_verdict_v1"],
+      "earliest_valid_lifecycle_state": "POST_TRADE_ECONOMIC",
+      "blocking_domain": "POST_TRADE_ECONOMIC_HEALTH",
+      "action_domain": "ECONOMIC_HEALTH",
+      "operator_meaning": "Portfolio capital-at-risk envelope depends on realized positions and NAV truth.",
+      "required_in_authorization_verdict": false,
+      "required_in_economic_health_verdict": true
+    },
+    {
+      "gate_id": "liquidity_slippage_gate_v1",
+      "gate_version": 1,
+      "bundle_membership": ["legacy_blended_gate_stack", "economic_health_gate_verdict_v1"],
+      "earliest_valid_lifecycle_state": "POST_TRADE_ECONOMIC",
+      "blocking_domain": "POST_TRADE_ECONOMIC_HEALTH",
+      "action_domain": "ECONOMIC_HEALTH",
+      "operator_meaning": "Liquidity/slippage enforcement currently depends on NAV/accounting truth and is not a bootstrap pre-trade authority gate.",
+      "required_in_authorization_verdict": false,
+      "required_in_economic_health_verdict": true
+    },
+    {
+      "gate_id": "operator_daily_gate_v3",
+      "gate_version": 3,
+      "bundle_membership": ["legacy_blended_gate_stack", "economic_health_gate_verdict_v1"],
+      "earliest_valid_lifecycle_state": "POST_TRADE_ECONOMIC",
+      "blocking_domain": "POST_TRADE_ECONOMIC_HEALTH",
+      "action_domain": "ECONOMIC_HEALTH",
+      "operator_meaning": "Operator economic-health readiness depends on allocation, positions, cash, reconciliation, and exit truth.",
+      "required_in_authorization_verdict": false,
+      "required_in_economic_health_verdict": true
+    }
+  ]
+}

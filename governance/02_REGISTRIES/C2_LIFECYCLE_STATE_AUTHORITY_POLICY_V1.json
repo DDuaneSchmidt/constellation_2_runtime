@@ -1,0 +1,42 @@
+{
+  "schema_id": "C2_LIFECYCLE_STATE_AUTHORITY_POLICY_V1",
+  "schema_version": 1,
+  "lifecycle_policy_id": "C2_LIFECYCLE_STATE_AUTHORITY_POLICY_V1",
+  "lifecycle_policy_version": 1,
+  "states": [
+    {
+      "lifecycle_state": "PRE_TRADE",
+      "meaning": "No real economic-truth artifact family is present for the target day. Authorization authority must evaluate only pre-trade applicable gates."
+    },
+    {
+      "lifecycle_state": "POST_TRADE_ECONOMIC",
+      "meaning": "At least one real economic-truth artifact family is present for the target day. Economic-health gates become applicable."
+    }
+  ],
+  "derivation_rules": [
+    {
+      "rule_id": "no_actual_economic_truth_artifacts_means_pre_trade",
+      "state": "PRE_TRADE",
+      "required_absent_artifacts": [
+        "positions_v1/snapshots/<DAY>/positions_snapshot.v2.json",
+        "cash_ledger_v1/snapshots/<DAY>/cash_ledger_snapshot.v1.json",
+        "execution_evidence_v1/broker_statement_normalized_v1/<DAY>/broker_statement_normalized.v1.json",
+        "market_data_snapshot_v1/broker_marks_v1/<DAY>/broker_marks.v1.json",
+        "accounting_v2/nav/<DAY>/nav.v2.json",
+        "exit_reconciliation_v1/<DAY>/exit_reconciliation.v1.json"
+      ]
+    },
+    {
+      "rule_id": "any_actual_economic_truth_artifact_means_post_trade_economic",
+      "state": "POST_TRADE_ECONOMIC",
+      "required_present_any": [
+        "positions_v1/snapshots/<DAY>/positions_snapshot.v2.json",
+        "cash_ledger_v1/snapshots/<DAY>/cash_ledger_snapshot.v1.json",
+        "execution_evidence_v1/broker_statement_normalized_v1/<DAY>/broker_statement_normalized.v1.json",
+        "market_data_snapshot_v1/broker_marks_v1/<DAY>/broker_marks.v1.json",
+        "accounting_v2/nav/<DAY>/nav.v2.json",
+        "exit_reconciliation_v1/<DAY>/exit_reconciliation.v1.json"
+      ]
+    }
+  ]
+}

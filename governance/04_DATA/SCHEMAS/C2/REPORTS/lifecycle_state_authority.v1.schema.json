@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "lifecycle_state_authority.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "lifecycle_policy_id",
+    "lifecycle_policy_version",
+    "day_utc",
+    "mode",
+    "run_scope",
+    "produced_utc",
+    "lifecycle_state",
+    "derivation_inputs",
+    "derivation_reasons",
+    "evidence_refs"
+  ],
+  "properties": {
+    "schema_id": { "const": "lifecycle_state_authority_v1" },
+    "schema_version": { "const": 1 },
+    "lifecycle_policy_id": { "type": "string", "minLength": 1 },
+    "lifecycle_policy_version": { "type": "integer", "minimum": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "mode": { "type": "string", "enum": ["PAPER", "LIVE"] },
+    "run_scope": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["day_utc", "mode", "truth_partition"],
+      "properties": {
+        "day_utc": { "type": "string" },
+        "mode": { "type": "string" },
+        "sleeve_id": { "type": ["string", "null"] },
+        "truth_partition": { "type": "string" }
+      }
+    },
+    "produced_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T00:00:00Z$" },
+    "lifecycle_state": { "type": "string", "enum": ["PRE_TRADE", "POST_TRADE_ECONOMIC"] },
+    "derivation_inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["artifact_family", "path", "present"],
+        "properties": {
+          "artifact_family": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "present": { "type": "boolean" }
+        }
+      }
+    },
+    "derivation_reasons": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "evidence_refs": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}

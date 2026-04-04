@@ -75,6 +75,19 @@ def _require_authority_head_pass_authoritative(day: str, truth_root: Path) -> Di
         raise SystemExit(f"FAIL: AUTHORITY_HEAD_NOT_PASS status={status!r}")
     if not authoritative:
         raise SystemExit("FAIL: AUTHORITY_HEAD_NOT_AUTHORITATIVE")
+    points_to = str(ah.get("points_to") or "").strip()
+    if "authorization_gate_verdict_v1" not in points_to:
+        raise SystemExit("FAIL: AUTHORITY_HEAD_NOT_AUTHORIZATION_VERDICT")
+    verdict_path = Path(points_to).resolve() if Path(points_to).is_absolute() else (truth_root / points_to).resolve()
+    verdict = _read_json_obj(verdict_path)
+    if str(verdict.get("schema_id") or "").strip() != "authorization_gate_verdict_v1":
+        raise SystemExit("FAIL: AUTHORIZATION_VERDICT_SCHEMA_MISMATCH")
+    if int(verdict.get("schema_version") or 0) != 1:
+        raise SystemExit("FAIL: AUTHORIZATION_VERDICT_VERSION_MISMATCH")
+    if str(verdict.get("day_utc") or "").strip() != day:
+        raise SystemExit("FAIL: AUTHORIZATION_VERDICT_DAY_MISMATCH")
+    if str(verdict.get("status") or "").strip().upper() != "PASS":
+        raise SystemExit("FAIL: AUTHORIZATION_VERDICT_NOT_PASS")
     return ah
 
 

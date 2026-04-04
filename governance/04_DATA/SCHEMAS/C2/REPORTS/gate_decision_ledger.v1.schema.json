@@ -1,0 +1,81 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "gate_decision_ledger.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "lifecycle_state_authority_ref",
+    "gate_classification_registry_id",
+    "gate_classification_registry_version",
+    "authorization_verdict_ref",
+    "economic_health_verdict_ref",
+    "day_utc",
+    "produced_utc",
+    "gate_evaluation_records",
+    "inclusion_exclusion_decisions",
+    "blocking_domain_decisions",
+    "evidence_refs"
+  ],
+  "properties": {
+    "schema_id": { "const": "gate_decision_ledger_v1" },
+    "schema_version": { "const": 1 },
+    "lifecycle_state_authority_ref": { "type": "string", "minLength": 1 },
+    "gate_classification_registry_id": { "type": "string", "minLength": 1 },
+    "gate_classification_registry_version": { "type": "integer", "minimum": 1 },
+    "authorization_verdict_ref": { "type": "string", "minLength": 1 },
+    "economic_health_verdict_ref": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T00:00:00Z$" },
+    "gate_evaluation_records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["gate_id", "observed_status", "legacy_gate_class", "blocking_domain", "action_domain", "artifact_path", "reason_codes"],
+        "properties": {
+          "gate_id": { "type": "string", "minLength": 1 },
+          "observed_status": { "type": "string", "minLength": 1 },
+          "legacy_gate_class": { "type": "string", "minLength": 1 },
+          "blocking_domain": { "type": "string", "minLength": 1 },
+          "action_domain": { "type": "string", "minLength": 1 },
+          "artifact_path": { "type": "string" },
+          "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "inclusion_exclusion_decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["gate_id", "included_in_authorization_verdict", "included_in_economic_health_verdict", "exclusion_reasons"],
+        "properties": {
+          "gate_id": { "type": "string", "minLength": 1 },
+          "included_in_authorization_verdict": { "type": "boolean" },
+          "included_in_economic_health_verdict": { "type": "boolean" },
+          "exclusion_reasons": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "blocking_domain_decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["domain", "status", "blocking_class", "reason_codes"],
+        "properties": {
+          "domain": { "type": "string", "enum": ["AUTHORIZATION", "ECONOMIC_HEALTH"] },
+          "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+          "blocking_class": {
+            "type": "string",
+            "enum": ["CLASS1_SYSTEM_HARD_STOP", "CLASS2_RISK_HARD_STOP", "CLASS3_CONTROLLED_DEGRADATION", "CLASS4_ADVISORY", "NONE"]
+          },
+          "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "evidence_refs": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}

@@ -268,6 +268,9 @@ def _require_authority_head_pass_authoritative(day: str, truth_root: Path) -> Di
         raise SystemExit(f"FAIL: AUTHORITY_HEAD_NOT_PASS status={status!r}")
     if not authoritative:
         raise SystemExit("FAIL: AUTHORITY_HEAD_NOT_AUTHORITATIVE")
+    points_to = str(ah.get("points_to") or "").strip()
+    if "authorization_gate_verdict_v1" not in points_to:
+        raise SystemExit("FAIL: AUTHORITY_HEAD_NOT_AUTHORIZATION_VERDICT")
     return ah
 
 
