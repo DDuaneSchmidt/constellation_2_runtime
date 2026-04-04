@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "c2.reports.visibility_metric_snapshot.v1",
+  "title": "C2 Visibility Metric Snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "metric_registry_id", "metric_registry_version", "run_scope", "extracted_metrics", "evidence_refs", "integrity_status"],
+  "properties": {
+    "schema_id": { "type": "string", "const": "visibility_metric_snapshot_v1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "metric_registry_id": { "type": "string", "const": "C2_VISIBILITY_METRIC_REGISTRY_V1" },
+    "metric_registry_version": { "type": "integer", "const": 1 },
+    "run_scope": { "$ref": "#/$defs/run_scope" },
+    "extracted_metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["metric_id", "metric_version", "value", "source_ref", "scope", "availability_status", "reconciliation_status"],
+        "properties": {
+          "metric_id": { "type": "string" },
+          "metric_version": { "type": "integer", "minimum": 1 },
+          "value": { "anyOf": [{ "type": "integer" }, { "type": "string" }, { "type": "null" }] },
+          "source_ref": { "type": "string" },
+          "scope": { "$ref": "#/$defs/run_scope" },
+          "availability_status": { "type": "string", "enum": ["VALUE", "ZERO", "UNAVAILABLE", "BLOCKED_DOWNSTREAM", "INTEGRITY_FAILED"] },
+          "reconciliation_status": { "type": "string", "enum": ["OK", "UNAVAILABLE", "BLOCKED_DOWNSTREAM", "EVIDENCE_INCONSISTENT", "INTERNAL_FAILURE"] }
+        }
+      }
+    },
+    "evidence_refs": { "type": "array", "items": { "type": "string" } },
+    "integrity_status": { "type": "string", "enum": ["OK", "BOUNDED_INCOMPLETE", "EVIDENCE_INCONSISTENT", "INTERNAL_FAILURE"] }
+  },
+  "$defs": {
+    "run_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["day_utc", "mode", "sleeve_id", "engine_id", "attempt_id", "attempt_seq", "truth_partition"],
+      "properties": {
+        "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "mode": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "sleeve_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "engine_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "attempt_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "attempt_seq": { "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }] },
+        "truth_partition": { "type": "string" }
+      }
+    }
+  }
+}

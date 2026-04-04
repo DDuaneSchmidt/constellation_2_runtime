@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "c2.reports.drift_report.v1",
+  "title": "C2 Drift Report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "visibility_ruleset_id", "visibility_ruleset_version", "metric_registry_id", "metric_registry_version", "run_scope", "comparison_window_definition", "comparison_set_refs", "compared_metrics", "material_changes", "drift_classifications", "metric_snapshot_ref", "decision_ledger_ref", "evidence_refs", "integrity_status"],
+  "properties": {
+    "schema_id": { "type": "string", "const": "drift_report_v1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "visibility_ruleset_id": { "type": "string", "const": "BATCH2_VISIBILITY_RULESET" },
+    "visibility_ruleset_version": { "type": "integer", "const": 1 },
+    "metric_registry_id": { "type": "string", "const": "C2_VISIBILITY_METRIC_REGISTRY_V1" },
+    "metric_registry_version": { "type": "integer", "const": 1 },
+    "run_scope": { "$ref": "#/$defs/run_scope" },
+    "comparison_window_definition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["comparison_mode", "comparison_day_utc", "source_artifact"],
+      "properties": {
+        "comparison_mode": { "type": "string", "const": "PRIOR_DAY" },
+        "comparison_day_utc": { "anyOf": [{ "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }, { "type": "null" }] },
+        "source_artifact": { "type": "string" }
+      }
+    },
+    "comparison_set_refs": { "type": "array", "items": { "type": "string" } },
+    "compared_metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["metric_id", "metric_version", "metric_name", "current_value", "comparison_value", "absolute_change", "relative_change", "comparison_status", "comparability_status"],
+        "properties": {
+          "metric_id": { "type": "string" },
+          "metric_version": { "type": "integer", "minimum": 1 },
+          "metric_name": { "type": "string" },
+          "current_value": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+          "comparison_value": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+          "absolute_change": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+          "relative_change": { "anyOf": [{ "type": "integer" }, { "type": "null" }] },
+          "comparison_status": { "type": "string", "enum": ["COMPARED", "UNAVAILABLE", "NOT_COMPUTED"] },
+          "comparability_status": { "type": "string", "enum": ["LEGITIMATE", "COMPARISON_MODE_MISMATCH", "METRIC_NOT_REGISTERED", "CURRENT_SNAPSHOT_MISSING", "CURRENT_VALUE_MISMATCH", "SCOPE_MISMATCH", "NOT_COMPARABLE"] }
+        }
+      }
+    },
+    "material_changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["metric_id", "absolute_change"],
+        "properties": {
+          "metric_id": { "type": "string" },
+          "absolute_change": { "type": "integer" }
+        }
+      }
+    },
+    "drift_classifications": { "type": "array", "items": { "type": "string" } },
+    "metric_snapshot_ref": { "type": "string" },
+    "decision_ledger_ref": { "type": "string" },
+    "evidence_refs": { "type": "array", "items": { "type": "string" } },
+    "integrity_status": { "type": "string", "enum": ["OK", "COMPARISON_UNAVAILABLE", "BOUNDED_INCOMPLETE", "EVIDENCE_INCONSISTENT", "INTERNAL_FAILURE"] }
+  },
+  "$defs": {
+    "run_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["day_utc", "mode", "sleeve_id", "engine_id", "attempt_id", "attempt_seq", "truth_partition"],
+      "properties": {
+        "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "mode": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "sleeve_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "engine_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "attempt_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "attempt_seq": { "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }] },
+        "truth_partition": { "type": "string" }
+      }
+    }
+  }
+}

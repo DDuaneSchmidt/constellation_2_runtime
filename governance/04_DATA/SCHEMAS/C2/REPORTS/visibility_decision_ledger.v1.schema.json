@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "c2.reports.visibility_decision_ledger.v1",
+  "title": "C2 Visibility Decision Ledger v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "visibility_ruleset_id", "visibility_ruleset_version", "metric_registry_id", "metric_registry_version", "run_scope", "metric_snapshot_ref", "comparison_legitimacy_results", "source_precedence_resolution", "rules_evaluated", "winning_derivation_paths", "rejected_higher_priority_paths", "evidence_refs"],
+  "properties": {
+    "schema_id": { "type": "string", "const": "visibility_decision_ledger_v1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "visibility_ruleset_id": { "type": "string", "const": "BATCH2_VISIBILITY_RULESET" },
+    "visibility_ruleset_version": { "type": "integer", "const": 1 },
+    "metric_registry_id": { "type": "string", "const": "C2_VISIBILITY_METRIC_REGISTRY_V1" },
+    "metric_registry_version": { "type": "integer", "const": 1 },
+    "run_scope": { "$ref": "#/$defs/run_scope" },
+    "metric_snapshot_ref": { "type": "string" },
+    "comparison_legitimacy_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["metric_id", "comparison_mode", "comparison_status", "comparability_status", "reason"],
+        "properties": {
+          "metric_id": { "type": "string" },
+          "comparison_mode": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "comparison_status": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "comparability_status": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "source_precedence_resolution": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["priority", "source", "outcome"],
+        "properties": {
+          "priority": { "type": "integer", "minimum": 1 },
+          "source": { "type": "string" },
+          "outcome": { "type": "string" }
+        }
+      }
+    },
+    "rules_evaluated": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rule_id", "result", "detail"],
+        "properties": {
+          "rule_id": { "type": "string" },
+          "result": { "type": "string" },
+          "detail": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "winning_derivation_paths": { "type": "array", "items": { "type": "string" } },
+    "rejected_higher_priority_paths": { "type": "array", "items": { "type": "string" } },
+    "evidence_refs": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "run_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["day_utc", "mode", "sleeve_id", "engine_id", "attempt_id", "attempt_seq", "truth_partition"],
+      "properties": {
+        "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "mode": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "sleeve_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "engine_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "attempt_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "attempt_seq": { "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }] },
+        "truth_partition": { "type": "string" }
+      }
+    }
+  }
+}

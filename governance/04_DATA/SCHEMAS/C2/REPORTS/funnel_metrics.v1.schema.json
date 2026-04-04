@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "c2.reports.funnel_metrics.v1",
+  "title": "C2 Funnel Metrics v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "visibility_ruleset_id", "visibility_ruleset_version", "metric_registry_id", "metric_registry_version", "run_scope", "stage_metrics", "total_universe_count", "total_signal_count", "total_intent_count", "dominant_drop_stage", "dominant_drop_reason_classification", "metric_snapshot_ref", "decision_ledger_ref", "evidence_refs", "integrity_status"],
+  "properties": {
+    "schema_id": { "type": "string", "const": "funnel_metrics_v1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "visibility_ruleset_id": { "type": "string", "const": "BATCH2_VISIBILITY_RULESET" },
+    "visibility_ruleset_version": { "type": "integer", "const": 1 },
+    "metric_registry_id": { "type": "string", "const": "C2_VISIBILITY_METRIC_REGISTRY_V1" },
+    "metric_registry_version": { "type": "integer", "const": 1 },
+    "run_scope": { "$ref": "#/$defs/run_scope" },
+    "stage_metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["stage_name", "input_count", "passed_count", "rejected_count", "emitted_count", "reconciliation_status"],
+        "properties": {
+          "stage_name": { "type": "string" },
+          "input_count": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+          "passed_count": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+          "rejected_count": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+          "emitted_count": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+          "reconciliation_status": { "type": "string", "enum": ["OK", "UNAVAILABLE", "BLOCKED_DOWNSTREAM", "EVIDENCE_INCONSISTENT", "INTERNAL_FAILURE"] }
+        }
+      }
+    },
+    "total_universe_count": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+    "total_signal_count": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+    "total_intent_count": { "anyOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+    "dominant_drop_stage": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+    "dominant_drop_reason_classification": { "type": "string", "enum": ["NONE", "UPSTREAM_BLOCKED", "REJECTED", "VETOED", "INTERNAL_FAILURE"] },
+    "metric_snapshot_ref": { "type": "string" },
+    "decision_ledger_ref": { "type": "string" },
+    "evidence_refs": { "type": "array", "items": { "type": "string" } },
+    "integrity_status": { "type": "string", "enum": ["OK", "BOUNDED_INCOMPLETE", "EVIDENCE_INCONSISTENT", "INTERNAL_FAILURE"] }
+  },
+  "$defs": {
+    "run_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["day_utc", "mode", "sleeve_id", "engine_id", "attempt_id", "attempt_seq", "truth_partition"],
+      "properties": {
+        "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "mode": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "sleeve_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "engine_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "attempt_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "attempt_seq": { "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }] },
+        "truth_partition": { "type": "string" }
+      }
+    }
+  }
+}
