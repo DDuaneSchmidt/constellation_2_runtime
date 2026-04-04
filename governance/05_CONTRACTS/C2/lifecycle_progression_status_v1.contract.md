@@ -10,10 +10,10 @@ scope: constellation_2_0
 ---
 
 # Purpose
-Provide the canonical staged lifecycle status for intent, authorization, submission, execution stream, and fill completion.
+Provide the canonical staged lifecycle status for intent, authorization, submission, execution stream, and fill completion under the governed lifecycle-completeness policy.
 
 # Canonical path
 - `constellation_2/runtime/truth/reports/lifecycle_progression_status_v1/<DAY>/lifecycle_progression_status.v1.json`
 
 # Audit rule
-Later lifecycle stages must never be presented as complete when earlier stages are blocked, missing, or sparse.
+Later lifecycle stages must never be presented as complete when earlier stages are blocked, missing, sparse, or producer-contract-incomplete.

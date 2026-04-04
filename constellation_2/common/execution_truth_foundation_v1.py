@@ -29,9 +29,15 @@ DEPENDENCY_REGISTRY_ID = "C2_EXECUTION_DEPENDENCY_REGISTRY_V1"
 DEPENDENCY_REGISTRY_VERSION = 1
 PAYLOAD_CONTRACTS_ID = "C2_EXECUTION_PAYLOAD_COMPLETENESS_CONTRACTS_V1"
 PAYLOAD_CONTRACTS_VERSION = 1
+PRODUCER_CONTRACT_REGISTRY_ID = "C2_PRODUCER_CONTRACT_REGISTRY_V1"
+PRODUCER_CONTRACT_REGISTRY_VERSION = 1
+LIFECYCLE_COMPLETENESS_POLICY_ID = "C2_LIFECYCLE_COMPLETENESS_POLICY_V1"
+LIFECYCLE_COMPLETENESS_POLICY_VERSION = 1
 
 DEPENDENCY_REGISTRY_RELPATH = "governance/02_REGISTRIES/C2_EXECUTION_DEPENDENCY_REGISTRY_V1.json"
 PAYLOAD_CONTRACTS_RELPATH = "governance/02_REGISTRIES/C2_EXECUTION_PAYLOAD_COMPLETENESS_CONTRACTS_V1.json"
+PRODUCER_CONTRACT_REGISTRY_RELPATH = "governance/02_REGISTRIES/C2_PRODUCER_CONTRACT_REGISTRY_V1.json"
+LIFECYCLE_COMPLETENESS_POLICY_RELPATH = "governance/02_REGISTRIES/C2_LIFECYCLE_COMPLETENESS_POLICY_V1.json"
 
 NORMALIZATION_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/execution_evidence_normalization.v1.schema.json"
 LIFECYCLE_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/lifecycle_progression_status.v1.schema.json"
@@ -94,6 +100,24 @@ class FamilyProbe:
     missing_required_fields: Tuple[str, ...]
     missing_join_critical_fields: Tuple[str, ...]
     downstream_stage_blockers: Tuple[str, ...]
+    notes: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ProducerContractProbe:
+    producer_contract_id: str
+    producer_contract_version: int
+    artifact_family: str
+    producer_owner: Optional[str]
+    contract_status: str
+    observed_paths: Tuple[str, ...]
+    schema_validation_status: str
+    required_fields: Tuple[str, ...]
+    optional_fields: Tuple[str, ...]
+    join_critical_fields: Tuple[str, ...]
+    missing_required_fields: Tuple[str, ...]
+    missing_join_critical_fields: Tuple[str, ...]
+    downstream_stages_blocked: Tuple[str, ...]
     notes: Tuple[str, ...]
 
 
@@ -633,6 +657,86 @@ def build_payload_probes(repo_root: Path, truth_root: Path, day_utc: str, facts:
     return probes
 
 
+def build_producer_contract_results(repo_root: Path, payload_probes: Dict[str, FamilyProbe]) -> List[ProducerContractProbe]:
+    registry = _read_registry(repo_root, PRODUCER_CONTRACT_REGISTRY_RELPATH)
+    entries = registry.get("contracts")
+    if not isinstance(entries, list):
+        raise SystemExit(f"FAIL: invalid producer contract registry entries: {PRODUCER_CONTRACT_REGISTRY_RELPATH}")
+    results: List[ProducerContractProbe] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        probe_key = str(entry.get("probe_family_key") or "").strip()
+        if not probe_key:
+            continue
+        probe = payload_probes[probe_key]
+        if probe.record_count == 0 or probe.completeness_status == "MISSING_ARTIFACT":
+            contract_status = "MISSING_ARTIFACT"
+        elif probe.completeness_status == "COMPLETE":
+            contract_status = "CONTRACT_COMPLIANT"
+        else:
+            contract_status = "PRESENT_BUT_INCOMPLETE"
+        results.append(
+            ProducerContractProbe(
+                producer_contract_id=str(entry.get("producer_contract_id") or "").strip(),
+                producer_contract_version=int(entry.get("producer_contract_version") or 1),
+                artifact_family=probe.family,
+                producer_owner=entry.get("producer_owner"),
+                contract_status=contract_status,
+                observed_paths=probe.observed_paths,
+                schema_validation_status=probe.schema_validation_status,
+                required_fields=tuple(entry.get("required_fields") or []),
+                optional_fields=tuple(entry.get("optional_fields") or []),
+                join_critical_fields=tuple(entry.get("join_critical_fields") or []),
+                missing_required_fields=probe.missing_required_fields,
+                missing_join_critical_fields=probe.missing_join_critical_fields,
+                downstream_stages_blocked=tuple(entry.get("downstream_stages_blocked_if_absent") or []),
+                notes=probe.notes,
+            )
+        )
+    return results
+
+
+def _producer_contract_doc(probe: ProducerContractProbe) -> Dict[str, Any]:
+    return {
+        "producer_contract_id": probe.producer_contract_id,
+        "producer_contract_version": probe.producer_contract_version,
+        "artifact_family": probe.artifact_family,
+        "producer_owner": probe.producer_owner,
+        "contract_status": probe.contract_status,
+        "observed_paths": list(probe.observed_paths),
+        "schema_validation_status": probe.schema_validation_status,
+        "required_fields": list(probe.required_fields),
+        "optional_fields": list(probe.optional_fields),
+        "join_critical_fields": list(probe.join_critical_fields),
+        "missing_required_fields": list(probe.missing_required_fields),
+        "missing_join_critical_fields": list(probe.missing_join_critical_fields),
+        "downstream_stages_blocked": list(probe.downstream_stages_blocked),
+        "notes": list(probe.notes),
+    }
+
+
+def _producer_contract_by_family(contract_results: List[ProducerContractProbe]) -> Dict[str, ProducerContractProbe]:
+    return {row.artifact_family: row for row in contract_results}
+
+
+def _read_lifecycle_completeness_policy(repo_root: Path) -> Dict[str, Any]:
+    policy = _read_registry(repo_root, LIFECYCLE_COMPLETENESS_POLICY_RELPATH)
+    stages = policy.get("stages")
+    if not isinstance(stages, list):
+        raise SystemExit(f"FAIL: invalid lifecycle completeness policy: {LIFECYCLE_COMPLETENESS_POLICY_RELPATH}")
+    return policy
+
+
+def _stage_policy_map(policy: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    rows = policy.get("stages") or []
+    out: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        if isinstance(row, dict) and isinstance(row.get("stage_name"), str):
+            out[row["stage_name"]] = row
+    return out
+
+
 def _find_broker_raw_input(repo_root: Path, day_utc: str) -> Optional[Path]:
     root = (repo_root / "constellation_2" / "operator_inputs").resolve()
     if not root.exists() or not root.is_dir():
@@ -731,10 +835,12 @@ def build_execution_evidence_normalization_doc(
     run_scope: Dict[str, Any],
     dependency_statuses: List[Dict[str, Any]],
     payload_probes: Dict[str, FamilyProbe],
+    producer_contract_results: List[ProducerContractProbe],
     facts: Dict[str, Any],
 ) -> Dict[str, Any]:
     normalized = []
     dependency_by_id = {row["dependency_id"]: row["status"] for row in dependency_statuses}
+    producer_contract_by_family = _producer_contract_by_family(producer_contract_results)
     for key in [
         "intents_day_rollup_linkage",
         "intent_snapshot",
@@ -752,12 +858,16 @@ def build_execution_evidence_normalization_doc(
         "exit_reconciliation",
     ]:
         probe = payload_probes[key]
+        producer_contract = producer_contract_by_family.get(probe.family)
         normalized.append(
             {
                 "artifact_family": probe.family,
                 "observed_paths": list(probe.observed_paths),
                 "record_count": probe.record_count,
                 "dependency_status": _dependency_status_for_family(probe.family, dependency_by_id),
+                "producer_contract_id": None if producer_contract is None else producer_contract.producer_contract_id,
+                "producer_contract_version": None if producer_contract is None else producer_contract.producer_contract_version,
+                "producer_contract_status": None if producer_contract is None else producer_contract.contract_status,
                 "schema_validation_status": probe.schema_validation_status,
                 "completeness_status": probe.completeness_status,
                 "missing_required_fields": list(probe.missing_required_fields),
@@ -782,6 +892,8 @@ def build_execution_evidence_normalization_doc(
         "dependency_registry_version": DEPENDENCY_REGISTRY_VERSION,
         "payload_contracts_id": PAYLOAD_CONTRACTS_ID,
         "payload_contracts_version": PAYLOAD_CONTRACTS_VERSION,
+        "producer_contract_registry_id": PRODUCER_CONTRACT_REGISTRY_ID,
+        "producer_contract_registry_version": PRODUCER_CONTRACT_REGISTRY_VERSION,
         "run_scope": run_scope,
         "normalized_evidence": normalized,
         "evidence_refs": sorted(set(_evidence_refs(facts))),
@@ -806,74 +918,92 @@ def _dependency_status_for_family(family: str, dependency_by_id: Dict[str, str])
 
 def build_lifecycle_progression_status_doc(
     *,
+    repo_root: Path,
     truth_root: Path,
     day_utc: str,
     produced_utc: str,
     run_scope: Dict[str, Any],
     dependency_statuses: List[Dict[str, Any]],
     payload_probes: Dict[str, FamilyProbe],
+    producer_contract_results: List[ProducerContractProbe],
     facts: Dict[str, Any],
 ) -> Dict[str, Any]:
     dep = {row["dependency_id"]: row for row in dependency_statuses}
+    producer_contract_by_family = _producer_contract_by_family(producer_contract_results)
+    producer_contract_by_id = {row.producer_contract_id: row for row in producer_contract_results}
+    lifecycle_policy = _read_lifecycle_completeness_policy(repo_root)
+    stage_policy_by_name = _stage_policy_map(lifecycle_policy)
     stage_rows: List[Dict[str, Any]] = []
     prior_complete = True
     for stage in LIFECYCLE_STAGES:
+        stage_policy = stage_policy_by_name.get(stage, {})
+        required_contract_ids = list(stage_policy.get("required_producer_contract_ids") or [])
+        producer_contract_failures = [
+            contract_id
+            for contract_id in required_contract_ids
+            if contract_id not in producer_contract_by_id or producer_contract_by_id[contract_id].contract_status != "CONTRACT_COMPLIANT"
+        ]
         row: Dict[str, Any]
         if stage == "INTENT_EMITTED":
             intent_probe = payload_probes["intent_snapshot"]
             rollup_probe = payload_probes["intents_day_rollup_linkage"]
             if intent_probe.completeness_status == "COMPLETE":
-                row = _stage_row(stage, "COMPLETE", [], [], _maybe_writer(stage, dep))
+                row = _stage_row(stage, "COMPLETE", [], producer_contract_failures, [], _maybe_writer(stage, dep))
             elif dep["market_data_snapshot_for_real_intent_generation"]["status"] != "READY":
-                row = _stage_row(stage, "BLOCKED_MISSING_DEPENDENCY", ["market_data_snapshot_for_real_intent_generation"], list(intent_probe.missing_required_fields or rollup_probe.missing_join_critical_fields), _maybe_writer(stage, dep))
+                row = _stage_row(stage, "BLOCKED_MISSING_DEPENDENCY", ["market_data_snapshot_for_real_intent_generation"], producer_contract_failures, list(intent_probe.missing_required_fields or rollup_probe.missing_join_critical_fields), _maybe_writer(stage, dep))
             elif rollup_probe.completeness_status == "AGGREGATE_ONLY_NO_LINKAGE":
-                row = _stage_row(stage, "BLOCKED_PAYLOAD_INCOMPLETE", [], list(rollup_probe.missing_join_critical_fields), _maybe_writer(stage, dep))
+                row = _stage_row(stage, "BLOCKED_PAYLOAD_INCOMPLETE", [], producer_contract_failures, list(rollup_probe.missing_join_critical_fields), _maybe_writer(stage, dep))
             else:
-                row = _stage_row(stage, "BLOCKED_MISSING_ARTIFACT", [], list(intent_probe.missing_required_fields), _maybe_writer(stage, dep))
+                row = _stage_row(stage, "BLOCKED_MISSING_ARTIFACT", [], producer_contract_failures, list(intent_probe.missing_required_fields), _maybe_writer(stage, dep))
         elif stage == "AUTHORIZATION_COMPLETE":
             probe = payload_probes["authorization"]
+            contract = producer_contract_by_family.get("authorization")
             if not prior_complete:
-                row = _stage_row(stage, "BLOCKED_UPSTREAM", [], [], _maybe_writer(stage, dep))
+                row = _stage_row(stage, "BLOCKED_UPSTREAM", [], producer_contract_failures, [], _maybe_writer(stage, dep))
             elif probe.completeness_status == "COMPLETE":
-                row = _stage_row(stage, "COMPLETE", [], [], _maybe_writer(stage, dep))
+                row = _stage_row(stage, "COMPLETE", [], producer_contract_failures, [], _maybe_writer(stage, dep))
             else:
-                row = _stage_row(stage, "BLOCKED_PAYLOAD_INCOMPLETE", [], list(probe.missing_required_fields + probe.missing_join_critical_fields), _maybe_writer(stage, dep))
+                row = _stage_row(stage, "BLOCKED_PAYLOAD_INCOMPLETE" if contract is None or contract.contract_status == "PRESENT_BUT_INCOMPLETE" else "BLOCKED_MISSING_ARTIFACT", [], producer_contract_failures, list(probe.missing_required_fields + probe.missing_join_critical_fields), _maybe_writer(stage, dep))
         elif stage == "SUBMISSION_COMPLETE":
             probe = payload_probes["broker_submission_record"]
+            contract = producer_contract_by_family.get("broker_submission_record")
             if not prior_complete:
-                row = _stage_row(stage, "BLOCKED_UPSTREAM", [], [], _maybe_writer(stage, dep))
+                row = _stage_row(stage, "BLOCKED_UPSTREAM", [], producer_contract_failures, [], _maybe_writer(stage, dep))
             elif probe.completeness_status == "COMPLETE":
-                row = _stage_row(stage, "COMPLETE", [], [], _maybe_writer(stage, dep))
+                row = _stage_row(stage, "COMPLETE", [], producer_contract_failures, [], _maybe_writer(stage, dep))
             else:
                 dep_failures = []
                 if dep["submission_identity_bundle"]["status"] != "READY":
                     dep_failures.append("submission_identity_bundle")
-                row = _stage_row(stage, "BLOCKED_PAYLOAD_INCOMPLETE", dep_failures, list(probe.missing_required_fields + probe.missing_join_critical_fields), _maybe_writer(stage, dep))
+                row = _stage_row(stage, "BLOCKED_PAYLOAD_INCOMPLETE" if contract is None or contract.contract_status == "PRESENT_BUT_INCOMPLETE" else "BLOCKED_MISSING_ARTIFACT", dep_failures, producer_contract_failures, list(probe.missing_required_fields + probe.missing_join_critical_fields), _maybe_writer(stage, dep))
         elif stage == "EXECUTION_STREAM_COMPLETE":
             probe = payload_probes["execution_stream"]
+            contract = producer_contract_by_family.get("execution_stream")
             if not prior_complete:
-                row = _stage_row(stage, "BLOCKED_UPSTREAM", [], [], _maybe_writer(stage, dep))
+                row = _stage_row(stage, "BLOCKED_UPSTREAM", [], producer_contract_failures, [], _maybe_writer(stage, dep))
             elif probe.completeness_status == "COMPLETE":
-                row = _stage_row(stage, "COMPLETE", [], [], _maybe_writer(stage, dep))
+                row = _stage_row(stage, "COMPLETE", [], producer_contract_failures, [], _maybe_writer(stage, dep))
             else:
                 dep_failures = []
                 if dep["execution_stream_prerequisites"]["status"] != "READY":
                     dep_failures.append("execution_stream_prerequisites")
-                row = _stage_row(stage, "BLOCKED_MISSING_ARTIFACT" if probe.record_count == 0 else "BLOCKED_PAYLOAD_INCOMPLETE", dep_failures, list(probe.missing_required_fields + probe.missing_join_critical_fields), _maybe_writer(stage, dep))
+                row = _stage_row(stage, "BLOCKED_MISSING_ARTIFACT" if probe.record_count == 0 else "BLOCKED_PAYLOAD_INCOMPLETE", dep_failures, producer_contract_failures, list(probe.missing_required_fields + probe.missing_join_critical_fields), _maybe_writer(stage, dep))
         else:
             fill_probe = payload_probes["fill_ledger"]
             fill_input_probe = payload_probes["fill_ledger_input_bundle"]
+            contract = producer_contract_by_family.get("fill_ledger_input_bundle")
             if not prior_complete:
-                row = _stage_row(stage, "BLOCKED_UPSTREAM", [], [], _maybe_writer(stage, dep))
+                row = _stage_row(stage, "BLOCKED_UPSTREAM", [], producer_contract_failures, [], _maybe_writer(stage, dep))
             elif fill_probe.completeness_status == "COMPLETE":
-                row = _stage_row(stage, "COMPLETE", [], [], _maybe_writer(stage, dep))
+                row = _stage_row(stage, "COMPLETE", [], producer_contract_failures, [], _maybe_writer(stage, dep))
             elif fill_input_probe.completeness_status in {"INPUTS_TOO_SPARSE", "SCHEMA_MISMATCH"}:
-                row = _stage_row(stage, "BLOCKED_PAYLOAD_INCOMPLETE", ["execution_stream_prerequisites"], list(fill_input_probe.missing_required_fields + fill_input_probe.missing_join_critical_fields), _maybe_writer(stage, dep))
+                row = _stage_row(stage, "BLOCKED_PAYLOAD_INCOMPLETE", ["execution_stream_prerequisites"], producer_contract_failures, list(fill_input_probe.missing_required_fields + fill_input_probe.missing_join_critical_fields), _maybe_writer(stage, dep))
             else:
-                row = _stage_row(stage, "BLOCKED_MISSING_ARTIFACT", ["execution_stream_prerequisites"], list(fill_probe.missing_required_fields), _maybe_writer(stage, dep))
+                row = _stage_row(stage, "BLOCKED_MISSING_ARTIFACT", ["execution_stream_prerequisites"], producer_contract_failures, list(fill_probe.missing_required_fields), _maybe_writer(stage, dep))
         prior_complete = row["stage_status"] == "COMPLETE"
         stage_rows.append(row)
     first_break_stage = next((row["stage_name"] for row in stage_rows if row["stage_status"] != "COMPLETE"), None)
+    execution_truth_status = "EXECUTION_TRUTH_COMPLETE" if first_break_stage is None else "EXECUTION_TRUTH_INCOMPLETE"
     integrity_status = "OK" if first_break_stage is None else "PAYLOAD_INCOMPLETE"
     return {
         "schema_id": "lifecycle_progression_status_v1",
@@ -882,20 +1012,31 @@ def build_lifecycle_progression_status_doc(
         "produced_utc": produced_utc,
         "execution_completion_ruleset_id": EXECUTION_COMPLETION_RULESET_ID,
         "execution_completion_ruleset_version": EXECUTION_COMPLETION_RULESET_VERSION,
+        "lifecycle_completeness_policy_id": LIFECYCLE_COMPLETENESS_POLICY_ID,
+        "lifecycle_completeness_policy_version": LIFECYCLE_COMPLETENESS_POLICY_VERSION,
         "run_scope": run_scope,
         "stages": stage_rows,
         "first_break_stage": first_break_stage,
+        "execution_truth_status": execution_truth_status,
         "integrity_status": integrity_status,
         "evidence_refs": sorted(set(_evidence_refs(facts))),
     }
 
 
-def _stage_row(stage_name: str, stage_status: str, dependency_failures: List[str], missing_fields: List[str], blocked_writer: Optional[str]) -> Dict[str, Any]:
-    writers = [] if blocked_writer is None else [blocked_writer]
+def _stage_row(
+    stage_name: str,
+    stage_status: str,
+    dependency_failures: List[str],
+    producer_contract_failures: List[str],
+    missing_fields: List[str],
+    blocked_writer: Optional[str],
+) -> Dict[str, Any]:
+    writers = [] if blocked_writer is None or stage_status == "COMPLETE" else [blocked_writer]
     return {
         "stage_name": stage_name,
         "stage_status": stage_status,
         "dependency_failures": sorted(set(dependency_failures)),
+        "producer_contract_failures": sorted(set(producer_contract_failures)),
         "missing_fields": sorted(set(missing_fields)),
         "blocked_writers": writers,
     }
@@ -924,6 +1065,7 @@ def build_economic_finalization_status_doc(
 ) -> Dict[str, Any]:
     dep = {row["dependency_id"]: row for row in dependency_statuses}
     fill_complete = any(row["stage_name"] == "FILL_COMPLETE" and row["stage_status"] == "COMPLETE" for row in lifecycle_doc.get("stages", []))
+    execution_truth_status = lifecycle_doc.get("execution_truth_status", "EXECUTION_TRUTH_INCOMPLETE")
     stage_rows: List[Dict[str, Any]] = []
     if not fill_complete:
         overall = "NOT_READY_FOR_ECONOMIC_FINALIZATION"
@@ -996,7 +1138,10 @@ def build_economic_finalization_status_doc(
         "produced_utc": produced_utc,
         "execution_completion_ruleset_id": EXECUTION_COMPLETION_RULESET_ID,
         "execution_completion_ruleset_version": EXECUTION_COMPLETION_RULESET_VERSION,
+        "lifecycle_completeness_policy_id": LIFECYCLE_COMPLETENESS_POLICY_ID,
+        "lifecycle_completeness_policy_version": LIFECYCLE_COMPLETENESS_POLICY_VERSION,
         "run_scope": run_scope,
+        "execution_truth_status": execution_truth_status,
         "economic_finalization_status": overall,
         "stage_statuses": stage_rows,
         "integrity_status": integrity_status,
@@ -1022,6 +1167,7 @@ def build_execution_completion_gap_report_doc(
     run_scope: Dict[str, Any],
     dependency_statuses: List[Dict[str, Any]],
     payload_probes: Dict[str, FamilyProbe],
+    producer_contract_results: List[ProducerContractProbe],
     lifecycle_doc: Dict[str, Any],
     economic_doc: Dict[str, Any],
     facts: Dict[str, Any],
@@ -1070,11 +1216,17 @@ def build_execution_completion_gap_report_doc(
         "produced_utc": produced_utc,
         "execution_completion_ruleset_id": EXECUTION_COMPLETION_RULESET_ID,
         "execution_completion_ruleset_version": EXECUTION_COMPLETION_RULESET_VERSION,
+        "producer_contract_registry_id": PRODUCER_CONTRACT_REGISTRY_ID,
+        "producer_contract_registry_version": PRODUCER_CONTRACT_REGISTRY_VERSION,
+        "lifecycle_completeness_policy_id": LIFECYCLE_COMPLETENESS_POLICY_ID,
+        "lifecycle_completeness_policy_version": LIFECYCLE_COMPLETENESS_POLICY_VERSION,
         "run_scope": run_scope,
         "target_day_utc": day_utc,
         "dependency_statuses": dependency_statuses,
+        "producer_contract_results": [_producer_contract_doc(row) for row in producer_contract_results],
         "payload_completeness_results": [_family_probe_to_doc(row) for row in payload_probes.values()],
         "lifecycle_stage_statuses": lifecycle_rows,
+        "execution_truth_status": lifecycle_doc.get("execution_truth_status", "EXECUTION_TRUTH_INCOMPLETE"),
         "economic_finalization_status": economic_doc.get("economic_finalization_status"),
         "first_break_stage": first_break_stage,
         "missing_dependencies": missing_dependencies,
@@ -1122,6 +1274,7 @@ def build_execution_truth_docs(repo_root: Path, truth_root: Path, day_utc: str, 
     facts = collect_execution_truth_facts(repo_root, truth_root, day_utc)
     dependency_statuses = build_dependency_statuses(repo_root, truth_root, day_utc, facts)
     payload_probes = build_payload_probes(repo_root, truth_root, day_utc, facts)
+    producer_contract_results = build_producer_contract_results(repo_root, payload_probes)
     run_scope = _derive_run_scope(repo_root, truth_root, day_utc, facts)
     normalization = build_execution_evidence_normalization_doc(
         repo_root=repo_root,
@@ -1131,15 +1284,18 @@ def build_execution_truth_docs(repo_root: Path, truth_root: Path, day_utc: str, 
         run_scope=run_scope,
         dependency_statuses=dependency_statuses,
         payload_probes=payload_probes,
+        producer_contract_results=producer_contract_results,
         facts=facts,
     )
     lifecycle = build_lifecycle_progression_status_doc(
+        repo_root=repo_root,
         truth_root=truth_root,
         day_utc=day_utc,
         produced_utc=produced_utc,
         run_scope=run_scope,
         dependency_statuses=dependency_statuses,
         payload_probes=payload_probes,
+        producer_contract_results=producer_contract_results,
         facts=facts,
     )
     economic = build_economic_finalization_status_doc(
@@ -1157,6 +1313,7 @@ def build_execution_truth_docs(repo_root: Path, truth_root: Path, day_utc: str, 
         run_scope=run_scope,
         dependency_statuses=dependency_statuses,
         payload_probes=payload_probes,
+        producer_contract_results=producer_contract_results,
         lifecycle_doc=lifecycle,
         economic_doc=economic,
         facts=facts,
@@ -1189,6 +1346,8 @@ def _internal_failure_docs(repo_root: Path, truth_root: Path, day_utc: str, prod
         "dependency_registry_version": DEPENDENCY_REGISTRY_VERSION,
         "payload_contracts_id": PAYLOAD_CONTRACTS_ID,
         "payload_contracts_version": PAYLOAD_CONTRACTS_VERSION,
+        "producer_contract_registry_id": PRODUCER_CONTRACT_REGISTRY_ID,
+        "producer_contract_registry_version": PRODUCER_CONTRACT_REGISTRY_VERSION,
         "run_scope": run_scope,
         "normalized_evidence": [],
         "evidence_refs": evidence_refs,
@@ -1201,18 +1360,22 @@ def _internal_failure_docs(repo_root: Path, truth_root: Path, day_utc: str, prod
         "produced_utc": produced_utc,
         "execution_completion_ruleset_id": EXECUTION_COMPLETION_RULESET_ID,
         "execution_completion_ruleset_version": EXECUTION_COMPLETION_RULESET_VERSION,
+        "lifecycle_completeness_policy_id": LIFECYCLE_COMPLETENESS_POLICY_ID,
+        "lifecycle_completeness_policy_version": LIFECYCLE_COMPLETENESS_POLICY_VERSION,
         "run_scope": run_scope,
         "stages": [
             {
                 "stage_name": stage,
                 "stage_status": "INTERNAL_FAILURE",
                 "dependency_failures": [],
+                "producer_contract_failures": [],
                 "missing_fields": [],
                 "blocked_writers": [],
             }
             for stage in LIFECYCLE_STAGES
         ],
         "first_break_stage": "INTERNAL_FAILURE",
+        "execution_truth_status": "INTERNAL_FAILURE",
         "integrity_status": "INTERNAL_FAILURE",
         "evidence_refs": evidence_refs,
     }
@@ -1223,7 +1386,10 @@ def _internal_failure_docs(repo_root: Path, truth_root: Path, day_utc: str, prod
         "produced_utc": produced_utc,
         "execution_completion_ruleset_id": EXECUTION_COMPLETION_RULESET_ID,
         "execution_completion_ruleset_version": EXECUTION_COMPLETION_RULESET_VERSION,
+        "lifecycle_completeness_policy_id": LIFECYCLE_COMPLETENESS_POLICY_ID,
+        "lifecycle_completeness_policy_version": LIFECYCLE_COMPLETENESS_POLICY_VERSION,
         "run_scope": run_scope,
+        "execution_truth_status": "INTERNAL_FAILURE",
         "economic_finalization_status": "INTERNAL_FAILURE",
         "stage_statuses": [
             {
@@ -1244,11 +1410,17 @@ def _internal_failure_docs(repo_root: Path, truth_root: Path, day_utc: str, prod
         "produced_utc": produced_utc,
         "execution_completion_ruleset_id": EXECUTION_COMPLETION_RULESET_ID,
         "execution_completion_ruleset_version": EXECUTION_COMPLETION_RULESET_VERSION,
+        "producer_contract_registry_id": PRODUCER_CONTRACT_REGISTRY_ID,
+        "producer_contract_registry_version": PRODUCER_CONTRACT_REGISTRY_VERSION,
+        "lifecycle_completeness_policy_id": LIFECYCLE_COMPLETENESS_POLICY_ID,
+        "lifecycle_completeness_policy_version": LIFECYCLE_COMPLETENESS_POLICY_VERSION,
         "run_scope": run_scope,
         "target_day_utc": day_utc,
         "dependency_statuses": [],
+        "producer_contract_results": [],
         "payload_completeness_results": [],
         "lifecycle_stage_statuses": lifecycle["stages"],
+        "execution_truth_status": "INTERNAL_FAILURE",
         "economic_finalization_status": "INTERNAL_FAILURE",
         "first_break_stage": "INTERNAL_FAILURE",
         "missing_dependencies": [],

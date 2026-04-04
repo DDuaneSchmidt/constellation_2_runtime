@@ -1,0 +1,71 @@
+{
+  "schema_id": "C2_LIFECYCLE_COMPLETENESS_POLICY_V1",
+  "schema_version": 1,
+  "execution_completion_ruleset_id": "EXECUTION_COMPLETION_RULESET_V1",
+  "execution_completion_ruleset_version": 1,
+  "lifecycle_completeness_policy_id": "C2_LIFECYCLE_COMPLETENESS_POLICY_V1",
+  "lifecycle_completeness_policy_version": 1,
+  "stages": [
+    {
+      "stage_name": "INTENT_EMITTED",
+      "stage_version": 1,
+      "required_dependency_ids": ["market_data_snapshot_for_real_intent_generation"],
+      "required_producer_contract_ids": ["intent_snapshot_producer_contract_v1"],
+      "required_payload_families": ["intents_day_rollup_linkage", "intent_snapshot"],
+      "upstream_stages": [],
+      "blocked_writer": "constellation_2/phaseI/trend_eq_primary/run/run_trend_eq_primary_intents_day_v1.py",
+      "completeness_rule": "Intent snapshots must be present and contract-compliant. Aggregate-only rollups never satisfy record-level lifecycle truth."
+    },
+    {
+      "stage_name": "AUTHORIZATION_COMPLETE",
+      "stage_version": 1,
+      "required_dependency_ids": [],
+      "required_producer_contract_ids": ["authorization_payload_contract_v1"],
+      "required_payload_families": ["authorization"],
+      "upstream_stages": ["INTENT_EMITTED"],
+      "blocked_writer": "ops/tools/run_authorization_artifacts_day_v1.py",
+      "completeness_rule": "Authorization must be present and contract-compliant for each intent."
+    },
+    {
+      "stage_name": "SUBMISSION_COMPLETE",
+      "stage_version": 1,
+      "required_dependency_ids": ["submission_identity_bundle"],
+      "required_producer_contract_ids": ["broker_submission_record_contract_v1"],
+      "required_payload_families": ["broker_submission_record"],
+      "upstream_stages": ["AUTHORIZATION_COMPLETE"],
+      "blocked_writer": "constellation_2/phaseF/execution_evidence/run/run_execution_evidence_truth_day_v1.py",
+      "completeness_rule": "Submission evidence must expose governed submission identity fields before later execution stages may advance."
+    },
+    {
+      "stage_name": "EXECUTION_STREAM_COMPLETE",
+      "stage_version": 1,
+      "required_dependency_ids": ["execution_stream_prerequisites"],
+      "required_producer_contract_ids": ["execution_stream_record_contract_v1"],
+      "required_payload_families": ["execution_stream"],
+      "upstream_stages": ["SUBMISSION_COMPLETE"],
+      "blocked_writer": "ops/tools/run_execution_stream_snapshot_day_v1.py",
+      "completeness_rule": "Execution stream truth requires governed stream records, not sparse submission-side fallbacks."
+    },
+    {
+      "stage_name": "FILL_COMPLETE",
+      "stage_version": 1,
+      "required_dependency_ids": ["execution_stream_prerequisites"],
+      "required_producer_contract_ids": ["fill_ledger_input_contract_v1"],
+      "required_payload_families": ["fill_ledger_input_bundle", "fill_ledger"],
+      "upstream_stages": ["EXECUTION_STREAM_COMPLETE"],
+      "blocked_writer": "ops/tools/run_fill_ledger_day_v1.py",
+      "completeness_rule": "Fill completion requires contract-compliant input bundles plus materialized fill-ledger truth."
+    }
+  ],
+  "execution_truth_complete_requires": [
+    "INTENT_EMITTED",
+    "AUTHORIZATION_COMPLETE",
+    "SUBMISSION_COMPLETE",
+    "EXECUTION_STREAM_COMPLETE",
+    "FILL_COMPLETE"
+  ],
+  "economic_truth_states": [
+    "ECONOMIC_TRUTH_INCOMPLETE",
+    "ECONOMIC_TRUTH_COMPLETE"
+  ]
+}

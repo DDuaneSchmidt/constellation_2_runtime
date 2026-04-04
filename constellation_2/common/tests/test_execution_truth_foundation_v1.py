@@ -22,6 +22,10 @@ def _hx(char: str) -> str:
     return char * 64
 
 
+def _producer_contract_by_id(rows: list[dict]) -> dict[str, dict]:
+    return {row["producer_contract_id"]: row for row in rows}
+
+
 def _prepare_sparse_truth(truth_root: Path, day: str = "2026-04-02") -> None:
     _write_day_fixture(
         truth_root,
@@ -235,12 +239,25 @@ def test_payload_completeness_failure_classification(tmp_path: Path) -> None:
     assert probes["intents_day_rollup_linkage"].completeness_status == "AGGREGATE_ONLY_NO_LINKAGE"
 
 
+def test_producer_contract_violation_classification(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    _prepare_sparse_truth(truth_root)
+    facts = etf.collect_execution_truth_facts(REPO_ROOT, truth_root, "2026-04-02")
+    probes = etf.build_payload_probes(REPO_ROOT, truth_root, "2026-04-02", facts)
+    contract_results = etf.build_producer_contract_results(REPO_ROOT, probes)
+    by_id = {row.producer_contract_id: row for row in contract_results}
+    assert by_id["intent_snapshot_producer_contract_v1"].contract_status == "MISSING_ARTIFACT"
+    assert by_id["authorization_payload_contract_v1"].contract_status == "PRESENT_BUT_INCOMPLETE"
+
+
 def test_lifecycle_progression_blocked_by_sparse_evidence(tmp_path: Path) -> None:
     truth_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
     _prepare_sparse_truth(truth_root)
     docs = etf.build_execution_truth_docs(REPO_ROOT, truth_root, "2026-04-02", "2026-04-02T00:00:00Z")
     assert docs["lifecycle"]["first_break_stage"] == "INTENT_EMITTED"
+    assert docs["lifecycle"]["execution_truth_status"] == "EXECUTION_TRUTH_INCOMPLETE"
     assert docs["lifecycle"]["stages"][0]["stage_status"] == "BLOCKED_MISSING_DEPENDENCY"
+    assert docs["lifecycle"]["stages"][0]["producer_contract_failures"] == ["intent_snapshot_producer_contract_v1"]
 
 
 def test_lifecycle_progression_advances_only_when_prerequisites_met(tmp_path: Path) -> None:
@@ -248,6 +265,7 @@ def test_lifecycle_progression_advances_only_when_prerequisites_met(tmp_path: Pa
     _prepare_complete_execution_truth(truth_root)
     docs = etf.build_execution_truth_docs(REPO_ROOT, truth_root, "2026-04-02", "2026-04-02T00:00:00Z")
     assert all(row["stage_status"] == "COMPLETE" for row in docs["lifecycle"]["stages"])
+    assert docs["lifecycle"]["execution_truth_status"] == "EXECUTION_TRUTH_COMPLETE"
 
 
 def test_economic_finalization_blocked_without_required_inputs(tmp_path: Path) -> None:
@@ -255,6 +273,7 @@ def test_economic_finalization_blocked_without_required_inputs(tmp_path: Path) -
     _prepare_complete_execution_truth(truth_root)
     docs = etf.build_execution_truth_docs(REPO_ROOT, truth_root, "2026-04-02", "2026-04-02T00:00:00Z")
     assert docs["economic"]["economic_finalization_status"] == "READY_FOR_POSITIONS"
+    assert docs["economic"]["execution_truth_status"] == "EXECUTION_TRUTH_COMPLETE"
 
 
 def test_gap_report_identifies_first_break_and_blocked_writers(tmp_path: Path) -> None:
@@ -262,6 +281,8 @@ def test_gap_report_identifies_first_break_and_blocked_writers(tmp_path: Path) -
     _prepare_sparse_truth(truth_root)
     docs = etf.build_execution_truth_docs(REPO_ROOT, truth_root, "2026-04-02", "2026-04-02T00:00:00Z")
     assert docs["gap"]["first_break_stage"] == "INTENT_EMITTED"
+    contract_rows = _producer_contract_by_id(docs["gap"]["producer_contract_results"])
+    assert contract_rows["intent_snapshot_producer_contract_v1"]["contract_status"] == "MISSING_ARTIFACT"
     assert "constellation_2/phaseI/trend_eq_primary/run/run_trend_eq_primary_intents_day_v1.py" in docs["gap"]["blocked_writers"]
 
 
@@ -294,3 +315,4 @@ def test_internal_self_failure_path(tmp_path: Path, monkeypatch) -> None:
     )
     assert gap_doc["integrity_status"] == "INTERNAL_FAILURE"
     assert gap_doc["first_break_stage"] == "INTERNAL_FAILURE"
+    assert gap_doc["execution_truth_status"] == "INTERNAL_FAILURE"

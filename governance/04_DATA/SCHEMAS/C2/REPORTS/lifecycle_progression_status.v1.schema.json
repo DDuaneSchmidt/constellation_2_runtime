@@ -11,9 +11,12 @@
     "produced_utc",
     "execution_completion_ruleset_id",
     "execution_completion_ruleset_version",
+    "lifecycle_completeness_policy_id",
+    "lifecycle_completeness_policy_version",
     "run_scope",
     "stages",
     "first_break_stage",
+    "execution_truth_status",
     "integrity_status",
     "evidence_refs"
   ],
@@ -24,6 +27,8 @@
     "produced_utc": { "type": "string", "minLength": 1 },
     "execution_completion_ruleset_id": { "type": "string", "const": "EXECUTION_COMPLETION_RULESET_V1" },
     "execution_completion_ruleset_version": { "type": "integer", "const": 1 },
+    "lifecycle_completeness_policy_id": { "type": "string", "const": "C2_LIFECYCLE_COMPLETENESS_POLICY_V1" },
+    "lifecycle_completeness_policy_version": { "type": "integer", "const": 1 },
     "run_scope": { "$ref": "#/$defs/run_scope" },
     "stages": {
       "type": "array",
@@ -32,11 +37,12 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["stage_name", "stage_status", "dependency_failures", "missing_fields", "blocked_writers"],
+        "required": ["stage_name", "stage_status", "dependency_failures", "producer_contract_failures", "missing_fields", "blocked_writers"],
         "properties": {
           "stage_name": { "type": "string", "enum": ["INTENT_EMITTED", "AUTHORIZATION_COMPLETE", "SUBMISSION_COMPLETE", "EXECUTION_STREAM_COMPLETE", "FILL_COMPLETE"] },
           "stage_status": { "type": "string", "enum": ["COMPLETE", "BLOCKED_MISSING_DEPENDENCY", "BLOCKED_PAYLOAD_INCOMPLETE", "BLOCKED_MISSING_ARTIFACT", "BLOCKED_UPSTREAM", "INTERNAL_FAILURE"] },
           "dependency_failures": { "type": "array", "items": { "type": "string" } },
+          "producer_contract_failures": { "type": "array", "items": { "type": "string" } },
           "missing_fields": { "type": "array", "items": { "type": "string" } },
           "blocked_writers": { "type": "array", "items": { "type": "string" } }
         }
@@ -48,6 +54,7 @@
         { "type": "string", "enum": ["INTENT_EMITTED", "AUTHORIZATION_COMPLETE", "SUBMISSION_COMPLETE", "EXECUTION_STREAM_COMPLETE", "FILL_COMPLETE", "INTERNAL_FAILURE"] }
       ]
     },
+    "execution_truth_status": { "type": "string", "enum": ["EXECUTION_TRUTH_COMPLETE", "EXECUTION_TRUTH_INCOMPLETE", "INTERNAL_FAILURE"] },
     "integrity_status": { "type": "string", "enum": ["OK", "PAYLOAD_INCOMPLETE", "INTERNAL_FAILURE"] },
     "evidence_refs": { "type": "array", "items": { "type": "string" } }
   },

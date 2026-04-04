@@ -16,4 +16,4 @@ Provide the canonical gate for when positions, cash, marks, accounting, and exit
 - `constellation_2/runtime/truth/reports/economic_finalization_status_v1/<DAY>/economic_finalization_status.v1.json`
 
 # Audit rule
-Economic truth must remain blocked until the required execution truth and external/operator prerequisites are actually present and governed.
+Economic truth must remain blocked until the required execution truth, lifecycle-completeness conditions, and external/operator prerequisites are actually present and governed.

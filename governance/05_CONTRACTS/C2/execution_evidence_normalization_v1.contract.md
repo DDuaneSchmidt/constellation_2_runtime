@@ -10,10 +10,10 @@ scope: constellation_2_0
 ---
 
 # Purpose
-Provide the canonical normalized execution-evidence surface for dependency and payload completeness evaluation.
+Provide the canonical normalized execution-evidence surface for dependency readiness, producer-contract evaluation, and payload completeness evaluation.
 
 # Canonical path
 - `constellation_2/runtime/truth/reports/execution_evidence_normalization_v1/<DAY>/execution_evidence_normalization.v1.json`
 
 # Audit rule
-No execution-completion conclusion is authoritative without normalized evidence refs and governed completeness results.
+No lifecycle-truth conclusion is authoritative without normalized evidence refs, governed dependency statuses, and producer-contract-aware completeness results.

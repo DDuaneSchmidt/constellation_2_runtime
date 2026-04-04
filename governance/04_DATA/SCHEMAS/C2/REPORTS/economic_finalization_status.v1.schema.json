@@ -11,7 +11,10 @@
     "produced_utc",
     "execution_completion_ruleset_id",
     "execution_completion_ruleset_version",
+    "lifecycle_completeness_policy_id",
+    "lifecycle_completeness_policy_version",
     "run_scope",
+    "execution_truth_status",
     "economic_finalization_status",
     "stage_statuses",
     "integrity_status",
@@ -24,7 +27,10 @@
     "produced_utc": { "type": "string", "minLength": 1 },
     "execution_completion_ruleset_id": { "type": "string", "const": "EXECUTION_COMPLETION_RULESET_V1" },
     "execution_completion_ruleset_version": { "type": "integer", "const": 1 },
+    "lifecycle_completeness_policy_id": { "type": "string", "const": "C2_LIFECYCLE_COMPLETENESS_POLICY_V1" },
+    "lifecycle_completeness_policy_version": { "type": "integer", "const": 1 },
     "run_scope": { "$ref": "#/$defs/run_scope" },
+    "execution_truth_status": { "type": "string", "enum": ["EXECUTION_TRUTH_COMPLETE", "EXECUTION_TRUTH_INCOMPLETE", "INTERNAL_FAILURE"] },
     "economic_finalization_status": {
       "type": "string",
       "enum": [

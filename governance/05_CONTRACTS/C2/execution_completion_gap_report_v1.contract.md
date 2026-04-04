@@ -10,10 +10,10 @@ scope: constellation_2_0
 ---
 
 # Purpose
-Provide the canonical first-break explanation for missing dependencies, sparse payloads, blocked writers, and economic finalization blockers.
+Provide the canonical first-break explanation for missing dependencies, producer-contract violations, sparse payloads, blocked writers, and economic finalization blockers.
 
 # Canonical path
 - `constellation_2/runtime/truth/reports/execution_completion_gap_report_v1/<DAY>/execution_completion_gap_report.v1.json`
 
 # Audit rule
-The gap report is the authoritative explanation surface for why execution truth or economic truth could not advance for a target day.
+The gap report is the authoritative explanation surface for why execution truth or economic truth could not advance for a target day, including exact producer-contract failures at the producer boundary.
