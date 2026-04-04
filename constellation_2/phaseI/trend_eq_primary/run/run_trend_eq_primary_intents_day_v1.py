@@ -52,7 +52,7 @@ from constellation_2.common.truth_root_v1 import resolve_truth_root
 from constellation_2.phaseD.lib.canon_json_v1 import CanonicalizationError, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+REPO_ROOT = Path(__file__).resolve().parents[4]
 TRUTH_ROOT = resolve_truth_root(repo_root=REPO_ROOT)
 
 INTENTS_ROOT = (TRUTH_ROOT / "intents_v1" / "snapshots").resolve()
@@ -60,7 +60,7 @@ INTENTS_ROOT = (TRUTH_ROOT / "intents_v1" / "snapshots").resolve()
 MD_ROOT = (TRUTH_ROOT / "market_data_snapshot_v1").resolve()
 MD_MANIFEST = (MD_ROOT / "dataset_manifest.json").resolve()
 
-EXPOSURE_INTENT_SCHEMA = (REPO_ROOT / "constellation_2" / "schemas" / "exposure_intent.v1.schema.json").resolve()
+EXPOSURE_INTENT_SCHEMA_RELPATH = "constellation_2/schemas/exposure_intent.v1.schema.json"
 
 ENGINE_ID = "C2_TREND_EQ_PRIMARY_V1"
 ENGINE_SUITE = "C2_HYBRID_V1"
@@ -324,7 +324,7 @@ def main() -> int:
     )
 
     try:
-        validate_against_repo_schema_v1(intent_obj, EXPOSURE_INTENT_SCHEMA)
+        validate_against_repo_schema_v1(intent_obj, REPO_ROOT, EXPOSURE_INTENT_SCHEMA_RELPATH)
     except Exception as e:  # noqa: BLE001
         raise TrendIntentError(f"SCHEMA_VALIDATION_FAILED: {e}") from e
 
