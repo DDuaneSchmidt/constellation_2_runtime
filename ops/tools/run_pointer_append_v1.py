@@ -21,14 +21,16 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
-RUNPTR_ROOT = (TRUTH_ROOT / "run_pointer_v1").resolve()
-IDX_PATH = (RUNPTR_ROOT / "canonical_pointer_index.v1.jsonl").resolve()
-LOCK_PATH = (RUNPTR_ROOT / ".canonical_pointer_index.v1.lock").resolve()
+_THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = _THIS_FILE.parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.common.truth_root_v1 import resolve_truth_root  # noqa: E402
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -86,23 +88,42 @@ def _require_produced_utc_day0(day: str, produced_utc: str) -> str:
     return s
 
 
-def _lock_acquire() -> int:
-    RUNPTR_ROOT.mkdir(parents=True, exist_ok=True)
+def _resolve_truth_root(truth_root_arg: str) -> Path:
+    arg = (truth_root_arg or "").strip()
+    if arg:
+        p = Path(arg).expanduser().resolve()
+        if not p.is_absolute():
+            raise SystemExit(f"FAIL: --truth_root must be absolute: {p}")
+        if not p.exists() or not p.is_dir():
+            raise SystemExit(f"FAIL: --truth_root must exist and be a directory: {p}")
+        return p
+    return resolve_truth_root(repo_root=REPO_ROOT).resolve()
+
+
+def _runptr_paths(truth_root: Path) -> Tuple[Path, Path, Path]:
+    runptr_root = (truth_root / "run_pointer_v1").resolve()
+    idx_path = (runptr_root / "canonical_pointer_index.v1.jsonl").resolve()
+    lock_path = (runptr_root / ".canonical_pointer_index.v1.lock").resolve()
+    return runptr_root, idx_path, lock_path
+
+
+def _lock_acquire(runptr_root: Path, lock_path: Path) -> int:
+    runptr_root.mkdir(parents=True, exist_ok=True)
     try:
-        fd = os.open(str(LOCK_PATH), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError:
-        raise SystemExit(f"FAIL: lock busy (concurrent pointer append): {LOCK_PATH}")
+        raise SystemExit(f"FAIL: lock busy (concurrent pointer append): {lock_path}")
     os.write(fd, f"pid={os.getpid()}\n".encode("utf-8"))
     os.fsync(fd)
     return fd
 
 
-def _lock_release(fd: int) -> None:
+def _lock_release(fd: int, lock_path: Path) -> None:
     try:
         os.close(fd)
     finally:
         try:
-            os.unlink(str(LOCK_PATH))
+            os.unlink(str(lock_path))
         except FileNotFoundError:
             pass
 
@@ -163,6 +184,7 @@ def main() -> int:
     ap.add_argument("--produced_utc", required=True, help="Must equal <DAY>T00:00:00Z")
     ap.add_argument("--points_to", required=True, help="Path to gate_stack_verdict_v1 artifact (must contain gate_stack_verdict_v1)")
     ap.add_argument("--git_sha", default="", help="Optional override; defaults to HEAD")
+    ap.add_argument("--truth_root", default="", help="Absolute truth root; defaults to C2_TRUTH_ROOT or repo resolver")
     args = ap.parse_args()
 
     day = _require_day(args.day_utc)
@@ -173,14 +195,16 @@ def main() -> int:
     cfg_hash = _require_hash(args.orchestrator_config_hash, "orchestrator_config_hash", 12)
     produced_utc = _require_produced_utc_day0(day, args.produced_utc)
     git_sha = (str(args.git_sha) or "").strip() or _git_sha()
+    truth_root = _resolve_truth_root(str(args.truth_root))
+    runptr_root, idx_path, lock_path = _runptr_paths(truth_root)
 
     points_to = str(args.points_to).strip()
     if "gate_stack_verdict_v1" not in points_to:
         raise SystemExit("FAIL: points_to must reference gate_stack_verdict_v1 (path must contain token)")
 
-    lock_fd = _lock_acquire()
+    lock_fd = _lock_acquire(runptr_root, lock_path)
     try:
-        last_seq = _read_last_pointer_seq(IDX_PATH)
+        last_seq = _read_last_pointer_seq(idx_path)
         pointer_seq = last_seq + 1
 
         entry = {
@@ -199,10 +223,10 @@ def main() -> int:
             "points_to": points_to,
         }
 
-        line_sha, path_s = _atomic_append_jsonl(IDX_PATH, entry)
+        line_sha, path_s = _atomic_append_jsonl(idx_path, entry)
 
     finally:
-        _lock_release(lock_fd)
+        _lock_release(lock_fd, lock_path)
 
     out = {
         "ok": True,

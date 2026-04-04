@@ -17,13 +17,30 @@ if str(_REPO_ROOT) not in sys.path:
 if not (_REPO_ROOT / "constellation_2").exists():
     raise SystemExit(f"FATAL: repo_root_missing_constellation_2: derived={_REPO_ROOT}")
 
-TRUTH_ROOT = (_REPO_ROOT / "constellation_2/runtime/truth").resolve()
-IDX_PATH = (TRUTH_ROOT / "run_pointer_v1" / "canonical_pointer_index.v1.jsonl").resolve()
-OUT_DIR = (TRUTH_ROOT / "run_pointer_v2").resolve()
+from constellation_2.common.truth_root_v1 import resolve_truth_root  # noqa: E402
 
-DISPLAY_PATH = (OUT_DIR / "canonical_display_head.v1.json").resolve()
-AUTHORITY_PATH = (OUT_DIR / "canonical_authority_head.v1.json").resolve()
-LOCK_PATH = (OUT_DIR / ".heads_materialize_v1.lock").resolve()
+
+def _resolve_truth_root(truth_root_arg: str) -> Path:
+    arg = (truth_root_arg or "").strip()
+    if arg:
+        p = Path(arg).expanduser().resolve()
+        if not p.is_absolute():
+            raise SystemExit(f"FAIL: --truth_root must be absolute: {p}")
+        if not p.exists() or not p.is_dir():
+            raise SystemExit(f"FAIL: --truth_root must exist and be a directory: {p}")
+        return p
+    return resolve_truth_root(repo_root=_REPO_ROOT).resolve()
+
+
+def _pointer_paths(truth_root: Path) -> Dict[str, Path]:
+    out_dir = (truth_root / "run_pointer_v2").resolve()
+    return {
+        "idx_path": (truth_root / "run_pointer_v1" / "canonical_pointer_index.v1.jsonl").resolve(),
+        "out_dir": out_dir,
+        "display_path": (out_dir / "canonical_display_head.v1.json").resolve(),
+        "authority_path": (out_dir / "canonical_authority_head.v1.json").resolve(),
+        "lock_path": (out_dir / ".heads_materialize_v1.lock").resolve(),
+    }
 
 
 def _atomic_write_json(path: Path, obj: Dict[str, Any]) -> None:
@@ -42,23 +59,23 @@ def _atomic_write_json(path: Path, obj: Dict[str, Any]) -> None:
         os.close(dfd)
 
 
-def _lock_acquire() -> int:
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+def _lock_acquire(out_dir: Path, lock_path: Path) -> int:
+    out_dir.mkdir(parents=True, exist_ok=True)
     try:
-        fd = os.open(str(LOCK_PATH), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError:
-        raise SystemExit(f"FAIL: lock busy (heads materializer): {LOCK_PATH}")
+        raise SystemExit(f"FAIL: lock busy (heads materializer): {lock_path}")
     os.write(fd, f"pid={os.getpid()}\n".encode("utf-8"))
     os.fsync(fd)
     return fd
 
 
-def _lock_release(fd: int) -> None:
+def _lock_release(fd: int, lock_path: Path) -> None:
     try:
         os.close(fd)
     finally:
         try:
-            os.unlink(str(LOCK_PATH))
+            os.unlink(str(lock_path))
         except FileNotFoundError:
             pass
 
@@ -66,6 +83,7 @@ def _lock_release(fd: int) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_pointer_heads_materialize_v1")
     ap.add_argument("--fail_if_no_authority_head", required=True, choices=["YES", "NO"])
+    ap.add_argument("--truth_root", default="", help="Absolute truth root; defaults to C2_TRUTH_ROOT or repo resolver")
     args = ap.parse_args()
 
     from constellation_2.phaseC.lib.run_pointer_heads_v1 import (  # noqa: E402
@@ -75,17 +93,19 @@ def main() -> int:
     )
 
     fail_if_no_auth = str(args.fail_if_no_authority_head).strip().upper() == "YES"
+    truth_root = _resolve_truth_root(str(args.truth_root))
+    paths = _pointer_paths(truth_root)
 
-    lock_fd = _lock_acquire()
+    lock_fd = _lock_acquire(paths["out_dir"], paths["lock_path"])
     try:
-        display_entry = resolve_display_head_from_index(IDX_PATH)
+        display_entry = resolve_display_head_from_index(paths["idx_path"])
         display_obj = head_payload("canonical_display", display_entry)
-        _atomic_write_json(DISPLAY_PATH, display_obj)
+        _atomic_write_json(paths["display_path"], display_obj)
 
         try:
-            auth_entry = resolve_authority_head_from_index(IDX_PATH)
+            auth_entry = resolve_authority_head_from_index(paths["idx_path"])
             auth_obj = head_payload("canonical_authority", auth_entry)
-            _atomic_write_json(AUTHORITY_PATH, auth_obj)
+            _atomic_write_json(paths["authority_path"], auth_obj)
             authority_ok = True
             authority_msg = "OK"
         except Exception as e:
@@ -97,17 +117,17 @@ def main() -> int:
                 "ok": False,
                 "error": authority_msg,
             }
-            _atomic_write_json(AUTHORITY_PATH, missing)
+            _atomic_write_json(paths["authority_path"], missing)
             if fail_if_no_auth:
                 raise SystemExit(f"FAIL: no authority head: {authority_msg}")
     finally:
-        _lock_release(lock_fd)
+        _lock_release(lock_fd, paths["lock_path"])
 
     out = {
         "ok": True,
-        "index_path": str(IDX_PATH),
-        "display_head_path": str(DISPLAY_PATH),
-        "authority_head_path": str(AUTHORITY_PATH),
+        "index_path": str(paths["idx_path"]),
+        "display_head_path": str(paths["display_path"]),
+        "authority_head_path": str(paths["authority_path"]),
         "authority_ok": bool(authority_ok),
         "authority_msg": authority_msg,
     }

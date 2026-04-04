@@ -31,23 +31,35 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+HERE = Path(__file__).resolve()
+REPO_ROOT = HERE.parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.common.truth_root_v1 import resolve_truth_root
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
-
-
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH_ROOT = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
 
 POLICY_PATH = (REPO_ROOT / "governance" / "02_REGISTRIES" / "C2_CAPITAL_AUTHORITY_POLICY_V1.json").resolve()
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/ALLOCATION/capital_authority_allocation.v1.schema.json"
 
-OUT_ROOT = (TRUTH_ROOT / "allocation_v1" / "capital_authority_allocation_v1").resolve()
 
-AUTHORITY_HEAD_PATH = (TRUTH_ROOT / "run_pointer_v2" / "canonical_authority_head.v1.json").resolve()
+def _resolve_truth_root(truth_root_arg: Optional[str]) -> Path:
+    if truth_root_arg:
+        return Path(truth_root_arg).resolve()
+    return resolve_truth_root(REPO_ROOT)
 
 
-def _require_authority_head_pass_authoritative(day: str) -> Dict[str, Any]:
-    p = AUTHORITY_HEAD_PATH
+def _authority_head_path(truth_root: Path) -> Path:
+    return (truth_root / "run_pointer_v2" / "canonical_authority_head.v1.json").resolve()
+
+
+def _out_root(truth_root: Path) -> Path:
+    return (truth_root / "allocation_v1" / "capital_authority_allocation_v1").resolve()
+
+
+def _require_authority_head_pass_authoritative(day: str, truth_root: Path) -> Dict[str, Any]:
+    p = _authority_head_path(truth_root)
     ah = _read_json_obj(p)
     schema_id = str(ah.get("schema_id") or "").strip()
     schema_ver = str(ah.get("schema_version") or "").strip()
@@ -123,19 +135,19 @@ def _git_sha_failclosed() -> str:
     return s
 
 
-def EXPOSURE_NET_PATH(day: str) -> Path:
-    return (TRUTH_ROOT / "risk_v1" / "exposure_net_v1" / day / "exposure_net.v1.json").resolve()
+def EXPOSURE_NET_PATH(truth_root: Path, day: str) -> Path:
+    return (truth_root / "risk_v1" / "exposure_net_v1" / day / "exposure_net.v1.json").resolve()
 
 
-def ENVELOPE_V2_PATH(day: str) -> Path:
-    return (TRUTH_ROOT / "reports" / "capital_risk_envelope_v2" / day / "capital_risk_envelope.v2.json").resolve()
+def ENVELOPE_V2_PATH(truth_root: Path, day: str) -> Path:
+    return (truth_root / "reports" / "capital_risk_envelope_v2" / day / "capital_risk_envelope.v2.json").resolve()
 
 
-def INTENTS_DAY_DIR(day: str) -> Path:
-    return (TRUTH_ROOT / "intents_v1" / "snapshots" / day).resolve()
+def INTENTS_DAY_DIR(truth_root: Path, day: str) -> Path:
+    return (truth_root / "intents_v1" / "snapshots" / day).resolve()
 
-def CORRELATION_ENVELOPE_GATE_PATH(day: str) -> Path:
-    return (TRUTH_ROOT / "reports" / "correlation_envelope_gate_v1" / day / "correlation_envelope_gate.v1.json").resolve()
+def CORRELATION_ENVELOPE_GATE_PATH(truth_root: Path, day: str) -> Path:
+    return (truth_root / "reports" / "correlation_envelope_gate_v1" / day / "correlation_envelope_gate.v1.json").resolve()
 
 @dataclass(frozen=True)
 class SleeveLimit:
@@ -149,8 +161,8 @@ def _load_policy() -> Dict[str, Any]:
     return _read_json_obj(POLICY_PATH)
 
 
-def _headroom_from_envelope_v2(day: str) -> int:
-    p = ENVELOPE_V2_PATH(day)
+def _headroom_from_envelope_v2(truth_root: Path, day: str) -> int:
+    p = ENVELOPE_V2_PATH(truth_root, day)
     env = _read_json_obj(p)
     envelope = env.get("envelope")
     if not isinstance(envelope, dict):
@@ -229,26 +241,28 @@ def _allocate_sleeve_headroom(portfolio_headroom_cents: int, sleeves: List[Sleev
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="run_capital_authority_allocation_day_v1")
     ap.add_argument("--day_utc", required=True)
+    ap.add_argument("--truth_root", required=False, default=None)
     args = ap.parse_args(argv)
 
     day = _parse_day(args.day_utc)
     produced_utc = f"{day}T00:00:00Z"
+    truth_root = _resolve_truth_root(args.truth_root)
 
     # Fail-closed: allocation can only be produced on authority PASS+authoritative days.
-    _require_authority_head_pass_authoritative(day)
+    _require_authority_head_pass_authoritative(day, truth_root)
 
     # Required inputs
-    p_ex = EXPOSURE_NET_PATH(day)
+    p_ex = EXPOSURE_NET_PATH(truth_root, day)
     if not p_ex.exists():
         raise SystemExit(f"FAIL: EXPOSURE_NET_MISSING: {str(p_ex)}")
     ex_sha = _sha256_file(p_ex)
 
-    envp = ENVELOPE_V2_PATH(day)
+    envp = ENVELOPE_V2_PATH(truth_root, day)
     if not envp.exists():
         raise SystemExit(f"FAIL: ENVELOPE_V2_MISSING: {str(envp)}")
     env_sha = _sha256_file(envp)
 
-    cegp = CORRELATION_ENVELOPE_GATE_PATH(day)
+    cegp = CORRELATION_ENVELOPE_GATE_PATH(truth_root, day)
     if not cegp.exists():
         raise SystemExit(f"FAIL: CORRELATION_ENVELOPE_GATE_MISSING: {str(cegp)}")
     ceg_sha = _sha256_file(cegp)
@@ -260,7 +274,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not isinstance(mult, dict):
         raise SystemExit("FAIL: CORRELATION_ENVELOPE_GATE_MISSING_multiplier_bp_by_sleeve_OBJECT")
 
-    intents_dir = INTENTS_DAY_DIR(day)
+    intents_dir = INTENTS_DAY_DIR(truth_root, day)
     if not intents_dir.exists() or not intents_dir.is_dir():
         raise SystemExit(f"FAIL: INTENTS_DIR_MISSING: {str(intents_dir)}")
     intents = sorted([p for p in intents_dir.iterdir() if p.is_file() and p.name.endswith(".json")], key=lambda p: p.name)
@@ -271,7 +285,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     sleeves = _parse_sleeves(policy)
     engine_to_sleeve = _build_engine_to_sleeve(sleeves)
 
-    portfolio_headroom_cents = _headroom_from_envelope_v2(day)
+    portfolio_headroom_cents = _headroom_from_envelope_v2(truth_root, day)
     allowed_by_sleeve_raw = _allocate_sleeve_headroom(portfolio_headroom_cents, sleeves)
 
     # HARD BINDING: apply correlation envelope cap multipliers (basis points) per sleeve
@@ -374,7 +388,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     validate_against_repo_schema_v1(out_obj, REPO_ROOT, SCHEMA_RELPATH)
 
     payload = canonical_json_bytes_v1(out_obj) + b"\n"
-    out_path = (OUT_ROOT / day / "capital_authority_allocation.v1.json").resolve()
+    out_path = (_out_root(truth_root) / day / "capital_authority_allocation.v1.json").resolve()
     _atomic_write_refuse_overwrite(out_path, payload)
 
     print(
