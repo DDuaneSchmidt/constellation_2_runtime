@@ -32,19 +32,20 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+_THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = _THIS_FILE.parents[2]
 
-# Import bootstrap
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from constellation_2.common.truth_root_v1 import resolve_truth_root  # noqa: E402
 from constellation_2.phaseD.lib.canon_json_v1 import CanonicalizationError, canonical_json_bytes_v1  # noqa: E402
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1  # noqa: E402
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RISK/exposure_net.v1.schema.json"
 POLICY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/C2_CAPITAL_AUTHORITY_POLICY_V1.json").resolve()
 
+TRUTH = resolve_truth_root(repo_root=REPO_ROOT).resolve()
 INTENTS_DAY_ROOT = (TRUTH / "intents_v1/snapshots").resolve()
 OUT_ROOT = (TRUTH / "risk_v1/exposure_net_v1").resolve()
 
@@ -228,7 +229,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 }
             )
 
-    out_obj["per_engine"] = fallback
+        out_obj["per_engine"] = fallback
     validate_against_repo_schema_v1(out_obj, REPO_ROOT, SCHEMA_RELPATH)
 
     try:
