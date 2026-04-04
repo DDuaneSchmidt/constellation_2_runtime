@@ -1,0 +1,116 @@
+{
+  "schema_id": "C2_OPERATOR_QUERY_POLICY_REGISTRY_V1",
+  "schema_version": 1,
+  "interface_ruleset_id": "BATCH3_OPERATOR_INTERFACE_RULESET",
+  "interface_ruleset_version": 1,
+  "query_classes": [
+    {
+      "query_class_id": "readiness_state_query_v1",
+      "query_class_version": 1,
+      "supported_intent_patterns": ["readiness", "ready", "status"],
+      "required_sources": ["gate_stack_verdict_v1", "daily_summary_v1"],
+      "optional_sources": ["operator_trust_panel_v1"],
+      "scope_rules": ["day_utc_required"],
+      "precedence_rules": ["gate_stack_verdict_v1", "daily_summary_v1"],
+      "allowed_answer_template": "readiness_state_template_v1",
+      "degraded_state_behavior": "DOWNGRADE_TO_PARTIAL",
+      "unsupported_boundary": "NO_EXECUTION_ADVICE"
+    },
+    {
+      "query_class_id": "blocker_reason_query_v1",
+      "query_class_version": 1,
+      "supported_intent_patterns": ["blocked", "blocker", "why blocked"],
+      "required_sources": ["gate_stack_verdict_v1", "daily_summary_v1"],
+      "optional_sources": ["root_cause_v1"],
+      "scope_rules": ["day_utc_required"],
+      "precedence_rules": ["gate_stack_verdict_v1", "root_cause_v1"],
+      "allowed_answer_template": "blocker_reason_template_v1",
+      "degraded_state_behavior": "DOWNGRADE_TO_PARTIAL",
+      "unsupported_boundary": "NO_REMEDIATION_PLANS"
+    },
+    {
+      "query_class_id": "root_cause_query_v1",
+      "query_class_version": 1,
+      "supported_intent_patterns": ["root cause", "failure cause", "why failed"],
+      "required_sources": ["root_cause_v1", "diagnostic_decision_ledger_v1"],
+      "optional_sources": ["operator_trust_panel_v1"],
+      "scope_rules": ["day_utc_required"],
+      "precedence_rules": ["root_cause_v1", "diagnostic_decision_ledger_v1"],
+      "allowed_answer_template": "root_cause_template_v1",
+      "degraded_state_behavior": "DOWNGRADE_TO_PARTIAL",
+      "unsupported_boundary": "NO_PROBABILISTIC_ROOT_CAUSE"
+    },
+    {
+      "query_class_id": "no_intents_query_v1",
+      "query_class_version": 1,
+      "supported_intent_patterns": ["no intents", "zero intents", "why no intents"],
+      "required_sources": ["intent_absence_analysis_v1", "diagnostic_decision_ledger_v1"],
+      "optional_sources": ["funnel_metrics_v1"],
+      "scope_rules": ["day_utc_required"],
+      "precedence_rules": ["intent_absence_analysis_v1", "diagnostic_decision_ledger_v1"],
+      "allowed_answer_template": "no_intents_template_v1",
+      "degraded_state_behavior": "DOWNGRADE_TO_PARTIAL",
+      "unsupported_boundary": "NO_SPECULATION"
+    },
+    {
+      "query_class_id": "daily_summary_query_v1",
+      "query_class_version": 1,
+      "supported_intent_patterns": ["daily summary", "summary", "executive summary"],
+      "required_sources": ["daily_summary_v1"],
+      "optional_sources": ["gate_stack_verdict_v1", "operator_trust_panel_v1"],
+      "scope_rules": ["day_utc_required"],
+      "precedence_rules": ["daily_summary_v1"],
+      "allowed_answer_template": "daily_summary_template_v1",
+      "degraded_state_behavior": "DOWNGRADE_TO_PARTIAL",
+      "unsupported_boundary": "NO_NON_FACTUAL_NARRATIVE"
+    },
+    {
+      "query_class_id": "funnel_query_v1",
+      "query_class_version": 1,
+      "supported_intent_patterns": ["funnel", "stage counts", "rejections", "drop off"],
+      "required_sources": ["funnel_metrics_v1"],
+      "optional_sources": ["activity_flow_diagnostics_v1", "operator_trust_panel_v1"],
+      "scope_rules": ["day_utc_required"],
+      "precedence_rules": ["funnel_metrics_v1"],
+      "allowed_answer_template": "funnel_template_v1",
+      "degraded_state_behavior": "DOWNGRADE_TO_PARTIAL",
+      "unsupported_boundary": "NO_UNREGISTERED_METRICS"
+    },
+    {
+      "query_class_id": "drift_query_v1",
+      "query_class_version": 1,
+      "supported_intent_patterns": ["drift", "change vs prior day", "prior day change"],
+      "required_sources": ["drift_report_v1"],
+      "optional_sources": ["runtime_regression_analytics_v1", "operator_trust_panel_v1"],
+      "scope_rules": ["day_utc_required"],
+      "precedence_rules": ["drift_report_v1"],
+      "allowed_answer_template": "drift_template_v1",
+      "degraded_state_behavior": "DOWNGRADE_TO_PARTIAL",
+      "unsupported_boundary": "NO_AD_HOC_WINDOWS"
+    },
+    {
+      "query_class_id": "trust_explanation_query_v1",
+      "query_class_version": 1,
+      "supported_intent_patterns": ["trust", "can i trust this", "limitations", "why partial"],
+      "required_sources": ["operator_trust_panel_v1"],
+      "optional_sources": ["operator_retrieval_manifest_v1"],
+      "scope_rules": ["day_utc_required"],
+      "precedence_rules": ["operator_trust_panel_v1"],
+      "allowed_answer_template": "trust_template_v1",
+      "degraded_state_behavior": "SHOW_UNAVAILABLE",
+      "unsupported_boundary": "NO_NON_GOVERNED_ASSURANCE"
+    },
+    {
+      "query_class_id": "unsupported_query_v1",
+      "query_class_version": 1,
+      "supported_intent_patterns": [],
+      "required_sources": [],
+      "optional_sources": [],
+      "scope_rules": ["day_utc_optional"],
+      "precedence_rules": [],
+      "allowed_answer_template": "unsupported_template_v1",
+      "degraded_state_behavior": "SHOW_UNSUPPORTED",
+      "unsupported_boundary": "ALL_UNREGISTERED_INTENTS"
+    }
+  ]
+}

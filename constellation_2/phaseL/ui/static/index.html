@@ -56,10 +56,60 @@
     <section id="viewOperations" class="view">
       <div class="cockpit-shell">
         <div class="cockpit-nav-bar">
-          <button class="cockpit-nav-pill active" id="cockpitViewCockpit" type="button">Cockpit</button>
+          <button class="cockpit-nav-pill active" id="cockpitViewHome" type="button">Home</button>
+          <button class="cockpit-nav-pill" id="cockpitViewCockpit" type="button">Cockpit</button>
           <button class="cockpit-nav-pill" id="cockpitViewDiagnostics" type="button">Diagnostics</button>
           <button class="cockpit-nav-pill" id="cockpitViewRepair" type="button">Repair</button>
           <button class="cockpit-nav-pill" id="cockpitViewGovernance" type="button">Governance</button>
+        </div>
+
+        <div class="cockpit-section cockpit-primary-grid" data-cockpit-view="home">
+          <div class="cockpit-hero cockpit-primary-card" id="operatorHomeStatusCard">
+            <div class="card-head">
+              <div>
+                <div class="card-title">Governed Operator Home</div>
+                <div class="mono tiny muted">Single-entry Batch 3 surface over canonical Batch 0/1/2 outputs.</div>
+              </div>
+              <div id="operatorHomeMeta" class="mono tiny muted"></div>
+            </div>
+            <div id="operatorHomeHeadline"></div>
+          </div>
+          <div class="cockpit-panel cockpit-primary-card" id="operatorTrustCard">
+            <div class="card-head">
+              <div class="card-title">Presentation Trust Gate</div>
+              <div id="operatorTrustMeta" class="mono tiny muted"></div>
+            </div>
+            <div id="operatorTrustBody"></div>
+          </div>
+        </div>
+
+        <div class="cockpit-section cockpit-ops-grid" data-cockpit-view="home">
+          <div class="cockpit-panel cockpit-compact-panel cockpit-ops-grid-span-2">
+            <div class="card-head">
+              <div class="card-title">Governed Home Panels</div>
+              <div id="operatorPanelsMeta" class="mono tiny muted"></div>
+            </div>
+            <div id="operatorHomePanels"></div>
+          </div>
+          <div class="cockpit-panel cockpit-compact-panel">
+            <div class="card-head">
+              <div class="card-title">Governed Navigation</div>
+              <div class="mono tiny muted">Registry-backed destinations only.</div>
+            </div>
+            <div id="operatorNavigationBody"></div>
+          </div>
+          <div class="cockpit-panel cockpit-compact-panel">
+            <div class="card-head">
+              <div class="card-title">Governed Query</div>
+              <div class="mono tiny muted">Policy-bound query classes only.</div>
+            </div>
+            <div class="row" style="margin-bottom:8px;">
+              <input id="operatorQueryInput" class="ctrl-input" type="text" placeholder="e.g. why blocked today" style="flex:1;" />
+              <button id="btnOperatorQuery" class="btn">Run Query</button>
+            </div>
+            <div id="operatorQueryStatus" class="mono tiny muted" style="margin-bottom:8px;"></div>
+            <div id="operatorQueryBody"></div>
+          </div>
         </div>
 
         <div class="cockpit-section cockpit-primary-grid" data-cockpit-view="cockpit">

@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "c2.reports.operator_home_view.v1",
+  "title": "C2 Operator Home View v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "day_utc", "interface_ruleset_id", "interface_ruleset_version", "view_contract_id", "view_contract_version", "run_scope", "home_status_classification", "readiness_ref", "daily_summary_ref", "diagnostic_refs", "visibility_refs", "rendered_panels", "navigation_options", "trust_panel_ref", "evidence_refs", "partiality_status", "integrity_status"],
+  "properties": {
+    "schema_id": { "type": "string", "const": "operator_home_view_v1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "interface_ruleset_id": { "type": "string", "const": "BATCH3_OPERATOR_INTERFACE_RULESET" },
+    "interface_ruleset_version": { "type": "integer", "const": 1 },
+    "view_contract_id": { "type": "string" },
+    "view_contract_version": { "type": "integer", "minimum": 1 },
+    "run_scope": { "$ref": "#/$defs/run_scope" },
+    "home_status_classification": { "type": "string" },
+    "readiness_ref": { "type": "string" },
+    "daily_summary_ref": { "type": "string" },
+    "diagnostic_refs": { "type": "array", "items": { "type": "string" } },
+    "visibility_refs": { "type": "array", "items": { "type": "string" } },
+    "rendered_panels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["panel_id", "title", "state", "content_lines", "source_refs", "suppressed"],
+        "properties": {
+          "panel_id": { "type": "string" },
+          "title": { "type": "string" },
+          "state": { "type": "string" },
+          "content_lines": { "type": "array", "items": { "type": "string" } },
+          "source_refs": { "type": "array", "items": { "type": "string" } },
+          "suppressed": { "type": "boolean" }
+        }
+      }
+    },
+    "navigation_options": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["view_id", "label", "enabled", "reason"],
+        "properties": {
+          "view_id": { "type": "string" },
+          "label": { "type": "string" },
+          "enabled": { "type": "boolean" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "trust_panel_ref": { "type": "string" },
+    "evidence_refs": { "type": "array", "items": { "type": "string" } },
+    "partiality_status": { "type": "string", "enum": ["EXACT", "BOUNDED_PARTIAL", "UNAVAILABLE", "INTEGRITY_CONSTRAINED"] },
+    "integrity_status": { "type": "string", "enum": ["OK", "BOUNDED_INCOMPLETE", "EVIDENCE_INCONSISTENT", "INTERNAL_FAILURE"] }
+  },
+  "$defs": {
+    "run_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["day_utc", "mode", "sleeve_id", "engine_id", "attempt_id", "attempt_seq", "truth_partition"],
+      "properties": {
+        "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "mode": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "sleeve_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "engine_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "attempt_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "attempt_seq": { "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }] },
+        "truth_partition": { "type": "string" }
+      }
+    }
+  }
+}

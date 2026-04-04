@@ -4,7 +4,7 @@ const el = (id) => document.getElementById(id);
 
 const state = {
   view: "operations",
-  operationsSubView: "cockpit",
+  operationsSubView: "home",
   refreshSec: 60,
   timer: null,
   days: [],
@@ -12,6 +12,8 @@ const state = {
   attempts: [],
   attempt_id: null,
   statusV2: null,
+  operatorHome: null,
+  operatorQuery: null,
 };
 
 const STANDARD_TRADING_SLEEVE_IDS = [
@@ -56,6 +58,7 @@ function setOperationsSubView(v) {
     node.classList.toggle("hidden", !matches);
   });
   const nav = [
+    ["cockpitViewHome", "home"],
     ["cockpitViewCockpit", "cockpit"],
     ["cockpitViewDiagnostics", "diagnostics"],
     ["cockpitViewRepair", "repair"],
@@ -1071,6 +1074,97 @@ function escapeHtml(v) {
     .replaceAll(">", "&gt;")
     .replaceAll("\"", "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function renderOperatorHome(payload) {
+  state.operatorHome = payload;
+  const home = payload?.home_view || {};
+  const trust = payload?.trust_panel || {};
+  const manifest = payload?.retrieval_manifest || {};
+  const headline = el("operatorHomeHeadline");
+  const meta = el("operatorHomeMeta");
+  const trustMeta = el("operatorTrustMeta");
+  const trustBody = el("operatorTrustBody");
+  const panelsMeta = el("operatorPanelsMeta");
+  const panelsBody = el("operatorHomePanels");
+  const navBody = el("operatorNavigationBody");
+
+  if (meta) meta.textContent = `scope=${home?.run_scope?.day_utc || "n/a"} • partiality=${home?.partiality_status || "n/a"}`;
+  if (headline) {
+    headline.innerHTML = `
+      <div class="tile-state ${stateClass(home?.home_status_classification || trust?.exactness_classification)}">${escapeHtml(home?.home_status_classification || "UNAVAILABLE")}</div>
+      <div class="mono tiny muted">readiness_ref=${escapeHtml(home?.readiness_ref || "n/a")}</div>
+      <div class="mono tiny muted">daily_summary_ref=${escapeHtml(home?.daily_summary_ref || "n/a")}</div>
+    `;
+  }
+  if (trustMeta) trustMeta.textContent = `finalization=${trust?.finalization_state || "n/a"} • exactness=${trust?.exactness_classification || "n/a"}`;
+  if (trustBody) {
+    const limitations = Array.isArray(trust?.bounded_limitations) ? trust.bounded_limitations : [];
+    trustBody.innerHTML = `
+      <div class="mono tiny">trust_classification=${escapeHtml(trust?.trust_classification || "UNAVAILABLE")}</div>
+      <div class="mono tiny">integrity_state=${escapeHtml(trust?.integrity_state || "UNAVAILABLE")}</div>
+      <div class="mono tiny">source_count=${escapeHtml(trust?.source_count ?? "n/a")}</div>
+      <div class="mono tiny" style="margin-top:6px;">${limitations.length ? limitations.map((x) => `• ${escapeHtml(x)}`).join("<br/>") : "• No bounded limitations reported."}</div>
+    `;
+  }
+  if (panelsMeta) panelsMeta.textContent = `rendered=${(home?.rendered_panels || []).length} • retrieval=${manifest?.retrieval_status || "n/a"}`;
+  if (panelsBody) {
+    const panels = Array.isArray(home?.rendered_panels) ? home.rendered_panels : [];
+    panelsBody.innerHTML = panels.map((panel) => `
+      <div class="cockpit-subtle-panel" style="margin-bottom:10px;">
+        <div class="card-head">
+          <div class="card-title">${escapeHtml(panel?.title || panel?.panel_id || "panel")}</div>
+          <div class="mono tiny muted">${escapeHtml(panel?.state || "UNKNOWN")}${panel?.suppressed ? " • suppressed" : ""}</div>
+        </div>
+        <div class="mono tiny">${Array.isArray(panel?.content_lines) ? panel.content_lines.map((x) => `• ${escapeHtml(x)}`).join("<br/>") : "• No content."}</div>
+      </div>
+    `).join("");
+  }
+  if (navBody) {
+    const items = Array.isArray(home?.navigation_options) ? home.navigation_options : [];
+    navBody.innerHTML = items.map((item) => `
+      <div class="info-row">
+        <span>${escapeHtml(item?.label || item?.view_id || "view")}</span>
+        <span class="mono ${item?.enabled ? "tone-positive" : "tone-warning"}">${escapeHtml(item?.enabled ? "ENABLED" : item?.reason || "DISABLED")}</span>
+      </div>
+    `).join("");
+  }
+}
+
+function renderOperatorQuery(payload) {
+  state.operatorQuery = payload;
+  const response = payload?.query_response || {};
+  const trust = payload?.trust_panel || {};
+  const status = el("operatorQueryStatus");
+  const body = el("operatorQueryBody");
+  if (status) {
+    status.textContent = `class=${response?.query_class_id || "n/a"} • status=${response?.response_status || "n/a"} • exactness=${trust?.exactness_classification || "n/a"}`;
+  }
+  if (body) {
+    const blocks = Array.isArray(response?.answer_blocks) ? response.answer_blocks : [];
+    body.innerHTML = blocks.map((block) => `
+      <div class="cockpit-subtle-panel" style="margin-bottom:10px;">
+        <div class="card-head">
+          <div class="card-title">${escapeHtml(block?.title || block?.block_id || "block")}</div>
+          <div class="mono tiny muted">${escapeHtml(response?.response_template_id || "template")}</div>
+        </div>
+        <div class="mono tiny">${Array.isArray(block?.lines) ? block.lines.map((x) => `• ${escapeHtml(x)}`).join("<br/>") : "• No detail."}</div>
+      </div>
+    `).join("");
+  }
+}
+
+async function runOperatorQuery() {
+  if (!state.day) return;
+  const input = el("operatorQueryInput");
+  const text = String(input?.value || "").trim();
+  if (!text) {
+    el("operatorQueryStatus").textContent = "query_text_required";
+    el("operatorQueryBody").innerHTML = "";
+    return;
+  }
+  const payload = await api(`/api/operator/query?day=${encodeURIComponent(state.day)}&q=${encodeURIComponent(text)}`);
+  renderOperatorQuery(payload);
 }
 
 function svgPlatformReadinessHistory(points) {
@@ -2213,10 +2307,13 @@ async function loadAndRender() {
   try {
     const attemptParam = (state.attempt_id && el("attemptSelect").value) ? `&attempt_id=${encodeURIComponent(el("attemptSelect").value)}` : "";
     const payload = await api(`/api/status_v2?day=${encodeURIComponent(state.day)}${attemptParam}`);
+    const operatorHome = await api(`/api/operator/home?day=${encodeURIComponent(state.day)}`);
     state.statusV2 = payload;
+    state.operatorHome = operatorHome;
 
     el("lastRefresh").textContent = `refreshed=${payload?.meta?.server_time_utc || "n/a"}`;
 
+    renderOperatorHome(operatorHome);
     renderPlatformReadiness(payload);
     renderPlatformReadinessHistory(payload);
     renderPlatformReadinessSummary(payload);
@@ -2321,10 +2418,18 @@ function wire() {
   el("tabPositions").addEventListener("click", () => setView("positions"));
   el("tabHistory").addEventListener("click", () => setView("history"));
   el("tabTechnical").addEventListener("click", () => setView("technical"));
+  el("cockpitViewHome").addEventListener("click", () => setOperationsSubView("home"));
   el("cockpitViewCockpit").addEventListener("click", () => setOperationsSubView("cockpit"));
   el("cockpitViewDiagnostics").addEventListener("click", () => setOperationsSubView("diagnostics"));
   el("cockpitViewRepair").addEventListener("click", () => setOperationsSubView("repair"));
   el("cockpitViewGovernance").addEventListener("click", () => setOperationsSubView("governance"));
+  el("btnOperatorQuery").addEventListener("click", runOperatorQuery);
+  el("operatorQueryInput").addEventListener("keydown", async (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      await runOperatorQuery();
+    }
+  });
 
   el("btnEvidenceClose").addEventListener("click", closeEvidence);
   el("evidenceBackdrop").addEventListener("click", closeEvidence);
@@ -2337,7 +2442,7 @@ function wire() {
   await loadDays();
   await loadAttemptsForDay(state.day);
   setView("operations");
-  setOperationsSubView("cockpit");
+  setOperationsSubView("home");
   await loadAndRender();
   await loadCharts();
   resetTimer();

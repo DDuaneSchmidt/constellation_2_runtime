@@ -1,0 +1,18 @@
+{
+  "schema_id": "C2_OPERATOR_RESPONSE_TEMPLATE_REGISTRY_V1",
+  "schema_version": 1,
+  "interface_ruleset_id": "BATCH3_OPERATOR_INTERFACE_RULESET",
+  "interface_ruleset_version": 1,
+  "templates": [
+    {"response_template_id": "readiness_state_template_v1", "response_template_version": 1, "block_layout": ["headline", "evidence"], "home_panel_template": false},
+    {"response_template_id": "blocker_reason_template_v1", "response_template_version": 1, "block_layout": ["headline", "reason_codes", "evidence"], "home_panel_template": false},
+    {"response_template_id": "root_cause_template_v1", "response_template_version": 1, "block_layout": ["headline", "detail", "evidence"], "home_panel_template": false},
+    {"response_template_id": "no_intents_template_v1", "response_template_version": 1, "block_layout": ["headline", "detail", "evidence"], "home_panel_template": false},
+    {"response_template_id": "daily_summary_template_v1", "response_template_version": 1, "block_layout": ["headline", "counts", "risks"], "home_panel_template": false},
+    {"response_template_id": "funnel_template_v1", "response_template_version": 1, "block_layout": ["headline", "stages", "evidence"], "home_panel_template": false},
+    {"response_template_id": "drift_template_v1", "response_template_version": 1, "block_layout": ["headline", "changes", "evidence"], "home_panel_template": false},
+    {"response_template_id": "trust_template_v1", "response_template_version": 1, "block_layout": ["headline", "limitations", "evidence"], "home_panel_template": false},
+    {"response_template_id": "unsupported_template_v1", "response_template_version": 1, "block_layout": ["headline", "unsupported_reason"], "home_panel_template": false},
+    {"response_template_id": "home_panel_template_v1", "response_template_version": 1, "block_layout": ["panel"], "home_panel_template": true}
+  ]
+}

@@ -21,6 +21,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
+from constellation_2.common.operator_control_plane_v1 import (
+    build_operator_home_bundle,
+    build_operator_query_bundle,
+)
 from constellation_2.common.truth_root_v1 import resolve_truth_root
 from constellation_2.phaseL.ui.server.c3_ui_status_collector_v1 import build_c3_ui_status
 from constellation_2.phaseL.ui.server.c2_ops_cockpit_status_v2_collector_v1 import build_status_v2, discover_attempts, select_preferred_attempt
@@ -1118,6 +1122,60 @@ class OpsHandler(SimpleHTTPRequestHandler):
             payload["errors"] = []
             self._send_json(HTTPStatus.OK, payload)
             return True
+
+        if path == "/api/operator/home":
+            raw_day = (qs.get("day") or [None])[0]
+            day = raw_day if isinstance(raw_day, str) and raw_day and _is_day_str(raw_day) else _select_latest_day(_union_days())
+            if not day:
+                self._send_json(HTTPStatus.OK, {"ok": False, "errors": ["DAY_NOT_RESOLVED"]})
+                return True
+            selected_root = _truth_root_for_day(day)
+            bundle = build_operator_home_bundle(repo_root=REPO_ROOT, truth_root=selected_root, day_utc=day)
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "generated_utc": _utc_now_iso(),
+                    "day_utc": day,
+                    "truth_root": str(selected_root),
+                    "home_view": bundle["home_view"],
+                    "trust_panel": bundle["trust_panel"],
+                    "retrieval_manifest": bundle["retrieval_manifest"],
+                },
+            )
+            return True
+
+        if path == "/api/operator/query":
+            raw_day = (qs.get("day") or [None])[0]
+            day = raw_day if isinstance(raw_day, str) and raw_day and _is_day_str(raw_day) else _select_latest_day(_union_days())
+            query_text = (qs.get("q") or [""])[0]
+            if not day:
+                self._send_json(HTTPStatus.OK, {"ok": False, "errors": ["DAY_NOT_RESOLVED"]})
+                return True
+            if not isinstance(query_text, str) or not query_text.strip():
+                self._send_json(HTTPStatus.OK, {"ok": False, "errors": ["QUERY_TEXT_REQUIRED"]})
+                return True
+            selected_root = _truth_root_for_day(day)
+            bundle = build_operator_query_bundle(
+                repo_root=REPO_ROOT,
+                truth_root=selected_root,
+                day_utc=day,
+                query_text=query_text,
+            )
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "generated_utc": _utc_now_iso(),
+                    "day_utc": day,
+                    "truth_root": str(selected_root),
+                    "query_response": bundle["query_response"],
+                    "trust_panel": bundle["trust_panel"],
+                    "retrieval_manifest": bundle["retrieval_manifest"],
+                },
+            )
+            return True
+
         if path.startswith("/api/day/"):
             parts = path.strip("/").split("/")
             if len(parts) != 4:

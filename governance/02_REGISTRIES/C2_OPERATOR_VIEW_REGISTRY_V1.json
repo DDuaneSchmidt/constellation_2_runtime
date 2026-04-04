@@ -1,0 +1,59 @@
+{
+  "schema_id": "C2_OPERATOR_VIEW_REGISTRY_V1",
+  "schema_version": 1,
+  "interface_ruleset_id": "BATCH3_OPERATOR_INTERFACE_RULESET",
+  "interface_ruleset_version": 1,
+  "views": [
+    {
+      "view_id": "home_view_contract_v1",
+      "view_version": 1,
+      "required_sources": ["gate_stack_verdict_v1", "daily_summary_v1", "operator_trust_panel_v1", "operator_retrieval_manifest_v1"],
+      "optional_sources": ["root_cause_v1", "intent_absence_analysis_v1", "funnel_metrics_v1", "drift_report_v1"],
+      "scope_rules": ["day_utc", "mode", "sleeve_id", "attempt_id_optional"],
+      "degraded_state_behavior": "DOWNGRADE_TO_PARTIAL_OR_INTEGRITY_CONSTRAINED",
+      "mandatory_panels": ["readiness_panel", "summary_panel", "trust_panel", "navigation_panel"],
+      "forbidden_panels": ["healthy_flow_panel_when_blocked"],
+      "display_precedence": [
+        "gate_stack_verdict_v1",
+        "integrity_failure_truth",
+        "batch1_diagnostics",
+        "daily_summary_v1",
+        "funnel_metrics_v1",
+        "drift_report_v1"
+      ]
+    },
+    {
+      "view_id": "readiness_view_contract_v1",
+      "view_version": 1,
+      "required_sources": ["gate_stack_verdict_v1", "daily_summary_v1"],
+      "optional_sources": ["operator_trust_panel_v1"],
+      "scope_rules": ["day_utc", "mode", "sleeve_id"],
+      "degraded_state_behavior": "SHOW_BOUNDED_PARTIAL",
+      "mandatory_panels": ["readiness_panel"],
+      "forbidden_panels": [],
+      "display_precedence": ["gate_stack_verdict_v1", "daily_summary_v1"]
+    },
+    {
+      "view_id": "diagnostics_view_contract_v1",
+      "view_version": 1,
+      "required_sources": ["root_cause_v1", "intent_absence_analysis_v1", "diagnostic_decision_ledger_v1"],
+      "optional_sources": ["operator_trust_panel_v1"],
+      "scope_rules": ["day_utc", "attempt_id_optional"],
+      "degraded_state_behavior": "SHOW_BOUNDED_PARTIAL",
+      "mandatory_panels": ["diagnostic_panel"],
+      "forbidden_panels": [],
+      "display_precedence": ["root_cause_v1", "intent_absence_analysis_v1", "diagnostic_decision_ledger_v1"]
+    },
+    {
+      "view_id": "visibility_view_contract_v1",
+      "view_version": 1,
+      "required_sources": ["daily_summary_v1", "visibility_metric_snapshot_v1", "funnel_metrics_v1"],
+      "optional_sources": ["drift_report_v1", "visibility_decision_ledger_v1", "operator_trust_panel_v1"],
+      "scope_rules": ["day_utc", "mode", "sleeve_id"],
+      "degraded_state_behavior": "SHOW_BOUNDED_PARTIAL",
+      "mandatory_panels": ["summary_panel", "funnel_panel"],
+      "forbidden_panels": [],
+      "display_precedence": ["daily_summary_v1", "funnel_metrics_v1", "drift_report_v1"]
+    }
+  ]
+}

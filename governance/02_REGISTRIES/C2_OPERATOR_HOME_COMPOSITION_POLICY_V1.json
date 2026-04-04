@@ -1,0 +1,64 @@
+{
+  "schema_id": "C2_OPERATOR_HOME_COMPOSITION_POLICY_V1",
+  "schema_version": 1,
+  "view_id": "home_view_contract_v1",
+  "view_version": 1,
+  "panel_rules": [
+    {
+      "panel_id": "readiness_panel",
+      "mandatory": true,
+      "show_when": "ALWAYS",
+      "suppress_when": [],
+      "precedence_rank": 1
+    },
+    {
+      "panel_id": "integrity_panel",
+      "mandatory": false,
+      "show_when": "INTEGRITY_NOT_OK",
+      "suppress_when": [],
+      "precedence_rank": 2
+    },
+    {
+      "panel_id": "diagnostic_panel",
+      "mandatory": false,
+      "show_when": "BLOCKED_OR_DIAGNOSTIC_ATTENTION",
+      "suppress_when": [],
+      "precedence_rank": 3
+    },
+    {
+      "panel_id": "summary_panel",
+      "mandatory": true,
+      "show_when": "ALWAYS",
+      "suppress_when": [],
+      "precedence_rank": 4
+    },
+    {
+      "panel_id": "funnel_panel",
+      "mandatory": false,
+      "show_when": "NOT_BLOCKED_AND_FUNNEL_AVAILABLE",
+      "suppress_when": ["BLOCKED_STATUS"],
+      "precedence_rank": 5
+    },
+    {
+      "panel_id": "drift_panel",
+      "mandatory": false,
+      "show_when": "PRIOR_DAY_COMPARISON_LEGITIMATE",
+      "suppress_when": ["DRIFT_COMPARISON_UNAVAILABLE"],
+      "precedence_rank": 6
+    },
+    {
+      "panel_id": "navigation_panel",
+      "mandatory": true,
+      "show_when": "ALWAYS",
+      "suppress_when": [],
+      "precedence_rank": 7
+    },
+    {
+      "panel_id": "trust_panel",
+      "mandatory": true,
+      "show_when": "ALWAYS",
+      "suppress_when": [],
+      "precedence_rank": 8
+    }
+  ]
+}
