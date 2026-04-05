@@ -26,16 +26,18 @@ import argparse  # noqa: E402
 from constellation_2.common.runtime_guardrails_v1 import classify_failure, format_failure_line  # noqa: E402
 from constellation_2.phaseD.lib.submit_boundary_paper_v4 import run_submit_boundary_paper_v4  # noqa: E402
 
+BROKER_TRANSMIT_ENABLEMENT_MSG = (
+    "broker transmit disabled by default; explicit micro-live path requires "
+    "C2_ENABLE_BROKER_TRANSMIT=YES with --dry_run NO"
+)
+
 
 def _require_broker_transmit_enabled(*, dry_run: str) -> None:
     if dry_run == "YES":
         return
     enabled = str(os.environ.get("C2_ENABLE_BROKER_TRANSMIT") or "").strip().upper()
     if enabled != "YES":
-        raise SystemExit(
-            "FAIL_CLOSED: broker transmit disabled by default; "
-            "set C2_ENABLE_BROKER_TRANSMIT=YES for explicit broker submission enablement"
-        )
+        raise SystemExit(f"FAIL_CLOSED: {BROKER_TRANSMIT_ENABLEMENT_MSG}")
 
 
 def main() -> int:
@@ -50,7 +52,12 @@ def main() -> int:
     ap.add_argument("--ib_port", required=True, type=int)
     ap.add_argument("--ib_client_id", required=True, type=int)
     ap.add_argument("--ib_account", required=True)
-    ap.add_argument("--dry_run", required=True, choices=["YES", "NO"], help="YES writes artifacts but does not connect/submit to IB")
+    ap.add_argument(
+        "--dry_run",
+        required=True,
+        choices=["YES", "NO"],
+        help="YES writes artifacts without broker submission; NO requires C2_ENABLE_BROKER_TRANSMIT=YES",
+    )
     ap.add_argument("--submissions_root_override", default="", help="Optional override for submissions root (proof sandbox). If set, submissions are written under <override>/<day_utc>/")
     args = ap.parse_args()
     dry_run = str(args.dry_run).strip().upper()

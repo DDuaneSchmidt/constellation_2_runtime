@@ -34,6 +34,7 @@ async function api(path) {
 function setView(v) {
   state.view = v;
   el("viewOperations").classList.toggle("hidden", v !== "operations");
+  el("viewAdvisor").classList.toggle("hidden", v !== "advisor");
   el("viewEngines").classList.toggle("hidden", v !== "engines");
   el("viewPortfolio").classList.toggle("hidden", v !== "portfolio");
   el("viewPositions").classList.toggle("hidden", v !== "positions");
@@ -42,6 +43,7 @@ function setView(v) {
 
   const tabs = [
     ["tabOperations", "operations"],
+    ["tabAdvisor", "advisor"],
     ["tabEngines", "engines"],
     ["tabPortfolio", "portfolio"],
     ["tabPositions", "positions"],
@@ -1074,6 +1076,104 @@ function escapeHtml(v) {
     .replaceAll(">", "&gt;")
     .replaceAll("\"", "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function renderAdvisor(payload, previousChainSha) {
+  const advisor = payload?.advisor_visibility || {};
+  const shell = advisor?.shell || {};
+  const evidence = Array.isArray(advisor?.evidence_spine) ? advisor.evidence_spine : [];
+  const artifacts = advisor?.artifacts || {};
+  const hasAnyArtifacts = advisor?.has_any_artifacts === true;
+  const evidenceById = new Map(evidence.map((item) => [item?.id, item]));
+  const changedSinceLastRun = !previousChainSha
+    ? "initial load"
+    : previousChainSha === advisor?.chain_sha256
+      ? "no"
+      : "yes";
+
+  if (el("advisorShellMode")) {
+    el("advisorShellMode").textContent = `mode=${advisor?.mode || "n/a"} • day=${advisor?.day_utc || "n/a"}`;
+  }
+  if (el("advisorSystemState")) {
+    el("advisorSystemState").className = `tile-state ${stateClass(shell?.system_state || "UNKNOWN")}`;
+    el("advisorSystemState").textContent = shell?.system_state || "UNKNOWN";
+  }
+  if (el("advisorAllowedAction")) el("advisorAllowedAction").textContent = shell?.allowed_action || "NO_OPERATOR_ACTION";
+  if (el("advisorWhy")) el("advisorWhy").textContent = shell?.why || "No advisor artifacts found";
+  if (el("advisorLastValidated")) el("advisorLastValidated").textContent = shell?.last_validated || "n/a";
+  if (el("advisorChangedSinceLastRun")) el("advisorChangedSinceLastRun").textContent = changedSinceLastRun;
+  if (el("advisorEmptyState")) el("advisorEmptyState").classList.toggle("hidden", hasAnyArtifacts);
+
+  const spineIds = [
+    "advisorEvidenceExecutionTruth",
+    "advisorEvidenceGateAuthority",
+    "advisorEvidencePublicationPromotion",
+    "advisorEvidenceReplayIntegrity",
+    "advisorEvidenceTraceIntegrity",
+    "advisorEvidenceDiagnostics",
+  ];
+  spineIds.forEach((id) => {
+    const item = evidenceById.get(id) || {};
+    const host = el(id);
+    if (!host) return;
+    const button = item?.path
+      ? `<button class="btn btn-mini" data-open="${encodeURIComponent(item.path)}" data-title="${escapeHtml(item?.label || "advisor_evidence")}">Evidence</button>`
+      : "";
+    host.innerHTML = `
+      <div class="health-line">
+        <div class="health-line-main">
+          <span class="health-label">${escapeHtml(item?.label || "unknown")}</span>
+        </div>
+        <div class="status-chip ${toneClass(semanticTone(item?.state || "UNKNOWN", "info"))}">${escapeHtml(item?.state || "UNKNOWN")}</div>
+        <div class="health-detail">${escapeHtml(item?.detail || "No detail available.")}</div>
+        ${item?.sha256 ? `<div class="mono tiny muted">sha256=${escapeHtml(item.sha256)}</div>` : ""}
+        ${button}
+      </div>
+    `;
+  });
+
+  const renderArtifactCard = (artifact, hostId, fallbackLabel) => {
+    const host = el(hostId);
+    if (!host) return;
+    if (!artifact?.present) {
+      host.innerHTML = `
+        <div class="mono tiny muted">No artifact loaded.</div>
+        <div class="mono tiny muted">${escapeHtml(artifact?.path || fallbackLabel)}</div>
+      `;
+      return;
+    }
+    const rows = Array.isArray(artifact?.summary_rows) ? artifact.summary_rows : [];
+    const detailRows = rows.length
+      ? rows.map((row) => `<div class="info-row"><span>${escapeHtml(row?.label || "field")}</span><span class="mono">${escapeHtml(row?.value || "n/a")}</span></div>`).join("")
+      : `<div class="mono tiny muted">No summary fields available.</div>`;
+    const button = artifact?.path
+      ? `<button class="btn btn-mini" data-open="${encodeURIComponent(artifact.path)}" data-title="${escapeHtml(artifact?.label || fallbackLabel)}">Evidence</button>`
+      : "";
+    host.innerHTML = `
+      <div class="mono tiny muted">state=${escapeHtml(artifact?.display_state || "UNKNOWN")} • produced=${escapeHtml(artifact?.produced_utc || "n/a")}</div>
+      <div class="mono tiny muted" style="margin-top:4px;">path=${escapeHtml(artifact?.path || "n/a")}</div>
+      <div style="margin-top:8px;">${detailRows}</div>
+      <div class="mono tiny muted" style="margin-top:8px;">reason_codes=${escapeHtml((artifact?.reason_codes || []).join(", ") || "none")}</div>
+      <div style="margin-top:8px;">${button}</div>
+    `;
+  };
+
+  renderArtifactCard(artifacts?.decision_plan, "advisorDecisionPlanSummary", "decision_plan");
+  renderArtifactCard(artifacts?.official_recommendation_set, "advisorOfficialRecommendationSetSummary", "official_recommendation_set");
+  renderArtifactCard(artifacts?.promotion_candidate, "advisorPromotionCandidateSummary", "promotion_candidate");
+  renderArtifactCard(artifacts?.publication_gate_result, "advisorPublicationGateResultSummary", "publication_gate_result");
+  renderArtifactCard(artifacts?.authority_registry, "advisorAuthorityRegistrySummary", "authority_registry");
+
+  const advisorView = el("viewAdvisor");
+  if (advisorView) {
+    advisorView.querySelectorAll("[data-open]").forEach((button) => {
+      button.onclick = async () => {
+        const path = decodeURIComponent(button.getAttribute("data-open") || "");
+        const title = button.getAttribute("data-title") || "advisor_evidence";
+        await openEvidence(title, path);
+      };
+    });
+  }
 }
 
 function renderOperatorHome(payload) {
@@ -2306,6 +2406,7 @@ async function loadAndRender() {
   setRefreshState(true);
   try {
     const attemptParam = (state.attempt_id && el("attemptSelect").value) ? `&attempt_id=${encodeURIComponent(el("attemptSelect").value)}` : "";
+    const previousAdvisorChain = state.statusV2?.advisor_visibility?.chain_sha256 || null;
     const payload = await api(`/api/status_v2?day=${encodeURIComponent(state.day)}${attemptParam}`);
     const operatorHome = await api(`/api/operator/home?day=${encodeURIComponent(state.day)}`);
     state.statusV2 = payload;
@@ -2322,6 +2423,7 @@ async function loadAndRender() {
     renderSignalActivity(payload);
     renderScopeHealth(payload);
     renderGovernedRiskSurfaces(payload);
+    renderAdvisor(payload, previousAdvisorChain);
     renderPortfolioSummary(payload);
     renderTiles(payload);
     renderSleeveStrip(payload);
@@ -2413,6 +2515,7 @@ function wire() {
   });
 
   el("tabOperations").addEventListener("click", () => setView("operations"));
+  el("tabAdvisor").addEventListener("click", () => setView("advisor"));
   el("tabEngines").addEventListener("click", () => setView("engines"));
   el("tabPortfolio").addEventListener("click", () => setView("portfolio"));
   el("tabPositions").addEventListener("click", () => setView("positions"));

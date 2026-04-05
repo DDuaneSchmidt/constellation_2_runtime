@@ -50,6 +50,7 @@ REFRESHABLE_GATE_STAGE_IDS = {
     "A5B_HEARTBEAT_GATE_V1",
     "A5C_CORRELATION_ENVELOPE_GATE_V1",
 }
+DEFAULT_GOVERNED_SUBMIT_DRY_RUN = "YES"
 
 
 def _json_dumps(obj: Any) -> bytes:
@@ -1273,9 +1274,7 @@ def _build_governed_submit_cmd(
     ib_host = str(env.get("C2_IB_HOST") or "127.0.0.1").strip()
     ib_port = str(env.get("C2_IB_PORT") or "4002").strip()
     ib_client_id = str(env.get("C2_IB_CLIENT_ID") or "7").strip()
-    dry_run = str(env.get("C2_GOVERNED_SUBMIT_DRY_RUN") or "YES").strip().upper()
-    if dry_run not in ("YES", "NO"):
-        dry_run = "YES"
+    dry_run = _resolve_governed_submit_dry_run(env)
 
     return [
         sys.executable,
@@ -1297,6 +1296,13 @@ def _build_governed_submit_cmd(
         "--dry_run",
         dry_run,
     ]
+
+
+def _resolve_governed_submit_dry_run(env: Dict[str, str]) -> str:
+    dry_run = str(env.get("C2_GOVERNED_SUBMIT_DRY_RUN") or DEFAULT_GOVERNED_SUBMIT_DRY_RUN).strip().upper()
+    if dry_run not in ("YES", "NO"):
+        return DEFAULT_GOVERNED_SUBMIT_DRY_RUN
+    return dry_run
 
 
 def _run_governed_submit_stage(

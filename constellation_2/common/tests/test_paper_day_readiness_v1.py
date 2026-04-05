@@ -7,11 +7,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from ops.tools import run_paper_day_readiness_proof_v1 as proof_module
+from constellation_2.phaseD.tools import c2_submit_paper_v5 as submit_tool
 
 
 def _call_submit(*, truth_root: Path, dry_run: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -76,6 +79,15 @@ def test_paper_day_safe_submit_path_succeeds(tmp_path: Path) -> None:
     assert len(submissions) == 1
 
 
+def test_submit_live_enablement_contract_remains_explicit_and_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("C2_ENABLE_BROKER_TRANSMIT", raising=False)
+    with pytest.raises(SystemExit, match="C2_ENABLE_BROKER_TRANSMIT=YES"):
+        submit_tool._require_broker_transmit_enabled(dry_run="NO")
+    submit_tool._require_broker_transmit_enabled(dry_run="YES")
+    monkeypatch.setenv("C2_ENABLE_BROKER_TRANSMIT", "YES")
+    submit_tool._require_broker_transmit_enabled(dry_run="NO")
+
+
 def test_paper_day_validated_proof_command_produces_expected_outputs(tmp_path: Path) -> None:
     proof_root = Path("/tmp/constellation_2_foundation/paper_day_readiness_test_proof_v1")
     shutil.rmtree(proof_root, ignore_errors=True)
@@ -89,9 +101,14 @@ def test_paper_day_validated_proof_command_produces_expected_outputs(tmp_path: P
         check=False,
         capture_output=True,
         text=True,
+        cwd=str(tmp_path),
     )
     assert completed.returncode == 0, completed.stderr
     assert "PAPER_DAY_READINESS_PROOF_V1" in completed.stdout
+    assert "broker_submission_record=" in completed.stdout
+    assert "execution_truth_gap=" in completed.stdout
+    assert "runtime_trace_bundle=" in completed.stdout
+    assert "replay_manifest=" in completed.stdout
     truth_root = proof_root / "truth_sleeves" / "PRIMARY" / "PAPER"
     replay_root = proof_root / "replay_truth"
     advisor_output_root = proof_module.advisor_runtime_root()
@@ -113,8 +130,22 @@ def test_paper_day_validated_proof_command_produces_expected_outputs(tmp_path: P
     assert replay_manifest["status"] == "OK"
 
 
+def test_paper_day_proof_fails_closed_on_missing_phasec_fixture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    missing_fixture = tmp_path / "missing_phasec_fixture"
+    monkeypatch.setattr(proof_module, "PHASEC_FIXTURE", missing_fixture)
+    with pytest.raises(SystemExit, match="REQUIRED_PHASEC_FIXTURE_MISSING"):
+        proof_module.run_readiness_proof(
+            proof_root=Path("/tmp/constellation_2_foundation/paper_day_readiness_test_missing_fixture_v1"),
+            day="2026-04-02",
+            produced_utc="2026-04-02T14:30:00Z",
+            ib_account="DUO847203",
+        )
+
+
 def test_paper_day_runbook_matches_validated_command() -> None:
     runbook = (ROOT / "governance" / "05_CONTRACTS" / "C2" / "paper_day_readiness_runbook_v1.contract.md").read_text(encoding="utf-8")
     assert "python3 ops/tools/run_paper_day_readiness_proof_v1.py" in runbook
     assert "C2_ENABLE_BROKER_TRANSMIT=YES" in runbook
     assert "FAIL_CLOSED" in runbook
+    assert "Micro-Live Checklist" in runbook
+    assert "Pre-Live Abort Conditions" in runbook

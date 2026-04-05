@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from constellation_2.common.accounting_authority_v1 import read_accounting_authority_state
 from constellation_2.common.execution_day_authority_v1 import read_execution_day_authority_state
+from constellation_2.common.runtime_base_v1 import advisor_runtime_root
 
 # -------------------------
 # Deterministic helpers
@@ -129,6 +130,7 @@ STANDARD_TRADING_SLEEVE_IDS = {
     "C2_TREND_EQ_PRIMARY",
     "C2_VOL_INCOME_DEFINED_RISK",
 }
+ADVISOR_RUNTIME_ROOT = advisor_runtime_root()
 
 
 # -------------------------
@@ -1917,6 +1919,332 @@ def _load_platform_readiness_history(truth_root: Path) -> Dict[str, Any]:
     }
 
 
+def _summary_scalar(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float, str)):
+        text = str(value).strip()
+        return text or None
+    return None
+
+
+def _artifact_display_state(obj: Dict[str, Any]) -> str:
+    for key in (
+        "status",
+        "state",
+        "publication_status",
+        "candidate_status",
+        "review_status",
+        "overall_status",
+        "decision",
+    ):
+        value = _summary_scalar(obj.get(key))
+        if value:
+            return value.upper()
+    return "PRESENT"
+
+
+def _artifact_produced_utc(obj: Dict[str, Any]) -> Optional[str]:
+    for key in ("produced_utc", "created_at_utc", "created_at", "event_time_utc", "day_utc"):
+        value = _summary_scalar(obj.get(key))
+        if value:
+            return value
+    return None
+
+
+def _artifact_summary_rows(
+    obj: Dict[str, Any],
+    *,
+    preferred_fields: Tuple[Tuple[str, str], ...],
+    list_count_fields: Tuple[Tuple[str, str], ...] = (),
+) -> List[Dict[str, str]]:
+    rows: List[Dict[str, str]] = []
+    seen: set[str] = set()
+    for field, label in preferred_fields:
+        value = _summary_scalar(obj.get(field))
+        if value and label not in seen:
+            rows.append({"label": label, "value": value})
+            seen.add(label)
+    for field, label in list_count_fields:
+        value = obj.get(field)
+        if isinstance(value, list) and label not in seen:
+            rows.append({"label": label, "value": str(len(value))})
+            seen.add(label)
+    for fallback_field, fallback_label in (("schema_id", "schema_id"), ("schema_version", "schema_version")):
+        value = _summary_scalar(obj.get(fallback_field))
+        if value and fallback_label not in seen:
+            rows.append({"label": fallback_label, "value": value})
+            seen.add(fallback_label)
+    return rows[:6]
+
+
+def _load_json_artifact_summary(
+    path: Path,
+    *,
+    label: str,
+    preferred_fields: Tuple[Tuple[str, str], ...],
+    list_count_fields: Tuple[Tuple[str, str], ...] = (),
+) -> Dict[str, Any]:
+    resolved = path.resolve()
+    base = {
+        "label": label,
+        "present": False,
+        "path": str(resolved),
+        "sha256": _sha256_file(resolved) if resolved.exists() and resolved.is_file() else None,
+        "display_state": "MISSING",
+        "produced_utc": None,
+        "reason_codes": ["FILE_NOT_FOUND"] if not resolved.exists() else [],
+        "summary_rows": [],
+    }
+    obj, err = _safe_read_json(resolved)
+    if not isinstance(obj, dict):
+        if resolved.exists():
+            return {
+                **base,
+                "display_state": "UNREADABLE",
+                "reason_codes": [err or "READ_ERROR"],
+            }
+        return base
+    return {
+        **base,
+        "present": True,
+        "display_state": _artifact_display_state(obj),
+        "produced_utc": _artifact_produced_utc(obj),
+        "reason_codes": _top2_reason_codes(obj.get("reason_codes")),
+        "summary_rows": _artifact_summary_rows(
+            obj,
+            preferred_fields=preferred_fields,
+            list_count_fields=list_count_fields,
+        ),
+    }
+
+
+def _latest_day_file(day_root: Path, pattern: str) -> Optional[Path]:
+    if not day_root.exists() or not day_root.is_dir():
+        return None
+    matches = sorted((p.resolve() for p in day_root.glob(pattern) if p.is_file()), key=lambda p: str(p))
+    return matches[-1] if matches else None
+
+
+def _select_decision_plan_path(mode_root: Path, day: str) -> Optional[Path]:
+    if not mode_root.exists() or not mode_root.is_dir():
+        return None
+    candidates: List[Tuple[int, str, str, Path]] = []
+    for path in sorted(mode_root.rglob("decision_plan.v1.json"), key=lambda p: str(p)):
+        if "canonical" not in path.parts:
+            continue
+        obj, _err = _safe_read_json(path)
+        day_match = 1 if day in path.parts else 0
+        produced_utc = ""
+        if isinstance(obj, dict):
+            produced_utc = str(obj.get("produced_utc") or obj.get("created_at") or "").strip()
+            if str(obj.get("day_utc") or "").strip() == day or produced_utc.startswith(f"{day}T"):
+                day_match = 1
+        candidates.append((day_match, produced_utc, str(path), path.resolve()))
+    return candidates[-1][3] if candidates else None
+
+
+def _build_advisor_visibility(
+    *,
+    truth_root: Path,
+    day: str,
+    mode: str,
+    platform_readiness: Dict[str, Any],
+    operational_readiness: Dict[str, Any],
+) -> Dict[str, Any]:
+    mode_root = (ADVISOR_RUNTIME_ROOT / mode).resolve()
+    decision_plan_path = _select_decision_plan_path(mode_root, day)
+    official_path = (mode_root / "official_recommendation_set_v1" / day / "official_recommendation_set.v1.json").resolve()
+    promotion_candidate_path = (mode_root / "promotion_candidate_v1" / day / "promotion_candidate.v1.json").resolve()
+    publication_path = (mode_root / "publication_gate_result_v1" / day / "publication_gate_result.v1.json").resolve()
+    authority_registry_path = (mode_root / "reports" / "authority_registry_v1" / day / "authority_registry.v1.json").resolve()
+    replay_manifest_path = _latest_day_file((truth_root / "reports" / "replay_manifest_v1" / day).resolve(), "*.replay_manifest.v1.json")
+    runtime_trace_bundle_path = _latest_day_file((truth_root / "reports" / "runtime_trace_bundle_v1" / day).resolve(), "*.runtime_trace_bundle.v1.json")
+    execution_truth_path = (truth_root / "reports" / "execution_completion_gap_report_v1" / day / "execution_completion_gap_report.v1.json").resolve()
+    gate_authority_path = (truth_root / "reports" / "authorization_gate_verdict_v1" / day / "authorization_gate_verdict.v1.json").resolve()
+    canonical_head_path = (truth_root / "run_pointer_v2" / "canonical_authority_head.v1.json").resolve()
+
+    decision_plan = _load_json_artifact_summary(
+        decision_plan_path if decision_plan_path is not None else mode_root / "canonical" / "decision_plan.v1.json",
+        label="decision_plan",
+        preferred_fields=(("plan_id", "plan_id"), ("planning_snapshot_id", "planning_snapshot_id"), ("mode", "mode")),
+        list_count_fields=(("actions", "actions"), ("blocked_actions", "blocked_actions")),
+    )
+    official_recommendation_set = _load_json_artifact_summary(
+        official_path,
+        label="official_recommendation_set",
+        preferred_fields=(("advisory_packet_id", "advisory_packet_id"), ("version", "version")),
+        list_count_fields=(("recommendations", "recommendations"),),
+    )
+    promotion_candidate = _load_json_artifact_summary(
+        promotion_candidate_path,
+        label="promotion_candidate",
+        preferred_fields=(
+            ("candidate_id", "candidate_id"),
+            ("candidate_status", "candidate_status"),
+            ("candidate_class", "candidate_class"),
+            ("decision_plan_id", "decision_plan_id"),
+        ),
+    )
+    publication_gate_result = _load_json_artifact_summary(
+        publication_path,
+        label="publication_gate_result",
+        preferred_fields=(
+            ("publication_status", "publication_status"),
+            ("decision", "decision"),
+            ("decision_plan_id", "decision_plan_id"),
+        ),
+        list_count_fields=(("results", "results"),),
+    )
+    authority_registry = _load_json_artifact_summary(
+        authority_registry_path,
+        label="authority_registry",
+        preferred_fields=(("day_utc", "day_utc"), ("mode", "mode")),
+        list_count_fields=(("artifact_families", "artifact_families"), ("rows", "rows"), ("registry_rows", "registry_rows")),
+    )
+
+    execution_truth = _load_json_artifact_summary(
+        execution_truth_path,
+        label="execution_truth",
+        preferred_fields=(("status", "status"), ("day_utc", "day_utc")),
+    )
+    gate_authority = _load_json_artifact_summary(
+        gate_authority_path,
+        label="gate_authority",
+        preferred_fields=(("status", "status"), ("day_utc", "day_utc")),
+    )
+    replay_manifest = _load_json_artifact_summary(
+        replay_manifest_path if replay_manifest_path is not None else (truth_root / "reports" / "replay_manifest_v1" / day / "missing.replay_manifest.v1.json"),
+        label="replay_manifest",
+        preferred_fields=(("status", "status"), ("day_utc", "day_utc")),
+    )
+    runtime_trace_bundle = _load_json_artifact_summary(
+        runtime_trace_bundle_path if runtime_trace_bundle_path is not None else (truth_root / "reports" / "runtime_trace_bundle_v1" / day / "missing.runtime_trace_bundle.v1.json"),
+        label="runtime_trace_bundle",
+        preferred_fields=(("status", "status"), ("day_utc", "day_utc")),
+        list_count_fields=(("stages", "stages"),),
+    )
+
+    canonical_head_obj, canonical_head_err = _safe_read_json(canonical_head_path)
+    canonical_head_present = isinstance(canonical_head_obj, dict)
+    canonical_head_authoritative = bool(canonical_head_obj.get("authoritative")) if canonical_head_present else False
+    canonical_head_status = str(canonical_head_obj.get("status") or "MISSING").strip().upper() if canonical_head_present else "MISSING"
+    gate_authority_detail = (
+        f"authorization={gate_authority['display_state']} • canonical_head={canonical_head_status}"
+        if canonical_head_present
+        else f"authorization={gate_authority['display_state']} • canonical_head={canonical_head_err or 'FILE_NOT_FOUND'}"
+    )
+    publication_detail = (
+        f"publication={publication_gate_result['display_state']} • promotion_candidate={promotion_candidate['display_state']}"
+    )
+    diagnostics_state = str(platform_readiness.get("platform_readiness_state") or operational_readiness.get("state") or "UNKNOWN").upper()
+    diagnostics_detail = str(platform_readiness.get("readiness_summary") or operational_readiness.get("summary") or "No diagnostics summary available.")
+
+    evidence_spine = [
+        {
+            "id": "advisorEvidenceExecutionTruth",
+            "label": "execution truth",
+            "state": execution_truth["display_state"],
+            "detail": execution_truth["reason_codes"][0] if execution_truth["reason_codes"] else "Execution truth artifact-backed",
+            "path": execution_truth["path"],
+            "sha256": execution_truth["sha256"],
+        },
+        {
+            "id": "advisorEvidenceGateAuthority",
+            "label": "gate authority",
+            "state": "PASS" if gate_authority["present"] and canonical_head_present and canonical_head_authoritative else gate_authority["display_state"],
+            "detail": gate_authority_detail,
+            "path": gate_authority["path"],
+            "sha256": gate_authority["sha256"],
+        },
+        {
+            "id": "advisorEvidencePublicationPromotion",
+            "label": "publication / promotion",
+            "state": publication_gate_result["display_state"] if publication_gate_result["present"] else promotion_candidate["display_state"],
+            "detail": publication_detail,
+            "path": publication_gate_result["path"] if publication_gate_result["present"] else promotion_candidate["path"],
+            "sha256": publication_gate_result["sha256"] if publication_gate_result["present"] else promotion_candidate["sha256"],
+        },
+        {
+            "id": "advisorEvidenceReplayIntegrity",
+            "label": "replay integrity",
+            "state": replay_manifest["display_state"],
+            "detail": replay_manifest["reason_codes"][0] if replay_manifest["reason_codes"] else "Replay manifest artifact-backed",
+            "path": replay_manifest["path"],
+            "sha256": replay_manifest["sha256"],
+        },
+        {
+            "id": "advisorEvidenceTraceIntegrity",
+            "label": "trace integrity",
+            "state": runtime_trace_bundle["display_state"],
+            "detail": runtime_trace_bundle["reason_codes"][0] if runtime_trace_bundle["reason_codes"] else "Runtime trace bundle artifact-backed",
+            "path": runtime_trace_bundle["path"],
+            "sha256": runtime_trace_bundle["sha256"],
+        },
+        {
+            "id": "advisorEvidenceDiagnostics",
+            "label": "diagnostics",
+            "state": diagnostics_state,
+            "detail": diagnostics_detail,
+            "path": str(platform_readiness.get("path") or ""),
+            "sha256": _sha256_file(Path(str(platform_readiness.get("path") or "")).resolve()) if str(platform_readiness.get("path") or "").strip() else None,
+        },
+    ]
+
+    advisor_artifacts = {
+        "decision_plan": decision_plan,
+        "official_recommendation_set": official_recommendation_set,
+        "promotion_candidate": promotion_candidate,
+        "publication_gate_result": publication_gate_result,
+        "authority_registry": authority_registry,
+    }
+    has_any_artifacts = any(artifact["present"] for artifact in advisor_artifacts.values())
+    last_validated_candidates = [
+        artifact.get("produced_utc")
+        for artifact in advisor_artifacts.values()
+        if isinstance(artifact.get("produced_utc"), str) and artifact.get("produced_utc")
+    ] + [
+        produced
+        for produced in (
+            execution_truth.get("produced_utc"),
+            gate_authority.get("produced_utc"),
+            replay_manifest.get("produced_utc"),
+            runtime_trace_bundle.get("produced_utc"),
+            platform_readiness.get("produced_utc"),
+        )
+        if isinstance(produced, str) and produced
+    ]
+    last_validated = max(last_validated_candidates) if last_validated_candidates else "n/a"
+    system_state = str(operational_readiness.get("state") or ("ARTIFACTS_PRESENT" if has_any_artifacts else "NO_ADVISOR_ARTIFACTS")).upper()
+    why = (
+        "No advisor artifacts found"
+        if not has_any_artifacts
+        else publication_detail
+    )
+    shell = {
+        "system_state": system_state,
+        "allowed_action": "READ_ONLY_REVIEW" if has_any_artifacts else "NO_OPERATOR_ACTION",
+        "why": why,
+        "last_validated": last_validated,
+    }
+    chain_sha256 = _sha256_bytes(_stable_json_bytes({"shell": shell, "evidence_spine": evidence_spine, "artifacts": advisor_artifacts}))
+    return {
+        "mode": mode,
+        "day_utc": day,
+        "chain_sha256": chain_sha256,
+        "has_any_artifacts": has_any_artifacts,
+        "shell": shell,
+        "evidence_spine": evidence_spine,
+        "artifacts": advisor_artifacts,
+        "empty_state": {
+            "title": "No advisor artifacts found",
+            "detail": "Advisor panel is read-only and artifact-backed",
+        },
+    }
+
+
 # -------------------------
 # Tile readers
 # -------------------------
@@ -3497,6 +3825,16 @@ def build_status_v2(
         trading_day_state=trading_day_state_doc if isinstance(trading_day_state_doc, dict) else {},
         day_start_blocked=day_start_blocked_doc if isinstance(day_start_blocked_doc, dict) else {},
     )
+    advisor_mode = str(mode_from_attempt or "PAPER").strip().upper()
+    if advisor_mode not in {"PAPER", "LIVE"}:
+        advisor_mode = "PAPER"
+    advisor_visibility = _build_advisor_visibility(
+        truth_root=truth_root,
+        day=day,
+        mode=advisor_mode,
+        platform_readiness=platform_readiness,
+        operational_readiness=operational_readiness,
+    )
 
     payload: Dict[str, Any] = {
         "meta": {
@@ -3521,6 +3859,7 @@ def build_status_v2(
         "platform_readiness_policy": platform_readiness_policy,
         "platform_readiness_history": _load_platform_readiness_history(truth_root),
         "signal_activity": signal_activity,
+        "advisor_visibility": advisor_visibility,
         "governed_risk_surfaces": governed_risk_surfaces,
         "sleeves": sleeves_out,
         "trade_flow_today": {

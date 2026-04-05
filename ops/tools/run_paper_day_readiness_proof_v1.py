@@ -27,6 +27,7 @@ DEFAULT_DAY = "2026-04-02"
 DEFAULT_PRODUCED_UTC = "2026-04-02T14:30:00Z"
 DEFAULT_IB_ACCOUNT = "DUO847203"
 PHASEC_FIXTURE = (REPO_ROOT / "_smoketest_phasec_2026_04_02").resolve()
+FOUNDATION_ROOT = Path("/tmp/constellation_2_foundation").resolve()
 
 
 def _write_json(path: Path, obj: Dict[str, Any]) -> None:
@@ -39,6 +40,29 @@ def _read_json(path: Path) -> Dict[str, Any]:
     if not isinstance(obj, dict):
         raise SystemExit(f"FAIL: TOP_LEVEL_NOT_OBJECT: {path}")
     return obj
+
+
+def _require_repo_prerequisites(*, proof_root: Path) -> None:
+    if not (REPO_ROOT / "constellation_2").exists():
+        raise SystemExit(f"FAIL: REPO_LAYOUT_MISSING_CONSTELLATION_2:{REPO_ROOT}")
+    if not (REPO_ROOT / "ops" / "tools").exists():
+        raise SystemExit(f"FAIL: REPO_LAYOUT_MISSING_OPS_TOOLS:{REPO_ROOT}")
+    if not PHASEC_FIXTURE.exists() or not PHASEC_FIXTURE.is_dir():
+        raise SystemExit(f"FAIL: REQUIRED_PHASEC_FIXTURE_MISSING:{PHASEC_FIXTURE}")
+    fixture_plan = PHASEC_FIXTURE / "equity_order_plan.v2.json"
+    if not fixture_plan.exists() or not fixture_plan.is_file():
+        raise SystemExit(f"FAIL: REQUIRED_PHASEC_ORDER_PLAN_MISSING:{fixture_plan}")
+    if proof_root != FOUNDATION_ROOT and FOUNDATION_ROOT not in proof_root.parents:
+        raise SystemExit(f"FAIL: PROOF_ROOT_OUTSIDE_FOUNDATION:{proof_root}")
+    try:
+        FOUNDATION_ROOT.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:  # noqa: BLE001
+        raise SystemExit(f"FAIL: FOUNDATION_ROOT_NOT_WRITABLE:{FOUNDATION_ROOT}:{type(exc).__name__}:{exc}") from exc
+    advisor_root = advisor_runtime_root()
+    try:
+        advisor_root.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:  # noqa: BLE001
+        raise SystemExit(f"FAIL: ADVISOR_RUNTIME_ROOT_NOT_WRITABLE:{advisor_root}:{type(exc).__name__}:{exc}") from exc
 
 
 def _hx(char: str) -> str:
@@ -211,6 +235,7 @@ def _call(script: Path, args: list[str], *, env: Dict[str, str]) -> subprocess.C
         capture_output=True,
         text=True,
         env=env,
+        cwd=str(REPO_ROOT),
     )
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout).strip()
@@ -412,6 +437,7 @@ def _write_promotion_inputs(root: Path, *, produced_utc: str) -> Dict[str, Path]
 
 
 def run_readiness_proof(*, proof_root: Path, day: str, produced_utc: str, ib_account: str) -> Dict[str, str]:
+    _require_repo_prerequisites(proof_root=proof_root)
     if not str(proof_root).startswith("/tmp/constellation_2_foundation/"):
         raise SystemExit(f"FAIL: proof_root must remain under /tmp/constellation_2_foundation: {proof_root}")
     paths = _proof_paths(proof_root)
@@ -462,6 +488,7 @@ def run_readiness_proof(*, proof_root: Path, day: str, produced_utc: str, ib_acc
     submission_dir = submission_dirs[0]
     if not (submission_dir / "broker_submission_record.v2.json").exists():
         raise SystemExit(f"FAIL: missing broker_submission_record.v2.json: {submission_dir}")
+    broker_submission_record = (submission_dir / "broker_submission_record.v2.json").resolve()
     post_submit = _seed_post_submit_truth(
         truth_root=paths["truth_root"],
         day=day,
@@ -521,6 +548,7 @@ def run_readiness_proof(*, proof_root: Path, day: str, produced_utc: str, ib_acc
         "replay_root": str(paths["replay_root"]),
         "advisor_output_root": str(paths["advisor_output_root"]),
         "submission_id": post_submit["submission_id"],
+        "broker_submission_record": str(broker_submission_record),
         "execution_truth_gap": str((paths["truth_root"] / "reports" / "execution_completion_gap_report_v1" / day / "execution_completion_gap_report.v1.json").resolve()),
         "authorization_verdict": str((paths["truth_root"] / "reports" / "authorization_gate_verdict_v1" / day / "authorization_gate_verdict.v1.json").resolve()),
         "runtime_trace_bundle": str((paths["truth_root"] / "reports" / "runtime_trace_bundle_v1" / day / f"{post_submit['submission_id']}.runtime_trace_bundle.v1.json").resolve()),

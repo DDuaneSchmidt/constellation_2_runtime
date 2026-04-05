@@ -39,6 +39,7 @@
 
   <nav class="tabs">
     <button class="tab active" id="tabOperations">Operations</button>
+    <button class="tab" id="tabAdvisor">Advisor</button>
     <button class="tab" id="tabEngines">Engines</button>
     <button class="tab" id="tabPortfolio">Portfolio</button>
     <button class="tab" id="tabPositions">Positions</button>
@@ -239,6 +240,109 @@
               <div id="blockedRow" class="blocked-row"></div>
               <div id="funnelDrilldown" style="margin-top:8px;"></div>
             </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ADVISOR -->
+    <section id="viewAdvisor" class="view hidden">
+      <div class="cockpit-shell">
+        <div class="cockpit-section">
+          <div class="cockpit-hero cockpit-primary-card" id="advisorDecisionShell">
+            <div class="card-head">
+              <div>
+                <div class="card-title">Operational Decision Shell</div>
+                <div class="mono tiny muted">Advisor panel is read-only and artifact-backed</div>
+              </div>
+              <div class="mono tiny muted" id="advisorShellMode"></div>
+            </div>
+            <div class="cockpit-kv-grid">
+              <div>
+                <div class="mono tiny muted">System State</div>
+                <div id="advisorSystemState" class="tile-state state-unknown">UNKNOWN</div>
+              </div>
+              <div>
+                <div class="mono tiny muted">Allowed Action</div>
+                <div id="advisorAllowedAction" class="mono">NO_OPERATOR_ACTION</div>
+              </div>
+              <div>
+                <div class="mono tiny muted">Why</div>
+                <div id="advisorWhy" class="mono tiny">No advisor artifacts found</div>
+              </div>
+              <div>
+                <div class="mono tiny muted">Last Validated</div>
+                <div id="advisorLastValidated" class="mono">n/a</div>
+              </div>
+              <div>
+                <div class="mono tiny muted">Changed Since Last Run</div>
+                <div id="advisorChangedSinceLastRun" class="mono">initial load</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cockpit-section">
+          <div class="cockpit-panel" id="advisorEvidenceSpine">
+            <div class="card-head">
+              <div>
+                <div class="card-title">Evidence Spine</div>
+                <div class="mono tiny muted">Top-level evidence visibility for execution, authority, replay, trace, and diagnostics.</div>
+              </div>
+            </div>
+            <div class="cockpit-kv-grid">
+              <div id="advisorEvidenceExecutionTruth"></div>
+              <div id="advisorEvidenceGateAuthority"></div>
+              <div id="advisorEvidencePublicationPromotion"></div>
+              <div id="advisorEvidenceReplayIntegrity"></div>
+              <div id="advisorEvidenceTraceIntegrity"></div>
+              <div id="advisorEvidenceDiagnostics"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cockpit-section">
+          <div class="cockpit-alert cockpit-info" id="advisorEmptyState">
+            <strong>No advisor artifacts found</strong><br />
+            Advisor panel is read-only and artifact-backed
+          </div>
+        </div>
+
+        <div class="cockpit-section cockpit-ops-grid">
+          <div class="cockpit-panel cockpit-compact-panel">
+            <div class="card-head">
+              <div class="card-title">Decision Plan</div>
+              <div class="mono tiny muted">Read-only summary</div>
+            </div>
+            <div id="advisorDecisionPlanSummary"></div>
+          </div>
+          <div class="cockpit-panel cockpit-compact-panel">
+            <div class="card-head">
+              <div class="card-title">Official Recommendation Set</div>
+              <div class="mono tiny muted">Read-only summary</div>
+            </div>
+            <div id="advisorOfficialRecommendationSetSummary"></div>
+          </div>
+          <div class="cockpit-panel cockpit-compact-panel">
+            <div class="card-head">
+              <div class="card-title">Promotion Candidate</div>
+              <div class="mono tiny muted">Read-only summary</div>
+            </div>
+            <div id="advisorPromotionCandidateSummary"></div>
+          </div>
+          <div class="cockpit-panel cockpit-compact-panel">
+            <div class="card-head">
+              <div class="card-title">Publication Gate Result</div>
+              <div class="mono tiny muted">Read-only summary</div>
+            </div>
+            <div id="advisorPublicationGateResultSummary"></div>
+          </div>
+          <div class="cockpit-panel cockpit-compact-panel cockpit-ops-grid-span-2">
+            <div class="card-head">
+              <div class="card-title">Authority Registry Summary</div>
+              <div class="mono tiny muted">Read-only summary</div>
+            </div>
+            <div id="advisorAuthorityRegistrySummary"></div>
           </div>
         </div>
       </div>

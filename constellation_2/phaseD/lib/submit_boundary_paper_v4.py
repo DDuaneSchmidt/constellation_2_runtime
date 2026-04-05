@@ -94,6 +94,9 @@ RC_READINESS_C2_NONAUTHORITATIVE = "C2_SUBMIT_READINESS_C2_NONAUTHORITATIVE"
 
 RC_AUTHORITY_HEAD_MISSING = "C2_SUBMIT_AUTHORITY_HEAD_MISSING"
 RC_AUTHORITY_HEAD_INVALID = "C2_SUBMIT_AUTHORITY_HEAD_INVALID"
+BROKER_TRANSMIT_ENABLEMENT_MSG = (
+    "explicit micro-live path requires C2_ENABLE_BROKER_TRANSMIT=YES with dry_run=False"
+)
 
 
 def _parse_utc_z(ts: str) -> None:
@@ -153,6 +156,13 @@ def _resolve_truth_root_for_phasec_out_dir(repo_root: Path, phasec_out_dir: Path
 
 def _broker_transmit_enabled() -> bool:
     return str(os.environ.get("C2_ENABLE_BROKER_TRANSMIT") or "").strip().upper() == "YES"
+
+
+def _require_explicit_live_enablement(*, dry_run: bool) -> None:
+    if dry_run:
+        return
+    if not _broker_transmit_enabled():
+        raise SubmitBoundaryV4Error(f"BROKER_TRANSMIT_DISABLED: {BROKER_TRANSMIT_ENABLEMENT_MSG}")
 
 
 def _read_authority_head(truth_root: Path, day: str) -> Path:
@@ -696,11 +706,7 @@ def run_submit_boundary_paper_v4(
         )
         return 0
 
-    if not _broker_transmit_enabled():
-        raise SubmitBoundaryV4Error(
-            "BROKER_TRANSMIT_DISABLED: "
-            "set C2_ENABLE_BROKER_TRANSMIT=YES for explicit broker submission enablement"
-        )
+    _require_explicit_live_enablement(dry_run=dry_run)
 
     adapter = IBPaperAdapterV2(conn=BrokerConnectionSpec(host=ib_host, port=ib_port, client_id=ib_client_id), env="PAPER")
 
