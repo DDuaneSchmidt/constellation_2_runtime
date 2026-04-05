@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-SOURCE_ROOT = Path('/home/node/constellation_2_clean')
+SOURCE_ROOT = Path('/home/node/constellation')
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 

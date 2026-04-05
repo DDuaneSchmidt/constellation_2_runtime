@@ -4,8 +4,8 @@ import sys
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-if '/home/node/constellation_2_clean' not in sys.path:
-    sys.path.insert(0, '/home/node/constellation_2_clean')
+if '/home/node/constellation' not in sys.path:
+    sys.path.insert(0, '/home/node/constellation')
 
 from constellation_2.common.advisor_execution.planning_snapshot_v1 import PlanningSnapshotV1
 from constellation_2.common.advisor_kernel.household_timeline_service import build_household_timeline

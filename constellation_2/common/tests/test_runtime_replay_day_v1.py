@@ -9,8 +9,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-if '/home/node/constellation_2_clean' not in sys.path:
-    sys.path.insert(0, '/home/node/constellation_2_clean')
+if '/home/node/constellation' not in sys.path:
+    sys.path.insert(0, '/home/node/constellation')
 
 from constellation_2.common.authority_registry_v1 import build_authority_registry
 from constellation_2.common.advisor_bridge.promotion_candidate_v1 import PromotionCandidateV1

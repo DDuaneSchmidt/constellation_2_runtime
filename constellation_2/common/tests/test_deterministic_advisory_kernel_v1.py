@@ -5,8 +5,8 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-if '/home/node/constellation_2_clean' not in sys.path:
-    sys.path.insert(0, '/home/node/constellation_2_clean')
+if '/home/node/constellation' not in sys.path:
+    sys.path.insert(0, '/home/node/constellation')
 
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 
