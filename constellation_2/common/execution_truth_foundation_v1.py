@@ -225,12 +225,14 @@ def _artifact_ref(truth_root: Path, family: str, day_utc: str, filename: str) ->
 
 def _source_probe_paths(truth_root: Path, day_utc: str) -> Dict[str, Any]:
     submissions_root = (truth_root / "execution_evidence_v1" / "submissions" / day_utc).resolve()
+    submission_fact_root = (truth_root / "execution_evidence_fact_ledger_v1" / "submissions" / day_utc).resolve()
     return {
         "day_rollup": (truth_root / "intents_v1" / "day_rollup" / day_utc / "intents_day_rollup.v1.json").resolve(),
         "intent_snapshot_glob_root": (truth_root / "intents_v1" / "snapshots" / day_utc).resolve(),
         "authorization_root": (truth_root / "engine_activity_v1" / "authorization_v1" / day_utc).resolve(),
         "submissions_root": submissions_root,
-        "execution_stream_root": (truth_root / "execution_stream_v1" / day_utc).resolve(),
+        "submission_fact_root": submission_fact_root,
+        "execution_stream_root": (truth_root / "execution_stream_fact_ledger_v1" / day_utc).resolve(),
         "fill_ledger_root": (truth_root / "fill_ledger_v1" / day_utc).resolve(),
         "positions_snapshot": (truth_root / "positions_v1" / "snapshots" / day_utc / "positions_snapshot.v2.json").resolve(),
         "cash_ledger_snapshot": (truth_root / "cash_ledger_v1" / "snapshots" / day_utc / "cash_ledger_snapshot.v1.json").resolve(),
@@ -258,9 +260,10 @@ def collect_execution_truth_facts(repo_root: Path, truth_root: Path, day_utc: st
     day_rollup_probe = _probe_json(repo_root, paths["day_rollup"], ROLLUP_SCHEMA)
     auth_paths = _list_json_paths(paths["authorization_root"], "*.authorization.v1.json")
     intent_snapshot_paths = _list_json_paths(paths["intent_snapshot_glob_root"], "*.exposure_intent.v1.json")
-    execution_stream_paths = _list_json_paths(paths["execution_stream_root"], "*.execution_event_stream_record.v1.json")
+    execution_stream_paths = _list_json_paths(paths["execution_stream_root"], "*.execution_event_stream_record_admitted_fact.v1.json")
     fill_ledger_paths = _list_json_paths(paths["fill_ledger_root"], "*.fill_ledger.v1.json")
     submission_dirs = _submission_dirs(paths["submissions_root"])
+    submission_fact_dirs = _submission_dirs(paths["submission_fact_root"])
     repo_input_root = (repo_root / "constellation_2" / "operator_inputs").resolve()
     operator_statement_path = (repo_input_root / "cash_ledger_operator_statements" / day_utc / "operator_statement.v1.json").resolve()
     broker_marks_override_path = (repo_input_root / "broker_marks_operator_overrides" / day_utc / "broker_marks_override.v1.json").resolve()
@@ -276,6 +279,7 @@ def collect_execution_truth_facts(repo_root: Path, truth_root: Path, day_utc: st
         "intent_snapshot_paths": [str(p) for p in intent_snapshot_paths],
         "authorization_paths": [str(p) for p in auth_paths],
         "submission_dirs": [str(p) for p in submission_dirs],
+        "submission_fact_dirs": [str(p) for p in submission_fact_dirs],
         "execution_stream_paths": [str(p) for p in execution_stream_paths],
         "fill_ledger_paths": [str(p) for p in fill_ledger_paths],
         "operator_statement_path": str(operator_statement_path),
@@ -338,69 +342,101 @@ def _family_probe_from_json_paths(
     )
 
 
-def _intents_day_rollup_linkage_probe(repo_root: Path, facts: Dict[str, Any]) -> FamilyProbe:
-    probe: JsonProbe = facts["day_rollup_probe"]
-    if not probe.present:
+def _probe_admitted_fact_json(repo_root: Path, path: Path, schema_relpath: Optional[str]) -> JsonProbe:
+    wrapper_probe = _probe_json(repo_root, path, None)
+    if not wrapper_probe.valid:
+        return wrapper_probe
+    wrapper_doc = wrapper_probe.doc or {}
+    admitted_fact = wrapper_doc.get("admitted_fact")
+    if not isinstance(admitted_fact, dict):
+        return JsonProbe(
+            path=path,
+            present=wrapper_probe.present,
+            valid=False,
+            doc=None,
+            error_code="MISSING_ADMITTED_FACT",
+            error_detail="admitted_fact missing or not an object",
+        )
+    if schema_relpath:
+        try:
+            validate_against_repo_schema_v1(admitted_fact, repo_root=repo_root, schema_relpath=schema_relpath)
+        except SchemaValidationError as exc:
+            return JsonProbe(
+                path=path,
+                present=True,
+                valid=False,
+                doc=admitted_fact,
+                error_code="SCHEMA_MISMATCH",
+                error_detail=str(exc),
+            )
+    return JsonProbe(
+        path=path,
+        present=True,
+        valid=True,
+        doc=admitted_fact,
+        error_code="",
+        error_detail="",
+    )
+
+
+def _family_probe_from_admitted_fact_paths(
+    *,
+    repo_root: Path,
+    family: str,
+    paths: List[Path],
+    schema_relpath: Optional[str],
+    required_fields: List[str],
+    join_fields: List[str],
+    downstream_stage_blockers: List[str],
+    missing_status: str = "MISSING_ARTIFACT",
+) -> FamilyProbe:
+    if not paths:
         return FamilyProbe(
-            family="intents_day_rollup_linkage",
+            family=family,
             observed_paths=tuple(),
             record_count=0,
-            schema_validation_status="MISSING_ARTIFACT",
-            completeness_status="MISSING_ARTIFACT",
-            missing_required_fields=("engines",),
-            missing_join_critical_fields=("engines.intent_hashes",),
-            downstream_stage_blockers=("INTENT_EMITTED",),
+            schema_validation_status=missing_status,
+            completeness_status=missing_status,
+            missing_required_fields=tuple(required_fields),
+            missing_join_critical_fields=tuple(join_fields),
+            downstream_stage_blockers=tuple(downstream_stage_blockers),
             notes=tuple(),
         )
-    doc = probe.doc if isinstance(probe.doc, dict) else None
-    if not probe.valid:
-        return FamilyProbe(
-            family="intents_day_rollup_linkage",
-            observed_paths=(str(probe.path),),
-            record_count=1,
-            schema_validation_status=probe.error_code or "SCHEMA_MISMATCH",
-            completeness_status="SCHEMA_MISMATCH",
-            missing_required_fields=tuple(_missing_fields(doc, ["engines"])),
-            missing_join_critical_fields=("engines.intent_hashes",),
-            downstream_stage_blockers=("INTENT_EMITTED",),
-            notes=(probe.error_detail,),
-        )
+    schema_status = "VALID"
+    completeness_status = "COMPLETE"
+    missing_required: List[str] = []
     missing_join: List[str] = []
     notes: List[str] = []
-    engines = doc.get("engines")
-    if not isinstance(engines, list) or not engines:
-        missing_join.append("engines")
-    else:
-        linkage_missing = False
-        for idx, engine in enumerate(engines):
-            if not isinstance(engine, dict):
-                linkage_missing = True
-                continue
-            intent_count = int(engine.get("intent_count") or 0)
-            intent_hashes = engine.get("intent_hashes")
-            if intent_count > 0 and (not isinstance(intent_hashes, list) or not intent_hashes):
-                linkage_missing = True
-                missing_join.append(f"engines[{idx}].intent_hashes")
-        if linkage_missing:
-            notes.append("aggregate_only_rollup_no_record_level_intent_hashes")
-    status = "COMPLETE"
-    if missing_join:
-        status = "AGGREGATE_ONLY_NO_LINKAGE"
+    for path in paths:
+        probe = _probe_admitted_fact_json(repo_root, path, schema_relpath)
+        if not probe.valid:
+            schema_status = probe.error_code or "INVALID"
+            completeness_status = "SCHEMA_MISMATCH"
+        missing_required.extend(_missing_fields(probe.doc, required_fields))
+        missing_join.extend(_missing_fields(probe.doc, join_fields))
+    if completeness_status == "COMPLETE" and missing_required:
+        completeness_status = "MISSING_REQUIRED_FIELDS"
+    if completeness_status == "COMPLETE" and missing_join:
+        completeness_status = "MISSING_JOIN_CRITICAL_FIELDS"
+    if schema_status != "VALID":
+        notes.append("schema_validation_failed")
     return FamilyProbe(
-        family="intents_day_rollup_linkage",
-        observed_paths=(str(probe.path),),
-        record_count=1,
-        schema_validation_status="VALID",
-        completeness_status=status,
-        missing_required_fields=tuple(),
+        family=family,
+        observed_paths=tuple(str(p) for p in paths),
+        record_count=len(paths),
+        schema_validation_status=schema_status,
+        completeness_status=completeness_status,
+        missing_required_fields=tuple(sorted(set(missing_required))),
         missing_join_critical_fields=tuple(sorted(set(missing_join))),
-        downstream_stage_blockers=("INTENT_EMITTED",),
+        downstream_stage_blockers=tuple(downstream_stage_blockers),
         notes=tuple(sorted(set(notes))),
     )
 
 
 def _fill_ledger_input_probe(repo_root: Path, facts: Dict[str, Any]) -> FamilyProbe:
     submission_dirs = [Path(p) for p in facts.get("submission_dirs", [])]
+    submission_fact_dirs = [Path(p) for p in facts.get("submission_fact_dirs", [])]
+    submission_fact_dir_map = {p.name: p for p in submission_fact_dirs}
     if not submission_dirs:
         return FamilyProbe(
             family="fill_ledger_input_bundle",
@@ -429,14 +465,15 @@ def _fill_ledger_input_probe(repo_root: Path, facts: Dict[str, Any]) -> FamilyPr
     notes: List[str] = []
     schema_status = "VALID"
     for subdir in submission_dirs:
-        bsr_p = subdir / "broker_submission_record.v2.json"
+        fact_dir = submission_fact_dir_map.get(subdir.name)
+        bsr_p = None if fact_dir is None else (fact_dir / "broker_submission_record_admitted_fact.v1.json").resolve()
         evt_p = subdir / "execution_event_record.v1.json"
         plan_p = subdir / "equity_order_plan.v1.json"
         for p in (bsr_p, evt_p, plan_p):
-            if p.exists():
+            if p is not None and p.exists():
                 observed_paths.append(str(p.resolve()))
-        if bsr_p.exists():
-            bsr_probe = _probe_json(repo_root, bsr_p.resolve(), BROKER_SUBMISSION_SCHEMA)
+        if bsr_p is not None and bsr_p.exists():
+            bsr_probe = _probe_admitted_fact_json(repo_root, bsr_p.resolve(), BROKER_SUBMISSION_SCHEMA)
             if not bsr_probe.valid:
                 schema_status = bsr_probe.error_code or "SCHEMA_MISMATCH"
             missing_required.extend(
@@ -459,6 +496,7 @@ def _fill_ledger_input_probe(repo_root: Path, facts: Dict[str, Any]) -> FamilyPr
                 "broker_submission_record.broker_ids.order_id",
                 "broker_submission_record.broker_ids.perm_id",
             ])
+            notes.append("broker_submission_ledger_missing")
         if evt_p.exists():
             evt_probe = _probe_json(repo_root, evt_p.resolve(), EXECUTION_EVENT_SCHEMA)
             if not evt_probe.valid:
@@ -521,7 +559,7 @@ def _fill_ledger_input_probe(repo_root: Path, facts: Dict[str, Any]) -> FamilyPr
             "execution_stream.binding_hash",
             "execution_stream.intent_sha256",
         ])
-        notes.append("execution_stream_missing")
+        notes.append("execution_stream_ledger_missing")
     status = "COMPLETE"
     if schema_status != "VALID":
         status = "SCHEMA_MISMATCH"
@@ -562,10 +600,10 @@ def build_payload_probes(repo_root: Path, truth_root: Path, day_utc: str, facts:
             join_fields=["engine_id", "intent_id", "intent_hash", "authorization.decision_hash"],
             downstream_stage_blockers=["AUTHORIZATION_COMPLETE"],
         ),
-        "broker_submission_record": _family_probe_from_json_paths(
+        "broker_submission_record": _family_probe_from_admitted_fact_paths(
             repo_root=repo_root,
             family="broker_submission_record",
-            paths=[(Path(p) / "broker_submission_record.v2.json").resolve() for p in facts.get("submission_dirs", []) if (Path(p) / "broker_submission_record.v2.json").exists()],
+            paths=[(Path(p) / "broker_submission_record_admitted_fact.v1.json").resolve() for p in facts.get("submission_fact_dirs", []) if (Path(p) / "broker_submission_record_admitted_fact.v1.json").exists()],
             schema_relpath=BROKER_SUBMISSION_SCHEMA,
             required_fields=["submission_id", "submitted_at_utc", "binding_hash", "broker_ids.order_id", "broker_ids.perm_id"],
             join_fields=["submission_id", "binding_hash", "broker_ids.order_id", "broker_ids.perm_id"],
@@ -580,7 +618,7 @@ def build_payload_probes(repo_root: Path, truth_root: Path, day_utc: str, facts:
             join_fields=["binding_hash", "broker_submission_hash", "broker_order_id", "perm_id"],
             downstream_stage_blockers=["EXECUTION_STREAM_COMPLETE", "FILL_COMPLETE", "POSITIONS"],
         ),
-        "execution_stream": _family_probe_from_json_paths(
+        "execution_stream": _family_probe_from_admitted_fact_paths(
             repo_root=repo_root,
             family="execution_stream",
             paths=[Path(p) for p in facts.get("execution_stream_paths", [])],
@@ -621,17 +659,17 @@ def build_payload_probes(repo_root: Path, truth_root: Path, day_utc: str, facts:
             repo_root=repo_root,
             family="broker_statement_normalized",
             paths=[paths["broker_statement_normalized"]] if paths["broker_statement_normalized"].exists() else [],
-            schema_relpath=None,
-            required_fields=["day_utc", "account_id", "currency", "cash_end", "positions"],
-            join_fields=["account_id", "positions"],
+            schema_relpath="governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_statement_normalized.v1.schema.json",
+            required_fields=["day_utc", "statement_hash", "rows"],
+            join_fields=["statement_hash"],
             downstream_stage_blockers=["MARKS", "ACCOUNTING"],
         ),
         "broker_marks": _family_probe_from_json_paths(
             repo_root=repo_root,
             family="broker_marks",
             paths=[paths["broker_marks"]] if paths["broker_marks"].exists() else [],
-            schema_relpath=None,
-            required_fields=["day_utc", "currency", "cash_end", "marks"],
+            schema_relpath="governance/04_DATA/SCHEMAS/C2/MARKET_DATA/broker_marks.v1.schema.json",
+            required_fields=["day_utc", "marks"],
             join_fields=["marks"],
             downstream_stage_blockers=["MARKS", "ACCOUNTING"],
         ),
@@ -640,17 +678,17 @@ def build_payload_probes(repo_root: Path, truth_root: Path, day_utc: str, facts:
             family="accounting_nav",
             paths=[paths["accounting_nav"]] if paths["accounting_nav"].exists() else [],
             schema_relpath=ACCOUNTING_SCHEMA,
-            required_fields=["nav", "history"],
-            join_fields=["nav"],
-            downstream_stage_blockers=["ACCOUNTING"],
+            required_fields=["day_utc", "portfolio_nav"],
+            join_fields=["portfolio_nav"],
+            downstream_stage_blockers=["ACCOUNTING", "EXIT_RECONCILIATION"],
         ),
         "exit_reconciliation": _family_probe_from_json_paths(
             repo_root=repo_root,
             family="exit_reconciliation",
             paths=[paths["exit_reconciliation"]] if paths["exit_reconciliation"].exists() else [],
             schema_relpath=EXIT_RECON_SCHEMA,
-            required_fields=["status", "obligations"],
-            join_fields=["obligations"],
+            required_fields=["day_utc", "completed", "positions_closed"],
+            join_fields=["completed", "positions_closed"],
             downstream_stage_blockers=["EXIT_RECONCILIATION"],
         ),
     }
@@ -753,7 +791,7 @@ def build_dependency_statuses(repo_root: Path, truth_root: Path, day_utc: str, f
     statuses: List[Dict[str, Any]] = []
     market_manifest = (truth_root / "market_data_snapshot_v1" / "dataset_manifest.json").resolve()
     raw_broker_input = _find_broker_raw_input(repo_root, day_utc)
-    submission_dirs = [Path(p) for p in facts.get("submission_dirs", [])]
+    submission_fact_dirs = [Path(p) for p in facts.get("submission_fact_dirs", [])]
     for entry in entries:
         if not isinstance(entry, dict):
             continue
@@ -783,29 +821,28 @@ def build_dependency_statuses(repo_root: Path, truth_root: Path, day_utc: str, f
                 status = "PARTIAL_DEPENDENCY_SET"
                 reasons.append("override_not_present")
         elif dependency_id == "submission_identity_bundle":
-            resolved_path = str((truth_root / "execution_evidence_v1" / "submissions" / day_utc).resolve())
-            if not submission_dirs:
+            resolved_path = str((truth_root / "execution_evidence_fact_ledger_v1" / "submissions" / day_utc).resolve())
+            if not submission_fact_dirs:
                 status = "MISSING_BLOCKING_DEPENDENCY"
-                reasons.append("submission_dirs_missing")
+                reasons.append("submission_fact_ledger_missing")
             else:
                 incomplete = False
-                for subdir in submission_dirs:
-                    for name in ("broker_submission_record.v2.json", "execution_event_record.v1.json", "equity_order_plan.v1.json"):
-                        if not (subdir / name).exists():
-                            incomplete = True
+                for subdir in submission_fact_dirs:
+                    if not (subdir / "broker_submission_record_admitted_fact.v1.json").exists():
+                        incomplete = True
                 if incomplete:
                     status = "PARTIAL_DEPENDENCY_SET"
-                    reasons.append("submission_identity_bundle_incomplete")
+                    reasons.append("submission_fact_ledger_incomplete")
         elif dependency_id == "execution_stream_prerequisites":
-            resolved_path = str((truth_root / "execution_stream_v1" / day_utc).resolve())
-            if not submission_dirs:
+            resolved_path = str((truth_root / "execution_stream_fact_ledger_v1" / day_utc).resolve())
+            if not submission_fact_dirs:
                 status = "MISSING_BLOCKING_DEPENDENCY"
-                reasons.append("no_submission_dirs_for_execution_stream")
+                reasons.append("no_submission_fact_ledger_for_execution_stream")
             else:
                 stream_root = Path(resolved_path)
-                if not stream_root.exists() or not any(stream_root.glob("*.execution_event_stream_record.v1.json")):
+                if not stream_root.exists() or not any(stream_root.glob("*.execution_event_stream_record_admitted_fact.v1.json")):
                     status = "PARTIAL_DEPENDENCY_SET"
-                    reasons.append("execution_stream_not_materialized")
+                    reasons.append("execution_stream_fact_ledger_not_materialized")
         else:
             status = "PARTIAL_DEPENDENCY_SET"
             reasons.append("unhandled_dependency_id")
@@ -818,9 +855,6 @@ def build_dependency_statuses(repo_root: Path, truth_root: Path, day_utc: str, f
                 "status": status,
                 "resolved_path": resolved_path,
                 "reasons": sorted(set(reasons)),
-                "downstream_consumers": entry.get("downstream_consumers") or [],
-                "expected_source_path": entry.get("expected_source_path"),
-                "generation_path": entry.get("generation_path"),
             }
         )
     return statuses

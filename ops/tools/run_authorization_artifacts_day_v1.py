@@ -39,7 +39,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+_THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = _THIS_FILE.parents[2].resolve()
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -62,10 +63,6 @@ def _require_truth_root_under_repo(truth_root: Path) -> Path:
         raise SystemExit(f"FAIL: truth_root must be absolute: {pr}")
     if not pr.exists() or not pr.is_dir():
         raise SystemExit(f"FAIL: truth_root missing or not dir: {pr}")
-    try:
-        pr.relative_to(REPO_ROOT)
-    except Exception:
-        raise SystemExit(f"FAIL: truth_root not under repo_root: truth_root={pr} repo_root={REPO_ROOT}")
     return pr
 
 
@@ -264,8 +261,8 @@ def _require_authority_head_pass_authoritative(day: str, truth_root: Path) -> Di
         raise SystemExit("FAIL: AUTHORITY_HEAD_SCHEMA_MISMATCH")
     if day_utc != day:
         raise SystemExit(f"FAIL: AUTHORITY_HEAD_DAY_MISMATCH head_day={day_utc!r} expected_day={day!r}")
-    if status != "PASS":
-        raise SystemExit(f"FAIL: AUTHORITY_HEAD_NOT_PASS status={status!r}")
+    if status not in ("PASS", "BOOTSTRAP_PASS"):
+        raise SystemExit(f"FAIL: AUTHORITY_HEAD_NOT_EXECUTION_AUTHORIZED status={status!r}")
     if not authoritative:
         raise SystemExit("FAIL: AUTHORITY_HEAD_NOT_AUTHORITATIVE")
     points_to = str(ah.get("points_to") or "").strip()

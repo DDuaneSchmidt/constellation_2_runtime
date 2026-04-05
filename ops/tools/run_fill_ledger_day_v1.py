@@ -38,7 +38,7 @@ from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_again
 from constellation_2.common.truth_root_v1 import resolve_truth_root
 
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+REPO_ROOT = Path(__file__).resolve().parents[2]
 TRUTH = resolve_truth_root(repo_root=REPO_ROOT)
 
 STREAM_ROOT = (TRUTH / "execution_stream_v1").resolve()

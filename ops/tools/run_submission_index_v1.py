@@ -9,16 +9,16 @@ Institutional posture:
 - Otherwise, SIMULATED if explicit SYNTH_ markers exist; else FAIL (unproven broker truth).
 
 Inputs:
-  constellation_2/runtime/truth/execution_evidence_v1/submissions/<DAY>/*/
-    - broker_submission_record.v2.json
-    - execution_event_record.v1.json
+  truth_root/execution_evidence_fact_ledger_v1/submissions/<DAY>/*/
+    - broker_submission_record_admitted_fact.v1.json
+    - execution_event_record_admitted_fact.v1.json
 
 Broker truth (required to classify REAL):
-  constellation_2/runtime/truth/execution_evidence_v1/broker_events/<DAY>/
+  truth_root/execution_evidence_v1/broker_events/<DAY>/
     - broker_event_day_manifest.v1.json (preferred) OR broker_event_day_manifest.v1.<sha>.json
 
 Output:
-  constellation_2/runtime/truth/execution_evidence_v1/submission_index/<DAY>/submission_index.v1.json
+  truth_root/execution_evidence_v1/submission_index/<DAY>/submission_index.v1.json
 
 Schema (governed):
   governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/submission_index.v1.schema.json
@@ -46,13 +46,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from constellation_2.common.truth_root_v1 import resolve_truth_root  # type: ignore
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1  # type: ignore
+from constellation_2.phaseD.lib.validate_against_schema_v1 import SchemaValidationError, validate_against_repo_schema_v1  # type: ignore
 
 
-TRUTH = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
+TRUTH = resolve_truth_root(repo_root=REPO_ROOT)
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/submission_index.v1.schema.json"
+BROKER_SUBMISSION_SCHEMA = "constellation_2/schemas/broker_submission_record.v2.schema.json"
+EXECUTION_EVENT_SCHEMA = "constellation_2/schemas/execution_event_record.v1.schema.json"
 
+SUBMISSION_FACT_ROOT = (TRUTH / "execution_evidence_fact_ledger_v1" / "submissions").resolve()
 SUBMISSIONS_ROOT = (TRUTH / "execution_evidence_v1" / "submissions").resolve()
 BROKER_EVENTS_ROOT = (TRUTH / "execution_evidence_v1" / "broker_events").resolve()
 OUT_ROOT = (TRUTH / "execution_evidence_v1" / "submission_index").resolve()
@@ -88,6 +93,21 @@ def _git_sha() -> str:
 
 def _read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _load_admitted_fact_or_fail(day: str, submission_id: str, filename: str, schema_relpath: str) -> Dict[str, Any]:
+    path = (SUBMISSION_FACT_ROOT / day / submission_id / filename).resolve()
+    if not path.exists():
+        raise SystemExit(f"FAIL: missing authoritative submission ledger fact: {path}")
+    wrapper = _read_json(path)
+    admitted_fact = wrapper.get("admitted_fact") if isinstance(wrapper, dict) else None
+    if not isinstance(admitted_fact, dict):
+        raise SystemExit(f"FAIL: admitted_fact missing in authoritative submission ledger fact: {path}")
+    try:
+        validate_against_repo_schema_v1(admitted_fact, repo_root=REPO_ROOT, schema_relpath=schema_relpath)
+    except SchemaValidationError as exc:
+        raise SystemExit(f"FAIL: authoritative submission ledger fact schema validation failed: {path}: {exc}")
+    return admitted_fact
 
 
 def _validate_schema_available(schema_path: Path) -> None:
@@ -293,52 +313,43 @@ def main() -> int:
 
     produced_utc = _now_utc_iso()
 
-    day_dir = (SUBMISSIONS_ROOT / day).resolve()
+    day_dir = (SUBMISSION_FACT_ROOT / day).resolve()
     records: List[Dict[str, Any]] = []
 
-    if day_dir.exists():
-        sub_dirs = sorted([p for p in day_dir.iterdir() if p.is_dir()])
-        for sub_dir in sub_dirs:
-            bsr = (sub_dir / "broker_submission_record.v2.json").resolve()
-            exr = (sub_dir / "execution_event_record.v1.json").resolve()
+    if not day_dir.exists():
+        raise SystemExit(f"FAIL: missing authoritative submission ledger day dir: {day_dir}")
 
-            if not bsr.exists():
-                raise SystemExit(f"FAIL: missing broker_submission_record.v2.json: {bsr}")
-            if not exr.exists():
-                raise SystemExit(f"FAIL: missing execution_event_record.v1.json: {exr}")
+    sub_dirs = sorted([p for p in day_dir.iterdir() if p.is_dir()])
+    for sub_dir in sub_dirs:
+        broker_record = _load_admitted_fact_or_fail(day, sub_dir.name, "broker_submission_record_admitted_fact.v1.json", BROKER_SUBMISSION_SCHEMA)
+        exec_event = _load_admitted_fact_or_fail(day, sub_dir.name, "execution_event_record_admitted_fact.v1.json", EXECUTION_EVENT_SCHEMA)
 
-            broker_record = _read_json(bsr)
-            exec_event = _read_json(exr)
+        compat_submission_dir = (SUBMISSIONS_ROOT / day / sub_dir.name).resolve()
+        mode = _detect_mode(day, compat_submission_dir, exec_event, broker_record)
 
-            mode = _detect_mode(day, sub_dir, exec_event, broker_record)
+        submission_id = str(broker_record.get("submission_id") or sub_dir.name).strip()
+        engine_id = _extract_engine_id(broker_record)
 
-            submission_id = str(broker_record.get("submission_id") or sub_dir.name).strip()
-            engine_id = _extract_engine_id(broker_record)
+        order_id = _extract_order_id(broker_record)
+        if order_id is None:
+            order_id_out: Optional[str] = None
+        else:
+            order_id_out = str(order_id)
 
-            order_id = _extract_order_id(broker_record)
-            if order_id is None:
-                # Schema allows null order_id; keep null.
-                order_id_out: Optional[str] = None
-            else:
-                order_id_out = str(order_id)
+        account = ""
 
-            # NOTE: Account is not present in your submission record today.
-            # For audit-grade readiness, account must ultimately be wired into evidence.
-            # For now, we emit empty string (schema allows string), and Bundle A gate can enforce non-empty later.
-            account = ""
+        final_state = str(exec_event.get("status") or exec_event.get("final_state") or "UNKNOWN").strip()
+        filled_qty_raw = exec_event.get("filled_qty")
+        filled_qty = float(_coerce_float_or_none(filled_qty_raw) or 0.0)
 
-            final_state = str(exec_event.get("status") or exec_event.get("final_state") or "UNKNOWN").strip()
-            filled_qty_raw = exec_event.get("filled_qty")
-            filled_qty = float(_coerce_float_or_none(filled_qty_raw) or 0.0)
+        avg_px = _coerce_float_or_none(exec_event.get("avg_fill_px"))
+        if avg_px is None:
+            avg_px = _coerce_float_or_none(exec_event.get("avg_price"))
 
-            avg_px = _coerce_float_or_none(exec_event.get("avg_fill_px"))
-            if avg_px is None:
-                avg_px = _coerce_float_or_none(exec_event.get("avg_price"))
+        submitted_utc = str(broker_record.get("submitted_utc") or broker_record.get("submitted_at_utc") or produced_utc)
+        last_update_utc = str(exec_event.get("last_update_utc") or exec_event.get("event_time_utc") or exec_event.get("created_at_utc") or produced_utc)
 
-            submitted_utc = str(broker_record.get("submitted_utc") or broker_record.get("submitted_at_utc") or produced_utc)
-            last_update_utc = str(exec_event.get("last_update_utc") or exec_event.get("event_time_utc") or exec_event.get("created_at_utc") or produced_utc)
-
-            rec: Dict[str, Any] = {
+        rec: Dict[str, Any] = {
                 "submission_id": submission_id,
                 "engine_id": engine_id,
                 "intent_hash": broker_record.get("intent_hash"),
@@ -347,10 +358,10 @@ def main() -> int:
                 "broker": {"venue": "IB", "account": account, "order_id": order_id_out},
                 "status": {"final_state": final_state, "filled_qty": filled_qty, "avg_fill_px": avg_px},
                 "mode": mode,
-                "execution_event_record_hash": _sha256_file(exr),
+                "execution_event_record_hash": _sha256_bytes(canonical_json_bytes_v1(exec_event) + b"\n"),
                 "timestamps": {"submitted_utc": submitted_utc, "last_update_utc": last_update_utc},
-            }
-            records.append(rec)
+        }
+        records.append(rec)
 
     payload: Dict[str, Any] = {
         "schema_id": "submission_index.v1",

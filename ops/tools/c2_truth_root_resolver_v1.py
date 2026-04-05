@@ -24,12 +24,17 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Any, Dict, List
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-REPO_ROOT = "/home/node/constellation_2_runtime"
-REGISTRY_PATH = os.path.join(REPO_ROOT, "governance/02_REGISTRIES/C2_SLEEVE_REGISTRY_V1.json")
-RUNTIME_ROOT = os.path.join(REPO_ROOT, "constellation_2/runtime")
+from constellation_2.common.truth_root_v1 import resolve_governance_path, resolve_runtime_root  # noqa: E402
+
+REGISTRY_PATH = resolve_governance_path("02_REGISTRIES", "C2_SLEEVE_REGISTRY_V1.json")
+RUNTIME_ROOT = resolve_runtime_root()
 
 
 def die(msg: str, code: int = 2) -> None:
@@ -37,12 +42,11 @@ def die(msg: str, code: int = 2) -> None:
     sys.exit(code)
 
 
-def load_registry(path: str) -> Dict[str, Any]:
-    if not os.path.exists(path):
+def load_registry(path: Path) -> Dict[str, Any]:
+    if not path.exists():
         die(f"registry_missing path={path}")
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        return json.loads(path.read_text(encoding="utf-8"))
     except Exception as e:
         die(f"registry_json_parse_failed path={path} err={type(e).__name__}:{e}")
 
@@ -117,14 +121,14 @@ def main() -> None:
     if truth_partition != expected_partition:
         die(f"truth_partition_mismatch sleeve_id={sleeve_id} expected={expected_partition} got={truth_partition}")
 
-    abs_root = os.path.join(RUNTIME_ROOT, truth_partition)
+    abs_root = (RUNTIME_ROOT / truth_partition).resolve()
 
     # Fail-closed: partition path must exist.
-    if not os.path.isdir(abs_root):
+    if not abs_root.is_dir():
         die(f"truth_partition_path_missing path={abs_root}")
 
     # Print only the absolute path (machine-friendly).
-    print(abs_root)
+    print(str(abs_root))
 
 
 if __name__ == "__main__":

@@ -71,8 +71,8 @@ def _require_authority_head_pass_authoritative(day: str, truth_root: Path) -> Di
         raise SystemExit("FAIL: AUTHORITY_HEAD_SCHEMA_MISMATCH")
     if day_utc != day:
         raise SystemExit(f"FAIL: AUTHORITY_HEAD_DAY_MISMATCH head_day={day_utc!r} expected_day={day!r}")
-    if status != "PASS":
-        raise SystemExit(f"FAIL: AUTHORITY_HEAD_NOT_PASS status={status!r}")
+    if status not in ("PASS", "BOOTSTRAP_PASS"):
+        raise SystemExit(f"FAIL: AUTHORITY_HEAD_NOT_EXECUTION_AUTHORIZED status={status!r}")
     if not authoritative:
         raise SystemExit("FAIL: AUTHORITY_HEAD_NOT_AUTHORITATIVE")
     points_to = str(ah.get("points_to") or "").strip()
@@ -86,8 +86,8 @@ def _require_authority_head_pass_authoritative(day: str, truth_root: Path) -> Di
         raise SystemExit("FAIL: AUTHORIZATION_VERDICT_VERSION_MISMATCH")
     if str(verdict.get("day_utc") or "").strip() != day:
         raise SystemExit("FAIL: AUTHORIZATION_VERDICT_DAY_MISMATCH")
-    if str(verdict.get("status") or "").strip().upper() != "PASS":
-        raise SystemExit("FAIL: AUTHORIZATION_VERDICT_NOT_PASS")
+    if str(verdict.get("status") or "").strip().upper() not in ("PASS", "BOOTSTRAP_PASS"):
+        raise SystemExit("FAIL: AUTHORIZATION_VERDICT_NOT_EXECUTION_AUTHORIZED")
     return ah
 
 
@@ -261,7 +261,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     produced_utc = f"{day}T00:00:00Z"
     truth_root = _resolve_truth_root(args.truth_root)
 
-    # Fail-closed: allocation can only be produced on authority PASS+authoritative days.
+    # Fail-closed: allocation can only be produced on authority PASS/BOOTSTRAP_PASS + authoritative days.
     _require_authority_head_pass_authoritative(day, truth_root)
 
     # Required inputs

@@ -38,7 +38,8 @@ from constellation_2.common.truth_root_v1 import resolve_truth_root  # noqa: E40
 from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1  # noqa: E402
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-DEFAULT_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
+DEFAULT_TRUTH_ROOT = resolve_truth_root(repo_root=REPO_ROOT).resolve()
 
 POLICY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/C2_FEED_ATTESTATION_POLICY_V1.json").resolve()
 
@@ -116,10 +117,6 @@ def _require_truth_root_under_repo(truth_root: Path) -> Path:
         raise SystemExit(f"FAIL: truth_root must be absolute: {pr}")
     if not pr.exists() or not pr.is_dir():
         raise SystemExit(f"FAIL: truth_root missing or not dir: {pr}")
-    try:
-        pr.relative_to(REPO_ROOT)
-    except Exception:
-        raise SystemExit(f"FAIL: truth_root not under repo_root: truth_root={pr} repo_root={REPO_ROOT}")
     return pr
 
 
@@ -194,9 +191,9 @@ def _resolve_target_path(truth_root: Path, target_rel: str) -> Path:
 
     p = (truth_root / rel_norm).resolve()
     try:
-        p.relative_to(REPO_ROOT)
+        p.relative_to(truth_root.resolve())
     except Exception:
-        raise SystemExit(f"FAIL: target path escapes repo_root: {p}")
+        raise SystemExit(f"FAIL: target path escapes truth_root: {p}")
     return p
 
 

@@ -12,8 +12,8 @@ Deterministic, fail-closed.
 
 AUDIT-GRADE ENFORCEMENT (v4):
 - NO broker call unless ALL are proven true for the submission day:
-  - canonical_authority_head exists and matches the submission day (PASS-only head)
-  - authorization_gate_verdict_v1.status == PASS
+  - canonical_authority_head exists and matches the submission day (PASS or BOOTSTRAP_PASS head)
+  - authorization_gate_verdict_v1.status in (PASS, BOOTSTRAP_PASS)
   - global_kill_switch_state.state == INACTIVE AND allow_entries == true
   - authorization artifact exists for intent_hash and is AUTHORIZED (status+decision) with authorized_quantity > 0
   - ib_account is allowed by governed registry C2_IB_ACCOUNT_REGISTRY_V1:
@@ -186,7 +186,7 @@ def _read_authority_head(truth_root: Path, day: str) -> Path:
     head_status = str(obj.get("status") or "").strip().upper()
     head_authoritative = bool(obj.get("authoritative"))
 
-    if head_day != day or head_status != "PASS" or (not head_authoritative):
+    if head_day != day or head_status not in ("PASS", "BOOTSTRAP_PASS") or (not head_authoritative):
         raise SubmitBoundaryV4Error(
             f"{RC_AUTHORITY_HEAD_INVALID}: head_mismatch day={head_day} status={head_status} authoritative={head_authoritative} expected_day={day}"
         )
@@ -595,7 +595,7 @@ def run_submit_boundary_paper_v4(
 
         auth_gate_status, auth_gate_path = _read_authorization_gate_verdict_status(truth_root, day)
         pointers.append(str(auth_gate_path))
-        if auth_gate_status != "PASS":
+        if auth_gate_status not in ("PASS", "BOOTSTRAP_PASS"):
             raise SubmitBoundaryV4Error(f"{RC_AUTHORIZATION_VERDICT_NOT_PASS}: status={auth_gate_status}")
 
         ks_state, ks_allow_entries, ks_path = _read_kill_switch_state(truth_root, day)

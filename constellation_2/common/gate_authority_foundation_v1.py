@@ -25,10 +25,13 @@ GATE_CLASSIFICATION_REGISTRY_ID = "GATE_CLASSIFICATION_REGISTRY_V1"
 GATE_CLASSIFICATION_REGISTRY_VERSION = 1
 LEGACY_GATE_HIERARCHY_ID = "GATE_HIERARCHY_V1"
 LEGACY_GATE_HIERARCHY_VERSION = 1
+BOOTSTRAP_EXECUTION_POLICY_ID = "C2_BOOTSTRAP_EXECUTION_POLICY_V1"
+BOOTSTRAP_EXECUTION_POLICY_VERSION = 1
 
 LIFECYCLE_POLICY_RELPATH = "governance/02_REGISTRIES/C2_LIFECYCLE_STATE_AUTHORITY_POLICY_V1.json"
 GATE_CLASSIFICATION_RELPATH = "governance/02_REGISTRIES/GATE_CLASSIFICATION_REGISTRY_V1.json"
 GATE_HIERARCHY_RELPATH = "governance/02_REGISTRIES/GATE_HIERARCHY_V1.json"
+BOOTSTRAP_EXECUTION_POLICY_RELPATH = "governance/02_REGISTRIES/C2_BOOTSTRAP_EXECUTION_POLICY_V1.json"
 
 LIFECYCLE_STATE_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/lifecycle_state_authority.v1.schema.json"
 AUTHORIZATION_VERDICT_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/authorization_gate_verdict.v1.schema.json"
@@ -41,6 +44,7 @@ STATE_ORDER = {
 }
 
 PASS_STATUSES = {"PASS", "OK"}
+EXECUTION_ALLOWED_STATUSES = {"PASS", "BOOTSTRAP_PASS"}
 
 
 def _read_registry(repo_root: Path, relpath: str) -> Dict[str, Any]:
@@ -211,6 +215,13 @@ def _classification_map(repo_root: Path) -> Dict[str, Dict[str, Any]]:
     return by_id
 
 
+def _bootstrap_policy(repo_root: Path) -> Dict[str, Any]:
+    policy = _read_registry(repo_root, BOOTSTRAP_EXECUTION_POLICY_RELPATH)
+    if str(policy.get("bootstrap_execution_policy_id") or "").strip() != BOOTSTRAP_EXECUTION_POLICY_ID:
+        raise RuntimeError("BOOTSTRAP_EXECUTION_POLICY_ID_MISMATCH")
+    return policy
+
+
 def _gate_stack_rows(facts: Dict[str, Any]) -> List[Dict[str, Any]]:
     gate_stack_doc = facts.get("gate_stack_doc")
     if not isinstance(gate_stack_doc, dict):
@@ -296,17 +307,53 @@ def build_authorization_gate_verdict_doc(
     produced_utc: str,
     mode: str,
     lifecycle_doc: Dict[str, Any],
+    facts: Dict[str, Any],
     gate_rows: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
+    bootstrap_policy = _bootstrap_policy(repo_root)
     included = [row for row in gate_rows if row["included_in_authorization_verdict"]]
     excluded = [row for row in gate_rows if not row["included_in_authorization_verdict"]]
     blocking = [row for row in included if row["observed_status"] not in PASS_STATUSES]
+    bootstrap_mode_applied = False
+    bootstrap_allowed_missing_gates: List[str] = []
 
     status = "PASS" if not blocking else "FAIL"
     blocking_class = "NONE" if not blocking else str(blocking[0]["legacy_gate_class"] or "CLASS1_SYSTEM_HARD_STOP")
     reason_codes = ["AUTHORIZATION_GATES_PASS"] if status == "PASS" else [
         f"AUTHORIZATION_GATE_NOT_PASS:{row['gate_id']}:{row['observed_status']}" for row in blocking
     ]
+
+    lifecycle_state = str(lifecycle_doc.get("lifecycle_state") or "")
+    no_economic_truth = not any(bool(v) for v in facts["economic_presence"].values())
+    policy_rows = bootstrap_policy.get("states")
+    bootstrap_row: Optional[Dict[str, Any]] = None
+    if isinstance(policy_rows, list):
+        for row in policy_rows:
+            if isinstance(row, dict) and str(row.get("lifecycle_state") or "").strip() == lifecycle_state:
+                bootstrap_row = row
+                break
+
+    if status == "FAIL" and bootstrap_row is not None and lifecycle_state == "PRE_TRADE" and no_economic_truth:
+        bootstrap_allowed_missing_gates = sorted(
+            [str(x).strip() for x in (bootstrap_row.get("allowed_missing_authorization_gates") or []) if str(x).strip()]
+        )
+        required_passing = sorted(
+            [str(x).strip() for x in (bootstrap_row.get("required_passing_authorization_gates") or []) if str(x).strip()]
+        )
+        blocking_ids = sorted({str(row["gate_id"]) for row in blocking})
+        required_failures = [
+            row for row in included
+            if (str(row["gate_id"]) in required_passing) and (str(row["observed_status"]) not in PASS_STATUSES)
+        ]
+        if set(blocking_ids).issubset(set(bootstrap_allowed_missing_gates)) and not required_failures:
+            status = str(bootstrap_row.get("authorization_override_status") or "BOOTSTRAP_PASS").strip() or "BOOTSTRAP_PASS"
+            blocking_class = "CLASS3_CONTROLLED_DEGRADATION"
+            bootstrap_mode_applied = True
+            reason_codes = [
+                "BOOTSTRAP_EXECUTION_MODE_APPLIED",
+                *[f"BOOTSTRAP_ALLOWED_MISSING_GATE:{gate_id}" for gate_id in blocking_ids],
+            ]
+
     evidence_refs = [row["artifact_path"] for row in included if row["artifact_path"]]
     evidence_refs.append(_verdict_artifact_ref(truth_root, "lifecycle_state_authority_v1", day_utc, "lifecycle_state_authority.v1.json"))
 
@@ -315,6 +362,8 @@ def build_authorization_gate_verdict_doc(
         "schema_version": 1,
         "gate_classification_registry_id": GATE_CLASSIFICATION_REGISTRY_ID,
         "gate_classification_registry_version": GATE_CLASSIFICATION_REGISTRY_VERSION,
+        "bootstrap_execution_policy_id": BOOTSTRAP_EXECUTION_POLICY_ID,
+        "bootstrap_execution_policy_version": BOOTSTRAP_EXECUTION_POLICY_VERSION,
         "lifecycle_state_authority_ref": _verdict_artifact_ref(
             truth_root, "lifecycle_state_authority_v1", day_utc, "lifecycle_state_authority.v1.json"
         ),
@@ -351,6 +400,8 @@ def build_authorization_gate_verdict_doc(
         ],
         "status": status,
         "blocking_class": blocking_class,
+        "bootstrap_mode_applied": bootstrap_mode_applied,
+        "bootstrap_allowed_missing_gates": bootstrap_allowed_missing_gates,
         "reason_codes": reason_codes,
         "evidence_refs": sorted(set(evidence_refs)),
         "decision_ledger_ref": _verdict_artifact_ref(truth_root, "gate_decision_ledger_v1", day_utc, "gate_decision_ledger.v1.json"),
@@ -452,6 +503,8 @@ def build_gate_decision_ledger_doc(
         ),
         "gate_classification_registry_id": GATE_CLASSIFICATION_REGISTRY_ID,
         "gate_classification_registry_version": GATE_CLASSIFICATION_REGISTRY_VERSION,
+        "bootstrap_execution_policy_id": BOOTSTRAP_EXECUTION_POLICY_ID,
+        "bootstrap_execution_policy_version": BOOTSTRAP_EXECUTION_POLICY_VERSION,
         "authorization_verdict_ref": _verdict_artifact_ref(
             truth_root, "authorization_gate_verdict_v1", day_utc, "authorization_gate_verdict.v1.json"
         ),
@@ -525,6 +578,7 @@ def build_gate_authority_docs(
         produced_utc=produced_utc,
         mode=mode,
         lifecycle_doc=lifecycle_doc,
+        facts=facts,
         gate_rows=gate_rows,
     )
     economic_doc = build_economic_health_gate_verdict_doc(
@@ -584,6 +638,8 @@ def _internal_failure_docs(
         "schema_version": 1,
         "gate_classification_registry_id": GATE_CLASSIFICATION_REGISTRY_ID,
         "gate_classification_registry_version": GATE_CLASSIFICATION_REGISTRY_VERSION,
+        "bootstrap_execution_policy_id": BOOTSTRAP_EXECUTION_POLICY_ID,
+        "bootstrap_execution_policy_version": BOOTSTRAP_EXECUTION_POLICY_VERSION,
         "lifecycle_state_authority_ref": _verdict_artifact_ref(
             truth_root, "lifecycle_state_authority_v1", day_utc, "lifecycle_state_authority.v1.json"
         ),
@@ -595,6 +651,8 @@ def _internal_failure_docs(
         "blocking_gates": [],
         "status": "FAIL",
         "blocking_class": "CLASS1_SYSTEM_HARD_STOP",
+        "bootstrap_mode_applied": False,
+        "bootstrap_allowed_missing_gates": [],
         "reason_codes": [f"INTERNAL_FAILURE:{error_text}"],
         "evidence_refs": [tb],
         "decision_ledger_ref": _verdict_artifact_ref(truth_root, "gate_decision_ledger_v1", day_utc, "gate_decision_ledger.v1.json"),
@@ -627,6 +685,8 @@ def _internal_failure_docs(
         ),
         "gate_classification_registry_id": GATE_CLASSIFICATION_REGISTRY_ID,
         "gate_classification_registry_version": GATE_CLASSIFICATION_REGISTRY_VERSION,
+        "bootstrap_execution_policy_id": BOOTSTRAP_EXECUTION_POLICY_ID,
+        "bootstrap_execution_policy_version": BOOTSTRAP_EXECUTION_POLICY_VERSION,
         "authorization_verdict_ref": _verdict_artifact_ref(
             truth_root, "authorization_gate_verdict_v1", day_utc, "authorization_gate_verdict.v1.json"
         ),
