@@ -5,11 +5,11 @@ run_execution_stream_snapshot_day_v1.py
 Bundle 1 / Execution Observer (pull snapshot) v1 — hardened.
 
 Writes:
-  constellation_2/runtime/truth/execution_stream_v1/<DAY>/
+  <TRUTH_ROOT>/execution_stream_v1/<DAY>/
     <event_hash>.execution_event_stream_record.v1.json
 
 On failure, writes governed failure artifact:
-  constellation_2/runtime/truth/execution_stream_v1/failures/<DAY>/failure.json
+  <TRUTH_ROOT>/execution_stream_v1/failures/<DAY>/failure.json
 Schema:
   governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/execution_evidence_failure.v1.schema.json
 
@@ -28,25 +28,35 @@ import argparse
 import hashlib
 import json
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from typing import Any, Dict, List, Optional, Tuple
 
+from constellation_2.common.runtime_guardrails_v1 import classify_failure, format_failure_line
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
-
-
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
 SCHEMA_STREAM = "governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/execution_event_stream_record.v1.schema.json"
 SCHEMA_FAILURE = "governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/execution_evidence_failure.v1.schema.json"
 
-SUBMISSIONS_DAY_ROOT = (TRUTH / "execution_evidence_v1" / "submissions").resolve()
-OUT_ROOT = (TRUTH / "execution_stream_v1").resolve()
-FAIL_ROOT = (OUT_ROOT / "failures").resolve()
+SUBMISSIONS_DAY_ROOT: Path | None = None
+OUT_ROOT: Path | None = None
+FAIL_ROOT: Path | None = None
+
+
+def _require_truth_root(raw: str) -> Path:
+    p = Path(str(raw).strip()).expanduser().resolve()
+    if not p.is_absolute() or not p.exists() or not p.is_dir():
+        raise SystemExit(f"FAIL: invalid --truth_root: {p}")
+    return p
 
 
 def _git_sha() -> str:
@@ -150,14 +160,37 @@ def _write_failure(
 
 
 def _list_submission_dirs(day: str) -> List[Path]:
+    if SUBMISSIONS_DAY_ROOT is None:
+        raise RuntimeError("SUBMISSIONS_DAY_ROOT_UNSET")
     d = (SUBMISSIONS_DAY_ROOT / day).resolve()
     if not d.exists() or not d.is_dir():
         raise RuntimeError(f"MISSING_SUBMISSIONS_DAY_DIR: {d}")
     return sorted([p for p in d.iterdir() if p.is_dir()])
 
 
-def _build_orderid_index(day: str) -> Dict[str, Dict[str, Any]]:
-    idx: Dict[str, Dict[str, Any]] = {}
+def _order_qty_from_submission_dir(subdir: Path) -> int:
+    plan_p = (subdir / "equity_order_plan.v1.json").resolve()
+    if plan_p.exists():
+        plan = _read_json_obj(plan_p)
+        qty_any = plan.get("qty_shares")
+        if not isinstance(qty_any, int) or qty_any <= 0:
+            raise RuntimeError(f"EQUITY_ORDER_PLAN_QTY_INVALID: {plan_p}")
+        return int(qty_any)
+
+    order_plan_p = (subdir / "order_plan.v1.json").resolve()
+    if order_plan_p.exists():
+        plan = _read_json_obj(order_plan_p)
+        risk = plan.get("risk_proof") if isinstance(plan.get("risk_proof"), dict) else {}
+        qty_any = risk.get("contracts")
+        if not isinstance(qty_any, int) or qty_any <= 0:
+            raise RuntimeError(f"OPTIONS_ORDER_PLAN_CONTRACTS_INVALID: {order_plan_p}")
+        return int(qty_any)
+
+    raise RuntimeError(f"MISSING_SUPPORTED_PLAN_FOR_ORDER_QTY: {subdir}")
+
+
+def _submission_meta_rows(day: str) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
     for subdir in _list_submission_dirs(day):
         bsr_p = subdir / "broker_submission_record.v2.json"
         if not bsr_p.exists():
@@ -166,9 +199,10 @@ def _build_orderid_index(day: str) -> Dict[str, Dict[str, Any]]:
 
         submission_id = str(bsr.get("submission_id") or "").strip() or subdir.name
         binding_hash = str(bsr.get("binding_hash") or "").strip()
-
         broker = bsr.get("broker") if isinstance(bsr.get("broker"), dict) else {}
         env = str(broker.get("environment") or "PAPER").strip()
+        submitted_at_utc = str(bsr.get("submitted_at_utc") or "").strip()
+        status = str(bsr.get("status") or "UNKNOWN").strip().upper() or "UNKNOWN"
 
         engine_id = ""
         source_intent_id = ""
@@ -181,25 +215,55 @@ def _build_orderid_index(day: str) -> Dict[str, Dict[str, Any]]:
             source_intent_id = str(evt.get("source_intent_id") or "").strip()
             intent_sha256 = str(evt.get("intent_sha256") or "").strip()
 
-        if not engine_id or not source_intent_id or not intent_sha256:
-            plan_p = subdir / "equity_order_plan.v1.json"
+        order_qty = 0
+        plan_p = subdir / "equity_order_plan.v1.json"
+        if plan_p.exists():
+            plan = _read_json_obj(plan_p)
+            engine_id = engine_id or str(plan.get("engine_id") or "").strip()
+            source_intent_id = source_intent_id or str(plan.get("source_intent_id") or "").strip()
+            intent_sha256 = intent_sha256 or str(plan.get("intent_sha256") or "").strip()
+        else:
+            plan_p = subdir / "order_plan.v1.json"
             if plan_p.exists():
                 plan = _read_json_obj(plan_p)
                 engine_id = engine_id or str(plan.get("engine_id") or "").strip()
                 source_intent_id = source_intent_id or str(plan.get("source_intent_id") or "").strip()
                 intent_sha256 = intent_sha256 or str(plan.get("intent_sha256") or "").strip()
 
-        broker_ids = bsr.get("broker_ids") if isinstance(bsr.get("broker_ids"), dict) else {}
-        order_id = broker_ids.get("order_id")
-        perm_id = broker_ids.get("perm_id")
+        try:
+            order_qty = _order_qty_from_submission_dir(subdir)
+        except RuntimeError:
+            order_qty = 0
 
-        base = {
+        broker_ids = bsr.get("broker_ids") if isinstance(bsr.get("broker_ids"), dict) else {}
+        rows.append({
             "submission_id": submission_id,
             "binding_hash": binding_hash,
             "engine_id": engine_id,
             "source_intent_id": source_intent_id,
             "intent_sha256": intent_sha256,
             "broker_env": env,
+            "submitted_at_utc": submitted_at_utc,
+            "broker_status": status,
+            "order_id": broker_ids.get("order_id"),
+            "perm_id": broker_ids.get("perm_id"),
+            "order_qty": order_qty,
+        })
+    return rows
+
+
+def _build_orderid_index(day: str) -> Dict[str, Dict[str, Any]]:
+    idx: Dict[str, Dict[str, Any]] = {}
+    for meta in _submission_meta_rows(day):
+        order_id = meta.get("order_id")
+        perm_id = meta.get("perm_id")
+        base = {
+            "submission_id": meta["submission_id"],
+            "binding_hash": meta["binding_hash"],
+            "engine_id": meta["engine_id"],
+            "source_intent_id": meta["source_intent_id"],
+            "intent_sha256": meta["intent_sha256"],
+            "broker_env": meta["broker_env"],
         }
         if isinstance(order_id, int) and order_id >= 0:
             idx[f"order_id:{order_id}"] = base
@@ -211,6 +275,7 @@ def _build_orderid_index(day: str) -> Dict[str, Dict[str, Any]]:
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_execution_stream_snapshot_day_v1")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
+    ap.add_argument("--truth_root", required=True, help="Authoritative runtime truth root")
     ap.add_argument("--ib_host", default="127.0.0.1")
     ap.add_argument("--ib_port", type=int, default=4002)
     ap.add_argument("--ib_client_id", type=int, default=7)
@@ -219,6 +284,12 @@ def main() -> int:
     day = str(args.day_utc).strip()
     produced_utc = f"{day}T00:00:00Z"
     observed_at = _now_iso_z()
+
+    truth_root = _require_truth_root(args.truth_root)
+    global SUBMISSIONS_DAY_ROOT, OUT_ROOT, FAIL_ROOT
+    SUBMISSIONS_DAY_ROOT = (truth_root / "execution_evidence_v1" / "submissions").resolve()
+    OUT_ROOT = (truth_root / "execution_stream_v1").resolve()
+    FAIL_ROOT = (OUT_ROOT / "failures").resolve()
 
     out_day = (OUT_ROOT / day).resolve()
     out_day.mkdir(parents=True, exist_ok=True)
@@ -245,6 +316,61 @@ def main() -> int:
         )
         print(f"FAIL: {e}", file=sys.stderr)  # type: ignore[name-defined]
         return 2
+
+    synthetic_rows = [
+        row
+        for row in _submission_meta_rows(day)
+        if row.get("engine_id") and row.get("source_intent_id") and row.get("intent_sha256") and isinstance(row.get("order_qty"), int) and int(row.get("order_qty")) > 0
+    ]
+    if not idx and synthetic_rows:
+        wrote = 0
+        for meta in synthetic_rows:
+            event_hash = _event_hash_key([
+                day,
+                "ORDER_STATUS",
+                str(meta["submission_id"]),
+                "",
+                "",
+                str(meta.get("broker_status") or "UNKNOWN"),
+                "0",
+                "0",
+                "0",
+                str(meta.get("submitted_at_utc") or produced_utc),
+            ])
+            rec: Dict[str, Any] = {
+                "schema_id": "C2_EXECUTION_EVENT_STREAM_RECORD_V1",
+                "schema_version": 1,
+                "produced_utc": str(meta.get("submitted_at_utc") or produced_utc),
+                "day_utc": day,
+                "producer": {"repo": "constellation_2_runtime", "git_sha": _git_sha(), "module": "ops/tools/run_execution_stream_snapshot_day_v1.py"},
+                "status": "OK",
+                "reason_codes": ["DRY_RUN_SUBMISSION_SNAPSHOT"],
+                "submission_id": str(meta["submission_id"]),
+                "binding_hash": str(meta["binding_hash"]),
+                "engine_id": str(meta["engine_id"]),
+                "source_intent_id": str(meta["source_intent_id"]),
+                "intent_sha256": str(meta["intent_sha256"]),
+                "broker": {"name": "INTERACTIVE_BROKERS", "environment": str(meta.get("broker_env") or "PAPER")},
+                "event_type": "ORDER_STATUS",
+                "event_time_utc": str(meta.get("submitted_at_utc") or produced_utc),
+                "observed_at_utc": str(meta.get("submitted_at_utc") or produced_utc),
+                "broker_ids": {"order_id": None, "perm_id": None},
+                "order_state": {
+                    "status": str(meta.get("broker_status") or "UNKNOWN"),
+                    "filled_qty": 0,
+                    "remaining_qty": int(meta.get("order_qty") or 0),
+                    "avg_fill_price": "0",
+                },
+                "fill": {"fill_qty": 0, "fill_price": "0", "commission": "0", "currency": "USD"},
+                "canonical_json_hash": "",
+            }
+            rec["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(rec)
+            validate_against_repo_schema_v1(rec, REPO_ROOT, SCHEMA_STREAM)
+            out_path = (out_day / f"{event_hash}.execution_event_stream_record.v1.json").resolve()
+            _write_immutable(out_path, canonical_json_bytes_v1(rec) + b"\n")
+            wrote += 1
+        print(f"OK: EXECUTION_STREAM_SNAPSHOT_WRITTEN day={day} wrote={wrote} out_dir={out_day}")
+        return 0
 
     # Import ib_insync
     try:
@@ -463,5 +589,12 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    import sys
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except Exception as exc:  # noqa: BLE001
+        print(format_failure_line(
+            "run_execution_stream_snapshot_day_v1",
+            classify_failure(exc),
+            error=repr(exc),
+        ), file=sys.stderr)
+        raise SystemExit(2)

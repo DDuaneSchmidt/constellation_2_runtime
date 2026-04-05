@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/runtime_trace_bundle.v1.schema.json",
+  "title": "runtime_trace_bundle.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "day_utc",
+    "source_truth_root",
+    "submission_id",
+    "artifacts",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": {"const": "C2_RUNTIME_TRACE_BUNDLE_V1"},
+    "schema_version": {"type": "integer", "const": 1},
+    "produced_utc": {"type": "string", "format": "date-time"},
+    "day_utc": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+    "source_truth_root": {"type": "string", "minLength": 1},
+    "submission_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["stage", "artifact_type", "path", "sha256"],
+        "properties": {
+          "stage": {"type": "string", "enum": ["allocation", "authorization", "submission", "execution_stream", "fill_ledger"]},
+          "artifact_type": {"type": "string", "minLength": 1},
+          "path": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "producer": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "canonical_json_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

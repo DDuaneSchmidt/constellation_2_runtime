@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisor_bridge/advisor_trade_intent_proposal.v1.schema.json",
+  "title": "advisor_trade_intent_proposal.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "run_id",
+    "proposal_id",
+    "planning_snapshot_id",
+    "decision_plan_id",
+    "decision_action_id",
+    "translation_status",
+    "proposal_class",
+    "source_account",
+    "proposed_amount_cents",
+    "periodicity",
+    "rationale_refs",
+    "evidence_refs",
+    "notes"
+  ],
+  "properties": {
+    "schema_id": {"const": "advisor_trade_intent_proposal"},
+    "schema_version": {"const": "v1"},
+    "produced_utc": {"type": "string", "minLength": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "proposal_id": {"type": "string", "minLength": 1},
+    "planning_snapshot_id": {"type": "string", "minLength": 1},
+    "decision_plan_id": {"type": "string", "minLength": 1},
+    "decision_action_id": {"type": "string", "minLength": 1},
+    "translation_status": {"type": "string", "enum": ["proposed", "blocked", "non_trade_action"]},
+    "proposal_class": {"type": "string", "enum": ["withdrawal_candidate"]},
+    "source_account": {"type": "string", "minLength": 1},
+    "proposed_amount_cents": {"type": "integer", "minimum": 1},
+    "periodicity": {"type": "string", "enum": ["annual", "monthly", "none"]},
+    "rationale_refs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "evidence_refs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "notes": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  }
+}

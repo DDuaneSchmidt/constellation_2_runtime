@@ -8,8 +8,16 @@ from pathlib import Path
 from typing import Any, Dict, List
 from constellation_2.common.truth_root_v1 import resolve_truth_root
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+REPO_ROOT = Path(__file__).resolve().parents[2]
 TRUTH_ROOT = resolve_truth_root(repo_root=REPO_ROOT)
+
+def _require_truth_root(raw: str | None) -> Path:
+    if raw is None or not str(raw).strip():
+        return TRUTH_ROOT
+    p = Path(str(raw).strip()).expanduser().resolve()
+    if not p.is_absolute() or (not p.exists()) or (not p.is_dir()):
+        raise SystemExit(f"FAIL: invalid --truth_root: {p}")
+    return p
 
 def _sha256_file(p: Path) -> str:
     h = hashlib.sha256()
@@ -155,7 +163,11 @@ def main() -> int:
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
     ap.add_argument("--producer_repo", default="constellation_2_runtime")
     ap.add_argument("--producer_git_sha", required=True)
+    ap.add_argument("--truth_root", required=False)
     args = ap.parse_args()
+
+    global TRUTH_ROOT
+    TRUTH_ROOT = _require_truth_root(args.truth_root)
 
     day = str(args.day_utc).strip()
 

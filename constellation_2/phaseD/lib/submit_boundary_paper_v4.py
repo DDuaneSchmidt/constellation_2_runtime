@@ -38,6 +38,7 @@ DRY RUN:
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -65,6 +66,7 @@ from constellation_2.phaseD.lib.lineage_assert_v1 import (
     assert_required_lineage_fields,
 )
 from constellation_2.phaseD.lib.risk_budget_gate_v1 import enforce_risk_budget_against_whatif_v1
+from constellation_2.common.truth_root_v1 import resolve_truth_root
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
 
@@ -145,20 +147,12 @@ def _require_path_under_repo(repo_root: Path, p: Path) -> None:
 
 def _resolve_truth_root_for_phasec_out_dir(repo_root: Path, phasec_out_dir: Path) -> Path:
     rr = repo_root.resolve()
-    p = phasec_out_dir.resolve()
+    _ = phasec_out_dir.resolve()
+    return resolve_truth_root(repo_root=rr)
 
-    sleeves_root = (rr / "constellation_2/runtime/truth_sleeves").resolve()
-    try:
-        rel = p.relative_to(sleeves_root)
-        parts = rel.parts
-        # truth_sleeves/<sleeve_id>/<mode>/phaseC_preflight_v1/<day_utc>/<intent_hash>
-        if len(parts) >= 5 and parts[2] == "phaseC_preflight_v1":
-            candidate = (sleeves_root / parts[0] / parts[1]).resolve()
-            return candidate
-    except Exception:
-        pass
 
-    return (rr / "constellation_2/runtime/truth").resolve()
+def _broker_transmit_enabled() -> bool:
+    return str(os.environ.get("C2_ENABLE_BROKER_TRANSMIT") or "").strip().upper() == "YES"
 
 
 def _read_authority_head(truth_root: Path, day: str) -> Path:
@@ -603,7 +597,8 @@ def run_submit_boundary_paper_v4(
         if ks_state != "INACTIVE" or not ks_allow_entries:
             raise SubmitBoundaryV4Error(f"{RC_KILL_SWITCH_ACTIVE}: state={ks_state} allow_entries={ks_allow_entries}")
 
-        az_status, az_decision, az_qty, az_sha, az_path = _read_authorization(truth_root, day, intent_hash)
+        az_lookup_hash = str(getattr(lineage, "intent_sha256", "") or intent_hash).strip()
+        az_status, az_decision, az_qty, az_sha, az_path = _read_authorization(truth_root, day, az_lookup_hash)
         pointers.append(str(az_path))
         if az_status != "AUTHORIZED" or az_decision != "AUTHORIZED" or az_qty <= 0:
             raise SubmitBoundaryV4Error(
@@ -667,8 +662,6 @@ def run_submit_boundary_paper_v4(
     submission_dir = (day_dir / submission_id).resolve()
     submission_dir.mkdir(parents=True, exist_ok=False)
 
-    risk_budget = _read_json_file(risk_budget_path.resolve())
-
     if mode == "OPTIONS":
         _payload_obj, _dig = build_binding_digest_for_order_plan_v1(plan_obj)
     else:
@@ -703,10 +696,18 @@ def run_submit_boundary_paper_v4(
         )
         return 0
 
+    if not _broker_transmit_enabled():
+        raise SubmitBoundaryV4Error(
+            "BROKER_TRANSMIT_DISABLED: "
+            "set C2_ENABLE_BROKER_TRANSMIT=YES for explicit broker submission enablement"
+        )
+
     adapter = IBPaperAdapterV2(conn=BrokerConnectionSpec(host=ib_host, port=ib_port, client_id=ib_client_id), env="PAPER")
 
     try:
         adapter.connect()
+
+        risk_budget = _read_json_file(risk_budget_path.resolve())
 
         whatif = adapter.whatif_order(order_plan=plan_obj)
 

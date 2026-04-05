@@ -16,9 +16,6 @@ from constellation_2.phaseF.cash_ledger.lib.paths_v1 import REPO_ROOT, day_paths
 SCHEMA_RELPATH_SNAPSHOT = "governance/04_DATA/SCHEMAS/C2/CASH_LEDGER/cash_ledger_snapshot.v1.schema.json"
 SCHEMA_RELPATH_FAILURE = "governance/04_DATA/SCHEMAS/C2/CASH_LEDGER/cash_ledger_failure.v1.schema.json"
 
-# Canonical failure artifact path convention (new, governed)
-FAIL_ROOT = (REPO_ROOT / "constellation_2/runtime/truth/cash_ledger_v1/failures").resolve()
-
 
 def _sha256_file(path: Path) -> str:
     import hashlib
@@ -139,7 +136,7 @@ def _build_failure_obj_v1(
 def _write_failure_or_die(failure: Dict[str, Any], day_utc: str) -> None:
     validate_against_repo_schema_v1(failure, REPO_ROOT, SCHEMA_RELPATH_FAILURE)
     b = canonical_json_bytes_v1(failure) + b"\n"
-    out_path = (FAIL_ROOT / day_utc / "failure.json").resolve()
+    out_path = day_paths_v1(day_utc).failure_path
     try:
         _ = write_file_immutable_v1(path=out_path, data=b, create_dirs=True)
     except ImmutableWriteError as e:

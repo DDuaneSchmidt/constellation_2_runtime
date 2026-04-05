@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisor_execution/action_sizing_rule.v1.schema.json",
+  "title": "action_sizing_rule.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "rule_id",
+    "domain_id",
+    "action_type",
+    "rule_key",
+    "annual_amount_mode",
+    "periodic_amount_mode",
+    "periodicity"
+  ],
+  "properties": {
+    "rule_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "domain_id": {
+      "type": "string",
+      "enum": [
+        "liquidity",
+        "withdrawal",
+        "annuity",
+        "tax"
+      ]
+    },
+    "action_type": {
+      "type": "string",
+      "enum": [
+        "raise_cash_reserve",
+        "withdraw_from_taxable",
+        "hold_annuity",
+        "collect_missing_input"
+      ]
+    },
+    "rule_key": {
+      "type": "string",
+      "enum": [
+        "liquidity_12_month_minimum",
+        "withdrawal_required_income",
+        "annuity_hold",
+        "tax_gating"
+      ]
+    },
+    "annual_amount_mode": {
+      "type": "string",
+      "enum": [
+        "gap_to_12_month_minimum",
+        "required_income_annualized",
+        "zero",
+        "not_applicable"
+      ]
+    },
+    "periodic_amount_mode": {
+      "type": "string",
+      "enum": [
+        "gap_to_12_month_minimum",
+        "required_income_monthly",
+        "zero",
+        "not_applicable"
+      ]
+    },
+    "periodicity": {
+      "type": "string",
+      "enum": [
+        "annual",
+        "monthly",
+        "none"
+      ]
+    }
+  }
+}

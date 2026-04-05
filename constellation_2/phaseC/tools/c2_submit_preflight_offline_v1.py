@@ -14,6 +14,7 @@ Consumes:
 Requires:
 - --tick_size
 Produces:
+- options_intent.v2.json
 - order_plan.v1.json
 - mapping_ledger_record.v1.json
 - binding_record.v1.json
@@ -33,6 +34,7 @@ Produces:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -81,6 +83,70 @@ def _write_veto_only_failclosed(out_dir: Path, veto: Dict[str, Any]) -> int:
         return 3
     print(f"FAIL: VETO: {veto.get('reason_code')} :: {veto.get('reason_detail')}")
     return 2
+
+
+def _sha256_file_bytes(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _rebuild_options_identity_set_with_lineage(
+    *,
+    repo_root: Path,
+    intent_path: Path,
+    intent: Dict[str, Any],
+    order_plan: Dict[str, Any],
+    mapping_ledger_record: Dict[str, Any],
+    binding_record: Dict[str, Any],
+) -> tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    engine = intent.get("engine")
+    engine_id = str(engine.get("engine_id") or "").strip() if isinstance(engine, dict) else ""
+    source_intent_id = str(intent.get("intent_id") or "").strip()
+    intent_sha256 = _sha256_file_bytes(intent_path)
+    if not engine_id:
+        raise RuntimeError("OPTIONS_INTENT_ENGINE_ID_MISSING")
+    if not source_intent_id:
+        raise RuntimeError("OPTIONS_INTENT_ID_MISSING")
+
+    plan = dict(order_plan)
+    plan["engine_id"] = engine_id
+    plan["source_intent_id"] = source_intent_id
+    plan["intent_sha256"] = intent_sha256
+    plan["canonical_json_hash"] = None
+    plan["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(plan)
+    validate_against_repo_schema_v1(plan, repo_root, "constellation_2/schemas/order_plan.v1.schema.json")
+    plan_hash = canonical_hash_for_c2_artifact_v1(plan)
+
+    mapping = dict(mapping_ledger_record)
+    mapping["plan_hash"] = plan_hash
+    mapping_seed = {
+        "kind": "mapping_ledger_id_seed_v1",
+        "plan_hash": plan_hash,
+        "intent_hash": mapping["intent_hash"],
+        "chain_snapshot_hash": mapping["chain_snapshot_hash"],
+        "freshness_cert_hash": mapping["freshness_cert_hash"],
+    }
+    mapping["record_id"] = canonical_hash_for_c2_artifact_v1(mapping_seed)
+    mapping["canonical_json_hash"] = None
+    mapping["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(mapping)
+    validate_against_repo_schema_v1(mapping, repo_root, "constellation_2/schemas/mapping_ledger_record.v1.schema.json")
+    mapping_hash = canonical_hash_for_c2_artifact_v1(mapping)
+
+    binding = dict(binding_record)
+    binding["plan_hash"] = plan_hash
+    binding["mapping_ledger_hash"] = mapping_hash
+    binding_seed = {
+        "kind": "binding_id_seed_v1",
+        "plan_hash": plan_hash,
+        "mapping_ledger_hash": mapping_hash,
+        "freshness_cert_hash": binding["freshness_cert_hash"],
+        "broker_digest": binding["broker_payload_digest"]["digest_sha256"],
+    }
+    binding["binding_id"] = canonical_hash_for_c2_artifact_v1(binding_seed)
+    binding["canonical_json_hash"] = None
+    binding["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(binding)
+    validate_against_repo_schema_v1(binding, repo_root, "constellation_2/schemas/binding_record.v1.schema.json")
+
+    return plan, mapping, binding
 
 
 def _mk_submit_veto_minimal(*, eval_time_utc: str, reason_detail: str, pointers: List[str]) -> Dict[str, Any]:
@@ -185,6 +251,23 @@ def main(argv: Optional[List[str]] = None) -> int:
         mapping_ledger_record = res.mapping_ledger_record
         binding_record = res.binding_record
 
+        try:
+            order_plan, mapping_ledger_record, binding_record = _rebuild_options_identity_set_with_lineage(
+                repo_root=REPO_ROOT,
+                intent_path=p_intent,
+                intent=intent,
+                order_plan=order_plan,
+                mapping_ledger_record=mapping_ledger_record,
+                binding_record=binding_record,
+            )
+        except (RuntimeError, SchemaValidationError) as e:
+            veto = _mk_submit_veto_minimal(
+                eval_time_utc=args.eval_time_utc,
+                reason_detail=f"Phase C lineage injection failed: {e}",
+                pointers=pointers,
+            )
+            return _write_veto_only_failclosed(out_dir, veto)
+
         decision, veto = evaluate_submit_preflight_offline_v1(
             REPO_ROOT,
             intent=intent,
@@ -202,6 +285,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         try:
             write_phasec_success_outputs_options_v1(
                 out_dir,
+                options_intent=intent,
                 order_plan=order_plan,
                 mapping_ledger_record=mapping_ledger_record,
                 binding_record=binding_record,

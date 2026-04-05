@@ -133,6 +133,13 @@ def _maybe_copy_identity_file(*, src_dir: Path, dst_dir: Path, filename: str) ->
     return {"path": str(dst_dir / filename), "sha256": wr.sha256}
 
 
+def _existing_identity_file_ptr(*, src_dir: Path, filename: str) -> Optional[Dict[str, Any]]:
+    p_src = (src_dir / filename).resolve()
+    if not p_src.exists() or not p_src.is_file():
+        return None
+    return {"path": str(p_src), "sha256": _sha256_file(p_src)}
+
+
 def _validate_manifest_any_version(obj: Dict[str, Any]) -> Tuple[str, int]:
     sid = str(obj.get("schema_id") or "").strip()
     sver = int(obj.get("schema_version") or 0)
@@ -398,49 +405,76 @@ def main(argv: List[str] | None = None) -> int:
             continue
 
         final_dir = submission_artifact_dir_v1(day_utc=day_utc, submission_id=submission_id)
-        tmp_dir = _canonical_tmp_dir(dp, submission_id)
-        tmp_dir.mkdir(parents=True, exist_ok=False)
+        source_is_authoritative = sd.resolve() == final_dir.resolve()
+        tmp_dir = None if source_is_authoritative else _canonical_tmp_dir(dp, submission_id)
+        if tmp_dir is not None:
+            tmp_dir.mkdir(parents=True, exist_ok=False)
 
         try:
-            # Mirror auth binding
-            wr_auth = write_file_immutable_v1(path=tmp_dir / "authorization_binding_record.v1.json", data=p_auth.read_bytes(), create_dirs=True)
+            wr_broker_sha = None
+            wr_exec_sha = None
+            wr_veto_sha = None
 
-            wr_broker = None
-            wr_exec = None
-            wr_veto = None
-            wr_noexec = None
-
-            if has_veto:
-                wr_veto = write_file_immutable_v1(path=tmp_dir / "veto_record.v1.json", data=p_veto.read_bytes(), create_dirs=True)
-            else:
-                wr_broker = write_file_immutable_v1(path=tmp_dir / "broker_submission_record.v2.json", data=p_broker.read_bytes(), create_dirs=True)
-                if has_exec:
-                    wr_exec = write_file_immutable_v1(path=tmp_dir / "execution_event_record.v1.json", data=p_exec.read_bytes(), create_dirs=True)
+            if source_is_authoritative:
+                if has_veto:
+                    wr_veto_sha = _sha256_file(p_veto)
                 else:
-                    noexec_obj = _write_no_execution_event(
-                        day_utc=day_utc,
-                        submission_id=submission_id,
-                        reason_code="NO_EXECUTION_EVENT_PRESENT_IN_PHASED",
-                        reason_detail=f"PhaseD submission dir missing execution_event_record: {str(sd)}",
-                    )
-                    wr_noexec = write_file_immutable_v1(path=tmp_dir / "no_execution_event.v1.json", data=canonical_json_bytes_v1(noexec_obj) + b"\n", create_dirs=True)
-                    status = "DEGRADED_MISSING_EXECUTION_EVENT"
-                    if "MISSING_EXECUTION_EVENT" not in reason_codes:
-                        reason_codes.append("MISSING_EXECUTION_EVENT")
+                    wr_broker_sha = _sha256_file(p_broker)
+                    if has_exec:
+                        wr_exec_sha = _sha256_file(p_exec)
+                    else:
+                        noexec_obj = _write_no_execution_event(
+                            day_utc=day_utc,
+                            submission_id=submission_id,
+                            reason_code="NO_EXECUTION_EVENT_PRESENT_IN_PHASED",
+                            reason_detail=f"PhaseD submission dir missing execution_event_record: {str(sd)}",
+                        )
+                        _ = write_file_immutable_v1(path=final_dir / "no_execution_event.v1.json", data=canonical_json_bytes_v1(noexec_obj) + b"\n", create_dirs=True)
+                        status = "DEGRADED_MISSING_EXECUTION_EVENT"
+                        if "MISSING_EXECUTION_EVENT" not in reason_codes:
+                            reason_codes.append("MISSING_EXECUTION_EVENT")
 
-            # Mirror identity inputs when present
-            ptr_plan_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="order_plan.v1.json")
-            ptr_equity_plan_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="equity_order_plan.v1.json")
-            ptr_bind_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="binding_record.v1.json")
-            ptr_bind_v2 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="binding_record.v2.json")
-            ptr_map_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="mapping_ledger_record.v1.json")
-            ptr_map_v2 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="mapping_ledger_record.v2.json")
+                ptr_plan_v1 = _existing_identity_file_ptr(src_dir=sd, filename="order_plan.v1.json")
+                ptr_equity_plan_v1 = _existing_identity_file_ptr(src_dir=sd, filename="equity_order_plan.v1.json")
+                ptr_bind_v1 = _existing_identity_file_ptr(src_dir=sd, filename="binding_record.v1.json")
+                ptr_bind_v2 = _existing_identity_file_ptr(src_dir=sd, filename="binding_record.v2.json")
+                ptr_map_v1 = _existing_identity_file_ptr(src_dir=sd, filename="mapping_ledger_record.v1.json")
+                ptr_map_v2 = _existing_identity_file_ptr(src_dir=sd, filename="mapping_ledger_record.v2.json")
+            else:
+                _ = write_file_immutable_v1(path=tmp_dir / "authorization_binding_record.v1.json", data=p_auth.read_bytes(), create_dirs=True)
 
-            manifest_ptr_plan = ptr_plan_v1
+                if has_veto:
+                    wr_veto = write_file_immutable_v1(path=tmp_dir / "veto_record.v1.json", data=p_veto.read_bytes(), create_dirs=True)
+                    wr_veto_sha = wr_veto.sha256
+                else:
+                    wr_broker = write_file_immutable_v1(path=tmp_dir / "broker_submission_record.v2.json", data=p_broker.read_bytes(), create_dirs=True)
+                    wr_broker_sha = wr_broker.sha256
+                    if has_exec:
+                        wr_exec = write_file_immutable_v1(path=tmp_dir / "execution_event_record.v1.json", data=p_exec.read_bytes(), create_dirs=True)
+                        wr_exec_sha = wr_exec.sha256
+                    else:
+                        noexec_obj = _write_no_execution_event(
+                            day_utc=day_utc,
+                            submission_id=submission_id,
+                            reason_code="NO_EXECUTION_EVENT_PRESENT_IN_PHASED",
+                            reason_detail=f"PhaseD submission dir missing execution_event_record: {str(sd)}",
+                        )
+                        _ = write_file_immutable_v1(path=tmp_dir / "no_execution_event.v1.json", data=canonical_json_bytes_v1(noexec_obj) + b"\n", create_dirs=True)
+                        status = "DEGRADED_MISSING_EXECUTION_EVENT"
+                        if "MISSING_EXECUTION_EVENT" not in reason_codes:
+                            reason_codes.append("MISSING_EXECUTION_EVENT")
+
+                ptr_plan_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="order_plan.v1.json")
+                ptr_equity_plan_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="equity_order_plan.v1.json")
+                ptr_bind_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="binding_record.v1.json")
+                ptr_bind_v2 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="binding_record.v2.json")
+                ptr_map_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="mapping_ledger_record.v1.json")
+                ptr_map_v2 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="mapping_ledger_record.v2.json")
+                _atomic_publish_dir(tmp_dir, final_dir)
+
+            manifest_ptr_plan = ptr_plan_v1 if ptr_plan_v1 is not None else ptr_equity_plan_v1
             manifest_ptr_bind = ptr_bind_v1 if ptr_bind_v1 is not None else ptr_bind_v2
             manifest_ptr_map = ptr_map_v1 if ptr_map_v1 is not None else ptr_map_v2
-
-            _atomic_publish_dir(tmp_dir, final_dir)
 
             input_manifest = [{"type": "phaseD_submission_dir", "path": str(sd), "sha256": "0" * 64, "day_utc": day_utc, "producer": "phaseD"}]
 
@@ -457,9 +491,9 @@ def main(argv: List[str] | None = None) -> int:
                     "submission_id": submission_id,
                     "source_dir": str(sd),
                     "artifact_dir": str(final_dir),
-                    "broker_submission_record": None if wr_broker is None else {"path": str(final_dir / "broker_submission_record.v2.json"), "sha256": wr_broker.sha256},
-                    "execution_event_record": None if wr_exec is None else {"path": str(final_dir / "execution_event_record.v1.json"), "sha256": wr_exec.sha256},
-                    "veto_record": None if wr_veto is None else {"path": str(final_dir / "veto_record.v1.json"), "sha256": wr_veto.sha256},
+                    "broker_submission_record": None if wr_broker_sha is None else {"path": str(final_dir / "broker_submission_record.v2.json"), "sha256": wr_broker_sha},
+                    "execution_event_record": None if wr_exec_sha is None else {"path": str(final_dir / "execution_event_record.v1.json"), "sha256": wr_exec_sha},
+                    "veto_record": None if wr_veto_sha is None else {"path": str(final_dir / "veto_record.v1.json"), "sha256": wr_veto_sha},
                     "order_plan": manifest_ptr_plan,
                     "binding_record": manifest_ptr_bind,
                     "mapping_ledger_record": manifest_ptr_map,
@@ -522,7 +556,7 @@ def main(argv: List[str] | None = None) -> int:
 
         except Exception as e:  # noqa: BLE001
             try:
-                if tmp_dir.exists() and tmp_dir.is_dir():
+                if tmp_dir is not None and tmp_dir.exists() and tmp_dir.is_dir():
                     for p in tmp_dir.rglob("*"):
                         if p.is_file():
                             p.unlink()

@@ -232,10 +232,11 @@ def _source_probe_paths(truth_root: Path, day_utc: str) -> Dict[str, Any]:
         "authorization_root": (truth_root / "engine_activity_v1" / "authorization_v1" / day_utc).resolve(),
         "submissions_root": submissions_root,
         "submission_fact_root": submission_fact_root,
-        "execution_stream_root": (truth_root / "execution_stream_fact_ledger_v1" / day_utc).resolve(),
+        "execution_stream_root": (truth_root / "execution_stream_v1" / day_utc).resolve(),
         "fill_ledger_root": (truth_root / "fill_ledger_v1" / day_utc).resolve(),
         "positions_snapshot": (truth_root / "positions_v1" / "snapshots" / day_utc / "positions_snapshot.v2.json").resolve(),
         "cash_ledger_snapshot": (truth_root / "cash_ledger_v1" / "snapshots" / day_utc / "cash_ledger_snapshot.v1.json").resolve(),
+        "raw_broker_statement": (truth_root / "operator_inputs" / "raw_broker_statements" / day_utc / "broker_statement_raw.v1.json").resolve(),
         "broker_statement_normalized": (truth_root / "execution_evidence_v1" / "broker_statement_normalized_v1" / day_utc / "broker_statement_normalized.v1.json").resolve(),
         "broker_marks": (truth_root / "market_data_snapshot_v1" / "broker_marks_v1" / day_utc / "broker_marks.v1.json").resolve(),
         "accounting_nav": (truth_root / "accounting_v2" / "nav" / day_utc / "nav.v2.json").resolve(),
@@ -260,13 +261,13 @@ def collect_execution_truth_facts(repo_root: Path, truth_root: Path, day_utc: st
     day_rollup_probe = _probe_json(repo_root, paths["day_rollup"], ROLLUP_SCHEMA)
     auth_paths = _list_json_paths(paths["authorization_root"], "*.authorization.v1.json")
     intent_snapshot_paths = _list_json_paths(paths["intent_snapshot_glob_root"], "*.exposure_intent.v1.json")
-    execution_stream_paths = _list_json_paths(paths["execution_stream_root"], "*.execution_event_stream_record_admitted_fact.v1.json")
+    execution_stream_paths = _list_json_paths(paths["execution_stream_root"], "*.execution_event_stream_record.v1.json")
     fill_ledger_paths = _list_json_paths(paths["fill_ledger_root"], "*.fill_ledger.v1.json")
     submission_dirs = _submission_dirs(paths["submissions_root"])
     submission_fact_dirs = _submission_dirs(paths["submission_fact_root"])
-    repo_input_root = (repo_root / "constellation_2" / "operator_inputs").resolve()
-    operator_statement_path = (repo_input_root / "cash_ledger_operator_statements" / day_utc / "operator_statement.v1.json").resolve()
-    broker_marks_override_path = (repo_input_root / "broker_marks_operator_overrides" / day_utc / "broker_marks_override.v1.json").resolve()
+    operator_input_root = (truth_root / "operator_inputs").resolve()
+    operator_statement_path = (operator_input_root / "cash_ledger_operator_statements" / day_utc / "operator_statement.v1.json").resolve()
+    broker_marks_override_path = (operator_input_root / "broker_marks_operator_overrides" / day_utc / "broker_marks_override.v1.json").resolve()
     explanatory_refs: List[str] = []
     for _, (relpattern, schema_relpath) in EXPLANATORY_ARTIFACTS.items():
         probe = _probe_json(repo_root, (truth_root / relpattern.format(day=day_utc)).resolve(), schema_relpath)
@@ -578,6 +579,83 @@ def _fill_ledger_input_probe(repo_root: Path, facts: Dict[str, Any]) -> FamilyPr
     )
 
 
+def _intents_day_rollup_linkage_probe(repo_root: Path, facts: Dict[str, Any]) -> FamilyProbe:
+    rollup_probe: JsonProbe = facts['day_rollup_probe']
+    intent_paths = [Path(p) for p in facts.get('intent_snapshot_paths', [])]
+    observed_paths: List[str] = []
+    if rollup_probe.present:
+        observed_paths.append(str(rollup_probe.path))
+    observed_paths.extend(str(p.resolve()) for p in intent_paths)
+
+    if not rollup_probe.present:
+        return FamilyProbe(
+            family='intents_day_rollup_linkage',
+            observed_paths=tuple(sorted(set(observed_paths))),
+            record_count=0,
+            schema_validation_status=rollup_probe.error_code or 'MISSING_ARTIFACT',
+            completeness_status='MISSING_ARTIFACT',
+            missing_required_fields=('engines', 'engines.intent_hashes'),
+            missing_join_critical_fields=('engines.intent_hashes', 'intent_snapshot.intent_hash'),
+            downstream_stage_blockers=('INTENT_EMITTED',),
+            notes=tuple(),
+        )
+
+    if not rollup_probe.valid:
+        return FamilyProbe(
+            family='intents_day_rollup_linkage',
+            observed_paths=tuple(sorted(set(observed_paths))),
+            record_count=max(len(intent_paths), 1),
+            schema_validation_status=rollup_probe.error_code or 'SCHEMA_MISMATCH',
+            completeness_status='SCHEMA_MISMATCH',
+            missing_required_fields=tuple(),
+            missing_join_critical_fields=('engines.intent_hashes', 'intent_snapshot.intent_hash'),
+            downstream_stage_blockers=('INTENT_EMITTED',),
+            notes=('schema_validation_failed',),
+        )
+
+    rollup_doc = rollup_probe.doc or {}
+    engines = rollup_doc.get('engines')
+    expected_hashes: List[str] = []
+    if isinstance(engines, list):
+        for engine in engines:
+            if not isinstance(engine, dict):
+                continue
+            hashes = engine.get('intent_hashes')
+            if isinstance(hashes, list):
+                expected_hashes.extend(str(x).strip() for x in hashes if str(x).strip())
+
+    actual_hashes = sorted({p.name.split('.', 1)[0] for p in intent_paths})
+    missing_join: List[str] = []
+    notes: List[str] = []
+    completeness_status = 'COMPLETE'
+
+    if not expected_hashes:
+        completeness_status = 'AGGREGATE_ONLY_NO_LINKAGE'
+        missing_join.append('engines.intent_hashes')
+        notes.append('rollup_missing_intent_hash_linkage')
+    else:
+        missing_expected = sorted(set(expected_hashes) - set(actual_hashes))
+        extra_actual = sorted(set(actual_hashes) - set(expected_hashes))
+        if missing_expected or extra_actual:
+            completeness_status = 'MISSING_JOIN_CRITICAL_FIELDS'
+            if missing_expected:
+                missing_join.append('intent_snapshot.intent_hash')
+            if extra_actual:
+                missing_join.append('engines.intent_hashes')
+            notes.append('rollup_snapshot_linkage_mismatch')
+
+    return FamilyProbe(
+        family='intents_day_rollup_linkage',
+        observed_paths=tuple(sorted(set(observed_paths))),
+        record_count=max(len(actual_hashes), len(expected_hashes), 1),
+        schema_validation_status='VALID',
+        completeness_status=completeness_status,
+        missing_required_fields=tuple(),
+        missing_join_critical_fields=tuple(sorted(set(missing_join))),
+        downstream_stage_blockers=('INTENT_EMITTED',),
+        notes=tuple(sorted(set(notes))),
+    )
+
 def build_payload_probes(repo_root: Path, truth_root: Path, day_utc: str, facts: Dict[str, Any]) -> Dict[str, FamilyProbe]:
     paths = facts["paths"]
     probes = {
@@ -600,10 +678,10 @@ def build_payload_probes(repo_root: Path, truth_root: Path, day_utc: str, facts:
             join_fields=["engine_id", "intent_id", "intent_hash", "authorization.decision_hash"],
             downstream_stage_blockers=["AUTHORIZATION_COMPLETE"],
         ),
-        "broker_submission_record": _family_probe_from_admitted_fact_paths(
+        "broker_submission_record": _family_probe_from_json_paths(
             repo_root=repo_root,
             family="broker_submission_record",
-            paths=[(Path(p) / "broker_submission_record_admitted_fact.v1.json").resolve() for p in facts.get("submission_fact_dirs", []) if (Path(p) / "broker_submission_record_admitted_fact.v1.json").exists()],
+            paths=[(Path(p) / "broker_submission_record.v2.json").resolve() for p in facts.get("submission_dirs", []) if (Path(p) / "broker_submission_record.v2.json").exists()],
             schema_relpath=BROKER_SUBMISSION_SCHEMA,
             required_fields=["submission_id", "submitted_at_utc", "binding_hash", "broker_ids.order_id", "broker_ids.perm_id"],
             join_fields=["submission_id", "binding_hash", "broker_ids.order_id", "broker_ids.perm_id"],
@@ -618,7 +696,7 @@ def build_payload_probes(repo_root: Path, truth_root: Path, day_utc: str, facts:
             join_fields=["binding_hash", "broker_submission_hash", "broker_order_id", "perm_id"],
             downstream_stage_blockers=["EXECUTION_STREAM_COMPLETE", "FILL_COMPLETE", "POSITIONS"],
         ),
-        "execution_stream": _family_probe_from_admitted_fact_paths(
+        "execution_stream": _family_probe_from_json_paths(
             repo_root=repo_root,
             family="execution_stream",
             paths=[Path(p) for p in facts.get("execution_stream_paths", [])],
@@ -775,12 +853,8 @@ def _stage_policy_map(policy: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return out
 
 
-def _find_broker_raw_input(repo_root: Path, day_utc: str) -> Optional[Path]:
-    root = (repo_root / "constellation_2" / "operator_inputs").resolve()
-    if not root.exists() or not root.is_dir():
-        return None
-    matches = sorted([p.resolve() for p in root.rglob("*.json") if day_utc in str(p) and "broker" in p.name.lower()])
-    return matches[0] if matches else None
+def _resolve_raw_broker_input_path(truth_root: Path, day_utc: str) -> Path:
+    return (truth_root / "operator_inputs" / "raw_broker_statements" / day_utc / "broker_statement_raw.v1.json").resolve()
 
 
 def build_dependency_statuses(repo_root: Path, truth_root: Path, day_utc: str, facts: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -790,7 +864,8 @@ def build_dependency_statuses(repo_root: Path, truth_root: Path, day_utc: str, f
         raise SystemExit(f"FAIL: invalid dependency registry entries: {DEPENDENCY_REGISTRY_RELPATH}")
     statuses: List[Dict[str, Any]] = []
     market_manifest = (truth_root / "market_data_snapshot_v1" / "dataset_manifest.json").resolve()
-    raw_broker_input = _find_broker_raw_input(repo_root, day_utc)
+    raw_broker_input = _resolve_raw_broker_input_path(truth_root, day_utc)
+    submission_dirs = [Path(p) for p in facts.get("submission_dirs", [])]
     submission_fact_dirs = [Path(p) for p in facts.get("submission_fact_dirs", [])]
     for entry in entries:
         if not isinstance(entry, dict):
@@ -811,38 +886,42 @@ def build_dependency_statuses(repo_root: Path, truth_root: Path, day_utc: str, f
                 status = "MISSING_BLOCKING_DEPENDENCY"
                 reasons.append("operator_statement_missing")
         elif dependency_id == "raw_broker_statement_input":
-            resolved_path = None if raw_broker_input is None else str(raw_broker_input)
-            if raw_broker_input is None:
+            resolved_path = str(raw_broker_input)
+            if not raw_broker_input.exists():
                 status = "MISSING_BLOCKING_DEPENDENCY"
-                reasons.append("raw_broker_statement_input_not_discoverable")
+                reasons.append("raw_broker_statement_missing")
         elif dependency_id == "broker_marks_override_input":
             resolved_path = facts.get("broker_marks_override_path")
             if not Path(str(resolved_path)).exists():
                 status = "PARTIAL_DEPENDENCY_SET"
                 reasons.append("override_not_present")
         elif dependency_id == "submission_identity_bundle":
-            resolved_path = str((truth_root / "execution_evidence_fact_ledger_v1" / "submissions" / day_utc).resolve())
-            if not submission_fact_dirs:
+            resolved_path = str((truth_root / "execution_evidence_v1" / "submissions" / day_utc).resolve())
+            if not submission_dirs:
                 status = "MISSING_BLOCKING_DEPENDENCY"
-                reasons.append("submission_fact_ledger_missing")
+                reasons.append("submission_bundle_missing")
             else:
                 incomplete = False
-                for subdir in submission_fact_dirs:
-                    if not (subdir / "broker_submission_record_admitted_fact.v1.json").exists():
+                for subdir in submission_dirs:
+                    if not (subdir / "broker_submission_record.v2.json").exists():
+                        incomplete = True
+                    if not (subdir / "execution_event_record.v1.json").exists():
+                        incomplete = True
+                    if not (subdir / "equity_order_plan.v1.json").exists():
                         incomplete = True
                 if incomplete:
                     status = "PARTIAL_DEPENDENCY_SET"
-                    reasons.append("submission_fact_ledger_incomplete")
+                    reasons.append("submission_bundle_incomplete")
         elif dependency_id == "execution_stream_prerequisites":
-            resolved_path = str((truth_root / "execution_stream_fact_ledger_v1" / day_utc).resolve())
-            if not submission_fact_dirs:
+            resolved_path = str((truth_root / "execution_stream_v1" / day_utc).resolve())
+            if not submission_dirs:
                 status = "MISSING_BLOCKING_DEPENDENCY"
-                reasons.append("no_submission_fact_ledger_for_execution_stream")
+                reasons.append("no_submission_bundle_for_execution_stream")
             else:
                 stream_root = Path(resolved_path)
-                if not stream_root.exists() or not any(stream_root.glob("*.execution_event_stream_record_admitted_fact.v1.json")):
+                if not stream_root.exists() or not any(stream_root.glob("*.execution_event_stream_record.v1.json")):
                     status = "PARTIAL_DEPENDENCY_SET"
-                    reasons.append("execution_stream_fact_ledger_not_materialized")
+                    reasons.append("execution_stream_not_materialized")
         else:
             status = "PARTIAL_DEPENDENCY_SET"
             reasons.append("unhandled_dependency_id")
@@ -851,6 +930,9 @@ def build_dependency_statuses(repo_root: Path, truth_root: Path, day_utc: str, f
                 "dependency_id": dependency_id,
                 "dependency_version": int(entry.get("dependency_version") or 1),
                 "dependency_type": entry.get("dependency_type"),
+                "expected_source_path": entry.get("expected_source_path"),
+                "generation_path": entry.get("generation_path"),
+                "downstream_consumers": list(entry.get("downstream_consumers") or []),
                 "blocking": blocking,
                 "status": status,
                 "resolved_path": resolved_path,

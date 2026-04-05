@@ -58,6 +58,22 @@ Bundle A outputs MUST validate against governance-owned schemas at write time:
 - Output spine:
   - `constellation_2/runtime/truth/engine_activity_v1/authorization_v1/<DAY_UTC>/<INTENT_HASH>.authorization.v1.json`
 
+## 3A) Allocation semantics for v1
+The v1 allocation artifact is not a zero-only scaffold.
+
+It MAY emit nonzero `authorized_quantity` when and only when:
+- authority head is PASS or BOOTSTRAP_PASS and authoritative
+- capital risk envelope is passing with positive headroom
+- correlation envelope gate is passing
+- sleeve and portfolio headroom remain positive after deterministic cap binding
+- the intent carries a deterministic sizing basis already governed on the Bundle A path
+
+For Bundle A v1, the allowed deterministic sizing bases are:
+- `options_intent.v2`: `risk.max_contracts` bounded by `risk.max_risk_usd`
+- `equity_intent.v1`: at most one share-sized unit, bounded by `sizing.max_risk_pct * capital_risk_envelope_v2.envelope.nav_total_cents`
+
+If any required upstream input is missing, invalid, non-passing, or insufficient to derive a deterministic quantity, allocation MUST remain fail-closed and emit `REJECTED` with `authorized_quantity = 0`.
+
 ## 4) Required linkage fields
 Every authorization artifact MUST include:
 - `engine_id`

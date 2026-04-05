@@ -10,7 +10,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+_THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = _THIS_FILE.parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -321,9 +322,6 @@ def _write_session_report(*, day_utc: str, results: Dict[str, Any], failures: Li
         expected_schema_id="C2_SESSION_READINESS_REFRESH_V1",
         expected_schema_version=1,
         preserve_statuses=(),
-        truth_root=truth_root,
-        family_name="session_readiness_refresh_v1",
-        producer_module="ops/tools/run_session_readiness_refresh_v1.py",
     )
     return out_path, status
 
@@ -372,6 +370,14 @@ def _authority_lifecycle_result(day_utc: str, truth_root: Path) -> Dict[str, Any
     }
 
 
+def _write_operator_summary_safe(*, day_utc: str, truth_root: Path) -> Dict[str, Any]:
+    try:
+        write_operator_summary(summary_kind="preopen", day_utc=day_utc, truth_root=truth_root)
+        return {"status": "OK"}
+    except BaseException as exc:
+        return {"status": "ERROR", "error": str(exc)}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_session_readiness_refresh_v1")
     ap.add_argument("--day_utc", required=True)
@@ -390,6 +396,31 @@ def main() -> int:
     results: Dict[str, Any] = {}
     failures: List[str] = []
 
+    operator_cmd = [
+        str(OPERATOR_STATEMENT_PYTHON if OPERATOR_STATEMENT_PYTHON.exists() else Path(sys.executable).resolve()),
+        str(OPERATOR_STATEMENT_TOOL),
+        "--day_utc",
+        day,
+        "--ib_account",
+        paper_account,
+        "--mode",
+        "BROKER_ACCOUNT_VALUES",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "4002",
+        "--client_id",
+        OPERATOR_STATEMENT_CLIENT_ID,
+        "--timeout_seconds",
+        "15",
+        "--allow_create",
+        "YES",
+    ]
+    if "operator_statement" not in results:
+        results["operator_statement"] = _run(operator_cmd)
+        if results["operator_statement"]["returncode"] != 0:
+            failures.append("operator_statement")
+
     startup_materialization_cmd = [
         sys.executable,
         str(STARTUP_MATERIALIZATION_TOOL),
@@ -403,7 +434,7 @@ def main() -> int:
         failures.append("startup_materialization")
         report_path, report_status = _write_session_report(day_utc=day, results=results, failures=failures, truth_root=GLOBAL_TRUTH_ROOT)
         results["session_readiness_report"] = {"path": str(report_path)}
-        write_operator_summary(summary_kind="preopen", day_utc=day, truth_root=GLOBAL_TRUTH_ROOT)
+        results["operator_summary"] = _write_operator_summary_safe(day_utc=day, truth_root=GLOBAL_TRUTH_ROOT)
         print(
             json.dumps(
                 {
@@ -674,7 +705,7 @@ def main() -> int:
 
     report_path, report_status = _write_session_report(day_utc=day, results=results, failures=failures, truth_root=GLOBAL_TRUTH_ROOT)
     results["session_readiness_report"] = {"path": str(report_path)}
-    write_operator_summary(summary_kind="preopen", day_utc=day, truth_root=GLOBAL_TRUTH_ROOT)
+    results["operator_summary"] = _write_operator_summary_safe(day_utc=day, truth_root=GLOBAL_TRUTH_ROOT)
 
     print(
         json.dumps(

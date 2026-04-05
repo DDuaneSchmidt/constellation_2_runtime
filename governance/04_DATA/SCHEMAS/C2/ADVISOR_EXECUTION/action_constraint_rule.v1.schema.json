@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisor_execution/action_constraint_rule.v1.schema.json",
+  "title": "action_constraint_rule.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "rule_id",
+    "domain_id",
+    "action_type",
+    "constraint_code",
+    "support_status"
+  ],
+  "properties": {
+    "rule_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "domain_id": {
+      "type": "string",
+      "enum": [
+        "liquidity",
+        "withdrawal",
+        "annuity",
+        "tax"
+      ]
+    },
+    "action_type": {
+      "type": "string",
+      "enum": [
+        "raise_cash_reserve",
+        "withdraw_from_taxable",
+        "hold_annuity",
+        "collect_missing_input"
+      ]
+    },
+    "constraint_code": {
+      "type": "string",
+      "minLength": 1
+    },
+    "support_status": {
+      "type": "string",
+      "enum": [
+        "fully_supported",
+        "degraded",
+        "provisional",
+        "blocked"
+      ]
+    }
+  }
+}

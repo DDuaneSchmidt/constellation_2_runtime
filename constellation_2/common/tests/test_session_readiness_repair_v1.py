@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+(REPO_ROOT / "tmp").mkdir(parents=True, exist_ok=True)
 
 import ops.tools.run_ib_api_handshake_spine_v1 as handshake_module
 import ops.tools.run_c2_paper_day_orchestrator_v2 as orchestrator_module
@@ -13,9 +19,6 @@ import ops.tools.run_operator_daily_gate_v3 as operator_gate_module
 import ops.tools.run_session_readiness_refresh_v1 as session_refresh_module
 import ops.tools.run_trade_submit_readiness_c2_v1 as readiness_module
 from constellation_2.common.trade_submit_readiness_authority_v1 import read_trade_submit_readiness_authority_state
-
-
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 DAY = "2026-03-16"
 
 
@@ -404,6 +407,8 @@ class SessionReadinessRepairTests(unittest.TestCase):
             session_refresh_module, "_git_sha", return_value="abc1234"
         ), patch.object(
             session_refresh_module, "_resolve_paper_sleeve_truth_bindings", return_value=[]
+        ), patch.object(
+            session_refresh_module, "validate_against_repo_schema_v1", lambda *args, **kwargs: None
         ), patch.object(
             session_refresh_module, "_authority_lifecycle_result", return_value={"status": "OK", "incident_count": 0, "incidents": []}
         ), patch(

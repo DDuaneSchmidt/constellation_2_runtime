@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisor_execution/replan_trigger_rule.v1.schema.json",
+  "title": "replan_trigger_rule.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "trigger_id",
+    "trigger_type",
+    "description"
+  ],
+  "properties": {
+    "trigger_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "trigger_type": {
+      "type": "string",
+      "enum": [
+        "market_drawdown",
+        "spending_deviation",
+        "tax_profile_update",
+        "employment_change"
+      ]
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

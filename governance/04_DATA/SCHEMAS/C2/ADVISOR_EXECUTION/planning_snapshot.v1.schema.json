@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisor_execution/planning_snapshot.v1.schema.json",
+  "title": "planning_snapshot.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "planning_snapshot_id",
+    "advisory_packet_id",
+    "created_at",
+    "version",
+    "accounts",
+    "liquidity",
+    "spending",
+    "income",
+    "tax_profile",
+    "annuities"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "planning_snapshot"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "planning_snapshot_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "advisory_packet_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "const": "v1"
+    },
+    "accounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "taxable_account_id",
+        "cash_reserve_account_id",
+        "spending_account_id"
+      ],
+      "properties": {
+        "taxable_account_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cash_reserve_account_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "spending_account_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "liquidity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cash_cents"
+      ],
+      "properties": {
+        "cash_cents": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "spending": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minimum_monthly_spending_cents",
+        "monthly_spending_cents"
+      ],
+      "properties": {
+        "minimum_monthly_spending_cents": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "monthly_spending_cents": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "income": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "guaranteed_monthly_income_cents"
+      ],
+      "properties": {
+        "guaranteed_monthly_income_cents": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "tax_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "present"
+      ],
+      "properties": {
+        "present": {
+          "type": "boolean"
+        }
+      }
+    },
+    "annuities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "annuity_id",
+          "phase"
+        ],
+        "properties": {
+          "annuity_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "deferred_accumulation",
+              "payout",
+              "closed"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

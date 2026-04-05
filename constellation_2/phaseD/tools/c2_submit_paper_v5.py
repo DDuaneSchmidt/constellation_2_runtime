@@ -10,6 +10,7 @@ Defaults:
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -22,7 +23,19 @@ if not (_REPO_ROOT_FROM_FILE / "constellation_2").exists():
     raise SystemExit(f"FATAL: repo_root_missing_constellation_2: derived={_REPO_ROOT_FROM_FILE}")
 
 import argparse  # noqa: E402
+from constellation_2.common.runtime_guardrails_v1 import classify_failure, format_failure_line  # noqa: E402
 from constellation_2.phaseD.lib.submit_boundary_paper_v4 import run_submit_boundary_paper_v4  # noqa: E402
+
+
+def _require_broker_transmit_enabled(*, dry_run: str) -> None:
+    if dry_run == "YES":
+        return
+    enabled = str(os.environ.get("C2_ENABLE_BROKER_TRANSMIT") or "").strip().upper()
+    if enabled != "YES":
+        raise SystemExit(
+            "FAIL_CLOSED: broker transmit disabled by default; "
+            "set C2_ENABLE_BROKER_TRANSMIT=YES for explicit broker submission enablement"
+        )
 
 
 def main() -> int:
@@ -40,20 +53,33 @@ def main() -> int:
     ap.add_argument("--dry_run", required=True, choices=["YES", "NO"], help="YES writes artifacts but does not connect/submit to IB")
     ap.add_argument("--submissions_root_override", default="", help="Optional override for submissions root (proof sandbox). If set, submissions are written under <override>/<day_utc>/")
     args = ap.parse_args()
+    dry_run = str(args.dry_run).strip().upper()
+    _require_broker_transmit_enabled(dry_run=dry_run)
 
-    rc = run_submit_boundary_paper_v4(
-        repo_root=_REPO_ROOT_FROM_FILE,
-        eval_time_utc=str(args.eval_time_utc).strip(),
-        phasec_out_dir=Path(str(args.phasec_out_dir).strip()).resolve(),
-        risk_budget_path=Path(str(args.risk_budget).strip()).resolve(),
-        ib_host=str(args.ib_host).strip(),
-        ib_port=int(args.ib_port),
-        ib_client_id=int(args.ib_client_id),
-        ib_account=str(args.ib_account).strip(),
-        dry_run=(str(args.dry_run).strip().upper() == "YES"),
-        submissions_root_override=(Path(args.submissions_root_override).resolve() if str(args.submissions_root_override).strip() else None),
-    )
-    return int(rc)
+    try:
+        rc = run_submit_boundary_paper_v4(
+            repo_root=_REPO_ROOT_FROM_FILE,
+            eval_time_utc=str(args.eval_time_utc).strip(),
+            phasec_out_dir=Path(str(args.phasec_out_dir).strip()).resolve(),
+            risk_budget_path=Path(str(args.risk_budget).strip()).resolve(),
+            ib_host=str(args.ib_host).strip(),
+            ib_port=int(args.ib_port),
+            ib_client_id=int(args.ib_client_id),
+            ib_account=str(args.ib_account).strip(),
+            dry_run=(dry_run == "YES"),
+            submissions_root_override=(Path(args.submissions_root_override).resolve() if str(args.submissions_root_override).strip() else None),
+        )
+        return int(rc)
+    except Exception as exc:  # noqa: BLE001
+        print(format_failure_line(
+            "c2_submit_paper_v5",
+            classify_failure(exc),
+            error=repr(exc),
+            eval_time_utc=str(args.eval_time_utc).strip(),
+            phasec_out_dir=str(Path(str(args.phasec_out_dir).strip()).resolve()),
+            ib_account=str(args.ib_account).strip(),
+        ), file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

@@ -3,14 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from constellation_2.common.truth_root_v1 import resolve_truth_root
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH_ROOT = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+TRUTH_ROOT = resolve_truth_root(repo_root=REPO_ROOT)
 
 EXEC_EVIDENCE_ROOT = (TRUTH_ROOT / "execution_evidence_v1").resolve()
-
-# PhaseD outputs root for submissions (source-of-truth for mirroring)
-PHASED_SUBMISSIONS_ROOT = (REPO_ROOT / "constellation_2" / "phaseD" / "outputs" / "submissions").resolve()
+PHASED_SUBMISSIONS_ROOT = (EXEC_EVIDENCE_ROOT / "submissions").resolve()
 
 
 @dataclass(frozen=True)

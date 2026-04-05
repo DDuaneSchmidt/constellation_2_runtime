@@ -5,14 +5,14 @@ run_fill_ledger_day_v1.py
 Bundle 1: Fill Ledger Spine v1 (deterministic aggregation).
 
 Reads:
-  constellation_2/runtime/truth/execution_stream_v1/<DAY>/*.execution_event_stream_record.v1.json
-  constellation_2/runtime/truth/execution_evidence_v1/submissions/<DAY>/<submission_id>/
+  <TRUTH_ROOT>/execution_stream_v1/<DAY>/*.execution_event_stream_record.v1.json
+  <TRUTH_ROOT>/execution_evidence_v1/submissions/<DAY>/<submission_id>/
     - broker_submission_record.v2.json
     - equity_order_plan.v1.json (for order_qty)
     - execution_event_record.v1.json (lineage if needed)
 
 Writes (immutable):
-  constellation_2/runtime/truth/fill_ledger_v1/<DAY>/<submission_id>.fill_ledger.v1.json
+  <TRUTH_ROOT>/fill_ledger_v1/<DAY>/<submission_id>.fill_ledger.v1.json
 
 Fail-closed:
 - missing submissions day dir
@@ -29,21 +29,32 @@ import argparse
 import hashlib
 import json
 import subprocess
+import sys
 from decimal import Decimal
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from typing import Any, Dict, List, Tuple
 
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+from constellation_2.common.runtime_guardrails_v1 import classify_failure, format_failure_line
 from constellation_2.common.truth_root_v1 import resolve_truth_root
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-TRUTH = resolve_truth_root(repo_root=REPO_ROOT)
+STREAM_ROOT: Path | None = None
+SUB_ROOT: Path | None = None
+OUT_ROOT: Path | None = None
 
-STREAM_ROOT = (TRUTH / "execution_stream_v1").resolve()
-SUB_ROOT = (TRUTH / "execution_evidence_v1/submissions").resolve()
-OUT_ROOT = (TRUTH / "fill_ledger_v1").resolve()
+
+def _require_truth_root(raw: str) -> Path:
+    p = Path(str(raw).strip()).expanduser().resolve()
+    if not p.is_absolute() or not p.exists() or not p.is_dir():
+        raise SystemExit(f"FAIL: invalid --truth_root: {p}")
+    return p
 
 SCHEMA_LEDGER = "governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/fill_ledger.v1.schema.json"
 
@@ -83,28 +94,74 @@ def _write_immutable(path: Path, payload: bytes) -> None:
 
 
 def _list_stream_files(day: str) -> List[Path]:
+    if STREAM_ROOT is None:
+        raise RuntimeError("STREAM_ROOT_UNSET")
     d = (STREAM_ROOT / day).resolve()
     if not d.exists() or not d.is_dir():
         return []
     return sorted([p for p in d.iterdir() if p.is_file() and p.name.endswith(".execution_event_stream_record.v1.json")])
 
 
+def _supported_plan_path(subdir: Path) -> Path | None:
+    equity_plan_p = (subdir / "equity_order_plan.v1.json").resolve()
+    if equity_plan_p.exists():
+        return equity_plan_p
+    options_plan_p = (subdir / "order_plan.v1.json").resolve()
+    if options_plan_p.exists():
+        return options_plan_p
+    return None
+
+
+def _is_authoritative_submission_dir(subdir: Path) -> bool:
+    bsr_p = (subdir / "broker_submission_record.v2.json").resolve()
+    plan_p = _supported_plan_path(subdir)
+    if not bsr_p.exists() or plan_p is None:
+        return False
+    try:
+        bsr = _read_json_obj(bsr_p)
+        validate_against_repo_schema_v1(bsr, REPO_ROOT, "constellation_2/schemas/broker_submission_record.v2.schema.json")
+        plan = _read_json_obj(plan_p)
+        if plan_p.name == "equity_order_plan.v1.json":
+            try:
+                validate_against_repo_schema_v1(plan, REPO_ROOT, "constellation_2/schemas/equity_order_plan.v1.schema.json")
+            except Exception:
+                validate_against_repo_schema_v1(plan, REPO_ROOT, "constellation_2/schemas/equity_order_plan.v2.schema.json")
+        else:
+            validate_against_repo_schema_v1(plan, REPO_ROOT, "constellation_2/schemas/order_plan.v1.schema.json")
+    except Exception:
+        return False
+    return str(bsr.get("submission_id") or "").strip() == subdir.name
+
+
 def _list_submission_dirs(day: str) -> List[Path]:
+    if SUB_ROOT is None:
+        raise RuntimeError("SUB_ROOT_UNSET")
     d = (SUB_ROOT / day).resolve()
     if not d.exists() or not d.is_dir():
         raise RuntimeError(f"MISSING_SUBMISSIONS_DAY_DIR: {d}")
-    return sorted([p for p in d.iterdir() if p.is_dir()])
+    dirs = sorted([p for p in d.iterdir() if p.is_dir() and _is_authoritative_submission_dir(p)])
+    if not dirs:
+        raise RuntimeError(f"NO_AUTHORITATIVE_SUBMISSIONS_DAY_DIR: {d}")
+    return dirs
 
 
 def _order_qty_from_submission(subdir: Path) -> int:
-    # Equity only in our current bundle slice: qty_shares from equity_order_plan.v1.json
     p = (subdir / "equity_order_plan.v1.json").resolve()
+    if p.exists():
+        o = _read_json_obj(p)
+        qty = o.get("qty_shares")
+        if not isinstance(qty, int) or qty <= 0:
+            raise RuntimeError("EQUITY_ORDER_PLAN_QTY_INVALID")
+        return int(qty)
+
+    p = (subdir / "order_plan.v1.json").resolve()
     if not p.exists():
-        raise RuntimeError(f"MISSING_EQUITY_ORDER_PLAN_V1_FOR_ORDER_QTY: {p}")
+        raise RuntimeError(f"MISSING_SUPPORTED_PLAN_FOR_ORDER_QTY: {subdir}")
     o = _read_json_obj(p)
-    qty = o.get("qty_shares")
+    risk = o.get("risk_proof") if isinstance(o.get("risk_proof"), dict) else {}
+    qty = risk.get("contracts")
     if not isinstance(qty, int) or qty <= 0:
-        raise RuntimeError("EQUITY_ORDER_PLAN_QTY_INVALID")
+        raise RuntimeError("OPTIONS_ORDER_PLAN_CONTRACTS_INVALID")
     return int(qty)
 
 
@@ -139,6 +196,14 @@ def _lineage_from_submission(subdir: Path) -> Tuple[str, str, str, str]:
             source_intent_id = source_intent_id or str(plan.get("source_intent_id") or "").strip()
             intent_sha256 = intent_sha256 or str(plan.get("intent_sha256") or "").strip()
 
+    if not engine_id or not source_intent_id or not intent_sha256:
+        plan_p = (subdir / "order_plan.v1.json").resolve()
+        if plan_p.exists():
+            plan = _read_json_obj(plan_p)
+            engine_id = engine_id or str(plan.get("engine_id") or "").strip()
+            source_intent_id = source_intent_id or str(plan.get("source_intent_id") or "").strip()
+            intent_sha256 = intent_sha256 or str(plan.get("intent_sha256") or "").strip()
+
     if not (engine_id and source_intent_id and intent_sha256):
         raise RuntimeError("LINEAGE_MISSING_IN_SUBMISSION_DIR")
 
@@ -148,10 +213,17 @@ def _lineage_from_submission(subdir: Path) -> Tuple[str, str, str, str]:
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_fill_ledger_day_v1")
     ap.add_argument("--day_utc", required=True)
+    ap.add_argument("--truth_root", required=True, help="Authoritative runtime truth root")
     args = ap.parse_args()
 
     day = str(args.day_utc).strip()
     produced_utc = f"{day}T00:00:00Z"
+
+    truth_root = _require_truth_root(args.truth_root)
+    global STREAM_ROOT, SUB_ROOT, OUT_ROOT
+    STREAM_ROOT = (truth_root / "execution_stream_v1").resolve()
+    SUB_ROOT = (truth_root / "execution_evidence_v1" / "submissions").resolve()
+    OUT_ROOT = (truth_root / "fill_ledger_v1").resolve()
 
     # Load stream records once, group by submission_id
     stream_files = _list_stream_files(day)
@@ -253,4 +325,10 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except SystemExit:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        print(format_failure_line("run_fill_ledger_day_v1", classify_failure(exc), error=repr(exc)), file=sys.stderr)
+        raise SystemExit(2)

@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from constellation_2.common.level3_day_common_v1 import active_controllable_runtime_engine_ids_for_sleeve
 from constellation_2.common.engine_universe_v1 import EngineUniverseError, resolve_engine_candidate_basis
 
 

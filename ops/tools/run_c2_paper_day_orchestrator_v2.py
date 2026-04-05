@@ -1005,6 +1005,38 @@ def _positions_snapshot_v2_skip_safe(truth_root: Path, day: str) -> bool:
             pass
     return True
 
+
+def _seed_sleeve_positions_snapshot_from_canonical(truth_root: Path, day: str) -> dict:
+    global_truth = (truth_root / "global").resolve()
+    canonical_path = (
+        global_truth / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json"
+    ).resolve()
+    if not canonical_path.exists() or not canonical_path.is_file():
+        return {"seeded_count": 0}
+
+    canonical_payload = _read_json_obj(canonical_path)
+    sleeves_root = (truth_root / "sleeves").resolve()
+    if not sleeves_root.exists() or not sleeves_root.is_dir():
+        return {"seeded_count": 0}
+
+    seeded_count = 0
+    canonical_text = canonical_path.read_text(encoding="utf-8")
+    for sleeve_dir in sorted(sleeves_root.iterdir(), key=lambda p: p.name):
+        if not sleeve_dir.is_dir():
+            continue
+        sleeve_snapshot = (
+            sleeve_dir / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json"
+        ).resolve()
+        if sleeve_snapshot.exists():
+            continue
+        sleeve_snapshot.parent.mkdir(parents=True, exist_ok=True)
+        sleeve_snapshot.write_text(canonical_text, encoding="utf-8")
+        written_payload = _read_json_obj(sleeve_snapshot)
+        if written_payload != canonical_payload:
+            raise RuntimeError(f"SLEEVE_POSITIONS_SNAPSHOT_SEED_MISMATCH:{sleeve_dir.name}:{day}")
+        seeded_count += 1
+    return {"seeded_count": seeded_count}
+
 def _count_broker_submission_records(truth_root: Path, day: str) -> int:
     d = (truth_root / "execution_evidence_v1" / "submissions" / day).resolve()
     if not d.exists() or not d.is_dir():
@@ -1241,9 +1273,9 @@ def _build_governed_submit_cmd(
     ib_host = str(env.get("C2_IB_HOST") or "127.0.0.1").strip()
     ib_port = str(env.get("C2_IB_PORT") or "4002").strip()
     ib_client_id = str(env.get("C2_IB_CLIENT_ID") or "7").strip()
-    dry_run = str(env.get("C2_GOVERNED_SUBMIT_DRY_RUN") or "NO").strip().upper()
+    dry_run = str(env.get("C2_GOVERNED_SUBMIT_DRY_RUN") or "YES").strip().upper()
     if dry_run not in ("YES", "NO"):
-        dry_run = "NO"
+        dry_run = "YES"
 
     return [
         sys.executable,

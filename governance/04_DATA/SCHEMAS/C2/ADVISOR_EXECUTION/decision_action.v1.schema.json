@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisor_execution/decision_action.v1.schema.json",
+  "title": "decision_action.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "action_id",
+    "plan_id",
+    "recommendation_id",
+    "domain_id",
+    "action_type",
+    "action_status",
+    "support_status",
+    "priority",
+    "source_account",
+    "destination_account",
+    "annual_amount",
+    "periodic_amount",
+    "periodicity",
+    "constraints",
+    "blockers",
+    "rationale_refs",
+    "evidence_refs",
+    "created_at",
+    "version"
+  ],
+  "properties": {
+    "action_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "plan_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recommendation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "domain_id": {
+      "type": "string",
+      "enum": [
+        "liquidity",
+        "withdrawal",
+        "tax",
+        "annuity"
+      ]
+    },
+    "action_type": {
+      "type": "string",
+      "enum": [
+        "raise_cash_reserve",
+        "withdraw_from_taxable",
+        "hold_annuity",
+        "collect_missing_input"
+      ]
+    },
+    "action_status": {
+      "type": "string",
+      "enum": [
+        "planned",
+        "blocked"
+      ]
+    },
+    "support_status": {
+      "type": "string",
+      "enum": [
+        "fully_supported",
+        "degraded",
+        "provisional",
+        "blocked"
+      ]
+    },
+    "priority": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "source_account": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "destination_account": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "annual_amount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "periodic_amount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "periodicity": {
+      "type": "string",
+      "enum": [
+        "annual",
+        "monthly",
+        "none"
+      ]
+    },
+    "constraints": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "rationale_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "const": "v1"
+    }
+  }
+}

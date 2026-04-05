@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisor_execution/official_recommendation_set.v1.schema.json",
+  "title": "official_recommendation_set.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "advisory_packet_id",
+    "created_at",
+    "version",
+    "recommendations"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "official_recommendation_set"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "advisory_packet_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "const": "v1"
+    },
+    "recommendations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "recommendation_id",
+          "domain_id",
+          "action_type",
+          "priority",
+          "recommendation_status",
+          "rationale_refs",
+          "evidence_refs"
+        ],
+        "properties": {
+          "recommendation_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "domain_id": {
+            "type": "string",
+            "enum": [
+              "liquidity",
+              "withdrawal",
+              "tax",
+              "annuity"
+            ]
+          },
+          "action_type": {
+            "type": "string",
+            "enum": [
+              "raise_cash_reserve",
+              "withdraw_from_taxable",
+              "hold_annuity",
+              "collect_missing_input"
+            ]
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "recommendation_status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "inactive"
+            ]
+          },
+          "rationale_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "constraints": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

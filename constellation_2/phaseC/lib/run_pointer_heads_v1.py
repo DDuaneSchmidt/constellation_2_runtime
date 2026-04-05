@@ -163,3 +163,7 @@ def head_payload(kind: str, entry: PointerEntry) -> Dict[str, Any]:
         "producer_git_sha": entry.producer_git_sha,
         "points_to": entry.points_to,
     }
+
+
+def resolve_authority_head_for_day_from_index(idx_path: Path) -> PointerEntry:
+    return resolve_authority_head_from_index(idx_path)

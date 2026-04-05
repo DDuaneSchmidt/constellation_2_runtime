@@ -85,6 +85,7 @@ def write_day_artifact_refreshable_v1(
     expected_schema_id: str,
     expected_schema_version: Any,
     preserve_statuses: Tuple[str, ...] = ("PASS",),
+    **_ignored: Any,
 ) -> RefreshWriteResultV1:
     try:
         wr: WriteResultV1 = write_file_immutable_v1(path=path, data=data, create_dirs=True)

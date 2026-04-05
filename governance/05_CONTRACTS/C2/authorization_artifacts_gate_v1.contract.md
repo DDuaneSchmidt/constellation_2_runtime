@@ -18,8 +18,9 @@ This prevents “submit boundary” checks from failing due to missing authoriza
 ## Scope
 
 - Applies to **PAPER** and **LIVE** days whenever the authority head is present and indicates PASS+authoritative.
-- Applies to **ExposureIntent v1** files under:
-  - `constellation_2/runtime/truth/intents_v1/snapshots/<DAY>/*.exposure_intent.v1.json`
+- Applies to governed intent files under:
+  - `constellation_2/runtime/truth/intents_v1/snapshots/<DAY>/*.json`
+- Allocation/authorization remain fail-closed for unsupported intent schemas or intents that lack a deterministic sizing basis.
 
 ## Inputs
 
@@ -39,11 +40,11 @@ For day `<DAY>`:
 
 3) Intent files
 
-- `constellation_2/runtime/truth/intents_v1/snapshots/<DAY>/*.exposure_intent.v1.json`
+- `constellation_2/runtime/truth/intents_v1/snapshots/<DAY>/*.json`
 
 ## Required Outputs
 
-For each exposure intent file `F` under intents day `<DAY>`:
+For each governed intent file `F` under intents day `<DAY>`:
 
 - Let `H = sha256(bytes(F))`
 - Then the following file **must exist**:
@@ -58,6 +59,18 @@ and it must satisfy minimal schema checks:
 - `intent_hash == <H>`
 - `authorization.decision ∈ {"AUTHORIZED","REJECTED"}`
 - `authorization.authorized_quantity >= 0`
+
+## Allocation Semantics
+
+`run_capital_authority_allocation_day_v1.py` is the governed allocation writer for Bundle A v1.
+
+It MUST:
+- consume the policy manifest, capital risk envelope, correlation envelope gate, exposure net, and day intent set
+- remain deterministic and fail-closed on missing or invalid inputs
+- emit `decision = "AUTHORIZED"` with `authorized_quantity > 0` only when the intent has a deterministic sizing basis and all upstream gating inputs are passing
+- emit `decision = "REJECTED"` with `authorized_quantity = 0` for unsupported intents, under-specified intents, or days with non-positive headroom
+
+This contract does not require every governed intent schema to be sizeable under v1. It requires that any nonzero authorization be traceable to governed inputs and deterministic bounds already present on the Bundle A path.
 
 ## Orchestrator Ordering Requirement
 

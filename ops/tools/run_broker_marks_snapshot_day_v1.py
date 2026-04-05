@@ -7,15 +7,20 @@ from decimal import Decimal, InvalidOperation, DivisionByZero
 from pathlib import Path
 from typing import Any, Dict, List
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH_ROOT = REPO_ROOT / "constellation_2/runtime/truth"
-
-# Operator override input (day-scoped)
-OP_OVERRIDE_ROOT = REPO_ROOT / "constellation_2/operator_inputs/broker_marks_operator_overrides"
-OP_OVERRIDE_FILENAME = "broker_marks_override.v1.json"
-
 DAY0_NOTE_ALLOWED = "DAY0_BOOTSTRAP_BROKER_MARKS_MISSING_ALLOWED"
 OP_OVERRIDE_NOTE = "OPERATOR_BROKER_MARKS_OVERRIDE_V1"
+OP_OVERRIDE_FILENAME = "broker_marks_override.v1.json"
+
+
+def _require_truth_root(raw: str) -> Path:
+    p = Path(str(raw).strip()).expanduser().resolve()
+    if not p.exists() or not p.is_dir():
+        raise SystemExit(f"FATAL: invalid --truth_root: {p}")
+    return p
+
+
+def _operator_override_root(truth_root: Path) -> Path:
+    return (truth_root / "operator_inputs" / "broker_marks_operator_overrides").resolve()
 
 
 def _sha256_file(p: Path) -> str:
@@ -73,12 +78,12 @@ def _ds(d: Decimal) -> str:
     return s
 
 
-def _bootstrap_window_true(day_utc: str) -> bool:
+def _bootstrap_window_true(day_utc: str, truth_root: Path) -> bool:
     """
     Day-0 Bootstrap Window iff:
       TRUTH/execution_evidence_v1/submissions/<DAY>/ is missing OR contains zero submission dirs.
     """
-    root = (TRUTH_ROOT / "execution_evidence_v1" / "submissions" / day_utc).resolve()
+    root = (truth_root / "execution_evidence_v1" / "submissions" / day_utc).resolve()
     if (not root.exists()) or (not root.is_dir()):
         return True
     try:
@@ -86,30 +91,16 @@ def _bootstrap_window_true(day_utc: str) -> bool:
             if p.is_dir():
                 return False
     except Exception:
-        # Fail-closed: if we cannot enumerate, treat as NOT bootstrap.
         return False
     return True
 
 
-def _maybe_load_operator_override(day_utc: str) -> Dict[str, Any] | None:
+def _maybe_load_operator_override(day_utc: str, truth_root: Path) -> Dict[str, Any] | None:
     """
     Optional operator override:
-      constellation_2/operator_inputs/broker_marks_operator_overrides/<DAY>/broker_marks_override.v1.json
-
-    Expected shape (minimal, fail-closed):
-      {
-        "schema_id": "c2_broker_marks_override",
-        "schema_version": "v1",
-        "day_utc": "YYYY-MM-DD",
-        "currency": "USD",
-        "cash_end": "0",
-        "marks": [
-          {"symbol":"SPY","sec_type":"STK","qty":"0","avg_cost":"0","market_value":"0","implied_price":"100","currency":"USD"}
-        ],
-        "notes": [...]
-      }
+      <TRUTH_ROOT>/operator_inputs/broker_marks_operator_overrides/<DAY>/broker_marks_override.v1.json
     """
-    p = (OP_OVERRIDE_ROOT / day_utc / OP_OVERRIDE_FILENAME).resolve()
+    p = (_operator_override_root(truth_root) / day_utc / OP_OVERRIDE_FILENAME).resolve()
     if not p.exists():
         return None
     obj = _load_json(p)
@@ -127,7 +118,6 @@ def _maybe_load_operator_override(day_utc: str) -> Dict[str, Any] | None:
     if not isinstance(marks, list):
         raise SystemExit(f"FATAL: broker marks override marks must be list path={p}")
 
-    # Validate each mark minimally
     for it in marks:
         if not isinstance(it, dict):
             raise SystemExit(f"FATAL: broker marks override mark not object path={p}")
@@ -136,8 +126,6 @@ def _maybe_load_operator_override(day_utc: str) -> Dict[str, Any] | None:
         ip = str(it.get("implied_price") or "").strip()
         if sym == "" or sec == "" or ip == "":
             raise SystemExit(f"FATAL: broker marks override missing required fields (symbol/sec_type/implied_price) path={p}")
-
-        # implied_price must parse as decimal
         _ = _d(ip)
 
     obj["_override_path_abs"] = str(p)
@@ -148,27 +136,29 @@ def _maybe_load_operator_override(day_utc: str) -> Dict[str, Any] | None:
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_broker_marks_snapshot_day_v1")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
+    ap.add_argument("--truth_root", required=True, help="Authoritative runtime truth root")
     ap.add_argument("--produced_utc", required=False, help="UTC ISO-8601 Z timestamp (deterministic). If omitted, defaults to DAYT00:00:00Z")
     args = ap.parse_args()
     day = str(args.day_utc).strip()
+    truth_root = _require_truth_root(args.truth_root)
 
     produced_utc = str(args.produced_utc).strip() if args.produced_utc is not None else ""
     if produced_utc == "":
         produced_utc = f"{day}T00:00:00Z"
 
-    out_dir = TRUTH_ROOT / "market_data_snapshot_v1" / "broker_marks_v1" / day
+    out_dir = truth_root / "market_data_snapshot_v1" / "broker_marks_v1" / day
     out_path = out_dir / "broker_marks.v1.json"
 
-    # 0) Operator override (highest priority, deterministic, day-scoped)
-    ov = _maybe_load_operator_override(day)
+    ov = _maybe_load_operator_override(day, truth_root)
     if ov is not None:
+        override_path = Path(ov["_override_path_abs"])
         out = {
             "schema_id": "C2_BROKER_MARKS_SNAPSHOT_V1",
             "schema_version": "1.0.0",
             "produced_utc": produced_utc,
             "day_utc": day,
             "producer": "ops/tools/run_broker_marks_snapshot_day_v1.py",
-            "source_broker_statement_path": str(Path(ov["_override_path_abs"]).relative_to(REPO_ROOT)),
+            "source_broker_statement_path": str(override_path.relative_to(truth_root)),
             "source_broker_statement_sha256": str(ov["_override_sha256"]),
             "currency": str(ov.get("currency") or "USD"),
             "cash_end": str(ov.get("cash_end") or "0"),
@@ -179,19 +169,17 @@ def main() -> int:
         print(f"OK: wrote {out_path} (OPERATOR_OVERRIDE)")
         return 0
 
-    # 1) Normal source: broker_statement_normalized
-    src = TRUTH_ROOT / "execution_evidence_v1" / "broker_statement_normalized_v1" / day / "broker_statement_normalized.v1.json"
+    src = truth_root / "execution_evidence_v1" / "broker_statement_normalized_v1" / day / "broker_statement_normalized.v1.json"
 
-    # Day-0 bootstrap: if no submissions yet, broker marks snapshot may be missing.
     if not src.exists():
-        if _bootstrap_window_true(day):
+        if _bootstrap_window_true(day, truth_root):
             out = {
                 "schema_id": "C2_BROKER_MARKS_SNAPSHOT_V1",
                 "schema_version": "1.0.0",
                 "produced_utc": produced_utc,
                 "day_utc": day,
                 "producer": "ops/tools/run_broker_marks_snapshot_day_v1.py",
-                "source_broker_statement_path": str(src.relative_to(TRUTH_ROOT)),
+                "source_broker_statement_path": str(src.relative_to(truth_root)),
                 "source_broker_statement_sha256": "0" * 64,
                 "currency": "USD",
                 "cash_end": "0",
@@ -228,7 +216,7 @@ def main() -> int:
             ip = Decimal("0")
         else:
             try:
-                ip = (mv / qty)
+                ip = mv / qty
             except (DivisionByZero, InvalidOperation):
                 ip = Decimal("0")
 
@@ -251,7 +239,7 @@ def main() -> int:
         "produced_utc": produced_utc,
         "day_utc": day,
         "producer": "ops/tools/run_broker_marks_snapshot_day_v1.py",
-        "source_broker_statement_path": str(src.relative_to(TRUTH_ROOT)),
+        "source_broker_statement_path": str(src.relative_to(truth_root)),
         "source_broker_statement_sha256": _sha256_file(src),
         "currency": currency,
         "cash_end": cash_end,

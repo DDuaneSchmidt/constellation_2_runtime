@@ -17,8 +17,13 @@ Policy (v1 behavior):
   - Deterministic sleeve headroom allocation using:
       portfolio_headroom_cents from capital_risk_envelope_v2.envelope.headroom_cents
       plus per-sleeve caps from policy.sleeves[].limits.max_capital_at_risk_cents
-  - Conservative sizing in v1: authorized_quantity remains 0 (fail-closed required)
-    even when headroom exists, until sizing logic is introduced under governance.
+      plus correlation cap multipliers from correlation_envelope_gate_v1.caps.multiplier_bp_by_sleeve
+  - Deterministic sizing in v1:
+      * if any required upstream gate is non-passing, reject with authorized_quantity=0
+      * if portfolio or sleeve headroom is non-positive, reject with authorized_quantity=0
+      * options_intent.v2 may authorize contracts from risk.max_contracts bounded by risk.max_risk_usd
+      * equity_intent.v1 may authorize at most one share-sized unit, using max_risk_pct * nav_total_cents as a conservative per-unit risk proxy
+      * unsupported or under-specified intents remain fail-closed REJECTED with authorized_quantity=0
 """
 
 from __future__ import annotations
@@ -26,10 +31,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 HERE = Path(__file__).resolve()
 REPO_ROOT = HERE.parents[2]
@@ -119,11 +126,56 @@ def _read_json_obj(path: Path) -> Dict[str, Any]:
     return obj
 
 
-def _atomic_write_refuse_overwrite(path: Path, data: bytes) -> None:
+def _atomic_write_replace_if_changed(path: Path, data: bytes) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
+    candidate_sha = _sha256_bytes(data)
     if path.exists():
-        raise SystemExit(f"FAIL: REFUSE_OVERWRITE_EXISTING_FILE: {str(path)}")
-    path.write_bytes(data)
+        if not path.is_file():
+            raise SystemExit(f"FAIL: TARGET_NOT_FILE: {str(path)}")
+        existing = path.read_bytes()
+        existing_sha = _sha256_bytes(existing)
+        if existing == data:
+            print(
+                f"OK: CAPITAL_AUTHORITY_ALLOCATION_V1_WRITTEN path={path} "
+                f"sha256={existing_sha} action=EXISTS_IDENTICAL"
+            )
+            return existing_sha
+        tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}")
+        tmp.write_bytes(data)
+        fd = os.open(str(tmp), os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(str(tmp), str(path))
+        dfd = os.open(str(path.parent), os.O_RDONLY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+        print(
+            f"OK: CAPITAL_AUTHORITY_ALLOCATION_V1_WRITTEN path={path} "
+            f"sha256={candidate_sha} action=REPLACED_STALE existing_sha={existing_sha}"
+        )
+        return candidate_sha
+    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}")
+    tmp.write_bytes(data)
+    fd = os.open(str(tmp), os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.replace(str(tmp), str(path))
+    dfd = os.open(str(path.parent), os.O_RDONLY)
+    try:
+        os.fsync(dfd)
+    finally:
+        os.close(dfd)
+    print(
+        f"OK: CAPITAL_AUTHORITY_ALLOCATION_V1_WRITTEN path={path} "
+        f"sha256={candidate_sha} action=WROTE"
+    )
+    return candidate_sha
 
 
 def _git_sha_failclosed() -> str:
@@ -184,6 +236,55 @@ def _headroom_from_envelope_v2(truth_root: Path, day: str) -> int:
     if not isinstance(headroom, int):
         raise SystemExit("FAIL: ENVELOPE_V2_MISSING_headroom_cents_INT")
     return int(headroom)
+
+
+def _status_is_passing(status: Any) -> bool:
+    value = str(status or "").strip().upper()
+    return value in {"PASS", "OK", "BOOTSTRAP_PASS", "AUTHORIZED"}
+
+
+def _decimal_usd_to_cents(value: Any, *, field_name: str) -> int:
+    try:
+        dec = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError) as exc:
+        raise SystemExit(f"FAIL: INVALID_DECIMAL_{field_name}: {value!r}") from exc
+    if dec <= 0:
+        raise SystemExit(f"FAIL: NONPOSITIVE_DECIMAL_{field_name}: {value!r}")
+    cents = (dec * Decimal("100")).to_integral_value(rounding=ROUND_CEILING)
+    return int(cents)
+
+
+def _extract_quantity_and_risk_per_unit_cents(intent_obj: Dict[str, Any], *, nav_total_cents: int) -> Optional[Tuple[int, int]]:
+    schema_id = str(intent_obj.get("schema_id") or "").strip()
+    schema_version = str(intent_obj.get("schema_version") or "").strip()
+    if schema_id == "options_intent" and schema_version == "v2":
+        risk = intent_obj.get("risk")
+        if not isinstance(risk, dict):
+            return None
+        max_contracts = risk.get("max_contracts")
+        if not isinstance(max_contracts, int) or max_contracts <= 0:
+            return None
+        max_risk_cents = _decimal_usd_to_cents(risk.get("max_risk_usd"), field_name="MAX_RISK_USD")
+        risk_per_unit_cents = (max_risk_cents + max_contracts - 1) // max_contracts
+        if risk_per_unit_cents <= 0:
+            return None
+        return int(max_contracts), int(risk_per_unit_cents)
+    if schema_id == "equity_intent" and schema_version == "v1":
+        sizing = intent_obj.get("sizing")
+        if not isinstance(sizing, dict):
+            return None
+        target_notional_pct = Decimal(str(sizing.get("target_notional_pct") or "").strip())
+        max_risk_pct = Decimal(str(sizing.get("max_risk_pct") or "").strip())
+        if target_notional_pct <= 0 or max_risk_pct <= 0:
+            return None
+        if nav_total_cents <= 0:
+            return None
+        risk_per_unit_cents = int((Decimal(nav_total_cents) * max_risk_pct).to_integral_value(rounding=ROUND_CEILING))
+        if risk_per_unit_cents <= 0:
+            return None
+        # EquityIntent v1 does not carry a deterministic share count. Authorize at most one unit when caps are positive.
+        return 1, risk_per_unit_cents
+    return None
 
 
 def _parse_sleeves(policy: Dict[str, Any]) -> List[SleeveLimit]:
@@ -274,6 +375,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not envp.exists():
         raise SystemExit(f"FAIL: ENVELOPE_V2_MISSING: {str(envp)}")
     env_sha = _sha256_file(envp)
+    env_obj = _read_json_obj(envp)
+    env_status_ok = _status_is_passing(env_obj.get("status"))
 
     cegp = CORRELATION_ENVELOPE_GATE_PATH(truth_root, day)
     if not cegp.exists():
@@ -286,6 +389,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     mult = caps.get("multiplier_bp_by_sleeve")
     if not isinstance(mult, dict):
         raise SystemExit("FAIL: CORRELATION_ENVELOPE_GATE_MISSING_multiplier_bp_by_sleeve_OBJECT")
+    corr_status_ok = _status_is_passing(ceg_obj.get("status"))
 
     intents_dir = INTENTS_DAY_DIR(truth_root, day)
     if not intents_dir.exists() or not intents_dir.is_dir():
@@ -313,8 +417,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         allowed_by_sleeve[sid] = (int(allow) * bp) // 10000
 
 
-    # Deterministic per-intent decisions (v1 sizing intentionally fail-closed)
-    per_intent: List[Dict[str, Any]] = []
+    sleeve_priority = {s.sleeve_id: s.priority_rank for s in sleeves}
+    initial_allowed_by_sleeve = {sid: int(v) for sid, v in allowed_by_sleeve.items()}
+    remaining_by_sleeve = {sid: int(v) for sid, v in allowed_by_sleeve.items()}
+    remaining_portfolio_headroom_cents = int(max(portfolio_headroom_cents, 0))
+
+    per_intent_rows: List[Tuple[int, str, Dict[str, Any]]] = []
     for p in intents:
         o = _read_json_obj(p)
         engine_id = str(((o.get("engine") or {}).get("engine_id") or "")).strip()
@@ -324,36 +432,61 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         sleeve_id = engine_to_sleeve.get(engine_id, "UNKNOWN_SLEEVE")
         intent_sha = _sha256_file(p)
-
-        # v1: Even when headroom exists, we do not size yet -> explicit fail-closed.
         decision = "REJECTED"
         authorized_qty = 0
         rc = ["CAPAUTH_REJECTED", "CAPAUTH_FAIL_CLOSED_REQUIRED"]
 
-        per_intent.append(
-            {
-                "intent_hash": intent_sha,
-                "intent_id": intent_id,
-                "engine_id": engine_id,
-                "sleeve_id": sleeve_id,
-                "decision": decision,
-                "authorized_quantity": authorized_qty,
-                "reason_codes": rc,
-            }
+        risk_budget = _extract_quantity_and_risk_per_unit_cents(o, nav_total_cents=int(env_obj.get("envelope", {}).get("nav_total_cents") or 0))
+        if (
+            env_status_ok
+            and corr_status_ok
+            and remaining_portfolio_headroom_cents > 0
+            and int(remaining_by_sleeve.get(sleeve_id, 0)) > 0
+            and risk_budget is not None
+        ):
+            requested_qty, risk_per_unit_cents = risk_budget
+            max_by_sleeve = int(remaining_by_sleeve.get(sleeve_id, 0)) // int(risk_per_unit_cents)
+            max_by_portfolio = int(remaining_portfolio_headroom_cents) // int(risk_per_unit_cents)
+            authorized_qty = int(min(requested_qty, max_by_sleeve, max_by_portfolio))
+            if authorized_qty > 0:
+                used_cents = int(authorized_qty * risk_per_unit_cents)
+                remaining_by_sleeve[sleeve_id] = int(remaining_by_sleeve.get(sleeve_id, 0)) - used_cents
+                remaining_portfolio_headroom_cents -= used_cents
+                decision = "AUTHORIZED"
+                rc = ["CAPAUTH_AUTHORIZED"]
+
+        per_intent_rows.append(
+            (
+                int(sleeve_priority.get(sleeve_id, 999999)),
+                intent_sha,
+                {
+                    "intent_hash": intent_sha,
+                    "intent_id": intent_id,
+                    "engine_id": engine_id,
+                    "sleeve_id": sleeve_id,
+                    "decision": decision,
+                    "authorized_quantity": authorized_qty,
+                    "reason_codes": rc,
+                },
+            )
         )
 
+    per_intent_rows.sort(key=lambda row: (row[0], row[1]))
+    per_intent = [row[2] for row in per_intent_rows]
     per_intent.sort(key=lambda r: (r["sleeve_id"], r["intent_hash"]))
 
     per_sleeve = []
     for s in sorted(sleeves, key=lambda x: x.sleeve_id):
-        allow = int(allowed_by_sleeve.get(s.sleeve_id, 0))
+        initial_allow = int(initial_allowed_by_sleeve.get(s.sleeve_id, 0))
+        remaining_allow = int(remaining_by_sleeve.get(s.sleeve_id, 0))
+        used_allow = int(initial_allow - remaining_allow)
         per_sleeve.append(
             {
                 "sleeve_id": s.sleeve_id,
                 "engine_ids": list(s.engine_ids),
-                "allowed_capital_at_risk_cents": allow,
-                "used_capital_at_risk_cents": 0,
-                "headroom_cents": allow,
+                "allowed_capital_at_risk_cents": initial_allow,
+                "used_capital_at_risk_cents": used_allow,
+                "headroom_cents": remaining_allow,
             }
         )
 
@@ -383,8 +516,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
         "portfolio": {
             "allowed_capital_at_risk_cents": int(max(portfolio_headroom_cents, 0)),
-            "used_capital_at_risk_cents": 0,
-            "headroom_cents": int(portfolio_headroom_cents),
+            "used_capital_at_risk_cents": int(max(portfolio_headroom_cents, 0)) - int(remaining_portfolio_headroom_cents),
+            "headroom_cents": int(remaining_portfolio_headroom_cents),
         },
         "correlation_gate_binding": {
             "gate_artifact_path": str(cegp),
@@ -402,12 +535,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     payload = canonical_json_bytes_v1(out_obj) + b"\n"
     out_path = (_out_root(truth_root) / day / "capital_authority_allocation.v1.json").resolve()
-    _atomic_write_refuse_overwrite(out_path, payload)
+    wrote_sha = _atomic_write_replace_if_changed(out_path, payload)
 
-    print(
-        f"OK: CAPITAL_AUTHORITY_ALLOCATION_V1_WRITTEN day_utc={day} path={out_path} "
-        f"sha256={_sha256_bytes(payload)} status={out_obj['status']}"
-    )
+    print(f"OK: CAPITAL_AUTHORITY_ALLOCATION_V1_DAY day_utc={day} path={out_path} sha256={wrote_sha} status={out_obj['status']}")
     return 0
 
 

@@ -1,0 +1,12 @@
+{
+  "bootstrap_execution_policy_id": "C2_BOOTSTRAP_EXECUTION_POLICY_V1",
+  "bootstrap_execution_policy_version": 1,
+  "states": [
+    {
+      "allowed_missing_authorization_gates": [],
+      "authorization_override_status": "BOOTSTRAP_PASS",
+      "lifecycle_state": "PRE_TRADE",
+      "required_passing_authorization_gates": []
+    }
+  ]
+}

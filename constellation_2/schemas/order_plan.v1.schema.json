@@ -17,48 +17,80 @@
     "exit_policy_ref"
   ],
   "properties": {
-    "schema_id": { "const": "order_plan" },
-    "schema_version": { "const": "v1" },
-
+    "schema_id": {
+      "const": "order_plan"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
     "plan_id": {
       "type": "string",
       "minLength": 16,
       "maxLength": 128,
       "description": "Deterministic plan identifier (hash-derived preferred)."
     },
-
-    "created_at_utc": { "type": "string", "format": "date-time" },
-
+    "created_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
     "intent_hash": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$",
       "description": "SHA-256 of canonical OptionsIntent."
     },
-
+    "engine_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Engine identifier propagated for submit lineage completeness."
+    },
+    "source_intent_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Source intent identifier propagated for submit lineage completeness."
+    },
+    "intent_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA-256 of original intent file bytes used for submit lineage binding."
+    },
     "structure": {
       "type": "string",
-      "enum": ["VERTICAL_SPREAD"],
+      "enum": [
+        "VERTICAL_SPREAD"
+      ],
       "description": "Only vertical spreads supported in v1."
     },
-
     "underlying": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["symbol", "currency"],
+      "required": [
+        "symbol",
+        "currency"
+      ],
       "properties": {
-        "symbol": { "type": "string", "minLength": 1, "maxLength": 16 },
-        "currency": { "type": "string", "minLength": 3, "maxLength": 3 }
+        "symbol": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16
+        },
+        "currency": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 3
+        }
       }
     },
-
     "legs": {
       "type": "array",
       "minItems": 2,
       "maxItems": 4,
-      "items": { "$ref": "#/$defs/leg" },
+      "items": {
+        "$ref": "#/$defs/leg"
+      },
       "description": "Order legs. For vertical spread v1, exactly 2 legs required."
     },
-
     "order_terms": {
       "type": "object",
       "additionalProperties": false,
@@ -70,44 +102,66 @@
         "tick_rounding"
       ],
       "properties": {
-        "order_type": { "type": "string", "enum": ["LIMIT"] },
-
+        "order_type": {
+          "type": "string",
+          "enum": [
+            "LIMIT"
+          ]
+        },
         "limit_price": {
           "type": "string",
           "pattern": "^[0-9]+(\\.[0-9]+)?$",
           "description": "Limit price as decimal string. For credit spreads, this is the credit; for debit spreads, the debit."
         },
-
         "is_credit": {
           "type": "boolean",
           "description": "True for credit spreads, false for debit spreads."
         },
-
         "tick_rounding": {
           "type": "string",
-          "enum": ["ROUND_DOWN", "ROUND_UP"],
+          "enum": [
+            "ROUND_DOWN",
+            "ROUND_UP"
+          ],
           "description": "Deterministic rounding rule applied to computed limit."
         },
-
-        "time_in_force": { "type": "string", "enum": ["DAY", "GTC"] }
+        "time_in_force": {
+          "type": "string",
+          "enum": [
+            "DAY",
+            "GTC"
+          ]
+        }
       }
     },
-
     "exit_policy_ref": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["policy_id"],
+      "required": [
+        "policy_id"
+      ],
       "properties": {
-        "policy_id": { "type": "string", "minLength": 1, "maxLength": 128 }
+        "policy_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
       }
     },
-
     "risk_proof": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["defined_risk_proven", "max_loss_usd", "width_points", "multiplier", "contracts"],
+      "required": [
+        "defined_risk_proven",
+        "max_loss_usd",
+        "width_points",
+        "multiplier",
+        "contracts"
+      ],
       "properties": {
-        "defined_risk_proven": { "type": "boolean" },
+        "defined_risk_proven": {
+          "type": "boolean"
+        },
         "max_loss_usd": {
           "type": "string",
           "pattern": "^[0-9]+(\\.[0-9]+)?$",
@@ -117,17 +171,27 @@
           "type": "string",
           "pattern": "^[0-9]+(\\.[0-9]+)?$"
         },
-        "multiplier": { "type": "integer", "enum": [100] },
-        "contracts": { "type": "integer", "minimum": 1, "maximum": 1000 }
+        "multiplier": {
+          "type": "integer",
+          "enum": [
+            100
+          ]
+        },
+        "contracts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
       }
     },
-
     "canonical_json_hash": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "pattern": "^[a-f0-9]{64}$"
     }
   },
-
   "$defs": {
     "leg": {
       "type": "object",
@@ -142,13 +206,43 @@
         "ib_localSymbol"
       ],
       "properties": {
-        "action": { "type": "string", "enum": ["BUY", "SELL"] },
-        "ratio": { "type": "integer", "enum": [1] },
-        "right": { "type": "string", "enum": ["CALL", "PUT"] },
-        "expiry_utc": { "type": "string", "format": "date-time" },
-        "strike": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
-        "ib_conId": { "type": "integer", "minimum": 1 },
-        "ib_localSymbol": { "type": "string", "minLength": 1, "maxLength": 64 }
+        "action": {
+          "type": "string",
+          "enum": [
+            "BUY",
+            "SELL"
+          ]
+        },
+        "ratio": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "right": {
+          "type": "string",
+          "enum": [
+            "CALL",
+            "PUT"
+          ]
+        },
+        "expiry_utc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "strike": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$"
+        },
+        "ib_conId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "ib_localSymbol": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
       }
     }
   }

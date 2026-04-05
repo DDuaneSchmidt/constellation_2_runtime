@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisor_execution/action_policy_pack.v1.schema.json",
+  "title": "action_policy_pack.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "policy_pack_id",
+    "created_at",
+    "version",
+    "action_sizing_rules",
+    "action_constraint_rules",
+    "replan_trigger_rules",
+    "domain_action_maturity"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "action_policy_pack"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "policy_pack_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "const": "v1"
+    },
+    "action_sizing_rules": {
+      "type": "array",
+      "items": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://constellation.local/schemas/c2/advisor_execution/action_sizing_rule.v1.schema.json",
+        "title": "action_sizing_rule.v1",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rule_id",
+          "domain_id",
+          "action_type",
+          "rule_key",
+          "annual_amount_mode",
+          "periodic_amount_mode",
+          "periodicity"
+        ],
+        "properties": {
+          "rule_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "domain_id": {
+            "type": "string",
+            "enum": [
+              "liquidity",
+              "withdrawal",
+              "annuity",
+              "tax"
+            ]
+          },
+          "action_type": {
+            "type": "string",
+            "enum": [
+              "raise_cash_reserve",
+              "withdraw_from_taxable",
+              "hold_annuity",
+              "collect_missing_input"
+            ]
+          },
+          "rule_key": {
+            "type": "string",
+            "enum": [
+              "liquidity_12_month_minimum",
+              "withdrawal_required_income",
+              "annuity_hold",
+              "tax_gating"
+            ]
+          },
+          "annual_amount_mode": {
+            "type": "string",
+            "enum": [
+              "gap_to_12_month_minimum",
+              "required_income_annualized",
+              "zero",
+              "not_applicable"
+            ]
+          },
+          "periodic_amount_mode": {
+            "type": "string",
+            "enum": [
+              "gap_to_12_month_minimum",
+              "required_income_monthly",
+              "zero",
+              "not_applicable"
+            ]
+          },
+          "periodicity": {
+            "type": "string",
+            "enum": [
+              "annual",
+              "monthly",
+              "none"
+            ]
+          }
+        }
+      }
+    },
+    "action_constraint_rules": {
+      "type": "array",
+      "items": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://constellation.local/schemas/c2/advisor_execution/action_constraint_rule.v1.schema.json",
+        "title": "action_constraint_rule.v1",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rule_id",
+          "domain_id",
+          "action_type",
+          "constraint_code",
+          "support_status"
+        ],
+        "properties": {
+          "rule_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "domain_id": {
+            "type": "string",
+            "enum": [
+              "liquidity",
+              "withdrawal",
+              "annuity",
+              "tax"
+            ]
+          },
+          "action_type": {
+            "type": "string",
+            "enum": [
+              "raise_cash_reserve",
+              "withdraw_from_taxable",
+              "hold_annuity",
+              "collect_missing_input"
+            ]
+          },
+          "constraint_code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "support_status": {
+            "type": "string",
+            "enum": [
+              "fully_supported",
+              "degraded",
+              "provisional",
+              "blocked"
+            ]
+          }
+        }
+      }
+    },
+    "replan_trigger_rules": {
+      "type": "array",
+      "items": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://constellation.local/schemas/c2/advisor_execution/replan_trigger_rule.v1.schema.json",
+        "title": "replan_trigger_rule.v1",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "trigger_id",
+          "trigger_type",
+          "description"
+        ],
+        "properties": {
+          "trigger_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "trigger_type": {
+            "type": "string",
+            "enum": [
+              "market_drawdown",
+              "spending_deviation",
+              "tax_profile_update",
+              "employment_change"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "domain_action_maturity": {
+      "type": "array",
+      "items": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://constellation.local/schemas/c2/advisor_execution/domain_action_maturity.v1.schema.json",
+        "title": "domain_action_maturity.v1",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "domain_id",
+          "maturity"
+        ],
+        "properties": {
+          "domain_id": {
+            "type": "string",
+            "enum": [
+              "liquidity",
+              "withdrawal",
+              "tax",
+              "annuity"
+            ]
+          },
+          "maturity": {
+            "type": "string",
+            "enum": [
+              "recommend_only",
+              "plan_allowed",
+              "monitored_plan_allowed"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

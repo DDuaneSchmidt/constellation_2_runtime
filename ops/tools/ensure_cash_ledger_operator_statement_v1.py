@@ -9,7 +9,7 @@ Modes:
   SEED_100K  -> cash_total = 100000.00
 
 Target path:
-  constellation_2/operator_inputs/cash_ledger_operator_statements/<DAY>/operator_statement.v1.json
+  <TRUTH_ROOT>/operator_inputs/cash_ledger_operator_statements/<DAY>/operator_statement.v1.json
 
 Fail-closed:
 - No overwrite.
@@ -24,9 +24,15 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
+def _require_truth_root(raw: str) -> Path:
+    p = Path(str(raw).strip()).expanduser().resolve()
+    if not p.is_absolute() or not p.exists() or not p.is_dir():
+        raise SystemExit(f"FAIL: invalid --truth_root: {p}")
+    return p
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-OUT_ROOT = (REPO_ROOT / "constellation_2" / "operator_inputs" / "cash_ledger_operator_statements").resolve()
+
+def _operator_statement_root(truth_root: Path) -> Path:
+    return (truth_root / "operator_inputs" / "cash_ledger_operator_statements").resolve()
 
 
 def _day_prefix(day_utc: str) -> str:
@@ -91,6 +97,7 @@ def _build_seed_100k(day_utc: str, ib_account: str) -> Dict[str, Any]:
 def main() -> int:
     ap = argparse.ArgumentParser(prog="ensure_cash_ledger_operator_statement_v1")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
+    ap.add_argument("--truth_root", required=True, help="Authoritative runtime truth root")
     ap.add_argument("--ib_account", required=True, help="IB account id (DU*)")
     ap.add_argument("--mode", required=True, choices=["ZERO", "SEED_100K"])
     ap.add_argument("--allow_create", required=True, choices=["YES", "NO"])
@@ -100,11 +107,13 @@ def main() -> int:
     if len(day) != 10 or day[4] != "-" or day[7] != "-":
         raise SystemExit(f"FAIL: bad --day_utc: {day!r}")
 
+    truth_root = _require_truth_root(args.truth_root)
+
     ib = str(args.ib_account).strip()
     if not ib:
         raise SystemExit("FAIL: bad --ib_account (empty)")
 
-    out_dir = (OUT_ROOT / day).resolve()
+    out_dir = (_operator_statement_root(truth_root) / day).resolve()
     out_path = (out_dir / "operator_statement.v1.json").resolve()
 
     if out_path.exists():

@@ -5,13 +5,22 @@ import json
 import os
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime")
-TRUTH_ROOT = REPO_ROOT / "constellation_2/runtime/truth"
+from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_statement_normalized.v1.schema.json"
 SCHEMA_ID = "C2_BROKER_STATEMENT_NORMALIZED_V1"
 SCHEMA_VERSION = "1.0.0"
+
+
+def _require_truth_root(raw: str) -> Path:
+    p = Path(str(raw).strip()).expanduser().resolve()
+    if not p.exists() or not p.is_dir():
+        raise SystemExit(f"FATAL: invalid --truth_root: {p}")
+    return p
+
 
 def _sha256_file(p: Path) -> str:
     h = hashlib.sha256()
@@ -20,11 +29,14 @@ def _sha256_file(p: Path) -> str:
             h.update(chunk)
     return h.hexdigest()
 
+
 def _sha256_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
+
 def _json_dumps_deterministic(obj: Any) -> bytes:
     return (json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8")
+
 
 def _atomic_write(path: Path, content_bytes: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -35,13 +47,69 @@ def _atomic_write(path: Path, content_bytes: bytes) -> None:
         os.fsync(f.fileno())
     os.replace(tmp, path)
 
-def _immut_write(path: Path, content_bytes: bytes) -> None:
+
+def _validate_existing_canonical_or_reason(*, path: Path, day_utc: str) -> Tuple[bool, str]:
+    try:
+        obj = _load_json(path)
+    except Exception as e:
+        return False, f"PARSE_FAILED:{e!r}"
+    required = [
+        "schema_id",
+        "schema_version",
+        "produced_utc",
+        "day_utc",
+        "producer",
+        "source",
+        "source_file_sha256",
+        "account_id",
+        "currency",
+        "cash_end",
+        "fees_total",
+        "positions",
+        "notes",
+    ]
+    for key in required:
+        if key not in obj:
+            return False, f"MISSING_REQUIRED_FIELD:{key}"
+    if str(obj.get("schema_id") or "").strip() != SCHEMA_ID:
+        return False, f"SCHEMA_ID_MISMATCH:{obj.get('schema_id')!r}"
+    if str(obj.get("schema_version") or "").strip() != SCHEMA_VERSION:
+        return False, f"SCHEMA_VERSION_MISMATCH:{obj.get('schema_version')!r}"
+    if str(obj.get("day_utc") or "").strip() != day_utc:
+        return False, f"DAY_MISMATCH:{obj.get('day_utc')!r}"
+    try:
+        validate_against_repo_schema_v1(obj, REPO_ROOT, SCHEMA_RELPATH)
+    except Exception as e:
+        return False, f"SCHEMA_VALIDATION_FAILED:{e!r}"
+    return True, "OK"
+
+
+def _delete_existing_and_sync(path: Path) -> None:
+    path.unlink()
+    dir_fd = os.open(str(path.parent), os.O_DIRECTORY)
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
+
+
+def _write_canonical_with_integrity(*, path: Path, obj: Dict[str, Any], day_utc: str) -> str:
+    validate_against_repo_schema_v1(obj, REPO_ROOT, SCHEMA_RELPATH)
+    content_bytes = _json_dumps_deterministic(obj)
     if path.exists():
+        valid, reason = _validate_existing_canonical_or_reason(path=path, day_utc=day_utc)
+        if not valid:
+            _delete_existing_and_sync(path)
+            _atomic_write(path, content_bytes)
+            return f"REMOVED_INVALID_EXISTING:{reason}"
         existing = path.read_bytes()
-        if _sha256_bytes(existing) != _sha256_bytes(content_bytes):
-            raise RuntimeError(f"ImmutableWriteError: ATTEMPTED_REWRITE path={path} existing_sha={_sha256_bytes(existing)} candidate_sha={_sha256_bytes(content_bytes)}")
-        return
+        if _sha256_bytes(existing) == _sha256_bytes(content_bytes):
+            return "EXISTS_IDENTICAL"
+        _atomic_write(path, content_bytes)
+        return "REPLACED_STALE"
     _atomic_write(path, content_bytes)
+    return "WROTE_NEW"
+
 
 def _dec_str(x: Any) -> str:
     try:
@@ -56,13 +124,19 @@ def _dec_str(x: Any) -> str:
             s = "0"
     return s
 
+
 def _load_json(path: Path) -> Dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
-        return json.load(f)
+        obj = json.load(f)
+    if not isinstance(obj, dict):
+        raise SystemExit(f"FATAL: input_json top-level not object: {path}")
+    return obj
+
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
+    ap.add_argument("--truth_root", required=True, help="Authoritative runtime truth root")
     ap.add_argument("--source", required=True, choices=["IB_FLEX", "IB_TWS_EXPORT", "IB_PORTAL_EXPORT", "OTHER"])
     ap.add_argument("--account_id", required=True)
     ap.add_argument("--currency", required=True)
@@ -70,6 +144,7 @@ def main() -> int:
     args = ap.parse_args()
 
     day = str(args.day_utc).strip()
+    truth_root = _require_truth_root(args.truth_root)
     in_path = Path(args.input_json).expanduser().resolve()
     if not in_path.exists():
         raise SystemExit(f"FATAL: input_json missing: {in_path}")
@@ -126,14 +201,14 @@ def main() -> int:
         "notes": notes,
     }
 
-    out_dir = TRUTH_ROOT / "execution_evidence_v1" / "broker_statement_normalized_v1" / day
+    out_dir = truth_root / "execution_evidence_v1" / "broker_statement_normalized_v1" / day
     out_path = out_dir / "broker_statement_normalized.v1.json"
 
-    content = _json_dumps_deterministic(out)
-    _immut_write(out_path, content)
+    write_result = _write_canonical_with_integrity(path=out_path, obj=out, day_utc=day)
 
-    print(f"OK: wrote {out_path}")
+    print(f"OK: {write_result} path={out_path}")
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

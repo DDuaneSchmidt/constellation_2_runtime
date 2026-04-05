@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisor_bridge/advisor_trade_translation.v1.schema.json",
+  "title": "advisor_trade_translation.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "run_id",
+    "planning_snapshot_id",
+    "decision_plan_id",
+    "translations"
+  ],
+  "properties": {
+    "schema_id": {"const": "advisor_trade_translation"},
+    "schema_version": {"const": "v1"},
+    "produced_utc": {"type": "string", "minLength": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "planning_snapshot_id": {"type": "string", "minLength": 1},
+    "decision_plan_id": {"type": "string", "minLength": 1},
+    "translations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "decision_action_id",
+          "action_type",
+          "translation_status",
+          "bridge_classification",
+          "source_account",
+          "proposed_amount_cents",
+          "periodicity",
+          "rationale_refs",
+          "evidence_refs",
+          "notes"
+        ],
+        "properties": {
+          "decision_action_id": {"type": "string", "minLength": 1},
+          "action_type": {"type": "string", "enum": ["raise_cash_reserve", "collect_missing_input", "hold_annuity", "withdraw_from_taxable"]},
+          "translation_status": {"type": "string", "enum": ["proposed", "blocked", "non_trade_action"]},
+          "bridge_classification": {"type": "string", "enum": ["non_trade_action", "blocked", "candidate_trade_action"]},
+          "source_account": {"type": ["string", "null"]},
+          "proposed_amount_cents": {"type": ["integer", "null"], "minimum": 0},
+          "periodicity": {"type": ["string", "null"], "enum": ["annual", "monthly", "none", null]},
+          "rationale_refs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "evidence_refs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "notes": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisor_execution/decision_plan_delta.v1.schema.json",
+  "title": "decision_plan_delta.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "plan_delta_id",
+    "previous_plan_id",
+    "current_plan_id",
+    "delta_type",
+    "changed_action_ids",
+    "summary",
+    "version"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "decision_plan_delta"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "plan_delta_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "previous_plan_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "current_plan_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "delta_type": {
+      "type": "string",
+      "enum": [
+        "fact_change",
+        "policy_change",
+        "recommendation_change",
+        "constraint_change",
+        "no_change"
+      ]
+    },
+    "changed_action_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "const": "v1"
+    }
+  }
+}

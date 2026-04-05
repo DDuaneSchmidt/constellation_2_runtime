@@ -47,6 +47,8 @@ VISIBILITY_SNAPSHOT_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/visibility_m
 FUNNEL_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/funnel_metrics.v1.schema.json"
 DRIFT_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/drift_report.v1.schema.json"
 SUMMARY_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/daily_summary.v1.schema.json"
+LIFECYCLE_STATE_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/lifecycle_state_authority.v1.schema.json"
+ECONOMIC_FINALIZATION_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/economic_finalization_status.v1.schema.json"
 VISIBILITY_LEDGER_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/visibility_decision_ledger.v1.schema.json"
 
 DATE_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
@@ -78,6 +80,14 @@ ARTIFACT_SPECS: Dict[str, Tuple[str, str]] = {
     "funnel_metrics_v1": ("reports/funnel_metrics_v1/{day}/funnel_metrics.v1.json", FUNNEL_SCHEMA),
     "drift_report_v1": ("reports/drift_report_v1/{day}/drift_report.v1.json", DRIFT_SCHEMA),
     "daily_summary_v1": ("reports/daily_summary_v1/{day}/daily_summary.v1.json", SUMMARY_SCHEMA),
+    "lifecycle_state_authority_v1": (
+        "reports/lifecycle_state_authority_v1/{day}/lifecycle_state_authority.v1.json",
+        LIFECYCLE_STATE_SCHEMA,
+    ),
+    "economic_finalization_status_v1": (
+        "reports/economic_finalization_status_v1/{day}/economic_finalization_status.v1.json",
+        ECONOMIC_FINALIZATION_SCHEMA,
+    ),
     "visibility_decision_ledger_v1": (
         "reports/visibility_decision_ledger_v1/{day}/visibility_decision_ledger.v1.json",
         VISIBILITY_LEDGER_SCHEMA,
@@ -274,6 +284,17 @@ def _integrity_from_sources(sources: Dict[str, SourceArtifact]) -> str:
     return "OK"
 
 
+def _summary_blocks_finalization(summary_doc: Dict[str, Any]) -> bool:
+    blocked_status = str(summary_doc.get("blocked_status") or "").strip()
+    readiness_status = str(summary_doc.get("readiness_status") or "").strip()
+    summary_classification = str(summary_doc.get("summary_classification") or "").strip()
+    return (
+        blocked_status == "BLOCKED"
+        or readiness_status == "FAIL"
+        or summary_classification == "READINESS_BLOCKED"
+    )
+
+
 def evaluate_operator_access(
     view_or_query_id: str,
     required_source_names: List[str],
@@ -308,6 +329,44 @@ def evaluate_operator_access(
             integrity_state = "BOUNDED_INCOMPLETE" if integrity_state == "OK" else integrity_state
             detail = source.error_code if isinstance(source, SourceArtifact) else "MISSING"
             reasons.append(f"{artifact_name}:{detail}")
+
+    summary = sources.get("daily_summary_v1")
+    if isinstance(summary, SourceArtifact) and summary.valid and isinstance(summary.doc, dict):
+        if _summary_blocks_finalization(summary.doc) and finalization_state != "UNAVAILABLE":
+            finalization_state = "IN_FLIGHT_BLOCKED"
+            access_status = "DENY_FINAL"
+            reasons.append(
+                "daily_summary_v1:NON_FINAL_STATE:"
+                f"{summary.doc.get('summary_classification')}:{summary.doc.get('readiness_status')}:{summary.doc.get('blocked_status')}"
+            )
+
+    lifecycle = sources.get("lifecycle_state_authority_v1")
+    if not isinstance(lifecycle, SourceArtifact) or not lifecycle.present or not lifecycle.valid or not isinstance(lifecycle.doc, dict):
+        finalization_state = "UNAVAILABLE"
+        access_status = "ALLOW_BOUNDED_PARTIAL"
+        integrity_state = "BOUNDED_INCOMPLETE" if integrity_state == "OK" else integrity_state
+        detail = lifecycle.error_code if isinstance(lifecycle, SourceArtifact) else "MISSING"
+        reasons.append(f"lifecycle_state_authority_v1:{detail}")
+    else:
+        lifecycle_state = str(lifecycle.doc.get("lifecycle_state") or "").strip()
+        if lifecycle_state != "POST_TRADE_ECONOMIC" and finalization_state != "UNAVAILABLE":
+            finalization_state = "IN_FLIGHT_BLOCKED"
+            access_status = "DENY_FINAL"
+            reasons.append(f"lifecycle_state_authority_v1:NON_FINAL_STATE:{lifecycle_state}")
+
+    economic = sources.get("economic_finalization_status_v1")
+    if not isinstance(economic, SourceArtifact) or not economic.present or not economic.valid or not isinstance(economic.doc, dict):
+        finalization_state = "UNAVAILABLE"
+        access_status = "ALLOW_BOUNDED_PARTIAL"
+        integrity_state = "BOUNDED_INCOMPLETE" if integrity_state == "OK" else integrity_state
+        detail = economic.error_code if isinstance(economic, SourceArtifact) else "MISSING"
+        reasons.append(f"economic_finalization_status_v1:{detail}")
+    else:
+        economic_status = str(economic.doc.get("economic_finalization_status") or "").strip()
+        if economic_status != "ECONOMIC_FINALIZATION_COMPLETE" and finalization_state != "UNAVAILABLE":
+            finalization_state = "IN_FLIGHT_BLOCKED"
+            access_status = "DENY_FINAL"
+            reasons.append(f"economic_finalization_status_v1:NON_FINAL_STATE:{economic_status}")
 
     if integrity_state in {"EVIDENCE_INCONSISTENT", "INTERNAL_FAILURE"}:
         access_status = "ALLOW_INTEGRITY_CONSTRAINED"

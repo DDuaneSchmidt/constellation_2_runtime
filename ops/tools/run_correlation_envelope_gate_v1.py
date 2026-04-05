@@ -144,6 +144,16 @@ def _validate_against_repo_schema_v1(repo_root: Path, schema_relpath: str, obj: 
     validate_against_repo_schema_v1(obj, repo_root, schema_relpath)
 
 
+def _display_path(path: Path) -> str:
+    p = path.resolve()
+    for root in (TRUTH, REPO_ROOT):
+        try:
+            return str(p.relative_to(root))
+        except ValueError:
+            pass
+    return str(p)
+
+
 def _write_immutable_or_compare(path: Path, candidate_bytes: bytes, mismatch_code: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     cand = candidate_bytes if candidate_bytes.endswith(b"\n") else (candidate_bytes + b"\n")
@@ -764,12 +774,12 @@ def main() -> int:
             "producer": {"repo": "constellation_2_runtime", "git_sha": _git_sha(), "module": "ops/tools/run_correlation_envelope_gate_v1.py"},
             "status": "BLOCK_ALL" if depth_scale_bp == 0 else ("SCALE" if depth_scale_bp < 10000 else "PASS"),
             "fail_closed": False,
-            "policy": {"path": str(DEPTH_POLICY_PATH.relative_to(REPO_ROOT)), "sha256": depth_policy_sha, "policy_id": "C2_DEPTH_LIQUIDITY_STRESS_POLICY_V1"},
+            "policy": {"path": _display_path(DEPTH_POLICY_PATH), "sha256": depth_policy_sha, "policy_id": "C2_DEPTH_LIQUIDITY_STRESS_POLICY_V1"},
             "inputs": {
-                "intents_root": str(intents_root.relative_to(REPO_ROOT)),
-                "liquidity_dataset_manifest_path": str(LIQ_DATASET_MANIFEST.relative_to(REPO_ROOT)),
+                "intents_root": _display_path(intents_root),
+                "liquidity_dataset_manifest_path": _display_path(LIQ_DATASET_MANIFEST),
                 "liquidity_dataset_manifest_sha256": _sha256_file(LIQ_DATASET_MANIFEST),
-                "nav_snapshot_path": str(nav_path.relative_to(REPO_ROOT)),
+                "nav_snapshot_path": _display_path(nav_path),
                 "nav_snapshot_sha256": _sha256_file(nav_path),
             },
             "regime_used": regime_used,
@@ -806,7 +816,7 @@ def main() -> int:
             log_prefix="DEPTH_STRESS_REFRESHED_STALE_ARTIFACT",
         )
 
-        depth_out_rel = str(depth_out_path.relative_to(REPO_ROOT))
+        depth_out_rel = _display_path(depth_out_path)
         depth_out_sha = _sha256_file(depth_out_path)
 
         if shocked_risk <= max_risk or shocked_risk == Decimal("0"):
@@ -851,12 +861,12 @@ def main() -> int:
             "producer": {"repo": "constellation_2_runtime", "git_sha": _git_sha(), "module": "ops/tools/run_correlation_envelope_gate_v1.py"},
             "status": cse_status,
             "fail_closed": False,
-            "policy": {"path": str(CSE_POLICY_PATH.relative_to(REPO_ROOT)), "sha256": cse_policy_sha, "policy_id": "C2_CONVEX_SHOCK_ENVELOPE_POLICY_V1"},
+            "policy": {"path": _display_path(CSE_POLICY_PATH), "sha256": cse_policy_sha, "policy_id": "C2_CONVEX_SHOCK_ENVELOPE_POLICY_V1"},
             "inputs": {
-                "engine_correlation_matrix_path": str(corr_path.relative_to(REPO_ROOT)),
+                "engine_correlation_matrix_path": _display_path(corr_path),
                 "engine_correlation_matrix_sha256": _sha256_file(corr_path),
-                "intents_root": str(intents_root.relative_to(REPO_ROOT)),
-                "liquidity_dataset_manifest_path": str(LIQ_DATASET_MANIFEST.relative_to(REPO_ROOT)),
+                "intents_root": _display_path(intents_root),
+                "liquidity_dataset_manifest_path": _display_path(LIQ_DATASET_MANIFEST),
                 "liquidity_dataset_manifest_sha256": _sha256_file(LIQ_DATASET_MANIFEST),
                 "depth_stress_path": depth_out_rel,
                 "depth_stress_sha256": depth_out_sha,
@@ -913,11 +923,11 @@ def main() -> int:
         "producer": {"repo": str(REPO_ROOT), "git_sha": _git_sha(), "module": "ops/tools/run_correlation_envelope_gate_v1.py"},
         "status": status,
         "fail_closed": bool(fail_closed),
-        "policy": {"path": str(POLICY_PATH.relative_to(REPO_ROOT)), "sha256": policy_sha, "policy_id": "C2_CORRELATION_ENVELOPE_POLICY_V1"},
+        "policy": {"path": _display_path(POLICY_PATH), "sha256": policy_sha, "policy_id": "C2_CORRELATION_ENVELOPE_POLICY_V1"},
         "inputs": {
-            "engine_correlation_matrix_path": str(corr_path.relative_to(REPO_ROOT)),
+            "engine_correlation_matrix_path": _display_path(corr_path),
             "engine_correlation_matrix_sha256": _sha256_file(corr_path) if corr_path.exists() else "0" * 64,
-            "intents_root": str(intents_root.relative_to(REPO_ROOT)),
+            "intents_root": _display_path(intents_root),
         },
         "caps": {
             "multiplier_bp_by_sleeve": {k: int(multiplier_by_sleeve[k]) for k in sorted(multiplier_by_sleeve.keys())},

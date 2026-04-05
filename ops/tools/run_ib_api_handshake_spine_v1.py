@@ -30,11 +30,13 @@ from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_again
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+_THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = _THIS_FILE.parents[2]
 TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
 SCHEMA_HANDSHAKE = "governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/ib_api_handshake.v1.schema.json"
 SCHEMA_LATEST_PTR = "governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/ib_api_handshake_latest_pointer.v1.schema.json"
+AUTH_BROKER_EVENTS_ROOT = (TRUTH_ROOT / "execution_evidence_v2" / "broker_events").resolve()
 
 
 @dataclass(frozen=True)
@@ -87,9 +89,7 @@ def _paths_for_day(day_utc: str) -> Paths:
     day_dir = (TRUTH_ROOT / "ib_api_handshake" / day_utc).resolve()
     out_path = (day_dir / "ib_api_handshake.v1.json").resolve()
     latest_path = (TRUTH_ROOT / "ib_api_handshake" / "latest_pointer.v1.json").resolve()
-    broker_events_path = (
-        TRUTH_ROOT / "execution_evidence_v2/broker_events" / day_utc / "broker_event_log.v1.jsonl"
-    ).resolve()
+    broker_events_path = (AUTH_BROKER_EVENTS_ROOT / day_utc / "broker_event_log.v1.jsonl").resolve()
     return Paths(day_dir=day_dir, out_path=out_path, latest_path=latest_path, broker_events_path=broker_events_path)
 
 

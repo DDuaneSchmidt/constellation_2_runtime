@@ -4,7 +4,12 @@ import json
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path("/home/node/constellation_2_clean").resolve()
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+REPO_ROOT = _repo_root()
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -94,7 +99,88 @@ def _prepare_batch3_day(
         day_utc=day,
         produced_utc=f"{day}T00:00:00Z",
     )
+    _write_operator_finalization_truth(
+        truth_root,
+        day,
+        lifecycle_state="POST_TRADE_ECONOMIC" if gate_status == "PASS" and verdict_status == "PASS" else "PRE_TRADE",
+        economic_status="ECONOMIC_FINALIZATION_COMPLETE" if gate_status == "PASS" and verdict_status == "PASS" else "NOT_READY_FOR_ECONOMIC_FINALIZATION",
+    )
 
+
+
+
+def _write_operator_finalization_truth(
+    truth_root: Path,
+    day: str,
+    *,
+    lifecycle_state: str,
+    economic_status: str,
+) -> None:
+    run_scope = {
+        "day_utc": day,
+        "mode": "PAPER",
+        "sleeve_id": "PRIMARY",
+        "engine_id": None,
+        "attempt_id": None,
+        "attempt_seq": None,
+        "truth_partition": str(truth_root),
+    }
+    _write_json(
+        truth_root / "reports" / "lifecycle_state_authority_v1" / day / "lifecycle_state_authority.v1.json",
+        {
+            "schema_id": "lifecycle_state_authority_v1",
+            "schema_version": 1,
+            "lifecycle_policy_id": "C2_LIFECYCLE_STATE_POLICY_V1",
+            "lifecycle_policy_version": 1,
+            "day_utc": day,
+            "mode": "PAPER",
+            "run_scope": {
+                "day_utc": day,
+                "mode": "PAPER",
+                "truth_partition": str(truth_root),
+            },
+            "produced_utc": f"{day}T00:00:00Z",
+            "lifecycle_state": lifecycle_state,
+            "derivation_inputs": [
+                {
+                    "artifact_family": "gate_stack_verdict_v1",
+                    "path": str(truth_root / "reports" / "gate_stack_verdict_v1" / day / "gate_stack_verdict.v1.json"),
+                    "present": True,
+                }
+            ],
+            "derivation_reasons": [f"lifecycle_state={lifecycle_state}"],
+            "evidence_refs": [str(truth_root / "reports" / "gate_stack_verdict_v1" / day / "gate_stack_verdict.v1.json")],
+        },
+    )
+    blocked_stage_status = "COMPLETE" if economic_status == "ECONOMIC_FINALIZATION_COMPLETE" else "BLOCKED_UPSTREAM"
+    blocked_reasons = [] if economic_status == "ECONOMIC_FINALIZATION_COMPLETE" else [economic_status]
+    integrity_status = "OK" if economic_status == "ECONOMIC_FINALIZATION_COMPLETE" else "ECONOMIC_FINALIZATION_INCOMPLETE"
+    execution_truth_status = "EXECUTION_TRUTH_COMPLETE" if economic_status == "ECONOMIC_FINALIZATION_COMPLETE" else "EXECUTION_TRUTH_INCOMPLETE"
+    _write_json(
+        truth_root / "reports" / "economic_finalization_status_v1" / day / "economic_finalization_status.v1.json",
+        {
+            "schema_id": "economic_finalization_status_v1",
+            "schema_version": 1,
+            "day_utc": day,
+            "produced_utc": f"{day}T00:00:00Z",
+            "execution_completion_ruleset_id": "EXECUTION_COMPLETION_RULESET_V1",
+            "execution_completion_ruleset_version": 1,
+            "lifecycle_completeness_policy_id": "C2_LIFECYCLE_COMPLETENESS_POLICY_V1",
+            "lifecycle_completeness_policy_version": 1,
+            "run_scope": run_scope,
+            "execution_truth_status": execution_truth_status,
+            "economic_finalization_status": economic_status,
+            "stage_statuses": [
+                {"stage_name": "POSITIONS", "stage_status": blocked_stage_status, "blocking_reasons": blocked_reasons, "blocked_writers": []},
+                {"stage_name": "CASH", "stage_status": blocked_stage_status, "blocking_reasons": blocked_reasons, "blocked_writers": []},
+                {"stage_name": "MARKS", "stage_status": blocked_stage_status, "blocking_reasons": blocked_reasons, "blocked_writers": []},
+                {"stage_name": "ACCOUNTING", "stage_status": blocked_stage_status, "blocking_reasons": blocked_reasons, "blocked_writers": []},
+                {"stage_name": "EXIT_RECONCILIATION", "stage_status": blocked_stage_status, "blocking_reasons": blocked_reasons, "blocked_writers": []},
+            ],
+            "integrity_status": integrity_status,
+            "evidence_refs": [str(truth_root / "reports" / "daily_summary_v1" / day / "daily_summary.v1.json")],
+        },
+    )
 
 def test_home_view_for_blocked_finalized_day(tmp_path: Path) -> None:
     truth_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
@@ -112,9 +198,63 @@ def test_home_view_for_blocked_finalized_day(tmp_path: Path) -> None:
     )
     bundle = build_operator_home_bundle(repo_root=REPO_ROOT, truth_root=truth_root, day_utc="2026-04-03")
     assert bundle["home_view"]["home_status_classification"] == "READINESS_BLOCKED"
-    assert bundle["trust_panel"]["finalization_state"] == "FINALIZED"
-    assert bundle["home_view"]["partiality_status"] == "EXACT"
+    assert bundle["trust_panel"]["finalization_state"] == "IN_FLIGHT_BLOCKED"
+    assert bundle["trust_panel"]["trust_classification"] == "LIMITED"
+    assert bundle["home_view"]["partiality_status"] == "BOUNDED_PARTIAL"
 
+
+
+
+def test_home_view_for_bootstrap_day_is_not_trusted(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    _prepare_batch3_day(
+        truth_root,
+        "2026-04-03",
+        verdict_status="PASS",
+        intents=1,
+        submitted=1,
+        filled=1,
+        rejected=0,
+        vetoed=0,
+        gate_status="PASS",
+        blocking_class="NONE",
+    )
+    _write_operator_finalization_truth(
+        truth_root,
+        "2026-04-03",
+        lifecycle_state="PRE_TRADE",
+        economic_status="NOT_READY_FOR_ECONOMIC_FINALIZATION",
+    )
+    bundle = build_operator_home_bundle(repo_root=REPO_ROOT, truth_root=truth_root, day_utc="2026-04-03")
+    assert bundle["trust_panel"]["finalization_state"] == "IN_FLIGHT_BLOCKED"
+    assert bundle["trust_panel"]["trust_classification"] == "LIMITED"
+    assert bundle["trust_panel"]["exactness_classification"] == "BOUNDED_PARTIAL"
+
+
+def test_home_view_for_economic_not_ready_day_is_not_trusted(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    _prepare_batch3_day(
+        truth_root,
+        "2026-04-03",
+        verdict_status="PASS",
+        intents=1,
+        submitted=1,
+        filled=1,
+        rejected=0,
+        vetoed=0,
+        gate_status="PASS",
+        blocking_class="NONE",
+    )
+    _write_operator_finalization_truth(
+        truth_root,
+        "2026-04-03",
+        lifecycle_state="POST_TRADE_ECONOMIC",
+        economic_status="NOT_READY_FOR_ECONOMIC_FINALIZATION",
+    )
+    bundle = build_operator_home_bundle(repo_root=REPO_ROOT, truth_root=truth_root, day_utc="2026-04-03")
+    assert bundle["trust_panel"]["finalization_state"] == "IN_FLIGHT_BLOCKED"
+    assert bundle["trust_panel"]["trust_classification"] == "LIMITED"
+    assert bundle["trust_panel"]["exactness_classification"] == "BOUNDED_PARTIAL"
 
 def test_home_view_for_integrity_constrained_day(tmp_path: Path) -> None:
     truth_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"

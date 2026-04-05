@@ -13,6 +13,7 @@ Rules:
 Phase C outputs:
 
 OPTIONS SUCCESS:
+- options_intent.v2.json
 - order_plan.v1.json
 - mapping_ledger_record.v1.json
 - binding_record.v1.json
@@ -96,6 +97,7 @@ def write_phasec_veto_only_v1(out_dir: Path, *, veto_record: Dict[str, Any]) -> 
 def write_phasec_success_outputs_options_v1(
     out_dir: Path,
     *,
+    options_intent: Optional[Dict[str, Any]] = None,
     order_plan: Dict[str, Any],
     mapping_ledger_record: Dict[str, Any],
     binding_record: Dict[str, Any],
@@ -103,6 +105,8 @@ def write_phasec_success_outputs_options_v1(
 ) -> None:
     _ensure_out_dir_ready(out_dir)
 
+    if options_intent is not None:
+        _write_json_obj(out_dir, "options_intent.v2.json", options_intent)
     _write_json_obj(out_dir, "order_plan.v1.json", order_plan)
     _write_json_obj(out_dir, "mapping_ledger_record.v1.json", mapping_ledger_record)
     _write_json_obj(out_dir, "binding_record.v1.json", binding_record)

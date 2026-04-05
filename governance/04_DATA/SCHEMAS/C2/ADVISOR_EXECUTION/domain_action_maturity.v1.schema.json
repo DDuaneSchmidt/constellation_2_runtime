@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisor_execution/domain_action_maturity.v1.schema.json",
+  "title": "domain_action_maturity.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "domain_id",
+    "maturity"
+  ],
+  "properties": {
+    "domain_id": {
+      "type": "string",
+      "enum": [
+        "liquidity",
+        "withdrawal",
+        "tax",
+        "annuity"
+      ]
+    },
+    "maturity": {
+      "type": "string",
+      "enum": [
+        "recommend_only",
+        "plan_allowed",
+        "monitored_plan_allowed"
+      ]
+    }
+  }
+}
