@@ -60,8 +60,7 @@ TRUTH_ROOT = resolve_fact_plane_truth_root_v1()
 INTENTS_ROOT = (TRUTH_ROOT / "intents_v1" / "snapshots").resolve()
 
 MD_ROOT = (TRUTH_ROOT / "market_data_snapshot_v1" / "snapshots").resolve()
-# Updated for Bundle B: consume authoritative accounting_v2 NAV
-NAV_ROOT = (TRUTH_ROOT / "accounting_v2" / "nav").resolve()
+NAV_ROOT = (TRUTH_ROOT / "accounting_v1" / "nav").resolve()
 POS_ROOT = (TRUTH_ROOT / "positions_snapshot_v2" / "snapshots").resolve()
 COR_ROOT = (TRUTH_ROOT / "monitoring_v1" / "engine_correlation_matrix").resolve()
 REG_ROOT = (TRUTH_ROOT / "monitoring_v1" / "regime_snapshot_v2").resolve()
@@ -99,7 +98,7 @@ def _bind_truth_root(truth_root_arg: str) -> None:
     TRUTH_ROOT = resolve_fact_plane_truth_root_v1(truth_root_arg)
     INTENTS_ROOT = (TRUTH_ROOT / "intents_v1" / "snapshots").resolve()
     MD_ROOT = (TRUTH_ROOT / "market_data_snapshot_v1" / "snapshots").resolve()
-    NAV_ROOT = (TRUTH_ROOT / "accounting_v2" / "nav").resolve()
+    NAV_ROOT = (TRUTH_ROOT / "accounting_v1" / "nav").resolve()
     POS_ROOT = (TRUTH_ROOT / "positions_snapshot_v2" / "snapshots").resolve()
     COR_ROOT = (TRUTH_ROOT / "monitoring_v1" / "engine_correlation_matrix").resolve()
     REG_ROOT = (TRUTH_ROOT / "monitoring_v1" / "regime_snapshot_v2").resolve()
@@ -192,8 +191,7 @@ class _Inputs:
 
 def _resolve_inputs(day_utc: str, symbol: str) -> _Inputs:
     md_path = (MD_ROOT / day_utc / f"{symbol}.market_data_snapshot.v1.json").resolve()
-    # Updated for Bundle B: v2 NAV artifact
-    nav_path = (NAV_ROOT / day_utc / "nav.v2.json").resolve()
+    nav_path = (NAV_ROOT / day_utc / "nav_snapshot.v1.json").resolve()
     pos_path = (POS_ROOT / day_utc / "positions_snapshot.v2.json").resolve()
     cor_path = (COR_ROOT / day_utc / "engine_correlation_matrix.v1.json").resolve()
     reg_path = (REG_ROOT / day_utc / "regime_snapshot.v2.json").resolve()
