@@ -67,6 +67,18 @@ def _parse_day_utc(s: str) -> str:
     return d
 
 
+def _resolve_truth_root(raw: str) -> Path:
+    text = str(raw or "").strip()
+    if not text:
+        return TRUTH
+    path = Path(text).expanduser().resolve()
+    if not path.is_absolute():
+        raise SystemExit(f"FAIL: TRUTH_ROOT_NOT_ABSOLUTE: {path}")
+    if not path.exists() or not path.is_dir():
+        raise SystemExit(f"FAIL: TRUTH_ROOT_MISSING_OR_NOT_DIR: {path}")
+    return path
+
+
 def _git_sha() -> str:
     out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
     return out.decode("utf-8").strip()
@@ -225,10 +237,24 @@ def _capital_envelope_severe_failure(obj: Dict[str, Any]) -> bool:
     return False
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    global TRUTH, PATH_ACCOUNTING_NAV, PATH_ECON_DD_SNAP, PATH_RISK_LEDGER
+    global PATH_CAP_ENVELOPE_V1, PATH_CAP_ENVELOPE_V2, PATH_SUBMISSIONS
+    global PATH_BROKER_MANIFEST, OUT_ROOT
     ap = argparse.ArgumentParser(prog="run_regime_snapshot_v2")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
-    args = ap.parse_args()
+    ap.add_argument("--truth_root", default="", help="Absolute truth root override; defaults to repo truth")
+    args = ap.parse_args(argv)
+
+    TRUTH = _resolve_truth_root(str(args.truth_root))
+    PATH_ACCOUNTING_NAV = (TRUTH / "accounting_v2/nav").resolve()
+    PATH_ECON_DD_SNAP = (TRUTH / "monitoring_v1/economic_nav_drawdown_v1/nav_snapshot").resolve()
+    PATH_RISK_LEDGER = (TRUTH / "risk_v1/engine_budget").resolve()
+    PATH_CAP_ENVELOPE_V1 = (TRUTH / "reports/capital_risk_envelope_v1").resolve()
+    PATH_CAP_ENVELOPE_V2 = (TRUTH / "reports/capital_risk_envelope_v2").resolve()
+    PATH_SUBMISSIONS = (TRUTH / "execution_evidence_v1/submissions").resolve()
+    PATH_BROKER_MANIFEST = (TRUTH / "execution_evidence_v1/broker_events").resolve()
+    OUT_ROOT = (TRUTH / "monitoring_v1/regime_snapshot_v2").resolve()
 
     day = _parse_day_utc(args.day_utc)
     enforce_operational_day_key_invariant_v1(day)

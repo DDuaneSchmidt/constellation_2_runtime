@@ -30,8 +30,11 @@ def test_admission_runner_invokes_current_day_control_plane_in_order(monkeypatch
         ledger_path = admission_module.resolve_paper_session_ledger_path(truth_root=truth_root, day_utc=day_utc)
         commands: list[str] = []
 
-        def _fake_run(cmd: list[str]) -> dict[str, object]:
-            commands.append(Path(cmd[1]).name)
+        def _fake_run(cmd: list[str], *, truth_root: Path) -> dict[str, object]:
+            if len(cmd) > 2 and cmd[1] == "-m":
+                commands.append(cmd[2])
+            else:
+                commands.append(Path(cmd[1]).name)
             return {"cmd": cmd, "returncode": 0, "stdout": "", "stderr": ""}
 
         for path in (
@@ -44,6 +47,8 @@ def test_admission_runner_invokes_current_day_control_plane_in_order(monkeypatch
             _write_json(path, {"ok": True})
 
         monkeypatch.setattr(admission_module, "_run", _fake_run)
+        monkeypatch.setattr(admission_module, "_producer_git_sha", lambda: "a" * 40)
+        monkeypatch.setattr(admission_module, "resolve_single_paper_ib_account_from_sleeve_registry", lambda _: "DU1234567")
         monkeypatch.setattr(
             admission_module,
             "read_paper_session_ledger_ref_v1",
@@ -80,6 +85,13 @@ def test_admission_runner_invokes_current_day_control_plane_in_order(monkeypatch
             "run_paper_trading_posture_v1.py",
             "run_submit_boundary_status_v1.py",
             "run_paper_session_ledger_v1.py",
+            "ensure_cash_ledger_operator_statement_v1.py",
+            "constellation_2.phaseF.positions.run.run_positions_snapshot_day_v2",
+            "constellation_2.phaseF.cash_ledger.run.run_cash_ledger_snapshot_day_v1",
+            "run_accounting_nav_v2_day_v1.py",
+            "run_regime_snapshot_v2.py",
+            "build_defensive_tail_required_inputs_day_v1.py",
+            "run_engine_correlation_matrix_day_v1.py",
             "run_startup_proof_validation_v1.py",
             "run_deployment_state_machine_v1.py",
             "run_trading_day_state_machine_v1.py",
@@ -95,7 +107,7 @@ def test_admission_runner_fails_closed_when_required_control_plane_artifact_miss
         ledger_path = admission_module.resolve_paper_session_ledger_path(truth_root=truth_root, day_utc=day_utc)
         captured: list[dict[str, object]] = []
 
-        def _fake_run(cmd: list[str]) -> dict[str, object]:
+        def _fake_run(cmd: list[str], *, truth_root: Path) -> dict[str, object]:
             return {"cmd": cmd, "returncode": 0, "stdout": "", "stderr": ""}
 
         for path in (
@@ -107,6 +119,8 @@ def test_admission_runner_fails_closed_when_required_control_plane_artifact_miss
             _write_json(path, {"ok": True})
 
         monkeypatch.setattr(admission_module, "_run", _fake_run)
+        monkeypatch.setattr(admission_module, "_producer_git_sha", lambda: "a" * 40)
+        monkeypatch.setattr(admission_module, "resolve_single_paper_ib_account_from_sleeve_registry", lambda _: "DU1234567")
         monkeypatch.setattr(admission_module, "_print_payload", lambda payload: captured.append(dict(payload)))
         monkeypatch.setattr(
             admission_module,
