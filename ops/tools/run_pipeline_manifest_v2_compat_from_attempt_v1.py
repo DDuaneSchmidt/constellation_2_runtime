@@ -32,17 +32,21 @@ import argparse
 import hashlib
 import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.common.runtime_contract_v1 import resolve_release_provenance
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH_DEFAULT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/pipeline_manifest.v2.schema.json"
-OUT_ROOT = (TRUTH / "reports" / "pipeline_manifest_v2").resolve()
 
 STAGE_IDS_V2: List[str] = [
     "INTENTS",
@@ -96,8 +100,18 @@ def _sha256_dir_deterministic(root: Path) -> str:
 
 
 def _git_sha() -> str:
-    out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
-    s = out.decode("utf-8").strip()
+    try:
+        s = str(resolve_release_provenance().get("git_sha") or "").strip()
+        if s:
+            return s
+    except Exception:
+        pass
+    try:
+        out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
+        s = out.decode("utf-8").strip()
+    except Exception:
+        # Clean runtime roots can be source-derived without .git metadata.
+        s = "0" * 40
     if len(s) != 40:
         raise SystemExit(f"FAIL: bad git sha: {s!r}")
     return s
@@ -151,11 +165,13 @@ def main() -> int:
     ap = argparse.ArgumentParser(prog="run_pipeline_manifest_v2_compat_from_attempt_v1")
     ap.add_argument("--day_utc", required=True)
     ap.add_argument("--attempt_manifest_path", required=True)
+    ap.add_argument("--truth_root", default=None)
     args = ap.parse_args()
 
     day = _require_day(args.day_utc)
+    truth = Path(str(args.truth_root or TRUTH_DEFAULT)).resolve()
 
-    out_path = (OUT_ROOT / day / "pipeline_manifest.v2.json").resolve()
+    out_path = (truth / "reports" / "pipeline_manifest_v2" / day / "pipeline_manifest.v2.json").resolve()
 
     # Idempotency: if already present, validate and exit OK.
     if out_path.exists():
@@ -221,26 +237,26 @@ def main() -> int:
     notes.append("status_mapping: required/blocking FAIL=>FAIL; else optional/no-activity=>DEGRADED; else OK")
 
     # Evidence roots (legacy v2 stage ids + evidence dirs)
-    intents_day = (TRUTH / "intents_v1/snapshots" / day).resolve()
-    preflight_day = (TRUTH / "phaseC_preflight_v1" / day).resolve()
-    oms_day = (TRUTH / "oms_decisions_v1/decisions" / day).resolve()
-    alloc_day = (TRUTH / "allocation_v1/summary" / day).resolve()
+    intents_day = (truth / "intents_v1/snapshots" / day).resolve()
+    preflight_day = (truth / "phaseC_preflight_v1" / day).resolve()
+    oms_day = (truth / "oms_decisions_v1/decisions" / day).resolve()
+    alloc_day = (truth / "allocation_v1/summary" / day).resolve()
     phased_root = (REPO_ROOT / "constellation_2/phaseD/outputs/submissions").resolve()
-    exec_truth_day = (TRUTH / "execution_evidence_v1/submissions" / day).resolve()
-    exec_manifest_day = (TRUTH / "execution_evidence_v1/manifests" / day).resolve()
-    sub_index_day = (TRUTH / "execution_evidence_v1/submission_index" / day).resolve()
-    risk_budget_day = (TRUTH / "risk_v1/engine_budget" / day).resolve()
-    cap_risk_day = (TRUTH / "reports/capital_risk_envelope_v2" / day).resolve()
-    regime_day = (TRUTH / "monitoring_v1/regime_snapshot_v3" / day).resolve()
-    positions_day = (TRUTH / "positions_v1/snapshots" / day).resolve()
-    cash_day = (TRUTH / "cash_ledger_v1/snapshots" / day).resolve()
-    accounting_day = (TRUTH / "accounting_v1" / day).resolve()
-    recon_day = (TRUTH / "reports/reconciliation_report_v3" / day).resolve()
-    op_gate_day = (TRUTH / "reports/operator_daily_gate_v1" / day).resolve()
-    kill_day = (TRUTH / "risk_v1/kill_switch_v1" / day).resolve()
-    life_day = (TRUTH / "position_lifecycle_v1/ledger" / day).resolve()
-    crecon_day = (TRUTH / "reports/exposure_reconciliation_report_v1" / day).resolve()
-    plan_day = (TRUTH / "reports/delta_order_plan_v1" / day).resolve()
+    exec_truth_day = (truth / "execution_evidence_v1/submissions" / day).resolve()
+    exec_manifest_day = (truth / "execution_evidence_v1/manifests" / day).resolve()
+    sub_index_day = (truth / "execution_evidence_v1/submission_index" / day).resolve()
+    risk_budget_day = (truth / "risk_v1/engine_budget" / day).resolve()
+    cap_risk_day = (truth / "reports/capital_risk_envelope_v2" / day).resolve()
+    regime_day = (truth / "monitoring_v1/regime_snapshot_v3" / day).resolve()
+    positions_day = (truth / "positions_v1/snapshots" / day).resolve()
+    cash_day = (truth / "cash_ledger_v1/snapshots" / day).resolve()
+    accounting_day = (truth / "accounting_v1" / day).resolve()
+    recon_day = (truth / "reports/reconciliation_report_v3" / day).resolve()
+    op_gate_day = (truth / "reports/operator_daily_gate_v1" / day).resolve()
+    kill_day = (truth / "risk_v1/kill_switch_v1" / day).resolve()
+    life_day = (truth / "position_lifecycle_v1/ledger" / day).resolve()
+    crecon_day = (truth / "reports/exposure_reconciliation_report_v1" / day).resolve()
+    plan_day = (truth / "reports/delta_order_plan_v1" / day).resolve()
 
     base_ok = "OK" if status_top in ("OK", "DEGRADED") else "FAIL"
 

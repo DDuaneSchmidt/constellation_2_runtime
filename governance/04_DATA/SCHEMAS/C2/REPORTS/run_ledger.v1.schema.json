@@ -1,0 +1,82 @@
+{
+  "schema_id": "C2_REPORTS_RUN_LEDGER_SCHEMA_V1",
+  "title": "C2 Run Ledger V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "run_id",
+    "attempt_id",
+    "invoked_day_utc",
+    "effective_day_utc",
+    "release_id",
+    "git_sha",
+    "context",
+    "fact_refs",
+    "invariant_results",
+    "earliest_failing_invariant",
+    "executed_code_identity",
+    "status",
+    "supersedes_attempt_id",
+    "generated_at_utc"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "run_ledger.v1" },
+    "schema_version": { "type": "string", "const": "v1" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "attempt_id": { "type": "string", "minLength": 1 },
+    "invoked_day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
+    "effective_day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
+    "release_id": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string", "minLength": 1 }
+      ]
+    },
+    "git_sha": { "type": "string", "minLength": 1 },
+    "context": { "type": "object" },
+    "fact_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fact_type", "path", "sha256"],
+        "properties": {
+          "fact_type": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "invariant_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["invariant_name", "passed", "path", "sha256"],
+        "properties": {
+          "invariant_name": { "type": "string", "minLength": 1 },
+          "passed": { "type": "boolean" },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "earliest_failing_invariant": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string", "minLength": 1 }
+      ]
+    },
+    "executed_code_identity": { "type": "object" },
+    "status": { "type": "string", "enum": ["ACTIVE", "SUPERSEDED", "HISTORICAL", "ABORTED"] },
+    "supersedes_attempt_id": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string", "minLength": 1 }
+      ]
+    },
+    "generated_at_utc": { "type": "string", "minLength": 11 }
+  }
+}

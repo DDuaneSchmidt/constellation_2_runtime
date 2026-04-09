@@ -34,7 +34,6 @@ import argparse
 import hashlib
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -45,6 +44,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.common.truth_root_v1 import resolve_truth_root  # noqa: E402
+from constellation_2.common.runtime_contract_v1 import resolve_release_provenance  # noqa: E402
 from constellation_2.phaseD.lib.canon_json_v1 import (  # noqa: E402
     CanonicalizationError,
     canonical_hash_excluding_fields_v1,
@@ -84,8 +84,13 @@ def _parse_day(day: str) -> str:
 
 
 def _git_sha() -> str:
-    out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
-    return out.decode("utf-8").strip()
+    try:
+        value = str(resolve_release_provenance().get("git_sha") or "").strip()
+    except Exception:
+        value = ""
+    if len(value) != 40:
+        value = "0" * 40
+    return value
 
 
 def _sha256_file(p: Path) -> str:
@@ -266,8 +271,8 @@ def _require_authority_head_pass_authoritative(day: str, truth_root: Path) -> Di
     if not authoritative:
         raise SystemExit("FAIL: AUTHORITY_HEAD_NOT_AUTHORITATIVE")
     points_to = str(ah.get("points_to") or "").strip()
-    if "authorization_gate_verdict_v1" not in points_to:
-        raise SystemExit("FAIL: AUTHORITY_HEAD_NOT_AUTHORIZATION_VERDICT")
+    if ("authorization_gate_verdict_v1" not in points_to) and ("gate_stack_verdict_v1" not in points_to):
+        raise SystemExit("FAIL: AUTHORITY_HEAD_NOT_AUTHORIZATION_OR_GATE_STACK_VERDICT")
     return ah
 
 
@@ -281,6 +286,38 @@ def _intents_dir(truth_root: Path, day: str) -> Path:
 
 def _out_root(truth_root: Path) -> Path:
     return (truth_root / "engine_activity_v1" / "authorization_v1").resolve()
+
+
+def _select_effective_intents(intents_dir: Path) -> List[Path]:
+    # Same-day corrected snapshots may coexist with stale prior snapshots for the
+    # same intent_id. Keep exactly one effective file per intent_id by selecting
+    # the latest file mtime; break ties by lexicographically larger filename.
+    by_intent_id: Dict[str, tuple[int, str, Path]] = {}
+    passthrough: List[Path] = []
+    for p in sorted(
+        [
+            p for p in intents_dir.iterdir()
+            if p.is_file()
+            and p.name.endswith(".json")
+            and p.name != "no_intents_day.v1.json"
+        ],
+        key=lambda p: p.name,
+    ):
+        try:
+            obj = _read_json_obj(p)
+        except Exception:
+            passthrough.append(p)
+            continue
+        intent_id = str(obj.get("intent_id") or "").strip()
+        if not intent_id:
+            passthrough.append(p)
+            continue
+        stat = p.stat()
+        candidate = (int(stat.st_mtime_ns), p.name, p)
+        prior = by_intent_id.get(intent_id)
+        if prior is None or candidate[:2] >= prior[:2]:
+            by_intent_id[intent_id] = candidate
+    return sorted(passthrough + [item[2] for item in by_intent_id.values()], key=lambda p: p.name)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -304,16 +341,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     intents_dir = _intents_dir(truth_root, day)
     if not intents_dir.exists() or not intents_dir.is_dir():
         raise SystemExit(f"FAIL: INTENTS_DAY_DIR_MISSING: {str(intents_dir)}")
-
-    intent_files = sorted(
-        [
-            p for p in intents_dir.iterdir()
-            if p.is_file()
-            and p.name.endswith(".json")
-            and p.name != "no_intents_day.v1.json"
-        ],
-        key=lambda p: p.name,
-    )
+    intent_files = _select_effective_intents(intents_dir)
 
     marker_path = (intents_dir / "no_intents_day.v1.json").resolve()
 

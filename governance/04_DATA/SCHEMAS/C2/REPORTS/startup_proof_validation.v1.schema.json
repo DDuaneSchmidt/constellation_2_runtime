@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/startup_proof_validation.v1.schema.json",
+  "title": "startup_proof_validation.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_scope",
+    "validation_scope",
+    "day_utc",
+    "session_id",
+    "status",
+    "ledger_ref",
+    "ledger_id",
+    "ledger_authority_status",
+    "checks",
+    "blocking_codes",
+    "producer",
+    "produced_at_utc",
+    "non_authority_notice"
+  ],
+  "properties": {
+    "schema_id": { "const": "startup_proof_validation" },
+    "schema_version": { "const": "v1" },
+    "authority_scope": { "const": "NON_AUTHORITY_STARTUP_VALIDATION" },
+    "validation_scope": { "const": "BOD_CONTROL_PLANE_ONLY" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "session_id": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["STARTUP_READY", "STARTUP_BLOCKED"] },
+    "ledger_ref": { "type": "string" },
+    "ledger_id": { "type": "string" },
+    "ledger_authority_status": { "type": "string", "enum": ["", "GRANTED", "DENIED"] },
+    "checks": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["logical_name", "status", "evidence_ref", "blocking_codes", "detail"],
+        "properties": {
+          "logical_name": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+          "evidence_ref": { "type": "string" },
+          "blocking_codes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "detail": { "type": "object" }
+        }
+      }
+    },
+    "blocking_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 1 }
+      }
+    },
+    "produced_at_utc": { "type": "string", "minLength": 20 },
+    "non_authority_notice": { "type": "string", "minLength": 1 }
+  }
+}

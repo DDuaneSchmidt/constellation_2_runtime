@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/legacy_holdings/legacy_bond_risk_summary.v1.schema.json",
+  "title": "legacy_bond_risk_summary.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "summary_id",
+    "engine_version",
+    "policy_version",
+    "authority_status",
+    "execution_authority",
+    "source_artifact_refs",
+    "corporate_bond_exposure_summary",
+    "maturity_clustering",
+    "issuer_concentration_flags",
+    "review_required_items",
+    "excluded_from_active_sleeve_indicator",
+    "created_at"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "legacy_bond_risk_summary"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "summary_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "engine_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "policy_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "authority_status": {
+      "type": "string",
+      "enum": [
+        "candidate",
+        "authoritative"
+      ]
+    },
+    "execution_authority": {
+      "type": "boolean"
+    },
+    "source_artifact_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "corporate_bond_exposure_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total_market_value",
+        "position_count",
+        "issuer_count"
+      ],
+      "properties": {
+        "total_market_value": {
+          "type": "string",
+          "minLength": 1
+        },
+        "position_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "issuer_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "maturity_clustering": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "bucket_label",
+          "position_count",
+          "market_value"
+        ],
+        "properties": {
+          "bucket_label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "position_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "market_value": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "issuer_concentration_flags": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "issuer_name",
+          "severity",
+          "reason"
+        ],
+        "properties": {
+          "issuer_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "review_required_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "item_id",
+          "reason"
+        ],
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "excluded_from_active_sleeve_indicator": {
+      "type": "boolean"
+    },
+    "created_at": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

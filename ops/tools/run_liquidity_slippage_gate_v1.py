@@ -25,17 +25,24 @@ import argparse
 import hashlib
 import json
 import subprocess
+import sys
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+_THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = _THIS_FILE.parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.common.runtime_contract_v1 import resolve_release_provenance
+from constellation_2.common.paper_session_fact_plane_v1 import resolve_fact_plane_truth_root_v1
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 from constellation_2.common.truth_root_v1 import resolve_truth_root
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 TRUTH_ROOT = resolve_truth_root(repo_root=REPO_ROOT)
 
 POLICY_PATH = (REPO_ROOT / "governance" / "02_REGISTRIES" / "C2_LIQUIDITY_SLIPPAGE_POLICY_V1.json").resolve()
@@ -66,6 +73,10 @@ def _sha256_file(p: Path) -> str:
 
 
 def _git_sha() -> str:
+    try:
+        return str(resolve_release_provenance().get("git_sha") or "").strip() or "UNKNOWN"
+    except Exception:
+        pass
     try:
         out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
         return out.decode("utf-8").strip()
@@ -255,7 +266,23 @@ def _read_intents_for_day(day: str) -> List[Path]:
     d = (INTENTS_DIR_ROOT / day).resolve()
     if not d.exists() or not d.is_dir():
         return []
-    return sorted([p for p in d.glob("*.json") if p.is_file()])
+    # Same-day corrected snapshots may coexist with stale prior snapshots for the
+    # same intent_id. Collapse to one deterministic file per intent_id in stable
+    # path order so refreshed artifacts do not double-count against symbol caps.
+    by_intent_id: Dict[str, Path] = {}
+    passthrough: List[Path] = []
+    for p in sorted([p for p in d.glob("*.json") if p.is_file()]):
+        try:
+            obj = _read_json_obj(p)
+        except Exception:
+            passthrough.append(p)
+            continue
+        intent_id = str(obj.get("intent_id") or "").strip()
+        if not intent_id:
+            passthrough.append(p)
+            continue
+        by_intent_id[intent_id] = p
+    return sorted(passthrough + list(by_intent_id.values()))
 
 
 def _extract_intent_symbol_and_pct(intent_obj: Dict[str, Any]) -> Tuple[str, str]:
@@ -277,9 +304,24 @@ def _extract_intent_symbol_and_pct(intent_obj: Dict[str, Any]) -> Tuple[str, str
 
 
 def main() -> int:
+    global TRUTH_ROOT, OUT_ROOT, DATASET_MANIFEST, DATASET_ROOT, INTENTS_DIR_ROOT, NAV_V2_ROOT, NAV_V1_ROOT
+
     ap = argparse.ArgumentParser(prog="run_liquidity_slippage_gate_v1")
     ap.add_argument("--day_utc", required=True, help="UTC day key YYYY-MM-DD")
+    ap.add_argument("--truth_root", default="", help="Absolute source-authoritative truth root override.")
     args = ap.parse_args()
+
+    TRUTH_ROOT = (
+        resolve_fact_plane_truth_root_v1(str(args.truth_root or ""))
+        if str(args.truth_root or "").strip()
+        else resolve_truth_root(repo_root=REPO_ROOT)
+    )
+    OUT_ROOT = (TRUTH_ROOT / "reports" / "liquidity_slippage_gate_v1").resolve()
+    DATASET_MANIFEST = (TRUTH_ROOT / "market_data_snapshot_v1" / "dataset_manifest.json").resolve()
+    DATASET_ROOT = (TRUTH_ROOT / "market_data_snapshot_v1").resolve()
+    INTENTS_DIR_ROOT = (TRUTH_ROOT / "intents_v1" / "snapshots").resolve()
+    NAV_V2_ROOT = (TRUTH_ROOT / "accounting_v2" / "nav").resolve()
+    NAV_V1_ROOT = (TRUTH_ROOT / "accounting_v1" / "nav").resolve()
 
     day = _parse_day(str(args.day_utc))
 
@@ -304,9 +346,6 @@ def main() -> int:
     ds_manifest_sha = _sha256_file(DATASET_MANIFEST)
     input_manifest.append({"type": "market_data_dataset_manifest", "path": str(DATASET_MANIFEST), "sha256": ds_manifest_sha})
 
-    nav_cents, nav_path, nav_sha = _read_nav_total_cents(day)
-    input_manifest.append({"type": "accounting_nav", "path": str(nav_path), "sha256": nav_sha})
-
     intents = _read_intents_for_day(day)
     if not intents:
         allow = bool(((pol.get("defaults") or {}).get("allow_zero_intents_pass")) is True)
@@ -318,7 +357,7 @@ def main() -> int:
             "schema_version": "v1",
             "day_utc": day,
             "produced_utc": f"{day}T00:00:00Z",
-            "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_liquidity_slippage_gate_v1.py", "git_sha": _git_sha()},
+            "producer": {"repo": "constellation", "module": "ops/tools/run_liquidity_slippage_gate_v1.py", "git_sha": _git_sha()},
             "status": status,
             "reason_codes": reason_codes,
             "input_manifest": input_manifest,
@@ -344,6 +383,9 @@ def main() -> int:
 
         print(f"OK: liquidity_slippage_gate_v1 status={status} sha256={_sha256_file(out_path)} path={out_path}")
         return 0 if status in ("PASS", "OK") else 1
+
+    nav_cents, nav_path, nav_sha = _read_nav_total_cents(day)
+    input_manifest.append({"type": "accounting_nav", "path": str(nav_path), "sha256": nav_sha})
 
     per_intent: List[Dict[str, Any]] = []
     failed = 0
@@ -573,7 +615,7 @@ def main() -> int:
         "schema_version": "v1",
         "day_utc": day,
         "produced_utc": f"{day}T00:00:00Z",
-        "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_liquidity_slippage_gate_v1.py", "git_sha": _git_sha()},
+        "producer": {"repo": "constellation", "module": "ops/tools/run_liquidity_slippage_gate_v1.py", "git_sha": _git_sha()},
         "status": status,
         "reason_codes": reason_codes,
         "input_manifest": input_manifest,

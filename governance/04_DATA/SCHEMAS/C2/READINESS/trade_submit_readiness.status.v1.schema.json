@@ -6,6 +6,7 @@
   "required": [
     "schema_id",
     "schema_version",
+    "day_utc",
     "as_of_utc",
     "expires_utc",
     "ok",
@@ -15,17 +16,20 @@
     "reasons",
     "input_manifest",
     "producer",
-    "provenance"
+    "provenance",
+    "session_authority_attestation",
+    "run_state_authority_attestation"
   ],
   "properties": {
     "schema_id": { "type": "string", "const": "trade_submit_readiness_c2" },
     "schema_version": { "type": "string", "const": "v1" },
+    "day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
 
     "as_of_utc": { "type": "string" },
     "expires_utc": { "type": "string" },
 
     "ok": { "type": "boolean" },
-    "state": { "type": "string", "enum": ["OK", "FAIL"] },
+    "state": { "type": "string", "enum": ["OK", "FAIL", "SKIP", "BLOCKED"] },
 
     "environment": { "type": "string", "enum": ["PAPER", "LIVE"] },
     "ib_account": { "type": "string", "minLength": 1 },
@@ -63,10 +67,117 @@
     "provenance": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["truth_root", "registry_sha256"],
+      "required": ["truth_root", "registry_sha256", "sleeve_registry_sha256"],
       "properties": {
         "truth_root": { "type": "string" },
-        "registry_sha256": { "type": "string" }
+        "registry_sha256": { "type": "string" },
+        "sleeve_registry_sha256": { "type": "string" }
+      }
+    },
+    "session_authority_attestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision_artifact_path",
+        "decision_artifact_sha256",
+        "policy_version",
+        "evaluator_version",
+        "venue",
+        "session_date",
+        "decision_status",
+        "session_class",
+        "stage_id",
+        "policy_action",
+        "stage_execution_status",
+        "reason_codes"
+      ],
+      "properties": {
+        "decision_artifact_path": { "type": "string", "minLength": 1 },
+        "decision_artifact_sha256": { "type": "string", "minLength": 64, "maxLength": 64 },
+        "policy_version": { "type": "string", "minLength": 1 },
+        "evaluator_version": { "type": "string", "minLength": 1 },
+        "venue": { "type": "string", "minLength": 1 },
+        "session_date": { "type": "string", "minLength": 10, "maxLength": 10 },
+        "decision_status": { "type": "string", "enum": ["OK", "UNKNOWN", "BLOCKED"] },
+        "session_class": { "type": ["string", "null"] },
+        "stage_id": { "type": "string", "minLength": 1 },
+        "policy_action": { "type": "string", "enum": ["ALLOW", "SKIP", "BLOCK"] },
+        "stage_execution_status": { "type": "string", "minLength": 1 },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "run_state_authority_attestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authority_family",
+        "authority_artifact_path",
+        "authority_artifact_sha256",
+        "policy_version",
+        "evaluator_version",
+        "decision_status",
+        "classification_field",
+        "classification_value",
+        "cycle_snapshot_family",
+        "cycle_snapshot_artifact_path",
+        "cycle_snapshot_artifact_sha256",
+        "cycle_id",
+        "cycle_coherence_status",
+        "stage_id",
+        "stage_execution_status",
+        "reason_codes",
+        "upstream_authority_refs"
+      ],
+      "properties": {
+        "authority_family": { "type": "string", "minLength": 1 },
+        "authority_artifact_path": { "type": "string", "minLength": 1 },
+        "authority_artifact_sha256": { "type": "string", "minLength": 64, "maxLength": 64 },
+        "policy_version": { "type": "string", "minLength": 1 },
+        "evaluator_version": { "type": "string", "minLength": 1 },
+        "decision_status": { "type": "string", "enum": ["OK", "UNKNOWN", "BLOCKED"] },
+        "classification_field": { "type": "string", "minLength": 1 },
+        "classification_value": { "type": "string", "minLength": 1 },
+        "cycle_snapshot_family": { "type": "string", "minLength": 1 },
+        "cycle_snapshot_artifact_path": { "type": "string", "minLength": 1 },
+        "cycle_snapshot_artifact_sha256": { "type": "string", "minLength": 64, "maxLength": 64 },
+        "cycle_id": { "type": "string", "minLength": 1 },
+        "cycle_coherence_status": { "type": "string", "enum": ["COHERENT", "UNKNOWN", "BLOCKED"] },
+        "stage_id": { "type": "string", "minLength": 1 },
+        "stage_execution_status": { "type": "string", "minLength": 1 },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "upstream_authority_refs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "artifact_family",
+              "artifact_path",
+              "artifact_sha256",
+              "decision_status",
+              "generated_at",
+              "reason_codes"
+            ],
+            "properties": {
+              "artifact_family": { "type": "string", "minLength": 1 },
+              "artifact_path": { "type": "string", "minLength": 1 },
+              "artifact_sha256": { "type": "string", "minLength": 64 },
+              "decision_status": { "type": "string", "minLength": 1 },
+              "generated_at": { "type": "string" },
+              "reason_codes": { "type": "array", "items": { "type": "string" } },
+              "classification_field": { "type": "string" },
+              "classification_value": { "type": "string" },
+              "session_class": { "type": "string" },
+              "stage_id": { "type": "string" }
+            }
+          }
+        }
       }
     }
   }

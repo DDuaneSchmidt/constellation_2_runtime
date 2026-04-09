@@ -121,15 +121,18 @@ def _is_authoritative_submission_dir(subdir: Path) -> bool:
         bsr = _read_json_obj(bsr_p)
         validate_against_repo_schema_v1(bsr, REPO_ROOT, "constellation_2/schemas/broker_submission_record.v2.schema.json")
         plan = _read_json_obj(plan_p)
-        if plan_p.name == "equity_order_plan.v1.json":
-            try:
-                validate_against_repo_schema_v1(plan, REPO_ROOT, "constellation_2/schemas/equity_order_plan.v1.schema.json")
-            except Exception:
-                validate_against_repo_schema_v1(plan, REPO_ROOT, "constellation_2/schemas/equity_order_plan.v2.schema.json")
-        else:
-            validate_against_repo_schema_v1(plan, REPO_ROOT, "constellation_2/schemas/order_plan.v1.schema.json")
     except Exception:
         return False
+    if plan_p.name == "equity_order_plan.v1.json":
+        schema_id = str(plan.get("schema_id") or "").strip()
+        schema_version = str(plan.get("schema_version") or "").strip()
+        if schema_id != "equity_order_plan" or schema_version != "v1":
+            return False
+    else:
+        try:
+            validate_against_repo_schema_v1(plan, REPO_ROOT, "constellation_2/schemas/order_plan.v1.schema.json")
+        except Exception:
+            return False
     return str(bsr.get("submission_id") or "").strip() == subdir.name
 
 

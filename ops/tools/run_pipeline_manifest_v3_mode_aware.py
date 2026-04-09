@@ -23,13 +23,19 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.common.runtime_contract_v1 import resolve_release_provenance
 from constellation_2.common.truth_root_v1 import resolve_truth_root
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 TRUTH_ROOT = resolve_truth_root(repo_root=REPO_ROOT)
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/pipeline_manifest.v3.schema.json"
@@ -59,8 +65,18 @@ def _require_mode(mode: str) -> str:
 
 
 def _git_sha() -> str:
-    out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
-    s = out.decode("utf-8").strip()
+    try:
+        s = str(resolve_release_provenance().get("git_sha") or "").strip()
+        if s:
+            return s
+    except Exception:
+        pass
+    try:
+        out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
+        s = out.decode("utf-8").strip()
+    except Exception:
+        # Clean runtime roots can be source-derived without .git metadata.
+        s = "0" * 40
     if len(s) != 40:
         raise SystemExit(f"FAIL: bad git sha: {s!r}")
     return s
@@ -131,6 +147,18 @@ def _atomic_append_jsonl(path: Path, obj: Dict[str, Any]) -> Tuple[str, str]:
         os.close(dfd)
 
     return (line_sha, str(path))
+
+
+def _stable_unique_strings(values: List[str]) -> List[str]:
+    seen: set[str] = set()
+    ordered: List[str] = []
+    for value in values:
+        item = str(value or "").strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        ordered.append(item)
+    return ordered
 
 
 def main() -> int:
@@ -240,6 +268,16 @@ def main() -> int:
     out_dir = (OUT_ROOT / day / "attempts" / attempt_id).resolve()
     out_path = (out_dir / "pipeline_manifest.v3.json").resolve()
 
+    input_refs = _stable_unique_strings(
+        [str(item.get("path")) for item in man_obj.get("inputs", []) if isinstance(item, dict)]
+        + [str(man_path)]
+    )
+    output_refs = _stable_unique_strings(
+        [str(item.get("path")) for item in man_obj.get("outputs", []) if isinstance(item, dict)]
+        + [str(path) for stage in out_stages for path in stage.get("outputs_present", [])]
+        + [str(out_path)]
+    )
+
     out = {
         "schema_id": "pipeline_manifest.v3",
         "day_utc": day,
@@ -256,6 +294,9 @@ def main() -> int:
             "stages_total": int(len(out_stages)),
         },
         "reason_codes": list(reason_codes_top),
+        "decision_episode_ids": [attempt_id],
+        "input_refs": input_refs,
+        "output_refs": output_refs,
         "inputs": [{"type": "orchestrator_attempt_manifest_v2", "path": str(man_path), "sha256": str(man_sha)}],
         "stages": out_stages,
         "artifacts": {"attempt_manifest_path": str(man_path), "path": str(out_path)},

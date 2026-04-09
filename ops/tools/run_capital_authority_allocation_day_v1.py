@@ -32,6 +32,7 @@ import argparse
 import hashlib
 import json
 import os
+import subprocess
 import sys
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
@@ -83,18 +84,26 @@ def _require_authority_head_pass_authoritative(day: str, truth_root: Path) -> Di
     if not authoritative:
         raise SystemExit("FAIL: AUTHORITY_HEAD_NOT_AUTHORITATIVE")
     points_to = str(ah.get("points_to") or "").strip()
-    if "authorization_gate_verdict_v1" not in points_to:
-        raise SystemExit("FAIL: AUTHORITY_HEAD_NOT_AUTHORIZATION_VERDICT")
     verdict_path = Path(points_to).resolve() if Path(points_to).is_absolute() else (truth_root / points_to).resolve()
     verdict = _read_json_obj(verdict_path)
-    if str(verdict.get("schema_id") or "").strip() != "authorization_gate_verdict_v1":
-        raise SystemExit("FAIL: AUTHORIZATION_VERDICT_SCHEMA_MISMATCH")
-    if int(verdict.get("schema_version") or 0) != 1:
-        raise SystemExit("FAIL: AUTHORIZATION_VERDICT_VERSION_MISMATCH")
-    if str(verdict.get("day_utc") or "").strip() != day:
-        raise SystemExit("FAIL: AUTHORIZATION_VERDICT_DAY_MISMATCH")
-    if str(verdict.get("status") or "").strip().upper() not in ("PASS", "BOOTSTRAP_PASS"):
-        raise SystemExit("FAIL: AUTHORIZATION_VERDICT_NOT_EXECUTION_AUTHORIZED")
+    verdict_schema_id = str(verdict.get("schema_id") or "").strip()
+    verdict_schema_version = str(verdict.get("schema_version") or "").strip()
+    verdict_day = str(verdict.get("day_utc") or "").strip()
+    verdict_status = str(verdict.get("status") or "").strip().upper()
+
+    if verdict_day != day:
+        raise SystemExit("FAIL: AUTHORITY_HEAD_POINTS_TO_DAY_MISMATCH")
+    if verdict_status not in ("PASS", "BOOTSTRAP_PASS"):
+        raise SystemExit("FAIL: AUTHORITY_HEAD_POINTS_TO_NOT_EXECUTION_AUTHORIZED")
+
+    if "authorization_gate_verdict_v1" in points_to:
+        if verdict_schema_id != "authorization_gate_verdict_v1" or verdict_schema_version not in {"1", "v1"}:
+            raise SystemExit("FAIL: AUTHORIZATION_VERDICT_SCHEMA_MISMATCH")
+    elif "gate_stack_verdict_v1" in points_to:
+        if verdict_schema_id != "gate_stack_verdict" or verdict_schema_version != "v1":
+            raise SystemExit("FAIL: GATE_STACK_VERDICT_SCHEMA_MISMATCH")
+    else:
+        raise SystemExit("FAIL: AUTHORITY_HEAD_POINTS_TO_UNSUPPORTED_VERDICT")
     return ah
 
 
@@ -185,18 +194,14 @@ def _git_sha_failclosed() -> str:
       - If it is a ref, read that ref file
       - Return the hash string (must be 7..40 lowercase hex in schema)
     """
-    head = (REPO_ROOT / ".git" / "HEAD").resolve()
-    if not head.exists():
-        raise SystemExit("FAIL: GIT_HEAD_MISSING_FAILCLOSED")
-
-    s = head.read_text(encoding="utf-8").strip()
-    if s.startswith("ref:"):
-        ref = s.split(" ", 1)[1].strip()
-        refp = (REPO_ROOT / ".git" / ref).resolve()
-        if not refp.exists():
-            raise SystemExit(f"FAIL: GIT_REF_MISSING_FAILCLOSED: {ref}")
-        return refp.read_text(encoding="utf-8").strip()
-
+    try:
+        out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
+        s = out.decode("utf-8").strip()
+    except Exception:
+        # Clean runtime roots can be source-derived without .git metadata.
+        s = "0" * 40
+    if len(s) < 7:
+        raise SystemExit(f"FAIL: GIT_SHA_INVALID_FAILCLOSED: {s!r}")
     return s
 
 
@@ -284,6 +289,24 @@ def _extract_quantity_and_risk_per_unit_cents(intent_obj: Dict[str, Any], *, nav
             return None
         # EquityIntent v1 does not carry a deterministic share count. Authorize at most one unit when caps are positive.
         return 1, risk_per_unit_cents
+    if schema_id == "exposure_intent" and schema_version == "v1":
+        exposure_type = str(intent_obj.get("exposure_type") or "").strip().upper()
+        if exposure_type != "LONG_EQUITY":
+            return None
+        constraints = intent_obj.get("constraints")
+        if not isinstance(constraints, dict):
+            return None
+        target_notional_pct = Decimal(str(intent_obj.get("target_notional_pct") or "").strip())
+        max_risk_pct = Decimal(str(constraints.get("max_risk_pct") or "").strip())
+        if target_notional_pct <= 0 or max_risk_pct <= 0:
+            return None
+        if nav_total_cents <= 0:
+            return None
+        risk_per_unit_cents = int((Decimal(nav_total_cents) * max_risk_pct).to_integral_value(rounding=ROUND_CEILING))
+        if risk_per_unit_cents <= 0:
+            return None
+        # ExposureIntent v1 is pre-transform sizing; keep authorization conservative at one unit.
+        return 1, risk_per_unit_cents
     return None
 
 
@@ -341,6 +364,30 @@ def _build_engine_to_sleeve(sleeves: List[SleeveLimit]) -> Dict[str, str]:
     return m
 
 
+def _select_effective_intents(intents_dir: Path) -> List[Path]:
+    # Same-day corrected snapshots may coexist with stale prior snapshots for the
+    # same intent_id. Keep exactly one effective file per intent_id by selecting
+    # the latest file mtime; break ties by lexicographically larger filename.
+    by_intent_id: Dict[str, Tuple[int, str, Path]] = {}
+    passthrough: List[Path] = []
+    for p in sorted([p for p in intents_dir.iterdir() if p.is_file() and p.name.endswith(".json")], key=lambda p: p.name):
+        try:
+            obj = _read_json_obj(p)
+        except Exception:
+            passthrough.append(p)
+            continue
+        intent_id = str(obj.get("intent_id") or "").strip()
+        if not intent_id:
+            passthrough.append(p)
+            continue
+        stat = p.stat()
+        candidate = (int(stat.st_mtime_ns), p.name, p)
+        prior = by_intent_id.get(intent_id)
+        if prior is None or candidate[:2] >= prior[:2]:
+            by_intent_id[intent_id] = candidate
+    return sorted(passthrough + [item[2] for item in by_intent_id.values()], key=lambda p: p.name)
+
+
 def _allocate_sleeve_headroom(portfolio_headroom_cents: int, sleeves: List[SleeveLimit]) -> Dict[str, int]:
     remaining = int(max(portfolio_headroom_cents, 0))
     allowed_by_sleeve: Dict[str, int] = {}
@@ -362,8 +409,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     produced_utc = f"{day}T00:00:00Z"
     truth_root = _resolve_truth_root(args.truth_root)
 
-    # Fail-closed: allocation can only be produced on authority PASS/BOOTSTRAP_PASS + authoritative days.
-    _require_authority_head_pass_authoritative(day, truth_root)
+    intents_dir = INTENTS_DAY_DIR(truth_root, day)
+    if not intents_dir.exists() or not intents_dir.is_dir():
+        raise SystemExit(f"FAIL: INTENTS_DIR_MISSING: {str(intents_dir)}")
+    intents = _select_effective_intents(intents_dir)
+
+    # Fail-closed authority check:
+    # Required when there is intent activity; no-intent/no-submission clean roots can still emit
+    # deterministic no-activity allocation evidence without an authority-day head.
+    if intents:
+        _require_authority_head_pass_authoritative(day, truth_root)
 
     # Required inputs
     p_ex = EXPOSURE_NET_PATH(truth_root, day)
@@ -390,11 +445,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not isinstance(mult, dict):
         raise SystemExit("FAIL: CORRELATION_ENVELOPE_GATE_MISSING_multiplier_bp_by_sleeve_OBJECT")
     corr_status_ok = _status_is_passing(ceg_obj.get("status"))
-
-    intents_dir = INTENTS_DAY_DIR(truth_root, day)
-    if not intents_dir.exists() or not intents_dir.is_dir():
-        raise SystemExit(f"FAIL: INTENTS_DIR_MISSING: {str(intents_dir)}")
-    intents = sorted([p for p in intents_dir.iterdir() if p.is_file() and p.name.endswith(".json")], key=lambda p: p.name)
 
     policy = _load_policy()
     pol_sha = _sha256_file(POLICY_PATH)

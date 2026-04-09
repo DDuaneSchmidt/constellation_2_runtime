@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/paper_session_divergence.v1.schema.json",
+  "title": "paper_session_divergence.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "divergence_id",
+    "session_id",
+    "day_utc",
+    "certificate_ref",
+    "envelope_ref",
+    "dependency_key",
+    "accessed_path",
+    "reason_code",
+    "status",
+    "detected_at"
+  ],
+  "properties": {
+    "schema_id": { "const": "paper_session_divergence" },
+    "schema_version": { "const": "v1" },
+    "divergence_id": { "type": "string", "minLength": 1 },
+    "session_id": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "minLength": 1 },
+    "certificate_ref": { "type": "string", "minLength": 1 },
+    "envelope_ref": { "type": "string", "minLength": 1 },
+    "dependency_key": { "type": "string", "minLength": 1 },
+    "accessed_path": { "type": "string", "minLength": 1 },
+    "reason_code": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "const": "DIVERGED" },
+    "detected_at": { "type": "string", "minLength": 1 }
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "schema_id": "C2_FACT_RISK_POLICY_SCHEMA_V1",
+  "title": "C2 Risk Policy Fact V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "invoked_day_utc",
+    "target_notional_pct_default",
+    "per_trade_notional_pct_max",
+    "policy_sources",
+    "producer",
+    "producer_git_sha",
+    "generated_at_utc"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "risk_policy_fact.v1" },
+    "schema_version": { "type": "string", "const": "v1" },
+    "invoked_day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
+    "target_notional_pct_default": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+    "per_trade_notional_pct_max": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+    "policy_sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["policy_name", "path", "sha256"],
+        "properties": {
+          "policy_name": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "producer": { "type": "string", "minLength": 1 },
+    "producer_git_sha": { "type": "string", "minLength": 7, "maxLength": 64 },
+    "generated_at_utc": { "type": "string", "minLength": 11 }
+  }
+}

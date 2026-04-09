@@ -2,14 +2,11 @@
 Description=C2 Paper Day Orchestrator (daily PAPER run; fail-closed; authority-head)
 Wants=network-online.target
 After=network-online.target
-Requires=c2-baseline-readiness.service
-After=c2-baseline-readiness.service
 OnFailure=c2-kill-switch-engage.service
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/node/constellation_2_runtime
+WorkingDirectory=/home/node/constellation_active
 Environment=PYTHONUNBUFFERED=1
 Environment=C2_MODE=PAPER
-ExecStartPre=/usr/bin/bash -lc 'set -euo pipefail; cd /home/node/constellation_2_runtime; DAY="$$(TZ=America/New_York date +%%F)"; /home/node/constellation_2_runtime/.venv_c2/bin/python /home/node/constellation_2_runtime/ops/run/c2_check_baseline_ready_v1.py --day_utc "$$DAY"'
-ExecStart=/usr/bin/bash -lc 'set -euo pipefail; exec /home/node/constellation_2_runtime/ops/run/c2_paper_day_orchestrator_systemd_entry_v1.sh'
+ExecStart=/usr/bin/bash -lc 'set -euo pipefail; exec /home/node/constellation_active/ops/run/c2_paper_day_orchestrator_systemd_entry_v1.sh'

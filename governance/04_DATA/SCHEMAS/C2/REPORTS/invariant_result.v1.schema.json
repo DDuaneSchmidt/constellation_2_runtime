@@ -1,0 +1,40 @@
+{
+  "schema_id": "C2_REPORTS_INVARIANT_RESULT_SCHEMA_V1",
+  "title": "C2 Invariant Result V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "invariant_name",
+    "invoked_day_utc",
+    "passed",
+    "actual",
+    "expected",
+    "source_refs",
+    "generated_at_utc"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "invariant_result.v1" },
+    "schema_version": { "type": "string", "const": "v1" },
+    "invariant_name": { "type": "string", "minLength": 1 },
+    "invoked_day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
+    "passed": { "type": "boolean" },
+    "actual": {},
+    "expected": {},
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ref_type", "path", "sha256"],
+        "properties": {
+          "ref_type": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "generated_at_utc": { "type": "string", "minLength": 11 }
+  }
+}

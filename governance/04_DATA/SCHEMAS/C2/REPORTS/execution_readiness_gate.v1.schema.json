@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "blocking_reasons": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "checks": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "notes": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "passed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "passed",
+          "artifact_path",
+          "notes"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "day_utc": {
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "type": "string"
+    },
+    "family_certificates": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "path",
+          "status"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "generated_at_utc": {
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+      "type": "string"
+    },
+    "git_sha": {
+      "pattern": "^[a-f0-9]{40}$",
+      "type": "string"
+    },
+    "missing_count": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "release_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "run_allowed": {
+      "type": "boolean"
+    },
+    "runtime_contract_path": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "runtime_contract_status": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "runtime_seed_receipts": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "dataset": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset",
+          "path",
+          "status"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema_id": {
+      "const": "execution_readiness_gate.v1"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "source_data_bundles": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "dataset_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "path",
+          "status"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "status": {
+      "enum": [
+        "PASS",
+        "FAIL"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "release_id",
+    "git_sha",
+    "runtime_contract_path",
+    "runtime_contract_status",
+    "source_data_bundles",
+    "runtime_seed_receipts",
+    "family_certificates",
+    "checks",
+    "missing_count",
+    "blocking_reasons",
+    "run_allowed",
+    "generated_at_utc",
+    "status"
+  ],
+  "type": "object"
+}

@@ -32,13 +32,6 @@
       "versions": ["v1", "v2"]
     },
     {
-      "active": "v2",
-      "enforce_from_day_utc": "2026-02-20",
-      "exclusive": false,
-      "surface": "monitoring",
-      "versions": ["v1", "v2"]
-    },
-    {
       "active": "v3",
       "enforce_from_day_utc": "2026-02-20",
       "exclusive": true,

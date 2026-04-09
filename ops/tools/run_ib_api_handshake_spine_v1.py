@@ -36,7 +36,8 @@ TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
 SCHEMA_HANDSHAKE = "governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/ib_api_handshake.v1.schema.json"
 SCHEMA_LATEST_PTR = "governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/ib_api_handshake_latest_pointer.v1.schema.json"
-AUTH_BROKER_EVENTS_ROOT = (TRUTH_ROOT / "execution_evidence_v2" / "broker_events").resolve()
+# Authoritative broker-events surface is execution_evidence_v1.
+AUTH_BROKER_EVENTS_ROOT = (TRUTH_ROOT / "execution_evidence_v1" / "broker_events").resolve()
 
 
 @dataclass(frozen=True)

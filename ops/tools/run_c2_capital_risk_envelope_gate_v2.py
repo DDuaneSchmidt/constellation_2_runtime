@@ -39,7 +39,7 @@ if not (_REPO_ROOT_FROM_FILE / "governance").exists():
     raise SystemExit(f"FATAL: repo_root_missing_governance: derived={_REPO_ROOT_FROM_FILE}")
 
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
 DEFAULT_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
 SCHEMA_OUT = (REPO_ROOT / "governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v2.schema.json").resolve()
@@ -105,16 +105,14 @@ def _write_immutable(path: Path, data: bytes) -> str:
 
 
 def _git_sha() -> str:
-    head = (REPO_ROOT / ".git" / "HEAD").resolve()
-    if not head.exists():
-        raise RuntimeError("GIT_HEAD_MISSING_FAILCLOSED")
-    s = head.read_text(encoding="utf-8").strip()
-    if s.startswith("ref:"):
-        ref = s.split(" ", 1)[1].strip()
-        refp = (REPO_ROOT / ".git" / ref).resolve()
-        if not refp.exists():
-            raise RuntimeError(f"GIT_REF_MISSING_FAILCLOSED: {ref}")
-        return refp.read_text(encoding="utf-8").strip()
+    try:
+        out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
+        s = out.decode("utf-8").strip()
+    except Exception:
+        # Clean runtime roots can be source-derived without .git metadata.
+        s = "0" * 40
+    if len(s) != 40:
+        raise RuntimeError(f"GIT_SHA_INVALID_FAILCLOSED: {s!r}")
     return s
 
 

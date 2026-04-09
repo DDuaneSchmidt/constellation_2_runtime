@@ -1,0 +1,40 @@
+{
+  "schema_id": "C2_RUNTIME_ACTIVE_RUNTIME_CONTRACT_SCHEMA_V1",
+  "title": "C2 Active Runtime Contract V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "release_id",
+    "git_sha",
+    "release_root",
+    "runtime_data_root",
+    "canonical_truth_root",
+    "truth_sleeves_root",
+    "pointer_index_family",
+    "allowed_truth_roots",
+    "provenance_mode",
+    "generated_at_utc",
+    "status"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "active_runtime_contract.v1" },
+    "schema_version": { "type": "string", "const": "v1" },
+    "release_id": { "type": "string", "minLength": 1 },
+    "git_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "release_root": { "type": "string", "minLength": 1 },
+    "runtime_data_root": { "type": "string", "minLength": 1 },
+    "canonical_truth_root": { "type": "string", "minLength": 1 },
+    "truth_sleeves_root": { "type": "string", "minLength": 1 },
+    "pointer_index_family": { "type": "string", "enum": ["run_pointer_v1"] },
+    "allowed_truth_roots": {
+      "type": "array",
+      "minItems": 2,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "provenance_mode": { "type": "string", "enum": ["release_manifest"] },
+    "generated_at_utc": { "type": "string", "minLength": 11 },
+    "status": { "type": "string", "enum": ["ACTIVE"] }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "schema_id": "C2_FACT_LINEAGE_ENVELOPE_SCHEMA_V1",
+  "title": "C2 Lineage Envelope V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "engine_id",
+    "source_intent_id",
+    "intent_sha256",
+    "producer",
+    "producer_git_sha",
+    "invoked_day_utc",
+    "upstream_fact_refs",
+    "generated_at_utc"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "lineage_envelope.v1" },
+    "schema_version": { "type": "string", "const": "v1" },
+    "engine_id": { "type": "string", "minLength": 1 },
+    "source_intent_id": { "type": "string", "minLength": 1 },
+    "intent_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "producer": { "type": "string", "minLength": 1 },
+    "producer_git_sha": { "type": "string", "minLength": 7, "maxLength": 64 },
+    "invoked_day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
+    "upstream_fact_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fact_type", "path", "sha256"],
+        "properties": {
+          "fact_type": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "generated_at_utc": { "type": "string", "minLength": 11 }
+  }
+}

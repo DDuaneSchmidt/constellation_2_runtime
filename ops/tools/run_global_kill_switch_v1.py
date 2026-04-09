@@ -47,11 +47,12 @@ import json
 import subprocess
 from typing import Any, Dict, List, Tuple
 
+from constellation_2.common.runtime_contract_v1 import resolve_release_provenance
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1
 from constellation_2.common.truth_root_v1 import resolve_truth_root
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
 TRUTH = resolve_truth_root(repo_root=REPO_ROOT)
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RISK/global_kill_switch_state.v1.schema.json"
@@ -67,8 +68,18 @@ RC_INPUT_INVALID = "C2_KILL_SWITCH_INPUT_SCHEMA_INVALID"
 
 
 def _git_sha() -> str:
-    out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
-    return out.decode("utf-8").strip()
+    try:
+        s = str(resolve_release_provenance().get("git_sha") or "").strip()
+        if s:
+            return s
+    except Exception:
+        pass
+    try:
+        out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
+        return out.decode("utf-8").strip()
+    except Exception:
+        # Clean runtime roots can be source-derived without .git metadata.
+        return "0" * 40
 
 
 def _sha256_bytes(b: bytes) -> str:

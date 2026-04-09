@@ -29,10 +29,11 @@ import json
 import subprocess
 from typing import Any, Dict, List, Optional
 
+from constellation_2.common.runtime_contract_v1 import resolve_release_provenance
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
 TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/reconciliation_report.v3.schema.json"
@@ -43,9 +44,31 @@ EXEC_TRUTH_ROOT = (TRUTH / "execution_evidence_v1/submissions").resolve()
 OUT_ROOT = (TRUTH / "reports" / "reconciliation_report_v3").resolve()
 
 
+def _resolve_truth_root(truth_root_arg: str) -> Path:
+    raw = (truth_root_arg or "").strip()
+    if not raw:
+        return TRUTH
+    p = Path(raw).expanduser().resolve()
+    if not p.is_absolute():
+        raise SystemExit(f"FAIL: --truth_root must be absolute: {p}")
+    if not p.exists() or not p.is_dir():
+        raise SystemExit(f"FAIL: --truth_root must exist and be a directory: {p}")
+    return p
+
+
 def _git_sha() -> str:
-    out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
-    return out.decode("utf-8").strip()
+    try:
+        s = str(resolve_release_provenance().get("git_sha") or "").strip()
+        if s:
+            return s
+    except Exception:
+        pass
+    try:
+        out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
+        return out.decode("utf-8").strip()
+    except Exception:
+        # Clean runtime roots can be source-derived without .git metadata.
+        return "0" * 40
 
 
 def _parse_day_utc(s: str) -> str:
@@ -97,9 +120,14 @@ def _find_ok_broker_manifest(day_dir: Path) -> Optional[Path]:
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_reconciliation_report_v3")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
+    ap.add_argument("--truth_root", default="", help="Absolute truth root override; defaults to repo truth")
     args = ap.parse_args()
 
     day = _parse_day_utc(args.day_utc)
+    truth_root = _resolve_truth_root(str(args.truth_root))
+    broker_events_root = (truth_root / "execution_evidence_v1/broker_events").resolve()
+    exec_truth_root = (truth_root / "execution_evidence_v1/submissions").resolve()
+    out_root = (truth_root / "reports" / "reconciliation_report_v3").resolve()
 
     produced_utc = f"{day}T00:00:00Z"
 
@@ -108,7 +136,7 @@ def main() -> int:
     notes: List[str] = []
 
     # --- Truth side ---
-    exec_day_dir = (EXEC_TRUTH_ROOT / day).resolve()
+    exec_day_dir = (exec_truth_root / day).resolve()
     truth_ids: List[str] = []
     if exec_day_dir.exists() and exec_day_dir.is_dir():
         truth_ids = sorted([p.name for p in exec_day_dir.iterdir() if p.is_dir()])
@@ -127,7 +155,7 @@ def main() -> int:
     if submissions_total == 0:
         reason_codes.append("SAFE_IDLE_NO_SUBMISSIONS_OK")
 
-        broker_day_dir = (BROKER_EVENTS_ROOT / day).resolve()
+        broker_day_dir = (broker_events_root / day).resolve()
         broker_log = (broker_day_dir / "broker_event_log.v1.jsonl").resolve()
         broker_manifest_default = (broker_day_dir / "broker_event_day_manifest.v1.json").resolve()
 
@@ -165,7 +193,7 @@ def main() -> int:
 
         validate_against_repo_schema_v1(report, REPO_ROOT, SCHEMA_RELPATH)
 
-        out_dir = (OUT_ROOT / day).resolve()
+        out_dir = (out_root / day).resolve()
         out_path = (out_dir / "reconciliation_report.v3.json").resolve()
         payload = (json.dumps(report, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
 
@@ -178,7 +206,7 @@ def main() -> int:
         return 0
 
     # --- Active-trading mode (submissions present): broker truth required ---
-    broker_day_dir = (BROKER_EVENTS_ROOT / day).resolve()
+    broker_day_dir = (broker_events_root / day).resolve()
     broker_log = (broker_day_dir / "broker_event_log.v1.jsonl").resolve()
     ok_manifest_path = _find_ok_broker_manifest(broker_day_dir)
 
@@ -251,7 +279,7 @@ def main() -> int:
 
     validate_against_repo_schema_v1(report2, REPO_ROOT, SCHEMA_RELPATH)
 
-    out_dir2 = (OUT_ROOT / day).resolve()
+    out_dir2 = (out_root / day).resolve()
     out_path2 = (out_dir2 / "reconciliation_report.v3.json").resolve()
     payload2 = (json.dumps(report2, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
 

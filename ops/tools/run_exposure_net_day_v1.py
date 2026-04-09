@@ -51,8 +51,12 @@ OUT_ROOT = (TRUTH / "risk_v1/exposure_net_v1").resolve()
 
 
 def _git_sha() -> str:
-    out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
-    return out.decode("utf-8").strip()
+    try:
+        out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
+        return out.decode("utf-8").strip()
+    except Exception:
+        # Clean runtime roots can be source-derived without .git metadata.
+        return "0" * 40
 
 
 def _sha256_bytes(b: bytes) -> str:

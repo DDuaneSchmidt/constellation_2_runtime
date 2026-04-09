@@ -1,17 +1,8 @@
 #!/usr/bin/env python3
-"""
-run_trade_submit_readiness_c2_v1.py
-
-C2-native trade submit readiness writer (v1).
-
-Bootstrap-safe:
-- Derives repo_root from file path
-- Injects repo_root into sys.path before any C2 imports
-"""
-
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 _THIS_FILE = Path(__file__).resolve()
@@ -28,19 +19,26 @@ import argparse
 import hashlib
 import json
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
+from constellation_2.common.day_authority_decision_v1 import read_day_authority_decision_v1
+from constellation_2.common.trade_submit_readiness_authority_v1 import (
+    resolve_governed_account_binding,
+    resolve_governed_sleeve_truth_bindings,
+    resolve_pointer_bound_handshake_state,
+    validate_trade_submit_readiness_status_obj,
+)
 from constellation_2.phaseD.lib.validate_against_schema_v1 import (
     validate_against_repo_schema_v1,
 )
 
 REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
 TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
-OUT_DIR = (TRUTH_ROOT / "trade_submit_readiness_c2_v1").resolve()
+OUT_ROOT = (TRUTH_ROOT / "trade_submit_readiness_c2_v1").resolve()
+OUT_DIR = OUT_ROOT
 
 SCHEMA_STATUS = "governance/04_DATA/SCHEMAS/C2/READINESS/trade_submit_readiness.status.v1.schema.json"
 SCHEMA_LATEST = "governance/04_DATA/SCHEMAS/C2/READINESS/trade_submit_readiness.latest_pointer.v1.schema.json"
-REGISTRY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/C2_IB_ACCOUNT_REGISTRY_V1.json").resolve()
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -89,50 +87,200 @@ def _day_anchor_ts(day_utc: str) -> Tuple[str, str]:
     return as_of, expires
 
 
-def _load_registry_account(ib_account: str) -> Optional[Dict[str, Any]]:
-    reg = _read_json(REGISTRY_PATH)
-    if not isinstance(reg, dict):
-        raise SystemExit("FAIL: registry_not_object")
-    accounts = reg.get("accounts")
-    if not isinstance(accounts, list):
-        raise SystemExit("FAIL: registry_accounts_not_list")
-    for a in accounts:
-        if isinstance(a, dict) and str(a.get("account_id") or "").strip() == ib_account:
-            return a
-    return None
+def _today_utc_iso() -> str:
+    return datetime.now(timezone.utc).date().isoformat()
 
 
-def _handshake_paths() -> Tuple[Path, Optional[Path]]:
-    ptr = (TRUTH_ROOT / "ib_api_handshake" / "latest_pointer.v1.json").resolve()
-    if not ptr.exists():
-        return ptr, None
-    try:
-        o = _read_json(ptr)
-        day = str(o.get("day_utc") or "").strip()
-        if day:
-            return ptr, (TRUTH_ROOT / "ib_api_handshake" / day / "ib_api_handshake.v1.json").resolve()
-    except Exception:
-        pass
-    return ptr, None
+def _out_dir_for(environment: str, ib_account: str) -> Path:
+    return (OUT_ROOT / str(environment).strip().upper() / str(ib_account).strip()).resolve()
 
 
-def _handshake_ok(handshake_obj: Any) -> Tuple[bool, List[str]]:
-    reasons: List[str] = []
-    if not isinstance(handshake_obj, dict):
-        return False, ["HANDSHAKE_NOT_OBJECT"]
+def _history_out_dir_for(environment: str, ib_account: str, day_utc: str) -> Path:
+    return (OUT_ROOT / "_history" / str(environment).strip().upper() / str(ib_account).strip() / str(day_utc).strip()).resolve()
 
-    for key in ["ok", "connected", "ready"]:
-        if handshake_obj.get(key) is True:
-            reasons.append(f"HANDSHAKE_{key.upper()}_TRUE")
-            return True, reasons
 
-    status = str(handshake_obj.get("status") or "").strip().upper()
-    if status in {"OK", "PASS", "READY", "CONNECTED"}:
-        reasons.append(f"HANDSHAKE_STATUS_{status}")
-        return True, reasons
+def _load_day_authority(day_utc: str) -> tuple[Dict[str, Any] | None, Path, str | None]:
+    path = (TRUTH_ROOT / "reports" / "day_authority_decision_v1" / day_utc / "day_authority_decision.v1.json").resolve()
+    if not path.exists() or not path.is_file():
+        return None, path, None
+    payload = read_day_authority_decision_v1(truth_root=TRUTH_ROOT, trading_day=day_utc)
+    return payload.payload, payload.path, payload.sha256
 
-    reasons.append("HANDSHAKE_NOT_OK")
-    return False, reasons
+
+def _resolve_primary_scoped_gate_state(*, repo_root: Path, environment: str, ib_account: str, day_utc: str) -> Dict[str, Any]:
+    bindings = resolve_governed_sleeve_truth_bindings(
+        repo_root=repo_root,
+        environment=environment,
+        requested_ib_account=ib_account,
+    )
+    primary = None
+    for binding in bindings:
+        if str(binding.sleeve_id).strip().upper() == "PRIMARY":
+            primary = binding
+            break
+    if primary is None:
+        primary = bindings[0]
+
+    head_path = (primary.truth_root / "run_pointer_v2" / "canonical_authority_head.v1.json").resolve()
+    gate_path = (primary.truth_root / "reports" / "gate_stack_verdict_v1" / day_utc / "gate_stack_verdict.v1.json").resolve()
+    input_manifest: List[Dict[str, Any]] = []
+    if head_path.exists() and head_path.is_file():
+        head = _read_json(head_path)
+        input_manifest.append(
+            {
+                "type": f"canonical_authority_head_v1_scoped:{primary.sleeve_id}",
+                "path": str(head_path),
+                "sha256": _sha256_file(head_path),
+            }
+        )
+        candidate_gate_path = Path(str(head.get("points_to") or "").strip()).resolve()
+        if candidate_gate_path.exists() and candidate_gate_path.is_file():
+            gate_path = candidate_gate_path
+    if not gate_path.exists() or not gate_path.is_file():
+        raise ValueError(f"FINAL_GATE_STACK_NOT_PASS:sleeve_id={primary.sleeve_id}:reason=MISSING_GATE_STACK_AUTHORITY")
+    gate = _read_json(gate_path)
+    gate_status = str(gate.get("status") or "").strip().upper()
+    gate_day = str(gate.get("day_utc") or day_utc).strip()
+    input_manifest.append(
+        {
+            "type": f"gate_stack_verdict_v1_scoped:{primary.sleeve_id}",
+            "path": str(gate_path),
+            "sha256": _sha256_file(gate_path),
+        }
+    )
+    if gate_day != day_utc:
+        raise ValueError(
+            f"FINAL_GATE_STACK_NOT_PASS:sleeve_id={primary.sleeve_id}:reason=GATE_STACK_DAY_MISMATCH:expected_day_utc={day_utc}:actual_day_utc={gate_day}"
+        )
+    if gate_status != "PASS":
+        raise ValueError(
+            f"FINAL_GATE_STACK_NOT_PASS:sleeve_id={primary.sleeve_id}:reason=GATE_STACK_STATUS_NOT_PASS:status={gate_status or 'MISSING'}"
+        )
+    return {
+        "binding": primary,
+        "gate_path": gate_path,
+        "gate_sha256": _sha256_file(gate_path),
+        "gate_payload": gate,
+        "input_manifest": input_manifest,
+    }
+
+
+def _build_session_authority_attestation(
+    *,
+    day_utc: str,
+    reasons: List[str],
+    day_authority_payload: Dict[str, Any] | None,
+    day_authority_path: Path,
+    day_authority_sha256: str | None,
+    state: str,
+) -> Dict[str, Any]:
+    decision_state = "UNKNOWN"
+    policy_action = "SKIP"
+    stage_id = "PRE_ORCHESTRATION_PREFLIGHT"
+    if day_authority_payload is not None:
+        decision_state = "OK" if str(day_authority_payload.get("decision_state") or "").strip().upper() == "OPEN" else "BLOCKED"
+        stage_id = str(day_authority_payload.get("stage") or stage_id).strip()
+    return {
+        "decision_artifact_path": str(day_authority_path),
+        "decision_artifact_sha256": day_authority_sha256 or ("0" * 64),
+        "policy_version": "validation_result_only",
+        "evaluator_version": "validation_result_only",
+        "venue": "C2",
+        "session_date": day_utc,
+        "decision_status": decision_state,
+        "session_class": None,
+        "stage_id": stage_id,
+        "policy_action": policy_action,
+        "stage_execution_status": state,
+        "reason_codes": sorted(set(reasons)),
+    }
+
+
+def _build_run_state_authority_attestation(
+    *,
+    day_utc: str,
+    reasons: List[str],
+    state: str,
+    day_authority_payload: Dict[str, Any] | None,
+    day_authority_path: Path,
+    day_authority_sha256: str | None,
+    gate_state: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    decision_state = "UNKNOWN"
+    classification_value = "UNKNOWN"
+    if day_authority_payload is not None and str(day_authority_payload.get("decision_state") or "").strip().upper() == "OPEN":
+        decision_state = "OK"
+        classification_value = "OPEN"
+    elif day_authority_payload is not None:
+        decision_state = "BLOCKED"
+        classification_value = "BLOCKED"
+    gate_path = "UNAVAILABLE"
+    gate_sha256 = "0" * 64
+    cycle_coherence_status = "BLOCKED"
+    upstream_refs = []
+    if gate_state is not None:
+        gate_path = str(gate_state["gate_path"])
+        gate_sha256 = str(gate_state["gate_sha256"])
+        cycle_coherence_status = "COHERENT"
+        upstream_refs.extend(gate_state.get("input_manifest") or [])
+    if day_authority_payload is not None:
+        upstream_refs.append(
+            {
+                "artifact_family": "day_authority_decision_v1",
+                "artifact_path": str(day_authority_path),
+                "artifact_sha256": day_authority_sha256 or ("0" * 64),
+                "decision_status": decision_state,
+                "generated_at": str(day_authority_payload.get("emitted_at") or ""),
+                "reason_codes": list(day_authority_payload.get("blocking_evidence") or []),
+                "classification_field": "decision_state",
+                "classification_value": str(day_authority_payload.get("decision_state") or ""),
+                "stage_id": str(day_authority_payload.get("stage") or ""),
+            }
+        )
+    normalized_upstream = []
+    for row in upstream_refs:
+        if isinstance(row, dict) and "artifact_family" in row:
+            normalized_upstream.append(row)
+        elif isinstance(row, dict):
+            normalized_upstream.append(
+                {
+                    "artifact_family": str(row.get("type") or "").strip(),
+                    "artifact_path": str(row.get("path") or "").strip(),
+                    "artifact_sha256": str(row.get("sha256") or "").strip(),
+                    "decision_status": "OK",
+                    "generated_at": f"{day_utc}T00:00:00Z",
+                    "reason_codes": sorted(set(reasons)),
+                }
+            )
+    return {
+        "authority_family": "day_authority_decision_v1",
+        "authority_artifact_path": str(day_authority_path),
+        "authority_artifact_sha256": day_authority_sha256 or ("0" * 64),
+        "policy_version": "validation_result_only",
+        "evaluator_version": "validation_result_only",
+        "decision_status": decision_state,
+        "classification_field": "decision_state",
+        "classification_value": classification_value,
+        "cycle_snapshot_family": "gate_stack_verdict_v1",
+        "cycle_snapshot_artifact_path": gate_path,
+        "cycle_snapshot_artifact_sha256": gate_sha256,
+        "cycle_id": f"{day_utc}:{state}",
+        "cycle_coherence_status": cycle_coherence_status,
+        "stage_id": "TRADE_SUBMIT_READINESS",
+        "stage_execution_status": state,
+        "reason_codes": sorted(set(reasons)),
+        "upstream_authority_refs": normalized_upstream,
+    }
+
+
+def _append_fail_reason(reasons: List[str], message: str) -> None:
+    detail = f"FAIL:{message}"
+    reasons.append(detail)
+    base = detail.split(":", 2)
+    if len(base) >= 2:
+        short = ":".join(base[:2])
+        if short != detail:
+            reasons.append(short)
 
 
 def main() -> int:
@@ -149,79 +297,146 @@ def main() -> int:
     if not TRUTH_ROOT.exists():
         raise SystemExit(f"FAIL: truth_root_missing: {TRUTH_ROOT}")
 
-    reg_sha = _sha256_file(REGISTRY_PATH)
-    acct = _load_registry_account(ib_account)
-
     reasons: List[str] = []
-
-    if acct is None:
-        reasons.append("FAIL:IB_ACCOUNT_NOT_IN_REGISTRY")
-        ok_registry = False
-    else:
-        enabled = bool(acct.get("enabled_for_submission") is True)
-        acct_env = str(acct.get("environment") or "").strip().upper()
-        if not enabled:
-            reasons.append("FAIL:IB_ACCOUNT_DISABLED_FOR_SUBMISSION")
-        if acct_env != env:
-            reasons.append("FAIL:IB_ACCOUNT_ENV_MISMATCH")
-        if env == "PAPER" and not ib_account.startswith("DU"):
-            reasons.append("FAIL:PAPER_ACCOUNT_ID_NOT_DU")
-        ok_registry = enabled and acct_env == env and (env != "PAPER" or ib_account.startswith("DU"))
-
-    ptr_path, hs_path = _handshake_paths()
     input_manifest: List[Dict[str, Any]] = []
 
-    if ptr_path.exists():
-        input_manifest.append({
-            "type": "ib_api_handshake_latest_pointer_v1",
-            "path": str(ptr_path),
-            "sha256": _sha256_file(ptr_path),
-        })
-    else:
-        reasons.append("FAIL:IB_API_HANDSHAKE_POINTER_MISSING")
-
+    ok_registry = False
     ok_handshake = False
-    if hs_path and hs_path.exists():
-        input_manifest.append({
-            "type": "ib_api_handshake_v1",
-            "path": str(hs_path),
-            "sha256": _sha256_file(hs_path),
-        })
-        hs_obj = _read_json(hs_path)
-        ok_handshake, hs_reasons = _handshake_ok(hs_obj)
-        reasons.extend(hs_reasons)
-        if not ok_handshake:
-            reasons.append("FAIL:IB_API_HANDSHAKE_NOT_OK")
-    else:
-        reasons.append("FAIL:IB_API_HANDSHAKE_ARTIFACT_MISSING")
+    ok_gate = False
+    gate_state: Dict[str, Any] | None = None
+    day_authority_payload, day_authority_path, day_authority_sha256 = _load_day_authority(day)
 
-    ok = bool(ok_registry and ok_handshake)
+    try:
+        account_binding = resolve_governed_account_binding(
+            repo_root=REPO_ROOT,
+            environment=env,
+            requested_ib_account=ib_account,
+        )
+        ok_registry = True
+    except ValueError as exc:
+        account_binding = None
+        _append_fail_reason(reasons, str(exc))
+
+    registry_sha256 = account_binding.account_registry_sha256 if account_binding is not None else "UNAVAILABLE"
+    sleeve_registry_sha256 = account_binding.sleeve_registry_sha256 if account_binding is not None else "UNAVAILABLE"
+    if account_binding is not None:
+        input_manifest.append(
+            {
+                "type": "ib_account_registry_v1",
+                "path": str(account_binding.account_registry_path),
+                "sha256": registry_sha256,
+            }
+        )
+        input_manifest.append(
+            {
+                "type": "sleeve_registry_v1",
+                "path": str(account_binding.sleeve_registry_path),
+                "sha256": sleeve_registry_sha256,
+            }
+        )
+
+    try:
+        handshake = resolve_pointer_bound_handshake_state(
+            truth_root=TRUTH_ROOT,
+            day_utc=day,
+            environment=env,
+            ib_account=ib_account,
+        )
+        ok_handshake = True
+        reasons.append("IB_API_HANDSHAKE_POINTER_OK")
+        input_manifest.append(
+            {
+                "type": "ib_api_handshake_latest_pointer_v1",
+                "path": str(handshake.pointer_path),
+                "sha256": handshake.pointer_sha256,
+            }
+        )
+        input_manifest.append(
+            {
+                "type": "ib_api_handshake_v1",
+                "path": str(handshake.handshake_path),
+                "sha256": handshake.handshake_sha256,
+            }
+        )
+    except ValueError as exc:
+        _append_fail_reason(reasons, str(exc))
+
+    try:
+        gate_state = _resolve_primary_scoped_gate_state(
+            repo_root=REPO_ROOT,
+            environment=env,
+            ib_account=ib_account,
+            day_utc=day,
+        )
+        ok_gate = True
+        input_manifest.extend(gate_state["input_manifest"])
+    except ValueError as exc:
+        _append_fail_reason(reasons, str(exc))
+
+    if day_authority_payload is None:
+        reasons.append("INFO:DAY_AUTHORITY_VALIDATION_MISSING")
+    else:
+        input_manifest.append(
+            {
+                "type": "day_authority_decision_v1",
+                "path": str(day_authority_path),
+                "sha256": day_authority_sha256,
+            }
+        )
+        if str(day_authority_payload.get("decision_state") or "").strip().upper() != "OPEN":
+            reasons.append(
+                f"INFO:DAY_AUTHORITY_VALIDATION_BLOCKED:blocking_class={str(day_authority_payload.get('blocking_class') or 'UNKNOWN').strip()}"
+            )
+
+    ok = bool(ok_registry and ok_handshake and ok_gate)
     state = "OK" if ok else "FAIL"
 
     as_of_utc, expires_utc = _day_anchor_ts(day)
+    session_authority_attestation = _build_session_authority_attestation(
+        day_utc=day,
+        reasons=reasons,
+        day_authority_payload=day_authority_payload,
+        day_authority_path=day_authority_path,
+        day_authority_sha256=day_authority_sha256,
+        state=state,
+    )
+    run_state_authority_attestation = _build_run_state_authority_attestation(
+        day_utc=day,
+        reasons=reasons,
+        state=state,
+        day_authority_payload=day_authority_payload,
+        day_authority_path=day_authority_path,
+        day_authority_sha256=day_authority_sha256,
+        gate_state=gate_state,
+    )
 
     status_obj: Dict[str, Any] = {
         "schema_id": "trade_submit_readiness_c2",
         "schema_version": "v1",
+        "day_utc": day,
         "as_of_utc": as_of_utc,
         "expires_utc": expires_utc,
         "ok": ok,
         "state": state,
         "environment": env,
         "ib_account": ib_account,
-        "reasons": reasons,
+        "reasons": sorted(set(reasons)),
         "input_manifest": input_manifest,
         "producer": {
-            "repo": "constellation_2_runtime",
+            "repo": "constellation",
             "module": "ops/tools/run_trade_submit_readiness_c2_v1.py",
             "git_sha": _git_sha(),
         },
         "provenance": {
             "truth_root": str(TRUTH_ROOT),
-            "registry_sha256": reg_sha,
+            "registry_sha256": registry_sha256,
+            "sleeve_registry_sha256": sleeve_registry_sha256,
         },
+        "session_authority_attestation": session_authority_attestation,
+        "run_state_authority_attestation": run_state_authority_attestation,
     }
 
+    validate_trade_submit_readiness_status_obj(status_obj)
     validate_against_repo_schema_v1(status_obj, REPO_ROOT, SCHEMA_STATUS)
 
     status_bytes = _canonical_json_bytes(status_obj)
@@ -230,14 +445,17 @@ def main() -> int:
     latest_obj: Dict[str, Any] = {
         "schema_id": "trade_submit_readiness_c2_latest_pointer",
         "schema_version": "v1",
+        "day_utc": day,
         "as_of_utc": as_of_utc,
         "expires_utc": expires_utc,
         "ok": ok,
         "state": state,
+        "environment": env,
+        "ib_account": ib_account,
         "target_path": "status.json",
         "target_sha256": status_sha,
         "producer": {
-            "repo": "constellation_2_runtime",
+            "repo": "constellation",
             "module": "ops/tools/run_trade_submit_readiness_c2_v1.py",
             "git_sha": _git_sha(),
         },
@@ -248,11 +466,25 @@ def main() -> int:
 
     validate_against_repo_schema_v1(latest_obj, REPO_ROOT, SCHEMA_LATEST)
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    _atomic_write(OUT_DIR / "status.json", status_bytes)
-    _atomic_write(OUT_DIR / "latest_pointer.v1.json", _canonical_json_bytes(latest_obj))
+    out_dir = _out_dir_for(env, ib_account)
+    history_out_dir = _history_out_dir_for(env, ib_account, day)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    history_out_dir.mkdir(parents=True, exist_ok=True)
+    _atomic_write(history_out_dir / "status.json", status_bytes)
+    _atomic_write(history_out_dir / "latest_pointer.v1.json", _canonical_json_bytes(latest_obj))
+    _atomic_write(out_dir / "status.json", status_bytes)
+    _atomic_write(out_dir / "latest_pointer.v1.json", _canonical_json_bytes(latest_obj))
+    if env == "PAPER" and day == _today_utc_iso():
+        OUT_ROOT.mkdir(parents=True, exist_ok=True)
+        _atomic_write(OUT_ROOT / "status.json", status_bytes)
+        _atomic_write(OUT_ROOT / "latest_pointer.v1.json", _canonical_json_bytes(latest_obj))
 
-    print(f"OK: TRADE_SUBMIT_READINESS_C2_V1 state={state} ok={ok}")
+    print(
+        "OK: TRADE_SUBMIT_READINESS_C2_V1 "
+        f"state={state} ok={ok} "
+        f"current_path={out_dir / 'status.json'} "
+        f"history_path={history_out_dir / 'status.json'}"
+    )
     return 0 if ok else 2
 
 

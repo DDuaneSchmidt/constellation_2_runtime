@@ -78,9 +78,19 @@ def repo_root_from_here() -> Path:
     # .../constellation_2/phaseI/exit_reconciliation/run/run_exit_reconciliation_day_v1.py
     # parents: run(0), exit_reconciliation(1), phaseI(2), constellation_2(3), repo_root(4)
     root = here.parents[4]
-    if not (root / ".git").exists():
-        raise ExitReconError(f"Derived repo root not a git repo: {root}")
     return root
+
+
+def resolve_truth_root(repo_root: Path, truth_root_arg: str) -> Path:
+    raw = (truth_root_arg or "").strip()
+    if not raw:
+        return (repo_root / "constellation_2" / "runtime" / "truth").resolve()
+    p = Path(raw).expanduser().resolve()
+    if not p.is_absolute():
+        raise ExitReconError(f"--truth_root must be absolute: {p}")
+    if not p.exists() or not p.is_dir():
+        raise ExitReconError(f"--truth_root must exist and be a directory: {p}")
+    return p
 
 
 def load_json(path: Path) -> Dict[str, Any]:
@@ -93,14 +103,9 @@ def load_json(path: Path) -> Dict[str, Any]:
     return obj
 
 
-def read_positions_snapshot_from_latest(repo_root: Path) -> Tuple[Path, Dict[str, Any], str]:
+def read_positions_snapshot_from_latest(truth_root: Path) -> Tuple[Path, Dict[str, Any], str]:
     latest_ptr = (
-        repo_root
-        / "constellation_2"
-        / "runtime"
-        / "truth"
-        / "positions_v1"
-        / "latest_pointer.v2.json"
+        truth_root / "positions_v1" / "latest_pointer.v2.json"
     )
     if not latest_ptr.exists():
         raise ExitReconError(f"positions latest pointer missing: {latest_ptr}")
@@ -124,13 +129,16 @@ def read_positions_snapshot_from_latest(repo_root: Path) -> Tuple[Path, Dict[str
 def discover_exposure_intents_in_dir(intents_day_dir: Path) -> Dict[str, Dict[str, Any]]:
     """
     Returns engine_id -> intent object for ExposureIntent v1 only.
-    If multiple intents for same engine_id exist, fail-closed.
+    Same-day duplicate engine intents are tolerated in stable path order because
+    exit reconciliation only needs to know whether an engine emitted at least
+    one explicit intent and should therefore not receive a synthetic exit
+    obligation.
     """
     out: Dict[str, Dict[str, Any]] = {}
     if not intents_day_dir.exists() or not intents_day_dir.is_dir():
         return out
 
-    for p in intents_day_dir.rglob("*.json"):
+    for p in sorted(intents_day_dir.rglob("*.json")):
         try:
             obj = json.loads(p.read_text(encoding="utf-8"))
         except Exception:
@@ -146,7 +154,7 @@ def discover_exposure_intents_in_dir(intents_day_dir: Path) -> Dict[str, Dict[st
         if not isinstance(engine_id, str) or engine_id.strip() == "":
             continue
         if engine_id in out:
-            raise ExitReconError(f"Duplicate ExposureIntent v1 for engine_id={engine_id} under {intents_day_dir}")
+            continue
         out[engine_id] = obj
     return out
 
@@ -319,6 +327,7 @@ def build_exit_reconciliation(
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--day_utc", required=True, help="Day in UTC YYYY-MM-DD")
+    ap.add_argument("--truth_root", required=False, default="", help="Absolute truth root override (optional)")
     ap.add_argument("--intents_day_dir", required=False, default="", help="Path to intents day directory (optional)")
     ap.add_argument(
         "--positions_snapshot_path",
@@ -334,6 +343,7 @@ def main() -> int:
     day_utc = str(args.day_utc).strip()
     if not day_utc or len(day_utc) != 10:
         raise ExitReconError(f"Invalid --day_utc: {day_utc!r}")
+    truth_root = resolve_truth_root(repo_root, str(args.truth_root))
 
     if str(args.positions_snapshot_path).strip():
         positions_path = Path(str(args.positions_snapshot_path).strip())
@@ -342,16 +352,14 @@ def main() -> int:
         positions_obj = load_json(positions_path)
         positions_sha = sha256_file(positions_path)
     else:
-        positions_path, positions_obj, positions_sha = read_positions_snapshot_from_latest(repo_root)
+        positions_path, positions_obj, positions_sha = read_positions_snapshot_from_latest(truth_root)
 
     intents_day_dir: Optional[Path]
     if str(args.intents_day_dir).strip():
         intents_day_dir = Path(str(args.intents_day_dir).strip())
     else:
         # Default to standard intents snapshots location
-        intents_day_dir = (
-            repo_root / "constellation_2" / "runtime" / "truth" / "intents_v1" / "snapshots" / day_utc
-        )
+        intents_day_dir = (truth_root / "intents_v1" / "snapshots" / day_utc)
 
     out_obj = build_exit_reconciliation(
         repo_root=repo_root,
@@ -365,15 +373,7 @@ def main() -> int:
     if str(args.out_path).strip():
         out_path = Path(str(args.out_path).strip())
     else:
-        out_path = (
-            repo_root
-            / "constellation_2"
-            / "runtime"
-            / "truth"
-            / "exit_reconciliation_v1"
-            / day_utc
-            / "exit_reconciliation.v1.json"
-        )
+        out_path = (truth_root / "exit_reconciliation_v1" / day_utc / "exit_reconciliation.v1.json")
 
     atomic_write_json(out_path, out_obj)
     print(str(out_path))

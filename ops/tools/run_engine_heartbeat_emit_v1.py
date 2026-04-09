@@ -23,12 +23,23 @@ import argparse
 import hashlib
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-DEFAULT_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+from constellation_2.common.runtime_contract_v1 import (
+    require_truth_root_under_contract,
+    resolve_canonical_truth_root,
+    resolve_release_provenance,
+)
+
+_THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = _THIS_FILE.parents[2].resolve()
+try:
+    DEFAULT_TRUTH_ROOT = resolve_canonical_truth_root()
+except Exception:
+    DEFAULT_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/MONITORING/engine_heartbeat.v1.schema.json"
 SCHEMA_ID = "C2_ENGINE_HEARTBEAT_V1"
@@ -78,10 +89,13 @@ def _resolve_truth_root(arg_truth_root: str) -> Path:
     if not root.exists() or not root.is_dir():
         raise SystemExit(f"FATAL: truth_root missing or not directory: {root}")
     try:
-        root.relative_to(REPO_ROOT)
+        return require_truth_root_under_contract(root)
     except Exception:
-        raise SystemExit(f"FATAL: truth_root not under repo root: truth_root={root} repo_root={REPO_ROOT}")
-    return root
+        try:
+            root.relative_to(REPO_ROOT)
+        except Exception:
+            raise SystemExit(f"FATAL: truth_root not under repo root: truth_root={root} repo_root={REPO_ROOT}")
+        return root
 
 
 def _read_registry_engines_active() -> List[str]:
@@ -159,7 +173,7 @@ def main() -> int:
     ap.add_argument("--stale_after_seconds", type=int, required=True)
     ap.add_argument("--fingerprint", action="append", default=[], help="Repeatable fingerprints: name|path|sha256|present")
     ap.add_argument("--truth_root", default="", help="Override truth root (must be under repo root)")
-    ap.add_argument("--producer_repo", default="constellation_2_runtime")
+    ap.add_argument("--producer_repo", default="constellation")
     ap.add_argument("--producer_module", default="ops/tools/run_engine_heartbeat_emit_v1.py")
     ap.add_argument("--producer_git_sha", default="")
     ap.add_argument("--allow_inactive", action="store_true", help="Allow emitting for non-ACTIVE engines (default: forbidden)")
@@ -196,9 +210,19 @@ def main() -> int:
     # producer sha
     git_sha = str(args.producer_git_sha).strip()
     if not git_sha:
-        git_sha = (
-            os.popen("cd /home/node/constellation_2_runtime && /usr/bin/git rev-parse HEAD").read().strip()
-        )
+        try:
+            git_sha = str(resolve_release_provenance().get("git_sha") or "").strip()
+        except Exception:
+            git_sha = ""
+    if not git_sha:
+        try:
+            git_sha = subprocess.check_output(
+                ["/usr/bin/git", "rev-parse", "HEAD"],
+                cwd=str(REPO_ROOT),
+                text=True,
+            ).strip()
+        except Exception:
+            git_sha = ""
     if not git_sha:
         raise SystemExit("FATAL: unable to determine producer git sha")
 

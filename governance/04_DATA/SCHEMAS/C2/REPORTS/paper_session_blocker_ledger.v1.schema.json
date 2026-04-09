@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/paper_session_blocker_ledger.v1.schema.json",
+  "title": "paper_session_blocker_ledger.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "blocker_ledger_id",
+    "session_id",
+    "day_utc",
+    "blocker_count",
+    "blockers",
+    "recorded_at"
+  ],
+  "properties": {
+    "schema_id": { "const": "paper_session_blocker_ledger" },
+    "schema_version": { "const": "v1" },
+    "blocker_ledger_id": { "type": "string", "minLength": 1 },
+    "session_id": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "minLength": 1 },
+    "blocker_count": { "type": "integer", "minimum": 0 },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "blocker_id",
+          "node_id",
+          "dependency_key",
+          "blocker_type",
+          "reason_code",
+          "message"
+        ],
+        "properties": {
+          "blocker_id": { "type": "string", "minLength": 1 },
+          "node_id": { "type": "string", "minLength": 1 },
+          "dependency_key": { "type": "string", "minLength": 1 },
+          "blocker_type": { "type": "string", "minLength": 1 },
+          "reason_code": { "type": "string", "minLength": 1 },
+          "message": { "type": "string", "minLength": 1 },
+          "path": { "type": "string" }
+        }
+      }
+    },
+    "recorded_at": { "type": "string", "minLength": 1 }
+  }
+}

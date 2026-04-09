@@ -49,12 +49,15 @@ from decimal import Decimal, InvalidOperation, getcontext
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
-from constellation_2.common.truth_root_v1 import resolve_truth_root
+REPO_ROOT = Path(__file__).resolve().parents[4]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.common.paper_session_fact_plane_v1 import resolve_fact_plane_truth_root_v1
 from constellation_2.phaseD.lib.canon_json_v1 import CanonicalizationError, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH_ROOT = resolve_truth_root(repo_root=REPO_ROOT)
+TRUTH_ROOT = resolve_fact_plane_truth_root_v1()
 
 INTENTS_ROOT = (TRUTH_ROOT / "intents_v1" / "snapshots").resolve()
 
@@ -72,6 +75,14 @@ getcontext().prec = 28
 
 class VolIncomeIntentError(Exception):
     pass
+
+
+def _bind_truth_root(truth_root_arg: str) -> None:
+    global TRUTH_ROOT, INTENTS_ROOT, MD_ROOT, MD_MANIFEST
+    TRUTH_ROOT = resolve_fact_plane_truth_root_v1(truth_root_arg)
+    INTENTS_ROOT = (TRUTH_ROOT / "intents_v1" / "snapshots").resolve()
+    MD_ROOT = (TRUTH_ROOT / "market_data_snapshot_v1").resolve()
+    MD_MANIFEST = (MD_ROOT / "dataset_manifest.json").resolve()
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -281,6 +292,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(prog="run_vol_income_defined_risk_intents_day_v1")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
     ap.add_argument("--mode", required=True, choices=["PAPER", "LIVE"])
+    ap.add_argument("--truth_root", default="", help="Canonical truth root override")
     ap.add_argument("--symbol", default="SPY", help="Underlying symbol (default: SPY)")
     ap.add_argument("--target_notional_pct", default="0.40", help="Decimal string in [0,1]")
     ap.add_argument("--max_risk_pct", default="0.01", help="Decimal string in [0,1]")
@@ -289,6 +301,7 @@ def main() -> int:
     ap.add_argument("--enter_percentile", default="0.75", help="Decimal threshold in [0,1]")
 
     args = ap.parse_args()
+    _bind_truth_root(str(args.truth_root))
 
     day_utc = _parse_day_utc(args.day_utc)
     mode = str(args.mode).strip().upper()

@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/subsystem_readiness_report.v1.schema.json",
+  "title": "subsystem_readiness_report.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "readiness_id",
+    "subsystem_name",
+    "status",
+    "required_test_refs",
+    "blocking_issues",
+    "semantic_gaps",
+    "approved_for_next_gate",
+    "recorded_at",
+    "subsystem_rows"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "subsystem_readiness_report"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "readiness_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "subsystem_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": ["READY", "NOT_READY", "BLOCKED", "UNKNOWN", "SEMANTIC_GAP"]
+    },
+    "required_test_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "blocking_issues": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "semantic_gaps": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "approved_for_next_gate": {
+      "type": "boolean"
+    },
+    "recorded_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "subsystem_rows": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "subsystem_name",
+          "status",
+          "required_test_refs",
+          "blocking_issues",
+          "semantic_gaps",
+          "approved_for_next_gate"
+        ],
+        "properties": {
+          "subsystem_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": ["READY", "NOT_READY", "BLOCKED", "UNKNOWN", "SEMANTIC_GAP"]
+          },
+          "required_test_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "blocking_issues": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "semantic_gaps": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "approved_for_next_gate": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

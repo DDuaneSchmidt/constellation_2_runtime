@@ -9,6 +9,7 @@
     "schema_version",
     "produced_utc",
     "day_utc",
+    "authority_basis",
     "producer",
     "status",
     "reason_codes",
@@ -21,6 +22,10 @@
 
     "produced_utc": { "type": "string", "minLength": 1 },
     "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "authority_basis": {
+      "type": "string",
+      "enum": ["broker_account_values", "operator_statement", "other"]
+    },
 
     "producer": {
       "type": "object",

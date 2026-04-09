@@ -1,0 +1,236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/trading_day_execution_control_plane.v1.schema.json",
+  "title": "trading_day_execution_control_plane.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_scope",
+    "day_utc",
+    "day_attempt_id",
+    "execution_control_plane_id",
+    "evaluated_at_utc",
+    "supersedes_prior_control_plane",
+    "prior_control_plane_id",
+    "prior_day_attempt_id",
+    "producer",
+    "upstream_completeness",
+    "supporting_daily_controls",
+    "canonical_regeneration_results",
+    "supporting_session_authority",
+    "first_true_blocker",
+    "startup_proof_result",
+    "final_start_decision",
+    "blocking_codes",
+    "human_readable_summary",
+    "ignored_legacy_surfaces",
+    "ignored_superseded_surfaces",
+    "suppression_reason",
+    "derived_daily_summary"
+  ],
+  "properties": {
+    "schema_id": { "const": "trading_day_execution_control_plane" },
+    "schema_version": { "const": "v1" },
+    "authority_scope": { "const": "SUPPORTING_TRADING_DAY_EXECUTION_CONTROL_ARTIFACT" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "day_attempt_id": { "type": "string", "minLength": 1 },
+    "execution_control_plane_id": { "type": "string", "minLength": 1 },
+    "evaluated_at_utc": { "type": "string", "minLength": 20 },
+    "supersedes_prior_control_plane": { "type": "boolean" },
+    "prior_control_plane_id": { "type": "string" },
+    "prior_day_attempt_id": { "type": "string" },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 1 }
+      }
+    },
+    "upstream_completeness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "intents_day_completeness_ref",
+        "completeness_status",
+        "prerequisite_blocking_codes",
+        "first_missing_prerequisite"
+      ],
+      "properties": {
+        "intents_day_completeness_ref": { "type": "string" },
+        "completeness_status": {
+          "type": "string",
+          "enum": ["COMPLETE", "NO_INTENTS_DECLARED", "INCOMPLETE", "MALFORMED", "UNKNOWN", "DEFECT"]
+        },
+        "prerequisite_blocking_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "first_missing_prerequisite": { "type": "string" }
+      }
+    },
+    "supporting_daily_controls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "paper_day_control_plane_path",
+        "paper_day_control_plane_id",
+        "paper_day_startup_attempt_id",
+        "paper_day_final_start_decision",
+        "trading_day_control_plane_path",
+        "trading_day_control_plane_id",
+        "trading_day_day_attempt_id",
+        "trading_day_final_start_decision"
+      ],
+      "properties": {
+        "paper_day_control_plane_path": { "type": "string" },
+        "paper_day_control_plane_id": { "type": "string" },
+        "paper_day_startup_attempt_id": { "type": "string" },
+        "paper_day_final_start_decision": {
+          "type": "string",
+          "enum": ["READY_NOW", "BLOCKED_VALID", "BLOCKED_BY_DEFECT", "NOT_EVALUATED"]
+        },
+        "trading_day_control_plane_path": { "type": "string" },
+        "trading_day_control_plane_id": { "type": "string" },
+        "trading_day_day_attempt_id": { "type": "string" },
+        "trading_day_final_start_decision": {
+          "type": "string",
+          "enum": ["READY_NOW", "BLOCKED_VALID", "BLOCKED_BY_DEFECT", "NOT_EVALUATED"]
+        }
+      }
+    },
+    "canonical_regeneration_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["logical_name", "path", "status", "return_code", "digest", "produced_at"],
+        "properties": {
+          "logical_name": { "type": "string", "minLength": 1 },
+          "path": { "type": "string" },
+          "status": { "type": "string", "minLength": 1 },
+          "return_code": { "type": ["integer", "null"] },
+          "digest": { "type": "string" },
+          "produced_at": { "type": "string" }
+        }
+      }
+    },
+    "supporting_session_authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "paper_session_ledger_path",
+        "ledger_id",
+        "ledger_authority_status",
+        "ledger_evidence_status",
+        "system_ready",
+        "submission_authorized"
+      ],
+      "properties": {
+        "paper_session_ledger_path": { "type": "string" },
+        "ledger_id": { "type": "string" },
+        "ledger_authority_status": { "type": "string", "enum": ["GRANTED", "DENIED", "NOT_EVALUATED"] },
+        "ledger_evidence_status": { "type": "string", "enum": ["READY", "DENY", "NOT_EVALUATED"] },
+        "system_ready": { "type": "boolean" },
+        "submission_authorized": { "type": "boolean" }
+      }
+    },
+    "first_true_blocker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "first_true_blocker_code",
+        "first_true_blocker_artifact_path",
+        "blocker_classification"
+      ],
+      "properties": {
+        "first_true_blocker_code": { "type": "string" },
+        "first_true_blocker_artifact_path": { "type": "string" },
+        "blocker_classification": {
+          "type": "string",
+          "enum": [
+            "UPSTREAM_PREREQUISITE",
+            "CANONICAL_POLICY_OR_INPUT",
+            "REGENERATION_DEFECT",
+            "SUPPORTING_AUTHORITY_DENY",
+            "UNKNOWN"
+          ]
+        }
+      }
+    },
+    "startup_proof_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "startup_proof_validation_path",
+        "startup_proof_validation_status",
+        "agreement_with_supporting_authority"
+      ],
+      "properties": {
+        "startup_proof_validation_path": { "type": "string" },
+        "startup_proof_validation_status": { "type": "string", "minLength": 1 },
+        "agreement_with_supporting_authority": { "type": "boolean" }
+      }
+    },
+    "final_start_decision": {
+      "type": "string",
+      "enum": ["READY_NOW", "BLOCKED_VALID", "BLOCKED_BY_DEFECT"]
+    },
+    "blocking_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "human_readable_summary": { "type": "string", "minLength": 1 },
+    "ignored_legacy_surfaces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["logical_name", "path", "exists"],
+        "properties": {
+          "logical_name": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "exists": { "type": "boolean" }
+        }
+      }
+    },
+    "ignored_superseded_surfaces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["logical_name", "path", "exists"],
+        "properties": {
+          "logical_name": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "exists": { "type": "boolean" }
+        }
+      }
+    },
+    "suppression_reason": { "const": "NON_AUTHORITATIVE_FOR_STARTUP" },
+    "derived_daily_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary_state",
+        "execution_control_plane_id",
+        "day_attempt_id",
+        "first_true_blocker_code",
+        "ledger_id",
+        "non_authority_notice"
+      ],
+      "properties": {
+        "summary_state": { "type": "string", "minLength": 1 },
+        "execution_control_plane_id": { "type": "string", "minLength": 1 },
+        "day_attempt_id": { "type": "string", "minLength": 1 },
+        "first_true_blocker_code": { "type": "string" },
+        "ledger_id": { "type": "string" },
+        "non_authority_notice": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

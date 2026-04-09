@@ -1,0 +1,40 @@
+{
+  "schema_id": "C2_RISK_POLICY_REGISTRY_SCHEMA_V1",
+  "title": "C2 Risk Policy Registry V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "policies"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "C2_RISK_POLICY_REGISTRY_V1" },
+    "schema_version": { "type": "string", "const": "v1" },
+    "policies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["C2_TREND_EQ_PRIMARY_V1"],
+      "properties": {
+        "C2_TREND_EQ_PRIMARY_V1": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "target_notional_pct_default",
+            "per_trade_notional_pct_max"
+          ],
+          "properties": {
+            "target_notional_pct_default": {
+              "type": "string",
+              "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$"
+            },
+            "per_trade_notional_pct_max": {
+              "type": "string",
+              "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$"
+            }
+          }
+        }
+      }
+    }
+  }
+}

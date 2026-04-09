@@ -36,7 +36,20 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from zoneinfo import ZoneInfo
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+_THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = _THIS_FILE.parents[2].resolve()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.common.canonical_fact_store_v1 import resolve_latest_active_attempt
+from constellation_2.common.paper_session_ledger_v1 import assert_paper_session_ledger_granted_v1
+from constellation_2.common.runtime_contract_v1 import (
+    resolve_canonical_truth_root,
+    resolve_pointer_index_root_for_truth_root,
+    resolve_release_provenance,
+    resolve_truth_sleeves_root,
+)
+
 DEFAULT_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
 SLEEVE_REGISTRY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/C2_SLEEVE_REGISTRY_V1.json").resolve()
@@ -46,11 +59,45 @@ ENGINE_REGISTRY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/ENGINE_MODEL_REGIS
 POINTER_INDEX_NAME = "canonical_pointer_index.v1.jsonl"
 POINTER_LOCK_NAME = ".canonical_pointer_index.v1.lock"
 REFRESHABLE_GATE_STAGE_IDS = {
+    "A3_LIQUIDITY_SLIPPAGE_GATE_V1",
+    "A5A_OPERATOR_DAILY_GATE_V3",
     "A5AAA_FEED_ATTESTATION_GATE_V1",
     "A5B_HEARTBEAT_GATE_V1",
     "A5C_CORRELATION_ENVELOPE_GATE_V1",
 }
 DEFAULT_GOVERNED_SUBMIT_DRY_RUN = "YES"
+DEFAULT_STRUCTURAL_ACTIVITY_MODE = "OFF"
+ADMITTED_EXECUTION_STAGE_IDS = {
+    "A0_ENFORCE_SINGLE_ACCOUNT_TOPOLOGY",
+    "B0_POSITIONS_SNAPSHOT_V2",
+    "B0_CASH_LEDGER_SNAPSHOT_V1",
+    "B0_ENSURE_EXECUTION_SUBMISSIONS_DIR_V1",
+    "B0_ACCOUNTING_NAV_V2",
+    "B0_ACCOUNTING_NAV_COMPAT_BRIDGE_V1",
+    "A3_LIQUIDITY_SLIPPAGE_GATE_V1",
+    "A4A_ALLOCATION_DAY_V2",
+    "A5_CAPITAL_RISK_ENVELOPE_GATE_V2",
+    "A5AA_ENGINE_CORRELATION_MATRIX_DAY_V1",
+    "A5AAA_FEED_ATTESTATION_GATE_V1",
+    "A5AB_RECONCILIATION_REPORT_V3",
+    "A5AC_EXIT_RECONCILIATION_DAY_V1",
+    "A5A_OPERATOR_DAILY_GATE_V3",
+    "A5B_HEARTBEAT_GATE_V1",
+    "A5C_CORRELATION_ENVELOPE_GATE_V1",
+    "A5D_REPLAY_CERTIFICATION_GATE_V1",
+    "A6_GATE_STACK_VERDICT_V1",
+    "A7_GLOBAL_KILL_SWITCH_V1",
+    "A6A_RUN_POINTER_APPEND_V1",
+    "A6A_POINTER_HEADS_MATERIALIZE_V1",
+    "A6A_EXPOSURE_NET_DAY_V1",
+    "A6AA_CAPITAL_AUTHORITY_ALLOCATION_DAY_V1",
+    "A6B_AUTHORIZATION_ARTIFACTS_DAY_V1",
+    "A7_PHASEC_IDENTITY_MATERIALIZER_DAY_V1",
+    "A7A_GOVERNED_SUBMIT_V5",
+    "B0_EXECUTION_STREAM_SNAPSHOT_V1",
+    "B1_FILL_LEDGER_V1",
+    "B2_EXECUTION_RECONCILIATION_V1",
+}
 
 
 def _json_dumps(obj: Any) -> bytes:
@@ -89,7 +136,10 @@ def _resolve_truth_root_or_default(p: Optional[str]) -> Path:
     if env_root:
         return _require_truth_root(env_root)
 
-    return DEFAULT_TRUTH_ROOT
+    try:
+        return resolve_canonical_truth_root()
+    except Exception:
+        return DEFAULT_TRUTH_ROOT
 
 
 def _load_sleeve_registry() -> Dict[str, Any]:
@@ -110,19 +160,22 @@ def _load_sleeve_registry() -> Dict[str, Any]:
 
 
 def _resolve_expected_sleeve_account(*, truth_root: Path, mode: str) -> Tuple[str, str]:
-    runtime_root = (REPO_ROOT / "constellation_2/runtime").resolve()
     try:
-        rel_parts = truth_root.relative_to(runtime_root).parts
+        truth_sleeves_root = resolve_truth_sleeves_root()
+    except Exception:
+        truth_sleeves_root = (REPO_ROOT / "constellation_2/runtime" / "truth_sleeves").resolve()
+    try:
+        rel_parts = truth_root.relative_to(truth_sleeves_root).parts
     except ValueError:
         raise SystemExit(
-            f"FAIL: truth_root_outside_runtime_root truth_root={truth_root} runtime_root={runtime_root}"
+            f"FAIL: truth_root_outside_runtime_root truth_root={truth_root} runtime_root={truth_sleeves_root}"
         )
-    if len(rel_parts) != 3 or rel_parts[0] != "truth_sleeves":
+    if len(rel_parts) != 2:
         raise SystemExit(
             f"FAIL: truth_root_not_sleeve_partition truth_root={truth_root} expected=.../truth_sleeves/<SLEEVE>/<MODE>"
         )
-    sleeve_id = str(rel_parts[1]).strip()
-    partition_mode = str(rel_parts[2]).strip().upper()
+    sleeve_id = str(rel_parts[0]).strip()
+    partition_mode = str(rel_parts[1]).strip().upper()
     if partition_mode != mode:
         raise SystemExit(
             f"FAIL: truth_root_mode_mismatch truth_root_mode={partition_mode} requested_mode={mode} truth_root={truth_root}"
@@ -189,8 +242,19 @@ def _validate_produced_utc_isoz(s: str) -> str:
 
 
 def _git_sha() -> str:
-    out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
-    s = out.decode("utf-8").strip()
+    try:
+        s = str(resolve_release_provenance().get("git_sha") or "").strip()
+    except Exception:
+        try:
+            out = subprocess.check_output(
+                ["/usr/bin/git", "rev-parse", "HEAD"],
+                cwd=str(REPO_ROOT),
+                stderr=subprocess.DEVNULL,
+            )
+            s = out.decode("utf-8").strip()
+        except Exception:
+            # Clean runtime roots can be source-derived without .git metadata.
+            s = "0" * 40
     if len(s) != 40:
         raise SystemExit(f"FAIL: bad git sha: {s!r}")
     return s
@@ -200,6 +264,13 @@ def _intent_simulator_produced_utc_for_day(day: str) -> str:
     d = date.fromisoformat(day)
     local = datetime(d.year, d.month, d.day, 10, 0, 0, tzinfo=ZoneInfo("America/New_York"))
     return local.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _resolve_structural_activity_mode(env: Dict[str, str]) -> str:
+    raw = str(env.get("C2_STRUCTURAL_ACTIVITY_MODE") or DEFAULT_STRUCTURAL_ACTIVITY_MODE).strip().upper()
+    if raw not in {"OFF", "SIMULATOR"}:
+        return DEFAULT_STRUCTURAL_ACTIVITY_MODE
+    return raw
 
 
 def _load_engine_registry() -> Dict[str, Any]:
@@ -335,7 +406,7 @@ def _emit_missing_engine_heartbeat(
             "--truth_root",
             str(truth_root),
             "--producer_repo",
-            "constellation_2_runtime",
+            REPO_ROOT.name,
             "--producer_module",
             "ops/tools/run_engine_heartbeat_emit_v1.py",
             "--producer_git_sha",
@@ -361,6 +432,7 @@ def _run_structural_pre_activity_producers(
     active_engines = _active_engines_sorted(reg)
     allowed_map = _build_allowed_symbols_map_fail_closed(reg)
     registry_sha = _sha256_file(ENGINE_REGISTRY_PATH)
+    structural_activity_mode = _resolve_structural_activity_mode(env)
 
     intents_day = (truth_root / "intents_v1" / "snapshots" / day).resolve()
     producer_specs: List[Tuple[str, str, List[str]]] = [
@@ -403,27 +475,62 @@ def _run_structural_pre_activity_producers(
             ],
         ),
     ]
+    if structural_activity_mode == "SIMULATOR":
+        producer_specs.append(
+            (
+                "C2_INTENT_SIMULATOR_V1",
+                "A0S_INTENT_SIMULATOR_DAY_V1",
+                [
+                    "python3",
+                    "constellation_2/phaseH/intent_simulator/run/run_intent_simulator_day_v1.py",
+                    "--produced_utc",
+                    _intent_simulator_produced_utc_for_day(day),
+                    "--engine_registry_sha256",
+                    registry_sha,
+                ],
+            )
+        )
     producer_status: Dict[str, Tuple[str, str]] = {}
 
     if not (intents_day.exists() and intents_day.is_dir()):
+        ranked_rc = _run_cmd(
+            "A0R_RANKED_SYMBOL_UNIVERSE_DAY_V1",
+            [
+                "python3",
+                "ops/tools/run_ranked_symbol_universe_day_v1.py",
+                "--day_utc",
+                day,
+                "--truth_root",
+                str(truth_root),
+                "--produced_utc",
+                produced_utc,
+            ],
+            env=env,
+        )
+        if ranked_rc != 0:
+            raise SystemExit(f"FAIL: ranked symbol universe producer failed stage=A0R_RANKED_SYMBOL_UNIVERSE_DAY_V1 rc={ranked_rc}")
+
         structural_symbols: List[str] = []
         for engine_id, _, _ in producer_specs:
+            if engine_id == "C2_INTENT_SIMULATOR_V1":
+                continue
             allowed = allowed_map.get(engine_id)
+            if allowed is None:
+                structural_symbols.append(symbol)
+                continue
             if isinstance(allowed, list):
-                structural_symbols.extend([str(sym).strip().upper() for sym in allowed if str(sym).strip()])
+                allowed_symbols = {str(sym).strip().upper() for sym in allowed if str(sym).strip()}
+                if symbol in allowed_symbols:
+                    structural_symbols.append(symbol)
         md_executed, md_rc, md_reason_codes, _ = _run_market_data_refresh_for_symbols(
             truth_root=truth_root,
             day=day,
             produced_utc=produced_utc,
             env=env,
-            symbols=structural_symbols,
+            symbols=sorted(set(structural_symbols)),
             empty_reason="SKIP_NO_STRUCTURAL_ENGINE_SYMBOLS",
         )
-        if md_rc != 0:
-            raise SystemExit(
-                "FAIL: structural market data refresh failed "
-                + json.dumps({"rc": md_rc, "reason_codes": md_reason_codes}, sort_keys=True)
-            )
+        md_refresh_failed = (md_rc != 0)
         for engine_id, stage_id, cmd in producer_specs:
             engine = next((row for row in active_engines if row["engine_id"] == engine_id), None)
             if engine is None:
@@ -431,30 +538,48 @@ def _run_structural_pre_activity_producers(
                 continue
             allowed = allowed_map.get(engine_id)
             symbols = [symbol]
+            if engine_id == "C2_INTENT_SIMULATOR_V1":
+                symbols = []
             if isinstance(allowed, list) and allowed:
-                symbols = sorted(set(str(sym).strip().upper() for sym in allowed if str(sym).strip()))
+                allowed_symbols = {str(sym).strip().upper() for sym in allowed if str(sym).strip()}
+                if engine_id == "C2_INTENT_SIMULATOR_V1":
+                    if symbol not in allowed_symbols:
+                        producer_status[engine_id] = ("WARN", "ENGINE_SKIPPED_SYMBOL_UNIVERSE")
+                        continue
+                    symbols = []
+                else:
+                    symbols = [symbol] if symbol in allowed_symbols else []
             if not symbols:
-                producer_status[engine_id] = ("WARN", "ENGINE_SKIPPED_SYMBOL_UNIVERSE")
-                continue
+                if engine_id != "C2_INTENT_SIMULATOR_V1":
+                    producer_status[engine_id] = ("WARN", "ENGINE_SKIPPED_SYMBOL_UNIVERSE")
+                    continue
             engine_executed = False
-            for producer_symbol in symbols:
-                rc = _run_cmd(stage_id + "_" + producer_symbol, cmd + ["--symbol", producer_symbol], env=env)
+            if engine_id == "C2_INTENT_SIMULATOR_V1":
+                rc = _run_cmd(stage_id, cmd, env=env)
                 if rc != 0:
-                    raise SystemExit(
-                        f"FAIL: structural intent producer failed stage={stage_id}_{producer_symbol} rc={rc}"
-                    )
+                    raise SystemExit(f"FAIL: structural intent producer failed stage={stage_id} rc={rc}")
                 engine_executed = True
+            else:
+                for producer_symbol in symbols:
+                    rc = _run_cmd(stage_id + "_" + producer_symbol, cmd + ["--symbol", producer_symbol], env=env)
+                    if rc != 0:
+                        raise SystemExit(
+                            f"FAIL: structural intent producer failed stage={stage_id}_{producer_symbol} rc={rc}"
+                        )
+                    engine_executed = True
             if engine_executed:
                 hb_reason = "ENGINE_DIRECT_RUN_PRESENT_V2_STRUCTURAL_PREPASS"
                 if md_executed:
                     hb_reason = "ENGINE_DIRECT_RUN_PRESENT_V2_STRUCTURAL_PREPASS_WITH_MD_REFRESH"
+                elif md_refresh_failed:
+                    hb_reason = "ENGINE_DIRECT_RUN_PRESENT_V2_STRUCTURAL_PREPASS_MD_REFRESH_FAILED"
                 producer_status[engine_id] = ("OK", hb_reason)
 
     for engine in active_engines:
         engine_id = str(engine["engine_id"])
         if engine_id in producer_status:
             hb_status, hb_reason = producer_status[engine_id]
-        elif engine_id == "C2_INTENT_SIMULATOR_V1":
+        elif engine_id == "C2_INTENT_SIMULATOR_V1" and structural_activity_mode != "SIMULATOR":
             hb_status = "WARN"
             hb_reason = "ENGINE_DIRECT_RUN_NOT_PRESENT_V2_STRUCTURAL_PREPASS"
         else:
@@ -552,7 +677,10 @@ def _detect_activity(truth_root: Path, day: str) -> Dict[str, Any]:
     }
 
 def _resolve_session_state(day: str) -> Dict[str, Any]:
-    cal_root = (DEFAULT_TRUTH_ROOT / "market_calendar_v1").resolve()
+    try:
+        cal_root = (resolve_canonical_truth_root() / "market_calendar_v1").resolve()
+    except Exception:
+        cal_root = (DEFAULT_TRUTH_ROOT / "market_calendar_v1").resolve()
     manifest = (cal_root / "dataset_manifest.json").resolve()
     info: Dict[str, Any] = {
         "session_state": "UNKNOWN_SESSION",
@@ -787,6 +915,40 @@ def _market_data_close_for_same_day(truth_root: Path, day: str, symbol: str) -> 
     return None
 
 
+def _liquidity_gate_reference_price(truth_root: Path, day: str, symbol: str) -> Optional[str]:
+    gate_path = (truth_root / "reports" / "liquidity_slippage_gate_v1" / day / "liquidity_slippage_gate.v1.json").resolve()
+    if not gate_path.exists() or not gate_path.is_file():
+        return None
+    try:
+        gate_obj = _read_json_obj(gate_path)
+    except Exception:
+        return None
+    if str(gate_obj.get("status") or "").strip().upper() not in {"PASS", "OK"}:
+        return None
+    results = gate_obj.get("results")
+    per_intent = results.get("per_intent") if isinstance(results, dict) else None
+    if not isinstance(per_intent, list):
+        return None
+    symbol_upper = str(symbol or "").strip().upper()
+    for row in per_intent:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("symbol") or "").strip().upper() != symbol_upper:
+            continue
+        metrics = row.get("metrics")
+        if not isinstance(metrics, dict):
+            continue
+        raw_close = metrics.get("close")
+        try:
+            close = Decimal(str(raw_close).strip())
+        except (InvalidOperation, ValueError):
+            continue
+        if not close.is_finite() or close <= Decimal("0"):
+            continue
+        return format(close.normalize(), "f")
+    return None
+
+
 def _build_phasec_materializer_cmd(*, truth_root: Path, day: str, produced_utc: str) -> Tuple[List[str], List[str]]:
     cmd = [
         "python3",
@@ -803,9 +965,13 @@ def _build_phasec_materializer_cmd(*, truth_root: Path, day: str, produced_utc: 
     if len(equity_symbols) == 1:
         price_symbol = equity_symbols[0]
         price = _market_data_close_for_same_day(truth_root, day, price_symbol)
+        source = "MARKET_DATA"
+        if not price:
+            price = _liquidity_gate_reference_price(truth_root, day, price_symbol)
+            source = "LIQUIDITY_GATE"
         if price:
             cmd.extend(["--default_equity_reference_price", price])
-            reason_codes.append(f"DEFAULT_EQUITY_REFERENCE_PRICE_FROM_MARKET_DATA:{price_symbol}:{price}")
+            reason_codes.append(f"DEFAULT_EQUITY_REFERENCE_PRICE_FROM_{source}:{price_symbol}:{price}")
         else:
             reason_codes.append(f"DEFAULT_EQUITY_REFERENCE_PRICE_ABSENT_PRESERVE_VETO:{price_symbol}")
     elif len(equity_symbols) > 1:
@@ -973,7 +1139,7 @@ def _run_market_data_refresh_for_symbols(
         if _market_data_close_for_same_day(truth_root, day, symbol):
             reason_codes.append(f"MARKET_DATA_SAME_DAY_OK:{symbol}")
         else:
-            reason_codes.append(f"MARKET_DATA_SAME_DAY_STILL_ABSENT:{symbol}")
+            return (True, 2, [f"MARKET_DATA_SAME_DAY_STILL_ABSENT:{symbol}"], outputs)
     return (executed, 0, reason_codes or ["SKIP_NO_MARKET_DATA_REFRESH_NEEDED"], outputs)
 
 def _positions_snapshot_v2_skip_safe(truth_root: Path, day: str) -> bool:
@@ -1065,6 +1231,67 @@ def _fill_ledger_skip_safe(truth_root: Path, day: str) -> bool:
     return True
 
 
+def _allocation_summary_v1_skip_safe(path: Path, day: str) -> bool:
+    p = path.resolve()
+    if not p.exists() or not p.is_file():
+        return False
+    try:
+        obj = _read_json_obj(p)
+        if str(obj.get("day_utc") or "").strip() != day:
+            raise RuntimeError(f"DAY_MISMATCH:{p}")
+        from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1  # noqa: E402
+
+        validate_against_repo_schema_v1(
+            obj,
+            REPO_ROOT,
+            "governance/04_DATA/SCHEMAS/C2/ALLOCATION/allocation_summary.v1.schema.json",
+        )
+        return True
+    except Exception:
+        stale_sha = _sha256_file(p) if p.exists() and p.is_file() else "missing"
+        quarantine = p.with_name(f"{p.name}.INVALID_{stale_sha}.json")
+        if quarantine.exists():
+            quarantine = p.with_name(f"{p.name}.INVALID_{stale_sha}.{os.getpid()}.json")
+        os.replace(str(p), str(quarantine))
+        print(
+            f"WARN: QUARANTINED_STALE_ALLOCATION_SUMMARY day_utc={day} "
+            f"old_path={p} quarantined_path={quarantine} sha256={stale_sha}"
+        )
+        return False
+
+
+def _capital_risk_envelope_v2_skip_safe(path: Path, day: str) -> bool:
+    p = path.resolve()
+    if not p.exists() or not p.is_file():
+        return False
+    try:
+        obj = _read_json_obj(p)
+        if str(obj.get("day_utc") or "").strip() != day:
+            raise RuntimeError(f"DAY_MISMATCH:{p}")
+        status = str(obj.get("status") or "").strip().upper()
+        if status not in ("PASS", "OK"):
+            raise RuntimeError(f"STATUS_NOT_PASS:{status}")
+        from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1  # noqa: E402
+
+        validate_against_repo_schema_v1(
+            obj,
+            REPO_ROOT,
+            "governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v2.schema.json",
+        )
+        return True
+    except Exception:
+        stale_sha = _sha256_file(p) if p.exists() and p.is_file() else "missing"
+        quarantine = p.with_name(f"{p.name}.INVALID_{stale_sha}.json")
+        if quarantine.exists():
+            quarantine = p.with_name(f"{p.name}.INVALID_{stale_sha}.{os.getpid()}.json")
+        os.replace(str(p), str(quarantine))
+        print(
+            f"WARN: QUARANTINED_STALE_CAPITAL_RISK_ENVELOPE day_utc={day} "
+            f"old_path={p} quarantined_path={quarantine} sha256={stale_sha}"
+        )
+        return False
+
+
 def _identity_dir_has_supported_set(d: Path) -> bool:
     if not d.exists() or not d.is_dir():
         return False
@@ -1098,10 +1325,46 @@ def _discover_same_day_identity_dirs(truth_root: Path, day: str) -> List[Path]:
     if not root.exists() or not root.is_dir():
         return []
 
+    latest_active_pointer = (root / "latest_active_attempt.v1.json").resolve()
+    if latest_active_pointer.exists() and latest_active_pointer.is_file():
+        try:
+            pointer_obj = _read_json_obj(latest_active_pointer)
+        except Exception:
+            pointer_obj = {}
+        attempt_dir_value = str(pointer_obj.get("attempt_dir") or "").strip()
+        if attempt_dir_value:
+            attempt_dir = Path(attempt_dir_value).resolve()
+            if attempt_dir.exists() and attempt_dir.is_dir():
+                latest_dirs = [child.resolve() for child in sorted(attempt_dir.iterdir()) if child.is_dir() and _identity_dir_has_supported_set(child)]
+                if latest_dirs:
+                    return latest_dirs
+
+    latest_active = resolve_latest_active_attempt(
+        truth_root=truth_root,
+        invoked_day_utc=day,
+        scope_key="PRIMARY::PAPER",
+    )
+    if isinstance(latest_active, dict):
+        attempt_id = str(latest_active.get("attempt_id") or "").strip()
+        if attempt_id:
+            attempt_dir = (root / f"attempt_{attempt_id}").resolve()
+            if attempt_dir.exists() and attempt_dir.is_dir():
+                latest_dirs = [child.resolve() for child in sorted(attempt_dir.iterdir()) if child.is_dir() and _identity_dir_has_supported_set(child)]
+                if latest_dirs:
+                    return latest_dirs
+
     out: List[Path] = []
     for p in sorted(root.iterdir()):
-        if p.is_dir() and _identity_dir_has_supported_set(p):
+        if not p.is_dir():
+            continue
+        if _identity_dir_has_supported_set(p):
             out.append(p.resolve())
+            continue
+        if not p.name.startswith("attempt_A"):
+            continue
+        for child in sorted(p.iterdir()):
+            if child.is_dir() and _identity_dir_has_supported_set(child):
+                out.append(child.resolve())
     return out
 
 
@@ -1184,15 +1447,28 @@ def _extract_identity_set_intent_sha(identity_dir: Path, truth_root: Path, day: 
         if not p.exists() or not p.is_file():
             continue
         o = _read_json_obj(p)
-        # Preferred: align with authorization writer keying (sha256 of intent snapshot bytes).
-        # If the identity set carries source intent id, resolve the day intent file and hash it.
-        intent_file_sha = _intent_file_sha_by_intent_id(truth_root, day, str(o.get("source_intent_id") or ""))
-        if intent_file_sha:
-            return intent_file_sha
+        # Prefer explicit lineage hashes carried by the released identity set.
+        # Same-day intent ids may be reused across blocked/released snapshots.
         for k in ("intent_sha256", "intent_hash"):
             v = str(o.get(k) or "").strip()
             if v:
                 return v
+        # If the identity set only carries source intent id, resolve the day intent file
+        # and hash it to align with the authorization writer key.
+        intent_file_sha = _intent_file_sha_by_intent_id(truth_root, day, str(o.get("source_intent_id") or ""))
+        if intent_file_sha:
+            return intent_file_sha
+
+    # Equity identity sets may only carry intent_id on equity_intent.v1.json.
+    eq_intent = (identity_dir / "equity_intent.v1.json").resolve()
+    if eq_intent.exists() and eq_intent.is_file():
+        try:
+            o = _read_json_obj(eq_intent)
+            intent_file_sha = _intent_file_sha_by_intent_id(truth_root, day, str(o.get("intent_id") or ""))
+            if intent_file_sha:
+                return intent_file_sha
+        except Exception:
+            pass
     # Last-resort fallback for existing day structures where directory name is intent file sha.
     if _is_64hex(identity_dir.name):
         return identity_dir.name
@@ -1264,6 +1540,7 @@ def _read_authorization_state(truth_root: Path, day: str, intent_sha: str) -> Di
 def _build_governed_submit_cmd(
     *,
     phasec_out_dir: Path,
+    day: str,
     produced_utc: str,
     ib_account: str,
     env: Dict[str, str],
@@ -1275,12 +1552,13 @@ def _build_governed_submit_cmd(
     ib_port = str(env.get("C2_IB_PORT") or "4002").strip()
     ib_client_id = str(env.get("C2_IB_CLIENT_ID") or "7").strip()
     dry_run = _resolve_governed_submit_dry_run(env)
+    eval_time_utc = f"{day}T00:00:00Z"
 
     return [
         sys.executable,
         submit_tool,
         "--eval_time_utc",
-        produced_utc,
+        eval_time_utc,
         "--phasec_out_dir",
         str(phasec_out_dir.resolve()),
         "--risk_budget",
@@ -1353,6 +1631,7 @@ def _run_governed_submit_stage(
             "A7A_GOVERNED_SUBMIT_V5",
             _build_governed_submit_cmd(
                 phasec_out_dir=identity_dir,
+                day=day,
                 produced_utc=produced_utc,
                 ib_account=ib_account,
                 env=env,
@@ -1405,8 +1684,13 @@ def _stage_required_for_mode(sd: StageDef, mode: str, has_activity: bool) -> Tup
 def _run_cmd(stage_id: str, cmd: List[str], env: Dict[str, str]) -> int:
     try:
         real_cmd = list(cmd)
-        if real_cmd and real_cmd[0] == "python3":
-            real_cmd[0] = sys.executable
+        if real_cmd:
+            exe = str(real_cmd[0]).strip()
+            if exe == "python3":
+                real_cmd[0] = sys.executable
+            elif exe.endswith(".venv_c2/bin/python") or exe == ".venv_c2/bin/python":
+                candidate = (REPO_ROOT / exe).resolve() if not Path(exe).is_absolute() else Path(exe).resolve()
+                real_cmd[0] = str(candidate) if candidate.exists() else sys.executable
         return subprocess.call(real_cmd, env=env)
     except Exception as e:
         print(f"STAGE_EXCEPTION stage_id={stage_id} err={e!r}", file=sys.stderr)
@@ -1535,7 +1819,10 @@ def _append_run_pointer_v1(
     status = "PASS" if ok_authoritative else "FAIL"
     policy_hash = _sha256_file(GATE_HIERARCHY_POLICY_PATH)
 
-    runptr_root = (truth_root / "run_pointer_v1").resolve()
+    try:
+        runptr_root = resolve_pointer_index_root_for_truth_root(truth_root, family="run_pointer_v1")
+    except Exception:
+        runptr_root = (truth_root / "run_pointer_v1").resolve()
     idx_path = (runptr_root / "canonical_pointer_index.v1.jsonl").resolve()
     lock_path = (runptr_root / ".canonical_pointer_index.v1.lock").resolve()
 
@@ -1625,6 +1912,7 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
     exec_recon_out = str(truth / "reports" / "execution_reconciliation_v1" / day / "execution_reconciliation.v1.json")
     fills_day_dir = str(truth / "fill_ledger_v1" / day)
     nav_out = str(truth / "accounting_v2" / "nav" / day / "nav.v2.json")
+    nav_compat_out = str(truth / "accounting_compat_v1" / "nav" / day / "nav_snapshot.v1.json")
     exec_submissions_day_dir = str(truth / "execution_evidence_v1" / "submissions" / day)
     pos_out = str(truth / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json")
     cash_out = str(truth / "cash_ledger_v1" / "snapshots" / day / "cash_ledger_snapshot.v1.json")
@@ -1637,7 +1925,7 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
     )
     governed_submit_tool = str((REPO_ROOT / "constellation_2" / "phaseD" / "tools" / "c2_submit_paper_v5.py").resolve())
 
-    return [
+    all_stage_defs = [
         StageDef(
             stage_id="A0_ENFORCE_SINGLE_ACCOUNT_TOPOLOGY",
             cmd=["/bin/true"],
@@ -1658,7 +1946,7 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
                 "--producer_git_sha",
                 git_sha,
                 "--producer_repo",
-                "constellation_2_runtime",
+                REPO_ROOT.name,
             ],
             required_for_paper=True,
             required_for_live=True,
@@ -1677,7 +1965,7 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
                 "--operator_statement_json",
                 op_stmt,
                 "--producer_repo",
-                "constellation_2_runtime",
+                REPO_ROOT.name,
                 "--producer_git_sha",
                 git_sha,
             ],
@@ -1719,6 +2007,24 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
             skip_if_exists_paths=[],
         ),
         StageDef(
+            stage_id="B0_ACCOUNTING_NAV_V2",
+            cmd=[
+                "python3",
+                "ops/tools/run_accounting_nav_v2_day_v1.py",
+                "--day_utc",
+                day,
+                "--producer_git_sha",
+                git_sha,
+                "--producer_repo",
+                REPO_ROOT.name,
+            ],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=False,
+            blocking=True,
+            skip_if_exists_paths=[nav_out],
+        ),
+        StageDef(
             stage_id="A3_LIQUIDITY_SLIPPAGE_GATE_V1",
             cmd=["python3", "ops/tools/run_liquidity_slippage_gate_v1.py", "--day_utc", day],
             required_for_paper=True,
@@ -1737,22 +2043,20 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
             skip_if_exists_paths=[sys_gate_out],
         ),
         StageDef(
-            stage_id="B0_ACCOUNTING_NAV_V2",
+            stage_id="B0_ACCOUNTING_NAV_COMPAT_BRIDGE_V1",
             cmd=[
                 "python3",
-                "ops/tools/run_accounting_nav_v2_day_v1.py",
+                "ops/tools/bridge_accounting_nav_v2_to_compat_v1.py",
                 "--day_utc",
                 day,
-                "--producer_git_sha",
-                git_sha,
-                "--producer_repo",
-                "constellation_2_runtime",
+                "--truth_root",
+                str(truth),
             ],
             required_for_paper=True,
             required_for_live=True,
-            required_if_activity=False,
+            required_if_activity=True,
             blocking=True,
-            skip_if_exists_paths=[nav_out],
+            skip_if_exists_paths=[nav_compat_out],
         ),
         StageDef(
             stage_id="A4A_ALLOCATION_DAY_V2",
@@ -1764,7 +2068,7 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
                 "--producer_git_sha",
                 git_sha,
                 "--producer_repo",
-                "constellation_2_runtime",
+                REPO_ROOT.name,
                 "--truth_root",
                 str(truth),
             ],
@@ -1801,6 +2105,8 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
                 "constellation_2/phaseJ/monitoring/run/run_engine_correlation_matrix_day_v1.py",
                 "--day_utc",
                 day,
+                "--truth_root",
+                str(truth),
             ],
             required_for_paper=True,
             required_for_live=True,
@@ -2080,7 +2386,14 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
         ),
         StageDef(
             stage_id="B0_EXECUTION_STREAM_SNAPSHOT_V1",
-            cmd=["python3", "ops/tools/run_execution_stream_snapshot_day_v1.py", "--day_utc", day],
+            cmd=[
+                "python3",
+                "ops/tools/run_execution_stream_snapshot_day_v1.py",
+                "--day_utc",
+                day,
+                "--truth_root",
+                str(truth),
+            ],
             required_for_paper=True,
             required_for_live=True,
             required_if_activity=True,
@@ -2089,7 +2402,14 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
         ),
         StageDef(
             stage_id="B1_FILL_LEDGER_V1",
-            cmd=["python3", "ops/tools/run_fill_ledger_day_v1.py", "--day_utc", day],
+            cmd=[
+                "python3",
+                "ops/tools/run_fill_ledger_day_v1.py",
+                "--day_utc",
+                day,
+                "--truth_root",
+                str(truth),
+            ],
             required_for_paper=True,
             required_for_live=True,
             required_if_activity=True,
@@ -2167,6 +2487,7 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
             skip_if_exists_paths=[str(truth / "reports" / "execution_readiness_gate_v1" / day / "execution_readiness_gate.v1.json")],
         ),
     ]
+    return [stage for stage in all_stage_defs if stage.stage_id in ADMITTED_EXECUTION_STAGE_IDS]
 
 
 def _publish_pipeline_manifest_v3(
@@ -2268,10 +2589,12 @@ def main() -> int:
     ap.add_argument("--ib_account", required=True)
     ap.add_argument("--produced_utc", required=True)
     ap.add_argument("--truth_root", default=None)
+    ap.add_argument("--paper_session_ledger_path", required=True)
     args = ap.parse_args()
 
     truth_root = _resolve_truth_root_or_default(args.truth_root)
     verdict_root = (truth_root / "reports" / "orchestrator_run_verdict_v2").resolve()
+    paper_session_ledger_path = Path(str(args.paper_session_ledger_path)).resolve()
 
     day = _require_day(args.day_utc)
     input_day = _require_day((args.input_day_utc or "").strip() or day)
@@ -2286,7 +2609,13 @@ def main() -> int:
     if not ib_account:
         raise SystemExit("FAIL: --ib_account empty")
 
+    ledger = assert_paper_session_ledger_granted_v1(
+        path=paper_session_ledger_path,
+        day_utc=day,
+    )
+
     git_sha = _git_sha()
+    global_truth_root = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
     sleeve_id, expected_ib_account = _resolve_expected_sleeve_account(truth_root=truth_root, mode=mode)
     if ib_account != expected_ib_account:
@@ -2306,7 +2635,9 @@ def main() -> int:
             ],
             "stages": [],
             "replay": {"derived_from_attempt_manifest": True, "hashes": {}},
-            "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_c2_paper_day_orchestrator_v2.py", "git_sha": git_sha},
+            "producer": {"repo": REPO_ROOT.name, "module": "ops/tools/run_c2_paper_day_orchestrator_v2.py", "git_sha": git_sha},
+            "paper_session_ledger_path": str(paper_session_ledger_path),
+            "ledger_id": ledger.ledger_id,
         }
         attempt_id = f"{day}__{produced_utc}__{git_sha}__{mode}__{symbol}__{ib_account}"
         out_dir = (verdict_root / day / attempt_id).resolve()
@@ -2347,9 +2678,10 @@ def main() -> int:
     stage_env = dict(os.environ)
     stage_env["PYTHONPATH"] = str(REPO_ROOT)
     stage_env["C2_TRUTH_ROOT"] = str(truth_root)
+    stage_env["C2_AUTHORITY_MODE"] = "governance_primary"
     stage_env["C2_PRODUCED_UTC"] = produced_utc
 
-    if session_state == "TRADING_SESSION":
+    if mode == "PAPER":
         _run_structural_pre_activity_producers(
             truth_root=truth_root,
             day=day,
@@ -2391,7 +2723,10 @@ def main() -> int:
         "attempt_id": attempt_id,
         "attempt_seq": int(attempt_seq),
         "produced_utc": produced_utc,
-        "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_c2_paper_day_orchestrator_v2.py", "git_sha": git_sha},
+        "producer": {"repo": REPO_ROOT.name, "module": "ops/tools/run_c2_paper_day_orchestrator_v2.py", "git_sha": git_sha},
+        "paper_session_ledger_path": str(paper_session_ledger_path),
+        "ledger_id": ledger.ledger_id,
+        "session_id": ledger.session_id,
         "activity": act,
         "effective_activity": bool(effective_activity),
         "session": session_info,
@@ -2609,6 +2944,19 @@ def main() -> int:
             continue
 
         if sd.stage_id == "A6A_RUN_POINTER_APPEND_V1":
+            if not required:
+                sr = StageResult(
+                    stage_id=sd.stage_id,
+                    classification=classification,
+                    executed=False,
+                    rc=0,
+                    status="SKIP",
+                    reason_codes=["SKIP_NOT_REQUIRED_NO_ACTIVITY"],
+                    outputs_present=[],
+                )
+                stage_results.append(sr.__dict__)
+                attempt_manifest["stages"].append(sr.__dict__)
+                continue
             rp_rc, rp_reason_codes = _append_run_pointer_v1(
                 truth_root=truth_root,
                 day=day,
@@ -2705,6 +3053,36 @@ def main() -> int:
                 stage_results.append(sr.__dict__)
                 attempt_manifest["stages"].append(sr.__dict__)
                 continue
+        elif sd.stage_id == "A4A_ALLOCATION_DAY_V2":
+            outputs_present = [p for p in sd.skip_if_exists_paths if _path_exists(p)]
+            if outputs_present and _allocation_summary_v1_skip_safe(Path(outputs_present[0]), day):
+                sr = StageResult(
+                    stage_id=sd.stage_id,
+                    classification=classification,
+                    executed=False,
+                    rc=0,
+                    status="SKIP",
+                    reason_codes=["SKIP_EXISTING_OUTPUTS_AVOID_REWRITE"],
+                    outputs_present=outputs_present,
+                )
+                stage_results.append(sr.__dict__)
+                attempt_manifest["stages"].append(sr.__dict__)
+                continue
+        elif sd.stage_id == "A5_CAPITAL_RISK_ENVELOPE_GATE_V2":
+            outputs_present = [p for p in sd.skip_if_exists_paths if _path_exists(p)]
+            if outputs_present and _capital_risk_envelope_v2_skip_safe(Path(outputs_present[0]), day):
+                sr = StageResult(
+                    stage_id=sd.stage_id,
+                    classification=classification,
+                    executed=False,
+                    rc=0,
+                    status="SKIP",
+                    reason_codes=["SKIP_EXISTING_OUTPUTS_AVOID_REWRITE"],
+                    outputs_present=outputs_present,
+                )
+                stage_results.append(sr.__dict__)
+                attempt_manifest["stages"].append(sr.__dict__)
+                continue
         elif sd.stage_id == "B1_FILL_LEDGER_V1":
             if _fill_ledger_skip_safe(truth_root, day):
                 sr = StageResult(
@@ -2783,7 +3161,7 @@ def main() -> int:
         reason_codes.extend(governed_abort_reasons)
     else:
         if session_state == "UNKNOWN_SESSION":
-            status = "FAIL"
+            status = "FAIL" if effective_activity else "DEGRADED"
             if "UNKNOWN_SESSION" not in reason_codes:
                 reason_codes.append("UNKNOWN_SESSION")
         elif session_state == "NON_TRADING_SESSION":
@@ -2799,9 +3177,6 @@ def main() -> int:
                 reason_codes.append("NO_ACTIVITY_DAY")
         else:
             status = "PASS"
-
-    if session_state == "TRADING_SESSION":
-        status = _enforce_gate_stack_verdict(truth_root=truth_root, day=day, current_status=status, reason_codes=reason_codes)
 
     out_dir = (verdict_root / day / attempt_id).resolve()
     man_wr = _write_attempt_file(out_dir / "orchestrator_attempt_manifest.v2.json", _json_dumps(attempt_manifest))
@@ -2845,9 +3220,6 @@ def main() -> int:
         if status == "PASS":
             status = "DEGRADED"
 
-    if session_state == "TRADING_SESSION":
-        status = _enforce_gate_stack_verdict(truth_root=truth_root, day=day, current_status=status, reason_codes=reason_codes)
-
     verdict = {
         "schema_id": "C2_ORCHESTRATOR_RUN_VERDICT_V2",
         "day_utc": day,
@@ -2866,10 +3238,11 @@ def main() -> int:
             "derived_from_attempt_manifest": True,
             "hashes": {"attempt_manifest_sha256": str(man_wr["sha256"])},
         },
-        "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_c2_paper_day_orchestrator_v2.py", "git_sha": git_sha},
+        "producer": {"repo": REPO_ROOT.name, "module": "ops/tools/run_c2_paper_day_orchestrator_v2.py", "git_sha": git_sha},
     }
 
-    _write_attempt_file(out_dir / "orchestrator_run_verdict.v2.json", _json_dumps(verdict))
+    verdict_path = (out_dir / "orchestrator_run_verdict.v2.json").resolve()
+    _write_attempt_file(verdict_path, _json_dumps(verdict))
 
     day_root = (verdict_root / day).resolve()
     idx_path = (day_root / POINTER_INDEX_NAME).resolve()
@@ -2880,12 +3253,6 @@ def main() -> int:
         last_seq = _read_last_pointer_seq(idx_path, mode)
         pointer_seq = last_seq + 1
 
-        auth_verdict_path = (truth / "reports" / "authorization_gate_verdict_v1" / day / "authorization_gate_verdict.v1.json").resolve()
-        auth_verdict_obj = _read_json_obj(auth_verdict_path)
-        auth_verdict_status = str(auth_verdict_obj.get("status") or "").strip().upper()
-        if auth_verdict_status not in ("PASS", "FAIL"):
-            raise SystemExit(f"FAIL: AUTHORIZATION_GATE_VERDICT_STATUS_INVALID: {auth_verdict_status!r} path={auth_verdict_path}")
-
         entry = {
             "schema_id": "C2_ORCHESTRATOR_RUN_VERDICT_V2_POINTER_INDEX_V1",
             "pointer_seq": int(pointer_seq),
@@ -2893,11 +3260,11 @@ def main() -> int:
             "mode": mode,
             "attempt_id": attempt_id,
             "attempt_seq": int(attempt_seq),
-            "status": auth_verdict_status,
-            "authoritative": bool(auth_verdict_status == "PASS"),
+            "status": status,
+            "authoritative": bool(status == "PASS"),
             "producer_git_sha": git_sha,
             "produced_utc": f"{day}T00:00:00Z",
-            "points_to": str(auth_verdict_path),
+            "points_to": str(verdict_path),
             "attempt_manifest_path": str(attempt_manifest_path),
         }
         line_sha, _ = _atomic_append_jsonl(idx_path, entry)

@@ -43,6 +43,7 @@
         "required": [
           "engine_id",
           "activation_status",
+          "allowed_symbols",
           "runner_path",
           "approved_git_sha",
           "engine_runner_path",
@@ -61,6 +62,20 @@
           "activation_status": {
             "type": "string",
             "enum": ["ACTIVE", "INACTIVE", "DISABLED", "EXPERIMENTAL"]
+          },
+
+          "allowed_symbols": {
+            "anyOf": [
+              { "type": "null" },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 32
+                }
+              }
+            ]
           },
 
           "runner_path": {

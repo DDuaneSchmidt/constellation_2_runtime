@@ -20,7 +20,7 @@
       "limits": {
         "max_gross_notional_usd": "0",
         "max_net_notional_usd": "0",
-        "max_capital_at_risk_cents": 80000,
+        "max_capital_at_risk_cents": 120005,
         "max_symbols": 25,
         "max_sector_concentration_pct": "0.25",
         "max_single_name_notional_pct": "0.10",

@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/signal/hy_volatility_signal.v1.schema.json",
+  "title": "hy_volatility_signal.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "signal_id",
+    "engine_version",
+    "policy_version",
+    "authority_status",
+    "execution_authority",
+    "effective_at",
+    "volatility_state",
+    "warnings",
+    "created_at"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "hy_volatility_signal"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "signal_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "engine_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "policy_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "authority_status": {
+      "type": "string",
+      "enum": [
+        "candidate",
+        "authoritative"
+      ]
+    },
+    "execution_authority": {
+      "type": "boolean"
+    },
+    "effective_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "volatility_state": {
+      "type": "string",
+      "enum": [
+        "low",
+        "moderate",
+        "high"
+      ]
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

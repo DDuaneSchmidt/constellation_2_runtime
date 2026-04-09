@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/integration_test_result.v1.schema.json",
+  "title": "integration_test_result.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "result_id",
+    "results",
+    "recorded_at"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "integration_test_result"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "result_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recorded_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "results": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "subsystem_name",
+          "result_type",
+          "status",
+          "executed_at",
+          "input_artifact_refs",
+          "observed_outputs_summary",
+          "expected_outputs_summary",
+          "divergence_summary",
+          "blocking",
+          "severity",
+          "notes"
+        ],
+        "anyOf": [
+          {
+            "required": ["scenario_id"]
+          },
+          {
+            "required": ["source_test_id"]
+          }
+        ],
+        "properties": {
+          "scenario_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_test_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "subsystem_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "result_type": {
+            "const": "integration_test_result"
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1
+          },
+          "executed_at": {
+            "type": "string",
+            "minLength": 1
+          },
+          "input_artifact_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "observed_outputs_summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expected_outputs_summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "divergence_summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "blocking": {
+            "type": "boolean"
+          },
+          "severity": {
+            "type": "string",
+            "minLength": 1
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

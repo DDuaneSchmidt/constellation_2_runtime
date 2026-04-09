@@ -34,8 +34,9 @@ import json
 import subprocess
 from typing import Any, Dict, List, Optional, Tuple
 
+from constellation_2.common.runtime_contract_v1 import resolve_release_provenance
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
-from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
+from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1
 
 REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
 
@@ -81,8 +82,18 @@ RC_EXIT_INTENTS_UNSATISFIED = "EXIT_INTENTS_UNSATISFIED_FAILCLOSED"
 
 
 def _git_sha() -> str:
-    out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
-    return out.decode("utf-8").strip()
+    try:
+        s = str(resolve_release_provenance().get("git_sha") or "").strip()
+        if s:
+            return s
+    except Exception:
+        pass
+    try:
+        out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
+        return out.decode("utf-8").strip()
+    except Exception:
+        # Clean runtime roots can be source-derived without .git metadata.
+        return "0" * 40
 
 
 def _parse_day_utc(s: str) -> str:
@@ -340,11 +351,19 @@ def main() -> int:
     out_path = (out_dir / "operator_daily_gate.v3.json").resolve()
     payload = (json.dumps(gate, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
 
-    try:
-        wr = write_file_immutable_v1(path=out_path, data=payload, create_dirs=True)
-    except ImmutableWriteError as e:
-        raise SystemExit(f"FAIL: IMMUTABLE_WRITE_ERROR: {e}") from e
-
+    wr = write_day_artifact_refreshable_v1(
+        path=out_path,
+        data=payload,
+        expected_day_utc=day,
+        expected_schema_id="operator_daily_gate",
+        expected_schema_version="v3",
+        preserve_statuses=("PASS", "OK"),
+    )
+    if wr.action == "REFRESHED":
+        print(
+            f"WARN: OPERATOR_DAILY_GATE_V3_REFRESHED_STALE day_utc={day} path={wr.path} "
+            f"prior_sha256={wr.prior_sha256} quarantined_path={wr.quarantined_path}"
+        )
     print(f"OK: OPERATOR_DAILY_GATE_V3_WRITTEN day_utc={day} status={status} path={wr.path} sha256={wr.sha256} action={wr.action}")
     return 0 if status == "PASS" else 1
 

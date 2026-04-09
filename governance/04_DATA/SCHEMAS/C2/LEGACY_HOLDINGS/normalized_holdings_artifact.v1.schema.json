@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/legacy_holdings/normalized_holdings_artifact.v1.schema.json",
+  "title": "normalized_holdings_artifact.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "engine_version",
+    "policy_version",
+    "authority_status",
+    "execution_authority",
+    "source_upload_ref",
+    "account_id",
+    "as_of_date",
+    "holdings",
+    "input_warnings",
+    "created_at"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "normalized_holdings_artifact"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "artifact_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "engine_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "policy_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "authority_status": {
+      "type": "string",
+      "enum": [
+        "candidate",
+        "authoritative"
+      ]
+    },
+    "execution_authority": {
+      "type": "boolean"
+    },
+    "source_upload_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "account_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "as_of_date": {
+      "type": "string",
+      "minLength": 1
+    },
+    "holdings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "holding_id",
+          "symbol",
+          "security_type",
+          "issuer_name",
+          "quantity",
+          "market_value",
+          "currency",
+          "maturity_date",
+          "is_corporate_bond",
+          "excluded_from_active_sleeve_indicator"
+        ],
+        "properties": {
+          "holding_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "symbol": {
+            "type": "string",
+            "minLength": 1
+          },
+          "security_type": {
+            "type": "string",
+            "enum": [
+              "ETF",
+              "CORPORATE_BOND",
+              "TREASURY",
+              "CASH",
+              "OTHER"
+            ]
+          },
+          "issuer_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quantity": {
+            "type": "string",
+            "minLength": 1
+          },
+          "market_value": {
+            "type": "string",
+            "minLength": 1
+          },
+          "currency": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maturity_date": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "is_corporate_bond": {
+            "type": "boolean"
+          },
+          "excluded_from_active_sleeve_indicator": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "input_warnings": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

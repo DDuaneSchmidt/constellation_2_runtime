@@ -1,0 +1,20 @@
+{
+  "schema_id": "C2_REPO_AUTHORITY_V1",
+  "schema_version": 1,
+  "authoritative_repo_root": "/home/node/constellation",
+  "governance_authority_root": "/home/node/constellation/governance",
+  "design_authority_root": "/home/node/constellation",
+  "runtime_copy_roots": [
+    "/home/node/constellation_2_runtime"
+  ],
+  "runtime_copy_role": "deployed_runtime_copy",
+  "governance_authority_owner": "authoritative_repo_only",
+  "design_authority_owner": "authoritative_repo_only",
+  "allowed_relationship": "authoritative_source_to_deployed_runtime_copy",
+  "forbidden_runtime_copy_claims": [
+    "canonical_design_authority",
+    "canonical_governance_authority",
+    "sole_repo_authority"
+  ],
+  "authority_contract_path": "governance/05_CONTRACTS/C2/repo_authority_immutability_v1.contract.md"
+}

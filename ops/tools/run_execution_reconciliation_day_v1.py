@@ -31,14 +31,17 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Dict, List
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
-
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 DEFAULT_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
 SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/execution_reconciliation.v1.schema.json"
@@ -115,12 +118,18 @@ def _truth_root() -> Path:
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_execution_reconciliation_day_v1")
     ap.add_argument("--day_utc", required=True)
+    ap.add_argument("--truth_root", default="", help="Optional truth root override (absolute existing directory)")
     args = ap.parse_args()
 
     day = str(args.day_utc).strip()
     produced_utc = f"{day}T00:00:00Z"
 
-    truth = _truth_root()
+    if str(args.truth_root).strip():
+        truth = Path(str(args.truth_root).strip()).expanduser().resolve()
+        if (not truth.is_absolute()) or (not truth.exists()) or (not truth.is_dir()):
+            raise SystemExit(f"FAIL: invalid --truth_root: {truth}")
+    else:
+        truth = _truth_root()
 
     sub_root = (truth / "execution_evidence_v1/submissions").resolve()
     stream_root = (truth / "execution_stream_v1").resolve()
@@ -151,13 +160,13 @@ def main() -> int:
         raise SystemExit(f"FAIL: MISSING_FILL_LEDGER_DAY_DIR: {ledger_day}")
 
     # Gather submissions
-    submission_files = sorted([p for p in sub_day.glob("*.json") if p.is_file()])
-    if not submission_files:
+    submission_records = sorted([p for p in sub_day.glob("*/broker_submission_record.v2.json") if p.is_file()])
+    if not submission_records:
         # No submissions is allowed; still produces a deterministic report.
         reason_codes.append("NO_SUBMISSIONS_FOUND")
 
     submissions: List[Dict[str, Any]] = []
-    for p in submission_files:
+    for p in submission_records:
         try:
             obj = _read_json_obj(p)
         except Exception as e:
@@ -186,35 +195,35 @@ def main() -> int:
         status = "FAIL"
         reason_codes.append("DUPLICATE_SUBMISSION_ID")
 
+    input_manifest = [
+        {"type": "submissions_day_dir", "path": str(sub_day), "sha256": _sha256_dir_deterministic(sub_day)},
+        {"type": "execution_stream_day_dir", "path": str(stream_day), "sha256": _sha256_dir_deterministic(stream_day)},
+        {"type": "fill_ledger_day_dir", "path": str(ledger_day), "sha256": _sha256_dir_deterministic(ledger_day)},
+    ]
+
     # Build report payload
     payload_obj: Dict[str, Any] = {
         "schema_id": "C2_EXECUTION_RECONCILIATION_V1",
+        "schema_version": 1,
         "day_utc": day,
         "produced_utc": produced_utc,
         "status": status,
         "reason_codes": reason_codes,
+        "input_manifest": input_manifest,
         "checks": checks,
-        "inputs": {
-            "truth_root": str(truth),
-            "submissions_day_dir": str(sub_day),
-            "execution_stream_day_dir": str(stream_day),
-            "fill_ledger_day_dir": str(ledger_day),
-            "submissions_count": int(len(submissions)),
-            "submissions_sha256_deterministic": _sha256_dir_deterministic(sub_day),
-            "execution_stream_sha256_deterministic": stream_hash,
-            "fill_ledger_sha256_deterministic": ledger_hash,
-        },
         "producer": {
             "repo": "constellation_2_runtime",
             "module": "ops/tools/run_execution_reconciliation_day_v1.py",
             "git_sha": _git_sha(),
         },
+        "canonical_json_hash": "",
     }
 
     # Canonicalize + validate against schema
-    payload_bytes = canonical_json_bytes_v1(payload_obj)
-    payload_sha = canonical_hash_for_c2_artifact_v1(payload_bytes)
-    validate_against_repo_schema_v1(payload_obj, SCHEMA)
+    payload_sha = canonical_hash_for_c2_artifact_v1(payload_obj)
+    payload_obj["canonical_json_hash"] = payload_sha
+    validate_against_repo_schema_v1(payload_obj, REPO_ROOT, SCHEMA)
+    payload_bytes = canonical_json_bytes_v1(payload_obj) + b"\n"
 
     out_path = (out_root / day / "execution_reconciliation.v1.json").resolve()
     _write_immutable(out_path, payload_bytes)

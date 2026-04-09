@@ -1,0 +1,32 @@
+{
+  "schema_id": "C2_FACT_POSITIONS_SNAPSHOT_SCHEMA_V1",
+  "title": "C2 Positions Snapshot Fact V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "snapshot_path",
+    "snapshot_sha256",
+    "upstream_schema_id",
+    "input_manifest",
+    "positions",
+    "producer",
+    "producer_git_sha",
+    "generated_at_utc"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "positions_snapshot_fact.v1" },
+    "schema_version": { "type": "string", "const": "v1" },
+    "day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
+    "snapshot_path": { "type": "string", "minLength": 1 },
+    "snapshot_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "upstream_schema_id": { "type": "string", "minLength": 1 },
+    "input_manifest": { "type": "array" },
+    "positions": { "type": "object" },
+    "producer": { "type": "string", "minLength": 1 },
+    "producer_git_sha": { "type": "string", "minLength": 7, "maxLength": 64 },
+    "generated_at_utc": { "type": "string", "minLength": 11 }
+  }
+}

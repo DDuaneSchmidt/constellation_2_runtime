@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/paper_session_evidence_manifest.v1.schema.json",
+  "title": "paper_session_evidence_manifest.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_scope",
+    "day_utc",
+    "session_id",
+    "manifest_id",
+    "evaluated_at_utc",
+    "evidence_digest",
+    "overall_manifest_status",
+    "blocking_codes",
+    "inputs"
+  ],
+  "properties": {
+    "schema_id": { "const": "paper_session_evidence_manifest" },
+    "schema_version": { "const": "v1" },
+    "authority_scope": { "const": "NON_AUTHORITY_EVIDENCE_MANIFEST" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "session_id": { "type": "string", "minLength": 1 },
+    "manifest_id": { "type": "string", "minLength": 1 },
+    "evaluated_at_utc": { "type": "string", "minLength": 20 },
+    "evidence_digest": { "type": "string", "minLength": 64, "maxLength": 64 },
+    "overall_manifest_status": { "type": "string", "enum": ["READY", "DENY"] },
+    "blocking_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "inputs": {
+      "type": "array",
+      "minItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "logical_name",
+          "absolute_path",
+          "schema_id",
+          "schema_version",
+          "producer",
+          "producer_run_id",
+          "artifact_day_utc",
+          "artifact_session_id",
+          "artifact_timestamp_utc",
+          "content_hash",
+          "presence_verdict",
+          "schema_verdict",
+          "linkage_verdict",
+          "freshness_verdict",
+          "duplicate_resolution_verdict",
+          "blocking_codes"
+        ],
+        "properties": {
+          "logical_name": { "type": "string", "minLength": 1 },
+          "absolute_path": { "type": "string", "minLength": 1 },
+          "schema_id": { "type": "string", "minLength": 1 },
+          "schema_version": { "type": "string", "minLength": 1 },
+          "producer": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["repo", "module", "git_sha"],
+            "properties": {
+              "repo": { "type": "string", "minLength": 1 },
+              "module": { "type": "string", "minLength": 1 },
+              "git_sha": { "type": "string", "minLength": 1 }
+            }
+          },
+          "producer_run_id": { "type": "string" },
+          "artifact_day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+          "artifact_session_id": { "type": "string", "minLength": 1 },
+          "artifact_timestamp_utc": { "type": "string", "minLength": 1 },
+          "content_hash": { "type": "string", "minLength": 64, "maxLength": 64 },
+          "fact_status": { "type": "string" },
+          "system_ready": { "type": "boolean" },
+          "submission_authorized": { "type": "boolean" },
+          "presence_verdict": { "type": "string", "enum": ["PRESENT", "MISSING"] },
+          "schema_verdict": { "type": "string", "enum": ["VALID", "INVALID"] },
+          "linkage_verdict": { "type": "string", "enum": ["LINKED", "UNLINKED"] },
+          "freshness_verdict": { "type": "string", "enum": ["CURRENT", "STALE", "UNKNOWN"] },
+          "duplicate_resolution_verdict": { "type": "string", "enum": ["SINGLE_CANONICAL_MATCH", "AMBIGUOUS", "NONE"] },
+          "blocking_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    }
+  }
+}

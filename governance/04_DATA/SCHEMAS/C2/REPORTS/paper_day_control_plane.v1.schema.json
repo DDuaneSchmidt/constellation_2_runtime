@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/paper_day_control_plane.v1.schema.json",
+  "title": "paper_day_control_plane.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_scope",
+    "day_utc",
+    "startup_attempt_id",
+    "control_plane_id",
+    "evaluated_at_utc",
+    "producer",
+    "prerequisite_gate",
+    "canonical_regeneration_results",
+    "authority_result",
+    "startup_proof_result",
+    "final_start_decision",
+    "blocking_codes",
+    "human_readable_summary",
+    "ignored_legacy_surfaces",
+    "suppression_reason"
+  ],
+  "properties": {
+    "schema_id": { "const": "paper_day_control_plane" },
+    "schema_version": { "const": "v1" },
+    "authority_scope": { "const": "SUPPORTING_DAY_CONTROL_ARTIFACT" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "startup_attempt_id": { "type": "string", "minLength": 1 },
+    "control_plane_id": { "type": "string", "minLength": 1 },
+    "evaluated_at_utc": { "type": "string", "minLength": 20 },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 1 }
+      }
+    },
+    "prerequisite_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prerequisite_status",
+        "prerequisite_blocking_codes",
+        "prerequisite_artifact_refs",
+        "first_missing_prerequisite"
+      ],
+      "properties": {
+        "prerequisite_status": { "type": "string", "enum": ["PASS", "BLOCKED", "DEFECT"] },
+        "prerequisite_blocking_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "prerequisite_artifact_refs": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "first_missing_prerequisite": { "type": "string" }
+      }
+    },
+    "canonical_regeneration_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["logical_name", "path", "status", "return_code", "digest", "produced_at"],
+        "properties": {
+          "logical_name": { "type": "string", "minLength": 1 },
+          "path": { "type": "string" },
+          "status": { "type": "string", "minLength": 1 },
+          "return_code": { "type": ["integer", "null"] },
+          "digest": { "type": "string" },
+          "produced_at": { "type": "string" }
+        }
+      }
+    },
+    "authority_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ledger_path",
+        "ledger_id",
+        "ledger_authority_status",
+        "ledger_evidence_status",
+        "first_true_blocker_code",
+        "first_true_blocker_artifact_path"
+      ],
+      "properties": {
+        "ledger_path": { "type": "string" },
+        "ledger_id": { "type": "string" },
+        "ledger_authority_status": { "type": "string", "enum": ["GRANTED", "DENIED", "NOT_EVALUATED"] },
+        "ledger_evidence_status": { "type": "string", "enum": ["READY", "DENY", "NOT_EVALUATED"] },
+        "first_true_blocker_code": { "type": "string" },
+        "first_true_blocker_artifact_path": { "type": "string" }
+      }
+    },
+    "startup_proof_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "startup_proof_validation_path",
+        "startup_proof_validation_status",
+        "agreement_with_ledger"
+      ],
+      "properties": {
+        "startup_proof_validation_path": { "type": "string" },
+        "startup_proof_validation_status": { "type": "string", "minLength": 1 },
+        "agreement_with_ledger": { "type": "boolean" }
+      }
+    },
+    "final_start_decision": {
+      "type": "string",
+      "enum": ["READY_NOW", "BLOCKED_VALID", "BLOCKED_BY_DEFECT"]
+    },
+    "blocking_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "human_readable_summary": { "type": "string", "minLength": 1 },
+    "ignored_legacy_surfaces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["logical_name", "path", "exists"],
+        "properties": {
+          "logical_name": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "exists": { "type": "boolean" }
+        }
+      }
+    },
+    "suppression_reason": { "const": "NON_AUTHORITATIVE_FOR_STARTUP" }
+  }
+}

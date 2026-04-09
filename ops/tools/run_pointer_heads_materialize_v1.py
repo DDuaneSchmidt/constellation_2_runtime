@@ -80,6 +80,19 @@ def _lock_release(fd: int, lock_path: Path) -> None:
             pass
 
 
+def _has_any_submission_lineage(truth_root: Path) -> bool:
+    submissions_root = (truth_root / "execution_evidence_v1" / "submissions").resolve()
+    if not submissions_root.exists() or not submissions_root.is_dir():
+        return False
+    for day_dir in submissions_root.iterdir():
+        if not day_dir.is_dir():
+            continue
+        for lineage_dir in day_dir.iterdir():
+            if lineage_dir.is_dir():
+                return True
+    return False
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_pointer_heads_materialize_v1")
     ap.add_argument("--fail_if_no_authority_head", required=True, choices=["YES", "NO"])
@@ -98,7 +111,41 @@ def main() -> int:
 
     lock_fd = _lock_acquire(paths["out_dir"], paths["lock_path"])
     try:
-        display_entry = resolve_display_head_from_index(paths["idx_path"])
+        try:
+            display_entry = resolve_display_head_from_index(paths["idx_path"])
+        except Exception as e:
+            # No pointer index is expected when there has been no governed submission lineage yet.
+            if _has_any_submission_lineage(truth_root):
+                raise
+            missing_msg = str(e)
+            display_obj = {
+                "schema_id": "c2_run_pointer_canonical_display_head",
+                "schema_version": "v1",
+                "ok": False,
+                "error": missing_msg,
+                "reason_code": "NO_POINTER_INDEX_NO_SUBMISSIONS",
+            }
+            authority_obj = {
+                "schema_id": "c2_run_pointer_canonical_authority_head",
+                "schema_version": "v1",
+                "ok": False,
+                "error": missing_msg,
+                "reason_code": "NO_POINTER_INDEX_NO_SUBMISSIONS",
+            }
+            _atomic_write_json(paths["display_path"], display_obj)
+            _atomic_write_json(paths["authority_path"], authority_obj)
+            out = {
+                "ok": True,
+                "index_path": str(paths["idx_path"]),
+                "display_head_path": str(paths["display_path"]),
+                "authority_head_path": str(paths["authority_path"]),
+                "authority_ok": False,
+                "authority_msg": missing_msg,
+                "reason_code": "NO_POINTER_INDEX_NO_SUBMISSIONS",
+            }
+            print(json.dumps(out, sort_keys=True))
+            return 0
+
         display_obj = head_payload("canonical_display", display_entry)
         _atomic_write_json(paths["display_path"], display_obj)
 

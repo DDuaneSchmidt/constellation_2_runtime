@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import subprocess
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
+
+_THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = _THIS_FILE.parents[2].resolve()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+RELEASES_ROOT = Path("/home/node/constellation_releases").resolve()
+ACTIVE_POINTER = Path("/home/node/constellation_active")
+RUNTIME_DATA_ROOT = Path("/home/node/constellation_runtime_data").resolve()
+RELEASE_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RELEASES/release_manifest.v1.schema.json"
+ACTIVATION_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RELEASES/activation_receipt.v1.schema.json"
+WRITE_RUNTIME_CONTRACT_TOOL = (REPO_ROOT / "ops/tools/write_active_runtime_contract_v1.py").resolve()
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _utc_now_compact() -> str:
+    return datetime.now(UTC).replace(microsecond=0).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _load_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _require_manifest_for_release(release_root: Path) -> dict:
+    manifest_path = (release_root / "release_manifest.v1.json").resolve()
+    if not manifest_path.exists() or not manifest_path.is_file():
+        raise SystemExit(f"FAIL: release manifest missing: {manifest_path}")
+    import sys
+
+    if str(release_root) not in sys.path:
+        sys.path.insert(0, str(release_root))
+    from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+
+    manifest = _load_json(manifest_path)
+    validate_against_repo_schema_v1(manifest, release_root, RELEASE_SCHEMA_RELPATH)
+    return manifest
+
+
+def _verify_release_parity_or_fail(*, release_root: Path, manifest: dict) -> None:
+    for rel in manifest["included_files"]:
+        rel_path = Path(str(rel))
+        path = (release_root / rel_path).resolve()
+        if not path.exists() or not path.is_file():
+            raise SystemExit(f"FAIL: parity missing release file: {path}")
+        actual = _sha256_file(path)
+        expected = str(manifest["included_file_hashes"].get(str(rel_path)) or "").strip().lower()
+        if actual != expected:
+            raise SystemExit(
+                f"FAIL: parity hash mismatch rel={rel_path} expected={expected} actual={actual}"
+            )
+
+
+def _current_active_release_id() -> str | None:
+    if not ACTIVE_POINTER.exists():
+        return None
+    if not ACTIVE_POINTER.is_symlink():
+        raise SystemExit(f"FAIL: active pointer exists but is not symlink: {ACTIVE_POINTER}")
+    target = ACTIVE_POINTER.resolve()
+    manifest_path = (target / "release_manifest.v1.json").resolve()
+    if not manifest_path.exists():
+        return None
+    manifest = _load_json(manifest_path)
+    return str(manifest.get("release_id") or "").strip() or None
+
+
+def _atomic_activate_symlink(release_root: Path) -> None:
+    parent = ACTIVE_POINTER.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    tmp_link = parent / f".constellation_active.tmp.{os.getpid()}"
+    if tmp_link.exists() or tmp_link.is_symlink():
+        tmp_link.unlink()
+    os.symlink(str(release_root), str(tmp_link))
+    os.replace(str(tmp_link), str(ACTIVE_POINTER))
+
+
+def _restore_prior_active_pointer_or_fail(prior_target: Path | None) -> None:
+    if prior_target is None:
+        if ACTIVE_POINTER.exists() or ACTIVE_POINTER.is_symlink():
+            ACTIVE_POINTER.unlink()
+        return
+    _atomic_activate_symlink(prior_target)
+
+
+def _write_active_runtime_contract_or_fail() -> None:
+    proc = subprocess.run(
+        [sys.executable, str(WRITE_RUNTIME_CONTRACT_TOOL)],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise SystemExit(
+            "FAIL: active runtime contract write failed "
+            f"rc={proc.returncode} stdout={proc.stdout.strip()!r} stderr={proc.stderr.strip()!r}"
+        )
+
+
+def _post_activation_verify_or_fail(*, release_root: Path) -> None:
+    from constellation_2.common.deployment_state_machine_v1 import evaluate_post_activation_verification
+
+    verification = evaluate_post_activation_verification(release_root=release_root)
+    if verification["passed"] is not True:
+        raise SystemExit(
+            "FAIL: post-activation verification failed "
+            f"blocking_codes={verification['blocking_codes']!r} "
+            f"service_unit_path={verification['service_unit_path']!r}"
+        )
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="activate_constellation_release_v1")
+    ap.add_argument("--release_id", required=True)
+    args = ap.parse_args()
+
+    release_id = str(args.release_id).strip()
+    if not release_id:
+        raise SystemExit("FAIL: release_id empty")
+    release_root = (RELEASES_ROOT / release_id).resolve()
+    if not release_root.exists() or not release_root.is_dir():
+        raise SystemExit(f"FAIL: release root missing: {release_root}")
+
+    manifest = _require_manifest_for_release(release_root)
+    _verify_release_parity_or_fail(release_root=release_root, manifest=manifest)
+    prior_release_id = _current_active_release_id()
+
+    RUNTIME_DATA_ROOT.mkdir(parents=True, exist_ok=True)
+    prior_target = ACTIVE_POINTER.resolve() if ACTIVE_POINTER.exists() else None
+    _atomic_activate_symlink(release_root)
+    try:
+        _write_active_runtime_contract_or_fail()
+        _post_activation_verify_or_fail(release_root=release_root)
+    except SystemExit:
+        _restore_prior_active_pointer_or_fail(prior_target)
+        if prior_target is not None:
+            _write_active_runtime_contract_or_fail()
+        raise
+
+    receipt_dir = (RUNTIME_DATA_ROOT / "activations_v1" / f"{_utc_now_compact()}__{release_id}").resolve()
+    receipt_dir.mkdir(parents=True, exist_ok=False)
+    receipt = {
+        "schema_id": "activation_receipt.v1",
+        "schema_version": "v1",
+        "release_id": release_id,
+        "git_sha": str(manifest["git_sha"]),
+        "prior_release_id": prior_release_id,
+        "active_pointer_path": str(ACTIVE_POINTER),
+        "runtime_data_root": str(RUNTIME_DATA_ROOT),
+        "services_reloaded": [],
+        "parity_verified": True,
+        "generated_at_utc": _utc_now_iso(),
+        "status": "ACTIVATED",
+    }
+
+    if str(release_root) not in sys.path:
+        sys.path.insert(0, str(release_root))
+    from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+    from constellation_2.phaseC.lib.canon_json_v1 import canonical_json_bytes_v1
+
+    validate_against_repo_schema_v1(receipt, release_root, ACTIVATION_SCHEMA_RELPATH)
+    receipt_path = (receipt_dir / "activation_receipt.v1.json").resolve()
+    receipt_path.write_bytes(canonical_json_bytes_v1(receipt) + b"\n")
+
+    print(
+        json.dumps(
+            {
+                "release_id": release_id,
+                "release_root": str(release_root),
+                "active_pointer_target": str(ACTIVE_POINTER.resolve()),
+                "runtime_data_root": str(RUNTIME_DATA_ROOT),
+                "activation_receipt_path": str(receipt_path),
+                "prior_release_id": prior_release_id,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

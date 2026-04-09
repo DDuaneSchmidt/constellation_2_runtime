@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 import subprocess
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Dict
 
@@ -50,7 +50,8 @@ def _git_sha() -> str:
     try:
         return subprocess.check_output(['/usr/bin/git', 'rev-parse', 'HEAD'], cwd=str(REPO_ROOT)).decode().strip()
     except Exception:
-        return 'UNKNOWN'
+        # Clean runtime roots can be source-derived without .git metadata.
+        return '0' * 40
 
 
 def _parse_number(value: Any, *, field: str) -> int | float:
@@ -76,25 +77,76 @@ def _parse_number(value: Any, *, field: str) -> int | float:
     raise SystemExit(f'FAIL: UNSUPPORTED_NUMERIC_FIELD: {field} type={type(value).__name__}')
 
 
-def _derive_history(nav_v2: Dict[str, Any]) -> Dict[str, Any]:
+def _quant6(value: Decimal) -> Decimal:
+    return value.quantize(Decimal('0.000001'), rounding=ROUND_HALF_UP)
+
+
+def _historical_nav_v2_refs_or_fail(truth_root: Path, *, day: str) -> list[dict[str, Any]]:
+    nav_root = (truth_root / 'accounting_v2' / 'nav').resolve()
+    if not nav_root.exists() or not nav_root.is_dir():
+        raise SystemExit(f'FAIL: ACCOUNTING_V2_NAV_ROOT_MISSING: {nav_root}')
+    rows: list[dict[str, Any]] = []
+    for child in sorted(nav_root.iterdir(), key=lambda p: p.name):
+        if not child.is_dir():
+            continue
+        child_day = child.name
+        if len(child_day) != 10 or child_day > day:
+            continue
+        nav_path = (child / 'nav.v2.json').resolve()
+        if not nav_path.exists() or not nav_path.is_file():
+            continue
+        nav_obj = _read_json_obj(nav_path)
+        nav = nav_obj.get('nav') if isinstance(nav_obj.get('nav'), dict) else {}
+        nav_total = nav.get('nav_total')
+        if not isinstance(nav_total, int):
+            raise SystemExit(f'FAIL: ACCOUNTING_V2_NAV_TOTAL_NOT_INT: {nav_path}')
+        rows.append({'day_utc': child_day, 'path': nav_path, 'nav_total': nav_total})
+    return rows
+
+
+def _derive_history(day: str, *, truth_root: Path, nav_v2: Dict[str, Any]) -> tuple[Dict[str, Any], list[Dict[str, Any]]]:
     nav = nav_v2.get('nav') if isinstance(nav_v2.get('nav'), dict) else {}
     nav_total = nav.get('nav_total')
     if not isinstance(nav_total, int):
         raise SystemExit('FAIL: ACCOUNTING_V2_NAV_TOTAL_NOT_INT')
     hist = nav_v2.get('history')
-    if not isinstance(hist, dict) or not hist:
-        return {'peak_nav': int(nav_total), 'drawdown_abs': 0, 'drawdown_pct': '0.000000'}
-    peak_nav = hist.get('peak_nav')
-    drawdown_abs = hist.get('drawdown_abs')
-    drawdown_pct = hist.get('drawdown_pct')
-    if not isinstance(peak_nav, int):
-        raise SystemExit('FAIL: ACCOUNTING_V2_PEAK_NAV_NOT_INT')
-    if not isinstance(drawdown_abs, int):
-        raise SystemExit('FAIL: ACCOUNTING_V2_DRAWDOWN_ABS_NOT_INT')
-    if not isinstance(drawdown_pct, str) or not drawdown_pct.strip():
-        raise SystemExit('FAIL: ACCOUNTING_V2_DRAWDOWN_PCT_MISSING_OR_NOT_STRING')
-    dd = Decimal(drawdown_pct).quantize(Decimal('0.000001'))
-    return {'peak_nav': int(peak_nav), 'drawdown_abs': int(drawdown_abs), 'drawdown_pct': f'{dd:.6f}'}
+    if isinstance(hist, dict) and hist:
+        peak_nav = hist.get('peak_nav')
+        drawdown_abs = hist.get('drawdown_abs')
+        drawdown_pct = hist.get('drawdown_pct')
+        if not isinstance(peak_nav, int):
+            raise SystemExit('FAIL: ACCOUNTING_V2_PEAK_NAV_NOT_INT')
+        if not isinstance(drawdown_abs, int):
+            raise SystemExit('FAIL: ACCOUNTING_V2_DRAWDOWN_ABS_NOT_INT')
+        if not isinstance(drawdown_pct, str) or not drawdown_pct.strip():
+            raise SystemExit('FAIL: ACCOUNTING_V2_DRAWDOWN_PCT_MISSING_OR_NOT_STRING')
+        dd = Decimal(drawdown_pct).quantize(Decimal('0.000001'))
+        return (
+            {'peak_nav': int(peak_nav), 'drawdown_abs': int(drawdown_abs), 'drawdown_pct': f'{dd:.6f}'},
+            [],
+        )
+    series_rows = _historical_nav_v2_refs_or_fail(truth_root, day=day)
+    if not series_rows:
+        raise SystemExit('FAIL: ACCOUNTING_V2_NAV_HISTORY_EMPTY')
+    peak_nav = max(int(item['nav_total']) for item in series_rows)
+    if peak_nav <= 0:
+        raise SystemExit('FAIL: NO_POSITIVE_PEAK_AVAILABLE_FOR_DRAWDOWN')
+    drawdown_abs = int(nav_total) - int(peak_nav)
+    drawdown_pct = _quant6(Decimal(drawdown_abs) / Decimal(peak_nav))
+    history_refs = [
+        {
+            'type': 'other',
+            'path': str(Path(item['path']).resolve()),
+            'sha256': _sha256_file(Path(item['path']).resolve()),
+            'day_utc': str(item['day_utc']),
+            'producer': 'accounting_nav_v2',
+        }
+        for item in series_rows
+    ]
+    return (
+        {'peak_nav': int(peak_nav), 'drawdown_abs': int(drawdown_abs), 'drawdown_pct': f'{drawdown_pct:.6f}'},
+        history_refs,
+    )
 
 
 def _derive_status(source_status: str) -> tuple[str, list[str]]:
@@ -106,7 +158,7 @@ def _derive_status(source_status: str) -> tuple[str, list[str]]:
     raise SystemExit(f'FAIL: UNSUPPORTED_SOURCE_STATUS_FOR_COMPAT_BRIDGE: {source_status!r}')
 
 
-def _build_output(day: str, src_path: Path, src: Dict[str, Any]) -> Dict[str, Any]:
+def _build_output(day: str, truth_root: Path, src_path: Path, src: Dict[str, Any]) -> Dict[str, Any]:
     nav = src.get('nav') if isinstance(src.get('nav'), dict) else None
     if nav is None:
         raise SystemExit('FAIL: ACCOUNTING_V2_NAV_OBJECT_MISSING')
@@ -138,30 +190,38 @@ def _build_output(day: str, src_path: Path, src: Dict[str, Any]) -> Dict[str, An
                 'asof_utc': str(mark.get('asof_utc') or ''),
             },
         })
+    history_obj, history_refs = _derive_history(day, truth_root=truth_root, nav_v2=src)
     reason_codes = ['BRIDGED_FROM_ACCOUNTING_NAV_V2']
+    if history_refs:
+        reason_codes.append('DRAWDOWN_DERIVED_FROM_ACCOUNTING_NAV_V2_HISTORY')
     for rc in src.get('reason_codes') or []:
         if isinstance(rc, str) and rc.strip():
             reason_codes.append(f'SOURCE_{rc.strip()}')
     reason_codes.extend(extra_reason_codes)
+    input_manifest = [{
+        'type': 'other',
+        'path': str(src_path),
+        'sha256': _sha256_file(src_path),
+        'day_utc': day,
+        'producer': 'accounting_nav_v2',
+    }]
+    for ref in history_refs:
+        if ref['path'] == str(src_path):
+            continue
+        input_manifest.append(ref)
     return {
         'schema_id': 'C2_ACCOUNTING_NAV_V1',
         'schema_version': 1,
         'produced_utc': produced_utc,
         'day_utc': day,
         'producer': {
-            'repo': 'constellation_2_runtime',
+            'repo': 'constellation',
             'git_sha': _git_sha(),
             'module': MODULE,
         },
         'status': out_status,
         'reason_codes': reason_codes,
-        'input_manifest': [{
-            'type': 'other',
-            'path': str(src_path),
-            'sha256': _sha256_file(src_path),
-            'day_utc': day,
-            'producer': 'accounting_nav_v2',
-        }],
+        'input_manifest': input_manifest,
         'nav': {
             'currency': str(nav.get('currency') or ''),
             'nav_total': int(nav.get('nav_total')),
@@ -172,7 +232,7 @@ def _build_output(day: str, src_path: Path, src: Dict[str, Any]) -> Dict[str, An
             'components': components,
             'notes': [str(x) for x in (nav.get('notes') or [])],
         },
-        'history': _derive_history(src),
+        'history': history_obj,
     }
 
 
@@ -224,7 +284,7 @@ def main() -> int:
     if not src_path.exists() or not src_path.is_file():
         raise SystemExit(f'FAIL: SOURCE_NAV_V2_MISSING: {src_path}')
     src = _read_json_obj(src_path)
-    out = _build_output(day, src_path, src)
+    out = _build_output(day, truth_root, src_path, src)
     action = _write_with_integrity(out_path, out)
     print(f'OK: ACCOUNTING_NAV_COMPAT_BRIDGED day_utc={day} path={out_path} action={action}')
     return 0

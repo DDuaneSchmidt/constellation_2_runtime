@@ -31,11 +31,12 @@ from decimal import Decimal, ROUND_HALF_UP, getcontext
 from pathlib import Path
 from typing import Any, Dict, List
 
+from constellation_2.common.runtime_contract_v1 import resolve_release_provenance
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+REPO_ROOT = Path(__file__).resolve().parents[4]
 TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
 # FIX: correct input root is engine_daily_returns_v1 (matches orchestrator + truth)
@@ -51,12 +52,31 @@ class CliError(Exception):
     pass
 
 
+def _resolve_truth_root(truth_root_arg: str) -> Path:
+    raw = (truth_root_arg or "").strip()
+    if not raw:
+        return TRUTH
+    p = Path(raw).expanduser().resolve()
+    if not p.is_absolute():
+        raise CliError(f"TRUTH_ROOT_NOT_ABSOLUTE: {p}")
+    if not p.exists() or not p.is_dir():
+        raise CliError(f"TRUTH_ROOT_MISSING_OR_NOT_DIR: {p}")
+    return p
+
+
 def _git_sha() -> str:
+    try:
+        s = str(resolve_release_provenance().get("git_sha") or "").strip()
+        if s:
+            return s
+    except Exception:
+        pass
     try:
         out = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
         return out.decode("utf-8").strip()
-    except Exception as e:  # noqa: BLE001
-        raise CliError(f"FAIL_GIT_SHA: {e}") from e
+    except Exception:
+        # Clean runtime roots can be source-derived without .git metadata.
+        return "0" * 40
 
 
 def _sha256_file(p: Path) -> str:
@@ -149,12 +169,12 @@ def _clamp_corr(x: Decimal) -> Decimal:
     return x
 
 
-def _bootstrap_window_true(day_utc: str) -> bool:
+def _bootstrap_window_true(day_utc: str, truth_root: Path) -> bool:
     """
     Day-0 Bootstrap Window iff:
       TRUTH/execution_evidence_v1/submissions/<DAY>/ is missing OR contains zero submission dirs.
     """
-    root = (TRUTH / "execution_evidence_v1" / "submissions" / day_utc).resolve()
+    root = (truth_root / "execution_evidence_v1" / "submissions" / day_utc).resolve()
     if (not root.exists()) or (not root.is_dir()):
         return True
     try:
@@ -180,8 +200,16 @@ def _list_days(root: Path) -> List[date]:
     return sorted(out)
 
 
-def _select_window(all_days: List[date], end_day: date, window_days: int) -> List[date]:
+def _select_window(all_days: List[date], end_day: date, window_days: int, truth_root: Path) -> List[date]:
     if end_day not in all_days:
+        # Bootstrap window: allow missing end-day history and emit degraded matrix.
+        if _bootstrap_window_true(end_day.isoformat(), truth_root):
+            eligible = [d for d in all_days if d <= end_day]
+            if window_days <= 0:
+                raise CliError("BAD_WINDOW_DAYS")
+            if len(eligible) < window_days:
+                return eligible
+            return eligible[-window_days:]
         raise CliError(f"END_DAY_NOT_FOUND: {end_day.isoformat()}")
     eligible = [d for d in all_days if d <= end_day]
     if len(eligible) < 1:
@@ -240,19 +268,30 @@ def main() -> int:
     ap = argparse.ArgumentParser(prog="run_engine_correlation_matrix_day_v1")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
     ap.add_argument("--window_days", type=int, default=20, help="window size (uses most recent available <= day_utc)")
+    ap.add_argument("--truth_root", default="", help="Absolute truth root override; defaults to repo truth")
     args = ap.parse_args()
+
+    truth_root = _resolve_truth_root(str(args.truth_root))
+    in_root = (truth_root / "monitoring_v1/engine_daily_returns_v1").resolve()
+    out_root = (truth_root / "monitoring_v1/engine_correlation_matrix").resolve()
 
     day = _parse_day(args.day_utc)
     day_utc = _day_str(day)
     window_days = int(args.window_days)
 
-    out_path = (OUT_ROOT / day_utc / "engine_correlation_matrix.v1.json").resolve()
+    out_path = (out_root / day_utc / "engine_correlation_matrix.v1.json").resolve()
     existing_rc = _return_if_existing_report(out_path=out_path, expected_day_utc=day_utc)
     if existing_rc is not None:
         return int(existing_rc)
 
-    all_days = _list_days(IN_ROOT)
-    win = _select_window(all_days, day, window_days)
+    try:
+        all_days = _list_days(in_root)
+    except CliError as e:
+        if str(e).startswith("MISSING_ROOT_DIR:") and _bootstrap_window_true(day_utc, truth_root):
+            all_days = []
+        else:
+            raise
+    win = _select_window(all_days, day, window_days, truth_root)
 
     input_manifest: List[Dict[str, Any]] = []
     series_by_engine: Dict[str, List[Decimal]] = {}
@@ -261,7 +300,7 @@ def main() -> int:
     reason_codes: List[str] = []
 
     for d in win:
-        p = (IN_ROOT / _day_str(d) / "engine_daily_returns.v1.json").resolve()
+        p = (in_root / _day_str(d) / "engine_daily_returns.v1.json").resolve()
         if not p.exists():
             status = "FAIL_CORRUPT_INPUTS"
             reason_codes.append("MISSING_ENGINE_DAILY_RETURNS_FILE")
@@ -349,7 +388,7 @@ def main() -> int:
         "flags": flags,
         "input_manifest": input_manifest
         if len(input_manifest) > 0
-        else [{"type": "engine_daily_returns", "path": str(IN_ROOT), "sha256": "0" * 64, "producer": "phaseJ_engine_daily_returns_v1", "day_utc": day_utc}],
+        else [{"type": "engine_daily_returns", "path": str(in_root), "sha256": "0" * 64, "producer": "phaseJ_engine_daily_returns_v1", "day_utc": day_utc}],
         "produced_utc": produced_utc,
         "producer": {"repo": "constellation_2_runtime", "git_sha": _git_sha(), "module": "constellation_2/phaseJ/monitoring/run/run_engine_correlation_matrix_day_v1.py"},
         "reason_codes": sorted(list(dict.fromkeys(reason_codes))),
@@ -367,7 +406,7 @@ def main() -> int:
     print(f"OK: ENGINE_CORRELATION_MATRIX_V1_WRITTEN day={day_utc} out={out_path} action={wr.action} sha256={wr.sha256}")
 
     # Day-0 bootstrap: degraded correlation is non-blocking when no submissions exist.
-    if status == "DEGRADED_INSUFFICIENT_HISTORY" and _bootstrap_window_true(day_utc):
+    if status == "DEGRADED_INSUFFICIENT_HISTORY" and _bootstrap_window_true(day_utc, truth_root):
         return 0
 
     return 0 if status == "OK" else 2

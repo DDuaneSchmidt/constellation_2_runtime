@@ -14,6 +14,8 @@
       "sleeve_id": "PRIMARY",
       "enabled": true,
       "mode": "PAPER",
+      "execution_mode": "AUTO",
+      "status": "PRODUCTION",
       "ib_account": "DUO847203",
       "symbols": [
         "SPY"

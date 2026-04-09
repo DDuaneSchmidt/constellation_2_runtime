@@ -1,0 +1,318 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+_THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = _THIS_FILE.parents[2].resolve()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.common.deployment_state_machine_v1 import (
+    ACTIVE_POINTER,
+    AUTHORITATIVE_SERVICE_SOURCE_PATH,
+    RUNTIME_COPY_ROOT,
+    RUNTIME_SERVICE_SOURCE_PATH,
+    classify_deployment_decision,
+    evaluate_post_activation_verification,
+    evaluate_service_resolution,
+    git_branch_or_fail,
+    git_cleanliness_status,
+    git_sha_or_fail,
+    inspect_release_root,
+    load_active_runtime_contract_if_present,
+    resolve_live_service_fragment_path,
+)
+from constellation_2.phaseC.lib.canon_json_v1 import canonical_json_bytes_v1
+from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+
+
+SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/deployment_state_machine.v1.schema.json"
+REPORT_FAMILY = "deployment_state_machine_v1"
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _report_path(*, truth_root: Path, day_utc: str) -> Path:
+    return (
+        truth_root
+        / "reports"
+        / REPORT_FAMILY
+        / day_utc
+        / "deployment_state_machine.v1.json"
+    ).resolve()
+
+
+def _sha256_file(path: Path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _stable_payload_id(payload: dict[str, Any]) -> str:
+    encoded = canonical_json_bytes_v1(payload)
+    import hashlib
+
+    return hashlib.sha256(encoded).hexdigest()[:16]
+
+
+def _source_snapshot_id(git_sha: str, cleanliness_status: str) -> str:
+    return git_sha if cleanliness_status == "CLEAN" else ""
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="run_deployment_state_machine_v1")
+    ap.add_argument("--day_utc", required=True)
+    ap.add_argument(
+        "--truth_root",
+        default=str((REPO_ROOT / "constellation_2/runtime/truth").resolve()),
+    )
+    args = ap.parse_args(argv)
+
+    day_utc = str(args.day_utc).strip()
+    truth_root = Path(str(args.truth_root)).resolve()
+    evaluated_at_utc = _utc_now_iso()
+
+    authoritative_git_sha = git_sha_or_fail(REPO_ROOT)
+    authoritative_branch = git_branch_or_fail(REPO_ROOT)
+    authoritative_cleanliness_status, dirty_entries = git_cleanliness_status(REPO_ROOT)
+
+    internal_error = ""
+    active_symlink_target = ""
+    active_release: dict[str, Any] = {
+        "release_id": "",
+        "release_root": "",
+        "release_manifest_sha": "",
+        "bundled_file_hash_summary": {"file_count": 0, "aggregate_sha256": ""},
+        "build_status": "RELEASE_NOT_FOUND",
+        "required_startup_stack_files_present": False,
+        "missing_required_startup_stack_files": [],
+    }
+    verification: dict[str, Any] = {
+        "passed": False,
+        "service_unit_path": "",
+        "launcher_path": "",
+        "resolved_execution_root": "",
+        "active_root_match": False,
+        "blocking_codes": [],
+    }
+    live_service_source = {
+        "service_unit_path": str(AUTHORITATIVE_SERVICE_SOURCE_PATH),
+        "launcher_path": "",
+        "resolved_execution_root": "",
+        "active_root_match": False,
+    }
+
+    try:
+        active_target = ACTIVE_POINTER.resolve()
+        active_symlink_target = str(active_target)
+        inspection = inspect_release_root(active_target)
+        active_release = {
+            "release_id": inspection.release_id,
+            "release_root": str(inspection.release_root),
+            "release_manifest_sha": inspection.manifest_sha256,
+            "bundled_file_hash_summary": inspection.bundled_file_hash_summary,
+            "build_status": "RELEASE_PRESENT",
+            "required_startup_stack_files_present": inspection.required_startup_stack_present,
+            "missing_required_startup_stack_files": inspection.missing_required_files,
+        }
+        verification = evaluate_post_activation_verification(release_root=inspection.release_root)
+    except Exception as exc:
+        internal_error = f"{type(exc).__name__}:{exc}"
+
+    try:
+        live_service_source = evaluate_service_resolution(AUTHORITATIVE_SERVICE_SOURCE_PATH)
+    except Exception:
+        pass
+
+    installed_service_resolution = {
+        "service_unit_path": "",
+        "launcher_path": "",
+        "resolved_execution_root": "",
+        "active_root_match": False,
+    }
+    try:
+        installed_service_resolution = evaluate_service_resolution(resolve_live_service_fragment_path())
+    except Exception as exc:
+        if not internal_error:
+            internal_error = f"{type(exc).__name__}:{exc}"
+
+    active_runtime_contract = load_active_runtime_contract_if_present()
+    active_runtime_contract_status = (
+        str(active_runtime_contract.get("status") or "").strip().upper()
+        if isinstance(active_runtime_contract, dict)
+        else "MISSING"
+    )
+
+    runtime_copy_direct_exec_detected = False
+    runtime_copy_service_path = str(RUNTIME_SERVICE_SOURCE_PATH)
+    runtime_copy_launcher_path = ""
+    if RUNTIME_SERVICE_SOURCE_PATH.exists() and RUNTIME_SERVICE_SOURCE_PATH.is_file():
+        runtime_service_text = RUNTIME_SERVICE_SOURCE_PATH.read_text(encoding="utf-8")
+        runtime_copy_direct_exec_detected = str(RUNTIME_COPY_ROOT) in runtime_service_text
+        import re
+
+        match = re.search(
+            r"(/home/node/[A-Za-z0-9_./-]+/ops/run/c2_paper_day_orchestrator_systemd_entry_v1\.sh)",
+            runtime_service_text,
+        )
+        if match:
+            runtime_copy_launcher_path = match.group(1)
+
+    decision, blocking_codes, first_true_blocker_code = classify_deployment_decision(
+        authoritative_cleanliness_status=authoritative_cleanliness_status,
+        release_present=active_release["build_status"] == "RELEASE_PRESENT",
+        required_startup_stack_files_present=bool(active_release["required_startup_stack_files_present"]),
+        active_root_match=str(active_symlink_target) == str(active_release["release_root"]),
+        live_execution_root_match=bool(installed_service_resolution["active_root_match"]),
+        runtime_copy_direct_exec_detected=runtime_copy_direct_exec_detected,
+        internal_error=internal_error,
+    )
+
+    if decision == "DEPLOY_ACTIVE":
+        human_summary = (
+            "Active release, active runtime contract, and installed paper-day unit all align to "
+            "/home/node/constellation_active."
+        )
+    elif decision == "DEPLOY_BLOCKED_BY_DEFECT":
+        human_summary = f"Deployment verification failed by defect: {first_true_blocker_code}"
+    else:
+        human_summary = (
+            "Deployment is blocked because the authoritative source is not clean for immutable "
+            "release build and/or the active release/service stack does not fully match the "
+            "required startup stack."
+        )
+
+    payload = {
+        "schema_id": "deployment_state_machine",
+        "schema_version": "v1",
+        "authority_scope": "TOP_LEVEL_DEPLOYMENT_STATE_MACHINE_OWNER",
+        "day_utc": day_utc,
+        "deployment_attempt_id": f"deployment_state_machine_attempt:{day_utc}:{evaluated_at_utc}",
+        "deployment_state_machine_id": "",
+        "evaluated_at_utc": evaluated_at_utc,
+        "authoritative_source": {
+            "authoritative_repo_root": str(REPO_ROOT),
+            "authoritative_git_sha": authoritative_git_sha,
+            "authoritative_branch": authoritative_branch,
+            "authoritative_cleanliness_status": authoritative_cleanliness_status,
+            "dirty_entry_count": len(dirty_entries),
+            "dirty_entry_sample": dirty_entries[:10],
+            "source_snapshot_id": _source_snapshot_id(
+                authoritative_git_sha, authoritative_cleanliness_status
+            ),
+        },
+        "release_build": active_release,
+        "active_release": {
+            "active_symlink_path": str(ACTIVE_POINTER),
+            "active_symlink_target": active_symlink_target,
+            "activation_status": "ACTIVE_POINTER_PRESENT" if active_symlink_target else "ACTIVE_POINTER_MISSING",
+            "active_runtime_contract_path": (
+                ""
+                if active_runtime_contract is None
+                else "/home/node/constellation_runtime_data/runtime_contract_v1/active_runtime_contract.v1.json"
+            ),
+            "active_runtime_contract_status": active_runtime_contract_status,
+        },
+        "live_execution": {
+            "service_unit_path": installed_service_resolution["service_unit_path"],
+            "launcher_path": installed_service_resolution["launcher_path"],
+            "resolved_execution_root": installed_service_resolution["resolved_execution_root"],
+            "active_root_match": bool(installed_service_resolution["active_root_match"]),
+            "authoritative_service_source_path": live_service_source["service_unit_path"],
+            "authoritative_service_source_root": live_service_source["resolved_execution_root"],
+        },
+        "drift_checks": {
+            "authoritative_vs_release": {
+                "status": "PASS"
+                if authoritative_cleanliness_status == "CLEAN"
+                and active_release["build_status"] == "RELEASE_PRESENT"
+                else "FAIL",
+                "details": {
+                    "authoritative_cleanliness_status": authoritative_cleanliness_status,
+                    "active_release_git_sha": (
+                        str(active_runtime_contract.get("git_sha") or "")
+                        if isinstance(active_runtime_contract, dict)
+                        else ""
+                    ),
+                },
+            },
+            "release_vs_active": {
+                "status": "PASS"
+                if str(active_symlink_target) == str(active_release["release_root"])
+                and active_release["build_status"] == "RELEASE_PRESENT"
+                else "FAIL",
+                "details": {
+                    "active_symlink_target": active_symlink_target,
+                    "release_root": active_release["release_root"],
+                },
+            },
+            "active_vs_live_execution": {
+                "status": "PASS" if installed_service_resolution["active_root_match"] else "FAIL",
+                "details": installed_service_resolution,
+            },
+            "runtime_copy_still_executable": {
+                "status": "FAIL" if runtime_copy_direct_exec_detected else "PASS",
+                "details": {
+                    "runtime_service_source_path": runtime_copy_service_path,
+                    "runtime_launcher_path": runtime_copy_launcher_path,
+                },
+            },
+            "required_startup_stack_files_present": {
+                "status": "PASS" if active_release["required_startup_stack_files_present"] else "FAIL",
+                "details": {
+                    "missing_required_startup_stack_files": active_release[
+                        "missing_required_startup_stack_files"
+                    ]
+                },
+            },
+        },
+        "post_activation_verification": verification,
+        "final_deployment_decision": decision,
+        "blocking_codes": blocking_codes,
+        "first_true_blocker_code": first_true_blocker_code,
+        "first_true_blocker_path": (
+            installed_service_resolution["service_unit_path"]
+            if first_true_blocker_code == "LIVE_EXECUTION_NOT_ACTIVE_ROOT"
+            else (
+                RUNTIME_SERVICE_SOURCE_PATH.as_posix()
+                if first_true_blocker_code == "RUNTIME_COPY_DIRECT_EXECUTION_STILL_PRESENT"
+                else (
+                    REPO_ROOT.as_posix()
+                    if first_true_blocker_code == "AUTHORITATIVE_WORKTREE_DIRTY_BUILD_BLOCKED"
+                    else str(active_release["release_root"])
+                )
+            )
+        ),
+        "human_readable_summary": human_summary,
+        "producer": {
+            "repo": "constellation",
+            "module": "ops.tools.run_deployment_state_machine_v1",
+            "git_sha": authoritative_git_sha,
+        },
+    }
+    payload["deployment_state_machine_id"] = (
+        f"deployment_state_machine:{day_utc}:{_stable_payload_id({**payload, 'deployment_state_machine_id': ''})}"
+    )
+
+    validate_against_repo_schema_v1(payload, REPO_ROOT, SCHEMA_RELPATH)
+    out_path = _report_path(truth_root=truth_root, day_utc=day_utc)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(canonical_json_bytes_v1(payload) + b"\n")
+    print(json.dumps({"report_path": str(out_path), "final_deployment_decision": decision, "blocking_codes": blocking_codes}, indent=2, sort_keys=True))
+    return 0 if decision == "DEPLOY_ACTIVE" else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

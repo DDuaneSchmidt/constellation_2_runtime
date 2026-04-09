@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/startup_materialization_inputs_prep.v1.schema.json",
+  "title": "startup_materialization_inputs_prep.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_scope",
+    "day_utc",
+    "session_id",
+    "status",
+    "equity_entry_symbols",
+    "default_equity_reference_price",
+    "default_equity_reference_price_source",
+    "default_equity_reference_price_artifact_path",
+    "required_inputs_checked",
+    "blocking_codes",
+    "producer",
+    "produced_at_utc",
+    "liquidity_gate_result",
+    "human_readable_summary"
+  ],
+  "properties": {
+    "schema_id": { "const": "startup_materialization_inputs_prep" },
+    "schema_version": { "const": "v1" },
+    "authority_scope": { "const": "NON_AUTHORITY_FACT" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "session_id": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["PASS", "BLOCKED_VALID", "BLOCKED_BY_DEFECT"] },
+    "equity_entry_symbols": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "default_equity_reference_price": { "type": "string" },
+    "default_equity_reference_price_source": { "type": "string", "minLength": 1 },
+    "default_equity_reference_price_artifact_path": { "type": "string" },
+    "required_inputs_checked": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/factDependency" }
+    },
+    "blocking_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "producer": { "$ref": "#/$defs/producer" },
+    "produced_at_utc": { "type": "string", "minLength": 20 },
+    "liquidity_gate_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["returncode", "stdout", "stderr", "artifact_path", "artifact_status"],
+      "properties": {
+        "returncode": { "type": "integer" },
+        "stdout": { "type": "string" },
+        "stderr": { "type": "string" },
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_status": { "type": "string", "minLength": 1 }
+      }
+    },
+    "human_readable_summary": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 1 }
+      }
+    },
+    "factDependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["logical_name", "absolute_path", "sha256", "day_utc", "status", "reason_codes"],
+      "properties": {
+        "logical_name": { "type": "string", "minLength": 1 },
+        "absolute_path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string" },
+        "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "status": { "type": "string", "minLength": 1 },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

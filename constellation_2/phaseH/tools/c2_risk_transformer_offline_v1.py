@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import subprocess
 import sys
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_FLOOR, ROUND_HALF_UP
@@ -22,6 +24,12 @@ if str(REPO_ROOT) not in sys.path:
 
 from constellation_2.phaseC.lib.validate_against_schema_v1 import validate_against_repo_schema_v1  # noqa: E402
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1  # noqa: E402
+from constellation_2.common.c2_risk_policy_loader_v1 import (  # noqa: E402
+    RiskPolicyLoaderError,
+    get_per_trade_notional_pct_max_or_fail,
+)
+from constellation_2.common.canonical_fact_store_v1 import capture_executed_code_identity  # noqa: E402
+from constellation_2.common.truth_root_v1 import resolve_truth_root  # noqa: E402
 
 
 class TransformerError(Exception):
@@ -75,6 +83,21 @@ def _read_json_obj(path: Path) -> Dict[str, Any]:
     return obj
 
 
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _repo_git_sha_or_fail(repo_root: Path) -> str:
+    git_sha = str(capture_executed_code_identity(repo_root=repo_root).get("git_sha") or "").strip()
+    if git_sha:
+        return git_sha
+    raise TransformerError("REPO_GIT_SHA_UNAVAILABLE_FAIL_CLOSED")
+
+
 def _parse_day_utc_or_fail(day_utc: str) -> str:
     d = (day_utc or "").strip()
     if len(d) != 10 or d[4] != "-" or d[7] != "-":
@@ -82,14 +105,51 @@ def _parse_day_utc_or_fail(day_utc: str) -> str:
     return d
 
 
-def _load_nav_usd_from_accounting_day(repo_root: Path, day_utc: str) -> Tuple[int, str]:
+def _resolve_truth_root_arg(repo_root: Path, truth_root_arg: str) -> Path:
+    raw = (truth_root_arg or "").strip()
+    if raw:
+        p = Path(raw).expanduser().resolve()
+    else:
+        env_root = (os.environ.get("C2_TRUTH_ROOT") or "").strip()
+        if env_root:
+            p = Path(env_root).expanduser().resolve()
+        else:
+            p = resolve_truth_root(repo_root=repo_root)
+    if not p.is_absolute() or (not p.exists()) or (not p.is_dir()):
+        raise TransformerError(f"TRUTH_ROOT_INVALID_OR_MISSING: {p}")
+    return p
+
+
+def _load_nav_usd_from_accounting_day(repo_root: Path, day_utc: str, truth_root: Path) -> Tuple[int, str]:
     """
-    Deterministic (day-keyed): read accounting_v1/nav/<DAY>/nav.json -> nav.nav_total (int dollars).
+    Deterministic (day-keyed): prefer accounting_compat_v1, then accounting_v2, then accounting_v1.
     Fail-closed if any field missing or wrong type.
     Returns (nav_total_usd_int, nav_path_str).
     """
     day = _parse_day_utc_or_fail(day_utc)
-    p_nav = (repo_root / "constellation_2/runtime/truth/accounting_v1/nav" / day / "nav.json").resolve()
+    p_nav_compat = (truth_root / "accounting_compat_v1" / "nav" / day / "nav_snapshot.v1.json").resolve()
+    if p_nav_compat.exists() and p_nav_compat.is_file():
+        nav_obj = _read_json_obj(p_nav_compat)
+        nav = nav_obj.get("nav")
+        if not isinstance(nav, dict):
+            raise TransformerError("ACCOUNTING_NAV_OBJECT_MISSING")
+        nav_total = nav.get("nav_total")
+        if not isinstance(nav_total, int):
+            raise TransformerError("ACCOUNTING_NAV_TOTAL_NOT_INT")
+        return nav_total, str(p_nav_compat)
+
+    p_nav_v2 = (truth_root / "accounting_v2" / "nav" / day / "nav.v2.json").resolve()
+    if p_nav_v2.exists() and p_nav_v2.is_file():
+        nav_obj = _read_json_obj(p_nav_v2)
+        nav = nav_obj.get("nav")
+        if not isinstance(nav, dict):
+            raise TransformerError("ACCOUNTING_NAV_OBJECT_MISSING")
+        nav_total = nav.get("nav_total")
+        if not isinstance(nav_total, int):
+            raise TransformerError("ACCOUNTING_NAV_TOTAL_NOT_INT")
+        return nav_total, str(p_nav_v2)
+
+    p_nav = (truth_root / "accounting_v1" / "nav" / day / "nav.json").resolve()
     nav_obj = _read_json_obj(p_nav)
 
     nav = nav_obj.get("nav")
@@ -99,22 +159,6 @@ def _load_nav_usd_from_accounting_day(repo_root: Path, day_utc: str) -> Tuple[in
     if not isinstance(nav_total, int):
         raise TransformerError("ACCOUNTING_NAV_TOTAL_NOT_INT")
     return nav_total, str(p_nav)
-
-
-@dataclass(frozen=True)
-class CapsV1:
-    per_trade_notional_pct_max: Decimal  # v1 conservative: treat risk as notional
-    portfolio_net_delta_pct_max: Decimal
-    underlying_concentration_pct_max: Decimal
-    engine_allocation_pct_max: Decimal
-
-
-CAPS = CapsV1(
-    per_trade_notional_pct_max=Decimal("0.01"),
-    portfolio_net_delta_pct_max=Decimal("0.60"),
-    underlying_concentration_pct_max=Decimal("0.05"),
-    engine_allocation_pct_max=Decimal("0.40"),
-)
 
 
 def drawdown_multiplier_v1(drawdown_pct: Decimal) -> Decimal:
@@ -168,6 +212,14 @@ def _equity_qty_from_notional(nav_total_usd_int: int, target_pct: Decimal, ref_p
     return q if q >= 1 else 1
 
 
+def _load_per_trade_notional_pct_max_or_fail(engine_id: str) -> Decimal:
+    try:
+        raw = get_per_trade_notional_pct_max_or_fail(engine_id)
+    except RiskPolicyLoaderError as e:
+        raise TransformerError(f"GOVERNED_RISK_POLICY_LOAD_FAILED: {e}") from e
+    return _dec(raw, "per_trade_notional_pct_max")
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="c2_risk_transformer_offline_v1")
     ap.add_argument("--exposure_intent", required=True, help="Path to ExposureIntent v1 JSON")
@@ -175,14 +227,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--eval_time_utc", required=True, help="ISO-8601 Z timestamp (deterministic clock)")
     ap.add_argument("--out_dir", required=True, help="Output directory (must not exist or must be empty)")
     ap.add_argument("--equity_reference_price", default="", help="Required for LONG_EQUITY: decimal string price (deterministic operator input)")
+    ap.add_argument("--truth_root", default="", help="Absolute truth root for accounting/nav inputs")
     args = ap.parse_args(argv)
 
     repo_root = REPO_ROOT
     out_dir = Path(args.out_dir).resolve()
     _ensure_out_dir_ready(out_dir)
+    truth_root = _resolve_truth_root_arg(repo_root, str(args.truth_root or ""))
 
     exp_path = Path(args.exposure_intent).resolve()
     exp = _read_json_obj(exp_path)
+    exp_sha256 = _sha256_file(exp_path)
 
     # Validate exposure intent schema
     validate_against_repo_schema_v1(exp, repo_root, "constellation_2/schemas/exposure_intent.v1.schema.json")
@@ -193,18 +248,6 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     target_pct = _dec(exp["target_notional_pct"], "target_notional_pct")
 
-    # Conservative per-trade cap for v1 equity (treat notional as risk proxy)
-    if target_pct > CAPS.per_trade_notional_pct_max:
-        raise TransformerError(f"PER_TRADE_NOTIONAL_CAP_EXCEEDED: target={str(target_pct)} cap={str(CAPS.per_trade_notional_pct_max)}")
-
-    nav_total_usd_int, nav_path = _load_nav_usd_from_accounting_day(repo_root, args.day_utc)
-
-    # Drawdown scaling (strict: fail closed if drawdown missing)
-    nav_obj = _read_json_obj(Path(nav_path))
-    dd_pct = _parse_drawdown_pct_from_nav_or_fail(nav_obj)
-    mult = drawdown_multiplier_v1(dd_pct)
-    scaled_pct = (target_pct * mult)
-
     # Output routing
     if exposure_type == "LONG_EQUITY":
         ref_price_s = (args.equity_reference_price or "").strip()
@@ -212,10 +255,29 @@ def main(argv: Optional[list[str]] = None) -> int:
             raise TransformerError("EQUITY_REFERENCE_PRICE_REQUIRED_FOR_LONG_EQUITY")
         ref_price = _dec(ref_price_s, "equity_reference_price")
 
-        qty = _equity_qty_from_notional(nav_total_usd_int, scaled_pct, ref_price)
-
         sym = exp["underlying"]["symbol"]
         ccy = exp["underlying"]["currency"]
+        engine = exp.get("engine")
+        if not isinstance(engine, dict):
+            raise TransformerError("EXPOSURE_INTENT_ENGINE_NOT_OBJECT")
+        engine_id = str(engine.get("engine_id") or "").strip()
+        if not engine_id:
+            raise TransformerError("EXPOSURE_INTENT_ENGINE_ID_MISSING")
+        per_trade_notional_pct_max = _load_per_trade_notional_pct_max_or_fail(engine_id)
+
+        # Conservative per-trade cap for v1 equity (treat notional as risk proxy)
+        if target_pct > per_trade_notional_pct_max:
+            raise TransformerError(f"PER_TRADE_NOTIONAL_CAP_EXCEEDED: target={str(target_pct)} cap={str(per_trade_notional_pct_max)}")
+
+        nav_total_usd_int, nav_path = _load_nav_usd_from_accounting_day(repo_root, args.day_utc, truth_root)
+
+        # Drawdown scaling (strict: fail closed if drawdown missing)
+        nav_obj = _read_json_obj(Path(nav_path))
+        dd_pct = _parse_drawdown_pct_from_nav_or_fail(nav_obj)
+        mult = drawdown_multiplier_v1(dd_pct)
+        scaled_pct = (target_pct * mult)
+
+        qty = _equity_qty_from_notional(nav_total_usd_int, scaled_pct, ref_price)
 
         eq_intent = {
             "schema_id": "equity_intent",
@@ -227,7 +289,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             "intent_type": "EQUITY_LONG_OPEN",
             "sizing": {
                 "target_notional_pct": str(scaled_pct),
-                "max_risk_pct": str(CAPS.per_trade_notional_pct_max),
+                "max_risk_pct": str(per_trade_notional_pct_max),
             },
             "exit_policy": {
                 "policy_id": "c2_equity_time_exit_only_v1",
@@ -238,10 +300,35 @@ def main(argv: Optional[list[str]] = None) -> int:
         eq_intent["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(eq_intent)
 
         intent_hash = canonical_hash_for_c2_artifact_v1(eq_intent)
+        producer_git_sha = _repo_git_sha_or_fail(repo_root)
+        lineage_envelope = {
+            "schema_id": "lineage_envelope.v1",
+            "schema_version": "v1",
+            "engine_id": engine_id,
+            "source_intent_id": str(exp.get("intent_id") or "").strip(),
+            "intent_sha256": exp_sha256,
+            "producer": "constellation_2.phaseH.tools.c2_risk_transformer_offline_v1",
+            "producer_git_sha": producer_git_sha,
+            "invoked_day_utc": str(args.day_utc),
+            "upstream_fact_refs": [
+                {
+                    "fact_type": "intent_fact.v1",
+                    "path": str(exp_path),
+                    "sha256": exp_sha256,
+                }
+            ],
+            "generated_at_utc": args.eval_time_utc,
+        }
+        validate_against_repo_schema_v1(
+            lineage_envelope,
+            repo_root,
+            "governance/04_DATA/SCHEMAS/C2/FACTS/lineage_envelope.v1.schema.json",
+        )
+        lineage_envelope_sha256 = hashlib.sha256(canonical_json_bytes_v1(lineage_envelope)).hexdigest()
 
         eq_plan = {
             "schema_id": "equity_order_plan",
-            "schema_version": "v1",
+            "schema_version": "v2",
             "plan_id": exp["intent_id"],
             "created_at_utc": args.eval_time_utc,
             "intent_hash": intent_hash,
@@ -252,12 +339,21 @@ def main(argv: Optional[list[str]] = None) -> int:
             "qty_shares": qty,
             "order_terms": {"order_type": "LIMIT", "limit_price": str(ref_price), "time_in_force": "DAY"},
             "risk_proof": None,
+            "engine_id": engine_id,
+            "source_intent_id": str(exp.get("intent_id") or "").strip(),
+            "intent_sha256": exp_sha256,
+            "lineage_envelope_ref": {
+                "path": "lineage_envelope.v1.json",
+                "sha256": lineage_envelope_sha256,
+            },
             "canonical_json_hash": None,
         }
+        validate_against_repo_schema_v1(eq_plan, repo_root, "constellation_2/schemas/equity_order_plan.v2.schema.json")
         eq_plan["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(eq_plan)
 
         _atomic_write_bytes(out_dir / "equity_intent.v1.json", canonical_json_bytes_v1(eq_intent) + b"\n")
-        _atomic_write_bytes(out_dir / "equity_order_plan.v1.json", canonical_json_bytes_v1(eq_plan) + b"\n")
+        _atomic_write_bytes(out_dir / "lineage_envelope.v1.json", canonical_json_bytes_v1(lineage_envelope) + b"\n")
+        _atomic_write_bytes(out_dir / "equity_order_plan.v2.json", canonical_json_bytes_v1(eq_plan) + b"\n")
 
         print("OK: RISK_TRANSFORMER_EMITTED_EQUITY")
         return 0

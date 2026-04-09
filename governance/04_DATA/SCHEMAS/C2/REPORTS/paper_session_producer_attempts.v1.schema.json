@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/paper_session_producer_attempts.v1.schema.json",
+  "title": "paper_session_producer_attempts.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "attempt_set_id",
+    "session_id",
+    "day_utc",
+    "status",
+    "attempted_producer_ids",
+    "producer_attempts",
+    "recorded_at"
+  ],
+  "properties": {
+    "schema_id": { "const": "paper_session_producer_attempts" },
+    "schema_version": { "const": "v1" },
+    "attempt_set_id": { "type": "string", "minLength": 1 },
+    "session_id": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["NOT_NEEDED", "PASS", "PARTIAL", "FAIL"] },
+    "attempted_producer_ids": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "producer_attempts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "producer_id",
+          "dependency_keys",
+          "invocation_phase",
+          "entrypoint_relpath",
+          "status",
+          "returncode",
+          "command",
+          "output_paths",
+          "generated_paths",
+          "stdout",
+          "stderr"
+        ],
+        "properties": {
+          "producer_id": { "type": "string", "minLength": 1 },
+          "dependency_keys": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "invocation_phase": { "type": "string", "minLength": 1 },
+          "entrypoint_relpath": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "enum": ["PASS", "PARTIAL", "FAIL"] },
+          "returncode": { "type": "integer" },
+          "command": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "output_paths": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "generated_paths": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "stdout": { "type": "string" },
+          "stderr": { "type": "string" }
+        }
+      }
+    },
+    "recorded_at": { "type": "string", "minLength": 1 }
+  }
+}

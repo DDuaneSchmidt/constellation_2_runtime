@@ -9,6 +9,11 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
+from constellation_2.common.runtime_contract_v1 import (
+    require_truth_root_under_contract,
+    resolve_canonical_truth_root,
+    resolve_release_provenance,
+)
 from constellation_2.phaseD.lib.canon_json_v1 import (
     CanonicalizationError,
     canonical_hash_for_c2_artifact_v1,
@@ -17,8 +22,12 @@ from constellation_2.phaseD.lib.canon_json_v1 import (
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-DEFAULT_TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+_THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = _THIS_FILE.parents[2].resolve()
+try:
+    DEFAULT_TRUTH = resolve_canonical_truth_root()
+except Exception:
+    DEFAULT_TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
 SCHEMA_REPORT = "governance/04_DATA/SCHEMAS/C2/MONITORING/lifecycle_monitor_report.v1.schema.json"
 SCHEMA_EXPOSURE_RECON_V2 = (
@@ -27,8 +36,11 @@ SCHEMA_EXPOSURE_RECON_V2 = (
 
 
 def _git_sha() -> str:
-    out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
-    return out.decode("utf-8").strip()
+    try:
+        return str(resolve_release_provenance().get("git_sha") or "").strip()
+    except Exception:
+        out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
+        return out.decode("utf-8").strip()
 
 
 def _resolve_truth_root(args_truth_root: str) -> Path:
@@ -50,11 +62,13 @@ def _resolve_truth_root(args_truth_root: str) -> Path:
         raise SystemExit(f"FATAL: truth_root missing or not directory: {truth_root}")
 
     try:
-        truth_root.relative_to(REPO_ROOT)
+        return require_truth_root_under_contract(truth_root)
     except Exception:
-        raise SystemExit(f"FATAL: truth_root not under repo root: truth_root={truth_root} repo_root={REPO_ROOT}")
-
-    return truth_root
+        try:
+            truth_root.relative_to(REPO_ROOT)
+        except Exception:
+            raise SystemExit(f"FATAL: truth_root not under repo root: truth_root={truth_root} repo_root={REPO_ROOT}")
+        return truth_root
 
 
 def _read_json_obj(path: Path) -> Dict[str, Any]:

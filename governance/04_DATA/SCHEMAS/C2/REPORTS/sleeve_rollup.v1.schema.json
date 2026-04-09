@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/sleeve_rollup.v1.schema.json",
+  "title": "sleeve_rollup.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "input_day_utc",
+    "produced_utc",
+    "status",
+    "registry_path",
+    "session_id",
+    "paper_session_ledger_path",
+    "ledger_id",
+    "authority_status",
+    "sleeves",
+    "producer"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_SLEEVE_ROLLUP_V1" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "input_day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "minLength": 20 },
+    "status": { "type": "string", "enum": ["PASS", "DEGRADED", "FAIL", "ABORTED"] },
+    "registry_path": { "type": "string", "minLength": 1 },
+    "session_id": { "type": "string", "minLength": 1 },
+    "paper_session_ledger_path": { "type": "string", "minLength": 1 },
+    "ledger_id": { "type": "string", "minLength": 1 },
+    "authority_status": { "type": "string", "enum": ["GRANTED", "DENIED"] },
+    "sleeves": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sleeve_id", "enabled", "status"],
+        "properties": {
+          "sleeve_id": { "type": "string", "minLength": 1 },
+          "enabled": { "type": "boolean" },
+          "status": { "type": "string", "minLength": 1 },
+          "mode": { "type": "string" },
+          "ib_account": { "type": "string" },
+          "truth_root": { "type": "string" },
+          "orchestrator_rc": { "type": "integer" },
+          "verdict_status": { "type": "string" },
+          "verdict_reason_codes": { "type": "array", "items": { "type": "string" } },
+          "verdict_safety_breaches": { "type": "array", "items": { "type": "string" } },
+          "verdict_pointer_seq": { "type": "integer" },
+          "verdict_pointer_index_path": { "type": "string" },
+          "verdict_points_to": { "type": "string" },
+          "verdict_points_to_sha256": { "type": "string" },
+          "cmd": { "type": "string" },
+          "reason_code": { "type": "string" }
+        }
+      }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string" }
+      }
+    }
+  }
+}

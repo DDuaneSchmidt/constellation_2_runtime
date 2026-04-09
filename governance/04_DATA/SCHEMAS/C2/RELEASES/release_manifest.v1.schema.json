@@ -1,0 +1,37 @@
+{
+  "schema_id": "C2_RELEASES_RELEASE_MANIFEST_SCHEMA_V1",
+  "title": "C2 Release Manifest V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "release_id",
+    "git_sha",
+    "source_root",
+    "release_root",
+    "included_files",
+    "included_file_hashes",
+    "generated_at_utc"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "release_manifest.v1" },
+    "schema_version": { "type": "string", "const": "v1" },
+    "release_id": { "type": "string", "minLength": 1 },
+    "git_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "source_root": { "type": "string", "minLength": 1 },
+    "release_root": { "type": "string", "minLength": 1 },
+    "included_files": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "included_file_hashes": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^.+$": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "generated_at_utc": { "type": "string", "minLength": 11 }
+  }
+}

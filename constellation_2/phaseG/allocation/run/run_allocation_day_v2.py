@@ -22,10 +22,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
@@ -34,11 +39,7 @@ from constellation_2.phaseF.accounting.lib.immut_write_v1 import write_file_immu
 C2_DRAWDOWN_CONTRACT_ID = "C2_DRAWDOWN_CONVENTION_V1"
 DRAWDOWN_QUANT = Decimal("0.000001")
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH_ROOT = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
-
-ALLOC_ROOT = (TRUTH_ROOT / "allocation_v1").resolve()
-INTENTS_ROOT = (TRUTH_ROOT / "intents_v1" / "snapshots").resolve()
+TRUTH_ROOT_DEFAULT = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
 
 SCHEMA_SUMMARY = "governance/04_DATA/SCHEMAS/C2/ALLOCATION/allocation_summary.v1.schema.json"
 SCHEMA_DECISION = "governance/04_DATA/SCHEMAS/C2/ALLOCATION/allocation_decision.v1.schema.json"
@@ -189,8 +190,8 @@ def _dec01(s: str, name: str) -> Decimal:
     return d
 
 
-def _list_intent_files(day_utc: str) -> List[Path]:
-    d = (INTENTS_ROOT / day_utc).resolve()
+def _list_intent_files(*, truth_root: Path, day_utc: str) -> List[Path]:
+    d = (truth_root / "intents_v1" / "snapshots" / day_utc).resolve()
     if not d.exists() or not d.is_dir():
         raise FileNotFoundError(f"INTENTS_DAY_DIR_MISSING: {str(d)}")
     files = sorted([p for p in d.iterdir() if p.is_file() and p.name.endswith(".json")])
@@ -199,17 +200,29 @@ def _list_intent_files(day_utc: str) -> List[Path]:
     return files
 
 
-def _resolve_accounting_nav_paths(day_utc: str) -> Tuple[Path, Path]:
+def _resolve_sleeve_id_from_truth_root(*, truth_root: Path) -> str:
+    parts = truth_root.resolve().parts
+    if "truth_sleeves" not in parts:
+        return "GLOBAL"
+    idx = parts.index("truth_sleeves")
+    if idx + 1 >= len(parts):
+        return "GLOBAL"
+    sleeve_id = str(parts[idx + 1]).strip()
+    return sleeve_id or "GLOBAL"
+
+
+def _resolve_accounting_nav_paths(*, truth_root: Path, day_utc: str) -> Tuple[Path, Path]:
     """
     Prefer accounting_v2 nav, fall back to accounting_v1 nav.
     """
-    v2 = (TRUTH_ROOT / "accounting_v2" / "nav" / day_utc / "nav.v2.json").resolve()
-    v1 = (TRUTH_ROOT / "accounting_v1" / "nav" / day_utc / "nav.json").resolve()
+    v2 = (truth_root / "accounting_v2" / "nav" / day_utc / "nav.v2.json").resolve()
+    v1 = (truth_root / "accounting_v1" / "nav" / day_utc / "nav.json").resolve()
     return v2, v1
 
 
 def _write_failure(
     *,
+    truth_root: Path,
     day_utc: str,
     producer_repo: str,
     producer_sha: str,
@@ -235,7 +248,7 @@ def _write_failure(
     }
     validate_against_repo_schema_v1(fail_obj, REPO_ROOT, SCHEMA_FAILURE)
     b = canonical_json_bytes_v1(fail_obj) + b"\n"
-    out_path = (ALLOC_ROOT / "failures" / day_utc / "failure.json").resolve()
+    out_path = (truth_root / "allocation_v1" / "failures" / day_utc / "failure.json").resolve()
     _ = write_file_immutable_v1(path=out_path, data=b, create_dirs=True)
 
 
@@ -244,14 +257,17 @@ def main(argv: List[str] | None = None) -> int:
     ap.add_argument("--day_utc", required=True, help="UTC day key YYYY-MM-DD")
     ap.add_argument("--producer_git_sha", required=True, help="Producing git sha (explicit)")
     ap.add_argument("--producer_repo", default="constellation_2_runtime", help="Producer repo id")
+    ap.add_argument("--truth_root", default=None, help="Optional truth root override")
     args = ap.parse_args(argv)
 
     day_utc = str(args.day_utc).strip()
     producer_sha = str(args.producer_git_sha).strip()
     producer_repo = str(args.producer_repo).strip()
+    truth_root = Path(str(args.truth_root or os.environ.get("C2_TRUTH_ROOT") or TRUTH_ROOT_DEFAULT)).resolve()
+    alloc_root = (truth_root / "allocation_v1").resolve()
     module = "constellation_2/phaseG/allocation/run/run_allocation_day_v2.py"
 
-    summary_dir = (ALLOC_ROOT / "summary" / day_utc).resolve()
+    summary_dir = (alloc_root / "summary" / day_utc).resolve()
     summary_path = summary_dir / "summary.json"
 
     ex_sha = _lock_git_sha_if_exists(summary_path, producer_sha)
@@ -261,7 +277,7 @@ def main(argv: List[str] | None = None) -> int:
 
     produced_utc = f"{day_utc}T00:00:00Z"
 
-    nav_v2_path, nav_v1_path = _resolve_accounting_nav_paths(day_utc)
+    nav_v2_path, nav_v1_path = _resolve_accounting_nav_paths(truth_root=truth_root, day_utc=day_utc)
     input_manifest: List[Dict[str, Any]] = []
     attempted_outputs: List[Dict[str, Any]] = []
 
@@ -285,6 +301,7 @@ def main(argv: List[str] | None = None) -> int:
             nav_total, peak_nav, dd_abs, dd_pct_s = _parse_dd_pct_str_or_fail_accounting_v1(nav_obj)
     except Exception as e:
         _write_failure(
+            truth_root=truth_root,
             day_utc=day_utc,
             producer_repo=producer_repo,
             producer_sha=producer_sha,
@@ -347,7 +364,7 @@ def main(argv: List[str] | None = None) -> int:
     block_ct = 0
 
     try:
-        intent_files = _list_intent_files(day_utc)
+        intent_files = _list_intent_files(truth_root=truth_root, day_utc=day_utc)
         for p in intent_files:
             input_manifest.append({"type": "other", "path": str(p.resolve()), "sha256": _sha256_file(p), "day_utc": day_utc, "producer": "intents_v1"})
     except FileNotFoundError:
@@ -360,6 +377,7 @@ def main(argv: List[str] | None = None) -> int:
         intent_files = []
     except Exception as e:
         _write_failure(
+            truth_root=truth_root,
             day_utc=day_utc,
             producer_repo=producer_repo,
             producer_sha=producer_sha,
@@ -374,7 +392,7 @@ def main(argv: List[str] | None = None) -> int:
         print(f"FAIL: INTENTS_LIST_INVALID: {e}", file=sys.stderr)
         return 2
 
-    decisions_dir = (ALLOC_ROOT / "decisions" / day_utc).resolve()
+    decisions_dir = (alloc_root / "decisions" / day_utc).resolve()
 
     for p_intent in intent_files:
         intent_bytes = p_intent.read_bytes()
@@ -469,6 +487,7 @@ def main(argv: List[str] | None = None) -> int:
 
         except Exception as e:  # noqa: BLE001
             _write_failure(
+                truth_root=truth_root,
                 day_utc=day_utc,
                 producer_repo=producer_repo,
                 producer_sha=producer_sha,
@@ -492,7 +511,21 @@ def main(argv: List[str] | None = None) -> int:
         "status": "OK",
         "reason_codes": list(reason_codes),
         "input_manifest": list(input_manifest) if input_manifest else [{"type": nav_type, "path": str(nav_path), "sha256": nav_sha, "day_utc": day_utc, "producer": nav_producer}],
-        "summary": {"decisions": list(decisions_summary), "counts": {"allow": int(allow_ct), "block": int(block_ct)}, "notes": list(notes), "drawdown_enforcement": dd_block},
+        "summary": {
+            "decisions": list(decisions_summary),
+            "counts": {"allow": int(allow_ct), "block": int(block_ct)},
+            "notes": list(notes),
+            "sleeves": [
+                {
+                    "sleeve_id": _resolve_sleeve_id_from_truth_root(truth_root=truth_root),
+                    "truth_root": str(truth_root),
+                    "decision_count": int(len(decisions_summary)),
+                    "allow": int(allow_ct),
+                    "block": int(block_ct),
+                }
+            ],
+            "drawdown_enforcement": dd_block,
+        },
     }
 
     validate_against_repo_schema_v1(summary_obj, REPO_ROOT, SCHEMA_SUMMARY)

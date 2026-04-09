@@ -24,6 +24,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
+from constellation_2.common.paper_session_path_alignment_v1 import resolve_operator_statement_root
+
 def _require_truth_root(raw: str) -> Path:
     p = Path(str(raw).strip()).expanduser().resolve()
     if not p.is_absolute() or not p.exists() or not p.is_dir():
@@ -32,7 +34,7 @@ def _require_truth_root(raw: str) -> Path:
 
 
 def _operator_statement_root(truth_root: Path) -> Path:
-    return (truth_root / "operator_inputs" / "cash_ledger_operator_statements").resolve()
+    return resolve_operator_statement_root(operator_input_root=truth_root)
 
 
 def _day_prefix(day_utc: str) -> str:

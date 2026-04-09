@@ -7,9 +7,13 @@ from pathlib import Path
 from typing import Any, Dict
 
 from ops.tools.c2_account_resolution_v1 import resolve_single_paper_ib_account_from_sleeve_registry
+from constellation_2.common.paper_session_path_alignment_v1 import (
+    resolve_baseline_ready_path,
+    resolve_repo_truth_root,
+)
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+REPO_ROOT = Path(__file__).resolve().parents[2]
+TRUTH_ROOT = resolve_repo_truth_root(REPO_ROOT)
 
 LOCK_NAME = ".canonical_pointer_index.v1.lock"
 IDX_NAME = "canonical_pointer_index.v1.jsonl"
@@ -78,13 +82,18 @@ def _append_jsonl(idx_path: Path, obj: Dict[str, Any]) -> None:
         os.close(fd)
 
 def main() -> int:
+    global TRUTH_ROOT
     ap = argparse.ArgumentParser(prog="c2_baseline_readiness_publish_v1")
     ap.add_argument("--day_utc", required=True)
+    ap.add_argument("--truth_root", default="")
     ap.add_argument("--attempt_id", required=True)
     ap.add_argument("--ib_account", required=True)
     ap.add_argument("--nav_path", required=True)
     ap.add_argument("--producer_git_sha", required=True)
     args = ap.parse_args()
+
+    if str(args.truth_root).strip():
+        TRUTH_ROOT = Path(str(args.truth_root)).resolve()
 
     day = str(args.day_utc).strip()
     attempt_id = str(args.attempt_id).strip()
@@ -105,7 +114,7 @@ def main() -> int:
     if not isinstance(nav_total, int) or nav_total <= 0:
         raise SystemExit(f"FAIL: NAV_TOTAL_NOT_POSITIVE: {nav_total!r}")
 
-    root = (TRUTH_ROOT / "readiness_v1" / "baseline_ready" / day).resolve()
+    root = resolve_baseline_ready_path(truth_root=TRUTH_ROOT, day_utc=day).parent
     attempts_dir = (root / "attempts" / attempt_id).resolve()
     attempts_dir.mkdir(parents=True, exist_ok=True)
 
@@ -117,9 +126,11 @@ def main() -> int:
         "schema_version": 1,
         "day_utc": day,
         "ib_account": acct,
+        "status": "PASS",
+        "authoritative": True,
         "produced_utc": f"{day}T00:00:00Z",
         "nav": {"path": str(nav_path), "sha256": _sha256_file(nav_path), "nav_total": int(nav_total)},
-        "producer": {"repo": "constellation_2_runtime", "git_sha": sha, "module": "ops/run/c2_baseline_readiness_publish_v1.py"},
+        "producer": {"repo": REPO_ROOT.name, "git_sha": sha, "module": "ops/run/c2_baseline_readiness_publish_v1.py"},
         "attempt_id": attempt_id,
     }
     b = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")

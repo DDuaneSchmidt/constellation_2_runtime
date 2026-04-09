@@ -51,7 +51,7 @@ ENGINE_ID = "C2_INTENT_SIMULATOR_V1"
 ENGINE_SUITE = "C2_SYSTEM_VALIDATION_V1"
 MODE = "PAPER"
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+REPO_ROOT = Path(__file__).resolve().parents[4]
 TRUTH_ROOT = resolve_truth_root(repo_root=REPO_ROOT)
 INTENTS_ROOT = (TRUTH_ROOT / "intents_v1" / "snapshots").resolve()
 

@@ -221,12 +221,19 @@ def main(argv: List[str] | None = None) -> int:
                 "status": "DEGRADED_MISSING_INSTRUMENT_IDENTITY",
                 "reason_codes": ["BOOTSTRAP_UNKNOWN_INSTRUMENT_V2"],
                 "input_manifest": [
-                    {"type": "execution_evidence", "path": str(exec_dir), "sha256": "0" * 64}
+                    {
+                        "type": "execution_evidence",
+                        "path": str(exec_dir),
+                        "sha256": "0" * 64,
+                        "day_utc": day_utc,
+                        "producer": "execution_evidence_v1",
+                    }
                 ],
                 "positions": {
                     "currency": "USD",
                     "asof_utc": f"{day_utc}T00:00:00Z",
                     "items": items,
+                    "notes": ["BOOTSTRAP_UNKNOWN_INSTRUMENT_V2: instrument identity unavailable for submitted fills"],
                 },
             }
 

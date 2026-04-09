@@ -91,6 +91,16 @@
       "description": "Required lineage: sha256 of the *source* intent file bytes (ExposureIntent)."
     },
 
+    "lineage_envelope_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+
     "canonical_json_hash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }
   }
 }

@@ -2,27 +2,7 @@
 """
 run_c2_multi_sleeve_orchestrator_v1.py
 
-C2 Multi-Sleeve Orchestrator V1 (fail-closed topology driver)
-
-Reads governed sleeve registry:
-  governance/02_REGISTRIES/C2_SLEEVE_REGISTRY_V1.json
-
-For each enabled sleeve:
-  - resolves sleeve truth root (absolute)
-  - runs orchestrator v2 with --truth_root pointing at the sleeve partition
-  - records per-sleeve exit code + summary
-
-Always emits a global rollup verdict under canonical truth root:
-  constellation_2/runtime/truth/reports/sleeve_rollup_v1/<day>/...
-
-Verdict policy:
-  PASS      if all enabled sleeves PASS (orchestrator rc=0 and status != ABORTED)
-  DEGRADED  if any sleeve returns non-fatal but run completed (rc=0) with degraded/fail OR sleeve has NO_ACTIVITY (inferred by orchestrator reason codes)
-  FAIL      if any enabled sleeve returns rc=0 but status=FAIL (non-aborted failure)
-  ABORTED   only for safety breach / topology breach (rc != 0) OR registry invalid OR truth partition invalid
-
-Non-bricking:
-  Even if a sleeve fails, this tool must still emit the global rollup artifact.
+C2 Multi-Sleeve Orchestrator V1 (ledger-enforced topology driver)
 """
 
 from __future__ import annotations
@@ -36,16 +16,29 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+_THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = _THIS_FILE.parents[2].resolve()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+from constellation_2.common.paper_session_ledger_v1 import assert_paper_session_ledger_granted_v1
+from constellation_2.common.runtime_contract_v1 import (
+    resolve_canonical_truth_root,
+    resolve_pointer_index_path_for_truth_root,
+    resolve_truth_sleeves_root,
+)
+from constellation_2.common.truth_root_v1 import resolve_runtime_path
+from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+
+
 REGISTRY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/C2_SLEEVE_REGISTRY_V1.json").resolve()
-
-CANONICAL_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+try:
+    CANONICAL_TRUTH_ROOT = resolve_canonical_truth_root()
+except Exception:
+    CANONICAL_TRUTH_ROOT = resolve_runtime_path("truth").resolve()
 ROLLOUP_ROOT = (CANONICAL_TRUTH_ROOT / "reports" / "sleeve_rollup_v1").resolve()
-
 POINTER_INDEX_NAME = "canonical_pointer_index.v1.jsonl"
 POINTER_LOCK_NAME = ".canonical_pointer_index.v1.lock"
-
 ORCH_V2 = (REPO_ROOT / "ops/tools/run_c2_paper_day_orchestrator_v2.py").resolve()
 
 
@@ -68,10 +61,7 @@ def require_day(day: str) -> str:
 def load_json(path: Path) -> Dict[str, Any]:
     if not path.exists():
         die(f"missing_file path={path}")
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception as e:
-        die(f"json_parse_failed path={path} err={type(e).__name__}:{e}")
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def require_registry(reg: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -96,25 +86,25 @@ def resolve_sleeve_truth_root(sleeve: Dict[str, Any]) -> Tuple[str, str, str, Pa
         die(f"registry_invalid enabled must be bool sleeve_id={sleeve_id}")
     if not enabled:
         return (sleeve_id, "", "", Path("/dev/null"))
-
     mode = str(sleeve.get("mode") or "").strip().upper()
     if mode not in ("PAPER", "LIVE"):
         die(f"registry_invalid mode sleeve_id={sleeve_id} got={mode!r}")
-
     ib_account = str(sleeve.get("ib_account") or "").strip()
     if not ib_account:
         die(f"registry_invalid ib_account empty sleeve_id={sleeve_id}")
-
     truth_partition = str(sleeve.get("truth_partition") or "").strip()
     exp = canonical_partition(sleeve_id, mode)
     if truth_partition != exp:
         die(f"truth_partition_mismatch sleeve_id={sleeve_id} expected={exp} got={truth_partition}")
-
-    abs_root = (REPO_ROOT / "constellation_2/runtime" / truth_partition).resolve()
-    if not abs_root.exists() or (not abs_root.is_dir()):
+    try:
+        truth_sleeves_root = resolve_truth_sleeves_root()
+        abs_root = (truth_sleeves_root / sleeve_id / mode).resolve()
+    except Exception:
+        abs_root = resolve_runtime_path(*truth_partition.split("/")).resolve()
+    if not abs_root.exists() or not abs_root.is_dir():
         die(f"truth_partition_path_missing sleeve_id={sleeve_id} path={abs_root}")
-
     return (sleeve_id, mode, ib_account, abs_root)
+
 
 def sha256_file(p: Path) -> str:
     import hashlib
@@ -126,35 +116,24 @@ def sha256_file(p: Path) -> str:
 
 
 def read_json_obj(p: Path) -> Dict[str, Any]:
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+def resolve_latest_verdict_pointer(*, truth_root: Path, day: str, mode: str) -> Tuple[Path, Path, int]:
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except Exception as e:
-        die(f"json_parse_failed path={p} err={type(e).__name__}:{e}")
-
-
-def resolve_latest_verdict_pointer(*, verdict_root: Path, day: str, mode: str) -> Tuple[Path, Path, int]:
-    """
-    Returns:
-      (pointer_index_path, points_to_path, pointer_seq)
-
-    Fail-closed if pointer index missing or invalid.
-    """
-    idx = (verdict_root / day / "canonical_pointer_index.v1.jsonl").resolve()
+        idx = resolve_pointer_index_path_for_truth_root(truth_root, family="run_pointer_v1")
+    except Exception:
+        idx = (truth_root / "run_pointer_v1" / POINTER_INDEX_NAME).resolve()
     if not idx.exists():
         die(f"missing_pointer_index path={idx}")
-
     best_seq = -1
     best_points_to: Path | None = None
-
     for line in idx.read_text(encoding="utf-8").splitlines():
         s = line.strip()
         if not s:
             continue
-        try:
-            o = json.loads(s)
-        except Exception:
-            die(f"invalid_pointer_index_jsonl path={idx}")
-        if not isinstance(o, dict):
+        o = json.loads(s)
+        if str(o.get("day_utc") or "").strip() != day:
             continue
         if str(o.get("mode") or "").strip().upper() != mode:
             continue
@@ -169,16 +148,24 @@ def resolve_latest_verdict_pointer(*, verdict_root: Path, day: str, mode: str) -
             continue
         best_seq = ps
         best_points_to = Path(pt).resolve()
-
     if best_points_to is None or best_seq < 0:
         die(f"no_pointer_for_mode path={idx} mode={mode}")
-
     if not best_points_to.exists():
         die(f"pointer_points_to_missing points_to={best_points_to} idx={idx}")
-
     return idx, best_points_to, best_seq
 
-def run_orchestrator_v2(*, day: str, input_day: str, mode: str, symbol: str, ib_account: str, produced_utc: str, truth_root: Path) -> Tuple[int, str]:
+
+def run_orchestrator_v2(
+    *,
+    day: str,
+    input_day: str,
+    mode: str,
+    symbol: str,
+    ib_account: str,
+    produced_utc: str,
+    truth_root: Path,
+    paper_session_ledger_path: Path,
+) -> Tuple[int, str]:
     cmd = [
         "python3",
         str(ORCH_V2),
@@ -196,9 +183,12 @@ def run_orchestrator_v2(*, day: str, input_day: str, mode: str, symbol: str, ib_
         produced_utc,
         "--truth_root",
         str(truth_root),
+        "--paper_session_ledger_path",
+        str(paper_session_ledger_path),
     ]
     rc = subprocess.call(cmd, cwd=str(REPO_ROOT))
     return (int(rc), " ".join(cmd))
+
 
 def lock_acquire(lock_path: Path) -> int:
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -229,12 +219,7 @@ def read_last_pointer_seq(idx_path: Path) -> int:
         s = line.strip()
         if not s:
             continue
-        try:
-            o = json.loads(s)
-        except Exception:
-            die(f"invalid_pointer_index_jsonl path={idx_path}")
-        if not isinstance(o, dict):
-            continue
+        o = json.loads(s)
         try:
             ps = int(o.get("pointer_seq"))
         except Exception:
@@ -247,32 +232,30 @@ def read_last_pointer_seq(idx_path: Path) -> int:
 def atomic_append_jsonl(idx_path: Path, obj: Dict[str, Any]) -> str:
     idx_path.parent.mkdir(parents=True, exist_ok=True)
     line = (json.dumps(obj, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
-    line_sha = sha256_file_bytes(line)
-
+    line_sha = __import__("hashlib").sha256(line).hexdigest()
     fd = os.open(str(idx_path), os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
     try:
         os.write(fd, line)
         os.fsync(fd)
     finally:
         os.close(fd)
-
     dfd = os.open(str(idx_path.parent), os.O_RDONLY)
     try:
         os.fsync(dfd)
     finally:
         os.close(dfd)
-
     return line_sha
 
-
-def sha256_file_bytes(b: bytes) -> str:
-    import hashlib
-    return hashlib.sha256(b).hexdigest()
 
 def write_rollup(day: str, payload: Dict[str, Any]) -> Path:
     out_dir = (ROLLOUP_ROOT / day).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = (out_dir / "sleeve_rollup.v1.json").resolve()
+    validate_against_repo_schema_v1(
+        payload,
+        REPO_ROOT,
+        "governance/04_DATA/SCHEMAS/C2/REPORTS/sleeve_rollup.v1.schema.json",
+    )
     out_path.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     return out_path
 
@@ -281,17 +264,18 @@ def main() -> int:
     ap = argparse.ArgumentParser(prog="run_c2_multi_sleeve_orchestrator_v1")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
     ap.add_argument("--input_day_utc", default="", help="Optional input day key (defaults to day_utc)")
-    ap.add_argument("--symbol", default="SPY", help="Default symbol (sleeves may override in future; v1 uses this)")
+    ap.add_argument("--symbol", default="SPY")
+    ap.add_argument("--paper_session_ledger_path", required=True)
     args = ap.parse_args()
 
     day = require_day(args.day_utc)
     input_day = require_day((args.input_day_utc or "").strip() or day)
     symbol = str(args.symbol or "").strip().upper() or "SPY"
+    paper_session_ledger_path = Path(str(args.paper_session_ledger_path)).resolve()
+    ledger = assert_paper_session_ledger_granted_v1(path=paper_session_ledger_path, day_utc=day)
 
-    # Load registry
     reg = load_json(REGISTRY_PATH)
     sleeves = require_registry(reg)
-
     produced_utc = utc_now_isoz()
 
     per_sleeve: List[Dict[str, Any]] = []
@@ -299,14 +283,22 @@ def main() -> int:
     any_fail = False
     any_degraded = False
 
-    # Drive each enabled sleeve deterministically in listed order
     for s in sleeves:
         sleeve_id = str(s.get("sleeve_id") or "").strip() or "UNKNOWN"
         enabled = s.get("enabled")
         if enabled is False:
             per_sleeve.append({"sleeve_id": sleeve_id, "enabled": False, "status": "SKIP_DISABLED"})
             continue
-
+        if str(s.get("mode") or "").strip().upper() != "PAPER":
+            per_sleeve.append(
+                {
+                    "sleeve_id": sleeve_id,
+                    "enabled": True,
+                    "status": "SKIP_OUTSIDE_SESSION_SCOPE",
+                    "reason_code": "SLEEVE_NOT_IN_PAPER_SESSION_SCOPE",
+                }
+            )
+            continue
         sleeve_id, mode, ib_account, truth_root = resolve_sleeve_truth_root(s)
 
         rc, cmd_str = run_orchestrator_v2(
@@ -317,32 +309,23 @@ def main() -> int:
             ib_account=ib_account,
             produced_utc=produced_utc,
             truth_root=truth_root,
+            paper_session_ledger_path=paper_session_ledger_path,
         )
-
-        # Orchestrator v2 policy: rc!=0 implies ABORTED (safety breach)
-        # rc == 0 => orchestrator v2 completed and wrote verdict + pointer index in the sleeve truth root.
-        verdict_root = (truth_root / "reports" / "orchestrator_run_verdict_v2").resolve()
         idx_path, points_to_path, pointer_seq = resolve_latest_verdict_pointer(
-            verdict_root=verdict_root, day=day, mode=mode
+            truth_root=truth_root, day=day, mode=mode
         )
-
         verdict_obj = read_json_obj(points_to_path)
         v_status = str(verdict_obj.get("status") or "").strip().upper()
         v_reasons = verdict_obj.get("reason_codes") if isinstance(verdict_obj.get("reason_codes"), list) else []
         v_breaches = verdict_obj.get("safety_breaches") if isinstance(verdict_obj.get("safety_breaches"), list) else []
-
-        # Fail-closed if status missing/unknown
         if v_status not in ("PASS", "DEGRADED", "FAIL", "ABORTED"):
             die(f"verdict_status_invalid sleeve_id={sleeve_id} status={v_status!r} points_to={points_to_path}")
-
-        # Aggregate global status
         if v_status == "ABORTED":
             any_abort = True
         elif v_status == "FAIL":
             any_fail = True
         elif v_status == "DEGRADED":
             any_degraded = True
-
         per_sleeve.append(
             {
                 "sleeve_id": sleeve_id,
@@ -362,7 +345,6 @@ def main() -> int:
             }
         )
 
-    # Global verdict (fail-closed conservative)
     if any_abort:
         global_status = "ABORTED"
     elif any_fail:
@@ -374,23 +356,25 @@ def main() -> int:
 
     rollup = {
         "schema_id": "C2_SLEEVE_ROLLUP_V1",
+        "schema_version": "v1",
         "day_utc": day,
         "input_day_utc": input_day,
         "produced_utc": produced_utc,
         "status": global_status,
         "registry_path": str(REGISTRY_PATH),
+        "session_id": ledger.session_id,
+        "paper_session_ledger_path": str(paper_session_ledger_path),
+        "ledger_id": ledger.ledger_id,
+        "authority_status": str(ledger.control_state.get("authority_status") or "").strip().upper(),
         "sleeves": per_sleeve,
-        "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_c2_multi_sleeve_orchestrator_v1.py"},
+        "producer": {"repo": REPO_ROOT.name, "module": "ops/tools/run_c2_multi_sleeve_orchestrator_v1.py"},
     }
-
     out_path = write_rollup(day, rollup)
     print(f"OK: wrote_rollup path={out_path}")
 
-    # Append canonical pointer index for the rollup (day-scoped, append-only)
     day_dir = (ROLLOUP_ROOT / day).resolve()
     idx_path = (day_dir / POINTER_INDEX_NAME).resolve()
     lock_path = (day_dir / POINTER_LOCK_NAME).resolve()
-
     lock_fd = lock_acquire(lock_path)
     try:
         last_seq = read_last_pointer_seq(idx_path)
@@ -403,14 +387,13 @@ def main() -> int:
             "produced_utc": produced_utc,
             "points_to": str(out_path),
             "points_to_sha256": sha256_file(out_path),
-            "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_c2_multi_sleeve_orchestrator_v1.py"},
+            "producer": {"repo": REPO_ROOT.name, "module": "ops/tools/run_c2_multi_sleeve_orchestrator_v1.py"},
         }
         line_sha = atomic_append_jsonl(idx_path, entry)
     finally:
         lock_release(lock_fd, lock_path)
 
     print(f"OK: rollup_pointer_appended seq={pointer_seq} line_sha256={line_sha} idx={idx_path}")
-    # Always exit 0 except on ABORTED (safety breach)
     if global_status == "ABORTED":
         return 9
     return 0

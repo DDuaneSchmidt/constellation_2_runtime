@@ -147,6 +147,7 @@ def build_snapshot_obj_v1(
     *,
     produced_utc: str,
     day_utc: str,
+    authority_basis: str,
     producer_repo: str,
     producer_git_sha: str,
     producer_module: str,
@@ -167,6 +168,7 @@ def build_snapshot_obj_v1(
         "schema_version": 1,
         "produced_utc": produced_utc,
         "day_utc": day_utc,
+        "authority_basis": authority_basis,
         "producer": {"repo": producer_repo, "git_sha": producer_git_sha, "module": producer_module},
         "status": status,
         "reason_codes": reason_codes,
@@ -307,6 +309,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     snapshot = build_snapshot_obj_v1(
         produced_utc=produced_utc,
         day_utc=day_utc,
+        authority_basis="operator_statement",
         producer_repo=str(args.producer_repo),
         producer_git_sha=str(args.producer_git_sha),
         producer_module="constellation_2/phaseF/cash_ledger/run/run_cash_ledger_snapshot_day_v1.py",

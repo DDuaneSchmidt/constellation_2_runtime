@@ -1,0 +1,10 @@
+{
+  "schema_id": "C2_RISK_POLICY_REGISTRY_V1",
+  "schema_version": "v1",
+  "policies": {
+    "C2_TREND_EQ_PRIMARY_V1": {
+      "target_notional_pct_default": "0.01",
+      "per_trade_notional_pct_max": "0.01"
+    }
+  }
+}

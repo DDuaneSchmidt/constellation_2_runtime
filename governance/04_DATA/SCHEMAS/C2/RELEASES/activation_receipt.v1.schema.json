@@ -1,0 +1,40 @@
+{
+  "schema_id": "C2_RELEASES_ACTIVATION_RECEIPT_SCHEMA_V1",
+  "title": "C2 Activation Receipt V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "release_id",
+    "git_sha",
+    "prior_release_id",
+    "active_pointer_path",
+    "runtime_data_root",
+    "services_reloaded",
+    "parity_verified",
+    "generated_at_utc",
+    "status"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "activation_receipt.v1" },
+    "schema_version": { "type": "string", "const": "v1" },
+    "release_id": { "type": "string", "minLength": 1 },
+    "git_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "prior_release_id": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string", "minLength": 1 }
+      ]
+    },
+    "active_pointer_path": { "type": "string", "minLength": 1 },
+    "runtime_data_root": { "type": "string", "minLength": 1 },
+    "services_reloaded": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "parity_verified": { "type": "boolean" },
+    "generated_at_utc": { "type": "string", "minLength": 11 },
+    "status": { "type": "string", "enum": ["ACTIVATED"] }
+  }
+}

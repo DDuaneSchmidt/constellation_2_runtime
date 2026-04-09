@@ -1,0 +1,82 @@
+{
+  "schema_id": "C2_PAPER_SESSION_ADMISSION_PRODUCER_MAP_V1",
+  "schema_version": 1,
+  "authoritative_repo_root": "/home/node/constellation",
+  "invocation_phase": "admission_preclosure",
+  "producers": [
+    {
+      "producer_id": "operator_statement_seed",
+      "order": 10,
+      "invocation_phase": "admission_preclosure",
+      "entrypoint_relpath": "ops/tools/ensure_cash_ledger_operator_statement_v1.py",
+      "dependency_keys": [
+        "operator_input:operator_statement"
+      ],
+      "required_inputs": [
+        "day_utc",
+        "governance/02_REGISTRIES/C2_SLEEVE_REGISTRY_V1.json",
+        "constellation_2"
+      ],
+      "output_paths": [
+        "constellation_2/operator_inputs/cash_ledger_operator_statements/<DAY>/operator_statement.v1.json"
+      ],
+      "failure_semantics": "If operator statement creation fails, admission remains blocked on operator_statement."
+    },
+    {
+      "producer_id": "testing_evidence_plane_refresh",
+      "order": 20,
+      "invocation_phase": "admission_preclosure",
+      "entrypoint_relpath": "ops/tools/run_testing_evidence_plane_v1.py",
+      "dependency_keys": [
+        "readiness:subsystem_readiness_report",
+        "readiness:paper_open_readiness"
+      ],
+      "required_inputs": [
+        "day_utc",
+        "source_test_suites"
+      ],
+      "output_paths": [
+        "constellation_2/runtime/truth/reports/subsystem_readiness_report_v1/<DAY>/subsystem_readiness_report.v1.json",
+        "constellation_2/runtime/truth/reports/paper_open_readiness_v1/<DAY>/paper_open_readiness.v1.json"
+      ],
+      "failure_semantics": "If evidence-plane generation fails, admission remains blocked on the missing or invalid readiness artifacts."
+    },
+    {
+      "producer_id": "session_readiness_refresh",
+      "order": 30,
+      "invocation_phase": "admission_preclosure",
+      "entrypoint_relpath": "ops/tools/run_session_readiness_refresh_v1.py",
+      "dependency_keys": [
+        "readiness:session_readiness_refresh"
+      ],
+      "required_inputs": [
+        "day_utc",
+        "authoritative_source_repo_environment"
+      ],
+      "output_paths": [
+        "constellation_2/runtime/truth/reports/session_readiness_refresh_v1/<DAY>/session_readiness_refresh.v1.json"
+      ],
+      "failure_semantics": "If session readiness refresh fails, admission remains blocked on session_readiness_refresh."
+    },
+    {
+      "producer_id": "baseline_readiness",
+      "order": 40,
+      "invocation_phase": "admission_preclosure",
+      "entrypoint_relpath": "ops/tools/run_baseline_readiness_admission_v1.py",
+      "dependency_keys": [
+        "readiness:baseline_ready"
+      ],
+      "required_inputs": [
+        "day_utc",
+        "operator_statement",
+        "positions_snapshot",
+        "cash_ledger_snapshot",
+        "accounting_nav"
+      ],
+      "output_paths": [
+        "constellation_2/runtime/truth/readiness_v1/baseline_ready/<DAY>/baseline_ready.v1.json"
+      ],
+      "failure_semantics": "If baseline readiness generation fails, admission remains blocked on baseline_ready."
+    }
+  ]
+}

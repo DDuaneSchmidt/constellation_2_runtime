@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/paper_open_readiness.v1.schema.json",
+  "title": "paper_open_readiness.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "readiness_id",
+    "environment_name",
+    "subsystem_readiness_refs",
+    "unresolved_blockers",
+    "unresolved_semantic_gaps",
+    "overall_status",
+    "paper_open_allowed",
+    "rationale",
+    "recorded_at"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "paper_open_readiness"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "readiness_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "environment_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "subsystem_readiness_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "unresolved_blockers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "unresolved_semantic_gaps": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "overall_status": {
+      "type": "string",
+      "enum": ["READY", "NOT_READY", "BLOCKED", "UNKNOWN"]
+    },
+    "paper_open_allowed": {
+      "type": "boolean"
+    },
+    "authority_scope": {
+      "type": "string",
+      "const": "DERIVED_ONLY_VIEW"
+    },
+    "paper_session_ledger_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ledger_authority_status": {
+      "type": "string",
+      "enum": ["GRANTED", "DENIED", "UNKNOWN"]
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recorded_at": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/deployment_state_machine.v1.schema.json",
+  "title": "deployment_state_machine.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_scope",
+    "day_utc",
+    "deployment_attempt_id",
+    "deployment_state_machine_id",
+    "evaluated_at_utc",
+    "authoritative_source",
+    "release_build",
+    "active_release",
+    "live_execution",
+    "drift_checks",
+    "post_activation_verification",
+    "final_deployment_decision",
+    "blocking_codes",
+    "first_true_blocker_code",
+    "first_true_blocker_path",
+    "human_readable_summary",
+    "producer"
+  ],
+  "properties": {
+    "schema_id": { "const": "deployment_state_machine" },
+    "schema_version": { "const": "v1" },
+    "authority_scope": { "const": "TOP_LEVEL_DEPLOYMENT_STATE_MACHINE_OWNER" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "deployment_attempt_id": { "type": "string", "minLength": 1 },
+    "deployment_state_machine_id": { "type": "string", "minLength": 1 },
+    "evaluated_at_utc": { "type": "string", "minLength": 20 },
+    "authoritative_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authoritative_repo_root",
+        "authoritative_git_sha",
+        "authoritative_branch",
+        "authoritative_cleanliness_status",
+        "dirty_entry_count",
+        "dirty_entry_sample",
+        "source_snapshot_id"
+      ],
+      "properties": {
+        "authoritative_repo_root": { "type": "string", "minLength": 1 },
+        "authoritative_git_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "authoritative_branch": { "type": "string", "minLength": 1 },
+        "authoritative_cleanliness_status": { "type": "string", "enum": ["CLEAN", "DIRTY"] },
+        "dirty_entry_count": { "type": "integer", "minimum": 0 },
+        "dirty_entry_sample": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "source_snapshot_id": { "type": "string" }
+      }
+    },
+    "release_build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "release_id",
+        "release_root",
+        "release_manifest_sha",
+        "bundled_file_hash_summary",
+        "build_status",
+        "required_startup_stack_files_present",
+        "missing_required_startup_stack_files"
+      ],
+      "properties": {
+        "release_id": { "type": "string" },
+        "release_root": { "type": "string" },
+        "release_manifest_sha": { "type": "string" },
+        "bundled_file_hash_summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["file_count", "aggregate_sha256"],
+          "properties": {
+            "file_count": { "type": "integer", "minimum": 0 },
+            "aggregate_sha256": { "type": "string" }
+          }
+        },
+        "build_status": { "type": "string", "minLength": 1 },
+        "required_startup_stack_files_present": { "type": "boolean" },
+        "missing_required_startup_stack_files": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "active_release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "active_symlink_path",
+        "active_symlink_target",
+        "activation_status",
+        "active_runtime_contract_path",
+        "active_runtime_contract_status"
+      ],
+      "properties": {
+        "active_symlink_path": { "type": "string", "minLength": 1 },
+        "active_symlink_target": { "type": "string" },
+        "activation_status": { "type": "string", "minLength": 1 },
+        "active_runtime_contract_path": { "type": "string" },
+        "active_runtime_contract_status": { "type": "string", "minLength": 1 }
+      }
+    },
+    "live_execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "service_unit_path",
+        "launcher_path",
+        "resolved_execution_root",
+        "active_root_match",
+        "authoritative_service_source_path",
+        "authoritative_service_source_root"
+      ],
+      "properties": {
+        "service_unit_path": { "type": "string" },
+        "launcher_path": { "type": "string" },
+        "resolved_execution_root": { "type": "string" },
+        "active_root_match": { "type": "boolean" },
+        "authoritative_service_source_path": { "type": "string" },
+        "authoritative_service_source_root": { "type": "string" }
+      }
+    },
+    "drift_checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authoritative_vs_release",
+        "release_vs_active",
+        "active_vs_live_execution",
+        "runtime_copy_still_executable",
+        "required_startup_stack_files_present"
+      ],
+      "properties": {
+        "authoritative_vs_release": { "$ref": "#/$defs/check" },
+        "release_vs_active": { "$ref": "#/$defs/check" },
+        "active_vs_live_execution": { "$ref": "#/$defs/check" },
+        "runtime_copy_still_executable": { "$ref": "#/$defs/check" },
+        "required_startup_stack_files_present": { "$ref": "#/$defs/check" }
+      }
+    },
+    "post_activation_verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "passed",
+        "release_id",
+        "release_root",
+        "active_symlink_path",
+        "active_symlink_target",
+        "active_pointer_matches_release",
+        "required_startup_stack_files_present",
+        "missing_required_startup_stack_files",
+        "service_unit_path",
+        "launcher_path",
+        "resolved_execution_root",
+        "active_root_match",
+        "active_runtime_contract_path",
+        "active_runtime_contract_match",
+        "blocking_codes"
+      ],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "release_id": { "type": "string" },
+        "release_root": { "type": "string" },
+        "active_symlink_path": { "type": "string", "minLength": 1 },
+        "active_symlink_target": { "type": "string" },
+        "active_pointer_matches_release": { "type": "boolean" },
+        "required_startup_stack_files_present": { "type": "boolean" },
+        "missing_required_startup_stack_files": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "service_unit_path": { "type": "string" },
+        "launcher_path": { "type": "string" },
+        "resolved_execution_root": { "type": "string" },
+        "active_root_match": { "type": "boolean" },
+        "active_runtime_contract_path": { "type": "string", "minLength": 1 },
+        "active_runtime_contract_match": { "type": "boolean" },
+        "blocking_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "final_deployment_decision": {
+      "type": "string",
+      "enum": ["DEPLOY_READY", "DEPLOY_BLOCKED_VALID", "DEPLOY_BLOCKED_BY_DEFECT", "DEPLOY_ACTIVE"]
+    },
+    "blocking_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "first_true_blocker_code": { "type": "string" },
+    "first_true_blocker_path": { "type": "string" },
+    "human_readable_summary": { "type": "string", "minLength": 1 },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" }
+      }
+    }
+  },
+  "$defs": {
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "details"],
+      "properties": {
+        "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+        "details": { "type": "object" }
+      }
+    }
+  }
+}

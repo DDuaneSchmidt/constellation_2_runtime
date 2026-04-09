@@ -22,8 +22,12 @@ AUTHORITY_MODE_GOVERNANCE_PRIMARY = "governance_primary"
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GOVERNANCE_ROOT = (REPO_ROOT / "governance").resolve()
-RUNTIME_ROOT = Path("/tmp/constellation_2_foundation").resolve()
+RUNTIME_ROOT = Path("/home/node/constellation_runtime_data").resolve()
 RUNTIME_TRUTH_ROOT = (RUNTIME_ROOT / "truth_sleeves" / "PRIMARY" / "PAPER").resolve()
+
+
+def _governance_truth_root(repo_root: Path) -> Path:
+    return RUNTIME_TRUTH_ROOT
 
 
 def _require_absolute_existing_dir(path: Path, *, label: str) -> Path:
@@ -97,6 +101,14 @@ def resolve_runtime_truth_root() -> Path:
 def resolve_truth_root(*, repo_root: Path) -> Path:
     repo_root_resolved = Path(repo_root).resolve()
     _require_under_repo(repo_root_resolved, label="repo_root")
+    authority_mode = resolve_authority_mode()
+    if authority_mode == AUTHORITY_MODE_GOVERNANCE_PRIMARY:
+        default_root = _require_absolute_existing_dir(_governance_truth_root(repo_root_resolved), label="GOVERNANCE_TRUTH_ROOT")
+        raw = (os.environ.get(ENV_VAR) or "").strip()
+        if not raw:
+            return default_root
+        pr = _require_absolute_existing_dir(Path(raw).expanduser().resolve(), label=ENV_VAR)
+        return _require_under_root(pr, root=resolve_runtime_root(), label=ENV_VAR)
     return resolve_runtime_truth_root()
 
 

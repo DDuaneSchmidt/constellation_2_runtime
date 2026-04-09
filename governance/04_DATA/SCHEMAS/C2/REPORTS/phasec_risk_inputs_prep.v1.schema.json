@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/phasec_risk_inputs_prep.v1.schema.json",
+  "title": "phasec_risk_inputs_prep.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_scope",
+    "day_utc",
+    "session_id",
+    "status",
+    "compatible_nav_path",
+    "drawdown_pct",
+    "required_inputs_checked",
+    "blocking_codes",
+    "producer",
+    "produced_at_utc",
+    "bridge_result",
+    "human_readable_summary"
+  ],
+  "properties": {
+    "schema_id": { "const": "phasec_risk_inputs_prep" },
+    "schema_version": { "const": "v1" },
+    "authority_scope": { "const": "NON_AUTHORITY_FACT" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "session_id": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["PASS", "BLOCKED_VALID", "BLOCKED_BY_DEFECT"] },
+    "compatible_nav_path": { "type": "string", "minLength": 1 },
+    "drawdown_pct": { "type": "string" },
+    "required_inputs_checked": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/factDependency" }
+    },
+    "blocking_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "producer": { "$ref": "#/$defs/producer" },
+    "produced_at_utc": { "type": "string", "minLength": 20 },
+    "bridge_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["returncode", "stdout", "stderr", "artifact_path", "artifact_status"],
+      "properties": {
+        "returncode": { "type": "integer" },
+        "stdout": { "type": "string" },
+        "stderr": { "type": "string" },
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_status": { "type": "string", "minLength": 1 }
+      }
+    },
+    "human_readable_summary": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 1 }
+      }
+    },
+    "factDependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["logical_name", "absolute_path", "sha256", "day_utc", "status", "reason_codes"],
+      "properties": {
+        "logical_name": { "type": "string", "minLength": 1 },
+        "absolute_path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string" },
+        "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "status": { "type": "string", "minLength": 1 },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

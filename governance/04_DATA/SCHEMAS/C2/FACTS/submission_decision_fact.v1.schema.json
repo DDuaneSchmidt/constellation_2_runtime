@@ -1,0 +1,42 @@
+{
+  "schema_id": "C2_FACT_SUBMISSION_DECISION_SCHEMA_V1",
+  "title": "C2 Submission Decision Fact V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "invoked_day_utc",
+    "allowed",
+    "reason_code",
+    "reason_detail",
+    "source_refs",
+    "producer",
+    "producer_git_sha",
+    "generated_at_utc"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "submission_decision_fact.v1" },
+    "schema_version": { "type": "string", "const": "v1" },
+    "invoked_day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
+    "allowed": { "type": "boolean" },
+    "reason_code": { "type": "string", "minLength": 1 },
+    "reason_detail": { "type": "string" },
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ref_type", "path", "sha256"],
+        "properties": {
+          "ref_type": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "producer": { "type": "string", "minLength": 1 },
+    "producer_git_sha": { "type": "string", "minLength": 7, "maxLength": 64 },
+    "generated_at_utc": { "type": "string", "minLength": 11 }
+  }
+}

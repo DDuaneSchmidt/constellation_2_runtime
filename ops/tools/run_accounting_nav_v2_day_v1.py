@@ -3,12 +3,17 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List
-from constellation_2.common.truth_root_v1 import resolve_truth_root
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.common.truth_root_v1 import resolve_truth_root
+
 TRUTH_ROOT = resolve_truth_root(repo_root=REPO_ROOT)
 
 def _require_truth_root(raw: str | None) -> Path:
@@ -49,9 +54,47 @@ def _immut_write(path: Path, content: bytes) -> None:
     _atomic_write(path, content)
 
 
+def _write_nav_report(path: Path, content: bytes) -> None:
+    if not path.exists():
+        _immut_write(path, content)
+        return
+
+    existing = _load_json(path)
+    candidate = json.loads(content.decode("utf-8"))
+    existing_status = str(existing.get("status") or "").strip().upper()
+    candidate_status = str(candidate.get("status") or "").strip().upper()
+    if existing_status == "BOOTSTRAP" and candidate_status == "ACTIVE":
+        _atomic_write(path, content)
+        return
+    _immut_write(path, content)
+
+
 def _load_json(p: Path) -> Dict[str, Any]:
     with p.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+def _existing_bootstrap_can_be_upgraded(*, existing: Dict[str, Any], truth_root: Path, day_utc: str) -> bool:
+    if str(existing.get("status") or "").strip().upper() != "BOOTSTRAP":
+        return False
+
+    cash_path = truth_root / "cash_ledger_v1" / "snapshots" / day_utc / "cash_ledger_snapshot.v1.json"
+    pos_path = truth_root / "positions_v1" / "snapshots" / day_utc / "positions_snapshot.v2.json"
+    if (not cash_path.exists()) or (not pos_path.exists()):
+        return False
+
+    try:
+        pos = _load_json(pos_path)
+        marks_path = truth_root / "market_data_snapshot_v1" / "broker_marks_v1" / day_utc / "broker_marks.v1.json"
+        p = pos.get("positions")
+        if isinstance(p, dict) and isinstance(p.get("items"), list):
+            return (len(p.get("items") or [])) == 0 or marks_path.exists()
+        items = pos.get("items")
+        if isinstance(items, list):
+            return len(items) == 0 or marks_path.exists()
+    except Exception:
+        return False
+    return False
+
 
 def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | None:
     """
@@ -76,6 +119,10 @@ def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | N
         raise SystemExit(f"FAIL: EXISTING_REPORT_SCHEMA_MISMATCH: schema_id={schema_id!r} path={out_path}")
     if day_utc != expected_day_utc:
         raise SystemExit(f"FAIL: EXISTING_REPORT_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}")
+
+    if _existing_bootstrap_can_be_upgraded(existing=existing, truth_root=TRUTH_ROOT, day_utc=expected_day_utc):
+        print(f"OK: accounting_nav_v2_existing_bootstrap_upgrade_allowed day_utc={expected_day_utc} path={out_path}")
+        return None
 
     sha = _sha256_file(out_path)
     print(f"OK: accounting_nav_v2_exists day_utc={expected_day_utc} path={out_path} sha256={sha} action=EXISTS")
@@ -153,7 +200,7 @@ def _write_bootstrap_stub(*, out_path: Path, day: str, producer_repo: str, produ
         "history": {},
     }
 
-    _immut_write(out_path, _json_bytes(out))
+    _write_nav_report(out_path, _json_bytes(out))
     print(f"OK: wrote {out_path} (DAY0_BOOTSTRAP)")
 
 
@@ -293,8 +340,11 @@ def main() -> int:
     input_manifest = [
         {"type": "cash_ledger", "path": str(cash_path), "sha256": _sha256_file(cash_path), "day_utc": day, "producer": "cash_ledger_v1"},
         {"type": "positions_truth", "path": str(pos_path), "sha256": _sha256_file(pos_path), "day_utc": day, "producer": "positions_v1"},
-        {"type": "broker_marks", "path": str(marks_path), "sha256": _sha256_file(marks_path), "day_utc": day, "producer": "broker_marks_v1"},
     ]
+    if marks_path.exists():
+        input_manifest.append(
+            {"type": "broker_marks", "path": str(marks_path), "sha256": _sha256_file(marks_path), "day_utc": day, "producer": "broker_marks_v1"}
+        )
 
     out = {
         "schema_id": "C2_ACCOUNTING_NAV_V2",
@@ -318,7 +368,7 @@ def main() -> int:
         "history": {},
     }
 
-    _immut_write(out_path, _json_bytes(out))
+    _write_nav_report(out_path, _json_bytes(out))
 
     print(f"OK: wrote {out_path}")
     return 0

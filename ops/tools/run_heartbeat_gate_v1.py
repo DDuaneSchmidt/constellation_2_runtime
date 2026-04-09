@@ -31,10 +31,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from constellation_2.common.runtime_contract_v1 import (
+    require_truth_root_under_contract,
+    resolve_canonical_truth_root,
+    resolve_release_provenance,
+)
 from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-DEFAULT_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+_THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = _THIS_FILE.parents[2].resolve()
+try:
+    DEFAULT_TRUTH_ROOT = resolve_canonical_truth_root()
+except Exception:
+    DEFAULT_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
 REG_PATH = (REPO_ROOT / "governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json").resolve()
 
@@ -57,6 +66,10 @@ def _sha256_file(p: Path) -> str:
 
 
 def _git_sha() -> str:
+    try:
+        return str(resolve_release_provenance().get("git_sha") or "").strip()
+    except Exception:
+        pass
     try:
         out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
         return out.decode("utf-8").strip()
@@ -118,10 +131,13 @@ def _resolve_truth_root(arg_truth_root: str) -> Path:
     if not truth_root.exists() or not truth_root.is_dir():
         raise SystemExit(f"FAIL: truth_root missing or not dir: {truth_root}")
     try:
-        truth_root.relative_to(REPO_ROOT)
+        return require_truth_root_under_contract(truth_root)
     except Exception:
-        raise SystemExit(f"FAIL: truth_root not under repo root: truth_root={truth_root} repo_root={REPO_ROOT}")
-    return truth_root
+        try:
+            truth_root.relative_to(REPO_ROOT)
+        except Exception:
+            raise SystemExit(f"FAIL: truth_root not under repo root: truth_root={truth_root} repo_root={REPO_ROOT}")
+        return truth_root
 
 
 def _active_engines_from_registry(reg: Dict[str, Any]) -> List[Dict[str, str]]:

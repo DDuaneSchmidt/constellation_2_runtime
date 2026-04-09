@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/trading_day_intent_generation.v1.schema.json",
+  "title": "trading_day_intent_generation.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_scope",
+    "day_utc",
+    "generation_run_id",
+    "produced_at_utc",
+    "producer",
+    "truth_root",
+    "active_engine_registry_path",
+    "active_engine_registry_sha256",
+    "producer_topology",
+    "skipped_active_engines",
+    "producer_results",
+    "final_status",
+    "first_blocker_code",
+    "first_blocker_artifact_path",
+    "canonical_outputs",
+    "blocking_codes",
+    "human_readable_summary"
+  ],
+  "properties": {
+    "schema_id": { "const": "trading_day_intent_generation" },
+    "schema_version": { "const": "v1" },
+    "authority_scope": { "const": "NON_AUTHORITY_PREREQUISITE_FACT" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "generation_run_id": { "type": "string", "minLength": 1 },
+    "produced_at_utc": { "type": "string", "minLength": 20 },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 1 }
+      }
+    },
+    "truth_root": { "type": "string", "minLength": 1 },
+    "active_engine_registry_path": { "type": "string", "minLength": 1 },
+    "active_engine_registry_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "producer_topology": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["engine_id", "script_path", "script_sha256", "registry_runner_sha256", "required"],
+        "properties": {
+          "engine_id": { "type": "string", "minLength": 1 },
+          "script_path": { "type": "string", "minLength": 1 },
+          "script_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "registry_runner_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "required": { "type": "boolean" }
+        }
+      }
+    },
+    "skipped_active_engines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["engine_id", "reason_code"],
+        "properties": {
+          "engine_id": { "type": "string", "minLength": 1 },
+          "reason_code": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "producer_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "logical_name",
+          "engine_id",
+          "script_path",
+          "script_sha256",
+          "registry_runner_sha256",
+          "status",
+          "return_code",
+          "reason_codes",
+          "stdout",
+          "stderr",
+          "output_paths"
+        ],
+        "properties": {
+          "logical_name": { "type": "string", "minLength": 1 },
+          "engine_id": { "type": "string" },
+          "script_path": { "type": "string", "minLength": 1 },
+          "script_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "registry_runner_sha256": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["INTENT_WRITTEN", "NO_INTENT", "VALID_ZERO_WRITTEN", "BLOCKED_VALID", "BLOCKED_BY_DEFECT", "SKIPPED"]
+          },
+          "return_code": { "type": ["integer", "null"] },
+          "reason_codes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "stdout": { "type": "string" },
+          "stderr": { "type": "string" },
+          "output_paths": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "final_status": {
+      "type": "string",
+      "enum": ["INTENTS_PRESENT", "VALID_ZERO", "BLOCKED_VALID", "BLOCKED_BY_DEFECT"]
+    },
+    "first_blocker_code": { "type": "string" },
+    "first_blocker_artifact_path": { "type": "string" },
+    "canonical_outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intents_dir", "intent_output_paths", "no_intents_marker_path", "output_count"],
+      "properties": {
+        "intents_dir": { "type": "string", "minLength": 1 },
+        "intent_output_paths": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "no_intents_marker_path": { "type": "string" },
+        "output_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "blocking_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "human_readable_summary": { "type": "string", "minLength": 1 }
+  }
+}

@@ -86,7 +86,7 @@
     "summary": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["decisions", "counts", "notes", "drawdown_enforcement"],
+      "required": ["decisions", "counts", "notes", "drawdown_enforcement", "sleeves"],
       "properties": {
         "decisions": {
           "type": "array",
@@ -112,6 +112,22 @@
           }
         },
         "notes": { "type": "array", "items": { "type": "string" } },
+        "sleeves": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["sleeve_id", "truth_root", "decision_count", "allow", "block"],
+            "properties": {
+              "sleeve_id": { "type": "string", "minLength": 1 },
+              "truth_root": { "type": "string", "minLength": 1 },
+              "decision_count": { "type": "integer", "minimum": 0 },
+              "allow": { "type": "integer", "minimum": 0 },
+              "block": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
 
         "drawdown_enforcement": {
           "type": "object",

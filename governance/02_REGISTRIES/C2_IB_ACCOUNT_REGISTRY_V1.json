@@ -24,6 +24,9 @@
       "allowed_symbols": [
         "SPY"
       ],
+      "allowed_sleeve_ids": [
+        "PRIMARY"
+      ],
       "notes": [
         "Discovered from C2 truth: cash_ledger_v1 snapshots embed account_id=DUO847203.",
         "Policy: DUO847203 is restricted to SPY only via allowed_symbols=[SPY].",

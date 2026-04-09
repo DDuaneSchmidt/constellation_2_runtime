@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/intents_day_completeness.v1.schema.json",
+  "title": "intents_day_completeness.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_scope",
+    "day_utc",
+    "session_id",
+    "completeness_status",
+    "required_inputs_checked",
+    "missing_inputs",
+    "freshness_verdict",
+    "linkage_verdict",
+    "blocking_codes",
+    "producer",
+    "produced_at_utc"
+  ],
+  "properties": {
+    "schema_id": { "const": "intents_day_completeness" },
+    "schema_version": { "const": "v1" },
+    "authority_scope": { "const": "NON_AUTHORITY_PREREQUISITE_FACT" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "session_id": { "type": "string", "minLength": 1 },
+    "completeness_status": {
+      "type": "string",
+      "enum": [
+        "COMPLETE",
+        "NO_INTENTS_DECLARED",
+        "INCOMPLETE",
+        "MALFORMED",
+        "UNKNOWN"
+      ]
+    },
+    "required_inputs_checked": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["logical_name", "absolute_path", "sha256", "day_utc", "status", "reason_codes"],
+        "properties": {
+          "logical_name": { "type": "string", "minLength": 1 },
+          "absolute_path": { "type": "string" },
+          "sha256": { "type": "string" },
+          "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+          "status": { "type": "string", "minLength": 1 },
+          "reason_codes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "missing_inputs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "freshness_verdict": { "type": "string", "enum": ["CURRENT", "UNKNOWN"] },
+    "linkage_verdict": { "type": "string", "enum": ["LINKED", "UNLINKED"] },
+    "blocking_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 1 }
+      }
+    },
+    "produced_at_utc": { "type": "string", "minLength": 20 }
+  }
+}

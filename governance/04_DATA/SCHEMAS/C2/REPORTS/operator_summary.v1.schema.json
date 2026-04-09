@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/operator_summary.v1.schema.json",
+  "title": "operator_summary.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_scope",
+    "summary_kind",
+    "day_utc",
+    "produced_at_utc",
+    "producer",
+    "control_plane_ref",
+    "control_plane_id",
+    "state_machine_id",
+    "final_start_decision",
+    "first_true_blocker_code",
+    "ledger_ref",
+    "ledger_id",
+    "authority_status",
+    "submission_authorized",
+    "summary_state",
+    "startup_proof_validation_ref",
+    "startup_proof_status",
+    "session_readiness_refresh_ref",
+    "non_authority_notice",
+    "blocking_codes"
+  ],
+  "properties": {
+    "schema_id": { "const": "operator_summary" },
+    "schema_version": { "const": "v1" },
+    "authority_scope": { "const": "DERIVED_ONLY_VIEW" },
+    "summary_kind": { "type": "string", "enum": ["preopen"] },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_at_utc": { "type": "string", "minLength": 20 },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 1 }
+      }
+    },
+    "control_plane_ref": { "type": "string", "minLength": 1 },
+    "control_plane_id": { "type": "string", "minLength": 1 },
+    "state_machine_id": { "type": "string", "minLength": 1 },
+    "final_start_decision": { "type": "string", "enum": ["READY_NOW", "BLOCKED_VALID", "BLOCKED_BY_DEFECT"] },
+    "first_true_blocker_code": { "type": "string" },
+    "ledger_ref": { "type": "string" },
+    "ledger_id": { "type": "string" },
+    "authority_status": { "type": "string", "enum": ["GRANTED", "DENIED", "NOT_EVALUATED"] },
+    "submission_authorized": { "type": "boolean" },
+    "summary_state": { "type": "string", "minLength": 1 },
+    "startup_proof_validation_ref": { "type": "string" },
+    "startup_proof_status": { "type": "string", "minLength": 1 },
+    "session_readiness_refresh_ref": { "type": "string" },
+    "non_authority_notice": { "type": "string", "minLength": 1 },
+    "blocking_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

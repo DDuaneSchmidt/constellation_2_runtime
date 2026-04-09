@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/paper_session_admission_certificate.v1.schema.json",
+  "title": "paper_session_admission_certificate.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "certificate_id",
+    "session_id",
+    "day_utc",
+    "status",
+    "paper_ready",
+    "graph_fingerprint",
+    "envelope_ref",
+    "closure_ref",
+    "blocker_ledger_ref",
+    "issued_at",
+    "valid_until"
+  ],
+  "properties": {
+    "schema_id": { "const": "paper_session_admission_certificate" },
+    "schema_version": { "const": "v1" },
+    "certificate_id": { "type": "string", "minLength": 1 },
+    "session_id": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "const": "ADMITTED" },
+    "paper_ready": { "type": "boolean", "const": true },
+    "graph_fingerprint": { "type": "string", "minLength": 1 },
+    "envelope_ref": { "type": "string", "minLength": 1 },
+    "closure_ref": { "type": "string", "minLength": 1 },
+    "blocker_ledger_ref": { "type": "string", "minLength": 1 },
+    "issued_at": { "type": "string", "minLength": 1 },
+    "valid_until": { "type": "string", "minLength": 1 }
+  }
+}

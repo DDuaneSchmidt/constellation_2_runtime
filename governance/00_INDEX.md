@@ -53,6 +53,24 @@ Additional registries introduced:
 - `governance/02_REGISTRIES/C2_PLATFORM_READINESS_POLICY_V1.json`
 - `governance/02_REGISTRIES/C2_LIFECYCLE_DEPENDENCY_CLASSIFICATION_V1.json`
 - `governance/05_CONTRACTS/C2/multi_sleeve_rollup_pointer_index_v1.contract.md`
+- `governance/05_CONTRACTS/C2/sleeve_rollup_v1.contract.md`
+- `governance/05_CONTRACTS/C2/paper_session_ledger_v1.contract.md`
+- `governance/05_CONTRACTS/C2/startup_proof_validation_v1.contract.md`
+- `governance/05_CONTRACTS/C2/operator_summary_v1.contract.md`
+- `governance/05_CONTRACTS/C2/intents_day_completeness_v1.contract.md`
+- `governance/05_CONTRACTS/C2/no_intents_day_v1.contract.md`
+- `governance/05_CONTRACTS/C2/trading_day_intent_generation_v1.contract.md`
+- `governance/05_CONTRACTS/C2/startup_materialization_inputs_prep_v1.contract.md`
+- `governance/05_CONTRACTS/C2/phasec_risk_inputs_prep_v1.contract.md`
+- `governance/05_CONTRACTS/C2/paper_day_control_plane_v1.contract.md`
+- `governance/05_CONTRACTS/C2/trading_day_control_plane_v1.contract.md`
+- `governance/05_CONTRACTS/C2/trading_day_execution_control_plane_v1.contract.md`
+- `governance/05_CONTRACTS/C2/trading_day_state_machine_v1.contract.md`
+- `governance/05_CONTRACTS/C2/deployment_state_machine_v1.contract.md`
+- `governance/05_CONTRACTS/C2/release_root_activation_v1.contract.md`
+- `governance/05_CONTRACTS/C2/active_runtime_contract_v1.contract.md`
+- `governance/05_CONTRACTS/C2/paper_session_evidence_manifest_v1.contract.md` (superseded by `paper_session_ledger_v1`)
+- `governance/05_CONTRACTS/C2/paper_session_kernel_v1.contract.md` (superseded by `paper_session_ledger_v1`)
 - `governance/05_CONTRACTS/C2/preopen_requires_multi_sleeve_rollup_verification_v1.contract.md`
 - `governance/05_CONTRACTS/C2/v2_readiness_dependency_contract_v1.contract.md`
 - `governance/05_CONTRACTS/C2/capital_monitoring_attestation_v1.contract.md`
@@ -151,6 +169,23 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `ops/tools/run_constellation_bug_metrics_v1.py`
 - `ops/tools/run_constellation_platform_readiness_v1.py`
 - `ops/tools/run_capital_monitoring_attestation_v1.py`
+- `ops/tools/run_startup_materialization_v1.py`
+- `ops/tools/run_paper_trading_posture_v1.py`
+- `ops/tools/run_submit_boundary_status_v1.py`
+- `ops/tools/run_startup_proof_validation_v1.py`
+- `ops/tools/run_operator_summary_v1.py`
+- `ops/tools/run_intents_day_completeness_v1.py`
+- `ops/tools/run_trading_day_intent_generation_v1.py`
+- `ops/tools/run_startup_materialization_inputs_prep_v1.py`
+- `ops/tools/run_phasec_risk_inputs_prep_v1.py`
+- `ops/tools/run_paper_day_control_plane_v1.py`
+- `ops/tools/run_trading_day_control_plane_v1.py`
+- `ops/tools/run_trading_day_execution_control_plane_v1.py`
+- `ops/tools/run_trading_day_state_machine_v1.py`
+- `ops/tools/run_deployment_state_machine_v1.py`
+- `ops/tools/run_paper_session_ledger_v1.py`
+- `ops/tools/run_paper_session_evidence_manifest_v1.py` (superseded by `paper_session_ledger_v1`)
+- `ops/tools/run_paper_session_kernel_v1.py` (superseded by `paper_session_ledger_v1`)
 
 ### Engine activity schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/oms_decision.v1.schema.json`
@@ -203,6 +238,24 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/gate_stack_verdict.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/truth_surface_authority_gate.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/failure_injection_harness.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/startup_materialization.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/paper_trading_posture.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/submit_boundary_status.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/startup_proof_validation.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/operator_summary.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/sleeve_rollup.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/paper_session_ledger.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/intents_day_completeness.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/trading_day_intent_generation.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/startup_materialization_inputs_prep.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/phasec_risk_inputs_prep.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/paper_day_control_plane.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/trading_day_control_plane.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/trading_day_execution_control_plane.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/trading_day_state_machine.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/deployment_state_machine.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/paper_session_evidence_manifest.v1.schema.json` (superseded by `paper_session_ledger_v1`)
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/paper_session_kernel.v1.schema.json` (superseded by `paper_session_ledger_v1`)
 
 ### Execution evidence schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/submission_index.v1.schema.json`
