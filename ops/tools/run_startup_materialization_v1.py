@@ -16,7 +16,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from constellation_2.common.paper_session_fact_plane_v1 import (
     NON_AUTHORITY_SCOPE,
-    atomic_write_validated_json_v1,
+    atomic_write_idempotent_validated_json_v1,
     build_fact_dependency_row_v1,
     canonical_paper_session_id_v1,
     collect_intent_files_v1,
@@ -413,10 +413,11 @@ def main(argv: List[str] | None = None) -> int:
             "stderr": str(phasec_result["stderr"]),
         },
     }
-    ref = atomic_write_validated_json_v1(
+    ref = atomic_write_idempotent_validated_json_v1(
         path=resolve_startup_materialization_path(truth_root=truth_root, day_utc=day_utc),
         payload=payload,
         schema_relpath="governance/04_DATA/SCHEMAS/C2/REPORTS/startup_materialization.v1.schema.json",
+        volatile_field_names=("produced_at_utc",),
     )
     print(json.dumps({"path": str(ref.path), "sha256": ref.sha256, "status": status}, sort_keys=True))
     return 0 if status == "SUCCESS" else 2

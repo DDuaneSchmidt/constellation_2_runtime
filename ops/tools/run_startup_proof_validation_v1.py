@@ -13,12 +13,13 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.common.paper_session_fact_plane_v1 import (
-    atomic_write_validated_json_v1,
+    atomic_write_idempotent_validated_json_v1,
     canonical_paper_session_id_v1,
     now_utc_iso_v1,
     read_paper_session_ledger_ref_v1,
     read_startup_materialization_ref_v1,
     repo_git_sha_v1,
+    resolve_authoritative_repo_root_v1,
     resolve_fact_plane_truth_root_v1,
 )
 from constellation_2.common.paper_session_path_alignment_v1 import (
@@ -146,9 +147,10 @@ def main(argv: list[str] | None = None) -> int:
     session_id = canonical_paper_session_id_v1(day_utc)
     produced_at_utc = now_utc_iso_v1()
 
+    authoritative_repo_root = resolve_authoritative_repo_root_v1(REPO_ROOT)
     try:
         repo_proof_payload, repo_failures = collect_repo_authority_proof_v1(
-            authoritative_repo_root=REPO_ROOT,
+            authoritative_repo_root=authoritative_repo_root,
             mode="authoritative_source_only",
         )
     except Exception as exc:
@@ -161,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
     repo_check = _check_row(
         logical_name="repo_authority_proof_v1",
         status="PASS" if not repo_failures else "FAIL",
-        evidence_ref=f"{REPO_ROOT}/repo_role.v1.json",
+        evidence_ref=f"{authoritative_repo_root}/repo_role.v1.json",
         blocking_codes=["STARTUP_PROOF_REPO_AUTHORITY_INVALID"] if repo_failures else [],
         detail={
             "mode": str(repo_proof_payload.get("mode") or "").strip(),
@@ -210,10 +212,11 @@ def main(argv: list[str] | None = None) -> int:
             "authoritative paper-session control owner."
         ),
     }
-    ref = atomic_write_validated_json_v1(
+    ref = atomic_write_idempotent_validated_json_v1(
         path=resolve_startup_proof_validation_path(truth_root=truth_root, day_utc=day_utc),
         payload=payload,
         schema_relpath=SCHEMA_RELPATH_V1,
+        volatile_field_names=("produced_at_utc",),
     )
     print(
         json.dumps(

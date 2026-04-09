@@ -106,6 +106,7 @@ def _source_generated_at_from_event(event: dict[str, Any] | None) -> str:
 
 def _contradictions(
     *,
+    truth_root: Path,
     deployment_payload: dict[str, Any],
     startup_payload: dict[str, Any],
     startup_proof_payload: dict[str, Any],
@@ -127,7 +128,7 @@ def _contradictions(
                 "contradiction_details": "Trading day is READY_NOW while deployment is not DEPLOY_ACTIVE.",
                 "source_artifact_paths": [
                     resolve_trading_day_state_machine_path(
-                        truth_root=resolve_fact_plane_truth_root_v1(None),
+                        truth_root=truth_root,
                         day_utc=str(trading_day_payload.get("day_utc") or ""),
                     ).as_posix()
                 ],
@@ -278,6 +279,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     for contradiction in _contradictions(
+        truth_root=truth_root,
         deployment_payload=deployment_payload,
         startup_payload=startup_payload,
         startup_proof_payload=startup_proof_payload,

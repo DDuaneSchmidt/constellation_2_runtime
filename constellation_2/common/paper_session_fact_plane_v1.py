@@ -32,6 +32,7 @@ from constellation_2.common.paper_session_path_alignment_v1 import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_TRUTH_ROOT = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
 NON_AUTHORITY_SCOPE = "NON_AUTHORITY_FACT"
+REPO_ROLE_FILENAME = "repo_role.v1.json"
 
 STARTUP_MATERIALIZATION_SCHEMA_RELPATH_V1 = (
     "governance/04_DATA/SCHEMAS/C2/REPORTS/startup_materialization.v1.schema.json"
@@ -106,10 +107,31 @@ def canonical_paper_session_id_v1(day_utc: str) -> str:
 
 
 def repo_git_sha_v1() -> str:
+    authoritative_root = resolve_authoritative_repo_root_v1()
     try:
-        return subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT), text=True).strip()
+        return subprocess.check_output(
+            ["/usr/bin/git", "rev-parse", "HEAD"],
+            cwd=str(authoritative_root),
+            text=True,
+        ).strip()
     except Exception:
         return "UNKNOWN"
+
+
+def resolve_authoritative_repo_root_v1(repo_root: Path | None = None) -> Path:
+    root = Path(repo_root or REPO_ROOT).resolve()
+    marker_path = (root / REPO_ROLE_FILENAME).resolve()
+    if marker_path.exists() and marker_path.is_file():
+        try:
+            marker = read_json_object_v1(marker_path)
+        except ValueError:
+            marker = {}
+        authoritative_text = str(marker.get("authoritative_repo_root") or "").strip()
+        if authoritative_text:
+            authoritative_root = Path(authoritative_text).expanduser().resolve()
+            if authoritative_root.is_absolute():
+                return authoritative_root
+    return root
 
 
 def resolve_fact_plane_truth_root_v1(truth_root: str | Path | None = None) -> Path:
@@ -151,6 +173,66 @@ def atomic_write_validated_json_v1(*, path: Path, payload: Dict[str, Any], schem
     tmp.write_bytes(raw)
     os.replace(str(tmp), str(path))
     return SurfaceRefV1(path=path, payload=payload, sha256=hashlib.sha256(raw).hexdigest())
+
+
+def _normalize_semantic_noop_value_v1(value: Any, *, volatile_field_names: set[str]) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): (
+                None
+                if str(key) in volatile_field_names
+                else _normalize_semantic_noop_value_v1(item, volatile_field_names=volatile_field_names)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _normalize_semantic_noop_value_v1(item, volatile_field_names=volatile_field_names)
+            for item in value
+        ]
+    return value
+
+
+def atomic_write_idempotent_validated_json_v1(
+    *,
+    path: Path,
+    payload: Dict[str, Any],
+    schema_relpath: str,
+    volatile_field_names: Iterable[str],
+) -> SurfaceRefV1:
+    validate_against_repo_schema_v1(payload, REPO_ROOT, schema_relpath)
+    normalized_volatile_names = {
+        str(field_name).strip()
+        for field_name in volatile_field_names
+        if str(field_name).strip()
+    }
+    if path.exists() and path.is_file():
+        try:
+            existing_payload = read_json_object_v1(path)
+            validate_against_repo_schema_v1(existing_payload, REPO_ROOT, schema_relpath)
+        except Exception:
+            existing_payload = None
+        if isinstance(existing_payload, dict):
+            existing_normalized = _normalize_semantic_noop_value_v1(
+                existing_payload,
+                volatile_field_names=normalized_volatile_names,
+            )
+            candidate_normalized = _normalize_semantic_noop_value_v1(
+                payload,
+                volatile_field_names=normalized_volatile_names,
+            )
+            if existing_normalized == candidate_normalized:
+                raw = canonical_json_bytes_v1(existing_payload) + b"\n"
+                return SurfaceRefV1(
+                    path=path,
+                    payload=existing_payload,
+                    sha256=hashlib.sha256(raw).hexdigest(),
+                )
+    return atomic_write_validated_json_v1(
+        path=path,
+        payload=payload,
+        schema_relpath=schema_relpath,
+    )
 
 
 def read_validated_surface_v1(*, path: Path, schema_relpath: str) -> SurfaceRefV1:
@@ -533,8 +615,9 @@ def read_trade_submit_readiness_for_day_v1(
 
 
 def producer_block_v1(*, module: str, git_sha: str | None = None) -> Dict[str, Any]:
+    authoritative_root = resolve_authoritative_repo_root_v1()
     return {
-        "repo": REPO_ROOT.name,
+        "repo": authoritative_root.name,
         "module": str(module),
         "git_sha": str(git_sha or repo_git_sha_v1()),
     }

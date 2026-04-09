@@ -393,6 +393,28 @@ def test_ledger_write_allows_nonfinalized_same_day_evidence_refresh(tmp_path: Pa
     assert payload["control_state"]["authority_status"] == "GRANTED"
 
 
+def test_ledger_write_is_noop_for_equivalent_same_day_refresh(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth"
+    ledger_a = _build_manual_ledger(
+        day_utc="2026-04-08",
+        authority_status="DENIED",
+        finalization_status="OPEN",
+        evidence_digest="f" * 64,
+    )
+    write_paper_session_ledger_v1(truth_root=truth_root, ledger=ledger_a)
+    ledger_path = truth_root / "reports" / "paper_session_ledger_v1" / "2026-04-08" / "paper_session_ledger.v1.json"
+    first = ledger_path.read_text(encoding="utf-8")
+    ledger_b = PaperSessionLedgerV1.from_dict(
+        {
+            **ledger_a.to_dict(),
+            "evaluated_at_utc": "2026-04-08T00:01:00Z",
+        }
+    )
+    write_paper_session_ledger_v1(truth_root=truth_root, ledger=ledger_b)
+    second = ledger_path.read_text(encoding="utf-8")
+    assert first == second
+
+
 def test_ledger_binds_post_submit_lineage_when_rollup_and_lineage_exist(tmp_path: Path) -> None:
     truth_root = tmp_path / "truth"
     day_utc = "2026-04-08"

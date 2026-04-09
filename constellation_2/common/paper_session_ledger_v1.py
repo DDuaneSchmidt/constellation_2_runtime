@@ -72,6 +72,24 @@ def _normalize_section(obj: dict[str, Any]) -> dict[str, Any]:
     return section
 
 
+def _normalize_volatile_fields_v1(value: Any, *, volatile_field_names: set[str]) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): (
+                None
+                if str(key) in volatile_field_names
+                else _normalize_volatile_fields_v1(item, volatile_field_names=volatile_field_names)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _normalize_volatile_fields_v1(item, volatile_field_names=volatile_field_names)
+            for item in value
+        ]
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class PaperSessionLedgerV1:
     schema_id: str
@@ -302,6 +320,12 @@ def write_paper_session_ledger_v1(
         new_evaluated_at = str(ledger.evaluated_at_utc).strip()
         if existing_evaluated_at and new_evaluated_at and new_evaluated_at < existing_evaluated_at:
             raise ValueError(f"PAPER_SESSION_LEDGER_NON_MONOTONIC_EVALUATED_AT:path={path}")
+        volatile_fields = {"evaluated_at_utc", "transition_at_utc"}
+        if _normalize_volatile_fields_v1(existing.to_dict(), volatile_field_names=volatile_fields) == _normalize_volatile_fields_v1(
+            payload,
+            volatile_field_names=volatile_fields,
+        ):
+            return path
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_bytes(raw)
     tmp.replace(path)

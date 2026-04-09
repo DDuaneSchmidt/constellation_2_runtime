@@ -15,7 +15,7 @@ if str(REPO_ROOT) not in sys.path:
 from ops.tools.c2_account_resolution_v1 import resolve_single_paper_ib_account_from_sleeve_registry
 from constellation_2.common.paper_session_fact_plane_v1 import (
     NON_AUTHORITY_SCOPE,
-    atomic_write_validated_json_v1,
+    atomic_write_idempotent_validated_json_v1,
     build_fact_dependency_row_v1,
     canonical_paper_session_id_v1,
     now_utc_iso_v1,
@@ -194,10 +194,11 @@ def main(argv: List[str] | None = None) -> int:
         "linkage_verdict": linkage_verdict,
         "paper_account": paper_account,
     }
-    ref = atomic_write_validated_json_v1(
+    ref = atomic_write_idempotent_validated_json_v1(
         path=resolve_submit_boundary_status_path(truth_root=truth_root, day_utc=day_utc),
         payload=payload,
         schema_relpath="governance/04_DATA/SCHEMAS/C2/REPORTS/submit_boundary_status.v1.schema.json",
+        volatile_field_names=("produced_at_utc",),
     )
     print(json.dumps({"path": str(ref.path), "sha256": ref.sha256, "boundary_status": payload["boundary_status"]}, sort_keys=True))
     return 0 if payload["boundary_status"] in {"AUTHORIZED", "DENIED"} else 2

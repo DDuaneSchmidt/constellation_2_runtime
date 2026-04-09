@@ -518,9 +518,84 @@ def test_fact_plane_outputs_are_deterministic_for_fixed_inputs() -> None:
         truth_root = Path(td) / "truth"
         day_utc = "2026-04-08"
         _write_market_calendar_day(truth_root, day_utc=day_utc, is_trading_session=False)
-        with patch.object(posture_module, "now_utc_iso_v1", return_value="2026-04-08T00:00:00Z"):
+        with patch.object(posture_module, "now_utc_iso_v1", side_effect=["2026-04-08T00:00:00Z", "2026-04-08T00:00:01Z"]):
             posture_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
             first = (truth_root / "reports" / "paper_trading_posture_v1" / day_utc / "paper_trading_posture.v1.json").read_text(encoding="utf-8")
             posture_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
             second = (truth_root / "reports" / "paper_trading_posture_v1" / day_utc / "paper_trading_posture.v1.json").read_text(encoding="utf-8")
+        assert first == second
+
+
+def test_startup_materialization_noop_preserves_bytes_when_only_timestamp_changes() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        day_utc = "2026-04-08"
+        intents_dir = truth_root / "intents_v1" / "snapshots" / day_utc
+        _write_json(intents_dir / "spy.exposure_intent.v1.json", {"schema_id": "exposure_intent", "schema_version": "v1"})
+        _write_startup_inputs_prep(
+            truth_root,
+            day_utc=day_utc,
+            status="PASS",
+            default_equity_reference_price="655.83",
+        )
+        _write_phasec_risk_inputs_prep(truth_root, day_utc=day_utc, status="PASS")
+        phasec_root = truth_root / "phaseC_preflight_v1" / day_utc
+        identity_dir = phasec_root / "attempt_A0001" / "spy"
+        identity_dir.mkdir(parents=True, exist_ok=True)
+        for name in ("equity_order_plan.v2.json", "mapping_ledger_record.v2.json", "binding_record.v2.json"):
+            _write_json(identity_dir / name, {"ok": True})
+        _write_json(
+            phasec_root / "latest_active_attempt.v1.json",
+            {"schema_id": "phasec_latest_active_attempt.v1", "schema_version": "v1", "day_utc": day_utc, "attempt_id": "A0001", "attempt_dir": str((phasec_root / "attempt_A0001").resolve())},
+        )
+        with patch.object(startup_module, "_run_inputs_prep", return_value={"returncode": 0, "stdout": "", "stderr": "", "cmd": []}), patch.object(startup_module, "_run_phasec_risk_inputs_prep", return_value={"returncode": 0, "stdout": "", "stderr": "", "cmd": []}), patch.object(startup_module, "_run_phasec_materializer", return_value={"returncode": 0, "stdout": "", "stderr": "", "cmd": []}), patch.object(startup_module, "now_utc_iso_v1", side_effect=["2026-04-08T00:00:00Z", "2026-04-08T00:00:01Z"]):
+            startup_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+            first = (truth_root / "reports" / "startup_materialization_v1" / day_utc / "startup_materialization.v1.json").read_text(encoding="utf-8")
+            startup_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+            second = (truth_root / "reports" / "startup_materialization_v1" / day_utc / "startup_materialization.v1.json").read_text(encoding="utf-8")
+        assert first == second
+
+
+def test_submit_boundary_noop_preserves_bytes_when_only_timestamp_changes() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        truth_root = root / "truth"
+        day_utc = "2026-04-08"
+        _write_json(
+            root / "governance" / "02_REGISTRIES" / "C2_SLEEVE_REGISTRY_V1.json",
+            {
+                "schema_id": "c2_sleeve_registry",
+                "schema_version": "v1",
+                "sleeves": [{"sleeve_id": "PRIMARY", "enabled": True, "mode": "PAPER", "ib_account": "DUO847203"}],
+            },
+        )
+        _write_json(
+            truth_root / "reports" / "startup_materialization_v1" / day_utc / "startup_materialization.v1.json",
+            {
+                "schema_id": "startup_materialization",
+                "schema_version": "v1",
+                "authority_scope": "NON_AUTHORITY_FACT",
+                "day_utc": day_utc,
+                "session_id": canonical_paper_session_id_v1(day_utc),
+                "status": "SUCCESS",
+                "required_inputs_checked": [],
+                "materialized_outputs": [],
+                "blocking_codes": [],
+                "producer": {"repo": "constellation", "module": "test", "git_sha": "abc1234"},
+                "produced_at_utc": f"{day_utc}T00:00:00Z",
+                "freshness_verdict": "CURRENT",
+                "linkage_verdict": "LINKED",
+                "path_resolution_evidence": {"phasec_root": "/tmp/phasec", "latest_active_attempt_path": "/tmp/latest.json"},
+                "producer_run_id": "startup:test",
+                "phasec_materializer_result": {"returncode": 0, "stdout": "", "stderr": ""},
+            },
+        )
+        _write_market_calendar_day(truth_root, day_utc=day_utc, is_trading_session=True)
+        posture_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+        _write_trade_submit_status(truth_root, day_utc=day_utc, ib_account="DUO847203", ok=True, state="OK")
+        with patch.object(boundary_module, "REPO_ROOT", root), patch.object(boundary_module, "now_utc_iso_v1", side_effect=["2026-04-08T00:00:00Z", "2026-04-08T00:00:01Z"]):
+            boundary_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+            first = (truth_root / "reports" / "submit_boundary_status_v1" / day_utc / "submit_boundary_status.v1.json").read_text(encoding="utf-8")
+            boundary_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+            second = (truth_root / "reports" / "submit_boundary_status_v1" / day_utc / "submit_boundary_status.v1.json").read_text(encoding="utf-8")
         assert first == second

@@ -14,7 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from constellation_2.common.paper_session_fact_plane_v1 import (
     NON_AUTHORITY_SCOPE,
-    atomic_write_validated_json_v1,
+    atomic_write_idempotent_validated_json_v1,
     build_source_dependency_row_v1,
     canonical_paper_session_id_v1,
     now_utc_iso_v1,
@@ -122,10 +122,11 @@ def main(argv: List[str] | None = None) -> int:
         "freshness_verdict": freshness_verdict,
         "linkage_verdict": linkage_verdict,
     }
-    ref = atomic_write_validated_json_v1(
+    ref = atomic_write_idempotent_validated_json_v1(
         path=resolve_paper_trading_posture_path(truth_root=truth_root, day_utc=day_utc),
         payload=payload,
         schema_relpath="governance/04_DATA/SCHEMAS/C2/REPORTS/paper_trading_posture.v1.schema.json",
+        volatile_field_names=("produced_at_utc",),
     )
     print(json.dumps({"path": str(ref.path), "sha256": ref.sha256, "posture_status": posture_status}, sort_keys=True))
     return 0 if posture_status in {"ENABLED", "DISABLED"} else 2

@@ -13,7 +13,7 @@ from constellation_2.common.execution_journal_v1 import (
 )
 from constellation_2.common.paper_session_fact_plane_v1 import (
     SurfaceRefV1,
-    atomic_write_validated_json_v1,
+    atomic_write_idempotent_validated_json_v1,
     now_utc_iso_v1,
     producer_block_v1,
     resolve_fact_plane_truth_root_v1,
@@ -429,8 +429,9 @@ def write_current_system_projection_v1(
     payload: Mapping[str, Any],
 ) -> SurfaceRefV1:
     root = resolve_fact_plane_truth_root_v1(truth_root)
-    return atomic_write_validated_json_v1(
+    return atomic_write_idempotent_validated_json_v1(
         path=resolve_current_system_projection_path(truth_root=root, day_utc=str(payload["day_utc"])),
         payload=dict(payload),
         schema_relpath=SCHEMA_RELPATH_V1,
+        volatile_field_names=("generated_at_utc",),
     )

@@ -18,7 +18,12 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     resolve_fact_plane_truth_root_v1,
 )
 from constellation_2.common.paper_session_path_alignment_v1 import (
+    resolve_current_system_projection_path,
+    resolve_deployment_state_machine_path,
+    resolve_execution_journal_path,
     resolve_paper_session_ledger_path,
+    resolve_startup_proof_validation_path,
+    resolve_trading_day_state_machine_path,
 )
 
 
@@ -26,6 +31,11 @@ STARTUP_TOOL = (REPO_ROOT / "ops/tools/run_startup_materialization_v1.py").resol
 POSTURE_TOOL = (REPO_ROOT / "ops/tools/run_paper_trading_posture_v1.py").resolve()
 BOUNDARY_TOOL = (REPO_ROOT / "ops/tools/run_submit_boundary_status_v1.py").resolve()
 LEDGER_TOOL = (REPO_ROOT / "ops/tools/run_paper_session_ledger_v1.py").resolve()
+STARTUP_PROOF_TOOL = (REPO_ROOT / "ops/tools/run_startup_proof_validation_v1.py").resolve()
+DEPLOYMENT_TOOL = (REPO_ROOT / "ops/tools/run_deployment_state_machine_v1.py").resolve()
+TRADING_DAY_STATE_MACHINE_TOOL = (REPO_ROOT / "ops/tools/run_trading_day_state_machine_v1.py").resolve()
+EXECUTION_JOURNAL_TOOL = (REPO_ROOT / "ops/tools/run_execution_journal_v1.py").resolve()
+CURRENT_SYSTEM_PROJECTION_TOOL = (REPO_ROOT / "ops/tools/run_current_system_projection_v1.py").resolve()
 EXECUTION_TOOL = (REPO_ROOT / "ops/tools/run_c2_multi_sleeve_orchestrator_v1.py").resolve()
 
 
@@ -82,6 +92,38 @@ def main() -> int:
     ledger = ledger_ref.payload
     control_state = ledger.get("control_state") if isinstance(ledger.get("control_state"), dict) else {}
     authority_status = str(control_state.get("authority_status") or "").strip().upper()
+    control_plane_runs = {
+        "startup_proof_validation": _run(
+            [sys.executable, str(STARTUP_PROOF_TOOL), "--day_utc", day_utc, "--truth_root", str(truth_root)]
+        ),
+        "deployment_state_machine": _run(
+            [sys.executable, str(DEPLOYMENT_TOOL), "--day_utc", day_utc, "--truth_root", str(truth_root)]
+        ),
+        "trading_day_state_machine": _run(
+            [sys.executable, str(TRADING_DAY_STATE_MACHINE_TOOL), "--day_utc", day_utc, "--truth_root", str(truth_root)]
+        ),
+        "execution_journal": _run(
+            [sys.executable, str(EXECUTION_JOURNAL_TOOL), "--day_utc", day_utc, "--truth_root", str(truth_root)]
+        ),
+        "current_system_projection": _run(
+            [sys.executable, str(CURRENT_SYSTEM_PROJECTION_TOOL), "--day_utc", day_utc, "--truth_root", str(truth_root)]
+        ),
+    }
+    runs.update(control_plane_runs)
+    control_plane_artifacts = {
+        "startup_proof_validation_v1": str(resolve_startup_proof_validation_path(truth_root=truth_root, day_utc=day_utc)),
+        "deployment_state_machine_v1": str(resolve_deployment_state_machine_path(truth_root=truth_root, day_utc=day_utc)),
+        "trading_day_state_machine_v1": str(resolve_trading_day_state_machine_path(truth_root=truth_root, day_utc=day_utc)),
+        "execution_journal_v1": str(resolve_execution_journal_path(truth_root=truth_root, day_utc=day_utc)),
+        "current_system_projection_v1": str(
+            resolve_current_system_projection_path(truth_root=truth_root, day_utc=day_utc)
+        ),
+    }
+    missing_control_plane_artifacts = [
+        logical_name
+        for logical_name, path_text in control_plane_artifacts.items()
+        if not Path(path_text).exists()
+    ]
     summary = {
         "day_utc": day_utc,
         "input_day_utc": input_day_utc,
@@ -92,7 +134,14 @@ def main() -> int:
         "submission_authorized": bool(control_state.get("submission_authorized") is True),
         "current_state": str(control_state.get("current_state") or "").strip(),
         "runs": runs,
+        "control_plane_artifacts": control_plane_artifacts,
+        "missing_control_plane_artifacts": missing_control_plane_artifacts,
     }
+    if missing_control_plane_artifacts:
+        summary["status"] = "CONTROL_PLANE_INCOMPLETE"
+        summary["next_action"] = "inspect_missing_current_day_control_plane_artifacts"
+        _print_payload(summary)
+        return 4
     if authority_status != "GRANTED":
         summary["status"] = "NOT_AUTHORIZED"
         summary["next_action"] = "resolve_kernel_blocking_codes_and_rerun"

@@ -50,6 +50,7 @@ from constellation_2.common.recurrence_kill_gate_v1 import (
 from constellation_2.common.recurrence_registry_v1 import (
     update_recurrence_registry_v1,
 )
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
 
@@ -61,14 +62,21 @@ def _load_active_release_manifest(active_symlink_target: Path) -> dict[str, Any]
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="run_recurrence_kill_gate_v1")
     ap.add_argument("--day_utc", required=True)
-    ap.add_argument(
-        "--truth_root",
-        default=str((REPO_ROOT / "constellation_2/runtime/truth").resolve()),
-    )
+    ap.add_argument("--truth_root", default="")
     args = ap.parse_args(argv)
 
-    truth_root = resolve_fact_plane_truth_root_v1(args.truth_root)
     day_utc = str(args.day_utc).strip()
+    live_day_value = live_day_utc_v1()
+    canonical_truth_root = resolve_canonical_truth_root()
+    truth_root = (
+        resolve_fact_plane_truth_root_v1(args.truth_root)
+        if str(args.truth_root or "").strip()
+        else canonical_truth_root
+    )
+    if day_utc == live_day_value and truth_root != canonical_truth_root:
+        raise ValueError(
+            f"LIVE_TRUTH_ROOT_MISMATCH:expected={canonical_truth_root}:got={truth_root}"
+        )
     generated_at_utc = now_utc_iso_v1()
 
     deployment_path = resolve_deployment_state_machine_path(truth_root=truth_root, day_utc=day_utc)
@@ -131,7 +139,6 @@ def main(argv: list[str] | None = None) -> int:
         trading_day_payload=trading_day_payload,
     )
     proof_failures.extend(list(live_entrypoint_verification.get("proof_failures") or []))
-    live_day_value = live_day_utc_v1()
     if day_utc != live_day_value:
         proof_failures.append("TARGET_DAY_NOT_LIVE_CURRENT_DAY")
 

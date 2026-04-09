@@ -32,6 +32,10 @@ from constellation_2.common.execution_journal_v1 import (
     append_deployment_outcome_event_v1,
     read_execution_journal_identity_anchor_v1,
 )
+from constellation_2.common.paper_session_fact_plane_v1 import (
+    atomic_write_idempotent_validated_json_v1,
+    resolve_authoritative_repo_root_v1,
+)
 from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_trading_day_state_machine_path,
 )
@@ -116,14 +120,15 @@ def main(argv: list[str] | None = None) -> int:
     truth_root = Path(str(args.truth_root)).resolve()
     evaluated_at_utc = _utc_now_iso()
     out_path = _report_path(truth_root=truth_root, day_utc=day_utc)
+    authoritative_repo_root = resolve_authoritative_repo_root_v1(REPO_ROOT)
     prior_payload = _load_prior_payload(out_path, day_utc=day_utc)
     deployment_attempt_id = str((prior_payload or {}).get("deployment_attempt_id") or "").strip()
     if not deployment_attempt_id:
         deployment_attempt_id = f"deployment_state_machine_attempt:{day_utc}:{evaluated_at_utc}"
 
-    authoritative_git_sha = git_sha_or_fail(REPO_ROOT)
-    authoritative_branch = git_branch_or_fail(REPO_ROOT)
-    authoritative_cleanliness_status, dirty_entries = git_cleanliness_status(REPO_ROOT)
+    authoritative_git_sha = git_sha_or_fail(authoritative_repo_root)
+    authoritative_branch = git_branch_or_fail(authoritative_repo_root)
+    authoritative_cleanliness_status, dirty_entries = git_cleanliness_status(authoritative_repo_root)
 
     internal_error = ""
     active_symlink_target = ""
@@ -242,7 +247,7 @@ def main(argv: list[str] | None = None) -> int:
         "deployment_state_machine_id": "",
         "evaluated_at_utc": evaluated_at_utc,
         "authoritative_source": {
-            "authoritative_repo_root": str(REPO_ROOT),
+            "authoritative_repo_root": str(authoritative_repo_root),
             "authoritative_git_sha": authoritative_git_sha,
             "authoritative_branch": authoritative_branch,
             "authoritative_cleanliness_status": authoritative_cleanliness_status,
@@ -328,7 +333,7 @@ def main(argv: list[str] | None = None) -> int:
                 RUNTIME_SERVICE_SOURCE_PATH.as_posix()
                 if first_true_blocker_code == "RUNTIME_COPY_DIRECT_EXECUTION_STILL_PRESENT"
                 else (
-                    REPO_ROOT.as_posix()
+                    authoritative_repo_root.as_posix()
                     if first_true_blocker_code == "AUTHORITATIVE_WORKTREE_DIRTY_BUILD_BLOCKED"
                     else str(active_release["release_root"])
                 )
@@ -344,10 +349,12 @@ def main(argv: list[str] | None = None) -> int:
     payload["deployment_state_machine_id"] = (
         f"deployment_state_machine:{day_utc}:{_stable_payload_id({**payload, 'deployment_state_machine_id': ''})}"
     )
-
-    validate_against_repo_schema_v1(payload, REPO_ROOT, SCHEMA_RELPATH)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_bytes(canonical_json_bytes_v1(payload) + b"\n")
+    ref = atomic_write_idempotent_validated_json_v1(
+        path=out_path,
+        payload=payload,
+        schema_relpath=SCHEMA_RELPATH,
+        volatile_field_names=("evaluated_at_utc",),
+    )
     journal_emission = {
         "status": "DEFERRED_IDENTITY_ANCHOR_MISSING",
         "event_type": "",
@@ -363,7 +370,7 @@ def main(argv: list[str] | None = None) -> int:
                 pipeline_run_id=str(payload.get("deployment_attempt_id") or "").strip(),
                 release_id=str(dict(payload.get("release_build") or {}).get("release_id") or "").strip(),
                 git_sha=active_release_git_sha,
-                source_path=out_path,
+                source_path=ref.path,
                 source_payload=payload,
                 producer_module="ops/tools/run_deployment_state_machine_v1.py",
             )

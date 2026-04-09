@@ -9,6 +9,7 @@ SOURCE_ROOT = Path("/home/node/constellation")
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
+import ops.tools.run_recurrence_kill_gate_v1 as gate_runner
 from constellation_2.common import recurrence_fingerprint_v1 as recurrence_fingerprint
 from constellation_2.common import recurrence_kill_gate_v1 as recurrence_gate
 
@@ -256,6 +257,18 @@ def test_live_entrypoint_verification_rejects_contract_mismatch(tmp_path: Path) 
     )
     assert proof["live_entrypoint_verified"] is False
     assert "LIVE_ENTRYPOINT_RUNTIME_CONTRACT_RELEASE_ID_MISMATCH" in proof["proof_failures"]
+
+
+def test_runner_rejects_live_day_wrong_truth_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gate_runner, "live_day_utc_v1", lambda: "2026-04-09")
+    monkeypatch.setattr(gate_runner, "resolve_canonical_truth_root", lambda: Path("/tmp/live-truth"))
+    monkeypatch.setattr(
+        gate_runner,
+        "resolve_fact_plane_truth_root_v1",
+        lambda value: Path(str(value)),
+    )
+    with pytest.raises(ValueError, match="LIVE_TRUTH_ROOT_MISMATCH"):
+        gate_runner.main(["--day_utc", "2026-04-09", "--truth_root", "/tmp/repo-truth"])
 
 
 def test_live_entrypoint_verification_requires_entrypoint_file() -> None:

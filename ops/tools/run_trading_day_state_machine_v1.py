@@ -17,7 +17,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from constellation_2.common.paper_session_fact_plane_v1 import (
     SurfaceRefV1,
-    atomic_write_validated_json_v1,
+    atomic_write_idempotent_validated_json_v1,
     now_utc_iso_v1,
     parse_day_utc_v1,
     producer_block_v1,
@@ -972,10 +972,11 @@ def main(argv: list[str] | None = None) -> int:
             ),
         },
     }
-    ref = atomic_write_validated_json_v1(
+    ref = atomic_write_idempotent_validated_json_v1(
         path=output_path,
         payload=payload,
         schema_relpath=OUTPUT_SCHEMA_RELPATH_V1,
+        volatile_field_names=("evaluated_at_utc", "transition_at_utc"),
     )
     journal_emission = {
         "status": "DEFERRED_IDENTITY_ANCHOR_MISSING",
