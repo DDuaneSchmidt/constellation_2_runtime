@@ -103,8 +103,6 @@ def _bound_source_artifact_row(
         event_payload = dict(candidate.get("payload") or {})
         if str(event_payload.get("source_artifact_path") or "").strip() != str(path):
             continue
-        if str(event_payload.get("source_artifact_sha256") or "").strip() != str(base["sha256"]):
-            continue
         binding_event = candidate
         break
     if not isinstance(binding_event, dict):

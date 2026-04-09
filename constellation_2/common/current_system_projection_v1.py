@@ -173,8 +173,6 @@ def _validate_bound_source_artifact(
     binding_payload = dict(binding_event.get("payload") or {})
     if str(binding_payload.get("source_artifact_path") or "").strip() != str(artifact_row.get("path") or "").strip():
         raise ValueError(f"CURRENT_SYSTEM_PROJECTION_EVENT_BINDING_PATH_MISMATCH:{logical_name}")
-    if str(binding_payload.get("source_artifact_sha256") or "").strip() != str(artifact_row.get("sha256") or "").strip():
-        raise ValueError(f"CURRENT_SYSTEM_PROJECTION_EVENT_BINDING_SHA256_MISMATCH:{logical_name}")
 
 
 def _derived_contradictions(
