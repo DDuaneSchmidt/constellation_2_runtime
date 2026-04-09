@@ -516,6 +516,90 @@ def _write_execution_control_plane(truth_root: Path, day_utc: str, *, final_deci
     )
 
 
+def _write_deployment_state_machine(truth_root: Path, day_utc: str, *, release_root: Path) -> None:
+    release_root.mkdir(parents=True, exist_ok=True)
+    _write_json(
+        release_root / "release_manifest.v1.json",
+        {
+            "schema_id": "release_manifest.v1",
+            "schema_version": "v1",
+            "release_id": "release-001",
+            "git_sha": "a" * 40,
+            "source_root": "/home/node/constellation",
+            "release_root": str(release_root),
+            "included_files": [],
+            "included_file_hashes": {},
+            "generated_at_utc": "2026-04-08T00:00:00Z",
+        },
+    )
+    _write_json(
+        truth_root / "reports" / "deployment_state_machine_v1" / day_utc / "deployment_state_machine.v1.json",
+        {
+            "schema_id": "deployment_state_machine",
+            "schema_version": "v1",
+            "authority_scope": "TOP_LEVEL_DEPLOYMENT_STATE_MACHINE_OWNER",
+            "day_utc": day_utc,
+            "deployment_attempt_id": f"deployment_state_machine_attempt:{day_utc}:test",
+            "deployment_state_machine_id": f"deployment_state_machine:{day_utc}:test",
+            "evaluated_at_utc": f"{day_utc}T00:00:00Z",
+            "authoritative_source": {
+                "authoritative_repo_root": "/home/node/constellation",
+                "authoritative_git_sha": "a" * 40,
+                "authoritative_branch": "feature/test",
+                "authoritative_cleanliness_status": "CLEAN",
+                "dirty_entry_count": 0,
+                "dirty_entry_sample": [],
+                "source_snapshot_id": "a" * 40,
+            },
+            "release_build": {
+                "release_id": "release-001",
+                "release_root": str(release_root),
+                "release_manifest_sha": "b" * 64,
+                "bundled_file_hash_summary": {"file_count": 0, "aggregate_sha256": "c" * 64},
+                "build_status": "RELEASE_PRESENT",
+                "required_startup_stack_files_present": True,
+                "missing_required_startup_stack_files": [],
+            },
+            "active_release": {
+                "active_symlink_path": "/home/node/constellation_active",
+                "active_symlink_target": str(release_root),
+                "activation_status": "ACTIVE_POINTER_PRESENT",
+                "active_runtime_contract_path": "/tmp/active_runtime_contract.v1.json",
+                "active_runtime_contract_status": "ACTIVE",
+            },
+            "live_execution": {
+                "service_unit_path": "/tmp/live.service",
+                "launcher_path": "/home/node/constellation_active/ops/run/c2_paper_day_orchestrator_systemd_entry_v1.sh",
+                "resolved_execution_root": "/home/node/constellation_active",
+                "active_root_match": True,
+                "authoritative_service_source_path": "/tmp/source.service",
+                "authoritative_service_source_root": "/home/node/constellation_active",
+            },
+            "drift_checks": {
+                "authoritative_vs_release": {"status": "PASS", "details": {}},
+                "release_vs_active": {"status": "PASS", "details": {}},
+                "active_vs_live_execution": {"status": "PASS", "details": {}},
+                "runtime_copy_still_executable": {"status": "PASS", "details": {}},
+                "required_startup_stack_files_present": {"status": "PASS", "details": {"missing_required_startup_stack_files": []}}
+            },
+            "post_activation_verification": {
+                "passed": True,
+                "service_unit_path": "/tmp/live.service",
+                "launcher_path": "/home/node/constellation_active/ops/run/c2_paper_day_orchestrator_systemd_entry_v1.sh",
+                "resolved_execution_root": "/home/node/constellation_active",
+                "active_root_match": True,
+                "blocking_codes": [],
+            },
+            "final_deployment_decision": "DEPLOY_ACTIVE",
+            "blocking_codes": [],
+            "first_true_blocker_code": "",
+            "first_true_blocker_path": "",
+            "human_readable_summary": "test",
+            "producer": _producer(),
+        },
+    )
+
+
 def test_trading_day_state_machine_missing_intents_blocks_immediately(tmp_path: Path) -> None:
     truth_root = tmp_path / "truth"
     day_utc = "2026-04-08"
@@ -613,6 +697,44 @@ def test_trading_day_state_machine_runs_supporting_chain_records_order_and_can_r
         "DAY_OPEN_ALLOWED",
         "DAY_NOT_OPENED",
     ]
+
+
+def test_trading_day_state_machine_direct_emits_journal_event_idempotently(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth"
+    day_utc = "2026-04-08"
+    _write_deployment_state_machine(truth_root, day_utc, release_root=tmp_path / "release")
+
+    def fake_run(cmd: list[str], *, truth_root: Path) -> dict:
+        tool_name = Path(cmd[1]).name
+        if tool_name == "run_trading_day_intent_generation_v1.py":
+            _write_intent_generation_report(truth_root, day_utc, final_status="INTENTS_PRESENT")
+            return {"return_code": 0, "stdout": "{}", "stderr": ""}
+        if tool_name == "run_intents_day_completeness_v1.py":
+            _write_complete_prerequisite(truth_root, day_utc)
+            return {"return_code": 0, "stdout": "{}", "stderr": ""}
+        if tool_name == "run_trading_day_execution_control_plane_v1.py":
+            _write_startup(truth_root, day_utc, status="SUCCESS")
+            _write_posture(truth_root, day_utc, enabled=True)
+            _write_boundary(truth_root, day_utc, authorized=True)
+            _write_ledger(truth_root, day_utc, authority_status="GRANTED")
+            _write_startup_proof(truth_root, day_utc, ready=True)
+            _write_paper_day_control_plane(truth_root, day_utc, final_decision="READY_NOW", authority_status="GRANTED")
+            _write_trading_day_control_plane(truth_root, day_utc, final_decision="READY_NOW", authority_status="GRANTED")
+            _write_execution_control_plane(truth_root, day_utc, final_decision="READY_NOW", authority_status="GRANTED")
+            return {"return_code": 0, "stdout": "{}", "stderr": ""}
+        raise AssertionError(tool_name)
+
+    with patch.object(state_machine_module, "_run", side_effect=fake_run):
+        first_rc = state_machine_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+        second_rc = state_machine_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+
+    journal_payload = json.loads(
+        (truth_root / "reports" / "execution_journal_v1" / day_utc / "execution_journal.v1.json").read_text(encoding="utf-8")
+    )
+    event_types = [row["event_type"] for row in journal_payload["events"]]
+    assert first_rc == 0
+    assert second_rc == 0
+    assert event_types.count("STATE_MACHINE_DECISION_RECORDED") == 1
 
 
 def test_trading_day_state_machine_records_supporting_authority_deny(tmp_path: Path) -> None:

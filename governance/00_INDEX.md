@@ -68,6 +68,7 @@ Additional registries introduced:
 - `governance/05_CONTRACTS/C2/trading_day_state_machine_v1.contract.md`
 - `governance/05_CONTRACTS/C2/deployment_state_machine_v1.contract.md`
 - `governance/05_CONTRACTS/C2/execution_journal_v1.contract.md`
+- `governance/05_CONTRACTS/C2/execution_journal_event_type_registry_v1.contract.md`
 - `governance/05_CONTRACTS/C2/current_system_projection_v1.contract.md`
 - `governance/05_CONTRACTS/C2/alerts_projection_v1.contract.md`
 - `governance/05_CONTRACTS/C2/performance_projection_v1.contract.md`
@@ -81,6 +82,7 @@ Additional registries introduced:
 
 ### Registries (governed)
 - `governance/02_REGISTRIES/GATE_HIERARCHY_V1.json`
+- `governance/02_REGISTRIES/C2_EXECUTION_JOURNAL_EVENT_TYPE_REGISTRY_V1.json`
 
 ### D) Operator docs and runbooks (non-authoritative guidance)
 - `docs/` (informational; not a contract unless also registered in the manifest)

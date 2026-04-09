@@ -5,6 +5,12 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from constellation_2.common.execution_journal_v1 import (
+    IDENTITY_FIELDS_V1,
+    identity_tuple_from_mapping_v1,
+    require_matching_identity_tuple_v1,
+    validate_execution_journal_payload_v1,
+)
 from constellation_2.common.paper_session_fact_plane_v1 import (
     SurfaceRefV1,
     atomic_write_validated_json_v1,
@@ -26,6 +32,47 @@ REQUIRED_EVENT_TYPES_V1 = (
     "LEDGER_AUTHORITY_RECORDED",
     "STATE_MACHINE_DECISION_RECORDED",
 )
+REQUIRED_SOURCE_ARTIFACTS_V1 = (
+    "execution_journal_v1",
+    "deployment_state_machine_v1",
+    "startup_materialization_v1",
+    "startup_proof_validation_v1",
+    "paper_session_ledger_v1",
+    "trading_day_state_machine_v1",
+)
+SOURCE_EVENT_BINDINGS_V1 = {
+    "deployment_state_machine_v1": ("DEPLOYMENT_ACTIVATED", "DEPLOYMENT_BLOCKED"),
+    "startup_materialization_v1": ("STARTUP_MATERIALIZATION_COMPLETED",),
+    "startup_proof_validation_v1": ("STARTUP_PROOF_VALIDATION_COMPLETED",),
+    "paper_session_ledger_v1": ("LEDGER_AUTHORITY_RECORDED",),
+    "trading_day_state_machine_v1": ("STATE_MACHINE_DECISION_RECORDED",),
+}
+
+
+def _require_nonempty_string(value: Any, code: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError(code)
+    return text
+
+
+def _require_mapping(value: Any, code: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError(code)
+    return value
+
+
+def _source_artifacts_by_name(source_artifacts: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    rows: dict[str, dict[str, Any]] = {}
+    for row in source_artifacts:
+        if not isinstance(row, Mapping):
+            raise ValueError("CURRENT_SYSTEM_PROJECTION_SOURCE_ARTIFACT_ROW_INVALID")
+        logical_name = _require_nonempty_string(
+            row.get("logical_name"),
+            "CURRENT_SYSTEM_PROJECTION_SOURCE_ARTIFACT_LOGICAL_NAME_MISSING",
+        )
+        rows[logical_name] = dict(row)
+    return rows
 
 
 def _require_event(events_by_type: Mapping[str, dict[str, Any]], event_type: str) -> dict[str, Any]:
@@ -46,6 +93,88 @@ def _latest_events_by_type(journal_payload: Mapping[str, Any]) -> dict[str, dict
             continue
         rows[str(event.get("event_type") or "").strip()] = dict(event)
     return rows
+
+
+def _required_native_identity_subset(
+    *,
+    logical_name: str,
+    payload: Mapping[str, Any],
+    expected_identity: Mapping[str, str],
+) -> None:
+    if str(payload.get("day_utc") or "").strip() != str(expected_identity["day_utc"]):
+        raise ValueError(f"CURRENT_SYSTEM_PROJECTION_NATIVE_IDENTITY_MISMATCH:{logical_name}:day_utc")
+    if logical_name == "deployment_state_machine_v1":
+        if str(payload.get("deployment_attempt_id") or "").strip() != str(expected_identity["pipeline_run_id"]):
+            raise ValueError(
+                "CURRENT_SYSTEM_PROJECTION_NATIVE_IDENTITY_MISMATCH:deployment_state_machine_v1:pipeline_run_id"
+            )
+        release_build = _require_mapping(
+            payload.get("release_build"),
+            "CURRENT_SYSTEM_PROJECTION_NATIVE_IDENTITY_MISSING:deployment_state_machine_v1:release_build",
+        )
+        if str(release_build.get("release_id") or "").strip() != str(expected_identity["release_id"]):
+            raise ValueError(
+                "CURRENT_SYSTEM_PROJECTION_NATIVE_IDENTITY_MISMATCH:deployment_state_machine_v1:release_id"
+            )
+        return
+    if logical_name == "trading_day_state_machine_v1":
+        if str(payload.get("day_attempt_id") or "").strip() != str(expected_identity["day_attempt_id"]):
+            raise ValueError(
+                "CURRENT_SYSTEM_PROJECTION_NATIVE_IDENTITY_MISMATCH:trading_day_state_machine_v1:day_attempt_id"
+            )
+
+
+def _validate_bound_source_artifact(
+    *,
+    logical_name: str,
+    artifact_row: Mapping[str, Any],
+    expected_identity: Mapping[str, str],
+    events_by_type: Mapping[str, dict[str, Any]],
+) -> None:
+    _require_nonempty_string(
+        artifact_row.get("path"),
+        f"CURRENT_SYSTEM_PROJECTION_SOURCE_ARTIFACT_PATH_MISSING:{logical_name}",
+    )
+    _require_nonempty_string(
+        artifact_row.get("sha256"),
+        f"CURRENT_SYSTEM_PROJECTION_SOURCE_ARTIFACT_SHA256_MISSING:{logical_name}",
+    )
+    bound_identity = identity_tuple_from_mapping_v1(
+        _require_mapping(
+            artifact_row.get("identity_tuple"),
+            f"CURRENT_SYSTEM_PROJECTION_IDENTITY_TUPLE_MISSING:{logical_name}",
+        ),
+        context=f"source_artifact:{logical_name}",
+    )
+    require_matching_identity_tuple_v1(
+        expected_identity=expected_identity,
+        candidate_identity=bound_identity,
+        context=f"source_artifact:{logical_name}",
+    )
+    if logical_name == "execution_journal_v1":
+        return
+    allowed_event_types = SOURCE_EVENT_BINDINGS_V1.get(logical_name)
+    if not isinstance(allowed_event_types, tuple):
+        raise ValueError(f"CURRENT_SYSTEM_PROJECTION_EVENT_BINDING_CONFIG_MISSING:{logical_name}")
+    binding_event_type = _require_nonempty_string(
+        artifact_row.get("identity_binding_event_type"),
+        f"CURRENT_SYSTEM_PROJECTION_EVENT_BINDING_TYPE_MISSING:{logical_name}",
+    )
+    if binding_event_type not in allowed_event_types:
+        raise ValueError(f"CURRENT_SYSTEM_PROJECTION_EVENT_BINDING_TYPE_INVALID:{logical_name}")
+    binding_event = _require_event(events_by_type, binding_event_type)
+    if str(binding_event.get("event_key") or "").strip() != str(artifact_row.get("identity_binding_event_key") or "").strip():
+        raise ValueError(f"CURRENT_SYSTEM_PROJECTION_EVENT_BINDING_KEY_MISMATCH:{logical_name}")
+    require_matching_identity_tuple_v1(
+        expected_identity=expected_identity,
+        candidate_identity=binding_event,
+        context=f"source_binding_event:{logical_name}",
+    )
+    binding_payload = dict(binding_event.get("payload") or {})
+    if str(binding_payload.get("source_artifact_path") or "").strip() != str(artifact_row.get("path") or "").strip():
+        raise ValueError(f"CURRENT_SYSTEM_PROJECTION_EVENT_BINDING_PATH_MISMATCH:{logical_name}")
+    if str(binding_payload.get("source_artifact_sha256") or "").strip() != str(artifact_row.get("sha256") or "").strip():
+        raise ValueError(f"CURRENT_SYSTEM_PROJECTION_EVENT_BINDING_SHA256_MISMATCH:{logical_name}")
 
 
 def _derived_contradictions(
@@ -134,9 +263,48 @@ def build_current_system_projection_v1(
     generated_at_utc: str,
     producer_module: str,
 ) -> dict[str, Any]:
-    events_by_type = _latest_events_by_type(journal_payload)
+    validated_journal = validate_execution_journal_payload_v1(journal_payload)
+    expected_identity = identity_tuple_from_mapping_v1(validated_journal, context="execution_journal_v1")
+    source_artifact_rows = _source_artifacts_by_name(source_artifacts)
+    for logical_name in REQUIRED_SOURCE_ARTIFACTS_V1:
+        if logical_name not in source_artifact_rows:
+            raise ValueError(f"CURRENT_SYSTEM_PROJECTION_REQUIRED_SOURCE_ARTIFACT_MISSING:{logical_name}")
+    _required_native_identity_subset(
+        logical_name="deployment_state_machine_v1",
+        payload=deployment_payload,
+        expected_identity=expected_identity,
+    )
+    _required_native_identity_subset(
+        logical_name="startup_materialization_v1",
+        payload=startup_materialization_payload,
+        expected_identity=expected_identity,
+    )
+    _required_native_identity_subset(
+        logical_name="startup_proof_validation_v1",
+        payload=startup_proof_payload,
+        expected_identity=expected_identity,
+    )
+    _required_native_identity_subset(
+        logical_name="paper_session_ledger_v1",
+        payload=ledger_payload,
+        expected_identity=expected_identity,
+    )
+    _required_native_identity_subset(
+        logical_name="trading_day_state_machine_v1",
+        payload=trading_day_payload,
+        expected_identity=expected_identity,
+    )
+
+    events_by_type = _latest_events_by_type(validated_journal)
     for required in REQUIRED_EVENT_TYPES_V1:
         _require_event(events_by_type, required)
+    for logical_name, row in source_artifact_rows.items():
+        _validate_bound_source_artifact(
+            logical_name=logical_name,
+            artifact_row=row,
+            expected_identity=expected_identity,
+            events_by_type=events_by_type,
+        )
 
     deployment_event = events_by_type.get("DEPLOYMENT_ACTIVATED") or events_by_type.get("DEPLOYMENT_BLOCKED")
     if not isinstance(deployment_event, dict):
@@ -162,7 +330,8 @@ def build_current_system_projection_v1(
             "source_paths": list(dict(event.get("payload") or {}).get("source_artifact_paths") or []),
         }
         for event in list(journal_payload.get("events") or [])
-        if isinstance(event, dict) and str(event.get("event_type") or "").strip() == "SYSTEM_CONTRADICTION_DETECTED"
+        if isinstance(event, dict)
+        if str(event.get("event_type") or "").strip() == "SYSTEM_CONTRADICTION_DETECTED"
     ]
     contradiction_events.extend(
         _derived_contradictions(
@@ -197,12 +366,12 @@ def build_current_system_projection_v1(
         "projection_id": "",
         "generated_at_utc": str(generated_at_utc).strip(),
         "journal_ref": str(source_artifacts[0]["path"]) if source_artifacts else "",
-        "journal_id": str(journal_payload.get("journal_id") or "").strip(),
-        "journal_event_count": len(list(journal_payload.get("events") or [])),
-        "day_attempt_id": str(journal_payload.get("day_attempt_id") or "").strip(),
-        "pipeline_run_id": str(journal_payload.get("pipeline_run_id") or "").strip(),
-        "release_id": str(journal_payload.get("release_id") or "").strip(),
-        "git_sha": str(journal_payload.get("git_sha") or "").strip(),
+        "journal_id": str(validated_journal.get("journal_id") or "").strip(),
+        "journal_event_count": len(list(validated_journal.get("events") or [])),
+        "day_attempt_id": str(expected_identity["day_attempt_id"]),
+        "pipeline_run_id": str(expected_identity["pipeline_run_id"]),
+        "release_id": str(expected_identity["release_id"]),
+        "git_sha": str(expected_identity["git_sha"]),
         "current_deployment_status": deployment_status,
         "current_startup_status": startup_materialization_status,
         "current_startup_proof_status": startup_proof_status,
@@ -227,7 +396,7 @@ def build_current_system_projection_v1(
             "source_artifact_count": len(source_artifacts),
             "source_artifacts_complete": all(str(item.get("path") or "").strip() for item in source_artifacts),
         },
-        "source_artifacts": list(source_artifacts),
+        "source_artifacts": [dict(source_artifact_rows[name]) for name in REQUIRED_SOURCE_ARTIFACTS_V1],
         "source_generated_at_utc": {
             "deployment_state_machine_v1": str(
                 deployment_payload.get("evaluated_at_utc") or ""
@@ -249,7 +418,7 @@ def build_current_system_projection_v1(
             "Derived from execution_journal_v1 plus authoritative final snapshots only. "
             "Do not treat this projection as an independent decision authority."
         ),
-        "producer": producer_block_v1(module=producer_module, git_sha=str(journal_payload.get("git_sha") or "").strip()),
+        "producer": producer_block_v1(module=producer_module, git_sha=str(expected_identity["git_sha"])),
     }
     payload["projection_id"] = f"current_system_projection:{payload['day_utc']}:{_stable_id(payload)}"
     validate_against_repo_schema_v1(payload, REPO_ROOT, SCHEMA_RELPATH_V1)

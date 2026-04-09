@@ -60,20 +60,7 @@
           "git_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
           "event_seq": { "type": "integer", "minimum": 1 },
           "event_key": { "type": "string", "minLength": 1 },
-          "event_type": {
-            "type": "string",
-            "enum": [
-              "DEPLOYMENT_ACTIVATED",
-              "DEPLOYMENT_BLOCKED",
-              "STARTUP_MATERIALIZATION_COMPLETED",
-              "STARTUP_PROOF_VALIDATION_COMPLETED",
-              "LEDGER_AUTHORITY_RECORDED",
-              "STATE_MACHINE_DECISION_RECORDED",
-              "SUBMISSION_AUTHORIZATION_RECORDED",
-              "STAGE_DURATION_RECORDED",
-              "SYSTEM_CONTRADICTION_DETECTED"
-            ]
-          },
+          "event_type": { "type": "string", "minLength": 1 },
           "event_source": { "type": "string", "minLength": 1 },
           "generated_at_utc": { "type": "string", "minLength": 20 },
           "status": { "type": "string", "minLength": 1 },
@@ -93,4 +80,3 @@
     }
   }
 }
-

@@ -39,6 +39,6 @@ It derives timing and degradation information from the execution journal only.
 ## Fail-closed rules
 
 - Missing execution journal input must fail closed.
+- Missing or invalid journal identity fields must fail closed.
 - Invalid or contradictory stage-duration event shapes must fail closed.
 - Performance degradation by itself must never become a readiness blocker through this surface.
-

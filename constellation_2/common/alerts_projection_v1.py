@@ -24,10 +24,67 @@ ROOT_CAUSE_FAMILIES_V1 = (
     "SYSTEM_DEFECT",
     "DEPLOYMENT_BLOCK",
 )
+REQUIRED_CURRENT_PROJECTION_FIELDS_V1 = (
+    "day_utc",
+    "projection_id",
+    "projection_ref",
+    "generated_at_utc",
+    "git_sha",
+    "first_true_blocker_code",
+    "first_true_blocker_source",
+    "operator_action_summary",
+    "contradiction_status",
+    "contradictions",
+)
 
 
 def _stable_id(seed: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical_json_bytes_v1(dict(seed))).hexdigest()[:16]
+
+
+def _require_nonempty_string(value: Any, code: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError(code)
+    return text
+
+
+def validate_current_projection_input_v1(payload: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, Mapping):
+        raise ValueError("ALERTS_PROJECTION_INPUT_NOT_OBJECT")
+    obj = dict(payload)
+    if str(obj.get("authority_scope") or "").strip() != "DERIVED_ONLY_CURRENT_SYSTEM_PROJECTION":
+        raise ValueError("ALERTS_PROJECTION_INPUT_AUTHORITY_SCOPE_INVALID")
+    for field_name in REQUIRED_CURRENT_PROJECTION_FIELDS_V1:
+        if field_name not in obj:
+            raise ValueError(f"ALERTS_PROJECTION_REQUIRED_FIELD_MISSING:{field_name}")
+    _require_nonempty_string(obj.get("day_utc"), "ALERTS_PROJECTION_REQUIRED_FIELD_MISSING:day_utc")
+    _require_nonempty_string(obj.get("projection_id"), "ALERTS_PROJECTION_REQUIRED_FIELD_MISSING:projection_id")
+    _require_nonempty_string(obj.get("projection_ref"), "ALERTS_PROJECTION_REQUIRED_FIELD_MISSING:projection_ref")
+    _require_nonempty_string(obj.get("generated_at_utc"), "ALERTS_PROJECTION_REQUIRED_FIELD_MISSING:generated_at_utc")
+    git_sha = _require_nonempty_string(obj.get("git_sha"), "ALERTS_PROJECTION_REQUIRED_FIELD_MISSING:git_sha").lower()
+    if len(git_sha) != 40 or any(ch not in "0123456789abcdef" for ch in git_sha):
+        raise ValueError("ALERTS_PROJECTION_GIT_SHA_INVALID")
+    contradiction_status = str(obj.get("contradiction_status") or "").strip().upper()
+    if contradiction_status not in {"NONE", "PRESENT"}:
+        raise ValueError("ALERTS_PROJECTION_CONTRADICTION_STATUS_INVALID")
+    contradictions = obj.get("contradictions")
+    if not isinstance(contradictions, list):
+        raise ValueError("ALERTS_PROJECTION_CONTRADICTIONS_INVALID")
+    for row in contradictions:
+        if not isinstance(row, Mapping):
+            raise ValueError("ALERTS_PROJECTION_CONTRADICTION_ROW_INVALID")
+        _require_nonempty_string(
+            row.get("contradiction_code"),
+            "ALERTS_PROJECTION_CONTRADICTION_CODE_MISSING",
+        )
+        _require_nonempty_string(
+            row.get("summary"),
+            "ALERTS_PROJECTION_CONTRADICTION_SUMMARY_MISSING",
+        )
+        if not isinstance(row.get("source_paths"), list):
+            raise ValueError("ALERTS_PROJECTION_CONTRADICTION_SOURCE_PATHS_INVALID")
+    return obj
 
 
 def _classify_root_cause_family(code: str) -> str:
@@ -95,17 +152,18 @@ def build_alerts_projection_v1(
     generated_at_utc: str,
     producer_module: str,
 ) -> dict[str, Any]:
-    blocker_code = str(current_projection_payload.get("first_true_blocker_code") or "").strip()
-    blocker_source = str(current_projection_payload.get("first_true_blocker_source") or "").strip()
-    contradiction_status = str(current_projection_payload.get("contradiction_status") or "").strip().upper()
-    contradictions = list(current_projection_payload.get("contradictions") or [])
+    validated_projection = validate_current_projection_input_v1(current_projection_payload)
+    blocker_code = str(validated_projection.get("first_true_blocker_code") or "").strip()
+    blocker_source = str(validated_projection.get("first_true_blocker_source") or "").strip()
+    contradiction_status = str(validated_projection.get("contradiction_status") or "").strip().upper()
+    contradictions = list(validated_projection.get("contradictions") or [])
 
     candidates: list[dict[str, Any]] = []
     if blocker_code:
         candidates.append(
             _alert_row(
                 alert_code=blocker_code,
-                summary=str(current_projection_payload.get("operator_action_summary") or "").strip(),
+                summary=str(validated_projection.get("operator_action_summary") or "").strip(),
                 source_ref=blocker_source,
                 blocker_present=True,
             )
@@ -129,7 +187,7 @@ def build_alerts_projection_v1(
             _alert_row(
                 alert_code="SYSTEM_READY",
                 summary="Current deployment, startup, ledger, and day-start projection are healthy.",
-                source_ref=str(current_projection_payload.get("journal_ref") or "").strip(),
+                source_ref=str(validated_projection.get("journal_ref") or "").strip(),
                 blocker_present=False,
             )
         )
@@ -140,21 +198,21 @@ def build_alerts_projection_v1(
         "schema_id": "alerts_projection",
         "schema_version": "v1",
         "authority_scope": "DERIVED_ONLY_ALERTS_PROJECTION",
-        "day_utc": str(current_projection_payload.get("day_utc") or "").strip(),
+        "day_utc": str(validated_projection.get("day_utc") or "").strip(),
         "projection_id": "",
         "generated_at_utc": str(generated_at_utc).strip(),
-        "current_system_projection_ref": str(current_projection_payload.get("projection_ref") or "").strip(),
-        "current_system_projection_id": str(current_projection_payload.get("projection_id") or "").strip(),
+        "current_system_projection_ref": str(validated_projection.get("projection_ref") or "").strip(),
+        "current_system_projection_id": str(validated_projection.get("projection_id") or "").strip(),
         "first_true_blocker_code": blocker_code,
         "active_alerts": active_alerts,
         "first_actionable_alert": first_actionable,
         "suppressed_or_secondary_alerts": suppressed,
-        "operator_summary": str(current_projection_payload.get("operator_action_summary") or "").strip(),
+        "operator_summary": str(validated_projection.get("operator_action_summary") or "").strip(),
         "source_artifacts": [
             {
                 "logical_name": "current_system_projection_v1",
-                "path": str(current_projection_payload.get("projection_ref") or "").strip(),
-                "generated_at_utc": str(current_projection_payload.get("generated_at_utc") or "").strip(),
+                "path": str(validated_projection.get("projection_ref") or "").strip(),
+                "generated_at_utc": str(validated_projection.get("generated_at_utc") or "").strip(),
                 "status": contradiction_status or "NONE",
             }
         ],
@@ -164,7 +222,7 @@ def build_alerts_projection_v1(
         ),
         "producer": producer_block_v1(
             module=producer_module,
-            git_sha=str(current_projection_payload.get("git_sha") or "").strip(),
+            git_sha=str(validated_projection.get("git_sha") or "").strip(),
         ),
     }
     payload["projection_id"] = f"alerts_projection:{payload['day_utc']}:{_stable_id(payload)}"

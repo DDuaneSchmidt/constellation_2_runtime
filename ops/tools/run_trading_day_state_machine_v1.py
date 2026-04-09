@@ -34,7 +34,11 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     read_trading_day_intent_generation_ref_v1,
     resolve_fact_plane_truth_root_v1,
 )
+from constellation_2.common.execution_journal_v1 import (
+    append_state_machine_decision_event_v1,
+)
 from constellation_2.common.paper_session_path_alignment_v1 import (
+    resolve_deployment_state_machine_path,
     resolve_intents_day_completeness_path,
     resolve_paper_day_control_plane_path,
     resolve_paper_session_evidence_manifest_path,
@@ -220,6 +224,35 @@ def _day_attempt_id(day_utc: str, evaluated_at_utc: str) -> str:
 def _state_machine_id(day_utc: str, parts: dict[str, Any]) -> str:
     digest = _sha256_bytes(canonical_json_bytes_v1(parts))
     return f"trading_day_state_machine:{day_utc}:{digest[:16]}"
+
+
+def _resolve_source_emission_identity(*, truth_root: Path, day_utc: str, day_attempt_id: str) -> dict[str, str] | None:
+    deployment_path = resolve_deployment_state_machine_path(truth_root=truth_root, day_utc=day_utc)
+    if not deployment_path.exists() or not deployment_path.is_file():
+        return None
+    deployment_payload = read_json_object_v1(deployment_path)
+    pipeline_run_id = str(deployment_payload.get("deployment_attempt_id") or "").strip()
+    release_build = deployment_payload.get("release_build")
+    if not isinstance(release_build, dict):
+        return None
+    release_id = str(release_build.get("release_id") or "").strip()
+    release_root = str(release_build.get("release_root") or "").strip()
+    if not pipeline_run_id or not release_id or not release_root:
+        return None
+    manifest_path = (Path(release_root).resolve() / "release_manifest.v1.json").resolve()
+    if not manifest_path.exists() or not manifest_path.is_file():
+        return None
+    manifest_payload = read_json_object_v1(manifest_path)
+    git_sha = str(manifest_payload.get("git_sha") or "").strip().lower()
+    if len(git_sha) != 40:
+        return None
+    return {
+        "day_utc": day_utc,
+        "day_attempt_id": day_attempt_id,
+        "pipeline_run_id": pipeline_run_id,
+        "release_id": release_id,
+        "git_sha": git_sha,
+    }
 
 
 def _valid_zero_intent_status(completeness_status: str) -> str:
@@ -942,6 +975,59 @@ def main(argv: list[str] | None = None) -> int:
         payload=payload,
         schema_relpath=OUTPUT_SCHEMA_RELPATH_V1,
     )
+    journal_emission = {
+        "status": "DEFERRED_IDENTITY_ANCHOR_MISSING",
+        "event_type": "",
+        "journal_path": "",
+    }
+    source_emission_identity = _resolve_source_emission_identity(
+        truth_root=truth_root,
+        day_utc=day,
+        day_attempt_id=day_attempt_id,
+    )
+    if isinstance(source_emission_identity, dict):
+        try:
+            journal_ref = append_state_machine_decision_event_v1(
+                truth_root=truth_root,
+                identity=source_emission_identity,
+                source_path=ref.path,
+                source_payload=payload,
+                producer_module="ops/tools/run_trading_day_state_machine_v1.py",
+            )
+            journal_emission = {
+                "status": "EMITTED",
+                "event_type": "STATE_MACHINE_DECISION_RECORDED",
+                "journal_path": str(journal_ref.path),
+            }
+        except Exception as exc:
+            reason = f"{type(exc).__name__}:{exc}"
+            if "EXECUTION_JOURNAL_CROSS_IDENTITY_CONTAMINATION:existing_journal:" in reason:
+                journal_emission = {
+                    "status": "DEFERRED_EXISTING_JOURNAL_IDENTITY_MISMATCH",
+                    "event_type": "",
+                    "journal_path": "",
+                    "reason": reason,
+                }
+            else:
+                print(
+                    json.dumps(
+                        {
+                            "path": str(ref.path),
+                            "sha256": ref.sha256,
+                            "state_machine_id": state_machine_id,
+                            "day_attempt_id": day_attempt_id,
+                            "final_start_decision": final_start_decision,
+                            "first_true_blocker_code": first_true_blocker["first_true_blocker_code"],
+                            "ledger_id": supporting_session_authority["ledger_id"],
+                            "journal_emission": {
+                                "status": "FAILED",
+                                "reason": reason,
+                            },
+                        },
+                        sort_keys=True,
+                    )
+                )
+                return 4
     print(
         json.dumps(
             {
@@ -952,6 +1038,7 @@ def main(argv: list[str] | None = None) -> int:
                 "final_start_decision": final_start_decision,
                 "first_true_blocker_code": first_true_blocker["first_true_blocker_code"],
                 "ledger_id": supporting_session_authority["ledger_id"],
+                "journal_emission": journal_emission,
             },
             sort_keys=True,
         )

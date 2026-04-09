@@ -217,6 +217,10 @@ documents:
     path: governance/05_CONTRACTS/C2/execution_journal_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
+  - id: C2_EXECUTION_JOURNAL_EVENT_TYPE_REGISTRY_V1
+    path: governance/05_CONTRACTS/C2/execution_journal_event_type_registry_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
   - id: C2_CURRENT_SYSTEM_PROJECTION_V1
     path: governance/05_CONTRACTS/C2/current_system_projection_v1.contract.md
     class: C2_CONTRACT
@@ -236,6 +240,10 @@ documents:
 
   - id: C2_REPO_AUTHORITY_V1
     path: governance/02_REGISTRIES/REPO_AUTHORITY_V1.json
+    class: C2_REGISTRY
+    status: DRAFT
+  - id: C2_EXECUTION_JOURNAL_EVENT_TYPE_REGISTRY_FILE_V1
+    path: governance/02_REGISTRIES/C2_EXECUTION_JOURNAL_EVENT_TYPE_REGISTRY_V1.json
     class: C2_REGISTRY
     status: DRAFT
 

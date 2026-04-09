@@ -103,14 +103,40 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["logical_name", "path", "generated_at_utc", "sha256", "status", "producer_git_sha"],
+        "required": [
+          "logical_name",
+          "path",
+          "generated_at_utc",
+          "sha256",
+          "status",
+          "producer_git_sha",
+          "identity_tuple",
+          "identity_binding_source",
+          "identity_binding_event_type",
+          "identity_binding_event_key"
+        ],
         "properties": {
           "logical_name": { "type": "string", "minLength": 1 },
           "path": { "type": "string", "minLength": 1 },
           "generated_at_utc": { "type": "string" },
           "sha256": { "type": "string", "minLength": 1 },
           "status": { "type": "string", "minLength": 1 },
-          "producer_git_sha": { "type": "string" }
+          "producer_git_sha": { "type": "string" },
+          "identity_tuple": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["day_utc", "day_attempt_id", "pipeline_run_id", "release_id", "git_sha"],
+            "properties": {
+              "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+              "day_attempt_id": { "type": "string", "minLength": 1 },
+              "pipeline_run_id": { "type": "string", "minLength": 1 },
+              "release_id": { "type": "string", "minLength": 1 },
+              "git_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" }
+            }
+          },
+          "identity_binding_source": { "type": "string", "minLength": 1 },
+          "identity_binding_event_type": { "type": "string" },
+          "identity_binding_event_key": { "type": "string" }
         }
       }
     },
@@ -145,4 +171,3 @@
     }
   }
 }
-

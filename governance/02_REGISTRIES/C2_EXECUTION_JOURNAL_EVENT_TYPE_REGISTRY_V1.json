@@ -1,0 +1,213 @@
+{
+  "schema_id": "C2_EXECUTION_JOURNAL_EVENT_TYPE_REGISTRY_V1",
+  "schema_version": "v1",
+  "event_types": {
+    "DEPLOYMENT_ACTIVATED": {
+      "payload_family": "deployment_state_machine_outcome",
+      "semantics": "Deployment state machine reached DEPLOY_ACTIVE for the bound day attempt and active release.",
+      "allowed_event_sources": [
+        "deployment_state_machine_v1"
+      ],
+      "required_payload_fields": [
+        "source_artifact_path",
+        "source_artifact_sha256",
+        "source_generated_at_utc",
+        "final_deployment_decision",
+        "blocking_codes",
+        "first_true_blocker_code"
+      ],
+      "event_key_payload_fields": [
+        "final_deployment_decision",
+        "blocking_codes",
+        "first_true_blocker_code"
+      ],
+      "duplicate_policy": "IDEMPOTENT_BY_EVENT_KEY",
+      "multiple_per_day_attempt": false
+    },
+    "DEPLOYMENT_BLOCKED": {
+      "payload_family": "deployment_state_machine_outcome",
+      "semantics": "Deployment state machine did not reach DEPLOY_ACTIVE for the bound day attempt and active release.",
+      "allowed_event_sources": [
+        "deployment_state_machine_v1"
+      ],
+      "required_payload_fields": [
+        "source_artifact_path",
+        "source_artifact_sha256",
+        "source_generated_at_utc",
+        "final_deployment_decision",
+        "blocking_codes",
+        "first_true_blocker_code"
+      ],
+      "event_key_payload_fields": [
+        "final_deployment_decision",
+        "blocking_codes",
+        "first_true_blocker_code"
+      ],
+      "duplicate_policy": "IDEMPOTENT_BY_EVENT_KEY",
+      "multiple_per_day_attempt": false
+    },
+    "STARTUP_MATERIALIZATION_COMPLETED": {
+      "payload_family": "startup_materialization_outcome",
+      "semantics": "Startup materialization completed and produced the bound authoritative result.",
+      "allowed_event_sources": [
+        "startup_materialization_v1"
+      ],
+      "required_payload_fields": [
+        "source_artifact_path",
+        "source_artifact_sha256",
+        "source_generated_at_utc",
+        "startup_status",
+        "freshness_verdict",
+        "linkage_verdict",
+        "blocking_codes"
+      ],
+      "event_key_payload_fields": [
+        "startup_status",
+        "freshness_verdict",
+        "linkage_verdict",
+        "blocking_codes"
+      ],
+      "duplicate_policy": "IDEMPOTENT_BY_EVENT_KEY",
+      "multiple_per_day_attempt": false
+    },
+    "STARTUP_PROOF_VALIDATION_COMPLETED": {
+      "payload_family": "startup_proof_validation_outcome",
+      "semantics": "Startup proof validation completed and recorded agreement or denial relative to authoritative startup evidence.",
+      "allowed_event_sources": [
+        "startup_proof_validation_v1"
+      ],
+      "required_payload_fields": [
+        "source_artifact_path",
+        "source_artifact_sha256",
+        "source_generated_at_utc",
+        "startup_proof_status",
+        "ledger_authority_status",
+        "blocking_codes"
+      ],
+      "event_key_payload_fields": [
+        "startup_proof_status",
+        "ledger_authority_status",
+        "blocking_codes"
+      ],
+      "duplicate_policy": "IDEMPOTENT_BY_EVENT_KEY",
+      "multiple_per_day_attempt": false
+    },
+    "LEDGER_AUTHORITY_RECORDED": {
+      "payload_family": "ledger_authority_outcome",
+      "semantics": "Paper session ledger recorded authoritative grant or denial for the bound session state.",
+      "allowed_event_sources": [
+        "paper_session_ledger_v1"
+      ],
+      "required_payload_fields": [
+        "source_artifact_path",
+        "source_artifact_sha256",
+        "source_generated_at_utc",
+        "ledger_id",
+        "authority_status",
+        "system_ready",
+        "submission_authorized",
+        "blocking_codes"
+      ],
+      "event_key_payload_fields": [
+        "ledger_id",
+        "authority_status",
+        "system_ready",
+        "submission_authorized",
+        "blocking_codes"
+      ],
+      "duplicate_policy": "IDEMPOTENT_BY_EVENT_KEY",
+      "multiple_per_day_attempt": false
+    },
+    "STATE_MACHINE_DECISION_RECORDED": {
+      "payload_family": "state_machine_decision_outcome",
+      "semantics": "Trading-day state machine recorded the authoritative final day-start decision for the bound attempt.",
+      "allowed_event_sources": [
+        "trading_day_state_machine_v1"
+      ],
+      "required_payload_fields": [
+        "source_artifact_path",
+        "source_artifact_sha256",
+        "source_generated_at_utc",
+        "state_machine_id",
+        "final_start_decision",
+        "first_true_blocker_code",
+        "first_true_blocker_artifact_path"
+      ],
+      "event_key_payload_fields": [
+        "final_start_decision",
+        "first_true_blocker_code",
+        "first_true_blocker_artifact_path"
+      ],
+      "duplicate_policy": "IDEMPOTENT_BY_EVENT_KEY",
+      "multiple_per_day_attempt": false
+    },
+    "SUBMISSION_AUTHORIZATION_RECORDED": {
+      "payload_family": "submission_authorization_outcome",
+      "semantics": "Paper session ledger recorded the authoritative submission authorization state for the bound session.",
+      "allowed_event_sources": [
+        "paper_session_ledger_v1"
+      ],
+      "required_payload_fields": [
+        "source_artifact_path",
+        "source_artifact_sha256",
+        "source_generated_at_utc",
+        "ledger_id",
+        "submission_authorized",
+        "authority_status"
+      ],
+      "event_key_payload_fields": [
+        "ledger_id",
+        "submission_authorized",
+        "authority_status"
+      ],
+      "duplicate_policy": "IDEMPOTENT_BY_EVENT_KEY",
+      "multiple_per_day_attempt": false
+    },
+    "STAGE_DURATION_RECORDED": {
+      "payload_family": "stage_duration_measurement",
+      "semantics": "A derived stage duration was recorded for the bound day attempt without changing authority truth.",
+      "allowed_event_sources": [
+        "paper_session_startup_flow_v1"
+      ],
+      "required_payload_fields": [
+        "source_artifact_path",
+        "source_artifact_sha256",
+        "source_generated_at_utc",
+        "stage_name",
+        "started_at_utc",
+        "ended_at_utc",
+        "duration_ms"
+      ],
+      "event_key_payload_fields": [
+        "stage_name",
+        "started_at_utc",
+        "ended_at_utc",
+        "duration_ms"
+      ],
+      "duplicate_policy": "IDEMPOTENT_BY_EVENT_KEY",
+      "multiple_per_day_attempt": true
+    },
+    "SYSTEM_CONTRADICTION_DETECTED": {
+      "payload_family": "system_contradiction",
+      "semantics": "A contradiction between authoritative outputs was detected and recorded explicitly for investigation.",
+      "allowed_event_sources": [
+        "execution_journal_v1"
+      ],
+      "required_payload_fields": [
+        "source_artifact_path",
+        "source_artifact_sha256",
+        "source_generated_at_utc",
+        "contradiction_code",
+        "contradiction_details",
+        "source_artifact_paths"
+      ],
+      "event_key_payload_fields": [
+        "contradiction_code",
+        "contradiction_details",
+        "source_artifact_paths"
+      ],
+      "duplicate_policy": "IDEMPOTENT_BY_EVENT_KEY",
+      "multiple_per_day_attempt": true
+    }
+  }
+}

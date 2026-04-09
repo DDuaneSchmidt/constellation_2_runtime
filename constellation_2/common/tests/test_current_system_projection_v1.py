@@ -31,6 +31,21 @@ def _source_payload(path: str = "/tmp/source.json") -> dict[str, object]:
     }
 
 
+def _source_artifact_row(logical_name: str, path: str, event_type: str, event_key: str) -> dict[str, object]:
+    return {
+        "logical_name": logical_name,
+        "path": path,
+        "generated_at_utc": "2026-04-08T13:00:04Z",
+        "sha256": "c" * 64 if logical_name == "execution_journal_v1" else "b" * 64,
+        "status": "PRESENT",
+        "producer_git_sha": "a" * 40,
+        "identity_tuple": _identity(),
+        "identity_binding_source": "journal_self_identity" if logical_name == "execution_journal_v1" else "execution_journal_v1",
+        "identity_binding_event_type": event_type,
+        "identity_binding_event_key": event_key,
+    }
+
+
 def _journal_payload() -> dict[str, object]:
     identity = _identity()
     events = [
@@ -98,22 +113,24 @@ def _journal_payload() -> dict[str, object]:
 
 
 def test_current_projection_from_valid_journal() -> None:
+    journal_payload = _journal_payload()
+    events_by_type = {event["event_type"]: event for event in journal_payload["events"]}
     payload = current_projection.build_current_system_projection_v1(
         day_utc="2026-04-08",
-        journal_payload=_journal_payload(),
+        journal_payload=journal_payload,
         source_artifacts=[
-            {"logical_name": "execution_journal_v1", "path": "/tmp/journal.json", "generated_at_utc": "2026-04-08T13:00:04Z", "sha256": "c" * 64, "status": "PRESENT", "producer_git_sha": "a" * 40},
-            {"logical_name": "deployment_state_machine_v1", "path": "/tmp/deploy.json", "generated_at_utc": "2026-04-08T13:00:00Z", "sha256": "d" * 64, "status": "PRESENT", "producer_git_sha": "a" * 40},
-            {"logical_name": "startup_materialization_v1", "path": "/tmp/startup.json", "generated_at_utc": "2026-04-08T13:00:01Z", "sha256": "e" * 64, "status": "PRESENT", "producer_git_sha": "a" * 40},
-            {"logical_name": "startup_proof_validation_v1", "path": "/tmp/startup_proof.json", "generated_at_utc": "2026-04-08T13:00:02Z", "sha256": "f" * 64, "status": "PRESENT", "producer_git_sha": "a" * 40},
-            {"logical_name": "paper_session_ledger_v1", "path": "/tmp/ledger.json", "generated_at_utc": "2026-04-08T13:00:03Z", "sha256": "1" * 64, "status": "PRESENT", "producer_git_sha": "a" * 40},
-            {"logical_name": "trading_day_state_machine_v1", "path": "/tmp/state_machine.json", "generated_at_utc": "2026-04-08T13:00:04Z", "sha256": "2" * 64, "status": "PRESENT", "producer_git_sha": "a" * 40},
+            _source_artifact_row("execution_journal_v1", "/tmp/journal.json", "", ""),
+            _source_artifact_row("deployment_state_machine_v1", "/tmp/deploy.json", "DEPLOYMENT_ACTIVATED", events_by_type["DEPLOYMENT_ACTIVATED"]["event_key"]),
+            _source_artifact_row("startup_materialization_v1", "/tmp/startup.json", "STARTUP_MATERIALIZATION_COMPLETED", events_by_type["STARTUP_MATERIALIZATION_COMPLETED"]["event_key"]),
+            _source_artifact_row("startup_proof_validation_v1", "/tmp/startup_proof.json", "STARTUP_PROOF_VALIDATION_COMPLETED", events_by_type["STARTUP_PROOF_VALIDATION_COMPLETED"]["event_key"]),
+            _source_artifact_row("paper_session_ledger_v1", "/tmp/ledger.json", "LEDGER_AUTHORITY_RECORDED", events_by_type["LEDGER_AUTHORITY_RECORDED"]["event_key"]),
+            _source_artifact_row("trading_day_state_machine_v1", "/tmp/state_machine.json", "STATE_MACHINE_DECISION_RECORDED", events_by_type["STATE_MACHINE_DECISION_RECORDED"]["event_key"]),
         ],
-        deployment_payload={"evaluated_at_utc": "2026-04-08T13:00:00Z"},
-        startup_materialization_payload={"produced_at_utc": "2026-04-08T13:00:01Z"},
-        startup_proof_payload={"generated_at_utc": "2026-04-08T13:00:02Z"},
-        ledger_payload={"evaluated_at_utc": "2026-04-08T13:00:03Z"},
-        trading_day_payload={"evaluated_at_utc": "2026-04-08T13:00:04Z"},
+        deployment_payload={"day_utc": "2026-04-08", "deployment_attempt_id": _identity()["pipeline_run_id"], "release_build": {"release_id": _identity()["release_id"]}, "evaluated_at_utc": "2026-04-08T13:00:00Z"},
+        startup_materialization_payload={"day_utc": "2026-04-08", "produced_at_utc": "2026-04-08T13:00:01Z"},
+        startup_proof_payload={"day_utc": "2026-04-08", "generated_at_utc": "2026-04-08T13:00:02Z"},
+        ledger_payload={"day_utc": "2026-04-08", "evaluated_at_utc": "2026-04-08T13:00:03Z"},
+        trading_day_payload={"day_utc": "2026-04-08", "day_attempt_id": _identity()["day_attempt_id"], "evaluated_at_utc": "2026-04-08T13:00:04Z"},
         generated_at_utc="2026-04-08T13:00:05Z",
         producer_module="test.module",
     )
@@ -124,19 +141,104 @@ def test_current_projection_from_valid_journal() -> None:
 
 def test_current_projection_fails_closed_when_required_event_missing() -> None:
     bad_journal = _journal_payload()
+    source_events = {event["event_type"]: event for event in bad_journal["events"]}
     bad_journal["events"] = [event for event in bad_journal["events"] if event["event_type"] != "LEDGER_AUTHORITY_RECORDED"]
-    bad_journal["last_event_seq"] = len(bad_journal["events"])
+    renumbered_events = []
+    for idx, event in enumerate(bad_journal["events"], start=1):
+        renumbered_events.append(
+            journal.build_event_record_v1(
+                **_identity(),
+                event_seq=idx,
+                event_type=event["event_type"],
+                event_source=event["event_source"],
+                generated_at_utc=event["generated_at_utc"],
+                status=event["status"],
+                payload=event["payload"],
+            )
+        )
+    bad_journal["events"] = renumbered_events
+    bad_journal["last_event_seq"] = len(renumbered_events)
     with pytest.raises(ValueError, match="REQUIRED_EVENT_MISSING"):
         current_projection.build_current_system_projection_v1(
             day_utc="2026-04-08",
             journal_payload=bad_journal,
-            source_artifacts=[],
-            deployment_payload={},
-            startup_materialization_payload={},
-            startup_proof_payload={},
-            ledger_payload={},
-            trading_day_payload={},
+            source_artifacts=[
+                _source_artifact_row("execution_journal_v1", "/tmp/journal.json", "", ""),
+                _source_artifact_row("deployment_state_machine_v1", "/tmp/deploy.json", "DEPLOYMENT_ACTIVATED", source_events["DEPLOYMENT_ACTIVATED"]["event_key"]),
+                _source_artifact_row("startup_materialization_v1", "/tmp/startup.json", "STARTUP_MATERIALIZATION_COMPLETED", source_events["STARTUP_MATERIALIZATION_COMPLETED"]["event_key"]),
+                _source_artifact_row("startup_proof_validation_v1", "/tmp/startup_proof.json", "STARTUP_PROOF_VALIDATION_COMPLETED", source_events["STARTUP_PROOF_VALIDATION_COMPLETED"]["event_key"]),
+                _source_artifact_row("paper_session_ledger_v1", "/tmp/ledger.json", "LEDGER_AUTHORITY_RECORDED", "missing-ledger-key"),
+                _source_artifact_row("trading_day_state_machine_v1", "/tmp/state_machine.json", "STATE_MACHINE_DECISION_RECORDED", source_events["STATE_MACHINE_DECISION_RECORDED"]["event_key"]),
+            ],
+            deployment_payload={"day_utc": "2026-04-08", "deployment_attempt_id": _identity()["pipeline_run_id"], "release_build": {"release_id": _identity()["release_id"]}, "evaluated_at_utc": "2026-04-08T13:00:00Z"},
+            startup_materialization_payload={"day_utc": "2026-04-08", "produced_at_utc": "2026-04-08T13:00:01Z"},
+            startup_proof_payload={"day_utc": "2026-04-08", "generated_at_utc": "2026-04-08T13:00:02Z"},
+            ledger_payload={"day_utc": "2026-04-08", "evaluated_at_utc": "2026-04-08T13:00:03Z"},
+            trading_day_payload={"day_utc": "2026-04-08", "day_attempt_id": _identity()["day_attempt_id"], "evaluated_at_utc": "2026-04-08T13:00:04Z"},
             generated_at_utc="2026-04-08T13:00:05Z",
             producer_module="test.module",
         )
 
+
+def test_current_projection_rejects_identity_mismatch() -> None:
+    journal_payload = _journal_payload()
+    events_by_type = {event["event_type"]: event for event in journal_payload["events"]}
+    bad_row = _source_artifact_row(
+        "trading_day_state_machine_v1",
+        "/tmp/state_machine.json",
+        "STATE_MACHINE_DECISION_RECORDED",
+        events_by_type["STATE_MACHINE_DECISION_RECORDED"]["event_key"],
+    )
+    bad_row["identity_tuple"] = {**_identity(), "release_id": "release-002"}
+    with pytest.raises(ValueError, match="IDENTITY_TUPLE_MISSING|CROSS_IDENTITY_CONTAMINATION"):
+        current_projection.build_current_system_projection_v1(
+            day_utc="2026-04-08",
+            journal_payload=journal_payload,
+            source_artifacts=[
+                _source_artifact_row("execution_journal_v1", "/tmp/journal.json", "", ""),
+                _source_artifact_row("deployment_state_machine_v1", "/tmp/deploy.json", "DEPLOYMENT_ACTIVATED", events_by_type["DEPLOYMENT_ACTIVATED"]["event_key"]),
+                _source_artifact_row("startup_materialization_v1", "/tmp/startup.json", "STARTUP_MATERIALIZATION_COMPLETED", events_by_type["STARTUP_MATERIALIZATION_COMPLETED"]["event_key"]),
+                _source_artifact_row("startup_proof_validation_v1", "/tmp/startup_proof.json", "STARTUP_PROOF_VALIDATION_COMPLETED", events_by_type["STARTUP_PROOF_VALIDATION_COMPLETED"]["event_key"]),
+                _source_artifact_row("paper_session_ledger_v1", "/tmp/ledger.json", "LEDGER_AUTHORITY_RECORDED", events_by_type["LEDGER_AUTHORITY_RECORDED"]["event_key"]),
+                bad_row,
+            ],
+            deployment_payload={"day_utc": "2026-04-08", "deployment_attempt_id": _identity()["pipeline_run_id"], "release_build": {"release_id": _identity()["release_id"]}, "evaluated_at_utc": "2026-04-08T13:00:00Z"},
+            startup_materialization_payload={"day_utc": "2026-04-08", "produced_at_utc": "2026-04-08T13:00:01Z"},
+            startup_proof_payload={"day_utc": "2026-04-08", "generated_at_utc": "2026-04-08T13:00:02Z"},
+            ledger_payload={"day_utc": "2026-04-08", "evaluated_at_utc": "2026-04-08T13:00:03Z"},
+            trading_day_payload={"day_utc": "2026-04-08", "day_attempt_id": _identity()["day_attempt_id"], "evaluated_at_utc": "2026-04-08T13:00:04Z"},
+            generated_at_utc="2026-04-08T13:00:05Z",
+            producer_module="test.module",
+        )
+
+
+def test_current_projection_rejects_missing_identity_field() -> None:
+    journal_payload = _journal_payload()
+    events_by_type = {event["event_type"]: event for event in journal_payload["events"]}
+    bad_row = _source_artifact_row(
+        "deployment_state_machine_v1",
+        "/tmp/deploy.json",
+        "DEPLOYMENT_ACTIVATED",
+        events_by_type["DEPLOYMENT_ACTIVATED"]["event_key"],
+    )
+    del bad_row["identity_tuple"]["pipeline_run_id"]
+    with pytest.raises(ValueError, match="REQUIRED_FIELD_MISSING|IDENTITY_TUPLE_MISSING"):
+        current_projection.build_current_system_projection_v1(
+            day_utc="2026-04-08",
+            journal_payload=journal_payload,
+            source_artifacts=[
+                _source_artifact_row("execution_journal_v1", "/tmp/journal.json", "", ""),
+                bad_row,
+                _source_artifact_row("startup_materialization_v1", "/tmp/startup.json", "STARTUP_MATERIALIZATION_COMPLETED", events_by_type["STARTUP_MATERIALIZATION_COMPLETED"]["event_key"]),
+                _source_artifact_row("startup_proof_validation_v1", "/tmp/startup_proof.json", "STARTUP_PROOF_VALIDATION_COMPLETED", events_by_type["STARTUP_PROOF_VALIDATION_COMPLETED"]["event_key"]),
+                _source_artifact_row("paper_session_ledger_v1", "/tmp/ledger.json", "LEDGER_AUTHORITY_RECORDED", events_by_type["LEDGER_AUTHORITY_RECORDED"]["event_key"]),
+                _source_artifact_row("trading_day_state_machine_v1", "/tmp/state_machine.json", "STATE_MACHINE_DECISION_RECORDED", events_by_type["STATE_MACHINE_DECISION_RECORDED"]["event_key"]),
+            ],
+            deployment_payload={"day_utc": "2026-04-08", "deployment_attempt_id": _identity()["pipeline_run_id"], "release_build": {"release_id": _identity()["release_id"]}, "evaluated_at_utc": "2026-04-08T13:00:00Z"},
+            startup_materialization_payload={"day_utc": "2026-04-08", "produced_at_utc": "2026-04-08T13:00:01Z"},
+            startup_proof_payload={"day_utc": "2026-04-08", "generated_at_utc": "2026-04-08T13:00:02Z"},
+            ledger_payload={"day_utc": "2026-04-08", "evaluated_at_utc": "2026-04-08T13:00:03Z"},
+            trading_day_payload={"day_utc": "2026-04-08", "day_attempt_id": _identity()["day_attempt_id"], "evaluated_at_utc": "2026-04-08T13:00:04Z"},
+            generated_at_utc="2026-04-08T13:00:05Z",
+            producer_module="test.module",
+        )

@@ -52,6 +52,6 @@ Allowed root-cause families:
 ## Fail-closed rules
 
 - Missing or invalid `current_system_projection_v1` input must fail closed.
+- Malformed or identity-invalid current-system projection inputs must fail closed.
 - Duplicate alert storms are forbidden; alerts must deduplicate by root cause.
 - This surface must never claim readiness truth.
-

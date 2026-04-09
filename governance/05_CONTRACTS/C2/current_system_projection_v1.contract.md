@@ -59,6 +59,14 @@ The projection must include:
 ## Fail-closed rules
 
 - Missing required journal events must fail closed.
-- Missing or cross-identity-mismatched supporting snapshots must fail closed.
+- Every required supporting input must bind to the full identity tuple:
+  - `day_utc`
+  - `day_attempt_id`
+  - `pipeline_run_id`
+  - `release_id`
+  - `git_sha`
+- Supporting snapshots that do not natively carry the full tuple must bind through matching
+  `execution_journal_v1` source-artifact event references.
+- Missing identity fields, binding mismatches, missing required input artifacts, or cross-identity
+  mismatches must fail closed.
 - Contradictions must be recorded explicitly and must not be hidden inside a single boolean.
-

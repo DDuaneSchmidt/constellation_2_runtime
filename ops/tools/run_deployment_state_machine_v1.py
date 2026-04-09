@@ -28,6 +28,13 @@ from constellation_2.common.deployment_state_machine_v1 import (
     load_active_runtime_contract_if_present,
     resolve_live_service_fragment_path,
 )
+from constellation_2.common.execution_journal_v1 import (
+    append_deployment_outcome_event_v1,
+    read_execution_journal_identity_anchor_v1,
+)
+from constellation_2.common.paper_session_path_alignment_v1 import (
+    resolve_trading_day_state_machine_path,
+)
 from constellation_2.phaseC.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
@@ -71,6 +78,17 @@ def _source_snapshot_id(git_sha: str, cleanliness_status: str) -> str:
     return git_sha if cleanliness_status == "CLEAN" else ""
 
 
+def _resolve_day_attempt_anchor(*, truth_root: Path, day_utc: str) -> str:
+    journal_identity = read_execution_journal_identity_anchor_v1(truth_root=truth_root, day_utc=day_utc)
+    if isinstance(journal_identity, dict):
+        return str(journal_identity["day_attempt_id"])
+    trading_day_path = resolve_trading_day_state_machine_path(truth_root=truth_root, day_utc=day_utc)
+    if not trading_day_path.exists() or not trading_day_path.is_file():
+        return ""
+    payload = json.loads(trading_day_path.read_text(encoding="utf-8"))
+    return str(payload.get("day_attempt_id") or "").strip()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="run_deployment_state_machine_v1")
     ap.add_argument("--day_utc", required=True)
@@ -90,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
 
     internal_error = ""
     active_symlink_target = ""
+    active_release_git_sha = ""
     active_release: dict[str, Any] = {
         "release_id": "",
         "release_root": "",
@@ -118,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
         active_target = ACTIVE_POINTER.resolve()
         active_symlink_target = str(active_target)
         inspection = inspect_release_root(active_target)
+        active_release_git_sha = str(inspection.manifest.get("git_sha") or "").strip().lower()
         active_release = {
             "release_id": inspection.release_id,
             "release_root": str(inspection.release_root),
@@ -310,7 +330,69 @@ def main(argv: list[str] | None = None) -> int:
     out_path = _report_path(truth_root=truth_root, day_utc=day_utc)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(canonical_json_bytes_v1(payload) + b"\n")
-    print(json.dumps({"report_path": str(out_path), "final_deployment_decision": decision, "blocking_codes": blocking_codes}, indent=2, sort_keys=True))
+    journal_emission = {
+        "status": "DEFERRED_IDENTITY_ANCHOR_MISSING",
+        "event_type": "",
+        "journal_path": "",
+    }
+    day_attempt_id = _resolve_day_attempt_anchor(truth_root=truth_root, day_utc=day_utc)
+    if day_attempt_id and str(payload.get("release_build", {}).get("release_id") or "").strip() and active_release_git_sha:
+        try:
+            journal_ref = append_deployment_outcome_event_v1(
+                truth_root=truth_root,
+                day_utc=day_utc,
+                day_attempt_id=day_attempt_id,
+                pipeline_run_id=str(payload.get("deployment_attempt_id") or "").strip(),
+                release_id=str(dict(payload.get("release_build") or {}).get("release_id") or "").strip(),
+                git_sha=active_release_git_sha,
+                source_path=out_path,
+                source_payload=payload,
+                producer_module="ops/tools/run_deployment_state_machine_v1.py",
+            )
+            event_type = "DEPLOYMENT_ACTIVATED" if decision == "DEPLOY_ACTIVE" else "DEPLOYMENT_BLOCKED"
+            journal_emission = {
+                "status": "EMITTED",
+                "event_type": event_type,
+                "journal_path": str(journal_ref.path),
+            }
+        except Exception as exc:
+            reason = f"{type(exc).__name__}:{exc}"
+            if "EXECUTION_JOURNAL_CROSS_IDENTITY_CONTAMINATION:existing_journal:" in reason:
+                journal_emission = {
+                    "status": "DEFERRED_EXISTING_JOURNAL_IDENTITY_MISMATCH",
+                    "event_type": "",
+                    "journal_path": "",
+                    "reason": reason,
+                }
+            else:
+                print(
+                    json.dumps(
+                        {
+                            "report_path": str(out_path),
+                            "final_deployment_decision": decision,
+                            "blocking_codes": blocking_codes,
+                            "journal_emission": {
+                                "status": "FAILED",
+                                "reason": reason,
+                            },
+                        },
+                        indent=2,
+                        sort_keys=True,
+                    )
+                )
+                return 4
+    print(
+        json.dumps(
+            {
+                "report_path": str(out_path),
+                "final_deployment_decision": decision,
+                "blocking_codes": blocking_codes,
+                "journal_emission": journal_emission,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
     return 0 if decision == "DEPLOY_ACTIVE" else 2
 
 

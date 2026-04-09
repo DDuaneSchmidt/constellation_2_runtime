@@ -24,11 +24,15 @@ bus.
 ## Truth owner
 
 - Truth owner: Constellation governance
-- Canonical writer: `ops/tools/run_execution_journal_v1.py`
+- Canonical writer family:
+  - source-side emitters under authoritative runners
+  - `ops/tools/run_execution_journal_v1.py` as transitional reconciler/backfill
 - Canonical artifact path:
   - `constellation_2/runtime/truth/reports/execution_journal_v1/<DAY>/execution_journal.v1.json`
 - Canonical schema:
   - `governance/04_DATA/SCHEMAS/C2/REPORTS/execution_journal.v1.schema.json`
+- Canonical event type registry:
+  - `governance/02_REGISTRIES/C2_EXECUTION_JOURNAL_EVENT_TYPE_REGISTRY_V1.json`
 
 ## Authority classification
 
@@ -70,15 +74,10 @@ Every event must include:
 
 ## Allowed event types
 
-- `DEPLOYMENT_ACTIVATED`
-- `DEPLOYMENT_BLOCKED`
-- `STARTUP_MATERIALIZATION_COMPLETED`
-- `STARTUP_PROOF_VALIDATION_COMPLETED`
-- `LEDGER_AUTHORITY_RECORDED`
-- `STATE_MACHINE_DECISION_RECORDED`
-- `SUBMISSION_AUTHORIZATION_RECORDED`
-- `STAGE_DURATION_RECORDED`
-- `SYSTEM_CONTRADICTION_DETECTED`
+Allowed event types, emitters, and payload families are governed only through:
+
+- `governance/02_REGISTRIES/C2_EXECUTION_JOURNAL_EVENT_TYPE_REGISTRY_V1.json`
+- `governance/05_CONTRACTS/C2/execution_journal_event_type_registry_v1.contract.md`
 
 ## Fail-closed rules
 
@@ -86,8 +85,8 @@ Every event must include:
 - Mutation of prior events is forbidden.
 - `event_seq` must be strictly monotonic and contiguous.
 - Duplicate `event_seq` or duplicate `event_key` must fail closed.
-- Missing identity fields, invalid event types, invalid payload shapes, or cross-identity
-  contamination must fail closed.
+- Missing identity fields, invalid event types, invalid event sources, invalid payload shapes, or
+  cross-identity contamination must fail closed.
 - The full journal must validate against schema before every write.
 
 ## Determinism requirements
@@ -95,4 +94,3 @@ Every event must include:
 - The journal file must use deterministic canonical JSON serialization.
 - Appends must be atomic.
 - Repeated writes from the same authoritative source state must be idempotent.
-
