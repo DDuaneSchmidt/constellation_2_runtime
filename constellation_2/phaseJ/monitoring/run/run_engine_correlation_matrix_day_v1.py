@@ -26,17 +26,21 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import sys
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP, getcontext
 from pathlib import Path
 from typing import Any, Dict, List
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.common.runtime_contract_v1 import resolve_release_provenance
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
 TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
 # FIX: correct input root is engine_daily_returns_v1 (matches orchestrator + truth)

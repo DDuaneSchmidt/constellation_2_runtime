@@ -29,6 +29,7 @@ import json
 import subprocess
 from typing import Any, Dict, List, Tuple
 
+from constellation_2.common.runtime_contract_v1 import resolve_release_provenance
 from constellation_2.phaseD.lib.enforce_operational_day_invariant_v1 import (
     enforce_operational_day_key_invariant_v1,
 )
@@ -80,8 +81,17 @@ def _resolve_truth_root(raw: str) -> Path:
 
 
 def _git_sha() -> str:
-    out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
-    return out.decode("utf-8").strip()
+    try:
+        s = str(resolve_release_provenance().get("git_sha") or "").strip()
+        if s:
+            return s
+    except Exception:
+        pass
+    try:
+        out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
+        return out.decode("utf-8").strip()
+    except Exception:
+        return "0" * 40
 
 
 def _sha256_bytes(b: bytes) -> str:
