@@ -25,6 +25,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     read_startup_materialization_ref_v1,
     read_trade_submit_readiness_for_day_v1,
     repo_git_sha_v1,
+    resolve_authoritative_repo_root_v1,
     resolve_fact_plane_truth_root_v1,
     resolve_submit_boundary_status_path,
 )
@@ -38,6 +39,37 @@ def _check_row(*, logical_name: str, path: Path, status: str, day_utc: str, reas
         reason_codes=reason_codes,
         day_utc=day_utc,
     )
+
+
+def _refresh_trade_submit_readiness_artifact_v1(*, truth_root: Path, day_utc: str, ib_account: str, environment: str = "PAPER") -> int:
+    import ops.tools.run_trade_submit_readiness_c2_v1 as readiness_module
+
+    resolved_truth_root = Path(truth_root).resolve()
+    resolved_truth_root.mkdir(parents=True, exist_ok=True)
+    authoritative_repo_root = resolve_authoritative_repo_root_v1(readiness_module.REPO_ROOT)
+    original_repo_root = readiness_module.REPO_ROOT
+    original_truth_root = readiness_module.TRUTH_ROOT
+    original_out_root = readiness_module.OUT_ROOT
+    original_argv = list(sys.argv)
+    try:
+        readiness_module.REPO_ROOT = authoritative_repo_root
+        readiness_module.TRUTH_ROOT = resolved_truth_root
+        readiness_module.OUT_ROOT = (resolved_truth_root / "trade_submit_readiness_c2_v1").resolve()
+        sys.argv = [
+            "run_trade_submit_readiness_c2_v1.py",
+            "--day_utc",
+            day_utc,
+            "--ib_account",
+            ib_account,
+            "--environment",
+            str(environment or "").strip().upper(),
+        ]
+        return int(readiness_module.main())
+    finally:
+        sys.argv = original_argv
+        readiness_module.REPO_ROOT = original_repo_root
+        readiness_module.TRUTH_ROOT = original_truth_root
+        readiness_module.OUT_ROOT = original_out_root
 
 
 def main(argv: List[str] | None = None) -> int:
@@ -136,12 +168,27 @@ def main(argv: List[str] | None = None) -> int:
         blocking_codes.extend(row["reason_codes"])
 
     try:
-        readiness_ref = read_trade_submit_readiness_for_day_v1(
-            truth_root=truth_root,
-            day_utc=day_utc,
-            ib_account=paper_account,
-            environment="PAPER",
-        )
+        try:
+            readiness_ref = read_trade_submit_readiness_for_day_v1(
+                truth_root=truth_root,
+                day_utc=day_utc,
+                ib_account=paper_account,
+                environment="PAPER",
+            )
+        except Exception:
+            if freshness_verdict == "CURRENT" and linkage_verdict == "LINKED":
+                _refresh_trade_submit_readiness_artifact_v1(
+                    truth_root=truth_root,
+                    day_utc=day_utc,
+                    ib_account=paper_account,
+                    environment="PAPER",
+                )
+            readiness_ref = read_trade_submit_readiness_for_day_v1(
+                truth_root=truth_root,
+                day_utc=day_utc,
+                ib_account=paper_account,
+                environment="PAPER",
+            )
         readiness_payload = readiness_ref.payload
         readiness_ok = bool(readiness_payload.get("ok") is True) and str(readiness_payload.get("state") or "").strip().upper() == "OK"
         readiness_codes = [str(code).strip() for code in (readiness_payload.get("reasons") or []) if str(code).strip()]

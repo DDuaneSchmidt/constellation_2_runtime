@@ -468,6 +468,89 @@ def test_submit_boundary_missing_dependency_blocks() -> None:
         assert payload["submission_authorized"] is False
 
 
+def test_submit_boundary_refreshes_missing_trade_submit_readiness_and_stays_current_linked() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        truth_root = root / "truth"
+        day_utc = "2026-04-08"
+        _write_json(
+            root / "governance" / "02_REGISTRIES" / "C2_IB_ACCOUNT_REGISTRY_V1.json",
+            {
+                "schema_id": "c2_ib_account_registry",
+                "schema_version": "v1",
+                "accounts": [
+                    {
+                        "account_id": "DUO847203",
+                        "environment": "PAPER",
+                        "enabled_for_submission": True,
+                        "allowed_sleeve_ids": ["PRIMARY"],
+                    }
+                ],
+            },
+        )
+        _write_json(
+            root / "governance" / "02_REGISTRIES" / "C2_SLEEVE_REGISTRY_V1.json",
+            {
+                "schema_id": "c2_sleeve_registry",
+                "schema_version": "v1",
+                "sleeves": [
+                    {
+                        "sleeve_id": "PRIMARY",
+                        "enabled": True,
+                        "mode": "PAPER",
+                        "execution_mode": "AUTO",
+                        "status": "PRODUCTION",
+                        "ib_account": "DUO847203",
+                        "truth_partition": "truth_sleeves/PRIMARY/PAPER",
+                        "assigned_engine_ids": ["C2_DEFENSIVE_TAIL_V1"],
+                        "active_controllable_engine_ids": ["C2_DEFENSIVE_TAIL_V1"],
+                        "disabled_by_default_engine_ids": [],
+                        "support_only_engine_ids": [],
+                    }
+                ],
+            },
+        )
+        _write_json(
+            truth_root / "reports" / "startup_materialization_v1" / day_utc / "startup_materialization.v1.json",
+            {
+                "schema_id": "startup_materialization",
+                "schema_version": "v1",
+                "authority_scope": "NON_AUTHORITY_FACT",
+                "day_utc": day_utc,
+                "session_id": canonical_paper_session_id_v1(day_utc),
+                "status": "SUCCESS",
+                "required_inputs_checked": [],
+                "materialized_outputs": [],
+                "blocking_codes": [],
+                "producer": {"repo": "constellation", "module": "test", "git_sha": "abc1234"},
+                "produced_at_utc": f"{day_utc}T00:00:00Z",
+                "freshness_verdict": "CURRENT",
+                "linkage_verdict": "LINKED",
+                "path_resolution_evidence": {"phasec_root": "/tmp/phasec", "latest_active_attempt_path": "/tmp/latest.json"},
+                "producer_run_id": "startup:test",
+                "phasec_materializer_result": {"returncode": 0, "stdout": "", "stderr": ""},
+            },
+        )
+        _write_market_calendar_day(truth_root, day_utc=day_utc, is_trading_session=True)
+        posture_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+        with patch.object(boundary_module, "REPO_ROOT", root):
+            rc = boundary_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+        assert rc == 0
+        payload = json.loads((truth_root / "reports" / "submit_boundary_status_v1" / day_utc / "submit_boundary_status.v1.json").read_text(encoding="utf-8"))
+        assert payload["boundary_status"] == "DENIED"
+        assert payload["submission_authorized"] is False
+        assert payload["freshness_verdict"] == "CURRENT"
+        assert payload["linkage_verdict"] == "LINKED"
+        assert "trade_submit_readiness_c2_v1" in {row["logical_name"] for row in payload["required_boundary_checks"]}
+        readiness_path = truth_root / "trade_submit_readiness_c2_v1" / "_history" / "PAPER" / "DUO847203" / day_utc / "status.json"
+        readiness = json.loads(readiness_path.read_text(encoding="utf-8"))
+        assert readiness["environment"] == "PAPER"
+        assert readiness["ib_account"] == "DUO847203"
+        assert readiness["day_utc"] == day_utc
+        assert readiness["state"] == "FAIL"
+        assert readiness["provenance"]["truth_root"] == str(truth_root.resolve())
+
+
 def test_submit_boundary_denied_when_posture_disabled() -> None:
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
