@@ -726,7 +726,13 @@ def test_trading_day_state_machine_direct_emits_journal_event_idempotently(tmp_p
 
     with patch.object(state_machine_module, "_run", side_effect=fake_run):
         first_rc = state_machine_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+        first_payload = json.loads(
+            (truth_root / "reports" / "trading_day_state_machine_v1" / day_utc / "trading_day_state_machine.v1.json").read_text(encoding="utf-8")
+        )
         second_rc = state_machine_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+        second_payload = json.loads(
+            (truth_root / "reports" / "trading_day_state_machine_v1" / day_utc / "trading_day_state_machine.v1.json").read_text(encoding="utf-8")
+        )
 
     journal_payload = json.loads(
         (truth_root / "reports" / "execution_journal_v1" / day_utc / "execution_journal.v1.json").read_text(encoding="utf-8")
@@ -734,6 +740,7 @@ def test_trading_day_state_machine_direct_emits_journal_event_idempotently(tmp_p
     event_types = [row["event_type"] for row in journal_payload["events"]]
     assert first_rc == 0
     assert second_rc == 0
+    assert second_payload["day_attempt_id"] == first_payload["day_attempt_id"]
     assert event_types.count("STATE_MACHINE_DECISION_RECORDED") == 1
 
 

@@ -12,6 +12,7 @@ if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
 from constellation_2.common import deployment_state_machine_v1 as deploy_common
+import ops.tools.run_deployment_state_machine_v1 as deploy_runner
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -168,3 +169,107 @@ def test_deploy_active_only_when_checks_pass() -> None:
     assert blocked_decision == "DEPLOY_BLOCKED_VALID"
     assert blocked_first == "AUTHORITATIVE_WORKTREE_DIRTY_BUILD_BLOCKED"
     assert "LIVE_EXECUTION_NOT_ACTIVE_ROOT" in blocked_codes
+
+
+def test_deployment_runner_direct_emits_idempotently_with_stable_attempt_id(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    truth_root = tmp_path / "truth"
+    day_utc = "2026-04-08"
+    release_root = tmp_path / "release"
+    release_root.mkdir(parents=True, exist_ok=True)
+    active_pointer = tmp_path / "constellation_active"
+    active_pointer.symlink_to(release_root)
+    service_path = tmp_path / "live.service"
+    service_path.write_text(
+        "[Service]\n"
+        "ExecStart=/usr/bin/bash -lc 'exec /home/node/constellation_active/ops/run/c2_paper_day_orchestrator_systemd_entry_v1.sh'\n",
+        encoding="utf-8",
+    )
+
+    inspection = deploy_common.ReleaseInspectionV1(
+        release_id="release-001",
+        release_root=release_root,
+        manifest_path=release_root / "release_manifest.v1.json",
+        manifest={
+            "release_id": "release-001",
+            "git_sha": "a" * 40,
+        },
+        manifest_sha256="b" * 64,
+        bundled_file_hash_summary={"file_count": 10, "aggregate_sha256": "c" * 64},
+        required_startup_stack_present=True,
+        missing_required_files=[],
+    )
+
+    monkeypatch.setattr(deploy_runner, "ACTIVE_POINTER", active_pointer)
+    monkeypatch.setattr(deploy_runner, "git_sha_or_fail", lambda repo_root: "a" * 40)
+    monkeypatch.setattr(deploy_runner, "git_branch_or_fail", lambda repo_root: "feature/test")
+    monkeypatch.setattr(deploy_runner, "git_cleanliness_status", lambda repo_root: ("CLEAN", []))
+    monkeypatch.setattr(deploy_runner, "inspect_release_root", lambda release_root: inspection)
+    monkeypatch.setattr(
+        deploy_runner,
+        "evaluate_post_activation_verification",
+        lambda release_root: {
+            "passed": True,
+            "release_id": "release-001",
+            "release_root": str(release_root),
+            "active_symlink_path": str(active_pointer),
+            "active_symlink_target": str(release_root),
+            "active_pointer_matches_release": True,
+            "required_startup_stack_files_present": True,
+            "missing_required_startup_stack_files": [],
+            "service_unit_path": str(service_path),
+            "launcher_path": "/home/node/constellation_active/ops/run/c2_paper_day_orchestrator_systemd_entry_v1.sh",
+            "resolved_execution_root": "/home/node/constellation_active",
+            "active_root_match": True,
+            "active_runtime_contract_path": "/tmp/active_runtime_contract.v1.json",
+            "active_runtime_contract_match": True,
+            "blocking_codes": [],
+        },
+    )
+    monkeypatch.setattr(
+        deploy_runner,
+        "evaluate_service_resolution",
+        lambda service_unit_path: {
+            "service_unit_path": str(service_unit_path),
+            "launcher_path": "/home/node/constellation_active/ops/run/c2_paper_day_orchestrator_systemd_entry_v1.sh",
+            "resolved_execution_root": "/home/node/constellation_active",
+            "active_root_match": True,
+        },
+    )
+    monkeypatch.setattr(deploy_runner, "resolve_live_service_fragment_path", lambda: service_path)
+    monkeypatch.setattr(
+        deploy_runner,
+        "load_active_runtime_contract_if_present",
+        lambda: {
+            "release_root": str(release_root),
+            "release_id": "release-001",
+            "status": "ACTIVE",
+        },
+    )
+    monkeypatch.setattr(
+        deploy_runner,
+        "read_execution_journal_identity_anchor_v1",
+        lambda truth_root, day_utc: {
+            "day_utc": day_utc,
+            "day_attempt_id": "trading_day_state_machine_attempt:2026-04-08:test",
+            "pipeline_run_id": "",
+            "release_id": "",
+            "git_sha": "a" * 40,
+        },
+    )
+
+    report_path = truth_root / "reports" / "deployment_state_machine_v1" / day_utc / "deployment_state_machine.v1.json"
+    first_rc = deploy_runner.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+    first_payload = json.loads(report_path.read_text(encoding="utf-8"))
+    second_rc = deploy_runner.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+    second_payload = json.loads(report_path.read_text(encoding="utf-8"))
+    journal_path = truth_root / "reports" / "execution_journal_v1" / day_utc / "execution_journal.v1.json"
+    journal_payload = json.loads(journal_path.read_text(encoding="utf-8"))
+    event_types = [row["event_type"] for row in journal_payload["events"]]
+
+    assert first_rc == 0
+    assert second_rc == 0
+    assert second_payload["deployment_attempt_id"] == first_payload["deployment_attempt_id"]
+    assert event_types.count("DEPLOYMENT_ACTIVATED") == 1

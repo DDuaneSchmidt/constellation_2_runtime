@@ -57,6 +57,20 @@ def _report_path(*, truth_root: Path, day_utc: str) -> Path:
     ).resolve()
 
 
+def _load_prior_payload(path: Path, *, day_utc: str) -> dict[str, Any] | None:
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if str(payload.get("day_utc") or "").strip() != day_utc:
+        return None
+    return payload
+
+
 def _sha256_file(path: Path) -> str:
     import hashlib
 
@@ -101,6 +115,11 @@ def main(argv: list[str] | None = None) -> int:
     day_utc = str(args.day_utc).strip()
     truth_root = Path(str(args.truth_root)).resolve()
     evaluated_at_utc = _utc_now_iso()
+    out_path = _report_path(truth_root=truth_root, day_utc=day_utc)
+    prior_payload = _load_prior_payload(out_path, day_utc=day_utc)
+    deployment_attempt_id = str((prior_payload or {}).get("deployment_attempt_id") or "").strip()
+    if not deployment_attempt_id:
+        deployment_attempt_id = f"deployment_state_machine_attempt:{day_utc}:{evaluated_at_utc}"
 
     authoritative_git_sha = git_sha_or_fail(REPO_ROOT)
     authoritative_branch = git_branch_or_fail(REPO_ROOT)
@@ -219,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
         "schema_version": "v1",
         "authority_scope": "TOP_LEVEL_DEPLOYMENT_STATE_MACHINE_OWNER",
         "day_utc": day_utc,
-        "deployment_attempt_id": f"deployment_state_machine_attempt:{day_utc}:{evaluated_at_utc}",
+        "deployment_attempt_id": deployment_attempt_id,
         "deployment_state_machine_id": "",
         "evaluated_at_utc": evaluated_at_utc,
         "authoritative_source": {
@@ -327,7 +346,6 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     validate_against_repo_schema_v1(payload, REPO_ROOT, SCHEMA_RELPATH)
-    out_path = _report_path(truth_root=truth_root, day_utc=day_utc)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(canonical_json_bytes_v1(payload) + b"\n")
     journal_emission = {

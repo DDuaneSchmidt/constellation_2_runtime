@@ -445,9 +445,11 @@ def main(argv: list[str] | None = None) -> int:
     day = parse_day_utc_v1(args.day_utc)
     truth_root = resolve_fact_plane_truth_root_v1(args.truth_root)
     evaluated_at_utc = now_utc_iso_v1()
-    day_attempt_id = _day_attempt_id(day, evaluated_at_utc)
     output_path = resolve_trading_day_state_machine_path(truth_root=truth_root, day_utc=day)
     prior_payload = _load_prior_payload(output_path)
+    day_attempt_id = str((prior_payload or {}).get("day_attempt_id") or "").strip()
+    if not day_attempt_id:
+        day_attempt_id = _day_attempt_id(day, evaluated_at_utc)
     blocking_codes: set[str] = set()
     intent_generation_path = resolve_trading_day_intent_generation_path(truth_root=truth_root, day_utc=day)
 
