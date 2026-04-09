@@ -106,6 +106,26 @@ def _build_latest_ptr(day_utc: str, out_path: Path, out_sha256: str) -> Dict[str
     }
 
 
+def _write_latest_pointer_if_monotonic(*, day_utc: str, paths: Paths, out_sha256: str) -> None:
+    skip_latest = False
+    if paths.latest_path.exists():
+        try:
+            latest_obj = json.loads(paths.latest_path.read_text(encoding="utf-8"))
+            latest_day = str(latest_obj.get("day_utc") or "").strip()
+        except Exception:
+            latest_day = ""
+        if latest_day and day_utc < latest_day:
+            skip_latest = True
+
+    if skip_latest:
+        return
+
+    latest_ptr = _build_latest_ptr(day_utc, paths.out_path, out_sha256)
+    validate_against_repo_schema_v1(latest_ptr, REPO_ROOT, SCHEMA_LATEST_PTR)
+    latest_bytes = canonical_json_bytes_v1(latest_ptr) + b"\n"
+    write_file_immutable_v1(path=paths.latest_path, data=latest_bytes, create_dirs=True)
+
+
 def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="run_ib_api_handshake_spine_v1")
     ap.add_argument("--day_utc", required=True, help="UTC day key YYYY-MM-DD")
@@ -128,7 +148,8 @@ def main(argv: List[str] | None = None) -> int:
         validate_against_repo_schema_v1(doc, REPO_ROOT, SCHEMA_HANDSHAKE)
         payload = canonical_json_bytes_v1(doc) + b"\n"
         try:
-            _ = write_file_immutable_v1(path=p.out_path, data=payload, create_dirs=True)
+            wr = write_file_immutable_v1(path=p.out_path, data=payload, create_dirs=True)
+            _write_latest_pointer_if_monotonic(day_utc=day_utc, paths=p, out_sha256=wr.sha256)
         except ImmutableWriteError as e:
             print(f"FAIL: {e}", file=sys.stderr)
             return 4
@@ -162,7 +183,8 @@ def main(argv: List[str] | None = None) -> int:
         validate_against_repo_schema_v1(doc, REPO_ROOT, SCHEMA_HANDSHAKE)
         payload = canonical_json_bytes_v1(doc) + b"\n"
         try:
-            _ = write_file_immutable_v1(path=p.out_path, data=payload, create_dirs=True)
+            wr = write_file_immutable_v1(path=p.out_path, data=payload, create_dirs=True)
+            _write_latest_pointer_if_monotonic(day_utc=day_utc, paths=p, out_sha256=wr.sha256)
         except ImmutableWriteError as e:
             print(f"FAIL: {e}", file=sys.stderr)
             return 4
@@ -216,26 +238,11 @@ def main(argv: List[str] | None = None) -> int:
         print(f"FAIL: {e}", file=sys.stderr)
         return 4
 
-    # Latest pointer: monotonic day only. If latest exists with a later day, skip.
-    skip_latest = False
-    if p.latest_path.exists():
-        try:
-            latest_obj = json.loads(p.latest_path.read_text(encoding="utf-8"))
-            latest_day = str(latest_obj.get("day_utc") or "").strip()
-        except Exception:
-            latest_day = ""
-        if latest_day and day_utc < latest_day:
-            skip_latest = True
-
-    if not skip_latest:
-        latest_ptr = _build_latest_ptr(day_utc, p.out_path, wr.sha256)
-        validate_against_repo_schema_v1(latest_ptr, REPO_ROOT, SCHEMA_LATEST_PTR)
-        latest_bytes = canonical_json_bytes_v1(latest_ptr) + b"\n"
-        try:
-            _ = write_file_immutable_v1(path=p.latest_path, data=latest_bytes, create_dirs=True)
-        except ImmutableWriteError as e:
-            print(f"FAIL: {e}", file=sys.stderr)
-            return 4
+    try:
+        _write_latest_pointer_if_monotonic(day_utc=day_utc, paths=p, out_sha256=wr.sha256)
+    except ImmutableWriteError as e:
+        print(f"FAIL: {e}", file=sys.stderr)
+        return 4
 
     print(f"OK: IB_API_HANDSHAKE_V1_WRITTEN day_utc={day_utc} ok={ok} path={p.out_path} sha256={wr.sha256}")
     return 0

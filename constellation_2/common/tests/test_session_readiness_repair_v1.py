@@ -160,6 +160,9 @@ class SessionReadinessRepairTests(unittest.TestCase):
             out = json.loads((truth_root / "ib_api_handshake" / DAY / "ib_api_handshake.v1.json").read_text(encoding="utf-8"))
             self.assertEqual(out["status"], "FAIL")
             self.assertIn("BROKER_EVENTS_MISSING", out["reason_codes"])
+            latest = json.loads((truth_root / "ib_api_handshake" / "latest_pointer.v1.json").read_text(encoding="utf-8"))
+            self.assertEqual(latest["day_utc"], DAY)
+            self.assertEqual(latest["pointers"]["handshake_path"], str(truth_root / "ib_api_handshake" / DAY / "ib_api_handshake.v1.json"))
 
     def test_trade_submit_readiness_uses_day_scoped_handshake_when_latest_pointer_is_stale(self) -> None:
         with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
@@ -328,7 +331,62 @@ class SessionReadinessRepairTests(unittest.TestCase):
                 rc = readiness_module.main()
             self.assertEqual(rc, 2)
             out = _read_trade_status_for_day(truth_root=truth_root, day=DAY)
-            self.assertIn("FAIL:IB_API_HANDSHAKE_POINTER_MISSING", out["reasons"])
+            self.assertTrue(any(reason.startswith("FAIL:IB_API_HANDSHAKE_NOT_OK:") for reason in out["reasons"]))
+
+    def test_trade_submit_readiness_prefers_current_day_scoped_gate_over_stale_head(self) -> None:
+        with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
+            root = Path(td)
+            truth_root = root / "constellation_2" / "runtime" / "truth"
+            self._write_minimal_registries(root)
+            _write_scoped_gate_stack_authority_day(root=root, sleeve_id="PRIMARY", day="2026-03-13", status="PASS")
+            _write_gate_stack_authority_day(
+                truth_root=root / "constellation_2" / "runtime" / "truth_sleeves" / "PRIMARY" / "PAPER",
+                day=DAY,
+                status="FAIL",
+            )
+            handshake_path = truth_root / "ib_api_handshake" / DAY / "ib_api_handshake.v1.json"
+            _write_json(
+                handshake_path,
+                {
+                    "schema_id": "C2_IB_API_HANDSHAKE_V1",
+                    "schema_version": 1,
+                    "day_utc": DAY,
+                    "status": "OK",
+                    "ok": True,
+                    "environment": "PAPER",
+                    "ib_account": "DUO847203",
+                    "reason_codes": ["HANDSHAKE_OK_NEXTVALIDID_SEEN_NO_504_AFTER"],
+                    "inputs": {},
+                    "observations": {},
+                },
+            )
+            _write_json(
+                truth_root / "ib_api_handshake" / "latest_pointer.v1.json",
+                {
+                    "schema_id": "C2_IB_API_HANDSHAKE_LATEST_POINTER_V1",
+                    "schema_version": 1,
+                    "day_utc": DAY,
+                    "pointers": {
+                        "handshake_path": str(handshake_path),
+                        "handshake_sha256": readiness_module._sha256_file(handshake_path),
+                    },
+                },
+            )
+            with patch.object(readiness_module, "REPO_ROOT", root), patch.object(
+                readiness_module, "TRUTH_ROOT", truth_root
+            ), patch.object(
+                readiness_module, "OUT_ROOT", truth_root / "trade_submit_readiness_c2_v1"
+            ), patch.object(
+                readiness_module, "validate_against_repo_schema_v1", lambda *args, **kwargs: None
+            ), patch(
+                "sys.argv",
+                ["run_trade_submit_readiness_c2_v1.py", "--day_utc", DAY, "--ib_account", "DUO847203", "--environment", "PAPER"],
+            ):
+                rc = readiness_module.main()
+            self.assertEqual(rc, 2)
+            out = _read_trade_status_for_day(truth_root=truth_root, day=DAY)
+            self.assertTrue(any(reason.startswith("FAIL:FINAL_GATE_STACK_NOT_PASS:sleeve_id=PRIMARY:reason=GATE_STACK_STATUS_NOT_PASS") for reason in out["reasons"]))
+            self.assertFalse(any("GATE_STACK_DAY_MISMATCH" in reason for reason in out["reasons"]))
 
     def test_trade_submit_readiness_does_not_fallback_to_global_pass_when_scoped_paper_truth_fails(self) -> None:
         with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:

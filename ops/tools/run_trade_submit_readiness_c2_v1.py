@@ -19,6 +19,7 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 from typing import Any, Dict, List, Tuple
 
 from constellation_2.common.day_authority_decision_v1 import read_day_authority_decision_v1
@@ -107,6 +108,47 @@ def _load_day_authority(day_utc: str) -> tuple[Dict[str, Any] | None, Path, str 
     return payload.payload, payload.path, payload.sha256
 
 
+def _refresh_handshake_spine_for_day(*, day_utc: str) -> int:
+    import ops.tools.run_ib_api_handshake_spine_v1 as handshake_module
+
+    original_repo_root = handshake_module.REPO_ROOT
+    original_truth_root = handshake_module.TRUTH_ROOT
+    original_events_root = handshake_module.AUTH_BROKER_EVENTS_ROOT
+    original_argv = list(sys.argv)
+    try:
+        handshake_module.REPO_ROOT = original_repo_root
+        handshake_module.TRUTH_ROOT = TRUTH_ROOT
+        handshake_module.AUTH_BROKER_EVENTS_ROOT = (TRUTH_ROOT / "execution_evidence_v1" / "broker_events").resolve()
+        sys.argv = ["run_ib_api_handshake_spine_v1.py", "--day_utc", day_utc]
+        return int(handshake_module.main())
+    finally:
+        sys.argv = original_argv
+        handshake_module.REPO_ROOT = original_repo_root
+        handshake_module.TRUTH_ROOT = original_truth_root
+        handshake_module.AUTH_BROKER_EVENTS_ROOT = original_events_root
+
+
+def _refresh_scoped_gate_for_day(*, truth_root: Path, day_utc: str, mode: str = "PAPER") -> int:
+    import ops.tools.run_gate_stack_verdict_v1 as gate_module
+
+    original_argv = list(sys.argv)
+    try:
+        sys.argv = [
+            "run_gate_stack_verdict_v1.py",
+            "--day_utc",
+            day_utc,
+            "--truth_root",
+            str(Path(truth_root).resolve()),
+            "--produced_utc",
+            f"{day_utc}T00:00:00Z",
+            "--mode",
+            str(mode or "").strip().upper(),
+        ]
+        return int(gate_module.main())
+    finally:
+        sys.argv = original_argv
+
+
 def _resolve_primary_scoped_gate_state(*, repo_root: Path, environment: str, ib_account: str, day_utc: str) -> Dict[str, Any]:
     bindings = resolve_governed_sleeve_truth_bindings(
         repo_root=repo_root,
@@ -124,6 +166,8 @@ def _resolve_primary_scoped_gate_state(*, repo_root: Path, environment: str, ib_
     head_path = (primary.truth_root / "run_pointer_v2" / "canonical_authority_head.v1.json").resolve()
     gate_path = (primary.truth_root / "reports" / "gate_stack_verdict_v1" / day_utc / "gate_stack_verdict.v1.json").resolve()
     input_manifest: List[Dict[str, Any]] = []
+    if not gate_path.exists() or not gate_path.is_file():
+        _refresh_scoped_gate_for_day(truth_root=primary.truth_root, day_utc=day_utc, mode=environment)
     if head_path.exists() and head_path.is_file():
         head = _read_json(head_path)
         input_manifest.append(
@@ -134,7 +178,12 @@ def _resolve_primary_scoped_gate_state(*, repo_root: Path, environment: str, ib_
             }
         )
         candidate_gate_path = Path(str(head.get("points_to") or "").strip()).resolve()
-        if candidate_gate_path.exists() and candidate_gate_path.is_file():
+        head_day = str(head.get("day_utc") or "").strip()
+        if (
+            head_day == day_utc
+            and candidate_gate_path.exists()
+            and candidate_gate_path.is_file()
+        ):
             gate_path = candidate_gate_path
     if not gate_path.exists() or not gate_path.is_file():
         raise ValueError(f"FINAL_GATE_STACK_NOT_PASS:sleeve_id={primary.sleeve_id}:reason=MISSING_GATE_STACK_AUTHORITY")
@@ -359,7 +408,36 @@ def main() -> int:
             }
         )
     except ValueError as exc:
-        _append_fail_reason(reasons, str(exc))
+        exc_text = str(exc)
+        if exc_text.startswith("IB_API_HANDSHAKE_POINTER_MISSING:") or exc_text.startswith("IB_API_HANDSHAKE_STALE_POINTER:"):
+            _refresh_handshake_spine_for_day(day_utc=day)
+            try:
+                handshake = resolve_pointer_bound_handshake_state(
+                    truth_root=TRUTH_ROOT,
+                    day_utc=day,
+                    environment=env,
+                    ib_account=ib_account,
+                )
+                ok_handshake = True
+                reasons.append("IB_API_HANDSHAKE_POINTER_OK")
+                input_manifest.append(
+                    {
+                        "type": "ib_api_handshake_latest_pointer_v1",
+                        "path": str(handshake.pointer_path),
+                        "sha256": handshake.pointer_sha256,
+                    }
+                )
+                input_manifest.append(
+                    {
+                        "type": "ib_api_handshake_v1",
+                        "path": str(handshake.handshake_path),
+                        "sha256": handshake.handshake_sha256,
+                    }
+                )
+            except ValueError as refreshed_exc:
+                _append_fail_reason(reasons, str(refreshed_exc))
+        else:
+            _append_fail_reason(reasons, exc_text)
 
     try:
         gate_state = _resolve_primary_scoped_gate_state(
