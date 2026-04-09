@@ -285,6 +285,108 @@ def test_transitional_reconciler_backfills_missing_events_without_duplicate_sour
     assert "SUBMISSION_AUTHORIZATION_RECORDED" in event_types
 
 
+def test_transitional_reconciler_keeps_stage_duration_stable_across_timestamp_churn(tmp_path: Path) -> None:
+    identity = _base_identity()
+    deployment_path = tmp_path / "deployment.json"
+    state_machine_path = tmp_path / "state_machine.json"
+    startup_path = tmp_path / "startup.json"
+    startup_proof_path = tmp_path / "startup_proof.json"
+    ledger_path = tmp_path / "ledger.json"
+
+    deployment_payload = {
+        "day_utc": identity["day_utc"],
+        "deployment_attempt_id": identity["pipeline_run_id"],
+        "final_deployment_decision": "DEPLOY_ACTIVE",
+        "blocking_codes": [],
+        "first_true_blocker_code": "",
+        "release_build": {"release_id": identity["release_id"]},
+        "evaluated_at_utc": "2026-04-08T13:00:00Z",
+    }
+    trading_day_payload = {
+        "day_utc": identity["day_utc"],
+        "day_attempt_id": identity["day_attempt_id"],
+        "state_machine_id": "state-001",
+        "final_start_decision": "READY_NOW",
+        "first_true_blocker": {
+            "first_true_blocker_code": "",
+            "first_true_blocker_artifact_path": "",
+        },
+        "evaluated_at_utc": "2026-04-08T13:00:04Z",
+    }
+    startup_payload = {
+        "day_utc": identity["day_utc"],
+        "status": "SUCCESS",
+        "freshness_verdict": "CURRENT",
+        "linkage_verdict": "LINKED",
+        "blocking_codes": [],
+        "produced_at_utc": "2026-04-08T13:00:01Z",
+    }
+    startup_proof_payload = {
+        "day_utc": identity["day_utc"],
+        "status": "STARTUP_READY",
+        "ledger_authority_status": "GRANTED",
+        "blocking_codes": [],
+        "produced_at_utc": "2026-04-08T13:00:03Z",
+    }
+    ledger_payload = {
+        "day_utc": identity["day_utc"],
+        "ledger_id": "ledger-001",
+        "control_state": {
+            "authority_status": "GRANTED",
+            "system_ready": True,
+            "submission_authorized": True,
+            "blocking_codes": [],
+        },
+        "evaluated_at_utc": "2026-04-08T13:00:02Z",
+    }
+
+    for path, payload in (
+        (deployment_path, deployment_payload),
+        (state_machine_path, trading_day_payload),
+        (startup_path, startup_payload),
+        (startup_proof_path, startup_proof_payload),
+        (ledger_path, ledger_payload),
+    ):
+        _write_json(path, payload)
+
+    def _run_once(startup_ts: str, ledger_ts: str) -> None:
+        run_startup_payload = dict(startup_payload)
+        run_startup_payload["produced_at_utc"] = startup_ts
+        run_ledger_payload = dict(ledger_payload)
+        run_ledger_payload["evaluated_at_utc"] = ledger_ts
+        with patch.object(journal_tool, "_load_deployment_payload", return_value=(deployment_path, deployment_payload)), patch.object(
+            journal_tool,
+            "_resolve_release_git_sha",
+            return_value=identity["git_sha"],
+        ), patch.object(
+            journal_tool,
+            "read_startup_materialization_ref_v1",
+            return_value=SurfaceRefV1(path=startup_path, payload=run_startup_payload, sha256="d" * 64),
+        ), patch.object(
+            journal_tool,
+            "read_startup_proof_validation_ref_v1",
+            return_value=SurfaceRefV1(path=startup_proof_path, payload=startup_proof_payload, sha256="e" * 64),
+        ), patch.object(
+            journal_tool,
+            "read_paper_session_ledger_ref_v1",
+            return_value=SurfaceRefV1(path=ledger_path, payload=run_ledger_payload, sha256="f" * 64),
+        ), patch.object(
+            journal_tool,
+            "read_trading_day_state_machine_ref_v1",
+            return_value=SurfaceRefV1(path=state_machine_path, payload=trading_day_payload, sha256="1" * 64),
+        ):
+            assert journal_tool.main(["--day_utc", identity["day_utc"], "--truth_root", str(tmp_path)]) == 0
+
+    _run_once("2026-04-08T13:00:01Z", "2026-04-08T13:00:02Z")
+    _run_once("2026-04-08T13:05:01Z", "2026-04-08T13:05:02Z")
+
+    journal_ref = journal.read_execution_journal_v1(truth_root=tmp_path, day_utc=identity["day_utc"])
+    stage_events = [row for row in journal_ref.payload["events"] if row["event_type"] == "STAGE_DURATION_RECORDED"]
+    assert len(stage_events) == 1
+    assert stage_events[0]["payload"]["started_at_utc"] == "2026-04-08T13:00:01Z"
+    assert stage_events[0]["payload"]["ended_at_utc"] == "2026-04-08T13:00:02Z"
+
+
 def test_transitional_reconciler_rebuilds_legacy_identity_mismatch_journal(tmp_path: Path) -> None:
     current_identity = _base_identity()
     legacy_identity = {

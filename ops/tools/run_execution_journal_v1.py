@@ -88,6 +88,22 @@ def _iso_duration_ms(started_at_utc: str, ended_at_utc: str) -> int | None:
     return int((ended_dt - started_dt).total_seconds() * 1000)
 
 
+def _latest_events_by_type(journal_payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    rows: dict[str, dict[str, Any]] = {}
+    for event in list(journal_payload.get("events") or []):
+        if not isinstance(event, dict):
+            continue
+        rows[str(event.get("event_type") or "").strip()] = dict(event)
+    return rows
+
+
+def _source_generated_at_from_event(event: dict[str, Any] | None) -> str:
+    if not isinstance(event, dict):
+        return ""
+    payload = dict(event.get("payload") or {})
+    return str(payload.get("source_generated_at_utc") or "").strip()
+
+
 def _contradictions(
     *,
     deployment_payload: dict[str, Any],
@@ -236,9 +252,17 @@ def main(argv: list[str] | None = None) -> int:
         producer_module="ops/tools/run_execution_journal_v1.py",
     )
 
+    journal_ref = read_execution_journal_v1(truth_root=truth_root, day_utc=day_utc)
+    latest_events = _latest_events_by_type(dict(journal_ref.payload))
+    startup_started_at = _source_generated_at_from_event(
+        latest_events.get("STARTUP_MATERIALIZATION_COMPLETED")
+    ) or artifact_generated_at_utc_v1(startup_payload)
+    ledger_ended_at = _source_generated_at_from_event(
+        latest_events.get("LEDGER_AUTHORITY_RECORDED")
+    ) or artifact_generated_at_utc_v1(ledger_payload)
     stage_duration_ms = _iso_duration_ms(
-        artifact_generated_at_utc_v1(startup_payload),
-        artifact_generated_at_utc_v1(ledger_payload),
+        startup_started_at,
+        ledger_ended_at,
     )
     if stage_duration_ms is not None:
         append_stage_duration_event_v1(
@@ -247,8 +271,8 @@ def main(argv: list[str] | None = None) -> int:
             source_path=ledger_ref.path,
             source_payload=ledger_payload,
             stage_name="STARTUP_MATERIALIZATION_TO_LEDGER_ELAPSED",
-            started_at_utc=artifact_generated_at_utc_v1(startup_payload),
-            ended_at_utc=artifact_generated_at_utc_v1(ledger_payload),
+            started_at_utc=startup_started_at,
+            ended_at_utc=ledger_ended_at,
             duration_ms=stage_duration_ms,
             producer_module="ops/tools/run_execution_journal_v1.py",
         )
