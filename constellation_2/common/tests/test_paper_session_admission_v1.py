@@ -29,12 +29,15 @@ def test_admission_runner_invokes_current_day_control_plane_in_order(monkeypatch
         day_utc = "2026-04-09"
         ledger_path = admission_module.resolve_paper_session_ledger_path(truth_root=truth_root, day_utc=day_utc)
         commands: list[str] = []
+        downloader_cmds: list[list[str]] = []
 
         def _fake_run(cmd: list[str], *, truth_root: Path) -> dict[str, object]:
             if len(cmd) > 2 and cmd[1] == "-m":
                 commands.append(cmd[2])
             else:
                 commands.append(Path(cmd[1]).name)
+            if len(cmd) > 1 and Path(cmd[1]).name == "ib_historical_market_data_snapshot_downloader_v1.py":
+                downloader_cmds.append(list(cmd))
             return {"cmd": cmd, "returncode": 0, "stdout": "", "stderr": ""}
 
         for path in (
@@ -48,6 +51,7 @@ def test_admission_runner_invokes_current_day_control_plane_in_order(monkeypatch
 
         monkeypatch.setattr(admission_module, "_run", _fake_run)
         monkeypatch.setattr(admission_module, "_producer_git_sha", lambda: "a" * 40)
+        monkeypatch.setattr(admission_module, "_active_market_data_symbols", lambda: ["GLD", "IWM", "QQQ", "SPY"])
         monkeypatch.setattr(admission_module, "resolve_single_paper_ib_account_from_sleeve_registry", lambda _: "DU1234567")
         monkeypatch.setattr(
             admission_module,
@@ -86,6 +90,7 @@ def test_admission_runner_invokes_current_day_control_plane_in_order(monkeypatch
             "run_submit_boundary_status_v1.py",
             "run_paper_session_ledger_v1.py",
             "ensure_cash_ledger_operator_statement_v1.py",
+            "ib_historical_market_data_snapshot_downloader_v1.py",
             "constellation_2.phaseF.positions.run.run_positions_snapshot_day_v2",
             "constellation_2.phaseF.cash_ledger.run.run_cash_ledger_snapshot_day_v1",
             "run_accounting_nav_v2_day_v1.py",
@@ -97,6 +102,37 @@ def test_admission_runner_invokes_current_day_control_plane_in_order(monkeypatch
             "run_trading_day_state_machine_v1.py",
             "run_execution_journal_v1.py",
             "run_current_system_projection_v1.py",
+        ]
+        assert len(downloader_cmds) == 1
+        assert downloader_cmds[0] == [
+            admission_module.sys.executable,
+            str(admission_module.MARKET_DATA_DOWNLOADER_TOOL),
+            "--run_utc",
+            f"{day_utc}T00:00:00Z",
+            "--dataset_version",
+            "v1",
+            "--symbol",
+            "GLD",
+            "--symbol",
+            "IWM",
+            "--symbol",
+            "QQQ",
+            "--symbol",
+            "SPY",
+            "--start_year",
+            "2026",
+            "--end_year",
+            "2026",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "4002",
+            "--client_id",
+            "7",
+            "--sleep_sec",
+            "0.1",
+            "--use_rth",
+            "1",
         ]
 
 
@@ -120,6 +156,7 @@ def test_admission_runner_fails_closed_when_required_control_plane_artifact_miss
 
         monkeypatch.setattr(admission_module, "_run", _fake_run)
         monkeypatch.setattr(admission_module, "_producer_git_sha", lambda: "a" * 40)
+        monkeypatch.setattr(admission_module, "_active_market_data_symbols", lambda: ["GLD", "IWM", "QQQ", "SPY"])
         monkeypatch.setattr(admission_module, "resolve_single_paper_ib_account_from_sleeve_registry", lambda _: "DU1234567")
         monkeypatch.setattr(admission_module, "_print_payload", lambda payload: captured.append(dict(payload)))
         monkeypatch.setattr(

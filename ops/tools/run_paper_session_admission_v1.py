@@ -52,6 +52,10 @@ TRADING_DAY_STATE_MACHINE_TOOL = (REPO_ROOT / "ops/tools/run_trading_day_state_m
 EXECUTION_JOURNAL_TOOL = (REPO_ROOT / "ops/tools/run_execution_journal_v1.py").resolve()
 CURRENT_SYSTEM_PROJECTION_TOOL = (REPO_ROOT / "ops/tools/run_current_system_projection_v1.py").resolve()
 EXECUTION_TOOL = (REPO_ROOT / "ops/tools/run_c2_multi_sleeve_orchestrator_v1.py").resolve()
+ENGINE_REGISTRY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json").resolve()
+MARKET_DATA_DOWNLOADER_TOOL = (
+    REPO_ROOT / "constellation_2/phaseJ/tools/ib_historical_market_data_snapshot_downloader_v1.py"
+).resolve()
 
 
 def _print_payload(payload: dict[str, object]) -> None:
@@ -78,6 +82,38 @@ def _producer_git_sha() -> str:
         return "0" * 40
 
 
+def _active_market_data_symbols() -> list[str]:
+    if not ENGINE_REGISTRY_PATH.exists() or not ENGINE_REGISTRY_PATH.is_file():
+        raise SystemExit(f"FAIL: engine_registry_missing path={ENGINE_REGISTRY_PATH}")
+    try:
+        payload = json.loads(ENGINE_REGISTRY_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise SystemExit(
+            f"FAIL: engine_registry_parse_error path={ENGINE_REGISTRY_PATH} err={type(exc).__name__}:{exc}"
+        ) from exc
+    engines = payload.get("engines")
+    if not isinstance(engines, list):
+        raise SystemExit(f"FAIL: engine_registry_invalid_engines path={ENGINE_REGISTRY_PATH}")
+    symbols: set[str] = set()
+    for row in engines:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("activation_status") or "").strip().upper() != "ACTIVE":
+            continue
+        if str(row.get("engine_id") or "").strip() == "C2_INTENT_SIMULATOR_V1":
+            continue
+        allowed = row.get("allowed_symbols")
+        if not isinstance(allowed, list):
+            continue
+        for symbol in allowed:
+            text = str(symbol or "").strip().upper()
+            if text:
+                symbols.add(text)
+    if not symbols:
+        raise SystemExit("FAIL: no_active_market_data_symbols")
+    return sorted(symbols)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_paper_session_admission_v1")
     ap.add_argument("--day_utc", required=True)
@@ -95,6 +131,12 @@ def main() -> int:
     producer_repo = REPO_ROOT.name
     ib_account = resolve_single_paper_ib_account_from_sleeve_registry(REPO_ROOT)
     operator_statement_path = resolve_operator_statement_path(operator_input_root=truth_root, day_utc=day_utc)
+    market_data_symbols = _active_market_data_symbols()
+    market_data_run_utc = f"{day_utc}T00:00:00Z"
+    ib_host = str(os.environ.get("C2_IB_HOST") or "127.0.0.1").strip()
+    ib_port = str(os.environ.get("C2_IB_PORT") or "4002").strip()
+    ib_client_id = str(os.environ.get("C2_IB_CLIENT_ID") or "7").strip()
+    ib_sleep_sec = str(os.environ.get("C2_IB_SLEEP_SEC") or "0.1").strip()
 
     runs = {
         "startup_materialization": _run(
@@ -127,6 +169,32 @@ def main() -> int:
                 "SEED_100K",
                 "--allow_create",
                 "YES",
+            ],
+            truth_root=truth_root,
+        ),
+        "market_data_snapshot_manifest_v1": _run(
+            [
+                sys.executable,
+                str(MARKET_DATA_DOWNLOADER_TOOL),
+                "--run_utc",
+                market_data_run_utc,
+                "--dataset_version",
+                "v1",
+                *[part for symbol in market_data_symbols for part in ("--symbol", symbol)],
+                "--start_year",
+                day_utc[:4],
+                "--end_year",
+                day_utc[:4],
+                "--host",
+                ib_host,
+                "--port",
+                ib_port,
+                "--client_id",
+                ib_client_id,
+                "--sleep_sec",
+                ib_sleep_sec,
+                "--use_rth",
+                "1",
             ],
             truth_root=truth_root,
         ),
