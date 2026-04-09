@@ -1,0 +1,14 @@
+{
+  "schema_id": "C2_REPO_ROLE_V1",
+  "schema_version": 1,
+  "repo_root": "/home/node/constellation",
+  "repo_role": "authoritative_source",
+  "authoritative_repo_root": "/home/node/constellation",
+  "governance_authority": true,
+  "design_authority": true,
+  "runtime_execution_copy": false,
+  "runtime_copy_roots": [
+    "/home/node/constellation_2_runtime"
+  ],
+  "authoritative_registry_hint": "/home/node/constellation/governance/02_REGISTRIES/REPO_AUTHORITY_V1.json"
+}
