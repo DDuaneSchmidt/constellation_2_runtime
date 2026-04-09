@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/alerts_projection.v1.schema.json",
+  "title": "alerts_projection.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_scope",
+    "day_utc",
+    "projection_id",
+    "generated_at_utc",
+    "current_system_projection_ref",
+    "current_system_projection_id",
+    "first_true_blocker_code",
+    "active_alerts",
+    "first_actionable_alert",
+    "suppressed_or_secondary_alerts",
+    "operator_summary",
+    "source_artifacts",
+    "non_authority_notice",
+    "producer"
+  ],
+  "properties": {
+    "schema_id": { "const": "alerts_projection" },
+    "schema_version": { "const": "v1" },
+    "authority_scope": { "const": "DERIVED_ONLY_ALERTS_PROJECTION" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "projection_id": { "type": "string", "minLength": 1 },
+    "generated_at_utc": { "type": "string", "minLength": 20 },
+    "current_system_projection_ref": { "type": "string", "minLength": 1 },
+    "current_system_projection_id": { "type": "string", "minLength": 1 },
+    "first_true_blocker_code": { "type": "string" },
+    "active_alerts": { "type": "array", "items": { "$ref": "#/$defs/alert" } },
+    "first_actionable_alert": { "$ref": "#/$defs/alert" },
+    "suppressed_or_secondary_alerts": { "type": "array", "items": { "$ref": "#/$defs/alert" } },
+    "operator_summary": { "type": "string", "minLength": 1 },
+    "source_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["logical_name", "path", "generated_at_utc", "status"],
+        "properties": {
+          "logical_name": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "generated_at_utc": { "type": "string" },
+          "status": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "non_authority_notice": { "type": "string", "minLength": 1 },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" }
+      }
+    }
+  },
+  "$defs": {
+    "alert": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alert_code", "severity", "root_cause_family", "summary", "source_ref", "blocking"],
+      "properties": {
+        "alert_code": { "type": "string", "minLength": 1 },
+        "severity": { "type": "string", "enum": ["INFO", "ACTION_REQUIRED", "DEGRADED", "CRITICAL_BLOCK"] },
+        "root_cause_family": {
+          "type": "string",
+          "enum": ["UPSTREAM_MISSING_INPUT", "POLICY_BLOCK", "SYSTEM_DEFECT", "DEPLOYMENT_BLOCK"]
+        },
+        "summary": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "blocking": { "type": "boolean" }
+      }
+    }
+  }
+}
+

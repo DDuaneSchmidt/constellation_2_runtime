@@ -177,6 +177,51 @@ def resolve_trading_day_state_machine_path(*, truth_root: Path, day_utc: str) ->
     )
 
 
+def resolve_deployment_state_machine_path(*, truth_root: Path, day_utc: str) -> Path:
+    return resolve_report_artifact_path(
+        truth_root=truth_root,
+        artifact_family="deployment_state_machine_v1",
+        day_utc=day_utc,
+        filename="deployment_state_machine.v1.json",
+    )
+
+
+def resolve_execution_journal_path(*, truth_root: Path, day_utc: str) -> Path:
+    return resolve_report_artifact_path(
+        truth_root=truth_root,
+        artifact_family="execution_journal_v1",
+        day_utc=day_utc,
+        filename="execution_journal.v1.json",
+    )
+
+
+def resolve_current_system_projection_path(*, truth_root: Path, day_utc: str) -> Path:
+    return resolve_report_artifact_path(
+        truth_root=truth_root,
+        artifact_family="current_system_projection_v1",
+        day_utc=day_utc,
+        filename="current_system_projection.v1.json",
+    )
+
+
+def resolve_alerts_projection_path(*, truth_root: Path, day_utc: str) -> Path:
+    return resolve_report_artifact_path(
+        truth_root=truth_root,
+        artifact_family="alerts_projection_v1",
+        day_utc=day_utc,
+        filename="alerts_projection.v1.json",
+    )
+
+
+def resolve_performance_projection_path(*, truth_root: Path, day_utc: str) -> Path:
+    return resolve_report_artifact_path(
+        truth_root=truth_root,
+        artifact_family="performance_projection_v1",
+        day_utc=day_utc,
+        filename="performance_projection.v1.json",
+    )
+
+
 def resolve_baseline_ready_path(*, truth_root: Path, day_utc: str) -> Path:
     return (
         Path(truth_root).resolve()

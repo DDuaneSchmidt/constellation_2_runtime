@@ -67,6 +67,10 @@ Additional registries introduced:
 - `governance/05_CONTRACTS/C2/trading_day_execution_control_plane_v1.contract.md`
 - `governance/05_CONTRACTS/C2/trading_day_state_machine_v1.contract.md`
 - `governance/05_CONTRACTS/C2/deployment_state_machine_v1.contract.md`
+- `governance/05_CONTRACTS/C2/execution_journal_v1.contract.md`
+- `governance/05_CONTRACTS/C2/current_system_projection_v1.contract.md`
+- `governance/05_CONTRACTS/C2/alerts_projection_v1.contract.md`
+- `governance/05_CONTRACTS/C2/performance_projection_v1.contract.md`
 - `governance/05_CONTRACTS/C2/release_root_activation_v1.contract.md`
 - `governance/05_CONTRACTS/C2/active_runtime_contract_v1.contract.md`
 - `governance/05_CONTRACTS/C2/paper_session_evidence_manifest_v1.contract.md` (superseded by `paper_session_ledger_v1`)
@@ -183,6 +187,10 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `ops/tools/run_trading_day_execution_control_plane_v1.py`
 - `ops/tools/run_trading_day_state_machine_v1.py`
 - `ops/tools/run_deployment_state_machine_v1.py`
+- `ops/tools/run_execution_journal_v1.py`
+- `ops/tools/run_current_system_projection_v1.py`
+- `ops/tools/run_alerts_projection_v1.py`
+- `ops/tools/run_performance_projection_v1.py`
 - `ops/tools/run_paper_session_ledger_v1.py`
 - `ops/tools/run_paper_session_evidence_manifest_v1.py` (superseded by `paper_session_ledger_v1`)
 - `ops/tools/run_paper_session_kernel_v1.py` (superseded by `paper_session_ledger_v1`)
@@ -256,6 +264,10 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/deployment_state_machine.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/paper_session_evidence_manifest.v1.schema.json` (superseded by `paper_session_ledger_v1`)
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/paper_session_kernel.v1.schema.json` (superseded by `paper_session_ledger_v1`)
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/execution_journal.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/current_system_projection.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/alerts_projection.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/performance_projection.v1.schema.json`
 
 ### Execution evidence schemas (governed outputs)
 - `governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/submission_index.v1.schema.json`

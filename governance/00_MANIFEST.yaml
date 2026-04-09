@@ -180,6 +180,22 @@ documents:
     path: ops/tools/run_deployment_state_machine_v1.py
     class: C2_TOOL
     status: DRAFT
+  - id: C2_TOOL_EXECUTION_JOURNAL_V1
+    path: ops/tools/run_execution_journal_v1.py
+    class: C2_TOOL
+    status: DRAFT
+  - id: C2_TOOL_CURRENT_SYSTEM_PROJECTION_V1
+    path: ops/tools/run_current_system_projection_v1.py
+    class: C2_TOOL
+    status: DRAFT
+  - id: C2_TOOL_ALERTS_PROJECTION_V1
+    path: ops/tools/run_alerts_projection_v1.py
+    class: C2_TOOL
+    status: DRAFT
+  - id: C2_TOOL_PERFORMANCE_PROJECTION_V1
+    path: ops/tools/run_performance_projection_v1.py
+    class: C2_TOOL
+    status: DRAFT
 
   - id: C2_REPO_AUTHORITY_IMMUTABILITY_V1
     path: governance/05_CONTRACTS/C2/repo_authority_immutability_v1.contract.md
@@ -195,6 +211,22 @@ documents:
     status: DRAFT
   - id: C2_DEPLOYMENT_STATE_MACHINE_V1
     path: governance/05_CONTRACTS/C2/deployment_state_machine_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_EXECUTION_JOURNAL_V1
+    path: governance/05_CONTRACTS/C2/execution_journal_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_CURRENT_SYSTEM_PROJECTION_V1
+    path: governance/05_CONTRACTS/C2/current_system_projection_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_ALERTS_PROJECTION_V1
+    path: governance/05_CONTRACTS/C2/alerts_projection_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_PERFORMANCE_PROJECTION_V1
+    path: governance/05_CONTRACTS/C2/performance_projection_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
   - id: C2_REPORTS_DEPLOYMENT_STATE_MACHINE_SCHEMA_V1
@@ -992,6 +1024,22 @@ documents:
     status: DRAFT
   - id: C2_REPORTS_PHASEC_RISK_INPUTS_PREP_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/phasec_risk_inputs_prep.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_EXECUTION_JOURNAL_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/execution_journal.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_CURRENT_SYSTEM_PROJECTION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/current_system_projection.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_ALERTS_PROJECTION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/alerts_projection.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_PERFORMANCE_PROJECTION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/performance_projection.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
   - id: C2_REPORTS_PAPER_DAY_CONTROL_PLANE_SCHEMA_V1

@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/execution_journal.v1.schema.json",
+  "title": "execution_journal.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_scope",
+    "day_utc",
+    "day_attempt_id",
+    "pipeline_run_id",
+    "release_id",
+    "git_sha",
+    "journal_id",
+    "generated_at_utc",
+    "last_event_seq",
+    "events",
+    "producer"
+  ],
+  "properties": {
+    "schema_id": { "const": "execution_journal" },
+    "schema_version": { "const": "v1" },
+    "authority_scope": { "const": "CANONICAL_EXECUTION_JOURNAL" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "day_attempt_id": { "type": "string", "minLength": 1 },
+    "pipeline_run_id": { "type": "string", "minLength": 1 },
+    "release_id": { "type": "string", "minLength": 1 },
+    "git_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "journal_id": { "type": "string", "minLength": 1 },
+    "generated_at_utc": { "type": "string", "minLength": 20 },
+    "last_event_seq": { "type": "integer", "minimum": 0 },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema_version",
+          "day_utc",
+          "day_attempt_id",
+          "pipeline_run_id",
+          "release_id",
+          "git_sha",
+          "event_seq",
+          "event_key",
+          "event_type",
+          "event_source",
+          "generated_at_utc",
+          "status",
+          "payload"
+        ],
+        "properties": {
+          "schema_version": { "const": "v1" },
+          "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+          "day_attempt_id": { "type": "string", "minLength": 1 },
+          "pipeline_run_id": { "type": "string", "minLength": 1 },
+          "release_id": { "type": "string", "minLength": 1 },
+          "git_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+          "event_seq": { "type": "integer", "minimum": 1 },
+          "event_key": { "type": "string", "minLength": 1 },
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "DEPLOYMENT_ACTIVATED",
+              "DEPLOYMENT_BLOCKED",
+              "STARTUP_MATERIALIZATION_COMPLETED",
+              "STARTUP_PROOF_VALIDATION_COMPLETED",
+              "LEDGER_AUTHORITY_RECORDED",
+              "STATE_MACHINE_DECISION_RECORDED",
+              "SUBMISSION_AUTHORIZATION_RECORDED",
+              "STAGE_DURATION_RECORDED",
+              "SYSTEM_CONTRADICTION_DETECTED"
+            ]
+          },
+          "event_source": { "type": "string", "minLength": 1 },
+          "generated_at_utc": { "type": "string", "minLength": 20 },
+          "status": { "type": "string", "minLength": 1 },
+          "payload": { "type": "object" }
+        }
+      }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" }
+      }
+    }
+  }
+}
+
