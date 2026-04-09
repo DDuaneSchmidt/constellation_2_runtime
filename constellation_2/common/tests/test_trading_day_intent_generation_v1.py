@@ -309,3 +309,55 @@ def test_state_machine_generator_defect_becomes_first_true_blocker_not_missing_d
     )
     assert payload["first_true_blocker"]["first_true_blocker_code"] == "ENGINE_RUNNER_SHA256_MISMATCH"
     assert payload["first_true_blocker"]["first_true_blocker_code"] != "INTENTS_DAY_COMPLETENESS_MISSING_DAY_DIR"
+
+
+def test_authoritative_active_engine_registry_code_lock_matches_runner_bytes() -> None:
+    registry_path = SOURCE_ROOT / "governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json"
+    payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    active_rows = [row for row in payload["engines"] if row.get("activation_status") == "ACTIVE"]
+    assert active_rows
+
+    for row in active_rows:
+        runner_path = (SOURCE_ROOT / row["engine_runner_path"]).resolve()
+        assert runner_path.is_file(), row["engine_id"]
+        actual_sha = hashlib.sha256(runner_path.read_bytes()).hexdigest()
+        assert row["engine_runner_sha256"] == actual_sha, row["engine_id"]
+
+
+def test_generator_still_fails_closed_on_true_runner_sha_mismatch(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth"
+    day_utc = "2026-04-08"
+    script_relpath = "constellation_2/phaseI/defensive_tail/run/run_defensive_tail_intents_day_v1.py"
+    script_path = (SOURCE_ROOT / script_relpath).resolve()
+    specs = [
+        generation_module.ProducerSpec(
+            engine_id="C2_DEFENSIVE_TAIL_V1",
+            script_path=script_path,
+            registry_runner_sha256="0" * 64,
+        ),
+    ]
+
+    with patch.object(
+        generation_module,
+        "_load_registry",
+        return_value=(_registry_payload(), SOURCE_ROOT / "governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json", "a" * 64),
+    ):
+        with patch.object(generation_module, "_load_required_producer_specs", return_value=(specs, [])):
+            with patch.object(generation_module, "_run", side_effect=AssertionError("producer should not run")):
+                rc = generation_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+
+    assert rc == 3
+    payload = json.loads(
+        (
+            truth_root
+            / "reports"
+            / "trading_day_intent_generation_v1"
+            / day_utc
+            / "trading_day_intent_generation.v1.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert payload["final_status"] == "BLOCKED_BY_DEFECT"
+    assert payload["first_blocker_code"] == "ENGINE_RUNNER_SHA256_MISMATCH"
+    assert payload["first_blocker_artifact_path"] == str(script_path)
+    assert payload["producer_results"][0]["script_sha256"] == hashlib.sha256(script_path.read_bytes()).hexdigest()
+    assert payload["producer_results"][0]["registry_runner_sha256"] == "0" * 64
