@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -72,6 +73,28 @@ def _first_nonempty(values: List[str]) -> str:
         if str(value).strip():
             return str(value).strip()
     return ""
+
+
+_NONZERO_REASON_RE = re.compile(r"(?<![A-Z0-9_])([A-Z][A-Z0-9_]{2,})(?=:\s|$)")
+
+
+def _classify_producer_nonzero_reason(*, stdout: str, stderr: str) -> str:
+    text_blocks = [str(stderr or "").strip(), str(stdout or "").strip()]
+    for block in text_blocks:
+        if not block:
+            continue
+        for line in block.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            for match in _NONZERO_REASON_RE.finditer(stripped):
+                candidate = match.group(1)
+                if candidate not in {"FAIL", "TRACEBACK"}:
+                    return candidate
+            lowered = stripped.lower()
+            if "missing market data manifest:" in lowered:
+                return "MARKET_DATA_MANIFEST_MISSING"
+    return "PRODUCER_NONZERO_RC"
 
 
 def _intents_dir(*, truth_root: Path, day_utc: str) -> Path:
@@ -288,7 +311,10 @@ def main(argv: List[str] | None = None) -> int:
             after = {str(path) for path in collect_intent_files_v1(truth_root=truth_root, day_utc=day_utc)}
             new_outputs = sorted(after - before)
             if result["return_code"] != 0:
-                reason_code = "PRODUCER_NONZERO_RC"
+                reason_code = _classify_producer_nonzero_reason(
+                    stdout=result["stdout"],
+                    stderr=result["stderr"],
+                )
                 blocking_codes.add(reason_code)
                 if not first_blocker_code:
                     first_blocker_code = reason_code

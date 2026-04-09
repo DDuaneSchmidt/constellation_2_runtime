@@ -361,3 +361,129 @@ def test_generator_still_fails_closed_on_true_runner_sha_mismatch(tmp_path: Path
     assert payload["first_blocker_artifact_path"] == str(script_path)
     assert payload["producer_results"][0]["script_sha256"] == hashlib.sha256(script_path.read_bytes()).hexdigest()
     assert payload["producer_results"][0]["registry_runner_sha256"] == "0" * 64
+
+
+def test_generator_nonzero_rc_uses_structured_failure_code_when_present(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth"
+    day_utc = "2026-04-08"
+    specs = [
+        _producer_spec(
+            "C2_DEFENSIVE_TAIL_V1",
+            "constellation_2/phaseI/defensive_tail/run/run_defensive_tail_intents_day_v1.py",
+        ),
+    ]
+
+    with patch.object(
+        generation_module,
+        "_load_registry",
+        return_value=(_registry_payload(), SOURCE_ROOT / "governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json", "a" * 64),
+    ):
+        with patch.object(generation_module, "_load_required_producer_specs", return_value=(specs, [])):
+            with patch.object(
+                generation_module,
+                "_run",
+                return_value={
+                    "return_code": 1,
+                    "stdout": "",
+                    "stderr": "FAIL: MISSING_REQUIRED_INPUTS: /tmp/missing.json",
+                },
+            ):
+                rc = generation_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+
+    assert rc == 3
+    payload = json.loads(
+        (
+            truth_root
+            / "reports"
+            / "trading_day_intent_generation_v1"
+            / day_utc
+            / "trading_day_intent_generation.v1.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert payload["first_blocker_code"] == "MISSING_REQUIRED_INPUTS"
+    assert payload["blocking_codes"] == ["MISSING_REQUIRED_INPUTS"]
+    assert payload["producer_results"][0]["reason_codes"] == ["MISSING_REQUIRED_INPUTS"]
+
+
+def test_generator_nonzero_rc_maps_missing_market_data_manifest_phrase(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth"
+    day_utc = "2026-04-08"
+    specs = [
+        _producer_spec(
+            "C2_EVENT_DISLOCATION_V1",
+            "constellation_2/phaseI/event_dislocation/run/run_event_dislocation_intents_day_v1.py",
+        ),
+    ]
+
+    with patch.object(
+        generation_module,
+        "_load_registry",
+        return_value=(_registry_payload(), SOURCE_ROOT / "governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json", "a" * 64),
+    ):
+        with patch.object(generation_module, "_load_required_producer_specs", return_value=(specs, [])):
+            with patch.object(
+                generation_module,
+                "_run",
+                return_value={
+                    "return_code": 1,
+                    "stdout": "",
+                    "stderr": "FAIL: Missing market data manifest: /tmp/dataset_manifest.json",
+                },
+            ):
+                rc = generation_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+
+    assert rc == 3
+    payload = json.loads(
+        (
+            truth_root
+            / "reports"
+            / "trading_day_intent_generation_v1"
+            / day_utc
+            / "trading_day_intent_generation.v1.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert payload["first_blocker_code"] == "MARKET_DATA_MANIFEST_MISSING"
+    assert payload["blocking_codes"] == ["MARKET_DATA_MANIFEST_MISSING"]
+    assert payload["producer_results"][0]["reason_codes"] == ["MARKET_DATA_MANIFEST_MISSING"]
+
+
+def test_generator_nonzero_rc_still_falls_back_when_failure_is_unstructured(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth"
+    day_utc = "2026-04-08"
+    specs = [
+        _producer_spec(
+            "C2_DEFENSIVE_TAIL_V1",
+            "constellation_2/phaseI/defensive_tail/run/run_defensive_tail_intents_day_v1.py",
+        ),
+    ]
+
+    with patch.object(
+        generation_module,
+        "_load_registry",
+        return_value=(_registry_payload(), SOURCE_ROOT / "governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json", "a" * 64),
+    ):
+        with patch.object(generation_module, "_load_required_producer_specs", return_value=(specs, [])):
+            with patch.object(
+                generation_module,
+                "_run",
+                return_value={
+                    "return_code": 1,
+                    "stdout": "",
+                    "stderr": "plain runtime failure",
+                },
+            ):
+                rc = generation_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+
+    assert rc == 3
+    payload = json.loads(
+        (
+            truth_root
+            / "reports"
+            / "trading_day_intent_generation_v1"
+            / day_utc
+            / "trading_day_intent_generation.v1.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert payload["first_blocker_code"] == "PRODUCER_NONZERO_RC"
+    assert payload["blocking_codes"] == ["PRODUCER_NONZERO_RC"]
+    assert payload["producer_results"][0]["reason_codes"] == ["PRODUCER_NONZERO_RC"]
