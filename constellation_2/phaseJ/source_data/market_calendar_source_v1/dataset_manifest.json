@@ -1,15 +1,15 @@
 {
   "dataset_id": "market_calendar_source_dataset_v1:NYSE:2026",
   "effective_date_range": {
-    "end": "2026-04-08",
-    "start": "2026-04-07"
+    "end": "2026-04-09",
+    "start": "2026-04-09"
   },
   "exchange": "NYSE",
-  "generated_at_utc": "2026-04-08T02:49:54Z",
+  "generated_at_utc": "2026-04-09T21:43:49Z",
   "schema_id": "market_calendar_source_dataset.v1",
   "schema_version": "v1",
   "source_file_hashes": {
-    "NYSE_calendar_2026_seed.csv": "5807d3552d9274d7e01d6714fa32e77b1af260a4fe9a5acccacb659f828a1c72"
+    "NYSE_calendar_2026_seed.csv": "24f008c4bf3272db0a10a143a9260cc16842dc2475c87066f593ca3bb41b4cb7"
   },
   "source_files": [
     "NYSE_calendar_2026_seed.csv"

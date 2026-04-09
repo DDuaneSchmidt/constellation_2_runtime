@@ -34,10 +34,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-TRUTH_ROOT = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
-SPINE_ROOT = (TRUTH_ROOT / "market_calendar_v1").resolve()
+DEFAULT_TRUTH_ROOT = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
 SCHEMA_PATH = (REPO_ROOT / "governance" / "04_DATA" / "SCHEMAS" / "C2" / "MARKET_DATA" / "market_calendar.v1.schema.json").resolve()
-MANIFEST_PATH = (SPINE_ROOT / "dataset_manifest.json").resolve()
 
 ISO_Z = "%Y-%m-%dT%H:%M:%SZ"
 
@@ -145,10 +143,10 @@ def _stable_global_hash(file_entries: List[dict]) -> str:
     return _sha256_bytes(payload)
 
 
-def _load_manifest() -> Optional[dict]:
-    if not MANIFEST_PATH.exists():
+def _load_manifest(path: Path) -> Optional[dict]:
+    if not path.exists():
         return None
-    with MANIFEST_PATH.open("r", encoding="utf-8") as f:
+    with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -186,7 +184,7 @@ class CsvSpec:
     csv_path: Path
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="market_calendar_ingest_v1", description="C2 Market Calendar Truth Spine ingest (offline, deterministic).")
     ap.add_argument("--dataset_version", required=True, help="Dataset version string (e.g. v1). Must match manifest.dataset_version.")
     ap.add_argument("--run_utc", required=True, help="Determinism anchor UTC Z: YYYY-MM-DDTHH:MM:SSZ")
@@ -194,10 +192,15 @@ def main() -> int:
     ap.add_argument("--csv", required=True, help="CSV path with header day_utc,is_trading_session")
     ap.add_argument("--source_name", required=True, help="Source name string.")
     ap.add_argument("--source_hash", required=True, help="SHA256 of source CSV bytes (lowercase hex).")
-    args = ap.parse_args()
+    ap.add_argument("--truth_root", default="", help="Optional truth root override. Defaults to repo runtime truth.")
+    args = ap.parse_args(argv)
 
     _load_schema()
     run_utc = _parse_run_utc_z(args.run_utc)
+
+    truth_root = Path(args.truth_root).expanduser().resolve() if str(args.truth_root).strip() else DEFAULT_TRUTH_ROOT
+    spine_root = (truth_root / "market_calendar_v1").resolve()
+    manifest_path = (spine_root / "dataset_manifest.json").resolve()
 
     source_hash = args.source_hash.strip()
     if any(c not in "0123456789abcdef" for c in source_hash) or len(source_hash) != 64:
@@ -214,8 +217,8 @@ def main() -> int:
     if not spec.csv_path.exists():
         raise SystemExit(f"FAIL: missing CSV input: {spec.csv_path}")
 
-    SPINE_ROOT.mkdir(parents=True, exist_ok=True)
-    ex_dir = (SPINE_ROOT / spec.exchange).resolve()
+    spine_root.mkdir(parents=True, exist_ok=True)
+    ex_dir = (spine_root / spec.exchange).resolve()
     ex_dir.mkdir(parents=True, exist_ok=True)
 
     # Load rows
@@ -265,7 +268,7 @@ def main() -> int:
 
     for year, recs in sorted(by_year.items(), key=lambda kv: kv[0]):
         out_rel = f"{spec.exchange}/{year}.jsonl"
-        out_path = (SPINE_ROOT / out_rel).resolve()
+        out_path = (spine_root / out_rel).resolve()
         existing_records = _load_existing_jsonl_records(out_path)
         if existing_records:
             for old in existing_records:
@@ -278,7 +281,7 @@ def main() -> int:
         new_entries.append({"exchange": spec.exchange, "year": year, "file": out_rel, "sha256": sha})
 
     # Manifest update (immutable files; manifest can append)
-    manifest = _load_manifest()
+    manifest = _load_manifest(manifest_path)
     if manifest is None:
         manifest = {
             "dataset_version": spec.dataset_version,
@@ -324,9 +327,9 @@ def main() -> int:
         "created_utc": manifest.get("created_utc") or run_utc,
     }
 
-    _write_manifest(MANIFEST_PATH, out_manifest)
+    _write_manifest(manifest_path, out_manifest)
 
-    print(f"OK: wrote/updated calendar manifest: {MANIFEST_PATH}")
+    print(f"OK: wrote/updated calendar manifest: {manifest_path}")
     print(f"OK: global_hash={out_manifest['global_hash']}")
     print(f"OK: run_utc={run_utc}")
     return 0
