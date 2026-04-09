@@ -72,6 +72,9 @@ Additional registries introduced:
 - `governance/05_CONTRACTS/C2/current_system_projection_v1.contract.md`
 - `governance/05_CONTRACTS/C2/alerts_projection_v1.contract.md`
 - `governance/05_CONTRACTS/C2/performance_projection_v1.contract.md`
+- `governance/05_CONTRACTS/C2/recurrence_fingerprint_v1.contract.md`
+- `governance/05_CONTRACTS/C2/recurrence_registry_v1.contract.md`
+- `governance/05_CONTRACTS/C2/recurrence_kill_gate_v1.contract.md`
 - `governance/05_CONTRACTS/C2/release_root_activation_v1.contract.md`
 - `governance/05_CONTRACTS/C2/active_runtime_contract_v1.contract.md`
 - `governance/05_CONTRACTS/C2/paper_session_evidence_manifest_v1.contract.md` (superseded by `paper_session_ledger_v1`)
@@ -193,6 +196,7 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `ops/tools/run_current_system_projection_v1.py`
 - `ops/tools/run_alerts_projection_v1.py`
 - `ops/tools/run_performance_projection_v1.py`
+- `ops/tools/run_recurrence_kill_gate_v1.py`
 - `ops/tools/run_paper_session_ledger_v1.py`
 - `ops/tools/run_paper_session_evidence_manifest_v1.py` (superseded by `paper_session_ledger_v1`)
 - `ops/tools/run_paper_session_kernel_v1.py` (superseded by `paper_session_ledger_v1`)
@@ -255,6 +259,8 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/operator_summary.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/sleeve_rollup.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/paper_session_ledger.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/recurrence_registry.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/recurrence_kill_gate.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/intents_day_completeness.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/trading_day_intent_generation.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/startup_materialization_inputs_prep.v1.schema.json`

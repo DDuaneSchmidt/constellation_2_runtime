@@ -222,6 +222,24 @@ def resolve_performance_projection_path(*, truth_root: Path, day_utc: str) -> Pa
     )
 
 
+def resolve_recurrence_kill_gate_path(*, truth_root: Path, day_utc: str) -> Path:
+    return resolve_report_artifact_path(
+        truth_root=truth_root,
+        artifact_family="recurrence_kill_gate_v1",
+        day_utc=day_utc,
+        filename="recurrence_kill_gate.v1.json",
+    )
+
+
+def resolve_recurrence_registry_path(*, truth_root: Path) -> Path:
+    return (
+        Path(truth_root).resolve()
+        / "reports"
+        / "recurrence_registry_v1"
+        / "recurrence_registry.v1.json"
+    ).resolve()
+
+
 def resolve_baseline_ready_path(*, truth_root: Path, day_utc: str) -> Path:
     return (
         Path(truth_root).resolve()

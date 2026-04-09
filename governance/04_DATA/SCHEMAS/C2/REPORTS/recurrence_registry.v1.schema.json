@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/recurrence_registry.v1.schema.json",
+  "title": "recurrence_registry.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_scope",
+    "registry_id",
+    "generated_at_utc",
+    "entries_by_fingerprint",
+    "producer"
+  ],
+  "properties": {
+    "schema_id": { "const": "recurrence_registry" },
+    "schema_version": { "const": "v1" },
+    "authority_scope": { "const": "CANONICAL_RECURRENCE_REGISTRY" },
+    "registry_id": { "const": "recurrence_registry_v1" },
+    "generated_at_utc": { "type": "string", "minLength": 20 },
+    "entries_by_fingerprint": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "recurrence_fingerprint",
+          "blocker_family",
+          "blocker_code",
+          "authority_source",
+          "stage_id",
+          "first_seen_at_utc",
+          "last_seen_at_utc",
+          "occurrence_count",
+          "current_status",
+          "last_day_utc",
+          "last_day_attempt_id",
+          "last_release_id",
+          "last_git_sha",
+          "last_terminal_state",
+          "last_first_true_blocker_code"
+        ],
+        "properties": {
+          "recurrence_fingerprint": { "type": "string", "pattern": "^recurrence:[a-f0-9]{24}$" },
+          "blocker_family": {
+            "type": "string",
+            "enum": [
+              "SUCCESS_VERIFICATION",
+              "PROOF_INVALID",
+              "DEPLOYMENT_BLOCK",
+              "DAY_START_BLOCK"
+            ]
+          },
+          "blocker_code": { "type": "string", "minLength": 1 },
+          "authority_source": { "type": "string", "minLength": 1 },
+          "stage_id": { "type": "string", "minLength": 1 },
+          "first_seen_at_utc": { "type": "string", "minLength": 20 },
+          "last_seen_at_utc": { "type": "string", "minLength": 20 },
+          "occurrence_count": { "type": "integer", "minimum": 1 },
+          "current_status": { "type": "string", "enum": ["OPEN", "CONTAINED", "ELIMINATED"] },
+          "last_day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+          "last_day_attempt_id": { "type": "string", "minLength": 1 },
+          "last_release_id": { "type": "string", "minLength": 1 },
+          "last_git_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+          "last_terminal_state": { "type": "string", "minLength": 1 },
+          "last_first_true_blocker_code": { "type": "string" }
+        }
+      }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

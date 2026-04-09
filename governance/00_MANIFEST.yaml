@@ -196,6 +196,10 @@ documents:
     path: ops/tools/run_performance_projection_v1.py
     class: C2_TOOL
     status: DRAFT
+  - id: C2_TOOL_RECURRENCE_KILL_GATE_V1
+    path: ops/tools/run_recurrence_kill_gate_v1.py
+    class: C2_TOOL
+    status: DRAFT
 
   - id: C2_REPO_AUTHORITY_IMMUTABILITY_V1
     path: governance/05_CONTRACTS/C2/repo_authority_immutability_v1.contract.md
@@ -233,8 +237,28 @@ documents:
     path: governance/05_CONTRACTS/C2/performance_projection_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
+  - id: C2_RECURRENCE_FINGERPRINT_V1
+    path: governance/05_CONTRACTS/C2/recurrence_fingerprint_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_RECURRENCE_REGISTRY_V1
+    path: governance/05_CONTRACTS/C2/recurrence_registry_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_RECURRENCE_KILL_GATE_V1
+    path: governance/05_CONTRACTS/C2/recurrence_kill_gate_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
   - id: C2_REPORTS_DEPLOYMENT_STATE_MACHINE_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/deployment_state_machine.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_RECURRENCE_REGISTRY_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/recurrence_registry.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_RECURRENCE_KILL_GATE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/recurrence_kill_gate.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
 

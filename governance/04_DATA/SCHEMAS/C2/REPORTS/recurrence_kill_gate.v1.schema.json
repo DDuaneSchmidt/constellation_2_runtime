@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/recurrence_kill_gate.v1.schema.json",
+  "title": "recurrence_kill_gate.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_scope",
+    "day_utc",
+    "day_attempt_id",
+    "pipeline_run_id",
+    "release_id",
+    "git_sha",
+    "proof_status",
+    "live_entrypoint_verified",
+    "target_day_verified",
+    "live_target_day_utc",
+    "terminal_state",
+    "first_true_blocker_code",
+    "first_true_blocker_source",
+    "blocker_family",
+    "rerun_idempotent",
+    "recurrence_fingerprint",
+    "recurrence_status_before",
+    "recurrence_status_after",
+    "reason",
+    "proof_failures",
+    "authoritative_sources",
+    "generated_at_utc",
+    "producer"
+  ],
+  "properties": {
+    "schema_id": { "const": "recurrence_kill_gate" },
+    "schema_version": { "const": "v1" },
+    "authority_scope": { "const": "OPERATIONAL_RECURRENCE_CLOSURE_GATE" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "day_attempt_id": { "type": "string", "minLength": 1 },
+    "pipeline_run_id": { "type": "string", "minLength": 1 },
+    "release_id": { "type": "string", "minLength": 1 },
+    "git_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "proof_status": {
+      "type": "string",
+      "enum": ["RECURRENCE_SAFE", "MITIGATED_NOT_RECURRENCE_SAFE", "INVALID_PROOF"]
+    },
+    "live_entrypoint_verified": { "type": "boolean" },
+    "target_day_verified": { "type": "boolean" },
+    "live_target_day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "terminal_state": { "type": "string", "minLength": 1 },
+    "first_true_blocker_code": { "type": "string" },
+    "first_true_blocker_source": { "type": "string", "minLength": 1 },
+    "blocker_family": {
+      "type": "string",
+      "enum": [
+        "SUCCESS_VERIFICATION",
+        "PROOF_INVALID",
+        "DEPLOYMENT_BLOCK",
+        "DAY_START_BLOCK"
+      ]
+    },
+    "rerun_idempotent": { "type": "boolean" },
+    "recurrence_fingerprint": { "type": "string", "pattern": "^recurrence:[a-f0-9]{24}$" },
+    "recurrence_status_before": {
+      "type": "string",
+      "enum": ["UNSEEN", "OPEN", "CONTAINED", "ELIMINATED"]
+    },
+    "recurrence_status_after": {
+      "type": "string",
+      "enum": ["OPEN", "CONTAINED", "ELIMINATED"]
+    },
+    "reason": { "type": "string", "minLength": 1 },
+    "proof_failures": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "authoritative_sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["logical_name", "path", "generated_at_utc", "sha256", "status"],
+        "properties": {
+          "logical_name": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "generated_at_utc": { "type": "string", "minLength": 20 },
+          "sha256": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "generated_at_utc": { "type": "string", "minLength": 20 },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" }
+      }
+    }
+  }
+}
