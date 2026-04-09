@@ -168,27 +168,19 @@ def main(argv: List[str] | None = None) -> int:
         blocking_codes.extend(row["reason_codes"])
 
     try:
-        try:
-            readiness_ref = read_trade_submit_readiness_for_day_v1(
+        if freshness_verdict == "CURRENT" and linkage_verdict == "LINKED":
+            _refresh_trade_submit_readiness_artifact_v1(
                 truth_root=truth_root,
                 day_utc=day_utc,
                 ib_account=paper_account,
                 environment="PAPER",
             )
-        except Exception:
-            if freshness_verdict == "CURRENT" and linkage_verdict == "LINKED":
-                _refresh_trade_submit_readiness_artifact_v1(
-                    truth_root=truth_root,
-                    day_utc=day_utc,
-                    ib_account=paper_account,
-                    environment="PAPER",
-                )
-            readiness_ref = read_trade_submit_readiness_for_day_v1(
-                truth_root=truth_root,
-                day_utc=day_utc,
-                ib_account=paper_account,
-                environment="PAPER",
-            )
+        readiness_ref = read_trade_submit_readiness_for_day_v1(
+            truth_root=truth_root,
+            day_utc=day_utc,
+            ib_account=paper_account,
+            environment="PAPER",
+        )
         readiness_payload = readiness_ref.payload
         readiness_ok = bool(readiness_payload.get("ok") is True) and str(readiness_payload.get("state") or "").strip().upper() == "OK"
         readiness_codes = [str(code).strip() for code in (readiness_payload.get("reasons") or []) if str(code).strip()]
