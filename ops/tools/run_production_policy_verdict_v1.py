@@ -23,6 +23,7 @@ from constellation_2.common.production_policy_verdict_v1 import (
     write_production_policy_verdict_v1,
 )
 from constellation_2.common.trade_submit_readiness_authority_v1 import resolve_governed_sleeve_truth_bindings
+from constellation_2.common.trade_submit_readiness_authority_v1 import resolve_canonical_governed_sleeve_truth_root
 
 
 def _resolve_primary_sleeve_truth_root(*, ib_account: str, environment: str) -> Path:
@@ -34,10 +35,10 @@ def _resolve_primary_sleeve_truth_root(*, ib_account: str, environment: str) -> 
     )
     for binding in bindings:
         if str(binding.sleeve_id).strip().upper() == "PRIMARY":
-            return Path(binding.truth_root).resolve()
+            return resolve_canonical_governed_sleeve_truth_root(binding)
     if not bindings:
         raise SystemExit("FAIL: no_governed_sleeve_truth_bindings")
-    return Path(bindings[0].truth_root).resolve()
+    return resolve_canonical_governed_sleeve_truth_root(bindings[0])
 
 
 def main(argv: list[str] | None = None) -> int:

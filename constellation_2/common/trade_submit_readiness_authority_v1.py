@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
+from constellation_2.common.runtime_contract_v1 import resolve_truth_sleeves_root
+
 
 @dataclass(frozen=True)
 class GovernedAccountBinding:
@@ -437,6 +439,22 @@ def resolve_governed_sleeve_truth_bindings(
             )
         raise ValueError(f"NO_ACTIVE_SLEEVE_TRUTH_BINDINGS:environment={env}:account_id={binding.ib_account}")
     return tuple(sorted(scoped, key=lambda item: item.sleeve_id))
+
+
+def resolve_canonical_governed_sleeve_truth_root(binding: GovernedSleeveTruthBinding) -> Path:
+    truth_partition = str(binding.truth_partition or "").strip().replace("\\", "/").lstrip("/")
+    if not truth_partition:
+        raise ValueError(f"SLEEVE_TRUTH_PARTITION_MISSING:sleeve_id={binding.sleeve_id}")
+    relpath = truth_partition
+    if relpath == "truth_sleeves":
+        relpath = ""
+    elif relpath.startswith("truth_sleeves/"):
+        relpath = relpath[len("truth_sleeves/") :]
+    canonical_root = resolve_truth_sleeves_root().resolve()
+    resolved = (canonical_root / relpath).resolve()
+    if not resolved.exists() or not resolved.is_dir():
+        raise ValueError(f"SLEEVE_TRUTH_ROOT_MISSING_CANONICAL:sleeve_id={binding.sleeve_id}:path={resolved}")
+    return resolved
 
 
 def resolve_pointer_bound_handshake_state(

@@ -222,6 +222,33 @@ def _write_minimal_evidence(root: Path, truth_root: Path) -> Path:
     return gate_stack_path
 
 
+def _write_canonical_production_cert_gates(canonical_sleeve_truth_root: Path) -> None:
+    gate_specs = {
+        "feed_attestation_gate_v1": ("feed_attestation_gate.v1.json", "PASS", []),
+        "heartbeat_gate_v1": ("heartbeat_gate.v1.json", "PASS", []),
+        "replay_certification_gate_v1": ("replay_certification_gate.v1.json", "PASS", ["REPLAY_CERT_FIRST_RUN"]),
+    }
+    for gate_id, (filename, status, reasons) in gate_specs.items():
+        _write_json(
+            canonical_sleeve_truth_root / "reports" / gate_id / DAY / filename,
+            {"schema_id": gate_id, "schema_version": "v1", "day_utc": DAY, "status": status, "reason_codes": reasons},
+        )
+    _write_json(
+        canonical_sleeve_truth_root / "reports" / "gate_stack_verdict_v1" / DAY / "gate_stack_verdict.v1.json",
+        {
+            "schema_id": "gate_stack_verdict",
+            "schema_version": "v1",
+            "day_utc": DAY,
+            "produced_utc": f"{DAY}T00:00:00Z",
+            "status": "FAIL",
+            "blocking_class": "CLASS1_SYSTEM_HARD_STOP",
+            "reason_codes": ["GATE_REQUIRED_NOT_PASS:correlation_envelope_gate_v1:FAIL"],
+            "input_manifest": [],
+            "gates": [],
+        },
+    )
+
+
 def test_capability_state_derives_core_and_production_capabilities() -> None:
     with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
         root = Path(td)
@@ -229,13 +256,17 @@ def test_capability_state_derives_core_and_production_capabilities() -> None:
         _write_minimal_registries(root)
         _write_minimal_evidence(root, truth_root)
 
-        payload = derive_capability_state_payload(
-            repo_root=root,
-            truth_root=truth_root,
-            day_utc=DAY,
-            ib_account="DUO847203",
-            environment="PAPER",
-        )
+        with patch(
+            "constellation_2.common.trade_submit_readiness_authority_v1.resolve_truth_sleeves_root",
+            side_effect=RuntimeError("no canonical sleeve root in unit test"),
+        ):
+            payload = derive_capability_state_payload(
+                repo_root=root,
+                truth_root=truth_root,
+                day_utc=DAY,
+                ib_account="DUO847203",
+                environment="PAPER",
+            )
 
         by_id = {row["capability_id"]: row for row in payload["capabilities"]}
         assert by_id["account_binding_valid"]["status"] == "PASS"
@@ -262,19 +293,27 @@ def test_capability_state_resolves_authoritative_sleeve_truth_from_release_repo_
             },
         )
 
-        payload = derive_capability_state_payload(
-            repo_root=release_root,
-            truth_root=truth_root,
-            day_utc=DAY,
-            ib_account="DUO847203",
-            environment="PAPER",
-        )
+        canonical_truth_sleeves_root = tmp_root / "runtime_data" / "truth_sleeves"
+        _write_canonical_production_cert_gates(canonical_truth_sleeves_root / "PRIMARY" / "PAPER")
+
+        with patch(
+            "constellation_2.common.trade_submit_readiness_authority_v1.resolve_truth_sleeves_root",
+            return_value=canonical_truth_sleeves_root,
+        ):
+            payload = derive_capability_state_payload(
+                repo_root=release_root,
+                truth_root=truth_root,
+                day_utc=DAY,
+                ib_account="DUO847203",
+                environment="PAPER",
+            )
 
         by_id = {row["capability_id"]: row for row in payload["capabilities"]}
         assert by_id["account_binding_valid"]["status"] == "PASS"
         assert by_id["core_sleeve_gate_set_ready"]["status"] == "PASS"
-        assert by_id["production_certification_gate_set_complete"]["status"] == "FAIL"
+        assert by_id["production_certification_gate_set_complete"]["status"] == "PASS"
         assert authoritative_root.as_posix() in by_id["core_sleeve_gate_set_ready"]["details"]["sleeve_truth_root"]
+        assert str(canonical_truth_sleeves_root / "PRIMARY" / "PAPER") == by_id["production_certification_gate_set_complete"]["details"]["sleeve_truth_root"]
 
 
 def test_production_policy_runner_resolves_authoritative_sleeve_truth_from_release_repo_role() -> None:
@@ -293,18 +332,22 @@ def test_production_policy_runner_resolves_authoritative_sleeve_truth_from_relea
                 "authoritative_repo_root": str(authoritative_root),
             },
         )
-
-        expected = (
+        (
             authoritative_root
             / "constellation_2"
             / "runtime"
             / "truth_sleeves"
             / "PRIMARY"
             / "PAPER"
-        ).resolve()
+        ).mkdir(parents=True, exist_ok=True)
+
+        expected = (tmp_root / "runtime_data" / "truth_sleeves" / "PRIMARY" / "PAPER").resolve()
         expected.mkdir(parents=True, exist_ok=True)
 
-        with patch.object(production_policy_module, "REPO_ROOT", release_root):
+        with patch.object(production_policy_module, "REPO_ROOT", release_root), patch(
+            "constellation_2.common.trade_submit_readiness_authority_v1.resolve_truth_sleeves_root",
+            return_value=(tmp_root / "runtime_data" / "truth_sleeves").resolve(),
+        ):
             resolved = production_policy_module._resolve_primary_sleeve_truth_root(
                 ib_account="DUO847203",
                 environment="PAPER",
@@ -320,13 +363,17 @@ def test_policy_verdicts_split_paper_from_production_without_splitting_evidence(
         _write_minimal_registries(root)
         gate_stack_path = _write_minimal_evidence(root, truth_root)
 
-        capability_payload = derive_capability_state_payload(
-            repo_root=root,
-            truth_root=truth_root,
-            day_utc=DAY,
-            ib_account="DUO847203",
-            environment="PAPER",
-        )
+        with patch(
+            "constellation_2.common.trade_submit_readiness_authority_v1.resolve_truth_sleeves_root",
+            side_effect=RuntimeError("no canonical sleeve root in unit test"),
+        ):
+            capability_payload = derive_capability_state_payload(
+                repo_root=root,
+                truth_root=truth_root,
+                day_utc=DAY,
+                ib_account="DUO847203",
+                environment="PAPER",
+            )
         capability_path = resolve_capability_state_path(truth_root=truth_root, day_utc=DAY)
         _write_json(capability_path, capability_payload)
         capability_ref = _surface_ref(capability_path, capability_payload)
@@ -366,13 +413,17 @@ def test_trade_submit_readiness_uses_paper_policy_when_production_only_items_rem
         _write_minimal_registries(root)
         gate_stack_path = _write_minimal_evidence(root, truth_root)
 
-        capability_payload = derive_capability_state_payload(
-            repo_root=root,
-            truth_root=truth_root,
-            day_utc=DAY,
-            ib_account="DUO847203",
-            environment="PAPER",
-        )
+        with patch(
+            "constellation_2.common.trade_submit_readiness_authority_v1.resolve_truth_sleeves_root",
+            side_effect=RuntimeError("no canonical sleeve root in unit test"),
+        ):
+            capability_payload = derive_capability_state_payload(
+                repo_root=root,
+                truth_root=truth_root,
+                day_utc=DAY,
+                ib_account="DUO847203",
+                environment="PAPER",
+            )
         capability_path = resolve_capability_state_path(truth_root=truth_root, day_utc=DAY)
         _write_json(capability_path, capability_payload)
         capability_ref = _surface_ref(capability_path, capability_payload)

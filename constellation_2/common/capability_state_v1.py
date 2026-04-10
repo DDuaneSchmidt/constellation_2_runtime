@@ -17,6 +17,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
 )
 from constellation_2.common.runtime_contract_v1 import resolve_release_provenance
 from constellation_2.common.trade_submit_readiness_authority_v1 import (
+    resolve_canonical_governed_sleeve_truth_root,
     resolve_governed_account_binding,
     resolve_governed_sleeve_truth_bindings,
     resolve_pointer_bound_handshake_state,
@@ -340,16 +341,25 @@ def derive_capability_state_payload(
     sleeve_truth_root = Path(primary_binding.truth_root).resolve() if primary_binding is not None else (
         authoritative_repo_root / "constellation_2" / "runtime" / "truth_sleeves" / "PRIMARY" / env
     ).resolve()
+    production_cert_truth_root = sleeve_truth_root
+    if primary_binding is not None:
+        try:
+            production_cert_truth_root = resolve_canonical_governed_sleeve_truth_root(primary_binding)
+        except Exception:
+            production_cert_truth_root = sleeve_truth_root
     for capability_id, gate_ids in (
         ("core_sleeve_gate_set_ready", CORE_GATE_IDS),
         ("production_certification_gate_set_complete", PRODUCTION_CERT_GATE_IDS),
     ):
+        selected_sleeve_truth_root = (
+            production_cert_truth_root if capability_id == "production_certification_gate_set_complete" else sleeve_truth_root
+        )
         gate_refs: List[Dict[str, str]] = []
         gate_failures: List[str] = []
         gate_statuses: Dict[str, str] = {}
         for gate_id in gate_ids:
             gate_path = _gate_artifact_path(
-                sleeve_truth_root=sleeve_truth_root,
+                sleeve_truth_root=selected_sleeve_truth_root,
                 gate_id=gate_id,
                 gate_relpaths=gate_relpaths,
                 day_utc=day,
@@ -374,7 +384,7 @@ def derive_capability_state_payload(
             kind="SYNTHESIZED_SUMMARY",
             reason_codes=gate_failures,
             source_artifacts=gate_refs,
-            details={"gate_statuses": gate_statuses, "sleeve_truth_root": str(sleeve_truth_root)},
+            details={"gate_statuses": gate_statuses, "sleeve_truth_root": str(selected_sleeve_truth_root)},
         )
         capability_rows.append(row)
         source_manifest.extend(row["source_artifacts"])
