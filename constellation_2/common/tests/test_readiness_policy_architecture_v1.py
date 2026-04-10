@@ -22,6 +22,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import SurfaceRefV1
 from constellation_2.common.policy_diff_v1 import derive_policy_diff_payload
 from constellation_2.common.production_policy_verdict_v1 import derive_production_policy_verdict_payload
 import ops.tools.run_trade_submit_readiness_c2_v1 as readiness_module
+import ops.tools.run_production_policy_verdict_v1 as production_policy_module
 
 
 DAY = "2026-04-09"
@@ -274,6 +275,42 @@ def test_capability_state_resolves_authoritative_sleeve_truth_from_release_repo_
         assert by_id["core_sleeve_gate_set_ready"]["status"] == "PASS"
         assert by_id["production_certification_gate_set_complete"]["status"] == "FAIL"
         assert authoritative_root.as_posix() in by_id["core_sleeve_gate_set_ready"]["details"]["sleeve_truth_root"]
+
+
+def test_production_policy_runner_resolves_authoritative_sleeve_truth_from_release_repo_role() -> None:
+    with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
+        tmp_root = Path(td)
+        authoritative_root = tmp_root / "authoritative_repo"
+        release_root = tmp_root / "release_repo"
+
+        _write_minimal_registries(authoritative_root)
+        _write_minimal_registries(release_root)
+        _write_json(
+            release_root / "repo_role.v1.json",
+            {
+                "schema_id": "repo_role",
+                "schema_version": "v1",
+                "authoritative_repo_root": str(authoritative_root),
+            },
+        )
+
+        expected = (
+            authoritative_root
+            / "constellation_2"
+            / "runtime"
+            / "truth_sleeves"
+            / "PRIMARY"
+            / "PAPER"
+        ).resolve()
+        expected.mkdir(parents=True, exist_ok=True)
+
+        with patch.object(production_policy_module, "REPO_ROOT", release_root):
+            resolved = production_policy_module._resolve_primary_sleeve_truth_root(
+                ib_account="DUO847203",
+                environment="PAPER",
+            )
+
+        assert resolved == expected
 
 
 def test_policy_verdicts_split_paper_from_production_without_splitting_evidence() -> None:

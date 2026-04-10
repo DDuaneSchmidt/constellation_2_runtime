@@ -13,7 +13,10 @@ if str(REPO_ROOT) not in sys.path:
 
 from ops.tools.c2_account_resolution_v1 import resolve_single_paper_ib_account_from_sleeve_registry
 from constellation_2.common.capability_state_v1 import resolve_production_policy_verdict_path
-from constellation_2.common.paper_session_fact_plane_v1 import resolve_fact_plane_truth_root_v1
+from constellation_2.common.paper_session_fact_plane_v1 import (
+    resolve_authoritative_repo_root_v1,
+    resolve_fact_plane_truth_root_v1,
+)
 from constellation_2.common.production_policy_verdict_v1 import (
     derive_production_policy_verdict_payload,
     read_capability_state_ref,
@@ -23,8 +26,9 @@ from constellation_2.common.trade_submit_readiness_authority_v1 import resolve_g
 
 
 def _resolve_primary_sleeve_truth_root(*, ib_account: str, environment: str) -> Path:
+    authoritative_repo_root = resolve_authoritative_repo_root_v1(REPO_ROOT)
     bindings = resolve_governed_sleeve_truth_bindings(
-        repo_root=REPO_ROOT,
+        repo_root=authoritative_repo_root,
         environment=environment,
         requested_ib_account=ib_account,
     )
