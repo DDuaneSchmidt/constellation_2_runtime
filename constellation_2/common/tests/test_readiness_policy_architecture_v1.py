@@ -242,6 +242,40 @@ def test_capability_state_derives_core_and_production_capabilities() -> None:
         assert by_id["production_certification_gate_set_complete"]["status"] == "FAIL"
 
 
+def test_capability_state_resolves_authoritative_sleeve_truth_from_release_repo_role() -> None:
+    with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
+        tmp_root = Path(td)
+        authoritative_root = tmp_root / "authoritative_repo"
+        release_root = tmp_root / "release_repo"
+        truth_root = tmp_root / "runtime_truth"
+
+        _write_minimal_registries(authoritative_root)
+        _write_minimal_evidence(authoritative_root, truth_root)
+        _write_minimal_registries(release_root)
+        _write_json(
+            release_root / "repo_role.v1.json",
+            {
+                "schema_id": "repo_role",
+                "schema_version": "v1",
+                "authoritative_repo_root": str(authoritative_root),
+            },
+        )
+
+        payload = derive_capability_state_payload(
+            repo_root=release_root,
+            truth_root=truth_root,
+            day_utc=DAY,
+            ib_account="DUO847203",
+            environment="PAPER",
+        )
+
+        by_id = {row["capability_id"]: row for row in payload["capabilities"]}
+        assert by_id["account_binding_valid"]["status"] == "PASS"
+        assert by_id["core_sleeve_gate_set_ready"]["status"] == "PASS"
+        assert by_id["production_certification_gate_set_complete"]["status"] == "FAIL"
+        assert authoritative_root.as_posix() in by_id["core_sleeve_gate_set_ready"]["details"]["sleeve_truth_root"]
+
+
 def test_policy_verdicts_split_paper_from_production_without_splitting_evidence() -> None:
     with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
         root = Path(td)

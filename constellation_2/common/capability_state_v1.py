@@ -11,6 +11,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     atomic_write_idempotent_validated_json_v1,
     read_paper_trading_posture_ref_v1,
     read_startup_materialization_ref_v1,
+    resolve_authoritative_repo_root_v1,
     resolve_fact_plane_truth_root_v1,
     sha256_file_v1,
 )
@@ -188,6 +189,7 @@ def derive_capability_state_payload(
     environment: str = "PAPER",
 ) -> Dict[str, Any]:
     resolved_repo_root = Path(repo_root).resolve()
+    authoritative_repo_root = resolve_authoritative_repo_root_v1(resolved_repo_root)
     resolved_truth_root = resolve_fact_plane_truth_root_v1(truth_root)
     env = str(environment).strip().upper()
     day = str(day_utc).strip()
@@ -201,11 +203,11 @@ def derive_capability_state_payload(
 
     try:
         account_binding = resolve_governed_account_binding(
-            repo_root=resolved_repo_root,
+            repo_root=authoritative_repo_root,
             environment=env,
             requested_ib_account=account,
         )
-        primary_binding = _resolve_primary_binding(repo_root=resolved_repo_root, environment=env, ib_account=account)
+        primary_binding = _resolve_primary_binding(repo_root=authoritative_repo_root, environment=env, ib_account=account)
         row = _capability_row(
             capability_id="account_binding_valid",
             status="PASS",
@@ -336,7 +338,7 @@ def derive_capability_state_payload(
     source_manifest.extend(row["source_artifacts"])
 
     sleeve_truth_root = Path(primary_binding.truth_root).resolve() if primary_binding is not None else (
-        resolved_repo_root / "constellation_2" / "runtime" / "truth_sleeves" / "PRIMARY" / env
+        authoritative_repo_root / "constellation_2" / "runtime" / "truth_sleeves" / "PRIMARY" / env
     ).resolve()
     for capability_id, gate_ids in (
         ("core_sleeve_gate_set_ready", CORE_GATE_IDS),
