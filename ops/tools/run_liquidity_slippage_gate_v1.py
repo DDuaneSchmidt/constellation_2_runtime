@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -36,8 +37,9 @@ REPO_ROOT = _THIS_FILE.parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from constellation_2.common.paper_session_fact_plane_v1 import resolve_authoritative_repo_root_v1
 from constellation_2.common.runtime_contract_v1 import resolve_release_provenance
-from constellation_2.common.paper_session_fact_plane_v1 import resolve_fact_plane_truth_root_v1
+from constellation_2.common.runtime_contract_v1 import require_truth_root_under_contract
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
@@ -58,6 +60,37 @@ INTENTS_DIR_ROOT = (TRUTH_ROOT / "intents_v1" / "snapshots").resolve()
 
 NAV_V2_ROOT = (TRUTH_ROOT / "accounting_v2" / "nav").resolve()
 NAV_V1_ROOT = (TRUTH_ROOT / "accounting_v1" / "nav").resolve()
+
+
+def _require_supported_truth_root(truth_root: Path) -> Path:
+    resolved = Path(truth_root).expanduser().resolve()
+    if not resolved.is_absolute():
+        raise SystemExit(f"FAIL: truth_root must be absolute: {resolved}")
+    if not resolved.exists() or not resolved.is_dir():
+        raise SystemExit(f"FAIL: truth_root missing or not dir: {resolved}")
+    try:
+        return require_truth_root_under_contract(resolved)
+    except BaseException:
+        authoritative_repo_root = resolve_authoritative_repo_root_v1(REPO_ROOT)
+        authoritative_runtime_root = (authoritative_repo_root / "constellation_2" / "runtime").resolve()
+        try:
+            resolved.relative_to(authoritative_runtime_root)
+        except Exception as exc:
+            raise SystemExit(
+                "FAIL: truth_root must remain under active runtime contract or authoritative runtime root: "
+                f"{resolved}"
+            ) from exc
+        return resolved
+
+
+def _resolve_gate_truth_root(arg_truth_root: str) -> Path:
+    raw = str(arg_truth_root or "").strip()
+    if raw:
+        return _require_supported_truth_root(Path(raw))
+    env_root = (os.environ.get("C2_TRUTH_ROOT") or "").strip()
+    if env_root:
+        return _require_supported_truth_root(Path(env_root))
+    return _require_supported_truth_root(resolve_truth_root(repo_root=REPO_ROOT))
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -311,11 +344,7 @@ def main() -> int:
     ap.add_argument("--truth_root", default="", help="Absolute source-authoritative truth root override.")
     args = ap.parse_args()
 
-    TRUTH_ROOT = (
-        resolve_fact_plane_truth_root_v1(str(args.truth_root or ""))
-        if str(args.truth_root or "").strip()
-        else resolve_truth_root(repo_root=REPO_ROOT)
-    )
+    TRUTH_ROOT = _resolve_gate_truth_root(str(args.truth_root or ""))
     OUT_ROOT = (TRUTH_ROOT / "reports" / "liquidity_slippage_gate_v1").resolve()
     DATASET_MANIFEST = (TRUTH_ROOT / "market_data_snapshot_v1" / "dataset_manifest.json").resolve()
     DATASET_ROOT = (TRUTH_ROOT / "market_data_snapshot_v1").resolve()

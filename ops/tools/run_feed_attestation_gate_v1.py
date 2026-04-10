@@ -34,7 +34,8 @@ _REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
 if str(_REPO_ROOT_FROM_FILE) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
 
-from constellation_2.common.runtime_contract_v1 import resolve_release_provenance  # noqa: E402
+from constellation_2.common.paper_session_fact_plane_v1 import resolve_authoritative_repo_root_v1  # noqa: E402
+from constellation_2.common.runtime_contract_v1 import require_truth_root_under_contract, resolve_release_provenance  # noqa: E402
 from constellation_2.common.truth_root_v1 import resolve_truth_root  # noqa: E402
 from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1  # noqa: E402
 
@@ -126,15 +127,32 @@ def _require_truth_root_under_repo(truth_root: Path) -> Path:
     return pr
 
 
+def _require_supported_truth_root(truth_root: Path) -> Path:
+    pr = _require_truth_root_under_repo(truth_root)
+    try:
+        return require_truth_root_under_contract(pr)
+    except BaseException:
+        authoritative_repo_root = resolve_authoritative_repo_root_v1(REPO_ROOT)
+        authoritative_runtime_root = (authoritative_repo_root / "constellation_2" / "runtime").resolve()
+        try:
+            pr.relative_to(authoritative_runtime_root)
+        except Exception as exc:
+            raise SystemExit(
+                "FAIL: truth_root must remain under active runtime contract or authoritative runtime root: "
+                f"{pr}"
+            ) from exc
+        return pr
+
+
 def _resolve_truth_root(arg_truth_root: str) -> Path:
     tr = (arg_truth_root or "").strip()
     if tr:
-        return _require_truth_root_under_repo(Path(tr))
+        return _require_supported_truth_root(Path(tr))
     env_root = (os.environ.get("C2_TRUTH_ROOT") or "").strip()
     if env_root:
-        return _require_truth_root_under_repo(Path(env_root))
+        return _require_supported_truth_root(Path(env_root))
     resolved = resolve_truth_root(repo_root=REPO_ROOT)
-    return _require_truth_root_under_repo(resolved)
+    return _require_supported_truth_root(resolved)
 
 
 def _latest_prior_day_record_dir(records_root: Path, artifact_id: str, day: str) -> Optional[Path]:

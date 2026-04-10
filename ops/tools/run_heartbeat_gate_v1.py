@@ -31,6 +31,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+_THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = _THIS_FILE.parents[2].resolve()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.common.paper_session_fact_plane_v1 import resolve_authoritative_repo_root_v1
 from constellation_2.common.runtime_contract_v1 import (
     require_truth_root_under_contract,
     resolve_canonical_truth_root,
@@ -38,8 +44,6 @@ from constellation_2.common.runtime_contract_v1 import (
 )
 from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1
 
-_THIS_FILE = Path(__file__).resolve()
-REPO_ROOT = _THIS_FILE.parents[2].resolve()
 try:
     DEFAULT_TRUTH_ROOT = resolve_canonical_truth_root()
 except Exception:
@@ -132,11 +136,16 @@ def _resolve_truth_root(arg_truth_root: str) -> Path:
         raise SystemExit(f"FAIL: truth_root missing or not dir: {truth_root}")
     try:
         return require_truth_root_under_contract(truth_root)
-    except Exception:
+    except BaseException:
+        authoritative_repo_root = resolve_authoritative_repo_root_v1(REPO_ROOT)
+        authoritative_runtime_root = (authoritative_repo_root / "constellation_2" / "runtime").resolve()
         try:
-            truth_root.relative_to(REPO_ROOT)
-        except Exception:
-            raise SystemExit(f"FAIL: truth_root not under repo root: truth_root={truth_root} repo_root={REPO_ROOT}")
+            truth_root.relative_to(authoritative_runtime_root)
+        except Exception as exc:
+            raise SystemExit(
+                "FAIL: truth_root must remain under active runtime contract or authoritative runtime root: "
+                f"{truth_root}"
+            ) from exc
         return truth_root
 
 
