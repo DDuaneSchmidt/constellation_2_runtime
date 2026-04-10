@@ -13,6 +13,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
 EXECUTION_OUTCOME_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/execution_outcome.v1.schema.json"
 SELF_HEAL_MARKERS = ("QUARANTINED_STALE_", "REFRESHED_STALE_", "self_heal=1")
 DEFERRED_MARKERS = ("DEFERRED_",)
+FATAL_MARKERS = ("Traceback", "FAIL:", "SchemaValidationError", "ImmutableWriteError", "FileNotFoundError")
 
 
 def resolve_execution_outcome_path(*, truth_root: Path, day_utc: str) -> Path:
@@ -38,6 +39,10 @@ def _extract_items(*, stage_id: str, text: str, item_kind: str, markers: Iterabl
         if any(marker in line for marker in markers):
             items.append({"stage_id": stage_id, "item_kind": item_kind, "message": line})
     return items
+
+
+def _has_fatal_signal(text: str) -> bool:
+    return any(marker in text for marker in FATAL_MARKERS)
 
 
 def derive_execution_outcome_payload(
@@ -70,6 +75,8 @@ def derive_execution_outcome_payload(
             item_kind="DEFERRED",
             markers=DEFERRED_MARKERS,
         )
+        combined_text = f"{stdout_text}\n{stderr_text}"
+        nonfatal_override = returncode != 0 and bool(stage_self_heal or stage_deferred) and not _has_fatal_signal(combined_text)
         self_heal_items.extend(stage_self_heal)
         deferred_items.extend(stage_deferred)
         nonfatal_items.extend(stage_self_heal)
@@ -77,7 +84,7 @@ def derive_execution_outcome_payload(
         stage_rows.append(
             {
                 "stage_id": str(stage_id),
-                "status": "PASS" if returncode == 0 else "FAIL",
+                "status": "PASS" if returncode == 0 or nonfatal_override else "FAIL",
                 "returncode": returncode,
                 "command": list(raw.get("cmd") or []),
                 "self_heal_count": len(stage_self_heal),

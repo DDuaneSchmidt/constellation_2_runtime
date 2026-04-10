@@ -147,6 +147,30 @@ def test_execution_outcome_classifies_clean_self_heal_deferred_and_fail() -> Non
         },
     )
     assert self_heal["execution_status"] == "PASS_WITH_SELF_HEAL"
+    assert self_heal["stages"][0]["status"] == "PASS"
+
+    self_heal_nonzero = derive_execution_outcome_payload(
+        truth_root=SOURCE_ROOT,
+        context={
+            "day_utc": "2026-04-09",
+            "release_id": "r1",
+            "git_sha": "a" * 40,
+            "entrypoint": "entry.sh",
+            "overall_exit_code": 0,
+            "generated_at_utc": "2026-04-09T00:00:00Z",
+            "runs": {
+                "stage_a": {
+                    "cmd": ["x"],
+                    "returncode": 1,
+                    "stdout": "WARN: REFRESHED_STALE_X\nOK: stage self_heal=1",
+                    "stderr": "",
+                }
+            },
+            "source_artifacts": [],
+        },
+    )
+    assert self_heal_nonzero["execution_status"] == "PASS_WITH_SELF_HEAL"
+    assert self_heal_nonzero["stages"][0]["status"] == "PASS"
 
     deferred = derive_execution_outcome_payload(
         truth_root=SOURCE_ROOT,
