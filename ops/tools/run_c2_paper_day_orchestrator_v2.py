@@ -446,6 +446,8 @@ def _run_structural_pre_activity_producers(
                 day,
                 "--mode",
                 mode,
+                "--truth_root",
+                str(truth_root),
                 "--target_notional_pct",
                 "0.01",
             ],
@@ -460,6 +462,8 @@ def _run_structural_pre_activity_producers(
                 day,
                 "--mode",
                 mode,
+                "--truth_root",
+                str(truth_root),
             ],
         ),
         (
@@ -472,6 +476,8 @@ def _run_structural_pre_activity_producers(
                 day,
                 "--mode",
                 mode,
+                "--truth_root",
+                str(truth_root),
             ],
         ),
     ]
