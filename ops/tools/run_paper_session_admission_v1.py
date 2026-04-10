@@ -7,7 +7,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 _THIS_FILE = Path(__file__).resolve()
 REPO_ROOT = _THIS_FILE.parents[2].resolve()
@@ -49,6 +49,12 @@ DEFENSIVE_TAIL_INPUTS_BRIDGE_TOOL = (
 ).resolve()
 ENGINE_CORRELATION_MATRIX_TOOL = (
     REPO_ROOT / "constellation_2/phaseJ/monitoring/run/run_engine_correlation_matrix_day_v1.py"
+).resolve()
+ACCOUNTING_NAV_COMPAT_BRIDGE_TOOL = (REPO_ROOT / "ops/tools/bridge_accounting_nav_v2_to_compat_v1.py").resolve()
+ALLOCATION_DAY_V2_TOOL = (REPO_ROOT / "constellation_2/phaseG/allocation/run/run_allocation_day_v2.py").resolve()
+RECONCILIATION_REPORT_V3_TOOL = (REPO_ROOT / "ops/tools/run_reconciliation_report_v3.py").resolve()
+EXIT_RECONCILIATION_DAY_V1_TOOL = (
+    REPO_ROOT / "constellation_2/phaseI/exit_reconciliation/run/run_exit_reconciliation_day_v1.py"
 ).resolve()
 STARTUP_PROOF_TOOL = (REPO_ROOT / "ops/tools/run_startup_proof_validation_v1.py").resolve()
 DEPLOYMENT_TOOL = (REPO_ROOT / "ops/tools/run_deployment_state_machine_v1.py").resolve()
@@ -92,6 +98,110 @@ def _producer_git_sha() -> str:
         return str(resolve_release_provenance().get("git_sha") or "").strip() or ("0" * 40)
     except Exception:
         return "0" * 40
+
+
+def _sha256_file(path: Path) -> str:
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _mirror_canonical_file(*, source_path: Path, target_path: Path, artifact_id: str) -> Dict[str, Any]:
+    if not source_path.exists() or not source_path.is_file():
+        return {
+            "status": "SOURCE_MISSING",
+            "artifact_id": artifact_id,
+            "source_path": str(source_path),
+            "target_path": str(target_path),
+        }
+    source_bytes = source_path.read_bytes()
+    source_sha = _sha256_file(source_path)
+    if target_path.exists():
+        target_sha = _sha256_file(target_path)
+        if target_sha != source_sha:
+            return {
+                "status": "TARGET_MISMATCH",
+                "artifact_id": artifact_id,
+                "source_path": str(source_path),
+                "target_path": str(target_path),
+                "source_sha256": source_sha,
+                "target_sha256": target_sha,
+            }
+        return {
+            "status": "EXISTS_IDENTICAL",
+            "artifact_id": artifact_id,
+            "source_path": str(source_path),
+            "target_path": str(target_path),
+            "sha256": source_sha,
+        }
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_bytes(source_bytes)
+    return {
+        "status": "COPIED",
+        "artifact_id": artifact_id,
+        "source_path": str(source_path),
+        "target_path": str(target_path),
+        "sha256": source_sha,
+    }
+
+
+def _mirror_canonical_day_json_dir(*, source_dir: Path, target_dir: Path, artifact_id: str) -> Dict[str, Any]:
+    if not source_dir.exists() or not source_dir.is_dir():
+        return {
+            "status": "SOURCE_DIR_MISSING",
+            "artifact_id": artifact_id,
+            "source_dir": str(source_dir),
+            "target_dir": str(target_dir),
+        }
+
+    source_files = sorted([p for p in source_dir.iterdir() if p.is_file() and p.suffix == ".json"], key=lambda p: p.name)
+    source_names = {p.name for p in source_files}
+    if not source_files:
+        return {
+            "status": "SOURCE_DIR_EMPTY",
+            "artifact_id": artifact_id,
+            "source_dir": str(source_dir),
+            "target_dir": str(target_dir),
+        }
+
+    target_names = set()
+    if target_dir.exists() and target_dir.is_dir():
+        target_names = {p.name for p in target_dir.iterdir() if p.is_file() and p.suffix == ".json"}
+    extra_names = sorted(target_names - source_names)
+    if extra_names:
+        return {
+            "status": "TARGET_EXTRA_FILES",
+            "artifact_id": artifact_id,
+            "source_dir": str(source_dir),
+            "target_dir": str(target_dir),
+            "extra_files": extra_names,
+        }
+
+    results: List[Dict[str, Any]] = []
+    for source_file in source_files:
+        target_file = (target_dir / source_file.name).resolve()
+        results.append(
+            _mirror_canonical_file(
+                source_path=source_file.resolve(),
+                target_path=target_file,
+                artifact_id=f"{artifact_id}:{source_file.name}",
+            )
+        )
+    statuses = {str(row.get("status") or "") for row in results}
+    if statuses == {"EXISTS_IDENTICAL"}:
+        status = "EXISTS_IDENTICAL"
+    elif any(status.endswith("MISMATCH") or status.startswith("SOURCE_") for status in statuses):
+        status = "PARTIAL_FAILURE"
+    else:
+        status = "SYNCED"
+    return {
+        "status": status,
+        "artifact_id": artifact_id,
+        "source_dir": str(source_dir),
+        "target_dir": str(target_dir),
+        "file_count": len(source_files),
+        "results": results,
+    }
 
 
 def _active_market_data_symbols() -> list[str]:
@@ -161,6 +271,20 @@ def main() -> int:
     operator_statement_path = resolve_operator_statement_path(operator_input_root=truth_root, day_utc=day_utc)
     market_data_symbols = _active_market_data_symbols()
     market_data_run_utc = f"{day_utc}T00:00:00Z"
+    canonical_positions_snapshot_path = (
+        truth_root / "positions_v1" / "snapshots" / day_utc / "positions_snapshot.v2.json"
+    ).resolve()
+    sleeve_positions_snapshot_path = (
+        primary_sleeve_truth_root / "positions_v1" / "snapshots" / day_utc / "positions_snapshot.v2.json"
+    ).resolve()
+    canonical_cash_ledger_snapshot_path = (
+        truth_root / "cash_ledger_v1" / "snapshots" / day_utc / "cash_ledger_snapshot.v1.json"
+    ).resolve()
+    sleeve_cash_ledger_snapshot_path = (
+        primary_sleeve_truth_root / "cash_ledger_v1" / "snapshots" / day_utc / "cash_ledger_snapshot.v1.json"
+    ).resolve()
+    canonical_intents_day_dir = (truth_root / "intents_v1" / "snapshots" / day_utc).resolve()
+    sleeve_intents_day_dir = (primary_sleeve_truth_root / "intents_v1" / "snapshots" / day_utc).resolve()
     ib_host = str(os.environ.get("C2_IB_HOST") or "127.0.0.1").strip()
     ib_port = str(os.environ.get("C2_IB_PORT") or "4002").strip()
     ib_client_id = str(os.environ.get("C2_IB_CLIENT_ID") or "7").strip()
@@ -285,6 +409,97 @@ def main() -> int:
         "engine_correlation_matrix_v1": _run(
             [sys.executable, str(ENGINE_CORRELATION_MATRIX_TOOL), "--day_utc", day_utc, "--truth_root", str(truth_root)],
             truth_root=truth_root,
+        ),
+        "sleeve_positions_snapshot_seed_v2": _mirror_canonical_file(
+            source_path=canonical_positions_snapshot_path,
+            target_path=sleeve_positions_snapshot_path,
+            artifact_id="sleeve_positions_snapshot_v2",
+        ),
+        "sleeve_cash_ledger_snapshot_seed_v1": _mirror_canonical_file(
+            source_path=canonical_cash_ledger_snapshot_path,
+            target_path=sleeve_cash_ledger_snapshot_path,
+            artifact_id="sleeve_cash_ledger_snapshot_v1",
+        ),
+        "sleeve_accounting_nav_v2": _run(
+            [
+                sys.executable,
+                str(ACCOUNTING_NAV_TOOL),
+                "--day_utc",
+                day_utc,
+                "--truth_root",
+                str(primary_sleeve_truth_root),
+                "--producer_repo",
+                producer_repo,
+                "--producer_git_sha",
+                producer_git_sha,
+            ],
+            truth_root=primary_sleeve_truth_root,
+        ),
+        "sleeve_accounting_nav_compat_v1": _run(
+            [
+                sys.executable,
+                str(ACCOUNTING_NAV_COMPAT_BRIDGE_TOOL),
+                "--day_utc",
+                day_utc,
+                "--truth_root",
+                str(primary_sleeve_truth_root),
+            ],
+            truth_root=primary_sleeve_truth_root,
+        ),
+        "sleeve_intents_snapshot_sync_v1": _mirror_canonical_day_json_dir(
+            source_dir=canonical_intents_day_dir,
+            target_dir=sleeve_intents_day_dir,
+            artifact_id="sleeve_intents_snapshot_v1",
+        ),
+        "sleeve_engine_correlation_matrix_v1": _run(
+            [
+                sys.executable,
+                str(ENGINE_CORRELATION_MATRIX_TOOL),
+                "--day_utc",
+                day_utc,
+                "--truth_root",
+                str(primary_sleeve_truth_root),
+            ],
+            truth_root=primary_sleeve_truth_root,
+        ),
+        "sleeve_reconciliation_report_v3": _run(
+            [
+                sys.executable,
+                str(RECONCILIATION_REPORT_V3_TOOL),
+                "--day_utc",
+                day_utc,
+                "--truth_root",
+                str(primary_sleeve_truth_root),
+            ],
+            truth_root=primary_sleeve_truth_root,
+        ),
+        "sleeve_exit_reconciliation_v1": _run(
+            [
+                sys.executable,
+                str(EXIT_RECONCILIATION_DAY_V1_TOOL),
+                "--day_utc",
+                day_utc,
+                "--truth_root",
+                str(primary_sleeve_truth_root),
+                "--positions_snapshot_path",
+                str(sleeve_positions_snapshot_path),
+            ],
+            truth_root=primary_sleeve_truth_root,
+        ),
+        "sleeve_allocation_day_v2": _run(
+            [
+                sys.executable,
+                str(ALLOCATION_DAY_V2_TOOL),
+                "--day_utc",
+                day_utc,
+                "--producer_git_sha",
+                producer_git_sha,
+                "--producer_repo",
+                producer_repo,
+                "--truth_root",
+                str(primary_sleeve_truth_root),
+            ],
+            truth_root=primary_sleeve_truth_root,
         ),
         "sleeve_gate_liquidity_slippage_gate_v1": _run(
             [sys.executable, str(LIQUIDITY_SLIPPAGE_GATE_TOOL), "--day_utc", day_utc],
