@@ -260,6 +260,43 @@ def write_rollup(day: str, payload: Dict[str, Any]) -> Path:
     return out_path
 
 
+def _build_enabled_sleeve_rollup_entry(
+    *,
+    sleeve_id: str,
+    mode: str,
+    ib_account: str,
+    truth_root: Path,
+    rc: int,
+    cmd_str: str,
+    pointer_seq: int,
+    idx_path: Path,
+    points_to_path: Path,
+    verdict_obj: Dict[str, Any],
+) -> Dict[str, Any]:
+    v_status = str(verdict_obj.get("status") or "").strip().upper()
+    v_reasons = verdict_obj.get("reason_codes") if isinstance(verdict_obj.get("reason_codes"), list) else []
+    v_breaches = verdict_obj.get("safety_breaches") if isinstance(verdict_obj.get("safety_breaches"), list) else []
+    if v_status not in ("PASS", "DEGRADED", "FAIL", "ABORTED"):
+        die(f"verdict_status_invalid sleeve_id={sleeve_id} status={v_status!r} points_to={points_to_path}")
+    return {
+        "sleeve_id": sleeve_id,
+        "enabled": True,
+        "status": v_status,
+        "mode": mode,
+        "ib_account": ib_account,
+        "truth_root": str(truth_root),
+        "orchestrator_rc": int(rc),
+        "verdict_status": v_status,
+        "verdict_reason_codes": [str(x) for x in v_reasons],
+        "verdict_safety_breaches": [str(x) for x in v_breaches],
+        "verdict_pointer_seq": int(pointer_seq),
+        "verdict_pointer_index_path": str(idx_path),
+        "verdict_points_to": str(points_to_path),
+        "verdict_points_to_sha256": sha256_file(points_to_path),
+        "cmd": cmd_str,
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_c2_multi_sleeve_orchestrator_v1")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
@@ -316,10 +353,6 @@ def main() -> int:
         )
         verdict_obj = read_json_obj(points_to_path)
         v_status = str(verdict_obj.get("status") or "").strip().upper()
-        v_reasons = verdict_obj.get("reason_codes") if isinstance(verdict_obj.get("reason_codes"), list) else []
-        v_breaches = verdict_obj.get("safety_breaches") if isinstance(verdict_obj.get("safety_breaches"), list) else []
-        if v_status not in ("PASS", "DEGRADED", "FAIL", "ABORTED"):
-            die(f"verdict_status_invalid sleeve_id={sleeve_id} status={v_status!r} points_to={points_to_path}")
         if v_status == "ABORTED":
             any_abort = True
         elif v_status == "FAIL":
@@ -327,22 +360,18 @@ def main() -> int:
         elif v_status == "DEGRADED":
             any_degraded = True
         per_sleeve.append(
-            {
-                "sleeve_id": sleeve_id,
-                "enabled": True,
-                "mode": mode,
-                "ib_account": ib_account,
-                "truth_root": str(truth_root),
-                "orchestrator_rc": int(rc),
-                "verdict_status": v_status,
-                "verdict_reason_codes": [str(x) for x in v_reasons],
-                "verdict_safety_breaches": [str(x) for x in v_breaches],
-                "verdict_pointer_seq": int(pointer_seq),
-                "verdict_pointer_index_path": str(idx_path),
-                "verdict_points_to": str(points_to_path),
-                "verdict_points_to_sha256": sha256_file(points_to_path),
-                "cmd": cmd_str,
-            }
+            _build_enabled_sleeve_rollup_entry(
+                sleeve_id=sleeve_id,
+                mode=mode,
+                ib_account=ib_account,
+                truth_root=truth_root,
+                rc=rc,
+                cmd_str=cmd_str,
+                pointer_seq=pointer_seq,
+                idx_path=idx_path,
+                points_to_path=points_to_path,
+                verdict_obj=verdict_obj,
+            )
         )
 
     if any_abort:

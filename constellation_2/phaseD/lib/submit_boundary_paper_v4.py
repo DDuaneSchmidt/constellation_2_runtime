@@ -139,13 +139,15 @@ def _require_paper(env: str) -> None:
         raise SubmitBoundaryV4Error(RC_ENV_NOT_PAPER)
 
 
-def _require_path_under_repo(repo_root: Path, p: Path) -> None:
-    rr = repo_root.resolve()
+def _require_phasec_out_dir_under_truth_root(truth_root: Path, p: Path) -> None:
+    allowed_root = (truth_root.resolve() / "phaseC_preflight_v1").resolve()
     pp = p.resolve()
     try:
-        pp.relative_to(rr)
+        pp.relative_to(allowed_root)
     except Exception:
-        raise SubmitBoundaryV4Error(f"{RC_PHASEC_OUT_DIR_UNSAFE}: path_not_under_repo_root: path={pp} repo_root={rr}")
+        raise SubmitBoundaryV4Error(
+            f"{RC_PHASEC_OUT_DIR_UNSAFE}: path_not_under_phasec_truth_root: path={pp} phasec_root={allowed_root}"
+        )
 
 
 def _resolve_truth_root_for_phasec_out_dir(repo_root: Path, phasec_out_dir: Path) -> Path:
@@ -544,7 +546,7 @@ def run_submit_boundary_paper_v4(
     repo_root = repo_root.resolve()
     truth_root = _resolve_truth_root_for_phasec_out_dir(repo_root, phasec_out_dir)
 
-    _require_path_under_repo(repo_root, phasec_out_dir)
+    _require_phasec_out_dir_under_truth_root(truth_root, phasec_out_dir)
 
     mode, plan_obj, mapping_obj, binding_obj, pointers = _load_identity_set(phasec_out_dir)
     if mode == "OPTIONS":
