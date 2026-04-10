@@ -129,6 +129,13 @@ def _dec(x: Any) -> Decimal:
         raise SystemExit(f"FAIL: invalid_decimal: {x!r}")
 
 
+def _fixed_decimal_str(value: Decimal) -> str:
+    rendered = format(value, "f")
+    if rendered == "-0":
+        return "0"
+    return rendered
+
+
 def _canonical_json_bytes_v1(obj: Any) -> bytes:
     try:
         from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1  # type: ignore
@@ -719,16 +726,16 @@ def main() -> int:
                 max_sym = sym
 
             by_symbol[sym] = {
-                "intent_notional_dollar": str(intent_notional),
-                "price_close": str(price_close),
-                "adv_shares": str(adv_shares),
-                "adv_dollar": str(adv_dollar),
-                "depth_dollar_normal": str(depth_dol_norm),
-                "depth_dollar_stressed": str(depth_dol_stressed),
-                "spread_bps_stressed": str(spread_bps_stressed),
-                "impact_bps": str(impact_bps),
-                "total_cost_bps": str(total_cost_bps),
-                "total_cost_dollar": str(cost_dol),
+                "intent_notional_dollar": _fixed_decimal_str(intent_notional),
+                "price_close": _fixed_decimal_str(price_close),
+                "adv_shares": _fixed_decimal_str(adv_shares),
+                "adv_dollar": _fixed_decimal_str(adv_dollar),
+                "depth_dollar_normal": _fixed_decimal_str(depth_dol_norm),
+                "depth_dollar_stressed": _fixed_decimal_str(depth_dol_stressed),
+                "spread_bps_stressed": _fixed_decimal_str(spread_bps_stressed),
+                "impact_bps": _fixed_decimal_str(impact_bps),
+                "total_cost_bps": _fixed_decimal_str(total_cost_bps),
+                "total_cost_dollar": _fixed_decimal_str(cost_dol),
             }
 
         if total_notional <= Decimal("0"):
@@ -786,19 +793,19 @@ def main() -> int:
             "aggregation": {
                 "by_symbol": by_symbol,
                 "portfolio": {
-                    "total_intent_notional_dollar": str(total_notional),
-                    "total_cost_dollar": str(total_cost_dol),
-                    "portfolio_cost_bps": str(portfolio_cost_bps),
+                    "total_intent_notional_dollar": _fixed_decimal_str(total_notional),
+                    "total_cost_dollar": _fixed_decimal_str(total_cost_dol),
+                    "portfolio_cost_bps": _fixed_decimal_str(portfolio_cost_bps),
                     "max_symbol": max_sym if max_sym else ("NONE"),
-                    "max_symbol_cost_bps": str(max_sym_cost_bps),
+                    "max_symbol_cost_bps": _fixed_decimal_str(max_sym_cost_bps),
                 },
             },
             "enforcement": {
                 "depth_scale_bp": int(depth_scale_bp),
-                "max_depth_portfolio_cost_bps": str(max_port_bps),
-                "max_depth_symbol_cost_bps": str(max_sym_bps),
-                "portfolio_cost_bps_used": str(portfolio_cost_bps),
-                "max_symbol_cost_bps_used": str(max_sym_cost_bps),
+                "max_depth_portfolio_cost_bps": _fixed_decimal_str(max_port_bps),
+                "max_depth_symbol_cost_bps": _fixed_decimal_str(max_sym_bps),
+                "portfolio_cost_bps_used": _fixed_decimal_str(portfolio_cost_bps),
+                "max_symbol_cost_bps_used": _fixed_decimal_str(max_sym_cost_bps),
                 "reason_codes": depth_reason_codes,
             },
             "violations": depth_violations,
