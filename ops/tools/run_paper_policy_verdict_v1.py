@@ -16,7 +16,7 @@ from constellation_2.common.paper_policy_verdict_v1 import (
     read_capability_state_ref,
     write_paper_policy_verdict_v1,
 )
-from constellation_2.common.paper_session_fact_plane_v1 import resolve_fact_plane_truth_root_v1
+from constellation_2.common.runtime_path_authority_v1 import resolve_decision_truth_root_v1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -25,7 +25,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--truth_root", required=True)
     args = ap.parse_args(argv)
 
-    truth_root = resolve_fact_plane_truth_root_v1(args.truth_root)
+    truth_root = resolve_decision_truth_root_v1(args.truth_root, repo_root=REPO_ROOT)
     capability_ref = read_capability_state_ref(truth_root=truth_root, day_utc=str(args.day_utc).strip())
     payload = derive_paper_policy_verdict_payload(
         repo_root=REPO_ROOT,

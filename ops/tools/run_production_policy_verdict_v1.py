@@ -13,15 +13,13 @@ if str(REPO_ROOT) not in sys.path:
 
 from ops.tools.c2_account_resolution_v1 import resolve_single_paper_ib_account_from_sleeve_registry
 from constellation_2.common.capability_state_v1 import resolve_production_policy_verdict_path
-from constellation_2.common.paper_session_fact_plane_v1 import (
-    resolve_authoritative_repo_root_v1,
-    resolve_fact_plane_truth_root_v1,
-)
+from constellation_2.common.paper_session_fact_plane_v1 import resolve_authoritative_repo_root_v1
 from constellation_2.common.production_policy_verdict_v1 import (
     derive_production_policy_verdict_payload,
     read_capability_state_ref,
     write_production_policy_verdict_v1,
 )
+from constellation_2.common.runtime_path_authority_v1 import resolve_decision_truth_root_v1
 from constellation_2.common.trade_submit_readiness_authority_v1 import resolve_governed_sleeve_truth_bindings
 from constellation_2.common.trade_submit_readiness_authority_v1 import resolve_canonical_governed_sleeve_truth_root
 
@@ -50,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     env = str(args.environment).strip().upper()
-    truth_root = resolve_fact_plane_truth_root_v1(args.truth_root)
+    truth_root = resolve_decision_truth_root_v1(args.truth_root, repo_root=REPO_ROOT)
     ib_account = str(args.ib_account or "").strip() or resolve_single_paper_ib_account_from_sleeve_registry(REPO_ROOT)
     sleeve_truth_root = _resolve_primary_sleeve_truth_root(ib_account=ib_account, environment=env)
     gate_stack_path = (sleeve_truth_root / "reports" / "gate_stack_verdict_v1" / str(args.day_utc).strip() / "gate_stack_verdict.v1.json").resolve()

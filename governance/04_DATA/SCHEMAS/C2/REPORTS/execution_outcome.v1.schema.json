@@ -1,0 +1,74 @@
+{
+  "$id": "C2_REPORTS_EXECUTION_OUTCOME_V1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "C2 Execution Outcome v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "release_id",
+    "git_sha",
+    "entrypoint",
+    "overall_exit_code",
+    "execution_status",
+    "stages",
+    "nonfatal_items",
+    "self_heal_items",
+    "deferred_items",
+    "clean_run_status",
+    "source_artifacts",
+    "generated_at_utc"
+  ],
+  "properties": {
+    "schema_id": { "const": "execution_outcome" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "release_id": { "type": "string" },
+    "git_sha": { "type": "string" },
+    "entrypoint": { "type": "string" },
+    "overall_exit_code": { "type": "integer" },
+    "execution_status": {
+      "type": "string",
+      "enum": ["PASS", "FAIL", "PASS_WITH_SELF_HEAL", "PASS_WITH_DEFERRED"]
+    },
+    "stages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["stage_id", "status", "returncode", "command", "self_heal_count", "deferred_count"],
+        "properties": {
+          "stage_id": { "type": "string" },
+          "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+          "returncode": { "type": "integer" },
+          "command": { "type": "array", "items": { "type": "string" } },
+          "self_heal_count": { "type": "integer", "minimum": 0 },
+          "deferred_count": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "nonfatal_items": { "type": "array", "items": { "type": "object" } },
+    "self_heal_items": { "type": "array", "items": { "type": "object" } },
+    "deferred_items": { "type": "array", "items": { "type": "object" } },
+    "clean_run_status": {
+      "type": "string",
+      "enum": ["CLEAN", "CLEAN_WITH_SELF_HEAL", "CLEAN_WITH_DEFERRED", "DIRTY"]
+    },
+    "source_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["artifact_family", "artifact_path", "artifact_sha256"],
+        "properties": {
+          "artifact_family": { "type": "string" },
+          "artifact_path": { "type": "string" },
+          "artifact_sha256": { "type": "string", "minLength": 64, "maxLength": 64 }
+        }
+      }
+    },
+    "generated_at_utc": { "type": "string" }
+  }
+}

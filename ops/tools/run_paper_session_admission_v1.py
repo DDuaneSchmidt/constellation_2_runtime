@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
+from datetime import date, timedelta
 
 _THIS_FILE = Path(__file__).resolve()
 REPO_ROOT = _THIS_FILE.parents[2].resolve()
@@ -20,6 +21,22 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     resolve_fact_plane_truth_root_v1,
 )
 from constellation_2.common.runtime_contract_v1 import resolve_release_provenance
+from constellation_2.common.execution_outcome_v1 import (
+    derive_execution_outcome_payload,
+    write_execution_outcome_v1,
+)
+from constellation_2.common.next_day_readiness_probe_v1 import (
+    derive_next_day_readiness_probe_payload,
+    write_next_day_readiness_probe_v1,
+)
+from constellation_2.common.capability_state_v1 import (
+    resolve_paper_policy_verdict_path,
+    resolve_production_policy_verdict_path,
+    resolve_policy_diff_path,
+)
+from constellation_2.common.runtime_path_authority_v1 import (
+    resolve_decision_truth_root_v1,
+)
 from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_current_system_projection_path,
     resolve_deployment_state_machine_path,
@@ -301,7 +318,7 @@ def main() -> int:
     ap.add_argument("--truth_root", default=str((REPO_ROOT / "constellation_2/runtime/truth").resolve()))
     args = ap.parse_args()
 
-    truth_root = resolve_fact_plane_truth_root_v1(args.truth_root)
+    truth_root = resolve_decision_truth_root_v1(args.truth_root, repo_root=REPO_ROOT)
     day_utc = str(args.day_utc).strip()
     input_day_utc = str((args.input_day_utc or "").strip() or day_utc)
     producer_git_sha = _producer_git_sha()
@@ -810,11 +827,24 @@ def main() -> int:
         "control_plane_artifacts": control_plane_artifacts,
         "missing_control_plane_artifacts": missing_control_plane_artifacts,
     }
+
+    next_day_utc = (date.fromisoformat(day_utc) + timedelta(days=1)).isoformat()
     if missing_control_plane_artifacts:
         summary["status"] = "CONTROL_PLANE_INCOMPLETE"
         summary["next_action"] = "inspect_missing_current_day_control_plane_artifacts"
         _print_payload(summary)
         return 4
+
+    next_day_payload = derive_next_day_readiness_probe_payload(
+        repo_root=REPO_ROOT,
+        truth_root=truth_root,
+        target_day_utc=next_day_utc,
+        environment="PAPER",
+        ib_account=ib_account,
+    )
+    next_day_ref = write_next_day_readiness_probe_v1(truth_root=truth_root, payload=next_day_payload)
+    summary["next_day_probe_path"] = str(next_day_ref.path)
+
     if authority_status != "GRANTED":
         summary["status"] = "NOT_AUTHORIZED"
         summary["next_action"] = "resolve_kernel_blocking_codes_and_rerun"
@@ -837,9 +867,65 @@ def main() -> int:
         ]
         summary["execution_command"] = " ".join(cmd)
         _print_payload(summary)
-        return int(subprocess.call(cmd, cwd=str(REPO_ROOT)))
+        execution_rc = int(subprocess.call(cmd, cwd=str(REPO_ROOT)))
+        execution_context = {
+            "day_utc": day_utc,
+            "release_id": str(resolve_release_provenance().get("release_id") or "").strip(),
+            "git_sha": str(resolve_release_provenance().get("git_sha") or "").strip(),
+            "entrypoint": "ops/run/c2_paper_day_orchestrator_systemd_entry_v1.sh",
+            "overall_exit_code": execution_rc,
+            "generated_at_utc": f"{day_utc}T00:00:00Z",
+            "runs": runs,
+            "source_artifacts": [
+                {
+                    "artifact_family": "paper_policy_verdict_v1",
+                    "artifact_path": str(resolve_paper_policy_verdict_path(truth_root=truth_root, day_utc=day_utc)),
+                    "artifact_sha256": _sha256_file(resolve_paper_policy_verdict_path(truth_root=truth_root, day_utc=day_utc)),
+                },
+                {
+                    "artifact_family": "production_policy_verdict_v1",
+                    "artifact_path": str(resolve_production_policy_verdict_path(truth_root=truth_root, day_utc=day_utc)),
+                    "artifact_sha256": _sha256_file(resolve_production_policy_verdict_path(truth_root=truth_root, day_utc=day_utc)),
+                },
+                {
+                    "artifact_family": "policy_diff_v1",
+                    "artifact_path": str(resolve_policy_diff_path(truth_root=truth_root, day_utc=day_utc)),
+                    "artifact_sha256": _sha256_file(resolve_policy_diff_path(truth_root=truth_root, day_utc=day_utc)),
+                },
+                {
+                    "artifact_family": "sleeve_rollup_v1",
+                    "artifact_path": str((truth_root / "reports" / "sleeve_rollup_v1" / day_utc / "sleeve_rollup.v1.json").resolve()),
+                    "artifact_sha256": _sha256_file((truth_root / "reports" / "sleeve_rollup_v1" / day_utc / "sleeve_rollup.v1.json").resolve()),
+                },
+                {
+                    "artifact_family": "current_system_projection_v1",
+                    "artifact_path": str(resolve_current_system_projection_path(truth_root=truth_root, day_utc=day_utc)),
+                    "artifact_sha256": _sha256_file(resolve_current_system_projection_path(truth_root=truth_root, day_utc=day_utc)),
+                },
+                {
+                    "artifact_family": "execution_journal_v1",
+                    "artifact_path": str(resolve_execution_journal_path(truth_root=truth_root, day_utc=day_utc)),
+                    "artifact_sha256": _sha256_file(resolve_execution_journal_path(truth_root=truth_root, day_utc=day_utc)),
+                },
+            ],
+        }
+        execution_payload = derive_execution_outcome_payload(truth_root=truth_root, context=execution_context)
+        write_execution_outcome_v1(truth_root=truth_root, payload=execution_payload)
+        return execution_rc
 
     summary["next_action"] = "execution_permitted_via_kernel_gated_entrypoint"
+    execution_context = {
+        "day_utc": day_utc,
+        "release_id": str(resolve_release_provenance().get("release_id") or "").strip(),
+        "git_sha": str(resolve_release_provenance().get("git_sha") or "").strip(),
+        "entrypoint": "ops/run/c2_paper_day_orchestrator_systemd_entry_v1.sh",
+        "overall_exit_code": 0,
+        "generated_at_utc": f"{day_utc}T00:00:00Z",
+        "runs": runs,
+        "source_artifacts": [],
+    }
+    execution_payload = derive_execution_outcome_payload(truth_root=truth_root, context=execution_context)
+    write_execution_outcome_v1(truth_root=truth_root, payload=execution_payload)
     _print_payload(summary)
     return 0
 

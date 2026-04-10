@@ -17,8 +17,9 @@ from constellation_2.common.capability_state_v1 import (
     resolve_policy_diff_path,
     resolve_production_policy_verdict_path,
 )
-from constellation_2.common.paper_session_fact_plane_v1 import read_validated_surface_v1, resolve_fact_plane_truth_root_v1
+from constellation_2.common.paper_session_fact_plane_v1 import read_validated_surface_v1
 from constellation_2.common.policy_diff_v1 import derive_policy_diff_payload, write_policy_diff_v1
+from constellation_2.common.runtime_path_authority_v1 import resolve_decision_truth_root_v1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -28,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     day_utc = str(args.day_utc).strip()
-    truth_root = resolve_fact_plane_truth_root_v1(args.truth_root)
+    truth_root = resolve_decision_truth_root_v1(args.truth_root, repo_root=REPO_ROOT)
     capability_ref = read_validated_surface_v1(
         path=resolve_capability_state_path(truth_root=truth_root, day_utc=day_utc),
         schema_relpath="governance/04_DATA/SCHEMAS/C2/REPORTS/capability_state.v1.schema.json",

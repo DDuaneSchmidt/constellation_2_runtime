@@ -18,6 +18,12 @@ class _LedgerRef:
         self.payload = payload
 
 
+class _WriteRef:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.sha256 = "f" * 64
+
+
 def _write_json(path: Path, obj: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(obj, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
@@ -93,10 +99,54 @@ def test_admission_runner_invokes_current_day_control_plane_in_order(monkeypatch
             truth_root / "intents_v1" / "snapshots" / day_utc / "intent.json",
             {"schema_id": "exposure_intent", "schema_version": "v1"},
         )
+        _write_json(
+            truth_root / "reports" / "paper_policy_verdict_v1" / day_utc / "paper_policy_verdict.v1.json",
+            {"schema_id": "paper_policy_verdict", "schema_version": "v1", "day_utc": day_utc, "overall_status": "PASS", "paper_allowed": True, "blocking_items": [], "advisory_items": [], "production_only_open_items": [], "capability_state_ref": {}, "source_artifacts": [], "release_id": "r1", "git_sha": "a" * 40, "generated_at_utc": f"{day_utc}T00:00:00Z", "environment": "PAPER", "ib_account": "DU1234567", "sleeve_id": "PRIMARY"},
+        )
+        _write_json(
+            truth_root / "reports" / "production_policy_verdict_v1" / day_utc / "production_policy_verdict.v1.json",
+            {"schema_id": "production_policy_verdict", "schema_version": "v1", "day_utc": day_utc, "overall_status": "PASS", "production_allowed": True, "blocking_items": [], "gate_stack_status": "PASS", "gate_stack_reason_codes": [], "capability_state_ref": {}, "gate_stack_ref": {}, "source_artifacts": [], "release_id": "r1", "git_sha": "a" * 40, "generated_at_utc": f"{day_utc}T00:00:00Z", "environment": "PAPER", "ib_account": "DU1234567", "sleeve_id": "PRIMARY"},
+        )
+        _write_json(
+            truth_root / "reports" / "policy_diff_v1" / day_utc / "policy_diff.v1.json",
+            {"schema_id": "policy_diff", "schema_version": "v1", "day_utc": day_utc, "paper_policy_status": "PASS", "production_policy_status": "PASS", "paper_blocking_items": [], "production_blocking_items": [], "production_only_open_items": [], "shared_source_artifacts": [], "release_id": "r1", "git_sha": "a" * 40, "generated_at_utc": f"{day_utc}T00:00:00Z"},
+        )
+        _write_json(
+            truth_root / "trade_submit_readiness_c2_v1" / "_history" / "PAPER" / "DU1234567" / day_utc / "status.json",
+            {"schema_id": "trade_submit_readiness_c2", "schema_version": "v1", "day_utc": day_utc, "as_of_utc": f"{day_utc}T00:00:00Z", "expires_utc": f"{day_utc}T23:59:59Z", "ok": True, "state": "OK", "environment": "PAPER", "ib_account": "DU1234567", "reasons": [], "input_manifest": [], "producer": {}, "provenance": {"truth_root": str(truth_root), "registry_sha256": "a" * 64, "sleeve_registry_sha256": "b" * 64}, "session_authority_attestation": {}, "run_state_authority_attestation": {"cycle_snapshot_family": "x", "cycle_snapshot_artifact_path": "y", "cycle_snapshot_artifact_sha256": "c" * 64, "cycle_id": "z", "cycle_coherence_status": "OK"}},
+        )
+        _write_json(
+            truth_root / "reports" / "recurrence_kill_gate_v1" / day_utc / "recurrence_kill_gate.v1.json",
+            {"schema_id": "recurrence_kill_gate", "schema_version": "v1", "day_utc": day_utc, "proof_status": "RECURRENCE_SAFE", "terminal_state": "OK", "first_true_blocker_code": "", "first_true_blocker_source": "", "blocker_family": "", "recurrence_fingerprint": "r", "recurrence_status_before": "CLEAR", "recurrence_status_after": "CLEAR", "proof_failures": [], "reason": "", "generated_at_utc": f"{day_utc}T00:00:00Z"},
+        )
 
         monkeypatch.setattr(admission_module, "_run", _fake_run)
+        monkeypatch.setattr(admission_module, "resolve_decision_truth_root_v1", lambda truth_root, repo_root=None: Path(truth_root).resolve())
+        monkeypatch.setattr(
+            admission_module,
+            "derive_next_day_readiness_probe_payload",
+            lambda **_: {"target_day_utc": "2026-04-10", "probe_status": "UNKNOWN"},
+        )
+        monkeypatch.setattr(
+            admission_module,
+            "write_next_day_readiness_probe_v1",
+            lambda *, truth_root, payload: (
+                _write_json(
+                    Path(truth_root) / "reports" / "next_day_readiness_probe_v1" / str(payload["target_day_utc"]) / "next_day_readiness_probe.v1.json",
+                    dict(payload),
+                )
+                or _WriteRef(
+                    Path(truth_root) / "reports" / "next_day_readiness_probe_v1" / str(payload["target_day_utc"]) / "next_day_readiness_probe.v1.json"
+                )
+            ),
+        )
         monkeypatch.setattr(admission_module, "_market_data_client_id", lambda: "7")
         monkeypatch.setattr(admission_module, "_producer_git_sha", lambda: "a" * 40)
+        monkeypatch.setattr(
+            admission_module,
+            "resolve_release_provenance",
+            lambda: {"release_id": "r1", "git_sha": "a" * 40, "release_root": "/tmp/r1"},
+        )
         monkeypatch.setattr(admission_module, "_active_market_data_symbols", lambda: ["GLD", "IWM", "QQQ", "SPY"])
         monkeypatch.setattr(admission_module, "resolve_single_paper_ib_account_from_sleeve_registry", lambda _: "DU1234567")
         monkeypatch.setattr(admission_module, "_resolve_primary_paper_sleeve_truth_root", lambda **_: sleeve_truth_root)
@@ -131,6 +181,9 @@ def test_admission_runner_invokes_current_day_control_plane_in_order(monkeypatch
         rc = admission_module.main()
 
         assert rc == 2
+        assert (
+            truth_root / "reports" / "next_day_readiness_probe_v1" / "2026-04-10" / "next_day_readiness_probe.v1.json"
+        ).exists()
         assert commands == [
             "run_startup_materialization_v1.py",
             "run_paper_trading_posture_v1.py",
@@ -258,7 +311,25 @@ def test_admission_runner_fails_closed_when_required_control_plane_artifact_miss
             _write_json(path, {"ok": True})
 
         monkeypatch.setattr(admission_module, "_run", _fake_run)
+        monkeypatch.setattr(admission_module, "resolve_decision_truth_root_v1", lambda truth_root, repo_root=None: Path(truth_root).resolve())
+        monkeypatch.setattr(
+            admission_module,
+            "derive_next_day_readiness_probe_payload",
+            lambda **_: {"target_day_utc": "2026-04-10", "probe_status": "UNKNOWN"},
+        )
+        monkeypatch.setattr(
+            admission_module,
+            "write_next_day_readiness_probe_v1",
+            lambda *, truth_root, payload: _WriteRef(
+                Path(truth_root) / "reports" / "next_day_readiness_probe_v1" / str(payload["target_day_utc"]) / "next_day_readiness_probe.v1.json"
+            ),
+        )
         monkeypatch.setattr(admission_module, "_producer_git_sha", lambda: "a" * 40)
+        monkeypatch.setattr(
+            admission_module,
+            "resolve_release_provenance",
+            lambda: {"release_id": "r1", "git_sha": "a" * 40, "release_root": "/tmp/r1"},
+        )
         monkeypatch.setattr(admission_module, "_active_market_data_symbols", lambda: ["GLD", "IWM", "QQQ", "SPY"])
         monkeypatch.setattr(admission_module, "resolve_single_paper_ib_account_from_sleeve_registry", lambda _: "DU1234567")
         monkeypatch.setattr(admission_module, "_resolve_primary_paper_sleeve_truth_root", lambda **_: sleeve_truth_root)

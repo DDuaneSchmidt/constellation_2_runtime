@@ -140,6 +140,14 @@ documents:
     path: ops/tools/run_policy_diff_v1.py
     class: C2_TOOL
     status: ACTIVE
+  - id: C2_TOOL_EXECUTION_OUTCOME_V1
+    path: ops/tools/run_execution_outcome_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_NEXT_DAY_READINESS_PROBE_V1
+    path: ops/tools/run_next_day_readiness_probe_v1.py
+    class: C2_TOOL
+    status: ACTIVE
   - id: C2_TOOL_PAPER_SESSION_EVIDENCE_MANIFEST_V1
     path: ops/tools/run_paper_session_evidence_manifest_v1.py
     class: C2_TOOL
@@ -243,6 +251,18 @@ documents:
     status: DRAFT
   - id: C2_CURRENT_SYSTEM_PROJECTION_V1
     path: governance/05_CONTRACTS/C2/current_system_projection_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_RUNTIME_PATH_AUTHORITY_V1
+    path: governance/05_CONTRACTS/C2/runtime_path_authority_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_EXECUTION_OUTCOME_V1
+    path: governance/05_CONTRACTS/C2/execution_outcome_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_NEXT_DAY_READINESS_PROBE_V1
+    path: governance/05_CONTRACTS/C2/next_day_readiness_probe_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
   - id: C2_ALERTS_PROJECTION_V1

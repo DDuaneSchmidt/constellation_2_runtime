@@ -1,0 +1,41 @@
+{
+  "$id": "C2_REPORTS_NEXT_DAY_READINESS_PROBE_V1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "C2 Next Day Readiness Probe v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "target_day_utc",
+    "reference_day_utc",
+    "truth_root",
+    "truth_sleeves_root",
+    "release_id",
+    "git_sha",
+    "evidence_projection",
+    "capability_projection",
+    "predicted_paper_policy_status",
+    "predicted_blocking_items",
+    "confidence",
+    "probe_status",
+    "generated_at_utc"
+  ],
+  "properties": {
+    "schema_id": { "const": "next_day_readiness_probe" },
+    "schema_version": { "const": "v1" },
+    "target_day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "reference_day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "truth_root": { "type": "string" },
+    "truth_sleeves_root": { "type": "string" },
+    "release_id": { "type": "string" },
+    "git_sha": { "type": "string" },
+    "evidence_projection": { "type": "array", "items": { "type": "object" } },
+    "capability_projection": { "type": "array", "items": { "type": "object" } },
+    "predicted_paper_policy_status": { "type": "string", "enum": ["PASS", "FAIL", "UNKNOWN"] },
+    "predicted_blocking_items": { "type": "array", "items": { "type": "object" } },
+    "confidence": { "type": "string", "enum": ["HIGH", "MEDIUM", "LOW"] },
+    "probe_status": { "type": "string", "enum": ["READY", "BLOCKED", "UNKNOWN"] },
+    "generated_at_utc": { "type": "string" }
+  }
+}
