@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional
 
 from constellation_2.phaseD.lib.canon_json_v1 import CanonicalizationError, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
 
@@ -86,12 +87,21 @@ def _extract_order_id_from_next_valid_id(evt: Dict[str, Any]) -> Optional[int]:
     return None
 
 
-def _paths_for_day(day_utc: str) -> Paths:
-    day_dir = (TRUTH_ROOT / "ib_api_handshake" / day_utc).resolve()
+def _paths_for_day(day_utc: str, *, truth_root: Path, broker_events_root: Path) -> Paths:
+    day_dir = (truth_root / "ib_api_handshake" / day_utc).resolve()
     out_path = (day_dir / "ib_api_handshake.v1.json").resolve()
-    latest_path = (TRUTH_ROOT / "ib_api_handshake" / "latest_pointer.v1.json").resolve()
-    broker_events_path = (AUTH_BROKER_EVENTS_ROOT / day_utc / "broker_event_log.v1.jsonl").resolve()
+    latest_path = (truth_root / "ib_api_handshake" / "latest_pointer.v1.json").resolve()
+    broker_events_path = (broker_events_root / day_utc / "broker_event_log.v1.jsonl").resolve()
     return Paths(day_dir=day_dir, out_path=out_path, latest_path=latest_path, broker_events_path=broker_events_path)
+
+
+def _resolve_truth_and_events_roots(truth_root_arg: str) -> tuple[Path, Path]:
+    raw = str(truth_root_arg or "").strip()
+    if raw:
+        truth_root = Path(raw).resolve()
+        broker_events_root = (truth_root / "execution_evidence_v1" / "broker_events").resolve()
+        return truth_root, broker_events_root
+    return TRUTH_ROOT, AUTH_BROKER_EVENTS_ROOT
 
 
 def _build_latest_ptr(day_utc: str, out_path: Path, out_sha256: str) -> Dict[str, Any]:
@@ -123,16 +133,42 @@ def _write_latest_pointer_if_monotonic(*, day_utc: str, paths: Paths, out_sha256
     latest_ptr = _build_latest_ptr(day_utc, paths.out_path, out_sha256)
     validate_against_repo_schema_v1(latest_ptr, REPO_ROOT, SCHEMA_LATEST_PTR)
     latest_bytes = canonical_json_bytes_v1(latest_ptr) + b"\n"
-    write_file_immutable_v1(path=paths.latest_path, data=latest_bytes, create_dirs=True)
+    write_day_artifact_refreshable_v1(
+        path=paths.latest_path,
+        data=latest_bytes,
+        expected_day_utc=day_utc,
+        expected_schema_id="C2_IB_API_HANDSHAKE_LATEST_POINTER_V1",
+        expected_schema_version=1,
+        preserve_statuses=(),
+    )
+
+
+def _write_handshake_doc(*, day_utc: str, paths: Paths, doc: Dict[str, Any]) -> str:
+    validate_against_repo_schema_v1(doc, REPO_ROOT, SCHEMA_HANDSHAKE)
+    try:
+        payload = canonical_json_bytes_v1(doc) + b"\n"
+    except CanonicalizationError as e:
+        raise SystemExit(f"FAIL: CANONICALIZATION_ERROR: {e}") from e
+    wr = write_day_artifact_refreshable_v1(
+        path=paths.out_path,
+        data=payload,
+        expected_day_utc=day_utc,
+        expected_schema_id="C2_IB_API_HANDSHAKE_V1",
+        expected_schema_version=1,
+        preserve_statuses=(),
+    )
+    return wr.sha256
 
 
 def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="run_ib_api_handshake_spine_v1")
     ap.add_argument("--day_utc", required=True, help="UTC day key YYYY-MM-DD")
+    ap.add_argument("--truth_root", default="", help="Optional canonical truth root override.")
     args = ap.parse_args(argv)
 
     day_utc = str(args.day_utc).strip()
-    p = _paths_for_day(day_utc)
+    truth_root, broker_events_root = _resolve_truth_and_events_roots(args.truth_root)
+    p = _paths_for_day(day_utc, truth_root=truth_root, broker_events_root=broker_events_root)
 
     if not p.broker_events_path.exists():
         doc = {
@@ -145,13 +181,11 @@ def main(argv: List[str] | None = None) -> int:
             "inputs": {"broker_event_log": str(p.broker_events_path)},
             "observations": {},
         }
-        validate_against_repo_schema_v1(doc, REPO_ROOT, SCHEMA_HANDSHAKE)
-        payload = canonical_json_bytes_v1(doc) + b"\n"
         try:
-            wr = write_file_immutable_v1(path=p.out_path, data=payload, create_dirs=True)
-            _write_latest_pointer_if_monotonic(day_utc=day_utc, paths=p, out_sha256=wr.sha256)
-        except ImmutableWriteError as e:
-            print(f"FAIL: {e}", file=sys.stderr)
+            out_sha256 = _write_handshake_doc(day_utc=day_utc, paths=p, doc=doc)
+            _write_latest_pointer_if_monotonic(day_utc=day_utc, paths=p, out_sha256=out_sha256)
+        except (ImmutableWriteError, SystemExit) as e:
+            print(str(e), file=sys.stderr)
             return 4
         print(f"FAIL: BROKER_EVENTS_MISSING day_utc={day_utc} path={p.out_path}")
         return 2
@@ -180,13 +214,11 @@ def main(argv: List[str] | None = None) -> int:
             "inputs": {"broker_event_log": str(p.broker_events_path)},
             "observations": {"lines_total": len(lines)},
         }
-        validate_against_repo_schema_v1(doc, REPO_ROOT, SCHEMA_HANDSHAKE)
-        payload = canonical_json_bytes_v1(doc) + b"\n"
         try:
-            wr = write_file_immutable_v1(path=p.out_path, data=payload, create_dirs=True)
-            _write_latest_pointer_if_monotonic(day_utc=day_utc, paths=p, out_sha256=wr.sha256)
-        except ImmutableWriteError as e:
-            print(f"FAIL: {e}", file=sys.stderr)
+            out_sha256 = _write_handshake_doc(day_utc=day_utc, paths=p, doc=doc)
+            _write_latest_pointer_if_monotonic(day_utc=day_utc, paths=p, out_sha256=out_sha256)
+        except (ImmutableWriteError, SystemExit) as e:
+            print(str(e), file=sys.stderr)
             return 4
         print(f"FAIL: NO_NEXT_VALID_ID_OBSERVED day_utc={day_utc} path={p.out_path}")
         return 2
@@ -225,26 +257,19 @@ def main(argv: List[str] | None = None) -> int:
         },
     }
 
-    validate_against_repo_schema_v1(doc, REPO_ROOT, SCHEMA_HANDSHAKE)
     try:
-        payload = canonical_json_bytes_v1(doc) + b"\n"
-    except CanonicalizationError as e:
-        print(f"FAIL: CANONICALIZATION_ERROR: {e}", file=sys.stderr)
+        out_sha256 = _write_handshake_doc(day_utc=day_utc, paths=p, doc=doc)
+    except (ImmutableWriteError, SystemExit) as e:
+        print(str(e), file=sys.stderr)
         return 4
 
     try:
-        wr = write_file_immutable_v1(path=p.out_path, data=payload, create_dirs=True)
+        _write_latest_pointer_if_monotonic(day_utc=day_utc, paths=p, out_sha256=out_sha256)
     except ImmutableWriteError as e:
         print(f"FAIL: {e}", file=sys.stderr)
         return 4
 
-    try:
-        _write_latest_pointer_if_monotonic(day_utc=day_utc, paths=p, out_sha256=wr.sha256)
-    except ImmutableWriteError as e:
-        print(f"FAIL: {e}", file=sys.stderr)
-        return 4
-
-    print(f"OK: IB_API_HANDSHAKE_V1_WRITTEN day_utc={day_utc} ok={ok} path={p.out_path} sha256={wr.sha256}")
+    print(f"OK: IB_API_HANDSHAKE_V1_WRITTEN day_utc={day_utc} ok={ok} path={p.out_path} sha256={out_sha256}")
     return 0
 
 

@@ -45,13 +45,20 @@ from typing import Any, Dict, List, Optional
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
 TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 
 RAW_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_event_raw.v1.schema.json"
 MAN_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_event_day_manifest.v1.schema.json"
 
 BROKER_EVENTS_ROOT = (TRUTH / "execution_evidence_v1/broker_events").resolve()
+
+
+def _resolve_truth_root(arg: str) -> Path:
+    raw = str(arg or "").strip()
+    if raw:
+        return Path(raw).resolve()
+    return TRUTH
 
 
 def _utc_now() -> str:
@@ -107,10 +114,12 @@ def _seal_write(path: Path, payload_bytes: bytes) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_broker_event_day_manifest_v1")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
+    ap.add_argument("--truth_root", default="", help="Optional canonical truth root override.")
     args = ap.parse_args()
     day = _parse_day_utc(args.day_utc)
+    truth_root = _resolve_truth_root(args.truth_root)
 
-    day_dir = (BROKER_EVENTS_ROOT / day).resolve()
+    day_dir = (truth_root / "execution_evidence_v1" / "broker_events" / day).resolve()
     log_path = (day_dir / "broker_event_log.v1.jsonl").resolve()
 
     # Fixed-name first seal (only if absent)

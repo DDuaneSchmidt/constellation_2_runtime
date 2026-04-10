@@ -105,6 +105,17 @@ def _parse_json_stdout(result: Dict[str, Any]) -> Dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _resolve_broker_events_bootstrap_python() -> Path:
+    candidates = [
+        BROKER_EVENTS_BOOTSTRAP_PYTHON.resolve(),
+        (REPO_ROOT.parent / "constellation_2_runtime" / ".venv_c2" / "bin" / "python").resolve(),
+    ]
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return Path(sys.executable).resolve()
+
+
 def _write_day_authority_decision_from_validation(
     *,
     day_utc: str,
@@ -645,8 +656,10 @@ def main() -> int:
         failures.append("sleeve_positions_snapshot_seed")
 
     broker_events_cmd = [
-        str(BROKER_EVENTS_BOOTSTRAP_PYTHON if BROKER_EVENTS_BOOTSTRAP_PYTHON.exists() else Path(sys.executable).resolve()),
+        str(_resolve_broker_events_bootstrap_python()),
         str(BROKER_EVENTS_BOOTSTRAP_TOOL),
+        "--truth_root",
+        str(GLOBAL_TRUTH_ROOT),
         "--host",
         "127.0.0.1",
         "--port",
@@ -669,12 +682,26 @@ def main() -> int:
     if results["broker_events_bootstrap"]["returncode"] != 0:
         failures.append("broker_events_bootstrap")
 
-    broker_events_manifest_cmd = [sys.executable, str(BROKER_EVENTS_MANIFEST_TOOL), "--day_utc", day]
+    broker_events_manifest_cmd = [
+        sys.executable,
+        str(BROKER_EVENTS_MANIFEST_TOOL),
+        "--day_utc",
+        day,
+        "--truth_root",
+        str(GLOBAL_TRUTH_ROOT),
+    ]
     results["broker_event_day_manifest"] = _run(broker_events_manifest_cmd)
     if results["broker_event_day_manifest"]["returncode"] != 0:
         failures.append("broker_event_day_manifest")
 
-    handshake_cmd = [sys.executable, str(HANDSHAKE_TOOL), "--day_utc", day]
+    handshake_cmd = [
+        sys.executable,
+        str(HANDSHAKE_TOOL),
+        "--day_utc",
+        day,
+        "--truth_root",
+        str(GLOBAL_TRUTH_ROOT),
+    ]
     results["ib_api_handshake"] = _run(handshake_cmd)
     if results["ib_api_handshake"]["returncode"] != 0:
         failures.append("ib_api_handshake")

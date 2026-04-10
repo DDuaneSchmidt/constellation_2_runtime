@@ -22,6 +22,7 @@ import json
 import os
 import signal
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -144,6 +145,7 @@ class Observer(EWrapper, EClient):
         self.writer = writer
         self.poll_seconds = poll_seconds
         self._last_poll = 0.0
+        self.handshake_seen = False
 
     def _poll(self) -> None:
         now = time.monotonic()
@@ -165,6 +167,7 @@ class Observer(EWrapper, EClient):
     # ---- callbacks ----
 
     def nextValidId(self, orderId: int) -> None:
+        self.handshake_seen = True
         self.writer.write_raw("nextValidId", [f"orderId={orderId}"])
         try:
             self.reqAllOpenOrders()
@@ -255,26 +258,78 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--port", type=int, default=4002)
     p.add_argument("--client-id", type=int, default=79)
     p.add_argument("--poll-seconds", type=int, default=10)
+    p.add_argument("--truth_root", default="", help="Optional canonical truth root override.")
     p.add_argument(
         "--log-root",
         default="constellation_2/runtime/truth/execution_evidence_v1/broker_events",
     )
     p.add_argument("--environment", default="PAPER")
     p.add_argument("--day-utc", default="", help="Optional override YYYY-MM-DD. If set, writes under that day dir.")
+    p.add_argument("--bootstrap-handshake-only", action="store_true", help="Connect only long enough to capture handshake evidence.")
+    p.add_argument("--handshake-timeout-seconds", type=int, default=15, help="Timeout for bootstrap handshake-only mode.")
 
     return p.parse_args()
+
+
+def _resolve_log_root(*, repo_root: Path, truth_root_value: str, log_root_value: str) -> Path:
+    truth_root_raw = str(truth_root_value or "").strip()
+    if truth_root_raw:
+        return (Path(truth_root_raw).resolve() / "execution_evidence_v1" / "broker_events").resolve()
+    log_root = (repo_root / str(log_root_value or "").strip()).resolve()
+    try:
+        log_root.relative_to(repo_root)
+    except Exception:
+        raise SystemExit(f"FATAL: log_root not under repo: {log_root}")
+    return log_root
+
+
+def _run_bootstrap_handshake_loop(
+    *,
+    app: Observer,
+    writer: JsonlRawWriter,
+    timeout_seconds: int,
+    stopping: Dict[str, bool],
+) -> int:
+    timeout_seconds = max(int(timeout_seconds), 1)
+
+    def _watchdog() -> None:
+        deadline = time.monotonic() + float(timeout_seconds)
+        while not stopping["stop"] and time.monotonic() < deadline:
+            if app.handshake_seen:
+                writer.write_raw("bootstrapHandshakeComplete", [f"timeoutSeconds={timeout_seconds}"])
+                stopping["stop"] = True
+                try:
+                    app.disconnect()
+                except Exception:
+                    pass
+                return
+            time.sleep(0.1)
+        writer.write_raw("bootstrapHandshakeTimeout", [f"timeoutSeconds={timeout_seconds}"])
+        stopping["stop"] = True
+        try:
+            app.disconnect()
+        except Exception:
+            pass
+
+    watcher = threading.Thread(target=_watchdog, daemon=True)
+    watcher.start()
+    try:
+        app.run()
+    except Exception as e:
+        writer.write_raw("bootstrapRunError", [repr(e)])
+        return 3
+    finally:
+        watcher.join(timeout=1.0)
+    return 0 if app.handshake_seen else 2
 
 
 def main() -> int:
     args = parse_args()
     repo_root = Path.cwd().resolve()
-    log_root = (repo_root / args.log_root).resolve()
-
-    # Fail-closed: must be under repo
     try:
-        log_root.relative_to(repo_root)
-    except Exception:
-        print(f"FATAL: log_root not under repo: {log_root}", file=sys.stderr)
+        log_root = _resolve_log_root(repo_root=repo_root, truth_root_value=args.truth_root, log_root_value=args.log_root)
+    except SystemExit as exc:
+        print(str(exc), file=sys.stderr)
         return 2
 
     d_override = str(getattr(args, "day_utc", "") or "").strip()
@@ -318,6 +373,18 @@ def main() -> int:
         writer.write_raw("connect_failed", [repr(e)])
         writer.close()
         return 3
+
+    if bool(args.bootstrap_handshake_only):
+        try:
+            return _run_bootstrap_handshake_loop(
+                app=app,
+                writer=writer,
+                timeout_seconds=int(args.handshake_timeout_seconds),
+                stopping=stopping,
+            )
+        finally:
+            writer.write_raw("stopped", ["stopped()"])
+            writer.close()
 
     # Run in a loop so we can poll without extra threads
     # EClient.run() is blocking; we do lightweight message processing manually.

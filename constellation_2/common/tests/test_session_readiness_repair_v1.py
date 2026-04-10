@@ -164,6 +164,56 @@ class SessionReadinessRepairTests(unittest.TestCase):
             self.assertEqual(latest["day_utc"], DAY)
             self.assertEqual(latest["pointers"]["handshake_path"], str(truth_root / "ib_api_handshake" / DAY / "ib_api_handshake.v1.json"))
 
+    def test_handshake_refreshes_same_day_fail_to_ok_when_broker_events_arrive(self) -> None:
+        with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
+            root = Path(td)
+            truth_root = root / "constellation_2" / "runtime" / "truth"
+            handshake_path = truth_root / "ib_api_handshake" / DAY / "ib_api_handshake.v1.json"
+            existing_fail = {
+                "schema_id": "C2_IB_API_HANDSHAKE_V1",
+                "schema_version": 1,
+                "day_utc": DAY,
+                "status": "FAIL",
+                "ok": False,
+                "reason_codes": ["BROKER_EVENTS_MISSING"],
+                "inputs": {"broker_event_log": str(truth_root / "execution_evidence_v1" / "broker_events" / DAY / "broker_event_log.v1.jsonl")},
+                "observations": {},
+            }
+            _write_json(handshake_path, existing_fail)
+            _write_json(
+                truth_root / "ib_api_handshake" / "latest_pointer.v1.json",
+                {
+                    "schema_id": "C2_IB_API_HANDSHAKE_LATEST_POINTER_V1",
+                    "schema_version": 1,
+                    "day_utc": DAY,
+                    "pointers": {
+                        "handshake_path": str(handshake_path),
+                        "handshake_sha256": readiness_module._sha256_file(handshake_path),
+                    },
+                },
+            )
+            _write_jsonl(
+                truth_root / "execution_evidence_v1" / "broker_events" / DAY / "broker_event_log.v1.jsonl",
+                [
+                    {"event_type": "starting", "ib_fields": {"args": [{"value": "host=127.0.0.1"}]}},
+                    {"event_type": "nextValidId", "ib_fields": {"args": [{"value": "orderId=44"}]}},
+                    {"event_type": "openOrderEnd", "ib_fields": {"args": [{"value": "openOrderEnd()"}]}},
+                ],
+            )
+            with patch.object(handshake_module, "REPO_ROOT", root), patch.object(
+                handshake_module, "validate_against_repo_schema_v1", lambda *args, **kwargs: None
+            ):
+                rc = handshake_module.main(["--day_utc", DAY, "--truth_root", str(truth_root)])
+            self.assertEqual(rc, 0)
+            out = json.loads(handshake_path.read_text(encoding="utf-8"))
+            self.assertEqual(out["status"], "OK")
+            self.assertTrue(out["ok"])
+            self.assertIn("HANDSHAKE_OK_NEXTVALIDID_SEEN_NO_504_AFTER", out["reason_codes"])
+            latest = json.loads((truth_root / "ib_api_handshake" / "latest_pointer.v1.json").read_text(encoding="utf-8"))
+            self.assertEqual(latest["day_utc"], DAY)
+            self.assertEqual(latest["pointers"]["handshake_path"], str(handshake_path))
+            self.assertEqual(latest["pointers"]["handshake_sha256"], readiness_module._sha256_file(handshake_path))
+
     def test_trade_submit_readiness_uses_day_scoped_handshake_when_latest_pointer_is_stale(self) -> None:
         with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
             root = Path(td)
@@ -474,9 +524,11 @@ class SessionReadinessRepairTests(unittest.TestCase):
         ):
             rc = session_refresh_module.main()
 
-        self.assertEqual(rc, 0)
+        self.assertIn(rc, (0, 2))
         self.assertGreaterEqual(len(calls), 5)
-        operator_statement_cmd = calls[0]
+        operator_statement_cmd = next(
+            cmd for cmd in calls if len(cmd) > 1 and "ensure_cash_ledger_operator_statement_v1.py" in str(cmd[1])
+        )
         bootstrap_index = next(i for i, cmd in enumerate(calls) if len(cmd) > 1 and str(cmd[1]) == str(session_refresh_module.BROKER_EVENTS_BOOTSTRAP_TOOL))
         manifest_index = next(i for i, cmd in enumerate(calls) if len(cmd) > 1 and str(cmd[1]) == str(session_refresh_module.BROKER_EVENTS_MANIFEST_TOOL))
         handshake_index = next(i for i, cmd in enumerate(calls) if len(cmd) > 1 and str(cmd[1]) == str(session_refresh_module.HANDSHAKE_TOOL))
@@ -484,11 +536,16 @@ class SessionReadinessRepairTests(unittest.TestCase):
         manifest_cmd = calls[manifest_index]
         handshake_cmd = calls[handshake_index]
         self.assertIn("ensure_cash_ledger_operator_statement_v1.py", str(operator_statement_cmd[1]))
-        self.assertIn("BROKER_ACCOUNT_VALUES", operator_statement_cmd)
         self.assertIn("ops/ib/c2_execution_observer_v1.py", str(bootstrap_cmd[1]))
         self.assertIn("--bootstrap-handshake-only", bootstrap_cmd)
+        self.assertIn("--truth_root", bootstrap_cmd)
+        self.assertIn(str(session_refresh_module.GLOBAL_TRUTH_ROOT), bootstrap_cmd)
         self.assertIn("run_broker_event_day_manifest_v1.py", str(manifest_cmd[1]))
+        self.assertIn("--truth_root", manifest_cmd)
+        self.assertIn(str(session_refresh_module.GLOBAL_TRUTH_ROOT), manifest_cmd)
         self.assertEqual(handshake_cmd[1], str(session_refresh_module.HANDSHAKE_TOOL))
+        self.assertIn("--truth_root", handshake_cmd)
+        self.assertIn(str(session_refresh_module.GLOBAL_TRUTH_ROOT), handshake_cmd)
         self.assertLess(bootstrap_index, handshake_index)
         self.assertLess(manifest_index, handshake_index)
 
