@@ -178,6 +178,7 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/policy_diff.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/execution_outcome.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/next_day_readiness_probe.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/fresh_day_admission.v1.schema.json`
 
 ### READINESS tools (governed writers)
 - `ops/tools/run_trade_submit_readiness_c2_v1.py`
@@ -187,6 +188,7 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `ops/tools/run_policy_diff_v1.py`
 - `ops/tools/run_execution_outcome_v1.py`
 - `ops/tools/run_next_day_readiness_probe_v1.py`
+- `ops/tools/run_fresh_day_admission_v1.py`
 - `ops/tools/run_sleeve_live_readiness_v1.py`
 - `ops/tools/run_constellation_bug_metrics_v1.py`
 - `ops/tools/run_constellation_platform_readiness_v1.py`
@@ -213,6 +215,7 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/05_CONTRACTS/C2/runtime_path_authority_v1.contract.md`
 - `governance/05_CONTRACTS/C2/execution_outcome_v1.contract.md`
 - `governance/05_CONTRACTS/C2/next_day_readiness_probe_v1.contract.md`
+- `governance/05_CONTRACTS/C2/fresh_day_admission_v1.contract.md`
 - `ops/tools/run_paper_session_ledger_v1.py`
 - `ops/tools/run_paper_session_evidence_manifest_v1.py` (superseded by `paper_session_ledger_v1`)
 - `ops/tools/run_paper_session_kernel_v1.py` (superseded by `paper_session_ledger_v1`)

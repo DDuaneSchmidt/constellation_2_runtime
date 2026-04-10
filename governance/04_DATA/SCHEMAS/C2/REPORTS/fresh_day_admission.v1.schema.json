@@ -1,0 +1,84 @@
+{
+  "$id": "C2_REPORTS_FRESH_DAY_ADMISSION_V1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "C2 Fresh Day Admission v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "target_day_utc",
+    "reference_day_utc",
+    "admission_status",
+    "probe_status",
+    "probe_artifact_path",
+    "blocking_items",
+    "required_target_day_artifacts",
+    "materialized_target_day_artifacts",
+    "missing_required_artifacts",
+    "path_authority_snapshot",
+    "release_id",
+    "git_sha",
+    "truth_root",
+    "truth_sleeves_root",
+    "evaluated_at_utc"
+  ],
+  "properties": {
+    "schema_id": { "const": "fresh_day_admission" },
+    "schema_version": { "const": "v1" },
+    "target_day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "reference_day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "admission_status": { "type": "string", "enum": ["ADMIT", "BLOCKED"] },
+    "probe_status": { "type": "string", "enum": ["READY", "BLOCKED", "UNKNOWN", "MISSING"] },
+    "probe_artifact_path": { "type": "string" },
+    "blocking_items": { "type": "array", "items": { "type": "object" } },
+    "required_target_day_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["artifact_id", "artifact_path", "requirement_class"],
+        "properties": {
+          "artifact_id": { "type": "string" },
+          "artifact_path": { "type": "string" },
+          "requirement_class": { "type": "string", "enum": ["REQUIRED_PRE_ADMISSION"] }
+        }
+      }
+    },
+    "materialized_target_day_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["artifact_id", "artifact_path", "artifact_sha256", "artifact_status"],
+        "properties": {
+          "artifact_id": { "type": "string" },
+          "artifact_path": { "type": "string" },
+          "artifact_sha256": { "type": "string", "minLength": 64, "maxLength": 64 },
+          "artifact_status": { "type": "string", "enum": ["PASS", "FAIL", "UNKNOWN"] }
+        }
+      }
+    },
+    "missing_required_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["artifact_id", "artifact_path"],
+        "properties": {
+          "artifact_id": { "type": "string" },
+          "artifact_path": { "type": "string" }
+        }
+      }
+    },
+    "path_authority_snapshot": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "release_id": { "type": "string" },
+    "git_sha": { "type": "string" },
+    "truth_root": { "type": "string" },
+    "truth_sleeves_root": { "type": "string" },
+    "evaluated_at_utc": { "type": "string" }
+  }
+}

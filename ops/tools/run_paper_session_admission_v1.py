@@ -25,8 +25,14 @@ from constellation_2.common.execution_outcome_v1 import (
     derive_execution_outcome_payload,
     write_execution_outcome_v1,
 )
+from constellation_2.common.fresh_day_admission_v1 import (
+    derive_fresh_day_admission_payload,
+    resolve_fresh_day_admission_path,
+    write_fresh_day_admission_v1,
+)
 from constellation_2.common.next_day_readiness_probe_v1 import (
     derive_next_day_readiness_probe_payload,
+    resolve_next_day_readiness_probe_path,
     write_next_day_readiness_probe_v1,
 )
 from constellation_2.common.capability_state_v1 import (
@@ -325,6 +331,38 @@ def main() -> int:
     producer_repo = REPO_ROOT.name
     ib_account = resolve_single_paper_ib_account_from_sleeve_registry(REPO_ROOT)
     primary_sleeve_truth_root = _resolve_primary_paper_sleeve_truth_root(ib_account=ib_account)
+    fresh_day_probe_path = resolve_next_day_readiness_probe_path(truth_root=truth_root, target_day_utc=day_utc)
+    if not fresh_day_probe_path.exists() or not fresh_day_probe_path.is_file():
+        fresh_day_probe_payload = derive_next_day_readiness_probe_payload(
+            repo_root=REPO_ROOT,
+            truth_root=truth_root,
+            target_day_utc=day_utc,
+            environment="PAPER",
+            ib_account=ib_account,
+        )
+        write_next_day_readiness_probe_v1(truth_root=truth_root, payload=fresh_day_probe_payload)
+    fresh_day_payload = derive_fresh_day_admission_payload(
+        repo_root=REPO_ROOT,
+        truth_root=truth_root,
+        target_day_utc=day_utc,
+        environment="PAPER",
+        ib_account=ib_account,
+    )
+    fresh_day_ref = write_fresh_day_admission_v1(truth_root=truth_root, payload=fresh_day_payload)
+    if str(fresh_day_payload.get("admission_status") or "").strip().upper() != "ADMIT":
+        _print_payload(
+            {
+                "status": "FRESH_DAY_BLOCKED",
+                "day_utc": day_utc,
+                "input_day_utc": input_day_utc,
+                "fresh_day_admission_path": str(fresh_day_ref.path),
+                "fresh_day_admission_status": fresh_day_payload.get("admission_status"),
+                "blocking_items": fresh_day_payload.get("blocking_items"),
+                "missing_required_artifacts": fresh_day_payload.get("missing_required_artifacts"),
+                "next_action": "materialize_and_green_required_target_day_admission_artifacts_before_execution",
+            }
+        )
+        return 2
     operator_statement_path = resolve_operator_statement_path(operator_input_root=truth_root, day_utc=day_utc)
     market_data_symbols = _active_market_data_symbols()
     market_data_run_utc = f"{day_utc}T00:00:00Z"
@@ -817,6 +855,7 @@ def main() -> int:
     summary = {
         "day_utc": day_utc,
         "input_day_utc": input_day_utc,
+        "fresh_day_admission_path": str(resolve_fresh_day_admission_path(truth_root=truth_root, target_day_utc=day_utc)),
         "ledger_path": str(ledger_path),
         "ledger_id": str(ledger.get("ledger_id") or "").strip(),
         "authority_status": authority_status,

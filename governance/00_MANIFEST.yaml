@@ -148,6 +148,10 @@ documents:
     path: ops/tools/run_next_day_readiness_probe_v1.py
     class: C2_TOOL
     status: ACTIVE
+  - id: C2_TOOL_FRESH_DAY_ADMISSION_V1
+    path: ops/tools/run_fresh_day_admission_v1.py
+    class: C2_TOOL
+    status: ACTIVE
   - id: C2_TOOL_PAPER_SESSION_EVIDENCE_MANIFEST_V1
     path: ops/tools/run_paper_session_evidence_manifest_v1.py
     class: C2_TOOL
@@ -265,6 +269,10 @@ documents:
     path: governance/05_CONTRACTS/C2/next_day_readiness_probe_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
+  - id: C2_FRESH_DAY_ADMISSION_V1
+    path: governance/05_CONTRACTS/C2/fresh_day_admission_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
   - id: C2_ALERTS_PROJECTION_V1
     path: governance/05_CONTRACTS/C2/alerts_projection_v1.contract.md
     class: C2_CONTRACT
@@ -331,6 +339,10 @@ documents:
     status: DRAFT
   - id: C2_REPORTS_POLICY_DIFF_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/policy_diff.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_FRESH_DAY_ADMISSION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/fresh_day_admission.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
   - id: C2_REGISTRY_CAPABILITY_POLICY_SCHEMA_V1

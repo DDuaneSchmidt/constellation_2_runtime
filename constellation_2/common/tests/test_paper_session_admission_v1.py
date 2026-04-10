@@ -140,6 +140,24 @@ def test_admission_runner_invokes_current_day_control_plane_in_order(monkeypatch
                 )
             ),
         )
+        monkeypatch.setattr(
+            admission_module,
+            "derive_fresh_day_admission_payload",
+            lambda **_: {
+                "target_day_utc": day_utc,
+                "reference_day_utc": "2026-04-08",
+                "admission_status": "ADMIT",
+                "blocking_items": [],
+                "missing_required_artifacts": [],
+            },
+        )
+        monkeypatch.setattr(
+            admission_module,
+            "write_fresh_day_admission_v1",
+            lambda *, truth_root, payload: _WriteRef(
+                Path(truth_root) / "reports" / "fresh_day_admission_v1" / str(payload["target_day_utc"]) / "fresh_day_admission.v1.json"
+            ),
+        )
         monkeypatch.setattr(admission_module, "_market_data_client_id", lambda: "7")
         monkeypatch.setattr(admission_module, "_producer_git_sha", lambda: "a" * 40)
         monkeypatch.setattr(
@@ -324,6 +342,24 @@ def test_admission_runner_fails_closed_when_required_control_plane_artifact_miss
                 Path(truth_root) / "reports" / "next_day_readiness_probe_v1" / str(payload["target_day_utc"]) / "next_day_readiness_probe.v1.json"
             ),
         )
+        monkeypatch.setattr(
+            admission_module,
+            "derive_fresh_day_admission_payload",
+            lambda **_: {
+                "target_day_utc": day_utc,
+                "reference_day_utc": "2026-04-08",
+                "admission_status": "ADMIT",
+                "blocking_items": [],
+                "missing_required_artifacts": [],
+            },
+        )
+        monkeypatch.setattr(
+            admission_module,
+            "write_fresh_day_admission_v1",
+            lambda *, truth_root, payload: _WriteRef(
+                Path(truth_root) / "reports" / "fresh_day_admission_v1" / str(payload["target_day_utc"]) / "fresh_day_admission.v1.json"
+            ),
+        )
         monkeypatch.setattr(admission_module, "_producer_git_sha", lambda: "a" * 40)
         monkeypatch.setattr(
             admission_module,
@@ -367,3 +403,71 @@ def test_admission_runner_fails_closed_when_required_control_plane_artifact_miss
         assert rc == 4
         assert captured[-1]["status"] == "CONTROL_PLANE_INCOMPLETE"
         assert "current_system_projection_v1" in captured[-1]["missing_control_plane_artifacts"]
+
+
+def test_admission_runner_blocks_before_any_target_day_execution_when_fresh_day_is_blocked(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        day_utc = "2026-04-10"
+        captured: list[dict[str, object]] = []
+        run_calls: list[list[str]] = []
+
+        def _fake_run(cmd: list[str], *, truth_root: Path) -> dict[str, object]:
+            run_calls.append(list(cmd))
+            return {"cmd": cmd, "returncode": 0, "stdout": "", "stderr": ""}
+
+        monkeypatch.setattr(admission_module, "_run", _fake_run)
+        monkeypatch.setattr(admission_module, "resolve_decision_truth_root_v1", lambda truth_root, repo_root=None: Path(truth_root).resolve())
+        monkeypatch.setattr(
+            admission_module,
+            "derive_next_day_readiness_probe_payload",
+            lambda **_: {"target_day_utc": day_utc, "probe_status": "BLOCKED"},
+        )
+        monkeypatch.setattr(
+            admission_module,
+            "write_next_day_readiness_probe_v1",
+            lambda *, truth_root, payload: _WriteRef(
+                Path(truth_root) / "reports" / "next_day_readiness_probe_v1" / str(payload["target_day_utc"]) / "next_day_readiness_probe.v1.json"
+            ),
+        )
+        monkeypatch.setattr(
+            admission_module,
+            "derive_fresh_day_admission_payload",
+            lambda **_: {
+                "target_day_utc": day_utc,
+                "reference_day_utc": "2026-04-09",
+                "admission_status": "BLOCKED",
+                "blocking_items": [{"item_id": "target_day_paper_policy", "reason": "TARGET_DAY_PAPER_POLICY_BLOCKED"}],
+                "missing_required_artifacts": [{"artifact_id": "trade_submit_readiness_c2_v1"}],
+            },
+        )
+        monkeypatch.setattr(
+            admission_module,
+            "write_fresh_day_admission_v1",
+            lambda *, truth_root, payload: _WriteRef(
+                Path(truth_root) / "reports" / "fresh_day_admission_v1" / str(payload["target_day_utc"]) / "fresh_day_admission.v1.json"
+            ),
+        )
+        monkeypatch.setattr(admission_module, "resolve_single_paper_ib_account_from_sleeve_registry", lambda _: "DU1234567")
+        monkeypatch.setattr(admission_module, "_resolve_primary_paper_sleeve_truth_root", lambda **_: Path(td) / "truth_sleeves" / "PRIMARY" / "PAPER")
+        monkeypatch.setattr(admission_module, "_print_payload", lambda payload: captured.append(dict(payload)))
+        monkeypatch.setattr(
+            admission_module.sys,
+            "argv",
+            [
+                "run_paper_session_admission_v1.py",
+                "--day_utc",
+                day_utc,
+                "--truth_root",
+                str(truth_root),
+                "--execute",
+                "YES",
+            ],
+        )
+
+        rc = admission_module.main()
+
+        assert rc == 2
+        assert run_calls == []
+        assert captured[-1]["status"] == "FRESH_DAY_BLOCKED"
+        assert captured[-1]["fresh_day_admission_status"] == "BLOCKED"
