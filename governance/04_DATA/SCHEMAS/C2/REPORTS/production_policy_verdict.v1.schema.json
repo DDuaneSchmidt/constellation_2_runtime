@@ -1,0 +1,82 @@
+{
+  "$id": "C2_REPORTS_PRODUCTION_POLICY_VERDICT_V1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "C2 Production Policy Verdict v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "environment",
+    "ib_account",
+    "sleeve_id",
+    "overall_status",
+    "production_allowed",
+    "blocking_items",
+    "gate_stack_status",
+    "gate_stack_reason_codes",
+    "capability_state_ref",
+    "gate_stack_ref",
+    "source_artifacts",
+    "release_id",
+    "git_sha",
+    "generated_at_utc"
+  ],
+  "properties": {
+    "schema_id": { "const": "production_policy_verdict" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "environment": { "type": "string", "enum": ["PAPER", "LIVE"] },
+    "ib_account": { "type": "string" },
+    "sleeve_id": { "type": "string" },
+    "overall_status": { "type": "string", "enum": ["PASS", "FAIL"] },
+    "production_allowed": { "type": "boolean" },
+    "blocking_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["item_id", "item_type", "status", "reason_codes"],
+        "properties": {
+          "item_id": { "type": "string" },
+          "item_type": { "type": "string" },
+          "status": { "type": "string" },
+          "reason_codes": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "gate_stack_status": { "type": "string", "enum": ["PASS", "FAIL"] },
+    "gate_stack_reason_codes": { "type": "array", "items": { "type": "string" } },
+    "capability_state_ref": { "$ref": "#/$defs/artifactRef" },
+    "gate_stack_ref": { "$ref": "#/$defs/artifactRef" },
+    "source_artifacts": { "$ref": "#/$defs/artifactRefs" },
+    "release_id": { "type": "string" },
+    "git_sha": { "type": "string" },
+    "generated_at_utc": { "type": "string" }
+  },
+  "$defs": {
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_path": { "type": "string" },
+        "artifact_sha256": { "type": "string", "minLength": 64, "maxLength": 64 }
+      }
+    },
+    "artifactRefs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["artifact_family", "artifact_path", "artifact_sha256"],
+        "properties": {
+          "artifact_family": { "type": "string" },
+          "artifact_path": { "type": "string" },
+          "artifact_sha256": { "type": "string", "minLength": 64, "maxLength": 64 }
+        }
+      }
+    }
+  }
+}

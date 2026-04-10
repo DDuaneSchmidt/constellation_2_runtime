@@ -23,6 +23,12 @@ import sys
 from typing import Any, Dict, List, Tuple
 
 from constellation_2.common.day_authority_decision_v1 import read_day_authority_decision_v1
+from constellation_2.common.capability_state_v1 import (
+    resolve_capability_state_path,
+    resolve_paper_policy_verdict_path,
+    resolve_policy_diff_path,
+    resolve_production_policy_verdict_path,
+)
 from constellation_2.common.trade_submit_readiness_authority_v1 import (
     resolve_governed_account_binding,
     resolve_governed_sleeve_truth_bindings,
@@ -149,7 +155,7 @@ def _refresh_scoped_gate_for_day(*, truth_root: Path, day_utc: str, mode: str = 
         sys.argv = original_argv
 
 
-def _resolve_primary_scoped_gate_state(*, repo_root: Path, environment: str, ib_account: str, day_utc: str) -> Dict[str, Any]:
+def _load_primary_scoped_gate_snapshot(*, repo_root: Path, environment: str, ib_account: str, day_utc: str) -> Dict[str, Any]:
     bindings = resolve_governed_sleeve_truth_bindings(
         repo_root=repo_root,
         environment=environment,
@@ -201,16 +207,110 @@ def _resolve_primary_scoped_gate_state(*, repo_root: Path, environment: str, ib_
         raise ValueError(
             f"FINAL_GATE_STACK_NOT_PASS:sleeve_id={primary.sleeve_id}:reason=GATE_STACK_DAY_MISMATCH:expected_day_utc={day_utc}:actual_day_utc={gate_day}"
         )
-    if gate_status != "PASS":
-        raise ValueError(
-            f"FINAL_GATE_STACK_NOT_PASS:sleeve_id={primary.sleeve_id}:reason=GATE_STACK_STATUS_NOT_PASS:status={gate_status or 'MISSING'}"
-        )
     return {
         "binding": primary,
         "gate_path": gate_path,
         "gate_sha256": _sha256_file(gate_path),
         "gate_payload": gate,
+        "gate_status": gate_status or "MISSING",
         "input_manifest": input_manifest,
+    }
+
+
+def _resolve_primary_scoped_gate_state(*, repo_root: Path, environment: str, ib_account: str, day_utc: str) -> Dict[str, Any]:
+    state = _load_primary_scoped_gate_snapshot(
+        repo_root=repo_root,
+        environment=environment,
+        ib_account=ib_account,
+        day_utc=day_utc,
+    )
+    gate_status = str(state.get("gate_status") or "").strip().upper()
+    if gate_status != "PASS":
+        raise ValueError(
+            f"FINAL_GATE_STACK_NOT_PASS:sleeve_id={state['binding'].sleeve_id}:reason=GATE_STACK_STATUS_NOT_PASS:status={gate_status or 'MISSING'}"
+        )
+    return state
+
+
+def _refresh_policy_stack_for_day(*, day_utc: str, ib_account: str, environment: str) -> None:
+    import ops.tools.run_capability_state_v1 as capability_module
+    import ops.tools.run_paper_policy_verdict_v1 as paper_policy_module
+    import ops.tools.run_production_policy_verdict_v1 as production_policy_module
+    import ops.tools.run_policy_diff_v1 as policy_diff_module
+
+    capability_rc = int(
+        capability_module.main(
+            [
+                "--day_utc",
+                day_utc,
+                "--truth_root",
+                str(TRUTH_ROOT),
+                "--environment",
+                str(environment or "").strip().upper(),
+                "--ib_account",
+                ib_account,
+            ]
+        )
+    )
+    if capability_rc != 0:
+        raise ValueError(f"CAPABILITY_STATE_REFRESH_FAILED:returncode={capability_rc}")
+
+    paper_rc = int(
+        paper_policy_module.main(
+            [
+                "--day_utc",
+                day_utc,
+                "--truth_root",
+                str(TRUTH_ROOT),
+            ]
+        )
+    )
+    if paper_rc not in (0, 2):
+        raise ValueError(f"PAPER_POLICY_REFRESH_FAILED:returncode={paper_rc}")
+
+    production_rc = int(
+        production_policy_module.main(
+            [
+                "--day_utc",
+                day_utc,
+                "--truth_root",
+                str(TRUTH_ROOT),
+                "--environment",
+                str(environment or "").strip().upper(),
+                "--ib_account",
+                ib_account,
+            ]
+        )
+    )
+    if production_rc not in (0, 2):
+        raise ValueError(f"PRODUCTION_POLICY_REFRESH_FAILED:returncode={production_rc}")
+
+    diff_rc = int(
+        policy_diff_module.main(
+            [
+                "--day_utc",
+                day_utc,
+                "--truth_root",
+                str(TRUTH_ROOT),
+            ]
+        )
+    )
+    if diff_rc != 0:
+        raise ValueError(f"POLICY_DIFF_REFRESH_FAILED:returncode={diff_rc}")
+
+
+def _read_policy_artifact(*, path: Path, expected_schema_id: str, day_utc: str) -> Dict[str, Any]:
+    payload = _read_json(path)
+    if str(payload.get("schema_id") or "").strip() != expected_schema_id:
+        raise ValueError(f"READINESS_POLICY_SCHEMA_ID_INVALID:path={path}")
+    if str(payload.get("schema_version") or "").strip() != "v1":
+        raise ValueError(f"READINESS_POLICY_SCHEMA_VERSION_INVALID:path={path}")
+    if str(payload.get("day_utc") or "").strip() != day_utc:
+        raise ValueError(f"READINESS_POLICY_DAY_MISMATCH:path={path}:requested_day_utc={day_utc}")
+    return {
+        "path": path,
+        "sha256": _sha256_file(path),
+        "payload": payload,
     }
 
 
@@ -253,7 +353,11 @@ def _build_run_state_authority_attestation(
     day_authority_payload: Dict[str, Any] | None,
     day_authority_path: Path,
     day_authority_sha256: str | None,
-    gate_state: Dict[str, Any] | None,
+    cycle_snapshot_family: str,
+    cycle_snapshot_artifact_path: str,
+    cycle_snapshot_artifact_sha256: str,
+    cycle_coherence_status: str,
+    upstream_refs: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     decision_state = "UNKNOWN"
     classification_value = "UNKNOWN"
@@ -263,15 +367,6 @@ def _build_run_state_authority_attestation(
     elif day_authority_payload is not None:
         decision_state = "BLOCKED"
         classification_value = "BLOCKED"
-    gate_path = "UNAVAILABLE"
-    gate_sha256 = "0" * 64
-    cycle_coherence_status = "BLOCKED"
-    upstream_refs = []
-    if gate_state is not None:
-        gate_path = str(gate_state["gate_path"])
-        gate_sha256 = str(gate_state["gate_sha256"])
-        cycle_coherence_status = "COHERENT"
-        upstream_refs.extend(gate_state.get("input_manifest") or [])
     if day_authority_payload is not None:
         upstream_refs.append(
             {
@@ -310,9 +405,9 @@ def _build_run_state_authority_attestation(
         "decision_status": decision_state,
         "classification_field": "decision_state",
         "classification_value": classification_value,
-        "cycle_snapshot_family": "gate_stack_verdict_v1",
-        "cycle_snapshot_artifact_path": gate_path,
-        "cycle_snapshot_artifact_sha256": gate_sha256,
+        "cycle_snapshot_family": cycle_snapshot_family,
+        "cycle_snapshot_artifact_path": cycle_snapshot_artifact_path,
+        "cycle_snapshot_artifact_sha256": cycle_snapshot_artifact_sha256,
         "cycle_id": f"{day_utc}:{state}",
         "cycle_coherence_status": cycle_coherence_status,
         "stage_id": "TRADE_SUBMIT_READINESS",
@@ -353,6 +448,11 @@ def main() -> int:
     ok_handshake = False
     ok_gate = False
     gate_state: Dict[str, Any] | None = None
+    cycle_snapshot_family = "gate_stack_verdict_v1"
+    cycle_snapshot_artifact_path = "UNAVAILABLE"
+    cycle_snapshot_artifact_sha256 = "0" * 64
+    cycle_coherence_status = "BLOCKED"
+    cycle_upstream_refs: List[Dict[str, Any]] = []
     day_authority_payload, day_authority_path, day_authority_sha256 = _load_day_authority(day)
 
     try:
@@ -440,16 +540,92 @@ def main() -> int:
             _append_fail_reason(reasons, exc_text)
 
     try:
-        gate_state = _resolve_primary_scoped_gate_state(
+        gate_state = _load_primary_scoped_gate_snapshot(
             repo_root=REPO_ROOT,
             environment=env,
             ib_account=ib_account,
             day_utc=day,
         )
-        ok_gate = True
         input_manifest.extend(gate_state["input_manifest"])
+        cycle_snapshot_artifact_path = str(gate_state["gate_path"])
+        cycle_snapshot_artifact_sha256 = str(gate_state["gate_sha256"])
+        cycle_coherence_status = "COHERENT"
+        cycle_upstream_refs.extend(gate_state["input_manifest"])
     except ValueError as exc:
         _append_fail_reason(reasons, str(exc))
+
+    if gate_state is not None:
+        try:
+            _refresh_policy_stack_for_day(day_utc=day, ib_account=ib_account, environment=env)
+            capability_path = resolve_capability_state_path(truth_root=TRUTH_ROOT, day_utc=day)
+            paper_policy_path = resolve_paper_policy_verdict_path(truth_root=TRUTH_ROOT, day_utc=day)
+            production_policy_path = resolve_production_policy_verdict_path(truth_root=TRUTH_ROOT, day_utc=day)
+            diff_path = resolve_policy_diff_path(truth_root=TRUTH_ROOT, day_utc=day)
+
+            capability_state = _read_policy_artifact(path=capability_path, expected_schema_id="capability_state", day_utc=day)
+            paper_policy_state = _read_policy_artifact(path=paper_policy_path, expected_schema_id="paper_policy_verdict", day_utc=day)
+            production_policy_state = _read_policy_artifact(
+                path=production_policy_path,
+                expected_schema_id="production_policy_verdict",
+                day_utc=day,
+            )
+            policy_diff_state = _read_policy_artifact(path=diff_path, expected_schema_id="policy_diff", day_utc=day)
+
+            input_manifest.extend(
+                [
+                    {"type": "capability_state_v1", "path": str(capability_state["path"]), "sha256": capability_state["sha256"]},
+                    {"type": "paper_policy_verdict_v1", "path": str(paper_policy_state["path"]), "sha256": paper_policy_state["sha256"]},
+                    {
+                        "type": "production_policy_verdict_v1",
+                        "path": str(production_policy_state["path"]),
+                        "sha256": production_policy_state["sha256"],
+                    },
+                    {"type": "policy_diff_v1", "path": str(policy_diff_state["path"]), "sha256": policy_diff_state["sha256"]},
+                ]
+            )
+            cycle_snapshot_family = "paper_policy_verdict_v1"
+            cycle_snapshot_artifact_path = str(paper_policy_state["path"])
+            cycle_snapshot_artifact_sha256 = str(paper_policy_state["sha256"])
+            cycle_upstream_refs.extend(
+                [
+                    {"type": "capability_state_v1", "path": str(capability_state["path"]), "sha256": capability_state["sha256"]},
+                    {"type": "paper_policy_verdict_v1", "path": str(paper_policy_state["path"]), "sha256": paper_policy_state["sha256"]},
+                    {
+                        "type": "production_policy_verdict_v1",
+                        "path": str(production_policy_state["path"]),
+                        "sha256": production_policy_state["sha256"],
+                    },
+                    {"type": "policy_diff_v1", "path": str(policy_diff_state["path"]), "sha256": policy_diff_state["sha256"]},
+                ]
+            )
+
+            paper_status = str(paper_policy_state["payload"].get("overall_status") or "").strip().upper()
+            ok_gate = paper_status == "PASS"
+            if ok_gate:
+                reasons.append("PAPER_POLICY_VERDICT_OK")
+            else:
+                for item in paper_policy_state["payload"].get("blocking_items") or []:
+                    capability_id = str(item.get("capability_id") or "UNKNOWN").strip()
+                    item_status = str(item.get("status") or "UNKNOWN").strip().upper()
+                    _append_fail_reason(reasons, f"PAPER_POLICY_NOT_PASS:{capability_id}:status={item_status}")
+
+            production_status = str(production_policy_state["payload"].get("overall_status") or "").strip().upper()
+            if production_status != "PASS":
+                reasons.append("INFO:PRODUCTION_POLICY_NOT_PASS")
+            for item in policy_diff_state["payload"].get("production_only_open_items") or []:
+                item_id = str(item.get("capability_id") or item.get("item_id") or "").strip()
+                if item_id:
+                    reasons.append(f"INFO:PRODUCTION_ONLY_OPEN:{item_id}")
+        except Exception as exc:
+            reasons.append(f"INFO:PAPER_POLICY_VERDICT_UNAVAILABLE:{type(exc).__name__}")
+            gate_status = str(gate_state.get("gate_status") or "").strip().upper()
+            if gate_status == "PASS":
+                ok_gate = True
+            else:
+                _append_fail_reason(
+                    reasons,
+                    f"FINAL_GATE_STACK_NOT_PASS:sleeve_id={gate_state['binding'].sleeve_id}:reason=GATE_STACK_STATUS_NOT_PASS:status={gate_status or 'MISSING'}",
+                )
 
     if day_authority_payload is None:
         reasons.append("INFO:DAY_AUTHORITY_VALIDATION_MISSING")
@@ -485,7 +661,11 @@ def main() -> int:
         day_authority_payload=day_authority_payload,
         day_authority_path=day_authority_path,
         day_authority_sha256=day_authority_sha256,
-        gate_state=gate_state,
+        cycle_snapshot_family=cycle_snapshot_family,
+        cycle_snapshot_artifact_path=cycle_snapshot_artifact_path,
+        cycle_snapshot_artifact_sha256=cycle_snapshot_artifact_sha256,
+        cycle_coherence_status=cycle_coherence_status,
+        upstream_refs=cycle_upstream_refs,
     )
 
     status_obj: Dict[str, Any] = {

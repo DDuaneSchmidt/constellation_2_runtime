@@ -74,6 +74,10 @@ HEARTBEAT_GATE_TOOL = (REPO_ROOT / "ops/tools/run_heartbeat_gate_v1.py").resolve
 CORRELATION_ENVELOPE_GATE_TOOL = (REPO_ROOT / "ops/tools/run_correlation_envelope_gate_v1.py").resolve()
 REPLAY_CERTIFICATION_GATE_TOOL = (REPO_ROOT / "ops/tools/run_replay_certification_gate_v1.py").resolve()
 GATE_STACK_VERDICT_TOOL = (REPO_ROOT / "ops/tools/run_gate_stack_verdict_v1.py").resolve()
+CAPABILITY_STATE_TOOL = (REPO_ROOT / "ops/tools/run_capability_state_v1.py").resolve()
+PAPER_POLICY_VERDICT_TOOL = (REPO_ROOT / "ops/tools/run_paper_policy_verdict_v1.py").resolve()
+PRODUCTION_POLICY_VERDICT_TOOL = (REPO_ROOT / "ops/tools/run_production_policy_verdict_v1.py").resolve()
+POLICY_DIFF_TOOL = (REPO_ROOT / "ops/tools/run_policy_diff_v1.py").resolve()
 
 
 def _print_payload(payload: dict[str, object]) -> None:
@@ -587,6 +591,58 @@ def main() -> int:
                 "PAPER",
             ],
             truth_root=primary_sleeve_truth_root,
+        ),
+        "capability_state_v1": _run(
+            [
+                sys.executable,
+                str(CAPABILITY_STATE_TOOL),
+                "--day_utc",
+                day_utc,
+                "--truth_root",
+                str(truth_root),
+                "--environment",
+                "PAPER",
+                "--ib_account",
+                ib_account,
+            ],
+            truth_root=truth_root,
+        ),
+        "paper_policy_verdict_v1": _run(
+            [
+                sys.executable,
+                str(PAPER_POLICY_VERDICT_TOOL),
+                "--day_utc",
+                day_utc,
+                "--truth_root",
+                str(truth_root),
+            ],
+            truth_root=truth_root,
+        ),
+        "production_policy_verdict_v1": _run(
+            [
+                sys.executable,
+                str(PRODUCTION_POLICY_VERDICT_TOOL),
+                "--day_utc",
+                day_utc,
+                "--truth_root",
+                str(truth_root),
+                "--environment",
+                "PAPER",
+                "--ib_account",
+                ib_account,
+            ],
+            truth_root=truth_root,
+        ),
+        "policy_diff_v1": _run(
+            [
+                sys.executable,
+                str(POLICY_DIFF_TOOL),
+                "--day_utc",
+                day_utc,
+                "--truth_root",
+                str(truth_root),
+            ],
+            truth_root=truth_root,
         ),
         "submit_boundary_status": _run(
             [sys.executable, str(BOUNDARY_TOOL), "--day_utc", day_utc, "--truth_root", str(truth_root)],

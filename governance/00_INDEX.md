@@ -171,9 +171,18 @@ These JSON schemas are governance-controlled and must be explicitly listed in `g
 - `governance/04_DATA/SCHEMAS/C2/READINESS/sleeve_live_readiness.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/READINESS/bug_metrics.v1.schema.json`
 - `governance/04_DATA/SCHEMAS/C2/READINESS/platform_readiness.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REGISTRIES/capability_policy_registry.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/capability_state.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/paper_policy_verdict.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/production_policy_verdict.v1.schema.json`
+- `governance/04_DATA/SCHEMAS/C2/REPORTS/policy_diff.v1.schema.json`
 
 ### READINESS tools (governed writers)
 - `ops/tools/run_trade_submit_readiness_c2_v1.py`
+- `ops/tools/run_capability_state_v1.py`
+- `ops/tools/run_paper_policy_verdict_v1.py`
+- `ops/tools/run_production_policy_verdict_v1.py`
+- `ops/tools/run_policy_diff_v1.py`
 - `ops/tools/run_sleeve_live_readiness_v1.py`
 - `ops/tools/run_constellation_bug_metrics_v1.py`
 - `ops/tools/run_constellation_platform_readiness_v1.py`

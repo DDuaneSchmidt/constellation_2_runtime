@@ -1,0 +1,29 @@
+{
+  "$id": "C2_REGISTRIES_CAPABILITY_POLICY_REGISTRY_V1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "C2 Capability Policy Registry v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "status", "owner", "capabilities"],
+  "properties": {
+    "schema_id": { "const": "capability_policy_registry" },
+    "schema_version": { "const": "v1" },
+    "status": { "type": "string" },
+    "owner": { "type": "string" },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["capability_id", "paper_role", "production_role", "owner", "rationale"],
+        "properties": {
+          "capability_id": { "type": "string", "minLength": 1 },
+          "paper_role": { "type": "string", "enum": ["BLOCKING", "ADVISORY"] },
+          "production_role": { "type": "string", "enum": ["BLOCKING", "ADVISORY"] },
+          "owner": { "type": "string", "minLength": 1 },
+          "rationale": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

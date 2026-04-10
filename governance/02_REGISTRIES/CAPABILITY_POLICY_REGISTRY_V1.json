@@ -1,0 +1,50 @@
+{
+  "schema_id": "capability_policy_registry",
+  "schema_version": "v1",
+  "status": "ACTIVE",
+  "owner": "Constellation_2",
+  "capabilities": [
+    {
+      "capability_id": "account_binding_valid",
+      "paper_role": "BLOCKING",
+      "production_role": "BLOCKING",
+      "owner": "Constellation_2",
+      "rationale": "Account and sleeve binding must resolve correctly before any submission authority can be trusted."
+    },
+    {
+      "capability_id": "startup_materialization_ready",
+      "paper_role": "BLOCKING",
+      "production_role": "BLOCKING",
+      "owner": "Constellation_2",
+      "rationale": "The current-day startup materialization is the baseline control-plane precondition for both paper and production."
+    },
+    {
+      "capability_id": "paper_trading_posture_ready",
+      "paper_role": "BLOCKING",
+      "production_role": "BLOCKING",
+      "owner": "Constellation_2",
+      "rationale": "The governed posture artifact confirms current-day authority, freshness, linkage, and operator trading enablement."
+    },
+    {
+      "capability_id": "broker_connectivity_available",
+      "paper_role": "BLOCKING",
+      "production_role": "BLOCKING",
+      "owner": "Constellation_2",
+      "rationale": "A truthful positive IB handshake is required before any paper or production submission capability can be claimed."
+    },
+    {
+      "capability_id": "core_sleeve_gate_set_ready",
+      "paper_role": "BLOCKING",
+      "production_role": "BLOCKING",
+      "owner": "Constellation_2",
+      "rationale": "Capital risk, correlation, liquidity, and operator daily gates encode the minimum safe execution envelope for paper and production."
+    },
+    {
+      "capability_id": "production_certification_gate_set_complete",
+      "paper_role": "ADVISORY",
+      "production_role": "BLOCKING",
+      "owner": "Constellation_2",
+      "rationale": "Feed attestation, heartbeat, and replay certification remain production-critical, but they are certification burdens rather than core paper execution capability."
+    }
+  ]
+}

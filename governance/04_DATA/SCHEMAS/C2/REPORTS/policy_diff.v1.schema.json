@@ -1,0 +1,47 @@
+{
+  "$id": "C2_REPORTS_POLICY_DIFF_V1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "C2 Policy Diff v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "paper_policy_status",
+    "production_policy_status",
+    "paper_blocking_items",
+    "production_blocking_items",
+    "production_only_open_items",
+    "shared_source_artifacts",
+    "release_id",
+    "git_sha",
+    "generated_at_utc"
+  ],
+  "properties": {
+    "schema_id": { "const": "policy_diff" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "paper_policy_status": { "type": "string", "enum": ["PASS", "FAIL"] },
+    "production_policy_status": { "type": "string", "enum": ["PASS", "FAIL"] },
+    "paper_blocking_items": { "type": "array", "items": { "type": "object" } },
+    "production_blocking_items": { "type": "array", "items": { "type": "object" } },
+    "production_only_open_items": { "type": "array", "items": { "type": "object" } },
+    "shared_source_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["artifact_family", "artifact_path", "artifact_sha256"],
+        "properties": {
+          "artifact_family": { "type": "string" },
+          "artifact_path": { "type": "string" },
+          "artifact_sha256": { "type": "string", "minLength": 64, "maxLength": 64 }
+        }
+      }
+    },
+    "release_id": { "type": "string" },
+    "git_sha": { "type": "string" },
+    "generated_at_utc": { "type": "string" }
+  }
+}
