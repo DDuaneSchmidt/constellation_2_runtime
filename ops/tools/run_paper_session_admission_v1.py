@@ -28,6 +28,9 @@ from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_startup_proof_validation_path,
     resolve_trading_day_state_machine_path,
 )
+from constellation_2.common.trade_submit_readiness_authority_v1 import (
+    resolve_governed_sleeve_truth_bindings,
+)
 from ops.tools.c2_account_resolution_v1 import resolve_single_paper_ib_account_from_sleeve_registry
 
 
@@ -56,6 +59,14 @@ ENGINE_REGISTRY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/ENGINE_MODEL_REGIS
 MARKET_DATA_DOWNLOADER_TOOL = (
     REPO_ROOT / "constellation_2/phaseJ/tools/ib_historical_market_data_snapshot_downloader_v1.py"
 ).resolve()
+LIQUIDITY_SLIPPAGE_GATE_TOOL = (REPO_ROOT / "ops/tools/run_liquidity_slippage_gate_v1.py").resolve()
+CAPITAL_RISK_ENVELOPE_GATE_TOOL = (REPO_ROOT / "ops/tools/run_c2_capital_risk_envelope_gate_v2.py").resolve()
+FEED_ATTESTATION_GATE_TOOL = (REPO_ROOT / "ops/tools/run_feed_attestation_gate_v1.py").resolve()
+OPERATOR_DAILY_GATE_TOOL = (REPO_ROOT / "ops/tools/run_operator_daily_gate_v3.py").resolve()
+HEARTBEAT_GATE_TOOL = (REPO_ROOT / "ops/tools/run_heartbeat_gate_v1.py").resolve()
+CORRELATION_ENVELOPE_GATE_TOOL = (REPO_ROOT / "ops/tools/run_correlation_envelope_gate_v1.py").resolve()
+REPLAY_CERTIFICATION_GATE_TOOL = (REPO_ROOT / "ops/tools/run_replay_certification_gate_v1.py").resolve()
+GATE_STACK_VERDICT_TOOL = (REPO_ROOT / "ops/tools/run_gate_stack_verdict_v1.py").resolve()
 
 
 def _print_payload(payload: dict[str, object]) -> None:
@@ -114,6 +125,20 @@ def _active_market_data_symbols() -> list[str]:
     return sorted(symbols)
 
 
+def _resolve_primary_paper_sleeve_truth_root(*, ib_account: str) -> Path:
+    bindings = resolve_governed_sleeve_truth_bindings(
+        repo_root=REPO_ROOT,
+        environment="PAPER",
+        requested_ib_account=ib_account,
+    )
+    for binding in bindings:
+        if str(binding.sleeve_id).strip().upper() == "PRIMARY":
+            return Path(binding.truth_root).resolve()
+    if not bindings:
+        raise SystemExit(f"FAIL: no_governed_sleeve_truth_bindings environment=PAPER ib_account={ib_account}")
+    return Path(bindings[0].truth_root).resolve()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_paper_session_admission_v1")
     ap.add_argument("--day_utc", required=True)
@@ -130,6 +155,7 @@ def main() -> int:
     producer_git_sha = _producer_git_sha()
     producer_repo = REPO_ROOT.name
     ib_account = resolve_single_paper_ib_account_from_sleeve_registry(REPO_ROOT)
+    primary_sleeve_truth_root = _resolve_primary_paper_sleeve_truth_root(ib_account=ib_account)
     operator_statement_path = resolve_operator_statement_path(operator_input_root=truth_root, day_utc=day_utc)
     market_data_symbols = _active_market_data_symbols()
     market_data_run_utc = f"{day_utc}T00:00:00Z"
@@ -147,12 +173,8 @@ def main() -> int:
             [sys.executable, str(POSTURE_TOOL), "--day_utc", day_utc, "--truth_root", str(truth_root)],
             truth_root=truth_root,
         ),
-        "submit_boundary_status": _run(
+        "submit_boundary_status_pre_gates": _run(
             [sys.executable, str(BOUNDARY_TOOL), "--day_utc", day_utc, "--truth_root", str(truth_root)],
-            truth_root=truth_root,
-        ),
-        "paper_session_ledger": _run(
-            [sys.executable, str(LEDGER_TOOL), "--day_utc", day_utc, "--truth_root", str(truth_root)],
             truth_root=truth_root,
         ),
         "ensure_cash_ledger_operator_statement": _run(
@@ -260,6 +282,101 @@ def main() -> int:
         ),
         "engine_correlation_matrix_v1": _run(
             [sys.executable, str(ENGINE_CORRELATION_MATRIX_TOOL), "--day_utc", day_utc, "--truth_root", str(truth_root)],
+            truth_root=truth_root,
+        ),
+        "sleeve_gate_liquidity_slippage_gate_v1": _run(
+            [sys.executable, str(LIQUIDITY_SLIPPAGE_GATE_TOOL), "--day_utc", day_utc],
+            truth_root=primary_sleeve_truth_root,
+        ),
+        "sleeve_gate_capital_risk_envelope_v2": _run(
+            [
+                sys.executable,
+                str(CAPITAL_RISK_ENVELOPE_GATE_TOOL),
+                "--out_day_utc",
+                day_utc,
+                "--input_day_utc",
+                input_day_utc,
+                "--truth_root",
+                str(primary_sleeve_truth_root),
+                "--produced_utc",
+                f"{day_utc}T00:00:00Z",
+            ],
+            truth_root=primary_sleeve_truth_root,
+        ),
+        "sleeve_gate_feed_attestation_gate_v1": _run(
+            [sys.executable, str(FEED_ATTESTATION_GATE_TOOL), "--day_utc", day_utc, "--truth_root", str(primary_sleeve_truth_root)],
+            truth_root=primary_sleeve_truth_root,
+        ),
+        "sleeve_gate_operator_daily_gate_v3": _run(
+            [
+                sys.executable,
+                str(OPERATOR_DAILY_GATE_TOOL),
+                "--day_utc",
+                day_utc,
+                "--truth_root",
+                str(primary_sleeve_truth_root),
+                "--produced_utc",
+                f"{day_utc}T00:00:00Z",
+                "--mode",
+                "PAPER",
+            ],
+            truth_root=primary_sleeve_truth_root,
+        ),
+        "sleeve_gate_heartbeat_gate_v1": _run(
+            [sys.executable, str(HEARTBEAT_GATE_TOOL), "--day_utc", day_utc, "--truth_root", str(primary_sleeve_truth_root)],
+            truth_root=primary_sleeve_truth_root,
+        ),
+        "sleeve_gate_correlation_envelope_gate_v1": _run(
+            [
+                sys.executable,
+                str(CORRELATION_ENVELOPE_GATE_TOOL),
+                "--day_utc",
+                day_utc,
+                "--truth_root",
+                str(primary_sleeve_truth_root),
+                "--produced_utc",
+                f"{day_utc}T00:00:00Z",
+                "--mode",
+                "PAPER",
+            ],
+            truth_root=primary_sleeve_truth_root,
+        ),
+        "sleeve_gate_replay_certification_gate_v1": _run(
+            [
+                sys.executable,
+                str(REPLAY_CERTIFICATION_GATE_TOOL),
+                "--day_utc",
+                day_utc,
+                "--truth_root",
+                str(primary_sleeve_truth_root),
+                "--produced_utc",
+                f"{day_utc}T00:00:00Z",
+                "--mode",
+                "PAPER",
+            ],
+            truth_root=primary_sleeve_truth_root,
+        ),
+        "sleeve_gate_gate_stack_verdict_v1": _run(
+            [
+                sys.executable,
+                str(GATE_STACK_VERDICT_TOOL),
+                "--day_utc",
+                day_utc,
+                "--truth_root",
+                str(primary_sleeve_truth_root),
+                "--produced_utc",
+                f"{day_utc}T00:00:00Z",
+                "--mode",
+                "PAPER",
+            ],
+            truth_root=primary_sleeve_truth_root,
+        ),
+        "submit_boundary_status": _run(
+            [sys.executable, str(BOUNDARY_TOOL), "--day_utc", day_utc, "--truth_root", str(truth_root)],
+            truth_root=truth_root,
+        ),
+        "paper_session_ledger": _run(
+            [sys.executable, str(LEDGER_TOOL), "--day_utc", day_utc, "--truth_root", str(truth_root)],
             truth_root=truth_root,
         ),
     }
