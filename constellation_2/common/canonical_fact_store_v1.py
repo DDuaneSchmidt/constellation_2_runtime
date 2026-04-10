@@ -99,13 +99,21 @@ def capture_executed_code_identity(*, repo_root: Path = REPO_ROOT) -> dict[str, 
     if not git_sha:
         try:
             git_sha = (
-                subprocess.check_output(["git", "-C", str(resolved_repo_root), "rev-parse", "HEAD"], text=True).strip()
+                subprocess.check_output(
+                    ["git", "-C", str(resolved_repo_root), "rev-parse", "HEAD"],
+                    text=True,
+                    stderr=subprocess.DEVNULL,
+                ).strip()
             )
         except Exception:
             git_sha = "UNKNOWN"
     try:
         branch = (
-            subprocess.check_output(["git", "-C", str(resolved_repo_root), "branch", "--show-current"], text=True).strip()
+            subprocess.check_output(
+                ["git", "-C", str(resolved_repo_root), "branch", "--show-current"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
         )
     except Exception:
         branch = "RELEASE" if release_manifest is not None else "UNKNOWN"

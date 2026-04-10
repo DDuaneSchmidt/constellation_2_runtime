@@ -104,7 +104,11 @@ def _sha256_file(p: Path) -> str:
 
 def _git_sha() -> str:
     try:
-        out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
+        out = subprocess.check_output(
+            ["/usr/bin/git", "rev-parse", "HEAD"],
+            cwd=str(REPO_ROOT),
+            stderr=subprocess.DEVNULL,
+        )
         return out.decode("utf-8").strip()
     except Exception:
         return "UNKNOWN"
