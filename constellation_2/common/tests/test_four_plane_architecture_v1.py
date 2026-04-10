@@ -258,3 +258,38 @@ def test_next_day_readiness_probe_ready_blocked_unknown(monkeypatch, tmp_path: P
         ib_account=acct,
     )
     assert blocked["probe_status"] == "BLOCKED"
+
+
+def test_next_day_readiness_probe_returns_unknown_when_reference_day_not_materialized(monkeypatch, tmp_path: Path) -> None:
+    truth_root = (tmp_path / "truth").resolve()
+    monkeypatch.setattr(
+        "constellation_2.common.next_day_readiness_probe_v1.resolve_release_provenance",
+        lambda: {"release_id": "20260410T000000Z__abc", "git_sha": "a" * 40},
+    )
+    monkeypatch.setattr(
+        "constellation_2.common.next_day_readiness_probe_v1.resolve_runtime_path_authority_snapshot_v1",
+        lambda repo_root=None: {
+            "authoritative_repo_root": str(tmp_path / "repo"),
+            "canonical_runtime_truth_root": str(truth_root),
+            "canonical_runtime_truth_sleeves_root": str(tmp_path / "truth_sleeves"),
+            "authoritative_repo_truth_root": str(tmp_path / "repo" / "constellation_2" / "runtime" / "truth"),
+            "authoritative_repo_truth_sleeves_root": str(tmp_path / "repo" / "constellation_2" / "runtime" / "truth_sleeves"),
+            "active_release_root": str(tmp_path / "release"),
+        },
+    )
+    monkeypatch.setattr(
+        "constellation_2.common.next_day_readiness_probe_v1.resolve_decision_truth_root_v1",
+        lambda truth_root, repo_root=None: Path(truth_root).resolve(),
+    )
+
+    payload = derive_next_day_readiness_probe_payload(
+        repo_root=SOURCE_ROOT,
+        truth_root=truth_root,
+        target_day_utc="2026-04-11",
+        environment="PAPER",
+        ib_account="DUO847203",
+    )
+
+    assert payload["probe_status"] == "UNKNOWN"
+    assert payload["confidence"] == "LOW"
+    assert payload["predicted_blocking_items"][0]["reason"] == "CURRENT_DAY_BASELINE_NOT_MATERIALIZED"

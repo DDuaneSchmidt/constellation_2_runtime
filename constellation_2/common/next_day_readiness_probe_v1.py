@@ -88,22 +88,22 @@ def derive_next_day_readiness_probe_payload(
     authority_snapshot = resolve_runtime_path_authority_snapshot_v1(repo_root=repo_root)
     current_day_utc = _day_minus_one(target_day_utc)
 
-    current_paper_ref = read_validated_surface_v1(
-        path=resolve_paper_policy_verdict_path(truth_root=resolved_truth_root, day_utc=current_day_utc),
-        schema_relpath="governance/04_DATA/SCHEMAS/C2/REPORTS/paper_policy_verdict.v1.schema.json",
+    current_paper_ref = _read_optional_surface(
+        resolve_paper_policy_verdict_path(truth_root=resolved_truth_root, day_utc=current_day_utc),
+        "governance/04_DATA/SCHEMAS/C2/REPORTS/paper_policy_verdict.v1.schema.json",
     )
-    current_prod_ref = read_validated_surface_v1(
-        path=resolve_production_policy_verdict_path(truth_root=resolved_truth_root, day_utc=current_day_utc),
-        schema_relpath="governance/04_DATA/SCHEMAS/C2/REPORTS/production_policy_verdict.v1.schema.json",
+    current_prod_ref = _read_optional_surface(
+        resolve_production_policy_verdict_path(truth_root=resolved_truth_root, day_utc=current_day_utc),
+        "governance/04_DATA/SCHEMAS/C2/REPORTS/production_policy_verdict.v1.schema.json",
     )
-    current_trade_ref = read_validated_surface_v1(
-        path=_trade_submit_path(
+    current_trade_ref = _read_optional_surface(
+        _trade_submit_path(
             truth_root=resolved_truth_root,
             day_utc=current_day_utc,
             environment=environment,
             ib_account=ib_account,
         ),
-        schema_relpath=TRADE_SUBMIT_READINESS_SCHEMA_RELPATH,
+        TRADE_SUBMIT_READINESS_SCHEMA_RELPATH,
     )
     current_recurrence_ref = _read_optional_surface(
         _recurrence_path(truth_root=resolved_truth_root, day_utc=current_day_utc),
@@ -124,25 +124,40 @@ def derive_next_day_readiness_probe_payload(
         TRADE_SUBMIT_READINESS_SCHEMA_RELPATH,
     )
 
+    current_baseline_unknown = any(ref is None for ref in (current_paper_ref, current_prod_ref, current_trade_ref))
     evidence_projection: List[Dict[str, Any]] = [
         {
             "projection_id": "current_day_baseline",
             "status": (
-                "PASS"
-                if str(current_paper_ref.payload.get("overall_status") or "").strip().upper() == "PASS"
-                and str(current_prod_ref.payload.get("overall_status") or "").strip().upper() == "PASS"
-                and str(current_trade_ref.payload.get("state") or "").strip().upper() == "OK"
-                and (
-                    current_recurrence_ref is None
-                    or str(current_recurrence_ref.payload.get("proof_status") or "").strip().upper() == "RECURRENCE_SAFE"
+                "UNKNOWN"
+                if current_baseline_unknown
+                else (
+                    "PASS"
+                    if str(current_paper_ref.payload.get("overall_status") or "").strip().upper() == "PASS"
+                    and str(current_prod_ref.payload.get("overall_status") or "").strip().upper() == "PASS"
+                    and str(current_trade_ref.payload.get("state") or "").strip().upper() == "OK"
+                    and (
+                        current_recurrence_ref is None
+                        or str(current_recurrence_ref.payload.get("proof_status") or "").strip().upper() == "RECURRENCE_SAFE"
+                    )
+                    else "FAIL"
                 )
-                else "FAIL"
             ),
-            "basis": [
-                _artifact_ref(current_paper_ref.path),
-                _artifact_ref(current_prod_ref.path),
-                _artifact_ref(current_trade_ref.path),
-            ]
+            "basis": (
+                []
+                if current_paper_ref is None
+                else [_artifact_ref(current_paper_ref.path)]
+            )
+            + (
+                []
+                if current_prod_ref is None
+                else [_artifact_ref(current_prod_ref.path)]
+            )
+            + (
+                []
+                if current_trade_ref is None
+                else [_artifact_ref(current_trade_ref.path)]
+            )
             + ([] if current_recurrence_ref is None else [_artifact_ref(current_recurrence_ref.path)]),
         },
         {
@@ -166,13 +181,21 @@ def derive_next_day_readiness_probe_payload(
         },
     ]
 
-    current_baseline_pass = evidence_projection[0]["status"] == "PASS"
+    current_baseline_status = str(evidence_projection[0]["status"] or "").strip().upper()
+    current_baseline_pass = current_baseline_status == "PASS"
     predicted_blocking_items: List[Dict[str, Any]] = []
-    if not current_baseline_pass:
+    if current_baseline_status == "FAIL":
         predicted_blocking_items.append(
             {
                 "item_id": "current_day_baseline",
                 "reason": "CURRENT_DAY_BASELINE_NOT_GREEN",
+            }
+        )
+    elif current_baseline_status == "UNKNOWN":
+        predicted_blocking_items.append(
+            {
+                "item_id": "current_day_baseline",
+                "reason": "CURRENT_DAY_BASELINE_NOT_MATERIALIZED",
             }
         )
 
@@ -200,9 +223,12 @@ def derive_next_day_readiness_probe_payload(
             {"item_id": "target_day_trade_submit_readiness", "reason": "TARGET_DAY_TRADE_SUBMIT_NOT_OK"}
         )
 
-    if not current_baseline_pass:
+    if current_baseline_status == "FAIL":
         probe_status = "BLOCKED"
         confidence = "HIGH"
+    elif current_baseline_status == "UNKNOWN":
+        probe_status = "UNKNOWN"
+        confidence = "LOW"
     elif target_paper_ref is not None and target_trade_ref is not None and predicted_paper_policy_status == "PASS":
         probe_status = "READY"
         confidence = "HIGH"
