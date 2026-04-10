@@ -16,6 +16,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from constellation_2.common.paper_session_fact_plane_v1 import (
     read_paper_session_ledger_ref_v1,
+    resolve_authoritative_repo_root_v1,
     resolve_fact_plane_truth_root_v1,
 )
 from constellation_2.common.runtime_contract_v1 import resolve_release_provenance
@@ -126,8 +127,9 @@ def _active_market_data_symbols() -> list[str]:
 
 
 def _resolve_primary_paper_sleeve_truth_root(*, ib_account: str) -> Path:
+    authoritative_repo_root = resolve_authoritative_repo_root_v1(REPO_ROOT)
     bindings = resolve_governed_sleeve_truth_bindings(
-        repo_root=REPO_ROOT,
+        repo_root=authoritative_repo_root,
         environment="PAPER",
         requested_ib_account=ib_account,
     )
