@@ -58,11 +58,44 @@ def test_admission_runner_invokes_current_day_control_plane_in_order(monkeypatch
             {"schema_id": "C2_CASH_LEDGER_SNAPSHOT_V1", "status": "OK"},
         )
         _write_json(
+            sleeve_truth_root / "accounting_v2" / "nav" / day_utc / "nav.v2.json",
+            {"schema_id": "accounting_nav_v2", "day_utc": day_utc, "status": "OK"},
+        )
+        _write_json(
+            sleeve_truth_root / "accounting_compat_v1" / "nav" / day_utc / "nav_snapshot.v1.json",
+            {"schema_id": "C2_ACCOUNTING_NAV_V1", "day_utc": day_utc, "status": "OK"},
+        )
+        _write_json(
+            sleeve_truth_root / "reports" / "reconciliation_report_v3" / day_utc / "reconciliation_report.v3.json",
+            {"schema_id": "reconciliation_report_v3", "day_utc": day_utc, "status": "OK"},
+        )
+        _write_json(
+            sleeve_truth_root / "allocation_v1" / "summary" / day_utc / "summary.json",
+            {"schema_id": "allocation_summary", "day_utc": day_utc, "status": "OK"},
+        )
+        _write_json(
+            sleeve_truth_root / "reports" / "liquidity_slippage_gate_v1" / day_utc / "liquidity_slippage_gate.v1.json",
+            {"schema_id": "liquidity_slippage_gate_v1", "day_utc": day_utc, "status": "PASS"},
+        )
+        _write_json(
+            sleeve_truth_root / "reports" / "feed_attestation_gate_v1" / day_utc / "feed_attestation_gate.v1.json",
+            {"schema_id": "feed_attestation_gate_v1", "day_utc": day_utc, "status": "PASS"},
+        )
+        _write_json(
+            sleeve_truth_root / "reports" / "heartbeat_gate_v1" / day_utc / "heartbeat_gate.v1.json",
+            {"schema_id": "heartbeat_gate_v1", "day_utc": day_utc, "status": "PASS"},
+        )
+        _write_json(
+            sleeve_truth_root / "reports" / "replay_certification_gate_v1" / day_utc / "replay_certification_gate.v1.json",
+            {"schema_id": "replay_certification_gate_v1", "day_utc": day_utc, "status": "PASS"},
+        )
+        _write_json(
             truth_root / "intents_v1" / "snapshots" / day_utc / "intent.json",
             {"schema_id": "exposure_intent", "schema_version": "v1"},
         )
 
         monkeypatch.setattr(admission_module, "_run", _fake_run)
+        monkeypatch.setattr(admission_module, "_market_data_client_id", lambda: "7")
         monkeypatch.setattr(admission_module, "_producer_git_sha", lambda: "a" * 40)
         monkeypatch.setattr(admission_module, "_active_market_data_symbols", lambda: ["GLD", "IWM", "QQQ", "SPY"])
         monkeypatch.setattr(admission_module, "resolve_single_paper_ib_account_from_sleeve_registry", lambda _: "DU1234567")
@@ -104,25 +137,15 @@ def test_admission_runner_invokes_current_day_control_plane_in_order(monkeypatch
             "run_submit_boundary_status_v1.py",
             "ensure_cash_ledger_operator_statement_v1.py",
             "ib_historical_market_data_snapshot_downloader_v1.py",
-            "constellation_2.phaseF.positions.run.run_positions_snapshot_day_v2",
-            "constellation_2.phaseF.cash_ledger.run.run_cash_ledger_snapshot_day_v1",
             "run_accounting_nav_v2_day_v1.py",
             "run_regime_snapshot_v2.py",
             "build_defensive_tail_required_inputs_day_v1.py",
             "run_engine_correlation_matrix_day_v1.py",
-            "run_accounting_nav_v2_day_v1.py",
-            "bridge_accounting_nav_v2_to_compat_v1.py",
             "run_engine_correlation_matrix_day_v1.py",
-            "run_reconciliation_report_v3.py",
             "run_exit_reconciliation_day_v1.py",
-            "run_allocation_day_v2.py",
-            "run_liquidity_slippage_gate_v1.py",
             "run_c2_capital_risk_envelope_gate_v2.py",
-            "run_feed_attestation_gate_v1.py",
             "run_operator_daily_gate_v3.py",
-            "run_heartbeat_gate_v1.py",
             "run_correlation_envelope_gate_v1.py",
-            "run_replay_certification_gate_v1.py",
             "run_gate_stack_verdict_v1.py",
             "run_capability_state_v1.py",
             "run_paper_policy_verdict_v1.py",
@@ -167,6 +190,15 @@ def test_admission_runner_invokes_current_day_control_plane_in_order(monkeypatch
             "--use_rth",
             "1",
         ]
+
+
+def test_market_data_client_id_prefers_env_and_derives_pid_default(monkeypatch) -> None:
+    monkeypatch.delenv("C2_IB_CLIENT_ID", raising=False)
+    monkeypatch.setattr(admission_module.os, "getpid", lambda: 321)
+    assert admission_module._market_data_client_id() == "7321"
+
+    monkeypatch.setenv("C2_IB_CLIENT_ID", "91")
+    assert admission_module._market_data_client_id() == "91"
 
 
 def test_mirror_canonical_file_copies_missing_target_and_preserves_identical_bytes(tmp_path: Path) -> None:

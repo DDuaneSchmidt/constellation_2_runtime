@@ -48,7 +48,11 @@ def _read_json_obj(p: Path) -> Dict[str, Any]:
 
 def _git_sha() -> str:
     try:
-        return subprocess.check_output(['/usr/bin/git', 'rev-parse', 'HEAD'], cwd=str(REPO_ROOT)).decode().strip()
+        return subprocess.check_output(
+            ['/usr/bin/git', 'rev-parse', 'HEAD'],
+            cwd=str(REPO_ROOT),
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()
     except Exception:
         # Clean runtime roots can be source-derived without .git metadata.
         return '0' * 40

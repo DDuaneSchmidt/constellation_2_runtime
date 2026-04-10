@@ -97,6 +97,35 @@ def _run(cmd: List[str], *, truth_root: Path) -> Dict[str, object]:
     }
 
 
+def _run_if_artifact_missing(
+    cmd: List[str],
+    *,
+    truth_root: Path,
+    artifact_path: Path,
+    artifact_id: str,
+    expected_day_utc: str,
+) -> Dict[str, object]:
+    if artifact_path.exists() and artifact_path.is_file():
+        try:
+            payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+        except Exception:
+            payload = None
+        if isinstance(payload, dict):
+            existing_day = str(payload.get("day_utc") or "").strip()
+            if existing_day and existing_day != expected_day_utc:
+                return _run(cmd, truth_root=truth_root)
+            return {
+                "cmd": cmd,
+                "returncode": 0,
+                "stdout": (
+                    f"OK: {artifact_id} action=SKIP_EXISTING "
+                    f"path={artifact_path}"
+                ),
+                "stderr": "",
+            }
+    return _run(cmd, truth_root=truth_root)
+
+
 def _producer_git_sha() -> str:
     try:
         return str(resolve_release_provenance().get("git_sha") or "").strip() or ("0" * 40)
@@ -255,6 +284,13 @@ def _resolve_primary_paper_sleeve_truth_root(*, ib_account: str) -> Path:
     return Path(bindings[0].truth_root).resolve()
 
 
+def _market_data_client_id() -> str:
+    explicit = str(os.environ.get("C2_IB_CLIENT_ID") or "").strip()
+    if explicit:
+        return explicit
+    return str(7000 + (os.getpid() % 1000))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_paper_session_admission_v1")
     ap.add_argument("--day_utc", required=True)
@@ -291,8 +327,30 @@ def main() -> int:
     sleeve_intents_day_dir = (primary_sleeve_truth_root / "intents_v1" / "snapshots" / day_utc).resolve()
     ib_host = str(os.environ.get("C2_IB_HOST") or "127.0.0.1").strip()
     ib_port = str(os.environ.get("C2_IB_PORT") or "4002").strip()
-    ib_client_id = str(os.environ.get("C2_IB_CLIENT_ID") or "7").strip()
+    ib_client_id = _market_data_client_id()
     ib_sleep_sec = str(os.environ.get("C2_IB_SLEEP_SEC") or "0.1").strip()
+    sleeve_nav_v2_path = (primary_sleeve_truth_root / "accounting_v2" / "nav" / day_utc / "nav.v2.json").resolve()
+    sleeve_nav_compat_path = (
+        primary_sleeve_truth_root / "accounting_compat_v1" / "nav" / day_utc / "nav_snapshot.v1.json"
+    ).resolve()
+    sleeve_reconciliation_report_path = (
+        primary_sleeve_truth_root / "reports" / "reconciliation_report_v3" / day_utc / "reconciliation_report.v3.json"
+    ).resolve()
+    sleeve_allocation_summary_path = (
+        primary_sleeve_truth_root / "allocation_v1" / "summary" / day_utc / "summary.json"
+    ).resolve()
+    sleeve_liquidity_slippage_gate_path = (
+        primary_sleeve_truth_root / "reports" / "liquidity_slippage_gate_v1" / day_utc / "liquidity_slippage_gate.v1.json"
+    ).resolve()
+    sleeve_feed_attestation_gate_path = (
+        primary_sleeve_truth_root / "reports" / "feed_attestation_gate_v1" / day_utc / "feed_attestation_gate.v1.json"
+    ).resolve()
+    sleeve_heartbeat_gate_path = (
+        primary_sleeve_truth_root / "reports" / "heartbeat_gate_v1" / day_utc / "heartbeat_gate.v1.json"
+    ).resolve()
+    sleeve_replay_certification_gate_path = (
+        primary_sleeve_truth_root / "reports" / "replay_certification_gate_v1" / day_utc / "replay_certification_gate.v1.json"
+    ).resolve()
 
     runs = {
         "startup_materialization": _run(
@@ -350,7 +408,7 @@ def main() -> int:
             ],
             truth_root=truth_root,
         ),
-        "positions_snapshot_v2": _run(
+        "positions_snapshot_v2": _run_if_artifact_missing(
             [
                 sys.executable,
                 "-m",
@@ -363,8 +421,11 @@ def main() -> int:
                 producer_repo,
             ],
             truth_root=truth_root,
+            artifact_path=canonical_positions_snapshot_path,
+            artifact_id="positions_snapshot_v2",
+            expected_day_utc=day_utc,
         ),
-        "cash_ledger_snapshot_v1": _run(
+        "cash_ledger_snapshot_v1": _run_if_artifact_missing(
             [
                 sys.executable,
                 "-m",
@@ -379,6 +440,9 @@ def main() -> int:
                 producer_git_sha,
             ],
             truth_root=truth_root,
+            artifact_path=canonical_cash_ledger_snapshot_path,
+            artifact_id="cash_ledger_snapshot_v1",
+            expected_day_utc=day_utc,
         ),
         "accounting_nav_v2": _run(
             [
@@ -424,7 +488,7 @@ def main() -> int:
             target_path=sleeve_cash_ledger_snapshot_path,
             artifact_id="sleeve_cash_ledger_snapshot_v1",
         ),
-        "sleeve_accounting_nav_v2": _run(
+        "sleeve_accounting_nav_v2": _run_if_artifact_missing(
             [
                 sys.executable,
                 str(ACCOUNTING_NAV_TOOL),
@@ -438,8 +502,11 @@ def main() -> int:
                 producer_git_sha,
             ],
             truth_root=primary_sleeve_truth_root,
+            artifact_path=sleeve_nav_v2_path,
+            artifact_id="sleeve_accounting_nav_v2",
+            expected_day_utc=day_utc,
         ),
-        "sleeve_accounting_nav_compat_v1": _run(
+        "sleeve_accounting_nav_compat_v1": _run_if_artifact_missing(
             [
                 sys.executable,
                 str(ACCOUNTING_NAV_COMPAT_BRIDGE_TOOL),
@@ -449,6 +516,9 @@ def main() -> int:
                 str(primary_sleeve_truth_root),
             ],
             truth_root=primary_sleeve_truth_root,
+            artifact_path=sleeve_nav_compat_path,
+            artifact_id="sleeve_accounting_nav_compat_v1",
+            expected_day_utc=day_utc,
         ),
         "sleeve_intents_snapshot_sync_v1": _mirror_canonical_day_json_dir(
             source_dir=canonical_intents_day_dir,
@@ -466,7 +536,7 @@ def main() -> int:
             ],
             truth_root=primary_sleeve_truth_root,
         ),
-        "sleeve_reconciliation_report_v3": _run(
+        "sleeve_reconciliation_report_v3": _run_if_artifact_missing(
             [
                 sys.executable,
                 str(RECONCILIATION_REPORT_V3_TOOL),
@@ -476,6 +546,9 @@ def main() -> int:
                 str(primary_sleeve_truth_root),
             ],
             truth_root=primary_sleeve_truth_root,
+            artifact_path=sleeve_reconciliation_report_path,
+            artifact_id="sleeve_reconciliation_report_v3",
+            expected_day_utc=day_utc,
         ),
         "sleeve_exit_reconciliation_v1": _run(
             [
@@ -490,7 +563,7 @@ def main() -> int:
             ],
             truth_root=primary_sleeve_truth_root,
         ),
-        "sleeve_allocation_day_v2": _run(
+        "sleeve_allocation_day_v2": _run_if_artifact_missing(
             [
                 sys.executable,
                 str(ALLOCATION_DAY_V2_TOOL),
@@ -504,10 +577,16 @@ def main() -> int:
                 str(primary_sleeve_truth_root),
             ],
             truth_root=primary_sleeve_truth_root,
+            artifact_path=sleeve_allocation_summary_path,
+            artifact_id="sleeve_allocation_day_v2",
+            expected_day_utc=day_utc,
         ),
-        "sleeve_gate_liquidity_slippage_gate_v1": _run(
+        "sleeve_gate_liquidity_slippage_gate_v1": _run_if_artifact_missing(
             [sys.executable, str(LIQUIDITY_SLIPPAGE_GATE_TOOL), "--day_utc", day_utc],
             truth_root=primary_sleeve_truth_root,
+            artifact_path=sleeve_liquidity_slippage_gate_path,
+            artifact_id="sleeve_gate_liquidity_slippage_gate_v1",
+            expected_day_utc=day_utc,
         ),
         "sleeve_gate_capital_risk_envelope_v2": _run(
             [
@@ -524,9 +603,12 @@ def main() -> int:
             ],
             truth_root=primary_sleeve_truth_root,
         ),
-        "sleeve_gate_feed_attestation_gate_v1": _run(
+        "sleeve_gate_feed_attestation_gate_v1": _run_if_artifact_missing(
             [sys.executable, str(FEED_ATTESTATION_GATE_TOOL), "--day_utc", day_utc, "--truth_root", str(primary_sleeve_truth_root)],
             truth_root=primary_sleeve_truth_root,
+            artifact_path=sleeve_feed_attestation_gate_path,
+            artifact_id="sleeve_gate_feed_attestation_gate_v1",
+            expected_day_utc=day_utc,
         ),
         "sleeve_gate_operator_daily_gate_v3": _run(
             [
@@ -543,9 +625,12 @@ def main() -> int:
             ],
             truth_root=primary_sleeve_truth_root,
         ),
-        "sleeve_gate_heartbeat_gate_v1": _run(
+        "sleeve_gate_heartbeat_gate_v1": _run_if_artifact_missing(
             [sys.executable, str(HEARTBEAT_GATE_TOOL), "--day_utc", day_utc, "--truth_root", str(primary_sleeve_truth_root)],
             truth_root=primary_sleeve_truth_root,
+            artifact_path=sleeve_heartbeat_gate_path,
+            artifact_id="sleeve_gate_heartbeat_gate_v1",
+            expected_day_utc=day_utc,
         ),
         "sleeve_gate_correlation_envelope_gate_v1": _run(
             [
@@ -562,7 +647,7 @@ def main() -> int:
             ],
             truth_root=primary_sleeve_truth_root,
         ),
-        "sleeve_gate_replay_certification_gate_v1": _run(
+        "sleeve_gate_replay_certification_gate_v1": _run_if_artifact_missing(
             [
                 sys.executable,
                 str(REPLAY_CERTIFICATION_GATE_TOOL),
@@ -576,6 +661,9 @@ def main() -> int:
                 "PAPER",
             ],
             truth_root=primary_sleeve_truth_root,
+            artifact_path=sleeve_replay_certification_gate_path,
+            artifact_id="sleeve_gate_replay_certification_gate_v1",
+            expected_day_utc=day_utc,
         ),
         "sleeve_gate_gate_stack_verdict_v1": _run(
             [
