@@ -46,7 +46,7 @@ def _source_artifact_row(logical_name: str, path: str, event_type: str, event_ke
     }
 
 
-def _journal_payload() -> dict[str, object]:
+def _journal_payload(*, submission_authorized: bool = True) -> dict[str, object]:
     identity = _identity()
     events = [
         journal.build_event_record_v1(
@@ -91,8 +91,13 @@ def _journal_payload() -> dict[str, object]:
             event_type="SUBMISSION_AUTHORIZATION_RECORDED",
             event_source="paper_session_ledger_v1",
             generated_at_utc="2026-04-08T13:00:03Z",
-            status="AUTHORIZED",
-            payload={**_source_payload("/tmp/ledger.json"), "ledger_id": "ledger-001", "submission_authorized": True, "authority_status": "GRANTED"},
+            status="AUTHORIZED" if submission_authorized else "NOT_AUTHORIZED",
+            payload={
+                **_source_payload("/tmp/ledger.json"),
+                "ledger_id": "ledger-001",
+                "submission_authorized": submission_authorized,
+                "authority_status": "GRANTED",
+            },
         ),
         journal.build_event_record_v1(
             **identity,
@@ -137,6 +142,72 @@ def test_current_projection_from_valid_journal() -> None:
     assert payload["authoritative_day_start_decision"] == "READY_NOW"
     assert payload["current_deployment_status"] == "DEPLOY_ACTIVE"
     assert payload["operator_action_required"] is False
+
+
+def test_current_projection_ready_now_with_submit_blocked_is_not_contradiction_for_paper() -> None:
+    journal_payload = _journal_payload(submission_authorized=False)
+    events_by_type = {event["event_type"]: event for event in journal_payload["events"]}
+    payload = current_projection.build_current_system_projection_v1(
+        day_utc="2026-04-08",
+        journal_payload=journal_payload,
+        source_artifacts=[
+            _source_artifact_row("execution_journal_v1", "/tmp/journal.json", "", ""),
+            _source_artifact_row("deployment_state_machine_v1", "/tmp/deploy.json", "DEPLOYMENT_ACTIVATED", events_by_type["DEPLOYMENT_ACTIVATED"]["event_key"]),
+            _source_artifact_row("startup_materialization_v1", "/tmp/startup.json", "STARTUP_MATERIALIZATION_COMPLETED", events_by_type["STARTUP_MATERIALIZATION_COMPLETED"]["event_key"]),
+            _source_artifact_row("startup_proof_validation_v1", "/tmp/startup_proof.json", "STARTUP_PROOF_VALIDATION_COMPLETED", events_by_type["STARTUP_PROOF_VALIDATION_COMPLETED"]["event_key"]),
+            _source_artifact_row("paper_session_ledger_v1", "/tmp/ledger.json", "LEDGER_AUTHORITY_RECORDED", events_by_type["LEDGER_AUTHORITY_RECORDED"]["event_key"]),
+            _source_artifact_row("trading_day_state_machine_v1", "/tmp/state_machine.json", "STATE_MACHINE_DECISION_RECORDED", events_by_type["STATE_MACHINE_DECISION_RECORDED"]["event_key"]),
+        ],
+        deployment_payload={"day_utc": "2026-04-08", "deployment_attempt_id": _identity()["pipeline_run_id"], "release_build": {"release_id": _identity()["release_id"]}, "evaluated_at_utc": "2026-04-08T13:00:00Z"},
+        startup_materialization_payload={"day_utc": "2026-04-08", "produced_at_utc": "2026-04-08T13:00:01Z"},
+        startup_proof_payload={"day_utc": "2026-04-08", "generated_at_utc": "2026-04-08T13:00:02Z"},
+        ledger_payload={"day_utc": "2026-04-08", "evaluated_at_utc": "2026-04-08T13:00:03Z"},
+        trading_day_payload={
+            "day_utc": "2026-04-08",
+            "day_attempt_id": _identity()["day_attempt_id"],
+            "evaluated_at_utc": "2026-04-08T13:00:04Z",
+            "open_policy": {"environment": "PAPER"},
+        },
+        generated_at_utc="2026-04-08T13:00:05Z",
+        producer_module="test.module",
+    )
+    assert payload["authoritative_day_start_decision"] == "READY_NOW"
+    assert payload["current_submission_status"] == "NOT_AUTHORIZED"
+    assert payload["contradiction_status"] == "NONE"
+    assert payload["operator_action_required"] is False
+
+
+def test_current_projection_ready_now_with_submit_blocked_remains_contradiction_for_non_paper() -> None:
+    journal_payload = _journal_payload(submission_authorized=False)
+    events_by_type = {event["event_type"]: event for event in journal_payload["events"]}
+    payload = current_projection.build_current_system_projection_v1(
+        day_utc="2026-04-08",
+        journal_payload=journal_payload,
+        source_artifacts=[
+            _source_artifact_row("execution_journal_v1", "/tmp/journal.json", "", ""),
+            _source_artifact_row("deployment_state_machine_v1", "/tmp/deploy.json", "DEPLOYMENT_ACTIVATED", events_by_type["DEPLOYMENT_ACTIVATED"]["event_key"]),
+            _source_artifact_row("startup_materialization_v1", "/tmp/startup.json", "STARTUP_MATERIALIZATION_COMPLETED", events_by_type["STARTUP_MATERIALIZATION_COMPLETED"]["event_key"]),
+            _source_artifact_row("startup_proof_validation_v1", "/tmp/startup_proof.json", "STARTUP_PROOF_VALIDATION_COMPLETED", events_by_type["STARTUP_PROOF_VALIDATION_COMPLETED"]["event_key"]),
+            _source_artifact_row("paper_session_ledger_v1", "/tmp/ledger.json", "LEDGER_AUTHORITY_RECORDED", events_by_type["LEDGER_AUTHORITY_RECORDED"]["event_key"]),
+            _source_artifact_row("trading_day_state_machine_v1", "/tmp/state_machine.json", "STATE_MACHINE_DECISION_RECORDED", events_by_type["STATE_MACHINE_DECISION_RECORDED"]["event_key"]),
+        ],
+        deployment_payload={"day_utc": "2026-04-08", "deployment_attempt_id": _identity()["pipeline_run_id"], "release_build": {"release_id": _identity()["release_id"]}, "evaluated_at_utc": "2026-04-08T13:00:00Z"},
+        startup_materialization_payload={"day_utc": "2026-04-08", "produced_at_utc": "2026-04-08T13:00:01Z"},
+        startup_proof_payload={"day_utc": "2026-04-08", "generated_at_utc": "2026-04-08T13:00:02Z"},
+        ledger_payload={"day_utc": "2026-04-08", "evaluated_at_utc": "2026-04-08T13:00:03Z"},
+        trading_day_payload={
+            "day_utc": "2026-04-08",
+            "day_attempt_id": _identity()["day_attempt_id"],
+            "evaluated_at_utc": "2026-04-08T13:00:04Z",
+            "open_policy": {"environment": "LIVE"},
+        },
+        generated_at_utc="2026-04-08T13:00:05Z",
+        producer_module="test.module",
+    )
+    assert payload["authoritative_day_start_decision"] == "READY_NOW"
+    assert payload["current_submission_status"] == "NOT_AUTHORIZED"
+    assert payload["contradiction_status"] == "PRESENT"
+    assert payload["first_true_blocker_code"] == "CURRENT_SYSTEM_PROJECTION_SUBMISSION_NOT_AUTHORIZED"
 
 
 def test_current_projection_fails_closed_when_required_event_missing() -> None:

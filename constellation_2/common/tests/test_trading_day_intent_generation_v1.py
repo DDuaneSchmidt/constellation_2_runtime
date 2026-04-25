@@ -299,7 +299,8 @@ def test_state_machine_generator_defect_becomes_first_true_blocker_not_missing_d
         "_run",
         return_value={"return_code": 3, "stdout": "{}", "stderr": "generation failed"},
     ):
-        rc = state_machine_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+        with patch.object(state_machine_module, "resolve_decision_truth_root_v1", return_value=truth_root.resolve()):
+            rc = state_machine_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
 
     assert rc == 3
     payload = json.loads(
@@ -487,3 +488,41 @@ def test_generator_nonzero_rc_still_falls_back_when_failure_is_unstructured(tmp_
     assert payload["first_blocker_code"] == "PRODUCER_NONZERO_RC"
     assert payload["blocking_codes"] == ["PRODUCER_NONZERO_RC"]
     assert payload["producer_results"][0]["reason_codes"] == ["PRODUCER_NONZERO_RC"]
+
+
+def test_generator_uses_resolved_paper_intent_truth_root_when_preexisting_intent_exists(tmp_path: Path) -> None:
+    canonical_truth_root = tmp_path / "truth"
+    sleeve_truth_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    day_utc = "2026-04-24"
+    payload = _sample_intent_bytes()
+    digest = hashlib.sha256(payload).hexdigest()
+    sleeve_day = sleeve_truth_root / "intents_v1" / "snapshots" / day_utc
+    sleeve_day.mkdir(parents=True, exist_ok=True)
+    intent_path = sleeve_day / f"{digest}.exposure_intent.v1.json"
+    intent_path.write_bytes(payload)
+
+    with patch.object(
+        generation_module,
+        "_load_registry",
+        return_value=(_registry_payload(), SOURCE_ROOT / "governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json", "a" * 64),
+    ):
+        with patch.object(generation_module, "_load_required_producer_specs", return_value=([], [])):
+            with patch.object(
+                generation_module,
+                "resolve_paper_intent_truth_root_v1",
+                return_value=sleeve_truth_root.resolve(),
+            ):
+                rc = generation_module.main(["--day_utc", day_utc, "--truth_root", str(canonical_truth_root)])
+
+    assert rc == 0
+    report_path = (
+        canonical_truth_root
+        / "reports"
+        / "trading_day_intent_generation_v1"
+        / day_utc
+        / "trading_day_intent_generation.v1.json"
+    )
+    payload_obj = json.loads(report_path.read_text(encoding="utf-8"))
+    assert payload_obj["final_status"] == "INTENTS_PRESENT"
+    assert payload_obj["canonical_outputs"]["intents_dir"] == str(sleeve_day.resolve())
+    assert payload_obj["canonical_outputs"]["intent_output_paths"] == [str(intent_path.resolve())]

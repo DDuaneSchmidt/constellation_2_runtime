@@ -15,10 +15,13 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+REPO_ROOT = Path("/home/node/constellation").resolve()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 SUP = (REPO_ROOT / "ops" / "run" / "c2_supervisor_paper_v2.py").resolve()
 
 STATE_ROOT = (Path.home() / ".local/state/constellation_2").resolve()
@@ -56,6 +59,7 @@ class TestSupervisorPhaseDRootTriggerV1(unittest.TestCase):
             obj = json.load(f)
 
         self.assertIsInstance(obj, dict, "health file must be a JSON object")
+        self.assertEqual(obj["producer"]["repo"], "constellation")
 
         phaseD = obj.get("phaseD_submissions_root")
         self.assertIsInstance(phaseD, dict, "health must include phaseD_submissions_root object")

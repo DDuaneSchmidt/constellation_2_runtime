@@ -188,6 +188,57 @@ def test_authorization_and_economic_verdicts_are_independent(tmp_path: Path) -> 
     assert docs["economic_verdict"]["status"] == "FAIL"
 
 
+def test_authorization_pass_with_failed_excluded_gates_is_explicitly_marked(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    day = "2026-04-02"
+    _write_lifecycle_support(truth_root, day)
+    _write_gate_stack(
+        truth_root,
+        day,
+        [
+            _gate_row("feed_attestation_gate_v1", "PASS"),
+            _gate_row("heartbeat_gate_v1", "PASS"),
+            _gate_row("correlation_envelope_gate_v1", "PASS"),
+            _gate_row("replay_certification_gate_v1", "PASS", ["REPLAY_CERT_FIRST_RUN"]),
+            _gate_row("capital_risk_envelope_v2", "PASS"),
+            _gate_row("liquidity_slippage_gate_v1", "PASS"),
+            _gate_row("operator_daily_gate_v3", "FAIL", ["MISSING_RECONCILIATION_REPORT_V3"]),
+        ],
+        status="FAIL",
+    )
+    docs = gaf.build_gate_authority_docs(REPO_ROOT, truth_root, day, f"{day}T00:00:00Z", "PAPER")
+    verdict = docs["authorization_verdict"]
+    assert verdict["status"] == "PASS"
+    assert "AUTHORIZATION_DERIVED_FROM_CLASSIFIED_GATE_SUBSET" in verdict["reason_codes"]
+    assert "AUTHORIZATION_EXCLUDED_FAILING_GATE:operator_daily_gate_v3" in verdict["reason_codes"]
+
+
+def test_authorization_coherence_fails_when_gate_stack_fail_has_no_failed_gates(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    day = "2026-04-02"
+    _write_lifecycle_support(truth_root, day)
+    _write_gate_stack(
+        truth_root,
+        day,
+        [
+            _gate_row("feed_attestation_gate_v1", "PASS"),
+            _gate_row("heartbeat_gate_v1", "PASS"),
+            _gate_row("correlation_envelope_gate_v1", "PASS"),
+            _gate_row("replay_certification_gate_v1", "PASS", ["REPLAY_CERT_FIRST_RUN"]),
+            _gate_row("capital_risk_envelope_v2", "PASS"),
+            _gate_row("liquidity_slippage_gate_v1", "PASS"),
+            _gate_row("operator_daily_gate_v3", "PASS"),
+        ],
+        status="FAIL",
+    )
+    try:
+        gaf.build_gate_authority_docs(REPO_ROOT, truth_root, day, f"{day}T00:00:00Z", "PAPER")
+    except RuntimeError as exc:
+        assert "AUTHORIZATION_GATE_STACK_INCOHERENT:GATE_STACK_FAIL_WITHOUT_FAILING_GATES" in str(exc)
+    else:
+        raise AssertionError("expected gate-stack/authorization coherence failure")
+
+
 def test_pointer_and_allocation_consume_authorization_verdict_only(tmp_path: Path) -> None:
     truth_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
     day = "2026-04-02"

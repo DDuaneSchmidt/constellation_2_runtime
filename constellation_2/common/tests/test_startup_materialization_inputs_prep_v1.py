@@ -33,7 +33,7 @@ def _write_intent(truth_root: Path, day_utc: str, *, symbol: str = "SPY", target
     )
 
 
-def _write_market_data(truth_root: Path, *, symbol: str, day_rows: list[tuple[str, str]]) -> None:
+def _write_market_data(truth_root: Path, *, symbol: str, day_rows: list[tuple[str, ...]]) -> None:
     md_root = truth_root / "market_data_snapshot_v1"
     year_path = md_root / symbol / "2026.jsonl"
     year_path.parent.mkdir(parents=True, exist_ok=True)
@@ -50,12 +50,19 @@ def _write_market_data(truth_root: Path, *, symbol: str, day_rows: list[tuple[st
                 "volume": 1000000,
                 "source_name": "TEST",
                 "source_hash": "a" * 64,
-                "ingested_utc": "2026-04-08T00:00:00Z",
+                "ingested_utc": ingested_utc,
             },
             sort_keys=True,
             separators=(",", ":"),
         )
-        for day, close in day_rows
+        for day, close, ingested_utc in (
+            (
+                row[0],
+                row[1],
+                row[2] if len(row) >= 3 else f"{row[0]}T14:00:00Z",
+            )
+            for row in day_rows
+        )
     ]
     payload = "\n".join(lines) + "\n"
     year_path.write_text(payload, encoding="utf-8")
@@ -130,41 +137,17 @@ def _write_liquidity_gate(truth_root: Path, day_utc: str, *, status: str, close:
     return path
 
 
-def test_inputs_prep_uses_same_day_market_close_when_present() -> None:
+def test_inputs_prep_uses_same_day_core_session_price_when_present_after_open() -> None:
     with tempfile.TemporaryDirectory() as td:
         truth_root = Path(td) / "truth"
         day_utc = "2026-04-08"
         _write_intent(truth_root, day_utc)
-        _write_market_data(truth_root, symbol="SPY", day_rows=[("2026-04-08", "655.83")])
-        rc = prep_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
-        assert rc == 0
-        payload = json.loads(
-            (
-                truth_root
-                / "reports"
-                / "startup_materialization_inputs_prep_v1"
-                / day_utc
-                / "startup_materialization_inputs_prep.v1.json"
-            ).read_text(encoding="utf-8")
+        _write_market_data(
+            truth_root,
+            symbol="SPY",
+            day_rows=[("2026-04-08", "655.83", "2026-04-08T13:31:00Z")],
         )
-        assert payload["status"] == "PASS"
-        assert payload["session_id"] == canonical_paper_session_id_v1(day_utc)
-        assert payload["default_equity_reference_price_source"] == "SAME_DAY_MARKET_CLOSE"
-        assert payload["default_equity_reference_price"] == "655.83"
-
-
-def test_inputs_prep_falls_back_to_liquidity_gate() -> None:
-    with tempfile.TemporaryDirectory() as td:
-        truth_root = Path(td) / "truth"
-        day_utc = "2026-04-08"
-        _write_intent(truth_root, day_utc)
-        _write_market_data(truth_root, symbol="SPY", day_rows=[("2026-04-02", "650.00")])
-        _write_liquidity_gate(truth_root, day_utc, status="PASS", close="650.00")
-        with patch.object(
-            prep_module,
-            "_run_liquidity_gate",
-            return_value={"cmd": [], "returncode": 0, "stdout": "", "stderr": ""},
-        ):
+        with patch.object(prep_module, "now_utc_iso_v1", return_value="2026-04-08T13:35:00Z"):
             rc = prep_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
         assert rc == 0
         payload = json.loads(
@@ -177,11 +160,111 @@ def test_inputs_prep_falls_back_to_liquidity_gate() -> None:
             ).read_text(encoding="utf-8")
         )
         assert payload["status"] == "PASS"
-        assert payload["default_equity_reference_price_source"] == "LIQUIDITY_GATE"
-        assert payload["default_equity_reference_price"] == "650.00"
+        assert payload["session_id"] == canonical_paper_session_id_v1(day_utc)
+        assert payload["default_equity_reference_price_source"] == "SAME_DAY_CORE_SESSION_PRICE"
+        assert payload["default_equity_reference_price"] == "655.83"
 
 
-def test_inputs_prep_fails_closed_when_fallback_price_is_unavailable() -> None:
+def test_inputs_prep_rejects_same_day_price_before_core_session_open() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        day_utc = "2026-04-08"
+        _write_intent(truth_root, day_utc)
+        _write_market_data(
+            truth_root,
+            symbol="SPY",
+            day_rows=[("2026-04-08", "655.83", "2026-04-08T13:25:00Z")],
+        )
+        with patch.object(prep_module, "now_utc_iso_v1", return_value="2026-04-08T13:29:00Z"):
+            rc = prep_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+        assert rc == 2
+        payload = json.loads(
+            (
+                truth_root
+                / "reports"
+                / "startup_materialization_inputs_prep_v1"
+                / day_utc
+                / "startup_materialization_inputs_prep.v1.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert payload["status"] == "BLOCKED_VALID"
+        assert payload["default_equity_reference_price"] == ""
+        assert "STARTUP_MATERIALIZATION_MISSING_DEPENDENCY:DEFAULT_EQUITY_REFERENCE_PRICE_UNAVAILABLE" in payload["blocking_codes"]
+
+
+def test_inputs_prep_materializes_same_day_market_data_after_open_when_missing() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        day_utc = "2026-04-08"
+        _write_intent(truth_root, day_utc)
+        _write_market_data(truth_root, symbol="SPY", day_rows=[("2026-04-07", "650.00", "2026-04-07T20:00:00Z")])
+
+        def _fake_refresh(*, day_utc: str, truth_root: Path, symbol: str, run_utc: str) -> dict:
+            _write_market_data(
+                truth_root,
+                symbol=symbol,
+                day_rows=[
+                    ("2026-04-07", "650.00", "2026-04-07T20:00:00Z"),
+                    ("2026-04-08", "655.83", "2026-04-08T13:35:00Z"),
+                ],
+            )
+            return {"cmd": ["fake"], "returncode": 0, "stdout": "ok", "stderr": ""}
+
+        with patch.object(prep_module, "now_utc_iso_v1", return_value="2026-04-08T13:35:00Z"), patch.object(
+            prep_module,
+            "_run_market_data_refresh_for_symbol",
+            side_effect=_fake_refresh,
+        ) as refresh_mock:
+            rc = prep_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+
+        assert rc == 0
+        refresh_mock.assert_called_once()
+        payload = json.loads(
+            (
+                truth_root
+                / "reports"
+                / "startup_materialization_inputs_prep_v1"
+                / day_utc
+                / "startup_materialization_inputs_prep.v1.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert payload["status"] == "PASS"
+        assert payload["default_equity_reference_price_source"] == "SAME_DAY_CORE_SESSION_PRICE"
+        assert payload["default_equity_reference_price"] == "655.83"
+        assert payload["default_equity_reference_price_artifact_path"].endswith("/market_data_snapshot_v1/SPY/2026.jsonl")
+
+
+def test_inputs_prep_blocks_if_same_day_market_data_refresh_still_cannot_prove_price() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        day_utc = "2026-04-08"
+        _write_intent(truth_root, day_utc)
+        _write_market_data(truth_root, symbol="SPY", day_rows=[("2026-04-07", "650.00", "2026-04-07T20:00:00Z")])
+
+        with patch.object(prep_module, "now_utc_iso_v1", return_value="2026-04-08T13:35:00Z"), patch.object(
+            prep_module,
+            "_run_market_data_refresh_for_symbol",
+            return_value={"cmd": ["fake"], "returncode": 0, "stdout": "ok", "stderr": ""},
+        ) as refresh_mock:
+            rc = prep_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+
+        assert rc == 2
+        refresh_mock.assert_called_once()
+        payload = json.loads(
+            (
+                truth_root
+                / "reports"
+                / "startup_materialization_inputs_prep_v1"
+                / day_utc
+                / "startup_materialization_inputs_prep.v1.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert payload["status"] == "BLOCKED_VALID"
+        assert payload["default_equity_reference_price"] == ""
+        assert "STARTUP_MATERIALIZATION_MISSING_DEPENDENCY:DEFAULT_EQUITY_REFERENCE_PRICE_UNAVAILABLE" in payload["blocking_codes"]
+
+
+def test_inputs_prep_rejects_stale_prior_day_price_and_does_not_use_liquidity_gate_fallback() -> None:
     with tempfile.TemporaryDirectory() as td:
         truth_root = Path(td) / "truth"
         day_utc = "2026-04-08"
@@ -191,8 +274,8 @@ def test_inputs_prep_fails_closed_when_fallback_price_is_unavailable() -> None:
         with patch.object(
             prep_module,
             "_run_liquidity_gate",
-            return_value={"cmd": [], "returncode": 1, "stdout": "", "stderr": "FAIL"},
-        ):
+            side_effect=AssertionError("liquidity gate should not be used as a stale fallback price source"),
+        ), patch.object(prep_module, "now_utc_iso_v1", return_value="2026-04-08T14:00:00Z"):
             rc = prep_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
         assert rc == 2
         payload = json.loads(
@@ -206,7 +289,34 @@ def test_inputs_prep_fails_closed_when_fallback_price_is_unavailable() -> None:
         )
         assert payload["status"] == "BLOCKED_VALID"
         assert "STARTUP_MATERIALIZATION_MISSING_DEPENDENCY:DEFAULT_EQUITY_REFERENCE_PRICE_UNAVAILABLE" in payload["blocking_codes"]
-        assert "LIQUIDITY_SLIPPAGE_GATE:LIQPOL_FAIL_CLOSED_REQUIRED" in payload["blocking_codes"]
+        assert payload["liquidity_gate_result"]["artifact_status"] == "NOT_REQUIRED"
+
+
+def test_inputs_prep_fails_closed_when_same_day_price_is_nonpositive() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        day_utc = "2026-04-08"
+        _write_intent(truth_root, day_utc)
+        _write_market_data(
+            truth_root,
+            symbol="SPY",
+            day_rows=[("2026-04-08", "0.00", "2026-04-08T13:31:00Z")],
+        )
+        with patch.object(prep_module, "now_utc_iso_v1", return_value="2026-04-08T14:00:00Z"):
+            rc = prep_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+        assert rc == 2
+        payload = json.loads(
+            (
+                truth_root
+                / "reports"
+                / "startup_materialization_inputs_prep_v1"
+                / day_utc
+                / "startup_materialization_inputs_prep.v1.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert payload["status"] == "BLOCKED_VALID"
+        assert payload["default_equity_reference_price"] == ""
+        assert "STARTUP_MATERIALIZATION_MISSING_DEPENDENCY:DEFAULT_EQUITY_REFERENCE_PRICE_UNAVAILABLE" in payload["blocking_codes"]
 
 
 def test_risk_transformer_uses_accounting_v2_under_truth_root() -> None:
@@ -225,3 +335,31 @@ def test_risk_transformer_uses_accounting_v2_under_truth_root() -> None:
         nav_total, nav_path = _load_nav_usd_from_accounting_day(repo_root, day_utc, truth_root)
         assert nav_total == 100000
         assert nav_path.endswith("/accounting_v2/nav/2026-04-08/nav.v2.json")
+
+
+def test_inputs_prep_rejects_nonpositive_liquidity_gate_price() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        day_utc = "2026-04-08"
+        _write_intent(truth_root, day_utc)
+        _write_market_data(truth_root, symbol="SPY", day_rows=[("2026-04-02", "650.00")])
+        _write_liquidity_gate(truth_root, day_utc, status="PASS", close="0.00")
+        with patch.object(
+            prep_module,
+            "_run_liquidity_gate",
+            side_effect=AssertionError("liquidity gate should not be used as a stale fallback price source"),
+        ), patch.object(prep_module, "now_utc_iso_v1", return_value="2026-04-08T14:00:00Z"):
+            rc = prep_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+        assert rc == 2
+        payload = json.loads(
+            (
+                truth_root
+                / "reports"
+                / "startup_materialization_inputs_prep_v1"
+                / day_utc
+                / "startup_materialization_inputs_prep.v1.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert payload["status"] == "BLOCKED_VALID"
+        assert payload["default_equity_reference_price"] == ""
+        assert "STARTUP_MATERIALIZATION_MISSING_DEPENDENCY:DEFAULT_EQUITY_REFERENCE_PRICE_UNAVAILABLE" in payload["blocking_codes"]

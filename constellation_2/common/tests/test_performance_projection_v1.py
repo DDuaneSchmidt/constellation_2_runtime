@@ -47,12 +47,17 @@ def test_performance_projection_from_stage_duration_events() -> None:
     payload = performance_projection.build_performance_projection_v1(
         journal_payload=journal_payload,
         journal_ref="/tmp/execution_journal.v1.json",
+        journal_sha256="c" * 64,
         journal_generated_at_utc="2026-04-08T13:00:02Z",
         generated_at_utc="2026-04-08T13:01:00Z",
-        producer_module="test.module",
+        producer_module="ops/tools/run_performance_projection_v1.py",
     )
     assert payload["overall_wall_time_ms"] == 2000
     assert payload["per_stage_durations"][0]["stage_name"] == "STARTUP_MATERIALIZATION_TO_LEDGER_ELAPSED"
+    assert payload["constitutional_lineage"]["artifact_type"] == "performance_projection_v1"
+    assert payload["constitutional_dependency_declaration"]["declared_dependency_artifacts"] == [
+        "execution_journal_v1"
+    ]
 
 
 def test_performance_projection_rejects_missing_journal_identity() -> None:
@@ -91,7 +96,8 @@ def test_performance_projection_rejects_missing_journal_identity() -> None:
         performance_projection.build_performance_projection_v1(
             journal_payload=journal_payload,
             journal_ref="/tmp/execution_journal.v1.json",
+            journal_sha256="c" * 64,
             journal_generated_at_utc="2026-04-08T13:00:02Z",
             generated_at_utc="2026-04-08T13:01:00Z",
-            producer_module="test.module",
+            producer_module="ops/tools/run_performance_projection_v1.py",
         )

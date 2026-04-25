@@ -121,7 +121,11 @@ def test_admission_runner_invokes_current_day_control_plane_in_order(monkeypatch
         )
 
         monkeypatch.setattr(admission_module, "_run", _fake_run)
-        monkeypatch.setattr(admission_module, "resolve_decision_truth_root_v1", lambda truth_root, repo_root=None: Path(truth_root).resolve())
+        monkeypatch.setattr(
+            admission_module,
+            "resolve_decision_truth_root_bridge_v1",
+            lambda truth_root, repo_root=None, caller="": Path(truth_root).resolve(),
+        )
         monkeypatch.setattr(
             admission_module,
             "derive_next_day_readiness_probe_payload",
@@ -329,7 +333,11 @@ def test_admission_runner_fails_closed_when_required_control_plane_artifact_miss
             _write_json(path, {"ok": True})
 
         monkeypatch.setattr(admission_module, "_run", _fake_run)
-        monkeypatch.setattr(admission_module, "resolve_decision_truth_root_v1", lambda truth_root, repo_root=None: Path(truth_root).resolve())
+        monkeypatch.setattr(
+            admission_module,
+            "resolve_decision_truth_root_bridge_v1",
+            lambda truth_root, repo_root=None, caller="": Path(truth_root).resolve(),
+        )
         monkeypatch.setattr(
             admission_module,
             "derive_next_day_readiness_probe_payload",
@@ -417,7 +425,11 @@ def test_admission_runner_blocks_before_any_target_day_execution_when_fresh_day_
             return {"cmd": cmd, "returncode": 0, "stdout": "", "stderr": ""}
 
         monkeypatch.setattr(admission_module, "_run", _fake_run)
-        monkeypatch.setattr(admission_module, "resolve_decision_truth_root_v1", lambda truth_root, repo_root=None: Path(truth_root).resolve())
+        monkeypatch.setattr(
+            admission_module,
+            "resolve_decision_truth_root_bridge_v1",
+            lambda truth_root, repo_root=None, caller="": Path(truth_root).resolve(),
+        )
         monkeypatch.setattr(
             admission_module,
             "derive_next_day_readiness_probe_payload",

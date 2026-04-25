@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 
 from constellation_2.phaseA.lib.canon_json_v1 import load_json_file
-from constellation_2.phaseA.lib.map_vertical_spread_v1 import map_vertical_spread_offline
+from constellation_2.phaseA.lib.map_vertical_spread_v1 import _liquid_contract, map_vertical_spread_offline
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -23,6 +23,34 @@ SAMPLES = REPO_ROOT / "constellation_2" / "acceptance" / "samples"
 
 
 class TestPhaseAFailClosedV1(unittest.TestCase):
+    def test_liquidity_allows_zero_volume_for_paper_when_quotes_and_spread_valid(self) -> None:
+        contract = {
+            "bid": "0.25",
+            "ask": "0.30",
+            "open_interest": 0,
+            "volume": 0,
+        }
+        pol = {
+            "min_open_interest": 0,
+            "min_volume": 0,
+            "max_bid_ask_spread": "0.10",
+        }
+        self.assertTrue(_liquid_contract(contract, pol, engine_mode="PAPER"))
+
+    def test_liquidity_keeps_live_volume_floor(self) -> None:
+        contract = {
+            "bid": "0.25",
+            "ask": "0.30",
+            "open_interest": 0,
+            "volume": 0,
+        }
+        pol = {
+            "min_open_interest": 0,
+            "min_volume": 0,
+            "max_bid_ask_spread": "0.10",
+        }
+        self.assertFalse(_liquid_contract(contract, pol, engine_mode="LIVE"))
+
     def test_expired_freshness_vetos_and_no_partial_outputs(self) -> None:
         intent = load_json_file(SAMPLES / "sample_options_intent.v2.json")
         chain = load_json_file(SAMPLES / "sample_chain_snapshot.v1.json")

@@ -76,6 +76,12 @@ def _rerun_idempotency(ok: bool, reason_code: str = "") -> dict[str, object]:
     }
 
 
+def test_runner_uses_runtime_contract_helper_instead_of_direct_contract_file_read() -> None:
+    text = (SOURCE_ROOT / "ops/tools/run_recurrence_kill_gate_v1.py").resolve().read_text(encoding="utf-8")
+    assert "load_active_runtime_contract_or_fail" in text
+    assert "read_json_object_v1(ACTIVE_RUNTIME_CONTRACT_PATH)" not in text
+
+
 def test_recurrence_kill_gate_invalid_proof_for_wrong_entrypoint() -> None:
     fingerprint = recurrence_fingerprint.build_recurrence_fingerprint_record_v1(
         blocker_family="PROOF_INVALID",
@@ -261,7 +267,7 @@ def test_live_entrypoint_verification_rejects_contract_mismatch(tmp_path: Path) 
 
 def test_runner_rejects_live_day_wrong_truth_root(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gate_runner, "live_day_utc_v1", lambda: "2026-04-09")
-    monkeypatch.setattr(gate_runner, "resolve_canonical_truth_root", lambda: Path("/tmp/live-truth"))
+    monkeypatch.setattr(gate_runner, "resolve_canonical_truth_root_bridge_v1", lambda caller="": Path("/tmp/live-truth"))
     monkeypatch.setattr(
         gate_runner,
         "resolve_fact_plane_truth_root_v1",

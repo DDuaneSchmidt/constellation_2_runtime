@@ -3,7 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+from contextlib import ExitStack
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 SOURCE_ROOT = Path("/home/node/constellation")
@@ -516,6 +518,54 @@ def _write_execution_control_plane(truth_root: Path, day_utc: str, *, final_deci
     )
 
 
+def _surface_ref(path: Path) -> SimpleNamespace:
+    return SimpleNamespace(path=path, payload=json.loads(path.read_text(encoding="utf-8")), sha256="d" * 64)
+
+
+def _supporting_surface_patchers(truth_root: Path, day_utc: str) -> list:
+    return [
+        patch.object(
+            state_machine_module,
+            "read_startup_materialization_ref_v1",
+            side_effect=lambda *args, **kwargs: _surface_ref(
+                truth_root / "reports" / "startup_materialization_v1" / day_utc / "startup_materialization.v1.json"
+            ),
+        ),
+        patch.object(
+            state_machine_module,
+            "read_paper_trading_posture_ref_v1",
+            side_effect=lambda *args, **kwargs: _surface_ref(
+                truth_root / "reports" / "paper_trading_posture_v1" / day_utc / "paper_trading_posture.v1.json"
+            ),
+        ),
+        patch.object(
+            state_machine_module,
+            "read_submit_boundary_status_ref_v1",
+            side_effect=lambda *args, **kwargs: _surface_ref(
+                truth_root / "reports" / "submit_boundary_status_v1" / day_utc / "submit_boundary_status.v1.json"
+            ),
+        ),
+        patch.object(
+            state_machine_module,
+            "read_paper_session_ledger_ref_v1",
+            side_effect=lambda *args, **kwargs: _surface_ref(
+                truth_root / "reports" / "paper_session_ledger_v1" / day_utc / "paper_session_ledger.v1.json"
+            ),
+        ),
+        patch.object(
+            state_machine_module,
+            "read_startup_proof_validation_ref_v1",
+            side_effect=lambda *args, **kwargs: _surface_ref(
+                truth_root
+                / "reports"
+                / "startup_proof_validation_v1"
+                / day_utc
+                / "startup_proof_validation.v1.json"
+            ),
+        ),
+    ]
+
+
 def _write_deployment_state_machine(truth_root: Path, day_utc: str, *, release_root: Path) -> None:
     release_root.mkdir(parents=True, exist_ok=True)
     _write_json(
@@ -605,7 +655,7 @@ def test_trading_day_state_machine_missing_intents_blocks_immediately(tmp_path: 
     day_utc = "2026-04-08"
 
     original_run = state_machine_module._run
-    with patch.object(state_machine_module, "_run", side_effect=lambda cmd, truth_root: (
+    with patch.object(state_machine_module, "resolve_decision_truth_root_v1", return_value=truth_root), patch.object(state_machine_module, "_run", side_effect=lambda cmd, truth_root: (
         (_write_intent_generation_report(truth_root, day_utc, final_status="INTENTS_PRESENT") or {"return_code": 0, "stdout": "{}", "stderr": ""})
         if Path(cmd[1]).name == "run_trading_day_intent_generation_v1.py"
         else original_run(cmd, truth_root=truth_root)
@@ -630,7 +680,7 @@ def test_trading_day_state_machine_zero_intent_marker_blocks_validly(tmp_path: P
     _write_no_intents_marker(truth_root, day_utc)
 
     original_run = state_machine_module._run
-    with patch.object(state_machine_module, "_run", side_effect=lambda cmd, truth_root: (
+    with patch.object(state_machine_module, "resolve_decision_truth_root_v1", return_value=truth_root), patch.object(state_machine_module, "_run", side_effect=lambda cmd, truth_root: (
         (_write_intent_generation_report(truth_root, day_utc, final_status="VALID_ZERO") or {"return_code": 0, "stdout": "{}", "stderr": ""})
         if Path(cmd[1]).name == "run_trading_day_intent_generation_v1.py"
         else original_run(cmd, truth_root=truth_root)
@@ -673,7 +723,11 @@ def test_trading_day_state_machine_runs_supporting_chain_records_order_and_can_r
             return {"return_code": 0, "stdout": "{}", "stderr": ""}
         raise AssertionError(tool_name)
 
-    with patch.object(state_machine_module, "_run", side_effect=fake_run):
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(state_machine_module, "resolve_decision_truth_root_v1", return_value=truth_root))
+        stack.enter_context(patch.object(state_machine_module, "_run", side_effect=fake_run))
+        for patcher in _supporting_surface_patchers(truth_root, day_utc):
+            stack.enter_context(patcher)
         rc = state_machine_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
 
     assert rc == 0
@@ -687,6 +741,8 @@ def test_trading_day_state_machine_runs_supporting_chain_records_order_and_can_r
     )
     assert payload["final_start_decision"] == "READY_NOW"
     assert payload["supporting_session_authority"]["ledger_authority_status"] == "GRANTED"
+    assert payload["supporting_session_authority"]["system_ready"] is True
+    assert payload["supporting_session_authority"]["submission_authorized"] is True
     assert payload["supporting_daily_control_refs"]["trading_day_execution_final_start_decision"] == "READY_NOW"
     assert [row["to_state"] for row in payload["state_transitions"]] == [
         "DAY_CREATED",
@@ -697,6 +753,61 @@ def test_trading_day_state_machine_runs_supporting_chain_records_order_and_can_r
         "DAY_OPEN_ALLOWED",
         "DAY_NOT_OPENED",
     ]
+
+
+def test_trading_day_state_machine_ready_now_clears_stale_blockers(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth"
+    day_utc = "2026-04-08"
+
+    def fake_run(cmd: list[str], *, truth_root: Path) -> dict:
+        tool_name = Path(cmd[1]).name
+        if tool_name == "run_trading_day_intent_generation_v1.py":
+            _write_intent_generation_report(truth_root, day_utc, final_status="INTENTS_PRESENT")
+            return {"return_code": 0, "stdout": "{}", "stderr": ""}
+        if tool_name == "run_intents_day_completeness_v1.py":
+            _write_complete_prerequisite(truth_root, day_utc)
+            return {"return_code": 0, "stdout": "{}", "stderr": ""}
+        if tool_name == "run_trading_day_execution_control_plane_v1.py":
+            _write_startup(truth_root, day_utc, status="SUCCESS")
+            _write_posture(truth_root, day_utc, enabled=True)
+            _write_boundary(truth_root, day_utc, authorized=True)
+            _write_ledger(truth_root, day_utc, authority_status="GRANTED")
+            _write_startup_proof(truth_root, day_utc, ready=True)
+            _write_paper_day_control_plane(truth_root, day_utc, final_decision="READY_NOW", authority_status="GRANTED")
+            _write_trading_day_control_plane(truth_root, day_utc, final_decision="READY_NOW", authority_status="GRANTED")
+            _write_execution_control_plane(truth_root, day_utc, final_decision="READY_NOW", authority_status="GRANTED")
+            execution_path = (
+                truth_root
+                / "reports"
+                / "trading_day_execution_control_plane_v1"
+                / day_utc
+                / "trading_day_execution_control_plane.v1.json"
+            )
+            execution_payload = json.loads(execution_path.read_text(encoding="utf-8"))
+            execution_payload["blocking_codes"] = ["HIDDEN_DEPENDENCY_DETECTED"]
+            execution_payload["first_true_blocker"] = {
+                "first_true_blocker_code": "HIDDEN_DEPENDENCY_DETECTED",
+                "first_true_blocker_artifact_path": "/tmp/stale.json",
+                "blocker_classification": "UNKNOWN",
+            }
+            _write_json(execution_path, execution_payload)
+            return {"return_code": 0, "stdout": "{}", "stderr": ""}
+        raise AssertionError(tool_name)
+
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(state_machine_module, "resolve_decision_truth_root_v1", return_value=truth_root))
+        stack.enter_context(patch.object(state_machine_module, "_run", side_effect=fake_run))
+        for patcher in _supporting_surface_patchers(truth_root, day_utc):
+            stack.enter_context(patcher)
+        rc = state_machine_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+
+    assert rc == 0
+    payload = json.loads(
+        (truth_root / "reports" / "trading_day_state_machine_v1" / day_utc / "trading_day_state_machine.v1.json").read_text(encoding="utf-8")
+    )
+    assert payload["final_start_decision"] == "READY_NOW"
+    assert payload["blocking_codes"] == []
+    assert payload["first_true_blocker"]["first_true_blocker_code"] == ""
 
 
 def test_trading_day_state_machine_direct_emits_journal_event_idempotently(tmp_path: Path) -> None:
@@ -724,7 +835,11 @@ def test_trading_day_state_machine_direct_emits_journal_event_idempotently(tmp_p
             return {"return_code": 0, "stdout": "{}", "stderr": ""}
         raise AssertionError(tool_name)
 
-    with patch.object(state_machine_module, "_run", side_effect=fake_run):
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(state_machine_module, "resolve_decision_truth_root_v1", return_value=truth_root))
+        stack.enter_context(patch.object(state_machine_module, "_run", side_effect=fake_run))
+        for patcher in _supporting_surface_patchers(truth_root, day_utc):
+            stack.enter_context(patcher)
         first_rc = state_machine_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
         first_payload = json.loads(
             (truth_root / "reports" / "trading_day_state_machine_v1" / day_utc / "trading_day_state_machine.v1.json").read_text(encoding="utf-8")
@@ -768,7 +883,11 @@ def test_trading_day_state_machine_records_supporting_authority_deny(tmp_path: P
             return {"return_code": 2, "stdout": "{}", "stderr": ""}
         raise AssertionError(tool_name)
 
-    with patch.object(state_machine_module, "_run", side_effect=fake_run):
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(state_machine_module, "resolve_decision_truth_root_v1", return_value=truth_root))
+        stack.enter_context(patch.object(state_machine_module, "_run", side_effect=fake_run))
+        for patcher in _supporting_surface_patchers(truth_root, day_utc):
+            stack.enter_context(patcher)
         rc = state_machine_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
 
     assert rc == 2
@@ -778,6 +897,97 @@ def test_trading_day_state_machine_records_supporting_authority_deny(tmp_path: P
     assert payload["final_start_decision"] == "BLOCKED_VALID"
     assert payload["supporting_session_authority"]["ledger_authority_status"] == "DENIED"
     assert payload["first_true_blocker"]["blocker_classification"] == "SUPPORTING_AUTHORITY_DENY"
+
+
+def test_trading_day_state_machine_records_open_trigger_emitted(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth"
+    day_utc = "2026-04-08"
+
+    _write_json(
+        truth_root / "reports" / "day_open_trigger_v1" / day_utc / "day_open_trigger.v1.json",
+        {
+            "trigger_status": "EMITTED",
+            "dedupe_key": f"{day_utc}:INITIAL_BOD_TRIGGER:{day_utc}T09:31:00-04:00",
+            "consumed": False,
+        },
+    )
+
+    def fake_run(cmd: list[str], *, truth_root: Path) -> dict:
+        tool_name = Path(cmd[1]).name
+        if tool_name == "run_trading_day_intent_generation_v1.py":
+            _write_intent_generation_report(truth_root, day_utc, final_status="INTENTS_PRESENT")
+            return {"return_code": 0, "stdout": "{}", "stderr": ""}
+        if tool_name == "run_intents_day_completeness_v1.py":
+            _write_complete_prerequisite(truth_root, day_utc)
+            return {"return_code": 0, "stdout": "{}", "stderr": ""}
+        if tool_name == "run_trading_day_execution_control_plane_v1.py":
+            _write_startup(truth_root, day_utc, status="SUCCESS")
+            _write_posture(truth_root, day_utc, enabled=True)
+            _write_boundary(truth_root, day_utc, authorized=True)
+            _write_ledger(truth_root, day_utc, authority_status="GRANTED")
+            _write_startup_proof(truth_root, day_utc, ready=True)
+            _write_paper_day_control_plane(truth_root, day_utc, final_decision="READY_NOW", authority_status="GRANTED")
+            _write_trading_day_control_plane(truth_root, day_utc, final_decision="READY_NOW", authority_status="GRANTED")
+            _write_execution_control_plane(truth_root, day_utc, final_decision="READY_NOW", authority_status="GRANTED")
+            return {"return_code": 0, "stdout": "{}", "stderr": ""}
+        raise AssertionError(tool_name)
+
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(state_machine_module, "resolve_decision_truth_root_v1", return_value=truth_root))
+        stack.enter_context(patch.object(state_machine_module, "_run", side_effect=fake_run))
+        stack.enter_context(patch.object(state_machine_module, "build_day_open_window_v1", return_value=SimpleNamespace(window_status="OPEN_WINDOW")))
+        for patcher in _supporting_surface_patchers(truth_root, day_utc):
+            stack.enter_context(patcher)
+        rc = state_machine_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+
+    assert rc == 0
+    payload = json.loads(
+        (truth_root / "reports" / "trading_day_state_machine_v1" / day_utc / "trading_day_state_machine.v1.json").read_text(encoding="utf-8")
+    )
+    assert payload["open_lifecycle_state"] == "OPEN_TRIGGER_EMITTED"
+    assert payload["state_transitions"][-1]["to_state"] == "DAY_OPEN_TRIGGER_EMITTED"
+
+
+def test_trading_day_state_machine_marks_paper_open_available_after_window(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth"
+    day_utc = "2026-04-08"
+
+    def fake_run(cmd: list[str], *, truth_root: Path) -> dict:
+        tool_name = Path(cmd[1]).name
+        if tool_name == "run_trading_day_intent_generation_v1.py":
+            _write_intent_generation_report(truth_root, day_utc, final_status="INTENTS_PRESENT")
+            return {"return_code": 0, "stdout": "{}", "stderr": ""}
+        if tool_name == "run_intents_day_completeness_v1.py":
+            _write_complete_prerequisite(truth_root, day_utc)
+            return {"return_code": 0, "stdout": "{}", "stderr": ""}
+        if tool_name == "run_trading_day_execution_control_plane_v1.py":
+            _write_startup(truth_root, day_utc, status="SUCCESS")
+            _write_posture(truth_root, day_utc, enabled=True)
+            _write_boundary(truth_root, day_utc, authorized=True)
+            _write_ledger(truth_root, day_utc, authority_status="GRANTED")
+            _write_startup_proof(truth_root, day_utc, ready=True)
+            _write_paper_day_control_plane(truth_root, day_utc, final_decision="READY_NOW", authority_status="GRANTED")
+            _write_trading_day_control_plane(truth_root, day_utc, final_decision="READY_NOW", authority_status="GRANTED")
+            _write_execution_control_plane(truth_root, day_utc, final_decision="READY_NOW", authority_status="GRANTED")
+            return {"return_code": 0, "stdout": "{}", "stderr": ""}
+        raise AssertionError(tool_name)
+
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(state_machine_module, "resolve_decision_truth_root_v1", return_value=truth_root))
+        stack.enter_context(patch.object(state_machine_module, "_run", side_effect=fake_run))
+        stack.enter_context(patch.object(state_machine_module, "build_day_open_window_v1", return_value=SimpleNamespace(window_status="POST_OPEN_WINDOW")))
+        for patcher in _supporting_surface_patchers(truth_root, day_utc):
+            stack.enter_context(patcher)
+        rc = state_machine_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+
+    assert rc == 0
+    payload = json.loads(
+        (truth_root / "reports" / "trading_day_state_machine_v1" / day_utc / "trading_day_state_machine.v1.json").read_text(encoding="utf-8")
+    )
+    assert payload["open_lifecycle_state"] == "PAPER_OPEN_AVAILABLE"
+    assert payload["first_true_blocker"]["first_true_blocker_code"] == ""
+    assert "available now" in payload["human_readable_summary"].lower()
+    assert payload["state_transitions"][-1]["transition_reason_code"] == "STATE_MACHINE_AUTHORITY_ONLY_NO_OPEN_COMMAND_EXECUTED"
 
 
 def test_trading_day_state_machine_marks_missing_supporting_output_as_defect(tmp_path: Path) -> None:
@@ -796,7 +1006,7 @@ def test_trading_day_state_machine_marks_missing_supporting_output_as_defect(tmp
             return {"return_code": 3, "stdout": "{}", "stderr": "missing"}
         raise AssertionError(tool_name)
 
-    with patch.object(state_machine_module, "_run", side_effect=fake_run):
+    with patch.object(state_machine_module, "resolve_decision_truth_root_v1", return_value=truth_root), patch.object(state_machine_module, "_run", side_effect=fake_run):
         rc = state_machine_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
 
     assert rc == 3
@@ -831,7 +1041,11 @@ def test_trading_day_state_machine_supersession_is_explicit(tmp_path: Path) -> N
             return {"return_code": 0, "stdout": "{}", "stderr": ""}
         raise AssertionError(tool_name)
 
-    with patch.object(state_machine_module, "_run", side_effect=fake_run):
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(state_machine_module, "resolve_decision_truth_root_v1", return_value=truth_root))
+        stack.enter_context(patch.object(state_machine_module, "_run", side_effect=fake_run))
+        for patcher in _supporting_surface_patchers(truth_root, day_utc):
+            stack.enter_context(patcher)
         first_rc = state_machine_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
         first_payload = json.loads(
             (truth_root / "reports" / "trading_day_state_machine_v1" / day_utc / "trading_day_state_machine.v1.json").read_text(encoding="utf-8")

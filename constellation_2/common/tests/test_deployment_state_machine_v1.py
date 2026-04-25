@@ -259,6 +259,11 @@ def test_deployment_runner_direct_emits_idempotently_with_stable_attempt_id(
             "git_sha": "a" * 40,
         },
     )
+    monkeypatch.setattr(
+        deploy_runner,
+        "resolve_decision_truth_root_v1",
+        lambda truth_root_arg, repo_root: Path(truth_root_arg).resolve(),
+    )
 
     report_path = truth_root / "reports" / "deployment_state_machine_v1" / day_utc / "deployment_state_machine.v1.json"
     first_rc = deploy_runner.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])

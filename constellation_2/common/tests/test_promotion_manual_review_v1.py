@@ -68,12 +68,12 @@ def test_manual_review_artifact_registry_and_decision_chain() -> None:
         'artifact_family': 'promotion_manual_review_v1',
         'owner_plane': 'promotion_plane',
         'write_root': '/tmp/constellation_2_foundation/advisor_runtime/<MODE>/promotion_manual_review_v1/<DAY>/',
-        'authority_class': 'recommendation_authority',
+        'authority_class': 'intermediate_only',
         'publication_required': True,
         'promotion_required': False,
         'replay_expected': True,
-        'downstream_consumers': ['future promotion gate only'],
-        'notes': ['reviewed but non-executable promotion artifact'],
+        'downstream_consumers': ['promotion_gate_result_v1', 'promotion_record_v1'],
+        'notes': ['manual_approval_input_only', 'never_promotion_authority'],
     }
 
     planning_snapshot = SimpleNamespace(planning_snapshot_id='ps1', advisory_packet_id='packet1')

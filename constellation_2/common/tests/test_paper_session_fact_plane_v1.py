@@ -226,6 +226,32 @@ def test_startup_materialization_missing_inputs_fails_closed() -> None:
         assert "STARTUP_MATERIALIZATION_MISSING_DEPENDENCY:INTENTS_DAY_DIR_EMPTY_OR_ABSENT" in payload["blocking_codes"]
 
 
+def test_startup_materialization_fails_closed_on_phasec_risk_inputs_blocker() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        day_utc = "2026-04-08"
+        intents_dir = truth_root / "intents_v1" / "snapshots" / day_utc
+        _write_json(intents_dir / "spy.exposure_intent.v1.json", {"schema_id": "exposure_intent", "schema_version": "v1"})
+        _write_startup_inputs_prep(
+            truth_root,
+            day_utc=day_utc,
+            status="PASS",
+            default_equity_reference_price="655.83",
+        )
+        _write_phasec_risk_inputs_prep(
+            truth_root,
+            day_utc=day_utc,
+            status="BLOCKED_BY_DEFECT",
+            blocking_codes=["PHASEC_RISK_INPUTS_PREP_FAIL:ACCOUNTING_NAV_COMPAT_BRIDGE_NONZERO"],
+        )
+        with patch.object(startup_module, "_run_inputs_prep", return_value={"returncode": 0, "stdout": "", "stderr": "", "cmd": []}), patch.object(startup_module, "_run_phasec_risk_inputs_prep", return_value={"returncode": 2, "stdout": "", "stderr": "FAIL", "cmd": []}), patch.object(startup_module, "_run_phasec_materializer", side_effect=AssertionError("phasec should not run")):
+            rc = startup_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+        assert rc == 2
+        payload = json.loads((truth_root / "reports" / "startup_materialization_v1" / day_utc / "startup_materialization.v1.json").read_text(encoding="utf-8"))
+        assert payload["status"] != "SUCCESS"
+        assert "STARTUP_MATERIALIZATION_FAIL:PHASEC_RISK_INPUTS_PREP_FAIL:ACCOUNTING_NAV_COMPAT_BRIDGE_NONZERO" in payload["blocking_codes"]
+
+
 def test_startup_materialization_prep_block_prevents_old_phasec_pointer_blockers() -> None:
     with tempfile.TemporaryDirectory() as td:
         truth_root = Path(td) / "truth"
@@ -388,6 +414,7 @@ def test_paper_trading_posture_non_trading_day_is_valid_no_op_fact() -> None:
         assert payload["expected_no_op_today"] is True
         assert payload["blocking_reason_codes"] == ["MARKET_CALENDAR_NON_TRADING_SESSION"]
         assert payload["authority_scope"] == "NON_AUTHORITY_FACT"
+        assert payload["binding_classification"] == "NON_BINDING_DIAGNOSTIC"
 
 
 def test_paper_trading_posture_missing_calendar_fails_closed() -> None:

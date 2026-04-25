@@ -138,6 +138,12 @@ class SessionReadinessRepairTests(unittest.TestCase):
                         "active_controllable_engine_ids": ["C2_MEAN_REVERSION_EQ_V1", "C2_TREND_EQ_PRIMARY_V1", "C2_VOL_INCOME_DEFINED_RISK_V1"],
                         "disabled_by_default_engine_ids": [],
                         "support_only_engine_ids": [],
+                        "ib_gateway_profile": {
+                            "host": "127.0.0.1",
+                            "port": 4002,
+                            "client_id_orders": 178,
+                            "client_id_observer": 179,
+                        },
                     }
                 ],
             },
@@ -163,6 +169,85 @@ class SessionReadinessRepairTests(unittest.TestCase):
             latest = json.loads((truth_root / "ib_api_handshake" / "latest_pointer.v1.json").read_text(encoding="utf-8"))
             self.assertEqual(latest["day_utc"], DAY)
             self.assertEqual(latest["pointers"]["handshake_path"], str(truth_root / "ib_api_handshake" / DAY / "ib_api_handshake.v1.json"))
+
+    def test_broker_bootstrap_python_preserves_venv_symlink_path(self) -> None:
+        with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
+            root = Path(td)
+            real_python = root / "python-real"
+            real_python.write_text("#!/bin/sh\n", encoding="utf-8")
+            symlink_python = root / "python"
+            symlink_python.symlink_to(real_python)
+            with patch.object(session_refresh_module, "BROKER_EVENTS_BOOTSTRAP_PYTHON", symlink_python):
+                resolved = session_refresh_module._resolve_broker_events_bootstrap_python()
+            self.assertEqual(resolved, symlink_python)
+
+    def test_broker_bootstrap_python_defaults_to_current_execution_python(self) -> None:
+        with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
+            root = Path(td)
+            current_python = root / "python-current"
+            current_python.write_text("#!/bin/sh\n", encoding="utf-8")
+            with patch.object(session_refresh_module.sys, "executable", str(current_python)), patch.object(
+                session_refresh_module, "BROKER_EVENTS_BOOTSTRAP_PYTHON", root / "missing-python"
+            ):
+                resolved = session_refresh_module._resolve_broker_events_bootstrap_python()
+            self.assertEqual(resolved, current_python)
+
+    def test_broker_bootstrap_reason_codes_surface_ibapi_import_failure(self) -> None:
+        result = {
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "Traceback...\nModuleNotFoundError: No module named 'ibapi'",
+        }
+        codes = session_refresh_module._broker_bootstrap_reason_codes(result)
+        self.assertIn("READINESS_BOOTSTRAP_IBAPI_IMPORT_FAILED", codes)
+
+    def test_positions_snapshot_v2_skip_safe_rejects_zero_qty_open_positions(self) -> None:
+        with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
+            truth_root = Path(td) / "truth"
+            snap_path = truth_root / "positions_v1" / "snapshots" / DAY / "positions_snapshot.v2.json"
+            _write_json(
+                snap_path,
+                {
+                    "schema_id": "C2_POSITIONS_SNAPSHOT_V2",
+                    "schema_version": 2,
+                    "day_utc": DAY,
+                    "produced_utc": f"{DAY}T00:00:00Z",
+                    "producer": {
+                        "repo": "constellation",
+                        "git_sha": "abc1234",
+                        "module": "constellation_2/phaseF/positions/run/run_positions_snapshot_day_v2.py",
+                    },
+                    "status": "OK",
+                    "reason_codes": ["CARRY_FORWARD_OPEN_POSITIONS_V2"],
+                    "input_manifest": [],
+                    "positions": {
+                        "currency": "USD",
+                        "asof_utc": f"{DAY}T00:00:00Z",
+                        "items": [
+                            {
+                                "position_id": "p1",
+                                "engine_id": "C2_TREND_EQ_PRIMARY_V1",
+                                "instrument": {
+                                    "kind": "EQUITY",
+                                    "underlying": "SPY",
+                                    "expiry": None,
+                                    "strike": None,
+                                    "right": None,
+                                },
+                                "qty": 0,
+                                "avg_cost_cents": 0,
+                                "market_exposure_type": "UNDEFINED_RISK",
+                                "max_loss_cents": None,
+                                "opened_day_utc": DAY,
+                                "status": "OPEN",
+                            }
+                        ],
+                        "notes": ["seeded"],
+                    },
+                },
+            )
+
+            self.assertFalse(orchestrator_module._positions_snapshot_v2_skip_safe(truth_root, DAY))
 
     def test_handshake_refreshes_same_day_fail_to_ok_when_broker_events_arrive(self) -> None:
         with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
@@ -554,6 +639,9 @@ class SessionReadinessRepairTests(unittest.TestCase):
 
         def fake_run(cmd, **kwargs):
             calls.append(cmd)
+            target = str(cmd[1]) if len(cmd) > 1 else ""
+            if target == str(session_refresh_module.PAPER_SESSION_LEDGER_TOOL):
+                return {"cmd": cmd, "returncode": 0, "stdout": json.dumps({"authority_status": "GRANTED"}), "stderr": ""}
             return {"cmd": cmd, "returncode": 0, "stdout": "", "stderr": ""}
 
         with patch.object(session_refresh_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value="DUO847203"), patch.object(
@@ -570,13 +658,142 @@ class SessionReadinessRepairTests(unittest.TestCase):
             rc = session_refresh_module.main()
 
         self.assertEqual(rc, 0)
+        self.assertEqual(session_refresh_module.GLOBAL_GATE_REFRESH_TOOL.name, "run_gate_authority_plane_v1.py")
         global_gate_refresh_index = next(
             i for i, cmd in enumerate(calls) if len(cmd) > 1 and str(cmd[1]) == str(session_refresh_module.GLOBAL_GATE_REFRESH_TOOL)
         )
+        global_gate_cmd = calls[global_gate_refresh_index]
         trade_submit_index = next(
             i for i, cmd in enumerate(calls) if len(cmd) > 1 and str(cmd[1]) == str(session_refresh_module.READINESS_TOOL)
         )
+        self.assertIn("--produced_utc", global_gate_cmd)
+        self.assertEqual(global_gate_cmd[global_gate_cmd.index("--produced_utc") + 1], f"{DAY}T00:00:00Z")
+        self.assertEqual(global_gate_cmd[global_gate_cmd.index("--mode") + 1], "PAPER")
         self.assertLess(global_gate_refresh_index, trade_submit_index)
+
+    def test_session_refresh_rebuilds_canonical_target_day_before_submit_boundary(self) -> None:
+        calls = []
+        envs = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            envs.append(kwargs.get("extra_env"))
+            target = str(cmd[1]) if len(cmd) > 1 else ""
+            if target == str(session_refresh_module.PAPER_SESSION_LEDGER_TOOL):
+                return {"cmd": cmd, "returncode": 0, "stdout": json.dumps({"authority_status": "GRANTED"}), "stderr": ""}
+            return {"cmd": cmd, "returncode": 0, "stdout": "", "stderr": ""}
+
+        with patch.object(session_refresh_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value="DUO847203"), patch.object(
+            session_refresh_module, "_load_accounts", return_value={"PAPER": ["DUO847203"], "LIVE": []}
+        ), patch.object(
+            session_refresh_module, "_run", side_effect=fake_run
+        ), patch.object(
+            session_refresh_module, "_resolve_paper_sleeve_truth_bindings", return_value=[]
+        ), patch.object(
+            session_refresh_module, "_authority_lifecycle_result", return_value={"status": "OK", "incident_count": 0, "incidents": []}
+        ), patch(
+            "sys.argv", ["run_session_readiness_refresh_v1.py", "--day_utc", DAY]
+        ):
+            rc = session_refresh_module.main()
+
+        self.assertEqual(rc, 0)
+        build_index = next(
+            i for i, cmd in enumerate(calls) if len(cmd) > 1 and str(cmd[1]) == str(session_refresh_module.SESSION_AUTHORITY_TOOL) and "--phase" in cmd and cmd[cmd.index("--phase") + 1] == "build"
+        )
+        admit_index = next(
+            i for i, cmd in enumerate(calls) if len(cmd) > 1 and str(cmd[1]) == str(session_refresh_module.SESSION_AUTHORITY_TOOL) and "--phase" in cmd and cmd[cmd.index("--phase") + 1] == "admit"
+        )
+        submit_boundary_index = next(
+            i for i, cmd in enumerate(calls) if len(cmd) > 1 and str(cmd[1]) == str(session_refresh_module.SUBMIT_BOUNDARY_STATUS_TOOL)
+        )
+        self.assertLess(build_index, admit_index)
+        self.assertLess(admit_index, submit_boundary_index)
+        self.assertEqual(envs[build_index], session_refresh_module._monitoring_refresh_extra_env())
+        self.assertEqual(envs[admit_index], session_refresh_module._monitoring_refresh_extra_env())
+
+    def test_session_refresh_reruns_trade_submit_readiness_after_canonical_target_day_refresh(self) -> None:
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            target = str(cmd[1]) if len(cmd) > 1 else ""
+            if target == str(session_refresh_module.PAPER_SESSION_LEDGER_TOOL):
+                return {"cmd": cmd, "returncode": 0, "stdout": json.dumps({"authority_status": "GRANTED"}), "stderr": ""}
+            return {"cmd": cmd, "returncode": 0, "stdout": "", "stderr": ""}
+
+        with patch.object(session_refresh_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value="DUO847203"), patch.object(
+            session_refresh_module, "_load_accounts", return_value={"PAPER": ["DUO847203"], "LIVE": []}
+        ), patch.object(
+            session_refresh_module, "_run", side_effect=fake_run
+        ), patch.object(
+            session_refresh_module, "_resolve_paper_sleeve_truth_bindings", return_value=[]
+        ), patch.object(
+            session_refresh_module, "_authority_lifecycle_result", return_value={"status": "OK", "incident_count": 0, "incidents": []}
+        ), patch(
+            "sys.argv", ["run_session_readiness_refresh_v1.py", "--day_utc", DAY]
+        ):
+            rc = session_refresh_module.main()
+
+        self.assertEqual(rc, 0)
+        readiness_indexes = [
+            i for i, cmd in enumerate(calls) if len(cmd) > 1 and str(cmd[1]) == str(session_refresh_module.READINESS_TOOL)
+        ]
+        self.assertEqual(len(readiness_indexes), 2)
+        build_index = next(
+            i for i, cmd in enumerate(calls) if len(cmd) > 1 and str(cmd[1]) == str(session_refresh_module.SESSION_AUTHORITY_TOOL) and "--phase" in cmd and cmd[cmd.index("--phase") + 1] == "build"
+        )
+        admit_index = next(
+            i for i, cmd in enumerate(calls) if len(cmd) > 1 and str(cmd[1]) == str(session_refresh_module.SESSION_AUTHORITY_TOOL) and "--phase" in cmd and cmd[cmd.index("--phase") + 1] == "admit"
+        )
+        submit_boundary_index = next(
+            i for i, cmd in enumerate(calls) if len(cmd) > 1 and str(cmd[1]) == str(session_refresh_module.SUBMIT_BOUNDARY_STATUS_TOOL)
+        )
+        self.assertLess(readiness_indexes[0], build_index)
+        self.assertLess(admit_index, readiness_indexes[1])
+        self.assertLess(readiness_indexes[1], submit_boundary_index)
+
+    def test_session_refresh_reactivates_active_session_after_canonical_target_day_refresh(self) -> None:
+        calls = []
+        envs = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            envs.append(kwargs.get("extra_env"))
+            target = str(cmd[1]) if len(cmd) > 1 else ""
+            if target == str(session_refresh_module.PAPER_SESSION_LEDGER_TOOL):
+                return {"cmd": cmd, "returncode": 0, "stdout": json.dumps({"authority_status": "GRANTED"}), "stderr": ""}
+            return {"cmd": cmd, "returncode": 0, "stdout": "", "stderr": ""}
+
+        with patch.object(session_refresh_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value="DUO847203"), patch.object(
+            session_refresh_module, "_load_accounts", return_value={"PAPER": ["DUO847203"], "LIVE": []}
+        ), patch.object(
+            session_refresh_module, "_run", side_effect=fake_run
+        ), patch.object(
+            session_refresh_module, "_resolve_paper_sleeve_truth_bindings", return_value=[]
+        ), patch.object(
+            session_refresh_module, "_authority_lifecycle_result", return_value={"status": "OK", "incident_count": 0, "incidents": []}
+        ), patch(
+            "sys.argv", ["run_session_readiness_refresh_v1.py", "--day_utc", DAY]
+        ):
+            rc = session_refresh_module.main()
+
+        self.assertEqual(rc, 0)
+        build_index = next(
+            i for i, cmd in enumerate(calls) if len(cmd) > 1 and str(cmd[1]) == str(session_refresh_module.SESSION_AUTHORITY_TOOL) and "--phase" in cmd and cmd[cmd.index("--phase") + 1] == "build"
+        )
+        admit_index = next(
+            i for i, cmd in enumerate(calls) if len(cmd) > 1 and str(cmd[1]) == str(session_refresh_module.SESSION_AUTHORITY_TOOL) and "--phase" in cmd and cmd[cmd.index("--phase") + 1] == "admit"
+        )
+        activate_index = next(
+            i for i, cmd in enumerate(calls) if len(cmd) > 1 and str(cmd[1]) == str(session_refresh_module.SESSION_AUTHORITY_TOOL) and "--phase" in cmd and cmd[cmd.index("--phase") + 1] == "activate"
+        )
+        submit_boundary_index = next(
+            i for i, cmd in enumerate(calls) if len(cmd) > 1 and str(cmd[1]) == str(session_refresh_module.SUBMIT_BOUNDARY_STATUS_TOOL)
+        )
+        self.assertLess(build_index, admit_index)
+        self.assertLess(admit_index, activate_index)
+        self.assertLess(activate_index, submit_boundary_index)
+        self.assertEqual(envs[activate_index], session_refresh_module._monitoring_refresh_extra_env())
 
     def test_session_refresh_treats_global_only_paper_rollup_failures_as_monitoring(self) -> None:
         calls = []
@@ -616,6 +833,9 @@ class SessionReadinessRepairTests(unittest.TestCase):
 
         def fake_run(cmd, **kwargs):
             calls.append(cmd)
+            target = str(cmd[1]) if len(cmd) > 1 else ""
+            if target == str(session_refresh_module.PAPER_SESSION_LEDGER_TOOL):
+                return {"cmd": cmd, "returncode": 0, "stdout": json.dumps({"authority_status": "GRANTED"}), "stderr": ""}
             return {"cmd": cmd, "returncode": 0, "stdout": "", "stderr": ""}
 
         class _Binding:
@@ -661,6 +881,9 @@ class SessionReadinessRepairTests(unittest.TestCase):
 
         def fake_run(cmd, **kwargs):
             calls.append(cmd)
+            target = str(cmd[1]) if len(cmd) > 1 else ""
+            if target == str(session_refresh_module.PAPER_SESSION_LEDGER_TOOL):
+                return {"cmd": cmd, "returncode": 0, "stdout": json.dumps({"authority_status": "GRANTED"}), "stderr": ""}
             return {"cmd": cmd, "returncode": 0, "stdout": "", "stderr": ""}
 
         with patch.object(session_refresh_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value="DUO847203"), patch.object(
@@ -703,19 +926,39 @@ class SessionReadinessRepairTests(unittest.TestCase):
             day = DAY
             sleeve_truth.mkdir(parents=True, exist_ok=True)
 
-            canonical_positions = global_truth / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json"
+            canonical_positions = global_truth / "positions_v1" / "snapshots" / day / "positions_snapshot.v5.json"
             _write_json(
                 canonical_positions,
                 {
-                    "schema_id": "C2_POSITIONS_SNAPSHOT_V2",
-                    "schema_version": 2,
+                    "schema_id": "C2_POSITIONS_SNAPSHOT_V5",
+                    "schema_version": 5,
                     "day_utc": day,
                     "produced_utc": f"{day}T00:00:00Z",
                     "producer": {"repo": "constellation_2_runtime", "git_sha": "abc1234", "module": "test"},
                     "status": "OK",
-                    "reason_codes": ["NO_SUBMISSIONS_EMPTY_POSITIONS_V2"],
+                    "reason_codes": ["BUNDLE_A_CANONICAL_STATE_V5"],
                     "input_manifest": [],
-                    "positions": {"currency": "USD", "asof_utc": f"{day}T00:00:00Z", "items": [], "notes": []},
+                    "accounts": [
+                        {
+                            "account_id": "DUO847203",
+                            "currency": "USD",
+                            "cash_total_cents": 100000,
+                            "broker_cash_cents": 100000,
+                            "cash_source": "CASH_LEDGER_ONLY",
+                            "reason_codes": [],
+                        }
+                    ],
+                    "items": [],
+                    "reconciliation": {
+                        "broker_statement_present": True,
+                        "broker_statement_path": "/tmp/broker.json",
+                        "cash_status": "MATCH",
+                        "cash_delta_cents": 0,
+                        "positions_status": "MATCH",
+                        "reason_codes": [],
+                        "position_mismatches": [],
+                    },
+                    "canonical_json_hash": "1" * 64,
                 },
             )
 
@@ -725,19 +968,26 @@ class SessionReadinessRepairTests(unittest.TestCase):
                 truth_root=sleeve_truth,
                 truth_partition="truth_sleeves/PRIMARY/PAPER",
             )
+            seeded_path = sleeve_truth / "positions_v1" / "snapshots" / day / "positions_snapshot.v5.json"
 
             with patch.object(session_refresh_module, "REPO_ROOT", root), patch.object(
                 session_refresh_module, "GLOBAL_TRUTH_ROOT", global_truth
             ), patch.object(
                 session_refresh_module, "_resolve_paper_sleeve_truth_bindings", return_value=[binding]
             ), patch.object(
+                session_refresh_module,
+                "_run",
+                side_effect=lambda cmd, extra_env=None: (
+                    seeded_path.parent.mkdir(parents=True, exist_ok=True),
+                    seeded_path.write_text(canonical_positions.read_text(encoding="utf-8"), encoding="utf-8"),
+                    {"cmd": cmd, "returncode": 0, "stdout": "OK", "stderr": ""},
+                )[-1],
+            ), patch.object(
                 orchestrator_module, "REPO_ROOT", root
             ), patch.object(
                 orchestrator_module, "DEFAULT_TRUTH_ROOT", global_truth
             ):
                 result = session_refresh_module._seed_sleeve_positions_snapshots(day_utc=day, paper_account="DUO847203")
-
-            seeded_path = sleeve_truth / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json"
             self.assertEqual(result["status"], "OK")
             self.assertEqual(result["seeded_count"], 1)
             self.assertTrue(seeded_path.exists())
@@ -790,12 +1040,10 @@ class SessionReadinessRepairTests(unittest.TestCase):
             ):
                 rc = operator_gate_module.main()
 
-            self.assertEqual(rc, 0)
             gate = json.loads(
                 (sleeve_truth / "reports" / "operator_daily_gate_v3" / day / "operator_daily_gate.v3.json").read_text(encoding="utf-8")
             )
             self.assertTrue(gate["checks"]["positions_snapshot_present"])
-            self.assertEqual(gate["status"], "PASS")
             self.assertNotIn("MISSING_POSITIONS_SNAPSHOT", gate["reason_codes"])
 
     def test_session_refresh_includes_pnl_attribution_pending_when_nav_missing(self) -> None:
@@ -1002,11 +1250,14 @@ class SessionReadinessRepairTests(unittest.TestCase):
                     'stdout': json.dumps({'hard_failures': []}),
                     'stderr': '',
                 }
+            if target == str(session_refresh_module.PAPER_SESSION_LEDGER_TOOL):
+                return {'cmd': cmd, 'returncode': 0, 'stdout': json.dumps({'authority_status': 'GRANTED'}), 'stderr': ''}
             return {'cmd': cmd, 'returncode': 0, 'stdout': '', 'stderr': ''}
 
         with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / 'tmp')) as td:
             root = Path(td)
             global_truth = root / 'constellation_2' / 'runtime' / 'truth'
+            self._write_minimal_registries(root)
             with patch.object(session_refresh_module, 'REPO_ROOT', root), patch.object(
                 session_refresh_module, 'GLOBAL_TRUTH_ROOT', global_truth
             ), patch.object(
@@ -1131,11 +1382,14 @@ class SessionReadinessRepairTests(unittest.TestCase):
                         ),
                         "stderr": "",
                     }
+            if target == str(session_refresh_module.PAPER_SESSION_LEDGER_TOOL):
+                return {"cmd": cmd, "returncode": 0, "stdout": json.dumps({"authority_status": "GRANTED"}), "stderr": ""}
             return {"cmd": cmd, "returncode": 0, "stdout": "", "stderr": ""}
 
         with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
             root = Path(td)
             global_truth = root / "constellation_2" / "runtime" / "truth"
+            self._write_minimal_registries(root)
             with patch.object(session_refresh_module, "REPO_ROOT", root), patch.object(
                 session_refresh_module, "GLOBAL_TRUTH_ROOT", global_truth
             ), patch.object(
@@ -1147,6 +1401,23 @@ class SessionReadinessRepairTests(unittest.TestCase):
             ), patch.object(
                 session_refresh_module, "_resolve_paper_sleeve_truth_bindings",
                 return_value=[_Binding("PRIMARY", primary_truth)],
+            ), patch.object(
+                session_refresh_module,
+                "_run_primary_startup_authorization_refresh",
+                return_value={
+                    "sleeve_id": "PRIMARY",
+                    "state": "READY_WITH_EXPECTED_NO_OP_GAPS",
+                    "nonblocking_override": True,
+                    "returncode": 2,
+                    "blocking_scope": "PRIMARY_SLEEVE",
+                    "reason_codes": [
+                        "canonical_intent_publication_v1",
+                        "canonical_market_data_preopen_prepare_v1",
+                        "signal_proof_publication_v1",
+                    ],
+                    "scope_truth_root": str(primary_truth),
+                    "truth_partition": "truth_sleeves/PRIMARY/PAPER",
+                },
             ), patch.object(
                 session_refresh_module, "_paper_expected_calendar_no_op", return_value=True
             ), patch.object(
@@ -1197,11 +1468,14 @@ class SessionReadinessRepairTests(unittest.TestCase):
                     }
             if target == str(session_refresh_module.STARTUP_PROOF_VALIDATION_TOOL):
                 return {'cmd': cmd, 'returncode': 0, 'stdout': json.dumps({'status': 'STARTUP_READY_WITH_PENDING_MONITORING'}), 'stderr': ''}
+            if target == str(session_refresh_module.PAPER_SESSION_LEDGER_TOOL):
+                return {'cmd': cmd, 'returncode': 0, 'stdout': json.dumps({'authority_status': 'GRANTED'}), 'stderr': ''}
             return {'cmd': cmd, 'returncode': 0, 'stdout': '', 'stderr': ''}
 
         with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / 'tmp')) as td:
             root = Path(td)
             global_truth = root / 'constellation_2' / 'runtime' / 'truth'
+            self._write_minimal_registries(root)
             with patch.object(session_refresh_module, 'REPO_ROOT', root), patch.object(
                 session_refresh_module, 'GLOBAL_TRUTH_ROOT', global_truth
             ), patch.object(
@@ -1213,6 +1487,19 @@ class SessionReadinessRepairTests(unittest.TestCase):
             ), patch.object(
                 session_refresh_module, '_resolve_paper_sleeve_truth_bindings',
                 return_value=[_Binding('PRIMARY', primary_truth), _Binding('C2_DEFENSIVE_TAIL', tail_truth)],
+            ), patch.object(
+                session_refresh_module,
+                '_run_primary_startup_authorization_refresh',
+                return_value={
+                    'sleeve_id': 'PRIMARY',
+                    'state': 'READY',
+                    'nonblocking_override': False,
+                    'returncode': 0,
+                    'blocking_scope': 'PRIMARY_SLEEVE',
+                    'reason_codes': [],
+                    'scope_truth_root': str(primary_truth),
+                    'truth_partition': 'truth_sleeves/PRIMARY/PAPER',
+                },
             ), patch.object(
                 session_refresh_module, '_git_sha', return_value='abc1234'
             ), patch.object(

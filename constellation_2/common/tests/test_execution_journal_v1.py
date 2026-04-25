@@ -58,6 +58,32 @@ def test_execution_journal_append_success(tmp_path: Path) -> None:
     assert ref.payload["events"][0]["event_type"] == "DEPLOYMENT_ACTIVATED"
 
 
+def test_execution_journal_append_records_runtime_lifecycle_ref_when_provided(tmp_path: Path) -> None:
+    runtime_lifecycle_ref = {
+        "run_id": "20260418T150000Z__c2_paper_day_orchestrator_service__pid5150",
+        "runtime_identity_contract_path": "/tmp/active_runtime_contract.v1.json",
+        "runtime_identity_contract_sha256": "c" * 64,
+        "startup_identity_receipt_path": "/tmp/runtime_startup_identity.v1.json",
+        "lifecycle_start_receipt_path": "/tmp/runtime_lifecycle_receipt.v1.json",
+    }
+    ref = journal.append_execution_event_v1(
+        truth_root=tmp_path,
+        producer_module="test.module",
+        event_type="DEPLOYMENT_ACTIVATED",
+        event_source="deployment_state_machine_v1",
+        status="DEPLOY_ACTIVE",
+        payload={
+            **_source_payload(),
+            "final_deployment_decision": "DEPLOY_ACTIVE",
+            "blocking_codes": [],
+            "first_true_blocker_code": "",
+        },
+        runtime_lifecycle_ref=runtime_lifecycle_ref,
+        **_base_identity(),
+    )
+    assert ref.payload["runtime_lifecycle_ref"] == runtime_lifecycle_ref
+
+
 def test_duplicate_sequence_rejection() -> None:
     identity = _base_identity()
     event = journal.build_event_record_v1(
@@ -172,8 +198,76 @@ def test_invalid_payload_family_required_field_rejection() -> None:
         )
 
 
+def test_ledger_authority_event_carries_constitutional_payload(tmp_path: Path) -> None:
+    identity = _base_identity()
+    ledger_path = tmp_path / "ledger.json"
+    ledger_payload = {
+        "day_utc": identity["day_utc"],
+        "ledger_id": "ledger-001",
+        "evaluated_at_utc": "2026-04-08T13:00:02Z",
+        "control_state": {
+            "authority_status": "GRANTED",
+            "system_ready": True,
+            "submission_authorized": True,
+            "blocking_codes": [],
+        },
+        "constitutional_context": {
+            "proposal_hash": "1" * 64,
+            "fact_bundle_hash": "2" * 64,
+            "decision_enum": "REQUIRE_HUMAN_REVIEW",
+            "effective_scope": {
+                "global": "PAPER",
+                "domain": "TRADING",
+                "account": "DU1234567",
+                "sleeve": "PRIMARY",
+                "action_class": "CONSTRUCTIVE",
+                "effective_authority": "REQUIRE_HUMAN_REVIEW",
+            },
+            "blocker_rules": ["RULE_A"],
+            "rule_provenance": [
+                {
+                    "rule_id": "rule_a",
+                    "gate_index": 5,
+                    "outcome": "FAIL",
+                    "detail": "detail",
+                }
+            ],
+            "negative_evidence": [
+                {
+                    "type": "MISSING_FACT",
+                    "fact": "test",
+                    "severity": "BLOCKING",
+                    "detail": "required fact type missing: test",
+                }
+            ],
+            "policy_version": "constitutional_shadow_v1",
+        },
+    }
+    _write_json(ledger_path, ledger_payload)
+    ref = journal.append_ledger_authority_event_v1(
+        truth_root=tmp_path,
+        identity=identity,
+        source_path=ledger_path,
+        source_payload=ledger_payload,
+        producer_module="test.module",
+    )
+    payload = ref.payload["events"][0]["payload"]
+    assert payload["proposal_hash"] == "1" * 64
+    assert payload["fact_bundle_hash"] == "2" * 64
+    assert payload["decision_enum"] == "REQUIRE_HUMAN_REVIEW"
+    assert payload["effective_scope"]["effective_authority"] == "REQUIRE_HUMAN_REVIEW"
+    assert payload["policy_version"] == "constitutional_shadow_v1"
+
+
 def test_transitional_reconciler_backfills_missing_events_without_duplicate_source_events(tmp_path: Path) -> None:
     identity = _base_identity()
+    runtime_lifecycle_ref = {
+        "run_id": "20260418T150000Z__c2_paper_day_orchestrator_service__pid5150",
+        "runtime_identity_contract_path": "/tmp/active_runtime_contract.v1.json",
+        "runtime_identity_contract_sha256": "d" * 64,
+        "startup_identity_receipt_path": "/tmp/runtime_startup_identity.v1.json",
+        "lifecycle_start_receipt_path": "/tmp/runtime_lifecycle_receipt.v1.json",
+    }
     deployment_path = tmp_path / "deployment.json"
     state_machine_path = tmp_path / "state_machine.json"
     startup_path = tmp_path / "startup.json"
@@ -271,6 +365,10 @@ def test_transitional_reconciler_backfills_missing_events_without_duplicate_sour
         journal_tool,
         "read_trading_day_state_machine_ref_v1",
         return_value=SurfaceRefV1(path=state_machine_path, payload=trading_day_payload, sha256="1" * 64),
+    ), patch.object(
+        journal_tool,
+        "read_day_open_attempt_runtime_lifecycle_ref_v1",
+        return_value=(tmp_path / "reports" / "day_open_attempt_v1" / identity["day_utc"] / "day_open_attempt.v1.json", runtime_lifecycle_ref),
     ):
         rc = journal_tool.main(["--day_utc", identity["day_utc"], "--truth_root", str(tmp_path)])
 
@@ -283,6 +381,7 @@ def test_transitional_reconciler_backfills_missing_events_without_duplicate_sour
     assert "STARTUP_PROOF_VALIDATION_COMPLETED" in event_types
     assert "LEDGER_AUTHORITY_RECORDED" in event_types
     assert "SUBMISSION_AUTHORIZATION_RECORDED" in event_types
+    assert journal_ref.payload["runtime_lifecycle_ref"] == runtime_lifecycle_ref
 
 
 def test_transitional_reconciler_keeps_stage_duration_stable_across_timestamp_churn(tmp_path: Path) -> None:

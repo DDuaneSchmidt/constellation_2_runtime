@@ -18,7 +18,7 @@ from ops.tools.run_c2_multi_sleeve_orchestrator_v1 import _build_enabled_sleeve_
 
 
 def test_phasec_out_dir_accepts_canonical_truth_root_phasec_path(tmp_path: Path) -> None:
-    truth_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    truth_root = tmp_path / "truth"
     phasec_dir = truth_root / "phaseC_preflight_v1" / "2026-04-09" / "attempt_A0001" / "intent_hash"
     phasec_dir.mkdir(parents=True)
 

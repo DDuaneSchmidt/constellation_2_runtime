@@ -19,8 +19,15 @@ from pathlib import Path
 
 from constellation_2.phaseC.tools.c2_submit_preflight_offline_v1 import main as phasec_main
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
-from constellation_2.phaseD.lib.evidence_writer_v1 import EvidenceWriteError, write_phased_success_outputs_v1
-from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+from constellation_2.phaseD.lib.evidence_writer_v1 import (
+    EvidenceWriteError,
+    write_phased_submission_only_v1,
+    write_phased_success_outputs_v1,
+)
+from constellation_2.phaseD.lib.validate_against_schema_v1 import (
+    SchemaValidationError,
+    validate_against_repo_schema_v1,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SAMPLES = REPO_ROOT / "constellation_2" / "acceptance" / "samples"
@@ -34,6 +41,85 @@ def _load_json(path: Path) -> dict:
 
 
 class TestPhaseDIdentityInputsWrittenV1(unittest.TestCase):
+    def test_equity_plan_v2_writes_versioned_filename(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td).resolve()
+            out_dir = td_path / "submission_out"
+            bsr = {
+                "schema_id": "broker_submission_record",
+                "schema_version": "v2",
+                "submission_id": "1" * 64,
+                "submitted_at_utc": "2026-02-14T00:00:00Z",
+                "binding_hash": "2" * 64,
+                "broker": {"name": "INTERACTIVE_BROKERS", "environment": "PAPER"},
+                "status": "SUBMITTED",
+                "broker_ids": {"order_id": 1, "perm_id": 1},
+                "error": None,
+                "canonical_json_hash": "3" * 64,
+            }
+            equity_plan_v2 = {
+                "schema_id": "equity_order_plan",
+                "schema_version": "v2",
+                "plan_id": "plan-v2",
+                "created_at_utc": "2026-02-14T00:00:00Z",
+                "intent_hash": "4" * 64,
+                "intent_sha256": "4" * 64,
+                "engine_id": "C2_TREND_EQ_PRIMARY_V1",
+                "source_intent_id": "c2_trend_eq_spy_2026-02-14_v1",
+                "lineage_envelope_ref": {"path": "lineage_envelope.v1.json", "sha256": "5" * 64},
+                "structure": "EQUITY_SPOT",
+                "symbol": "SPY",
+                "currency": "USD",
+                "action": "BUY",
+                "qty_shares": 1,
+                "order_terms": {"order_type": "LIMIT", "limit_price": "500.00", "time_in_force": "DAY"},
+                "risk_proof": None,
+                "canonical_json_hash": "6" * 64,
+            }
+
+            write_phased_submission_only_v1(
+                out_dir,
+                broker_submission_record=bsr,
+                order_plan=equity_plan_v2,
+            )
+
+            self.assertTrue((out_dir / "equity_order_plan.v2.json").exists())
+            self.assertFalse((out_dir / "equity_order_plan.v1.json").exists())
+
+    def test_broker_submission_record_accepts_pending_submit_and_rejects_unknown_statuses(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td).resolve()
+            binding_hash = "2" * 64
+            canonical_hash = "3" * 64
+            base_bsr = {
+                "schema_id": "broker_submission_record",
+                "schema_version": "v2",
+                "submission_id": "1" * 64,
+                "submitted_at_utc": "2026-02-14T00:00:00Z",
+                "binding_hash": binding_hash,
+                "broker": {"name": "INTERACTIVE_BROKERS", "environment": "PAPER"},
+                "broker_ids": {"order_id": 1, "perm_id": 1},
+                "error": None,
+                "canonical_json_hash": canonical_hash,
+            }
+
+            pending_submit_bsr = dict(base_bsr)
+            pending_submit_bsr["status"] = "PENDINGSUBMIT"
+            validate_against_repo_schema_v1(
+                pending_submit_bsr,
+                REPO_ROOT,
+                "constellation_2/schemas/broker_submission_record.v2.schema.json",
+            )
+
+            invalid_bsr = dict(base_bsr)
+            invalid_bsr["status"] = "BROKER_STATUS_IMPOSSIBLE"
+            with self.assertRaises(SchemaValidationError):
+                validate_against_repo_schema_v1(
+                    invalid_bsr,
+                    REPO_ROOT,
+                    "constellation_2/schemas/broker_submission_record.v2.schema.json",
+                )
+
     def test_identity_inputs_written_and_overwrite_refused(self) -> None:
         # Step 1: Generate schema-valid Phase C outputs (order_plan, mapping_ledger_record, binding_record).
         with tempfile.TemporaryDirectory() as td:

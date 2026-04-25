@@ -4,6 +4,7 @@ import json
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -19,7 +20,10 @@ from constellation_2.common.capability_state_v1 import (
 )
 from constellation_2.common.paper_policy_verdict_v1 import derive_paper_policy_verdict_payload
 from constellation_2.common.paper_session_fact_plane_v1 import SurfaceRefV1
-from constellation_2.common.policy_diff_v1 import derive_policy_diff_payload
+from constellation_2.common.policy_diff_v1 import (
+    derive_policy_diff_payload,
+    summarize_override_impact_from_replay_manifests_v1,
+)
 from constellation_2.common.production_policy_verdict_v1 import derive_production_policy_verdict_payload
 import ops.tools.run_trade_submit_readiness_c2_v1 as readiness_module
 import ops.tools.run_production_policy_verdict_v1 as production_policy_module
@@ -259,6 +263,18 @@ def test_capability_state_derives_core_and_production_capabilities() -> None:
         with patch(
             "constellation_2.common.trade_submit_readiness_authority_v1.resolve_truth_sleeves_root",
             side_effect=RuntimeError("no canonical sleeve root in unit test"),
+        ), patch(
+            "constellation_2.common.capability_state_v1.resolve_decision_truth_root_v1",
+            return_value=truth_root.resolve(),
+        ), patch(
+            "constellation_2.common.capability_state_v1.resolve_governed_account_binding",
+            return_value=SimpleNamespace(
+                account_registry_path=root / "governance" / "02_REGISTRIES" / "C2_IB_ACCOUNT_REGISTRY_V1.json",
+                sleeve_registry_path=root / "governance" / "02_REGISTRIES" / "C2_SLEEVE_REGISTRY_V1.json",
+            ),
+        ), patch(
+            "constellation_2.common.capability_state_v1.resolve_governed_sleeve_truth_bindings",
+            return_value=[SimpleNamespace(sleeve_id="PRIMARY", truth_root=root / "constellation_2" / "runtime" / "truth_sleeves" / "PRIMARY" / "PAPER")],
         ):
             payload = derive_capability_state_payload(
                 repo_root=root,
@@ -272,6 +288,86 @@ def test_capability_state_derives_core_and_production_capabilities() -> None:
         assert by_id["account_binding_valid"]["status"] == "PASS"
         assert by_id["core_sleeve_gate_set_ready"]["status"] == "PASS"
         assert by_id["production_certification_gate_set_complete"]["status"] == "FAIL"
+
+
+def test_capability_state_passes_missing_monday_core_gate_class_when_gate_artifacts_exist() -> None:
+    with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
+        root = Path(td)
+        truth_root = root / "runtime_truth"
+        sleeve_truth = root / "constellation_2" / "runtime" / "truth_sleeves" / "PRIMARY" / "PAPER"
+        _write_minimal_registries(root)
+        _write_minimal_evidence(root, truth_root)
+        _write_json(
+            sleeve_truth / "reports" / "authorization_gate_verdict_v1" / DAY / "authorization_gate_verdict.v1.json",
+            {
+                "schema_id": "authorization_gate_verdict_v1",
+                "schema_version": 1,
+                "day_utc": DAY,
+                "mode": "PAPER",
+                "produced_utc": f"{DAY}T00:00:00Z",
+                "included_gates": [],
+                "excluded_gates": [],
+                "blocking_gates": [],
+                "status": "PASS",
+                "blocking_class": "NONE",
+                "reason_codes": [],
+                "evidence_refs": [],
+                "decision_ledger_ref": "ledger",
+                "gate_classification_registry_id": "test",
+                "gate_classification_registry_version": "v1",
+                "lifecycle_state_authority_ref": "lifecycle",
+            },
+        )
+        _write_json(
+            sleeve_truth / "reports" / "economic_health_gate_verdict_v1" / DAY / "economic_health_gate_verdict.v1.json",
+            {
+                "schema_id": "economic_health_gate_verdict_v1",
+                "schema_version": 1,
+                "day_utc": DAY,
+                "mode": "PAPER",
+                "produced_utc": f"{DAY}T00:00:00Z",
+                "included_gates": [],
+                "excluded_gates": [],
+                "blocking_gates": [],
+                "status": "PASS",
+                "blocking_class": "NONE",
+                "reason_codes": [],
+                "evidence_refs": [],
+                "decision_ledger_ref": "ledger",
+                "gate_classification_registry_id": "test",
+                "gate_classification_registry_version": "v1",
+                "lifecycle_state_authority_ref": "lifecycle",
+            },
+        )
+
+        with patch(
+            "constellation_2.common.trade_submit_readiness_authority_v1.resolve_truth_sleeves_root",
+            side_effect=RuntimeError("no canonical sleeve root in unit test"),
+        ), patch(
+            "constellation_2.common.capability_state_v1.resolve_decision_truth_root_v1",
+            return_value=truth_root.resolve(),
+        ), patch(
+            "constellation_2.common.capability_state_v1.resolve_governed_account_binding",
+            return_value=SimpleNamespace(
+                account_registry_path=root / "governance" / "02_REGISTRIES" / "C2_IB_ACCOUNT_REGISTRY_V1.json",
+                sleeve_registry_path=root / "governance" / "02_REGISTRIES" / "C2_SLEEVE_REGISTRY_V1.json",
+            ),
+        ), patch(
+            "constellation_2.common.capability_state_v1.resolve_governed_sleeve_truth_bindings",
+            return_value=[SimpleNamespace(sleeve_id="PRIMARY", truth_root=root / "constellation_2" / "runtime" / "truth_sleeves" / "PRIMARY" / "PAPER")],
+        ):
+            payload = derive_capability_state_payload(
+                repo_root=root,
+                truth_root=truth_root,
+                day_utc=DAY,
+                ib_account="DUO847203",
+                environment="PAPER",
+            )
+
+        by_id = {row["capability_id"]: row for row in payload["capabilities"]}
+        assert by_id["core_sleeve_gate_set_ready"]["status"] == "PASS"
+        assert by_id["economic_health_gate_set_complete"]["status"] == "PASS"
+        assert not any(code.endswith(":MISSING") for code in by_id["core_sleeve_gate_set_ready"]["reason_codes"])
 
 
 def test_capability_state_resolves_authoritative_sleeve_truth_from_release_repo_role() -> None:
@@ -473,3 +569,155 @@ def test_trade_submit_readiness_uses_paper_policy_when_production_only_items_rem
         assert "PAPER_POLICY_VERDICT_OK" in status["reasons"]
         assert "INFO:PRODUCTION_POLICY_NOT_PASS" in status["reasons"]
         assert "INFO:PRODUCTION_ONLY_OPEN:production_certification_gate_set_complete" in status["reasons"]
+
+
+def test_paper_policy_fails_closed_when_startup_materialization_capability_fails() -> None:
+    with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
+        root = Path(td)
+        truth_root = root / "constellation_2" / "runtime" / "truth"
+        _write_minimal_registries(root)
+        capability_payload = {
+            "schema_id": "capability_state",
+            "schema_version": "v1",
+            "day_utc": DAY,
+            "environment": "PAPER",
+            "ib_account": "DUO847203",
+            "sleeve_id": "PRIMARY",
+            "overall_status": "FAIL",
+            "capabilities": [
+                {
+                    "capability_id": "startup_materialization_ready",
+                    "status": "FAIL",
+                    "kind": "SYNTHESIZED_SUMMARY",
+                    "reason_codes": [
+                        "STARTUP_MATERIALIZATION_FAIL:PHASEC_RISK_INPUTS_PREP_FAIL:ACCOUNTING_NAV_COMPAT_BRIDGE_NONZERO"
+                    ],
+                    "source_artifacts": [],
+                    "details": {},
+                }
+            ],
+            "source_artifacts": [],
+            "registry_ref": {"artifact_sha256": "a" * 64},
+            "release_id": "TEST_RELEASE",
+            "git_sha": "b" * 40,
+            "generated_at_utc": f"{DAY}T00:00:00Z",
+        }
+        capability_path = resolve_capability_state_path(truth_root=truth_root, day_utc=DAY)
+        _write_json(capability_path, capability_payload)
+        capability_ref = _surface_ref(capability_path, capability_payload)
+
+        paper_payload = derive_paper_policy_verdict_payload(repo_root=root, truth_root=truth_root, capability_ref=capability_ref)
+
+        assert paper_payload["overall_status"] == "FAIL"
+        assert paper_payload["paper_allowed"] is False
+        assert paper_payload["blocking_items"][0]["capability_id"] == "startup_materialization_ready"
+
+
+def test_policy_diff_reflects_override_impact_from_replay_manifests() -> None:
+    with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
+        root = Path(td)
+        truth_root = root / "constellation_2" / "runtime" / "truth"
+        capability_payload = {
+            "schema_id": "capability_state",
+            "schema_version": "v1",
+            "day_utc": DAY,
+            "environment": "PAPER",
+            "ib_account": "DUO847203",
+            "sleeve_id": "PRIMARY",
+            "overall_status": "PASS",
+            "capabilities": [],
+            "source_artifacts": [],
+            "registry_ref": {"artifact_sha256": "a" * 64},
+            "release_id": "TEST_RELEASE",
+            "git_sha": "b" * 40,
+            "generated_at_utc": f"{DAY}T00:00:00Z",
+        }
+        capability_path = resolve_capability_state_path(truth_root=truth_root, day_utc=DAY)
+        _write_json(capability_path, capability_payload)
+        capability_ref = _surface_ref(capability_path, capability_payload)
+
+        paper_payload = {
+            "schema_id": "paper_policy_verdict",
+            "schema_version": "v1",
+            "day_utc": DAY,
+            "overall_status": "PASS",
+            "blocking_items": [],
+            "production_only_open_items": [],
+            "source_artifacts": [],
+            "generated_at_utc": f"{DAY}T00:00:00Z",
+        }
+        paper_path = resolve_paper_policy_verdict_path(truth_root=truth_root, day_utc=DAY)
+        _write_json(paper_path, paper_payload)
+        paper_ref = _surface_ref(paper_path, paper_payload)
+
+        production_payload = {
+            "schema_id": "production_policy_verdict",
+            "schema_version": "v1",
+            "day_utc": DAY,
+            "overall_status": "FAIL",
+            "blocking_items": [{"item_id": "production_certification_gate_set_complete"}],
+            "source_artifacts": [],
+            "generated_at_utc": f"{DAY}T00:00:00Z",
+        }
+        production_path = resolve_production_policy_verdict_path(truth_root=truth_root, day_utc=DAY)
+        _write_json(production_path, production_payload)
+        production_ref = _surface_ref(production_path, production_payload)
+
+        replay_manifest_path = truth_root / "reports" / "replay_manifest_v1" / DAY / ("a" * 64 + ".replay_manifest.v1.json")
+        _write_json(
+            replay_manifest_path,
+            {
+                "schema_id": "C2_REPLAY_MANIFEST_V1",
+                "schema_version": 1,
+                "produced_utc": f"{DAY}T00:00:00Z",
+                "day_utc": DAY,
+                "source_truth_root": str(truth_root),
+                "replay_truth_root": str((root / "replay").resolve()),
+                "submission_id": "a" * 64,
+                "status": "OK",
+                "reason_codes": [],
+                "tool_runs": [],
+                "comparisons": [],
+                "override_analysis": {
+                    "comparison_status": "identical",
+                    "source": {
+                        "review_required_count": 1,
+                        "operator_decision_count": 1,
+                        "approved_override_count": 1,
+                        "override_frequency_by_action_class": {"PROTECTIVE": 1},
+                        "mismatch_count": 1,
+                        "mismatch_cases": [],
+                        "block_reasons_distribution": {"POLICY_REQUIRES_HUMAN_REVIEW": 1},
+                        "human_system_divergence_count": 1,
+                        "override_cases": [],
+                    },
+                    "replay": {
+                        "review_required_count": 1,
+                        "operator_decision_count": 1,
+                        "approved_override_count": 1,
+                        "override_frequency_by_action_class": {"PROTECTIVE": 1},
+                        "mismatch_count": 1,
+                        "mismatch_cases": [],
+                        "block_reasons_distribution": {"POLICY_REQUIRES_HUMAN_REVIEW": 1},
+                        "human_system_divergence_count": 1,
+                        "override_cases": [],
+                    },
+                },
+                "canonical_json_hash": "b" * 64,
+            },
+        )
+
+        override_impact = summarize_override_impact_from_replay_manifests_v1(
+            truth_root=truth_root,
+            day_utc=DAY,
+        )
+        diff_payload = derive_policy_diff_payload(
+            capability_ref=capability_ref,
+            paper_policy_ref=paper_ref,
+            production_policy_ref=production_ref,
+            override_impact_analysis=override_impact,
+        )
+
+        assert diff_payload["override_impact_analysis"]["replay_manifest_count"] == 1
+        assert diff_payload["override_impact_analysis"]["override_frequency_by_action_class"] == {"PROTECTIVE": 1}
+        assert diff_payload["override_impact_analysis"]["mismatch_count"] == 1
