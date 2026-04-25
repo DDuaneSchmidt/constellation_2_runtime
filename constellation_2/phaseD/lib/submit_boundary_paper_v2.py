@@ -165,6 +165,11 @@ def run_submit_boundary_paper_v2(
       0 success (submission + event written)
       2 veto written or prereq failed (fail-closed posture)
     """
+    raise RuntimeError(
+        "LEGACY_EXECUTION_SUBMISSION_PATH_DISABLED:"
+        "use_submit_boundary_paper_v4_with_execution_submission_record"
+    )
+
     _parse_utc_z(eval_time_utc)
     day = _day_from_eval_time_utc(eval_time_utc)
 

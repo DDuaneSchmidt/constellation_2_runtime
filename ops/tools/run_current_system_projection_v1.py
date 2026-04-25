@@ -16,6 +16,7 @@ from constellation_2.common.current_system_projection_v1 import (
     build_current_system_projection_v1,
     write_current_system_projection_v1,
 )
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
 from constellation_2.common.execution_journal_v1 import (
     IDENTITY_FIELDS_V1,
     identity_tuple_from_mapping_v1,
@@ -147,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--day_utc", required=True)
     ap.add_argument(
         "--truth_root",
-        default=str((REPO_ROOT / "constellation_2/runtime/truth").resolve()),
+        default=str(resolve_canonical_truth_root().resolve()),
     )
     args = ap.parse_args(argv)
 

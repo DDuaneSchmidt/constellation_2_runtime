@@ -15,7 +15,8 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     resolve_fact_plane_truth_root_v1,
     sha256_file_v1,
 )
-from constellation_2.common.runtime_contract_v1 import resolve_release_provenance
+from constellation_2.common.runtime_contract_v1 import resolve_release_provenance, resolve_truth_sleeves_root
+from constellation_2.common.runtime_path_authority_v1 import resolve_decision_truth_root_v1
 from constellation_2.common.trade_submit_readiness_authority_v1 import (
     resolve_canonical_governed_sleeve_truth_root,
     resolve_governed_account_binding,
@@ -41,6 +42,10 @@ PRODUCTION_CERT_GATE_IDS: Tuple[str, ...] = (
     "replay_certification_gate_v1",
 )
 ALL_TRACKED_GATE_IDS: Tuple[str, ...] = CORE_GATE_IDS + PRODUCTION_CERT_GATE_IDS
+
+
+def _verdict_artifact_path(*, sleeve_truth_root: Path, family: str, day_utc: str, filename: str) -> Path:
+    return (Path(sleeve_truth_root).resolve() / "reports" / family / str(day_utc).strip() / filename).resolve()
 
 
 def resolve_capability_state_path(*, truth_root: Path, day_utc: str) -> Path:
@@ -191,7 +196,7 @@ def derive_capability_state_payload(
 ) -> Dict[str, Any]:
     resolved_repo_root = Path(repo_root).resolve()
     authoritative_repo_root = resolve_authoritative_repo_root_v1(resolved_repo_root)
-    resolved_truth_root = resolve_fact_plane_truth_root_v1(truth_root)
+    resolved_truth_root = resolve_decision_truth_root_v1(truth_root, repo_root=resolved_repo_root)
     env = str(environment).strip().upper()
     day = str(day_utc).strip()
     account = str(ib_account).strip()
@@ -298,11 +303,14 @@ def derive_capability_state_payload(
     capability_rows.append(row)
     source_manifest.extend(row["source_artifacts"])
 
-    handshake_pointer_path = (resolved_truth_root / "ib_api_handshake" / "latest_pointer.v1.json").resolve()
-    handshake_artifact_path = (resolved_truth_root / "ib_api_handshake" / day / "ib_api_handshake.v1.json").resolve()
+    handshake_truth_root = Path(primary_binding.truth_root).resolve() if primary_binding is not None else (
+        resolve_truth_sleeves_root().resolve() / "PRIMARY" / env
+    ).resolve()
+    handshake_pointer_path = (handshake_truth_root / "ib_api_handshake" / "latest_pointer.v1.json").resolve()
+    handshake_artifact_path = (handshake_truth_root / "ib_api_handshake" / day / "ib_api_handshake.v1.json").resolve()
     try:
         handshake = resolve_pointer_bound_handshake_state(
-            truth_root=resolved_truth_root,
+            truth_root=handshake_truth_root,
             day_utc=day,
             environment=env,
             ib_account=account,
@@ -338,15 +346,55 @@ def derive_capability_state_payload(
     capability_rows.append(row)
     source_manifest.extend(row["source_artifacts"])
 
-    sleeve_truth_root = Path(primary_binding.truth_root).resolve() if primary_binding is not None else (
-        authoritative_repo_root / "constellation_2" / "runtime" / "truth_sleeves" / "PRIMARY" / env
-    ).resolve()
+    sleeve_truth_root = handshake_truth_root
     production_cert_truth_root = sleeve_truth_root
     if primary_binding is not None:
         try:
             production_cert_truth_root = resolve_canonical_governed_sleeve_truth_root(primary_binding)
         except Exception:
             production_cert_truth_root = sleeve_truth_root
+
+    for capability_id, verdict_family, filename, accepted_statuses in (
+        ("startup_authorization_gate_set_ready", "authorization_gate_verdict_v1", "authorization_gate_verdict.v1.json", {"PASS", "BOOTSTRAP_PASS"}),
+        ("economic_health_gate_set_complete", "economic_health_gate_verdict_v1", "economic_health_gate_verdict.v1.json", {"PASS"}),
+    ):
+        verdict_path = _verdict_artifact_path(
+            sleeve_truth_root=sleeve_truth_root,
+            family=verdict_family,
+            day_utc=day,
+            filename=filename,
+        )
+        if not verdict_path.exists() or not verdict_path.is_file():
+            row = _capability_row(
+                capability_id=capability_id,
+                status="FAIL",
+                kind="SYNTHESIZED_SUMMARY",
+                reason_codes=[f"{verdict_family}:MISSING"],
+                source_artifacts=[_missing_artifact_ref(artifact_family=verdict_family, path=verdict_path)],
+                details={"verdict_family": verdict_family, "sleeve_truth_root": str(sleeve_truth_root)},
+            )
+        else:
+            verdict_payload = _read_json(verdict_path)
+            verdict_status = str(verdict_payload.get("status") or "").strip().upper() or "UNKNOWN"
+            reason_codes = [
+                f"{verdict_family}:{verdict_status}",
+                *[f"{verdict_family}:{code}" for code in (verdict_payload.get("reason_codes") or []) if str(code).strip()],
+            ]
+            row = _capability_row(
+                capability_id=capability_id,
+                status="PASS" if verdict_status in accepted_statuses else "FAIL",
+                kind="SYNTHESIZED_SUMMARY",
+                reason_codes=[] if verdict_status in accepted_statuses else reason_codes,
+                source_artifacts=[_artifact_ref(artifact_family=verdict_family, path=verdict_path)],
+                details={
+                    "verdict_family": verdict_family,
+                    "verdict_status": verdict_status,
+                    "sleeve_truth_root": str(sleeve_truth_root),
+                },
+            )
+        capability_rows.append(row)
+        source_manifest.extend(row["source_artifacts"])
+
     for capability_id, gate_ids in (
         ("core_sleeve_gate_set_ready", CORE_GATE_IDS),
         ("production_certification_gate_set_complete", PRODUCTION_CERT_GATE_IDS),

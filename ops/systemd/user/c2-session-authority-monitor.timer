@@ -1,0 +1,10 @@
+[Unit]
+Description=Constellation Session Authority Monitor Timer
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=c2-session-authority-monitor.service
+
+[Install]
+WantedBy=timers.target

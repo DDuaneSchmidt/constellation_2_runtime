@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List
 from datetime import date, timedelta
@@ -40,8 +41,8 @@ from constellation_2.common.capability_state_v1 import (
     resolve_production_policy_verdict_path,
     resolve_policy_diff_path,
 )
-from constellation_2.common.runtime_path_authority_v1 import (
-    resolve_decision_truth_root_v1,
+from constellation_2.common.decision_authority_bridge_v1 import (
+    resolve_decision_truth_root_bridge_v1,
 )
 from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_current_system_projection_path,
@@ -49,6 +50,7 @@ from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_operator_statement_path,
     resolve_execution_journal_path,
     resolve_paper_session_ledger_path,
+    resolve_submit_boundary_status_path,
     resolve_startup_proof_validation_path,
     resolve_trading_day_state_machine_path,
 )
@@ -162,6 +164,51 @@ def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _write_bytes_replace(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(prefix=f".{path.name}.tmp.", dir=str(path.parent), delete=False) as tmp:
+        tmp.write(data)
+        tmp.flush()
+        import os as _os
+        _os.fsync(tmp.fileno())
+        tmp_path = Path(tmp.name)
+    tmp_path.replace(path)
+
+
+def _positions_items_by_id(snapshot_obj: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    positions = snapshot_obj.get("positions") if isinstance(snapshot_obj.get("positions"), dict) else {}
+    items = positions.get("items") if isinstance(positions, dict) else []
+    if not isinstance(items, list):
+        return {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        position_id = str(item.get("position_id") or "").strip()
+        if position_id:
+            out[position_id] = item
+    return out
+
+
+def _is_safe_positions_snapshot_v2_seed_upgrade(existing_obj: Dict[str, Any], candidate_obj: Dict[str, Any]) -> bool:
+    if str(existing_obj.get("schema_id") or "").strip() != "C2_POSITIONS_SNAPSHOT_V2":
+        return False
+    if str(candidate_obj.get("schema_id") or "").strip() != "C2_POSITIONS_SNAPSHOT_V2":
+        return False
+    if str(existing_obj.get("day_utc") or "").strip() != str(candidate_obj.get("day_utc") or "").strip():
+        return False
+    existing_items = _positions_items_by_id(existing_obj)
+    candidate_items = _positions_items_by_id(candidate_obj)
+    if not existing_items and bool(candidate_items):
+        return True
+    if len(candidate_items) < len(existing_items):
+        return False
+    for position_id, existing_item in existing_items.items():
+        if candidate_items.get(position_id) != existing_item:
+            return False
+    return True
+
+
 def _mirror_canonical_file(*, source_path: Path, target_path: Path, artifact_id: str) -> Dict[str, Any]:
     if not source_path.exists() or not source_path.is_file():
         return {
@@ -175,6 +222,23 @@ def _mirror_canonical_file(*, source_path: Path, target_path: Path, artifact_id:
     if target_path.exists():
         target_sha = _sha256_file(target_path)
         if target_sha != source_sha:
+            if source_path.name == "positions_snapshot.v2.json" and target_path.name == "positions_snapshot.v2.json":
+                try:
+                    source_obj = json.loads(source_bytes.decode("utf-8"))
+                    target_obj = json.loads(target_path.read_text(encoding="utf-8"))
+                except Exception:
+                    source_obj = None
+                    target_obj = None
+                if isinstance(source_obj, dict) and isinstance(target_obj, dict):
+                    if _is_safe_positions_snapshot_v2_seed_upgrade(target_obj, source_obj):
+                        _write_bytes_replace(target_path, source_bytes)
+                        return {
+                            "status": "BACKFILL_REPAIRED",
+                            "artifact_id": artifact_id,
+                            "source_path": str(source_path),
+                            "target_path": str(target_path),
+                            "sha256": source_sha,
+                        }
             return {
                 "status": "TARGET_MISMATCH",
                 "artifact_id": artifact_id,
@@ -324,7 +388,11 @@ def main() -> int:
     ap.add_argument("--truth_root", default=str((REPO_ROOT / "constellation_2/runtime/truth").resolve()))
     args = ap.parse_args()
 
-    truth_root = resolve_decision_truth_root_v1(args.truth_root, repo_root=REPO_ROOT)
+    truth_root = resolve_decision_truth_root_bridge_v1(
+        args.truth_root,
+        repo_root=REPO_ROOT,
+        caller="ops/tools/run_paper_session_admission_v1.py",
+    )
     day_utc = str(args.day_utc).strip()
     input_day_utc = str((args.input_day_utc or "").strip() or day_utc)
     producer_git_sha = _producer_git_sha()
@@ -369,8 +437,14 @@ def main() -> int:
     canonical_positions_snapshot_path = (
         truth_root / "positions_v1" / "snapshots" / day_utc / "positions_snapshot.v2.json"
     ).resolve()
+    canonical_input_positions_snapshot_path = (
+        truth_root / "positions_v1" / "snapshots" / input_day_utc / "positions_snapshot.v2.json"
+    ).resolve()
     sleeve_positions_snapshot_path = (
         primary_sleeve_truth_root / "positions_v1" / "snapshots" / day_utc / "positions_snapshot.v2.json"
+    ).resolve()
+    sleeve_input_positions_snapshot_path = (
+        primary_sleeve_truth_root / "positions_v1" / "snapshots" / input_day_utc / "positions_snapshot.v2.json"
     ).resolve()
     canonical_cash_ledger_snapshot_path = (
         truth_root / "cash_ledger_v1" / "snapshots" / day_utc / "cash_ledger_snapshot.v1.json"
@@ -480,6 +554,25 @@ def main() -> int:
             artifact_id="positions_snapshot_v2",
             expected_day_utc=day_utc,
         ),
+        "input_day_positions_snapshot_v2": _run(
+            [
+                sys.executable,
+                "-m",
+                POSITIONS_TOOL,
+                "--day_utc",
+                input_day_utc,
+                "--producer_git_sha",
+                producer_git_sha,
+                "--producer_repo",
+                producer_repo,
+            ],
+            truth_root=truth_root,
+        ) if input_day_utc != day_utc else {
+            "cmd": [],
+            "returncode": 0,
+            "stdout": "OK: input_day_positions_snapshot_v2 action=SKIP_SAME_DAY",
+            "stderr": "",
+        },
         "cash_ledger_snapshot_v1": _run_if_artifact_missing(
             [
                 sys.executable,
@@ -538,6 +631,16 @@ def main() -> int:
             target_path=sleeve_positions_snapshot_path,
             artifact_id="sleeve_positions_snapshot_v2",
         ),
+        "sleeve_input_positions_snapshot_seed_v2": _mirror_canonical_file(
+            source_path=canonical_input_positions_snapshot_path,
+            target_path=sleeve_input_positions_snapshot_path,
+            artifact_id="sleeve_input_positions_snapshot_v2",
+        ) if input_day_utc != day_utc else {
+            "status": "SKIP_SAME_DAY",
+            "artifact_id": "sleeve_input_positions_snapshot_v2",
+            "source_path": str(canonical_input_positions_snapshot_path),
+            "target_path": str(sleeve_input_positions_snapshot_path),
+        },
         "sleeve_cash_ledger_snapshot_seed_v1": _mirror_canonical_file(
             source_path=canonical_cash_ledger_snapshot_path,
             target_path=sleeve_cash_ledger_snapshot_path,
@@ -917,6 +1020,11 @@ def main() -> int:
             "runs": runs,
             "source_artifacts": [
                 {
+                    "artifact_family": "submit_boundary_status_v1",
+                    "artifact_path": str(resolve_submit_boundary_status_path(truth_root=truth_root, day_utc=day_utc)),
+                    "artifact_sha256": _sha256_file(resolve_submit_boundary_status_path(truth_root=truth_root, day_utc=day_utc)),
+                },
+                {
                     "artifact_family": "paper_policy_verdict_v1",
                     "artifact_path": str(resolve_paper_policy_verdict_path(truth_root=truth_root, day_utc=day_utc)),
                     "artifact_sha256": _sha256_file(resolve_paper_policy_verdict_path(truth_root=truth_root, day_utc=day_utc)),
@@ -961,7 +1069,18 @@ def main() -> int:
         "overall_exit_code": 0,
         "generated_at_utc": f"{day_utc}T00:00:00Z",
         "runs": runs,
-        "source_artifacts": [],
+        "source_artifacts": [
+            {
+                "artifact_family": "submit_boundary_status_v1",
+                "artifact_path": str(resolve_submit_boundary_status_path(truth_root=truth_root, day_utc=day_utc)),
+                "artifact_sha256": _sha256_file(resolve_submit_boundary_status_path(truth_root=truth_root, day_utc=day_utc)),
+            },
+            {
+                "artifact_family": "execution_journal_v1",
+                "artifact_path": str(resolve_execution_journal_path(truth_root=truth_root, day_utc=day_utc)),
+                "artifact_sha256": _sha256_file(resolve_execution_journal_path(truth_root=truth_root, day_utc=day_utc)),
+            },
+        ],
     }
     execution_payload = derive_execution_outcome_payload(truth_root=truth_root, context=execution_context)
     write_execution_outcome_v1(truth_root=truth_root, payload=execution_payload)

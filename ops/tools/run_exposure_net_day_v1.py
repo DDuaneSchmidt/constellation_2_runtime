@@ -19,6 +19,9 @@ Strictness posture (v1):
 - If intents dir exists but empty: writes FAIL_MISSING_INPUTS (deterministic).
 - For this bootstrap v1, if positions/cash snapshots are missing we still write OK with zeros and explicit reason codes.
   (Bundle A allocation/authorization will still enforce headroom=0 due to envelope gate.)
+- PAPER bootstrap carve-out:
+  if this is a governed PAPER bootstrap day with zero positions, no prior exposure chain, and no intents,
+  emit deterministic zero exposure with reason code PAPER_BOOTSTRAP_ZERO_EXPOSURE.
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -45,9 +49,18 @@ from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_again
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RISK/exposure_net.v1.schema.json"
 POLICY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/C2_CAPITAL_AUTHORITY_POLICY_V1.json").resolve()
 
-TRUTH = resolve_truth_root(repo_root=REPO_ROOT).resolve()
-INTENTS_DAY_ROOT = (TRUTH / "intents_v1/snapshots").resolve()
-OUT_ROOT = (TRUTH / "risk_v1/exposure_net_v1").resolve()
+def _resolve_truth_root(truth_root_arg: Optional[str]) -> Path:
+    if truth_root_arg:
+        return Path(truth_root_arg).resolve()
+    return resolve_truth_root(repo_root=REPO_ROOT).resolve()
+
+
+def _intents_day_root(truth_root: Path) -> Path:
+    return (truth_root / "intents_v1" / "snapshots").resolve()
+
+
+def _out_root(truth_root: Path) -> Path:
+    return (truth_root / "risk_v1" / "exposure_net_v1").resolve()
 
 
 def _git_sha() -> str:
@@ -94,8 +107,8 @@ def _atomic_write_refuse_overwrite(path: Path, data: bytes) -> None:
     os.replace(str(tmp), str(path))
 
 
-def _list_intent_files(day: str) -> List[Path]:
-    d = (INTENTS_DAY_ROOT / day).resolve()
+def _list_intent_files(day: str, truth_root: Path) -> List[Path]:
+    d = (_intents_day_root(truth_root) / day).resolve()
     if not d.exists():
         raise SystemExit(f"FAIL: INTENTS_DAY_DIR_MISSING: {str(d)}")
     if not d.is_dir():
@@ -112,6 +125,53 @@ def _parse_day(day: str) -> str:
     if len(s) != 10 or s[4] != "-" or s[7] != "-":
         raise SystemExit(f"FAIL: BAD_DAY_UTC_FORMAT_EXPECTED_YYYY_MM_DD: {s!r}")
     return s
+
+
+def _truth_root_environment(truth_root: Path) -> str:
+    resolved = truth_root.resolve()
+    for parent in [resolved, *resolved.parents]:
+        if parent.name != "truth_sleeves":
+            continue
+        try:
+            rel = resolved.relative_to(parent)
+        except ValueError:
+            continue
+        if len(rel.parts) >= 2:
+            return str(rel.parts[1]).strip().upper()
+    return ""
+
+
+def _canonical_truth_root_for(truth_root: Path) -> Path:
+    resolved = truth_root.resolve()
+    for parent in [resolved, *resolved.parents]:
+        if parent.name == "truth_sleeves":
+            return (parent.parent / "truth").resolve()
+    return resolved
+
+
+def _target_day_admission_mode(day: str, truth_root: Path) -> str:
+    candidate = (_canonical_truth_root_for(truth_root) / "target_day_admission_v1" / f"{day}.json").resolve()
+    if not candidate.exists() or not candidate.is_file():
+        return ""
+    payload = _read_json_obj(candidate)
+    return str(payload.get("mode") or "").strip().upper()
+
+
+def _positions_known_zero(day: str, truth_root: Path) -> Tuple[bool, bool]:
+    path = (truth_root / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json").resolve()
+    if not path.exists() or not path.is_file():
+        return False, False
+    payload = _read_json_obj(path)
+    items = payload.get("items")
+    if not isinstance(items, list):
+        return True, False
+    return True, len(items) == 0
+
+
+def _prior_day_exposure_exists(day: str, truth_root: Path) -> bool:
+    prev = (date.fromisoformat(day) - timedelta(days=1)).isoformat()
+    path = (_out_root(truth_root) / prev / "exposure_net.v1.json").resolve()
+    return path.exists() and path.is_file()
 
 def _policy_engine_ids_fallback() -> List[str]:
     """
@@ -147,9 +207,11 @@ def _policy_engine_ids_fallback() -> List[str]:
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="run_exposure_net_day_v1")
     ap.add_argument("--day_utc", required=True)
+    ap.add_argument("--truth_root", required=False, default=None)
     args = ap.parse_args(argv)
 
     day = _parse_day(args.day_utc)
+    truth_root = _resolve_truth_root(args.truth_root)
 
     produced_utc = f"{day}T00:00:00Z"
     reason_codes: List[str] = []
@@ -160,7 +222,28 @@ def main(argv: Optional[List[str]] = None) -> int:
         raise SystemExit(f"FAIL: POLICY_MISSING: {str(POLICY_PATH)}")
     policy_sha = _sha256_file(POLICY_PATH)
 
-    intent_files = _list_intent_files(day)
+    intents_dir_missing = False
+    try:
+        intent_files = _list_intent_files(day, truth_root)
+    except SystemExit as exc:
+        detail = str(exc)
+        if "INTENTS_DAY_DIR_MISSING" in detail:
+            intents_dir_missing = True
+            intent_files = []
+        else:
+            raise
+
+    positions_known, positions_zero = _positions_known_zero(day, truth_root)
+    bootstrap_zero_exposure = (
+        _truth_root_environment(truth_root) == "PAPER"
+        and _target_day_admission_mode(day, truth_root) == "PAPER_BOOTSTRAP"
+        and positions_known
+        and positions_zero
+        and not _prior_day_exposure_exists(day, truth_root)
+        and not intent_files
+    )
+    if intents_dir_missing and not bootstrap_zero_exposure:
+        raise SystemExit(f"FAIL: INTENTS_DAY_DIR_MISSING: {str((_intents_day_root(truth_root) / day).resolve())}")
 
     input_manifest: List[Dict[str, Any]] = []
     input_manifest.append({"type": "policy_manifest", "path": str(POLICY_PATH), "sha256": policy_sha, "day_utc": None, "producer": "governance"})
@@ -173,8 +256,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     per_engine: Dict[str, Dict[str, Any]] = {}
 
     if not intent_files:
-        reason_codes.append("CAPAUTH_INTENTS_MISSING")
-        status = "FAIL_MISSING_INPUTS"
+        if bootstrap_zero_exposure:
+            reason_codes.append("PAPER_BOOTSTRAP_ZERO_EXPOSURE")
+            status = "OK"
+        else:
+            reason_codes.append("CAPAUTH_INTENTS_MISSING")
+            status = "FAIL_MISSING_INPUTS"
     else:
         status = "OK"
         for p in intent_files:
@@ -241,7 +328,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     except CanonicalizationError as e:
         raise SystemExit(f"FAIL: CANONICALIZATION_FAILED: {e}") from e
 
-    out_path = (OUT_ROOT / day / "exposure_net.v1.json").resolve()
+    out_path = (_out_root(truth_root) / day / "exposure_net.v1.json").resolve()
     _atomic_write_refuse_overwrite(out_path, payload)
 
     print(f"OK: EXPOSURE_NET_V1_WRITTEN day_utc={day} path={out_path} sha256={_sha256_bytes(payload)} status={status}")

@@ -18,6 +18,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 # -----------------------------------------------------------------------------
 
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root  # noqa: E402
 from constellation_2.phaseK_struct.lib.k_struct_common_v1 import (  # noqa: E402
     KStructError,
     sha256_file,
@@ -31,7 +32,7 @@ from constellation_2.phaseK_struct.lib.k_struct_capital_scaling_v1 import run_ca
 from constellation_2.phaseK_struct.lib.k_struct_monte_carlo_v1 import run_monte_carlo_structural  # noqa: E402
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH_ROOT = resolve_canonical_truth_root().resolve()
 OUT_ROOT = (TRUTH_ROOT / "certification_v1/phaseK_struct").resolve()
 
 

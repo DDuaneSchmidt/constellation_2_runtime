@@ -9,12 +9,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
 from constellation_2.phaseD.lib.canon_json_v1 import CanonicalizationError, canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH = resolve_canonical_truth_root().resolve()
 
 SCHEMA = "governance/04_DATA/SCHEMAS/C2/MONITORING/paper_readiness_report.v1.schema.json"
 

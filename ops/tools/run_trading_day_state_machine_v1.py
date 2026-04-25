@@ -34,10 +34,14 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     read_trading_day_intent_generation_ref_v1,
     resolve_fact_plane_truth_root_v1,
 )
+from constellation_2.common.day_open_window_v1 import build_day_open_window_v1
+from constellation_2.common.day_open_policy_v1 import build_day_open_policy_snapshot
 from constellation_2.common.execution_journal_v1 import (
     append_state_machine_decision_event_v1,
 )
 from constellation_2.common.paper_session_path_alignment_v1 import (
+    resolve_day_open_attempt_path,
+    resolve_day_open_trigger_path,
     resolve_deployment_state_machine_path,
     resolve_intents_day_completeness_path,
     resolve_paper_day_control_plane_path,
@@ -53,6 +57,9 @@ from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_trading_day_intent_generation_path,
     resolve_trading_day_state_machine_path,
 )
+from constellation_2.common.runtime_path_authority_v1 import resolve_decision_truth_root_v1
+from constellation_2.common.runtime_path_authority_v1 import require_authoritative_repo_runtime_v1
+from constellation_2.common.control_plane_read_gateway_v1 import read_control_plane_surface_v1
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 
 
@@ -203,7 +210,40 @@ def _superseded_surface_rows(*, truth_root: Path, day_utc: str) -> list[dict[str
     ]
 
 
-def _build_summary(*, day_utc: str, decision: str, blocker: str) -> str:
+def _build_summary(
+    *,
+    day_utc: str,
+    decision: str,
+    blocker: str,
+    open_lifecycle_state: str,
+    open_policy: dict[str, Any],
+) -> str:
+    if open_lifecycle_state == "PRE_OPEN_READY":
+        return f"Paper trading is admitted for {day_utc} and waiting for the governed open window."
+    if open_lifecycle_state == "PAPER_OPEN_AVAILABLE":
+        return f"Paper trading is currently authorized for {day_utc}; governed paper open is available now."
+    if open_lifecycle_state == "OPEN_WAITING_FOR_AUTHORITY":
+        return f"Paper trading is admitted for {day_utc} but is still waiting for binding open authority."
+    if open_lifecycle_state == "OPEN_TRIGGER_EMITTED":
+        return f"A governed day-open trigger is emitted for {day_utc} and is awaiting orchestrator consumption."
+    if open_lifecycle_state == "OPEN_ATTEMPTED":
+        return f"A governed day-open attempt is recorded for {day_utc} and is awaiting final outcome."
+    if open_lifecycle_state == "OPEN_SUCCEEDED":
+        if str(open_policy.get("environment") or "PAPER").strip().upper() == "PAPER":
+            return f"The latest governed paper open succeeded for {day_utc}; paper trading remains available while readiness stays granted."
+        if bool(open_policy.get("successful_open_already_recorded") is True):
+            return f"Paper trading open already succeeded for {day_utc}; additional opens are forbidden."
+        return f"Paper trading open succeeded for {day_utc}."
+    if open_lifecycle_state == "LATE_OPEN_AVAILABLE":
+        return f"Initial paper open did not succeed for {day_utc}; one governed late-open remains available."
+    if open_lifecycle_state == "LATE_OPEN_EXHAUSTED":
+        return f"Late-open has been consumed or exhausted for {day_utc}; no further open attempts are allowed today."
+    if open_lifecycle_state == "OPEN_MISSED":
+        return f"Paper trading was authorized for {day_utc}, but the governed open window expired without a successful open attempt."
+    if open_lifecycle_state == "OPEN_FAILED":
+        if str(open_policy.get("environment") or "PAPER").strip().upper() == "PAPER":
+            return f"The latest governed paper open failed for {day_utc}; another governed paper open remains allowed while readiness stays granted."
+        return f"Paper trading open failed for {day_utc} after a governed open attempt."
     if decision == "READY_NOW":
         return (
             f"Paper trading is startable for {day_utc}. "
@@ -239,10 +279,15 @@ def _resolve_source_emission_identity(*, truth_root: Path, day_utc: str, day_att
     release_root = str(release_build.get("release_root") or "").strip()
     if not pipeline_run_id or not release_id or not release_root:
         return None
-    manifest_path = (Path(release_root).resolve() / "release_manifest.v1.json").resolve()
-    if not manifest_path.exists() or not manifest_path.is_file():
+    try:
+        manifest_ref = read_control_plane_surface_v1(
+            domain="release",
+            surface="release_manifest_for_release_root",
+            release_root=Path(release_root).resolve(),
+        )
+    except Exception:
         return None
-    manifest_payload = read_json_object_v1(manifest_path)
+    manifest_payload = dict(manifest_ref.payload)
     git_sha = str(manifest_payload.get("git_sha") or "").strip().lower()
     if len(git_sha) != 40:
         return None
@@ -281,6 +326,73 @@ def _append_transition(
     )
 
 
+def _optional_payload(path: Path) -> dict[str, Any] | None:
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        payload = read_json_object_v1(path)
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _open_lifecycle_state(
+    *,
+    repo_root: Path,
+    truth_root: Path,
+    day_utc: str,
+    final_start_decision: str,
+    trigger_payload: dict[str, Any] | None,
+    attempt_payload: dict[str, Any] | None,
+) -> dict[str, Any]:
+    trigger_status = str((trigger_payload or {}).get("trigger_status") or "").strip().upper()
+    attempt_classification = str((attempt_payload or {}).get("final_classification") or "").strip().upper()
+    window = build_day_open_window_v1(repo_root=repo_root, day_utc=day_utc)
+    open_policy = build_day_open_policy_snapshot(
+        environment="PAPER",
+        window_status=window.window_status,
+        trigger_payload=trigger_payload,
+        attempt_payload=attempt_payload,
+        attempt_path=resolve_day_open_attempt_path(truth_root=truth_root, day_utc=day_utc),
+    )
+    is_paper_unbounded = str(open_policy.get("policy_mode") or "").strip().upper() == "PAPER_READY_WHEN_GRANTED_UNBOUNDED_SAME_DAY"
+
+    state = "OPEN_WAITING_FOR_AUTHORITY"
+    reason = "STATE_MACHINE_OPEN_WAITING_FOR_AUTHORITY"
+    if final_start_decision != "READY_NOW":
+        if window.window_status == "PRE_OPEN":
+            state = "PRE_OPEN_READY"
+            reason = "STATE_MACHINE_PRE_OPEN_READY"
+        elif not is_paper_unbounded and window.window_status == "POST_OPEN_WINDOW":
+            state = "OPEN_MISSED"
+            reason = "STATE_MACHINE_OPEN_WINDOW_EXPIRED_BEFORE_READY"
+        return {"state": state, "reason": reason, "policy": open_policy}
+
+    if attempt_classification in {"OPEN_ATTEMPTED", "OPEN_SUCCEEDED", "OPEN_FAILED", "OPEN_MISSED"}:
+        if is_paper_unbounded and attempt_classification == "OPEN_MISSED":
+            return {"state": "PAPER_OPEN_AVAILABLE", "reason": "STATE_MACHINE_PAPER_READY_AVAILABLE_NOW", "policy": open_policy}
+        if attempt_classification in {"OPEN_FAILED", "OPEN_MISSED"} and bool(open_policy.get("late_open_available") is True):
+            return {"state": "LATE_OPEN_AVAILABLE", "reason": "STATE_MACHINE_LATE_OPEN_AVAILABLE", "policy": open_policy}
+        if attempt_classification in {"OPEN_FAILED", "OPEN_MISSED"} and bool(open_policy.get("late_open_consumed") is True):
+            return {"state": "LATE_OPEN_EXHAUSTED", "reason": "STATE_MACHINE_LATE_OPEN_EXHAUSTED", "policy": open_policy}
+        reason_map = {
+            "OPEN_ATTEMPTED": "STATE_MACHINE_OPEN_ATTEMPT_RECORDED",
+            "OPEN_SUCCEEDED": "STATE_MACHINE_OPEN_SUCCEEDED",
+            "OPEN_FAILED": "STATE_MACHINE_OPEN_FAILED",
+            "OPEN_MISSED": "STATE_MACHINE_OPEN_MISSED",
+        }
+        return {"state": attempt_classification, "reason": reason_map[attempt_classification], "policy": open_policy}
+    if trigger_status == "EMITTED":
+        return {"state": "OPEN_TRIGGER_EMITTED", "reason": "STATE_MACHINE_OPEN_TRIGGER_PENDING_CONSUMPTION", "policy": open_policy}
+    if is_paper_unbounded:
+        return {"state": "PAPER_OPEN_AVAILABLE", "reason": "STATE_MACHINE_PAPER_READY_AVAILABLE_NOW", "policy": open_policy}
+    if window.window_status == "PRE_OPEN":
+        return {"state": "PRE_OPEN_READY", "reason": "STATE_MACHINE_PRE_OPEN_READY", "policy": open_policy}
+    if window.window_status == "POST_OPEN_WINDOW":
+        return {"state": "OPEN_MISSED", "reason": "STATE_MACHINE_OPEN_WINDOW_EXPIRED_WITHOUT_ATTEMPT", "policy": open_policy}
+    return {"state": "OPEN_WAITING_FOR_AUTHORITY", "reason": "STATE_MACHINE_AUTHORITY_GRANTED_WAITING_FOR_TRIGGER", "policy": open_policy}
+
+
 def _build_state_transitions(
     *,
     evaluated_at_utc: str,
@@ -290,6 +402,10 @@ def _build_state_transitions(
     final_start_decision: str,
     ledger_authority_status: str,
     first_true_blocker_code: str,
+    open_lifecycle_state: str,
+    open_lifecycle_reason: str,
+    trigger_ref: str,
+    attempt_ref: str,
 ) -> list[dict[str, str]]:
     transitions: list[dict[str, str]] = []
     blocker_code = first_true_blocker_code or "STATE_MACHINE_DECISION_UNSPECIFIED"
@@ -363,14 +479,64 @@ def _build_state_transitions(
             transition_reason_code="STATE_MACHINE_READY_NOW",
             evidence_ref=execution_ref,
         )
-        _append_transition(
-            transitions,
-            from_state="DAY_OPEN_ALLOWED",
-            to_state="DAY_NOT_OPENED",
-            transition_at_utc=evaluated_at_utc,
-            transition_reason_code="STATE_MACHINE_AUTHORITY_ONLY_NO_OPEN_COMMAND_EXECUTED",
-            evidence_ref=execution_ref,
-        )
+        if open_lifecycle_state == "OPEN_TRIGGER_EMITTED":
+            _append_transition(
+                transitions,
+                from_state="DAY_OPEN_ALLOWED",
+                to_state="DAY_OPEN_TRIGGER_EMITTED",
+                transition_at_utc=evaluated_at_utc,
+                transition_reason_code=open_lifecycle_reason,
+                evidence_ref=trigger_ref or execution_ref,
+            )
+        elif open_lifecycle_state == "OPEN_ATTEMPTED":
+            _append_transition(
+                transitions,
+                from_state="DAY_OPEN_ALLOWED",
+                to_state="DAY_OPEN_ATTEMPTED",
+                transition_at_utc=evaluated_at_utc,
+                transition_reason_code=open_lifecycle_reason,
+                evidence_ref=attempt_ref or execution_ref,
+            )
+        elif open_lifecycle_state == "OPEN_SUCCEEDED":
+            _append_transition(
+                transitions,
+                from_state="DAY_OPEN_ALLOWED",
+                to_state="DAY_OPENED",
+                transition_at_utc=evaluated_at_utc,
+                transition_reason_code=open_lifecycle_reason,
+                evidence_ref=attempt_ref or execution_ref,
+            )
+        elif open_lifecycle_state == "LATE_OPEN_AVAILABLE":
+            _append_transition(
+                transitions,
+                from_state="DAY_OPEN_ALLOWED",
+                to_state="DAY_LATE_OPEN_AVAILABLE",
+                transition_at_utc=evaluated_at_utc,
+                transition_reason_code=open_lifecycle_reason,
+                evidence_ref=attempt_ref or trigger_ref or execution_ref,
+            )
+        elif open_lifecycle_state == "LATE_OPEN_EXHAUSTED":
+            _append_transition(
+                transitions,
+                from_state="DAY_OPEN_ALLOWED",
+                to_state="DAY_LATE_OPEN_EXHAUSTED",
+                transition_at_utc=evaluated_at_utc,
+                transition_reason_code=open_lifecycle_reason,
+                evidence_ref=attempt_ref or trigger_ref or execution_ref,
+            )
+        else:
+            _append_transition(
+                transitions,
+                from_state="DAY_OPEN_ALLOWED",
+                to_state="DAY_NOT_OPENED",
+                transition_at_utc=evaluated_at_utc,
+                transition_reason_code=(
+                    open_lifecycle_reason
+                    if open_lifecycle_state == "OPEN_MISSED"
+                    else "STATE_MACHINE_AUTHORITY_ONLY_NO_OPEN_COMMAND_EXECUTED"
+                ),
+                evidence_ref=attempt_ref or trigger_ref or execution_ref,
+            )
         return transitions
 
     if completeness_status == "COMPLETE":
@@ -436,14 +602,48 @@ def _build_state_transitions(
     return transitions
 
 
+def _open_failure_blocker(
+    *,
+    attempt_payload: dict[str, Any] | None,
+    attempt_path: Path,
+    trigger_payload: dict[str, Any] | None,
+    trigger_path: Path,
+    default_code: str,
+) -> dict[str, str]:
+    if isinstance(attempt_payload, dict):
+        reason_codes = attempt_payload.get("reason_codes") if isinstance(attempt_payload.get("reason_codes"), list) else []
+        first_reason = _first_nonempty([str(code).strip() for code in reason_codes])
+        result_code = str(attempt_payload.get("result_code") or "").strip()
+        if first_reason or result_code:
+            return {
+                "first_true_blocker_code": first_reason or result_code,
+                "first_true_blocker_artifact_path": str(attempt_path),
+                "blocker_classification": "UNKNOWN",
+            }
+    if isinstance(trigger_payload, dict):
+        reason_code = str(trigger_payload.get("trigger_reason_code") or "").strip()
+        if reason_code:
+            return {
+                "first_true_blocker_code": reason_code,
+                "first_true_blocker_artifact_path": str(trigger_path),
+                "blocker_classification": "UNKNOWN",
+            }
+    return {
+        "first_true_blocker_code": default_code,
+        "first_true_blocker_artifact_path": "",
+        "blocker_classification": "UNKNOWN",
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
+    require_authoritative_repo_runtime_v1(REPO_ROOT)
     ap = argparse.ArgumentParser(prog="run_trading_day_state_machine_v1")
     ap.add_argument("--day_utc", required=True)
     ap.add_argument("--truth_root", default="")
     args = ap.parse_args(argv)
 
     day = parse_day_utc_v1(args.day_utc)
-    truth_root = resolve_fact_plane_truth_root_v1(args.truth_root)
+    truth_root = resolve_decision_truth_root_v1(args.truth_root, repo_root=REPO_ROOT)
     evaluated_at_utc = now_utc_iso_v1()
     output_path = resolve_trading_day_state_machine_path(truth_root=truth_root, day_utc=day)
     prior_payload = _load_prior_payload(output_path)
@@ -601,6 +801,10 @@ def main(argv: list[str] | None = None) -> int:
         "startup_proof_validation_status": "NOT_EVALUATED",
         "agreement_with_supporting_authority": False,
     }
+    day_open_trigger_path = resolve_day_open_trigger_path(truth_root=truth_root, day_utc=day)
+    day_open_attempt_path = resolve_day_open_attempt_path(truth_root=truth_root, day_utc=day)
+    day_open_trigger_payload = _optional_payload(day_open_trigger_path)
+    day_open_attempt_payload = _optional_payload(day_open_attempt_path)
 
     if final_start_decision in {"BLOCKED_BY_DEFECT", "BLOCKED_VALID"}:
         pass
@@ -744,8 +948,13 @@ def main(argv: list[str] | None = None) -> int:
                         (ledger_payload.get("evidence_freeze") or {}).get("overall_evidence_status") or ""
                     ).strip().upper()
                     or "NOT_EVALUATED",
-                    "system_ready": bool(ledger_payload.get("system_ready") is True),
-                    "submission_authorized": bool(ledger_payload.get("submission_authorized") is True),
+                    "system_ready": bool(
+                        control_state.get("system_ready") is True or ledger_payload.get("system_ready") is True
+                    ),
+                    "submission_authorized": bool(
+                        control_state.get("submission_authorized") is True
+                        or ledger_payload.get("submission_authorized") is True
+                    ),
                 }
                 startup_proof_result = {
                     "startup_proof_validation_path": str(startup_proof_ref.path),
@@ -887,6 +1096,14 @@ def main(argv: list[str] | None = None) -> int:
         }
         final_start_decision = "BLOCKED_VALID"
 
+    if final_start_decision == "READY_NOW":
+        blocking_codes = set()
+        first_true_blocker = {
+            "first_true_blocker_code": "",
+            "first_true_blocker_artifact_path": "",
+            "blocker_classification": "UNKNOWN",
+        }
+
     if not first_true_blocker["first_true_blocker_code"]:
         first_true_blocker["first_true_blocker_code"] = _first_nonempty(sorted(blocking_codes))
     if not first_true_blocker["first_true_blocker_artifact_path"]:
@@ -905,6 +1122,26 @@ def main(argv: list[str] | None = None) -> int:
     supersedes_prior_state_machine = bool(prior_payload)
     prior_state_machine_id = str((prior_payload or {}).get("state_machine_id") or "").strip()
     prior_day_attempt_id = str((prior_payload or {}).get("day_attempt_id") or "").strip()
+    open_lifecycle = _open_lifecycle_state(
+        repo_root=REPO_ROOT,
+        truth_root=truth_root,
+        day_utc=day,
+        final_start_decision=final_start_decision,
+        trigger_payload=day_open_trigger_payload,
+        attempt_payload=day_open_attempt_payload,
+    )
+    if open_lifecycle["state"] in {"OPEN_MISSED", "OPEN_FAILED", "LATE_OPEN_EXHAUSTED"} and not first_true_blocker["first_true_blocker_code"]:
+        first_true_blocker = _open_failure_blocker(
+            attempt_payload=day_open_attempt_payload,
+            attempt_path=day_open_attempt_path,
+            trigger_payload=day_open_trigger_payload,
+            trigger_path=day_open_trigger_path,
+            default_code=(
+                "OPEN_TRIGGER_OPEN_WINDOW_EXPIRED"
+                if open_lifecycle["state"] in {"OPEN_MISSED", "LATE_OPEN_EXHAUSTED"}
+                else "OPEN_ATTEMPT_FAILED"
+            ),
+        )
     transitions = _build_state_transitions(
         evaluated_at_utc=evaluated_at_utc,
         completeness_ref=upstream_intent_status["intents_day_completeness_ref"],
@@ -913,6 +1150,10 @@ def main(argv: list[str] | None = None) -> int:
         final_start_decision=final_start_decision,
         ledger_authority_status=supporting_session_authority["ledger_authority_status"],
         first_true_blocker_code=first_true_blocker["first_true_blocker_code"],
+        open_lifecycle_state=open_lifecycle["state"],
+        open_lifecycle_reason=open_lifecycle["reason"],
+        trigger_ref=str(day_open_trigger_path) if day_open_trigger_path.exists() else "",
+        attempt_ref=str(day_open_attempt_path) if day_open_attempt_path.exists() else "",
     )
 
     state_machine_parts = {
@@ -926,6 +1167,23 @@ def main(argv: list[str] | None = None) -> int:
         "supporting_daily_control_refs": supporting_daily_control_refs,
         "supporting_regeneration_results": supporting_regeneration_results,
         "supporting_session_authority": supporting_session_authority,
+        "open_lifecycle_state": open_lifecycle["state"],
+        "open_lifecycle_reason_code": open_lifecycle["reason"],
+        "open_policy": open_lifecycle["policy"],
+        "day_open_trigger": {
+            "path": str(day_open_trigger_path),
+            "trigger_status": str((day_open_trigger_payload or {}).get("trigger_status") or "").strip().upper() or "UNAVAILABLE",
+            "consumed": bool((day_open_trigger_payload or {}).get("consumed") is True),
+            "dedupe_key": str((day_open_trigger_payload or {}).get("dedupe_key") or "").strip(),
+            "trigger_kind": str((day_open_trigger_payload or {}).get("trigger_kind") or "").strip().upper() or "UNAVAILABLE",
+        },
+        "day_open_attempt": {
+            "path": str(day_open_attempt_path),
+            "attempt_status": str((day_open_attempt_payload or {}).get("final_classification") or "").strip().upper() or "UNAVAILABLE",
+            "open_command_executed": bool((day_open_attempt_payload or {}).get("open_command_executed") is True),
+            "final_classification": str((day_open_attempt_payload or {}).get("final_classification") or "").strip().upper() or "UNAVAILABLE",
+            "trigger_kind": str((day_open_attempt_payload or {}).get("trigger_kind") or "").strip().upper() or "UNAVAILABLE",
+        },
         "state_transitions": transitions,
         "first_true_blocker": first_true_blocker,
         "final_start_decision": final_start_decision,
@@ -948,6 +1206,23 @@ def main(argv: list[str] | None = None) -> int:
         "supporting_daily_control_refs": supporting_daily_control_refs,
         "supporting_regeneration_results": supporting_regeneration_results,
         "supporting_session_authority": supporting_session_authority,
+        "open_lifecycle_state": open_lifecycle["state"],
+        "open_lifecycle_reason_code": open_lifecycle["reason"],
+        "open_policy": open_lifecycle["policy"],
+        "day_open_trigger": {
+            "path": str(day_open_trigger_path),
+            "trigger_status": str((day_open_trigger_payload or {}).get("trigger_status") or "").strip().upper() or "UNAVAILABLE",
+            "consumed": bool((day_open_trigger_payload or {}).get("consumed") is True),
+            "dedupe_key": str((day_open_trigger_payload or {}).get("dedupe_key") or "").strip(),
+            "trigger_kind": str((day_open_trigger_payload or {}).get("trigger_kind") or "").strip().upper() or "UNAVAILABLE",
+        },
+        "day_open_attempt": {
+            "path": str(day_open_attempt_path),
+            "attempt_status": str((day_open_attempt_payload or {}).get("final_classification") or "").strip().upper() or "UNAVAILABLE",
+            "open_command_executed": bool((day_open_attempt_payload or {}).get("open_command_executed") is True),
+            "final_classification": str((day_open_attempt_payload or {}).get("final_classification") or "").strip().upper() or "UNAVAILABLE",
+            "trigger_kind": str((day_open_attempt_payload or {}).get("trigger_kind") or "").strip().upper() or "UNAVAILABLE",
+        },
         "state_transitions": transitions,
         "first_true_blocker": first_true_blocker,
         "final_start_decision": final_start_decision,
@@ -956,6 +1231,8 @@ def main(argv: list[str] | None = None) -> int:
             day_utc=day,
             decision=final_start_decision,
             blocker=first_true_blocker["first_true_blocker_code"],
+            open_lifecycle_state=open_lifecycle["state"],
+            open_policy=open_lifecycle["policy"],
         ),
         "ignored_legacy_surfaces": _legacy_surface_rows(truth_root=truth_root, day_utc=day),
         "ignored_superseded_surfaces": _superseded_surface_rows(truth_root=truth_root, day_utc=day),
@@ -966,6 +1243,8 @@ def main(argv: list[str] | None = None) -> int:
             "day_attempt_id": day_attempt_id,
             "first_true_blocker_code": first_true_blocker["first_true_blocker_code"],
             "ledger_id": supporting_session_authority["ledger_id"],
+            "open_lifecycle_state": open_lifecycle["state"],
+            "open_policy": open_lifecycle["policy"],
             "non_authority_notice": (
                 "Operator-facing summary derived only from trading_day_state_machine_v1. "
                 "No legacy or superseded startup surface may override this state machine."

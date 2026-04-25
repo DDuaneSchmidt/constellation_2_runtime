@@ -26,12 +26,11 @@ from typing import Any, Dict, Optional
 
 # Hard anchor (repo root)
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
-
 # Ensure repo import path for canonicalization helpers
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root  # noqa: E402
 from constellation_2.phaseD.lib.canon_json_v1 import (  # noqa: E402
     CanonicalizationError,
     canonical_hash_for_c2_artifact_v1,
@@ -40,6 +39,7 @@ from constellation_2.phaseD.lib.canon_json_v1 import (  # noqa: E402
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1  # noqa: E402
 
 
+TRUTH_ROOT = resolve_canonical_truth_root().resolve()
 INTENTS_ROOT = (TRUTH_ROOT / "intents_v1/snapshots").resolve()
 SCHEMA_RELPATH = "constellation_2/schemas/exposure_intent.v1.schema.json"
 

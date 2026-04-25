@@ -235,6 +235,87 @@ def _gate_stack_rows(facts: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [row for row in rows if isinstance(row, dict)]
 
 
+def _derive_authorization_coherence_reason_codes(
+    *,
+    facts: Dict[str, Any],
+    gate_rows: List[Dict[str, Any]],
+    included: List[Dict[str, Any]],
+    excluded: List[Dict[str, Any]],
+    blocking: List[Dict[str, Any]],
+    authorization_status: str,
+    bootstrap_mode_applied: bool,
+) -> List[str]:
+    gate_stack_doc = facts.get("gate_stack_doc")
+    if not isinstance(gate_stack_doc, dict):
+        raise RuntimeError("GATE_STACK_VERDICT_MISSING_OR_INVALID")
+    gate_stack_status = str(gate_stack_doc.get("status") or "").strip().upper()
+    if gate_stack_status not in {"PASS", "FAIL"}:
+        raise RuntimeError(f"GATE_STACK_VERDICT_STATUS_INVALID:{gate_stack_status or 'UNKNOWN'}")
+
+    included_failing = sorted(
+        {
+            str(row.get("gate_id") or "").strip()
+            for row in included
+            if str(row.get("observed_status") or "").strip().upper() not in PASS_STATUSES
+            and str(row.get("gate_id") or "").strip()
+        }
+    )
+    excluded_failing = sorted(
+        {
+            str(row.get("gate_id") or "").strip()
+            for row in excluded
+            if str(row.get("observed_status") or "").strip().upper() not in PASS_STATUSES
+            and str(row.get("gate_id") or "").strip()
+        }
+    )
+    gate_stack_failing = sorted(
+        {
+            str(row.get("gate_id") or "").strip()
+            for row in gate_rows
+            if str(row.get("observed_status") or "").strip().upper() not in PASS_STATUSES
+            and str(row.get("gate_id") or "").strip()
+        }
+    )
+
+    if authorization_status == "PASS" and included_failing and not bootstrap_mode_applied:
+        raise RuntimeError(
+            "AUTHORIZATION_GATE_STACK_INCOHERENT:PASS_WITH_INCLUDED_FAILING_GATES:"
+            + ",".join(included_failing)
+        )
+
+    if gate_stack_status == "PASS" and authorization_status == "FAIL":
+        raise RuntimeError("AUTHORIZATION_GATE_STACK_INCOHERENT:GATE_STACK_PASS_AUTHORIZATION_FAIL")
+
+    if authorization_status != "PASS":
+        return []
+
+    if gate_stack_status == "PASS":
+        return ["AUTHORIZATION_GATE_STACK_ALIGNED"]
+
+    if bootstrap_mode_applied:
+        return ["AUTHORIZATION_BOOTSTRAP_OVERRIDE_APPLIED"]
+
+    if not gate_stack_failing:
+        raise RuntimeError("AUTHORIZATION_GATE_STACK_INCOHERENT:GATE_STACK_FAIL_WITHOUT_FAILING_GATES")
+
+    unexplained = sorted(set(gate_stack_failing) - set(excluded_failing))
+    if unexplained:
+        raise RuntimeError(
+            "AUTHORIZATION_GATE_STACK_INCOHERENT:UNEXPLAINED_FAILING_GATES:" + ",".join(unexplained)
+        )
+
+    if not blocking and gate_stack_failing:
+        return [
+            "AUTHORIZATION_DERIVED_FROM_CLASSIFIED_GATE_SUBSET",
+            *[f"AUTHORIZATION_EXCLUDED_FAILING_GATE:{gate_id}" for gate_id in excluded_failing],
+        ]
+
+    return [
+        "AUTHORIZATION_DERIVED_FROM_CLASSIFIED_GATE_SUBSET",
+        *[f"AUTHORIZATION_EXCLUDED_FAILING_GATE:{gate_id}" for gate_id in excluded_failing],
+    ]
+
+
 def _legacy_hierarchy_map(repo_root: Path) -> Dict[str, Dict[str, Any]]:
     reg = _read_registry(repo_root, GATE_HIERARCHY_RELPATH)
     gates = reg.get("gates")
@@ -356,6 +437,17 @@ def build_authorization_gate_verdict_doc(
                 "BOOTSTRAP_EXECUTION_MODE_APPLIED",
                 *[f"BOOTSTRAP_ALLOWED_MISSING_GATE:{gate_id}" for gate_id in blocking_ids],
             ]
+
+    coherence_reason_codes = _derive_authorization_coherence_reason_codes(
+        facts=facts,
+        gate_rows=gate_rows,
+        included=included,
+        excluded=excluded,
+        blocking=blocking,
+        authorization_status=status,
+        bootstrap_mode_applied=bootstrap_mode_applied,
+    )
+    reason_codes = sorted(set(reason_codes + coherence_reason_codes))
 
     evidence_refs = [row["artifact_path"] for row in included if row["artifact_path"]]
     evidence_refs.append(_verdict_artifact_ref(truth_root, "lifecycle_state_authority_v1", day_utc, "lifecycle_state_authority.v1.json"))

@@ -18,24 +18,36 @@
   "properties": {
     "schema_id": { "const": "binding_record" },
     "schema_version": { "const": "v2" },
-
     "binding_id": {
       "type": "string",
       "minLength": 16,
       "maxLength": 128,
       "description": "Deterministic binding identifier (hash-derived preferred)."
     },
-
     "created_at_utc": { "type": "string", "format": "date-time" },
-
+    "intent_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Governed strategic intent identity when execution identity authority is active."
+    },
+    "intent_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "plan_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "mapping_ledger_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-
+    "trade_instance_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Governed identity of a specific valid execution instance."
+    },
+    "submission_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Deterministic submission identity derived from intent_id + plan_hash + trade_instance_id when execution identity authority is active."
+    },
     "freshness_cert_hash": {
       "type": ["string", "null"],
       "pattern": "^[a-f0-9]{64}$"
     },
-
     "broker_payload_digest": {
       "type": "object",
       "additionalProperties": false,
@@ -55,7 +67,6 @@
         }
       }
     },
-
     "preflight": {
       "type": "object",
       "additionalProperties": false,
@@ -74,13 +85,11 @@
         "exit_policy_present": { "type": "boolean" }
       }
     },
-
     "canonical_json_hash": {
       "type": ["string", "null"],
       "pattern": "^[a-f0-9]{64}$"
     }
   },
-
   "allOf": [
     {
       "if": {

@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
+from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 _THIS_FILE = Path(__file__).resolve()
 REPO_ROOT = _THIS_FILE.parents[2]
@@ -26,8 +29,12 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     read_json_object_v1,
     repo_git_sha_v1,
     resolve_fact_plane_truth_root_v1,
+    resolve_paper_intent_truth_root_v1,
 )
 from ops.tools.run_phasec_identity_materializer_day_v1 import _same_day_market_close_sources
+
+
+NEW_YORK_TZ = ZoneInfo("America/New_York")
 
 
 def _resolve_report_path(*, truth_root: Path, day_utc: str) -> Path:
@@ -65,6 +72,73 @@ def _run_liquidity_gate(*, day_utc: str, truth_root: Path) -> Dict[str, Any]:
         capture_output=True,
         text=True,
         check=False,
+    )
+    return {
+        "cmd": cmd,
+        "returncode": int(proc.returncode),
+        "stdout": proc.stdout.strip(),
+        "stderr": proc.stderr.strip(),
+    }
+
+
+def _parse_utc_timestamp(text: str) -> Optional[datetime]:
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def _core_session_open_utc(day_utc: str) -> datetime:
+    target_day = date.fromisoformat(str(day_utc).strip())
+    return datetime(
+        target_day.year,
+        target_day.month,
+        target_day.day,
+        9,
+        30,
+        0,
+        tzinfo=NEW_YORK_TZ,
+    ).astimezone(timezone.utc)
+
+
+def _run_market_data_refresh_for_symbol(*, day_utc: str, truth_root: Path, symbol: str, run_utc: str) -> Dict[str, Any]:
+    cmd = [
+        sys.executable,
+        str((REPO_ROOT / "constellation_2/phaseJ/tools/ib_historical_market_data_snapshot_downloader_v1.py").resolve()),
+        "--run_utc",
+        str(run_utc).strip(),
+        "--dataset_version",
+        "v1",
+        "--symbol",
+        str(symbol).strip().upper(),
+        "--start_year",
+        str(day_utc).strip()[:4],
+        "--end_year",
+        str(day_utc).strip()[:4],
+        "--host",
+        str(os.environ.get("C2_IB_HOST") or "127.0.0.1").strip(),
+        "--port",
+        str(os.environ.get("C2_IB_PORT") or "4002").strip(),
+        "--client_id",
+        str(os.environ.get("C2_IB_CLIENT_ID") or "7").strip(),
+        "--sleep_sec",
+        str(os.environ.get("C2_IB_SLEEP_SEC") or "0.1").strip(),
+        "--use_rth",
+        "1",
+    ]
+    env = dict(os.environ)
+    env["C2_TRUTH_ROOT"] = str(truth_root)
+    proc = subprocess.run(
+        cmd,
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
     )
     return {
         "cmd": cmd,
@@ -116,8 +190,15 @@ def _gate_price_from_payload(*, gate_payload: Dict[str, Any], symbol: str) -> Op
         if not isinstance(metrics, dict):
             continue
         close = str(metrics.get("close") or "").strip()
-        if close:
-            return close
+        if not close:
+            continue
+        try:
+            close_value = Decimal(close)
+        except InvalidOperation:
+            continue
+        if close_value <= Decimal("0"):
+            continue
+        return close
     return None
 
 
@@ -129,14 +210,15 @@ def main(argv: List[str] | None = None) -> int:
 
     day_utc = parse_day_utc_v1(args.day_utc)
     truth_root = resolve_fact_plane_truth_root_v1(args.truth_root)
+    intent_truth_root = resolve_paper_intent_truth_root_v1(truth_root=truth_root, repo_root=REPO_ROOT)
     produced_at_utc = now_utc_iso_v1()
     session_id = canonical_paper_session_id_v1(day_utc)
 
-    intent_files = collect_intent_files_v1(truth_root=truth_root, day_utc=day_utc)
+    intent_files = collect_intent_files_v1(truth_root=intent_truth_root, day_utc=day_utc)
     inputs_checked: List[Dict[str, Any]] = [
         build_fact_dependency_row_v1(
             logical_name="intents_day_dir",
-            absolute_path=(truth_root / "intents_v1" / "snapshots" / day_utc).resolve(),
+            absolute_path=(intent_truth_root / "intents_v1" / "snapshots" / day_utc).resolve(),
             status="PRESENT" if intent_files else "MISSING",
             reason_codes=[] if intent_files else ["STARTUP_MATERIALIZATION_MISSING_DEPENDENCY:INTENTS_DAY_DIR_EMPTY_OR_ABSENT"],
             day_utc=day_utc,
@@ -184,77 +266,46 @@ def main(argv: List[str] | None = None) -> int:
             truth_root=truth_root,
             day_utc=day_utc,
             symbol=symbol,
+            evaluation_time_utc=produced_at_utc,
         )
+        evaluation_dt = _parse_utc_timestamp(produced_at_utc)
+        if not str(same_day_close or "").strip() and evaluation_dt is not None and evaluation_dt >= _core_session_open_utc(day_utc):
+            _run_market_data_refresh_for_symbol(
+                day_utc=day_utc,
+                truth_root=truth_root,
+                symbol=symbol,
+                run_utc=produced_at_utc,
+            )
+            same_day_close, same_day_paths = _same_day_market_close_sources(
+                truth_root=truth_root,
+                day_utc=day_utc,
+                symbol=symbol,
+                evaluation_time_utc=produced_at_utc,
+            )
         for source_path in same_day_paths:
             inputs_checked.append(
                 build_fact_dependency_row_v1(
-                    logical_name=f"same_day_market_close_source:{source_path.name}",
+                    logical_name=f"same_day_core_session_price_source:{source_path.name}",
                     absolute_path=source_path,
                     status="PRESENT" if source_path.exists() else "MISSING",
-                    reason_codes=[] if source_path.exists() else ["STARTUP_MATERIALIZATION_MISSING_DEPENDENCY:SAME_DAY_MARKET_CLOSE_SOURCE_MISSING"],
+                    reason_codes=[] if source_path.exists() else ["STARTUP_MATERIALIZATION_MISSING_DEPENDENCY:SAME_DAY_CORE_SESSION_PRICE_SOURCE_MISSING"],
                     day_utc=day_utc,
                 )
             )
         if str(same_day_close or "").strip():
             default_equity_reference_price = str(same_day_close).strip()
-            default_equity_reference_price_source = "SAME_DAY_MARKET_CLOSE"
+            default_equity_reference_price_source = "SAME_DAY_CORE_SESSION_PRICE"
             default_equity_reference_price_artifact_path = str(same_day_paths[-1]) if same_day_paths else ""
             status = "PASS"
-            human_readable_summary = f"Resolved default equity reference price from same-day market close for {symbol}."
-        else:
-            liquidity_gate_result = {
-                **liquidity_gate_result,
-                **_run_liquidity_gate(day_utc=day_utc, truth_root=truth_root),
-            }
-            gate_payload: Optional[Dict[str, Any]] = None
-            if liquidity_gate_path.exists() and liquidity_gate_path.is_file():
-                try:
-                    gate_payload = read_json_object_v1(liquidity_gate_path)
-                except ValueError:
-                    gate_payload = None
-            gate_status = ""
-            gate_reason_codes: List[str] = []
-            if gate_payload is not None:
-                gate_status = str(gate_payload.get("status") or "").strip().upper()
-                gate_reason_codes = [
-                    str(code).strip()
-                    for code in (gate_payload.get("reason_codes") or [])
-                    if str(code).strip()
-                ]
-            liquidity_gate_result["artifact_status"] = gate_status or "MISSING"
-            inputs_checked.append(
-                build_fact_dependency_row_v1(
-                    logical_name="liquidity_slippage_gate_v1",
-                    absolute_path=liquidity_gate_path,
-                    status="PRESENT" if gate_payload is not None else "MISSING",
-                    reason_codes=gate_reason_codes
-                    if gate_payload is not None
-                    else ["STARTUP_MATERIALIZATION_FAIL:LIQUIDITY_GATE_OUTPUT_MISSING"],
-                    day_utc=day_utc,
-                )
+            human_readable_summary = (
+                f"Resolved default equity reference price from a governed positive same-day core-session price for {symbol}."
             )
-            gate_price = _gate_price_from_payload(gate_payload=gate_payload or {}, symbol=symbol) if gate_payload else None
-            if gate_price:
-                default_equity_reference_price = gate_price
-                default_equity_reference_price_source = "LIQUIDITY_GATE"
-                default_equity_reference_price_artifact_path = str(liquidity_gate_path)
-                status = "PASS"
-                human_readable_summary = f"Resolved default equity reference price from liquidity gate fallback for {symbol}."
-            elif gate_payload is not None and gate_status == "FAIL":
-                blocking_codes.append("STARTUP_MATERIALIZATION_MISSING_DEPENDENCY:DEFAULT_EQUITY_REFERENCE_PRICE_UNAVAILABLE")
-                blocking_codes.extend(f"LIQUIDITY_SLIPPAGE_GATE:{code}" for code in gate_reason_codes)
-                status = "BLOCKED_VALID"
-                human_readable_summary = f"Liquidity gate could not certify a fallback default equity reference price for {symbol}."
-            elif gate_payload is None:
-                blocking_codes.append("STARTUP_MATERIALIZATION_FAIL:LIQUIDITY_GATE_OUTPUT_MISSING")
-                if liquidity_gate_result["returncode"] != 0:
-                    blocking_codes.append("STARTUP_MATERIALIZATION_FAIL:LIQUIDITY_GATE_NONZERO")
-                status = "BLOCKED_BY_DEFECT"
-                human_readable_summary = f"Liquidity gate did not produce a valid source-authoritative fallback price artifact for {symbol}."
-            else:
-                blocking_codes.append("STARTUP_MATERIALIZATION_FAIL:LIQUIDITY_GATE_PRICE_MISSING")
-                status = "BLOCKED_BY_DEFECT"
-                human_readable_summary = f"Liquidity gate output was present but did not expose a usable fallback price for {symbol}."
+        else:
+            blocking_codes.append("STARTUP_MATERIALIZATION_MISSING_DEPENDENCY:DEFAULT_EQUITY_REFERENCE_PRICE_UNAVAILABLE")
+            status = "BLOCKED_VALID"
+            human_readable_summary = (
+                f"No governed positive same-day 09:30+ America/New_York core-session price is yet available for {symbol}."
+            )
 
     payload: Dict[str, Any] = {
         "schema_id": "startup_materialization_inputs_prep",

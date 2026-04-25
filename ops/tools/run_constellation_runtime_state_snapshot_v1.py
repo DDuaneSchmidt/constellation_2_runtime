@@ -2,15 +2,26 @@
 import argparse
 import json
 import re
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime")
-TRUTH_ROOT = REPO_ROOT / "constellation_2" / "runtime" / "truth"
-RUNTIME_ROOT = REPO_ROOT / "constellation_2" / "runtime"
-SYSTEM_SNAPSHOT_ROOT = TRUTH_ROOT / "system_snapshot"
+THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = THIS_FILE.parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.common.release_baseline_common_v1 import resolve_release_baseline_roots_v1  # noqa: E402
+
+
+ROOTS = resolve_release_baseline_roots_v1(REPO_ROOT)
+REPO_ROOT = ROOTS.repo_root
+TRUTH_ROOT = ROOTS.canonical_truth_root
+TRUTH_SLEEVES_ROOT = ROOTS.truth_sleeves_root
+RUNTIME_ROOT = TRUTH_ROOT.parent
+SYSTEM_SNAPSHOT_ROOT = ROOTS.system_snapshot_root
 OUTPUT_PATH = SYSTEM_SNAPSHOT_ROOT / "constellation_runtime_state.v1.json"
 
 FRESHNESS_POLICY_PATH = REPO_ROOT / "governance" / "02_REGISTRIES" / "C2_DIAGNOSTICS_FRESHNESS_POLICY_V1.json"
@@ -19,10 +30,32 @@ LIFECYCLE_DEP_GOV_PATH = REPO_ROOT / "governance" / "02_REGISTRIES" / "C2_LIFECY
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 DENY_NAME_TOKENS = (".INVALID_", ".QUARANTINED_")
 DENY_DIR_PREFIXES = ("__quarantine", "__quarantined", "__archived")
+GLOBAL_PREFIX = "global:"
+SLEEVE_PREFIX = "sleeve:"
+STREAM_INTENTS_SNAPSHOTS = f"{GLOBAL_PREFIX}intents_v1/snapshots"
+STREAM_INTENTS_DAY_ROLLUP = f"{GLOBAL_PREFIX}intents_v1/day_rollup"
+STREAM_PHASEC_PREFLIGHT = f"{GLOBAL_PREFIX}phaseC_preflight_v1"
+STREAM_EXECUTION_SUBMISSIONS = f"{GLOBAL_PREFIX}execution_evidence_v1/submissions"
+STREAM_EXECUTION_SUBMISSION_INDEX = f"{GLOBAL_PREFIX}execution_evidence_v1/submission_index"
+STREAM_EXECUTION_BROKER_EVENTS = f"{GLOBAL_PREFIX}execution_evidence_v1/broker_events"
+STREAM_FILL_LEDGER = f"{GLOBAL_PREFIX}fill_ledger_v1"
+STREAM_POSITIONS_SNAPSHOTS = f"{GLOBAL_PREFIX}positions_v1/snapshots"
+STREAM_POSITION_LIFECYCLE = f"{GLOBAL_PREFIX}position_lifecycle_v2"
+STREAM_MONITORING_LIFECYCLE = f"{GLOBAL_PREFIX}monitoring_v1/lifecycle_monitor"
+STREAM_MONITORING_PAPER_READINESS = f"{GLOBAL_PREFIX}monitoring_v1/paper_readiness"
+STREAM_REPORT_OPERATOR_DAILY_GATE = f"{GLOBAL_PREFIX}reports/operator_daily_gate_v3"
+STREAM_REPORT_GATE_STACK = f"{GLOBAL_PREFIX}reports/gate_stack_verdict_v1"
+STREAM_REPORT_RECONCILIATION = f"{GLOBAL_PREFIX}reports/reconciliation_report_v3"
+STREAM_REPORT_BROKER_RECON = f"{GLOBAL_PREFIX}reports/broker_reconciliation_v3"
+STREAM_REPORT_EXEC_RECON = f"{GLOBAL_PREFIX}reports/execution_reconciliation_v1"
+STREAM_CAPITAL_AUTHORITY = f"{GLOBAL_PREFIX}allocation_v1/capital_authority_allocation_v1"
+STREAM_CAPITAL_RISK = f"{GLOBAL_PREFIX}reports/capital_risk_envelope_v2"
+STREAM_IB_HANDSHAKE = f"{GLOBAL_PREFIX}ib_api_handshake"
+STREAM_PRIMARY_PAPER = f"{SLEEVE_PREFIX}PRIMARY/PAPER"
 LIFECYCLE_DEPENDENCY_SPECS = [
     {
         "dep_id": "position_lifecycle_v2",
-        "stream_path": "constellation_2/runtime/truth/position_lifecycle_v2",
+        "stream_path": STREAM_POSITION_LIFECYCLE,
         "filename": "position_lifecycle_snapshot.v2.json",
         "producer_tool": "ops/tools/run_position_lifecycle_snapshot_v2.py",
         "producer_stage_id_v2": None,
@@ -30,7 +63,7 @@ LIFECYCLE_DEPENDENCY_SPECS = [
     },
     {
         "dep_id": "exit_obligations_v1",
-        "stream_path": "constellation_2/runtime/truth/exit_obligations_v1",
+        "stream_path": f"{GLOBAL_PREFIX}exit_obligations_v1",
         "filename": "exit_obligations.v1.json",
         "producer_tool": "ops/tools/run_exit_obligations_v1.py",
         "producer_stage_id_v2": None,
@@ -38,7 +71,7 @@ LIFECYCLE_DEPENDENCY_SPECS = [
     },
     {
         "dep_id": "exposure_reconciliation_v2",
-        "stream_path": "constellation_2/runtime/truth/exposure_reconciliation_v2",
+        "stream_path": f"{GLOBAL_PREFIX}exposure_reconciliation_v2",
         "filename": "exposure_reconciliation.v2.json",
         "producer_tool": "ops/tools/run_exposure_reconciliation_v2.py",
         "producer_stage_id_v2": None,
@@ -124,10 +157,39 @@ def count_json_files(root: Path) -> int:
     return sum(1 for _ in iter_authoritative_json_files(root))
 
 
+def _display_path(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(resolved)
+
+
+def _stream_root(rel_path: str) -> Path:
+    if rel_path.startswith(GLOBAL_PREFIX):
+        return (TRUTH_ROOT / rel_path[len(GLOBAL_PREFIX):]).resolve()
+    if rel_path.startswith(SLEEVE_PREFIX):
+        return (TRUTH_SLEEVES_ROOT / rel_path[len(SLEEVE_PREFIX):]).resolve()
+    raise SystemExit(f"FAIL_CLOSED: unknown stream root prefix: {rel_path}")
+
+
+def _resolve_surface_path(path_text: str) -> Path:
+    raw = str(path_text or "").strip()
+    if not raw:
+        raise SystemExit("FAIL_CLOSED: empty surface path")
+    if raw.startswith((GLOBAL_PREFIX, SLEEVE_PREFIX)):
+        return _stream_root(raw)
+    surface_path = Path(raw).expanduser()
+    if surface_path.is_absolute():
+        return surface_path.resolve()
+    return (REPO_ROOT / raw).resolve()
+
+
 def assert_stream_root_is_authoritative(rel_path: str) -> None:
-    p = (REPO_ROOT / rel_path).resolve()
-    if not str(p).startswith(str(RUNTIME_ROOT.resolve())):
-        raise SystemExit(f"FAIL_CLOSED: stream path outside runtime root: {p}")
+    p = _stream_root(rel_path)
+    allowed_roots = (TRUTH_ROOT.resolve(), TRUTH_SLEEVES_ROOT.resolve())
+    if not any(str(p).startswith(str(root)) for root in allowed_roots):
+        raise SystemExit(f"FAIL_CLOSED: stream path outside canonical truth roots: {p}")
     for part in p.parts:
         if part.startswith(DENY_DIR_PREFIXES):
             raise SystemExit(f"FAIL_CLOSED: stream path in non-authoritative residue: {p}")
@@ -135,20 +197,20 @@ def assert_stream_root_is_authoritative(rel_path: str) -> None:
 
 def stream_summary(rel_path: str, preferred_names: list[str] | None = None) -> dict[str, Any]:
     assert_stream_root_is_authoritative(rel_path)
-    root = REPO_ROOT / rel_path
+    root = _stream_root(rel_path)
     latest_file = latest_json_file_under(root, preferred_names=preferred_names)
     return {
         "path": rel_path,
         "exists": root.exists(),
         "latest_day": latest_day_under(root),
         "json_count": count_json_files(root),
-        "latest_json_file": str(latest_file.relative_to(REPO_ROOT)) if latest_file else None,
+        "latest_json_file": str(latest_file) if latest_file else None,
     }
 
 
 def load_if_present(rel_path: str, preferred_names: list[str] | None = None) -> dict[str, Any] | None:
     assert_stream_root_is_authoritative(rel_path)
-    root = REPO_ROOT / rel_path
+    root = _stream_root(rel_path)
     latest_file = latest_json_file_under(root, preferred_names=preferred_names)
     if latest_file is None:
         return None
@@ -250,7 +312,7 @@ def lifecycle_stage_presence(truth_root: Path, day: str | None) -> dict[str, Any
     }
     return {
         stage: {
-            "path": str(path.relative_to(REPO_ROOT)),
+            "path": _display_path(path),
             "present": path.exists()
         }
         for stage, path in checks.items()
@@ -261,7 +323,7 @@ def detect_quarantine_activity() -> list[str]:
     hits = []
     for p in RUNTIME_ROOT.iterdir():
         if p.name.startswith("__quarantine") or p.name.startswith("__quarantined"):
-            hits.append(str(p.relative_to(REPO_ROOT)))
+            hits.append(_display_path(p))
     return sorted(hits)
 
 
@@ -335,22 +397,23 @@ def _load_lifecycle_dependency_governance() -> dict[str, dict[str, Any]]:
 
 
 def _surface_stream_summary(rel_path: str) -> dict[str, Any]:
-    root = REPO_ROOT / rel_path
+    root = _resolve_surface_path(rel_path)
+    assert_stream_root_is_authoritative(f"{GLOBAL_PREFIX}{root.relative_to(TRUTH_ROOT)}" if root.is_relative_to(TRUTH_ROOT) else f"{SLEEVE_PREFIX}{root.relative_to(TRUTH_SLEEVES_ROOT)}")
     latest_file = latest_json_file_under(root)
     return {
         "exists": root.exists(),
         "latest_day": latest_day_under(root),
-        "latest_json_file": str(latest_file.relative_to(REPO_ROOT)) if latest_file else None,
+        "latest_json_file": str(latest_file.resolve()) if latest_file else None,
     }
 
 
 def _surface_file_summary(rel_path: str, timestamp_field: str) -> dict[str, Any]:
-    p = (REPO_ROOT / rel_path).resolve()
+    p = _resolve_surface_path(rel_path)
     if not p.exists() or not p.is_file():
         return {
             "exists": False,
             "day": None,
-            "path": rel_path,
+            "path": str(p),
             "timestamp_field": timestamp_field,
         }
     obj = safe_read_json(p)
@@ -358,7 +421,7 @@ def _surface_file_summary(rel_path: str, timestamp_field: str) -> dict[str, Any]
     return {
         "exists": True,
         "day": day,
-        "path": rel_path,
+        "path": str(p),
         "timestamp_field": timestamp_field,
     }
 
@@ -399,7 +462,7 @@ def _latest_sleeve_stage_status_map_for_day(reference_day: str) -> dict[str, Any
         return {
             "sleeve_id": str(sleeve.get("sleeve_id") or "UNKNOWN"),
             "mode": "PAPER",
-            "verdict_path": str(p.relative_to(REPO_ROOT)),
+            "verdict_path": _display_path(p),
             "stage_status_map": stage_map,
         }
     return {
@@ -422,7 +485,7 @@ def _find_artifact_in_other_scope(dep_id: str, day: str, filename: str, expected
             continue
         if day not in parts:
             continue
-        out.append(str(p.relative_to(REPO_ROOT)))
+        out.append(_display_path(p))
     return sorted(out)
 
 
@@ -473,7 +536,7 @@ def evaluate_monitoring_freshness(policy: dict[str, Any], reference_day: str | N
             actual_day = summary["latest_day"]
             latest_json_file = summary["latest_json_file"]
             if latest_json_file:
-                obj = safe_read_json(REPO_ROOT / latest_json_file)
+                obj = safe_read_json(Path(latest_json_file))
                 if isinstance(obj, dict):
                     sv = obj.get(status_field)
                     status_value = str(sv).strip() if isinstance(sv, str) else None
@@ -511,7 +574,7 @@ def evaluate_monitoring_freshness(policy: dict[str, Any], reference_day: str | N
                     dep_summary = _surface_stream_summary(dep_path)
                     dep_latest_day = dep_summary.get("latest_day")
                     dep_latest_file = dep_summary.get("latest_json_file")
-                    expected_abs = (REPO_ROOT / dep_path / reference_day / dep_file).resolve()
+                    expected_abs = (_stream_root(dep_path) / reference_day / dep_file).resolve()
                     dep_present_ref = expected_abs.exists() and expected_abs.is_file()
                     if dep_present_ref:
                         present_for_ref += 1
@@ -558,7 +621,7 @@ def evaluate_monitoring_freshness(policy: dict[str, Any], reference_day: str | N
                         "dep_id": dep_id,
                         "classification": dep_classification,
                         "path": dep_path,
-                        "expected_artifact_path": str((REPO_ROOT / dep_path / reference_day / dep_file).relative_to(REPO_ROOT)),
+                        "expected_artifact_path": str(expected_abs),
                         "latest_day": dep_latest_day,
                         "latest_json_file": dep_latest_file,
                         "present_for_reference_day": dep_present_ref,
@@ -575,7 +638,7 @@ def evaluate_monitoring_freshness(policy: dict[str, Any], reference_day: str | N
                     "dependency_count": len(dep_rows),
                     "dependencies_present_for_reference_day": present_for_ref,
                     "orchestrator_v2_verdict_path": vmap.get("verdict_path"),
-                    "governance_registry_path": str(LIFECYCLE_DEP_GOV_PATH.relative_to(REPO_ROOT)),
+                    "governance_registry_path": _display_path(LIFECYCLE_DEP_GOV_PATH),
                     "dependencies": dep_rows,
                 }
         elif s_type == "FILE_GENERATED_UTC":
@@ -743,7 +806,7 @@ def resolve_sleeve_execution_health(sleeves: list[dict[str, Any]]) -> dict[str, 
                 "sleeve_id": sleeve.get("sleeve_id", "UNKNOWN"),
                 "status": "FAIL",
                 "reason": "MISSING_ORCHESTRATOR_VERDICT",
-                "evidence_root": str(verdict_root.relative_to(REPO_ROOT)),
+                "evidence_root": _display_path(verdict_root),
             })
             continue
 
@@ -760,7 +823,7 @@ def resolve_sleeve_execution_health(sleeves: list[dict[str, Any]]) -> dict[str, 
             "status": verdict_status,
             "verdict_status_raw": str((verdict_obj or {}).get("status") or "UNKNOWN"),
             "latest_day": latest_day,
-            "latest_verdict_path": str(latest_verdict.relative_to(REPO_ROOT)),
+            "latest_verdict_path": _display_path(latest_verdict),
             "attempt_id": (verdict_obj or {}).get("attempt_id"),
             "produced_utc": (verdict_obj or {}).get("produced_utc"),
         })
@@ -833,14 +896,14 @@ def diagnostics(
     out: list[dict[str, Any]] = []
 
     required_streams = [
-        "constellation_2/runtime/truth/intents_v1/snapshots",
-        "constellation_2/runtime/truth/phaseC_preflight_v1",
-        "constellation_2/runtime/truth/execution_evidence_v1/submissions",
-        "constellation_2/runtime/truth/execution_evidence_v1/broker_events",
-        "constellation_2/runtime/truth/fill_ledger_v1",
-        "constellation_2/runtime/truth/positions_v1/snapshots",
-        "constellation_2/runtime/truth/reports/operator_daily_gate_v3",
-        "constellation_2/runtime/truth/monitoring_v1/paper_readiness",
+        STREAM_INTENTS_SNAPSHOTS,
+        STREAM_PHASEC_PREFLIGHT,
+        STREAM_EXECUTION_SUBMISSIONS,
+        STREAM_EXECUTION_BROKER_EVENTS,
+        STREAM_FILL_LEDGER,
+        STREAM_POSITIONS_SNAPSHOTS,
+        STREAM_REPORT_OPERATOR_DAILY_GATE,
+        STREAM_MONITORING_PAPER_READINESS,
     ]
     for key in required_streams:
         summary = stream_map[key]
@@ -918,8 +981,8 @@ def diagnostics(
             "status": "DEGRADED",
             "summary": "Non-authoritative execution_evidence_v2 broker_events surface is present alongside authoritative execution_evidence_v1 broker_events.",
             "evidence": [
-                "constellation_2/runtime/truth/execution_evidence_v1/broker_events",
-                "constellation_2/runtime/truth/execution_evidence_v2/broker_events",
+                str((TRUTH_ROOT / "execution_evidence_v1/broker_events").resolve()),
+                str((TRUTH_ROOT / "execution_evidence_v2/broker_events").resolve()),
                 "governance/02_REGISTRIES/C2_TRUTH_AUTHORITY_REGISTRY_V1.json",
             ],
         })
@@ -989,70 +1052,70 @@ def main(argv: list[str] | None = None) -> None:
     ensure_dir(SYSTEM_SNAPSHOT_ROOT)
 
     stream_paths = [
-        "constellation_2/runtime/truth/intents_v1/snapshots",
-        "constellation_2/runtime/truth/intents_v1/day_rollup",
-        "constellation_2/runtime/truth/phaseC_preflight_v1",
-        "constellation_2/runtime/truth/execution_evidence_v1/submissions",
-        "constellation_2/runtime/truth/execution_evidence_v1/submission_index",
-        "constellation_2/runtime/truth/execution_evidence_v1/broker_events",
-        "constellation_2/runtime/truth/fill_ledger_v1",
-        "constellation_2/runtime/truth/positions_v1/snapshots",
-        "constellation_2/runtime/truth/position_lifecycle_v2",
-        "constellation_2/runtime/truth/monitoring_v1/lifecycle_monitor",
-        "constellation_2/runtime/truth/monitoring_v1/paper_readiness",
-        "constellation_2/runtime/truth/reports/operator_daily_gate_v3",
-        "constellation_2/runtime/truth/reports/gate_stack_verdict_v1",
-        "constellation_2/runtime/truth/reports/reconciliation_report_v3",
-        "constellation_2/runtime/truth/reports/broker_reconciliation_v3",
-        "constellation_2/runtime/truth/reports/execution_reconciliation_v1",
-        "constellation_2/runtime/truth/allocation_v1/capital_authority_allocation_v1",
-        "constellation_2/runtime/truth/reports/capital_risk_envelope_v2",
-        "constellation_2/runtime/truth/ib_api_handshake",
-        "constellation_2/runtime/truth_sleeves/PRIMARY/PAPER",
+        STREAM_INTENTS_SNAPSHOTS,
+        STREAM_INTENTS_DAY_ROLLUP,
+        STREAM_PHASEC_PREFLIGHT,
+        STREAM_EXECUTION_SUBMISSIONS,
+        STREAM_EXECUTION_SUBMISSION_INDEX,
+        STREAM_EXECUTION_BROKER_EVENTS,
+        STREAM_FILL_LEDGER,
+        STREAM_POSITIONS_SNAPSHOTS,
+        STREAM_POSITION_LIFECYCLE,
+        STREAM_MONITORING_LIFECYCLE,
+        STREAM_MONITORING_PAPER_READINESS,
+        STREAM_REPORT_OPERATOR_DAILY_GATE,
+        STREAM_REPORT_GATE_STACK,
+        STREAM_REPORT_RECONCILIATION,
+        STREAM_REPORT_BROKER_RECON,
+        STREAM_REPORT_EXEC_RECON,
+        STREAM_CAPITAL_AUTHORITY,
+        STREAM_CAPITAL_RISK,
+        STREAM_IB_HANDSHAKE,
+        STREAM_PRIMARY_PAPER,
     ]
 
-    if "constellation_2/runtime/truth/execution_evidence_v2/broker_events" in stream_paths:
+    if f"{GLOBAL_PREFIX}execution_evidence_v2/broker_events" in stream_paths:
         raise SystemExit("FAIL_CLOSED: non-authoritative execution_evidence_v2 stream configured")
 
     stream_map = {path: stream_summary(path) for path in stream_paths}
 
     global_activity_day = latest_operating_day([
-        stream_map["constellation_2/runtime/truth/intents_v1/snapshots"],
-        stream_map["constellation_2/runtime/truth/phaseC_preflight_v1"],
-        stream_map["constellation_2/runtime/truth/execution_evidence_v1/submissions"],
-        stream_map["constellation_2/runtime/truth/execution_evidence_v1/broker_events"],
-        stream_map["constellation_2/runtime/truth/fill_ledger_v1"],
-        stream_map["constellation_2/runtime/truth/positions_v1/snapshots"],
+        stream_map[STREAM_INTENTS_SNAPSHOTS],
+        stream_map[STREAM_PHASEC_PREFLIGHT],
+        stream_map[STREAM_EXECUTION_SUBMISSIONS],
+        stream_map[STREAM_EXECUTION_BROKER_EVENTS],
+        stream_map[STREAM_FILL_LEDGER],
+        stream_map[STREAM_POSITIONS_SNAPSHOTS],
     ])
 
     lifecycle_presence_global = lifecycle_stage_presence(TRUTH_ROOT, global_activity_day)
 
     paper_readiness = load_if_present(
-        "constellation_2/runtime/truth/monitoring_v1/paper_readiness",
+        STREAM_MONITORING_PAPER_READINESS,
         preferred_names=["paper_readiness_report.v1.json"],
     )
     lifecycle_monitor = load_if_present(
-        "constellation_2/runtime/truth/monitoring_v1/lifecycle_monitor",
+        STREAM_MONITORING_LIFECYCLE,
         preferred_names=["lifecycle_monitor_report.v1.json"],
     )
     operator_daily_gate = load_if_present(
-        "constellation_2/runtime/truth/reports/operator_daily_gate_v3",
+        STREAM_REPORT_OPERATOR_DAILY_GATE,
         preferred_names=["operator_daily_gate.v3.json"],
     )
     gate_stack_verdict = load_if_present(
-        "constellation_2/runtime/truth/reports/gate_stack_verdict_v1",
+        STREAM_REPORT_GATE_STACK,
         preferred_names=["gate_stack_verdict.v1.json"],
     )
     capital_authority = load_if_present(
-        "constellation_2/runtime/truth/allocation_v1/capital_authority_allocation_v1",
+        STREAM_CAPITAL_AUTHORITY,
         preferred_names=["capital_authority_allocation.v1.json"],
     )
     capital_risk = load_if_present(
-        "constellation_2/runtime/truth/reports/capital_risk_envelope_v2",
+        STREAM_CAPITAL_RISK,
         preferred_names=["capital_risk_envelope.v2.json"],
     )
     ib_handshake = load_if_present(
-        "constellation_2/runtime/truth/ib_api_handshake",
+        STREAM_IB_HANDSHAKE,
         preferred_names=["ib_api_handshake.v1.json"],
     )
 
@@ -1135,13 +1198,13 @@ def main(argv: list[str] | None = None) -> None:
         "capital_state": {
             "capital_authority_status": coalesce_status(capital_authority),
             "capital_risk_envelope_status": coalesce_status(capital_risk),
-            "latest_capital_authority_day": stream_map["constellation_2/runtime/truth/allocation_v1/capital_authority_allocation_v1"]["latest_day"],
+            "latest_capital_authority_day": stream_map[STREAM_CAPITAL_AUTHORITY]["latest_day"],
         },
         "execution_state": {
             "broker_connection_status": coalesce_status(ib_handshake),
-            "latest_submission_day": stream_map["constellation_2/runtime/truth/execution_evidence_v1/submissions"]["latest_day"],
-            "latest_broker_event_day": stream_map["constellation_2/runtime/truth/execution_evidence_v1/broker_events"]["latest_day"],
-            "latest_fill_ledger_day": stream_map["constellation_2/runtime/truth/fill_ledger_v1"]["latest_day"],
+            "latest_submission_day": stream_map[STREAM_EXECUTION_SUBMISSIONS]["latest_day"],
+            "latest_broker_event_day": stream_map[STREAM_EXECUTION_BROKER_EVENTS]["latest_day"],
+            "latest_fill_ledger_day": stream_map[STREAM_FILL_LEDGER]["latest_day"],
         },
         "stream_summaries": stream_map,
         "self_diagnostics": {

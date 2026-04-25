@@ -97,6 +97,16 @@ def _lock_git_sha_if_exists(existing_path: Path, provided_sha: str) -> Optional[
     return None
 
 
+def _allocation_summary_skip_safe(existing_path: Path, day_utc: str) -> bool:
+    if not existing_path.exists() or not existing_path.is_file():
+        return False
+    obj = _read_json_obj(existing_path)
+    if str(obj.get("day_utc") or "").strip() != day_utc:
+        return False
+    validate_against_repo_schema_v1(obj, REPO_ROOT, SCHEMA_SUMMARY)
+    return True
+
+
 def _parse_dd_pct_str_or_fail_accounting_v1(nav_obj: Dict[str, Any]) -> Tuple[int, int, int, str]:
     """
     Accounting v1 expected shape:
@@ -274,6 +284,12 @@ def main(argv: List[str] | None = None) -> int:
     if ex_sha is not None:
         print(f"FAIL: PRODUCER_GIT_SHA_MISMATCH_FOR_EXISTING_DAY: existing={ex_sha} provided={producer_sha}", file=sys.stderr)
         return 4
+    if _allocation_summary_skip_safe(summary_path, day_utc):
+        print(
+            f"OK: ALLOCATION_SUMMARY_V1_EXISTS_VALID day_utc={day_utc} path={summary_path} "
+            "action=SKIP_EXISTING_OUTPUTS_AVOID_REWRITE"
+        )
+        return 0
 
     produced_utc = f"{day_utc}T00:00:00Z"
 
@@ -508,6 +524,11 @@ def main(argv: List[str] | None = None) -> int:
         "produced_utc": produced_utc,
         "day_utc": day_utc,
         "producer": {"repo": producer_repo, "git_sha": producer_sha, "module": module},
+        "authority_classification": "NON_CANONICAL_ADVISORY_ONLY",
+        "control_decision_warning": (
+            "DO_NOT_USE_FOR_CONTROL_DECISIONS; canonical allocation control truth is "
+            "capital_authority_allocation_v1 and canonical sleeve-edge control truth is sleeve_edge_snapshot_v1"
+        ),
         "status": "OK",
         "reason_codes": list(reason_codes),
         "input_manifest": list(input_manifest) if input_manifest else [{"type": nav_type, "path": str(nav_path), "sha256": nav_sha, "day_utc": day_utc, "producer": nav_producer}],

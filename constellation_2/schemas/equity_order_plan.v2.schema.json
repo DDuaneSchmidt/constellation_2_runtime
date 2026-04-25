@@ -61,6 +61,53 @@
       ]
     },
 
+    "protective_stop": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["order_type", "stop_price", "time_in_force", "basis", "stop_loss_bps"],
+      "properties": {
+        "order_type": { "type": "string", "const": "STOP" },
+        "stop_price": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$"
+        },
+        "time_in_force": { "type": "string", "enum": ["DAY", "GTC"] },
+        "basis": {
+          "type": "string",
+          "enum": ["ENTRY_REFERENCE_PRICE"]
+        },
+        "stop_loss_bps": { "type": "integer", "minimum": 1, "maximum": 10000 }
+      }
+    },
+
+    "take_profit": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["order_type", "limit_price", "time_in_force"],
+      "properties": {
+        "order_type": { "type": "string", "const": "LIMIT" },
+        "limit_price": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$"
+        },
+        "time_in_force": { "type": "string", "enum": ["DAY", "GTC"] }
+      }
+    },
+
+    "bracket": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["enabled", "transmit_sequence"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "oca_group": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+        "transmit_sequence": {
+          "type": "string",
+          "enum": ["PARENT_FALSE_FINAL_CHILD_TRUE"]
+        }
+      }
+    },
+
     "risk_proof": {
       "type": ["object", "null"],
       "additionalProperties": false,

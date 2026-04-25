@@ -27,6 +27,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     read_startup_proof_validation_ref_v1,
     resolve_fact_plane_truth_root_v1,
 )
+from constellation_2.common.runtime_path_authority_v1 import require_authoritative_repo_runtime_v1
 from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_intents_day_completeness_path,
     resolve_paper_day_control_plane_path,
@@ -147,6 +148,7 @@ def _control_plane_id(day_utc: str, parts: dict[str, Any]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    require_authoritative_repo_runtime_v1(REPO_ROOT)
     ap = argparse.ArgumentParser(prog="run_trading_day_control_plane_v1")
     ap.add_argument("--day_utc", required=True)
     ap.add_argument("--truth_root", default="")
@@ -289,8 +291,13 @@ def main(argv: list[str] | None = None) -> int:
                         (ledger_payload.get("evidence_freeze") or {}).get("overall_evidence_status") or ""
                     ).strip().upper()
                     or "NOT_EVALUATED",
-                    "system_ready": bool(ledger_payload.get("system_ready") is True),
-                    "submission_authorized": bool(ledger_payload.get("submission_authorized") is True),
+                    "system_ready": bool(
+                        control_state.get("system_ready") is True or ledger_payload.get("system_ready") is True
+                    ),
+                    "submission_authorized": bool(
+                        control_state.get("submission_authorized") is True
+                        or ledger_payload.get("submission_authorized") is True
+                    ),
                 }
                 blocking_codes.update(
                     str(code).strip()
@@ -385,6 +392,14 @@ def main(argv: list[str] | None = None) -> int:
             "blocker_classification": "UPSTREAM_PREREQUISITE",
         }
         final_start_decision = "BLOCKED_VALID"
+
+    if final_start_decision == "READY_NOW":
+        blocking_codes = set()
+        first_true_blocker = {
+            "first_true_blocker_code": "",
+            "first_true_blocker_artifact_path": "",
+            "blocker_classification": "UNKNOWN",
+        }
 
     if not first_true_blocker["first_true_blocker_code"]:
         first_true_blocker["first_true_blocker_code"] = _first_nonempty(sorted(blocking_codes))

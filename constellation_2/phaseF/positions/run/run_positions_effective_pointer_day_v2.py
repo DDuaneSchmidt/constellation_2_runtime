@@ -28,13 +28,14 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+from constellation_2.common.runtime_contract_v1 import require_truth_root_under_contract, resolve_canonical_truth_root
 from constellation_2.phaseD.lib.canon_json_v1 import CanonicalizationError, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-DEFAULT_TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+DEFAULT_TRUTH = resolve_canonical_truth_root().resolve()
 
 # Output path
 OUT_ROOT_REL = "positions_v1/effective_v1/days"
@@ -87,13 +88,7 @@ def _resolve_truth_root(args_truth_root: str) -> Path:
     truth_root = Path(tr).resolve()
     if not truth_root.exists() or not truth_root.is_dir():
         raise SystemExit(f"FATAL: truth_root missing or not directory: {truth_root}")
-
-    try:
-        truth_root.relative_to(REPO_ROOT)
-    except Exception:
-        raise SystemExit(f"FATAL: truth_root not under repo root: truth_root={truth_root} repo_root={REPO_ROOT}")
-
-    return truth_root
+    return require_truth_root_under_contract(truth_root)
 
 
 def _read_json_obj(path: Path) -> Dict[str, Any]:

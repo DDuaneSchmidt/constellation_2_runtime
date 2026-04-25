@@ -17,9 +17,10 @@ from constellation_2.phaseD.lib.canon_json_v1 import (
 )
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
+from constellation_2.common.truth_root_v1 import resolve_truth_root
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-DEFAULT_TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+REPO_ROOT = Path(__file__).resolve().parents[2].resolve()
+DEFAULT_TRUTH = resolve_truth_root(repo_root=REPO_ROOT)
 
 # Output location (immutable)
 OUT_ROOT = "exit_obligations_v1"
@@ -62,13 +63,6 @@ def _read_json_obj(path: Path) -> Dict[str, Any]:
 
 
 def _resolve_truth_root(args_truth_root: str) -> Path:
-    """
-    Deterministic truth_root resolution order:
-      1) --truth_root if provided
-      2) env C2_TRUTH_ROOT if set
-      3) DEFAULT_TRUTH (canonical)
-    Hard guard: truth_root must be under repo root.
-    """
     tr = (args_truth_root or "").strip()
     if not tr:
         tr = (os.environ.get("C2_TRUTH_ROOT") or "").strip()
@@ -78,11 +72,6 @@ def _resolve_truth_root(args_truth_root: str) -> Path:
     truth_root = Path(tr).resolve()
     if not truth_root.exists() or not truth_root.is_dir():
         raise SystemExit(f"FATAL: truth_root missing or not directory: {truth_root}")
-
-    try:
-        truth_root.relative_to(REPO_ROOT)
-    except Exception:
-        raise SystemExit(f"FATAL: truth_root not under repo root: truth_root={truth_root} repo_root={REPO_ROOT}")
 
     return truth_root
 
@@ -211,6 +200,41 @@ def main() -> int:
     life = _read_json_obj(p_life)
     # Validate lifecycle snapshot only if its schema exists
     _ = _validate_if_schema_exists(life, LIFECYCLE_SNAPSHOT_SCHEMA_CANDIDATES)
+    life_status = str(life.get("status") or "").strip().upper()
+    if life_status != "OK":
+        checks = [
+            {
+                "name": "position_lifecycle_snapshot_status",
+                "status": "FAIL",
+                "details": {"path": str(p_life), "lifecycle_status": life_status or "UNKNOWN"},
+            }
+        ]
+        out_fail = {
+            "schema_id": "C2_EXIT_OBLIGATIONS_V1",
+            "schema_version": 1,
+            "day_utc": day,
+            "produced_utc": produced_utc,
+            "producer": {"repo": "constellation_2_runtime", "git_sha": _git_sha(), "module": "ops/tools/run_exit_obligations_v1.py"},
+            "status": "FAIL",
+            "reason_codes": ["POSITION_LIFECYCLE_STATUS_NOT_OK"],
+            "checks": checks,
+            "obligations": [],
+            "canonical_json_hash": None,
+        }
+        out_fail["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(out_fail)
+        _ = _validate_if_schema_exists(out_fail, OUT_SCHEMA_CANDIDATES)
+        try:
+            payload = canonical_json_bytes_v1(out_fail) + b"\n"
+        except CanonicalizationError as e:
+            print(f"FAIL: CANONICALIZATION_ERROR: {e}", file=sys.stderr)
+            return 4
+        try:
+            _ = write_file_immutable_v1(path=out_path, data=payload, create_dirs=True)
+        except ImmutableWriteError as e:
+            print(f"FAIL: IMMUTABLE_WRITE_FAILED: {e}", file=sys.stderr)
+            return 4
+        print(f"FAIL: EXIT_OBLIGATIONS_V1 day_utc={day} path={out_path}")
+        return 2
 
     items = life.get("items")
     if not isinstance(items, list):

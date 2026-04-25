@@ -6,7 +6,16 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime")
+THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = THIS_FILE.parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.common.release_baseline_common_v1 import resolve_release_baseline_roots_v1  # noqa: E402
+
+
+ROOTS = resolve_release_baseline_roots_v1(REPO_ROOT)
+REPO_ROOT = ROOTS.repo_root
 
 RUNTIME_STATE_SCRIPT = REPO_ROOT / "ops/tools/run_constellation_runtime_state_snapshot_v1.py"
 ROOT_CAUSE_SCRIPT = REPO_ROOT / "ops/tools/run_constellation_root_cause_classifier_v1.py"
@@ -17,7 +26,7 @@ SELF_HEAL_SCRIPT = REPO_ROOT / "ops/tools/run_constellation_self_heal_candidate_
 MEMO_SCRIPT = REPO_ROOT / "ops/tools/run_constellation_diagnostics_memo_v1.py"
 CONTROL_PANEL_SCRIPT = REPO_ROOT / "ops/tools/run_constellation_ai_control_panel_v1.py"
 
-ARTIFACT_ROOT = REPO_ROOT / "constellation_2/runtime/truth/system_snapshot"
+ARTIFACT_ROOT = ROOTS.system_snapshot_root
 
 
 def run(script: Path, extra_args: list[str] | None = None) -> None:
@@ -98,8 +107,8 @@ def main() -> None:
     verify_artifact(ARTIFACT_ROOT / "constellation_runtime_state.v1.json")
     verify_artifact(ARTIFACT_ROOT / "constellation_root_cause_report.v1.json")
     verify_artifact(ARTIFACT_ROOT / "constellation_repair_plan.v1.json")
-    verify_artifact(REPO_ROOT / "constellation_2/runtime/truth/readiness_v1/constellation_bug_metrics_v1" / latest_operating_day / "constellation_bug_metrics.v1.json")
-    verify_artifact(REPO_ROOT / "constellation_2/runtime/truth/readiness_v1/constellation_platform_readiness_v1" / latest_operating_day / "constellation_platform_readiness.v1.json")
+    verify_artifact(ROOTS.readiness_root / "constellation_bug_metrics_v1" / latest_operating_day / "constellation_bug_metrics.v1.json")
+    verify_artifact(ROOTS.readiness_root / "constellation_platform_readiness_v1" / latest_operating_day / "constellation_platform_readiness.v1.json")
     if not args.skip_self_heal:
         verify_artifact(ARTIFACT_ROOT / "constellation_self_heal_packet.v1.json")
         verify_artifact(ARTIFACT_ROOT / "constellation_self_heal_memo.v1.md")
@@ -111,8 +120,8 @@ def main() -> None:
     print(ARTIFACT_ROOT / "constellation_runtime_state.v1.json")
     print(ARTIFACT_ROOT / "constellation_root_cause_report.v1.json")
     print(ARTIFACT_ROOT / "constellation_repair_plan.v1.json")
-    print(REPO_ROOT / "constellation_2/runtime/truth/readiness_v1/constellation_bug_metrics_v1" / latest_operating_day / "constellation_bug_metrics.v1.json")
-    print(REPO_ROOT / "constellation_2/runtime/truth/readiness_v1/constellation_platform_readiness_v1" / latest_operating_day / "constellation_platform_readiness.v1.json")
+    print(ROOTS.readiness_root / "constellation_bug_metrics_v1" / latest_operating_day / "constellation_bug_metrics.v1.json")
+    print(ROOTS.readiness_root / "constellation_platform_readiness_v1" / latest_operating_day / "constellation_platform_readiness.v1.json")
     if not args.skip_self_heal:
         print(ARTIFACT_ROOT / "constellation_self_heal_packet.v1.json")
         print(ARTIFACT_ROOT / "constellation_self_heal_memo.v1.md")

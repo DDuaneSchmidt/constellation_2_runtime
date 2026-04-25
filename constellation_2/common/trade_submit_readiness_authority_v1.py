@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
+from constellation_2.common.constitutional_runtime_v1 import validate_governed_artifact_payload_v1
 from constellation_2.common.runtime_contract_v1 import resolve_truth_sleeves_root
 
 
@@ -71,6 +72,8 @@ def validate_trade_submit_readiness_status_obj(obj: Dict[str, Any]) -> None:
         "input_manifest",
         "producer",
         "provenance",
+        "constitutional_dependency_declaration",
+        "constitutional_lineage",
         "session_authority_attestation",
         "run_state_authority_attestation",
     )
@@ -134,16 +137,22 @@ def read_trade_submit_readiness_authority_state(
     env = str(environment or "").strip().upper()
     account = str(ib_account or "").strip()
     day = str(day_utc or "").strip()
-    global_truth_root = (Path(repo_root).resolve() / "constellation_2" / "runtime" / "truth").resolve()
-    current_path = (global_truth_root / "trade_submit_readiness_c2_v1" / env / account / "status.json").resolve()
-    history_path = (global_truth_root / "trade_submit_readiness_c2_v1" / "_history" / env / account / day / "status.json").resolve()
+    bindings = resolve_governed_sleeve_truth_bindings(
+        repo_root=Path(repo_root).resolve(),
+        environment=env,
+        requested_ib_account=account,
+        sleeve_id="PRIMARY",
+    )
+    execution_truth_root = resolve_canonical_governed_sleeve_truth_root(bindings[0]).resolve()
+    current_path = (execution_truth_root / "trade_submit_readiness_c2_v1" / env / account / "status.json").resolve()
+    history_path = (execution_truth_root / "trade_submit_readiness_c2_v1" / "_history" / env / account / day / "status.json").resolve()
     try:
         history_obj = _read_and_validate_trade_submit_readiness_obj(
             status_path=history_path,
             environment=env,
             ib_account=account,
             day_utc=day,
-            expected_truth_root=global_truth_root,
+            expected_truth_root=execution_truth_root,
         )
     except ValueError as exc:
         if current_path.exists() and current_path.is_file():
@@ -153,7 +162,7 @@ def read_trade_submit_readiness_authority_state(
                     environment=env,
                     ib_account=account,
                     day_utc=str(_read_json_obj(current_path).get("day_utc") or "").strip(),
-                    expected_truth_root=global_truth_root,
+                    expected_truth_root=execution_truth_root,
                     allow_day_mismatch=True,
                 )
             except ValueError as current_exc:
@@ -166,7 +175,7 @@ def read_trade_submit_readiness_authority_state(
             environment=env,
             ib_account=account,
             day_utc=str(_read_json_obj(current_path).get("day_utc") or "").strip(),
-            expected_truth_root=global_truth_root,
+            expected_truth_root=execution_truth_root,
             allow_day_mismatch=True,
         )
         current_day = str(current_obj.get("day_utc") or "").strip()
@@ -219,6 +228,17 @@ def _read_and_validate_trade_submit_readiness_obj(
         raise ValueError(
             f"TRADE_SUBMIT_READINESS_NONAUTHORITATIVE:provenance_truth_root={truth_root_value!r}:expected={str(expected_truth_root)!r}:path={status_path}"
         )
+    try:
+        validate_governed_artifact_payload_v1(
+            repo_root=Path(__file__).resolve().parents[2],
+            artifact_id="trade_submit_readiness_c2_v1",
+            payload=obj,
+            required_finality_states=["provisional", "finalized", "corrected"],
+        )
+    except Exception as exc:
+        raise ValueError(
+            f"TRADE_SUBMIT_READINESS_CONSTITUTIONAL_INVALID:path={status_path}:reason={exc}"
+        ) from exc
     return obj
 
 
@@ -417,7 +437,17 @@ def resolve_governed_sleeve_truth_bindings(
         truth_partition = str(row.get("truth_partition") or "").strip()
         if not truth_partition:
             raise ValueError(f"SLEEVE_TRUTH_PARTITION_MISSING:sleeve_id={row_sleeve_id}")
-        truth_root = (Path(repo_root).resolve() / "constellation_2" / "runtime" / truth_partition).resolve()
+        truth_root = resolve_canonical_governed_sleeve_truth_root(
+            GovernedSleeveTruthBinding(
+                environment=env,
+                ib_account=binding.ib_account,
+                sleeve_id=row_sleeve_id,
+                truth_partition=truth_partition,
+                truth_root=Path("/"),
+                sleeve_registry_path=sleeve_registry_path,
+                sleeve_registry_sha256=binding.sleeve_registry_sha256,
+            )
+        )
         if not truth_root.exists() or not truth_root.is_dir():
             raise ValueError(f"SLEEVE_TRUTH_ROOT_MISSING:sleeve_id={row_sleeve_id}:path={truth_root}")
         scoped.append(

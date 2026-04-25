@@ -32,9 +32,20 @@ import os
 import hashlib
 import json
 import subprocess
+from datetime import date, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Tuple
 
 from constellation_2.common.runtime_contract_v1 import resolve_release_provenance
+from constellation_2.common.constitutional_runtime_v1 import (
+    FINALITY_PROVISIONAL,
+    assert_constitutional_writer_allowed_v1,
+    build_artifact_dependency_declaration_v1,
+    build_governed_artifact_lineage_v1,
+    build_governed_dependency_ref_v1,
+    build_machine_blocker_envelope_v1,
+    validate_governed_artifact_payload_v1,
+)
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1
 
@@ -64,10 +75,11 @@ TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()  # placeholder; 
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/operator_daily_gate.v3.schema.json"
 OUT_ROOT = (TRUTH / "reports" / "operator_daily_gate_v3").resolve()
+ECONOMIC_BUILD_FAMILY = "economic_state_build_v1"
+ECONOMIC_DRAWDOWN_BLOCK_LIMIT = Decimal("-0.100000")
 
 RECON_ROOT_V3 = (TRUTH / "reports" / "reconciliation_report_v3").resolve()
 POS_SNAP_ROOT = (TRUTH / "positions_v1/snapshots").resolve()
-ALLOC_SUM_ROOT = (TRUTH / "allocation_v1/summary").resolve()
 CAP_ENV_ROOT_V2 = (TRUTH / "reports" / "capital_risk_envelope_v2").resolve()
 
 CASH_SNAP_ROOT = (TRUTH / "cash_ledger_v1/snapshots").resolve()
@@ -127,6 +139,112 @@ def _day_prefix(day_utc: str) -> str:
     return f"{day_utc}T"
 
 
+def _prior_day_utc(day_utc: str) -> str:
+    return (date.fromisoformat(day_utc) - timedelta(days=1)).isoformat()
+
+
+def _decimal_or_none(raw: Any) -> Decimal | None:
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    try:
+        return Decimal(text)
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _load_previous_day_economic_build_state(*, truth_root: Path, day_utc: str) -> Dict[str, Any]:
+    prev_day_utc = _prior_day_utc(day_utc)
+    build_root = (truth_root / "reports" / ECONOMIC_BUILD_FAMILY / prev_day_utc).resolve()
+    unknown = {
+        "status": "UNKNOWN",
+        "source_day_utc": prev_day_utc,
+        "artifact_path": "",
+        "artifact_sha256": "",
+        "drawdown_pct": None,
+        "drawdown_guard_status": "UNKNOWN",
+        "policy_baseline_comparison_vs_portfolio_return": None,
+        "external_benchmark_underperformer_count": 0,
+        "reason_codes": ["BUNDLE_C_PREVIOUS_DAY_ECONOMIC_BUILD_MISSING"],
+    }
+    if not build_root.exists() or not build_root.is_dir():
+        return dict(unknown)
+
+    candidates = sorted(build_root.glob("*/economic_state_build.v1.json"))
+    if not candidates:
+        return dict(unknown)
+    if len(candidates) != 1:
+        raise SystemExit(
+            "FAIL: BUNDLE_C_PREVIOUS_DAY_ECONOMIC_BUILD_AMBIGUOUS:"
+            f"day_utc={prev_day_utc}:count={len(candidates)}"
+        )
+
+    build_path = candidates[0].resolve()
+    build_sha256 = _sha256_file(build_path)
+    build_obj = _read_json(build_path)
+    if str(build_obj.get("schema_id") or "").strip() != "economic_state_build":
+        return {
+            **unknown,
+            "artifact_path": str(build_path),
+            "artifact_sha256": build_sha256,
+            "reason_codes": ["BUNDLE_C_PREVIOUS_DAY_ECONOMIC_BUILD_SCHEMA_INVALID"],
+        }
+    if str(build_obj.get("day_utc") or "").strip() != prev_day_utc:
+        return {
+            **unknown,
+            "artifact_path": str(build_path),
+            "artifact_sha256": build_sha256,
+            "reason_codes": ["BUNDLE_C_PREVIOUS_DAY_ECONOMIC_BUILD_DAY_MISMATCH"],
+        }
+    if str(build_obj.get("closure_status") or "").strip().upper() != "COMPLETE":
+        return {
+            **unknown,
+            "artifact_path": str(build_path),
+            "artifact_sha256": build_sha256,
+            "reason_codes": ["BUNDLE_C_PREVIOUS_DAY_ECONOMIC_BUILD_NOT_COMPLETE"],
+        }
+
+    evaluation = build_obj.get("economic_evaluation")
+    if not isinstance(evaluation, dict):
+        return {
+            **unknown,
+            "artifact_path": str(build_path),
+            "artifact_sha256": build_sha256,
+            "reason_codes": ["BUNDLE_C_PREVIOUS_DAY_ECONOMIC_EVALUATION_MISSING"],
+        }
+
+    risk_state = evaluation.get("risk_state") if isinstance(evaluation.get("risk_state"), dict) else {}
+    benchmark_state = evaluation.get("benchmark_state") if isinstance(evaluation.get("benchmark_state"), dict) else {}
+    policy_baseline = benchmark_state.get("policy_baseline") if isinstance(benchmark_state.get("policy_baseline"), dict) else {}
+    drawdown_pct = risk_state.get("drawdown_pct")
+    drawdown_decimal = _decimal_or_none(drawdown_pct)
+    drawdown_guard_status = "UNKNOWN"
+    if drawdown_decimal is not None:
+        drawdown_guard_status = "BLOCKED" if drawdown_decimal <= ECONOMIC_DRAWDOWN_BLOCK_LIMIT else "PASS"
+
+    external_underperformer_count = 0
+    for row in benchmark_state.get("external_benchmarks") or []:
+        if not isinstance(row, dict):
+            continue
+        comparison = _decimal_or_none(row.get("comparison_vs_portfolio_return"))
+        if comparison is not None and comparison < 0:
+            external_underperformer_count += 1
+
+    return {
+        "status": "OK",
+        "source_day_utc": prev_day_utc,
+        "artifact_path": str(build_path),
+        "artifact_sha256": build_sha256,
+        "drawdown_pct": drawdown_pct,
+        "drawdown_guard_status": drawdown_guard_status,
+        "policy_baseline_comparison_vs_portfolio_return": policy_baseline.get("comparison_vs_portfolio_return"),
+        "external_benchmark_underperformer_count": external_underperformer_count,
+        "reason_codes": [],
+    }
+
+
 def _cash_snapshot_day_integrity(day_utc: str, cash_obj: Dict[str, Any]) -> Tuple[bool, List[str]]:
     rc: List[str] = []
     pu = str(cash_obj.get("produced_utc") or "").strip()
@@ -170,6 +288,11 @@ def _scan_exit_intents(day: str) -> Dict[str, int]:
 
 
 def main() -> int:
+    contract = assert_constitutional_writer_allowed_v1(
+        REPO_ROOT,
+        "operator_daily_gate_v3",
+        "ops/tools/run_operator_daily_gate_v3.py",
+    )
     ap = argparse.ArgumentParser(prog="run_operator_daily_gate_v3")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
     ap.add_argument("--truth_root", default=None, help="Absolute truth root directory (optional). If omitted, uses env C2_TRUTH_ROOT, else global truth.")
@@ -213,34 +336,14 @@ def main() -> int:
         reason_codes.append("MISSING_RECONCILIATION_REPORT_V3")
         input_manifest.append({"type": "reconciliation_report_v3_missing", "path": str(recon_path), "sha256": _sha256_bytes(b"")})
 
-    # Positions snapshot required (prefer v3, else any v*.json)
-    pos_day_dir = (POS_SNAP_ROOT / day).resolve()
-    pos_present = False
-    pos_path: Optional[Path] = None
-    if pos_day_dir.exists():
-        v3 = pos_day_dir / "positions_snapshot.v3.json"
-        if v3.exists():
-            pos_present = True
-            pos_path = v3
-        else:
-            cands = sorted([p for p in pos_day_dir.glob("positions_snapshot.v*.json") if p.is_file()])
-            if cands:
-                pos_present = True
-                pos_path = cands[-1]
-    if pos_present and pos_path:
-        input_manifest.append({"type": "positions_snapshot", "path": str(pos_path), "sha256": _sha256_file(pos_path)})
+    # Canonical Bundle A positions snapshot required: v5 only.
+    pos_path = (POS_SNAP_ROOT / day / "positions_snapshot.v5.json").resolve()
+    pos_present = pos_path.exists() and pos_path.is_file()
+    if pos_present:
+        input_manifest.append({"type": "positions_snapshot_v5", "path": str(pos_path), "sha256": _sha256_file(pos_path)})
     else:
-        reason_codes.append("MISSING_POSITIONS_SNAPSHOT")
-        input_manifest.append({"type": "positions_snapshot_missing", "path": str(pos_day_dir), "sha256": _sha256_bytes(b"")})
-
-    # Allocation summary required
-    alloc_path = (ALLOC_SUM_ROOT / day / "summary.json").resolve()
-    alloc_present = alloc_path.exists()
-    if alloc_present:
-        input_manifest.append({"type": "allocation_summary", "path": str(alloc_path), "sha256": _sha256_file(alloc_path)})
-    else:
-        reason_codes.append("MISSING_ALLOCATION_SUMMARY")
-        input_manifest.append({"type": "allocation_summary_missing", "path": str(alloc_path), "sha256": _sha256_bytes(b"")})
+        reason_codes.append("MISSING_POSITIONS_SNAPSHOT_V5")
+        input_manifest.append({"type": "positions_snapshot_v5_missing", "path": str(pos_path), "sha256": _sha256_bytes(b"")})
 
     # Capital envelope v2 required and must PASS
     cap_path = (CAP_ENV_ROOT_V2 / day / "capital_risk_envelope.v2.json").resolve()
@@ -319,11 +422,187 @@ def main() -> int:
             notes.append(f"missing_exit_intents_for_engines={','.join(missing_eids)}")
             exit_intents_satisfied = False
 
+    economic_state = _load_previous_day_economic_build_state(truth_root=TRUTH, day_utc=day)
+    if str(economic_state.get("artifact_path") or "").strip():
+        input_manifest.append(
+            {
+                "type": "economic_state_build_v1",
+                "path": str(economic_state["artifact_path"]),
+                "sha256": str(economic_state.get("artifact_sha256") or ""),
+            }
+        )
+    if str(economic_state.get("status") or "").strip().upper() == "OK":
+        if str(economic_state.get("drawdown_guard_status") or "").strip().upper() == "BLOCKED":
+            reason_codes.append("BUNDLE_C_DRAWDOWN_LIMIT_EXCEEDED")
+            notes.append(
+                "bundle_c_drawdown_block:"
+                f"source_day_utc={economic_state['source_day_utc']}:"
+                f"drawdown_pct={economic_state.get('drawdown_pct')}:"
+                f"limit_pct={str(ECONOMIC_DRAWDOWN_BLOCK_LIMIT)}"
+            )
+        policy_comparison = _decimal_or_none(
+            economic_state.get("policy_baseline_comparison_vs_portfolio_return")
+        )
+        if policy_comparison is not None:
+            if policy_comparison < 0:
+                notes.append("bundle_c_policy_baseline=UNDERPERFORMING")
+            elif policy_comparison > 0:
+                notes.append("bundle_c_policy_baseline=OUTPERFORMING")
+            else:
+                notes.append("bundle_c_policy_baseline=INLINE")
+        external_underperformer_count = int(economic_state.get("external_benchmark_underperformer_count") or 0)
+        if external_underperformer_count > 0:
+            notes.append(
+                f"bundle_c_external_benchmark_underperformer_count={external_underperformer_count}"
+            )
+    else:
+        reason_codes.append("MISSING_PREVIOUS_DAY_ECONOMIC_STATE_FAILCLOSED")
+        notes.append("bundle_c_previous_day_economic_state=UNKNOWN_FAILCLOSED")
+
     status = "PASS"
     if reason_codes:
         status = "FAIL"
     reason_codes = sorted(set(reason_codes))
+    constitutional_dependency_refs: List[Dict[str, Any]] = []
+    missing_dependency_artifacts: List[str] = []
+    governed_dependency_reason_codes: List[str] = []
+    if recon_path.exists() and recon_path.is_file():
+        recon_sha = _sha256_file(recon_path)
+        constitutional_dependency_refs.append(
+            build_governed_dependency_ref_v1(
+                repo_root=REPO_ROOT,
+                artifact_id="reconciliation_report_v3",
+                path=recon_path,
+                sha256=recon_sha,
+                finality_state=FINALITY_PROVISIONAL,
+            )
+        )
+        try:
+            validate_governed_artifact_payload_v1(
+                repo_root=REPO_ROOT,
+                artifact_id="reconciliation_report_v3",
+                payload=_read_json(recon_path),
+            )
+        except Exception:
+            governed_dependency_reason_codes.append("INVALID_GOVERNED_DEPENDENCY:reconciliation_report_v3")
+    else:
+        missing_dependency_artifacts.append("reconciliation_report_v3")
+    if pos_present:
+        constitutional_dependency_refs.append(
+            build_governed_dependency_ref_v1(
+                repo_root=REPO_ROOT,
+                artifact_id="positions_snapshot_v5",
+                path=pos_path,
+                sha256=_sha256_file(pos_path),
+                finality_state=FINALITY_PROVISIONAL,
+            )
+        )
+    else:
+        missing_dependency_artifacts.append("positions_snapshot_v5")
+    if cap_path.exists() and cap_path.is_file():
+        cap_sha = _sha256_file(cap_path)
+        constitutional_dependency_refs.append(
+            build_governed_dependency_ref_v1(
+                repo_root=REPO_ROOT,
+                artifact_id="capital_risk_envelope_v2",
+                path=cap_path,
+                sha256=cap_sha,
+                finality_state=FINALITY_PROVISIONAL,
+            )
+        )
+        try:
+            validate_governed_artifact_payload_v1(
+                repo_root=REPO_ROOT,
+                artifact_id="capital_risk_envelope_v2",
+                payload=_read_json(cap_path),
+            )
+        except Exception:
+            governed_dependency_reason_codes.append("INVALID_GOVERNED_DEPENDENCY:capital_risk_envelope_v2")
+    else:
+        missing_dependency_artifacts.append("capital_risk_envelope_v2")
+    if cash_present:
+        constitutional_dependency_refs.append(
+            build_governed_dependency_ref_v1(
+                repo_root=REPO_ROOT,
+                artifact_id="cash_ledger_snapshot_v1",
+                path=cash_path,
+                sha256=_sha256_file(cash_path),
+                finality_state=FINALITY_PROVISIONAL,
+            )
+        )
+    else:
+        missing_dependency_artifacts.append("cash_ledger_snapshot_v1")
+    if exit_recon_present:
+        exit_recon_sha = _sha256_file(exit_recon_path)
+        constitutional_dependency_refs.append(
+            build_governed_dependency_ref_v1(
+                repo_root=REPO_ROOT,
+                artifact_id="exit_reconciliation_v1",
+                path=exit_recon_path,
+                sha256=exit_recon_sha,
+                finality_state=FINALITY_PROVISIONAL,
+            )
+        )
+        try:
+            validate_governed_artifact_payload_v1(
+                repo_root=REPO_ROOT,
+                artifact_id="exit_reconciliation_v1",
+                payload=_read_json(exit_recon_path),
+            )
+        except Exception:
+            governed_dependency_reason_codes.append("INVALID_GOVERNED_DEPENDENCY:exit_reconciliation_v1")
+    else:
+        missing_dependency_artifacts.append("exit_reconciliation_v1")
+    if str(economic_state.get("artifact_path") or "").strip() and str(economic_state.get("artifact_sha256") or "").strip():
+        constitutional_dependency_refs.append(
+            build_governed_dependency_ref_v1(
+                repo_root=REPO_ROOT,
+                artifact_id="economic_state_build_v1",
+                path=str(economic_state.get("artifact_path") or "").strip(),
+                sha256=str(economic_state.get("artifact_sha256") or "").strip(),
+                finality_state=FINALITY_PROVISIONAL,
+            )
+        )
+    else:
+        missing_dependency_artifacts.append("economic_state_build_v1")
+    if governed_dependency_reason_codes:
+        status = "FAIL"
+    blocker_envelope = build_machine_blocker_envelope_v1(
+        closure_state=(
+            "COMPLETE"
+            if status == "PASS" and not governed_dependency_reason_codes and not missing_dependency_artifacts
+            else "BLOCKED"
+        ),
+        reason_codes=[*reason_codes, *governed_dependency_reason_codes],
+        missing_dependency_artifacts=missing_dependency_artifacts,
+    )
+    constitutional_dependency_declaration = build_artifact_dependency_declaration_v1(
+        artifact_type="operator_daily_gate_v3",
+        artifact_class=str(contract.get("artifact_class") or "").strip(),
+        authority_id="operator_daily_gate_v3",
+        declared_dependency_artifacts=[
+            str(item).strip()
+            for item in (contract.get("required_upstream_dependencies") or [])
+            if str(item).strip()
+        ],
+        dependency_refs=constitutional_dependency_refs,
+    )
+    constitutional_lineage = build_governed_artifact_lineage_v1(
+        artifact_type="operator_daily_gate_v3",
+        artifact_version="v3",
+        artifact_class=str(contract.get("artifact_class") or "").strip(),
+        authority_id="operator_daily_gate_v3",
+        producer_id="ops/tools/run_operator_daily_gate_v3.py",
+        generated_at_utc=produced_utc,
+        effective_at_utc=produced_utc,
+        finality_state=FINALITY_PROVISIONAL,
+        input_artifact_refs=constitutional_dependency_refs,
+        policy_snapshot_refs=[],
+        code_version=_git_sha(),
+        run_id=f"operator_daily_gate:{day}:{str(args.mode).strip().upper()}",
+    )
 
+    payload_reason_codes = sorted(set([*reason_codes, *governed_dependency_reason_codes]))
     gate: Dict[str, Any] = {
         "schema_id": "operator_daily_gate",
         "schema_version": "v3",
@@ -331,21 +610,49 @@ def main() -> int:
         "produced_utc": produced_utc,
         "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_operator_daily_gate_v3.py", "git_sha": _git_sha()},
         "status": status,
-        "reason_codes": reason_codes,
+        "reason_codes": payload_reason_codes,
+        "blocking_codes": list(blocker_envelope["blocking_codes"]),
+        "closure_state": str(blocker_envelope["closure_state"]),
+        "first_blocker_code": str(blocker_envelope["first_blocker_code"]),
+        "missing_dependency_artifacts": list(blocker_envelope["missing_dependency_artifacts"]),
+        "constitutional_dependency_declaration": constitutional_dependency_declaration,
+        "constitutional_lineage": constitutional_lineage,
         "notes": notes,
         "input_manifest": input_manifest,
         "checks": {
             "reconciliation_v3_status": (recon_status if recon_status in ("OK", "FAIL", "MISSING") else "MISSING"),
             "cash_ledger_integrity_ok": bool(cash_present and cash_integrity_ok and (not cash_fail_present)),
             "positions_snapshot_present": bool(pos_present),
-            "allocation_summary_present": bool(alloc_present),
             "capital_risk_envelope_v2_status": (cap_status if cap_status in ("PASS", "FAIL", "MISSING") else "MISSING"),
             "exit_reconciliation_present": bool(exit_recon_present),
             "exit_intents_satisfied_when_obligations_exist": bool(exit_intents_satisfied),
+            "previous_day_economic_state_status": str(economic_state.get("status") or "UNKNOWN"),
+            "previous_day_drawdown_guard_status": str(economic_state.get("drawdown_guard_status") or "UNKNOWN"),
+        },
+        "economic_state": {
+            "status": str(economic_state.get("status") or "UNKNOWN"),
+            "source_day_utc": str(economic_state.get("source_day_utc") or ""),
+            "artifact_path": str(economic_state.get("artifact_path") or ""),
+            "artifact_sha256": str(economic_state.get("artifact_sha256") or ""),
+            "drawdown_pct": economic_state.get("drawdown_pct"),
+            "drawdown_guard_status": str(economic_state.get("drawdown_guard_status") or "UNKNOWN"),
+            "policy_baseline_comparison_vs_portfolio_return": economic_state.get(
+                "policy_baseline_comparison_vs_portfolio_return"
+            ),
+            "external_benchmark_underperformer_count": int(
+                economic_state.get("external_benchmark_underperformer_count") or 0
+            ),
+            "reason_codes": list(economic_state.get("reason_codes") or []),
         },
     }
 
     validate_against_repo_schema_v1(gate, REPO_ROOT, SCHEMA_RELPATH)
+    validate_governed_artifact_payload_v1(
+        repo_root=REPO_ROOT,
+        artifact_id="operator_daily_gate_v3",
+        payload=gate,
+        required_finality_states=["provisional", "finalized", "corrected"],
+    )
 
     out_dir = (OUT_ROOT / day).resolve()
     out_path = (out_dir / "operator_daily_gate.v3.json").resolve()

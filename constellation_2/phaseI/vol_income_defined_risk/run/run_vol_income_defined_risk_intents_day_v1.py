@@ -68,7 +68,7 @@ EXPOSURE_INTENT_SCHEMA = (REPO_ROOT / "constellation_2" / "schemas" / "exposure_
 
 ENGINE_ID = "C2_VOL_INCOME_DEFINED_RISK_V1"
 ENGINE_SUITE = "C2_HYBRID_V1"
-RISK_CLASS = "VRP_DEFINED"
+RISK_CLASS = "VOL_INCOME_DEFINED"
 
 getcontext().prec = 28
 
@@ -280,6 +280,7 @@ def _build_exposure_intent(day_utc: str, mode: str, symbol: str, target_pct: str
         "engine": {"engine_id": ENGINE_ID, "suite": ENGINE_SUITE, "mode": mode},
         "underlying": {"symbol": symbol, "currency": "USD"},
         "exposure_type": "SHORT_VOL_DEFINED",
+        "option": {"structure": "PUT", "direction": "SELL"},
         "target_notional_pct": target_pct,
         "expected_holding_days": 7,
         "risk_class": RISK_CLASS,
@@ -294,7 +295,7 @@ def main() -> int:
     ap.add_argument("--mode", required=True, choices=["PAPER", "LIVE"])
     ap.add_argument("--truth_root", default="", help="Canonical truth root override")
     ap.add_argument("--symbol", default="SPY", help="Underlying symbol (default: SPY)")
-    ap.add_argument("--target_notional_pct", default="0.40", help="Decimal string in [0,1]")
+    ap.add_argument("--target_notional_pct", default="0.01", help="Decimal string in [0,1]")
     ap.add_argument("--max_risk_pct", default="0.01", help="Decimal string in [0,1]")
     ap.add_argument("--stdev_window", default="3", help="Integer window for vol proxy (default fits bootstrap dataset)")
     ap.add_argument("--percentile_window", default="7", help="Integer lookback for percentile (default fits bootstrap dataset)")
@@ -391,7 +392,7 @@ def main() -> int:
     )
 
     try:
-        validate_against_repo_schema_v1(intent_obj, EXPOSURE_INTENT_SCHEMA)
+        validate_against_repo_schema_v1(intent_obj, REPO_ROOT, "constellation_2/schemas/exposure_intent.v1.schema.json")
     except Exception as e:  # noqa: BLE001
         raise VolIncomeIntentError(f"SCHEMA_VALIDATION_FAILED: {e}") from e
 

@@ -1,0 +1,5 @@
+day_utc,is_trading_session
+2026-04-10,true
+2026-04-11,false
+2026-04-12,false
+2026-04-13,true

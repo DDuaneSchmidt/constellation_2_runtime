@@ -12,6 +12,11 @@ Inputs:
 Outputs:
 - engine_activity_v1/authorization_v1/<DAY>/<INTENT_SHA>.authorization.v1.json
 
+Compatibility note:
+- authorization_v1 remains the submit-boundary compatibility projection.
+- capital_authority_allocation_v1.decision_chain.authorized_trade_intents is the
+  canonical Bundle B authority and must be present.
+
 Truth-root selection order:
   1) --truth_root
   2) C2_TRUTH_ROOT
@@ -44,7 +49,19 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.common.truth_root_v1 import resolve_truth_root  # noqa: E402
-from constellation_2.common.runtime_contract_v1 import resolve_release_provenance  # noqa: E402
+from constellation_2.common.constitutional_authorization_v1 import build_constitutional_authorization_v1  # noqa: E402
+from constellation_2.common.constitutional_authorization_v1 import compare_legacy_authorization_to_constitutional_v1  # noqa: E402
+from constellation_2.common.constitutional_decision_v1 import evaluate_constitutional_decision_v1  # noqa: E402
+from constellation_2.common.constitutional_proposal_v1 import (  # noqa: E402
+    build_exposure_intent_proposal_v1,
+    proposal_hash_v1,
+)
+from constellation_2.common.constitutional_review_resolution_v1 import build_review_packet_from_authorization_artifact_v1  # noqa: E402
+from constellation_2.common.paper_session_fact_plane_v1 import (  # noqa: E402
+    build_constitutional_fact_bundle_v1,
+    build_constitutional_fact_record_v1,
+)
+from constellation_2.common.runtime_contract_v1 import resolve_release_provenance_release_current_first_v1  # noqa: E402
 from constellation_2.phaseD.lib.canon_json_v1 import (  # noqa: E402
     CanonicalizationError,
     canonical_hash_excluding_fields_v1,
@@ -55,6 +72,7 @@ from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_again
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/authorization.v1.schema.json"
 NO_INTENTS_SCHEMA = "governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/no_intents_day.v1.schema.json"
 POLICY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/C2_CAPITAL_AUTHORITY_POLICY_V1.json").resolve()
+CONSTITUTIONAL_SHADOW_POLICY_VERSION = "constitutional_shadow_v1"
 
 
 def _require_truth_root_under_repo(truth_root: Path) -> Path:
@@ -85,7 +103,12 @@ def _parse_day(day: str) -> str:
 
 def _git_sha() -> str:
     try:
-        value = str(resolve_release_provenance().get("git_sha") or "").strip()
+        value = str(
+            resolve_release_provenance_release_current_first_v1(
+                caller="ops/tools/run_authorization_artifacts_day_v1.py"
+            ).get("git_sha")
+            or ""
+        ).strip()
     except Exception:
         value = ""
     if len(value) != 40:
@@ -288,11 +311,74 @@ def _out_root(truth_root: Path) -> Path:
     return (truth_root / "engine_activity_v1" / "authorization_v1").resolve()
 
 
+def _authorization_projection_v1(full_authorization: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "proposal_hash": str(full_authorization.get("proposal_hash") or "").strip().lower(),
+        "fact_bundle_hash": str(full_authorization.get("fact_bundle_hash") or "").strip().lower(),
+        "policy_version": str(full_authorization.get("policy_version") or "").strip(),
+        "effective_scope": dict(full_authorization.get("effective_scope") or {}),
+        "decision_enum": str(full_authorization.get("decision_enum") or "").strip().upper(),
+        "issued_at": str(full_authorization.get("issued_at") or "").strip(),
+        "expires_at": full_authorization.get("expires_at"),
+        "authorization_source": str(full_authorization.get("authorization_source") or "").strip().upper(),
+    }
+
+
+def _bundle_b_authorized_rows(alloc_obj: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    decision_chain = alloc_obj.get("decision_chain")
+    if not isinstance(decision_chain, dict):
+        raise SystemExit("FAIL: BUNDLE_B_DECISION_CHAIN_MISSING")
+    rows = decision_chain.get("authorized_trade_intents")
+    if not isinstance(rows, list):
+        raise SystemExit("FAIL: BUNDLE_B_AUTHORIZED_TRADE_INTENTS_MISSING")
+    out: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        intent_hash = str(row.get("intent_hash") or "").strip()
+        if intent_hash:
+            out[intent_hash] = row
+    return out
+
+
+def _append_constraint(constraints: List[str], *, key: str, value: int) -> None:
+    constraints.append(f"{str(key).strip()}={int(value)}")
+
+
+def _headroom_constraints_from_decision(decision_row: Dict[str, Any]) -> List[str]:
+    reason_codes = {
+        str(code).strip().upper()
+        for code in list(decision_row.get("reason_codes") or [])
+        if str(code).strip()
+    }
+    if "BUNDLE_B_HEADROOM_REJECTED" not in reason_codes:
+        return []
+
+    constraints: List[str] = []
+    field_map = {
+        "HEADROOM_REQUESTED_QUANTITY": "requested_quantity",
+        "HEADROOM_AUTHORIZED_QUANTITY": "authorized_quantity",
+        "HEADROOM_REJECTED_QUANTITY": "rejected_quantity",
+        "HEADROOM_RISK_PER_UNIT_CENTS": "risk_per_unit_cents",
+        "HEADROOM_REQUIRED_RISK_CENTS": "required_risk_cents",
+        "HEADROOM_AVAILABLE_CENTS": "headroom_cents",
+        "HEADROOM_ALLOWED_CAPITAL_AT_RISK_CENTS": "allowed_capital_at_risk_cents",
+        "HEADROOM_AVAILABLE_SLEEVE_CENTS": "available_sleeve_headroom_cents",
+        "HEADROOM_AVAILABLE_PORTFOLIO_CENTS": "available_portfolio_headroom_cents",
+    }
+    for key, field_name in field_map.items():
+        raw = decision_row.get(field_name)
+        if isinstance(raw, int):
+            _append_constraint(constraints, key=key, value=int(raw))
+    return constraints
+
+
 def _select_effective_intents(intents_dir: Path) -> List[Path]:
     # Same-day corrected snapshots may coexist with stale prior snapshots for the
-    # same intent_id. Keep exactly one effective file per intent_id by selecting
-    # the latest file mtime; break ties by lexicographically larger filename.
-    by_intent_id: Dict[str, tuple[int, str, Path]] = {}
+    # same intent_id. Keep exactly one effective file per intent_id using only
+    # canonical artifact content: later created_at_utc wins; ties fall back to
+    # file sha256, then filename. Never depend on filesystem mtime.
+    by_intent_id: Dict[str, tuple[str, str, str, Path]] = {}
     passthrough: List[Path] = []
     for p in sorted(
         [
@@ -312,12 +398,12 @@ def _select_effective_intents(intents_dir: Path) -> List[Path]:
         if not intent_id:
             passthrough.append(p)
             continue
-        stat = p.stat()
-        candidate = (int(stat.st_mtime_ns), p.name, p)
+        created_at_utc = str(obj.get("created_at_utc") or "").strip()
+        candidate = (created_at_utc, _sha256_file(p), p.name, p)
         prior = by_intent_id.get(intent_id)
-        if prior is None or candidate[:2] >= prior[:2]:
+        if prior is None or candidate[:3] >= prior[:3]:
             by_intent_id[intent_id] = candidate
-    return sorted(passthrough + [item[2] for item in by_intent_id.values()], key=lambda p: p.name)
+    return sorted(passthrough + [item[3] for item in by_intent_id.values()], key=lambda p: p.name)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -357,16 +443,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     producer_git_sha = _git_sha()
     producer_git_sha_hash = _sha256_bytes((producer_git_sha + "\n").encode("utf-8"))
 
-    decisions: Dict[str, Dict[str, Any]] = {}
-    for row in alloc_obj.get("per_intent", []):
-        if not isinstance(row, dict):
-            continue
-        decisions[str(row.get("intent_hash") or "")] = row
+    decisions = _bundle_b_authorized_rows(alloc_obj)
 
     out_day_dir = (_out_root(truth_root) / day).resolve()
     out_day_dir.mkdir(parents=True, exist_ok=True)
 
     wrote = 0
+    constitutional_decision_counts: Dict[str, int] = {}
+    constitutional_missing_fact_count = 0
+    constitutional_dependency_degradation_count = 0
+    constitutional_mismatch_count = 0
+    constitutional_review_required_count = 0
     for p in intent_files:
         intent_obj = _read_json_obj(p)
         engine_id = str(((intent_obj.get("engine") or {}).get("engine_id") or "")).strip()
@@ -379,18 +466,159 @@ def main(argv: Optional[List[str]] = None) -> int:
         if not isinstance(dec, dict):
             raise SystemExit(f"FAIL: ALLOCATION_MISSING_INTENT_HASH: {intent_sha} file={str(p)}")
 
-        decision = str(dec.get("decision") or "REJECTED").strip().upper()
+        authorization_outcome = str(dec.get("authorization_outcome") or "").strip().upper()
         auth_qty = int(dec.get("authorized_quantity") or 0)
         rc = list(dec.get("reason_codes") or ["CAPAUTH_REJECTED", "CAPAUTH_FAIL_CLOSED_REQUIRED"])
-        status = "AUTHORIZED" if decision == "AUTHORIZED" and auth_qty > 0 else "REJECTED"
+        decision = "AUTHORIZED" if auth_qty > 0 else "REJECTED"
+        if authorization_outcome == "RESIZED" and auth_qty > 0:
+            rc = sorted({*rc, "BUNDLE_B_RESIZED"})
+        status = "AUTHORIZED" if auth_qty > 0 and authorization_outcome in {"APPROVED", "RESIZED"} else "REJECTED"
 
+        headroom_constraints = _headroom_constraints_from_decision(dec)
         auth_block: Dict[str, Any] = {
             "decision": decision,
             "authorized_quantity": int(auth_qty),
-            "constraints": [],
+            "constraints": list(headroom_constraints),
             "decision_hash": None,
         }
         auth_block["decision_hash"] = canonical_hash_excluding_fields_v1(auth_block, fields=("decision_hash",))
+        proposal = build_exposure_intent_proposal_v1(
+            day_utc=day,
+            intent_obj=intent_obj,
+            intent_path=p,
+            intent_hash=intent_sha,
+            policy_path=POLICY_PATH,
+            policy_hash=pol_sha,
+        )
+        proposal_hash = proposal_hash_v1(proposal)
+        allocation_fact = build_constitutional_fact_record_v1(
+            fact_type="account_state_fact",
+            source_system="capital_authority_allocation_v1",
+            source_version=str(alloc_obj.get("schema_version") or "v1").strip(),
+            observed_at=str(alloc_obj.get("produced_utc") or produced_utc).strip(),
+            captured_at=produced_utc,
+            freshness_class="CURRENT",
+            provenance_class="AUTHORITATIVE_FILE",
+            payload={
+                "decision": decision,
+                "authorized_quantity": int(auth_qty),
+                "reason_codes": sorted({str(code).strip() for code in rc if str(code).strip()}),
+                "authorization_outcome": authorization_outcome,
+            },
+            scope_keys={"day_utc": day, "intent_id": intent_id, "engine_id": engine_id},
+            content_hash=alloc_sha,
+            general_admissibility="VERIFIED_COMPLETE",
+            tax_admissibility="ESTIMATED_POSITION_LEVEL",
+            dependency_health="HEALTHY" if auth_qty >= 0 else "DEGRADED_BLOCKING",
+            state_coherence="COHERENT",
+            logical_name="capital_authority_allocation_v1",
+            artifact_path=str(p_alloc),
+        )
+        policy_fact = build_constitutional_fact_record_v1(
+            fact_type="policy_binding_fact",
+            source_system="governance_registry",
+            source_version="v1",
+            observed_at=produced_utc,
+            captured_at=produced_utc,
+            freshness_class="CURRENT" if POLICY_PATH.exists() else "UNKNOWN",
+            provenance_class="REGISTRY_BOUND",
+            payload={"policy_path": str(POLICY_PATH), "policy_sha256": pol_sha},
+            scope_keys={"day_utc": day, "intent_id": intent_id},
+            content_hash=pol_sha,
+            general_admissibility="VERIFIED_COMPLETE" if POLICY_PATH.exists() else "UNAVAILABLE",
+            tax_admissibility="ESTIMATED_POSITION_LEVEL",
+            dependency_health="HEALTHY" if POLICY_PATH.exists() else "UNAVAILABLE",
+            state_coherence="COHERENT" if POLICY_PATH.exists() else "UNKNOWN",
+            logical_name="capital_authority_policy_v1",
+            artifact_path=str(POLICY_PATH),
+        )
+        execution_fact = build_constitutional_fact_record_v1(
+            fact_type="execution_capability_fact",
+            source_system="authorization_artifacts_day_v1",
+            source_version="v1",
+            observed_at=produced_utc,
+            captured_at=produced_utc,
+            freshness_class="CURRENT",
+            provenance_class="DERIVED_FROM_AUTHORITATIVE_FILES",
+            payload={
+                "intent_hash": intent_sha,
+                "allocation_present": True,
+                "status": status,
+            },
+            scope_keys={"day_utc": day, "intent_id": intent_id, "engine_id": engine_id},
+            content_hash=_sha256_bytes(
+                canonical_json_bytes_v1({"intent_hash": intent_sha, "status": status, "authorized_quantity": int(auth_qty)})
+            ),
+            general_admissibility="VERIFIED_COMPLETE",
+            tax_admissibility="ESTIMATED_POSITION_LEVEL",
+            dependency_health="HEALTHY" if status == "AUTHORIZED" else "DEGRADED_NON_BLOCKING",
+            state_coherence="COHERENT",
+            logical_name="execution_capability_shadow_v1",
+            artifact_path="engine_activity_v1/authorization_v1",
+        )
+        fact_bundle = build_constitutional_fact_bundle_v1(
+            day_utc=day,
+            session_id=intent_id,
+            policy_version=CONSTITUTIONAL_SHADOW_POLICY_VERSION,
+            required_fact_types=list(proposal.get("required_fact_types") or []),
+            fact_records=[allocation_fact, policy_fact, execution_fact],
+        )
+        constitutional_decision = evaluate_constitutional_decision_v1(
+            proposal=proposal,
+            proposal_hash=proposal_hash,
+            fact_bundle=fact_bundle,
+            fact_bundle_hash=str(fact_bundle.get("fact_bundle_hash") or "").strip(),
+            policy_version=CONSTITUTIONAL_SHADOW_POLICY_VERSION,
+            scope_authorities={
+                "global": "REQUIRE_HUMAN_REVIEW",
+                "domain": "REQUIRE_HUMAN_REVIEW",
+                "account": "REQUIRE_HUMAN_REVIEW",
+                "sleeve": "REQUIRE_HUMAN_REVIEW",
+                "action_class": "REQUIRE_HUMAN_REVIEW",
+            },
+            hard_envelope_ok=bool(status == "AUTHORIZED" and auth_qty > 0),
+            policy_blockers=[] if status == "AUTHORIZED" and auth_qty > 0 else list(rc),
+            persistence_ok=True,
+            evaluated_at=produced_utc,
+        )
+        constitutional_authorization = build_constitutional_authorization_v1(
+            proposal_hash=proposal_hash,
+            fact_bundle_hash=str(fact_bundle.get("fact_bundle_hash") or "").strip(),
+            policy_version=CONSTITUTIONAL_SHADOW_POLICY_VERSION,
+            effective_scope=dict(constitutional_decision.get("effective_scope") or {}),
+            decision_enum=str(constitutional_decision.get("decision_enum") or "").strip(),
+            issued_at=produced_utc,
+            expires_at=f"{day}T23:59:59Z",
+            issuer_identity={
+                "issuer": "run_authorization_artifacts_day_v1",
+                "producer_module": "ops/tools/run_authorization_artifacts_day_v1.py",
+                "git_sha": producer_git_sha,
+            },
+        )
+        constitutional_authorization_projection = _authorization_projection_v1(constitutional_authorization)
+        legacy_constitutional_comparison = compare_legacy_authorization_to_constitutional_v1(
+            legacy_status=status,
+            legacy_decision=decision,
+            legacy_authorized_quantity=int(auth_qty),
+            constitutional_decision_enum=str(constitutional_decision.get("decision_enum") or "").strip(),
+            constitutional_authorization_issuable=bool(constitutional_decision.get("authorization_issuable") is True),
+        )
+        constitutional_decision_counts[str(constitutional_decision.get("decision_enum") or "").strip()] = (
+            constitutional_decision_counts.get(str(constitutional_decision.get("decision_enum") or "").strip(), 0) + 1
+        )
+        negative_evidence_rows = list(constitutional_decision.get("negative_evidence") or [])
+        constitutional_missing_fact_count += sum(
+            1 for row in negative_evidence_rows
+            if isinstance(row, dict) and str(row.get("type") or "").strip() == "MISSING_FACT"
+        )
+        constitutional_dependency_degradation_count += sum(
+            1
+            for row in (fact_bundle.get("fact_records") or [])
+            if isinstance(row, dict)
+            and str(row.get("dependency_health") or "").strip().upper() in {"DEGRADED_NON_BLOCKING", "DEGRADED_BLOCKING", "UNAVAILABLE"}
+        )
+        if str(legacy_constitutional_comparison.get("comparison_status") or "").strip() == "MISMATCH":
+            constitutional_mismatch_count += 1
 
         out_obj: Dict[str, Any] = {
             "schema_id": "C2_AUTHORIZATION_V1",
@@ -413,8 +641,27 @@ def main(argv: Optional[List[str]] = None) -> int:
             "engine_id": engine_id,
             "intent_id": intent_id,
             "intent_hash": intent_sha,
+            "proposal_hash": proposal_hash,
+            "fact_bundle_hash": str(fact_bundle.get("fact_bundle_hash") or "").strip(),
+            "decision_enum": str(constitutional_decision.get("decision_enum") or "").strip(),
+            "effective_scope": dict(constitutional_decision.get("effective_scope") or {}),
+            "issued_at": str(constitutional_authorization.get("issued_at") or "").strip(),
+            "expires_at": constitutional_authorization.get("expires_at"),
             "authorization": auth_block,
+            "legacy_constitutional_comparison": legacy_constitutional_comparison,
+            "constitutional_authorization": constitutional_authorization_projection,
+            "constitutional_shadow": {
+                "policy_version": CONSTITUTIONAL_SHADOW_POLICY_VERSION,
+                "proposal": proposal,
+                "fact_bundle": fact_bundle,
+                "decision": constitutional_decision,
+                "constitutional_authorization": constitutional_authorization,
+                "legacy_constitutional_comparison": legacy_constitutional_comparison,
+            },
         }
+        if str(constitutional_decision.get("decision_enum") or "").strip().upper() == "REQUIRE_HUMAN_REVIEW":
+            constitutional_review_required_count += 1
+            out_obj["constitutional_shadow"]["review_packet"] = build_review_packet_from_authorization_artifact_v1(out_obj)
 
         validate_against_repo_schema_v1(out_obj, REPO_ROOT, SCHEMA_RELPATH)
 
@@ -422,7 +669,24 @@ def main(argv: Optional[List[str]] = None) -> int:
         _write_daykey_with_freshness(out_path, out_obj)
         wrote += 1
 
-    print(f"OK: AUTHORIZATION_ARTIFACTS_WRITTEN day_utc={day} wrote={wrote} out_dir={out_day_dir}")
+    print(
+        json.dumps(
+            {
+                "day_utc": day,
+                "wrote": wrote,
+                "out_dir": str(out_day_dir),
+                "constitutional_shadow_metrics": {
+                    "proposal_count": wrote,
+                    "decision_counts": dict(sorted(constitutional_decision_counts.items())),
+                    "missing_fact_count": constitutional_missing_fact_count,
+                    "dependency_degradation_count": constitutional_dependency_degradation_count,
+                    "legacy_constitutional_mismatch_count": constitutional_mismatch_count,
+                    "review_required_count": constitutional_review_required_count,
+                },
+            },
+            sort_keys=True,
+        )
+    )
     return 0
 
 

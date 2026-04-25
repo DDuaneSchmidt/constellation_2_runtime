@@ -25,11 +25,12 @@ import json
 import subprocess
 from typing import Any, Dict, List
 
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH = resolve_canonical_truth_root().resolve()
 SUBMISSIONS_ROOT = (TRUTH / "execution_evidence_v1" / "submissions").resolve()
 OUT_ROOT = (TRUTH / "monitoring_v1" / "submissions_summary_v1").resolve()
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/MONITORING/submissions_summary.v1.schema.json"

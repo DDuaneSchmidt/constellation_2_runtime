@@ -37,11 +37,14 @@ from decimal import Decimal, ROUND_HALF_UP, getcontext
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH = resolve_canonical_truth_root_bridge_v1(
+    caller="constellation_2/phaseJ/monitoring/run/run_stress_replay_report_day_v1.py"
+).resolve()
 
 CAL_ROOT = (TRUTH / "market_calendar_v1").resolve()
 MD_ROOT = (TRUTH / "market_data_snapshot_v1").resolve()

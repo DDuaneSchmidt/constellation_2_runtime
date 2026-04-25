@@ -27,8 +27,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+from constellation_2.common.truth_root_v1 import resolve_runtime_root
+
+
+RUNTIME_ROOT = resolve_runtime_root()
+TRUTH = (RUNTIME_ROOT / "truth").resolve()
 OVERRIDE_ROOT = (TRUTH / "reports" / "operator_future_day_override_v1").resolve()
 
 

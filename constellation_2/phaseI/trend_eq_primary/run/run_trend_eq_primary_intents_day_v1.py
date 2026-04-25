@@ -55,6 +55,7 @@ if str(REPO_ROOT) not in sys.path:
 from constellation_2.common.paper_session_fact_plane_v1 import resolve_fact_plane_truth_root_v1
 from constellation_2.common.c2_risk_policy_loader_v1 import (
     RiskPolicyLoaderError,
+    get_stop_loss_bps_default_or_fail,
     get_per_trade_notional_pct_max_or_fail,
     get_target_notional_pct_default_or_fail,
 )
@@ -243,7 +244,14 @@ def _sma(values: List[Decimal], n: int) -> Decimal:
     return sum(values[-n:]) / Decimal(n)
 
 
-def _build_exposure_intent(day_utc: str, mode: str, symbol: str, target_pct: str, max_risk_pct: str) -> Dict[str, Any]:
+def _build_exposure_intent(
+    day_utc: str,
+    mode: str,
+    symbol: str,
+    target_pct: str,
+    max_risk_pct: str,
+    stop_loss_bps: int,
+) -> Dict[str, Any]:
     intent_id = f"c2_trend_eq_{symbol.lower()}_{day_utc}_v1"
     return {
         "schema_id": "exposure_intent",
@@ -256,7 +264,7 @@ def _build_exposure_intent(day_utc: str, mode: str, symbol: str, target_pct: str
         "target_notional_pct": target_pct,
         "expected_holding_days": 20,
         "risk_class": RISK_CLASS,
-        "constraints": {"max_risk_pct": max_risk_pct},
+        "constraints": {"max_risk_pct": max_risk_pct, "stop_loss_bps": int(stop_loss_bps)},
         "canonical_json_hash": None,
     }
 
@@ -265,10 +273,11 @@ def _resolve_governed_policy_or_fail(
     *,
     target_notional_pct_arg: str,
     max_risk_pct_arg: str,
-) -> tuple[str, str]:
+) -> tuple[str, str, int]:
     try:
         governed_target = get_target_notional_pct_default_or_fail(ENGINE_ID)
         governed_cap = get_per_trade_notional_pct_max_or_fail(ENGINE_ID)
+        governed_stop_loss_bps = int(get_stop_loss_bps_default_or_fail(ENGINE_ID))
     except RiskPolicyLoaderError as e:
         raise TrendIntentError(f"GOVERNED_RISK_POLICY_LOAD_FAILED: {e}") from e
 
@@ -288,7 +297,9 @@ def _resolve_governed_policy_or_fail(
         raise TrendIntentError(
             f"GOVERNED_MAX_RISK_OVERRIDE_FORBIDDEN: provided={max_risk_raw} governed={governed_cap}"
         )
-    return target_raw, max_risk_raw
+    if governed_stop_loss_bps <= 0:
+        raise TrendIntentError(f"GOVERNED_STOP_LOSS_BPS_INVALID: {governed_stop_loss_bps}")
+    return target_raw, max_risk_raw, governed_stop_loss_bps
 
 
 def main() -> int:
@@ -310,7 +321,7 @@ def main() -> int:
     symbol = str(args.symbol).strip().upper()
 
     try:
-        target_notional_pct, max_risk_pct = _resolve_governed_policy_or_fail(
+        target_notional_pct, max_risk_pct, stop_loss_bps = _resolve_governed_policy_or_fail(
             target_notional_pct_arg=str(args.target_notional_pct),
             max_risk_pct_arg=str(args.max_risk_pct),
         )
@@ -373,6 +384,7 @@ def main() -> int:
         symbol=symbol,
         target_pct=str(t),
         max_risk_pct=str(r),
+        stop_loss_bps=stop_loss_bps,
     )
 
     try:

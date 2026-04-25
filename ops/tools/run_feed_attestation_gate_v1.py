@@ -36,11 +36,17 @@ if str(_REPO_ROOT_FROM_FILE) not in sys.path:
 
 from constellation_2.common.paper_session_fact_plane_v1 import resolve_authoritative_repo_root_v1  # noqa: E402
 from constellation_2.common.runtime_contract_v1 import require_truth_root_under_contract, resolve_release_provenance  # noqa: E402
-from constellation_2.common.truth_root_v1 import resolve_truth_root  # noqa: E402
+from constellation_2.common.runtime_authority_bridge_v1 import (  # noqa: E402
+    resolve_canonical_truth_root_bridge_v1,
+    resolve_truth_root_bridge_v1,
+)
 from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1  # noqa: E402
 
 REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
-DEFAULT_TRUTH_ROOT = resolve_truth_root(repo_root=REPO_ROOT).resolve()
+DEFAULT_TRUTH_ROOT = resolve_truth_root_bridge_v1(
+    repo_root=REPO_ROOT,
+    caller="ops/tools/run_feed_attestation_gate_v1.py",
+).resolve()
 
 POLICY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/C2_FEED_ATTESTATION_POLICY_V1.json").resolve()
 
@@ -151,7 +157,10 @@ def _resolve_truth_root(arg_truth_root: str) -> Path:
     env_root = (os.environ.get("C2_TRUTH_ROOT") or "").strip()
     if env_root:
         return _require_supported_truth_root(Path(env_root))
-    resolved = resolve_truth_root(repo_root=REPO_ROOT)
+    resolved = resolve_truth_root_bridge_v1(
+        repo_root=REPO_ROOT,
+        caller="ops/tools/run_feed_attestation_gate_v1.py",
+    )
     return _require_supported_truth_root(resolved)
 
 
@@ -225,6 +234,30 @@ def _relpath_from_truth_root(truth_root: Path, path: Path) -> str:
     return str(path.resolve().relative_to(truth_root.resolve())).replace("\\", "/")
 
 
+def _resolve_policy_target_for_artifact(
+    *,
+    artifact_id: str,
+    truth_root: Path,
+    target_rel: str,
+) -> Tuple[Path, str]:
+    target_path = _resolve_target_path(truth_root, target_rel)
+    target_rel_for_record = _relpath_from_truth_root(truth_root, target_path)
+
+    # Liquidity dataset manifest is governed as canonical runtime truth authority.
+    # When this gate runs on a sleeve truth root, prefer canonical-truth input so
+    # stale sleeve-local mirrors do not hold authorization open incorrectly.
+    if str(artifact_id).strip() == "liquidity_dataset_manifest":
+        canonical_truth_root = _require_supported_truth_root(
+            resolve_canonical_truth_root_bridge_v1(caller="ops/tools/run_feed_attestation_gate_v1.py")
+        )
+        canonical_target_path = _resolve_target_path(canonical_truth_root, target_rel)
+        if canonical_target_path.exists() and canonical_target_path.is_file():
+            target_path = canonical_target_path
+            target_rel_for_record = str(target_rel).strip().lstrip("/")
+
+    return target_path, target_rel_for_record
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_feed_attestation_gate_v1")
     ap.add_argument("--day_utc", required=True)
@@ -270,8 +303,11 @@ def main() -> int:
         if not target_rel:
             raise SystemExit("FAIL: FAL_POLICY_SCHEMA_INVALID: target_relpath missing")
 
-        target_path = _resolve_target_path(truth_root, target_rel)
-        target_rel_from_truth = _relpath_from_truth_root(truth_root, target_path)
+        target_path, target_rel_from_truth = _resolve_policy_target_for_artifact(
+            artifact_id=artifact_id,
+            truth_root=truth_root,
+            target_rel=target_rel,
+        )
         expected_rec_rel = f"{RECORDS_ROOT_RELPATH}/{artifact_id}/{day}/feed_attestation_record.v1.json"
         rcodes: List[str] = []
 

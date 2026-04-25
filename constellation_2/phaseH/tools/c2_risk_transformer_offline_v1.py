@@ -15,6 +15,7 @@ from typing import Any, Dict, Optional, Tuple
 # Contract: C2_DRAWDOWN_CONVENTION_V1
 C2_DRAWDOWN_CONTRACT_ID = "C2_DRAWDOWN_CONVENTION_V1"
 DRAWDOWN_QUANT = Decimal("0.000001")  # 6dp per contract
+PRICE_QUANT = Decimal("0.01")
 
 
 # Fail-closed import root
@@ -220,6 +221,38 @@ def _load_per_trade_notional_pct_max_or_fail(engine_id: str) -> Decimal:
     return _dec(raw, "per_trade_notional_pct_max")
 
 
+def _require_stop_loss_bps_from_exposure_or_fail(exposure_intent: Dict[str, Any]) -> int:
+    constraints = exposure_intent.get("constraints")
+    if not isinstance(constraints, dict):
+        raise TransformerError("INTENT_PROTECTIVE_STOP_MISSING: constraints missing")
+    stop_loss_bps = constraints.get("stop_loss_bps")
+    if not isinstance(stop_loss_bps, int) or stop_loss_bps <= 0:
+        raise TransformerError("INTENT_PROTECTIVE_STOP_MISSING: stop_loss_bps missing or non-positive")
+    return int(stop_loss_bps)
+
+
+def _derive_stop_price_or_fail(*, entry_price: Decimal, action: str, stop_loss_bps: int) -> Decimal:
+    if entry_price <= Decimal("0"):
+        raise TransformerError("INTENT_PROTECTIVE_STOP_MISSING: entry reference price non-positive")
+    bps = Decimal(stop_loss_bps)
+    if bps <= Decimal("0"):
+        raise TransformerError("INTENT_PROTECTIVE_STOP_MISSING: stop_loss_bps non-positive")
+    if action == "BUY":
+        stop = entry_price * (Decimal("1") - (bps / Decimal("10000")))
+    elif action == "SELL":
+        stop = entry_price * (Decimal("1") + (bps / Decimal("10000")))
+    else:
+        raise TransformerError(f"INTENT_PROTECTIVE_STOP_MISSING: unsupported action={action!r}")
+    stop_q = stop.quantize(PRICE_QUANT, rounding=ROUND_HALF_UP)
+    if stop_q <= Decimal("0"):
+        raise TransformerError("INTENT_PROTECTIVE_STOP_MISSING: derived stop price non-positive")
+    if action == "BUY" and stop_q >= entry_price:
+        raise TransformerError("INTENT_PROTECTIVE_STOP_MISSING: derived stop must be below entry price for BUY")
+    if action == "SELL" and stop_q <= entry_price:
+        raise TransformerError("INTENT_PROTECTIVE_STOP_MISSING: derived stop must be above entry price for SELL")
+    return stop_q
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="c2_risk_transformer_offline_v1")
     ap.add_argument("--exposure_intent", required=True, help="Path to ExposureIntent v1 JSON")
@@ -264,6 +297,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         if not engine_id:
             raise TransformerError("EXPOSURE_INTENT_ENGINE_ID_MISSING")
         per_trade_notional_pct_max = _load_per_trade_notional_pct_max_or_fail(engine_id)
+        stop_loss_bps = _require_stop_loss_bps_from_exposure_or_fail(exp)
 
         # Conservative per-trade cap for v1 equity (treat notional as risk proxy)
         if target_pct > per_trade_notional_pct_max:
@@ -278,6 +312,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         scaled_pct = (target_pct * mult)
 
         qty = _equity_qty_from_notional(nav_total_usd_int, scaled_pct, ref_price)
+        stop_price = _derive_stop_price_or_fail(entry_price=ref_price, action="BUY", stop_loss_bps=stop_loss_bps)
 
         eq_intent = {
             "schema_id": "equity_intent",
@@ -294,6 +329,12 @@ def main(argv: Optional[list[str]] = None) -> int:
             "exit_policy": {
                 "policy_id": "c2_equity_time_exit_only_v1",
                 "time_exit": {"enabled": True, "max_holding_days": int(exp["expected_holding_days"])},
+                "protective_stop": {
+                    "enabled": True,
+                    "stop_price": str(stop_price),
+                    "stop_loss_bps": int(stop_loss_bps),
+                    "basis": "ENTRY_REFERENCE_PRICE",
+                },
             },
             "canonical_json_hash": None,
         }
@@ -338,6 +379,19 @@ def main(argv: Optional[list[str]] = None) -> int:
             "action": "BUY",
             "qty_shares": qty,
             "order_terms": {"order_type": "LIMIT", "limit_price": str(ref_price), "time_in_force": "DAY"},
+            "protective_stop": {
+                "order_type": "STOP",
+                "stop_price": str(stop_price),
+                "time_in_force": "DAY",
+                "basis": "ENTRY_REFERENCE_PRICE",
+                "stop_loss_bps": int(stop_loss_bps),
+            },
+            "take_profit": None,
+            "bracket": {
+                "enabled": True,
+                "oca_group": None,
+                "transmit_sequence": "PARENT_FALSE_FINAL_CHILD_TRUE",
+            },
             "risk_proof": None,
             "engine_id": engine_id,
             "source_intent_id": str(exp.get("intent_id") or "").strip(),

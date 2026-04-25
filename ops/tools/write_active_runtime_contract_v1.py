@@ -15,6 +15,9 @@ from constellation_2.common.runtime_contract_v1 import (
     ACTIVE_RUNTIME_CONTRACT_PATH,
     write_active_runtime_contract_bytes,
 )
+from constellation_2.common.execution_identity_binding_v1 import (
+    resolve_governed_execution_identity_v1,
+)
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
 
@@ -53,6 +56,7 @@ def main() -> int:
         "schema_version": "v1",
         "release_id": str(manifest["release_id"]),
         "git_sha": str(manifest["git_sha"]),
+        "authoritative_repo_root": str(REPO_ROOT),
         "release_root": str(release_root),
         "runtime_data_root": str(RUNTIME_DATA_ROOT),
         "canonical_truth_root": str(canonical_truth_root),
@@ -63,9 +67,19 @@ def main() -> int:
             str(truth_sleeves_root),
         ],
         "provenance_mode": "release_manifest",
+        "runtime_environment": "PAPER",
+        "primary_execution_identity_ref": {
+            "authority_owner": "execution_identity_binding_v1",
+            "sleeve_id": "PRIMARY",
+        },
         "generated_at_utc": _utc_now(),
         "status": "ACTIVE",
     }
+    resolve_governed_execution_identity_v1(
+        repo_root=REPO_ROOT,
+        environment=str(payload["runtime_environment"]),
+        sleeve_id=str(payload["primary_execution_identity_ref"]["sleeve_id"]),
+    )
     validate_against_repo_schema_v1(payload, REPO_ROOT, SCHEMA_RELPATH)
 
     ACTIVE_RUNTIME_CONTRACT_PATH.parent.mkdir(parents=True, exist_ok=True)

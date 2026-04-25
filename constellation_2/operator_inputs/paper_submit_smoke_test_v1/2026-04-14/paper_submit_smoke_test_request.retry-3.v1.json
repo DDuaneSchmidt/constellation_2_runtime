@@ -1,0 +1,38 @@
+{
+  "day_utc": "2026-04-14",
+  "engine_id": "C2_INTENT_SIMULATOR_V1",
+  "environment": "PAPER",
+  "ib_account": "DUO847203",
+  "instrument": {
+    "currency": "USD",
+    "ib_conId": 756733,
+    "ib_localSymbol": "SPY",
+    "kind": "EQUITY",
+    "symbol": "SPY"
+  },
+  "notes": [
+    "PAPER_SUBMIT_SMOKE_TEST_V1: explicit paper-only broker submit smoke request",
+    "TEST_ONLY",
+    "PAPER_ONLY",
+    "REQUEST_NONCE=retry-3"
+  ],
+  "order_terms": {
+    "limit_price": "500.00",
+    "order_type": "LIMIT",
+    "time_in_force": "DAY"
+  },
+  "policy_ref": {
+    "path": "/home/node/constellation/governance/02_REGISTRIES/C2_PAPER_SUBMIT_SMOKE_TEST_POLICY_V1.json",
+    "policy_id": "c2_paper_submit_smoke_test_policy_v1",
+    "sha256": "cb468d960adde5cee4b92ad3a6a0fe3081f89ac7e265eee86242efd295bf32e1"
+  },
+  "produced_utc": "2026-04-14T00:00:00Z",
+  "quantity_shares": 1,
+  "request_id": "79c1db816c4142e67587b8a4741a565bb8713f46810b26078671c5de54bb6cdf",
+  "request_nonce": "retry-3",
+  "schema_id": "paper_submit_smoke_test_request",
+  "schema_version": "v1",
+  "side": "BUY",
+  "sleeve_id": "PRIMARY",
+  "test_only": true
+}

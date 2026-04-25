@@ -37,10 +37,11 @@ _REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
 if str(_REPO_ROOT_FROM_FILE) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
 
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1  # type: ignore
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH = resolve_canonical_truth_root().resolve()
 
 GATE_REGISTRY = (REPO_ROOT / "governance/02_REGISTRIES/GATE_HIERARCHY_V1.json").resolve()
 OUT_ROOT = (TRUTH / "reports" / "failure_injection_harness_v1").resolve()

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Constellation 2.0 — Phase L — Live Ops Dashboard (Read-Only)
+Constellation 2.0 — Phase L — Live Ops Dashboard
 
-- Serves static UI + read-only JSON API
-- Reads ONLY canonical truth artifacts under constellation_2/runtime/truth
-- Never talks to IB, never submits orders, never mutates truth
+- Serves static UI + JSON API
+- Reads canonical runtime truth artifacts
+- Never talks to IB, never submits orders
+- Configuration API writes are draft-governed and activation-audited
 - Fail-closed: missing artifacts are surfaced with explicit error codes + file pointers
 - Minimal deps: Python stdlib only
 """
@@ -21,13 +22,61 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
+_BOOTSTRAP_REPO_ROOT = Path(__file__).resolve().parents[4]
+if str(_BOOTSTRAP_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BOOTSTRAP_REPO_ROOT))
+
 from constellation_2.common.operator_control_plane_v1 import (
     build_operator_home_bundle,
     build_operator_query_bundle,
 )
-from constellation_2.common.truth_root_v1 import resolve_truth_root
-from constellation_2.phaseL.ui.server.c3_ui_status_collector_v1 import build_c3_ui_status
-from constellation_2.phaseL.ui.server.c2_ops_cockpit_status_v2_collector_v1 import build_status_v2, discover_attempts, select_preferred_attempt
+from constellation_2.common.control_plane_read_gateway_v1 import read_control_plane_surface_v1
+from constellation_2.phaseL.ui_api import (
+    STATUS_SEMANTICS,
+    build_action_inventory,
+    build_advisory_view,
+    build_alerts_view,
+    build_capital_accounts_view,
+    build_capital_allocation_view,
+    build_capital_cashflow_view,
+    build_capital_flows_view,
+    build_capital_history_view,
+    build_capital_overview_view,
+    build_capital_query_surface_v1,
+    build_capital_validation_view,
+    build_configuration_catalog_v1,
+    build_configuration_current_v1,
+    build_financial_state_view,
+    build_kernel_status_rail_view,
+    build_integrity_view,
+    build_operations_view,
+    build_opportunity_state_view,
+    build_operator_work_queue_view,
+    build_orders_view,
+    build_operator_workflow_summary,
+    build_outcome_state_view,
+    build_policy_evolution_view,
+    build_positions_view,
+    build_reconciliation_view,
+    build_refinement_state_view,
+    build_sleeve_evaluation_view,
+    build_system_summary_view,
+    build_tax_state_view,
+    build_value_state_view,
+    build_workspace_view,
+    create_configuration_draft_v1,
+    dispatch_kernel_command,
+    get_configuration_draft_v1,
+    list_action_audit_entries,
+    reject_configuration_draft_v1,
+    resolve_effective_capital_cashflow_inputs_v1,
+    review_configuration_draft_v1,
+    run_action,
+    validate_configuration_draft_v1,
+    activate_configuration_draft_v1,
+)
+from constellation_2.phaseL.ui_api.configuration_workflow_v1 import ConfigurationWorkflowApiError
+from constellation_2.phaseL.ui_api.common import ADVISORY_RUNTIME_ROOT, GLOBAL_TRUTH_ROOT, SLEEVE_TRUTH_ROOT
 # --------------------------
 # Error codes (audit-safe)
 # --------------------------
@@ -64,8 +113,7 @@ THIS_FILE = Path(__file__).resolve()
 # .../constellation_2/phaseL/ui/server/run_ops_dashboard_v1.py
 # parents: [server, ui, phaseL, constellation_2, <repo_root>, ...]
 REPO_ROOT = THIS_FILE.parents[4]
-TRUTH_ROOT = resolve_truth_root(repo_root=REPO_ROOT)
-SLEEVE_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth_sleeves/PRIMARY/PAPER").resolve()
+TRUTH_ROOT = SLEEVE_TRUTH_ROOT
 
 
 def _known_truth_roots() -> List[Path]:
@@ -900,6 +948,545 @@ def _day_submissions(day: str) -> Dict[str, Any]:
     return resp
 
 
+def build_operational_truth_v1(truth_root: Path, day: str) -> Dict[str, Any]:
+    resp: Dict[str, Any] = {
+        "ok": True,
+        "generated_utc": _utc_now_iso(),
+        "day_utc": day,
+        "truth_root": str(truth_root),
+        "errors": [],
+        "warnings": [],
+        "missing_paths": [],
+        "source_paths": [],
+        "source_mtimes": {},
+        "summary": {
+            "positions_total": 0,
+            "open_positions": 0,
+            "orders_total": 0,
+            "working_orders": 0,
+            "alerts_total": 0,
+            "readiness_status": "UNKNOWN",
+        },
+        "positions_panel": {
+            "asof_utc": None,
+            "snapshot_path": None,
+            "pointer_path": None,
+            "rows": [],
+        },
+        "orders_panel": {
+            "rows": [],
+        },
+        "system_state_panel": {
+            "rows": [],
+        },
+        "alerts_panel": {
+            "rows": [],
+        },
+    }
+
+    if not _is_day_str(day):
+        resp["ok"] = False
+        resp["errors"].append(E_DAY_INVALID)
+        return resp
+
+    def note_source(path: Path) -> None:
+        p = str(path.resolve())
+        resp["source_paths"].append(p)
+        mt = _mtime(path)
+        if mt is not None:
+            resp["source_mtimes"][p] = mt
+
+    def read_json(path: Path) -> Optional[Any]:
+        obj, err = _safe_read_json(path)
+        if obj is None:
+            if err == "FILE_NOT_FOUND":
+                resp["missing_paths"].append(str(path.resolve()))
+            else:
+                resp["warnings"].append(f"UNREADABLE:{path.name}:{err}")
+            return None
+        note_source(path)
+        return obj
+
+    def fmt_cents_to_dollars(value: Any) -> Optional[str]:
+        try:
+            if value is None:
+                return None
+            cents = int(value)
+            return f"{cents / 100:.2f}"
+        except Exception:
+            return None
+
+    def parse_isoish(value: Any) -> str:
+        return str(value).strip() if isinstance(value, str) and str(value).strip() else ""
+
+    def latest_ts(*values: Any) -> Optional[str]:
+        items = [parse_isoish(v) for v in values if parse_isoish(v)]
+        return max(items) if items else None
+
+    def add_alert(severity: str, code: str, summary: str, artifact_path: Optional[str] = None) -> None:
+        resp["alerts_panel"]["rows"].append(
+            {
+                "severity": severity,
+                "code": code,
+                "summary": summary,
+                "artifact_path": artifact_path,
+            }
+        )
+
+    def add_system_row(
+        key: str,
+        label: str,
+        status: Any,
+        detail: str,
+        artifact_path: Optional[str],
+        produced_utc: Optional[str],
+    ) -> None:
+        resp["system_state_panel"]["rows"].append(
+            {
+                "key": key,
+                "label": label,
+                "status": str(status or "UNKNOWN"),
+                "detail": detail,
+                "artifact_path": artifact_path,
+                "produced_utc": produced_utc,
+            }
+        )
+
+    def extract_order_terms(order_plan: Any) -> Dict[str, Any]:
+        if not isinstance(order_plan, dict):
+            return {}
+        order_terms = order_plan.get("order_terms")
+        if isinstance(order_terms, dict):
+            return order_terms
+        return {}
+
+    def find_order_plan(submission_dir: Path) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        for name in ["equity_order_plan.v1.json", "equity_order_plan.v2.json"]:
+            candidate = (submission_dir / name).resolve()
+            obj = read_json(candidate)
+            if isinstance(obj, dict):
+                return obj, str(candidate)
+        return None, None
+
+    positions_pointer_path = (truth_root / "positions_v1" / "effective_v1" / "days" / day / "positions_effective_pointer.v1.json").resolve()
+    positions_snapshot_path: Optional[Path] = None
+    positions_pointer = read_json(positions_pointer_path)
+    if isinstance(positions_pointer, dict):
+        raw_snapshot_path = (((positions_pointer.get("pointers") or {}) if isinstance(positions_pointer.get("pointers"), dict) else {}).get("snapshot_path"))
+        if isinstance(raw_snapshot_path, str) and raw_snapshot_path:
+            candidate = Path(raw_snapshot_path).resolve()
+            snapshot_obj = read_json(candidate)
+            if isinstance(snapshot_obj, dict):
+                positions_snapshot_path = candidate
+                resp["positions_panel"]["pointer_path"] = str(positions_pointer_path)
+                resp["positions_panel"]["snapshot_path"] = str(candidate)
+                resp["positions_panel"]["asof_utc"] = (((snapshot_obj.get("positions") or {}) if isinstance(snapshot_obj.get("positions"), dict) else {}).get("asof_utc"))
+                items = (((snapshot_obj.get("positions") or {}) if isinstance(snapshot_obj.get("positions"), dict) else {}).get("items"))
+                if isinstance(items, list):
+                    for item in items:
+                        if not isinstance(item, dict):
+                            continue
+                        instrument = item.get("instrument") if isinstance(item.get("instrument"), dict) else {}
+                        avg_price = fmt_cents_to_dollars(item.get("avg_cost_cents"))
+                        row = {
+                            "position_id": item.get("position_id"),
+                            "engine_id": item.get("engine_id"),
+                            "symbol": instrument.get("symbol"),
+                            "quantity": item.get("qty"),
+                            "avg_price": avg_price,
+                            "status": item.get("status"),
+                            "currency": instrument.get("currency"),
+                            "unrealized_pnl": None,
+                        }
+                        resp["positions_panel"]["rows"].append(row)
+    if positions_snapshot_path is None:
+        for name in ["positions_snapshot.v4.json", "positions_snapshot.v2.json"]:
+            candidate = (truth_root / "positions_v1" / "snapshots" / day / name).resolve()
+            snapshot_obj = read_json(candidate)
+            if not isinstance(snapshot_obj, dict):
+                continue
+            positions_snapshot_path = candidate
+            resp["positions_panel"]["snapshot_path"] = str(candidate)
+            positions = snapshot_obj.get("positions")
+            if isinstance(positions, dict):
+                resp["positions_panel"]["asof_utc"] = positions.get("asof_utc")
+                items = positions.get("items")
+                if isinstance(items, list):
+                    for item in items:
+                        if not isinstance(item, dict):
+                            continue
+                        instrument = item.get("instrument") if isinstance(item.get("instrument"), dict) else {}
+                        avg_price = fmt_cents_to_dollars(item.get("avg_cost_cents"))
+                        resp["positions_panel"]["rows"].append(
+                            {
+                                "position_id": item.get("position_id"),
+                                "engine_id": item.get("engine_id"),
+                                "symbol": instrument.get("symbol"),
+                                "quantity": item.get("qty"),
+                                "avg_price": avg_price,
+                                "status": item.get("status"),
+                                "currency": instrument.get("currency"),
+                                "unrealized_pnl": None,
+                            }
+                        )
+            break
+
+    stream_day_dir = (truth_root / "execution_stream_v1" / day).resolve()
+    latest_stream_by_submission: Dict[str, Dict[str, Any]] = {}
+    if stream_day_dir.exists() and stream_day_dir.is_dir():
+        for record_path in sorted(stream_day_dir.iterdir(), key=lambda p: p.name):
+            if not record_path.is_file() or record_path.suffix != ".json":
+                continue
+            rec = read_json(record_path)
+            if not isinstance(rec, dict):
+                continue
+            submission_id = str(rec.get("submission_id") or "").strip()
+            if not submission_id:
+                continue
+            ts = latest_ts(rec.get("observed_at_utc"), rec.get("event_time_utc"), rec.get("produced_utc")) or ""
+            cur = latest_stream_by_submission.get(submission_id)
+            cur_ts = latest_ts((cur or {}).get("_latest_ts")) or ""
+            if cur is None or ts >= cur_ts:
+                rec["_latest_ts"] = ts
+                rec["_artifact_path"] = str(record_path.resolve())
+                latest_stream_by_submission[submission_id] = rec
+            reason_codes = rec.get("reason_codes") if isinstance(rec.get("reason_codes"), list) else []
+            if any("ORPHAN" in str(code).upper() for code in reason_codes):
+                broker_ids = rec.get("broker_ids") if isinstance(rec.get("broker_ids"), dict) else {}
+                add_alert(
+                    "WARNING",
+                    "ORPHAN_EVENT_LINEAGE",
+                    f"submission_id={submission_id} order_id={broker_ids.get('order_id')} perm_id={broker_ids.get('perm_id')}",
+                    str(record_path.resolve()),
+                )
+
+    failure_path = (truth_root / "execution_stream_v1" / "failures" / day / "failure.json").resolve()
+    failure_doc = read_json(failure_path)
+    if isinstance(failure_doc, dict):
+        add_alert(
+            "ERROR",
+            str(failure_doc.get("reason_code") or failure_doc.get("error_code") or "EXECUTION_STREAM_FAILURE"),
+            str(failure_doc.get("summary") or failure_doc.get("details") or "execution_stream_v1 failure"),
+            str(failure_path),
+        )
+
+    submissions_root = (truth_root / "execution_evidence_v1" / "submissions" / day).resolve()
+    fill_ledger_root = (truth_root / "fill_ledger_v1" / day).resolve()
+    if submissions_root.exists() and submissions_root.is_dir():
+        for submission_dir in sorted([p for p in submissions_root.iterdir() if p.is_dir()], key=lambda p: p.name):
+            if submission_dir.name.startswith("__"):
+                continue
+            submission_id = submission_dir.name
+            broker_record_path = (submission_dir / "broker_submission_record.v2.json").resolve()
+            execution_event_path = (submission_dir / "execution_event_record.v1.json").resolve()
+            broker_record = read_json(broker_record_path)
+            execution_event = read_json(execution_event_path)
+            order_plan, order_plan_path = find_order_plan(submission_dir)
+            fill_ledger_path = (fill_ledger_root / f"{submission_id}.fill_ledger.v1.json").resolve()
+            fill_ledger = read_json(fill_ledger_path)
+            latest_stream = latest_stream_by_submission.get(submission_id)
+
+            broker_ids = {}
+            if isinstance(broker_record, dict) and isinstance(broker_record.get("broker_ids"), dict):
+                broker_ids = broker_record.get("broker_ids") or {}
+            elif isinstance(latest_stream, dict) and isinstance(latest_stream.get("broker_ids"), dict):
+                broker_ids = latest_stream.get("broker_ids") or {}
+
+            order_terms = extract_order_terms(order_plan)
+            order_status = (
+                (((latest_stream.get("order_state") or {}) if isinstance((latest_stream or {}).get("order_state"), dict) else {}).get("status"))
+                or (execution_event.get("raw_broker_status") if isinstance(execution_event, dict) else None)
+                or (broker_record.get("status") if isinstance(broker_record, dict) else None)
+                or (fill_ledger.get("lifecycle_status") if isinstance(fill_ledger, dict) else None)
+                or "UNKNOWN"
+            )
+            last_update_utc = latest_ts(
+                ((latest_stream.get("observed_at_utc") if isinstance(latest_stream, dict) else None)),
+                ((latest_stream.get("event_time_utc") if isinstance(latest_stream, dict) else None)),
+                (execution_event.get("event_time_utc") if isinstance(execution_event, dict) else None),
+                (broker_record.get("submitted_at_utc") if isinstance(broker_record, dict) else None),
+                (fill_ledger.get("produced_utc") if isinstance(fill_ledger, dict) else None),
+            )
+
+            row = {
+                "submission_id": submission_id,
+                "symbol": order_plan.get("symbol") if isinstance(order_plan, dict) else None,
+                "side": order_plan.get("action") if isinstance(order_plan, dict) else None,
+                "quantity": order_plan.get("qty_shares") if isinstance(order_plan, dict) else None,
+                "status": str(order_status),
+                "broker_order_id": broker_ids.get("order_id"),
+                "perm_id": broker_ids.get("perm_id"),
+                "last_update_utc": last_update_utc,
+                "order_type": order_terms.get("order_type"),
+                "time_in_force": order_terms.get("time_in_force"),
+                "limit_price": order_terms.get("limit_price"),
+                "filled_qty": (fill_ledger.get("filled_qty") if isinstance(fill_ledger, dict) else None),
+                "remaining_qty": (fill_ledger.get("remaining_qty") if isinstance(fill_ledger, dict) else None),
+                "lifecycle_status": (fill_ledger.get("lifecycle_status") if isinstance(fill_ledger, dict) else None),
+                "artifact_paths": {
+                    "submission_dir": str(submission_dir.resolve()),
+                    "broker_submission_record": str(broker_record_path),
+                    "execution_event_record": str(execution_event_path),
+                    "order_plan": order_plan_path,
+                    "fill_ledger": str(fill_ledger_path),
+                    "latest_stream": latest_stream.get("_artifact_path") if isinstance(latest_stream, dict) else None,
+                },
+            }
+            resp["orders_panel"]["rows"].append(row)
+
+            latest_hash = str(latest_stream.get("canonical_json_hash") or "") if isinstance(latest_stream, dict) else ""
+            if latest_hash and isinstance(execution_event, dict):
+                if str(execution_event.get("upstream_hash") or "") != latest_hash:
+                    add_alert(
+                        "WARNING",
+                        "STALE_EXECUTION_EVENT",
+                        f"submission_id={submission_id} execution_event_record.v1.json does not reflect latest execution_stream observation",
+                        str(execution_event_path),
+                    )
+            if latest_hash and isinstance(fill_ledger, dict):
+                hashes = fill_ledger.get("event_hashes") if isinstance(fill_ledger.get("event_hashes"), list) else []
+                if latest_hash not in [str(x) for x in hashes]:
+                    add_alert(
+                        "WARNING",
+                        "STALE_FILL_LEDGER",
+                        f"submission_id={submission_id} fill_ledger_v1 missing latest execution_stream hash",
+                        str(fill_ledger_path),
+                    )
+
+    build_ref = None
+    admission_ref = None
+    boundary_ref = None
+    ledger_ref = None
+    control_plane_ref = None
+    session_status_ref = None
+    try:
+        build_ref = read_control_plane_surface_v1(domain="session", surface="target_day_build", truth_root=truth_root, day_utc=day)
+    except Exception:
+        pass
+    try:
+        admission_ref = read_control_plane_surface_v1(domain="session", surface="target_day_admission", truth_root=truth_root, day_utc=day)
+    except Exception:
+        pass
+    try:
+        boundary_ref = read_control_plane_surface_v1(domain="execution", surface="submit_boundary_status", truth_root=truth_root, day_utc=day)
+    except Exception:
+        pass
+    try:
+        ledger_ref = read_control_plane_surface_v1(domain="execution", surface="paper_session_ledger", truth_root=truth_root, day_utc=day)
+    except Exception:
+        pass
+    try:
+        control_plane_ref = read_control_plane_surface_v1(domain="execution", surface="paper_day_control_plane", truth_root=truth_root, day_utc=day)
+    except Exception:
+        pass
+    try:
+        session_status_ref = read_control_plane_surface_v1(domain="session", surface="session_authority_status_current", truth_root=truth_root)
+    except Exception:
+        pass
+    build_path = build_ref.path if build_ref is not None else (truth_root / "target_day_build_v1" / f"{day}.json").resolve()
+    admission_path = admission_ref.path if admission_ref is not None else (truth_root / "target_day_admission_v1" / f"{day}.json").resolve()
+    boundary_path = boundary_ref.path if boundary_ref is not None else (truth_root / "reports" / "submit_boundary_status_v1" / day / "submit_boundary_status.v1.json").resolve()
+    ledger_path = ledger_ref.path if ledger_ref is not None else (truth_root / "reports" / "paper_session_ledger_v1" / day / "paper_session_ledger.v1.json").resolve()
+    control_plane_path = control_plane_ref.path if control_plane_ref is not None else (truth_root / "reports" / "paper_day_control_plane_v1" / day / "paper_day_control_plane.v1.json").resolve()
+    session_status_path = session_status_ref.path if session_status_ref is not None else (truth_root / "session_authority_status_v1" / "current.json").resolve()
+    execution_recon_path = (truth_root / "reports" / "execution_reconciliation_v1" / day / "execution_reconciliation.v1.json").resolve()
+    try:
+        replay_gate_ref = read_control_plane_surface_v1(domain="execution", surface="replay_certification_gate", truth_root=truth_root, day_utc=day)
+    except Exception:
+        replay_gate_ref = None
+    try:
+        replay_bundle_ref = read_control_plane_surface_v1(domain="execution", surface="replay_certification_bundle", truth_root=truth_root, day_utc=day)
+    except Exception:
+        replay_bundle_ref = None
+    replay_gate_path = replay_gate_ref.path if replay_gate_ref is not None else (truth_root / "reports" / "replay_certification_gate_v1" / day / "replay_certification_gate.v1.json").resolve()
+    replay_bundle_path = replay_bundle_ref.path if replay_bundle_ref is not None else (truth_root / "reports" / "replay_certification_bundle_v1" / day / "replay_certification_bundle.v1.json").resolve()
+
+    build_doc = dict(build_ref.payload) if build_ref is not None else None
+    admission_doc = dict(admission_ref.payload) if admission_ref is not None else None
+    boundary_doc = dict(boundary_ref.payload) if boundary_ref is not None else None
+    ledger_doc = dict(ledger_ref.payload) if ledger_ref is not None else None
+    control_plane_doc = dict(control_plane_ref.payload) if control_plane_ref is not None else None
+    session_status_doc = dict(session_status_ref.payload) if session_status_ref is not None else None
+    execution_recon_doc = read_json(execution_recon_path)
+    replay_gate_doc = dict(replay_gate_ref.payload) if replay_gate_ref is not None else None
+    replay_bundle_doc = dict(replay_bundle_ref.payload) if replay_bundle_ref is not None else None
+
+    if isinstance(build_doc, dict):
+        add_system_row(
+            "build",
+            "Build",
+            build_doc.get("build_status"),
+            f"completeness={build_doc.get('completeness_result', 'n/a')} closure={build_doc.get('closure_status', 'n/a')}",
+            str(build_path),
+            build_doc.get("generated_utc"),
+        )
+    if isinstance(admission_doc, dict):
+        add_system_row(
+            "admission",
+            "Admission",
+            admission_doc.get("admission_status"),
+            f"closure={admission_doc.get('closure_status', 'n/a')}",
+            str(admission_path),
+            admission_doc.get("generated_utc"),
+        )
+    if isinstance(boundary_doc, dict):
+        add_system_row(
+            "boundary",
+            "Boundary",
+            boundary_doc.get("boundary_status"),
+            f"submission_authorized={boundary_doc.get('submission_authorized')}",
+            str(boundary_path),
+            boundary_doc.get("produced_at_utc"),
+        )
+    if isinstance(ledger_doc, dict):
+        control_state = ledger_doc.get("control_state") if isinstance(ledger_doc.get("control_state"), dict) else {}
+        add_system_row(
+            "ledger",
+            "Ledger",
+            control_state.get("authority_status"),
+            f"evidence={ledger_doc.get('evidence_status', 'n/a')} system_ready={control_state.get('system_ready')}",
+            str(ledger_path),
+            ledger_doc.get("evaluated_at_utc"),
+        )
+    if isinstance(control_plane_doc, dict):
+        add_system_row(
+            "control_plane",
+            "Control Plane",
+            control_plane_doc.get("final_start_decision"),
+            str(control_plane_doc.get("human_readable_summary") or ""),
+            str(control_plane_path),
+            control_plane_doc.get("evaluated_at_utc"),
+        )
+    consistency_status = "UNKNOWN"
+    consistency_detail = ""
+    if isinstance(session_status_doc, dict):
+        paper_projection = (
+            session_status_doc.get("paper_authority_projection")
+            if isinstance(session_status_doc.get("paper_authority_projection"), dict)
+            else {}
+        )
+        add_system_row(
+            "session_status",
+            "Session Status",
+            paper_projection.get("open_state")
+            or session_status_doc.get("submission_authorization_status"),
+            (
+                f"authority={paper_projection.get('authority_status', 'UNKNOWN')} "
+                f"degraded={paper_projection.get('degraded_mode', False)} "
+                f"submission_authorized={paper_projection.get('submission_authorized', False)} "
+                f"traceability={session_status_doc.get('traceability_status', 'n/a')}"
+            ),
+            str(session_status_path),
+            session_status_doc.get("generated_utc"),
+        )
+        monitoring_checks = session_status_doc.get("monitoring_checks") if isinstance(session_status_doc.get("monitoring_checks"), list) else []
+        for check in monitoring_checks:
+            if not isinstance(check, dict):
+                continue
+            if str(check.get("check_name") or "") == "canonical_readiness_authority":
+                consistency_status = check.get("status") or "UNKNOWN"
+                consistency_detail = str(check.get("summary") or "")
+                break
+        if consistency_status == "UNKNOWN":
+            traceability = str(session_status_doc.get("traceability_status") or "")
+            if traceability.upper() == "VALID":
+                consistency_status = "PASS"
+                consistency_detail = "traceability_status=VALID"
+            elif traceability:
+                consistency_status = traceability
+                consistency_detail = f"traceability_status={traceability}"
+        top_blockers = session_status_doc.get("top_blocker_reason_codes") if isinstance(session_status_doc.get("top_blocker_reason_codes"), list) else []
+        for code in top_blockers:
+            add_alert(
+                "WARNING",
+                f"SESSION_AUTHORITY:{code}",
+                f"session_authority_status_v1 reported {code}",
+                str(session_status_path),
+            )
+    add_system_row(
+        "consistency_gate",
+        "Consistency Gate",
+        consistency_status,
+        consistency_detail or "No canonical consistency detail available",
+        str(session_status_path),
+        session_status_doc.get("generated_utc") if isinstance(session_status_doc, dict) else None,
+    )
+
+    if isinstance(execution_recon_doc, dict):
+        recon_status = str(execution_recon_doc.get("status") or "UNKNOWN")
+        reason_codes = execution_recon_doc.get("reason_codes") if isinstance(execution_recon_doc.get("reason_codes"), list) else []
+        if recon_status.upper() != "PASS" or reason_codes:
+            add_alert(
+                "WARNING" if recon_status.upper() == "PASS" else "ERROR",
+                "EXECUTION_RECONCILIATION",
+                f"status={recon_status} reason_codes={','.join([str(x) for x in reason_codes]) or 'none'}",
+                str(execution_recon_path),
+            )
+    if isinstance(replay_gate_doc, dict) and str(replay_gate_doc.get("status") or "").upper() != "PASS":
+        add_alert(
+            "ERROR",
+            "REPLAY_CERTIFICATION_GATE",
+            f"status={replay_gate_doc.get('status')} reason_codes={','.join([str(x) for x in (replay_gate_doc.get('reason_codes') or [])]) or 'none'}",
+            str(replay_gate_path),
+        )
+    elif replay_gate_doc is None and replay_bundle_doc is not None:
+        add_alert(
+            "WARNING",
+            "REPLAY_GATE_MISSING",
+            "canonical replay certification gate is unavailable",
+            str(replay_gate_path),
+        )
+    if isinstance(replay_bundle_doc, dict) and str(replay_bundle_doc.get("status") or "").upper() != "PASS":
+        add_alert(
+            "ERROR",
+            "REPLAY_CERTIFICATION_BUNDLE",
+            f"status={replay_bundle_doc.get('status')}",
+            str(replay_bundle_path),
+        )
+
+    resp["positions_panel"]["rows"].sort(key=lambda row: (str(row.get("symbol") or ""), str(row.get("position_id") or "")))
+    resp["orders_panel"]["rows"].sort(key=lambda row: (str(row.get("last_update_utc") or ""), str(row.get("submission_id") or "")), reverse=True)
+    resp["alerts_panel"]["rows"].sort(key=lambda row: (str(row.get("severity") or ""), str(row.get("code") or ""), str(row.get("artifact_path") or "")))
+    resp["system_state_panel"]["rows"].sort(key=lambda row: [
+        "build",
+        "admission",
+        "boundary",
+        "ledger",
+        "control_plane",
+        "session_status",
+        "consistency_gate",
+    ].index(str(row.get("key")) if str(row.get("key")) in {
+        "build",
+        "admission",
+        "boundary",
+        "ledger",
+        "control_plane",
+        "session_status",
+        "consistency_gate",
+    } else "consistency_gate"))
+
+    positions_rows = resp["positions_panel"]["rows"]
+    order_rows = resp["orders_panel"]["rows"]
+    resp["summary"]["positions_total"] = len(positions_rows)
+    resp["summary"]["open_positions"] = sum(1 for row in positions_rows if str(row.get("status") or "").upper() == "OPEN")
+    resp["summary"]["orders_total"] = len(order_rows)
+    resp["summary"]["working_orders"] = sum(1 for row in order_rows if str(row.get("status") or "").upper() not in {"FILLED", "CANCELLED", "INACTIVE"})
+    resp["summary"]["alerts_total"] = len(resp["alerts_panel"]["rows"])
+    readiness_rows = {str(row.get("key")): row for row in resp["system_state_panel"]["rows"]}
+    control_status = str((readiness_rows.get("control_plane") or {}).get("status") or "UNKNOWN")
+    session_state = str((readiness_rows.get("session_status") or {}).get("status") or "UNKNOWN")
+    if control_status == "READY_NOW" and session_state == "AUTHORIZED":
+        resp["summary"]["readiness_status"] = "READY_NOW"
+    elif control_status and control_status != "UNKNOWN":
+        resp["summary"]["readiness_status"] = control_status
+
+    resp["missing_paths"] = sorted(set(resp["missing_paths"]))
+    resp["source_paths"] = sorted(set(resp["source_paths"]))
+    resp["warnings"] = sorted(set(resp["warnings"]))
+    resp["errors"] = sorted(set(resp["errors"]))
+    return resp
+
+
 def _days_list() -> Dict[str, Any]:
     resp: Dict[str, Any] = {
         "ok": True,
@@ -957,6 +1544,28 @@ def _series_nav_endpoint(qs: Dict[str, List[str]]) -> Dict[str, Any]:
 
 class OpsHandler(SimpleHTTPRequestHandler):
     STATIC_DIR = (Path(__file__).resolve().parents[1] / "static").resolve()
+    SHELL_ROUTES = {
+        "/",
+        "/capital",
+        "/capital/accounts",
+        "/capital/allocation",
+        "/capital/history",
+        "/capital/flows",
+        "/capital/cashflow",
+        "/capital/validation",
+        "/portfolio",
+        "/sleeves",
+        "/advisory",
+        "/tax",
+        "/operations",
+        "/configuration",
+        "/audit",
+        "/reports",
+        "/control",
+        "/state",
+        "/submission",
+        "/lifecycle",
+    }
 
     def end_headers(self) -> None:
         # Prevent stale browser assets; dashboard is operational truth UI.
@@ -974,7 +1583,11 @@ class OpsHandler(SimpleHTTPRequestHandler):
 
     def translate_path(self, path: str) -> str:
         u = urlparse(path)
-        rel = u.path.lstrip("/")
+        normalized = u.path.rstrip("/") or "/"
+        if normalized in self.SHELL_ROUTES:
+            rel = "index.html"
+        else:
+            rel = u.path.lstrip("/")
         if rel == "":
             rel = "index.html"
         full = (self.STATIC_DIR / rel).resolve()
@@ -989,6 +1602,196 @@ class OpsHandler(SimpleHTTPRequestHandler):
             return False
 
         qs = parse_qs(u.query)
+        raw_day = (qs.get("day") or [None])[0]
+        requested_day = raw_day if isinstance(raw_day, str) and raw_day and _is_day_str(raw_day) else None
+
+        if path == "/api/shared/status-semantics":
+            self._send_json(HTTPStatus.OK, {"ok": True, "status_semantics": STATUS_SEMANTICS})
+            return True
+
+        if path == "/api/shell/status-rail":
+            self._send_json(HTTPStatus.OK, build_kernel_status_rail_view())
+            return True
+
+        if path == "/api/work-queue":
+            self._send_json(HTTPStatus.OK, build_operator_work_queue_view())
+            return True
+
+        if path.startswith("/api/workspace/"):
+            workspace_id = path.rsplit("/", 1)[-1]
+            payload = build_workspace_view(workspace_id)
+            status_code = HTTPStatus.OK if payload.get("ok") else HTTPStatus.NOT_FOUND
+            self._send_json(status_code, payload)
+            return True
+
+        if path in {"/api/system/summary", "/api/product-summary"}:
+            self._send_json(HTTPStatus.OK, build_system_summary_view(requested_day))
+            return True
+
+        if path == "/api/refinement":
+            self._send_json(HTTPStatus.OK, build_refinement_state_view(requested_day))
+            return True
+
+        if path == "/api/system/actions":
+            self._send_json(HTTPStatus.OK, {"ok": True, **build_action_inventory()})
+            return True
+
+        if path == "/api/system/action-audit":
+            self._send_json(HTTPStatus.OK, {"ok": True, "audit_entries": list_action_audit_entries()})
+            return True
+
+        if path == "/api/operations":
+            self._send_json(HTTPStatus.OK, build_operations_view(requested_day))
+            return True
+
+        if path == "/api/operator-workflow":
+            self._send_json(
+                HTTPStatus.OK,
+                build_operator_workflow_summary(
+                    build_operations_view(requested_day),
+                    build_alerts_view(requested_day),
+                    build_reconciliation_view(requested_day),
+                    build_positions_view(requested_day),
+                    build_orders_view(requested_day),
+                    build_action_inventory(),
+                ),
+            )
+            return True
+
+        if path == "/api/advisory":
+            self._send_json(HTTPStatus.OK, build_advisory_view(requested_day))
+            return True
+
+        if path == "/api/policy-evolution":
+            self._send_json(HTTPStatus.OK, build_policy_evolution_view(requested_day))
+            return True
+
+        if path == "/api/opportunities":
+            self._send_json(HTTPStatus.OK, build_opportunity_state_view(requested_day))
+            return True
+
+        if path in {"/api/outcomes", "/api/value"}:
+            self._send_json(HTTPStatus.OK, build_value_state_view(requested_day))
+            return True
+
+        if path == "/api/financial-state":
+            self._send_json(HTTPStatus.OK, build_financial_state_view(requested_day))
+            return True
+
+        if path == "/api/capital":
+            self._send_json(HTTPStatus.OK, build_capital_query_surface_v1())
+            return True
+
+        if path == "/api/capital/overview":
+            self._send_json(HTTPStatus.OK, build_capital_overview_view())
+            return True
+
+        if path == "/api/capital/accounts":
+            self._send_json(HTTPStatus.OK, build_capital_accounts_view())
+            return True
+
+        if path == "/api/capital/allocation":
+            self._send_json(HTTPStatus.OK, build_capital_allocation_view())
+            return True
+
+        if path == "/api/capital/history":
+            self._send_json(HTTPStatus.OK, build_capital_history_view())
+            return True
+
+        if path == "/api/capital/flows":
+            self._send_json(HTTPStatus.OK, build_capital_flows_view())
+            return True
+
+        if path == "/api/capital/cashflow":
+            effective = resolve_effective_capital_cashflow_inputs_v1()
+            effective_values = dict(effective.get("values") or {})
+            raw_scenario = (qs.get("scenario") or [effective_values.get("scenario") or "florida"])[0]
+            scenario = str(raw_scenario or "florida").strip().lower()
+            if not scenario:
+                scenario = "florida"
+            raw_include = (qs.get("include_inheritance") or [effective_values.get("include_inheritance")])[0]
+            if isinstance(raw_include, bool):
+                include_inheritance = raw_include
+            else:
+                include_inheritance = str(raw_include).strip().lower() in {"1", "true", "yes", "on"}
+            raw_horizon = (qs.get("horizon_months") or [effective_values.get("horizon_months") or "24"])[0]
+            horizon_months = int(effective_values.get("horizon_months") or 24)
+            try:
+                horizon_months = int(raw_horizon)
+            except Exception:
+                horizon_months = int(effective_values.get("horizon_months") or 24)
+            raw_start_month = (qs.get("start_month") or [effective_values.get("start_month")])[0]
+            start_month = None if raw_start_month is None else str(raw_start_month)
+            self._send_json(
+                HTTPStatus.OK,
+                build_capital_cashflow_view(
+                    scenario=scenario,
+                    include_inheritance=include_inheritance,
+                    horizon_months=horizon_months,
+                    start_month=start_month,
+                ),
+            )
+            return True
+
+        if path == "/api/capital/validation":
+            self._send_json(HTTPStatus.OK, build_capital_validation_view())
+            return True
+
+        if path == "/api/configuration/catalog":
+            self._send_json(HTTPStatus.OK, build_configuration_catalog_v1())
+            return True
+
+        if path == "/api/configuration/current":
+            self._send_json(HTTPStatus.OK, build_configuration_current_v1())
+            return True
+
+        if path.startswith("/api/configuration/drafts/"):
+            parts = path.strip("/").split("/")
+            if len(parts) == 4 and parts[0] == "api" and parts[1] == "configuration" and parts[2] == "drafts":
+                draft_id = parts[3]
+                try:
+                    payload = get_configuration_draft_v1(draft_id)
+                except ConfigurationWorkflowApiError as exc:
+                    self._send_json(
+                        exc.status_code,
+                        {
+                            "ok": False,
+                            "message": str(exc),
+                            "reason_codes": exc.reason_codes,
+                            "details": exc.details,
+                        },
+                    )
+                    return True
+                self._send_json(HTTPStatus.OK, payload)
+                return True
+
+        if path == "/api/sleeves":
+            self._send_json(HTTPStatus.OK, build_sleeve_evaluation_view(requested_day))
+            return True
+
+        if path == "/api/tax":
+            self._send_json(HTTPStatus.OK, build_tax_state_view(requested_day))
+            return True
+
+        if path == "/api/orders":
+            self._send_json(HTTPStatus.OK, build_orders_view(requested_day))
+            return True
+
+        if path == "/api/positions":
+            self._send_json(HTTPStatus.OK, build_positions_view(requested_day))
+            return True
+
+        if path == "/api/reconciliation":
+            self._send_json(HTTPStatus.OK, build_reconciliation_view(requested_day))
+            return True
+
+        if path == "/api/integrity":
+            self._send_json(HTTPStatus.OK, build_integrity_view(requested_day))
+            return True
+
+        if path == "/api/alerts":
+            self._send_json(HTTPStatus.OK, build_alerts_view(requested_day))
+            return True
 
         if path == "/api/days":
             self._send_json(HTTPStatus.OK, _days_list())
@@ -1040,6 +1843,9 @@ class OpsHandler(SimpleHTTPRequestHandler):
                 day = day_raw if isinstance(day_raw, str) and day_raw and _is_day_str(day_raw) else None
                 selected_root = _truth_root_for_day(day)
                 allowed_roots = _known_truth_roots() or [selected_root]
+                for extra_root in [GLOBAL_TRUTH_ROOT, ADVISORY_RUNTIME_ROOT]:
+                    if isinstance(extra_root, Path) and extra_root.exists() and extra_root.is_dir():
+                        allowed_roots.append(extra_root.resolve())
 
                 p = Path(raw)
                 if not p.is_absolute():
@@ -1074,10 +1880,26 @@ class OpsHandler(SimpleHTTPRequestHandler):
                 return True
 
         if path == "/api/status":
+            from constellation_2.phaseL.ui.server.c3_ui_status_collector_v1 import build_c3_ui_status
+
             self._send_json(HTTPStatus.OK, build_c3_ui_status(TRUTH_ROOT))
             return True
 
+        if path == "/api/operational_truth":
+            raw_day = (qs.get("day") or [None])[0]
+            day = raw_day if isinstance(raw_day, str) and raw_day and _is_day_str(raw_day) else _select_latest_day(_union_days())
+            if not day:
+                self._send_json(HTTPStatus.OK, {"ok": False, "errors": ["DAY_NOT_RESOLVED"]})
+                return True
+            selected_root = _truth_root_for_day(day)
+            payload = build_operational_truth_v1(selected_root, day)
+            payload["truth_root"] = str(selected_root)
+            self._send_json(HTTPStatus.OK, payload)
+            return True
+
         if path == "/api/attempts":
+            from constellation_2.phaseL.ui.server.c2_ops_cockpit_status_v2_collector_v1 import discover_attempts, select_preferred_attempt
+
             raw_day = (qs.get("day") or [None])[0]
             day = raw_day if isinstance(raw_day, str) and raw_day and _is_day_str(raw_day) else _select_latest_day(_union_days())
             if not day:
@@ -1101,6 +1923,9 @@ class OpsHandler(SimpleHTTPRequestHandler):
             return True
 
         if path == "/api/status_v2":
+            from constellation_2.phaseL.ui.server.c2_ops_cockpit_status_v2_collector_v1 import build_status_v2
+            from constellation_2.phaseL.ui.server.c3_ui_status_collector_v1 import build_c3_ui_status
+
             # Consolidated payload for Ops Cockpit UI V2.
             raw_day = (qs.get("day") or [None])[0]
             day = raw_day if isinstance(raw_day, str) and raw_day and _is_day_str(raw_day) else _select_latest_day(_union_days())
@@ -1201,10 +2026,147 @@ class OpsHandler(SimpleHTTPRequestHandler):
         self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "errors": ["ENDPOINT_NOT_FOUND"], "path": path})
         return True
 
+    def _read_json_body(self) -> Dict[str, Any]:
+        try:
+            content_length = int(self.headers.get("Content-Length") or "0")
+        except Exception:
+            content_length = 0
+        raw = self.rfile.read(content_length) if content_length > 0 else b"{}"
+        try:
+            body = json.loads(raw.decode("utf-8")) if raw else {}
+        except Exception as exc:
+            raise ConfigurationWorkflowApiError(
+                "Invalid JSON body.",
+                status_code=400,
+                reason_codes=["INVALID_JSON_BODY"],
+            ) from exc
+        if not isinstance(body, dict):
+            raise ConfigurationWorkflowApiError(
+                "Body must be an object.",
+                status_code=400,
+                reason_codes=["BODY_MUST_BE_OBJECT"],
+            )
+        return body
+
+    def _route_configuration_post(self) -> bool:
+        u = urlparse(self.path)
+        path = u.path
+        if path == "/api/configuration/drafts":
+            try:
+                body = self._read_json_body()
+                payload = create_configuration_draft_v1(body)
+            except ConfigurationWorkflowApiError as exc:
+                self._send_json(
+                    exc.status_code,
+                    {
+                        "ok": False,
+                        "message": str(exc),
+                        "reason_codes": exc.reason_codes,
+                        "details": exc.details,
+                    },
+                )
+                return True
+            self._send_json(HTTPStatus.CREATED, payload)
+            return True
+        if not path.startswith("/api/configuration/drafts/"):
+            return False
+        parts = path.strip("/").split("/")
+        if len(parts) != 5 or parts[0] != "api" or parts[1] != "configuration" or parts[2] != "drafts":
+            self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "errors": ["ENDPOINT_NOT_FOUND"], "path": path})
+            return True
+        draft_id = parts[3]
+        action = parts[4]
+        try:
+            body = self._read_json_body()
+            if action == "validate":
+                payload = validate_configuration_draft_v1(draft_id)
+            elif action == "review":
+                payload = review_configuration_draft_v1(draft_id)
+            elif action == "activate":
+                payload = activate_configuration_draft_v1(draft_id)
+            elif action == "reject":
+                payload = reject_configuration_draft_v1(draft_id, body)
+            else:
+                self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "errors": ["ENDPOINT_NOT_FOUND"], "path": path})
+                return True
+        except ConfigurationWorkflowApiError as exc:
+            self._send_json(
+                exc.status_code,
+                {
+                    "ok": False,
+                    "message": str(exc),
+                    "reason_codes": exc.reason_codes,
+                    "details": exc.details,
+                },
+            )
+            return True
+        self._send_json(HTTPStatus.OK, payload)
+        return True
+
+    def _route_action_post(self) -> bool:
+        u = urlparse(self.path)
+        path = u.path
+        if path.startswith("/api/configuration/"):
+            return self._route_configuration_post()
+        if path.startswith("/api/commands/"):
+            try:
+                content_length = int(self.headers.get("Content-Length") or "0")
+            except Exception:
+                content_length = 0
+            raw = self.rfile.read(content_length) if content_length > 0 else b"{}"
+            try:
+                body = json.loads(raw.decode("utf-8")) if raw else {}
+            except Exception:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "result": "INVALID_JSON_BODY"})
+                return True
+            if not isinstance(body, dict):
+                self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "result": "BODY_MUST_BE_OBJECT"})
+                return True
+            result = dispatch_kernel_command(path, body)
+            self._send_json(HTTPStatus.OK, result)
+            return True
+        if not path.startswith("/api/actions/"):
+            return False
+
+        try:
+            content_length = int(self.headers.get("Content-Length") or "0")
+        except Exception:
+            content_length = 0
+        raw = self.rfile.read(content_length) if content_length > 0 else b"{}"
+        try:
+            body = json.loads(raw.decode("utf-8")) if raw else {}
+        except Exception:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "result": "INVALID_JSON_BODY"})
+            return True
+        if not isinstance(body, dict):
+            self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "result": "BODY_MUST_BE_OBJECT"})
+            return True
+
+        action_map = {
+            "/api/actions/refresh-lifecycle": "refresh-lifecycle",
+            "/api/actions/run-reconciliation": "run-reconciliation",
+            "/api/actions/run-replay-check": "run-replay-check",
+            "/api/actions/cancel-working-order": "cancel-working-order",
+        }
+        action_name = action_map.get(path)
+        if action_name is None:
+            self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "result": "ENDPOINT_NOT_FOUND", "path": path})
+            return True
+
+        result = run_action(action_name, body)
+        status_code = HTTPStatus.OK if result.get("ok") else HTTPStatus.CONFLICT
+        self._send_json(status_code, result)
+        return True
+
     def do_GET(self) -> None:
         if self._route_api():
             return
         return super().do_GET()
+
+    def do_POST(self) -> None:
+        if self._route_action_post():
+            return
+        self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "errors": ["ENDPOINT_NOT_FOUND"], "path": self.path})
 
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write("%s - - [%s] %s\n" % (self.client_address[0], _utc_now_iso(), fmt % args))
@@ -1213,7 +2175,7 @@ class OpsHandler(SimpleHTTPRequestHandler):
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=8787)
+    ap.add_argument("--port", type=int, default=3000)
     ns = ap.parse_args(argv)
 
     if not TRUTH_ROOT.exists():

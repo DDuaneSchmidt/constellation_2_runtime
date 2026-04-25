@@ -14,12 +14,17 @@ _THIS_FILE = Path(__file__).resolve()
 REPO_ROOT = _THIS_FILE.parents[2].resolve()
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+from constellation_2.common.control_plane_read_gateway_v1 import read_control_plane_surface_v1
+from constellation_2.common.release_current_shadow_validator_v1 import (
+    load_release_current_shadow_ref_if_present,
+)
 RELEASES_ROOT = Path("/home/node/constellation_releases").resolve()
 ACTIVE_POINTER = Path("/home/node/constellation_active")
 RUNTIME_DATA_ROOT = Path("/home/node/constellation_runtime_data").resolve()
 RELEASE_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RELEASES/release_manifest.v1.schema.json"
 ACTIVATION_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RELEASES/activation_receipt.v1.schema.json"
 WRITE_RUNTIME_CONTRACT_TOOL = (REPO_ROOT / "ops/tools/write_active_runtime_contract_v1.py").resolve()
+REDUCE_RELEASE_CURRENT_TOOL = (REPO_ROOT / "ops/tools/run_release_current_reducer_v1.py").resolve()
 
 
 def _sha256_file(path: Path) -> str:
@@ -117,6 +122,37 @@ def _write_active_runtime_contract_or_fail() -> None:
         )
 
 
+def _materialize_release_current_or_fail() -> None:
+    proc = subprocess.run(
+        [sys.executable, str(REDUCE_RELEASE_CURRENT_TOOL)],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise SystemExit(
+            "FAIL: release_current reducer failed "
+            f"rc={proc.returncode} stdout={proc.stdout.strip()!r} stderr={proc.stderr.strip()!r}"
+        )
+    try:
+        contract_ref = read_control_plane_surface_v1(domain="release", surface="active_runtime_contract")
+    except Exception as exc:
+        raise SystemExit(
+            "FAIL: release_current contract unreadable after activation "
+            f"err={type(exc).__name__}:{exc}"
+        ) from exc
+    canonical_truth_root = Path(str(contract_ref.payload.get("canonical_truth_root") or "")).resolve()
+    if not canonical_truth_root.is_absolute() or not canonical_truth_root.exists() or not canonical_truth_root.is_dir():
+        raise SystemExit(
+            f"FAIL: release_current canonical_truth_root invalid after activation: {canonical_truth_root}"
+        )
+    release_current_ref = load_release_current_shadow_ref_if_present(truth_root=canonical_truth_root)
+    if release_current_ref is None:
+        missing_path = (canonical_truth_root / "release_current_v1" / "current.json").resolve()
+        raise SystemExit(f"FAIL: release_current publication missing after activation path={missing_path}")
+
+
 def _post_activation_verify_or_fail(*, release_root: Path) -> None:
     from constellation_2.common.deployment_state_machine_v1 import evaluate_post_activation_verification
 
@@ -127,6 +163,19 @@ def _post_activation_verify_or_fail(*, release_root: Path) -> None:
             f"blocking_codes={verification['blocking_codes']!r} "
             f"service_unit_path={verification['service_unit_path']!r}"
         )
+
+
+def _activate_runtime_authority_stack_or_fail(*, release_root: Path, prior_target: Path | None) -> None:
+    _atomic_activate_symlink(release_root)
+    try:
+        _write_active_runtime_contract_or_fail()
+        _materialize_release_current_or_fail()
+        _post_activation_verify_or_fail(release_root=release_root)
+    except SystemExit:
+        _restore_prior_active_pointer_or_fail(prior_target)
+        if prior_target is not None:
+            _write_active_runtime_contract_or_fail()
+        raise
 
 
 def main() -> int:
@@ -147,15 +196,10 @@ def main() -> int:
 
     RUNTIME_DATA_ROOT.mkdir(parents=True, exist_ok=True)
     prior_target = ACTIVE_POINTER.resolve() if ACTIVE_POINTER.exists() else None
-    _atomic_activate_symlink(release_root)
-    try:
-        _write_active_runtime_contract_or_fail()
-        _post_activation_verify_or_fail(release_root=release_root)
-    except SystemExit:
-        _restore_prior_active_pointer_or_fail(prior_target)
-        if prior_target is not None:
-            _write_active_runtime_contract_or_fail()
-        raise
+    _activate_runtime_authority_stack_or_fail(
+        release_root=release_root,
+        prior_target=prior_target,
+    )
 
     receipt_dir = (RUNTIME_DATA_ROOT / "activations_v1" / f"{_utc_now_compact()}__{release_id}").resolve()
     receipt_dir.mkdir(parents=True, exist_ok=False)

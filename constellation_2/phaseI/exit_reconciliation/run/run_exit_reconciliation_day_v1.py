@@ -22,9 +22,28 @@ import argparse
 import hashlib
 import json
 import os
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+_THIS_FILE = Path(__file__).resolve()
+_REPO_ROOT = _THIS_FILE.parents[4]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from constellation_2.common.constitutional_runtime_v1 import (
+    CLOSURE_STATE_BLOCKED,
+    CLOSURE_STATE_COMPLETE,
+    CLOSURE_STATE_DEGRADED,
+    FINALITY_PROVISIONAL,
+    assert_constitutional_writer_allowed_v1,
+    build_artifact_dependency_declaration_v1,
+    build_governed_artifact_lineage_v1,
+    build_machine_blocker_envelope_v1,
+    validate_governed_artifact_payload_v1,
+)
 
 
 class ExitReconError(Exception):
@@ -33,6 +52,20 @@ class ExitReconError(Exception):
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _resolve_git_sha(repo_root: Path) -> str:
+    env_sha = str(os.environ.get("GIT_SHA") or "").strip().lower()
+    if 7 <= len(env_sha) <= 40 and all(ch in "0123456789abcdef" for ch in env_sha):
+        return env_sha
+    try:
+        out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(repo_root))
+        sha = out.decode("utf-8").strip().lower()
+        if 7 <= len(sha) <= 40 and all(ch in "0123456789abcdef" for ch in sha):
+            return sha
+    except Exception:
+        pass
+    return "0" * 40
 
 
 def sha256_file(path: Path) -> str:
@@ -284,12 +317,7 @@ def build_exit_reconciliation(
             reasons_stable.append(r)
 
     produced_utc = utc_now_iso()
-    git_sha = os.environ.get("GIT_SHA", "").strip()
-    if git_sha == "":
-        # Best-effort: read from .git/HEAD is non-trivial without invoking git.
-        # Fail-closed requirement for audit lineage is enforced later in Bundle A2 gating;
-        # for now we allow missing git_sha but surface it as reason.
-        reasons_stable.append("PRODUCER_GIT_SHA_MISSING_ENV")
+    git_sha = _resolve_git_sha(repo_root)
 
     out = {
         "schema_id": "C2_EXIT_RECONCILIATION_V1",
@@ -298,7 +326,7 @@ def build_exit_reconciliation(
         "day_utc": day_utc,
         "producer": {
             "repo": "constellation_2_runtime",
-            "git_sha": git_sha if git_sha else "UNKNOWN",
+            "git_sha": git_sha,
             "module": "constellation_2/phaseI/exit_reconciliation/run/run_exit_reconciliation_day_v1.py",
         },
         "status": status,
@@ -321,6 +349,41 @@ def build_exit_reconciliation(
         ],
         "obligations": obligations,
     }
+    closure_state = CLOSURE_STATE_COMPLETE
+    if status.startswith("DEGRADED"):
+        closure_state = CLOSURE_STATE_DEGRADED
+    elif status != "OK":
+        closure_state = CLOSURE_STATE_BLOCKED
+    blocker_envelope = build_machine_blocker_envelope_v1(
+        closure_state=closure_state,
+        reason_codes=reasons_stable,
+        missing_dependency_artifacts=[],
+    )
+    out["blocking_codes"] = list(blocker_envelope["blocking_codes"])
+    out["closure_state"] = str(blocker_envelope["closure_state"])
+    out["first_blocker_code"] = str(blocker_envelope["first_blocker_code"])
+    out["missing_dependency_artifacts"] = list(blocker_envelope["missing_dependency_artifacts"])
+    out["constitutional_dependency_declaration"] = build_artifact_dependency_declaration_v1(
+        artifact_type="exit_reconciliation_v1",
+        artifact_class="outcome_record",
+        authority_id="exit_reconciliation_v1",
+        declared_dependency_artifacts=[],
+        dependency_refs=[],
+    )
+    out["constitutional_lineage"] = build_governed_artifact_lineage_v1(
+        artifact_type="exit_reconciliation_v1",
+        artifact_version="1",
+        artifact_class="outcome_record",
+        authority_id="exit_reconciliation_v1",
+        producer_id="constellation_2.phaseI.exit_reconciliation.run.run_exit_reconciliation_day_v1",
+        generated_at_utc=produced_utc,
+        effective_at_utc=produced_utc,
+        finality_state=FINALITY_PROVISIONAL,
+        input_artifact_refs=[],
+        policy_snapshot_refs=[],
+        code_version=git_sha,
+        run_id=f"exit_reconciliation_v1:{day_utc}",
+    )
     return out
 
 
@@ -375,6 +438,17 @@ def main() -> int:
     else:
         out_path = (truth_root / "exit_reconciliation_v1" / day_utc / "exit_reconciliation.v1.json")
 
+    assert_constitutional_writer_allowed_v1(
+        repo_root,
+        "exit_reconciliation_v1",
+        "constellation_2.phaseI.exit_reconciliation.run.run_exit_reconciliation_day_v1",
+    )
+    validate_governed_artifact_payload_v1(
+        repo_root=repo_root,
+        artifact_id="exit_reconciliation_v1",
+        payload=out_obj,
+        required_finality_states=["provisional", "finalized", "corrected"],
+    )
     atomic_write_json(out_path, out_obj)
     print(str(out_path))
     return 0

@@ -183,6 +183,7 @@ def _derived_contradictions(
     ledger_authority_status: str,
     submission_authorized: bool,
     final_start_decision: str,
+    environment: str,
 ) -> list[dict[str, Any]]:
     contradictions: list[dict[str, Any]] = []
     if final_start_decision == "READY_NOW" and deployment_status != "DEPLOY_ACTIVE":
@@ -225,7 +226,7 @@ def _derived_contradictions(
                 "source_paths": [],
             }
         )
-    if final_start_decision == "READY_NOW" and not submission_authorized:
+    if final_start_decision == "READY_NOW" and not submission_authorized and environment != "PAPER":
         contradictions.append(
             {
                 "contradiction_code": "CURRENT_SYSTEM_PROJECTION_SUBMISSION_NOT_AUTHORIZED",
@@ -320,6 +321,8 @@ def build_current_system_projection_v1(
     ledger_authority_status = str(ledger_event.get("status") or "").strip()
     submission_authorized = bool(dict(submission_event.get("payload") or {}).get("submission_authorized") is True)
     final_start_decision = str(state_machine_event.get("status") or "").strip()
+    open_policy = trading_day_payload.get("open_policy") if isinstance(trading_day_payload, Mapping) else {}
+    environment = str(dict(open_policy or {}).get("environment") or "PAPER").strip().upper() or "PAPER"
 
     contradiction_events = [
         {
@@ -339,6 +342,7 @@ def build_current_system_projection_v1(
             ledger_authority_status=ledger_authority_status,
             submission_authorized=submission_authorized,
             final_start_decision=final_start_decision,
+            environment=environment,
         )
     )
 

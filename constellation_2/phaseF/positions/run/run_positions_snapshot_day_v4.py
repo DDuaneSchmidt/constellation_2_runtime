@@ -19,6 +19,7 @@ SCHEMA_POSITIONS_SNAPSHOT_V4 = "governance/04_DATA/SCHEMAS/C2/POSITIONS/position
 
 ORDER_PLAN_SCHEMA = "constellation_2/schemas/order_plan.v1.schema.json"
 EQUITY_ORDER_PLAN_SCHEMA = "constellation_2/schemas/equity_order_plan.v1.schema.json"
+EQUITY_ORDER_PLAN_V2_SCHEMA = "constellation_2/schemas/equity_order_plan.v2.schema.json"
 EXEC_EVENT_SCHEMA = "constellation_2/schemas/execution_event_record.v1.schema.json"
 
 
@@ -50,6 +51,91 @@ def _read_json_obj(path: Path) -> Dict[str, Any]:
     if not isinstance(obj, dict):
         raise ValueError(f"TOP_LEVEL_NOT_OBJECT: {str(path)}")
     return obj
+
+
+def _write_bytes_replace(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    if tmp.exists():
+        tmp.unlink()
+    tmp.write_bytes(data)
+    tmp.replace(path)
+
+
+def _items_by_position_id(snapshot_obj: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    positions = snapshot_obj.get("positions") if isinstance(snapshot_obj.get("positions"), dict) else {}
+    items = positions.get("items") if isinstance(positions, dict) else []
+    if not isinstance(items, list):
+        return {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        position_id = str(item.get("position_id") or "").strip()
+        if position_id:
+            out[position_id] = item
+    return out
+
+
+def _is_zero_qty_open_item(item: Dict[str, Any]) -> bool:
+    try:
+        qty = int(item.get("qty") or 0)
+    except Exception:
+        return False
+    return str(item.get("status") or "").strip().upper() == "OPEN" and qty <= 0
+
+
+def _is_safe_item_identity_upgrade(existing_item: Dict[str, Any], candidate_item: Dict[str, Any]) -> bool:
+    for field in (
+        "position_id",
+        "qty",
+        "avg_cost_cents",
+        "market_exposure_type",
+        "max_loss_cents",
+        "opened_day_utc",
+        "status",
+    ):
+        if existing_item.get(field) != candidate_item.get(field):
+            return False
+
+    existing_engine = str(existing_item.get("engine_id") or "").strip()
+    candidate_engine = str(candidate_item.get("engine_id") or "").strip()
+    if existing_engine != candidate_engine and existing_engine not in {"", "unknown"}:
+        return False
+
+    existing_instr = existing_item.get("instrument")
+    candidate_instr = candidate_item.get("instrument")
+    if existing_instr != candidate_instr:
+        return False
+    return True
+
+
+def _is_safe_backfill_upgrade(existing_obj: Dict[str, Any], candidate_obj: Dict[str, Any]) -> bool:
+    if str(existing_obj.get("schema_id") or "").strip() != "C2_POSITIONS_SNAPSHOT_V4":
+        return False
+    if str(candidate_obj.get("schema_id") or "").strip() != "C2_POSITIONS_SNAPSHOT_V4":
+        return False
+    if str(existing_obj.get("day_utc") or "").strip() != str(candidate_obj.get("day_utc") or "").strip():
+        return False
+
+    existing_items = _items_by_position_id(existing_obj)
+    candidate_items = _items_by_position_id(candidate_obj)
+    if not existing_items:
+        return False
+    removed_position_ids = set(existing_items) - set(candidate_items)
+    for position_id in removed_position_ids:
+        if not _is_zero_qty_open_item(existing_items[position_id]):
+            return False
+
+    for position_id, existing_item in existing_items.items():
+        candidate_item = candidate_items.get(position_id)
+        if position_id in removed_position_ids:
+            continue
+        if not isinstance(candidate_item, dict):
+            return False
+        if not _is_safe_item_identity_upgrade(existing_item, candidate_item):
+            return False
+    return True
 
 
 def _producer_sha_lock_if_existing_snapshot(snapshot_path: Path, producer_sha: str) -> int:
@@ -162,6 +248,36 @@ def _instrument_from_equity_order_plan_v1(ep: Dict[str, Any]) -> Dict[str, Any]:
     return {"kind": "EQUITY", "symbol": sym, "currency": ccy, "ib_conId": None, "ib_localSymbol": None}
 
 
+def _instrument_from_equity_order_plan_any(ep: Dict[str, Any]) -> Dict[str, Any]:
+    sym = str(ep.get("symbol") or "").strip()
+    ccy = str(ep.get("currency") or "USD").strip() or "USD"
+    if not sym:
+        raise ValueError("EQUITY_PLAN_SYMBOL_MISSING")
+    return {"kind": "EQUITY", "symbol": sym, "currency": ccy, "ib_conId": None, "ib_localSymbol": None}
+
+
+def _equity_position_identity_from_submission_dir(sd: Path) -> tuple[str, Dict[str, Any] | None]:
+    p_ep_v2 = sd / "equity_order_plan.v2.json"
+    p_ep_v1 = sd / "equity_order_plan.v1.json"
+    if p_ep_v2.exists():
+        ep = _read_json_obj(p_ep_v2)
+        validate_against_repo_schema_v1(ep, REPO_ROOT, EQUITY_ORDER_PLAN_V2_SCHEMA)
+        sym = str(ep.get("symbol") or "").strip()
+        ccy = str(ep.get("currency") or "USD").strip() or "USD"
+        engine_id = str(ep.get("engine_id") or "").strip() or "unknown"
+        if sym:
+            return engine_id, {"kind": "EQUITY", "symbol": sym, "currency": ccy, "ib_conId": None, "ib_localSymbol": None}
+        return engine_id, None
+    if p_ep_v1.exists():
+        ep = _read_json_obj(p_ep_v1)
+        schema_version = str(ep.get("schema_version") or "").strip()
+        if schema_version == "v1":
+            validate_against_repo_schema_v1(ep, REPO_ROOT, EQUITY_ORDER_PLAN_SCHEMA)
+            return "unknown", _instrument_from_equity_order_plan_v1(ep)
+        return str(ep.get("engine_id") or "").strip() or "unknown", _instrument_from_equity_order_plan_any(ep)
+    return "unknown", None
+
+
 def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="run_positions_snapshot_day_v4",
@@ -228,10 +344,10 @@ def main(argv: List[str] | None = None) -> int:
         p_op = sd / "order_plan.v1.json"
 
         instr: Optional[Dict[str, Any]] = None
-        if p_ep.exists():
-            ep = _read_json_obj(p_ep)
-            validate_against_repo_schema_v1(ep, REPO_ROOT, EQUITY_ORDER_PLAN_SCHEMA)
-            instr = _instrument_from_equity_order_plan_v1(ep)
+        engine_id = "unknown"
+        p_ep_v2 = sd / "equity_order_plan.v2.json"
+        if p_ep_v2.exists() or p_ep.exists():
+            engine_id, instr = _equity_position_identity_from_submission_dir(sd)
         elif p_op.exists():
             op = _read_json_obj(p_op)
             validate_against_repo_schema_v1(op, REPO_ROOT, ORDER_PLAN_SCHEMA)
@@ -240,6 +356,8 @@ def main(argv: List[str] | None = None) -> int:
             raise ValueError(f"NO_PLAN_FOUND_FOR_SUBMISSION: {submission_id}")
 
         qty = int(evt["filled_qty"])
+        if qty <= 0:
+            continue
         avg_cents = _parse_price_to_cents(str(evt["avg_price"]))
 
         pos_id = str(evt.get("binding_hash") or submission_id).strip()
@@ -249,7 +367,7 @@ def main(argv: List[str] | None = None) -> int:
         items.append(
             {
                 "position_id": pos_id,
-                "engine_id": "unknown",
+                "engine_id": engine_id,
                 "instrument": instr,
                 "qty": qty,
                 "avg_cost_cents": avg_cents,
@@ -295,6 +413,19 @@ def main(argv: List[str] | None = None) -> int:
     except CanonicalizationError as e:
         print(f"FAIL: SNAPSHOT_CANONICALIZATION_ERROR: {e}", file=sys.stderr)
         return 4
+
+    if dp_pos.snapshot_path.exists():
+        existing_bytes = dp_pos.snapshot_path.read_bytes()
+        if existing_bytes != snap_bytes:
+            try:
+                existing_obj = _read_json_obj(dp_pos.snapshot_path)
+            except Exception:
+                print("FAIL: EXISTING_SNAPSHOT_UNREADABLE_FOR_BACKFILL_REPAIR", file=sys.stderr)
+                return 4
+            if _is_safe_backfill_upgrade(existing_obj, snapshot_obj):
+                _write_bytes_replace(dp_pos.snapshot_path, snap_bytes)
+                print("OK: POSITIONS_SNAPSHOT_V4_BACKFILL_REPAIRED")
+                return 0
 
     try:
         _ = write_file_immutable_v1(path=dp_pos.snapshot_path, data=snap_bytes, create_dirs=True)

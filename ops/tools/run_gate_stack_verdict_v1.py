@@ -48,6 +48,15 @@ if str(_REPO_ROOT_FROM_FILE) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
 
 from constellation_2.common.runtime_contract_v1 import resolve_release_provenance  # type: ignore
+from constellation_2.common.constitutional_runtime_v1 import (  # type: ignore
+    FINALITY_PROVISIONAL,
+    assert_constitutional_writer_allowed_v1,
+    build_artifact_dependency_declaration_v1,
+    build_governed_artifact_lineage_v1,
+    build_machine_blocker_envelope_v1,
+    get_constitutional_artifact_contract_v1,
+    validate_governed_artifact_payload_v1,
+)
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1  # type: ignore
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1  # type: ignore
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1  # type: ignore
@@ -285,6 +294,7 @@ def _compute_verdict(*, truth_root: Path, day: str, produced_utc: str) -> Dict[s
 
     blocking_class = "NONE"
     reason_codes: List[str] = []
+    governed_dependency_reason_codes: List[str] = []
 
     # Evaluate fail-closed with precedence.
     status = "PASS"
@@ -321,6 +331,92 @@ def _compute_verdict(*, truth_root: Path, day: str, produced_utc: str) -> Dict[s
             reason_codes.append(f"GATE_BLOCKING_NOT_PASS:{g.get('gate_id')}:{observed}")
             break
 
+    for governed_gate_id in ("operator_daily_gate_v3", "capital_risk_envelope_v2"):
+        gate_row = next((row for row in gates_sorted if str(row.get("gate_id") or "").strip() == governed_gate_id), None)
+        if gate_row is None:
+            continue
+        artifact_path = Path(str(gate_row.get("artifact_path") or "")).resolve()
+        if not artifact_path.exists() or not artifact_path.is_file():
+            continue
+        try:
+            validate_governed_artifact_payload_v1(
+                repo_root=REPO_ROOT,
+                artifact_id=governed_gate_id,
+                payload=_read_json_obj(artifact_path),
+            )
+        except Exception:
+            governed_dependency_reason_codes.append(f"INVALID_GOVERNED_DEPENDENCY:{governed_gate_id}")
+    if governed_dependency_reason_codes:
+        status = "FAIL"
+        if blocking_class == "NONE":
+            blocking_class = "CLASS1_SYSTEM_HARD_STOP"
+
+    contract = get_constitutional_artifact_contract_v1(REPO_ROOT, "gate_stack_verdict_v1")
+    constitutional_dependency_refs: List[Dict[str, Any]] = []
+    missing_dependency_artifacts: List[str] = []
+    for gate_row in gates_sorted:
+        gate_id = str(gate_row.get("gate_id") or "").strip()
+        artifact_path = str(gate_row.get("artifact_path") or "").strip()
+        artifact_sha256 = str(gate_row.get("artifact_sha256") or "").strip()
+        observed = str(gate_row.get("status") or "").strip().upper()
+        if observed == "MISSING" or not artifact_path or not artifact_sha256 or artifact_sha256 == _sha256_bytes(b""):
+            missing_dependency_artifacts.append(gate_id)
+            continue
+        constitutional_dependency_refs.append(
+            {
+                "artifact_id": gate_id,
+                "path": artifact_path,
+                "sha256": artifact_sha256,
+                "artifact_class": "admission_result",
+                "finality_state": FINALITY_PROVISIONAL,
+            }
+        )
+    declared_dependency_order = [
+        str(item).strip()
+        for item in (contract.get("required_upstream_dependencies") or [])
+        if str(item).strip()
+    ]
+    ref_by_id = {
+        str(row.get("artifact_id") or "").strip(): row
+        for row in constitutional_dependency_refs
+        if str(row.get("artifact_id") or "").strip()
+    }
+    constitutional_dependency_refs = [
+        dict(ref_by_id[artifact_id])
+        for artifact_id in declared_dependency_order
+        if artifact_id in ref_by_id
+    ]
+    blocker_envelope = build_machine_blocker_envelope_v1(
+        closure_state=(
+            "COMPLETE"
+            if status == "PASS" and not governed_dependency_reason_codes and not missing_dependency_artifacts
+            else "BLOCKED"
+        ),
+        reason_codes=[*reason_codes, *governed_dependency_reason_codes],
+        missing_dependency_artifacts=missing_dependency_artifacts,
+    )
+    payload_reason_codes = sorted(set([*reason_codes, *governed_dependency_reason_codes]))
+    constitutional_dependency_declaration = build_artifact_dependency_declaration_v1(
+        artifact_type="gate_stack_verdict_v1",
+        artifact_class=str(contract.get("artifact_class") or "").strip(),
+        authority_id="gate_stack_verdict_v1",
+        declared_dependency_artifacts=declared_dependency_order,
+        dependency_refs=constitutional_dependency_refs,
+    )
+    constitutional_lineage = build_governed_artifact_lineage_v1(
+        artifact_type="gate_stack_verdict_v1",
+        artifact_version="v1",
+        artifact_class=str(contract.get("artifact_class") or "").strip(),
+        authority_id="gate_stack_verdict_v1",
+        producer_id="ops/tools/run_gate_stack_verdict_v1.py",
+        generated_at_utc=produced_utc,
+        effective_at_utc=produced_utc,
+        finality_state=FINALITY_PROVISIONAL,
+        input_artifact_refs=constitutional_dependency_refs,
+        policy_snapshot_refs=[],
+        code_version=_git_sha(),
+        run_id=f"gate_stack_verdict:{day}",
+    )
     out = {
         "schema_id": "gate_stack_verdict",
         "schema_version": "v1",
@@ -329,7 +425,13 @@ def _compute_verdict(*, truth_root: Path, day: str, produced_utc: str) -> Dict[s
         "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_gate_stack_verdict_v1.py", "git_sha": _git_sha()},
         "status": status,
         "blocking_class": blocking_class,
-        "reason_codes": reason_codes,
+        "reason_codes": payload_reason_codes,
+        "blocking_codes": list(blocker_envelope["blocking_codes"]),
+        "closure_state": str(blocker_envelope["closure_state"]),
+        "first_blocker_code": str(blocker_envelope["first_blocker_code"]),
+        "missing_dependency_artifacts": list(blocker_envelope["missing_dependency_artifacts"]),
+        "constitutional_dependency_declaration": constitutional_dependency_declaration,
+        "constitutional_lineage": constitutional_lineage,
         "input_manifest": manifest,
         "gates": [
             {
@@ -347,6 +449,12 @@ def _compute_verdict(*, truth_root: Path, day: str, produced_utc: str) -> Dict[s
     }
 
     validate_against_repo_schema_v1(out, REPO_ROOT, SCHEMA_RELPATH)
+    validate_governed_artifact_payload_v1(
+        repo_root=REPO_ROOT,
+        artifact_id="gate_stack_verdict_v1",
+        payload=out,
+        required_finality_states=["provisional", "finalized", "corrected"],
+    )
     return out
 
 
@@ -401,6 +509,7 @@ def _self_heal_if_needed(day: str, out_path: Path, new_obj: Dict[str, Any]) -> T
 
 
 def main() -> int:
+    assert_constitutional_writer_allowed_v1(REPO_ROOT, "gate_stack_verdict_v1", "ops/tools/run_gate_stack_verdict_v1.py")
     ap = argparse.ArgumentParser(prog="run_gate_stack_verdict_v1")
     ap.add_argument("--day_utc", required=True, help="UTC day key YYYY-MM-DD")
     ap.add_argument("--truth_root", required=True, help="Absolute truth root directory (sleeve truth root)")

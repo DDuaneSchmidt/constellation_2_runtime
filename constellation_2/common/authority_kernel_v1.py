@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping
 
+from constellation_2.common.constitutional_decision_v1 import evaluate_constitutional_decision_v1
+from constellation_2.common.constitutional_proposal_v1 import build_constitutional_proposal_v1, proposal_hash_v1
+from constellation_2.common.paper_session_fact_plane_v1 import (
+    build_constitutional_fact_bundle_v1,
+    build_constitutional_fact_record_v1,
+)
 from constellation_2.common.step_result_envelope_v1 import build_step_result_envelope_v1
 
 
@@ -31,6 +38,7 @@ BLOCKING_CLASS_ATTESTATION = "AUTHORITY_ATTESTATION_INCOMPATIBLE"
 BLOCKING_CLASS_CURRENT_DAY_INPUTS = "CURRENT_DAY_INPUT_ARTIFACT_MISSING"
 BLOCKING_CLASS_BUSINESS = "BUSINESS_DOMAIN_CONTRADICTION"
 BLOCKING_CLASS_MONITORING = "MONITORING_ONLY_DEGRADATION"
+CONSTITUTIONAL_SHADOW_POLICY_VERSION = "constitutional_shadow_v1"
 
 
 def _read_json(path: Path) -> Dict[str, Any]:
@@ -178,6 +186,191 @@ def _trade_readiness_schema_compatibility() -> tuple[List[Dict[str, str]], Dict[
     }
 
 
+def _mapping_sha_v1(payload: Mapping[str, Any] | None) -> str:
+    normalized = dict(payload or {})
+    return hashlib.sha256(
+        json.dumps(normalized, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+
+def _constitutional_fact_record_from_result_v1(
+    *,
+    logical_name: str,
+    fact_type: str,
+    result: Mapping[str, Any] | None,
+    observed_at: str,
+    rc: int,
+    scope_keys: Mapping[str, Any],
+) -> Dict[str, Any]:
+    payload = dict(result or {})
+    healthy = rc == 0
+    dependency_health = "HEALTHY" if healthy else "DEGRADED_BLOCKING"
+    state_coherence = "COHERENT" if healthy else "CONFLICTED"
+    general_admissibility = "VERIFIED_COMPLETE" if healthy else "UNAVAILABLE"
+    return build_constitutional_fact_record_v1(
+        fact_type=fact_type,
+        source_system=logical_name,
+        source_version="v1",
+        observed_at=observed_at,
+        captured_at=observed_at,
+        freshness_class="CURRENT" if healthy else "UNKNOWN",
+        provenance_class="DERIVED_FROM_AUTHORITATIVE_FILES",
+        payload=payload,
+        scope_keys=scope_keys,
+        content_hash=_mapping_sha_v1(payload),
+        general_admissibility=general_admissibility,
+        tax_admissibility="UNKNOWN",
+        dependency_health=dependency_health,
+        state_coherence=state_coherence,
+        logical_name=logical_name,
+        artifact_path=f"results.{logical_name}",
+    )
+
+
+def _constitutional_scope_summary_record_v1(
+    *,
+    day_utc: str,
+    scope_summary: Mapping[str, Any] | None,
+) -> Dict[str, Any]:
+    summary = dict(scope_summary or {})
+    primary_ready = bool(summary.get("primary_ready") is True)
+    return build_constitutional_fact_record_v1(
+        fact_type="sleeve_state_fact",
+        source_system="scope_summary",
+        source_version="v1",
+        observed_at=f"{day_utc}T00:00:00Z",
+        captured_at=f"{day_utc}T00:00:00Z",
+        freshness_class="CURRENT",
+        provenance_class="DERIVED_FROM_AUTHORITATIVE_FILES",
+        payload=summary,
+        scope_keys={"day_utc": day_utc, "scope": "PRIMARY"},
+        content_hash=_mapping_sha_v1(summary),
+        general_admissibility="VERIFIED_COMPLETE" if primary_ready else "VERIFIED_PARTIAL",
+        tax_admissibility="UNKNOWN",
+        dependency_health="HEALTHY" if primary_ready else "DEGRADED_NON_BLOCKING",
+        state_coherence="COHERENT" if primary_ready else "PARTIAL",
+        logical_name="scope_summary",
+        artifact_path="results.scope_summary",
+    )
+
+
+def _constitutional_shadow_v1(
+    *,
+    day_utc: str,
+    startup_materialization_result: Mapping[str, Any] | None,
+    handshake_result: Mapping[str, Any] | None,
+    global_gate_result: Mapping[str, Any] | None,
+    scope_summary: Mapping[str, Any] | None,
+    producer_module: str,
+    producer_git_sha: str,
+    hard_envelope_ok: bool,
+) -> Dict[str, Any]:
+    source_artifact_hashes = [
+        {"artifact_ref": "results.startup_materialization", "sha256": _mapping_sha_v1(startup_materialization_result)},
+        {"artifact_ref": "results.ib_api_handshake", "sha256": _mapping_sha_v1(handshake_result)},
+        {"artifact_ref": "results.global_gate_refresh", "sha256": _mapping_sha_v1(global_gate_result)},
+        {"artifact_ref": "results.scope_summary", "sha256": _mapping_sha_v1(scope_summary)},
+    ]
+    proposal = build_constitutional_proposal_v1(
+        proposal_id=f"authority-kernel-shadow:{day_utc}",
+        proposal_version="v1",
+        created_at=f"{day_utc}T00:00:00Z",
+        source_subsystem="authority_kernel_preflight_v1",
+        action_type="ENABLE_SESSION_SUBMISSION",
+        action_class="CONSTRUCTIVE",
+        target_scope={
+            "global": "PAPER",
+            "domain": "TRADING",
+            "account": "",
+            "sleeve": "PRIMARY",
+            "action_class": "CONSTRUCTIVE",
+        },
+        target_entities=["PRIMARY", "SESSION_SUBMISSION"],
+        requested_effect={"day_utc": day_utc, "requested_state": "SUBMISSION_ENABLED"},
+        expected_economic_effect={"status": "ENABLE_EXISTING_EXECUTION_BOUNDARY"},
+        expected_tax_effect={"status": "UNSPECIFIED"},
+        expected_risk_effect={"status": "BOUND_BY_EXISTING_GATES"},
+        reversibility_class="REVERSIBLE_BY_BOUNDARY_DENIAL",
+        urgency_class="DAY",
+        expiration_at=f"{day_utc}T23:59:59Z",
+        required_fact_types=[
+            "dependency_health_fact",
+            "execution_capability_fact",
+            "sleeve_state_fact",
+        ],
+        required_dependency_checks=[
+            "startup_materialization_result_present",
+            "ib_api_handshake_present",
+            "scope_summary_present",
+        ],
+        source_reasoning_reference="results.authority_kernel_validation",
+        source_policy_bindings=[str(TRUTH_SURFACE_AUTHORITY_PATH), str(TRADE_READINESS_STATUS_SCHEMA_PATH)],
+        source_artifact_hashes=source_artifact_hashes,
+    )
+    fact_records = [
+        _constitutional_fact_record_from_result_v1(
+            logical_name="startup_materialization",
+            fact_type="execution_capability_fact",
+            result=startup_materialization_result,
+            observed_at=f"{day_utc}T00:00:00Z",
+            rc=int((startup_materialization_result or {}).get("returncode") or 0),
+            scope_keys={"day_utc": day_utc},
+        ),
+        _constitutional_fact_record_from_result_v1(
+            logical_name="ib_api_handshake",
+            fact_type="dependency_health_fact",
+            result=handshake_result,
+            observed_at=f"{day_utc}T00:00:00Z",
+            rc=int((handshake_result or {}).get("returncode") or 0),
+            scope_keys={"day_utc": day_utc},
+        ),
+        _constitutional_fact_record_from_result_v1(
+            logical_name="global_gate_refresh",
+            fact_type="dependency_health_fact",
+            result=global_gate_result,
+            observed_at=f"{day_utc}T00:00:00Z",
+            rc=int((global_gate_result or {}).get("returncode") or 0),
+            scope_keys={"day_utc": day_utc},
+        ),
+        _constitutional_scope_summary_record_v1(day_utc=day_utc, scope_summary=scope_summary),
+    ]
+    fact_bundle = build_constitutional_fact_bundle_v1(
+        day_utc=day_utc,
+        session_id=f"paper_session:{day_utc}:PAPER",
+        policy_version=CONSTITUTIONAL_SHADOW_POLICY_VERSION,
+        required_fact_types=list(proposal.get("required_fact_types") or []),
+        fact_records=fact_records,
+    )
+    decision = evaluate_constitutional_decision_v1(
+        proposal=proposal,
+        proposal_hash=proposal_hash_v1(proposal),
+        fact_bundle=fact_bundle,
+        fact_bundle_hash=str(fact_bundle.get("fact_bundle_hash") or "").strip(),
+        policy_version=CONSTITUTIONAL_SHADOW_POLICY_VERSION,
+        scope_authorities={
+            "global": "REQUIRE_HUMAN_REVIEW",
+            "domain": "REQUIRE_HUMAN_REVIEW",
+            "account": "REQUIRE_HUMAN_REVIEW",
+            "sleeve": "REQUIRE_HUMAN_REVIEW",
+            "action_class": "REQUIRE_HUMAN_REVIEW",
+        },
+        hard_envelope_ok=hard_envelope_ok,
+        policy_blockers=[],
+        persistence_ok=True,
+        evaluated_at=f"{day_utc}T00:00:00Z",
+    )
+    return {
+        "policy_version": CONSTITUTIONAL_SHADOW_POLICY_VERSION,
+        "producer_module": producer_module,
+        "producer_git_sha": producer_git_sha,
+        "proposal": proposal,
+        "proposal_hash": proposal_hash_v1(proposal),
+        "fact_bundle": fact_bundle,
+        "fact_bundle_hash": str(fact_bundle.get("fact_bundle_hash") or "").strip(),
+        "decision": decision,
+    }
+
+
 def run_day_authority_preflight_v1(
     *,
     truth_root: Path,
@@ -266,6 +459,24 @@ def run_day_authority_preflight_v1(
             "evidence_ref": blockers[0]["evidence_ref"],
         }
     validation_state = "PASS" if not blockers else "FAIL"
+    constitutional_shadow = _constitutional_shadow_v1(
+        day_utc=day_utc,
+        startup_materialization_result=startup_materialization_result,
+        handshake_result=handshake_result,
+        global_gate_result=global_gate_result,
+        scope_summary=scope_summary,
+        producer_module=producer_module,
+        producer_git_sha=producer_git_sha,
+        hard_envelope_ok=not any(
+            row["blocking_class"] in {
+                BLOCKING_CLASS_GOVERNANCE_CONFIG,
+                BLOCKING_CLASS_REGISTRY_MAPPING,
+                BLOCKING_CLASS_REQUIRED_SCHEMA,
+                BLOCKING_CLASS_ATTESTATION,
+            }
+            for row in blockers
+        ),
+    )
     envelope = build_step_result_envelope_v1(
         step_id="authority_kernel_preflight_v1",
         status="BLOCKED" if blockers else ("OK_WITH_WARNINGS" if warnings else "OK"),
@@ -284,12 +495,19 @@ def run_day_authority_preflight_v1(
             "blocking_class": blocking_class,
             "first_failure": first_failure,
             "scope_summary": dict(scope_summary or {}),
+            "constitutional_shadow": {
+                "policy_version": constitutional_shadow["policy_version"],
+                "proposal_hash": constitutional_shadow["proposal_hash"],
+                "fact_bundle_hash": constitutional_shadow["fact_bundle_hash"],
+                "decision_enum": constitutional_shadow["decision"]["decision_enum"],
+            },
         },
         schema_refs=schema_refs,
     )
     return {
         "mode": "validation_result_only",
         "envelope": envelope,
+        "constitutional_shadow": constitutional_shadow,
         "validation_summary": {
             "validation_state": validation_state,
             "blocking_class": blocking_class,
@@ -304,6 +522,16 @@ def run_day_authority_preflight_v1(
                 "details": compatibility_details,
             },
             "diagnostic_warnings": warnings,
+            "constitutional_shadow": {
+                "policy_version": constitutional_shadow["policy_version"],
+                "proposal_hash": constitutional_shadow["proposal_hash"],
+                "fact_bundle_hash": constitutional_shadow["fact_bundle_hash"],
+                "decision_enum": constitutional_shadow["decision"]["decision_enum"],
+                "authorization_issuable": bool(constitutional_shadow["decision"]["authorization_issuable"]),
+                "blocker_rules": list(constitutional_shadow["decision"]["blocker_rules"]),
+                "rule_provenance": list(constitutional_shadow["decision"]["rule_provenance"]),
+                "negative_evidence": list(constitutional_shadow["decision"]["negative_evidence"]),
+            },
             "run_metadata": {
                 "truth_root": str(Path(truth_root).resolve()),
                 "producer_module": str(producer_module or "").strip(),

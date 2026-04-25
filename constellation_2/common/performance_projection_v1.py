@@ -11,6 +11,13 @@ from constellation_2.common.execution_journal_v1 import (
     require_matching_identity_tuple_v1,
     validate_execution_journal_payload_v1,
 )
+from constellation_2.common.constitutional_runtime_v1 import (
+    ARTIFACT_CLASS_OUTCOME_RECORD,
+    FINALITY_PROVISIONAL,
+    assert_constitutional_writer_allowed_v1,
+    build_artifact_dependency_declaration_v1,
+    build_governed_artifact_lineage_v1,
+)
 from constellation_2.common.paper_session_fact_plane_v1 import (
     SurfaceRefV1,
     atomic_write_validated_json_v1,
@@ -51,13 +58,20 @@ def build_performance_projection_v1(
     *,
     journal_payload: Mapping[str, Any],
     journal_ref: str,
+    journal_sha256: str,
     journal_generated_at_utc: str,
     generated_at_utc: str,
     producer_module: str,
 ) -> dict[str, Any]:
+    contract = assert_constitutional_writer_allowed_v1(
+        REPO_ROOT,
+        "performance_projection_v1",
+        producer_module,
+    )
     validated_journal = validate_execution_journal_payload_v1(journal_payload)
     expected_identity = identity_tuple_from_mapping_v1(validated_journal, context="execution_journal_v1")
     _require_nonempty_string(journal_ref, "PERFORMANCE_PROJECTION_JOURNAL_REF_MISSING")
+    _require_nonempty_string(journal_sha256, "PERFORMANCE_PROJECTION_JOURNAL_SHA256_MISSING")
     _require_nonempty_string(
         journal_generated_at_utc,
         "PERFORMANCE_PROJECTION_JOURNAL_GENERATED_AT_MISSING",
@@ -126,6 +140,40 @@ def build_performance_projection_v1(
             "history_points": len(stage_rows),
         }
     )
+    dependency_refs = [
+        {
+            "artifact_id": "execution_journal_v1",
+            "path": str(journal_ref).strip(),
+            "sha256": str(journal_sha256).strip(),
+            "artifact_class": "outcome_record",
+            "finality_state": "finalized",
+        }
+    ]
+    constitutional_dependency_declaration = build_artifact_dependency_declaration_v1(
+        artifact_type="performance_projection_v1",
+        artifact_class=str(contract.get("artifact_class") or "").strip(),
+        authority_id="performance_projection_v1",
+        declared_dependency_artifacts=[
+            str(item).strip()
+            for item in (contract.get("required_upstream_dependencies") or [])
+            if str(item).strip()
+        ],
+        dependency_refs=dependency_refs,
+    )
+    constitutional_lineage = build_governed_artifact_lineage_v1(
+        artifact_type="performance_projection_v1",
+        artifact_version="v1",
+        artifact_class=ARTIFACT_CLASS_OUTCOME_RECORD,
+        authority_id="performance_projection_v1",
+        producer_id=producer_module,
+        generated_at_utc=str(generated_at_utc).strip(),
+        effective_at_utc=str(journal_generated_at_utc).strip(),
+        finality_state=FINALITY_PROVISIONAL,
+        input_artifact_refs=dependency_refs,
+        policy_snapshot_refs=[],
+        code_version=str(expected_identity["git_sha"]),
+        run_id=str(validated_journal.get("journal_id") or "").strip(),
+    )
 
     payload = {
         "schema_id": "performance_projection",
@@ -139,10 +187,13 @@ def build_performance_projection_v1(
         "overall_wall_time_ms": overall_wall_time_ms,
         "per_stage_durations": stage_rows,
         "trend_summary": trend_summary,
+        "constitutional_dependency_declaration": constitutional_dependency_declaration,
+        "constitutional_lineage": constitutional_lineage,
         "source_artifacts": [
             {
                 "logical_name": "execution_journal_v1",
                 "path": str(journal_ref).strip(),
+                "sha256": str(journal_sha256).strip(),
                 "generated_at_utc": str(journal_generated_at_utc).strip(),
                 "status": "PRESENT",
             }

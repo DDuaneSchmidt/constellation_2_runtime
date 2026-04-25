@@ -15,6 +15,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from constellation_2.common.paper_session_fact_plane_v1 import (
     SurfaceRefV1,
+    build_constitutional_fact_bundle_v1,
+    build_constitutional_surface_fact_record_v1,
     canonical_paper_session_id_v1,
     now_utc_iso_v1,
     producer_block_v1,
@@ -27,17 +29,32 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     resolve_market_calendar_record_v1,
     sha256_file_v1,
 )
+from constellation_2.common.paper_session_authority_v1 import read_paper_session_authority_ref_v1
+from constellation_2.common.constitutional_decision_v1 import evaluate_constitutional_decision_v1
+from constellation_2.common.constitutional_proposal_v1 import (
+    build_session_submission_proposal_v1,
+    proposal_hash_v1,
+)
+from constellation_2.common.pre_open_materializer_v1 import (
+    read_pre_open_bundle_ref_v1,
+    resolve_pre_open_bundle_path_v1,
+)
 from constellation_2.common.paper_session_ledger_v1 import (
     build_paper_session_ledger_v1,
     write_paper_session_ledger_v1,
 )
 from constellation_2.common.paper_session_path_alignment_v1 import (
+    resolve_paper_session_authority_path,
     resolve_paper_session_ledger_path,
     resolve_paper_trading_posture_path,
     resolve_sleeve_rollup_path,
     resolve_startup_materialization_path,
     resolve_submit_boundary_status_path,
 )
+from constellation_2.common.runtime_path_authority_v1 import resolve_decision_truth_root_v1
+
+GATE_HIERARCHY_POLICY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/GATE_HIERARCHY_V1.json").resolve()
+CONSTITUTIONAL_SHADOW_POLICY_VERSION = "constitutional_shadow_v1"
 
 
 def _blocking_codes(*codes: str) -> list[str]:
@@ -86,9 +103,22 @@ def _safe_read_surface(
         )
     payload = dict(ref.payload)
     producer = payload.get("producer") if isinstance(payload.get("producer"), dict) else {}
-    payload_day = str(payload.get("day_utc") or "").strip()
-    payload_session = str(payload.get("session_id") or payload.get("admitted_session_id") or "").strip()
-    produced_at = str(payload.get("produced_at_utc") or payload.get("produced_utc") or "").strip()
+    if logical_name == "paper_session_authority_v1":
+        payload_day = str(payload.get("day_utc") or "").strip()
+        payload_session = session_id
+        produced_at = str(payload.get("produced_utc") or payload.get("produced_at_utc") or "").strip()
+    elif logical_name == "pre_open_bundle_v1":
+        payload_day = str(payload.get("target_day") or payload.get("day_utc") or "").strip()
+        payload_session = str(
+            payload.get("session_id")
+            or payload.get("admitted_session_id")
+            or canonical_paper_session_id_v1(payload_day or day_utc)
+        ).strip()
+        produced_at = str(payload.get("built_at_utc") or payload.get("produced_at_utc") or payload.get("produced_utc") or "").strip()
+    else:
+        payload_day = str(payload.get("day_utc") or "").strip()
+        payload_session = str(payload.get("session_id") or payload.get("admitted_session_id") or "").strip()
+        produced_at = str(payload.get("produced_at_utc") or payload.get("produced_utc") or "").strip()
     linkage = str(payload.get("linkage_verdict") or ("LINKED" if payload_session == session_id else "UNLINKED")).strip().upper()
     freshness = str(payload.get("freshness_verdict") or ("CURRENT" if payload_day == day_utc else "STALE")).strip().upper()
     schema_id = str(payload.get("schema_id") or "").strip()
@@ -113,11 +143,33 @@ def _safe_read_surface(
         "linkage_verdict": linkage if payload_session else "UNKNOWN",
         "freshness_verdict": freshness if produced_at else "UNKNOWN",
         "duplicate_resolution_verdict": "SINGLE_CANONICAL_PATH",
-        "blocking_codes": _blocking_codes(*list(payload.get("blocking_codes") or [])),
+        "blocking_codes": _blocking_codes(
+            *list(payload.get("blocking_codes") or []),
+            *list(payload.get("blocking_reason_codes") or []),
+        ),
         "lookup_evidence": lookup_evidence,
         "fact_snapshot": {},
     }
-    if logical_name == "startup_materialization_v1":
+    if logical_name == "paper_session_authority_v1":
+        row["fact_snapshot"] = {
+            "authority_status": str(payload.get("authority_status") or "").strip().upper(),
+            "paper_open_allowed": bool(payload.get("paper_open_allowed") is True),
+            "degraded_mode": bool(payload.get("degraded_mode") is True),
+            "submission_authorized": bool(payload.get("submission_authorized") is True),
+            "advisory_reason_codes": sorted(
+                {
+                    str(item.get("reason_code") or "").strip()
+                    for item in (payload.get("advisory_checks") or [])
+                    if isinstance(item, dict) and str(item.get("reason_code") or "").strip()
+                }
+            ),
+        }
+    elif logical_name == "pre_open_bundle_v1":
+        row["fact_snapshot"] = {
+            "materialization_state": str(payload.get("materialization_state") or "").strip().upper(),
+            "completion_state": str(payload.get("completion_state") or "").strip().upper(),
+        }
+    elif logical_name == "startup_materialization_v1":
         row["fact_snapshot"] = {"status": str(payload.get("status") or "").strip().upper()}
     elif logical_name == "paper_trading_posture_v1":
         row["fact_snapshot"] = {
@@ -136,18 +188,20 @@ def _safe_read_surface(
 
 def _evidence_freeze_from_rows(*, rows: list[dict[str, Any]]) -> dict[str, Any]:
     authority_rows = [dict(row) for row in rows if bool(row.get("required_for_authority") is True)]
+    strict_blocking_logical_names = {"paper_session_authority_v1"}
     blocking_codes: list[str] = []
     for row in authority_rows:
         logical_name = str(row["logical_name"])
-        if row.get("presence_verdict") != "PRESENT":
-            blocking_codes.append(f"LEDGER_EVIDENCE_INPUT_MISSING:{logical_name}")
-        if row.get("schema_verdict") != "VALID":
-            blocking_codes.append(f"LEDGER_EVIDENCE_SCHEMA_INVALID:{logical_name}")
-        if row.get("linkage_verdict") != "LINKED":
-            blocking_codes.append(f"LEDGER_EVIDENCE_LINKAGE_INVALID:{logical_name}")
-        if row.get("freshness_verdict") != "CURRENT":
-            blocking_codes.append(f"LEDGER_EVIDENCE_FRESHNESS_INVALID:{logical_name}")
-        blocking_codes.extend(str(code).strip() for code in (row.get("blocking_codes") or []) if str(code).strip())
+        if logical_name in strict_blocking_logical_names:
+            if row.get("presence_verdict") != "PRESENT":
+                blocking_codes.append(f"LEDGER_EVIDENCE_INPUT_MISSING:{logical_name}")
+            if row.get("schema_verdict") != "VALID":
+                blocking_codes.append(f"LEDGER_EVIDENCE_SCHEMA_INVALID:{logical_name}")
+            if row.get("linkage_verdict") != "LINKED":
+                blocking_codes.append(f"LEDGER_EVIDENCE_LINKAGE_INVALID:{logical_name}")
+            if row.get("freshness_verdict") != "CURRENT":
+                blocking_codes.append(f"LEDGER_EVIDENCE_FRESHNESS_INVALID:{logical_name}")
+            blocking_codes.extend(str(code).strip() for code in (row.get("blocking_codes") or []) if str(code).strip())
     freeze_inputs = sorted(authority_rows, key=lambda row: str(row["logical_name"]))
     evidence_digest = __import__("hashlib").sha256(
         json.dumps(freeze_inputs, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -160,29 +214,57 @@ def _evidence_freeze_from_rows(*, rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _control_from_rows(*, evidence_freeze: dict[str, Any], rows_by_name: dict[str, dict[str, Any]]) -> tuple[str, bool, bool, list[str]]:
+def _control_from_rows(
+    *,
+    evidence_freeze: dict[str, Any],
+    rows_by_name: dict[str, dict[str, Any]],
+) -> tuple[str, bool, bool, list[str], list[str]]:
     blocking_codes = [str(code).strip() for code in (evidence_freeze.get("blocking_codes") or []) if str(code).strip()]
+    advisory_codes: list[str] = []
     if str(evidence_freeze.get("overall_evidence_status") or "").strip().upper() != "READY":
-        return ("DENIED", False, False, sorted(set(blocking_codes + ["PAPER_SESSION_LEDGER_EVIDENCE_DENIED"])))
+        return (
+            "DENIED",
+            False,
+            False,
+            sorted(set(blocking_codes + ["PAPER_SESSION_LEDGER_EVIDENCE_DENIED"])),
+            advisory_codes,
+        )
+    authority = rows_by_name["paper_session_authority_v1"]
+    authority_snapshot = authority.get("fact_snapshot") if isinstance(authority.get("fact_snapshot"), dict) else {}
+    authority_status = str(authority_snapshot.get("authority_status") or "").strip().upper()
+    paper_open_allowed = bool(authority_snapshot.get("paper_open_allowed") is True)
+    advisory_codes.extend(
+        str(code).strip()
+        for code in (authority_snapshot.get("advisory_reason_codes") or [])
+        if str(code).strip()
+    )
+    if authority_status != "GRANTED" or not paper_open_allowed:
+        blocking_codes.append("PAPER_SESSION_AUTHORITY_DENIED")
+        return ("DENIED", False, False, sorted(set(blocking_codes)), sorted(set(advisory_codes)))
+
+    pre_open = rows_by_name["pre_open_bundle_v1"]
     startup = rows_by_name["startup_materialization_v1"]
     posture = rows_by_name["paper_trading_posture_v1"]
     boundary = rows_by_name["submit_boundary_status_v1"]
 
+    pre_open_complete = str(pre_open.get("fact_snapshot", {}).get("materialization_state") or "").strip().upper() == "COMPLETE"
     startup_ok = str(startup.get("fact_snapshot", {}).get("status") or "").strip().upper() == "SUCCESS"
     posture_enabled = str(posture.get("fact_snapshot", {}).get("posture_status") or "").strip().upper() == "ENABLED"
-    system_ready = posture_enabled and bool(posture.get("fact_snapshot", {}).get("system_ready") is True)
+    posture_ready = bool(posture.get("fact_snapshot", {}).get("system_ready") is True)
     boundary_ok = str(boundary.get("fact_snapshot", {}).get("boundary_status") or "").strip().upper() == "AUTHORIZED"
     submission_authorized = boundary_ok and bool(boundary.get("fact_snapshot", {}).get("submission_authorized") is True)
 
+    if not pre_open_complete:
+        advisory_codes.append("PAPER_SESSION_LEDGER_ADVISORY_PRE_OPEN_NOT_COMPLETE")
     if not startup_ok:
-        blocking_codes.append("PAPER_SESSION_LEDGER_STARTUP_DENIED")
-    if not system_ready:
-        blocking_codes.append("PAPER_SESSION_LEDGER_POSTURE_NOT_READY")
+        advisory_codes.append("PAPER_SESSION_LEDGER_ADVISORY_STARTUP_NOT_READY")
+    if not (posture_enabled and posture_ready):
+        advisory_codes.append("PAPER_SESSION_LEDGER_ADVISORY_POSTURE_NOT_READY")
     if not submission_authorized:
-        blocking_codes.append("PAPER_SESSION_LEDGER_SUBMIT_BOUNDARY_DENIED")
+        advisory_codes.append("PAPER_SESSION_LEDGER_ADVISORY_SUBMIT_BOUNDARY_DENIED")
     if blocking_codes:
-        return ("DENIED", False, False, sorted(set(blocking_codes)))
-    return ("GRANTED", True, True, [])
+        return ("DENIED", False, False, sorted(set(blocking_codes)), sorted(set(advisory_codes)))
+    return ("GRANTED", True, bool(submission_authorized), [], sorted(set(advisory_codes)))
 
 
 def _submit_lifecycle_from_rollup(*, rollup_row: dict[str, Any] | None, authority_status: str) -> dict[str, Any]:
@@ -296,6 +378,18 @@ def _operator_summary_state(
     return "AUTHORIZED_TO_PROCEED"
 
 
+def _fact_type_for_logical_name(logical_name: str) -> str:
+    mapping = {
+        "paper_session_authority_v1": "execution_capability_fact",
+        "pre_open_bundle_v1": "execution_capability_fact",
+        "startup_materialization_v1": "execution_capability_fact",
+        "paper_trading_posture_v1": "market_state_fact",
+        "submit_boundary_status_v1": "dependency_health_fact",
+        "sleeve_rollup_v1": "sleeve_state_fact",
+    }
+    return mapping.get(str(logical_name).strip(), "execution_capability_fact")
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="run_paper_session_ledger_v1")
     ap.add_argument("--day_utc", required=True)
@@ -303,16 +397,31 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     day_utc = str(args.day_utc).strip()
-    truth_root = resolve_fact_plane_truth_root_v1(args.truth_root)
+    truth_root = resolve_decision_truth_root_v1(args.truth_root, repo_root=REPO_ROOT)
     session_id = canonical_paper_session_id_v1(day_utc)
     evaluated_at_utc = now_utc_iso_v1()
 
     rows: list[dict[str, Any]] = []
     refs_by_name: dict[str, SurfaceRefV1 | None] = {}
     for logical_name, resolver, reader, required_for_authority in (
+        (
+            "paper_session_authority_v1",
+            resolve_paper_session_authority_path,
+            read_paper_session_authority_ref_v1,
+            True,
+        ),
+        (
+            "pre_open_bundle_v1",
+            resolve_pre_open_bundle_path_v1,
+            lambda **kwargs: read_pre_open_bundle_ref_v1(
+                truth_root=kwargs["truth_root"],
+                target_day=kwargs["day_utc"],
+            ),
+            True,
+        ),
         ("startup_materialization_v1", resolve_startup_materialization_path, read_startup_materialization_ref_v1, True),
         ("paper_trading_posture_v1", resolve_paper_trading_posture_path, read_paper_trading_posture_ref_v1, True),
-        ("submit_boundary_status_v1", resolve_submit_boundary_status_path, read_submit_boundary_status_ref_v1, True),
+        ("submit_boundary_status_v1", resolve_submit_boundary_status_path, read_submit_boundary_status_ref_v1, False),
         ("sleeve_rollup_v1", resolve_sleeve_rollup_path, read_sleeve_rollup_ref_v1, False),
     ):
         row, ref = _safe_read_surface(
@@ -329,7 +438,7 @@ def main(argv: list[str] | None = None) -> int:
 
     evidence_freeze = _evidence_freeze_from_rows(rows=rows)
     rows_by_name = {str(row["logical_name"]): row for row in rows}
-    authority_status, system_ready, submission_authorized, control_codes = _control_from_rows(
+    authority_status, system_ready, submission_authorized, control_codes, advisory_codes = _control_from_rows(
         evidence_freeze=evidence_freeze,
         rows_by_name=rows_by_name,
     )
@@ -353,8 +462,81 @@ def main(argv: list[str] | None = None) -> int:
         ),
         "authority_status": authority_status,
         "submission_authorized": bool(submission_authorized),
-        "non_authority_notice": "Derived from paper_session_ledger_v1 only. Do not treat this summary as an independent authority surface.",
+        "non_authority_notice": (
+            "Derived from paper_session_ledger_v1 only. Do not treat this summary as an independent authority surface."
+            if not advisory_codes
+            else (
+                "Derived from paper_session_ledger_v1 only. Do not treat this summary as an independent authority surface. "
+                f"Non-blocking paper-open advisories={','.join(advisory_codes)}"
+            )
+        ),
         "blocking_codes": sorted(set(control_codes)),
+    }
+    source_artifact_hashes = [
+        {
+            "artifact_ref": str(row.get("absolute_path") or ""),
+            "sha256": str(row.get("content_hash") or "").strip().lower(),
+        }
+        for row in rows
+        if str(row.get("absolute_path") or "").strip() and str(row.get("content_hash") or "").strip()
+    ]
+    if GATE_HIERARCHY_POLICY_PATH.exists() and GATE_HIERARCHY_POLICY_PATH.is_file():
+        source_artifact_hashes.append(
+            {
+                "artifact_ref": str(GATE_HIERARCHY_POLICY_PATH),
+                "sha256": sha256_file_v1(GATE_HIERARCHY_POLICY_PATH),
+            }
+        )
+    proposal = build_session_submission_proposal_v1(
+        day_utc=day_utc,
+        source_subsystem="paper_session_ledger_v1",
+        source_reasoning_reference="paper_session_ledger_v1",
+        source_policy_bindings=[str(GATE_HIERARCHY_POLICY_PATH)] if GATE_HIERARCHY_POLICY_PATH.exists() else [],
+        source_artifact_hashes=source_artifact_hashes,
+        target_entities=["PRIMARY", session_id],
+    )
+    proposal_hash = proposal_hash_v1(proposal)
+    fact_bundle = build_constitutional_fact_bundle_v1(
+        day_utc=day_utc,
+        session_id=session_id,
+        policy_version=CONSTITUTIONAL_SHADOW_POLICY_VERSION,
+        required_fact_types=list(proposal.get("required_fact_types") or []),
+        fact_records=[
+            build_constitutional_surface_fact_record_v1(
+                row=row,
+                fact_type=_fact_type_for_logical_name(str(row.get("logical_name") or "")),
+                source_system=str(row.get("logical_name") or ""),
+            )
+            for row in rows
+        ],
+    )
+    constitutional_decision = evaluate_constitutional_decision_v1(
+        proposal=proposal,
+        proposal_hash=proposal_hash,
+        fact_bundle=fact_bundle,
+        fact_bundle_hash=str(fact_bundle.get("fact_bundle_hash") or "").strip(),
+        policy_version=CONSTITUTIONAL_SHADOW_POLICY_VERSION,
+        scope_authorities={
+            "global": "REQUIRE_HUMAN_REVIEW",
+            "domain": "REQUIRE_HUMAN_REVIEW",
+            "account": "REQUIRE_HUMAN_REVIEW",
+            "sleeve": "REQUIRE_HUMAN_REVIEW",
+            "action_class": "REQUIRE_HUMAN_REVIEW",
+        },
+        hard_envelope_ok=str(evidence_freeze.get("overall_evidence_status") or "").strip().upper() == "READY",
+        policy_blockers=list(control_codes),
+        persistence_ok=True,
+        evaluated_at=evaluated_at_utc,
+    )
+    constitutional_context = {
+        "proposal_hash": proposal_hash,
+        "fact_bundle_hash": str(fact_bundle.get("fact_bundle_hash") or "").strip(),
+        "decision_enum": str(constitutional_decision.get("decision_enum") or "").strip(),
+        "effective_scope": dict(constitutional_decision.get("effective_scope") or {}),
+        "blocker_rules": list(constitutional_decision.get("blocker_rules") or []),
+        "rule_provenance": list(constitutional_decision.get("rule_provenance") or []),
+        "negative_evidence": list(constitutional_decision.get("negative_evidence") or []),
+        "policy_version": CONSTITUTIONAL_SHADOW_POLICY_VERSION,
     }
 
     ledger = build_paper_session_ledger_v1(
@@ -371,6 +553,7 @@ def main(argv: list[str] | None = None) -> int:
         submit_lifecycle=submit_lifecycle,
         post_submit_lifecycle=post_submit_lifecycle,
         operator_summary=operator_summary,
+        constitutional_context=constitutional_context,
     )
     path = write_paper_session_ledger_v1(truth_root=truth_root, ledger=ledger)
     print(

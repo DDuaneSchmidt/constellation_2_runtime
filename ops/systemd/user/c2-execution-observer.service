@@ -1,14 +1,14 @@
 [Unit]
-Description=C2 IB Execution Observer v1 (PAPER) - broker_event_log.v1.jsonl writer
+Description=C2 IB Execution Observer v1 (PAPER) - Core 1 canonical raw-evidence writer
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/node/constellation_2_runtime
+WorkingDirectory=/home/node/constellation
 
-# Fail-closed: if python/ibapi not available, service will fail and restart; supervisor/gates will catch missing broker logs.
-ExecStart=/usr/bin/env python3 /home/node/constellation_2_runtime/ops/ib/c2_execution_observer_v1.py --host 127.0.0.1 --port 4002 --client-id 79 --poll-seconds 10 --environment PAPER --log-root constellation_2/runtime/truth/execution_evidence_v1/broker_events
+# Fail-closed: if python/ibapi or canonical Core 1 governance is unavailable, service will fail and restart.
+ExecStart=/usr/bin/bash -lc 'set -euo pipefail; exec /home/node/constellation/ops/run/c2_execution_observer_v1.sh'
 
 Restart=always
 RestartSec=3

@@ -23,7 +23,7 @@ from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1  # 
 from constellation_2.phaseD.lib.validate_against_schema_v1 import SchemaValidationError, validate_against_repo_schema_v1  # noqa: E402
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1  # noqa: E402
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
 SCHEMA_EXPOSURE = "constellation_2/schemas/exposure_intent.v1.schema.json"
 SCHEMA_OPTIONS = "constellation_2/schemas/options_intent.v2.schema.json"
 SCHEMA_POLICY = "governance/04_DATA/SCHEMAS/C2/OPTIONS/exposure_to_options_intent_policy.v1.schema.json"
@@ -211,7 +211,7 @@ def main() -> int:
             "produced_utc": str(args.produced_utc).strip(),
             "producer": {
                 "module": "ops/tools/run_exposure_to_options_intent_adapter_v1.py",
-                "repo": "constellation_2_runtime",
+                "repo": "constellation",
                 "git_sha": _run_git_head_short(),
             },
             "canonical_json_hash": None,

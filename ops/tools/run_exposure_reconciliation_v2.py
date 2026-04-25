@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
 from constellation_2.phaseD.lib.canon_json_v1 import (
     CanonicalizationError,
     canonical_hash_for_c2_artifact_v1,
@@ -19,8 +20,8 @@ from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_again
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-DEFAULT_TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_TRUTH = resolve_canonical_truth_root().resolve()
 
 SCHEMA_OUT = "governance/04_DATA/SCHEMAS/C2/EXPOSURE_RECONCILIATION/exposure_reconciliation.v2.schema.json"
 
@@ -61,7 +62,6 @@ def _resolve_truth_root(args_truth_root: str) -> Path:
       1) --truth_root if provided
       2) env C2_TRUTH_ROOT if set
       3) DEFAULT_TRUTH (canonical)
-    Hard guard: truth_root must be under repo root.
     """
     tr = (args_truth_root or "").strip()
     if not tr:
@@ -72,11 +72,6 @@ def _resolve_truth_root(args_truth_root: str) -> Path:
     truth_root = Path(tr).resolve()
     if not truth_root.exists() or not truth_root.is_dir():
         raise SystemExit(f"FATAL: truth_root missing or not directory: {truth_root}")
-
-    try:
-        truth_root.relative_to(REPO_ROOT)
-    except Exception:
-        raise SystemExit(f"FATAL: truth_root not under repo root: truth_root={truth_root} repo_root={REPO_ROOT}")
 
     return truth_root
 
@@ -241,7 +236,7 @@ def main() -> int:
     ap.add_argument(
         "--truth_root",
         default="",
-        help="Override truth root (must be under repo root). If omitted, uses env C2_TRUTH_ROOT, else canonical.",
+        help="Override truth root. If omitted, uses env C2_TRUTH_ROOT, else canonical.",
     )
     args = ap.parse_args()
 

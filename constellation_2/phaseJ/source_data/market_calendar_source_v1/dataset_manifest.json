@@ -1,18 +1,22 @@
 {
   "dataset_id": "market_calendar_source_dataset_v1:NYSE:2026",
   "effective_date_range": {
-    "end": "2026-04-09",
+    "end": "2026-12-31",
     "start": "2026-04-09"
   },
   "exchange": "NYSE",
-  "generated_at_utc": "2026-04-09T21:43:49Z",
+  "generated_at_utc": "2026-04-10T21:46:20Z",
   "schema_id": "market_calendar_source_dataset.v1",
   "schema_version": "v1",
   "source_file_hashes": {
+    "NYSE_calendar_2026_extension_20260410.csv": "a9d5177b25aadce21379e0d8e7aa98166817b111b746e549ffb97c974fbb19fa",
+    "NYSE_calendar_2026_extension_20260414.csv": "5424fd60cefe6f1e558097d18113b52ff390416a406765569f5251c52fbc19e8",
     "NYSE_calendar_2026_seed.csv": "24f008c4bf3272db0a10a143a9260cc16842dc2475c87066f593ca3bb41b4cb7"
   },
   "source_files": [
-    "NYSE_calendar_2026_seed.csv"
+    "NYSE_calendar_2026_seed.csv",
+    "NYSE_calendar_2026_extension_20260410.csv",
+    "NYSE_calendar_2026_extension_20260414.csv"
   ],
   "status": "ACTIVE",
   "year": 2026

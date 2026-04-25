@@ -50,6 +50,12 @@ def load_risk_policy_for_engine_or_fail(engine_id: str) -> dict:
         raise RiskPolicyLoaderError(f"RISK_POLICY_TARGET_DEFAULT_MISSING: {engine_key}")
     if not isinstance(policy.get("per_trade_notional_pct_max"), str) or not str(policy["per_trade_notional_pct_max"]).strip():
         raise RiskPolicyLoaderError(f"RISK_POLICY_PER_TRADE_CAP_MISSING: {engine_key}")
+    stop_loss_bps = policy.get("stop_loss_bps_default")
+    if not isinstance(stop_loss_bps, int) or stop_loss_bps <= 0:
+        raise RiskPolicyLoaderError(f"RISK_POLICY_STOP_LOSS_BPS_DEFAULT_MISSING: {engine_key}")
+    allow_entry_only = policy.get("allow_entry_only_paper_test")
+    if not isinstance(allow_entry_only, bool):
+        raise RiskPolicyLoaderError(f"RISK_POLICY_ALLOW_ENTRY_ONLY_PAPER_TEST_MISSING: {engine_key}")
     return dict(policy)
 
 
@@ -59,3 +65,11 @@ def get_target_notional_pct_default_or_fail(engine_id: str) -> str:
 
 def get_per_trade_notional_pct_max_or_fail(engine_id: str) -> str:
     return str(load_risk_policy_for_engine_or_fail(engine_id)["per_trade_notional_pct_max"])
+
+
+def get_stop_loss_bps_default_or_fail(engine_id: str) -> int:
+    return int(load_risk_policy_for_engine_or_fail(engine_id)["stop_loss_bps_default"])
+
+
+def get_allow_entry_only_paper_test_or_fail(engine_id: str) -> bool:
+    return bool(load_risk_policy_for_engine_or_fail(engine_id)["allow_entry_only_paper_test"])

@@ -29,12 +29,28 @@ import json
 import subprocess
 from typing import Any, Dict, List, Optional
 
-from constellation_2.common.runtime_contract_v1 import resolve_release_provenance
+from constellation_2.common.day_open_attempt_v1 import (
+    read_day_open_attempt_runtime_lifecycle_ref_v1,
+)
+from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
+from constellation_2.common.runtime_contract_v1 import resolve_release_provenance_release_current_first_v1
+from constellation_2.common.constitutional_runtime_v1 import (
+    CLOSURE_STATE_BLOCKED,
+    CLOSURE_STATE_COMPLETE,
+    FINALITY_PROVISIONAL,
+    assert_constitutional_writer_allowed_v1,
+    build_artifact_dependency_declaration_v1,
+    build_governed_artifact_lineage_v1,
+    build_machine_blocker_envelope_v1,
+    validate_governed_artifact_payload_v1,
+)
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
-from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
+from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1
 
 REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH = resolve_canonical_truth_root_bridge_v1(
+    caller="ops/tools/run_reconciliation_report_v3.py"
+).resolve()
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/reconciliation_report.v3.schema.json"
 
@@ -58,7 +74,12 @@ def _resolve_truth_root(truth_root_arg: str) -> Path:
 
 def _git_sha() -> str:
     try:
-        s = str(resolve_release_provenance().get("git_sha") or "").strip()
+        s = str(
+            resolve_release_provenance_release_current_first_v1(
+                caller="ops/tools/run_reconciliation_report_v3.py"
+            ).get("git_sha")
+            or ""
+        ).strip()
         if s:
             return s
     except Exception:
@@ -97,24 +118,163 @@ def _read_json(path: Path) -> Dict[str, Any]:
     return obj
 
 
-def _find_ok_broker_manifest(day_dir: Path) -> Optional[Path]:
-    cands = sorted([p for p in day_dir.glob("broker_event_day_manifest.v1.*.json") if p.is_file()])
-    for p in reversed(cands):
+def _read_jsonl_rows(path: Path) -> List[Dict[str, Any]]:
+    if not path.exists() or not path.is_file():
+        return []
+    rows: List[Dict[str, Any]] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
         try:
-            o = _read_json(p)
-            if str(o.get("status")) == "OK":
-                return p
+            obj = json.loads(line)
         except Exception:
             continue
-    fixed = day_dir / "broker_event_day_manifest.v1.json"
-    if fixed.exists():
+        if isinstance(obj, dict):
+            rows.append(obj)
+    return rows
+
+
+def _legacy_event_type(row: Dict[str, Any]) -> str:
+    return str(row.get("event_type") or "").strip()
+
+
+def _legacy_event_args(row: Dict[str, Any]) -> List[str]:
+    ib_fields = row.get("ib_fields")
+    if not isinstance(ib_fields, dict):
+        return []
+    args = ib_fields.get("args")
+    if not isinstance(args, list):
+        return []
+    out: List[str] = []
+    for item in args:
+        if not isinstance(item, dict):
+            continue
+        value = str(item.get("value") or "").strip()
+        if value:
+            out.append(value)
+    return out
+
+
+def _kv_from_args(args: List[str]) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    for item in args:
+        if "=" not in item:
+            continue
+        key, value = item.split("=", 1)
+        key = str(key).strip()
+        value = str(value).strip()
+        if key and key not in out:
+            out[key] = value
+    return out
+
+
+def _broker_positions_capture(rows: List[Dict[str, Any]], *, position_fact_path: Path) -> tuple[str, str]:
+    if position_fact_path.exists() and position_fact_path.is_file():
+        return "OK", f"broker position fact ledger present path={position_fact_path}"
+    event_types = {_legacy_event_type(row) for row in rows}
+    if "positionEnd" in event_types:
+        return "OK", "broker position capture completed via positionEnd"
+    return "FAIL", "broker position capture missing for active-trading reconciliation"
+
+
+def _broker_cash_capture(
+    rows: List[Dict[str, Any]],
+    *,
+    broker_statement_path: Path,
+) -> tuple[str, str]:
+    if broker_statement_path.exists() and broker_statement_path.is_file():
         try:
-            o = _read_json(fixed)
-            if str(o.get("status")) == "OK":
-                return fixed
+            payload = _read_json(broker_statement_path)
+        except Exception as exc:
+            return "FAIL", f"broker statement normalized unreadable: {exc!r}"
+        if str(payload.get("day_utc") or "").strip():
+            return "OK", f"broker statement normalized present path={broker_statement_path}"
+    saw_summary_end = False
+    saw_cash_value = False
+    for row in rows:
+        event_type = _legacy_event_type(row)
+        if event_type == "accountSummaryEnd":
+            saw_summary_end = True
+            continue
+        if event_type not in {"accountSummary", "updateAccountValue"}:
+            continue
+        mapping = _kv_from_args(_legacy_event_args(row))
+        tag = str(mapping.get("tag") or mapping.get("key") or "").strip()
+        value = str(mapping.get("value") or "").strip()
+        if tag in {"TotalCashValue", "TotalCashBalance", "CashBalance", "NetLiquidation"} and value:
+            saw_cash_value = True
+    if saw_cash_value and saw_summary_end:
+        return "OK", "broker cash capture completed via accountSummary"
+    return "FAIL", "broker cash capture missing for active-trading reconciliation"
+
+
+def _find_ok_broker_manifest(day_dir: Path) -> Optional[Path]:
+    broker_log = (day_dir / "broker_event_log.v1.jsonl").resolve()
+    current_log_sha = _sha256_file(broker_log) if broker_log.exists() and broker_log.is_file() else ""
+
+    fixed = day_dir / "broker_event_day_manifest.v1.json"
+    cands = sorted([p for p in day_dir.glob("broker_event_day_manifest.v1.*.json") if p.is_file()])
+    if fixed.exists() and fixed.is_file():
+        cands.append(fixed)
+
+    ranked: List[tuple[bool, str, str, Path]] = []
+    for p in cands:
+        try:
+            o = _read_json(p)
         except Exception:
-            return None
+            continue
+        if str(o.get("status")) != "OK":
+            continue
+        log = o.get("log") if isinstance(o.get("log"), dict) else {}
+        manifest_log_sha = str(log.get("log_sha256") or "").strip()
+        if not manifest_log_sha:
+            for item in o.get("input_manifest") if isinstance(o.get("input_manifest"), list) else []:
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("type") or "").strip() == "broker_event_log_v1_jsonl":
+                    manifest_log_sha = str(item.get("sha256") or "").strip()
+                    break
+        produced_utc = str(o.get("produced_utc") or "").strip()
+        ranked.append((bool(current_log_sha and manifest_log_sha == current_log_sha), produced_utc, p.name, p))
+
+    if ranked:
+        ranked.sort()
+        return ranked[-1][3]
     return None
+
+
+def _submission_dirs(exec_day_dir: Path) -> List[Path]:
+    if not exec_day_dir.exists() or not exec_day_dir.is_dir():
+        return []
+    return sorted([path for path in exec_day_dir.iterdir() if path.is_dir()])
+
+
+def _submission_expects_execdetails(submission_dir: Path) -> bool:
+    execution_event_path = (submission_dir / "execution_event_record.v1.json").resolve()
+    if execution_event_path.exists() and execution_event_path.is_file():
+        return True
+
+    broker_submission_path = (submission_dir / "broker_submission_record.v2.json").resolve()
+    if not broker_submission_path.exists() or not broker_submission_path.is_file():
+        return True
+
+    try:
+        payload = _read_json(broker_submission_path)
+    except Exception:
+        return True
+
+    broker_ids = payload.get("broker_ids") if isinstance(payload.get("broker_ids"), dict) else {}
+    order_id = broker_ids.get("order_id")
+    perm_id = broker_ids.get("perm_id")
+    if order_id is not None or perm_id is not None:
+        return True
+
+    status = str(payload.get("status") or "").strip().upper()
+    if status in {"PARTIALLY_FILLED", "FILLED"}:
+        return True
+
+    return False
 
 
 def main() -> int:
@@ -134,14 +294,18 @@ def main() -> int:
     input_manifest: List[Dict[str, str]] = []
     reason_codes: List[str] = []
     notes: List[str] = []
+    day_open_attempt_path, runtime_lifecycle_ref = read_day_open_attempt_runtime_lifecycle_ref_v1(
+        truth_root=truth_root,
+        day_utc=day,
+    )
 
     # --- Truth side ---
     exec_day_dir = (exec_truth_root / day).resolve()
-    truth_ids: List[str] = []
-    if exec_day_dir.exists() and exec_day_dir.is_dir():
-        truth_ids = sorted([p.name for p in exec_day_dir.iterdir() if p.is_dir()])
+    submission_dirs = _submission_dirs(exec_day_dir)
+    truth_ids: List[str] = [path.name for path in submission_dirs]
 
     submissions_total = int(len(truth_ids))
+    execdetails_expected_total = int(sum(1 for path in submission_dirs if _submission_expects_execdetails(path)))
 
     input_manifest.append(
         {
@@ -150,6 +314,14 @@ def main() -> int:
             "sha256": _sha256_bytes(b"present") if exec_day_dir.exists() else _sha256_bytes(b""),
         }
     )
+    if runtime_lifecycle_ref is not None:
+        input_manifest.append(
+            {
+                "type": "day_open_attempt_v1",
+                "path": str(day_open_attempt_path),
+                "sha256": _sha256_file(day_open_attempt_path),
+            }
+        )
 
     # SAFE_IDLE: If no submissions, reconciliation is OK and broker truth is not required.
     if submissions_total == 0:
@@ -163,6 +335,33 @@ def main() -> int:
         input_manifest.append({"type": "broker_event_log_v1_jsonl_skipped_safe_idle", "path": str(broker_log), "sha256": broker_event_log_sha})
         input_manifest.append({"type": "broker_event_day_manifest_skipped_safe_idle", "path": str(broker_manifest_default), "sha256": _sha256_bytes(b"")})
 
+        blocker_envelope = build_machine_blocker_envelope_v1(
+            closure_state=CLOSURE_STATE_COMPLETE,
+            reason_codes=[],
+            missing_dependency_artifacts=[],
+        )
+        constitutional_dependency_declaration = build_artifact_dependency_declaration_v1(
+            artifact_type="reconciliation_report_v3",
+            artifact_class="outcome_record",
+            authority_id="reconciliation_report_v3",
+            declared_dependency_artifacts=[],
+            dependency_refs=[],
+        )
+        constitutional_lineage = build_governed_artifact_lineage_v1(
+            artifact_type="reconciliation_report_v3",
+            artifact_version="v3",
+            artifact_class="outcome_record",
+            authority_id="reconciliation_report_v3",
+            producer_id="ops/tools/run_reconciliation_report_v3.py",
+            generated_at_utc=produced_utc,
+            effective_at_utc=produced_utc,
+            finality_state=FINALITY_PROVISIONAL,
+            input_artifact_refs=[],
+            policy_snapshot_refs=[],
+            code_version=_git_sha(),
+            run_id=f"reconciliation_report_v3:{day}",
+        )
+
         report: Dict[str, Any] = {
             "schema_id": "reconciliation_report",
             "schema_version": "v3",
@@ -171,6 +370,12 @@ def main() -> int:
             "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_reconciliation_report_v3.py", "git_sha": _git_sha()},
             "status": "OK",
             "reason_codes": sorted(set(reason_codes)),
+            "blocking_codes": list(blocker_envelope["blocking_codes"]),
+            "closure_state": str(blocker_envelope["closure_state"]),
+            "first_blocker_code": str(blocker_envelope["first_blocker_code"]),
+            "missing_dependency_artifacts": list(blocker_envelope["missing_dependency_artifacts"]),
+            "constitutional_dependency_declaration": constitutional_dependency_declaration,
+            "constitutional_lineage": constitutional_lineage,
             "notes": notes,
             "input_manifest": input_manifest,
             "broker_side": {
@@ -190,17 +395,30 @@ def main() -> int:
                 "positions": {"status": "SKIPPED_SAFE_IDLE", "reason": "SAFE_IDLE: no submissions; positions broker truth capture not required"},
             },
         }
+        if runtime_lifecycle_ref is not None:
+            report["runtime_lifecycle_ref"] = dict(runtime_lifecycle_ref)
 
         validate_against_repo_schema_v1(report, REPO_ROOT, SCHEMA_RELPATH)
+        assert_constitutional_writer_allowed_v1(REPO_ROOT, "reconciliation_report_v3", "ops/tools/run_reconciliation_report_v3.py")
+        validate_governed_artifact_payload_v1(
+            repo_root=REPO_ROOT,
+            artifact_id="reconciliation_report_v3",
+            payload=report,
+            required_finality_states=["provisional", "finalized", "corrected"],
+        )
 
         out_dir = (out_root / day).resolve()
         out_path = (out_dir / "reconciliation_report.v3.json").resolve()
         payload = (json.dumps(report, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
 
-        try:
-            wr = write_file_immutable_v1(path=out_path, data=payload, create_dirs=True)
-        except ImmutableWriteError as e:
-            raise SystemExit(f"FAIL: IMMUTABLE_WRITE_ERROR: {e}") from e
+        wr = write_day_artifact_refreshable_v1(
+            path=out_path,
+            data=payload,
+            expected_day_utc=day,
+            expected_schema_id="reconciliation_report",
+            expected_schema_version="v3",
+            preserve_statuses=(),
+        )
 
         print(f"OK: RECON_REPORT_V3_WRITTEN day_utc={day} status=OK path={wr.path} sha256={wr.sha256} action={wr.action}")
         return 0
@@ -209,6 +427,13 @@ def main() -> int:
     broker_day_dir = (broker_events_root / day).resolve()
     broker_log = (broker_day_dir / "broker_event_log.v1.jsonl").resolve()
     ok_manifest_path = _find_ok_broker_manifest(broker_day_dir)
+    broker_rows = _read_jsonl_rows(broker_log)
+    broker_statement_path = (
+        truth_root / "execution_evidence_v1" / "broker_statement_normalized_v1" / day / "broker_statement_normalized.v1.json"
+    ).resolve()
+    position_fact_path = (
+        truth_root / "broker_fact_spine_v1" / "fact_ledger" / day / "observed_position_fact.v1.jsonl"
+    ).resolve()
 
     if not broker_log.exists():
         reason_codes.append("MISSING_BROKER_EVENT_LOG")
@@ -234,20 +459,55 @@ def main() -> int:
     if "MISSING_BROKER_EVENT_LOG" in reason_codes or "MISSING_OK_BROKER_EVENT_DAY_MANIFEST" in reason_codes:
         cmp_status = "FAIL"
         cmp_reason = "Broker truth missing; reconciliation cannot be performed."
+    elif execdetails_expected_total == 0:
+        cmp_status = "OK"
+        cmp_reason = "Submission-only truth is present without broker-linked execution identifiers; broker execDetails are not yet required."
     elif execdetails_total == 0:
         cmp_status = "FAIL"
         cmp_reason = "Truth submissions exist but broker execDetails count is zero."
+        reason_codes.append("BROKER_EXECDETAILS_COUNT_ZERO")
 
-    # Until implemented, active-trading requires cash/positions capture -> FAIL closed.
-    cash_cmp_status = "FAIL"
-    cash_cmp_reason = "cash broker truth capture not implemented; FAIL when submissions_total>0"
-    pos_cmp_status = "FAIL"
-    pos_cmp_reason = "positions broker truth capture not implemented; FAIL when submissions_total>0"
-    reason_codes.append("MISSING_CASH_BROKER_TRUTH_CAPTURE")
-    reason_codes.append("MISSING_POSITIONS_BROKER_TRUTH_CAPTURE")
+    cash_cmp_status, cash_cmp_reason = _broker_cash_capture(
+        broker_rows,
+        broker_statement_path=broker_statement_path,
+    )
+    pos_cmp_status, pos_cmp_reason = _broker_positions_capture(
+        broker_rows,
+        position_fact_path=position_fact_path,
+    )
+    if cash_cmp_status != "OK":
+        reason_codes.append("MISSING_CASH_BROKER_TRUTH_CAPTURE")
+    if pos_cmp_status != "OK":
+        reason_codes.append("MISSING_POSITIONS_BROKER_TRUTH_CAPTURE")
 
     status = "OK" if (cmp_status == "OK" and cash_cmp_status == "OK" and pos_cmp_status == "OK") else "FAIL"
     reason_codes = sorted(set(reason_codes))
+    blocker_envelope = build_machine_blocker_envelope_v1(
+        closure_state=(CLOSURE_STATE_COMPLETE if status == "OK" else CLOSURE_STATE_BLOCKED),
+        reason_codes=reason_codes,
+        missing_dependency_artifacts=[],
+    )
+    constitutional_dependency_declaration = build_artifact_dependency_declaration_v1(
+        artifact_type="reconciliation_report_v3",
+        artifact_class="outcome_record",
+        authority_id="reconciliation_report_v3",
+        declared_dependency_artifacts=[],
+        dependency_refs=[],
+    )
+    constitutional_lineage = build_governed_artifact_lineage_v1(
+        artifact_type="reconciliation_report_v3",
+        artifact_version="v3",
+        artifact_class="outcome_record",
+        authority_id="reconciliation_report_v3",
+        producer_id="ops/tools/run_reconciliation_report_v3.py",
+        generated_at_utc=produced_utc,
+        effective_at_utc=produced_utc,
+        finality_state=FINALITY_PROVISIONAL,
+        input_artifact_refs=[],
+        policy_snapshot_refs=[],
+        code_version=_git_sha(),
+        run_id=f"reconciliation_report_v3:{day}",
+    )
 
     report2: Dict[str, Any] = {
         "schema_id": "reconciliation_report",
@@ -257,6 +517,12 @@ def main() -> int:
         "producer": {"repo": "constellation_2_runtime", "module": "ops/tools/run_reconciliation_report_v3.py", "git_sha": _git_sha()},
         "status": status,
         "reason_codes": reason_codes,
+        "blocking_codes": list(blocker_envelope["blocking_codes"]),
+        "closure_state": str(blocker_envelope["closure_state"]),
+        "first_blocker_code": str(blocker_envelope["first_blocker_code"]),
+        "missing_dependency_artifacts": list(blocker_envelope["missing_dependency_artifacts"]),
+        "constitutional_dependency_declaration": constitutional_dependency_declaration,
+        "constitutional_lineage": constitutional_lineage,
         "notes": notes,
         "input_manifest": input_manifest,
         "broker_side": {
@@ -276,17 +542,30 @@ def main() -> int:
             "positions": {"status": pos_cmp_status, "reason": pos_cmp_reason},
         },
     }
+    if runtime_lifecycle_ref is not None:
+        report2["runtime_lifecycle_ref"] = dict(runtime_lifecycle_ref)
 
     validate_against_repo_schema_v1(report2, REPO_ROOT, SCHEMA_RELPATH)
+    assert_constitutional_writer_allowed_v1(REPO_ROOT, "reconciliation_report_v3", "ops/tools/run_reconciliation_report_v3.py")
+    validate_governed_artifact_payload_v1(
+        repo_root=REPO_ROOT,
+        artifact_id="reconciliation_report_v3",
+        payload=report2,
+        required_finality_states=["provisional", "finalized", "corrected"],
+    )
 
     out_dir2 = (out_root / day).resolve()
     out_path2 = (out_dir2 / "reconciliation_report.v3.json").resolve()
     payload2 = (json.dumps(report2, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
 
-    try:
-        wr2 = write_file_immutable_v1(path=out_path2, data=payload2, create_dirs=True)
-    except ImmutableWriteError as e:
-        raise SystemExit(f"FAIL: IMMUTABLE_WRITE_ERROR: {e}") from e
+    wr2 = write_day_artifact_refreshable_v1(
+        path=out_path2,
+        data=payload2,
+        expected_day_utc=day,
+        expected_schema_id="reconciliation_report",
+        expected_schema_version="v3",
+        preserve_statuses=(),
+    )
 
     print(f"OK: RECON_REPORT_V3_WRITTEN day_utc={day} status={status} path={wr2.path} sha256={wr2.sha256} action={wr2.action}")
     return 0 if status == "OK" else 1

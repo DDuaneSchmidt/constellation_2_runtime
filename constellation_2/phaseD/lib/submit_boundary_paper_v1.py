@@ -48,6 +48,10 @@ from constellation_2.phaseD.lib.evidence_writer_v1 import (
 )
 from constellation_2.phaseD.lib.ib_payload_bag_order_v1 import IBPayloadError, build_binding_digest_for_order_plan_v1
 from constellation_2.phaseD.lib.ib_payload_stock_order_v1 import build_binding_digest_for_equity_order_plan_v1
+from constellation_2.common.kill_switch_authority_v1 import (
+    STATUS_PASS as KILL_SWITCH_STATUS_PASS,
+    resolve_kill_switch_authority_v1,
+)
 from constellation_2.phaseD.lib.idempotency_guard_v1 import (
     IdempotencyError,
     assert_idempotent_or_raise_v1,
@@ -202,28 +206,26 @@ def _enforce_kill_switch_or_veto(
     truth_root = (repo_root / "constellation_2/runtime/truth").resolve()
     kill_path = (truth_root / "risk_v1" / "kill_switch_v1" / day / "global_kill_switch_state.v1.json").resolve()
 
-    if not kill_path.exists():
-        veto = _mk_veto(
-            eval_time_utc=eval_time_utc,
-            reason_code=RC_KILL_SWITCH_ACTIVE,
-            reason_detail=f"KILL_SWITCH_MISSING_FAILCLOSED: {str(kill_path)}",
-            pointers=list(pointers) + [str(kill_path)],
-            intent_hash=intent_hash,
-            plan_hash=plan_hash,
-            chain_snapshot_hash=chain_hash,
-            freshness_cert_hash=cert_hash,
-            upstream_hash=upstream_hash,
-            repo_root=repo_root,
-        )
-        write_phased_veto_only_v1(phased_out_dir, veto_record=veto, order_plan=order_plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
-        return 2
-
     try:
-        ks = _read_json_file(kill_path)
-        if not isinstance(ks, dict):
-            raise SubmitBoundaryError("KILL_SWITCH_NOT_OBJECT")
-        state = str(ks.get("state") or "").strip().upper()
-        sha = _sha256_file(kill_path)
+        kill_result = resolve_kill_switch_authority_v1(canonical_truth_root=truth_root, day_utc=day)
+        kill_path = kill_result.canonical_path
+        if kill_result.status != KILL_SWITCH_STATUS_PASS:
+            veto = _mk_veto(
+                eval_time_utc=eval_time_utc,
+                reason_code=RC_KILL_SWITCH_ACTIVE,
+                reason_detail=f"{kill_result.reason_code}: {kill_result.reason_detail}",
+                pointers=list(pointers) + [str(kill_result.canonical_path)] + [str(path) for path in kill_result.mismatch_paths],
+                intent_hash=intent_hash,
+                plan_hash=plan_hash,
+                chain_snapshot_hash=chain_hash,
+                freshness_cert_hash=cert_hash,
+                upstream_hash=upstream_hash,
+                repo_root=repo_root,
+            )
+            write_phased_veto_only_v1(phased_out_dir, veto_record=veto, order_plan=order_plan_obj, binding_record=binding_obj, mapping_ledger_record=mapping_obj)
+            return 2
+        state = kill_result.state
+        sha = kill_result.canonical_sha256
         if state != "INACTIVE":
             veto = _mk_veto(
                 eval_time_utc=eval_time_utc,
@@ -278,6 +280,11 @@ def run_submit_boundary_paper_v1(
       3 = broker rejected/error (wrote submission record only)
       4 = hard fail (idempotency/single-writer/evidence write failures)
     """
+    raise RuntimeError(
+        "LEGACY_EXECUTION_SUBMISSION_PATH_DISABLED:"
+        "use_submit_boundary_paper_v4_with_execution_submission_record"
+    )
+
     _parse_utc_z(eval_time_utc)
 
     p_budget = risk_budget_path.resolve()

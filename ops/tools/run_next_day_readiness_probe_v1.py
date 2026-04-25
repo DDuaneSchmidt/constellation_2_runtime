@@ -16,7 +16,7 @@ from constellation_2.common.next_day_readiness_probe_v1 import (
     derive_next_day_readiness_probe_payload,
     write_next_day_readiness_probe_v1,
 )
-from constellation_2.common.runtime_path_authority_v1 import resolve_decision_truth_root_v1
+from constellation_2.common.decision_authority_bridge_v1 import resolve_decision_truth_root_bridge_v1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -27,7 +27,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--ib_account", default="")
     args = ap.parse_args(argv)
 
-    truth_root = resolve_decision_truth_root_v1(args.truth_root, repo_root=REPO_ROOT)
+    truth_root = resolve_decision_truth_root_bridge_v1(
+        args.truth_root,
+        repo_root=REPO_ROOT,
+        caller="ops/tools/run_next_day_readiness_probe_v1.py",
+    )
     ib_account = str(args.ib_account or "").strip() or resolve_single_paper_ib_account_from_sleeve_registry(REPO_ROOT)
     payload = derive_next_day_readiness_probe_payload(
         repo_root=REPO_ROOT,

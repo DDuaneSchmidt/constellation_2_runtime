@@ -9,8 +9,15 @@ import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+_THIS_FILE = Path(__file__).resolve()
+_REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
+if str(_REPO_ROOT_FROM_FILE) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
+
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
+
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH = resolve_canonical_truth_root().resolve()
 
 # ---- Roots used by this proof tool (truth-only) ----
 PHASEC_PREFLIGHT_ROOT = (TRUTH / "phaseC_preflight_v1").resolve()

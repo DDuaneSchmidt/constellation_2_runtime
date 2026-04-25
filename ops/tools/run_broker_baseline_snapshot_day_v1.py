@@ -32,12 +32,20 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
+_THIS_FILE = Path(__file__).resolve()
+_REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
+if str(_REPO_ROOT_FROM_FILE) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
+
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
+
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH_ROOT = resolve_canonical_truth_root().resolve()
 OUT_ROOT = (TRUTH_ROOT / "execution_evidence_v1" / "broker_baseline_snapshot_v1").resolve()
 
 

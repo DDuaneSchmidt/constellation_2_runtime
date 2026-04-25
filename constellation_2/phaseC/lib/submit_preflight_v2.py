@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from constellation_2.common.execution_identity_authority_v1 import derive_submission_id_v1
+
 from .canon_json_v1 import CanonicalizationError, canonical_hash_for_c2_artifact_v1
 from .validate_against_schema_v1 import SchemaValidationError, validate_against_repo_schema_v1
 
@@ -28,6 +30,7 @@ class SubmitPreflightError(Exception):
 
 
 RC_SUBMIT_FAIL_CLOSED = "C2_SUBMIT_FAIL_CLOSED_REQUIRED"
+RC_INTENT_PROTECTIVE_STOP_MISSING = "INTENT_PROTECTIVE_STOP_MISSING"
 
 
 def _parse_utc_z(ts: str) -> datetime:
@@ -42,6 +45,24 @@ def _hash_or_fail(name: str, obj: Dict[str, Any]) -> str:
         return canonical_hash_for_c2_artifact_v1(obj)
     except CanonicalizationError as e:
         raise SubmitPreflightError(f"Canonicalization failed for {name}: {e}") from e
+
+
+def _require_equity_protective_stop_or_fail(order_plan: Dict[str, Any]) -> None:
+    stop = order_plan.get("protective_stop")
+    if not isinstance(stop, dict):
+        raise SubmitPreflightError(f"{RC_INTENT_PROTECTIVE_STOP_MISSING}: equity_order_plan.protective_stop missing")
+    order_type = str(stop.get("order_type") or "").strip().upper()
+    stop_price = str(stop.get("stop_price") or "").strip()
+    stop_loss_bps = stop.get("stop_loss_bps")
+    basis = str(stop.get("basis") or "").strip().upper()
+    if order_type != "STOP":
+        raise SubmitPreflightError(f"{RC_INTENT_PROTECTIVE_STOP_MISSING}: protective_stop.order_type must be STOP")
+    if not stop_price:
+        raise SubmitPreflightError(f"{RC_INTENT_PROTECTIVE_STOP_MISSING}: protective_stop.stop_price missing")
+    if not isinstance(stop_loss_bps, int) or stop_loss_bps <= 0:
+        raise SubmitPreflightError(f"{RC_INTENT_PROTECTIVE_STOP_MISSING}: protective_stop.stop_loss_bps missing or non-positive")
+    if basis != "ENTRY_REFERENCE_PRICE":
+        raise SubmitPreflightError(f"{RC_INTENT_PROTECTIVE_STOP_MISSING}: protective_stop.basis invalid")
 
 
 def _veto(
@@ -105,6 +126,8 @@ def evaluate_submit_preflight_offline_v2(
     chain_hash = None
     cert_hash = None
     binding_hash = None
+    trade_instance_id = None
+    submission_id = None
 
     try:
         _ = _parse_utc_z(eval_time_utc)
@@ -188,6 +211,37 @@ def evaluate_submit_preflight_offline_v2(
 
             if order_plan["structure"] != "EQUITY_SPOT":
                 raise SubmitPreflightError("Equity structure mismatch")
+            _require_equity_protective_stop_or_fail(order_plan)
+
+            intent_id = str(intent.get("intent_id") or "").strip()
+            if not intent_id:
+                raise SubmitPreflightError("Intent id missing in equity_intent")
+            if str(order_plan.get("source_intent_id") or "").strip() != intent_id:
+                raise SubmitPreflightError("source_intent_id mismatch in equity_order_plan")
+
+            mapping_intent_id = str(mapping_ledger_record.get("intent_id") or "").strip()
+            binding_intent_id = str(binding_record.get("intent_id") or "").strip()
+            if mapping_intent_id and mapping_intent_id != intent_id:
+                raise SubmitPreflightError("intent_id mismatch in mapping_ledger_record")
+            if binding_intent_id and binding_intent_id != intent_id:
+                raise SubmitPreflightError("intent_id mismatch in binding_record")
+
+            trade_instance_id = str(binding_record.get("trade_instance_id") or mapping_ledger_record.get("trade_instance_id") or "").strip() or None
+            submission_id = str(binding_record.get("submission_id") or "").strip() or None
+            if trade_instance_id or submission_id:
+                if not trade_instance_id or not submission_id:
+                    raise SubmitPreflightError("execution identity incomplete in binding_record")
+                if str(mapping_ledger_record.get("trade_instance_id") or "").strip() != trade_instance_id:
+                    raise SubmitPreflightError("trade_instance_id mismatch in mapping_ledger_record")
+                if str(binding_record.get("intent_hash") or "").strip() != intent_hash:
+                    raise SubmitPreflightError("intent_hash mismatch in binding_record")
+                expected_submission_id = derive_submission_id_v1(
+                    intent_id=intent_id,
+                    plan_hash=plan_hash,
+                    trade_instance_id=trade_instance_id,
+                )
+                if submission_id != expected_submission_id:
+                    raise SubmitPreflightError("submission_id mismatch in binding_record")
 
         else:
             raise SubmitPreflightError(f"Unsupported intent schema_id: {schema_id!r}")
@@ -202,6 +256,10 @@ def evaluate_submit_preflight_offline_v2(
             "upstream_hash": binding_hash,
             "canonical_json_hash": None,
         }
+        if trade_instance_id:
+            decision["trade_instance_id"] = trade_instance_id
+        if submission_id:
+            decision["submission_id"] = submission_id
         decision["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(decision)
         validate_against_repo_schema_v1(decision, repo_root, "constellation_2/schemas/submit_preflight_decision.v1.schema.json")
         return decision, None

@@ -1,14 +1,23 @@
 #!/usr/bin/env python3
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime")
-RUNTIME_ROOT = REPO_ROOT / "constellation_2" / "runtime"
-TRUTH_ROOT = RUNTIME_ROOT / "truth"
-SYSTEM_SNAPSHOT_ROOT = TRUTH_ROOT / "system_snapshot"
+THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = THIS_FILE.parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.common.release_baseline_common_v1 import resolve_release_baseline_roots_v1  # noqa: E402
+
+
+ROOTS = resolve_release_baseline_roots_v1(REPO_ROOT)
+REPO_ROOT = ROOTS.repo_root
+TRUTH_ROOT = ROOTS.canonical_truth_root
+SYSTEM_SNAPSHOT_ROOT = ROOTS.system_snapshot_root
 RUNTIME_STATE_PATH = SYSTEM_SNAPSHOT_ROOT / "constellation_runtime_state.v1.json"
 OUTPUT_PATH = SYSTEM_SNAPSHOT_ROOT / "constellation_root_cause_report.v1.json"
 
@@ -151,8 +160,8 @@ def classify(runtime_state: dict[str, Any]) -> list[dict[str, Any]]:
                 f"(expected_day={cap.get('expected_day')}, actual_day={cap.get('actual_day')})."
             ),
             "evidence": [
-                "constellation_2/runtime/truth/allocation_v1/capital_authority_allocation_v1",
-                "constellation_2/runtime/truth/reports/capital_risk_envelope_v2",
+                str((TRUTH_ROOT / "allocation_v1/capital_authority_allocation_v1").resolve()),
+                str((TRUTH_ROOT / "reports/capital_risk_envelope_v2").resolve()),
             ],
         })
 
@@ -165,7 +174,7 @@ def classify(runtime_state: dict[str, Any]) -> list[dict[str, Any]]:
                 "Scope-aware semantics active: execution authority PASS is preserved while monitoring remains degraded."
             ),
             "evidence": [
-                "constellation_2/runtime/truth/system_snapshot/constellation_runtime_state.v1.json"
+                str(RUNTIME_STATE_PATH.resolve())
             ],
         })
 
@@ -208,7 +217,7 @@ def main() -> None:
         "artifact_id": "constellation_root_cause_report",
         "schema_version": "1.0",
         "generated_utc": now_utc(),
-        "input_artifact": str(RUNTIME_STATE_PATH.relative_to(REPO_ROOT)),
+        "input_artifact": str(RUNTIME_STATE_PATH),
         "runtime_state_generated_utc": runtime_state.get("generated_utc"),
         "latest_operating_day": runtime_state.get("latest_operating_day"),
         "overall_status": overall_status(findings),

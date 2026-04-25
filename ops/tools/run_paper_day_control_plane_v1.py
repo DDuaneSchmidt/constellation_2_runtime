@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ REPO_ROOT = _THIS_FILE.parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from constellation_2.common.attempt_history_v1 import build_attempt_id_v1
 from constellation_2.common.paper_session_fact_plane_v1 import (
     atomic_write_validated_json_v1,
     now_utc_iso_v1,
@@ -26,8 +28,18 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     resolve_fact_plane_truth_root_v1,
     sha256_file_v1,
 )
+from constellation_2.common.next_day_readiness_consistency_gate_v1 import (
+    CONSISTENCY_GATE_FAILURE,
+    CONSISTENCY_GATE_STATUS_FAIL,
+    evaluate_next_day_readiness_consistency_gate_v1,
+)
+from constellation_2.common.session_authority_monitor_v1 import (
+    build_session_authority_status_payload_v1,
+    write_session_authority_status_v1,
+)
 from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_intents_day_completeness_path,
+    resolve_paper_day_control_plane_attempt_path,
     resolve_paper_day_control_plane_path,
     resolve_paper_session_ledger_path,
     resolve_paper_trading_posture_path,
@@ -171,6 +183,107 @@ def _control_plane_identity(day_utc: str, evaluated_at_utc: str, parts: dict[str
     return startup_attempt_id, control_plane_id
 
 
+def _freshen_status_generated_utc(*, payload: dict[str, Any], evaluated_at_utc: str) -> dict[str, Any]:
+    generated_at_utc = str(payload.get("generated_utc") or "").strip()
+    if not generated_at_utc:
+        payload["generated_utc"] = evaluated_at_utc
+        return payload
+    try:
+        normalized_generated = generated_at_utc[:-1] + "+00:00" if generated_at_utc.endswith("Z") else generated_at_utc
+        normalized_evaluated = evaluated_at_utc[:-1] + "+00:00" if evaluated_at_utc.endswith("Z") else evaluated_at_utc
+        generated_dt = datetime.fromisoformat(normalized_generated)
+        evaluated_dt = datetime.fromisoformat(normalized_evaluated)
+    except ValueError:
+        payload["generated_utc"] = evaluated_at_utc
+        return payload
+    if generated_dt.tzinfo is None:
+        generated_dt = generated_dt.replace(tzinfo=UTC)
+    if evaluated_dt.tzinfo is None:
+        evaluated_dt = evaluated_dt.replace(tzinfo=UTC)
+    if generated_dt.astimezone(UTC) < evaluated_dt.astimezone(UTC):
+        payload["generated_utc"] = evaluated_at_utc
+    return payload
+
+
+def _build_control_plane_payload(
+    *,
+    truth_root: Path,
+    day: str,
+    evaluated_at_utc: str,
+    prerequisite_status: str,
+    prerequisite_blocking_codes: list[str],
+    prerequisite_first_missing: str,
+    prereq_path: Path,
+    regeneration_results: list[dict[str, Any]],
+    authority_result: dict[str, Any],
+    startup_proof_result: dict[str, Any],
+    decision: str,
+    blocking_codes: set[str],
+) -> dict[str, Any]:
+    control_plane_parts = {
+        "day_utc": day,
+        "evaluated_at_utc": evaluated_at_utc,
+        "prerequisite_status": prerequisite_status,
+        "regeneration_results": regeneration_results,
+        "authority_result": authority_result,
+        "startup_proof_result": startup_proof_result,
+        "final_start_decision": decision,
+        "blocking_codes": sorted(blocking_codes | set(prerequisite_blocking_codes)),
+    }
+    startup_attempt_id, control_plane_id = _control_plane_identity(day, evaluated_at_utc, control_plane_parts)
+    return {
+        "schema_id": "paper_day_control_plane",
+        "schema_version": "v1",
+        "authority_scope": "SUPPORTING_DAY_CONTROL_ARTIFACT",
+        "day_utc": day,
+        "startup_attempt_id": startup_attempt_id,
+        "control_plane_id": control_plane_id,
+        "evaluated_at_utc": evaluated_at_utc,
+        "producer": producer_block_v1(module="ops/tools/run_paper_day_control_plane_v1.py"),
+        "prerequisite_gate": {
+            "prerequisite_status": prerequisite_status,
+            "prerequisite_blocking_codes": sorted(prerequisite_blocking_codes),
+            "prerequisite_artifact_refs": [str(prereq_path)] if prereq_path.exists() else [],
+            "first_missing_prerequisite": prerequisite_first_missing,
+        },
+        "canonical_regeneration_results": regeneration_results,
+        "authority_result": authority_result,
+        "startup_proof_result": startup_proof_result,
+        "final_start_decision": decision,
+        "blocking_codes": sorted(blocking_codes | set(prerequisite_blocking_codes)),
+        "human_readable_summary": _build_summary(
+            day_utc=day,
+            decision=decision,
+            blocker=authority_result["first_true_blocker_code"],
+        ),
+        "ignored_legacy_surfaces": _legacy_surface_rows(truth_root=truth_root, day_utc=day),
+        "suppression_reason": "NON_AUTHORITATIVE_FOR_STARTUP",
+    }
+
+
+def _write_control_plane_payload(
+    *,
+    truth_root: Path,
+    day: str,
+    payload: dict[str, Any],
+) -> Any:
+    attempt_id = build_attempt_id_v1(payload=payload)
+    atomic_write_validated_json_v1(
+        path=resolve_paper_day_control_plane_attempt_path(
+            truth_root=truth_root,
+            day_utc=day,
+            attempt_id=attempt_id,
+        ),
+        payload=payload,
+        schema_relpath=OUTPUT_SCHEMA_RELPATH_V1,
+    )
+    return atomic_write_validated_json_v1(
+        path=resolve_paper_day_control_plane_path(truth_root=truth_root, day_utc=day),
+        payload=payload,
+        schema_relpath=OUTPUT_SCHEMA_RELPATH_V1,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="run_paper_day_control_plane_v1")
     ap.add_argument("--day_utc", required=True)
@@ -219,6 +332,8 @@ def main(argv: list[str] | None = None) -> int:
         "first_true_blocker_code": "",
         "first_true_blocker_artifact_path": "",
     }
+    submit_boundary_payload: dict[str, Any] | None = None
+    paper_session_ledger_payload: dict[str, Any] | None = None
     startup_proof_result = {
         "startup_proof_validation_path": "",
         "startup_proof_validation_status": "NOT_EVALUATED",
@@ -272,6 +387,10 @@ def main(argv: list[str] | None = None) -> int:
                     status_field=status_field,
                 )
             )
+            if logical_name == "submit_boundary_status_v1":
+                submit_boundary_payload = _artifact_payload(output_path)
+            elif logical_name == "paper_session_ledger_v1":
+                paper_session_ledger_payload = _artifact_payload(output_path)
             if not output_path.exists() or not output_path.is_file():
                 regeneration_defect = True
                 blocking_codes.add(f"PAPER_DAY_CONTROL_PLANE_OUTPUT_MISSING:{logical_name}")
@@ -365,56 +484,97 @@ def main(argv: list[str] | None = None) -> int:
     if not authority_result["first_true_blocker_artifact_path"] and prereq_path.exists():
         authority_result["first_true_blocker_artifact_path"] = str(prereq_path)
 
-    control_plane_parts = {
-        "day_utc": day,
-        "evaluated_at_utc": evaluated_at_utc,
-        "prerequisite_status": prerequisite_status,
-        "regeneration_results": regeneration_results,
-        "authority_result": authority_result,
-        "startup_proof_result": startup_proof_result,
-        "final_start_decision": decision,
-        "blocking_codes": sorted(blocking_codes | set(prerequisite_blocking_codes)),
-    }
-    startup_attempt_id, control_plane_id = _control_plane_identity(day, evaluated_at_utc, control_plane_parts)
-    payload = {
-        "schema_id": "paper_day_control_plane",
-        "schema_version": "v1",
-        "authority_scope": "SUPPORTING_DAY_CONTROL_ARTIFACT",
-        "day_utc": day,
-        "startup_attempt_id": startup_attempt_id,
-        "control_plane_id": control_plane_id,
-        "evaluated_at_utc": evaluated_at_utc,
-        "producer": producer_block_v1(module="ops/tools/run_paper_day_control_plane_v1.py"),
-        "prerequisite_gate": {
-            "prerequisite_status": prerequisite_status,
-            "prerequisite_blocking_codes": sorted(prerequisite_blocking_codes),
-            "prerequisite_artifact_refs": [str(prereq_path)] if prereq_path.exists() else [],
-            "first_missing_prerequisite": prerequisite_first_missing,
-        },
-        "canonical_regeneration_results": regeneration_results,
-        "authority_result": authority_result,
-        "startup_proof_result": startup_proof_result,
-        "final_start_decision": decision,
-        "blocking_codes": sorted(blocking_codes | set(prerequisite_blocking_codes)),
-        "human_readable_summary": _build_summary(
-            day_utc=day,
-            decision=decision,
-            blocker=authority_result["first_true_blocker_code"],
-        ),
-        "ignored_legacy_surfaces": _legacy_surface_rows(truth_root=truth_root, day_utc=day),
-        "suppression_reason": "NON_AUTHORITATIVE_FOR_STARTUP",
-    }
-    ref = atomic_write_validated_json_v1(
-        path=resolve_paper_day_control_plane_path(truth_root=truth_root, day_utc=day),
-        payload=payload,
-        schema_relpath=OUTPUT_SCHEMA_RELPATH_V1,
+    payload = _build_control_plane_payload(
+        truth_root=truth_root,
+        day=day,
+        evaluated_at_utc=evaluated_at_utc,
+        prerequisite_status=prerequisite_status,
+        prerequisite_blocking_codes=prerequisite_blocking_codes,
+        prerequisite_first_missing=prerequisite_first_missing,
+        prereq_path=prereq_path,
+        regeneration_results=regeneration_results,
+        authority_result=authority_result,
+        startup_proof_result=startup_proof_result,
+        decision=decision,
+        blocking_codes=blocking_codes,
     )
+    ref = _write_control_plane_payload(
+        truth_root=truth_root,
+        day=day,
+        payload=payload,
+    )
+    refreshed_status_payload = build_session_authority_status_payload_v1(
+        truth_root=truth_root,
+        environment="PAPER",
+    )
+    refreshed_status_payload = _freshen_status_generated_utc(
+        payload=refreshed_status_payload,
+        evaluated_at_utc=evaluated_at_utc,
+    )
+    write_session_authority_status_v1(
+        truth_root=truth_root,
+        payload=refreshed_status_payload,
+    )
+
+    if decision == "READY_NOW":
+        consistency_result = evaluate_next_day_readiness_consistency_gate_v1(
+            truth_root=truth_root,
+            day_utc=day,
+            session_authority_status_payload=refreshed_status_payload,
+            submit_boundary_payload=submit_boundary_payload,
+            paper_session_ledger_payload=paper_session_ledger_payload,
+            paper_day_control_plane_payload=payload,
+        )
+        if consistency_result.status == CONSISTENCY_GATE_STATUS_FAIL:
+            decision = "BLOCKED_BY_DEFECT"
+            blocking_codes.add(CONSISTENCY_GATE_FAILURE)
+            authority_result["first_true_blocker_code"] = CONSISTENCY_GATE_FAILURE
+            first_issue = consistency_result.issues[0] if consistency_result.issues else None
+            authority_result["first_true_blocker_artifact_path"] = (
+                first_issue.artifact_path
+                if first_issue is not None and first_issue.artifact_path
+                else str(resolve_paper_day_control_plane_path(truth_root=truth_root, day_utc=day))
+            )
+            payload = _build_control_plane_payload(
+                truth_root=truth_root,
+                day=day,
+                evaluated_at_utc=evaluated_at_utc,
+                prerequisite_status=prerequisite_status,
+                prerequisite_blocking_codes=prerequisite_blocking_codes,
+                prerequisite_first_missing=prerequisite_first_missing,
+                prereq_path=prereq_path,
+                regeneration_results=regeneration_results,
+                authority_result=authority_result,
+                startup_proof_result=startup_proof_result,
+                decision=decision,
+                blocking_codes=blocking_codes,
+            )
+            ref = _write_control_plane_payload(
+                truth_root=truth_root,
+                day=day,
+                payload=payload,
+            )
+            refreshed_status_payload = build_session_authority_status_payload_v1(
+                truth_root=truth_root,
+                environment="PAPER",
+            )
+            refreshed_status_payload = _freshen_status_generated_utc(
+                payload=refreshed_status_payload,
+                evaluated_at_utc=evaluated_at_utc,
+            )
+            write_session_authority_status_v1(
+                truth_root=truth_root,
+                payload=refreshed_status_payload,
+            )
+            payload = dict(ref.payload)
+        else:
+            payload = dict(ref.payload)
     print(
         json.dumps(
             {
                 "path": str(ref.path),
                 "sha256": ref.sha256,
-                "control_plane_id": control_plane_id,
+                "control_plane_id": str(payload.get("control_plane_id") or ""),
                 "final_start_decision": decision,
                 "ledger_id": authority_result["ledger_id"],
                 "first_true_blocker_code": authority_result["first_true_blocker_code"],

@@ -1,0 +1,19 @@
+version: v1
+
+weights:
+  risk: 1.0
+  tax: 0.7
+  allocation: 0.8
+
+invariants:
+  - NO_NEGATIVE_CAPITAL
+  - NO_WASH_SALE
+
+limits:
+  max_actions_per_cycle: 10
+  min_decision_score: 0.2
+
+cooldown:
+  enabled: true
+  block_same_action: true
+  min_seconds_between_same_action: 300

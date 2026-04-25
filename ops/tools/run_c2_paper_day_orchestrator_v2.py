@@ -42,15 +42,32 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.common.canonical_fact_store_v1 import resolve_latest_active_attempt
+from constellation_2.common.governed_evaluation_control_v1 import (
+    resolve_adopted_governed_sleeve_bindings_v1,
+)
+from constellation_2.common.kill_switch_authority_v1 import (
+    STATUS_PASS as KILL_SWITCH_STATUS_PASS,
+    resolve_kill_switch_authority_v1,
+)
+from constellation_2.common.paper_execution_authority_v1 import (
+    resolve_governed_paper_execution_profile,
+    resolve_governed_paper_execution_roots,
+)
+from constellation_2.common.execution_kernel.execution_submission_record_v1 import (
+    write_execution_submission_record_from_execution_package_v1,
+)
 from constellation_2.common.paper_session_ledger_v1 import assert_paper_session_ledger_granted_v1
 from constellation_2.common.runtime_contract_v1 import (
-    resolve_canonical_truth_root,
     resolve_pointer_index_root_for_truth_root,
-    resolve_release_provenance,
-    resolve_truth_sleeves_root,
 )
-
-DEFAULT_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+from constellation_2.common.runtime_authority_bridge_v1 import (
+    resolve_canonical_truth_root_bridge_v1,
+    resolve_truth_root_bridge_v1,
+    resolve_truth_sleeves_root_bridge_v1,
+)
+from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1
+from constellation_2.phaseD.lib.evidence_writer_v1 import EvidenceWriteError, write_phased_veto_only_v1
+from ops.tools.c2_account_resolution_v1 import resolve_single_paper_ib_account_from_sleeve_registry
 
 SLEEVE_REGISTRY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/C2_SLEEVE_REGISTRY_V1.json").resolve()
 GATE_HIERARCHY_POLICY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/GATE_HIERARCHY_V1.json").resolve()
@@ -69,8 +86,9 @@ DEFAULT_GOVERNED_SUBMIT_DRY_RUN = "YES"
 DEFAULT_STRUCTURAL_ACTIVITY_MODE = "OFF"
 ADMITTED_EXECUTION_STAGE_IDS = {
     "A0_ENFORCE_SINGLE_ACCOUNT_TOPOLOGY",
-    "B0_POSITIONS_SNAPSHOT_V2",
     "B0_CASH_LEDGER_SNAPSHOT_V1",
+    "B0_POSITIONS_SNAPSHOT_V5",
+    "B0B_POSITIONS_SNAPSHOT_V2_COMPAT",
     "B0_ENSURE_EXECUTION_SUBMISSIONS_DIR_V1",
     "B0_ACCOUNTING_NAV_V2",
     "B0_ACCOUNTING_NAV_COMPAT_BRIDGE_V1",
@@ -90,14 +108,43 @@ ADMITTED_EXECUTION_STAGE_IDS = {
     "A6A_RUN_POINTER_APPEND_V1",
     "A6A_POINTER_HEADS_MATERIALIZE_V1",
     "A6A_EXPOSURE_NET_DAY_V1",
+    "A6A_SLEEVE_EDGE_MEASUREMENT_V1",
+    "A6A1_GOVERNED_EVALUATION_DAY_V1",
     "A6AA_CAPITAL_AUTHORITY_ALLOCATION_DAY_V1",
     "A6B_AUTHORIZATION_ARTIFACTS_DAY_V1",
+    "A6C_OPTIONS_CHAIN_CAPTURE_IB_DAY_V1",
+    "A6D_OPTIONS_CHAIN_TRUTH_PROMOTION_DAY_V1",
+    "A6E_MARKET_DATA_SNAPSHOT_REFRESH_V1",
     "A7_PHASEC_IDENTITY_MATERIALIZER_DAY_V1",
     "A7A_GOVERNED_SUBMIT_V5",
+    "B0A_EXECUTION_EVIDENCE_TRUTH_V1",
+    "B0C_POSITIONS_EFFECTIVE_POINTER_V1",
     "B0_EXECUTION_STREAM_SNAPSHOT_V1",
+    "B0AC_SUBMISSION_LIFECYCLE_REFRESH_V1",
     "B1_FILL_LEDGER_V1",
     "B2_EXECUTION_RECONCILIATION_V1",
 }
+SLEEVE_EDGE_PUBLICATION_STAGE_ID = "A6A_SLEEVE_EDGE_MEASUREMENT_V1"
+GOVERNED_EVALUATION_STAGE_ID = "A6A1_GOVERNED_EVALUATION_DAY_V1"
+CAPITAL_AUTHORITY_STAGE_ID = "A6AA_CAPITAL_AUTHORITY_ALLOCATION_DAY_V1"
+
+
+def _governed_evaluation_stage_cmd(*, day: str, truth: Path) -> list[str]:
+    cmd = [
+        "python3",
+        "ops/tools/run_governed_evaluation_day_v1.py",
+        "--day_utc",
+        day,
+        "--truth_root",
+        str(truth),
+        "--execution_sleeve_id",
+        "PRIMARY",
+        "--mode",
+        "PAPER",
+    ]
+    for row in resolve_adopted_governed_sleeve_bindings_v1(execution_sleeve_id="PRIMARY", mode="PAPER"):
+        cmd.extend(["--sleeve_id", row["sleeve_id"]])
+    return cmd
 
 
 def _json_dumps(obj: Any) -> bytes:
@@ -109,6 +156,22 @@ def _sha256_bytes(b: bytes) -> str:
 
 def _sha256_file(p: Path) -> str:
     return _sha256_bytes(p.read_bytes())
+
+
+def _git_sha() -> str:
+    try:
+        return (
+            subprocess.check_output(
+                ["/usr/bin/git", "rev-parse", "--short=7", "HEAD"],
+                cwd=str(REPO_ROOT),
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip()
+            or ("0" * 7)
+        )
+    except Exception:
+        return "0" * 7
+
 
 def _require_repo_root_cwd() -> None:
     cwd = Path.cwd().resolve()
@@ -136,10 +199,10 @@ def _resolve_truth_root_or_default(p: Optional[str]) -> Path:
     if env_root:
         return _require_truth_root(env_root)
 
-    try:
-        return resolve_canonical_truth_root()
-    except Exception:
-        return DEFAULT_TRUTH_ROOT
+    return resolve_truth_root_bridge_v1(
+        repo_root=REPO_ROOT,
+        caller="ops/tools/run_c2_paper_day_orchestrator_v2.py",
+    ).resolve()
 
 
 def _load_sleeve_registry() -> Dict[str, Any]:
@@ -160,10 +223,9 @@ def _load_sleeve_registry() -> Dict[str, Any]:
 
 
 def _resolve_expected_sleeve_account(*, truth_root: Path, mode: str) -> Tuple[str, str]:
-    try:
-        truth_sleeves_root = resolve_truth_sleeves_root()
-    except Exception:
-        truth_sleeves_root = (REPO_ROOT / "constellation_2/runtime" / "truth_sleeves").resolve()
+    truth_sleeves_root = resolve_truth_sleeves_root_bridge_v1(
+        caller="ops/tools/run_c2_paper_day_orchestrator_v2.py"
+    )
     try:
         rel_parts = truth_root.relative_to(truth_sleeves_root).parts
     except ValueError:
@@ -239,25 +301,6 @@ def _validate_produced_utc_isoz(s: str) -> str:
     if len(v) < 11 or not v.endswith("Z") or "T" not in v:
         raise SystemExit(f"FAIL: --produced_utc must look like ISO-8601 UTC Z timestamp: {v!r}")
     return v
-
-
-def _git_sha() -> str:
-    try:
-        s = str(resolve_release_provenance().get("git_sha") or "").strip()
-    except Exception:
-        try:
-            out = subprocess.check_output(
-                ["/usr/bin/git", "rev-parse", "HEAD"],
-                cwd=str(REPO_ROOT),
-                stderr=subprocess.DEVNULL,
-            )
-            s = out.decode("utf-8").strip()
-        except Exception:
-            # Clean runtime roots can be source-derived without .git metadata.
-            s = "0" * 40
-    if len(s) != 40:
-        raise SystemExit(f"FAIL: bad git sha: {s!r}")
-    return s
 
 
 def _intent_simulator_produced_utc_for_day(day: str) -> str:
@@ -632,6 +675,30 @@ class StageResult:
     outputs_present: List[str]
 
 
+def _validate_sleeve_edge_publication_order(stage_defs: List[StageDef]) -> None:
+    stage_ids = [stage.stage_id for stage in stage_defs]
+    try:
+        publication_index = stage_ids.index(SLEEVE_EDGE_PUBLICATION_STAGE_ID)
+        governed_evaluation_index = stage_ids.index(GOVERNED_EVALUATION_STAGE_ID)
+        allocation_index = stage_ids.index(CAPITAL_AUTHORITY_STAGE_ID)
+    except ValueError as exc:
+        raise SystemExit("FAIL: SLEEVE_EDGE_PUBLICATION_STAGE_MISSING_FROM_ORCHESTRATOR") from exc
+    if publication_index >= governed_evaluation_index:
+        raise SystemExit("FAIL: SLEEVE_EDGE_PUBLICATION_MUST_PRECEDE_GOVERNED_EVALUATION")
+    if governed_evaluation_index >= allocation_index:
+        raise SystemExit("FAIL: GOVERNED_EVALUATION_MUST_PRECEDE_CAPITAL_AUTHORITY_ALLOCATION")
+    if not bool(stage_defs[publication_index].blocking):
+        raise SystemExit("FAIL: SLEEVE_EDGE_PUBLICATION_STAGE_MUST_BE_BLOCKING")
+
+
+def _should_stop_after_sleeve_edge_publication_failure(stage_results: List[Dict[str, Any]]) -> bool:
+    for row in stage_results:
+        if str(row.get("stage_id") or "") != SLEEVE_EDGE_PUBLICATION_STAGE_ID:
+            continue
+        return str(row.get("status") or "") == "FAIL"
+    return False
+
+
 def _path_exists(p: str) -> bool:
     try:
         s = str(p)
@@ -682,11 +749,40 @@ def _detect_activity(truth_root: Path, day: str) -> Dict[str, Any]:
         },
     }
 
+
+def _sleeve_edge_core2_summary_ready(truth_root: Path, day: str) -> Tuple[bool, str]:
+    summary_root = (truth_root / "reports" / "reconciled_trade_state_summary_v1" / day).resolve()
+    if not summary_root.exists() or not summary_root.is_dir():
+        return (False, "SKIP_SLEEVE_EDGE_CORE2_SUMMARY_MISSING")
+
+    summary_paths = sorted(summary_root.glob("*/reconciled_trade_state_summary.v1.json"))
+    if not summary_paths:
+        return (False, "SKIP_SLEEVE_EDGE_CORE2_SUMMARY_MISSING")
+
+    saw_parsed_summary = False
+    for summary_path in summary_paths:
+        try:
+            summary_obj = _read_json_obj(summary_path)
+        except Exception:
+            # Preserve fail-closed behavior for malformed summary artifacts.
+            return (True, "")
+        saw_parsed_summary = True
+        trade_refs = summary_obj.get("trade_refs")
+        if isinstance(trade_refs, list) and len(trade_refs) > 0:
+            return (True, "")
+
+    if saw_parsed_summary:
+        return (False, "SKIP_SLEEVE_EDGE_CORE2_SUMMARY_EMPTY")
+    return (False, "SKIP_SLEEVE_EDGE_CORE2_SUMMARY_MISSING")
+
+
 def _resolve_session_state(day: str) -> Dict[str, Any]:
-    try:
-        cal_root = (resolve_canonical_truth_root() / "market_calendar_v1").resolve()
-    except Exception:
-        cal_root = (DEFAULT_TRUTH_ROOT / "market_calendar_v1").resolve()
+    cal_root = (
+        resolve_canonical_truth_root_bridge_v1(
+            caller="ops/tools/run_c2_paper_day_orchestrator_v2.py"
+        )
+        / "market_calendar_v1"
+    ).resolve()
     manifest = (cal_root / "dataset_manifest.json").resolve()
     info: Dict[str, Any] = {
         "session_state": "UNKNOWN_SESSION",
@@ -955,7 +1051,13 @@ def _liquidity_gate_reference_price(truth_root: Path, day: str, symbol: str) -> 
     return None
 
 
-def _build_phasec_materializer_cmd(*, truth_root: Path, day: str, produced_utc: str) -> Tuple[List[str], List[str]]:
+def _build_phasec_materializer_cmd(*, truth_root: Path, day: str, produced_utc: str, ib_account: str) -> Tuple[List[str], List[str]]:
+    execution_truth_root = resolve_governed_paper_execution_roots(
+        repo_root=REPO_ROOT,
+        environment="PAPER",
+        ib_account=ib_account,
+        sleeve_id="PRIMARY",
+    ).execution_root_path
     cmd = [
         "python3",
         "ops/tools/run_phasec_identity_materializer_day_v1.py",
@@ -965,6 +1067,8 @@ def _build_phasec_materializer_cmd(*, truth_root: Path, day: str, produced_utc: 
         f"{day}T00:00:00Z",
         "--truth_root",
         str(truth_root),
+        "--execution_truth_root",
+        str(execution_truth_root),
     ]
     reason_codes: List[str] = []
     equity_symbols = _discover_equity_entry_symbols(truth_root, day)
@@ -989,7 +1093,7 @@ def _build_phasec_materializer_cmd(*, truth_root: Path, day: str, produced_utc: 
     return cmd, reason_codes
 
 
-def _run_options_capture_stage(*, truth_root: Path, day: str, env: Dict[str, str]) -> Tuple[bool, int, List[str], List[str]]:
+def _run_options_capture_stage(*, truth_root: Path, day: str, produced_utc: str, env: Dict[str, str]) -> Tuple[bool, int, List[str], List[str]]:
     option_symbols = _discover_short_vol_symbols(truth_root, day)
     if not option_symbols:
         return (False, 0, ["SKIP_NO_SHORT_VOL_INTENTS"], [])
@@ -1010,12 +1114,12 @@ def _run_options_capture_stage(*, truth_root: Path, day: str, env: Dict[str, str
         rc = _run_cmd(
             f"A6C_OPTIONS_CHAIN_CAPTURE_IB_DAY_V1_{symbol}",
             [
-                ".venv_c2/bin/python",
+                "python3",
                 "ops/tools/run_options_chain_capture_ib_day_v1.py",
                 "--day_utc",
                 day,
                 "--eval_time_utc",
-                f"{day}T00:00:00Z",
+                produced_utc,
                 "--symbol",
                 symbol,
                 "--truth_root",
@@ -1035,7 +1139,7 @@ def _run_options_capture_stage(*, truth_root: Path, day: str, env: Dict[str, str
     return (executed, 0, reason_codes or ["SKIP_NO_OPTIONS_CAPTURE_NEEDED"], outputs)
 
 
-def _run_options_promotion_stage(*, truth_root: Path, day: str, env: Dict[str, str]) -> Tuple[bool, int, List[str], List[str]]:
+def _run_options_promotion_stage(*, truth_root: Path, day: str, produced_utc: str, env: Dict[str, str]) -> Tuple[bool, int, List[str], List[str]]:
     option_symbols = _discover_short_vol_symbols(truth_root, day)
     if not option_symbols:
         return (False, 0, ["SKIP_NO_SHORT_VOL_INTENTS"], [])
@@ -1061,7 +1165,7 @@ def _run_options_promotion_stage(*, truth_root: Path, day: str, env: Dict[str, s
                 "--day_utc",
                 day,
                 "--eval_time_utc",
-                f"{day}T00:00:00Z",
+                produced_utc,
                 "--symbol",
                 symbol,
                 "--truth_root",
@@ -1148,18 +1252,68 @@ def _run_market_data_refresh_for_symbols(
             return (True, 2, [f"MARKET_DATA_SAME_DAY_STILL_ABSENT:{symbol}"], outputs)
     return (executed, 0, reason_codes or ["SKIP_NO_MARKET_DATA_REFRESH_NEEDED"], outputs)
 
-def _positions_snapshot_v2_skip_safe(truth_root: Path, day: str) -> bool:
-    snap_path = (truth_root / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json").resolve()
-    latest_ptr = (truth_root / "positions_v1" / "latest_pointer.v2.json").resolve()
-
+def _positions_snapshot_v5_skip_safe(truth_root: Path, day: str) -> bool:
+    snap_path = (truth_root / "positions_v1" / "snapshots" / day / "positions_snapshot.v5.json").resolve()
     if not snap_path.exists() or not snap_path.is_file():
         return False
     try:
         snap_obj = _read_json_obj(snap_path)
     except Exception:
         return False
+    if str(snap_obj.get("schema_id") or "").strip() != "C2_POSITIONS_SNAPSHOT_V5":
+        return False
     if str(snap_obj.get("day_utc") or "").strip() != day:
         return False
+    items = snap_obj.get("items") if isinstance(snap_obj.get("items"), list) else []
+    if isinstance(items, list):
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("status") or "").strip().upper() != "OPEN":
+                continue
+            try:
+                qty = int(item.get("qty") or 0)
+            except Exception:
+                return False
+            if qty <= 0:
+                return False
+    return True
+
+
+def _positions_snapshot_v2_skip_safe(truth_root: Path, day: str) -> bool:
+    snap_path = (truth_root / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json").resolve()
+    latest_ptr = (truth_root / "positions_v1" / "latest_pointer.v2.json").resolve()
+    canonical_v5_path = (truth_root / "positions_v1" / "snapshots" / day / "positions_snapshot.v5.json").resolve()
+
+    if not canonical_v5_path.exists() or not canonical_v5_path.is_file():
+        return False
+    if not snap_path.exists() or not snap_path.is_file():
+        return False
+    try:
+        snap_obj = _read_json_obj(snap_path)
+    except Exception:
+        return False
+    if str(snap_obj.get("schema_id") or "").strip() != "C2_POSITIONS_SNAPSHOT_V2":
+        return False
+    if str(snap_obj.get("day_utc") or "").strip() != day:
+        return False
+    reason_codes = snap_obj.get("reason_codes")
+    if not isinstance(reason_codes, list) or "COMPAT_BRIDGE_FROM_POSITIONS_V5" not in reason_codes:
+        return False
+    positions = snap_obj.get("positions") if isinstance(snap_obj.get("positions"), dict) else {}
+    items = positions.get("items") if isinstance(positions, dict) else []
+    if isinstance(items, list):
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("status") or "").strip().upper() != "OPEN":
+                continue
+            try:
+                qty = int(item.get("qty") or 0)
+            except Exception:
+                return False
+            if qty <= 0:
+                return False
 
     # Optional strengthening: if latest pointer currently references this same snapshot,
     # require its embedded sha256 to match; otherwise still allow skip on valid same-day snapshot.
@@ -1215,6 +1369,170 @@ def _count_broker_submission_records(truth_root: Path, day: str) -> int:
     if not d.exists() or not d.is_dir():
         return 0
     return len(list(d.glob("*/broker_submission_record.v2.json")))
+
+
+def _count_submission_dirs(truth_root: Path, day: str) -> int:
+    d = (truth_root / "execution_evidence_v1" / "submissions" / day).resolve()
+    if not d.exists() or not d.is_dir():
+        return 0
+    return len([p for p in d.iterdir() if p.is_dir()])
+
+
+def _submission_dirs_for_day(
+    truth_root: Path,
+    day: str,
+    *,
+    require_broker_submission_record: bool = False,
+    require_lifecycle_ready_identity_set: bool = False,
+) -> List[Path]:
+    d = (truth_root / "execution_evidence_v1" / "submissions" / day).resolve()
+    if not d.exists() or not d.is_dir():
+        return []
+    out: List[Path] = []
+    for path in sorted((p.resolve() for p in d.iterdir() if p.is_dir()), key=lambda item: item.name):
+        if path.name.startswith("__"):
+            continue
+        if require_broker_submission_record:
+            bsr_path = (path / "broker_submission_record.v2.json").resolve()
+            if not bsr_path.exists() or not bsr_path.is_file():
+                continue
+        if require_lifecycle_ready_identity_set:
+            plan_v2 = (path / "equity_order_plan.v2.json").resolve()
+            if plan_v2.exists() and plan_v2.is_file():
+                out.append(path)
+                continue
+            options_plan = (path / "order_plan.v1.json").resolve()
+            if options_plan.exists() and options_plan.is_file():
+                out.append(path)
+                continue
+            plan_v1 = (path / "equity_order_plan.v1.json").resolve()
+            if not plan_v1.exists() or not plan_v1.is_file():
+                continue
+            try:
+                plan_obj = _read_json_obj(plan_v1)
+            except Exception:
+                continue
+            if str(plan_obj.get("schema_id") or "").strip() != "equity_order_plan":
+                continue
+            if str(plan_obj.get("schema_version") or "").strip() not in {"v1", "v2"}:
+                continue
+        out.append(path)
+    return out
+
+
+def _run_submission_lifecycle_refresh_stage(*, truth_root: Path, day: str, env: Dict[str, str]) -> Tuple[bool, int, List[str], List[str]]:
+    submission_dirs = _submission_dirs_for_day(
+        truth_root,
+        day,
+        require_broker_submission_record=True,
+        require_lifecycle_ready_identity_set=True,
+    )
+    if not submission_dirs:
+        return (False, 0, ["SKIP_NO_LIFECYCLE_ELIGIBLE_SUBMISSIONS"], [])
+
+    def _stream_record_is_dry_run_snapshot(stream_obj: Dict[str, Any]) -> bool:
+        reason_codes = stream_obj.get("reason_codes")
+        if not isinstance(reason_codes, list):
+            return False
+        return any(str(code).strip().upper() == "DRY_RUN_SUBMISSION_SNAPSHOT" for code in reason_codes)
+
+    def _submission_stream_is_dry_run_snapshot(submission_id: str) -> bool:
+        stream_dir = (truth_root / "execution_stream_v1" / day).resolve()
+        if not stream_dir.exists() or not stream_dir.is_dir():
+            return False
+        stream_rows: List[Dict[str, Any]] = []
+        for stream_path in sorted(stream_dir.glob("*.execution_event_stream_record.v1.json")):
+            if not stream_path.is_file():
+                continue
+            try:
+                payload = _read_json_obj(stream_path)
+            except Exception:
+                continue
+            if str(payload.get("submission_id") or "").strip() != submission_id:
+                continue
+            stream_rows.append(payload)
+        if not stream_rows:
+            return False
+        return all(_stream_record_is_dry_run_snapshot(row) for row in stream_rows)
+
+    outputs_present: List[str] = []
+    reason_codes: List[str] = []
+    for submission_dir in submission_dirs:
+        submission_id = submission_dir.name
+        rc = _run_cmd(
+            f"B0AC_SUBMISSION_LIFECYCLE_REFRESH_V1_{submission_id}",
+            [
+                "python3",
+                "ops/tools/run_submission_lifecycle_refresh_v1.py",
+                "--day_utc",
+                day,
+                "--truth_root",
+                str(truth_root),
+                "--submission_id",
+                submission_id,
+            ],
+            env=env,
+        )
+        if rc != 0:
+            return (True, int(rc), [f"SUBMISSION_LIFECYCLE_REFRESH_FAILED:{submission_id}:rc={int(rc)}"], outputs_present)
+        execution_event_path = (submission_dir / "execution_event_record.v1.json").resolve()
+        if execution_event_path.exists() and execution_event_path.is_file():
+            outputs_present.append(str(execution_event_path))
+            reason_codes.append(f"SUBMISSION_LIFECYCLE_REFRESH_OK:{submission_id}")
+            continue
+        broker_submission_path = (submission_dir / "broker_submission_record.v2.json").resolve()
+        if broker_submission_path.exists() and broker_submission_path.is_file():
+            outputs_present.append(str(broker_submission_path))
+            try:
+                broker_submission_obj = _read_json_obj(broker_submission_path)
+            except Exception:
+                broker_submission_obj = {}
+            broker_error = (
+                broker_submission_obj.get("error")
+                if isinstance(broker_submission_obj.get("error"), dict)
+                else {}
+            )
+            broker_error_code = str(broker_error.get("code") or "").strip().upper()
+            if broker_error_code == "DRY_RUN_NO_BROKER_ID" or _submission_stream_is_dry_run_snapshot(submission_id):
+                reason_codes.append(f"SUBMISSION_LIFECYCLE_REFRESH_DRY_RUN_NO_BROKER_ID:{submission_id}")
+                continue
+        reason_codes.append(f"SUBMISSION_LIFECYCLE_REFRESH_PENDING_NO_STREAM:{submission_id}")
+    return (True, 0, reason_codes, outputs_present)
+
+
+def _execution_stream_snapshot_skip_safe(truth_root: Path, day: str) -> bool:
+    stream_day = (truth_root / "execution_stream_v1" / day).resolve()
+    if not stream_day.exists() or not stream_day.is_dir():
+        return False
+
+    submission_dirs = _submission_dirs_for_day(
+        truth_root,
+        day,
+        require_broker_submission_record=True,
+        require_lifecycle_ready_identity_set=True,
+    )
+    if not submission_dirs:
+        return False
+
+    covered_submission_ids: set[str] = set()
+    for stream_path in sorted(stream_day.glob("*.execution_event_stream_record.v1.json")):
+        if not stream_path.is_file():
+            continue
+        try:
+            payload = _read_json_obj(stream_path)
+        except Exception:
+            return False
+        submission_id = str(payload.get("submission_id") or "").strip()
+        if submission_id:
+            covered_submission_ids.add(submission_id)
+
+    if not covered_submission_ids:
+        return False
+
+    for submission_dir in submission_dirs:
+        if submission_dir.name not in covered_submission_ids:
+            return False
+    return True
 
 
 def _fill_ledger_skip_safe(truth_root: Path, day: str) -> bool:
@@ -1326,8 +1644,19 @@ def _identity_dir_has_supported_set(d: Path) -> bool:
     return False
 
 
-def _discover_same_day_identity_dirs(truth_root: Path, day: str) -> List[Path]:
-    root = (truth_root / "phaseC_preflight_v1" / day).resolve()
+def _resolve_governed_phasec_day_root(*, day: str, ib_account: str = "") -> Path:
+    account = str(ib_account or "").strip() or resolve_single_paper_ib_account_from_sleeve_registry(REPO_ROOT)
+    execution_root = resolve_governed_paper_execution_roots(
+        repo_root=REPO_ROOT,
+        environment="PAPER",
+        ib_account=account,
+        sleeve_id="PRIMARY",
+    ).execution_root_path
+    return (execution_root / "phaseC_preflight_v1" / day).resolve()
+
+
+def _discover_same_day_identity_dirs(truth_root: Path, day: str, ib_account: str = "") -> List[Path]:
+    root = _resolve_governed_phasec_day_root(day=day, ib_account=ib_account)
     if not root.exists() or not root.is_dir():
         return []
 
@@ -1346,7 +1675,7 @@ def _discover_same_day_identity_dirs(truth_root: Path, day: str) -> List[Path]:
                     return latest_dirs
 
     latest_active = resolve_latest_active_attempt(
-        truth_root=truth_root,
+        truth_root=root.parent.parent.resolve(),
         invoked_day_utc=day,
         scope_key="PRIMARY::PAPER",
     )
@@ -1374,8 +1703,8 @@ def _discover_same_day_identity_dirs(truth_root: Path, day: str) -> List[Path]:
     return out
 
 
-def _phasec_veto_only_summary(truth_root: Path, day: str) -> Dict[str, Any]:
-    root = (truth_root / "phaseC_preflight_v1" / day).resolve()
+def _phasec_veto_only_summary(truth_root: Path, day: str, ib_account: str = "") -> Dict[str, Any]:
+    root = _resolve_governed_phasec_day_root(day=day, ib_account=ib_account)
     if not root.exists() or not root.is_dir():
         return {
             "present": False,
@@ -1385,7 +1714,7 @@ def _phasec_veto_only_summary(truth_root: Path, day: str) -> Dict[str, Any]:
             "detail_codes": [],
         }
 
-    identity_dirs = _discover_same_day_identity_dirs(truth_root, day)
+    identity_dirs = _discover_same_day_identity_dirs(truth_root, day, ib_account)
     veto_files = sorted(root.glob("*.veto_record.v1.json"))
     allow_files = sorted(root.glob("*.submit_preflight_decision.v1.json"))
     detail_codes: List[str] = []
@@ -1481,7 +1810,34 @@ def _extract_identity_set_intent_sha(identity_dir: Path, truth_root: Path, day: 
     return ""
 
 
-def _has_submission_evidence_for_intent_sha(*, truth_root: Path, day: str, intent_sha: str) -> bool:
+def _has_real_broker_id_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return value > 0
+    text = str(value or "").strip()
+    if not text:
+        return False
+    try:
+        return int(text) > 0
+    except Exception:
+        return False
+
+
+def _broker_submission_has_real_broker_ids(bsr_obj: Dict[str, Any]) -> bool:
+    broker_ids = bsr_obj.get("broker_ids")
+    if not isinstance(broker_ids, dict):
+        return False
+    return _has_real_broker_id_value(broker_ids.get("order_id")) or _has_real_broker_id_value(broker_ids.get("perm_id"))
+
+
+def _has_submission_evidence_for_intent_sha(
+    *,
+    truth_root: Path,
+    day: str,
+    intent_sha: str,
+    require_real_broker_ids: bool = False,
+) -> bool:
     target = str(intent_sha or "").strip().lower()
     if not _is_64hex(target):
         return False
@@ -1489,15 +1845,34 @@ def _has_submission_evidence_for_intent_sha(*, truth_root: Path, day: str, inten
     if not submissions_day.exists() or not submissions_day.is_dir():
         return False
     for subdir in sorted([p for p in submissions_day.iterdir() if p.is_dir()]):
-        plan_path = (subdir / "equity_order_plan.v1.json").resolve()
-        if not plan_path.exists() or not plan_path.is_file():
+        # Idempotency must only trigger after an actual submit attempt.
+        # Veto-only dirs are historical failures and must not suppress a new
+        # authorized attempt for the same intent.
+        bsr_path = (subdir / "broker_submission_record.v2.json").resolve()
+        if not bsr_path.exists() or not bsr_path.is_file():
             continue
-        try:
-            plan_obj = _read_json_obj(plan_path)
-        except Exception:
+        if require_real_broker_ids:
+            try:
+                bsr_obj = _read_json_obj(bsr_path)
+            except Exception:
+                continue
+            if not _broker_submission_has_real_broker_ids(bsr_obj):
+                continue
+        plan_obj: Optional[Dict[str, Any]] = None
+        for plan_name in ("equity_order_plan.v2.json", "equity_order_plan.v1.json", "order_plan.v1.json"):
+            plan_path = (subdir / plan_name).resolve()
+            if not plan_path.exists() or not plan_path.is_file():
+                continue
+            try:
+                plan_obj = _read_json_obj(plan_path)
+            except Exception:
+                plan_obj = None
+            if plan_obj is not None:
+                break
+        if plan_obj is None:
             continue
-        for k in ("intent_sha256", "intent_hash"):
-            candidate = str(plan_obj.get(k) or "").strip().lower()
+        for key in ("intent_sha256", "intent_hash"):
+            candidate = str(plan_obj.get(key) or "").strip().lower()
             if candidate == target:
                 return True
     return False
@@ -1543,9 +1918,245 @@ def _read_authorization_state(truth_root: Path, day: str, intent_sha: str) -> Di
     }
 
 
+def _load_identity_submit_payload(identity_dir: Path) -> Dict[str, Any]:
+    plan_v2 = (identity_dir / "equity_order_plan.v2.json").resolve()
+    plan_v1 = (identity_dir / "equity_order_plan.v1.json").resolve()
+    plan_opt = (identity_dir / "order_plan.v1.json").resolve()
+    if plan_v2.exists() and plan_v2.is_file():
+        plan_path = plan_v2
+        mapping_path = (identity_dir / "mapping_ledger_record.v2.json").resolve()
+        binding_path = (identity_dir / "binding_record.v2.json").resolve()
+    elif plan_v1.exists() and plan_v1.is_file():
+        plan_path = plan_v1
+        mapping_path = (identity_dir / "mapping_ledger_record.v2.json").resolve()
+        binding_path = (identity_dir / "binding_record.v2.json").resolve()
+    elif plan_opt.exists() and plan_opt.is_file():
+        plan_path = plan_opt
+        mapping_path = (identity_dir / "mapping_ledger_record.v1.json").resolve()
+        binding_path = (identity_dir / "binding_record.v1.json").resolve()
+    else:
+        raise RuntimeError(f"GOV_SUBMIT_IDENTITY_SET_MISSING_PLAN:{identity_dir}")
+    if not mapping_path.exists() or not mapping_path.is_file():
+        raise RuntimeError(f"GOV_SUBMIT_IDENTITY_SET_MISSING_MAPPING:{identity_dir}")
+    if not binding_path.exists() or not binding_path.is_file():
+        raise RuntimeError(f"GOV_SUBMIT_IDENTITY_SET_MISSING_BINDING:{identity_dir}")
+    plan_obj = _read_json_obj(plan_path)
+    mapping_obj = _read_json_obj(mapping_path)
+    binding_obj = _read_json_obj(binding_path)
+    submission_id = str(binding_obj.get("submission_id") or "").strip().lower()
+    if not _is_64hex(submission_id):
+        raise RuntimeError(f"GOV_SUBMIT_IDENTITY_SET_MISSING_SUBMISSION_ID:{identity_dir}")
+    return {
+        "plan_path": plan_path,
+        "plan_obj": plan_obj,
+        "mapping_path": mapping_path,
+        "mapping_obj": mapping_obj,
+        "binding_path": binding_path,
+        "binding_obj": binding_obj,
+        "submission_id": submission_id,
+    }
+
+
+def _execution_package_path_for_submission(*, truth_root: Path, day: str, submission_id: str) -> Path:
+    return (truth_root / "execution_package_v1" / day / submission_id / "execution_package.v1.json").resolve()
+
+
+def _execution_submission_record_path_for_submission(*, truth_root: Path, day: str, submission_id: str) -> Path:
+    return (truth_root / "execution_kernel_v1" / "submission_records" / day / submission_id / "submission_record.v1.json").resolve()
+
+
+def _materialize_submission_record_for_identity(
+    *,
+    truth_root: Path,
+    day: str,
+    identity_dir: Path,
+    execution_package_path: Path,
+    payload: Dict[str, Any],
+) -> Tuple[bool, str]:
+    try:
+        _, _, write_action = write_execution_submission_record_from_execution_package_v1(
+            execution_package_path=execution_package_path.resolve(),
+            day_utc=day,
+            produced_utc=f"{day}T00:00:00Z",
+            truth_root=truth_root.resolve(),
+            plan_obj=dict(payload.get("plan_obj") or {}),
+            binding_obj=dict(payload.get("binding_obj") or {}),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return (
+            False,
+            (
+                f"GOV_SUBMIT_SUBMISSION_RECORD_MATERIALIZE_FAILED:"
+                f"{identity_dir.name}:{type(exc).__name__}:{exc}"
+            ),
+        )
+    submission_id = str(payload.get("submission_id") or "").strip().lower()
+    return (True, f"GOV_SUBMIT_SUBMISSION_RECORD_{write_action}:{identity_dir.name}:{submission_id}")
+
+
+def _run_execution_build_authority_for_identity(
+    *,
+    identity_dir: Path,
+    env: Dict[str, str],
+) -> int:
+    return _run_cmd(
+        "A7AA_EXECUTION_BUILD_AUTHORITY_V1",
+        [
+            sys.executable,
+            str((REPO_ROOT / "ops/tools/run_execution_build_authority_v1.py").resolve()),
+            "--operation_type",
+            "fresh_paper_entry_v1",
+            "--candidate_path",
+            str(identity_dir.resolve()),
+            "--materialize",
+            "YES",
+            "--emit_package",
+            "YES",
+        ],
+        env=env,
+    )
+
+
+def _ensure_governed_submit_inputs(
+    *,
+    truth_root: Path,
+    day: str,
+    identity_dir: Path,
+    env: Dict[str, str],
+) -> Dict[str, Any]:
+    payload = _load_identity_submit_payload(identity_dir)
+    submission_id = str(payload["submission_id"])
+    package_path = _execution_package_path_for_submission(
+        truth_root=truth_root,
+        day=day,
+        submission_id=submission_id,
+    )
+    submission_record_path = _execution_submission_record_path_for_submission(
+        truth_root=truth_root,
+        day=day,
+        submission_id=submission_id,
+    )
+    if package_path.exists() and package_path.is_file() and submission_record_path.exists() and submission_record_path.is_file():
+        return {
+            "ok": True,
+            "reason_code": "",
+            "submission_id": submission_id,
+            "execution_package_path": package_path,
+            "submission_record_path": submission_record_path,
+        }
+    rc = _run_execution_build_authority_for_identity(identity_dir=identity_dir, env=env)
+    if rc != 0:
+        return {
+            "ok": False,
+            "reason_code": f"GOV_SUBMIT_EXECUTION_BUILD_NONZERO_RC:{identity_dir.name}:rc={rc}",
+            "submission_id": submission_id,
+            "execution_package_path": package_path,
+            "submission_record_path": submission_record_path,
+        }
+    if package_path.exists() and package_path.is_file() and (not submission_record_path.exists() or not submission_record_path.is_file()):
+        materialized_ok, materialize_code = _materialize_submission_record_for_identity(
+            truth_root=truth_root,
+            day=day,
+            identity_dir=identity_dir,
+            execution_package_path=package_path,
+            payload=payload,
+        )
+        if not materialized_ok:
+            return {
+                "ok": False,
+                "reason_code": materialize_code,
+                "submission_id": submission_id,
+                "execution_package_path": package_path,
+                "submission_record_path": submission_record_path,
+            }
+    missing: List[str] = []
+    if not package_path.exists() or not package_path.is_file():
+        missing.append(f"execution_package={package_path}")
+    if not submission_record_path.exists() or not submission_record_path.is_file():
+        missing.append(f"submission_record={submission_record_path}")
+    if missing:
+        return {
+            "ok": False,
+            "reason_code": f"GOV_SUBMIT_EXECUTION_INPUTS_MISSING_AFTER_BUILD:{identity_dir.name}:{'|'.join(missing)}",
+            "submission_id": submission_id,
+            "execution_package_path": package_path,
+            "submission_record_path": submission_record_path,
+        }
+    return {
+        "ok": True,
+        "reason_code": "",
+        "submission_id": submission_id,
+        "execution_package_path": package_path,
+        "submission_record_path": submission_record_path,
+    }
+
+
+def _emit_governed_submit_skip_veto(
+    *,
+    truth_root: Path,
+    day: str,
+    eval_time_utc: str,
+    identity_dir: Path,
+    reason_code: str,
+    reason_detail: str,
+    pointer_paths: List[str],
+) -> Tuple[bool, str]:
+    try:
+        payload = _load_identity_submit_payload(identity_dir)
+    except Exception as exc:  # noqa: BLE001
+        return (False, f"GOV_SUBMIT_SKIP_EVIDENCE_INPUT_ERROR:{identity_dir.name}:{type(exc).__name__}")
+    submission_id = str(payload["submission_id"])
+    submission_dir = (truth_root / "execution_evidence_v1" / "submissions" / day / submission_id).resolve()
+    evidence_files = (
+        (submission_dir / "broker_submission_record.v2.json").exists()
+        or (submission_dir / "execution_event_record.v1.json").exists()
+        or (submission_dir / "veto_record.v1.json").exists()
+    )
+    if evidence_files:
+        return (True, f"GOV_SUBMIT_SKIP_EVIDENCE_ALREADY_PRESENT:{submission_id}")
+    veto_obj: Dict[str, Any] = {
+        "schema_id": "veto_record",
+        "schema_version": "v1",
+        "observed_at_utc": eval_time_utc,
+        "boundary": "SUBMIT",
+        "reason_code": str(reason_code).strip().upper() or "GOV_SUBMIT_SKIPPED",
+        "reason_detail": str(reason_detail).strip(),
+        "inputs": {
+            "intent_hash": str(payload["plan_obj"].get("intent_hash") or "").strip() or str(payload["binding_obj"].get("intent_hash") or "").strip(),
+            "plan_hash": str(payload["plan_obj"].get("plan_hash") or "").strip(),
+            "chain_snapshot_hash": None,
+            "freshness_cert_hash": None,
+        },
+        "pointers": list(pointer_paths) if pointer_paths else [str(identity_dir.resolve())],
+        "canonical_json_hash": None,
+        "upstream_hash": canonical_hash_for_c2_artifact_v1(payload["binding_obj"]),
+    }
+    veto_obj["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(veto_obj)
+    try:
+        write_phased_veto_only_v1(
+            submission_dir,
+            veto_record=veto_obj,
+            order_plan=payload["plan_obj"],
+            binding_record=payload["binding_obj"],
+            mapping_ledger_record=payload["mapping_obj"],
+        )
+        return (True, f"GOV_SUBMIT_SKIP_EVIDENCE_WRITTEN:{submission_id}")
+    except EvidenceWriteError as exc:
+        if "OUT_DIR_NOT_EMPTY" in str(exc):
+            evidence_now = (
+                (submission_dir / "broker_submission_record.v2.json").exists()
+                or (submission_dir / "execution_event_record.v1.json").exists()
+                or (submission_dir / "veto_record.v1.json").exists()
+            )
+            if evidence_now:
+                return (True, f"GOV_SUBMIT_SKIP_EVIDENCE_ALREADY_PRESENT:{submission_id}")
+        return (False, f"GOV_SUBMIT_SKIP_EVIDENCE_WRITE_FAILED:{submission_id}:{type(exc).__name__}")
+
+
 def _build_governed_submit_cmd(
     *,
-    phasec_out_dir: Path,
+    execution_package_path: Path,
+    submission_record_path: Path,
     day: str,
     produced_utc: str,
     ib_account: str,
@@ -1553,10 +2164,12 @@ def _build_governed_submit_cmd(
 ) -> List[str]:
     submit_tool = str((REPO_ROOT / "constellation_2" / "phaseD" / "tools" / "c2_submit_paper_v5.py").resolve())
     risk_budget = str((REPO_ROOT / "constellation_2" / "phaseD" / "inputs" / "sample_risk_budget.v1.json").resolve())
-
-    ib_host = str(env.get("C2_IB_HOST") or "127.0.0.1").strip()
-    ib_port = str(env.get("C2_IB_PORT") or "4002").strip()
-    ib_client_id = str(env.get("C2_IB_CLIENT_ID") or "7").strip()
+    execution_profile = resolve_governed_paper_execution_profile(
+        repo_root=REPO_ROOT,
+        environment="PAPER",
+        ib_account=ib_account,
+        sleeve_id="PRIMARY",
+    )
     dry_run = _resolve_governed_submit_dry_run(env)
     eval_time_utc = f"{day}T00:00:00Z"
 
@@ -1565,16 +2178,18 @@ def _build_governed_submit_cmd(
         submit_tool,
         "--eval_time_utc",
         eval_time_utc,
-        "--phasec_out_dir",
-        str(phasec_out_dir.resolve()),
+        "--execution_package_path",
+        str(execution_package_path.resolve()),
+        "--submission_record_path",
+        str(submission_record_path.resolve()),
         "--risk_budget",
         risk_budget,
         "--ib_host",
-        ib_host,
+        execution_profile.host,
         "--ib_port",
-        ib_port,
+        str(execution_profile.port),
         "--ib_client_id",
-        ib_client_id,
+        str(execution_profile.client_id_orders),
         "--ib_account",
         ib_account,
         "--dry_run",
@@ -1597,7 +2212,7 @@ def _run_governed_submit_stage(
     ib_account: str,
     env: Dict[str, str],
 ) -> Tuple[int, List[str]]:
-    identity_dirs = _discover_same_day_identity_dirs(truth_root, day)
+    identity_dirs = _discover_same_day_identity_dirs(truth_root, day, ib_account)
     if not identity_dirs:
         return (1, ["GOV_SUBMIT_NO_SAME_DAY_IDENTITY_SET"])
 
@@ -1612,14 +2227,38 @@ def _run_governed_submit_stage(
 
         az = _read_authorization_state(truth_root, day, intent_sha)
         if not az["ok"]:
-            reason_codes.append(f"{az['reason_code']}:{identity_dir.name}:{intent_sha}")
+            reason_code = f"{az['reason_code']}:{identity_dir.name}:{intent_sha}"
+            reason_codes.append(reason_code)
+            emitted, emitted_code = _emit_governed_submit_skip_veto(
+                truth_root=truth_root,
+                day=day,
+                eval_time_utc=f"{day}T00:00:00Z",
+                identity_dir=identity_dir,
+                reason_code=az["reason_code"],
+                reason_detail=f"AUTHORIZATION_LOOKUP_FAILED:path={az['path']}",
+                pointer_paths=[az["path"], str(identity_dir.resolve())],
+            )
+            if emitted:
+                reason_codes.append(emitted_code)
             continue
 
         if az["status"] != "AUTHORIZED" or az["decision"] != "AUTHORIZED" or int(az["authorized_quantity"]) <= 0:
-            reason_codes.append(
+            reason_code = (
                 f"GOV_SUBMIT_AUTHZ_NOT_AUTHORIZED:{identity_dir.name}:{intent_sha}:"
                 f"status={az['status']}:decision={az['decision']}:authorized_quantity={az['authorized_quantity']}"
             )
+            reason_codes.append(reason_code)
+            emitted, emitted_code = _emit_governed_submit_skip_veto(
+                truth_root=truth_root,
+                day=day,
+                eval_time_utc=f"{day}T00:00:00Z",
+                identity_dir=identity_dir,
+                reason_code="GOV_SUBMIT_AUTHZ_NOT_AUTHORIZED",
+                reason_detail=reason_code,
+                pointer_paths=[az["path"], str(identity_dir.resolve())],
+            )
+            if emitted:
+                reason_codes.append(emitted_code)
             continue
         authorized_dirs.append(identity_dir)
 
@@ -1627,16 +2266,32 @@ def _run_governed_submit_stage(
         reason_codes.append("GOV_SUBMIT_NO_AUTHORIZED_IDENTITY_SETS")
         return (1, reason_codes)
 
+    require_real_broker_ids = _resolve_governed_submit_dry_run(env) == "NO"
     submit_failures: List[str] = []
     for identity_dir in authorized_dirs:
         intent_sha = _extract_identity_set_intent_sha(identity_dir, truth_root, day)
-        if intent_sha and _has_submission_evidence_for_intent_sha(truth_root=truth_root, day=day, intent_sha=intent_sha):
+        if intent_sha and _has_submission_evidence_for_intent_sha(
+            truth_root=truth_root,
+            day=day,
+            intent_sha=intent_sha,
+            require_real_broker_ids=require_real_broker_ids,
+        ):
             reason_codes.append(f"GOV_SUBMIT_IDEMPOTENT_ALREADY_SUBMITTED:{identity_dir.name}:{intent_sha}")
+            continue
+        submit_inputs = _ensure_governed_submit_inputs(
+            truth_root=truth_root,
+            day=day,
+            identity_dir=identity_dir,
+            env=env,
+        )
+        if not bool(submit_inputs.get("ok")):
+            submit_failures.append(str(submit_inputs.get("reason_code") or f"GOV_SUBMIT_INPUT_PREP_FAILED:{identity_dir.name}"))
             continue
         rc = _run_cmd(
             "A7A_GOVERNED_SUBMIT_V5",
             _build_governed_submit_cmd(
-                phasec_out_dir=identity_dir,
+                execution_package_path=Path(str(submit_inputs["execution_package_path"])).resolve(),
+                submission_record_path=Path(str(submit_inputs["submission_record_path"])).resolve(),
                 day=day,
                 produced_utc=produced_utc,
                 ib_account=ib_account,
@@ -1661,7 +2316,7 @@ def _governed_abort_reason_codes(*, truth_root: Path, day: str, gov_reason_codes
     codes = [str(x).strip() for x in gov_reason_codes if str(x).strip()]
     if codes != ["GOV_SUBMIT_NO_SAME_DAY_IDENTITY_SET"]:
         return []
-    summary = _phasec_veto_only_summary(truth_root, day)
+    summary = _phasec_veto_only_summary(truth_root, day, ib_account)
     if not summary.get("present"):
         return []
     if int(summary.get("identity_dir_count") or 0) != 0:
@@ -1812,15 +2467,15 @@ def _append_run_pointer_v1(
 
     hb_path = (truth_root / "reports" / "heartbeat_gate_v1" / day / "heartbeat_gate.v1.json").resolve()
     gs_path = (truth_root / "reports" / "gate_stack_verdict_v1" / day / "gate_stack_verdict.v1.json").resolve()
-    ks_path = (truth_root / "risk_v1" / "kill_switch_v1" / day / "global_kill_switch_state.v1.json").resolve()
-
     if not gs_path.exists() or not gs_path.is_file():
         return (1, [f"RUN_POINTER_GATE_STACK_MISSING:{gs_path}"])
 
     hb_status = _read_status_upper(hb_path, "status")
     gs_status = _read_status_upper(gs_path, "status")
-    ks_state = _read_status_upper(ks_path, "state")
-    ok_authoritative = (hb_status == "PASS") and (gs_status == "PASS") and (ks_state == "INACTIVE")
+    kill_result = resolve_kill_switch_authority_v1(canonical_truth_root=truth_root, day_utc=day)
+    ks_path = kill_result.canonical_path
+    ks_state = kill_result.state if kill_result.status == KILL_SWITCH_STATUS_PASS else "FAIL_CLOSED"
+    ok_authoritative = (hb_status == "PASS") and (gs_status == "PASS") and (kill_result.status == KILL_SWITCH_STATUS_PASS) and (ks_state == "INACTIVE")
 
     status = "PASS" if ok_authoritative else "FAIL"
     policy_hash = _sha256_file(GATE_HIERARCHY_POLICY_PATH)
@@ -1920,6 +2575,7 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
     nav_out = str(truth / "accounting_v2" / "nav" / day / "nav.v2.json")
     nav_compat_out = str(truth / "accounting_compat_v1" / "nav" / day / "nav_snapshot.v1.json")
     exec_submissions_day_dir = str(truth / "execution_evidence_v1" / "submissions" / day)
+    pos_v5_out = str(truth / "positions_v1" / "snapshots" / day / "positions_snapshot.v5.json")
     pos_out = str(truth / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json")
     cash_out = str(truth / "cash_ledger_v1" / "snapshots" / day / "cash_ledger_snapshot.v1.json")
     alloc_summary_out = str(truth / "allocation_v1" / "summary" / day / "summary.json")
@@ -1930,6 +2586,12 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
         REPO_ROOT / "constellation_2" / "operator_inputs" / "cash_ledger_operator_statements" / day / "operator_statement.v1.json"
     )
     governed_submit_tool = str((REPO_ROOT / "constellation_2" / "phaseD" / "tools" / "c2_submit_paper_v5.py").resolve())
+    execution_truth_root = resolve_governed_paper_execution_roots(
+        repo_root=REPO_ROOT,
+        environment="PAPER",
+        ib_account=ib_account,
+        sleeve_id="PRIMARY",
+    ).execution_root_path
 
     all_stage_defs = [
         StageDef(
@@ -1942,7 +2604,28 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
             skip_if_exists_paths=[],
         ),
         StageDef(
-            stage_id="B0_POSITIONS_SNAPSHOT_V2",
+            stage_id="B0_POSITIONS_SNAPSHOT_V5",
+            cmd=[
+                "python3",
+                "-m",
+                "constellation_2.phaseF.positions.run.run_positions_snapshot_day_v5",
+                "--day_utc",
+                day,
+                "--producer_git_sha",
+                git_sha,
+                "--producer_repo",
+                REPO_ROOT.name,
+                "--ib_account",
+                ib_account,
+            ],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=False,
+            blocking=True,
+            skip_if_exists_paths=[pos_v5_out],
+        ),
+        StageDef(
+            stage_id="B0B_POSITIONS_SNAPSHOT_V2_COMPAT",
             cmd=[
                 "python3",
                 "-m",
@@ -2277,7 +2960,7 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
         ),
         StageDef(
             stage_id="A6A_RUN_POINTER_APPEND_V1",
-            cmd=["/bin/true"],
+            cmd=["python3", "ops/tools/run_pointer_append_v1.py"],
             required_for_paper=True,
             required_for_live=True,
             required_if_activity=True,
@@ -2310,7 +2993,32 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
             skip_if_exists_paths=[exposure_net_out],
         ),
         StageDef(
-            stage_id="A6AA_CAPITAL_AUTHORITY_ALLOCATION_DAY_V1",
+            stage_id=SLEEVE_EDGE_PUBLICATION_STAGE_ID,
+            cmd=[
+                "python3",
+                "ops/tools/run_sleeve_edge_measurement_v1.py",
+                "--day_utc",
+                day,
+                "--truth_root",
+                str(truth),
+            ],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=True,
+            blocking=True,
+            skip_if_exists_paths=[],
+        ),
+        StageDef(
+            stage_id=GOVERNED_EVALUATION_STAGE_ID,
+            cmd=_governed_evaluation_stage_cmd(day=day, truth=truth),
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=True,
+            blocking=True,
+            skip_if_exists_paths=[],
+        ),
+        StageDef(
+            stage_id=CAPITAL_AUTHORITY_STAGE_ID,
             cmd=[
                 "python3",
                 "ops/tools/run_capital_authority_allocation_day_v1.py",
@@ -2318,6 +3026,8 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
                 day,
                 "--truth_root",
                 str(truth),
+                "--canonical_sequence_owner",
+                "ops/tools/run_c2_paper_day_orchestrator_v2.py",
             ],
             required_for_paper=True,
             required_for_live=True,
@@ -2345,7 +3055,10 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
         ),
         StageDef(
             stage_id="A6C_OPTIONS_CHAIN_CAPTURE_IB_DAY_V1",
-            cmd=["/bin/true"],
+            cmd=[
+                "python3",
+                "ops/tools/run_options_chain_capture_ib_day_v1.py",
+            ],
             required_for_paper=True,
             required_for_live=True,
             required_if_activity=True,
@@ -2354,7 +3067,10 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
         ),
         StageDef(
             stage_id="A6D_OPTIONS_CHAIN_TRUTH_PROMOTION_DAY_V1",
-            cmd=["/bin/true"],
+            cmd=[
+                "python3",
+                "ops/tools/run_options_chain_truth_promotion_day_v1.py",
+            ],
             required_for_paper=True,
             required_for_live=True,
             required_if_activity=True,
@@ -2363,7 +3079,10 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
         ),
         StageDef(
             stage_id="A6E_MARKET_DATA_SNAPSHOT_REFRESH_V1",
-            cmd=["/bin/true"],
+            cmd=[
+                "python3",
+                "ops/tools/run_market_data_snapshot_day_v1.py",
+            ],
             required_for_paper=True,
             required_for_live=True,
             required_if_activity=True,
@@ -2373,7 +3092,8 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
         StageDef(
             stage_id="A7_PHASEC_IDENTITY_MATERIALIZER_DAY_V1",
             cmd=[
-                "/bin/true",
+                "python3",
+                "ops/tools/run_phasec_identity_materializer_day_v1.py",
             ],
             required_for_paper=True,
             required_for_live=True,
@@ -2388,6 +3108,29 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
             required_for_live=True,
             required_if_activity=True,
             blocking=True,
+            skip_if_exists_paths=[],
+        ),
+        StageDef(
+            stage_id="B0A_EXECUTION_EVIDENCE_TRUTH_V1",
+            cmd=[
+                "python3",
+                "-m",
+                "constellation_2.phaseF.execution_evidence.run.run_execution_evidence_truth_day_v1",
+                "--day_utc",
+                day,
+                "--producer_git_sha",
+                git_sha,
+                "--producer_repo",
+                REPO_ROOT.name,
+                "--truth_root",
+                str(truth),
+                "--source_truth_root",
+                str(execution_truth_root),
+            ],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=True,
+            blocking=False,
             skip_if_exists_paths=[],
         ),
         StageDef(
@@ -2407,6 +3150,51 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
             skip_if_exists_paths=[execution_stream_records_glob],
         ),
         StageDef(
+            stage_id="B0AA_ORPHAN_SUBMISSION_BACKFILL_SLEEVE_V1",
+            cmd=[
+                "python3",
+                "ops/tools/run_orphan_submission_backfill_day_v1.py",
+                "--day_utc",
+                day,
+                "--truth_root",
+                str(execution_truth_root),
+                "--stream_truth_root",
+                str(truth),
+            ],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=True,
+            blocking=False,
+            skip_if_exists_paths=[],
+        ),
+        StageDef(
+            stage_id="B0AB_ORPHAN_SUBMISSION_BACKFILL_CANONICAL_V1",
+            cmd=[
+                "python3",
+                "ops/tools/run_orphan_submission_backfill_day_v1.py",
+                "--day_utc",
+                day,
+                "--truth_root",
+                str(truth),
+                "--stream_truth_root",
+                str(truth),
+            ],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=True,
+            blocking=False,
+            skip_if_exists_paths=[],
+        ),
+        StageDef(
+            stage_id="B0AC_SUBMISSION_LIFECYCLE_REFRESH_V1",
+            cmd=["python3", "ops/tools/run_submission_lifecycle_refresh_v1.py"],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=True,
+            blocking=False,
+            skip_if_exists_paths=[],
+        ),
+        StageDef(
             stage_id="B1_FILL_LEDGER_V1",
             cmd=[
                 "python3",
@@ -2423,8 +3211,53 @@ def _build_stage_defs(*, truth: Path, day: str, input_day: str, ib_account: str,
             skip_if_exists_paths=[],
         ),
         StageDef(
+            stage_id="B0B_POSITIONS_SNAPSHOT_V4",
+            cmd=[
+                "python3",
+                "-m",
+                "constellation_2.phaseF.positions.run.run_positions_snapshot_day_v4",
+                "--day_utc",
+                day,
+                "--producer_git_sha",
+                git_sha,
+                "--producer_repo",
+                REPO_ROOT.name,
+            ],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=True,
+            blocking=False,
+            skip_if_exists_paths=[],
+        ),
+        StageDef(
+            stage_id="B0C_POSITIONS_EFFECTIVE_POINTER_V1",
+            cmd=[
+                "python3",
+                "-m",
+                "constellation_2.phaseF.positions.run.run_positions_effective_pointer_day_v1",
+                "--day_utc",
+                day,
+                "--producer_git_sha",
+                git_sha,
+                "--producer_repo",
+                REPO_ROOT.name,
+            ],
+            required_for_paper=True,
+            required_for_live=True,
+            required_if_activity=True,
+            blocking=False,
+            skip_if_exists_paths=[],
+        ),
+        StageDef(
             stage_id="B2_EXECUTION_RECONCILIATION_V1",
-            cmd=["python3", "ops/tools/run_execution_reconciliation_day_v1.py", "--day_utc", day],
+            cmd=[
+                "python3",
+                "ops/tools/run_execution_reconciliation_day_v1.py",
+                "--day_utc",
+                day,
+                "--truth_root",
+                str(truth),
+            ],
             required_for_paper=True,
             required_for_live=True,
             required_if_activity=True,
@@ -2585,7 +3418,9 @@ def _enforce_gate_stack_verdict(*, truth_root: Path, day: str, current_status: s
 
 
 def main() -> int:
-    _require_repo_root_cwd()
+    from constellation_2.common.paper_day_orchestrator_pipeline_v1 import (
+        run_paper_day_orchestrator_obligation_pipeline_v1,
+    )
 
     ap = argparse.ArgumentParser(prog="run_c2_paper_day_orchestrator_v2")
     ap.add_argument("--day_utc", required=True)
@@ -2596,695 +3431,21 @@ def main() -> int:
     ap.add_argument("--produced_utc", required=True)
     ap.add_argument("--truth_root", default=None)
     ap.add_argument("--paper_session_ledger_path", required=True)
+    ap.add_argument(
+        "--pipeline_mode",
+        default="normal",
+        choices=["normal", "exact_ref_replay", "bounded_recompute", "forensic_replay"],
+    )
+    ap.add_argument("--replay_attempt_manifest_path", default="")
+    ap.add_argument("--budget_profile", default="contract_default")
+    ap.add_argument("--emit_pipeline_report", action="store_true")
     args = ap.parse_args()
 
-    truth_root = _resolve_truth_root_or_default(args.truth_root)
-    verdict_root = (truth_root / "reports" / "orchestrator_run_verdict_v2").resolve()
-    paper_session_ledger_path = Path(str(args.paper_session_ledger_path)).resolve()
-
-    day = _require_day(args.day_utc)
-    input_day = _require_day((args.input_day_utc or "").strip() or day)
-    mode = _require_mode(args.mode)
-    symbol = _require_symbol(args.symbol)
-    produced_utc = _validate_produced_utc_isoz(args.produced_utc)
-
-    if day != input_day:
-        raise SystemExit(f"FAIL: FUTURE_DAY_OR_SPLIT_DAY_RUN_NOT_ALLOWED day_utc={day!r} input_day_utc={input_day!r}")
-
-    ib_account = str(args.ib_account or "").strip()
-    if not ib_account:
-        raise SystemExit("FAIL: --ib_account empty")
-
-    ledger = assert_paper_session_ledger_granted_v1(
-        path=paper_session_ledger_path,
-        day_utc=day,
-    )
-
-    git_sha = _git_sha()
-    global_truth_root = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
-
-    sleeve_id, expected_ib_account = _resolve_expected_sleeve_account(truth_root=truth_root, mode=mode)
-    if ib_account != expected_ib_account:
-        verdict = {
-            "schema_id": "C2_ORCHESTRATOR_RUN_VERDICT_V2",
-            "day_utc": day,
-            "input_day_utc": input_day,
-            "mode": mode,
-            "symbol": symbol,
-            "ib_account": ib_account,
-            "produced_utc": produced_utc,
-            "status": "ABORTED",
-            "safety_breaches": ["IB_ACCOUNT_MISMATCH_SLEEVE_BINDING"],
-            "reason_codes": [
-                f"SLEEVE_ID={sleeve_id}",
-                f"EXPECTED_SLEEVE_ACCOUNT={expected_ib_account}",
-            ],
-            "stages": [],
-            "replay": {"derived_from_attempt_manifest": True, "hashes": {}},
-            "producer": {"repo": REPO_ROOT.name, "module": "ops/tools/run_c2_paper_day_orchestrator_v2.py", "git_sha": git_sha},
-            "paper_session_ledger_path": str(paper_session_ledger_path),
-            "ledger_id": ledger.ledger_id,
-        }
-        attempt_id = f"{day}__{produced_utc}__{git_sha}__{mode}__{symbol}__{ib_account}"
-        out_dir = (verdict_root / day / attempt_id).resolve()
-        _write_attempt_file(out_dir / "orchestrator_run_verdict.v2.json", _json_dumps(verdict))
-        return 7
-
-    cfg_hash = (os.environ.get("C2_ORCHESTRATOR_CONFIG_HASH") or "").strip().lower()
-    if len(cfg_hash) != 64 or any(c not in "0123456789abcdef" for c in cfg_hash):
-        cfg_hash = "0" * 64
-
-    alloc_raw = subprocess.check_output(
-        [
-            "python3",
-            "ops/tools/run_pointer_attempt_alloc_v1.py",
-            "--day_utc",
-            day,
-            "--mode",
-            mode,
-            "--orchestrator_config_hash",
-            cfg_hash,
-            "--git_sha",
-            git_sha,
-            "--truth_root",
-            str(truth_root),
-        ],
-        text=True,
-    ).strip()
-    alloc = json.loads(alloc_raw)
-
-    attempt_id = str(alloc.get("attempt_id") or "").strip()
-    attempt_seq = int(alloc.get("attempt_seq") or 0)
-    if not attempt_id or attempt_seq <= 0:
-        raise SystemExit(f"FATAL: run_pointer_attempt_alloc_v1 invalid payload: {alloc_raw}")
-
-    session_info = _resolve_session_state(day)
-    session_state = str(session_info.get("session_state") or "UNKNOWN_SESSION").strip().upper()
-
-    stage_env = dict(os.environ)
-    stage_env["PYTHONPATH"] = str(REPO_ROOT)
-    stage_env["C2_TRUTH_ROOT"] = str(truth_root)
-    stage_env["C2_AUTHORITY_MODE"] = "governance_primary"
-    stage_env["C2_PRODUCED_UTC"] = produced_utc
-
-    if mode == "PAPER":
-        _run_structural_pre_activity_producers(
-            truth_root=truth_root,
-            day=day,
-            mode=mode,
-            symbol=symbol,
-            produced_utc=produced_utc,
-            git_sha=git_sha,
-            env=stage_env,
-        )
-
-    act = _detect_activity(truth_root, day)
-    has_activity = bool(act["activity"])
-    effective_activity = bool(has_activity and session_state == "TRADING_SESSION")
-
-    stages = _build_stage_defs(
-        truth=truth_root,
-        day=day,
-        input_day=input_day,
-        ib_account=ib_account,
-        git_sha=git_sha,
-        attempt_id=attempt_id,
-    )
-
-    stage_results: List[Dict[str, Any]] = []
-    safety_breaches: List[str] = []
-    governed_abort_reasons: List[str] = []
-    reason_codes: List[str] = []
-
-    any_required_fail = False
-    any_optional_fail = False
-
-    attempt_manifest: Dict[str, Any] = {
-        "schema_id": "C2_ORCHESTRATOR_ATTEMPT_MANIFEST_V2",
-        "day_utc": day,
-        "input_day_utc": input_day,
-        "mode": mode,
-        "symbol": symbol,
-        "ib_account": ib_account,
-        "attempt_id": attempt_id,
-        "attempt_seq": int(attempt_seq),
-        "produced_utc": produced_utc,
-        "producer": {"repo": REPO_ROOT.name, "module": "ops/tools/run_c2_paper_day_orchestrator_v2.py", "git_sha": git_sha},
-        "paper_session_ledger_path": str(paper_session_ledger_path),
-        "ledger_id": ledger.ledger_id,
-        "session_id": ledger.session_id,
-        "activity": act,
-        "effective_activity": bool(effective_activity),
-        "session": session_info,
-        "stages": [],
-        "outputs": [],
-    }
-
-    for sd in stages:
-        required, blocking = _stage_required_for_mode(sd, mode, effective_activity)
-        classification = {
-            "required_for_mode": {"PAPER": bool(sd.required_for_paper), "LIVE": bool(sd.required_for_live)},
-            "required_if_activity": bool(sd.required_if_activity),
-            "blocking": bool(sd.blocking),
-            "effective_required": bool(required),
-            "effective_blocking": bool(blocking),
-        }
-
-        if sd.stage_id == "A0_ENFORCE_SINGLE_ACCOUNT_TOPOLOGY":
-            sr = StageResult(
-                stage_id=sd.stage_id,
-                classification=classification,
-                executed=False,
-                rc=0,
-                status="OK",
-                reason_codes=["SLEEVE_ACCOUNT_BINDING_ENFORCED"],
-                outputs_present=[],
-            )
-            stage_results.append(sr.__dict__)
-            attempt_manifest["stages"].append(sr.__dict__)
-            continue
-
-        if sd.stage_id == "A7A_GOVERNED_SUBMIT_V5":
-            if session_state != "TRADING_SESSION":
-                reason = (
-                    "SKIP_NON_TRADING_SESSION"
-                    if session_state == "NON_TRADING_SESSION"
-                    else "SKIP_UNKNOWN_SESSION_FAIL_CLOSED"
-                )
-                sr = StageResult(
-                    stage_id=sd.stage_id,
-                    classification=classification,
-                    executed=False,
-                    rc=0,
-                    status="SKIP",
-                    reason_codes=[reason],
-                    outputs_present=[],
-                )
-                stage_results.append(sr.__dict__)
-                attempt_manifest["stages"].append(sr.__dict__)
-                continue
-
-            if not required:
-                sr = StageResult(
-                    stage_id=sd.stage_id,
-                    classification=classification,
-                    executed=False,
-                    rc=0,
-                    status="SKIP",
-                    reason_codes=["SKIP_NOT_REQUIRED_NO_ACTIVITY"],
-                    outputs_present=[],
-                )
-                stage_results.append(sr.__dict__)
-                attempt_manifest["stages"].append(sr.__dict__)
-                continue
-
-            gov_rc, gov_reason_codes = _run_governed_submit_stage(
-                truth_root=truth_root,
-                day=day,
-                produced_utc=produced_utc,
-                ib_account=ib_account,
-                env=stage_env,
-            )
-            gov_ok = (gov_rc == 0)
-
-            sr = StageResult(
-                stage_id=sd.stage_id,
-                classification=classification,
-                executed=True,
-                rc=int(gov_rc),
-                status="OK" if gov_ok else "FAIL",
-                reason_codes=list(gov_reason_codes),
-                outputs_present=[],
-            )
-            stage_results.append(sr.__dict__)
-            attempt_manifest["stages"].append(sr.__dict__)
-
-            if not gov_ok:
-                governed_abort_codes = _governed_abort_reason_codes(
-                    truth_root=truth_root,
-                    day=day,
-                    gov_reason_codes=gov_reason_codes,
-                )
-                if governed_abort_codes:
-                    governed_abort_reasons.extend(governed_abort_codes)
-                else:
-                    safety_breaches.append(f"{sd.stage_id}_BLOCKING_FAIL")
-            continue
-
-        if sd.stage_id == "A6B_AUTHORIZATION_ARTIFACTS_DAY_V1":
-            if not required:
-                sr = StageResult(
-                    stage_id=sd.stage_id,
-                    classification=classification,
-                    executed=False,
-                    rc=0,
-                    status="SKIP",
-                    reason_codes=["SKIP_NOT_REQUIRED_NO_ACTIVITY"],
-                    outputs_present=[],
-                )
-                stage_results.append(sr.__dict__)
-                attempt_manifest["stages"].append(sr.__dict__)
-                continue
-
-        if sd.stage_id == "A6C_OPTIONS_CHAIN_CAPTURE_IB_DAY_V1":
-            if not required:
-                sr = StageResult(
-                    stage_id=sd.stage_id,
-                    classification=classification,
-                    executed=False,
-                    rc=0,
-                    status="SKIP",
-                    reason_codes=["SKIP_NOT_REQUIRED_NO_ACTIVITY"],
-                    outputs_present=[],
-                )
-                stage_results.append(sr.__dict__)
-                attempt_manifest["stages"].append(sr.__dict__)
-                continue
-            executed, rc, stage_reason_codes, outputs_present = _run_options_capture_stage(
-                truth_root=truth_root,
-                day=day,
-                env=stage_env,
-            )
-            sr = StageResult(
-                stage_id=sd.stage_id,
-                classification=classification,
-                executed=executed,
-                rc=int(rc),
-                status=("SKIP" if (not executed and rc == 0) else ("OK" if rc == 0 else "FAIL")),
-                reason_codes=list(stage_reason_codes),
-                outputs_present=outputs_present,
-            )
-            stage_results.append(sr.__dict__)
-            attempt_manifest["stages"].append(sr.__dict__)
-            if rc != 0:
-                safety_breaches.append(f"{sd.stage_id}_BLOCKING_FAIL")
-            continue
-
-        if sd.stage_id == "A6D_OPTIONS_CHAIN_TRUTH_PROMOTION_DAY_V1":
-            if not required:
-                sr = StageResult(
-                    stage_id=sd.stage_id,
-                    classification=classification,
-                    executed=False,
-                    rc=0,
-                    status="SKIP",
-                    reason_codes=["SKIP_NOT_REQUIRED_NO_ACTIVITY"],
-                    outputs_present=[],
-                )
-                stage_results.append(sr.__dict__)
-                attempt_manifest["stages"].append(sr.__dict__)
-                continue
-            executed, rc, stage_reason_codes, outputs_present = _run_options_promotion_stage(
-                truth_root=truth_root,
-                day=day,
-                env=stage_env,
-            )
-            sr = StageResult(
-                stage_id=sd.stage_id,
-                classification=classification,
-                executed=executed,
-                rc=int(rc),
-                status=("SKIP" if (not executed and rc == 0) else ("OK" if rc == 0 else "FAIL")),
-                reason_codes=list(stage_reason_codes),
-                outputs_present=outputs_present,
-            )
-            stage_results.append(sr.__dict__)
-            attempt_manifest["stages"].append(sr.__dict__)
-            if rc != 0:
-                safety_breaches.append(f"{sd.stage_id}_BLOCKING_FAIL")
-            continue
-
-        if sd.stage_id == "A6E_MARKET_DATA_SNAPSHOT_REFRESH_V1":
-            if not required:
-                sr = StageResult(
-                    stage_id=sd.stage_id,
-                    classification=classification,
-                    executed=False,
-                    rc=0,
-                    status="SKIP",
-                    reason_codes=["SKIP_NOT_REQUIRED_NO_ACTIVITY"],
-                    outputs_present=[],
-                )
-                stage_results.append(sr.__dict__)
-                attempt_manifest["stages"].append(sr.__dict__)
-                continue
-            executed, rc, stage_reason_codes, outputs_present = _run_market_data_refresh_stage(
-                truth_root=truth_root,
-                day=day,
-                produced_utc=produced_utc,
-                env=stage_env,
-            )
-            sr = StageResult(
-                stage_id=sd.stage_id,
-                classification=classification,
-                executed=executed,
-                rc=int(rc),
-                status=("SKIP" if (not executed and rc == 0) else ("OK" if rc == 0 else "FAIL")),
-                reason_codes=list(stage_reason_codes),
-                outputs_present=outputs_present,
-            )
-            stage_results.append(sr.__dict__)
-            attempt_manifest["stages"].append(sr.__dict__)
-            if rc != 0:
-                safety_breaches.append(f"{sd.stage_id}_BLOCKING_FAIL")
-            continue
-
-        if sd.stage_id == "A6A_RUN_POINTER_APPEND_V1":
-            if not required:
-                sr = StageResult(
-                    stage_id=sd.stage_id,
-                    classification=classification,
-                    executed=False,
-                    rc=0,
-                    status="SKIP",
-                    reason_codes=["SKIP_NOT_REQUIRED_NO_ACTIVITY"],
-                    outputs_present=[],
-                )
-                stage_results.append(sr.__dict__)
-                attempt_manifest["stages"].append(sr.__dict__)
-                continue
-            rp_rc, rp_reason_codes = _append_run_pointer_v1(
-                truth_root=truth_root,
-                day=day,
-                mode=mode,
-                attempt_id=attempt_id,
-                attempt_seq=int(attempt_seq),
-                cfg_hash=cfg_hash,
-                git_sha=git_sha,
-            )
-            rp_ok = (rp_rc == 0)
-            sr = StageResult(
-                stage_id=sd.stage_id,
-                classification=classification,
-                executed=True,
-                rc=int(rp_rc),
-                status="OK" if rp_ok else "FAIL",
-                reason_codes=list(rp_reason_codes),
-                outputs_present=[],
-            )
-            stage_results.append(sr.__dict__)
-            attempt_manifest["stages"].append(sr.__dict__)
-            if not rp_ok:
-                safety_breaches.append(f"{sd.stage_id}_BLOCKING_FAIL")
-            continue
-
-        if sd.stage_id == "A7_PHASEC_IDENTITY_MATERIALIZER_DAY_V1":
-            if not required:
-                sr = StageResult(
-                    stage_id=sd.stage_id,
-                    classification=classification,
-                    executed=False,
-                    rc=0,
-                    status="SKIP",
-                    reason_codes=["SKIP_NOT_REQUIRED_NO_ACTIVITY"],
-                    outputs_present=[],
-                )
-                stage_results.append(sr.__dict__)
-                attempt_manifest["stages"].append(sr.__dict__)
-                continue
-            cmd, stage_reason_codes = _build_phasec_materializer_cmd(
-                truth_root=truth_root,
-                day=day,
-                produced_utc=produced_utc,
-            )
-            rc = _run_cmd(sd.stage_id, cmd, env=stage_env)
-            ok = (rc == 0)
-            sr = StageResult(
-                stage_id=sd.stage_id,
-                classification=classification,
-                executed=True,
-                rc=int(rc),
-                status="OK" if ok else "FAIL",
-                reason_codes=list(stage_reason_codes),
-                outputs_present=[],
-            )
-            stage_results.append(sr.__dict__)
-            attempt_manifest["stages"].append(sr.__dict__)
-            if not ok:
-                safety_breaches.append(f"{sd.stage_id}_BLOCKING_FAIL")
-            continue
-
-        if sd.stage_id in ("B0_EXECUTION_STREAM_SNAPSHOT_V1", "B1_FILL_LEDGER_V1", "B2_EXECUTION_RECONCILIATION_V1"):
-            governed_submission_count = _count_broker_submission_records(truth_root, day)
-            if governed_submission_count <= 0:
-                sr = StageResult(
-                    stage_id=sd.stage_id,
-                    classification=classification,
-                    executed=False,
-                    rc=0,
-                    status="SKIP",
-                    reason_codes=[
-                        "SKIP_SAFE_IDLE_NO_GOVERNED_SUBMISSIONS"
-                        if not effective_activity
-                        else "SKIP_NO_GOVERNED_SUBMISSIONS"
-                    ],
-                    outputs_present=[],
-                )
-                stage_results.append(sr.__dict__)
-                attempt_manifest["stages"].append(sr.__dict__)
-                continue
-
-        if sd.stage_id == "B0_POSITIONS_SNAPSHOT_V2":
-            outputs_present = [p for p in sd.skip_if_exists_paths if _path_exists(p)]
-            if outputs_present and _positions_snapshot_v2_skip_safe(truth_root, day):
-                sr = StageResult(
-                    stage_id=sd.stage_id,
-                    classification=classification,
-                    executed=False,
-                    rc=0,
-                    status="SKIP",
-                    reason_codes=["SKIP_EXISTING_OUTPUTS_AVOID_REWRITE"],
-                    outputs_present=outputs_present,
-                )
-                stage_results.append(sr.__dict__)
-                attempt_manifest["stages"].append(sr.__dict__)
-                continue
-        elif sd.stage_id == "A4A_ALLOCATION_DAY_V2":
-            outputs_present = [p for p in sd.skip_if_exists_paths if _path_exists(p)]
-            if outputs_present and _allocation_summary_v1_skip_safe(Path(outputs_present[0]), day):
-                sr = StageResult(
-                    stage_id=sd.stage_id,
-                    classification=classification,
-                    executed=False,
-                    rc=0,
-                    status="SKIP",
-                    reason_codes=["SKIP_EXISTING_OUTPUTS_AVOID_REWRITE"],
-                    outputs_present=outputs_present,
-                )
-                stage_results.append(sr.__dict__)
-                attempt_manifest["stages"].append(sr.__dict__)
-                continue
-        elif sd.stage_id == "A5_CAPITAL_RISK_ENVELOPE_GATE_V2":
-            outputs_present = [p for p in sd.skip_if_exists_paths if _path_exists(p)]
-            if outputs_present and _capital_risk_envelope_v2_skip_safe(Path(outputs_present[0]), day):
-                sr = StageResult(
-                    stage_id=sd.stage_id,
-                    classification=classification,
-                    executed=False,
-                    rc=0,
-                    status="SKIP",
-                    reason_codes=["SKIP_EXISTING_OUTPUTS_AVOID_REWRITE"],
-                    outputs_present=outputs_present,
-                )
-                stage_results.append(sr.__dict__)
-                attempt_manifest["stages"].append(sr.__dict__)
-                continue
-        elif sd.stage_id == "B1_FILL_LEDGER_V1":
-            if _fill_ledger_skip_safe(truth_root, day):
-                sr = StageResult(
-                    stage_id=sd.stage_id,
-                    classification=classification,
-                    executed=False,
-                    rc=0,
-                    status="SKIP",
-                    reason_codes=["SKIP_EXISTING_OUTPUTS_AVOID_REWRITE"],
-                    outputs_present=[str((truth_root / "fill_ledger_v1" / day).resolve())],
-                )
-                stage_results.append(sr.__dict__)
-                attempt_manifest["stages"].append(sr.__dict__)
-                continue
-        else:
-            outputs_present = [p for p in sd.skip_if_exists_paths if _path_exists(p)]
-            if _should_skip_existing_outputs(sd, outputs_present):
-                sr = StageResult(
-                    stage_id=sd.stage_id,
-                    classification=classification,
-                    executed=False,
-                    rc=0,
-                    status="SKIP",
-                    reason_codes=["SKIP_EXISTING_OUTPUTS_AVOID_REWRITE"],
-                    outputs_present=outputs_present,
-                )
-                stage_results.append(sr.__dict__)
-                attempt_manifest["stages"].append(sr.__dict__)
-                continue
-
-        rc = _run_cmd(sd.stage_id, sd.cmd, env=stage_env)
-        ok = (rc == 0)
-
-        if ok:
-            sr = StageResult(
-                stage_id=sd.stage_id,
-                classification=classification,
-                executed=True,
-                rc=int(rc),
-                status="OK",
-                reason_codes=[],
-                outputs_present=[],
-            )
-            stage_results.append(sr.__dict__)
-            attempt_manifest["stages"].append(sr.__dict__)
-            continue
-
-        if blocking:
-            safety_breaches.append(f"{sd.stage_id}_BLOCKING_FAIL")
-            fail_code = "SAFETY_BREACH_BLOCKING_STAGE_FAIL"
-        else:
-            if required:
-                any_required_fail = True
-                fail_code = "REQUIRED_STAGE_FAIL"
-            else:
-                any_optional_fail = True
-                fail_code = "OPTIONAL_STAGE_FAIL"
-
-        sr = StageResult(
-            stage_id=sd.stage_id,
-            classification=classification,
-            executed=True,
-            rc=int(rc),
-            status="FAIL",
-            reason_codes=[fail_code],
-            outputs_present=[],
-        )
-        stage_results.append(sr.__dict__)
-        attempt_manifest["stages"].append(sr.__dict__)
-
-    if safety_breaches:
-        status = "ABORTED"
-        reason_codes.append("SAFETY_BREACH")
-    elif governed_abort_reasons:
-        status = "ABORTED"
-        reason_codes.extend(governed_abort_reasons)
-    else:
-        if session_state == "UNKNOWN_SESSION":
-            status = "FAIL" if effective_activity else "DEGRADED"
-            if "UNKNOWN_SESSION" not in reason_codes:
-                reason_codes.append("UNKNOWN_SESSION")
-        elif session_state == "NON_TRADING_SESSION":
-            status = "DEGRADED"
-            if "NON_TRADING_SESSION" not in reason_codes:
-                reason_codes.append("NON_TRADING_SESSION")
-        elif any_required_fail:
-            status = "FAIL"
-            reason_codes.append("REQUIRED_FAILURE")
-        elif any_optional_fail or not effective_activity:
-            status = "DEGRADED"
-            if not effective_activity:
-                reason_codes.append("NO_ACTIVITY_DAY")
-        else:
-            status = "PASS"
-
-    out_dir = (verdict_root / day / attempt_id).resolve()
-    man_wr = _write_attempt_file(out_dir / "orchestrator_attempt_manifest.v2.json", _json_dumps(attempt_manifest))
-    attempt_manifest_path = (out_dir / "orchestrator_attempt_manifest.v2.json").resolve()
-
-    pub3_ok, pub3_rc = _publish_pipeline_manifest_v3(
-        day=day,
-        mode=mode,
-        attempt_id=attempt_id,
-        attempt_seq=int(attempt_seq),
-        attempt_manifest_path=attempt_manifest_path,
-        env=stage_env,
-    )
-    if not pub3_ok:
-        reason_codes.append("PIPELINE_MANIFEST_V3_PUBLISH_FAIL")
-        reason_codes.append(f"PIPELINE_MANIFEST_V3_PUBLISH_RC={pub3_rc}")
-        if status == "PASS":
-            status = "DEGRADED"
-
-    pub2_ok, pub2_rc = _publish_pipeline_manifest_v2_compat(
-        day=day,
-        attempt_manifest_path=attempt_manifest_path,
-        truth_root=truth_root,
-        env=stage_env,
-    )
-    if not pub2_ok:
-        reason_codes.append("PIPELINE_MANIFEST_V2_COMPAT_PUBLISH_FAIL")
-        reason_codes.append(f"PIPELINE_MANIFEST_V2_COMPAT_PUBLISH_RC={pub2_rc}")
-        if status == "PASS":
-            status = "DEGRADED"
-
-    pub1_ok, pub1_rc = _publish_pipeline_manifest_v1_compat(
-        day=day,
-        attempt_manifest_path=attempt_manifest_path,
-        truth_root=truth_root,
-        env=stage_env,
-    )
-    if not pub1_ok:
-        reason_codes.append("PIPELINE_MANIFEST_V1_COMPAT_PUBLISH_FAIL")
-        reason_codes.append(f"PIPELINE_MANIFEST_V1_COMPAT_PUBLISH_RC={pub1_rc}")
-        if status == "PASS":
-            status = "DEGRADED"
-
-    verdict = {
-        "schema_id": "C2_ORCHESTRATOR_RUN_VERDICT_V2",
-        "day_utc": day,
-        "input_day_utc": input_day,
-        "mode": mode,
-        "symbol": symbol,
-        "ib_account": ib_account,
-        "attempt_id": attempt_id,
-        "attempt_seq": int(attempt_seq),
-        "produced_utc": produced_utc,
-        "status": status,
-        "safety_breaches": list(safety_breaches),
-        "reason_codes": list(reason_codes),
-        "stages": stage_results,
-        "replay": {
-            "derived_from_attempt_manifest": True,
-            "hashes": {"attempt_manifest_sha256": str(man_wr["sha256"])},
-        },
-        "producer": {"repo": REPO_ROOT.name, "module": "ops/tools/run_c2_paper_day_orchestrator_v2.py", "git_sha": git_sha},
-    }
-
-    verdict_path = (out_dir / "orchestrator_run_verdict.v2.json").resolve()
-    _write_attempt_file(verdict_path, _json_dumps(verdict))
-
-    day_root = (verdict_root / day).resolve()
-    idx_path = (day_root / POINTER_INDEX_NAME).resolve()
-    lock_path = (day_root / POINTER_LOCK_NAME).resolve()
-
-    lock_fd = _pointer_lock_acquire(lock_path)
-    try:
-        last_seq = _read_last_pointer_seq(idx_path, mode)
-        pointer_seq = last_seq + 1
-
-        entry = {
-            "schema_id": "C2_ORCHESTRATOR_RUN_VERDICT_V2_POINTER_INDEX_V1",
-            "pointer_seq": int(pointer_seq),
-            "day_utc": day,
-            "mode": mode,
-            "attempt_id": attempt_id,
-            "attempt_seq": int(attempt_seq),
-            "status": status,
-            "authoritative": bool(status == "PASS"),
-            "producer_git_sha": git_sha,
-            "produced_utc": f"{day}T00:00:00Z",
-            "points_to": str(verdict_path),
-            "attempt_manifest_path": str(attempt_manifest_path),
-        }
-        line_sha, _ = _atomic_append_jsonl(idx_path, entry)
-    finally:
-        _pointer_lock_release(lock_fd, lock_path)
-
-    _write_attempt_file(
-        out_dir / "orchestrator_run_verdict.v2.pointer_append.sha256.json",
-        _json_dumps({"append_line_sha256": line_sha, "index_path": str(idx_path)}),
-    )
-
-    if status == "ABORTED":
-        return 9
-    return 0
+    report = run_paper_day_orchestrator_obligation_pipeline_v1(args)
+    if args.emit_pipeline_report:
+        json.dump(report, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+    return int(report["exit_code"])
 
 
 if __name__ == "__main__":

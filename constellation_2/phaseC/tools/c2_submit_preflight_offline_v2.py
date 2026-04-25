@@ -37,6 +37,10 @@ from constellation_2.phaseC.lib.validate_against_schema_v1 import (  # noqa: E40
     SchemaValidationError,
     validate_against_repo_schema_v1,
 )
+from constellation_2.common.execution_identity_authority_v1 import (  # noqa: E402
+    derive_submission_id_v1,
+    resolve_intent_id_v1,
+)
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1  # noqa: E402
 from constellation_2.phaseD.lib.ib_payload_stock_order_v2 import build_binding_digest_for_equity_order_plan_v2  # noqa: E402
 
@@ -88,6 +92,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--intent", required=True, help="Path to equity_intent.v1.json")
     ap.add_argument("--equity_order_plan", required=True, help="Path to equity_order_plan.v2.json")
     ap.add_argument("--eval_time_utc", required=True, help="Evaluation time UTC (ISO-8601 with Z suffix)")
+    ap.add_argument("--trade_instance_id", default="", help="Optional governed trade instance identity for same-day execution identity authority")
     ap.add_argument("--out_dir", required=True, help="Output directory (must not exist or must be empty)")
     args = ap.parse_args(argv)
 
@@ -112,11 +117,17 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     intent_hash = canonical_hash_for_c2_artifact_v1(intent)
     plan_hash = canonical_hash_for_c2_artifact_v1(plan)
+    trade_instance_id = str(args.trade_instance_id or "").strip()
+    intent_id = resolve_intent_id_v1(intent_obj=intent, plan_obj=plan)
+
+    mrec_record_id_seed = {"intent_hash": intent_hash, "plan_hash": plan_hash, "mode": "EQUITY_DIRECT_V1"}
+    if trade_instance_id:
+        mrec_record_id_seed["trade_instance_id"] = trade_instance_id
 
     mrec = {
         "schema_id": "mapping_ledger_record",
         "schema_version": "v2",
-        "record_id": canonical_hash_for_c2_artifact_v1({"intent_hash": intent_hash, "plan_hash": plan_hash, "mode": "EQUITY_DIRECT_V1"}),
+        "record_id": canonical_hash_for_c2_artifact_v1(mrec_record_id_seed),
         "created_at_utc": args.eval_time_utc,
         "intent_hash": intent_hash,
         "plan_hash": plan_hash,
@@ -131,11 +142,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         "selection_trace": {"policy": "EQUITY_DIRECT_PLAN_V1", "tie_breakers": ["EQUITY_PLAN_PROVIDED"]},
         "canonical_json_hash": None,
     }
+    if trade_instance_id:
+        mrec["intent_id"] = intent_id
+        mrec["trade_instance_id"] = trade_instance_id
     mrec["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(mrec)
     validate_against_repo_schema_v1(mrec, REPO_ROOT, "constellation_2/schemas/mapping_ledger_record.v2.schema.json")
     mrec_hash = canonical_hash_for_c2_artifact_v1(mrec)
 
     _payload_obj, dig = build_binding_digest_for_equity_order_plan_v2(plan)
+    submission_id = derive_submission_id_v1(intent_id=intent_id, plan_hash=plan_hash, trade_instance_id=trade_instance_id) if trade_instance_id else ""
 
     brec = {
         "schema_id": "binding_record",
@@ -155,6 +170,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         },
         "canonical_json_hash": None,
     }
+    if trade_instance_id:
+        brec["intent_id"] = intent_id
+        brec["intent_hash"] = intent_hash
+        brec["trade_instance_id"] = trade_instance_id
+        brec["submission_id"] = submission_id
     brec["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(brec)
     validate_against_repo_schema_v1(brec, REPO_ROOT, "constellation_2/schemas/binding_record.v2.schema.json")
 

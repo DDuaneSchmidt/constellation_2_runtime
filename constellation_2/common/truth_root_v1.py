@@ -14,6 +14,12 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from constellation_2.common.runtime_contract_v1 import (
+    require_truth_root_under_contract,
+    resolve_runtime_data_root,
+    resolve_truth_sleeves_root,
+)
+
 
 ENV_VAR = "C2_TRUTH_ROOT"
 AUTHORITY_MODE_ENV_VAR = "C2_AUTHORITY_MODE"
@@ -22,12 +28,11 @@ AUTHORITY_MODE_GOVERNANCE_PRIMARY = "governance_primary"
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GOVERNANCE_ROOT = (REPO_ROOT / "governance").resolve()
-RUNTIME_ROOT = Path("/home/node/constellation_runtime_data").resolve()
-RUNTIME_TRUTH_ROOT = (RUNTIME_ROOT / "truth_sleeves" / "PRIMARY" / "PAPER").resolve()
 
 
 def _governance_truth_root(repo_root: Path) -> Path:
-    return RUNTIME_TRUTH_ROOT
+    _require_under_repo(repo_root, label="repo_root")
+    return (resolve_truth_sleeves_root().resolve() / "PRIMARY" / "PAPER").resolve()
 
 
 def _require_absolute_existing_dir(path: Path, *, label: str) -> Path:
@@ -69,7 +74,7 @@ def resolve_governance_root() -> Path:
 
 
 def resolve_runtime_root() -> Path:
-    return _require_absolute_existing_dir(RUNTIME_ROOT, label="RUNTIME_ROOT")
+    return _require_absolute_existing_dir(resolve_runtime_data_root().resolve(), label="RUNTIME_ROOT")
 
 
 def resolve_governance_path(*parts: str) -> Path:
@@ -87,15 +92,18 @@ def resolve_runtime_path(*parts: str) -> Path:
 
 
 def resolve_runtime_truth_root() -> Path:
-    runtime_root = resolve_runtime_root()
-    default_root = _require_absolute_existing_dir(RUNTIME_TRUTH_ROOT, label="RUNTIME_TRUTH_ROOT")
+    default_root = _require_absolute_existing_dir(
+        (resolve_truth_sleeves_root().resolve() / "PRIMARY" / "PAPER").resolve(),
+        label="RUNTIME_TRUTH_ROOT",
+    )
 
     raw = (os.environ.get(ENV_VAR) or "").strip()
     if not raw:
         return default_root
 
-    pr = _require_absolute_existing_dir(Path(raw).expanduser().resolve(), label=ENV_VAR)
-    return _require_under_root(pr, root=runtime_root, label=ENV_VAR)
+    return require_truth_root_under_contract(
+        _require_absolute_existing_dir(Path(raw).expanduser().resolve(), label=ENV_VAR)
+    )
 
 
 def resolve_truth_root(*, repo_root: Path) -> Path:
@@ -107,8 +115,9 @@ def resolve_truth_root(*, repo_root: Path) -> Path:
         raw = (os.environ.get(ENV_VAR) or "").strip()
         if not raw:
             return default_root
-        pr = _require_absolute_existing_dir(Path(raw).expanduser().resolve(), label=ENV_VAR)
-        return _require_under_root(pr, root=resolve_runtime_root(), label=ENV_VAR)
+        return require_truth_root_under_contract(
+            _require_absolute_existing_dir(Path(raw).expanduser().resolve(), label=ENV_VAR)
+        )
     return resolve_runtime_truth_root()
 
 

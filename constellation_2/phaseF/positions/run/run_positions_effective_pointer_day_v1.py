@@ -7,20 +7,16 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+from constellation_2.common.truth_root_v1 import resolve_truth_root
 from constellation_2.phaseD.lib.canon_json_v1 import CanonicalizationError, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 from constellation_2.phaseF.positions.lib.paths_effective_v1 import REPO_ROOT, day_paths_effective_v1
-from constellation_2.phaseF.positions.lib.paths_v2 import day_paths_v2
-from constellation_2.phaseF.positions.lib.paths_v3 import day_paths_v3
-from constellation_2.phaseF.positions.lib.paths_v4 import day_paths_v4
 from constellation_2.phaseF.positions.lib.write_failure_v1 import build_failure_obj_v1, write_failure_immutable_v1
 
 
 SCHEMA_EFFECTIVE_PTR_V1 = "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_effective_pointer.v1.schema.json"
-SCHEMA_V4 = "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_snapshot.v4.schema.json"
-SCHEMA_V3 = "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_snapshot.v3.schema.json"
-SCHEMA_V2 = "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_snapshot.v2.schema.json"
+SCHEMA_V5 = "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_snapshot.v5.schema.json"
 
 
 def _sha256_file(path: Path) -> str:
@@ -62,16 +58,10 @@ def _producer_sha_lock_if_existing(path: Path, producer_sha: str) -> int:
 
 
 def _choose_snapshot(day_utc: str) -> Tuple[str, int, Path]:
-    # Prefer v4 if present; else v3; else v2.
-    p4 = day_paths_v4(day_utc).snapshot_path
-    if p4.exists() and p4.is_file():
-        return ("C2_POSITIONS_SNAPSHOT_V4", 4, p4)
-    p3 = day_paths_v3(day_utc).snapshot_path
-    if p3.exists() and p3.is_file():
-        return ("C2_POSITIONS_SNAPSHOT_V3", 3, p3)
-    p2 = day_paths_v2(day_utc).snapshot_path
-    if p2.exists() and p2.is_file():
-        return ("C2_POSITIONS_SNAPSHOT_V2", 2, p2)
+    truth_root = resolve_truth_root(repo_root=REPO_ROOT)
+    p5 = (truth_root / "positions_v1" / "snapshots" / day_utc / "positions_snapshot.v5.json").resolve()
+    if p5.exists() and p5.is_file():
+        return ("C2_POSITIONS_SNAPSHOT_V5", 5, p5)
     raise FileNotFoundError("NO_POSITIONS_SNAPSHOT_FOUND")
 
 
@@ -107,7 +97,7 @@ def main(argv: List[str] | None = None) -> int:
             reason_codes=["NO_POSITIONS_SNAPSHOT_FOUND"],
             input_manifest=[],
             code="FAIL_CORRUPT_INPUTS",
-            message="No positions snapshot found for day (need v4, v3, or v2 snapshot).",
+            message="No canonical positions snapshot v5 found for day.",
             details={"day_utc": day_utc},
             attempted_outputs=[{"path": str(dp.pointer_path), "sha256": None}],
         )
@@ -117,15 +107,8 @@ def main(argv: List[str] | None = None) -> int:
 
     # Schema-validate selected snapshot (fail closed).
     snap_obj = _read_json_obj(snap_path)
-    if selected_schema_version == 4:
-        validate_against_repo_schema_v1(snap_obj, REPO_ROOT, SCHEMA_V4)
-        reason_codes = ["SELECTED_POSITIONS_V4"]
-    elif selected_schema_version == 3:
-        validate_against_repo_schema_v1(snap_obj, REPO_ROOT, SCHEMA_V3)
-        reason_codes = ["SELECTED_POSITIONS_V3"]
-    else:
-        validate_against_repo_schema_v1(snap_obj, REPO_ROOT, SCHEMA_V2)
-        reason_codes = ["SELECTED_POSITIONS_V2"]
+    validate_against_repo_schema_v1(snap_obj, REPO_ROOT, SCHEMA_V5)
+    reason_codes = ["SELECTED_POSITIONS_V5"]
 
     snap_sha = _sha256_file(snap_path)
 

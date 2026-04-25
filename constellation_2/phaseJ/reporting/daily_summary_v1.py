@@ -25,9 +25,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+_THIS_FILE = Path(__file__).resolve()
+_REPO_ROOT_FROM_FILE = _THIS_FILE.parents[3]
+if str(_REPO_ROOT_FROM_FILE) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
+
+from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
+
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime")
-CANON_DIR = REPO_ROOT / "constellation_2/runtime/truth/reports"
+CANON_DIR = (
+    resolve_canonical_truth_root_bridge_v1(caller="constellation_2/phaseJ/reporting/daily_summary_v1.py").resolve()
+    / "reports"
+).resolve()
 
 SNAPSHOT_BASENAME_RE = re.compile(r"^daily_portfolio_snapshot_v2_(\d{8})\.json$")
 SUMMARY_BASENAME_RE = re.compile(r"^daily_portfolio_summary_(\d{8})\.txt$")

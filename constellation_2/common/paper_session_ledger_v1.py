@@ -106,6 +106,7 @@ class PaperSessionLedgerV1:
     submit_lifecycle: dict[str, Any]
     post_submit_lifecycle: dict[str, Any]
     operator_summary: dict[str, Any]
+    constitutional_context: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, obj: dict[str, Any]) -> "PaperSessionLedgerV1":
@@ -127,6 +128,11 @@ class PaperSessionLedgerV1:
             submit_lifecycle=_normalize_section(dict(obj["submit_lifecycle"])),
             post_submit_lifecycle=_normalize_section(dict(obj["post_submit_lifecycle"])),
             operator_summary=_normalize_section(dict(obj["operator_summary"])),
+            constitutional_context=(
+                _normalize_section(dict(obj["constitutional_context"]))
+                if isinstance(obj.get("constitutional_context"), dict)
+                else None
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -146,6 +152,8 @@ class PaperSessionLedgerV1:
             "post_submit_lifecycle": _normalize_section(dict(self.post_submit_lifecycle)),
             "operator_summary": _normalize_section(dict(self.operator_summary)),
         }
+        if isinstance(self.constitutional_context, dict):
+            payload["constitutional_context"] = _normalize_section(dict(self.constitutional_context))
         validate_against_repo_schema_v1(payload, REPO_ROOT, SCHEMA_RELPATH_V1)
         validate_transition_history_v1(list(payload["control_state"]["transition_history"]))
         return payload
@@ -253,6 +261,7 @@ def build_paper_session_ledger_v1(
     submit_lifecycle: dict[str, Any],
     post_submit_lifecycle: dict[str, Any],
     operator_summary: dict[str, Any],
+    constitutional_context: dict[str, Any] | None = None,
 ) -> PaperSessionLedgerV1:
     ledger_seed = canonical_json_bytes_v1({"day_utc": str(day_utc), "session_id": str(session_id)})
     ledger_id = f"paper_session_ledger:{str(day_utc)}:{hashlib.sha256(ledger_seed).hexdigest()[:16]}"
@@ -296,6 +305,8 @@ def build_paper_session_ledger_v1(
         "post_submit_lifecycle": _normalize_section(dict(post_submit_lifecycle)),
         "operator_summary": _normalize_section(dict(operator_summary)),
     }
+    if isinstance(constitutional_context, dict):
+        payload["constitutional_context"] = _normalize_section(dict(constitutional_context))
     return PaperSessionLedgerV1.from_dict(payload)
 
 
@@ -337,6 +348,18 @@ def assert_paper_session_ledger_granted_v1(
     path: Path,
     day_utc: str,
 ) -> PaperSessionLedgerV1:
+    ledger = assert_paper_session_ledger_open_ready_v1(path=path, day_utc=day_utc)
+    control = ledger.control_state
+    if control.get("submission_authorized") is not True:
+        raise SystemExit(f"FAIL: PAPER_SESSION_LEDGER_NOT_SUBMIT_READY path={path}")
+    return ledger
+
+
+def assert_paper_session_ledger_open_ready_v1(
+    *,
+    path: Path,
+    day_utc: str,
+) -> PaperSessionLedgerV1:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     ledger = PaperSessionLedgerV1.from_dict(payload)
     if str(ledger.day_utc).strip() != str(day_utc).strip():
@@ -344,6 +367,6 @@ def assert_paper_session_ledger_granted_v1(
     control = ledger.control_state
     if str(control.get("authority_status") or "").strip().upper() != "GRANTED":
         raise SystemExit(f"FAIL: PAPER_SESSION_LEDGER_NOT_GRANTED path={path}")
-    if control.get("system_ready") is not True or control.get("submission_authorized") is not True:
-        raise SystemExit(f"FAIL: PAPER_SESSION_LEDGER_NOT_SUBMIT_READY path={path}")
+    if control.get("system_ready") is not True:
+        raise SystemExit(f"FAIL: PAPER_SESSION_LEDGER_NOT_OPEN_READY path={path}")
     return ledger

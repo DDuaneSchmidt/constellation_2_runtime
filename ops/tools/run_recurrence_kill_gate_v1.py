@@ -50,7 +50,8 @@ from constellation_2.common.recurrence_kill_gate_v1 import (
 from constellation_2.common.recurrence_registry_v1 import (
     update_recurrence_registry_v1,
 )
-from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
+from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
+from constellation_2.common.runtime_contract_v1 import load_active_runtime_contract_or_fail
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
 
@@ -67,7 +68,9 @@ def main(argv: list[str] | None = None) -> int:
 
     day_utc = str(args.day_utc).strip()
     live_day_value = live_day_utc_v1()
-    canonical_truth_root = resolve_canonical_truth_root()
+    canonical_truth_root = resolve_canonical_truth_root_bridge_v1(
+        caller="ops/tools/run_recurrence_kill_gate_v1.py"
+    )
     truth_root = (
         resolve_fact_plane_truth_root_v1(args.truth_root)
         if str(args.truth_root or "").strip()
@@ -89,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
 
     deployment_release = dict(deployment_payload.get("release_build") or {})
     active_symlink_target = ACTIVE_POINTER.resolve()
-    active_runtime_contract = read_json_object_v1(ACTIVE_RUNTIME_CONTRACT_PATH)
+    active_runtime_contract = load_active_runtime_contract_or_fail()
     active_release_manifest = _load_active_release_manifest(active_symlink_target)
 
     identity = execution_identity_tuple_v1(

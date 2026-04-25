@@ -25,14 +25,15 @@ Optional identity inputs (written when provided; immutable, canonical):
   - binding_record.v1.json
   - mapping_ledger_record.v1.json
 - Equity identity set:
-  - equity_order_plan.v1.json
+  - equity_order_plan.v2.json (preferred when schema_version=v2)
+  - equity_order_plan.v1.json (legacy when schema_version=v1)
   - binding_record.v2.json
   - mapping_ledger_record.v2.json
 
 IMPORTANT:
 - For plan files, write EXACTLY ONE of:
   - order_plan.v1.json (options) OR
-  - equity_order_plan.v1.json (equity)
+  - equity_order_plan.v2.json / equity_order_plan.v1.json (equity by schema_version)
 """
 
 from __future__ import annotations
@@ -67,12 +68,22 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
         raise EvidenceWriteError(f"ATOMIC_WRITE_FAILED: {str(path)}: {e}") from e
 
 
-def _ensure_out_dir_ready(out_dir: Path) -> None:
+def _ensure_out_dir_ready(
+    out_dir: Path,
+    *,
+    allowed_existing_filenames: tuple[str, ...] = (),
+) -> None:
+    allowed_existing = {str(name).strip() for name in allowed_existing_filenames if str(name).strip()}
     if out_dir.exists():
         if not out_dir.is_dir():
             raise EvidenceWriteError(f"OUT_DIR_NOT_DIRECTORY: {str(out_dir)}")
         entries = list(out_dir.iterdir())
-        if entries:
+        disallowed = [
+            entry
+            for entry in entries
+            if not entry.is_file() or entry.name not in allowed_existing
+        ]
+        if disallowed:
             raise EvidenceWriteError(f"OUT_DIR_NOT_EMPTY: {str(out_dir)}")
         return
     try:
@@ -104,12 +115,18 @@ def _write_optional_inputs_v1(
             except CanonicalizationError as e:
                 raise EvidenceWriteError(f"CANONICALIZATION_FAILED_DURING_WRITE: order_plan.v1.json: {e}") from e
         elif sid == "equity_order_plan":
-            p = out_dir / "equity_order_plan.v1.json"
+            sv = str(plan_obj.get("schema_version") or "").strip()
+            if sv == "v2":
+                p = out_dir / "equity_order_plan.v2.json"
+            elif sv in ("", "v1"):
+                p = out_dir / "equity_order_plan.v1.json"
+            else:
+                raise EvidenceWriteError(f"UNKNOWN_EQUITY_ORDER_PLAN_SCHEMA_VERSION: {sv!r}")
             _refuse_if_exists(p)
             try:
                 _atomic_write_bytes(p, canonical_json_bytes_v1(plan_obj) + b"\n")
             except CanonicalizationError as e:
-                raise EvidenceWriteError(f"CANONICALIZATION_FAILED_DURING_WRITE: equity_order_plan.v1.json: {e}") from e
+                raise EvidenceWriteError(f"CANONICALIZATION_FAILED_DURING_WRITE: {p.name}: {e}") from e
         else:
             raise EvidenceWriteError(f"UNKNOWN_PLAN_SCHEMA_ID_FOR_OPTIONAL_WRITE: {sid!r}")
 
@@ -151,8 +168,9 @@ def write_phased_submission_only_v1(
     order_plan: Optional[Dict[str, Any]] = None,
     binding_record: Optional[Dict[str, Any]] = None,
     mapping_ledger_record: Optional[Dict[str, Any]] = None,
+    allowed_existing_filenames: tuple[str, ...] = (),
 ) -> None:
-    _ensure_out_dir_ready(out_dir)
+    _ensure_out_dir_ready(out_dir, allowed_existing_filenames=allowed_existing_filenames)
 
     p_sub = out_dir / "broker_submission_record.v2.json"
     _refuse_if_exists(p_sub)
@@ -178,8 +196,9 @@ def write_phased_success_outputs_v1(
     order_plan: Optional[Dict[str, Any]] = None,
     binding_record: Optional[Dict[str, Any]] = None,
     mapping_ledger_record: Optional[Dict[str, Any]] = None,
+    allowed_existing_filenames: tuple[str, ...] = (),
 ) -> None:
-    _ensure_out_dir_ready(out_dir)
+    _ensure_out_dir_ready(out_dir, allowed_existing_filenames=allowed_existing_filenames)
 
     p_sub = out_dir / "broker_submission_record.v2.json"
     p_evt = out_dir / "execution_event_record.v1.json"
@@ -208,8 +227,9 @@ def write_phased_veto_only_v1(
     order_plan: Optional[Dict[str, Any]] = None,
     binding_record: Optional[Dict[str, Any]] = None,
     mapping_ledger_record: Optional[Dict[str, Any]] = None,
+    allowed_existing_filenames: tuple[str, ...] = (),
 ) -> None:
-    _ensure_out_dir_ready(out_dir)
+    _ensure_out_dir_ready(out_dir, allowed_existing_filenames=allowed_existing_filenames)
 
     p_veto = out_dir / "veto_record.v1.json"
     _refuse_if_exists(p_veto)
@@ -236,6 +256,7 @@ def expected_outputs_for_dir_v1(out_dir: Path) -> Dict[str, Optional[Path]]:
         # identity inputs (either options or equity)
         "order_plan": out_dir / "order_plan.v1.json",
         "equity_order_plan": out_dir / "equity_order_plan.v1.json",
+        "equity_order_plan_v2": out_dir / "equity_order_plan.v2.json",
         "binding_record_v1": out_dir / "binding_record.v1.json",
         "binding_record_v2": out_dir / "binding_record.v2.json",
         "mapping_ledger_record_v1": out_dir / "mapping_ledger_record.v1.json",

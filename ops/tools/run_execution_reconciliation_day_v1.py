@@ -39,10 +39,22 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+from constellation_2.common.operator_semantic_classifier_v1 import (
+    classify_operator_semantic_status_v1,
+)
+from constellation_2.common.day_open_attempt_v1 import (
+    read_day_open_attempt_runtime_lifecycle_ref_v1,
+)
+from constellation_2.common.runtime_ledger_v1 import (
+    projection_over_runtime_ledger_v1,
+    read_runtime_ledger_events_v1,
+    runtime_ledger_ref_v1,
+)
 
-DEFAULT_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+DEFAULT_TRUTH_ROOT = resolve_canonical_truth_root().resolve()
 
 SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/execution_reconciliation.v1.schema.json"
 
@@ -134,7 +146,14 @@ def main() -> int:
     sub_root = (truth / "execution_evidence_v1/submissions").resolve()
     stream_root = (truth / "execution_stream_v1").resolve()
     ledger_root = (truth / "fill_ledger_v1").resolve()
+    closure_root = (truth / "reports" / "canonical_lifecycle_closure_v1").resolve()
     out_root = (truth / "reports" / "execution_reconciliation_v1").resolve()
+    runtime_ledger = runtime_ledger_ref_v1(truth_root=truth, day_utc=day)
+    runtime_ledger_events = read_runtime_ledger_events_v1(truth_root=truth, day_utc=day)
+    day_open_attempt_path, runtime_lifecycle_ref = read_day_open_attempt_runtime_lifecycle_ref_v1(
+        truth_root=truth,
+        day_utc=day,
+    )
 
     sub_day = (sub_root / day).resolve()
     if not sub_day.exists() or not sub_day.is_dir():
@@ -142,6 +161,7 @@ def main() -> int:
 
     stream_day = (stream_root / day).resolve()
     ledger_day = (ledger_root / day).resolve()
+    closure_day = (closure_root / day).resolve()
 
     checks: List[Dict[str, Any]] = []
     reason_codes: List[str] = []
@@ -156,14 +176,42 @@ def main() -> int:
     ledger_present = ledger_day.exists() and ledger_day.is_dir()
     checks.append({"check_id": "FILL_LEDGER_DAY_DIR_PRESENT", "pass": bool(ledger_present), "details": str(ledger_day)})
 
+    closure_present = closure_day.exists() and closure_day.is_dir()
+    checks.append(
+        {
+            "check_id": "CANONICAL_LIFECYCLE_CLOSURE_DAY_DIR_PRESENT",
+            "pass": bool(closure_present),
+            "details": str(closure_day),
+        }
+    )
+    checks.append(
+        {
+            "check_id": "CANONICAL_RUNTIME_LEDGER_PRESENT",
+            "pass": bool(runtime_ledger["exists"]),
+            "details": str(runtime_ledger["path"]),
+        }
+    )
+
     if not ledger_present:
         raise SystemExit(f"FAIL: MISSING_FILL_LEDGER_DAY_DIR: {ledger_day}")
 
     # Gather submissions
     submission_records = sorted([p for p in sub_day.glob("*/broker_submission_record.v2.json") if p.is_file()])
+    closure_records = sorted([p for p in closure_day.glob("*/canonical_lifecycle_closure.v1.json") if p.is_file()]) if closure_present else []
+    checks.append(
+        {
+            "check_id": "CANONICAL_LIFECYCLE_CLOSURE_COUNT",
+            "pass": True,
+            "details": f"closure_count={len(closure_records)}",
+        }
+    )
     if not submission_records:
-        # No submissions is allowed; still produces a deterministic report.
-        reason_codes.append("NO_SUBMISSIONS_FOUND")
+        if closure_records:
+            status = "FAIL"
+            reason_codes.append("CANONICAL_CLOSURE_WITHOUT_SUBMISSION_EVIDENCE")
+        else:
+            # No submissions is allowed; still produces a deterministic report.
+            reason_codes.append("NO_SUBMISSIONS_FOUND")
 
     submissions: List[Dict[str, Any]] = []
     for p in submission_records:
@@ -195,11 +243,41 @@ def main() -> int:
         status = "FAIL"
         reason_codes.append("DUPLICATE_SUBMISSION_ID")
 
+    if not (stream_present and closure_present and bool(runtime_ledger["exists"])):
+        status = "FAIL"
+        reason_codes.append("UPSTREAM_NOT_MATERIALIZED")
+
+    semantic_status = classify_operator_semantic_status_v1(
+        required_facts_present=bool(
+            sub_day.exists()
+            and sub_day.is_dir()
+            and ledger_present
+            and stream_present
+            and closure_present
+            and bool(runtime_ledger["exists"])
+        ),
+        blocked_by_upstream_prerequisite=False,
+        pending_propagation=False,
+        materialized_failure=status != "PASS",
+        fully_observed_and_confirmed=status == "PASS",
+    )
+
     input_manifest = [
+        {"type": "runtime_ledger_day_file", "path": str(runtime_ledger["path"]), "sha256": str(runtime_ledger["sha256"] or _sha256_bytes(b""))},
         {"type": "submissions_day_dir", "path": str(sub_day), "sha256": _sha256_dir_deterministic(sub_day)},
         {"type": "execution_stream_day_dir", "path": str(stream_day), "sha256": _sha256_dir_deterministic(stream_day)},
         {"type": "fill_ledger_day_dir", "path": str(ledger_day), "sha256": _sha256_dir_deterministic(ledger_day)},
+        {"type": "canonical_lifecycle_closure_day_dir", "path": str(closure_day), "sha256": _sha256_dir_deterministic(closure_day)},
     ]
+    if runtime_lifecycle_ref is not None:
+        input_manifest.append(
+            {
+                "type": "day_open_attempt_v1",
+                "path": str(day_open_attempt_path),
+                "sha256": _sha256_file(day_open_attempt_path),
+            }
+        )
+    out_path = (out_root / day / "execution_reconciliation.v1.json").resolve()
 
     # Build report payload
     payload_obj: Dict[str, Any] = {
@@ -208,9 +286,31 @@ def main() -> int:
         "day_utc": day,
         "produced_utc": produced_utc,
         "status": status,
+        "semantic_status": semantic_status,
         "reason_codes": reason_codes,
         "input_manifest": input_manifest,
         "checks": checks,
+        "audit_guidance": {
+            "preferred_consumption_mode": "IMMUTABLE_VERSIONED_SNAPSHOT",
+            "versioned_snapshot_root": str((out_root / day).resolve()),
+            "alias_path": str(out_path),
+            "alias_is_best_effort": True,
+        },
+        "runtime_ledger_projection": projection_over_runtime_ledger_v1(
+            truth_root=truth,
+            day_utc=day,
+            matched_event_types=sorted(
+                {
+                    str(event.get("event_type") or "").strip()
+                    for event in runtime_ledger_events
+                    if str(event.get("event_type") or "").strip()
+                }
+            ),
+            projection_notice=(
+                "Execution reconciliation is a projection over canonical runtime ledger truth plus canonical execution "
+                "evidence day directories."
+            ),
+        ),
         "producer": {
             "repo": "constellation_2_runtime",
             "module": "ops/tools/run_execution_reconciliation_day_v1.py",
@@ -218,6 +318,8 @@ def main() -> int:
         },
         "canonical_json_hash": "",
     }
+    if runtime_lifecycle_ref is not None:
+        payload_obj["runtime_lifecycle_ref"] = dict(runtime_lifecycle_ref)
 
     # Canonicalize + validate against schema
     payload_sha = canonical_hash_for_c2_artifact_v1(payload_obj)
@@ -225,10 +327,21 @@ def main() -> int:
     validate_against_repo_schema_v1(payload_obj, REPO_ROOT, SCHEMA)
     payload_bytes = canonical_json_bytes_v1(payload_obj) + b"\n"
 
-    out_path = (out_root / day / "execution_reconciliation.v1.json").resolve()
-    _write_immutable(out_path, payload_bytes)
+    versioned_path = (out_root / day / payload_sha / "execution_reconciliation.v1.json").resolve()
+    _write_immutable(versioned_path, payload_bytes)
 
-    print(f"OK: EXECUTION_RECONCILIATION_V1_WRITTEN day_utc={day} status={status} path={out_path} sha256={payload_sha}")
+    alias_status = "REUSED"
+    if out_path.exists():
+        if _sha256_bytes(out_path.read_bytes()) != _sha256_bytes(payload_bytes):
+            alias_status = "STALE_ALIAS"
+    else:
+        _write_immutable(out_path, payload_bytes)
+        alias_status = "WRITTEN"
+
+    print(
+        "OK: EXECUTION_RECONCILIATION_V1_WRITTEN "
+        f"day_utc={day} status={status} path={versioned_path} alias_path={out_path} alias_status={alias_status} sha256={payload_sha}"
+    )
     return 0 if status != "FAIL" else 0
 
 

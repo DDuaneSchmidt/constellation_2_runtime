@@ -15,6 +15,7 @@ from constellation_2.common.alerts_projection_v1 import (
     build_alerts_projection_v1,
     write_alerts_projection_v1,
 )
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
 from constellation_2.common.paper_session_fact_plane_v1 import (
     now_utc_iso_v1,
     read_json_object_v1,
@@ -27,6 +28,7 @@ from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_again
 
 
 CURRENT_PROJECTION_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/current_system_projection.v1.schema.json"
+DEFAULT_TRUTH_ROOT = resolve_canonical_truth_root().resolve()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -34,7 +36,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--day_utc", required=True)
     ap.add_argument(
         "--truth_root",
-        default=str((REPO_ROOT / "constellation_2/runtime/truth").resolve()),
+        default=str(DEFAULT_TRUTH_ROOT),
     )
     args = ap.parse_args(argv)
 

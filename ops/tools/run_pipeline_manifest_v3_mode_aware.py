@@ -31,7 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from constellation_2.common.runtime_contract_v1 import resolve_release_provenance
+from constellation_2.common.runtime_contract_v1 import resolve_release_provenance_release_current_first_v1
 from constellation_2.common.truth_root_v1 import resolve_truth_root
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
@@ -66,7 +66,12 @@ def _require_mode(mode: str) -> str:
 
 def _git_sha() -> str:
     try:
-        s = str(resolve_release_provenance().get("git_sha") or "").strip()
+        s = str(
+            resolve_release_provenance_release_current_first_v1(
+                caller="ops/tools/run_pipeline_manifest_v3_mode_aware.py"
+            ).get("git_sha")
+            or ""
+        ).strip()
         if s:
             return s
     except Exception:

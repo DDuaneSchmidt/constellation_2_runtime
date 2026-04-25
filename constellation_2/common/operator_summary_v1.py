@@ -63,6 +63,7 @@ def build_operator_summary(*, summary_kind: str, day_utc: str, truth_root: Path)
         "schema_id": "operator_summary",
         "schema_version": "v1",
         "authority_scope": "DERIVED_ONLY_VIEW",
+        "binding_classification": "LEGACY_DERIVED_ONLY",
         "summary_kind": "preopen",
         "day_utc": str(day_utc).strip(),
         "produced_at_utc": now_utc_iso_v1(),

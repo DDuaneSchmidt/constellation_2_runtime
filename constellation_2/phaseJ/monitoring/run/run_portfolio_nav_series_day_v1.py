@@ -43,10 +43,13 @@ from decimal import Decimal, ROUND_HALF_UP, getcontext
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH_ROOT = resolve_canonical_truth_root_bridge_v1(
+    caller="constellation_2/phaseJ/monitoring/run/run_portfolio_nav_series_day_v1.py"
+).resolve()
 
 ACCOUNTING_NAV_ROOT = (TRUTH_ROOT / "accounting_v1/nav").resolve()
 OUT_ROOT = (TRUTH_ROOT / "monitoring_v1/nav_series").resolve()

@@ -42,11 +42,17 @@ import subprocess
 from decimal import Decimal
 from typing import Any, Dict, List, Tuple
 
+from constellation_2.common.kill_switch_authority_v1 import (
+    RC_KILL_SWITCH_CANONICAL_MISSING,
+    STATUS_PASS as KILL_SWITCH_STATUS_PASS,
+    resolve_kill_switch_authority_v1,
+)
+from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH = resolve_canonical_truth_root_bridge_v1(caller="ops/tools/run_systemic_risk_gate_v2.py").resolve()
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RISK/systemic_risk_gate.v2.schema.json"
 OUT_ROOT = (TRUTH / "reports" / "systemic_risk_gate_v2").resolve()
@@ -165,21 +171,23 @@ def _eval_regime(day: str) -> Tuple[bool, Dict[str, Any], List[str], List[Dict[s
 def _eval_kill(day: str) -> Tuple[bool, Dict[str, Any], List[str], List[Dict[str, str]]]:
     rc: List[str] = []
     manifest: List[Dict[str, str]] = []
-    p = (PATH_KILL / day / "global_kill_switch_state.v1.json").resolve()
-    if not p.exists():
-        manifest.append({"type": "global_kill_switch_state_v1_missing", "path": str(p), "sha256": _sha256_bytes(b"")})
-        rc.append("MISSING_KILL_SWITCH_STATE_V1")
-        return (False, {}, rc, manifest)
+    result = resolve_kill_switch_authority_v1(canonical_truth_root=TRUTH, day_utc=day)
+    p = result.canonical_path
+    if result.status != KILL_SWITCH_STATUS_PASS:
+        manifest.append(
+            {
+                "type": "global_kill_switch_state_v1_missing" if result.reason_code == RC_KILL_SWITCH_CANONICAL_MISSING else "global_kill_switch_state_v1",
+                "path": str(p),
+                "sha256": result.canonical_sha256,
+            }
+        )
+        rc.append(str(result.reason_code or "KILL_SWITCH_PARSE_ERROR"))
+        return (False, result.payload or {}, rc, manifest)
 
-    manifest.append({"type": "global_kill_switch_state_v1", "path": str(p), "sha256": _sha256_file(p)})
-    try:
-        o = _read_json_obj(p)
-    except Exception:
-        rc.append("KILL_SWITCH_PARSE_ERROR")
-        return (False, {}, rc, manifest)
-
-    state = str(o.get("state") or "").strip().upper()
-    allow_entries = bool(o.get("allow_entries"))
+    manifest.append({"type": "global_kill_switch_state_v1", "path": str(p), "sha256": result.canonical_sha256})
+    o = result.payload or {}
+    state = result.state
+    allow_entries = result.allow_entries
     if not (state == "INACTIVE" and allow_entries is True):
         rc.append("KILL_SWITCH_ACTIVE_OR_ENTRIES_DISABLED")
         return (False, o, rc, manifest)

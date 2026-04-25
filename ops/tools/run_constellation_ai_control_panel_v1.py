@@ -1,12 +1,22 @@
 #!/usr/bin/env python3
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime")
-SYSTEM_SNAPSHOT_ROOT = REPO_ROOT / "constellation_2" / "runtime" / "truth" / "system_snapshot"
+THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = THIS_FILE.parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.common.release_baseline_common_v1 import resolve_release_baseline_roots_v1  # noqa: E402
+
+
+ROOTS = resolve_release_baseline_roots_v1(REPO_ROOT)
+REPO_ROOT = ROOTS.repo_root
+SYSTEM_SNAPSHOT_ROOT = ROOTS.system_snapshot_root
 
 SYSTEM_SNAPSHOT_PATH = SYSTEM_SNAPSHOT_ROOT / "constellation_system_snapshot.v1.json"
 ARCH_INDEX_PATH = SYSTEM_SNAPSHOT_ROOT / "constellation_ai_architecture_index.v1.json"
@@ -15,8 +25,8 @@ RUNTIME_STATE_PATH = SYSTEM_SNAPSHOT_ROOT / "constellation_runtime_state.v1.json
 ROOT_CAUSE_PATH = SYSTEM_SNAPSHOT_ROOT / "constellation_root_cause_report.v1.json"
 REPAIR_PLAN_PATH = SYSTEM_SNAPSHOT_ROOT / "constellation_repair_plan.v1.json"
 DIAGNOSTICS_MEMO_PATH = SYSTEM_SNAPSHOT_ROOT / "constellation_diagnostics_memo.v1.md"
-BUG_METRICS_PATH = REPO_ROOT / "constellation_2" / "runtime" / "truth" / "readiness_v1" / "constellation_bug_metrics_v1" / "latest_pointer.v1.json"
-PLATFORM_READINESS_PATH = REPO_ROOT / "constellation_2" / "runtime" / "truth" / "readiness_v1" / "constellation_platform_readiness_v1" / "latest_pointer.v1.json"
+BUG_METRICS_PATH = ROOTS.readiness_root / "constellation_bug_metrics_v1" / "latest_pointer.v1.json"
+PLATFORM_READINESS_PATH = ROOTS.readiness_root / "constellation_platform_readiness_v1" / "latest_pointer.v1.json"
 
 AI_REASONING_CONTRACT_PATH = REPO_ROOT / "governance" / "contracts" / "constellation_ai_reasoning_contract.v1.md"
 SYSTEM_INVARIANTS_PATH = REPO_ROOT / "governance" / "contracts" / "constellation_system_invariants.v1.md"
@@ -41,7 +51,10 @@ def read_json(path: Path) -> dict[str, Any]:
 
 
 def rel(path: Path) -> str:
-    return str(path.relative_to(REPO_ROOT))
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path.resolve())
 
 
 def main() -> None:
@@ -84,7 +97,7 @@ def main() -> None:
         "schema_version": "1.0",
         "generated_utc": now_utc(),
         "repo_root": str(REPO_ROOT),
-        "canonical_truth_root": str(REPO_ROOT / "constellation_2" / "runtime" / "truth"),
+        "canonical_truth_root": str(ROOTS.canonical_truth_root),
         "control_panel_purpose": "Single AI entrypoint for loading Constellation architecture, runtime state, diagnostics, and repair context.",
         "load_order": [
             {

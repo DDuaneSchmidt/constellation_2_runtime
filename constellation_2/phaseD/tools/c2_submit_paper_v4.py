@@ -30,6 +30,11 @@ from constellation_2.phaseD.lib.submit_boundary_paper_v3 import run_submit_bound
 
 
 def main() -> int:
+    raise SystemExit(
+        "LEGACY_EXECUTION_SUBMISSION_PATH_DISABLED:"
+        "use_c2_submit_paper_v5_with_execution_package_and_submission_record"
+    )
+
     ap = argparse.ArgumentParser(prog="c2_submit_paper_v4")
     ap.add_argument("--eval_time_utc", required=True)
     ap.add_argument("--phasec_out_dir", required=True)

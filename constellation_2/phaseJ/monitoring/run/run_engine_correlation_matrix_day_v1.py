@@ -36,12 +36,15 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from constellation_2.common.runtime_contract_v1 import resolve_release_provenance
+from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
+from constellation_2.common.runtime_contract_v1 import resolve_release_provenance_release_current_first_v1
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH = resolve_canonical_truth_root_bridge_v1(
+    caller="constellation_2/phaseJ/monitoring/run/run_engine_correlation_matrix_day_v1.py"
+).resolve()
 
 # FIX: correct input root is engine_daily_returns_v1 (matches orchestrator + truth)
 IN_ROOT = (TRUTH / "monitoring_v1/engine_daily_returns_v1").resolve()
@@ -70,7 +73,12 @@ def _resolve_truth_root(truth_root_arg: str) -> Path:
 
 def _git_sha() -> str:
     try:
-        s = str(resolve_release_provenance().get("git_sha") or "").strip()
+        s = str(
+            resolve_release_provenance_release_current_first_v1(
+                caller="constellation_2/phaseJ/monitoring/run/run_engine_correlation_matrix_day_v1.py"
+            ).get("git_sha")
+            or ""
+        ).strip()
         if s:
             return s
     except Exception:

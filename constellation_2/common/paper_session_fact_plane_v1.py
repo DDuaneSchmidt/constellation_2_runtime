@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping
@@ -11,6 +12,7 @@ from typing import Any, Dict, Iterable, List, Mapping
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
+from constellation_2.common.control_plane_read_gateway_v1 import read_control_plane_surface_v1
 from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_intents_day_completeness_path,
     resolve_paper_day_control_plane_path,
@@ -33,6 +35,42 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_TRUTH_ROOT = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
 NON_AUTHORITY_SCOPE = "NON_AUTHORITY_FACT"
 REPO_ROLE_FILENAME = "repo_role.v1.json"
+GENERAL_ADMISSIBILITY_VALUES_V1 = (
+    "VERIFIED_COMPLETE",
+    "VERIFIED_PARTIAL",
+    "ESTIMATED",
+    "STALE",
+    "CONFLICTED",
+    "UNAVAILABLE",
+    "UNKNOWN",
+)
+TAX_ADMISSIBILITY_VALUES_V1 = (
+    "EXACT_LOT_LEVEL",
+    "ESTIMATED_LOT_LEVEL",
+    "ESTIMATED_POSITION_LEVEL",
+    "INCOMPLETE",
+    "UNKNOWN",
+)
+DEPENDENCY_HEALTH_VALUES_V1 = (
+    "HEALTHY",
+    "DEGRADED_NON_BLOCKING",
+    "DEGRADED_BLOCKING",
+    "UNAVAILABLE",
+)
+STATE_COHERENCE_VALUES_V1 = (
+    "COHERENT",
+    "PARTIAL",
+    "CONFLICTED",
+    "STALE",
+    "UNKNOWN",
+)
+PROVENANCE_CLASS_VALUES_V1 = (
+    "AUTHORITATIVE_FILE",
+    "DERIVED_FROM_AUTHORITATIVE_FILES",
+    "REGISTRY_BOUND",
+    "OPERATOR_ATTESTED",
+    "UNKNOWN",
+)
 
 STARTUP_MATERIALIZATION_SCHEMA_RELPATH_V1 = (
     "governance/04_DATA/SCHEMAS/C2/REPORTS/startup_materialization.v1.schema.json"
@@ -136,11 +174,50 @@ def resolve_authoritative_repo_root_v1(repo_root: Path | None = None) -> Path:
 
 def resolve_fact_plane_truth_root_v1(truth_root: str | Path | None = None) -> Path:
     if truth_root is None or not str(truth_root).strip():
-        return DEFAULT_TRUTH_ROOT
+        from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
+
+        return resolve_canonical_truth_root()
     root = Path(str(truth_root)).expanduser().resolve()
     if not root.is_absolute():
         raise ValueError(f"FACT_PLANE_TRUTH_ROOT_NOT_ABSOLUTE: {root}")
     return root
+
+
+def resolve_paper_intent_truth_root_v1(*, truth_root: Path, repo_root: Path | None = None) -> Path:
+    """
+    Resolve the authoritative PAPER intent execution truth root.
+
+    Decision/control-plane artifacts may still be written under canonical truth root,
+    but intent facts for active PAPER sleeves are sleeve-scoped under truth_sleeves.
+    """
+    requested_root = Path(truth_root).expanduser().resolve()
+    try:
+        from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
+    except Exception:
+        return requested_root
+
+    canonical_truth_root = resolve_canonical_truth_root().resolve()
+    if requested_root != canonical_truth_root:
+        return requested_root
+
+    try:
+        from constellation_2.common.trade_submit_readiness_authority_v1 import (
+            resolve_governed_sleeve_truth_bindings,
+        )
+
+        authoritative_repo_root = resolve_authoritative_repo_root_v1(repo_root or REPO_ROOT)
+        bindings = resolve_governed_sleeve_truth_bindings(
+            repo_root=authoritative_repo_root,
+            environment="PAPER",
+            requested_ib_account="",
+            sleeve_id="PRIMARY",
+        )
+        if not bindings:
+            return requested_root
+        selected = bindings[0]
+        return Path(selected.truth_root).resolve()
+    except Exception:
+        return requested_root
 
 
 def now_utc_iso_v1() -> str:
@@ -165,13 +242,47 @@ def sha256_file_v1(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _fsync_parent_directory_v1(path: Path) -> None:
+    flags = getattr(os, "O_RDONLY", 0)
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    dir_fd = os.open(str(path.parent), flags)
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
+
+
+def _durable_atomic_write_bytes_v1(*, path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_fd: int | None = None
+    tmp_path: str | None = None
+    try:
+        tmp_fd, tmp_path = tempfile.mkstemp(prefix=f".{path.name}.tmp.", dir=str(path.parent))
+        with os.fdopen(tmp_fd, "wb") as handle:
+            tmp_fd = None
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, str(path))
+        _fsync_parent_directory_v1(path)
+    finally:
+        if tmp_fd is not None:
+            try:
+                os.close(tmp_fd)
+            except Exception:
+                pass
+        if tmp_path is not None and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+
 def atomic_write_validated_json_v1(*, path: Path, payload: Dict[str, Any], schema_relpath: str) -> SurfaceRefV1:
     validate_against_repo_schema_v1(payload, REPO_ROOT, schema_relpath)
     raw = canonical_json_bytes_v1(payload) + b"\n"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
-    tmp.write_bytes(raw)
-    os.replace(str(tmp), str(path))
+    _durable_atomic_write_bytes_v1(path=path, data=raw)
     return SurfaceRefV1(path=path, payload=payload, sha256=hashlib.sha256(raw).hexdigest())
 
 
@@ -432,6 +543,254 @@ def build_source_dependency_row_v1(
     return row
 
 
+def _normalize_scope_keys_v1(scope_keys: Mapping[str, Any] | None) -> Dict[str, str]:
+    raw = dict(scope_keys or {})
+    normalized = {
+        str(key).strip(): str(value).strip()
+        for key, value in raw.items()
+        if str(key).strip() and str(value).strip()
+    }
+    return dict(sorted(normalized.items()))
+
+
+def _status_rank_v1(value: str, ordered_values: tuple[str, ...]) -> int:
+    lookup = {item: index for index, item in enumerate(ordered_values)}
+    text = str(value or "").strip().upper()
+    if text not in lookup:
+        return len(ordered_values)
+    return lookup[text]
+
+
+def _worst_status_v1(values: list[str], ordered_values: tuple[str, ...], fallback: str) -> str:
+    normalized = [str(value or "").strip().upper() for value in values if str(value).strip()]
+    if not normalized:
+        return fallback
+    return max(normalized, key=lambda item: _status_rank_v1(item, ordered_values))
+
+
+def _worst_status_ignoring_unknown_v1(values: list[str], ordered_values: tuple[str, ...], fallback: str) -> str:
+    normalized = [str(value or "").strip().upper() for value in values if str(value).strip()]
+    filtered = [value for value in normalized if value != "UNKNOWN"]
+    if filtered:
+        return max(filtered, key=lambda item: _status_rank_v1(item, ordered_values))
+    if normalized:
+        return max(normalized, key=lambda item: _status_rank_v1(item, ordered_values))
+    return fallback
+
+
+def _general_admissibility_from_surface_row_v1(row: Mapping[str, Any]) -> str:
+    presence = str(row.get("presence_verdict") or "").strip().upper()
+    schema = str(row.get("schema_verdict") or "").strip().upper()
+    linkage = str(row.get("linkage_verdict") or "").strip().upper()
+    freshness = str(row.get("freshness_verdict") or "").strip().upper()
+    if presence != "PRESENT":
+        return "UNAVAILABLE"
+    if schema != "VALID" or linkage in {"UNLINKED", "INVALID", "CONFLICTED"}:
+        return "CONFLICTED"
+    if freshness not in {"CURRENT", "FRESH"}:
+        return "STALE"
+    return "VERIFIED_COMPLETE"
+
+
+def _state_coherence_from_surface_row_v1(row: Mapping[str, Any]) -> str:
+    presence = str(row.get("presence_verdict") or "").strip().upper()
+    linkage = str(row.get("linkage_verdict") or "").strip().upper()
+    freshness = str(row.get("freshness_verdict") or "").strip().upper()
+    if presence != "PRESENT":
+        return "UNKNOWN"
+    if linkage in {"CONFLICTED", "UNLINKED", "INVALID"}:
+        return "CONFLICTED"
+    if freshness not in {"CURRENT", "FRESH"}:
+        return "STALE"
+    if linkage in {"UNKNOWN", ""}:
+        return "PARTIAL"
+    return "COHERENT"
+
+
+def _dependency_health_from_surface_row_v1(row: Mapping[str, Any]) -> str:
+    presence = str(row.get("presence_verdict") or "").strip().upper()
+    blocking_codes = [str(code).strip() for code in (row.get("blocking_codes") or []) if str(code).strip()]
+    required = bool(row.get("required_for_authority") is True)
+    if presence != "PRESENT":
+        return "UNAVAILABLE"
+    if blocking_codes and required:
+        return "DEGRADED_BLOCKING"
+    if blocking_codes:
+        return "DEGRADED_NON_BLOCKING"
+    return "HEALTHY"
+
+
+def build_constitutional_fact_record_v1(
+    *,
+    fact_type: str,
+    source_system: str,
+    source_version: str,
+    observed_at: str,
+    captured_at: str,
+    freshness_class: str,
+    provenance_class: str,
+    payload: Mapping[str, Any],
+    scope_keys: Mapping[str, Any] | None,
+    content_hash: str,
+    general_admissibility: str,
+    tax_admissibility: str,
+    dependency_health: str,
+    state_coherence: str,
+    logical_name: str,
+    artifact_path: str = "",
+) -> Dict[str, Any]:
+    fact_payload = {
+        "schema_id": "constitutional_fact_record_inline",
+        "logical_name": str(logical_name).strip(),
+        "fact_type": str(fact_type).strip(),
+        "source_system": str(source_system).strip(),
+        "source_version": str(source_version).strip(),
+        "observed_at": str(observed_at).strip(),
+        "captured_at": str(captured_at).strip(),
+        "freshness_class": str(freshness_class).strip().upper(),
+        "provenance_class": str(provenance_class).strip().upper(),
+        "content_hash": str(content_hash).strip().lower(),
+        "general_admissibility": str(general_admissibility).strip().upper(),
+        "tax_admissibility": str(tax_admissibility).strip().upper(),
+        "dependency_health": str(dependency_health).strip().upper(),
+        "state_coherence": str(state_coherence).strip().upper(),
+        "artifact_path": str(artifact_path).strip(),
+        "scope_keys": _normalize_scope_keys_v1(scope_keys),
+        "payload": dict(payload or {}),
+    }
+    fact_id = hashlib.sha256(canonical_json_bytes_v1(fact_payload)).hexdigest()
+    return {
+        "fact_id": f"fact:{fact_id[:16]}",
+        **fact_payload,
+    }
+
+
+def build_constitutional_surface_fact_record_v1(
+    *,
+    row: Mapping[str, Any],
+    fact_type: str,
+    source_system: str,
+) -> Dict[str, Any]:
+    row_dict = dict(row)
+    return build_constitutional_fact_record_v1(
+        fact_type=fact_type,
+        source_system=source_system,
+        source_version=str(row_dict.get("schema_version") or "unknown").strip() or "unknown",
+        observed_at=str(row_dict.get("artifact_timestamp_utc") or "").strip(),
+        captured_at=now_utc_iso_v1(),
+        freshness_class=str(row_dict.get("freshness_verdict") or "UNKNOWN").strip().upper(),
+        provenance_class="AUTHORITATIVE_FILE",
+        payload=dict(row_dict.get("fact_snapshot") or {}),
+        scope_keys={
+            "day_utc": str(row_dict.get("artifact_day_utc") or "").strip(),
+            "session_id": str(row_dict.get("artifact_session_id") or "").strip(),
+            "logical_name": str(row_dict.get("logical_name") or "").strip(),
+        },
+        content_hash=str(row_dict.get("content_hash") or "").strip().lower(),
+        general_admissibility=_general_admissibility_from_surface_row_v1(row_dict),
+        tax_admissibility="UNKNOWN",
+        dependency_health=_dependency_health_from_surface_row_v1(row_dict),
+        state_coherence=_state_coherence_from_surface_row_v1(row_dict),
+        logical_name=str(row_dict.get("logical_name") or "").strip(),
+        artifact_path=str(row_dict.get("absolute_path") or "").strip(),
+    )
+
+
+def build_constitutional_fact_bundle_v1(
+    *,
+    day_utc: str,
+    session_id: str,
+    policy_version: str,
+    required_fact_types: list[Any] | tuple[Any, ...],
+    fact_records: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...],
+) -> Dict[str, Any]:
+    normalized_records = [dict(record) for record in fact_records]
+    normalized_records.sort(
+        key=lambda row: (
+            str(row.get("fact_type") or ""),
+            str(row.get("logical_name") or ""),
+            str(row.get("content_hash") or ""),
+            str(row.get("fact_id") or ""),
+        )
+    )
+    fact_types_present = sorted({str(row.get("fact_type") or "").strip() for row in normalized_records if str(row.get("fact_type") or "").strip()})
+    negative_evidence: list[dict[str, str]] = []
+    for row in normalized_records:
+        general = str(row.get("general_admissibility") or "").strip().upper()
+        dependency = str(row.get("dependency_health") or "").strip().upper()
+        state = str(row.get("state_coherence") or "").strip().upper()
+        logical_name = str(row.get("logical_name") or "").strip()
+        if general in {"UNAVAILABLE", "CONFLICTED", "STALE", "UNKNOWN"}:
+            negative_evidence.append(
+                {
+                    "type": "FACT_ADMISSIBILITY",
+                    "fact": logical_name,
+                    "severity": "BLOCKING" if general in {"UNAVAILABLE", "CONFLICTED", "UNKNOWN"} else "NON_BLOCKING",
+                    "detail": f"general_admissibility={general}",
+                }
+            )
+        if dependency in {"DEGRADED_BLOCKING", "UNAVAILABLE"}:
+            negative_evidence.append(
+                {
+                    "type": "DEPENDENCY_HEALTH",
+                    "fact": logical_name,
+                    "severity": "BLOCKING",
+                    "detail": f"dependency_health={dependency}",
+                }
+            )
+        if state in {"CONFLICTED", "STALE", "UNKNOWN"}:
+            negative_evidence.append(
+                {
+                    "type": "STATE_COHERENCE",
+                    "fact": logical_name,
+                    "severity": "BLOCKING" if state in {"CONFLICTED", "UNKNOWN"} else "NON_BLOCKING",
+                    "detail": f"state_coherence={state}",
+                }
+            )
+    bundle_core = {
+        "bundle_type": "constitutional_fact_bundle",
+        "day_utc": parse_day_utc_v1(day_utc),
+        "session_id": str(session_id).strip(),
+        "policy_version": str(policy_version).strip(),
+        "required_fact_types": sorted({str(item).strip() for item in required_fact_types if str(item).strip()}),
+        "fact_types_present": fact_types_present,
+        "fact_records": normalized_records,
+        "general_admissibility": _worst_status_v1(
+            [str(row.get("general_admissibility") or "") for row in normalized_records],
+            GENERAL_ADMISSIBILITY_VALUES_V1,
+            "UNKNOWN",
+        ),
+        "tax_admissibility": _worst_status_v1(
+            [str(row.get("tax_admissibility") or "") for row in normalized_records],
+            TAX_ADMISSIBILITY_VALUES_V1,
+            "UNKNOWN",
+        ),
+        "dependency_health": _worst_status_v1(
+            [str(row.get("dependency_health") or "") for row in normalized_records],
+            DEPENDENCY_HEALTH_VALUES_V1,
+            "UNAVAILABLE",
+        ),
+        "state_coherence": _worst_status_v1(
+            [str(row.get("state_coherence") or "") for row in normalized_records],
+            STATE_COHERENCE_VALUES_V1,
+            "UNKNOWN",
+        ),
+        "negative_evidence": sorted(
+            negative_evidence,
+            key=lambda row: (row["type"], row["fact"], row["severity"], row["detail"]),
+        ),
+    }
+    bundle_core["tax_admissibility"] = _worst_status_ignoring_unknown_v1(
+        [str(row.get("tax_admissibility") or "") for row in normalized_records],
+            TAX_ADMISSIBILITY_VALUES_V1,
+            "UNKNOWN",
+    )
+    return {
+        **bundle_core,
+        "fact_bundle_hash": hashlib.sha256(canonical_json_bytes_v1(bundle_core)).hexdigest(),
+    }
+
+
 def validate_startup_materialization_obj_v1(obj: Dict[str, Any]) -> None:
     validate_against_repo_schema_v1(obj, REPO_ROOT, STARTUP_MATERIALIZATION_SCHEMA_RELPATH_V1)
 
@@ -489,10 +848,13 @@ def validate_startup_proof_validation_obj_v1(obj: Dict[str, Any]) -> None:
 
 
 def read_startup_materialization_ref_v1(*, truth_root: Path, day_utc: str) -> SurfaceRefV1:
-    return read_validated_surface_v1(
-        path=resolve_startup_materialization_path(truth_root=truth_root, day_utc=day_utc),
-        schema_relpath=STARTUP_MATERIALIZATION_SCHEMA_RELPATH_V1,
+    ref = read_control_plane_surface_v1(
+        domain="execution",
+        surface="startup_materialization",
+        truth_root=Path(truth_root).resolve(),
+        day_utc=day_utc,
     )
+    return SurfaceRefV1(path=ref.path, payload=ref.payload, sha256=ref.sha256)
 
 
 def read_intents_day_completeness_ref_v1(*, truth_root: Path, day_utc: str) -> SurfaceRefV1:
@@ -503,87 +865,123 @@ def read_intents_day_completeness_ref_v1(*, truth_root: Path, day_utc: str) -> S
 
 
 def read_trading_day_intent_generation_ref_v1(*, truth_root: Path, day_utc: str) -> SurfaceRefV1:
-    return read_validated_surface_v1(
-        path=resolve_trading_day_intent_generation_path(truth_root=truth_root, day_utc=day_utc),
-        schema_relpath=TRADING_DAY_INTENT_GENERATION_SCHEMA_RELPATH_V1,
+    ref = read_control_plane_surface_v1(
+        domain="execution",
+        surface="trading_day_intent_generation",
+        truth_root=Path(truth_root).resolve(),
+        day_utc=day_utc,
     )
+    return SurfaceRefV1(path=ref.path, payload=ref.payload, sha256=ref.sha256)
 
 
 def read_paper_trading_posture_ref_v1(*, truth_root: Path, day_utc: str) -> SurfaceRefV1:
-    return read_validated_surface_v1(
-        path=resolve_paper_trading_posture_path(truth_root=truth_root, day_utc=day_utc),
-        schema_relpath=PAPER_TRADING_POSTURE_SCHEMA_RELPATH_V1,
+    ref = read_control_plane_surface_v1(
+        domain="execution",
+        surface="paper_trading_posture",
+        truth_root=Path(truth_root).resolve(),
+        day_utc=day_utc,
     )
+    return SurfaceRefV1(path=ref.path, payload=ref.payload, sha256=ref.sha256)
 
 
 def read_submit_boundary_status_ref_v1(*, truth_root: Path, day_utc: str) -> SurfaceRefV1:
-    return read_validated_surface_v1(
-        path=resolve_submit_boundary_status_path(truth_root=truth_root, day_utc=day_utc),
-        schema_relpath=SUBMIT_BOUNDARY_STATUS_SCHEMA_RELPATH_V1,
+    ref = read_control_plane_surface_v1(
+        domain="execution",
+        surface="submit_boundary_status",
+        truth_root=Path(truth_root).resolve(),
+        day_utc=day_utc,
     )
+    return SurfaceRefV1(path=ref.path, payload=ref.payload, sha256=ref.sha256)
 
 
 def read_sleeve_rollup_ref_v1(*, truth_root: Path, day_utc: str) -> SurfaceRefV1:
-    return read_validated_surface_v1(
-        path=resolve_sleeve_rollup_path(truth_root=truth_root, day_utc=day_utc),
-        schema_relpath=SLEEVE_ROLLUP_SCHEMA_RELPATH_V1,
+    ref = read_control_plane_surface_v1(
+        domain="execution",
+        surface="sleeve_rollup",
+        truth_root=Path(truth_root).resolve(),
+        day_utc=day_utc,
     )
+    return SurfaceRefV1(path=ref.path, payload=ref.payload, sha256=ref.sha256)
 
 
 def read_paper_session_evidence_manifest_ref_v1(*, truth_root: Path, day_utc: str) -> SurfaceRefV1:
-    return read_validated_surface_v1(
-        path=resolve_paper_session_evidence_manifest_path(truth_root=truth_root, day_utc=day_utc),
-        schema_relpath=PAPER_SESSION_EVIDENCE_MANIFEST_SCHEMA_RELPATH_V1,
+    ref = read_control_plane_surface_v1(
+        domain="execution",
+        surface="paper_session_evidence_manifest",
+        truth_root=Path(truth_root).resolve(),
+        day_utc=day_utc,
     )
+    return SurfaceRefV1(path=ref.path, payload=ref.payload, sha256=ref.sha256)
 
 
 def read_paper_session_kernel_ref_v1(*, truth_root: Path, day_utc: str) -> SurfaceRefV1:
-    return read_validated_surface_v1(
-        path=resolve_paper_session_kernel_path(truth_root=truth_root, day_utc=day_utc),
-        schema_relpath=PAPER_SESSION_KERNEL_SCHEMA_RELPATH_V1,
+    ref = read_control_plane_surface_v1(
+        domain="execution",
+        surface="paper_session_kernel",
+        truth_root=Path(truth_root).resolve(),
+        day_utc=day_utc,
     )
+    return SurfaceRefV1(path=ref.path, payload=ref.payload, sha256=ref.sha256)
 
 
 def read_paper_session_ledger_ref_v1(*, truth_root: Path, day_utc: str) -> SurfaceRefV1:
-    return read_validated_surface_v1(
-        path=resolve_paper_session_ledger_path(truth_root=truth_root, day_utc=day_utc),
-        schema_relpath=PAPER_SESSION_LEDGER_SCHEMA_RELPATH_V1,
+    ref = read_control_plane_surface_v1(
+        domain="execution",
+        surface="paper_session_ledger",
+        truth_root=Path(truth_root).resolve(),
+        day_utc=day_utc,
     )
+    return SurfaceRefV1(path=ref.path, payload=ref.payload, sha256=ref.sha256)
 
 
 def read_paper_day_control_plane_ref_v1(*, truth_root: Path, day_utc: str) -> SurfaceRefV1:
-    return read_validated_surface_v1(
-        path=resolve_paper_day_control_plane_path(truth_root=truth_root, day_utc=day_utc),
-        schema_relpath=PAPER_DAY_CONTROL_PLANE_SCHEMA_RELPATH_V1,
+    ref = read_control_plane_surface_v1(
+        domain="execution",
+        surface="paper_day_control_plane",
+        truth_root=Path(truth_root).resolve(),
+        day_utc=day_utc,
     )
+    return SurfaceRefV1(path=ref.path, payload=ref.payload, sha256=ref.sha256)
 
 
 def read_trading_day_control_plane_ref_v1(*, truth_root: Path, day_utc: str) -> SurfaceRefV1:
-    return read_validated_surface_v1(
-        path=resolve_trading_day_control_plane_path(truth_root=truth_root, day_utc=day_utc),
-        schema_relpath=TRADING_DAY_CONTROL_PLANE_SCHEMA_RELPATH_V1,
+    ref = read_control_plane_surface_v1(
+        domain="execution",
+        surface="trading_day_control_plane",
+        truth_root=Path(truth_root).resolve(),
+        day_utc=day_utc,
     )
+    return SurfaceRefV1(path=ref.path, payload=ref.payload, sha256=ref.sha256)
 
 
 def read_trading_day_execution_control_plane_ref_v1(*, truth_root: Path, day_utc: str) -> SurfaceRefV1:
-    return read_validated_surface_v1(
-        path=resolve_trading_day_execution_control_plane_path(truth_root=truth_root, day_utc=day_utc),
-        schema_relpath=TRADING_DAY_EXECUTION_CONTROL_PLANE_SCHEMA_RELPATH_V1,
+    ref = read_control_plane_surface_v1(
+        domain="execution",
+        surface="trading_day_execution_control_plane",
+        truth_root=Path(truth_root).resolve(),
+        day_utc=day_utc,
     )
+    return SurfaceRefV1(path=ref.path, payload=ref.payload, sha256=ref.sha256)
 
 
 def read_trading_day_state_machine_ref_v1(*, truth_root: Path, day_utc: str) -> SurfaceRefV1:
-    return read_validated_surface_v1(
-        path=resolve_trading_day_state_machine_path(truth_root=truth_root, day_utc=day_utc),
-        schema_relpath=TRADING_DAY_STATE_MACHINE_SCHEMA_RELPATH_V1,
+    ref = read_control_plane_surface_v1(
+        domain="execution",
+        surface="trading_day_state_machine",
+        truth_root=Path(truth_root).resolve(),
+        day_utc=day_utc,
     )
+    return SurfaceRefV1(path=ref.path, payload=ref.payload, sha256=ref.sha256)
 
 
 def read_startup_proof_validation_ref_v1(*, truth_root: Path, day_utc: str) -> SurfaceRefV1:
-    return read_validated_surface_v1(
-        path=resolve_startup_proof_validation_path(truth_root=truth_root, day_utc=day_utc),
-        schema_relpath=STARTUP_PROOF_VALIDATION_SCHEMA_RELPATH_V1,
+    ref = read_control_plane_surface_v1(
+        domain="execution",
+        surface="startup_proof_validation",
+        truth_root=Path(truth_root).resolve(),
+        day_utc=day_utc,
     )
+    return SurfaceRefV1(path=ref.path, payload=ref.payload, sha256=ref.sha256)
 
 
 def read_trade_submit_readiness_for_day_v1(
@@ -596,21 +994,25 @@ def read_trade_submit_readiness_for_day_v1(
     day = parse_day_utc_v1(day_utc)
     env = str(environment or "").strip().upper()
     account = str(ib_account or "").strip()
-    history_path = (Path(truth_root).resolve() / "trade_submit_readiness_c2_v1" / "_history" / env / account / day / "status.json").resolve()
-    current_path = (Path(truth_root).resolve() / "trade_submit_readiness_c2_v1" / env / account / "status.json").resolve()
-    target = history_path if history_path.exists() and history_path.is_file() else current_path
-    ref = read_validated_surface_v1(path=target, schema_relpath=TRADE_SUBMIT_READINESS_STATUS_SCHEMA_RELPATH_V1)
+    ref = read_control_plane_surface_v1(
+        domain="execution",
+        surface="trade_submit_readiness",
+        truth_root=Path(truth_root).resolve(),
+        day_utc=day,
+        environment=env,
+        ib_account=account,
+    )
     payload = ref.payload
     if str(payload.get("environment") or "").strip().upper() != env:
-        raise ValueError(f"TRADE_SUBMIT_READINESS_ENVIRONMENT_MISMATCH:path={target}")
+        raise ValueError(f"TRADE_SUBMIT_READINESS_ENVIRONMENT_MISMATCH:path={ref.path}")
     if str(payload.get("ib_account") or "").strip() != account:
-        raise ValueError(f"TRADE_SUBMIT_READINESS_ACCOUNT_MISMATCH:path={target}")
+        raise ValueError(f"TRADE_SUBMIT_READINESS_ACCOUNT_MISMATCH:path={ref.path}")
     if str(payload.get("day_utc") or "").strip() != day:
-        raise ValueError(f"TRADE_SUBMIT_READINESS_DAY_MISMATCH:path={target}")
+        raise ValueError(f"TRADE_SUBMIT_READINESS_DAY_MISMATCH:path={ref.path}")
     provenance = payload.get("provenance")
     truth_root_value = str(provenance.get("truth_root") or "").strip() if isinstance(provenance, dict) else ""
     if truth_root_value and truth_root_value != str(Path(truth_root).resolve()):
-        raise ValueError(f"TRADE_SUBMIT_READINESS_TRUTH_ROOT_MISMATCH:path={target}")
+        raise ValueError(f"TRADE_SUBMIT_READINESS_TRUTH_ROOT_MISMATCH:path={ref.path}")
     return ref
 
 

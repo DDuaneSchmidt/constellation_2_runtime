@@ -25,6 +25,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     resolve_market_calendar_record_v1,
     resolve_paper_trading_posture_path,
 )
+from constellation_2.common.runtime_path_authority_v1 import resolve_decision_truth_root_v1
 
 
 def main(argv: List[str] | None = None) -> int:
@@ -34,7 +35,7 @@ def main(argv: List[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     day_utc = parse_day_utc_v1(args.day_utc)
-    truth_root = resolve_fact_plane_truth_root_v1(args.truth_root)
+    truth_root = resolve_decision_truth_root_v1(args.truth_root, repo_root=REPO_ROOT)
     session_id = canonical_paper_session_id_v1(day_utc)
     produced_at_utc = now_utc_iso_v1()
     calendar_state = resolve_market_calendar_record_v1(truth_root=truth_root, day_utc=day_utc)
@@ -106,6 +107,7 @@ def main(argv: List[str] | None = None) -> int:
         "schema_id": "paper_trading_posture",
         "schema_version": "v1",
         "authority_scope": NON_AUTHORITY_SCOPE,
+        "binding_classification": "NON_BINDING_DIAGNOSTIC",
         "day_utc": day_utc,
         "session_id": session_id,
         "system_ready": bool(system_ready),

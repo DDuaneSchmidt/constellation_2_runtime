@@ -21,9 +21,14 @@ from constellation_2.phaseF.execution_evidence.lib.paths_v1 import (
     PHASED_SUBMISSIONS_ROOT,
     REPO_ROOT,
     day_paths_v1,
+    day_paths_for_truth_root_v1,
+    phased_submissions_root_for_truth_root,
     submission_artifact_dir_v1,
+    submission_artifact_dir_for_truth_root_v1,
     submission_manifest_path_v1,
+    submission_manifest_path_for_truth_root_v1,
     submission_manifest_identity_patch_path_v1,
+    submission_manifest_identity_patch_path_for_truth_root_v1,
 )
 from constellation_2.phaseF.execution_evidence.lib.write_failure_v1 import build_failure_obj_v1
 
@@ -37,6 +42,8 @@ SCHEMA_MANIFEST_ID_PATCH_V1 = "governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/
 
 SCHEMA_TOMBSTONE_V1 = "governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/execution_evidence_quarantine_tombstone.v1.schema.json"
 SCHEMA_NO_EXEC_V1 = "governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/execution_evidence_no_execution_event.v1.schema.json"
+SCHEMA_EQUITY_ORDER_PLAN_V1 = "constellation_2/schemas/equity_order_plan.v1.schema.json"
+SCHEMA_EQUITY_ORDER_PLAN_V2 = "constellation_2/schemas/equity_order_plan.v2.schema.json"
 
 
 def _utc_now_iso() -> str:
@@ -124,11 +131,78 @@ def _derive_day_utc_from_inputs(
     raise ValueError("NO_VALID_UTC_TIMESTAMP_FOR_DAY_DERIVATION")
 
 
-def _maybe_copy_identity_file(*, src_dir: Path, dst_dir: Path, filename: str) -> Optional[Dict[str, Any]]:
-    p_src = (src_dir / filename).resolve()
+def _maybe_normalize_identity_file_bytes(*, src_path: Path, filename: str, reason_codes: List[str]) -> bytes:
+    raw = src_path.read_bytes()
+    if filename != "equity_order_plan.v1.json":
+        return raw
+
+    try:
+        obj = _read_json_obj(src_path)
+    except Exception:
+        return raw
+
+    if str(obj.get("schema_id") or "").strip() != "equity_order_plan":
+        return raw
+    if str(obj.get("schema_version") or "").strip() != "v2":
+        return raw
+
+    normalized_obj: Dict[str, Any] = {
+        "schema_id": "equity_order_plan",
+        "schema_version": "v1",
+        "plan_id": obj.get("plan_id"),
+        "created_at_utc": obj.get("created_at_utc"),
+        "intent_hash": obj.get("intent_hash"),
+        "structure": obj.get("structure"),
+        "symbol": obj.get("symbol"),
+        "currency": obj.get("currency"),
+        "action": obj.get("action"),
+        "qty_shares": obj.get("qty_shares"),
+        "order_terms": obj.get("order_terms"),
+        "risk_proof": obj.get("risk_proof"),
+        "canonical_json_hash": None,
+    }
+    normalized_obj["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(normalized_obj)
+    validate_against_repo_schema_v1(normalized_obj, REPO_ROOT, SCHEMA_EQUITY_ORDER_PLAN_V1)
+
+    rc = "EQUITY_ORDER_PLAN_V2_NORMALIZED_TO_V1"
+    if rc not in reason_codes:
+        reason_codes.append(rc)
+    return canonical_json_bytes_v1(normalized_obj) + b"\n"
+
+
+def _maybe_copy_equity_plan_v2_twin(*, src_dir: Path, dst_dir: Path, reason_codes: List[str]) -> Optional[Dict[str, Any]]:
+    p_src = (src_dir / "equity_order_plan.v2.json").resolve()
+    if not p_src.exists() or not p_src.is_file():
+        p_src = (src_dir / "equity_order_plan.v1.json").resolve()
     if not p_src.exists() or not p_src.is_file():
         return None
-    b = p_src.read_bytes()
+
+    try:
+        obj = _read_json_obj(p_src)
+    except Exception:
+        return None
+
+    if str(obj.get("schema_id") or "").strip() != "equity_order_plan":
+        return None
+    if str(obj.get("schema_version") or "").strip() != "v2":
+        return None
+
+    validate_against_repo_schema_v1(obj, REPO_ROOT, SCHEMA_EQUITY_ORDER_PLAN_V2)
+    wr = write_file_immutable_v1(path=(dst_dir / "equity_order_plan.v2.json"), data=p_src.read_bytes(), create_dirs=True)
+
+    rc = "EQUITY_ORDER_PLAN_V2_TWIN_WRITTEN"
+    if rc not in reason_codes:
+        reason_codes.append(rc)
+    return {"path": str(dst_dir / "equity_order_plan.v2.json"), "sha256": wr.sha256}
+
+
+def _maybe_copy_identity_file(*, src_dir: Path, dst_dir: Path, filename: str, reason_codes: List[str]) -> Optional[Dict[str, Any]]:
+    p_src = (src_dir / filename).resolve()
+    if filename == "equity_order_plan.v1.json" and (not p_src.exists() or not p_src.is_file()):
+        p_src = (src_dir / "equity_order_plan.v2.json").resolve()
+    if not p_src.exists() or not p_src.is_file():
+        return None
+    b = _maybe_normalize_identity_file_bytes(src_path=p_src, filename=filename, reason_codes=reason_codes)
     wr = write_file_immutable_v1(path=(dst_dir / filename), data=b, create_dirs=True)
     return {"path": str(dst_dir / filename), "sha256": wr.sha256}
 
@@ -153,6 +227,15 @@ def _validate_manifest_any_version(obj: Dict[str, Any]) -> Tuple[str, int]:
         validate_against_repo_schema_v1(obj, REPO_ROOT, SCHEMA_SUBMISSION_MANIFEST_V1)
         return (sid, sver)
     raise ValueError(f"UNSUPPORTED_MANIFEST_SCHEMA: {sid} v{sver}")
+
+
+def _is_reconstructed_broker_submission(obj: Dict[str, Any] | None) -> bool:
+    if not isinstance(obj, dict):
+        return False
+    error = obj.get("error")
+    if not isinstance(error, dict):
+        return False
+    return str(error.get("code") or "").strip() == "RECONSTRUCTED_FROM_EXECUTION_STREAM_V1"
 
 
 def _build_day_manifests_index_sha(manifests_day_dir: Path) -> str:
@@ -260,13 +343,32 @@ def main(argv: List[str] | None = None) -> int:
     ap.add_argument("--day_utc", required=True, help="UTC day key YYYY-MM-DD")
     ap.add_argument("--producer_git_sha", required=True, help="Producing git sha (explicit)")
     ap.add_argument("--producer_repo", default="constellation_2_runtime", help="Producer repo id")
+    ap.add_argument("--truth_root", default="", help="Optional target truth root override (canonical or sleeve)")
+    ap.add_argument(
+        "--source_truth_root",
+        default="",
+        help="Optional source truth root override; submissions are read from <source_truth_root>/execution_evidence_v1/submissions",
+    )
     args = ap.parse_args(argv)
 
     day_utc = args.day_utc.strip()
     producer_sha = str(args.producer_git_sha).strip()
     producer_repo = str(args.producer_repo).strip()
+    target_truth_root = str(args.truth_root).strip() or None
+    source_truth_root = str(args.source_truth_root).strip() or None
 
-    dp = day_paths_v1(day_utc)
+    if target_truth_root is None:
+        dp = day_paths_v1(day_utc)
+        target_truth_root_for_paths = None
+    else:
+        dp = day_paths_for_truth_root_v1(day_utc=day_utc, truth_root=target_truth_root)
+        target_truth_root_for_paths = target_truth_root
+
+    if source_truth_root is None:
+        source_submissions_root = PHASED_SUBMISSIONS_ROOT
+    else:
+        source_submissions_root = phased_submissions_root_for_truth_root(truth_root=source_truth_root)
+    source_submissions_day_root = (source_submissions_root / day_utc).resolve()
 
     ex_sha = _day_scoped_sha_lock_from_manifests_dir(dp.manifests_day_dir, producer_sha)
     if ex_sha is not None:
@@ -276,7 +378,7 @@ def main(argv: List[str] | None = None) -> int:
     status = "OK"
     reason_codes: List[str] = []
 
-    if not PHASED_SUBMISSIONS_ROOT.exists():
+    if not source_submissions_root.exists():
         failure = build_failure_obj_v1(
             day_utc=day_utc,
             producer_repo=producer_repo,
@@ -284,10 +386,10 @@ def main(argv: List[str] | None = None) -> int:
             producer_module="constellation_2/phaseF/execution_evidence/run/run_execution_evidence_truth_day_v1.py",
             status="FAIL_CORRUPT_INPUTS",
             reason_codes=["PHASED_SUBMISSIONS_ROOT_MISSING"],
-            input_manifest=[{"type": "phaseD_submissions_root", "path": str(PHASED_SUBMISSIONS_ROOT), "sha256": "0" * 64, "day_utc": None, "producer": "phaseD"}],
+            input_manifest=[{"type": "phaseD_submissions_root", "path": str(source_submissions_root), "sha256": "0" * 64, "day_utc": None, "producer": "phaseD"}],
             code="FAIL_CORRUPT_INPUTS",
-            message=f"Missing PhaseD submissions root: {str(PHASED_SUBMISSIONS_ROOT)}",
-            details={"missing_path": str(PHASED_SUBMISSIONS_ROOT)},
+            message=f"Missing PhaseD submissions root: {str(source_submissions_root)}",
+            details={"missing_path": str(source_submissions_root)},
             attempted_outputs=[{"path": str(dp.submissions_day_dir), "sha256": None}, {"path": str(dp.latest_path), "sha256": None}],
         )
         validate_against_repo_schema_v1(failure, REPO_ROOT, SCHEMA_FAILURE)
@@ -296,7 +398,8 @@ def main(argv: List[str] | None = None) -> int:
         print("FAIL: PHASED_SUBMISSIONS_ROOT_MISSING (failure artifact written)", file=sys.stderr)
         return 2
 
-    sub_dirs = sorted([p for p in PHASED_SUBMISSIONS_ROOT.iterdir() if p.is_dir()], key=lambda p: p.name)
+    iter_root = source_submissions_day_root if source_submissions_day_root.exists() and source_submissions_day_root.is_dir() else source_submissions_root
+    sub_dirs = sorted([p for p in iter_root.iterdir() if p.is_dir()], key=lambda p: p.name)
 
     for sd in sub_dirs:
         submission_id = sd.name.strip()
@@ -305,6 +408,8 @@ def main(argv: List[str] | None = None) -> int:
         p_exec = sd / "execution_event_record.v1.json"
         p_veto = sd / "veto_record.v1.json"
         p_auth = sd / "authorization_binding_record.v1.json"
+        p_bind_v1 = sd / "binding_record.v1.json"
+        p_bind_v2 = sd / "binding_record.v2.json"
 
         has_broker = p_broker.exists()
         has_exec = p_exec.exists()
@@ -373,7 +478,9 @@ def main(argv: List[str] | None = None) -> int:
         if derived_day != day_utc:
             continue
 
-        if has_broker and has_veto:
+        reconstructed_orphan = has_broker and has_veto and _is_reconstructed_broker_submission(broker_obj)
+
+        if has_broker and has_veto and not reconstructed_orphan:
             orig_hash = _sha256_bytes(canonical_json_bytes_v1({"source_dir": str(sd)}))
             _ = _write_quarantine_tombstone(
                 dp=dp,
@@ -388,8 +495,8 @@ def main(argv: List[str] | None = None) -> int:
             status = "FAIL_SCHEMA_VIOLATION"
             continue
 
-        # Still require authorization binding for canonical publish (fail-closed).
-        if auth_obj is None:
+        # Require the governed binding lineage produced by the submit path.
+        if auth_obj is None and (not p_bind_v1.exists()) and (not p_bind_v2.exists()):
             orig_hash = _sha256_bytes(canonical_json_bytes_v1({"source_dir": str(sd)}))
             _ = _write_quarantine_tombstone(
                 dp=dp,
@@ -397,16 +504,24 @@ def main(argv: List[str] | None = None) -> int:
                 submission_id=submission_id,
                 quarantine_reason="INTEGRITY_FAILURE",
                 original_hash=orig_hash,
-                details={"source_dir": str(sd), "reason": "MISSING_AUTHORIZATION_BINDING_RECORD"},
+                details={"source_dir": str(sd), "reason": "MISSING_BINDING_LINEAGE_RECORD"},
             )
-            if "MISSING_AUTHORIZATION_BINDING_RECORD" not in reason_codes:
-                reason_codes.append("MISSING_AUTHORIZATION_BINDING_RECORD")
+            if "MISSING_BINDING_LINEAGE_RECORD" not in reason_codes:
+                reason_codes.append("MISSING_BINDING_LINEAGE_RECORD")
             status = "FAIL_SCHEMA_VIOLATION"
             continue
 
-        final_dir = submission_artifact_dir_v1(day_utc=day_utc, submission_id=submission_id)
+        if target_truth_root_for_paths is None:
+            final_dir = submission_artifact_dir_v1(day_utc=day_utc, submission_id=submission_id)
+        else:
+            final_dir = submission_artifact_dir_for_truth_root_v1(
+                day_utc=day_utc,
+                submission_id=submission_id,
+                truth_root=target_truth_root_for_paths,
+            )
         source_is_authoritative = sd.resolve() == final_dir.resolve()
-        tmp_dir = None if source_is_authoritative else _canonical_tmp_dir(dp, submission_id)
+        target_already_published = final_dir.exists() and final_dir.is_dir()
+        tmp_dir = None if (source_is_authoritative or target_already_published) else _canonical_tmp_dir(dp, submission_id)
         if tmp_dir is not None:
             tmp_dir.mkdir(parents=True, exist_ok=False)
 
@@ -415,13 +530,23 @@ def main(argv: List[str] | None = None) -> int:
             wr_exec_sha = None
             wr_veto_sha = None
 
-            if source_is_authoritative:
+            if source_is_authoritative or target_already_published:
+                dst_dir = final_dir
+                if (not source_is_authoritative) and p_auth.exists():
+                    _ = write_file_immutable_v1(path=dst_dir / "authorization_binding_record.v1.json", data=p_auth.read_bytes(), create_dirs=True)
+
                 if has_veto:
-                    wr_veto_sha = _sha256_file(p_veto)
-                else:
-                    wr_broker_sha = _sha256_file(p_broker)
+                    if not source_is_authoritative:
+                        _ = write_file_immutable_v1(path=dst_dir / "veto_record.v1.json", data=p_veto.read_bytes(), create_dirs=True)
+                    wr_veto_sha = _sha256_file(dst_dir / "veto_record.v1.json")
+                if has_broker:
+                    if not source_is_authoritative:
+                        _ = write_file_immutable_v1(path=dst_dir / "broker_submission_record.v2.json", data=p_broker.read_bytes(), create_dirs=True)
+                    wr_broker_sha = _sha256_file(dst_dir / "broker_submission_record.v2.json")
                     if has_exec:
-                        wr_exec_sha = _sha256_file(p_exec)
+                        if not source_is_authoritative:
+                            _ = write_file_immutable_v1(path=dst_dir / "execution_event_record.v1.json", data=p_exec.read_bytes(), create_dirs=True)
+                        wr_exec_sha = _sha256_file(dst_dir / "execution_event_record.v1.json")
                     else:
                         noexec_obj = _write_no_execution_event(
                             day_utc=day_utc,
@@ -429,24 +554,39 @@ def main(argv: List[str] | None = None) -> int:
                             reason_code="NO_EXECUTION_EVENT_PRESENT_IN_PHASED",
                             reason_detail=f"PhaseD submission dir missing execution_event_record: {str(sd)}",
                         )
-                        _ = write_file_immutable_v1(path=final_dir / "no_execution_event.v1.json", data=canonical_json_bytes_v1(noexec_obj) + b"\n", create_dirs=True)
+                        _ = write_file_immutable_v1(path=dst_dir / "no_execution_event.v1.json", data=canonical_json_bytes_v1(noexec_obj) + b"\n", create_dirs=True)
                         status = "DEGRADED_MISSING_EXECUTION_EVENT"
                         if "MISSING_EXECUTION_EVENT" not in reason_codes:
                             reason_codes.append("MISSING_EXECUTION_EVENT")
 
-                ptr_plan_v1 = _existing_identity_file_ptr(src_dir=sd, filename="order_plan.v1.json")
-                ptr_equity_plan_v1 = _existing_identity_file_ptr(src_dir=sd, filename="equity_order_plan.v1.json")
-                ptr_bind_v1 = _existing_identity_file_ptr(src_dir=sd, filename="binding_record.v1.json")
-                ptr_bind_v2 = _existing_identity_file_ptr(src_dir=sd, filename="binding_record.v2.json")
-                ptr_map_v1 = _existing_identity_file_ptr(src_dir=sd, filename="mapping_ledger_record.v1.json")
-                ptr_map_v2 = _existing_identity_file_ptr(src_dir=sd, filename="mapping_ledger_record.v2.json")
+                if not source_is_authoritative:
+                    ptr_plan_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=dst_dir, filename="order_plan.v1.json", reason_codes=reason_codes)
+                    ptr_equity_plan_v1 = _maybe_copy_identity_file(
+                        src_dir=sd,
+                        dst_dir=dst_dir,
+                        filename="equity_order_plan.v1.json",
+                        reason_codes=reason_codes,
+                    )
+                    _ = _maybe_copy_equity_plan_v2_twin(src_dir=sd, dst_dir=dst_dir, reason_codes=reason_codes)
+                    ptr_bind_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=dst_dir, filename="binding_record.v1.json", reason_codes=reason_codes)
+                    ptr_bind_v2 = _maybe_copy_identity_file(src_dir=sd, dst_dir=dst_dir, filename="binding_record.v2.json", reason_codes=reason_codes)
+                    ptr_map_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=dst_dir, filename="mapping_ledger_record.v1.json", reason_codes=reason_codes)
+                    ptr_map_v2 = _maybe_copy_identity_file(src_dir=sd, dst_dir=dst_dir, filename="mapping_ledger_record.v2.json", reason_codes=reason_codes)
+                else:
+                    ptr_plan_v1 = _existing_identity_file_ptr(src_dir=sd, filename="order_plan.v1.json")
+                    ptr_equity_plan_v1 = _existing_identity_file_ptr(src_dir=sd, filename="equity_order_plan.v1.json")
+                    ptr_bind_v1 = _existing_identity_file_ptr(src_dir=sd, filename="binding_record.v1.json")
+                    ptr_bind_v2 = _existing_identity_file_ptr(src_dir=sd, filename="binding_record.v2.json")
+                    ptr_map_v1 = _existing_identity_file_ptr(src_dir=sd, filename="mapping_ledger_record.v1.json")
+                    ptr_map_v2 = _existing_identity_file_ptr(src_dir=sd, filename="mapping_ledger_record.v2.json")
             else:
-                _ = write_file_immutable_v1(path=tmp_dir / "authorization_binding_record.v1.json", data=p_auth.read_bytes(), create_dirs=True)
+                if p_auth.exists():
+                    _ = write_file_immutable_v1(path=tmp_dir / "authorization_binding_record.v1.json", data=p_auth.read_bytes(), create_dirs=True)
 
                 if has_veto:
                     wr_veto = write_file_immutable_v1(path=tmp_dir / "veto_record.v1.json", data=p_veto.read_bytes(), create_dirs=True)
                     wr_veto_sha = wr_veto.sha256
-                else:
+                if has_broker:
                     wr_broker = write_file_immutable_v1(path=tmp_dir / "broker_submission_record.v2.json", data=p_broker.read_bytes(), create_dirs=True)
                     wr_broker_sha = wr_broker.sha256
                     if has_exec:
@@ -464,12 +604,18 @@ def main(argv: List[str] | None = None) -> int:
                         if "MISSING_EXECUTION_EVENT" not in reason_codes:
                             reason_codes.append("MISSING_EXECUTION_EVENT")
 
-                ptr_plan_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="order_plan.v1.json")
-                ptr_equity_plan_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="equity_order_plan.v1.json")
-                ptr_bind_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="binding_record.v1.json")
-                ptr_bind_v2 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="binding_record.v2.json")
-                ptr_map_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="mapping_ledger_record.v1.json")
-                ptr_map_v2 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="mapping_ledger_record.v2.json")
+                ptr_plan_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="order_plan.v1.json", reason_codes=reason_codes)
+                ptr_equity_plan_v1 = _maybe_copy_identity_file(
+                    src_dir=sd,
+                    dst_dir=tmp_dir,
+                    filename="equity_order_plan.v1.json",
+                    reason_codes=reason_codes,
+                )
+                _ = _maybe_copy_equity_plan_v2_twin(src_dir=sd, dst_dir=tmp_dir, reason_codes=reason_codes)
+                ptr_bind_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="binding_record.v1.json", reason_codes=reason_codes)
+                ptr_bind_v2 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="binding_record.v2.json", reason_codes=reason_codes)
+                ptr_map_v1 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="mapping_ledger_record.v1.json", reason_codes=reason_codes)
+                ptr_map_v2 = _maybe_copy_identity_file(src_dir=sd, dst_dir=tmp_dir, filename="mapping_ledger_record.v2.json", reason_codes=reason_codes)
                 _atomic_publish_dir(tmp_dir, final_dir)
 
             manifest_ptr_plan = ptr_plan_v1 if ptr_plan_v1 is not None else ptr_equity_plan_v1
@@ -507,13 +653,27 @@ def main(argv: List[str] | None = None) -> int:
             else:
                 validate_against_repo_schema_v1(manifest_obj, REPO_ROOT, SCHEMA_SUBMISSION_MANIFEST_V2)
 
-            m_path = submission_manifest_path_v1(day_utc=day_utc, submission_id=submission_id)
+            if target_truth_root_for_paths is None:
+                m_path = submission_manifest_path_v1(day_utc=day_utc, submission_id=submission_id)
+            else:
+                m_path = submission_manifest_path_for_truth_root_v1(
+                    day_utc=day_utc,
+                    submission_id=submission_id,
+                    truth_root=target_truth_root_for_paths,
+                )
 
             if m_path.exists() and m_path.is_file():
                 ex_manifest = _read_json_obj(m_path)
                 _ = _validate_manifest_any_version(ex_manifest)
 
-                patch_path = submission_manifest_identity_patch_path_v1(day_utc=day_utc, submission_id=submission_id)
+                if target_truth_root_for_paths is None:
+                    patch_path = submission_manifest_identity_patch_path_v1(day_utc=day_utc, submission_id=submission_id)
+                else:
+                    patch_path = submission_manifest_identity_patch_path_for_truth_root_v1(
+                        day_utc=day_utc,
+                        submission_id=submission_id,
+                        truth_root=target_truth_root_for_paths,
+                    )
                 need_patch = False
                 if (
                     (ptr_plan_v1 is not None)

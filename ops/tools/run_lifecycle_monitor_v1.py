@@ -9,10 +9,10 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
+from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
 from constellation_2.common.runtime_contract_v1 import (
     require_truth_root_under_contract,
-    resolve_canonical_truth_root,
-    resolve_release_provenance,
+    resolve_release_provenance_release_current_first_v1,
 )
 from constellation_2.phaseD.lib.canon_json_v1 import (
     CanonicalizationError,
@@ -24,10 +24,9 @@ from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteE
 
 _THIS_FILE = Path(__file__).resolve()
 REPO_ROOT = _THIS_FILE.parents[2].resolve()
-try:
-    DEFAULT_TRUTH = resolve_canonical_truth_root()
-except Exception:
-    DEFAULT_TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+DEFAULT_TRUTH = resolve_canonical_truth_root_bridge_v1(
+    caller="ops/tools/run_lifecycle_monitor_v1.py"
+).resolve()
 
 SCHEMA_REPORT = "governance/04_DATA/SCHEMAS/C2/MONITORING/lifecycle_monitor_report.v1.schema.json"
 SCHEMA_EXPOSURE_RECON_V2 = (
@@ -37,7 +36,12 @@ SCHEMA_EXPOSURE_RECON_V2 = (
 
 def _git_sha() -> str:
     try:
-        return str(resolve_release_provenance().get("git_sha") or "").strip()
+        return str(
+            resolve_release_provenance_release_current_first_v1(
+                caller="ops/tools/run_lifecycle_monitor_v1.py"
+            ).get("git_sha")
+            or ""
+        ).strip()
     except Exception:
         out = subprocess.check_output(["/usr/bin/git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT))
         return out.decode("utf-8").strip()
@@ -60,15 +64,7 @@ def _resolve_truth_root(args_truth_root: str) -> Path:
     truth_root = Path(tr).resolve()
     if not truth_root.exists() or not truth_root.is_dir():
         raise SystemExit(f"FATAL: truth_root missing or not directory: {truth_root}")
-
-    try:
-        return require_truth_root_under_contract(truth_root)
-    except Exception:
-        try:
-            truth_root.relative_to(REPO_ROOT)
-        except Exception:
-            raise SystemExit(f"FATAL: truth_root not under repo root: truth_root={truth_root} repo_root={REPO_ROOT}")
-        return truth_root
+    return require_truth_root_under_contract(truth_root)
 
 
 def _read_json_obj(path: Path) -> Dict[str, Any]:
@@ -101,6 +97,28 @@ def _build_report(*, truth: Path, day: str, produced_utc: str) -> Dict[str, Any]
             checks.append({"name": name, "status": "FAIL", "details": {"path": str(p)}})
         else:
             checks.append({"name": name, "status": "OK", "details": {"path": str(p)}})
+
+    if p_life.exists():
+        life = _read_json_obj(p_life)
+        life_status = str(life.get("status") or "").strip().upper()
+        if life_status != "OK":
+            status = "FAIL"
+            reason_codes.append("LIFECYCLE_SNAPSHOT_NOT_OK")
+            checks.append(
+                {
+                    "name": "lifecycle_snapshot_status",
+                    "status": "FAIL",
+                    "details": {"lifecycle_status": life.get("status")},
+                }
+            )
+        else:
+            checks.append(
+                {
+                    "name": "lifecycle_snapshot_status",
+                    "status": "OK",
+                    "details": {"lifecycle_status": life.get("status")},
+                }
+            )
 
     # If exposure reconciliation exists, validate and require rec.status == OK
     if p_rec.exists():

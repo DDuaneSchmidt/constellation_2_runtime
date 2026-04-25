@@ -5,16 +5,14 @@ from pathlib import Path
 from typing import Any, Dict
 
 from constellation_2.common.paper_session_fact_plane_v1 import resolve_authoritative_repo_root_v1
+from constellation_2.common.runtime_authority_bridge_v1 import load_release_current_runtime_authority_v1
 from constellation_2.common.runtime_contract_v1 import (
     resolve_canonical_truth_root,
-    resolve_release_provenance,
     resolve_truth_sleeves_root,
 )
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_REPO_TRUTH_ROOT = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
-DEFAULT_REPO_TRUTH_SLEEVES_ROOT = (REPO_ROOT / "constellation_2" / "runtime" / "truth_sleeves").resolve()
 
 
 @dataclass(frozen=True)
@@ -35,16 +33,25 @@ def _under(path: Path, root: Path) -> bool:
         return False
 
 
+def _authoritative_repo_truth_root(authoritative_repo_root: Path) -> Path:
+    return (authoritative_repo_root / "constellation_2" / "runtime" / "truth").resolve()
+
+
+def _authoritative_repo_truth_sleeves_root(authoritative_repo_root: Path) -> Path:
+    return (authoritative_repo_root / "constellation_2" / "runtime" / "truth_sleeves").resolve()
+
+
 def load_runtime_path_authority_v1(*, repo_root: Path | None = None) -> RuntimePathAuthorityV1:
     resolved_repo_root = Path(repo_root or REPO_ROOT).resolve()
     authoritative_repo_root = resolve_authoritative_repo_root_v1(resolved_repo_root)
     canonical_runtime_truth_root = resolve_canonical_truth_root()
     canonical_runtime_truth_sleeves_root = resolve_truth_sleeves_root()
-    release_root = Path(str(resolve_release_provenance().get("release_root") or "")).resolve()
-    authoritative_repo_truth_root = (authoritative_repo_root / "constellation_2" / "runtime" / "truth").resolve()
-    authoritative_repo_truth_sleeves_root = (
-        authoritative_repo_root / "constellation_2" / "runtime" / "truth_sleeves"
-    ).resolve()
+    runtime_authority = load_release_current_runtime_authority_v1(
+        caller="constellation_2/common/runtime_path_authority_v1.py"
+    )
+    release_root = Path(str(runtime_authority.get("release_root") or "")).resolve()
+    authoritative_repo_truth_root = _authoritative_repo_truth_root(authoritative_repo_root)
+    authoritative_repo_truth_sleeves_root = _authoritative_repo_truth_sleeves_root(authoritative_repo_root)
     return RuntimePathAuthorityV1(
         authoritative_repo_root=authoritative_repo_root,
         canonical_runtime_truth_root=canonical_runtime_truth_root,
@@ -120,6 +127,17 @@ def resolve_execution_truth_root_v1(
     repo_root: Path | None = None,
 ) -> Path:
     return resolve_decision_truth_root_v1(explicit_truth_root, repo_root=repo_root)
+
+
+def require_authoritative_repo_runtime_v1(repo_root: Path | None = None) -> Path:
+    resolved_repo_root = Path(repo_root or REPO_ROOT).resolve()
+    authoritative_repo_root = resolve_authoritative_repo_root_v1(resolved_repo_root)
+    if resolved_repo_root != authoritative_repo_root:
+        raise SystemExit(
+            "FAIL: AUTHORITATIVE_REPO_RUNTIME_REQUIRED:"
+            f"runtime_repo={resolved_repo_root}:authoritative_repo={authoritative_repo_root}"
+        )
+    return authoritative_repo_root
 
 
 def resolve_runtime_path_authority_snapshot_v1(*, repo_root: Path | None = None) -> Dict[str, str]:

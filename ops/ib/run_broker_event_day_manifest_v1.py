@@ -3,7 +3,7 @@
 run_broker_event_day_manifest_v1.py
 
 Writes immutable, governed manifests ("seals") for:
-  constellation_2/runtime/truth/execution_evidence_v1/broker_events/<DAY>/broker_event_log.v1.jsonl
+  canonical_truth_root/execution_evidence_v1/broker_events/<DAY>/broker_event_log.v1.jsonl
 
 Institutional-grade properties:
 - Deterministic
@@ -42,11 +42,12 @@ import subprocess
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from constellation_2.common.truth_root_v1 import resolve_truth_root
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
 REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH = resolve_truth_root(repo_root=REPO_ROOT).resolve()
 
 RAW_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_event_raw.v1.schema.json"
 MAN_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_event_day_manifest.v1.schema.json"
@@ -57,7 +58,12 @@ BROKER_EVENTS_ROOT = (TRUTH / "execution_evidence_v1/broker_events").resolve()
 def _resolve_truth_root(arg: str) -> Path:
     raw = str(arg or "").strip()
     if raw:
-        return Path(raw).resolve()
+        path = Path(raw).expanduser().resolve()
+        if not path.is_absolute():
+            raise SystemExit(f"FAIL: --truth_root must be absolute: {path}")
+        if not path.exists() or not path.is_dir():
+            raise SystemExit(f"FAIL: --truth_root must exist and be a directory: {path}")
+        return path
     return TRUTH
 
 
@@ -139,7 +145,7 @@ def main() -> int:
             "schema_version": "v1",
             "day_utc": day,
             "produced_utc": _utc_now(),
-            "producer": {"repo": "constellation_2_runtime", "module": "ops/ib/run_broker_event_day_manifest_v1.py", "git_sha": _git_sha()},
+            "producer": {"repo": REPO_ROOT.name, "module": "ops/ib/run_broker_event_day_manifest_v1.py", "git_sha": _git_sha()},
             "status": status,
             "reason_codes": reason_codes,
             "notes": notes,
@@ -210,7 +216,7 @@ def main() -> int:
         "schema_version": "v1",
         "day_utc": day,
         "produced_utc": _utc_now(),
-        "producer": {"repo": "constellation_2_runtime", "module": "ops/ib/run_broker_event_day_manifest_v1.py", "git_sha": _git_sha()},
+        "producer": {"repo": REPO_ROOT.name, "module": "ops/ib/run_broker_event_day_manifest_v1.py", "git_sha": _git_sha()},
         "status": status,
         "reason_codes": reason_codes,
         "notes": notes,

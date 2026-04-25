@@ -10,9 +10,15 @@ Schema expectations (governance/04_DATA/SCHEMAS/C2/REPORTS/replay_certification_
 - input_entries: detailed list of entries (type,path,sha256,present)
 - hashes: includes depth_stress_artifact_hash
 
+Submission-evidence contract:
+- Prefer pillars decisions (pillars_v1r1, then pillars_v1) when present.
+- Fall back to legacy submission_index only if pillars are absent.
+- If no authoritative broker submission records exist for DAY, submission evidence is satisfied.
+
 Fail-closed:
 - If any required input is missing, status=FAIL and fail_closed=true.
-- Bundle is still written immutably for auditability.
+- Existing FAIL artifacts may be refreshed via the governed day-artifact refresh path.
+- Existing PASS artifacts are preserved.
 """
 
 from __future__ import annotations
@@ -23,7 +29,9 @@ import json
 import os
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
+
+from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1
 
 _THIS_FILE = Path(__file__).resolve()
 _REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
@@ -93,23 +101,23 @@ def _validate(obj: Any) -> None:
     validate_against_repo_schema_v1(obj, REPO_ROOT, SCHEMA_RELPATH)
 
 
-def _write_immutable(path: Path, obj: Dict[str, Any]) -> str:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def _write_refreshable_bundle(path: Path, obj: Dict[str, Any], *, day_utc: str) -> str:
     payload = _canonical_json_bytes_v1(obj) + b"\n"
-    sha = _sha256_bytes(payload)
-
-    if path.exists():
-        existing = path.read_bytes()
-        if _sha256_bytes(existing) == sha:
-            return sha
-        raise SystemExit(f"FAIL: refusing overwrite (different bytes): {path}")
-
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    if tmp.exists():
-        tmp.unlink()
-    tmp.write_bytes(payload)
-    os.replace(tmp, path)
-    return sha
+    wr = write_day_artifact_refreshable_v1(
+        path=path,
+        data=payload,
+        expected_day_utc=day_utc,
+        expected_schema_id="C2_REPLAY_CERTIFICATION_BUNDLE_V1",
+        expected_schema_version=1,
+        preserve_statuses=("PASS",),
+    )
+    if wr.action == "REFRESHED":
+        print(
+            "WARN: REPLAY_CERTIFICATION_BUNDLE_REFRESHED_STALE_ARTIFACT "
+            f"day_utc={day_utc} path={path} prior_sha256={wr.prior_sha256} "
+            f"quarantined_path={wr.quarantined_path}"
+        )
+    return wr.sha256
 
 
 def _hash_dir_listing(root: Path) -> str:
@@ -129,6 +137,76 @@ def _input_entry(truth_root: Path, type_: str, relpath: str) -> Dict[str, Any]:
     if p.exists() and p.is_dir():
         return {"type": type_, "path": relpath, "sha256": _hash_dir_listing(p), "present": True}
     return {"type": type_, "path": relpath, "sha256": "0" * 64, "present": False}
+
+
+def _count_broker_submission_records(truth_root: Path, day: str) -> int:
+    root = (truth_root / "execution_evidence_v1" / "submissions" / day).resolve()
+    if not root.exists() or not root.is_dir():
+        return 0
+    return len(list(root.glob("*/broker_submission_record.v2.json")))
+
+
+def _pillars_decisions_dir(truth_root: Path, day: str) -> Optional[Tuple[str, Path]]:
+    candidates = [
+        (f"pillars_v1r1/{day}/decisions", (truth_root / "pillars_v1r1" / day / "decisions").resolve()),
+        (f"pillars_v1/{day}/decisions", (truth_root / "pillars_v1" / day / "decisions").resolve()),
+    ]
+    for relpath, path in candidates:
+        if not path.exists() or not path.is_dir():
+            continue
+        count = len([p for p in path.iterdir() if p.is_file() and p.name.endswith(".submission_decision_record.v1.json")])
+        if count > 0:
+            return (relpath, path)
+    return None
+
+
+def _decision_record_hashes(decisions_dir: Path) -> List[str]:
+    files = sorted(
+        [p for p in decisions_dir.iterdir() if p.is_file() and p.name.endswith(".submission_decision_record.v1.json")],
+        key=lambda p: p.name,
+    )
+    return [_sha256_file(p) for p in files]
+
+
+def _submission_evidence_input(truth_root: Path, day: str) -> Tuple[Dict[str, Any], List[str]]:
+    pillars = _pillars_decisions_dir(truth_root, day)
+    if pillars is not None:
+        relpath, path = pillars
+        return (
+            {
+                "type": "submission_evidence",
+                "path": relpath,
+                "sha256": _hash_dir_listing(path),
+                "present": True,
+            },
+            _decision_record_hashes(path),
+        )
+
+    submission_index = f"execution_evidence_v1/submission_index/{day}/submission_index.v1.json"
+    legacy = _input_entry(truth_root, "submission_evidence", submission_index)
+    if legacy["present"]:
+        return (legacy, [str(legacy["sha256"])])
+
+    if _count_broker_submission_records(truth_root, day) == 0:
+        return (
+            {
+                "type": "submission_evidence",
+                "path": f"execution_evidence_v1/submissions/{day}",
+                "sha256": _sha256_bytes(b""),
+                "present": True,
+            },
+            [],
+        )
+
+    return (
+        {
+            "type": "submission_evidence",
+            "path": submission_index,
+            "sha256": "0" * 64,
+            "present": False,
+        },
+        [],
+    )
 
 
 def main() -> int:
@@ -153,8 +231,8 @@ def main() -> int:
     depth = f"reports/depth_liquidity_stress_v1/{day}/depth_liquidity_stress.v1.json"
     reconciliation = f"reports/broker_reconciliation_v2/{day}/broker_reconciliation.v2.json"
     nav = f"accounting_v2/nav/{day}/nav.v2.json"
-    submission_index = f"execution_evidence_v1/submission_index/{day}/submission_index.v1.json"
     gate_stack = f"reports/gate_stack_verdict_v1/{day}/gate_stack_verdict.v1.json"
+    submission_evidence_entry, submission_bundle_hashes = _submission_evidence_input(TRUTH_ROOT, day)
 
     input_entries: List[Dict[str, Any]] = [
         _input_entry(TRUTH_ROOT, "input_manifest", input_manifest),
@@ -163,7 +241,7 @@ def main() -> int:
         _input_entry(TRUTH_ROOT, "correlation_artifact", corr),
         _input_entry(TRUTH_ROOT, "convex_shock_artifact", convex),
         _input_entry(TRUTH_ROOT, "depth_stress_artifact", depth),
-        _input_entry(TRUTH_ROOT, "submission_index", submission_index),
+        submission_evidence_entry,
         _input_entry(TRUTH_ROOT, "reconciliation", reconciliation),
         _input_entry(TRUTH_ROOT, "nav", nav),
         _input_entry(TRUTH_ROOT, "gate_stack_verdict", gate_stack),
@@ -171,7 +249,11 @@ def main() -> int:
 
     present_types = [e["type"] for e in input_entries if e["present"]]
     missing_types = [e["type"] for e in input_entries if not e["present"]]
-    fail_closed = bool(missing_types)
+    broker_submission_records_total = _count_broker_submission_records(TRUTH_ROOT, day)
+    bootstrap_missing_allowed = {"input_manifest", "allocation_summary", "reconciliation"}
+    bootstrap_missing_subset = set(missing_types).issubset(bootstrap_missing_allowed)
+    bootstrap_replay_tolerance_applies = broker_submission_records_total == 0 and bootstrap_missing_subset
+    fail_closed = bool(missing_types) and not bootstrap_replay_tolerance_applies
     status = "FAIL" if fail_closed else "PASS"
 
     def _h(type_: str) -> str:
@@ -179,11 +261,6 @@ def main() -> int:
             if e["type"] == type_:
                 return str(e["sha256"])
         return "0" * 64
-
-    submission_bundle_hashes: List[str] = []
-    for e in input_entries:
-        if e["type"] in ("submission_index",):
-            submission_bundle_hashes.append(str(e["sha256"]))
 
     lines: List[str] = []
     for e in input_entries:
@@ -228,7 +305,7 @@ def main() -> int:
     _validate(out)
 
     out_path = (TRUTH_ROOT / "reports" / "replay_certification_bundle_v1" / day / "replay_certification_bundle.v1.json").resolve()
-    sha = _write_immutable(out_path, out)
+    sha = _write_refreshable_bundle(out_path, out, day_utc=day)
     print(sha)
     return 0
 

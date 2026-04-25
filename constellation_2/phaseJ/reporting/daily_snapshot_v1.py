@@ -22,13 +22,16 @@ from decimal import Decimal, ROUND_HALF_UP, getcontext
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
+
 # ---- Repo root / output locations ----
 REPO_ROOT = Path(__file__).resolve().parents[3]
-OUT_DIR = (REPO_ROOT / "constellation_2/runtime/truth/reports").resolve()
+RUNTIME_TRUTH = resolve_canonical_truth_root_bridge_v1(
+    caller="constellation_2/phaseJ/reporting/daily_snapshot_v1.py"
+).resolve()
+OUT_DIR = (RUNTIME_TRUTH / "reports").resolve()
 
 # ---- Upstream truth sources ----
-RUNTIME_TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
-
 ACCOUNTING_NAV_DIR = (RUNTIME_TRUTH / "accounting_v1/nav").resolve()
 ACCOUNTING_ATTR_DIR = (RUNTIME_TRUTH / "accounting_v1/attribution").resolve()
 ALLOCATION_SUMMARY_DIR = (RUNTIME_TRUTH / "allocation_v1/summary").resolve()

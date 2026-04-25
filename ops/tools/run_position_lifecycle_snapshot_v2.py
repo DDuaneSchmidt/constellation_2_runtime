@@ -1,14 +1,23 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+_THIS_FILE = Path(__file__).resolve()
+_REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
+if str(_REPO_ROOT_FROM_FILE) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
+
+if not (_REPO_ROOT_FROM_FILE / "constellation_2").exists():
+    raise SystemExit(f"FATAL: repo_root_missing_constellation_2: derived={_REPO_ROOT_FROM_FILE}")
+
 import argparse
 import hashlib
 import json
 import os
 import subprocess
-import sys
-from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 from constellation_2.phaseD.lib.canon_json_v1 import (
     CanonicalizationError,
@@ -17,18 +26,25 @@ from constellation_2.phaseD.lib.canon_json_v1 import (
 )
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
+from constellation_2.common.truth_root_v1 import resolve_truth_root
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-DEFAULT_TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
+DEFAULT_TRUTH = resolve_truth_root(repo_root=REPO_ROOT)
 
 OUT_SCHEMA = "governance/04_DATA/SCHEMAS/C2/POSITION_LIFECYCLE/position_lifecycle_snapshot.v2.schema.json"
 
-# Candidate input schemas by version (validated only if schema file exists on disk)
-POS_SNAPSHOT_SCHEMA_BY_VERSION: Dict[int, str] = {
-    5: "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_snapshot.v5.schema.json",
-    4: "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_snapshot.v4.schema.json",
-    3: "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_snapshot.v3.schema.json",
-    2: "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_snapshot.v2.schema.json",
+POS_SNAPSHOT_SCHEMA_V5 = "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_snapshot.v5.schema.json"
+VALID_LIFECYCLE_STATES = {
+    "OPEN",
+    "MANAGING",
+    "REDUCE_PENDING",
+    "REDUCING",
+    "CLOSE_PENDING",
+    "CLOSING",
+    "CLOSED",
+    "FORCED_CLOSE_PENDING",
+    "FORCED_CLOSED",
+    "ORPHANED",
 }
 
 
@@ -56,13 +72,6 @@ def _read_json_obj(path: Path) -> Dict[str, Any]:
 
 
 def _resolve_truth_root(args_truth_root: str) -> Path:
-    """
-    Deterministic truth_root resolution order:
-      1) --truth_root if provided
-      2) env C2_TRUTH_ROOT if set
-      3) DEFAULT_TRUTH (canonical)
-    Hard guard: truth_root must be under repo root.
-    """
     tr = (args_truth_root or "").strip()
     if not tr:
         tr = (os.environ.get("C2_TRUTH_ROOT") or "").strip()
@@ -72,12 +81,6 @@ def _resolve_truth_root(args_truth_root: str) -> Path:
     truth_root = Path(tr).resolve()
     if not truth_root.exists() or not truth_root.is_dir():
         raise SystemExit(f"FATAL: truth_root missing or not directory: {truth_root}")
-
-    try:
-        truth_root.relative_to(REPO_ROOT)
-    except Exception:
-        raise SystemExit(f"FATAL: truth_root not under repo root: truth_root={truth_root} repo_root={REPO_ROOT}")
-
     return truth_root
 
 
@@ -88,55 +91,11 @@ def _parse_day_utc(s: str) -> str:
     return d
 
 
-def _best_positions_snapshot_path(truth: Path, day: str) -> Tuple[int, Path]:
-    """
-    Prefer highest version available: v5 -> v4 -> v3 -> v2.
-    """
-    snap_dir = (truth / "positions_v1" / "snapshots" / day).resolve()
-    for v in (5, 4, 3, 2):
-        p = (snap_dir / f"positions_snapshot.v{v}.json").resolve()
-        if p.exists() and p.is_file():
-            return (v, p)
-    raise SystemExit(f"FAIL: MISSING_POSITIONS_SNAPSHOT_ANY_VERSION: dir={snap_dir}")
-
-
-def _validate_positions_snapshot_if_schema_present(pos_obj: Dict[str, Any], version: int) -> List[str]:
-    """
-    Validate the positions snapshot against governed schema *only if the schema file exists on disk*.
-    Returns reason_codes additions.
-    """
-    reasons: List[str] = []
-    schema_rel = POS_SNAPSHOT_SCHEMA_BY_VERSION.get(version)
-    if not schema_rel:
-        reasons.append(f"POSITIONS_SCHEMA_UNKNOWN_FOR_V{version}")
-        return reasons
-
-    schema_abs = (REPO_ROOT / schema_rel).resolve()
-    if not schema_abs.exists():
-        reasons.append(f"POSITIONS_SCHEMA_MISSING_SKIP_VALIDATION_V{version}")
-        return reasons
-
-    validate_against_repo_schema_v1(pos_obj, REPO_ROOT, schema_rel)
-    reasons.append(f"POSITIONS_SCHEMA_VALIDATED_V{version}")
-    return reasons
-
-
-def _extract_items_from_positions_snapshot(pos_obj: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    Supports multiple historical shapes:
-      - v5: items likely at pos["items"]
-      - v2/v3: positions block may be pos["positions"]["items"]
-    """
-    if isinstance(pos_obj.get("items"), list):
-        items = pos_obj.get("items")
-        return [x for x in items if isinstance(x, dict)]
-
-    positions = pos_obj.get("positions")
-    if isinstance(positions, dict) and isinstance(positions.get("items"), list):
-        items2 = positions.get("items")
-        return [x for x in items2 if isinstance(x, dict)]
-
-    raise SystemExit("FAIL: POSITIONS_ITEMS_NOT_FOUND_IN_SUPPORTED_LOCATIONS")
+def _positions_snapshot_v5_path(truth: Path, day: str) -> Path:
+    p = (truth / "positions_v1" / "snapshots" / day / "positions_snapshot.v5.json").resolve()
+    if not p.exists() or not p.is_file():
+        raise SystemExit(f"FAIL: MISSING_POSITIONS_SNAPSHOT_V5: path={p}")
+    return p
 
 
 def _safe_str(v: Any) -> str:
@@ -176,14 +135,14 @@ def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | N
         raise SystemExit(
             f"FAIL: EXISTING_REPORT_DAY_MISMATCH: day_utc={day_utc!r} expected={expected_day_utc!r} path={out_path}"
         )
-    if status != "OK":
+    if status not in {"OK", "FAIL"}:
         raise SystemExit(f"FAIL: EXISTING_REPORT_STATUS_INVALID: status={status!r} path={out_path}")
 
     print(
         f"OK: POSITION_LIFECYCLE_SNAPSHOT_V2_WRITTEN day_utc={expected_day_utc} "
         f"status={status} path={out_path} sha256={existing_sha} action=EXISTS"
     )
-    return 0
+    return 0 if status == "OK" else 2
 
 
 def main() -> int:
@@ -200,44 +159,60 @@ def main() -> int:
     truth = _resolve_truth_root(str(args.truth_root))
 
     produced_utc = f"{day}T00:00:00Z"
-    last_transition_utc = produced_utc
-
-    ver, p_pos = _best_positions_snapshot_path(truth, day)
+    p_pos = _positions_snapshot_v5_path(truth, day)
     pos = _read_json_obj(p_pos)
+    validate_against_repo_schema_v1(pos, REPO_ROOT, POS_SNAPSHOT_SCHEMA_V5)
 
-    reason_codes: List[str] = [f"DERIVED_FROM_POSITIONS_SNAPSHOT_V{ver}"]
-    reason_codes.extend(_validate_positions_snapshot_if_schema_present(pos, ver))
-
-    items_in = _extract_items_from_positions_snapshot(pos)
+    reason_codes: List[str] = ["DERIVED_FROM_POSITIONS_SNAPSHOT_V5", "POSITIONS_SCHEMA_VALIDATED_V5"]
+    items_in = pos.get("items")
+    if not isinstance(items_in, list):
+        raise SystemExit("FAIL: POSITIONS_V5_ITEMS_NOT_LIST")
 
     out_items: List[Dict[str, Any]] = []
+    validation_errors: List[str] = []
     for it in items_in:
+        if not isinstance(it, dict):
+            continue
         position_id = _safe_str(it.get("position_id") or it.get("positionId") or "")
-        engine_id = _safe_str(it.get("engine_id") or it.get("engineId") or "unknown")
+        engine_id = _safe_str(it.get("engine_id") or it.get("engineId") or "")
         opened_day_utc = _safe_str(it.get("opened_day_utc") or it.get("openedDayUtc") or day)
-
-        # Attribution (may be missing in v2/v3). We synthesize placeholders to keep lifecycle spine runnable.
         source_intent_id = _safe_str(it.get("source_intent_id") or it.get("sourceIntentId") or "")
         intent_sha256 = _safe_sha256_or_zeros(it.get("intent_sha256") or it.get("intentSha256") or "")
+        lifecycle_state = _safe_str(it.get("lifecycle_state") or "").upper()
+        last_transition_utc = _safe_str(it.get("last_transition_utc") or produced_utc) or produced_utc
+        lifecycle_reason_code = _safe_str(it.get("lifecycle_reason_code") or "")
+        item_errors: List[str] = []
+        imported_position_attribution = (
+            engine_id == "imported_position"
+            and source_intent_id.startswith("IMPORTED_POSITION:")
+            and intent_sha256 == "0" * 64
+        )
 
         if not position_id:
-            raise SystemExit("FAIL: POSITION_ID_MISSING_IN_POSITIONS_SNAPSHOT")
-
-        if not source_intent_id:
-            source_intent_id = f"UNKNOWN_INTENT:{position_id}"
-            reason_codes.append("MISSING_ATTRIBUTION_SOURCE_INTENT_ID_SYNTHESIZED")
-
-        if intent_sha256 == "0" * 64:
-            reason_codes.append("MISSING_ATTRIBUTION_INTENT_SHA256_SYNTHESIZED_ZEROS")
+            item_errors.append("POSITION_ID_MISSING_IN_POSITIONS_SNAPSHOT")
+        if position_id:
+            if not engine_id:
+                item_errors.append(f"LIFECYCLE_ENGINE_ID_MISSING:position_id={position_id}")
+            if lifecycle_state not in VALID_LIFECYCLE_STATES:
+                item_errors.append(f"LIFECYCLE_STATE_INVALID:position_id={position_id}:value={lifecycle_state or 'MISSING'}")
+            if not lifecycle_reason_code:
+                item_errors.append(f"LIFECYCLE_REASON_CODE_MISSING:position_id={position_id}")
+            if not source_intent_id:
+                item_errors.append(f"LIFECYCLE_SOURCE_INTENT_ID_MISSING:position_id={position_id}")
+            if intent_sha256 == "0" * 64 and not imported_position_attribution:
+                item_errors.append(f"LIFECYCLE_INTENT_SHA256_INVALID:position_id={position_id}")
+        if item_errors:
+            validation_errors.extend(item_errors)
+            continue
 
         out_items.append(
             {
                 "position_id": position_id,
-                "engine_id": engine_id if engine_id else "unknown",
+                "engine_id": engine_id,
                 "source_intent_id": source_intent_id,
                 "intent_sha256": intent_sha256,
-                "lifecycle_state": "MANAGING",
-                "lifecycle_reason_code": f"PRESENT_IN_POSITIONS_SNAPSHOT_V{ver}",
+                "lifecycle_state": lifecycle_state,
+                "lifecycle_reason_code": lifecycle_reason_code,
                 "opened_day_utc": opened_day_utc if opened_day_utc else day,
                 "last_transition_utc": last_transition_utc,
                 "exit_policy_ref": None,
@@ -264,9 +239,9 @@ def main() -> int:
             "git_sha": _git_sha(),
             "module": "ops/tools/run_position_lifecycle_snapshot_v2.py",
         },
-        "status": "OK",
-        "reason_codes": reason_codes_stable,
-        "items": out_items,
+        "status": ("FAIL" if validation_errors else "OK"),
+        "reason_codes": (reason_codes_stable + sorted(set(validation_errors))),
+        "items": ([] if validation_errors else out_items),
         "canonical_json_hash": None,
     }
 
@@ -293,10 +268,10 @@ def main() -> int:
         return 4
 
     print(
-        f"OK: POSITION_LIFECYCLE_SNAPSHOT_V2_WRITTEN day_utc={day} src_v={ver} "
+        f"OK: POSITION_LIFECYCLE_SNAPSHOT_V2_WRITTEN day_utc={day} src_v=5 "
         f"src_path={p_pos} out={out_path}"
     )
-    return 0
+    return 0 if out["status"] == "OK" else 2
 
 
 if __name__ == "__main__":

@@ -37,12 +37,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
 
 THIS_FILE = Path(__file__).resolve()
 REPO_ROOT = THIS_FILE.parents[4]
-TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH_ROOT = resolve_canonical_truth_root().resolve()
 
 MANIFESTS_ROOT = TRUTH_ROOT / "execution_evidence_v1/manifests"
 SUBMISSIONS_ROOT = TRUTH_ROOT / "execution_evidence_v1/submissions"

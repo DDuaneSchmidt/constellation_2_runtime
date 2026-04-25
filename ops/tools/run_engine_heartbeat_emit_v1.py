@@ -28,14 +28,17 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+_THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = _THIS_FILE.parents[2].resolve()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from constellation_2.common.runtime_contract_v1 import (
     require_truth_root_under_contract,
     resolve_canonical_truth_root,
-    resolve_release_provenance,
+    resolve_release_provenance_release_current_first_v1,
 )
 
-_THIS_FILE = Path(__file__).resolve()
-REPO_ROOT = _THIS_FILE.parents[2].resolve()
 try:
     DEFAULT_TRUTH_ROOT = resolve_canonical_truth_root()
 except Exception:
@@ -211,7 +214,12 @@ def main() -> int:
     git_sha = str(args.producer_git_sha).strip()
     if not git_sha:
         try:
-            git_sha = str(resolve_release_provenance().get("git_sha") or "").strip()
+            git_sha = str(
+                resolve_release_provenance_release_current_first_v1(
+                    caller="ops/tools/run_engine_heartbeat_emit_v1.py"
+                ).get("git_sha")
+                or ""
+            ).strip()
         except Exception:
             git_sha = ""
     if not git_sha:

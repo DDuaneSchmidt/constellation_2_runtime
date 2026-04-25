@@ -21,19 +21,21 @@ REPO_ROOT = _THIS_FILE.parents[2].resolve()
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from constellation_2.common.paper_session_ledger_v1 import assert_paper_session_ledger_granted_v1
+from constellation_2.common.paper_session_ledger_v1 import assert_paper_session_ledger_open_ready_v1
 from constellation_2.common.runtime_contract_v1 import (
-    resolve_canonical_truth_root,
     resolve_pointer_index_path_for_truth_root,
     resolve_truth_sleeves_root,
 )
+from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
 from constellation_2.common.truth_root_v1 import resolve_runtime_path
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
 
 REGISTRY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/C2_SLEEVE_REGISTRY_V1.json").resolve()
 try:
-    CANONICAL_TRUTH_ROOT = resolve_canonical_truth_root()
+    CANONICAL_TRUTH_ROOT = resolve_canonical_truth_root_bridge_v1(
+        caller="ops/tools/run_c2_multi_sleeve_orchestrator_v1.py"
+    )
 except Exception:
     CANONICAL_TRUTH_ROOT = resolve_runtime_path("truth").resolve()
 ROLLOUP_ROOT = (CANONICAL_TRUTH_ROOT / "reports" / "sleeve_rollup_v1").resolve()
@@ -166,6 +168,8 @@ def run_orchestrator_v2(
     truth_root: Path,
     paper_session_ledger_path: Path,
 ) -> Tuple[int, str]:
+    if not ORCH_V2.exists() or not ORCH_V2.is_file():
+        die(f"canonical_sequence_owner_missing path={ORCH_V2}")
     cmd = [
         "python3",
         str(ORCH_V2),
@@ -309,7 +313,7 @@ def main() -> int:
     input_day = require_day((args.input_day_utc or "").strip() or day)
     symbol = str(args.symbol or "").strip().upper() or "SPY"
     paper_session_ledger_path = Path(str(args.paper_session_ledger_path)).resolve()
-    ledger = assert_paper_session_ledger_granted_v1(path=paper_session_ledger_path, day_utc=day)
+    ledger = assert_paper_session_ledger_open_ready_v1(path=paper_session_ledger_path, day_utc=day)
 
     reg = load_json(REGISTRY_PATH)
     sleeves = require_registry(reg)

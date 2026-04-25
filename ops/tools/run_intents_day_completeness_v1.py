@@ -22,6 +22,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     producer_block_v1,
     read_json_object_v1,
     resolve_fact_plane_truth_root_v1,
+    resolve_paper_intent_truth_root_v1,
     sha256_file_v1,
 )
 from constellation_2.common.paper_session_path_alignment_v1 import resolve_intents_day_completeness_path
@@ -203,10 +204,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--truth_root", default="")
     args = ap.parse_args(argv)
 
-    truth_root = resolve_fact_plane_truth_root_v1(args.truth_root)
-    payload = _build_payload(day_utc=args.day_utc, truth_root=truth_root)
+    decision_truth_root = resolve_fact_plane_truth_root_v1(args.truth_root)
+    intent_truth_root = resolve_paper_intent_truth_root_v1(
+        truth_root=decision_truth_root,
+        repo_root=REPO_ROOT,
+    )
+    payload = _build_payload(day_utc=args.day_utc, truth_root=intent_truth_root)
     ref = atomic_write_validated_json_v1(
-        path=resolve_intents_day_completeness_path(truth_root=truth_root, day_utc=args.day_utc),
+        path=resolve_intents_day_completeness_path(truth_root=decision_truth_root, day_utc=args.day_utc),
         payload=payload,
         schema_relpath=OUTPUT_SCHEMA_RELPATH_V1,
     )

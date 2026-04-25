@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -13,9 +14,18 @@ from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH_ROOT = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
-SYSTEM_SNAPSHOT_ROOT = (TRUTH_ROOT / "system_snapshot").resolve()
+THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = THIS_FILE.parents[2].resolve()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.common.release_baseline_common_v1 import resolve_release_baseline_roots_v1  # noqa: E402
+
+
+ROOTS = resolve_release_baseline_roots_v1(REPO_ROOT)
+REPO_ROOT = ROOTS.repo_root
+TRUTH_ROOT = ROOTS.canonical_truth_root
+SYSTEM_SNAPSHOT_ROOT = ROOTS.system_snapshot_root
 POLICY_PATH = (REPO_ROOT / "governance" / "02_REGISTRIES" / "C2_PLATFORM_READINESS_POLICY_V1.json").resolve()
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/READINESS/bug_metrics.v1.schema.json"
 
@@ -113,9 +123,9 @@ def _collect_monitoring_events(day: str, events: list[dict[str, Any]], evidence_
                     "lifecycle_monitor",
                     str(rc),
                     "ERROR" if st == "FAIL" else "WARN",
-                    str(lifecycle_path.relative_to(REPO_ROOT)),
+                    str(lifecycle_path),
                 )
-        evidence_paths.add(str(lifecycle_path.relative_to(REPO_ROOT)))
+        evidence_paths.add(str(lifecycle_path))
 
     paper_path = (
         TRUTH_ROOT
@@ -139,9 +149,9 @@ def _collect_monitoring_events(day: str, events: list[dict[str, Any]], evidence_
                     "paper_readiness",
                     str(rc),
                     "ERROR" if st == "FAIL" else "WARN",
-                    str(paper_path.relative_to(REPO_ROOT)),
+                    str(paper_path),
                 )
-        evidence_paths.add(str(paper_path.relative_to(REPO_ROOT)))
+        evidence_paths.add(str(paper_path))
 
 
 def _collect_orchestrator_events(day: str, events: list[dict[str, Any]], evidence_paths: set[str]) -> None:
@@ -163,16 +173,16 @@ def _collect_orchestrator_events(day: str, events: list[dict[str, Any]], evidenc
                 "orchestrator_run_verdict_v2",
                 str(rc),
                 "ERROR" if st == "FAIL" else "WARN",
-                str(p.relative_to(REPO_ROOT)),
+                str(p),
             )
-    evidence_paths.add(str(p.relative_to(REPO_ROOT)))
+    evidence_paths.add(str(p))
 
 
 def _collect_root_cause_events(day: str, events: list[dict[str, Any]], evidence_paths: set[str]) -> None:
     root_path = (SYSTEM_SNAPSHOT_ROOT / "constellation_root_cause_report.v1.json").resolve()
     obj = _read_json(root_path)
     if str(obj.get("latest_operating_day") or "") != day:
-        evidence_paths.add(str(root_path.relative_to(REPO_ROOT)))
+        evidence_paths.add(str(root_path))
         return
     rows = obj.get("root_causes") if isinstance(obj.get("root_causes"), list) else []
     for rc in rows:
@@ -189,9 +199,9 @@ def _collect_root_cause_events(day: str, events: list[dict[str, Any]], evidence_
             "constellation_root_cause_report",
             code,
             sev if sev in {"INFO", "WARN", "ERROR", "BLOCKING"} else "WARN",
-            str(root_path.relative_to(REPO_ROOT)),
+            str(root_path),
         )
-    evidence_paths.add(str(root_path.relative_to(REPO_ROOT)))
+    evidence_paths.add(str(root_path))
 
 
 def _bug_velocity_for_window(day_counts: dict[str, int], ordered_days: list[str], window_days: int) -> tuple[int | None, int]:

@@ -3,18 +3,25 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
-from constellation_2.common.day_start_blocked_v1 import GLOBAL_TRUTH_ROOT
+from constellation_2.common.operator_alert_decision_v1 import build_operator_alert_decision_object_v1
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
 
 
 STATE_ROOT = (Path.home() / ".local/state/constellation_2").resolve()
 RECEIPTS_ROOT = (STATE_ROOT / "operator_alert_receipts_v1").resolve()
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+GLOBAL_TRUTH_ROOT = resolve_canonical_truth_root()
+REPO_ROOT = Path(__file__).resolve().parents[2]
+ORCHESTRATOR_TIMER_PATH = (REPO_ROOT / "ops" / "systemd" / "user" / "c2-paper-day-orchestrator.timer").resolve()
+_ON_CALENDAR_RE = re.compile(r"^(?:[A-Za-z,-]+\s+)?(?P<hour>\d{1,2}):(?P<minute>\d{2})\s+(?P<tz>\S+)$")
 
 
 def _canonical_json_bytes(obj: Dict[str, Any]) -> bytes:
@@ -38,6 +45,96 @@ def _safe_load_json(path: Path) -> Dict[str, Any]:
     return obj if isinstance(obj, dict) else {}
 
 
+@lru_cache(maxsize=1)
+def _load_bod_schedule() -> Tuple[int, int, str]:
+    for raw_line in ORCHESTRATOR_TIMER_PATH.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line.startswith("OnCalendar="):
+            continue
+        match = _ON_CALENDAR_RE.match(line.split("=", 1)[1].strip())
+        if not match:
+            break
+        return (
+            int(match.group("hour")),
+            int(match.group("minute")),
+            str(match.group("tz")),
+        )
+    raise RuntimeError(f"INVALID_ORCHESTRATOR_TIMER_ONCALENDAR: {ORCHESTRATOR_TIMER_PATH}")
+
+
+def _bod_time_label() -> str:
+    hour, minute, tz_name = _load_bod_schedule()
+    tz_label = "ET" if tz_name == "America/New_York" else tz_name
+    return f"{hour:02d}:{minute:02d} {tz_label}"
+
+
+def _bod_datetime_for_day(day_utc: str) -> datetime:
+    hour, minute, tz_name = _load_bod_schedule()
+    target_day = date.fromisoformat(str(day_utc).strip())
+    return datetime(target_day.year, target_day.month, target_day.day, hour, minute, tzinfo=ZoneInfo(tz_name))
+
+
+def _resolve_now_local(now: Optional[datetime]) -> datetime:
+    _, _, tz_name = _load_bod_schedule()
+    tz = ZoneInfo(tz_name)
+    if now is None:
+        return datetime.now(tz)
+    if now.tzinfo is None:
+        return now.replace(tzinfo=tz)
+    return now.astimezone(tz)
+
+
+def _is_pre_bod(*, day_utc: str, now: Optional[datetime]) -> bool:
+    return _resolve_now_local(now) < _bod_datetime_for_day(day_utc)
+
+
+def _phase_semantics_enabled(*, day_utc: str, now: Optional[datetime]) -> bool:
+    return str(day_utc).strip() == _resolve_now_local(now).date().isoformat()
+
+
+def _semantic_overlay(
+    *,
+    day_utc: str,
+    trading_day_state: Dict[str, Any],
+    blocked_day: Dict[str, Any],
+    state: str,
+    heartbeat_status: str,
+    first_failure: str,
+    blocked_stage: str,
+    orchestrator_started: Any,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    state_doc = dict(trading_day_state)
+    state_doc.update(
+        {
+            "day_utc": day_utc,
+            "state": state,
+            "heartbeat_status": heartbeat_status,
+            "first_failing_prerequisite": first_failure,
+            "orchestrator_started": orchestrator_started,
+        }
+    )
+    state_doc.setdefault("produced_utc", "")
+    blocked_doc = dict(blocked_day)
+    blocked_doc.update(
+        {
+            "day_utc": day_utc,
+            "blocked_stage": blocked_stage,
+            "failing_service": "c2-paper-day-orchestrator.timer",
+            "failing_script": "ops/systemd/user/c2-paper-day-orchestrator.timer",
+        }
+    )
+    blocked_doc.setdefault("evidence_paths", [str(ORCHESTRATOR_TIMER_PATH)])
+    return state_doc, blocked_doc
+
+
+def _semantic_status(*, pre_bod: bool, trading_day_state: Dict[str, Any]) -> str:
+    if pre_bod:
+        return "PRE_OPEN"
+    if trading_day_state.get("orchestrator_started") is True:
+        return "STARTED"
+    return "PENDING"
+
+
 def _execution_context() -> Dict[str, Any]:
     invocation_id = str(os.environ.get("INVOCATION_ID") or "").strip()
     journal_stream = str(os.environ.get("JOURNAL_STREAM") or "").strip()
@@ -56,6 +153,10 @@ def _trading_day_state_path(day_utc: str, truth_root: Path = GLOBAL_TRUTH_ROOT) 
 
 def _blocked_day_path(day_utc: str, truth_root: Path = GLOBAL_TRUTH_ROOT) -> Path:
     return (truth_root / "reports" / "day_start_blocked_v1" / day_utc / "day_start_blocked.v1.json").resolve()
+
+
+def _trading_day_state_machine_path(day_utc: str, truth_root: Path = GLOBAL_TRUTH_ROOT) -> Path:
+    return (truth_root / "reports" / "trading_day_state_machine_v1" / day_utc / "trading_day_state_machine.v1.json").resolve()
 
 
 def _receipt_path(day_utc: str) -> Path:
@@ -85,6 +186,78 @@ def _is_authoritative_doc(doc: Dict[str, Any]) -> bool:
     return False
 
 
+def _blocked_stage_from_state_machine(doc: Dict[str, Any]) -> str:
+    transitions = doc.get("state_transitions")
+    if isinstance(transitions, list):
+        for row in transitions:
+            if not isinstance(row, dict):
+                continue
+            to_state = str(row.get("to_state") or "").strip().upper()
+            if to_state in {"SUPPORTING_REGEN_BLOCKED", "SESSION_AUTHORITY_DENIED", "DAY_OPEN_BLOCKED"}:
+                return to_state
+        for row in reversed(transitions):
+            if isinstance(row, dict):
+                to_state = str(row.get("to_state") or "").strip().upper()
+                if to_state:
+                    return to_state
+    return str(doc.get("final_start_decision") or "UNKNOWN").strip().upper() or "UNKNOWN"
+
+
+def _legacy_surfaces_from_state_machine(day_utc: str, state_machine_path: Path) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    state_machine = _safe_load_json(state_machine_path)
+    if not state_machine:
+        return {}, {}
+
+    final_start_decision = str(state_machine.get("final_start_decision") or "").strip().upper()
+    first_true_blocker = state_machine.get("first_true_blocker")
+    if not isinstance(first_true_blocker, dict):
+        first_true_blocker = {}
+    blocker_code = ""
+    if final_start_decision in {"BLOCKED_VALID", "BLOCKED_BY_DEFECT"}:
+        blocker_code = str(
+            first_true_blocker.get("first_true_blocker_code") or final_start_decision or "UNKNOWN"
+        ).strip()
+    blocker_path = str(first_true_blocker.get("first_true_blocker_artifact_path") or str(state_machine_path)).strip()
+    blocked_stage = _blocked_stage_from_state_machine(state_machine)
+    alertable = final_start_decision in {"BLOCKED_VALID", "BLOCKED_BY_DEFECT"}
+    trading_day_state = {
+        "schema_id": "trading_day_state_legacy_projection",
+        "schema_version": "v1",
+        "day_utc": day_utc,
+        "state": "BLOCKED" if alertable else "PASS",
+        "heartbeat_status": "FAIL" if alertable else "PASS",
+        "first_failing_prerequisite": blocker_code,
+        "first_failing_path": blocker_path,
+        "orchestrator_started": False,
+        "produced_utc": str(state_machine.get("evaluated_at_utc") or ""),
+        "producer": {"repo": "constellation", "module": "ops/tools/run_trading_day_state_machine_v1.py"},
+        "evidence_paths": [
+            item
+            for item in [
+                str(state_machine_path),
+                blocker_path,
+                str(
+                    ((state_machine.get("supporting_daily_control_refs") or {}).get("trading_day_execution_control_plane_path") or "")
+                ).strip(),
+            ]
+            if item
+        ],
+        "provenance": {"authoritative_write": True, "derived_from": "trading_day_state_machine_v1"},
+    }
+    blocked_day = {
+        "schema_id": "day_start_blocked_legacy_projection",
+        "schema_version": "v1",
+        "day_utc": day_utc,
+        "blocked_stage": blocked_stage,
+        "failing_service": "trading-day-state-machine",
+        "failing_script": "ops/tools/run_trading_day_state_machine_v1.py",
+        "producer": {"repo": "constellation", "module": "ops/tools/run_trading_day_state_machine_v1.py"},
+        "evidence_paths": [path for path in [str(state_machine_path), blocker_path] if path],
+        "provenance": {"authoritative_write": True, "derived_from": "trading_day_state_machine_v1"},
+    }
+    return trading_day_state, blocked_day
+
+
 def _alert_key(trading_day_state: Dict[str, Any], blocked_day: Dict[str, Any]) -> str:
     key_obj = {
         "day_utc": str(trading_day_state.get("day_utc") or ""),
@@ -96,12 +269,41 @@ def _alert_key(trading_day_state: Dict[str, Any], blocked_day: Dict[str, Any]) -
     return hashlib.sha256(_canonical_json_bytes(key_obj)).hexdigest()
 
 
-def _build_message(trading_day_state: Dict[str, Any], blocked_day: Dict[str, Any]) -> Tuple[str, str]:
+def _build_message(
+    trading_day_state: Dict[str, Any],
+    blocked_day: Dict[str, Any],
+    *,
+    semantic_status: Optional[str] = None,
+) -> Tuple[str, str]:
     day_utc = str(trading_day_state.get("day_utc") or "UNKNOWN")
     state = str(trading_day_state.get("state") or "UNKNOWN")
     heartbeat = str(trading_day_state.get("heartbeat_status") or "UNKNOWN")
     first_fail = str(trading_day_state.get("first_failing_prerequisite") or "UNKNOWN")
     blocked_stage = str(blocked_day.get("blocked_stage") or trading_day_state.get("state") or "UNKNOWN")
+    if semantic_status == "PRE_OPEN":
+        summary = f"Constellation: PRE_OPEN ({day_utc})"
+        body = (
+            f"PRE_OPEN ({day_utc})\n"
+            f"Waiting for BOD ({_bod_time_label()})\n"
+            "Orchestrator: NOT STARTED (EXPECTED)"
+        )
+        return summary, body
+    if semantic_status == "PENDING":
+        summary = f"Constellation: ALERT: PENDING ({day_utc})"
+        body = (
+            f"PENDING ({day_utc})\n"
+            f"BOD passed ({_bod_time_label()})\n"
+            "Orchestrator: NOT STARTED"
+        )
+        return summary, body
+    if semantic_status == "STARTED" and state == "PASS":
+        summary = f"Constellation: STARTED ({day_utc})"
+        body = (
+            f"STARTED ({day_utc})\n"
+            f"Heartbeat: {heartbeat}\n"
+            "Orchestrator: STARTED"
+        )
+        return summary, body
     orchestrator_started = "yes" if trading_day_state.get("orchestrator_started") is True else "no"
     summary = f"Constellation trading day alert: {day_utc} {state}"
     body = (
@@ -116,13 +318,7 @@ def _now_utc_iso() -> str:
 
 
 def _alert_severity(decision: Dict[str, Any]) -> str:
-    state = str((decision.get("trading_day_state") or {}).get("state") or "").upper()
-    heartbeat = str((decision.get("trading_day_state") or {}).get("heartbeat_status") or "").upper()
-    if state in {"FAILED", "UNKNOWN_FAILURE"}:
-        return "CRITICAL"
-    if state == "BLOCKED" or heartbeat != "PASS":
-        return "ERROR"
-    return "INFO"
+    return str(decision.get("severity") or "INFO").upper()
 
 
 def _transport_configuration_notes() -> List[str]:
@@ -188,6 +384,7 @@ def _validate_log_row(row: Dict[str, Any]) -> None:
         "reason",
         "source_service",
         "source_script",
+        "source_authority",
         "trading_day_state_path",
         "producer",
     )
@@ -235,6 +432,7 @@ def _build_log_row(decision: Dict[str, Any]) -> Dict[str, Any]:
         "reason": _reason_with_transport_notes(str(decision.get("reason") or "").strip()),
         "source_service": source_service,
         "source_script": source_script,
+        "source_authority": str(decision.get("authority_source") or "UNKNOWN").strip(),
         "trading_day_state_path": str(decision.get("trading_day_state_path") or "").strip(),
         "related_artifact_paths": _related_artifact_paths(decision),
         "producer": producer,
@@ -296,39 +494,47 @@ def _persist_operator_alert_event(*, decision: Dict[str, Any], truth_root: Path)
     return decision
 
 
-def build_operator_alert_decision(*, day_utc: str, truth_root: Path = GLOBAL_TRUTH_ROOT) -> Dict[str, Any]:
+def build_operator_alert_decision(
+    *,
+    day_utc: str,
+    truth_root: Path = GLOBAL_TRUTH_ROOT,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
     trading_day_state_path = _trading_day_state_path(day_utc, truth_root)
     blocked_day_path = _blocked_day_path(day_utc, truth_root)
     trading_day_state = _safe_load_json(trading_day_state_path)
     blocked_day_raw = _safe_load_json(blocked_day_path)
     blocked_day = blocked_day_raw if _is_authoritative_doc(blocked_day_raw) else {}
+    authority_source = "legacy_day_start_bridge_v1"
     if not trading_day_state:
-        return {
-            "day_utc": day_utc,
-            "alert_required": False,
-            "reason": "TRADING_DAY_STATE_MISSING",
-            "trading_day_state_path": str(trading_day_state_path),
-            "blocked_day_path": str(blocked_day_path),
-            "receipt_path": str(_receipt_path(day_utc)),
-        }
-    state = str(trading_day_state.get("state") or "").upper()
-    heartbeat = str(trading_day_state.get("heartbeat_status") or "").upper()
-    alert_required = state in {"BLOCKED", "FAILED", "UNKNOWN_FAILURE"} or heartbeat != "PASS"
-    summary, body = _build_message(trading_day_state, blocked_day)
-    key = _alert_key(trading_day_state, blocked_day)
-    return {
-        "day_utc": day_utc,
-        "alert_required": bool(alert_required),
-        "reason": "BAD_TRADING_DAY_STATE" if alert_required else "STATE_NOT_ALERTABLE",
-        "trading_day_state_path": str(trading_day_state_path),
-        "blocked_day_path": str(blocked_day_path),
-        "trading_day_state": trading_day_state,
-        "blocked_day": blocked_day,
-        "alert_key": key,
-        "summary": summary,
-        "body": body,
-        "receipt_path": str(_receipt_path(day_utc)),
-    }
+        state_machine_path = _trading_day_state_machine_path(day_utc, truth_root)
+        trading_day_state, blocked_day = _legacy_surfaces_from_state_machine(day_utc, state_machine_path)
+        if trading_day_state:
+            trading_day_state_path = state_machine_path
+            blocked_day_path = state_machine_path
+            authority_source = "trading_day_state_machine_v1_projection"
+        else:
+            authority_source = "missing_authoritative_startup_surface"
+    decision = build_operator_alert_decision_object_v1(
+        day_utc=day_utc,
+        trading_day_state=trading_day_state,
+        blocked_day=blocked_day,
+        authority_source=authority_source,
+        trading_day_state_path=str(trading_day_state_path),
+        blocked_day_path=str(blocked_day_path),
+        now=now,
+    )
+    decision["semantic_status"] = str(decision.get("state") or "")
+    decision["receipt_path"] = str(_receipt_path(day_utc))
+    if decision["state"] == "PRE_OPEN_WAITING":
+        decision["reason"] = "PRE_OPEN_WAITING_FOR_BOD"
+    elif decision["state"] == "BOD_DUE_NOT_STARTED":
+        decision["reason"] = "ORCHESTRATOR_NOT_STARTED_AFTER_BOD_GRACE"
+    elif decision["notify_email"] or decision["notify_desktop"]:
+        decision["reason"] = "ACTIONABLE_ALERT_STATE"
+    else:
+        decision["reason"] = "STATE_NOT_ACTIONABLE"
+    return decision
 
 
 def _load_receipt(path: Path) -> Dict[str, Any]:
@@ -339,11 +545,15 @@ def _write_receipt(*, decision: Dict[str, Any], channel: str) -> Path:
     path = Path(str(decision["receipt_path"])).resolve()
     payload = {
         "day_utc": str(decision.get("day_utc") or ""),
-        "alert_key": str(decision.get("alert_key") or ""),
-        "state": str((decision.get("trading_day_state") or {}).get("state") or ""),
-        "heartbeat_status": str((decision.get("trading_day_state") or {}).get("heartbeat_status") or ""),
-        "first_failing_prerequisite": str((decision.get("trading_day_state") or {}).get("first_failing_prerequisite") or ""),
-        "blocked_stage": str((decision.get("blocked_day") or {}).get("blocked_stage") or ""),
+        "alert_key": str(decision.get("dedupe_key") or decision.get("alert_key") or ""),
+        "phase": str(decision.get("phase") or ""),
+        "state": str(decision.get("state") or ""),
+        "severity": str(decision.get("severity") or ""),
+        "notify_email": bool(decision.get("notify_email")),
+        "notify_desktop": bool(decision.get("notify_desktop")),
+        "notify_log": bool(decision.get("notify_log")),
+        "first_failing_prerequisite": str(decision.get("first_failure") or ""),
+        "blocked_stage": str(decision.get("blocked_stage") or ""),
         "trading_day_state_path": str(decision.get("trading_day_state_path") or ""),
         "blocked_day_path": str(decision.get("blocked_day_path") or ""),
         "channel": channel,
@@ -353,9 +563,14 @@ def _write_receipt(*, decision: Dict[str, Any], channel: str) -> Path:
     return path
 
 
-def emit_operator_alert_for_day(*, day_utc: str, truth_root: Path = GLOBAL_TRUTH_ROOT) -> Dict[str, Any]:
+def emit_operator_alert_for_day(
+    *,
+    day_utc: str,
+    truth_root: Path = GLOBAL_TRUTH_ROOT,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
     ctx = _execution_context()
-    decision = build_operator_alert_decision(day_utc=day_utc, truth_root=truth_root)
+    decision = build_operator_alert_decision(day_utc=day_utc, truth_root=truth_root, now=now)
     decision["execution_context"] = ctx
     if not ctx["authoritative_invocation"]:
         decision["emitted"] = False
@@ -363,25 +578,25 @@ def emit_operator_alert_for_day(*, day_utc: str, truth_root: Path = GLOBAL_TRUTH
         decision["channel"] = None
         decision["reason"] = "NONAUTHORITATIVE_INVOCATION"
         return decision
-    if not decision.get("alert_required"):
+    if not (bool(decision.get("notify_desktop")) or bool(decision.get("notify_log"))):
         decision["emitted"] = False
         decision["dedup_suppressed"] = False
         decision["channel"] = None
         return decision
     receipt = _load_receipt(Path(str(decision["receipt_path"])))
-    if str(receipt.get("alert_key") or "") == str(decision.get("alert_key") or ""):
+    if str(receipt.get("alert_key") or "") == str(decision.get("dedupe_key") or decision.get("alert_key") or ""):
         decision["emitted"] = False
         decision["dedup_suppressed"] = True
         decision["channel"] = str(receipt.get("channel") or "")
         decision["reason"] = "DEDUP_SUPPRESSED"
-        return _persist_operator_alert_event(decision=decision, truth_root=truth_root)
+        return decision
 
     summary = str(decision.get("summary") or "Constellation trading day alert")
     body = str(decision.get("body") or "")
     emitted = False
     channel = ""
     notify_send = shutil.which("notify-send")
-    if notify_send:
+    if notify_send and bool(decision.get("notify_desktop")):
         rc = subprocess.run(
             [notify_send, "--app-name=Constellation", summary, body],
             text=True,
@@ -391,7 +606,7 @@ def emit_operator_alert_for_day(*, day_utc: str, truth_root: Path = GLOBAL_TRUTH
         if rc == 0:
             emitted = True
             channel = "notify-send"
-    if not emitted:
+    if not emitted and bool(decision.get("notify_log")):
         logger_bin = shutil.which("logger")
         if logger_bin:
             rc = subprocess.run(
@@ -407,9 +622,9 @@ def emit_operator_alert_for_day(*, day_utc: str, truth_root: Path = GLOBAL_TRUTH
     decision["emitted"] = emitted
     decision["dedup_suppressed"] = False
     decision["channel"] = channel or None
-    if emitted:
-        receipt_path = _write_receipt(decision=decision, channel=channel)
+    if emitted or bool(decision.get("notify_log")):
+        receipt_path = _write_receipt(decision=decision, channel=channel or "durable_log")
         decision["receipt_path"] = str(receipt_path)
-    else:
+    if not emitted and not channel:
         decision["reason"] = "ALERT_EMISSION_FAILED"
     return _persist_operator_alert_event(decision=decision, truth_root=truth_root)

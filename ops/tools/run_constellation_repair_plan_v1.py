@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime")
-TRUTH_ROOT = REPO_ROOT / "constellation_2" / "runtime" / "truth"
-SYSTEM_SNAPSHOT_ROOT = TRUTH_ROOT / "system_snapshot"
+THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = THIS_FILE.parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.common.release_baseline_common_v1 import resolve_release_baseline_roots_v1  # noqa: E402
+
+
+ROOTS = resolve_release_baseline_roots_v1(REPO_ROOT)
+REPO_ROOT = ROOTS.repo_root
+TRUTH_ROOT = ROOTS.canonical_truth_root
+SYSTEM_SNAPSHOT_ROOT = ROOTS.system_snapshot_root
 
 RUNTIME_STATE_PATH = SYSTEM_SNAPSHOT_ROOT / "constellation_runtime_state.v1.json"
 ROOT_CAUSE_PATH = SYSTEM_SNAPSHOT_ROOT / "constellation_root_cause_report.v1.json"
@@ -262,8 +272,8 @@ def main() -> None:
         "schema_version": "1.0",
         "generated_utc": now_utc(),
         "inputs": {
-            "runtime_state": str(RUNTIME_STATE_PATH.relative_to(REPO_ROOT)),
-            "root_cause_report": str(ROOT_CAUSE_PATH.relative_to(REPO_ROOT)),
+            "runtime_state": str(RUNTIME_STATE_PATH),
+            "root_cause_report": str(ROOT_CAUSE_PATH),
         },
         "latest_operating_day": runtime_state.get("latest_operating_day"),
         "overall_status": overall_status(actions),

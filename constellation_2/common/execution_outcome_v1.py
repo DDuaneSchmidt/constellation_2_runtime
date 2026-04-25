@@ -4,6 +4,17 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
+from constellation_2.common.constitutional_runtime_v1 import (
+    CLOSURE_STATE_BLOCKED,
+    CLOSURE_STATE_COMPLETE,
+    CLOSURE_STATE_DEGRADED,
+    FINALITY_FINALIZED,
+    assert_constitutional_writer_allowed_v1,
+    build_artifact_dependency_declaration_v1,
+    build_governed_artifact_lineage_v1,
+    build_machine_blocker_envelope_v1,
+    validate_governed_artifact_payload_v1,
+)
 from constellation_2.common.paper_session_fact_plane_v1 import (
     SurfaceRefV1,
     atomic_write_idempotent_validated_json_v1,
@@ -50,6 +61,11 @@ def derive_execution_outcome_payload(
     truth_root: Path,
     context: Dict[str, Any],
 ) -> Dict[str, Any]:
+    contract = assert_constitutional_writer_allowed_v1(
+        Path(__file__).resolve().parents[2],
+        "execution_outcome_v1",
+        "constellation_2.common.execution_outcome_v1",
+    )
     day_utc = str(context.get("day_utc") or "").strip()
     runs = context.get("runs") if isinstance(context.get("runs"), dict) else {}
     stage_rows: List[Dict[str, Any]] = []
@@ -110,6 +126,77 @@ def derive_execution_outcome_payload(
     for row in context.get("source_artifacts") or []:
         if isinstance(row, dict):
             source_artifacts.append(dict(row))
+    source_artifact_map = {
+        str(row.get("artifact_family") or "").strip(): row
+        for row in source_artifacts
+        if str(row.get("artifact_family") or "").strip()
+    }
+    constitutional_dependency_refs: List[Dict[str, Any]] = []
+    missing_dependency_artifacts: List[str] = []
+    for artifact_id, artifact_class in (
+        ("submit_boundary_status_v1", "admission_result"),
+        ("execution_journal_v1", "outcome_record"),
+    ):
+        source_row = source_artifact_map.get(artifact_id)
+        if not isinstance(source_row, dict):
+            missing_dependency_artifacts.append(artifact_id)
+            continue
+        path_text = str(source_row.get("artifact_path") or "").strip()
+        sha256 = str(source_row.get("artifact_sha256") or "").strip()
+        if not path_text or not sha256:
+            missing_dependency_artifacts.append(artifact_id)
+            continue
+        constitutional_dependency_refs.append(
+            {
+                "artifact_id": artifact_id,
+                "path": path_text,
+                "sha256": sha256,
+                "artifact_class": artifact_class,
+                "finality_state": FINALITY_FINALIZED,
+            }
+        )
+    closure_state = CLOSURE_STATE_COMPLETE
+    if execution_status in {"PASS_WITH_SELF_HEAL", "PASS_WITH_DEFERRED"}:
+        closure_state = CLOSURE_STATE_DEGRADED
+    if execution_status == "FAIL" or missing_dependency_artifacts:
+        closure_state = CLOSURE_STATE_BLOCKED
+    blocking_codes: List[str] = []
+    if execution_status == "FAIL":
+        blocking_codes.append("EXECUTION_OUTCOME_FAILED")
+    if execution_status == "PASS_WITH_SELF_HEAL":
+        blocking_codes.append("EXECUTION_OUTCOME_SELF_HEAL")
+    if execution_status == "PASS_WITH_DEFERRED":
+        blocking_codes.append("EXECUTION_OUTCOME_DEFERRED")
+    blocker_envelope = build_machine_blocker_envelope_v1(
+        closure_state=closure_state,
+        reason_codes=blocking_codes,
+        missing_dependency_artifacts=missing_dependency_artifacts,
+    )
+    constitutional_dependency_declaration = build_artifact_dependency_declaration_v1(
+        artifact_type="execution_outcome_v1",
+        artifact_class=str(contract.get("artifact_class") or "").strip(),
+        authority_id="execution_outcome_v1",
+        declared_dependency_artifacts=[
+            str(item).strip()
+            for item in (contract.get("required_upstream_dependencies") or [])
+            if str(item).strip()
+        ],
+        dependency_refs=constitutional_dependency_refs,
+    )
+    constitutional_lineage = build_governed_artifact_lineage_v1(
+        artifact_type="execution_outcome_v1",
+        artifact_version="v1",
+        artifact_class=str(contract.get("artifact_class") or "").strip(),
+        authority_id="execution_outcome_v1",
+        producer_id="constellation_2.common.execution_outcome_v1",
+        generated_at_utc=str(context.get("generated_at_utc") or ""),
+        effective_at_utc=str(context.get("generated_at_utc") or ""),
+        finality_state=FINALITY_FINALIZED,
+        input_artifact_refs=constitutional_dependency_refs,
+        policy_snapshot_refs=[],
+        code_version=str(context.get("git_sha") or "").strip(),
+        run_id=f"execution_outcome:{day_utc}:{str(context.get('release_id') or '').strip()}",
+    )
 
     return {
         "schema_id": "execution_outcome",
@@ -120,6 +207,11 @@ def derive_execution_outcome_payload(
         "entrypoint": str(context.get("entrypoint") or "").strip(),
         "overall_exit_code": overall_exit_code,
         "execution_status": execution_status,
+        "closure_state": str(blocker_envelope["closure_state"]),
+        "first_blocker_code": str(blocker_envelope["first_blocker_code"]),
+        "missing_dependency_artifacts": list(blocker_envelope["missing_dependency_artifacts"]),
+        "constitutional_dependency_declaration": constitutional_dependency_declaration,
+        "constitutional_lineage": constitutional_lineage,
         "stages": stage_rows,
         "nonfatal_items": nonfatal_items,
         "self_heal_items": self_heal_items,
@@ -131,6 +223,12 @@ def derive_execution_outcome_payload(
 
 
 def write_execution_outcome_v1(*, truth_root: Path, payload: Dict[str, Any]) -> SurfaceRefV1:
+    validate_governed_artifact_payload_v1(
+        repo_root=Path(__file__).resolve().parents[2],
+        artifact_id="execution_outcome_v1",
+        payload=payload,
+        required_finality_states=["finalized", "corrected"],
+    )
     return atomic_write_idempotent_validated_json_v1(
         path=resolve_execution_outcome_path(
             truth_root=truth_root,

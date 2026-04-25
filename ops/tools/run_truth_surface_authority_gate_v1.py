@@ -32,9 +32,10 @@ if str(_REPO_ROOT_FROM_FILE) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
 
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1  # type: ignore
+from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH = resolve_canonical_truth_root_bridge_v1(caller="ops/tools/run_truth_surface_authority_gate_v1.py").resolve()
 
 REGISTRY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/TRUTH_SURFACE_AUTHORITY_V1.json").resolve()
 OUT_ROOT = (TRUTH / "reports" / "truth_surface_authority_gate_v1").resolve()

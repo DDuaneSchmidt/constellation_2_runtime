@@ -123,6 +123,12 @@
           "type": "string",
           "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$",
           "description": "Per-position max risk fraction of NAV. For v1 equity, treated conservatively as notional cap."
+        },
+        "stop_loss_bps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000,
+          "description": "Protective stop distance in basis points from entry reference price."
         }
       }
     },

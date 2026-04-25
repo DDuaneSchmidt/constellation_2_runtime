@@ -8,6 +8,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping
 
+from constellation_2.common.constitutional_runtime_v1 import (
+    FINALITY_PROVISIONAL,
+    assert_constitutional_writer_allowed_v1,
+    build_artifact_dependency_declaration_v1,
+    build_governed_artifact_lineage_v1,
+)
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
 
@@ -39,7 +45,13 @@ def build_day_authority_decision_v1(
     truth_root: Path,
     producer_module: str,
     producer_git_sha: str,
+    upstream_artifact_refs: Iterable[Mapping[str, Any]] | None = None,
 ) -> Dict[str, Any]:
+    contract = assert_constitutional_writer_allowed_v1(
+        SOURCE_REPO_ROOT,
+        "day_authority_decision_v1",
+        producer_module,
+    )
     day = str(trading_day or "").strip()
     if len(day) != 10:
         raise ValueError(f"DAY_AUTHORITY_DECISION_DAY_INVALID:trading_day={trading_day!r}")
@@ -66,6 +78,42 @@ def build_day_authority_decision_v1(
     detail_rows = [str(item).strip() for item in (compatibility_status.get("details") or []) if str(item).strip()]
     if not mapping_status or not schema_status or not reader_status:
         raise ValueError("DAY_AUTHORITY_DECISION_COMPATIBILITY_INVALID")
+    dependency_refs = [
+        {
+            "artifact_id": str(row.get("artifact_id") or "").strip(),
+            "path": str(row.get("path") or "").strip(),
+            "sha256": str(row.get("sha256") or "").strip(),
+            "artifact_class": str(row.get("artifact_class") or "").strip(),
+            "finality_state": str(row.get("finality_state") or "").strip(),
+        }
+        for row in (upstream_artifact_refs or [])
+        if str(row.get("artifact_id") or "").strip()
+    ]
+    constitutional_dependency_declaration = build_artifact_dependency_declaration_v1(
+        artifact_type="day_authority_decision_v1",
+        artifact_class=str(contract.get("artifact_class") or "").strip(),
+        authority_id="day_authority_decision_v1",
+        declared_dependency_artifacts=[
+            str(item).strip()
+            for item in (contract.get("required_upstream_dependencies") or [])
+            if str(item).strip()
+        ],
+        dependency_refs=dependency_refs,
+    )
+    constitutional_lineage = build_governed_artifact_lineage_v1(
+        artifact_type="day_authority_decision_v1",
+        artifact_version="v1",
+        artifact_class=str(contract.get("artifact_class") or "").strip(),
+        authority_id="day_authority_decision_v1",
+        producer_id=producer_module,
+        generated_at_utc=datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        effective_at_utc=f"{day}T00:00:00Z",
+        finality_state=FINALITY_PROVISIONAL,
+        input_artifact_refs=dependency_refs,
+        policy_snapshot_refs=[],
+        code_version=str(producer_git_sha or "").strip(),
+        run_id=f"day_authority_decision:{day}",
+    )
     return {
         "schema_id": "day_authority_decision",
         "schema_version": "v1",
@@ -87,6 +135,8 @@ def build_day_authority_decision_v1(
         "authority_attestation_refs_used": [
             str(item).strip() for item in authority_attestation_refs_used if str(item).strip()
         ],
+        "constitutional_dependency_declaration": constitutional_dependency_declaration,
+        "constitutional_lineage": constitutional_lineage,
         "compatibility_status": {
             "mapping_status": mapping_status,
             "schema_status": schema_status,
@@ -94,7 +144,7 @@ def build_day_authority_decision_v1(
             "details": detail_rows,
         },
         "diagnostic_warnings": [str(item).strip() for item in diagnostic_warnings if str(item).strip()],
-        "emitted_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "emitted_at": constitutional_lineage["generated_at_utc"],
         "run_metadata": {
             "truth_root": str(Path(truth_root).resolve()),
             "producer_module": str(producer_module or "").strip(),
@@ -124,6 +174,51 @@ def write_day_authority_decision_v1(*, truth_root: Path, payload: Dict[str, Any]
     os.replace(str(tmp), str(path))
     sha256 = hashlib.sha256(raw).hexdigest()
     return DayAuthorityDecisionRef(path=path, payload=payload, sha256=sha256)
+
+
+def write_day_authority_decision_from_authority_result_v1(
+    *,
+    day_utc: str,
+    authority_result: Mapping[str, Any],
+    truth_root: Path,
+    producer_module: str,
+    producer_git_sha: str,
+    upstream_artifact_refs: Iterable[Mapping[str, Any]] | None = None,
+) -> Dict[str, Any]:
+    summary = authority_result.get("validation_summary") or {}
+    if not isinstance(summary, dict):
+        return {
+            "status": "SKIPPED_INVALID_AUTHORITY_RESULT",
+            "reason": "validation_summary_missing",
+        }
+    first_failure = summary.get("first_failure")
+    if first_failure is not None and not isinstance(first_failure, dict):
+        first_failure = None
+    payload = build_day_authority_decision_v1(
+        trading_day=day_utc,
+        decision_state="OPEN" if str(summary.get("validation_state") or "").strip().upper() == "PASS" else "BLOCKED",
+        heartbeat={"status": "READY", "source_ref": "results.ib_api_handshake"},
+        first_failure=first_failure,
+        stage="PRE_ORCHESTRATION_PREFLIGHT",
+        orchestrator_started=False,
+        blocking_class=str(summary.get("blocking_class") or "NONE").strip() or "NONE",
+        blocking_evidence=list(summary.get("blocking_evidence") or []),
+        missing_or_invalid_prerequisite_refs=list(summary.get("missing_or_invalid_prerequisite_refs") or []),
+        authority_attestation_refs_used=list(summary.get("validation_refs_used") or []),
+        compatibility_status=dict(summary.get("compatibility_status") or {}),
+        diagnostic_warnings=list(summary.get("diagnostic_warnings") or []),
+        truth_root=truth_root,
+        producer_module=producer_module,
+        producer_git_sha=producer_git_sha,
+        upstream_artifact_refs=upstream_artifact_refs,
+    )
+    ref = write_day_authority_decision_v1(truth_root=truth_root, payload=payload)
+    return {
+        "status": "OK",
+        "path": str(ref.path),
+        "sha256": ref.sha256,
+        "decision_state": str(ref.payload.get("decision_state") or "").strip(),
+    }
 
 
 def read_day_authority_decision_v1(*, truth_root: Path, trading_day: str) -> DayAuthorityDecisionRef:

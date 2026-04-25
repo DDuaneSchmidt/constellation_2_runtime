@@ -9,10 +9,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from constellation_2.common.engine_universe_v1 import EngineUniverseError, resolve_engine_candidate_basis
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
 
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-GLOBAL_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+GLOBAL_TRUTH_ROOT = resolve_canonical_truth_root().resolve()
 POLICY_REGISTRY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/ENGINE_UNIVERSE_POLICY_V1.json").resolve()
 ALLOWED_SYMBOL_SOURCE_CLASSES = {"DYNAMIC_SAME_DAY", "GOVERNED_CURATED", "FIXED_STRUCTURAL"}
 

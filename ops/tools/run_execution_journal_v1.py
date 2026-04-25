@@ -27,6 +27,11 @@ from constellation_2.common.execution_journal_v1 import (
     read_execution_journal_v1,
     require_matching_identity_tuple_v1,
 )
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
+from constellation_2.common.control_plane_read_gateway_v1 import read_control_plane_surface_v1
+from constellation_2.common.day_open_attempt_v1 import (
+    read_day_open_attempt_runtime_lifecycle_ref_v1,
+)
 from constellation_2.common.paper_session_fact_plane_v1 import (
     read_json_object_v1,
     read_paper_session_ledger_ref_v1,
@@ -63,8 +68,12 @@ def _resolve_release_git_sha(deployment_payload: dict[str, Any]) -> str:
     target = str(active_release.get("active_symlink_target") or "").strip()
     if not target:
         raise ValueError("EXECUTION_JOURNAL_ACTIVE_RELEASE_TARGET_MISSING")
-    manifest_path = (Path(target).resolve() / "release_manifest.v1.json").resolve()
-    manifest = read_json_object_v1(manifest_path)
+    manifest_ref = read_control_plane_surface_v1(
+        domain="release",
+        surface="release_manifest_for_release_root",
+        release_root=Path(target).resolve(),
+    )
+    manifest = dict(manifest_ref.payload)
     git_sha = str(manifest.get("git_sha") or "").strip().lower()
     if len(git_sha) != 40:
         raise ValueError("EXECUTION_JOURNAL_RELEASE_MANIFEST_GIT_SHA_MISSING")
@@ -166,7 +175,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--day_utc", required=True)
     ap.add_argument(
         "--truth_root",
-        default=str((REPO_ROOT / "constellation_2/runtime/truth").resolve()),
+        default=str(resolve_canonical_truth_root().resolve()),
     )
     args = ap.parse_args(argv)
 
@@ -183,6 +192,10 @@ def main(argv: list[str] | None = None) -> int:
     startup_proof_payload = dict(startup_proof_ref.payload)
     ledger_payload = dict(ledger_ref.payload)
     trading_day_payload = dict(trading_day_ref.payload)
+    _, runtime_lifecycle_ref = read_day_open_attempt_runtime_lifecycle_ref_v1(
+        truth_root=truth_root,
+        day_utc=day_utc,
+    )
 
     identity = execution_identity_tuple_v1(
         day_utc=day_utc,
@@ -209,6 +222,7 @@ def main(argv: list[str] | None = None) -> int:
         source_path=deployment_path,
         source_payload=deployment_payload,
         producer_module="ops/tools/run_execution_journal_v1.py",
+        runtime_lifecycle_ref=runtime_lifecycle_ref,
         **identity,
     )
 
@@ -218,6 +232,7 @@ def main(argv: list[str] | None = None) -> int:
         source_path=startup_ref.path,
         source_payload=startup_payload,
         producer_module="ops/tools/run_execution_journal_v1.py",
+        runtime_lifecycle_ref=runtime_lifecycle_ref,
     )
 
     append_startup_proof_validation_event_v1(
@@ -226,6 +241,7 @@ def main(argv: list[str] | None = None) -> int:
         source_path=startup_proof_ref.path,
         source_payload=startup_proof_payload,
         producer_module="ops/tools/run_execution_journal_v1.py",
+        runtime_lifecycle_ref=runtime_lifecycle_ref,
     )
 
     ledger_control = dict(ledger_payload.get("control_state") or {})
@@ -235,6 +251,7 @@ def main(argv: list[str] | None = None) -> int:
         source_path=ledger_ref.path,
         source_payload=ledger_payload,
         producer_module="ops/tools/run_execution_journal_v1.py",
+        runtime_lifecycle_ref=runtime_lifecycle_ref,
     )
 
     append_submission_authorization_event_v1(
@@ -243,6 +260,7 @@ def main(argv: list[str] | None = None) -> int:
         source_path=ledger_ref.path,
         source_payload=ledger_payload,
         producer_module="ops/tools/run_execution_journal_v1.py",
+        runtime_lifecycle_ref=runtime_lifecycle_ref,
     )
 
     append_state_machine_decision_event_v1(
@@ -251,6 +269,7 @@ def main(argv: list[str] | None = None) -> int:
         source_path=trading_day_ref.path,
         source_payload=trading_day_payload,
         producer_module="ops/tools/run_execution_journal_v1.py",
+        runtime_lifecycle_ref=runtime_lifecycle_ref,
     )
 
     journal_ref = read_execution_journal_v1(truth_root=truth_root, day_utc=day_utc)
@@ -276,6 +295,7 @@ def main(argv: list[str] | None = None) -> int:
             ended_at_utc=ledger_ended_at,
             duration_ms=stage_duration_ms,
             producer_module="ops/tools/run_execution_journal_v1.py",
+            runtime_lifecycle_ref=runtime_lifecycle_ref,
         )
 
     for contradiction in _contradictions(
@@ -295,6 +315,7 @@ def main(argv: list[str] | None = None) -> int:
             contradiction_details=str(contradiction.get("contradiction_details") or "").strip(),
             source_artifact_paths=list(contradiction.get("source_artifact_paths") or []),
             producer_module="ops/tools/run_execution_journal_v1.py",
+            runtime_lifecycle_ref=runtime_lifecycle_ref,
         )
 
     journal_ref = read_execution_journal_v1(truth_root=truth_root, day_utc=day_utc)

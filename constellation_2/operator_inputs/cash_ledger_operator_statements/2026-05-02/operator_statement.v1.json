@@ -1,0 +1,13 @@
+{
+  "account_id": "DUO847203",
+  "available_funds": null,
+  "cash_total": "5000000.00",
+  "currency": "USD",
+  "excess_liquidity": null,
+  "nlv_total": "5000000.00",
+  "notes": [
+    "CAPITAL_SEED_V2: governed paper capital seed",
+    "seed_usd=5000000.00"
+  ],
+  "observed_at_utc": "2026-05-02T00:00:00Z"
+}

@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 _THIS_FILE = Path(__file__).resolve()
 _REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
+_CONSTITUTIONAL_REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
 if str(_REPO_ROOT_FROM_FILE) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
 
@@ -23,29 +25,42 @@ import sys
 from typing import Any, Dict, List, Tuple
 
 from constellation_2.common.day_authority_decision_v1 import read_day_authority_decision_v1
+from constellation_2.common.constitutional_runtime_v1 import (
+    FINALITY_PROVISIONAL,
+    assert_constitutional_writer_allowed_v1,
+    build_artifact_dependency_declaration_v1,
+    build_governed_artifact_lineage_v1,
+)
 from constellation_2.common.capability_state_v1 import (
     resolve_capability_state_path,
     resolve_paper_policy_verdict_path,
     resolve_policy_diff_path,
     resolve_production_policy_verdict_path,
 )
+from constellation_2.common.sleeve_execution_root_v1 import resolve_sleeve_execution_root_v1
+from constellation_2.common.artifact_authority_v1 import assert_artifact_consumer_allowed_v1
 from constellation_2.common.trade_submit_readiness_authority_v1 import (
     resolve_governed_account_binding,
     resolve_governed_sleeve_truth_bindings,
     resolve_pointer_bound_handshake_state,
     validate_trade_submit_readiness_status_obj,
 )
+from constellation_2.common.economic_state_authority_v1 import run_economic_state_authority_v1
+from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import (
     validate_against_repo_schema_v1,
 )
 
 REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
-TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH_ROOT = resolve_canonical_truth_root_bridge_v1(caller="ops/tools/run_trade_submit_readiness_c2_v1.py").resolve()
 OUT_ROOT = (TRUTH_ROOT / "trade_submit_readiness_c2_v1").resolve()
 OUT_DIR = OUT_ROOT
 
 SCHEMA_STATUS = "governance/04_DATA/SCHEMAS/C2/READINESS/trade_submit_readiness.status.v1.schema.json"
 SCHEMA_LATEST = "governance/04_DATA/SCHEMAS/C2/READINESS/trade_submit_readiness.latest_pointer.v1.schema.json"
+ECONOMIC_PACKAGE_FAMILY = "economic_state_package_v1"
+ECONOMIC_DRAWDOWN_BLOCK_LIMIT = Decimal("-0.100000")
+READINESS_FRESHNESS_WINDOW_MINUTES_DEFAULT = 15
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -88,14 +103,38 @@ def _git_sha() -> str:
         return "UNKNOWN"
 
 
-def _day_anchor_ts(day_utc: str) -> Tuple[str, str]:
-    as_of = f"{day_utc}T00:00:00Z"
-    expires = f"{day_utc}T00:02:00Z"
-    return as_of, expires
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
 
-def _today_utc_iso() -> str:
-    return datetime.now(timezone.utc).date().isoformat()
+def _to_utc_second_iso(ts: datetime) -> str:
+    normalized = ts.astimezone(timezone.utc).replace(microsecond=0)
+    return normalized.isoformat().replace("+00:00", "Z")
+
+
+def _runtime_freshness_ts(*, freshness_window_minutes: int, now_utc: datetime | None = None) -> Tuple[str, str]:
+    if freshness_window_minutes <= 0:
+        raise ValueError("invalid_freshness_window_minutes")
+    base = now_utc if now_utc is not None else _now_utc()
+    base_utc = base.astimezone(timezone.utc).replace(microsecond=0)
+    expires_utc = base_utc + timedelta(minutes=freshness_window_minutes)
+    return _to_utc_second_iso(base_utc), _to_utc_second_iso(expires_utc)
+
+
+def _prior_day_utc(day_utc: str) -> str:
+    return (date.fromisoformat(day_utc) - timedelta(days=1)).isoformat()
+
+
+def _dedupe_reason_codes(reason_codes: List[str]) -> List[str]:
+    seen: set[str] = set()
+    ordered: List[str] = []
+    for code in reason_codes:
+        text = str(code or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        ordered.append(text)
+    return ordered
 
 
 def _out_dir_for(environment: str, ib_account: str) -> Path:
@@ -114,7 +153,31 @@ def _load_day_authority(day_utc: str) -> tuple[Dict[str, Any] | None, Path, str 
     return payload.payload, payload.path, payload.sha256
 
 
-def _refresh_handshake_spine_for_day(*, day_utc: str) -> int:
+def _build_day_authority_constitutional_ref(
+    *,
+    day_utc: str,
+    day_authority_path: Path,
+    day_authority_sha256: str | None,
+) -> Dict[str, str]:
+    path_text = str(day_authority_path or "").strip()
+    sha_text = str(day_authority_sha256 or "").strip()
+    if not path_text or not sha_text:
+        raise ValueError(
+            "DAY_AUTHORITY_DECISION_REF_MISSING:"
+            f"day_utc={str(day_utc).strip()}:"
+            f"path={path_text or '<missing>'}:"
+            f"sha256_present={'YES' if bool(sha_text) else 'NO'}"
+        )
+    return {
+        "artifact_id": "day_authority_decision_v1",
+        "path": path_text,
+        "sha256": sha_text,
+        "artifact_class": "admission_result",
+        "finality_state": "provisional",
+    }
+
+
+def _refresh_handshake_spine_for_day(*, day_utc: str, execution_truth_root: Path) -> int:
     import ops.tools.run_ib_api_handshake_spine_v1 as handshake_module
 
     original_repo_root = handshake_module.REPO_ROOT
@@ -123,8 +186,8 @@ def _refresh_handshake_spine_for_day(*, day_utc: str) -> int:
     original_argv = list(sys.argv)
     try:
         handshake_module.REPO_ROOT = original_repo_root
-        handshake_module.TRUTH_ROOT = TRUTH_ROOT
-        handshake_module.AUTH_BROKER_EVENTS_ROOT = (TRUTH_ROOT / "execution_evidence_v1" / "broker_events").resolve()
+        handshake_module.TRUTH_ROOT = execution_truth_root
+        handshake_module.AUTH_BROKER_EVENTS_ROOT = (execution_truth_root / "execution_evidence_v1" / "broker_events").resolve()
         sys.argv = ["run_ib_api_handshake_spine_v1.py", "--day_utc", day_utc]
         return int(handshake_module.main())
     finally:
@@ -134,28 +197,34 @@ def _refresh_handshake_spine_for_day(*, day_utc: str) -> int:
         handshake_module.AUTH_BROKER_EVENTS_ROOT = original_events_root
 
 
-def _refresh_scoped_gate_for_day(*, truth_root: Path, day_utc: str, mode: str = "PAPER") -> int:
-    import ops.tools.run_gate_stack_verdict_v1 as gate_module
+def _refresh_authorization_convergence_for_day(
+    *,
+    day_utc: str,
+    ib_account: str,
+    environment: str,
+    execution_truth_root: Path,
+) -> int:
+    import ops.tools.run_paper_startup_authorization_convergence_v1 as convergence_module
 
     original_argv = list(sys.argv)
     try:
         sys.argv = [
-            "run_gate_stack_verdict_v1.py",
+            "run_paper_startup_authorization_convergence_v1.py",
             "--day_utc",
             day_utc,
             "--truth_root",
-            str(Path(truth_root).resolve()),
-            "--produced_utc",
-            f"{day_utc}T00:00:00Z",
-            "--mode",
-            str(mode or "").strip().upper(),
+            str(execution_truth_root),
+            "--environment",
+            str(environment or "").strip().upper(),
+            "--ib_account",
+            ib_account,
         ]
-        return int(gate_module.main())
+        return int(convergence_module.main())
     finally:
         sys.argv = original_argv
 
 
-def _load_primary_scoped_gate_snapshot(*, repo_root: Path, environment: str, ib_account: str, day_utc: str) -> Dict[str, Any]:
+def _load_primary_scoped_authorization_snapshot(*, repo_root: Path, environment: str, ib_account: str, day_utc: str) -> Dict[str, Any]:
     bindings = resolve_governed_sleeve_truth_bindings(
         repo_root=repo_root,
         environment=environment,
@@ -170,10 +239,8 @@ def _load_primary_scoped_gate_snapshot(*, repo_root: Path, environment: str, ib_
         primary = bindings[0]
 
     head_path = (primary.truth_root / "run_pointer_v2" / "canonical_authority_head.v1.json").resolve()
-    gate_path = (primary.truth_root / "reports" / "gate_stack_verdict_v1" / day_utc / "gate_stack_verdict.v1.json").resolve()
+    authorization_path = (primary.truth_root / "reports" / "authorization_gate_verdict_v1" / day_utc / "authorization_gate_verdict.v1.json").resolve()
     input_manifest: List[Dict[str, Any]] = []
-    if not gate_path.exists() or not gate_path.is_file():
-        _refresh_scoped_gate_for_day(truth_root=primary.truth_root, day_utc=day_utc, mode=environment)
     if head_path.exists() and head_path.is_file():
         head = _read_json(head_path)
         input_manifest.append(
@@ -183,53 +250,40 @@ def _load_primary_scoped_gate_snapshot(*, repo_root: Path, environment: str, ib_
                 "sha256": _sha256_file(head_path),
             }
         )
-        candidate_gate_path = Path(str(head.get("points_to") or "").strip()).resolve()
+        candidate_auth_path = Path(str(head.get("points_to") or "").strip()).resolve()
         head_day = str(head.get("day_utc") or "").strip()
         if (
             head_day == day_utc
-            and candidate_gate_path.exists()
-            and candidate_gate_path.is_file()
+            and "authorization_gate_verdict_v1" in str(candidate_auth_path)
+            and candidate_auth_path.exists()
+            and candidate_auth_path.is_file()
         ):
-            gate_path = candidate_gate_path
-    if not gate_path.exists() or not gate_path.is_file():
-        raise ValueError(f"FINAL_GATE_STACK_NOT_PASS:sleeve_id={primary.sleeve_id}:reason=MISSING_GATE_STACK_AUTHORITY")
-    gate = _read_json(gate_path)
-    gate_status = str(gate.get("status") or "").strip().upper()
-    gate_day = str(gate.get("day_utc") or day_utc).strip()
+            authorization_path = candidate_auth_path
+    if not authorization_path.exists() or not authorization_path.is_file():
+        raise ValueError(f"AUTHORIZATION_VERDICT_NOT_PASS:sleeve_id={primary.sleeve_id}:reason=MISSING_AUTHORIZATION_VERDICT")
+    authorization = _read_json(authorization_path)
+    authorization_status = str(authorization.get("status") or "").strip().upper()
+    authorization_day = str(authorization.get("day_utc") or day_utc).strip()
     input_manifest.append(
         {
-            "type": f"gate_stack_verdict_v1_scoped:{primary.sleeve_id}",
-            "path": str(gate_path),
-            "sha256": _sha256_file(gate_path),
+            "type": f"authorization_gate_verdict_v1_scoped:{primary.sleeve_id}",
+            "path": str(authorization_path),
+            "sha256": _sha256_file(authorization_path),
         }
     )
-    if gate_day != day_utc:
+    if authorization_day != day_utc:
         raise ValueError(
-            f"FINAL_GATE_STACK_NOT_PASS:sleeve_id={primary.sleeve_id}:reason=GATE_STACK_DAY_MISMATCH:expected_day_utc={day_utc}:actual_day_utc={gate_day}"
+            "AUTHORIZATION_VERDICT_NOT_PASS:"
+            f"sleeve_id={primary.sleeve_id}:reason=AUTHORIZATION_DAY_MISMATCH:expected_day_utc={day_utc}:actual_day_utc={authorization_day}"
         )
     return {
         "binding": primary,
-        "gate_path": gate_path,
-        "gate_sha256": _sha256_file(gate_path),
-        "gate_payload": gate,
-        "gate_status": gate_status or "MISSING",
+        "authorization_path": authorization_path,
+        "authorization_sha256": _sha256_file(authorization_path),
+        "authorization_payload": authorization,
+        "authorization_status": authorization_status or "MISSING",
         "input_manifest": input_manifest,
     }
-
-
-def _resolve_primary_scoped_gate_state(*, repo_root: Path, environment: str, ib_account: str, day_utc: str) -> Dict[str, Any]:
-    state = _load_primary_scoped_gate_snapshot(
-        repo_root=repo_root,
-        environment=environment,
-        ib_account=ib_account,
-        day_utc=day_utc,
-    )
-    gate_status = str(state.get("gate_status") or "").strip().upper()
-    if gate_status != "PASS":
-        raise ValueError(
-            f"FINAL_GATE_STACK_NOT_PASS:sleeve_id={state['binding'].sleeve_id}:reason=GATE_STACK_STATUS_NOT_PASS:status={gate_status or 'MISSING'}"
-        )
-    return state
 
 
 def _refresh_policy_stack_for_day(*, day_utc: str, ib_account: str, environment: str) -> None:
@@ -427,16 +481,256 @@ def _append_fail_reason(reasons: List[str], message: str) -> None:
             reasons.append(short)
 
 
+def _decimal_or_none(raw: Any) -> Decimal | None:
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    try:
+        return Decimal(text)
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _materialize_previous_day_economic_package(
+    *,
+    repo_root: Path,
+    day_utc: str,
+    sleeve_id: str,
+    environment: str,
+    ib_account: str,
+) -> Dict[str, Any]:
+    prev_day_utc = _prior_day_utc(day_utc)
+    try:
+        result = run_economic_state_authority_v1(
+            repo_root=repo_root,
+            operation_type="fresh_paper_entry_v1",
+            day_utc=prev_day_utc,
+            sleeve_id=sleeve_id,
+            environment=environment,
+            ib_account=ib_account,
+            materialize=True,
+            emit_package=True,
+        )
+    except Exception:
+        return {
+            "attempted": True,
+            "reason_codes": [
+                "BUNDLE_C_PREVIOUS_DAY_ECONOMIC_MATERIALIZATION_FAILED",
+                "BUNDLE_C_PREVIOUS_DAY_ECONOMIC_BOOTSTRAP_REQUIRED",
+            ],
+        }
+
+    build_obj = result.get("build_obj") if isinstance(result.get("build_obj"), dict) else {}
+    package_path = result.get("package_path")
+    if package_path is not None and Path(package_path).exists():
+        return {"attempted": True, "reason_codes": []}
+
+    reason_codes = ["BUNDLE_C_PREVIOUS_DAY_ECONOMIC_MATERIALIZATION_BLOCKED"]
+    if str(build_obj.get("closure_status") or "").strip().upper() != "COMPLETE":
+        reason_codes.append("BUNDLE_C_PREVIOUS_DAY_ECONOMIC_BOOTSTRAP_REQUIRED")
+        first_blocker = build_obj.get("first_real_blocker") if isinstance(build_obj.get("first_real_blocker"), dict) else {}
+        blocker_id = str(first_blocker.get("dependency_id") or "").strip()
+        if blocker_id:
+            reason_codes.append(f"BUNDLE_C_PREVIOUS_DAY_ECONOMIC_FIRST_BLOCKER:{blocker_id}")
+    else:
+        reason_codes.append("BUNDLE_C_PREVIOUS_DAY_ECONOMIC_PACKAGE_WRITE_MISSING")
+    return {"attempted": True, "reason_codes": reason_codes}
+
+
+def _load_previous_day_economic_package_state(
+    *,
+    execution_truth_root: Path,
+    day_utc: str,
+    repo_root: Path | None = None,
+    sleeve_id: str = "",
+    environment: str = "",
+    ib_account: str = "",
+) -> Dict[str, Any]:
+    assert_artifact_consumer_allowed_v1(_CONSTITUTIONAL_REPO_ROOT, "economic_state_package_v1", "trade_submit_readiness_c2_v1")
+    assert_artifact_consumer_allowed_v1(_CONSTITUTIONAL_REPO_ROOT, "economic_state_build_v1", "trade_submit_readiness_c2_v1")
+    prev_day_utc = _prior_day_utc(day_utc)
+    package_root = (execution_truth_root / ECONOMIC_PACKAGE_FAMILY / prev_day_utc).resolve()
+    unknown = {
+        "status": "UNKNOWN",
+        "source_day_utc": prev_day_utc,
+        "package_path": "",
+        "package_sha256": "",
+        "build_path": "",
+        "build_sha256": "",
+        "drawdown_pct": None,
+        "drawdown_guard_status": "UNKNOWN",
+        "policy_baseline_comparison_vs_portfolio_return": None,
+        "external_benchmark_underperformer_count": 0,
+        "reason_codes": ["BUNDLE_C_PREVIOUS_DAY_ECONOMIC_PACKAGE_MISSING"],
+    }
+    materialization_reason_codes: List[str] = []
+    if not package_root.exists() or not package_root.is_dir():
+        if repo_root is not None and sleeve_id and environment and ib_account:
+            materialization = _materialize_previous_day_economic_package(
+                repo_root=repo_root,
+                day_utc=day_utc,
+                sleeve_id=sleeve_id,
+                environment=environment,
+                ib_account=ib_account,
+            )
+            materialization_reason_codes = list(materialization.get("reason_codes") or [])
+            package_root = (execution_truth_root / ECONOMIC_PACKAGE_FAMILY / prev_day_utc).resolve()
+        if not package_root.exists() or not package_root.is_dir():
+            return {**unknown, "reason_codes": _dedupe_reason_codes(unknown["reason_codes"] + materialization_reason_codes)}
+
+    candidates = sorted(package_root.glob("*/economic_state_package.v1.json"))
+    if not candidates:
+        if repo_root is not None and sleeve_id and environment and ib_account and not materialization_reason_codes:
+            materialization = _materialize_previous_day_economic_package(
+                repo_root=repo_root,
+                day_utc=day_utc,
+                sleeve_id=sleeve_id,
+                environment=environment,
+                ib_account=ib_account,
+            )
+            materialization_reason_codes = list(materialization.get("reason_codes") or [])
+            candidates = sorted(package_root.glob("*/economic_state_package.v1.json"))
+        if not candidates:
+            return {**unknown, "reason_codes": _dedupe_reason_codes(unknown["reason_codes"] + materialization_reason_codes)}
+    if len(candidates) != 1:
+        raise ValueError(
+            f"BUNDLE_C_PREVIOUS_DAY_ECONOMIC_PACKAGE_AMBIGUOUS:day_utc={prev_day_utc}:count={len(candidates)}"
+        )
+
+    package_path = candidates[0].resolve()
+    package_sha256 = _sha256_file(package_path)
+    package_obj = _read_json(package_path)
+    if str(package_obj.get("schema_id") or "").strip() != "economic_state_package":
+        return {
+            **unknown,
+            "package_path": str(package_path),
+            "package_sha256": package_sha256,
+            "reason_codes": ["BUNDLE_C_PREVIOUS_DAY_ECONOMIC_PACKAGE_SCHEMA_INVALID"],
+        }
+    if str(package_obj.get("day_utc") or "").strip() != prev_day_utc:
+        return {
+            **unknown,
+            "package_path": str(package_path),
+            "package_sha256": package_sha256,
+            "reason_codes": ["BUNDLE_C_PREVIOUS_DAY_ECONOMIC_PACKAGE_DAY_MISMATCH"],
+        }
+    if package_obj.get("sealed") is not True:
+        return {
+            **unknown,
+            "package_path": str(package_path),
+            "package_sha256": package_sha256,
+            "reason_codes": ["BUNDLE_C_PREVIOUS_DAY_ECONOMIC_PACKAGE_NOT_SEALED"],
+        }
+
+    build_ref = package_obj.get("build_ref") if isinstance(package_obj.get("build_ref"), dict) else {}
+    build_path_text = str(build_ref.get("path") or "").strip()
+    if not build_path_text:
+        return {
+            **unknown,
+            "package_path": str(package_path),
+            "package_sha256": package_sha256,
+            "reason_codes": ["BUNDLE_C_PREVIOUS_DAY_ECONOMIC_BUILD_REF_MISSING"],
+        }
+    build_path = Path(build_path_text).resolve()
+    if not build_path.exists() or not build_path.is_file():
+        return {
+            **unknown,
+            "package_path": str(package_path),
+            "package_sha256": package_sha256,
+            "build_path": str(build_path),
+            "reason_codes": ["BUNDLE_C_PREVIOUS_DAY_ECONOMIC_BUILD_MISSING"],
+        }
+
+    build_sha256 = _sha256_file(build_path)
+    build_obj = _read_json(build_path)
+    if str(build_obj.get("schema_id") or "").strip() != "economic_state_build":
+        return {
+            **unknown,
+            "package_path": str(package_path),
+            "package_sha256": package_sha256,
+            "build_path": str(build_path),
+            "build_sha256": build_sha256,
+            "reason_codes": ["BUNDLE_C_PREVIOUS_DAY_ECONOMIC_BUILD_SCHEMA_INVALID"],
+        }
+    if str(build_obj.get("day_utc") or "").strip() != prev_day_utc:
+        return {
+            **unknown,
+            "package_path": str(package_path),
+            "package_sha256": package_sha256,
+            "build_path": str(build_path),
+            "build_sha256": build_sha256,
+            "reason_codes": ["BUNDLE_C_PREVIOUS_DAY_ECONOMIC_BUILD_DAY_MISMATCH"],
+        }
+    if str(build_obj.get("closure_status") or "").strip().upper() != "COMPLETE":
+        return {
+            **unknown,
+            "package_path": str(package_path),
+            "package_sha256": package_sha256,
+            "build_path": str(build_path),
+            "build_sha256": build_sha256,
+            "reason_codes": ["BUNDLE_C_PREVIOUS_DAY_ECONOMIC_BUILD_NOT_COMPLETE"],
+        }
+
+    evaluation = build_obj.get("economic_evaluation")
+    if not isinstance(evaluation, dict):
+        return {
+            **unknown,
+            "package_path": str(package_path),
+            "package_sha256": package_sha256,
+            "build_path": str(build_path),
+            "build_sha256": build_sha256,
+            "reason_codes": ["BUNDLE_C_PREVIOUS_DAY_ECONOMIC_EVALUATION_MISSING"],
+        }
+
+    risk_state = evaluation.get("risk_state") if isinstance(evaluation.get("risk_state"), dict) else {}
+    benchmark_state = evaluation.get("benchmark_state") if isinstance(evaluation.get("benchmark_state"), dict) else {}
+    policy_baseline = benchmark_state.get("policy_baseline") if isinstance(benchmark_state.get("policy_baseline"), dict) else {}
+    drawdown_pct = risk_state.get("drawdown_pct")
+    drawdown_decimal = _decimal_or_none(drawdown_pct)
+    drawdown_guard_status = "UNKNOWN"
+    if drawdown_decimal is not None:
+        drawdown_guard_status = "BLOCKED" if drawdown_decimal <= ECONOMIC_DRAWDOWN_BLOCK_LIMIT else "PASS"
+
+    external_underperformer_count = 0
+    for row in benchmark_state.get("external_benchmarks") or []:
+        if not isinstance(row, dict):
+            continue
+        comparison = _decimal_or_none(row.get("comparison_vs_portfolio_return"))
+        if comparison is not None and comparison < 0:
+            external_underperformer_count += 1
+
+    return {
+        "status": "OK",
+        "source_day_utc": prev_day_utc,
+        "package_path": str(package_path),
+        "package_sha256": package_sha256,
+        "build_path": str(build_path),
+        "build_sha256": build_sha256,
+        "drawdown_pct": drawdown_pct,
+        "drawdown_guard_status": drawdown_guard_status,
+        "policy_baseline_comparison_vs_portfolio_return": policy_baseline.get("comparison_vs_portfolio_return"),
+        "external_benchmark_underperformer_count": external_underperformer_count,
+        "reason_codes": [],
+    }
+
+
 def main() -> int:
+    global OUT_ROOT, OUT_DIR
     ap = argparse.ArgumentParser(prog="run_trade_submit_readiness_c2_v1")
     ap.add_argument("--day_utc", required=True)
     ap.add_argument("--ib_account", required=True)
     ap.add_argument("--environment", required=True, choices=["PAPER", "LIVE"])
+    ap.add_argument("--freshness_window_minutes", type=int, default=READINESS_FRESHNESS_WINDOW_MINUTES_DEFAULT)
     args = ap.parse_args()
 
     day = str(args.day_utc).strip()
     ib_account = str(args.ib_account).strip()
     env = str(args.environment).strip().upper()
+    freshness_window_minutes = int(args.freshness_window_minutes)
+    if freshness_window_minutes <= 0:
+        raise SystemExit("FAIL: freshness_window_minutes must be > 0")
 
     if not TRUTH_ROOT.exists():
         raise SystemExit(f"FAIL: truth_root_missing: {TRUTH_ROOT}")
@@ -447,8 +741,9 @@ def main() -> int:
     ok_registry = False
     ok_handshake = False
     ok_gate = False
-    gate_state: Dict[str, Any] | None = None
-    cycle_snapshot_family = "gate_stack_verdict_v1"
+    ok_economic = True
+    authorization_state: Dict[str, Any] | None = None
+    cycle_snapshot_family = "authorization_gate_verdict_v1"
     cycle_snapshot_artifact_path = "UNAVAILABLE"
     cycle_snapshot_artifact_sha256 = "0" * 64
     cycle_coherence_status = "BLOCKED"
@@ -485,8 +780,28 @@ def main() -> int:
         )
 
     try:
+        execution_root = resolve_sleeve_execution_root_v1(
+            repo_root=REPO_ROOT,
+            environment=env,
+            ib_account=ib_account,
+            sleeve_id="PRIMARY",
+        )
+        execution_truth_root = execution_root.execution_root_path.resolve()
+        OUT_ROOT = (execution_truth_root / "trade_submit_readiness_c2_v1").resolve()
+        OUT_DIR = OUT_ROOT
+        input_manifest.append(
+            {
+                "type": "sleeve_execution_root_v1",
+                "path": str(execution_truth_root),
+                "sha256": "",
+            }
+        )
+    except ValueError as exc:
+        raise SystemExit(f"FAIL: {exc}")
+
+    try:
         handshake = resolve_pointer_bound_handshake_state(
-            truth_root=TRUTH_ROOT,
+            truth_root=execution_truth_root,
             day_utc=day,
             environment=env,
             ib_account=ib_account,
@@ -510,10 +825,10 @@ def main() -> int:
     except ValueError as exc:
         exc_text = str(exc)
         if exc_text.startswith("IB_API_HANDSHAKE_POINTER_MISSING:") or exc_text.startswith("IB_API_HANDSHAKE_STALE_POINTER:"):
-            _refresh_handshake_spine_for_day(day_utc=day)
+            _refresh_handshake_spine_for_day(day_utc=day, execution_truth_root=execution_truth_root)
             try:
                 handshake = resolve_pointer_bound_handshake_state(
-                    truth_root=TRUTH_ROOT,
+                    truth_root=execution_truth_root,
                     day_utc=day,
                     environment=env,
                     ib_account=ib_account,
@@ -540,21 +855,101 @@ def main() -> int:
             _append_fail_reason(reasons, exc_text)
 
     try:
-        gate_state = _load_primary_scoped_gate_snapshot(
+        convergence_rc = _refresh_authorization_convergence_for_day(
+            day_utc=day,
+            ib_account=ib_account,
+            environment=env,
+            execution_truth_root=execution_truth_root,
+        )
+        if convergence_rc not in (0, 2):
+            raise ValueError(f"AUTHORIZATION_CONVERGENCE_REFRESH_FAILED:returncode={convergence_rc}")
+        authorization_state = _load_primary_scoped_authorization_snapshot(
             repo_root=REPO_ROOT,
             environment=env,
             ib_account=ib_account,
             day_utc=day,
         )
-        input_manifest.extend(gate_state["input_manifest"])
-        cycle_snapshot_artifact_path = str(gate_state["gate_path"])
-        cycle_snapshot_artifact_sha256 = str(gate_state["gate_sha256"])
+        input_manifest.extend(authorization_state["input_manifest"])
+        cycle_snapshot_artifact_path = str(authorization_state["authorization_path"])
+        cycle_snapshot_artifact_sha256 = str(authorization_state["authorization_sha256"])
         cycle_coherence_status = "COHERENT"
-        cycle_upstream_refs.extend(gate_state["input_manifest"])
+        cycle_upstream_refs.extend(authorization_state["input_manifest"])
     except ValueError as exc:
         _append_fail_reason(reasons, str(exc))
 
-    if gate_state is not None:
+    economic_state = _load_previous_day_economic_package_state(
+        execution_truth_root=execution_truth_root,
+        day_utc=day,
+        repo_root=REPO_ROOT,
+        sleeve_id=str(authorization_state["binding"].sleeve_id) if authorization_state is not None else "",
+        environment=env,
+        ib_account=ib_account,
+    )
+    if str(economic_state.get("package_path") or "").strip():
+        input_manifest.append(
+            {
+                "type": "economic_state_package_v1",
+                "path": str(economic_state["package_path"]),
+                "sha256": str(economic_state.get("package_sha256") or ""),
+            }
+        )
+        cycle_upstream_refs.append(
+            {
+                "type": "economic_state_package_v1",
+                "path": str(economic_state["package_path"]),
+                "sha256": str(economic_state.get("package_sha256") or ""),
+            }
+        )
+    if str(economic_state.get("build_path") or "").strip() and str(economic_state.get("build_sha256") or "").strip():
+        input_manifest.append(
+            {
+                "type": "economic_state_build_v1",
+                "path": str(economic_state["build_path"]),
+                "sha256": str(economic_state.get("build_sha256") or ""),
+            }
+        )
+        cycle_upstream_refs.append(
+            {
+                "type": "economic_state_build_v1",
+                "path": str(economic_state["build_path"]),
+                "sha256": str(economic_state.get("build_sha256") or ""),
+            }
+        )
+    if str(economic_state.get("status") or "").strip().upper() == "OK":
+        if str(economic_state.get("drawdown_guard_status") or "").strip().upper() == "BLOCKED":
+            ok_economic = False
+            _append_fail_reason(
+                reasons,
+                "BUNDLE_C_DRAWDOWN_LIMIT_EXCEEDED:"
+                f"source_day_utc={economic_state['source_day_utc']}:"
+                f"drawdown_pct={economic_state.get('drawdown_pct')}:"
+                f"limit_pct={str(ECONOMIC_DRAWDOWN_BLOCK_LIMIT)}",
+            )
+        policy_comparison = _decimal_or_none(
+            economic_state.get("policy_baseline_comparison_vs_portfolio_return")
+        )
+        if policy_comparison is not None:
+            if policy_comparison < 0:
+                reasons.append("INFO:BUNDLE_C_POLICY_BASELINE_UNDERPERFORMANCE")
+            elif policy_comparison > 0:
+                reasons.append("INFO:BUNDLE_C_POLICY_BASELINE_OUTPERFORMANCE")
+            else:
+                reasons.append("INFO:BUNDLE_C_POLICY_BASELINE_INLINE")
+        external_underperformer_count = int(economic_state.get("external_benchmark_underperformer_count") or 0)
+        if external_underperformer_count > 0:
+            reasons.append(
+                f"INFO:BUNDLE_C_EXTERNAL_BENCHMARK_UNDERPERFORMANCE:count={external_underperformer_count}"
+            )
+    else:
+        ok_economic = False
+        _append_fail_reason(
+            reasons,
+            "BUNDLE_C_PREVIOUS_DAY_ECONOMIC_STATE_REQUIRED:"
+            f"source_day_utc={economic_state['source_day_utc']}:"
+            f"reason_codes={','.join(str(x) for x in (economic_state.get('reason_codes') or [])) or 'UNKNOWN'}",
+        )
+
+    if authorization_state is not None:
         try:
             _refresh_policy_stack_for_day(day_utc=day, ib_account=ib_account, environment=env)
             capability_path = resolve_capability_state_path(truth_root=TRUTH_ROOT, day_utc=day)
@@ -575,32 +970,33 @@ def main() -> int:
                 [
                     {"type": "capability_state_v1", "path": str(capability_state["path"]), "sha256": capability_state["sha256"]},
                     {"type": "paper_policy_verdict_v1", "path": str(paper_policy_state["path"]), "sha256": paper_policy_state["sha256"]},
-                    {
-                        "type": "production_policy_verdict_v1",
-                        "path": str(production_policy_state["path"]),
-                        "sha256": production_policy_state["sha256"],
-                    },
-                    {"type": "policy_diff_v1", "path": str(policy_diff_state["path"]), "sha256": policy_diff_state["sha256"]},
                 ]
             )
-            cycle_snapshot_family = "paper_policy_verdict_v1"
-            cycle_snapshot_artifact_path = str(paper_policy_state["path"])
-            cycle_snapshot_artifact_sha256 = str(paper_policy_state["sha256"])
+            scoped_authorization_type = f"authorization_gate_verdict_v1_scoped:{authorization_state['binding'].sleeve_id}"
+            cycle_snapshot_family = scoped_authorization_type
+            cycle_snapshot_artifact_path = str(authorization_state["authorization_path"])
+            cycle_snapshot_artifact_sha256 = str(authorization_state["authorization_sha256"])
             cycle_upstream_refs.extend(
                 [
+                    {
+                        "type": scoped_authorization_type,
+                        "path": str(authorization_state["authorization_path"]),
+                        "sha256": authorization_state["authorization_sha256"],
+                    },
                     {"type": "capability_state_v1", "path": str(capability_state["path"]), "sha256": capability_state["sha256"]},
                     {"type": "paper_policy_verdict_v1", "path": str(paper_policy_state["path"]), "sha256": paper_policy_state["sha256"]},
-                    {
-                        "type": "production_policy_verdict_v1",
-                        "path": str(production_policy_state["path"]),
-                        "sha256": production_policy_state["sha256"],
-                    },
-                    {"type": "policy_diff_v1", "path": str(policy_diff_state["path"]), "sha256": policy_diff_state["sha256"]},
                 ]
             )
 
+            authorization_status = str(authorization_state.get("authorization_status") or "").strip().upper()
             paper_status = str(paper_policy_state["payload"].get("overall_status") or "").strip().upper()
-            ok_gate = paper_status == "PASS"
+            authorization_ok = authorization_status in {"PASS", "BOOTSTRAP_PASS"}
+            ok_gate = authorization_ok and paper_status == "PASS"
+            if not authorization_ok:
+                _append_fail_reason(
+                    reasons,
+                    f"AUTHORIZATION_VERDICT_NOT_PASS:sleeve_id={authorization_state['binding'].sleeve_id}:status={authorization_status or 'MISSING'}",
+                )
             if ok_gate:
                 reasons.append("PAPER_POLICY_VERDICT_OK")
             else:
@@ -618,13 +1014,13 @@ def main() -> int:
                     reasons.append(f"INFO:PRODUCTION_ONLY_OPEN:{item_id}")
         except Exception as exc:
             reasons.append(f"INFO:PAPER_POLICY_VERDICT_UNAVAILABLE:{type(exc).__name__}")
-            gate_status = str(gate_state.get("gate_status") or "").strip().upper()
-            if gate_status == "PASS":
+            authorization_status = str(authorization_state.get("authorization_status") or "").strip().upper()
+            if authorization_status in {"PASS", "BOOTSTRAP_PASS"}:
                 ok_gate = True
             else:
                 _append_fail_reason(
                     reasons,
-                    f"FINAL_GATE_STACK_NOT_PASS:sleeve_id={gate_state['binding'].sleeve_id}:reason=GATE_STACK_STATUS_NOT_PASS:status={gate_status or 'MISSING'}",
+                    f"AUTHORIZATION_VERDICT_NOT_PASS:sleeve_id={authorization_state['binding'].sleeve_id}:status={authorization_status or 'MISSING'}",
                 )
 
     if day_authority_payload is None:
@@ -642,10 +1038,19 @@ def main() -> int:
                 f"INFO:DAY_AUTHORITY_VALIDATION_BLOCKED:blocking_class={str(day_authority_payload.get('blocking_class') or 'UNKNOWN').strip()}"
             )
 
-    ok = bool(ok_registry and ok_handshake and ok_gate)
+    ok = bool(ok_registry and ok_handshake and ok_gate and ok_economic)
     state = "OK" if ok else "FAIL"
 
-    as_of_utc, expires_utc = _day_anchor_ts(day)
+    as_of_utc, expires_utc = _runtime_freshness_ts(
+        freshness_window_minutes=freshness_window_minutes,
+        now_utc=_now_utc(),
+    )
+    reasons.append(f"INFO:READINESS_FRESHNESS_WINDOW_MINUTES:{freshness_window_minutes}")
+    readiness_contract = assert_constitutional_writer_allowed_v1(
+        _CONSTITUTIONAL_REPO_ROOT,
+        "trade_submit_readiness_c2_v1",
+        "ops/tools/run_trade_submit_readiness_c2_v1.py",
+    )
     session_authority_attestation = _build_session_authority_attestation(
         day_utc=day,
         reasons=reasons,
@@ -667,6 +1072,41 @@ def main() -> int:
         cycle_coherence_status=cycle_coherence_status,
         upstream_refs=cycle_upstream_refs,
     )
+    try:
+        day_authority_ref = _build_day_authority_constitutional_ref(
+            day_utc=day,
+            day_authority_path=day_authority_path,
+            day_authority_sha256=day_authority_sha256,
+        )
+    except ValueError as exc:
+        print(f"FAIL_CLOSED:{exc}", file=sys.stderr)
+        return 2
+    constitutional_dependency_refs = [day_authority_ref]
+    constitutional_dependency_declaration = build_artifact_dependency_declaration_v1(
+        artifact_type="trade_submit_readiness_c2_v1",
+        artifact_class=str(readiness_contract.get("artifact_class") or "").strip(),
+        authority_id="trade_submit_readiness_c2_v1",
+        declared_dependency_artifacts=[
+            str(item).strip()
+            for item in (readiness_contract.get("required_upstream_dependencies") or [])
+            if str(item).strip()
+        ],
+        dependency_refs=constitutional_dependency_refs,
+    )
+    constitutional_lineage = build_governed_artifact_lineage_v1(
+        artifact_type="trade_submit_readiness_c2_v1",
+        artifact_version="v1",
+        artifact_class=str(readiness_contract.get("artifact_class") or "").strip(),
+        authority_id="trade_submit_readiness_c2_v1",
+        producer_id="ops/tools/run_trade_submit_readiness_c2_v1.py",
+        generated_at_utc=as_of_utc,
+        effective_at_utc=as_of_utc,
+        finality_state=FINALITY_PROVISIONAL,
+        input_artifact_refs=constitutional_dependency_refs,
+        policy_snapshot_refs=[],
+        code_version=_git_sha(),
+        run_id=f"{day}:{env}:{ib_account}",
+    )
 
     status_obj: Dict[str, Any] = {
         "schema_id": "trade_submit_readiness_c2",
@@ -685,10 +1125,29 @@ def main() -> int:
             "module": "ops/tools/run_trade_submit_readiness_c2_v1.py",
             "git_sha": _git_sha(),
         },
+        "constitutional_dependency_declaration": constitutional_dependency_declaration,
+        "constitutional_lineage": constitutional_lineage,
         "provenance": {
-            "truth_root": str(TRUTH_ROOT),
+            "truth_root": str(execution_truth_root),
             "registry_sha256": registry_sha256,
             "sleeve_registry_sha256": sleeve_registry_sha256,
+        },
+        "economic_state": {
+            "status": str(economic_state.get("status") or "UNKNOWN"),
+            "source_day_utc": str(economic_state.get("source_day_utc") or ""),
+            "package_path": str(economic_state.get("package_path") or ""),
+            "package_sha256": str(economic_state.get("package_sha256") or ""),
+            "build_path": str(economic_state.get("build_path") or ""),
+            "build_sha256": str(economic_state.get("build_sha256") or ""),
+            "drawdown_pct": economic_state.get("drawdown_pct"),
+            "drawdown_guard_status": str(economic_state.get("drawdown_guard_status") or "UNKNOWN"),
+            "policy_baseline_comparison_vs_portfolio_return": economic_state.get(
+                "policy_baseline_comparison_vs_portfolio_return"
+            ),
+            "external_benchmark_underperformer_count": int(
+                economic_state.get("external_benchmark_underperformer_count") or 0
+            ),
+            "reason_codes": list(economic_state.get("reason_codes") or []),
         },
         "session_authority_attestation": session_authority_attestation,
         "run_state_authority_attestation": run_state_authority_attestation,
@@ -718,7 +1177,7 @@ def main() -> int:
             "git_sha": _git_sha(),
         },
         "provenance": {
-            "truth_root": str(TRUTH_ROOT),
+            "truth_root": str(execution_truth_root),
         },
     }
 
@@ -732,10 +1191,6 @@ def main() -> int:
     _atomic_write(history_out_dir / "latest_pointer.v1.json", _canonical_json_bytes(latest_obj))
     _atomic_write(out_dir / "status.json", status_bytes)
     _atomic_write(out_dir / "latest_pointer.v1.json", _canonical_json_bytes(latest_obj))
-    if env == "PAPER" and day == _today_utc_iso():
-        OUT_ROOT.mkdir(parents=True, exist_ok=True)
-        _atomic_write(OUT_ROOT / "status.json", status_bytes)
-        _atomic_write(OUT_ROOT / "latest_pointer.v1.json", _canonical_json_bytes(latest_obj))
 
     print(
         "OK: TRADE_SUBMIT_READINESS_C2_V1 "

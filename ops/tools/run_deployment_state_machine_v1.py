@@ -36,6 +36,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     atomic_write_idempotent_validated_json_v1,
     resolve_authoritative_repo_root_v1,
 )
+from constellation_2.common.runtime_path_authority_v1 import resolve_decision_truth_root_v1
 from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_trading_day_state_machine_path,
 )
@@ -112,12 +113,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--day_utc", required=True)
     ap.add_argument(
         "--truth_root",
-        default=str((REPO_ROOT / "constellation_2/runtime/truth").resolve()),
+        default="",
     )
     args = ap.parse_args(argv)
 
     day_utc = str(args.day_utc).strip()
-    truth_root = Path(str(args.truth_root)).resolve()
+    truth_root = resolve_decision_truth_root_v1(args.truth_root, repo_root=REPO_ROOT)
     evaluated_at_utc = _utc_now_iso()
     out_path = _report_path(truth_root=truth_root, day_utc=day_utc)
     authoritative_repo_root = resolve_authoritative_repo_root_v1(REPO_ROOT)

@@ -39,11 +39,16 @@ import subprocess
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Tuple
 
+from constellation_2.common.kill_switch_authority_v1 import (
+    STATUS_PASS as KILL_SWITCH_STATUS_PASS,
+    resolve_kill_switch_authority_v1,
+)
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH = resolve_canonical_truth_root().resolve()
 
 SCHEMA_RECON = "governance/04_DATA/SCHEMAS/C2/REPORTS/exposure_reconciliation_report.v1.schema.json"
 SCHEMA_PLAN = "governance/04_DATA/SCHEMAS/C2/REPORTS/delta_order_plan.v1.schema.json"
@@ -138,14 +143,11 @@ def _normalize_underlying(u: Any) -> str:
     return str(u).strip() or "UNKNOWN"
 
 
-def _load_kill_state(day: str) -> Tuple[bool, Path, str]:
-    p = (KILL_ROOT / day / "global_kill_switch_state.v1.json").resolve()
-    if not p.exists():
-        return (True, p, _sha256_bytes(b""))  # fail-closed default ACTIVE
-    sha = _sha256_file(p)
-    obj = _read_json_obj(p)
-    state = str(obj.get("state") or "").strip().upper()
-    return ((state != "INACTIVE"), p, sha)
+def _load_kill_state(day: str) -> Tuple[bool, Path, str, str | None]:
+    result = resolve_kill_switch_authority_v1(canonical_truth_root=TRUTH, day_utc=day)
+    if result.status != KILL_SWITCH_STATUS_PASS:
+        return (True, result.canonical_path, result.canonical_sha256, result.reason_code)
+    return ((result.state != "INACTIVE"), result.canonical_path, result.canonical_sha256, None)
 
 
 def main() -> int:
@@ -160,13 +162,16 @@ def main() -> int:
 
     intents_day = (INTENTS_ROOT / day).resolve()
     ptr_path = (POS_PTR_ROOT / day / "positions_effective_pointer.v1.json").resolve()
-    kill_active, kill_path, kill_sha = _load_kill_state(day)
+    kill_active, kill_path, kill_sha, kill_authority_code = _load_kill_state(day)
 
     input_manifest: List[Dict[str, str]] = []
     reason_codes: List[str] = []
     notes: List[str] = []
 
     input_manifest.append({"type": "global_kill_switch_state_v1", "path": str(kill_path), "sha256": kill_sha})
+    if kill_authority_code:
+        reason_codes.append(kill_authority_code)
+        notes.append(f"kill switch authority fail-closed: {kill_authority_code}")
 
     if intents_day.exists() and intents_day.is_dir():
         intent_files = sorted([p for p in intents_day.glob("*.json") if p.is_file()])

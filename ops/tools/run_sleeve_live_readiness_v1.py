@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,9 +16,17 @@ from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-RUNTIME_ROOT = (REPO_ROOT / "constellation_2" / "runtime").resolve()
-RUNTIME_STATE_PATH = (RUNTIME_ROOT / "truth" / "system_snapshot" / "constellation_runtime_state.v1.json").resolve()
+THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = THIS_FILE.parents[2].resolve()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.common.release_baseline_common_v1 import resolve_release_baseline_roots_v1  # noqa: E402
+
+
+ROOTS = resolve_release_baseline_roots_v1(REPO_ROOT)
+REPO_ROOT = ROOTS.repo_root
+RUNTIME_STATE_PATH = (ROOTS.system_snapshot_root / "constellation_runtime_state.v1.json").resolve()
 
 SLEEVE_REGISTRY = (REPO_ROOT / "governance/02_REGISTRIES/C2_SLEEVE_REGISTRY_V1.json").resolve()
 POLICY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/C2_SLEEVE_LIVE_READINESS_POLICY_V1.json").resolve()
@@ -89,7 +98,7 @@ def _resolve_sleeve_truth_root(sleeve_id: str, mode: str, truth_root_arg: str) -
         rel = str(s.get("truth_partition") or "").strip()
         if not rel:
             raise SystemExit(f"FAIL_CLOSED: sleeve truth partition missing: {sleeve_id}/{mode}")
-        p = (RUNTIME_ROOT / rel).resolve()
+        p = (ROOTS.truth_sleeves_root / rel).resolve()
         if not p.exists() or not p.is_dir():
             raise SystemExit(f"FAIL_CLOSED: sleeve truth partition not found: {p}")
         return p
@@ -780,6 +789,8 @@ def _run(day: str, sleeve_id: str, mode: str, sleeve_truth_root: Path) -> dict[s
         "mode": mode,
         "day_utc": day,
         "produced_utc": produced_utc,
+        "authority_classification": "NON_CANONICAL_ADVISORY_ONLY",
+        "control_decision_warning": "DO_NOT_USE_FOR_CONTROL_DECISIONS; canonical sleeve-edge control truth is sleeve_edge_snapshot_v1",
         "readiness_state": readiness_state,
         "readiness_summary": readiness_summary,
         "promotion_decision_basis": promotion_decision_basis,

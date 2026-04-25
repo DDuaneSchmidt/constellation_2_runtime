@@ -106,6 +106,33 @@
       "description": "Optional monotonic sequence number if provided by adapter boundary."
     },
 
+    "protection_status": {
+      "type": ["string", "null"],
+      "enum": ["PROTECTED", "ENTRY_ONLY", "UNKNOWN", null]
+    },
+
+    "order_linkage": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "parent_order_id",
+        "stop_order_id",
+        "take_profit_order_id",
+        "bracket_linkage",
+        "oca_group"
+      ],
+      "properties": {
+        "parent_order_id": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+        "stop_order_id": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+        "take_profit_order_id": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+        "bracket_linkage": {
+          "type": "string",
+          "enum": ["PARENT_STOP", "PARENT_STOP_TAKE_PROFIT", "ENTRY_ONLY"]
+        },
+        "oca_group": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 }
+      }
+    },
+
     "canonical_json_hash": {
       "type": ["string", "null"],
       "pattern": "^[a-f0-9]{64}$"

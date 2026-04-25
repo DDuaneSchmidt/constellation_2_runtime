@@ -2,8 +2,16 @@
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 from datetime import datetime, timezone
+
+_THIS_FILE = Path(__file__).resolve()
+_REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
+if str(_REPO_ROOT_FROM_FILE) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
+
+from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 
@@ -14,7 +22,7 @@ def _truth_root() -> Path:
         if p.exists() and p.is_dir():
             return p
         raise SystemExit(f"FAIL: C2_TRUTH_ROOT invalid: {p}")
-    return (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+    return resolve_canonical_truth_root_bridge_v1(caller="ops/tools/run_execution_readiness_gate_v1.py").resolve()
 
 def main() -> int:
     ap = argparse.ArgumentParser(prog="run_execution_readiness_gate_v1")

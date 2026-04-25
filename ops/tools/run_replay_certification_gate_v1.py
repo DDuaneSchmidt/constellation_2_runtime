@@ -7,12 +7,11 @@ Deterministic, immutable, idempotent gate:
 - Ensures replay_certification_bundle_v1/<DAY>/replay_certification_bundle.v1.json exists (writer is immutable/idempotent).
 - Writes replay_certification_gate_v1/<DAY>/replay_certification_gate.v1.json ONCE.
 - On subsequent runs:
-  - does NOT rewrite gate file
-  - compares recomputed candidate bundle sha to the stored candidate sha
-  - if match => PASS (two-run equality proven)
-  - if mismatch => FAIL (tamper/drift)
+  - preserves an existing PASS gate only when its candidate bundle sha still matches
+  - refreshes stale derived gate files through the governed day-artifact refresh path
+  - if recomputed candidate bundle sha still matches the stored PASS gate => PASS (two-run equality proven)
 
-This matches Constellation immutability doctrine.
+This preserves stable PASS artifacts while allowing stale derived replay artifacts to refresh safely as authoritative submission evidence materializes.
 """
 
 from __future__ import annotations
@@ -25,6 +24,8 @@ import os
 import subprocess
 from pathlib import Path
 from typing import Any, Dict
+
+from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1
 
 _THIS_FILE = Path(__file__).resolve()
 _REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
@@ -93,6 +94,25 @@ def _write_once_or_refuse(path: Path, obj: Dict[str, Any]) -> str:
     return sha
 
 
+def _write_refreshable_gate(path: Path, obj: Dict[str, Any], *, day_utc: str) -> str:
+    payload = _canonical_json_bytes_v1(obj) + b"\n"
+    wr = write_day_artifact_refreshable_v1(
+        path=path,
+        data=payload,
+        expected_day_utc=day_utc,
+        expected_schema_id="C2_REPLAY_CERTIFICATION_GATE_V1",
+        expected_schema_version=1,
+        preserve_statuses=(),
+    )
+    if wr.action == "REFRESHED":
+        print(
+            "WARN: REPLAY_CERTIFICATION_GATE_REFRESHED_STALE_ARTIFACT "
+            f"day_utc={day_utc} path={path} prior_sha256={wr.prior_sha256} "
+            f"quarantined_path={wr.quarantined_path}"
+        )
+    return wr.sha256
+
+
 def _read_json_obj(p: Path) -> Dict[str, Any]:
     o = json.loads(p.read_text(encoding="utf-8"))
     if not isinstance(o, dict):
@@ -128,22 +148,61 @@ def main() -> int:
     env = dict(os.environ)
     env["C2_TRUTH_ROOT"] = str(TRUTH_ROOT)
     env["C2_PRODUCED_UTC"] = produced_utc
-    subprocess.check_call(
+    completed = subprocess.run(
         ["python3", "ops/tools/run_replay_certification_bundle_v1.py", "--day_utc", day],
         cwd=str(REPO_ROOT),
         env=env,
+        check=False,
+        capture_output=True,
+        text=True,
     )
+    if completed.returncode != 0 and not bundle_path.exists():
+        raise SystemExit(
+            f"FAIL: REPLAY_CERT_BUNDLE_BUILD_FAILED rc={completed.returncode} stderr={completed.stderr.strip()!r}"
+        )
+    bundle_obj = _read_json_obj(bundle_path)
     candidate_sha = _sha256_file(bundle_path)
+    bundle_status = str(bundle_obj.get("status") or "").strip().upper()
+    if bundle_status not in {"PASS", "FAIL"}:
+        raise SystemExit(f"FAIL: REPLAY_CERT_BUNDLE_STATUS_INVALID: {bundle_status!r}")
+
+    candidate_gate_obj: Dict[str, Any] = {
+        "schema_id": "C2_REPLAY_CERTIFICATION_GATE_V1",
+        "schema_version": 1,
+        "day_utc": day,
+        "produced_utc": produced_utc,
+        "producer": {"repo": "constellation_2_runtime", "git_sha": _git_sha(), "module": "ops/tools/run_replay_certification_gate_v1.py"},
+        "status": bundle_status,
+        "first_run": True,
+        "two_run_equality": None,
+        "existing_bundle_sha256": None,
+        "candidate_bundle_sha256": candidate_sha,
+        "reason_codes": [
+            "REPLAY_CERT_FIRST_RUN",
+            "REPLAY_CERT_BUNDLE_PASS" if bundle_status == "PASS" else "REPLAY_CERT_BUNDLE_FAIL_CLOSED",
+        ],
+        "gate_sha256": None,
+    }
+    unsigned_candidate = dict(candidate_gate_obj)
+    unsigned_candidate["gate_sha256"] = None
+    candidate_gate_obj["gate_sha256"] = _sha256_bytes(_canonical_json_bytes_v1(unsigned_candidate) + b"\n")
+    _validate(candidate_gate_obj)
 
     if gate_path.exists():
         # SECOND (or later) RUN: do not rewrite. Compare.
         gate_obj = _read_json_obj(gate_path)
         stored_candidate = str(gate_obj.get("candidate_bundle_sha256") or "").strip()
+        stored_status = str(gate_obj.get("status") or "").strip().upper()
 
         if stored_candidate != candidate_sha:
-            raise SystemExit(
-                f"FAIL: REPLAY_CERT_MISMATCH candidate_sha={candidate_sha} stored_candidate_sha={stored_candidate} gate_path={gate_path}"
-            )
+            gate_sha = _write_refreshable_gate(gate_path, candidate_gate_obj, day_utc=day)
+            print(gate_sha)
+            return 0
+
+        if stored_status != "PASS" or stored_status != bundle_status:
+            gate_sha = _write_refreshable_gate(gate_path, candidate_gate_obj, day_utc=day)
+            print(gate_sha)
+            return 0
 
         # Write second-run proof artifact (immutable, separate file)
         proof_path = (TRUTH_ROOT / "reports" / "replay_certification_gate_v1" / day / "replay_certification_gate.second_run.v1.json").resolve()
@@ -178,29 +237,8 @@ def main() -> int:
         return 0
 
     # FIRST RUN: write gate once
-    out: Dict[str, Any] = {
-        "schema_id": "C2_REPLAY_CERTIFICATION_GATE_V1",
-        "schema_version": 1,
-        "day_utc": day,
-        "produced_utc": produced_utc,
-        "producer": {"repo": "constellation_2_runtime", "git_sha": _git_sha(), "module": "ops/tools/run_replay_certification_gate_v1.py"},
-        "status": "PASS",
-        "first_run": True,
-        "two_run_equality": None,
-        "existing_bundle_sha256": None,
-        "candidate_bundle_sha256": candidate_sha,
-        "reason_codes": ["REPLAY_CERT_FIRST_RUN"],
-        "gate_sha256": None
-    }
-
-    unsigned = dict(out)
-    unsigned["gate_sha256"] = None
-    out["gate_sha256"] = _sha256_bytes(_canonical_json_bytes_v1(unsigned) + b"\n")
-
-    _validate(out)
-    _ = _write_once_or_refuse(gate_path, out)
-
-    print(out["gate_sha256"])
+    _ = _write_once_or_refuse(gate_path, candidate_gate_obj)
+    print(candidate_gate_obj["gate_sha256"])
     return 0
 
 

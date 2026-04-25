@@ -17,6 +17,7 @@ from constellation_2.common.performance_projection_v1 import (
     build_performance_projection_v1,
     write_performance_projection_v1,
 )
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -24,7 +25,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--day_utc", required=True)
     ap.add_argument(
         "--truth_root",
-        default=str((REPO_ROOT / "constellation_2/runtime/truth").resolve()),
+        default=str(resolve_canonical_truth_root().resolve()),
     )
     args = ap.parse_args(argv)
 
@@ -34,6 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     payload = build_performance_projection_v1(
         journal_payload=dict(journal_ref.payload),
         journal_ref=str(journal_ref.path),
+        journal_sha256=str(journal_ref.sha256),
         journal_generated_at_utc=str(journal_ref.payload.get("generated_at_utc") or "").strip(),
         generated_at_utc=now_utc_iso_v1(),
         producer_module="ops/tools/run_performance_projection_v1.py",

@@ -6,13 +6,17 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Dict
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_RELPATH = 'governance/04_DATA/SCHEMAS/C2/ACCOUNTING/accounting_nav.v1.schema.json'
 MODULE = 'ops/tools/bridge_accounting_nav_v2_to_compat_v1.py'
 
@@ -276,13 +280,31 @@ def _write_with_integrity(path: Path, obj: Dict[str, Any]) -> str:
     return f'WROTE sha256={cand_sha}'
 
 
+def _proof_payload(*, truth_root: Path, day_utc: str) -> Dict[str, Any]:
+    return {
+        'proof_mode': 'import_only',
+        'module': MODULE,
+        'repo_root': str(REPO_ROOT),
+        'cwd': os.getcwd(),
+        'python_executable': sys.executable,
+        'truth_root': str(truth_root),
+        'day_utc': str(day_utc),
+        'pythonpath': os.environ.get('PYTHONPATH', ''),
+        'sys_path_head': sys.path[:8],
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog='bridge_accounting_nav_v2_to_compat_v1')
     ap.add_argument('--day_utc', required=True)
     ap.add_argument('--truth_root', required=True)
+    ap.add_argument('--proof-mode', choices=('disabled', 'import_only'), default='disabled')
     args = ap.parse_args()
     day = str(args.day_utc).strip()
     truth_root = _require_truth_root(args.truth_root)
+    if args.proof_mode == 'import_only':
+        print(json.dumps(_proof_payload(truth_root=truth_root, day_utc=day), sort_keys=True))
+        return 0
     src_path = (truth_root / 'accounting_v2' / 'nav' / day / 'nav.v2.json').resolve()
     out_path = (truth_root / 'accounting_compat_v1' / 'nav' / day / 'nav_snapshot.v1.json').resolve()
     if not src_path.exists() or not src_path.is_file():

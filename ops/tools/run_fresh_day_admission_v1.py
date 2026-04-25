@@ -21,19 +21,30 @@ from constellation_2.common.next_day_readiness_probe_v1 import (
     resolve_next_day_readiness_probe_path,
     write_next_day_readiness_probe_v1,
 )
-from constellation_2.common.runtime_path_authority_v1 import resolve_decision_truth_root_v1
+from constellation_2.common.decision_authority_bridge_v1 import resolve_decision_truth_root_bridge_v1
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="run_fresh_day_admission_v1")
-    ap.add_argument("--target_day_utc", required=True)
+    ap.add_argument("--target_day_utc", default="")
+    ap.add_argument("--day_utc", default="")
     ap.add_argument("--truth_root", required=True)
     ap.add_argument("--environment", default="PAPER", choices=["PAPER", "LIVE"])
     ap.add_argument("--ib_account", default="")
     args = ap.parse_args(argv)
 
-    truth_root = resolve_decision_truth_root_v1(args.truth_root, repo_root=REPO_ROOT)
-    target_day_utc = str(args.target_day_utc).strip()
+    truth_root = resolve_decision_truth_root_bridge_v1(
+        args.truth_root,
+        repo_root=REPO_ROOT,
+        caller="ops/tools/run_fresh_day_admission_v1.py",
+    )
+    target_day_utc = str(args.target_day_utc or "").strip()
+    day_utc_alias = str(args.day_utc or "").strip()
+    if target_day_utc and day_utc_alias and target_day_utc != day_utc_alias:
+        ap.error("--target_day_utc and --day_utc must match when both are provided")
+    target_day_utc = target_day_utc or day_utc_alias
+    if not target_day_utc:
+        ap.error("one of --target_day_utc or --day_utc is required")
     environment = str(args.environment).strip().upper()
     ib_account = str(args.ib_account or "").strip() or resolve_single_paper_ib_account_from_sleeve_registry(REPO_ROOT)
 

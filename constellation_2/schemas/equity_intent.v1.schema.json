@@ -113,6 +113,23 @@
             "enabled": { "type": "boolean" },
             "max_holding_days": { "type": "integer", "minimum": 0, "maximum": 365 }
           }
+        },
+        "protective_stop": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "stop_price", "stop_loss_bps", "basis"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "stop_price": {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]+)?$"
+            },
+            "stop_loss_bps": { "type": "integer", "minimum": 1, "maximum": 10000 },
+            "basis": {
+              "type": "string",
+              "enum": ["ENTRY_REFERENCE_PRICE"]
+            }
+          }
         }
       }
     },

@@ -3,11 +3,19 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
+_THIS_FILE = Path(__file__).resolve()
+_REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
+if str(_REPO_ROOT_FROM_FILE) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
+
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
+
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH_ROOT = REPO_ROOT / "constellation_2/runtime/truth"
+TRUTH_ROOT = resolve_canonical_truth_root().resolve()
 
 DAY0_RC_ALLOWED = "DAY0_BOOTSTRAP_ATTRIB_DEGRADED_OK"
 

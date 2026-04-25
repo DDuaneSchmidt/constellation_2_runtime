@@ -54,6 +54,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from constellation_2.common.kill_switch_authority_v1 import (
+    STATUS_PASS as KILL_SWITCH_STATUS_PASS,
+    resolve_kill_switch_authority_v1,
+)
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1  # type: ignore
 from constellation_2.phaseD.lib.enforce_operational_day_invariant_v1 import (
     enforce_operational_day_key_invariant_v1,
@@ -344,15 +348,17 @@ def main() -> int:
 
     kill_inactive = False
     kill_details = "missing"
-    if _check_exists(kill_path):
-        try:
-            ks = _read_json(kill_path)
-            st = str(ks.get("state") or "").strip().upper()
-            kill_inactive = (st == "INACTIVE")
-            kill_details = f"state={st}"
-        except Exception as e:
+    try:
+        kill_result = resolve_kill_switch_authority_v1(canonical_truth_root=TRUTH, day_utc=day)
+        if kill_result.status == KILL_SWITCH_STATUS_PASS:
+            kill_inactive = (kill_result.state == "INACTIVE")
+            kill_details = f"state={kill_result.state}"
+        else:
             kill_inactive = False
-            kill_details = f"parse_error={e!r}"
+            kill_details = f"{kill_result.reason_code}: {kill_result.reason_detail}"
+    except Exception as e:
+        kill_inactive = False
+        kill_details = f"parse_error={e!r}"
     checks.append({"check_id": "BUNDLED_C_KILL_SWITCH_INACTIVE", "pass": kill_inactive, "evidence_paths": [str(kill_path)], "details": kill_details})
 
     all_pass = all(bool(c.get("pass")) for c in checks)

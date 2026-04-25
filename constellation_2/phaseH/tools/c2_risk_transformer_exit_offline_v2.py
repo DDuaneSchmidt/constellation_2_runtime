@@ -26,8 +26,11 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root  # noqa: E402
 from constellation_2.phaseC.lib.validate_against_schema_v1 import validate_against_repo_schema_v1  # noqa: E402
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1  # noqa: E402
+
+POSITIONS_SNAPSHOT_ROOT = (resolve_canonical_truth_root().resolve() / "positions_v1" / "snapshots").resolve()
 
 
 class ExitTransformerError(Exception):
@@ -96,8 +99,8 @@ def _parse_day_utc(day: str) -> str:
     return d
 
 
-def _find_positions_snapshot_for_day(repo_root: Path, day: str) -> Path:
-    day_dir = (repo_root / "constellation_2/runtime/truth/positions_v1/snapshots" / day).resolve()
+def _find_positions_snapshot_for_day(day: str) -> Path:
+    day_dir = (POSITIONS_SNAPSHOT_ROOT / day).resolve()
     if not day_dir.exists() or not day_dir.is_dir():
         raise ExitTransformerError(f"POSITIONS_SNAPSHOT_DAY_DIR_MISSING: {day_dir}")
     for v in (5, 4, 3, 2, 1):
@@ -195,7 +198,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if str(args.positions_snapshot_path or "").strip():
         pos_path = Path(str(args.positions_snapshot_path).strip()).resolve()
     else:
-        pos_path = _find_positions_snapshot_for_day(REPO_ROOT, day)
+        pos_path = _find_positions_snapshot_for_day(day)
 
     pos_obj = _read_json_obj(pos_path)
     qty = _exit_qty_from_positions_snapshot(pos_obj, engine_id=engine_id, symbol=sym)

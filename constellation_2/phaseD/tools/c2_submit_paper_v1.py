@@ -38,6 +38,11 @@ from constellation_2.phaseD.lib.submit_boundary_paper_v1 import run_submit_bound
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    raise SystemExit(
+        "LEGACY_EXECUTION_SUBMISSION_PATH_DISABLED:"
+        "use_c2_submit_paper_v5_with_execution_package_and_submission_record"
+    )
+
     ap = argparse.ArgumentParser(prog="c2_submit_paper_v1")
     ap.add_argument("--phasec_out_dir", required=True, help="Phase C out_dir containing order_plan, mapping_ledger_record, binding_record")
     ap.add_argument("--risk_budget", required=True, help="Path to RiskBudget v1 JSON file")

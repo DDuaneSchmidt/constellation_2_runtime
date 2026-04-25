@@ -43,9 +43,12 @@ from constellation_2.common.runtime_contract_v1 import require_truth_root_under_
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
-from constellation_2.common.truth_root_v1 import resolve_truth_root
+from constellation_2.common.runtime_authority_bridge_v1 import resolve_truth_root_bridge_v1
 
-TRUTH_ROOT = resolve_truth_root(repo_root=REPO_ROOT)
+TRUTH_ROOT = resolve_truth_root_bridge_v1(
+    repo_root=REPO_ROOT,
+    caller="ops/tools/run_liquidity_slippage_gate_v1.py",
+)
 
 POLICY_PATH = (REPO_ROOT / "governance" / "02_REGISTRIES" / "C2_LIQUIDITY_SLIPPAGE_POLICY_V1.json").resolve()
 POLICY_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RISK/liquidity_slippage_policy.v1.schema.json"
@@ -90,7 +93,12 @@ def _resolve_gate_truth_root(arg_truth_root: str) -> Path:
     env_root = (os.environ.get("C2_TRUTH_ROOT") or "").strip()
     if env_root:
         return _require_supported_truth_root(Path(env_root))
-    return _require_supported_truth_root(resolve_truth_root(repo_root=REPO_ROOT))
+    return _require_supported_truth_root(
+        resolve_truth_root_bridge_v1(
+            repo_root=REPO_ROOT,
+            caller="ops/tools/run_liquidity_slippage_gate_v1.py",
+        )
+    )
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -103,6 +111,57 @@ def _sha256_file(p: Path) -> str:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _write_gate_report(out_path: Path, out_obj: Dict[str, Any]) -> str:
+    validate_against_repo_schema_v1(out_obj, REPO_ROOT, OUT_SCHEMA_RELPATH)
+    payload = canonical_json_bytes_v1(out_obj) + b"\n"
+    candidate_sha = _sha256_bytes(payload)
+    candidate_manifest_hash = _sha256_bytes(
+        canonical_json_bytes_v1(out_obj.get("input_manifest") or [])
+    )
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if out_path.exists():
+        existing = _read_json_obj(out_path)
+        validate_against_repo_schema_v1(existing, REPO_ROOT, OUT_SCHEMA_RELPATH)
+
+        existing_schema_id = str(existing.get("schema_id") or "").strip()
+        existing_day = str(existing.get("day_utc") or "").strip()
+        if existing_schema_id != "liquidity_slippage_gate":
+            raise SystemExit(
+                f"FAIL: EXISTING_SCHEMA_ID_MISMATCH path={out_path} schema_id={existing_schema_id!r}"
+            )
+        if existing_day != str(out_obj.get("day_utc") or "").strip():
+            raise SystemExit(
+                f"FAIL: EXISTING_DAY_MISMATCH path={out_path} existing_day={existing_day!r} "
+                f"candidate_day={str(out_obj.get('day_utc') or '').strip()!r}"
+            )
+
+        existing_bytes = canonical_json_bytes_v1(existing) + b"\n"
+        existing_sha = _sha256_bytes(existing_bytes)
+        existing_manifest_hash = _sha256_bytes(
+            canonical_json_bytes_v1(existing.get("input_manifest") or [])
+        )
+
+        if existing_manifest_hash == candidate_manifest_hash:
+            if existing_sha != candidate_sha:
+                raise SystemExit(
+                    "FAIL: SAME_INPUT_MANIFEST_BUT_DIFFERENT_OUTPUT_BYTES "
+                    f"path={out_path} manifest_hash={candidate_manifest_hash} "
+                    f"existing_sha={existing_sha} candidate_sha={candidate_sha}"
+                )
+            return f"EXISTS_IDENTICAL sha256={existing_sha}"
+
+        tmp = out_path.with_suffix(out_path.suffix + ".tmp")
+        tmp.write_bytes(payload)
+        os.replace(tmp, out_path)
+        return f"REPLACED_STALE prior_sha256={existing_sha} sha256={candidate_sha}"
+
+    tmp = out_path.with_suffix(out_path.suffix + ".tmp")
+    tmp.write_bytes(payload)
+    os.replace(tmp, out_path)
+    return f"WROTE sha256={candidate_sha}"
 
 
 def _git_sha() -> str:
@@ -398,19 +457,17 @@ def main() -> int:
         tmp = dict(out_obj)
         tmp["gate_sha256"] = None
         out_obj["gate_sha256"] = _sha256_bytes(canonical_json_bytes_v1(tmp))
-        validate_against_repo_schema_v1(out_obj, REPO_ROOT, OUT_SCHEMA_RELPATH)
-
         out_dir = (OUT_ROOT / day).resolve()
         out_path = (out_dir / "liquidity_slippage_gate.v1.json").resolve()
-        payload = canonical_json_bytes_v1(out_obj) + b"\n"
-
-        out_dir.mkdir(parents=True, exist_ok=True)
         try:
-            write_file_immutable_v1(path=out_path, data=payload, create_dirs=False)
+            action = _write_gate_report(out_path, out_obj)
         except ImmutableWriteError as e:
             raise SystemExit(f"FAIL_IMMUTABLE_WRITE: {e}") from e
 
-        print(f"OK: liquidity_slippage_gate_v1 status={status} sha256={_sha256_file(out_path)} path={out_path}")
+        print(
+            f"OK: liquidity_slippage_gate_v1 status={status} sha256={_sha256_file(out_path)} "
+            f"path={out_path} action={action}"
+        )
         return 0 if status in ("PASS", "OK") else 1
 
     nav_cents, nav_path, nav_sha = _read_nav_total_cents(day)
@@ -657,19 +714,17 @@ def main() -> int:
     tmp["gate_sha256"] = None
     out_obj["gate_sha256"] = _sha256_bytes(canonical_json_bytes_v1(tmp))
 
-    validate_against_repo_schema_v1(out_obj, REPO_ROOT, OUT_SCHEMA_RELPATH)
-
     out_dir = (OUT_ROOT / day).resolve()
     out_path = (out_dir / "liquidity_slippage_gate.v1.json").resolve()
-    payload = canonical_json_bytes_v1(out_obj) + b"\n"
-
-    out_dir.mkdir(parents=True, exist_ok=True)
     try:
-        write_file_immutable_v1(path=out_path, data=payload, create_dirs=False)
+        action = _write_gate_report(out_path, out_obj)
     except ImmutableWriteError as e:
         raise SystemExit(f"FAIL_IMMUTABLE_WRITE: {e}") from e
 
-    print(f"OK: liquidity_slippage_gate_v1 status={status} sha256={_sha256_file(out_path)} path={out_path}")
+    print(
+        f"OK: liquidity_slippage_gate_v1 status={status} sha256={_sha256_file(out_path)} "
+        f"path={out_path} action={action}"
+    )
     return 0 if status in ("PASS", "OK") else 1
 
 

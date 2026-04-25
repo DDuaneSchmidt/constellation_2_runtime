@@ -476,6 +476,7 @@ def build_execution_journal_payload_v1(
     generated_at_utc: str,
     events: list[dict[str, Any]],
     producer_module: str,
+    runtime_lifecycle_ref: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     identity = execution_identity_tuple_v1(
         day_utc=day_utc,
@@ -496,6 +497,8 @@ def build_execution_journal_payload_v1(
         "events": normalized_events,
         "producer": producer_block_v1(module=producer_module, git_sha=identity["git_sha"]),
     }
+    if runtime_lifecycle_ref is not None:
+        payload["runtime_lifecycle_ref"] = dict(runtime_lifecycle_ref)
     return validate_execution_journal_payload_v1(payload)
 
 
@@ -535,6 +538,7 @@ def append_execution_event_v1(
     payload: Mapping[str, Any],
     producer_module: str,
     generated_at_utc: str | None = None,
+    runtime_lifecycle_ref: Mapping[str, Any] | None = None,
 ) -> SurfaceRefV1:
     root = resolve_fact_plane_truth_root_v1(truth_root)
     journal_path = resolve_execution_journal_path(truth_root=root, day_utc=day_utc)
@@ -586,6 +590,7 @@ def append_execution_event_v1(
         generated_at_utc=generated,
         events=updated_events,
         producer_module=producer_module,
+        runtime_lifecycle_ref=runtime_lifecycle_ref,
     )
     return atomic_write_validated_json_v1(
         path=journal_path,
@@ -605,6 +610,7 @@ def append_deployment_outcome_event_v1(
     source_path: Path | str,
     source_payload: Mapping[str, Any],
     producer_module: str,
+    runtime_lifecycle_ref: Mapping[str, Any] | None = None,
 ) -> SurfaceRefV1:
     final_deployment_decision = str(source_payload.get("final_deployment_decision") or "").strip().upper()
     event_type = "DEPLOYMENT_ACTIVATED" if final_deployment_decision == "DEPLOY_ACTIVE" else "DEPLOYMENT_BLOCKED"
@@ -626,6 +632,7 @@ def append_deployment_outcome_event_v1(
         },
         producer_module=producer_module,
         generated_at_utc=str(source_payload.get("evaluated_at_utc") or "").strip(),
+        runtime_lifecycle_ref=runtime_lifecycle_ref,
     )
 
 
@@ -636,6 +643,7 @@ def append_startup_materialization_event_v1(
     source_path: Path | str,
     source_payload: Mapping[str, Any],
     producer_module: str,
+    runtime_lifecycle_ref: Mapping[str, Any] | None = None,
 ) -> SurfaceRefV1:
     return append_execution_event_v1(
         truth_root=truth_root,
@@ -651,6 +659,7 @@ def append_startup_materialization_event_v1(
         },
         producer_module=producer_module,
         generated_at_utc=artifact_generated_at_utc_v1(source_payload),
+        runtime_lifecycle_ref=runtime_lifecycle_ref,
         **execution_identity_tuple_v1(
             day_utc=str(identity.get("day_utc") or "").strip(),
             day_attempt_id=str(identity.get("day_attempt_id") or "").strip(),
@@ -668,6 +677,7 @@ def append_startup_proof_validation_event_v1(
     source_path: Path | str,
     source_payload: Mapping[str, Any],
     producer_module: str,
+    runtime_lifecycle_ref: Mapping[str, Any] | None = None,
 ) -> SurfaceRefV1:
     return append_execution_event_v1(
         truth_root=truth_root,
@@ -682,6 +692,7 @@ def append_startup_proof_validation_event_v1(
         },
         producer_module=producer_module,
         generated_at_utc=artifact_generated_at_utc_v1(source_payload),
+        runtime_lifecycle_ref=runtime_lifecycle_ref,
         **execution_identity_tuple_v1(
             day_utc=str(identity.get("day_utc") or "").strip(),
             day_attempt_id=str(identity.get("day_attempt_id") or "").strip(),
@@ -699,8 +710,10 @@ def append_ledger_authority_event_v1(
     source_path: Path | str,
     source_payload: Mapping[str, Any],
     producer_module: str,
+    runtime_lifecycle_ref: Mapping[str, Any] | None = None,
 ) -> SurfaceRefV1:
     control_state = dict(source_payload.get("control_state") or {})
+    constitutional_context = dict(source_payload.get("constitutional_context") or {})
     return append_execution_event_v1(
         truth_root=truth_root,
         event_type="LEDGER_AUTHORITY_RECORDED",
@@ -715,9 +728,18 @@ def append_ledger_authority_event_v1(
             "system_ready": bool(control_state.get("system_ready") is True),
             "submission_authorized": bool(control_state.get("submission_authorized") is True),
             "blocking_codes": list(control_state.get("blocking_codes") or []),
+            "proposal_hash": str(constitutional_context.get("proposal_hash") or "").strip().lower(),
+            "fact_bundle_hash": str(constitutional_context.get("fact_bundle_hash") or "").strip().lower(),
+            "decision_enum": str(constitutional_context.get("decision_enum") or "").strip(),
+            "effective_scope": dict(constitutional_context.get("effective_scope") or {}),
+            "blocker_rules": list(constitutional_context.get("blocker_rules") or []),
+            "rule_provenance": list(constitutional_context.get("rule_provenance") or []),
+            "negative_evidence": list(constitutional_context.get("negative_evidence") or []),
+            "policy_version": str(constitutional_context.get("policy_version") or "").strip(),
         },
         producer_module=producer_module,
         generated_at_utc=artifact_generated_at_utc_v1(source_payload),
+        runtime_lifecycle_ref=runtime_lifecycle_ref,
         **execution_identity_tuple_v1(
             day_utc=str(identity.get("day_utc") or "").strip(),
             day_attempt_id=str(identity.get("day_attempt_id") or "").strip(),
@@ -735,8 +757,10 @@ def append_submission_authorization_event_v1(
     source_path: Path | str,
     source_payload: Mapping[str, Any],
     producer_module: str,
+    runtime_lifecycle_ref: Mapping[str, Any] | None = None,
 ) -> SurfaceRefV1:
     control_state = dict(source_payload.get("control_state") or {})
+    constitutional_context = dict(source_payload.get("constitutional_context") or {})
     return append_execution_event_v1(
         truth_root=truth_root,
         event_type="SUBMISSION_AUTHORIZATION_RECORDED",
@@ -749,9 +773,18 @@ def append_submission_authorization_event_v1(
             "authority_status": str(
                 control_state.get("authority_status") or source_payload.get("authority_status") or ""
             ).strip().upper(),
+            "proposal_hash": str(constitutional_context.get("proposal_hash") or "").strip().lower(),
+            "fact_bundle_hash": str(constitutional_context.get("fact_bundle_hash") or "").strip().lower(),
+            "decision_enum": str(constitutional_context.get("decision_enum") or "").strip(),
+            "effective_scope": dict(constitutional_context.get("effective_scope") or {}),
+            "blocker_rules": list(constitutional_context.get("blocker_rules") or []),
+            "rule_provenance": list(constitutional_context.get("rule_provenance") or []),
+            "negative_evidence": list(constitutional_context.get("negative_evidence") or []),
+            "policy_version": str(constitutional_context.get("policy_version") or "").strip(),
         },
         producer_module=producer_module,
         generated_at_utc=artifact_generated_at_utc_v1(source_payload),
+        runtime_lifecycle_ref=runtime_lifecycle_ref,
         **execution_identity_tuple_v1(
             day_utc=str(identity.get("day_utc") or "").strip(),
             day_attempt_id=str(identity.get("day_attempt_id") or "").strip(),
@@ -769,6 +802,7 @@ def append_state_machine_decision_event_v1(
     source_path: Path | str,
     source_payload: Mapping[str, Any],
     producer_module: str,
+    runtime_lifecycle_ref: Mapping[str, Any] | None = None,
 ) -> SurfaceRefV1:
     first_true_blocker = dict(source_payload.get("first_true_blocker") or {})
     return append_execution_event_v1(
@@ -789,6 +823,7 @@ def append_state_machine_decision_event_v1(
         },
         producer_module=producer_module,
         generated_at_utc=artifact_generated_at_utc_v1(source_payload),
+        runtime_lifecycle_ref=runtime_lifecycle_ref,
         **execution_identity_tuple_v1(
             day_utc=str(identity.get("day_utc") or "").strip(),
             day_attempt_id=str(identity.get("day_attempt_id") or "").strip(),
@@ -810,6 +845,7 @@ def append_stage_duration_event_v1(
     ended_at_utc: str,
     duration_ms: int,
     producer_module: str,
+    runtime_lifecycle_ref: Mapping[str, Any] | None = None,
 ) -> SurfaceRefV1:
     return append_execution_event_v1(
         truth_root=truth_root,
@@ -825,6 +861,7 @@ def append_stage_duration_event_v1(
         },
         producer_module=producer_module,
         generated_at_utc=artifact_generated_at_utc_v1(source_payload),
+        runtime_lifecycle_ref=runtime_lifecycle_ref,
         **execution_identity_tuple_v1(
             day_utc=str(identity.get("day_utc") or "").strip(),
             day_attempt_id=str(identity.get("day_attempt_id") or "").strip(),
@@ -845,6 +882,7 @@ def append_system_contradiction_event_v1(
     contradiction_details: str,
     source_artifact_paths: list[str],
     producer_module: str,
+    runtime_lifecycle_ref: Mapping[str, Any] | None = None,
 ) -> SurfaceRefV1:
     return append_execution_event_v1(
         truth_root=truth_root,
@@ -862,6 +900,7 @@ def append_system_contradiction_event_v1(
         },
         producer_module=producer_module,
         generated_at_utc=artifact_generated_at_utc_v1(source_payload),
+        runtime_lifecycle_ref=runtime_lifecycle_ref,
         **execution_identity_tuple_v1(
             day_utc=str(identity.get("day_utc") or "").strip(),
             day_attempt_id=str(identity.get("day_attempt_id") or "").strip(),

@@ -1,0 +1,10 @@
+[Unit]
+Description=Constellation Market Calendar Coverage Authority Timer
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30min
+Unit=c2-market-calendar-coverage-authority.service
+
+[Install]
+WantedBy=timers.target

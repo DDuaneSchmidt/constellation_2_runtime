@@ -21,6 +21,11 @@ REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
 
 
 def main() -> int:
+    raise SystemExit(
+        "LEGACY_EXECUTION_SUBMISSION_PATH_DISABLED:"
+        "use_c2_submit_paper_v5_with_execution_package_and_submission_record"
+    )
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--day_utc", required=True)
     ap.add_argument("--ib_host", default="127.0.0.1")

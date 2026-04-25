@@ -215,9 +215,13 @@ def _dte_days_calendar(as_of_utc: str, expiry_utc: str) -> int:
     return d
 
 
-def _liquid_contract(contract: Dict[str, Any], pol: Dict[str, Any]) -> bool:
+def _liquid_contract(contract: Dict[str, Any], pol: Dict[str, Any], *, engine_mode: str) -> bool:
     oi_min = int(pol["min_open_interest"])
-    vol_min = int(pol["min_volume"])
+    mode = str(engine_mode or "").strip().upper()
+    # Delayed PAPER options often have quoteable bid/ask with zero printed volume.
+    # Keep stricter live behavior by enforcing a minimum floor for LIVE mode.
+    vol_floor = 1 if mode == "LIVE" else 0
+    vol_min = max(int(pol["min_volume"]), vol_floor)
     max_spread = _dec(pol["max_bid_ask_spread"])
     bid = _dec(contract["bid"])
     ask = _dec(contract["ask"])
@@ -236,6 +240,7 @@ def _select_expiry(intent: Dict[str, Any], chain: Dict[str, Any]) -> str:
     dte_min = int(exp_pol["target_dte_min"])
     dte_max = int(exp_pol["target_dte_max"])
     right = intent["strategy"]["right"]
+    engine_mode = str(intent["engine"]["mode"] or "").strip().upper()
 
     liq_pol = intent["selection_policy"]["liquidity_policy"]
 
@@ -243,7 +248,7 @@ def _select_expiry(intent: Dict[str, Any], chain: Dict[str, Any]) -> str:
     for c in chain["contracts"]:
         if c["right"] != right:
             continue
-        if not _liquid_contract(c, liq_pol):
+        if not _liquid_contract(c, liq_pol, engine_mode=engine_mode):
             continue
         expiry = c["expiry_utc"]
         dte = _dte_days_calendar(chain["as_of_utc"], expiry)
@@ -279,13 +284,14 @@ def _select_strikes(intent: Dict[str, Any], chain: Dict[str, Any], expiry: str) 
     width = _dec(intent["selection_policy"]["width_policy"]["width_points"])
     spot = _dec(chain["underlying"]["spot_price"])
     liq_pol = intent["selection_policy"]["liquidity_policy"]
+    engine_mode = str(intent["engine"]["mode"] or "").strip().upper()
 
     # Gather liquid contracts at expiry/right
     candidates: List[Dict[str, Any]] = []
     for c in chain["contracts"]:
         if c["expiry_utc"] != expiry or c["right"] != right:
             continue
-        if not _liquid_contract(c, liq_pol):
+        if not _liquid_contract(c, liq_pol, engine_mode=engine_mode):
             continue
         candidates.append(c)
 
@@ -299,68 +305,80 @@ def _select_strikes(intent: Dict[str, Any], chain: Dict[str, Any], expiry: str) 
 
     tie_breakers: List[str] = []
 
-    def pick_short_near_money_put_credit() -> Dict[str, Any]:
-        # highest strike <= spot
+    def pick_short_near_money_put_credit_with_pair(
+        idx: Dict[Tuple[str, str, str], Dict[str, Any]],
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        # Deterministic priority: highest strike <= spot, but only if required width pair exists/liquid.
         le = [t for t in strikes_sorted if t[0] <= spot]
         if not le:
             raise MappingError("No PUT strikes <= spot for credit selection.")
-        # choose max strike; tie-break contract_key
-        max_strike = max(le, key=lambda t: (t[0], t[1]["contract_key"]))
-        tie_breakers.append("PUT_CREDIT_SHORT=highest_strike_le_spot;tie=contract_key_lex")
-        return max_strike[1]
+        ordered = sorted(le, key=lambda t: (t[0], t[1]["contract_key"]), reverse=True)
+        for short_strike, short_cand in ordered:
+            long_strike = short_strike - width
+            long_key = (expiry, right, f"{long_strike:.2f}")
+            long_cand = idx.get(long_key)
+            if long_cand is None:
+                continue
+            if not _liquid_contract(long_cand, liq_pol, engine_mode=engine_mode):
+                continue
+            tie_breakers.append("PUT_CREDIT_SHORT=highest_strike_le_spot_with_width_pair;tie=contract_key_lex")
+            return short_cand, long_cand
+        raise MappingError("No PUT credit spread pair satisfies width_points + liquidity.")
 
-    def pick_short_near_money_call_credit() -> Dict[str, Any]:
+    def pick_short_near_money_call_credit_with_pair(
+        idx: Dict[Tuple[str, str, str], Dict[str, Any]],
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         ge = [t for t in strikes_sorted if t[0] >= spot]
         if not ge:
             raise MappingError("No CALL strikes >= spot for credit selection.")
-        min_strike = min(ge, key=lambda t: (t[0], t[1]["contract_key"]))
-        tie_breakers.append("CALL_CREDIT_SHORT=lowest_strike_ge_spot;tie=contract_key_lex")
-        return min_strike[1]
+        ordered = sorted(ge, key=lambda t: (t[0], t[1]["contract_key"]))
+        for short_strike, short_cand in ordered:
+            long_strike = short_strike + width
+            long_key = (expiry, right, f"{long_strike:.2f}")
+            long_cand = idx.get(long_key)
+            if long_cand is None:
+                continue
+            if not _liquid_contract(long_cand, liq_pol, engine_mode=engine_mode):
+                continue
+            tie_breakers.append("CALL_CREDIT_SHORT=lowest_strike_ge_spot_with_width_pair;tie=contract_key_lex")
+            return short_cand, long_cand
+        raise MappingError("No CALL credit spread pair satisfies width_points + liquidity.")
 
-    def pick_near_money_for_debit() -> Dict[str, Any]:
-        # near money = minimal abs(strike-spot), tie break by strike then contract_key
-        best = min(strikes_sorted, key=lambda t: (abs(t[0] - spot), t[0], t[1]["contract_key"]))
-        tie_breakers.append("DEBIT_NEAR=closest_abs(strike-spot);tie=strike_then_contract_key")
-        return best[1]
+    def pick_near_money_for_debit_with_pair(
+        idx: Dict[Tuple[str, str, str], Dict[str, Any]],
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        # near money = minimal abs(strike-spot), tie break by strike then contract_key.
+        ordered = sorted(strikes_sorted, key=lambda t: (abs(t[0] - spot), t[0], t[1]["contract_key"]))
+        for near_strike, near_cand in ordered:
+            if right == "PUT":
+                far_strike = near_strike - width
+            elif right == "CALL":
+                far_strike = near_strike + width
+            else:
+                raise MappingError("Unsupported right.")
+            far_key = (expiry, right, f"{far_strike:.2f}")
+            far_cand = idx.get(far_key)
+            if far_cand is None:
+                continue
+            if not _liquid_contract(far_cand, liq_pol, engine_mode=engine_mode):
+                continue
+            tie_breakers.append("DEBIT_NEAR=closest_abs(strike-spot)_with_width_pair;tie=strike_then_contract_key")
+            return near_cand, far_cand
+        raise MappingError("No debit spread pair satisfies width_points + liquidity.")
 
     idx = _index_contracts(chain)
 
     if direction == "CREDIT":
         if right == "PUT":
-            short_c = pick_short_near_money_put_credit()
-            short_strike = _dec(short_c["strike"])
-            long_strike = short_strike - width
+            short_c, long_c = pick_short_near_money_put_credit_with_pair(idx)
         elif right == "CALL":
-            short_c = pick_short_near_money_call_credit()
-            short_strike = _dec(short_c["strike"])
-            long_strike = short_strike + width
+            short_c, long_c = pick_short_near_money_call_credit_with_pair(idx)
         else:
             raise MappingError("Unsupported right.")
-        long_key = (expiry, right, f"{long_strike:.2f}")
-        # strike strings in snapshot are "495.00" style. We must match exact formatting.
-        # If formatting mismatch exists, fail-closed.
-        if long_key not in idx:
-            raise MappingError(f"Required long strike contract not found for width_points. expected_strike='{long_key[2]}'")
-        long_c = idx[long_key]
-        if not _liquid_contract(long_c, liq_pol):
-            raise MappingError("Long leg fails liquidity policy.")
         return short_c, long_c, tie_breakers
 
     if direction == "DEBIT":
-        near = pick_near_money_for_debit()
-        near_strike = _dec(near["strike"])
-        if right == "PUT":
-            far_strike = near_strike - width
-        elif right == "CALL":
-            far_strike = near_strike + width
-        else:
-            raise MappingError("Unsupported right.")
-        far_key = (expiry, right, f"{far_strike:.2f}")
-        if far_key not in idx:
-            raise MappingError(f"Required far strike contract not found for width_points. expected_strike='{far_key[2]}'")
-        far = idx[far_key]
-        if not _liquid_contract(far, liq_pol):
-            raise MappingError("Far leg fails liquidity policy.")
+        near, far = pick_near_money_for_debit_with_pair(idx)
         # For debit, long is near (BUY), short is far (SELL)
         tie_breakers.append("DEBIT_LEGS=BUY_near_SELL_far")
         return far, near, tie_breakers  # return (short, long) ordering consistent with record fields

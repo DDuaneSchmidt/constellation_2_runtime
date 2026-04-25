@@ -33,11 +33,14 @@ from decimal import Decimal, ROUND_HALF_UP, getcontext
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH = resolve_canonical_truth_root_bridge_v1(
+    caller="constellation_2/phaseJ/monitoring/run/run_engine_daily_returns_day_v1.py"
+).resolve()
 
 ATTR_ROOT = (TRUTH / "accounting_v1/attribution").resolve()
 NAV_ROOT = (TRUTH / "accounting_v1/nav").resolve()

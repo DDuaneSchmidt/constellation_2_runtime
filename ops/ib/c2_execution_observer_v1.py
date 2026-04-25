@@ -1,19 +1,36 @@
 #!/usr/bin/env python3
 """
-C2 IB Execution Observer (PAPER) — Canonical BROKER_EVENT_RAW writer
+C2 IB Execution Observer (PAPER) — Core 1 canonical raw-evidence writer
 clientId: 79 (default)
 
-Writes append-only JSONL:
-constellation_2/runtime/truth/execution_evidence_v1/broker_events/<DAY>/broker_event_log.v1.jsonl
+Primary append-only JSONL:
+/home/node/constellation_runtime_data/truth_sleeves/<sleeve_id>/<mode>/broker_fact_spine_v1/raw_journal/<DAY>/broker_raw_evidence_envelope.v1.jsonl
+
+Optional diagnostic mirror:
+/home/node/constellation_runtime_data/truth_sleeves/<sleeve_id>/<mode>/execution_evidence_v1/broker_events/<DAY>/broker_event_log.v1.jsonl
 
 Contract:
-- single-writer required for monotonic sequence_number
+- single-writer required for monotonic canonical raw-journal sequence_number
 - append-only; fsync each record
-- schema_id="BROKER_EVENT_RAW", schema_version=1
-- captures orderStatus, execDetails, commissionReport, openOrder, error, connectionClosed, nextValidId
+- canonical raw journal must write first
+- BROKER_EVENT_RAW mirror is non-canonical diagnostic input only
+- captures orderStatus, execDetails, commissionReport, openOrder, position, accountSummary, error, connectionClosed, nextValidId
 """
 
 from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+_THIS_FILE = Path(__file__).resolve()
+_REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
+if str(_REPO_ROOT_FROM_FILE) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
+
+if not (_REPO_ROOT_FROM_FILE / "constellation_2").exists():
+    raise SystemExit(f"FATAL: repo_root_missing_constellation_2: derived={_REPO_ROOT_FROM_FILE}")
+if not (_REPO_ROOT_FROM_FILE / "governance").exists():
+    raise SystemExit(f"FATAL: repo_root_missing_governance: derived={_REPO_ROOT_FROM_FILE}")
 
 import argparse
 import datetime as dt
@@ -21,12 +38,19 @@ import hashlib
 import json
 import os
 import signal
-import sys
 import threading
 import time
-from pathlib import Path
+import uuid
 from typing import Any, Dict, Optional
 
+from constellation_2.common.broker_fact_spine_v1 import BrokerRawEvidenceJournalWriterV1
+from constellation_2.common.execution_identity_binding_v1 import (
+    resolve_governed_execution_identity_v1,
+)
+from constellation_2.common.paper_execution_authority_v1 import (
+    resolve_governed_paper_execution_roots,
+)
+from constellation_2.common.truth_root_v1 import resolve_truth_root
 from ibapi.client import EClient
 from ibapi.wrapper import EWrapper
 from ibapi.contract import Contract
@@ -94,58 +118,198 @@ class JsonlRawWriter:
             pass
 
     def write_raw(self, event_type: str, ib_args: Any) -> None:
-        """
-        Record shape matches existing listener:
-        {
-          "schema_id":"BROKER_EVENT_RAW",
-          "schema_version":1,
-          "received_utc":"...",
-          "sequence_number":N,
-          "broker":{...},
-          "event_type":"...",
-          "ib_fields":{"args":[{"value":"..."}]},
-          "sha256":"..."
-        }
-        """
         self.sequence_number += 1
+        record = build_legacy_raw_record(
+            broker=self.broker,
+            event_type=event_type,
+            ib_args=ib_args,
+            sequence_number=self.sequence_number,
+        )
+        self.write_record(record)
 
-        # Normalize ib_fields.args into list of {"value": "<string>"} (matches your existing log)
-        args_list = []
-        if isinstance(ib_args, list):
-            for a in ib_args:
-                args_list.append({"value": str(a)})
-        else:
-            args_list.append({"value": str(ib_args)})
-
-        rec_wo_sha = {
-            "broker": self.broker,
-            "event_type": event_type,
-            "ib_fields": {"args": args_list},
-            "received_utc": utc_now_z(),
-            "schema_id": "BROKER_EVENT_RAW",
-            "schema_version": 1,
-            "sequence_number": self.sequence_number,
-        }
-
-        # sha256 over canonical json WITHOUT sha256 field
-        canon = canonical_dumps(rec_wo_sha)
-        rec = dict(rec_wo_sha)
-        rec["sha256"] = sha256_hex(canon)
-
-        line = canonical_dumps(rec)
+    def write_record(self, record: Dict[str, Any]) -> None:
+        line = canonical_dumps(record)
         self.fh.write(line + "\n")
         self.fh.flush()
         os.fsync(self.fh.fileno())
 
 
+def build_legacy_raw_record(
+    *,
+    broker: Dict[str, Any],
+    event_type: str,
+    ib_args: Any,
+    sequence_number: int,
+) -> Dict[str, Any]:
+    """
+    Record shape matches existing listener:
+    {
+      "schema_id":"BROKER_EVENT_RAW",
+      "schema_version":1,
+      "received_utc":"...",
+      "sequence_number":N,
+      "broker":{...},
+      "event_type":"...",
+      "ib_fields":{"args":[{"value":"..."}]},
+      "sha256":"..."
+    }
+    """
+
+    args_list = []
+    if isinstance(ib_args, list):
+        for a in ib_args:
+            args_list.append({"value": str(a)})
+    else:
+        args_list.append({"value": str(ib_args)})
+    rec_wo_sha = {
+        "broker": broker,
+        "event_type": event_type,
+        "ib_fields": {"args": args_list},
+        "received_utc": utc_now_z(),
+        "schema_id": "BROKER_EVENT_RAW",
+        "schema_version": 1,
+        "sequence_number": int(sequence_number),
+    }
+    canon = canonical_dumps(rec_wo_sha)
+    rec = dict(rec_wo_sha)
+    rec["sha256"] = sha256_hex(canon)
+    return rec
+
+
+class ObserverFanoutWriter:
+    def __init__(
+        self,
+        *,
+        repo_root: Path,
+        execution_root_path: Path,
+        environment: str,
+        sleeve_id: str,
+        canonical_writer: BrokerRawEvidenceJournalWriterV1,
+        broker: Dict[str, Any],
+        legacy_writer: JsonlRawWriter | None,
+        legacy_log_root: Path | None,
+        fixed_day_utc: str,
+    ) -> None:
+        self.repo_root = repo_root
+        self.execution_root_path = execution_root_path
+        self.environment = str(environment).strip().upper()
+        self.sleeve_id = str(sleeve_id).strip().upper()
+        self.canonical_writer = canonical_writer
+        self.legacy_writer = legacy_writer
+        self.broker = dict(broker)
+        self.legacy_log_root = legacy_log_root
+        self.fixed_day_utc = str(fixed_day_utc or "").strip()
+        self._current_day_utc = self.fixed_day_utc or day_utc()
+        self._legacy_sequence_number = (
+            int(legacy_writer.sequence_number) if legacy_writer is not None else 0
+        )
+        self._lock = threading.Lock()
+
+    def close(self) -> None:
+        with self._lock:
+            self.canonical_writer.close()
+            if self.legacy_writer is not None:
+                self.legacy_writer.close()
+
+    def _reopen_for_day_locked(self, next_day_utc: str) -> None:
+        self.canonical_writer.close()
+        if self.legacy_writer is not None:
+            self.legacy_writer.close()
+        self.canonical_writer = BrokerRawEvidenceJournalWriterV1(
+            repo_root=self.repo_root,
+            execution_root_path=self.execution_root_path,
+            day_utc=next_day_utc,
+            environment=self.environment,
+            sleeve_id=self.sleeve_id,
+            source_adapter_name="ib_execution_observer_v1",
+            source_session_id=(
+                f"ib_observer:{self.environment}:{self.sleeve_id}:"
+                f"{self.broker['client_id']}:{next_day_utc}:{uuid.uuid4().hex[:12]}"
+            ),
+            source_path=f"observer://interactive_brokers/{self.sleeve_id}/{self.environment}",
+        )
+        if self.legacy_log_root is not None:
+            self.legacy_writer = JsonlRawWriter(
+                log_path=(self.legacy_log_root / next_day_utc / "broker_event_log.v1.jsonl"),
+                broker=self.broker,
+            )
+            self._legacy_sequence_number = int(self.legacy_writer.sequence_number)
+        else:
+            self.legacy_writer = None
+            self._legacy_sequence_number = 0
+        self._current_day_utc = next_day_utc
+
+    def _rotate_if_needed_locked(self) -> None:
+        if self.fixed_day_utc:
+            return
+        next_day_utc = day_utc()
+        if next_day_utc == self._current_day_utc:
+            return
+        self._reopen_for_day_locked(next_day_utc)
+
+    def write_raw(self, event_type: str, ib_args: Any) -> None:
+        with self._lock:
+            self._rotate_if_needed_locked()
+            self._legacy_sequence_number += 1
+            record = build_legacy_raw_record(
+                broker=self.broker,
+                event_type=event_type,
+                ib_args=ib_args,
+                sequence_number=self._legacy_sequence_number,
+            )
+            self.canonical_writer.write_payload(record)
+            if self.legacy_writer is not None:
+                self.legacy_writer.sequence_number = self._legacy_sequence_number
+                self.legacy_writer.write_record(record)
+
+
 class Observer(EWrapper, EClient):
-    def __init__(self, writer: JsonlRawWriter, poll_seconds: int) -> None:
+    def __init__(self, writer: ObserverFanoutWriter, poll_seconds: int) -> None:
         EWrapper.__init__(self)
         EClient.__init__(self, wrapper=self)
         self.writer = writer
         self.poll_seconds = poll_seconds
         self._last_poll = 0.0
         self.handshake_seen = False
+        self.open_orders_complete = False
+        self.executions_complete = False
+        self.positions_complete = False
+        self.account_summary_complete = False
+
+    def bootstrap_capture_complete(self) -> bool:
+        return (
+            self.handshake_seen
+            and self.open_orders_complete
+            and self.executions_complete
+            and self.positions_complete
+            and self.account_summary_complete
+        )
+
+    def _request_bootstrap_snapshots(self) -> None:
+        try:
+            self.reqAllOpenOrders()
+            self.writer.write_raw("reqAllOpenOrders", ["reqAllOpenOrders()"])
+        except Exception as e:
+            self.writer.write_raw("reqAllOpenOrders_error", [repr(e)])
+        try:
+            flt = ExecutionFilter()
+            self.reqExecutions(9001, flt)
+            self.writer.write_raw("reqExecutions", ["reqExecutions(reqId=9001, ExecutionFilter())"])
+        except Exception as e:
+            self.writer.write_raw("reqExecutions_error", [repr(e)])
+        try:
+            self.reqPositions()
+            self.writer.write_raw("reqPositions", ["reqPositions()"])
+        except Exception as e:
+            self.writer.write_raw("reqPositions_error", [repr(e)])
+        try:
+            self.reqAccountSummary(9003, "All", "TotalCashValue,TotalCashBalance,NetLiquidation,AvailableFunds,ExcessLiquidity")
+            self.writer.write_raw(
+                "reqAccountSummary",
+                ["reqId=9003", "groupName=All", "tags=TotalCashValue,TotalCashBalance,NetLiquidation,AvailableFunds,ExcessLiquidity"],
+            )
+        except Exception as e:
+            self.writer.write_raw("reqAccountSummary_error", [repr(e)])
 
     def _poll(self) -> None:
         now = time.monotonic()
@@ -169,17 +333,7 @@ class Observer(EWrapper, EClient):
     def nextValidId(self, orderId: int) -> None:
         self.handshake_seen = True
         self.writer.write_raw("nextValidId", [f"orderId={orderId}"])
-        try:
-            self.reqAllOpenOrders()
-            self.writer.write_raw("reqAllOpenOrders", ["reqAllOpenOrders()"])
-        except Exception as e:
-            self.writer.write_raw("reqAllOpenOrders_error", [repr(e)])
-        try:
-            flt = ExecutionFilter()
-            self.reqExecutions(9001, flt)
-            self.writer.write_raw("reqExecutions", ["reqExecutions(reqId=9001, ExecutionFilter())"])
-        except Exception as e:
-            self.writer.write_raw("reqExecutions_error", [repr(e)])
+        self._request_bootstrap_snapshots()
 
     def connectionClosed(self) -> None:
         self.writer.write_raw("connectionClosed", ["connectionClosed()"])
@@ -202,6 +356,7 @@ class Observer(EWrapper, EClient):
         )
 
     def openOrderEnd(self) -> None:
+        self.open_orders_complete = True
         self.writer.write_raw("openOrderEnd", ["openOrderEnd()"])
 
     def orderStatus(
@@ -246,23 +401,62 @@ class Observer(EWrapper, EClient):
         )
 
     def execDetailsEnd(self, reqId: int) -> None:
+        self.executions_complete = True
         self.writer.write_raw("execDetailsEnd", [f"reqId={reqId}"])
 
     def commissionReport(self, commissionReport: CommissionReport) -> None:
         self.writer.write_raw("commissionReport", [f"commissionReport={commissionReport}"])
 
+    def position(self, account: str, contract: Contract, position, avgCost: float) -> None:
+        self.writer.write_raw(
+            "position",
+            [
+                f"account={account}",
+                f"contract={contract}",
+                f"position={position}",
+                f"avgCost={avgCost}",
+            ],
+        )
+
+    def positionEnd(self) -> None:
+        self.positions_complete = True
+        self.writer.write_raw("positionEnd", ["positionEnd()"])
+
+    def accountSummary(self, reqId: int, account: str, tag: str, value: str, currency: str) -> None:
+        self.writer.write_raw(
+            "accountSummary",
+            [
+                f"reqId={reqId}",
+                f"account={account}",
+                f"tag={tag}",
+                f"value={value}",
+                f"currency={currency}",
+            ],
+        )
+
+    def accountSummaryEnd(self, reqId: int) -> None:
+        self.account_summary_complete = True
+        self.writer.write_raw("accountSummaryEnd", [f"reqId={reqId}"])
+        try:
+            self.cancelAccountSummary(reqId)
+        except Exception:
+            pass
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
+    p.add_argument("--repo-root", default="", help="Optional authoritative repo root override.")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=4002)
     p.add_argument("--client-id", type=int, default=79)
     p.add_argument("--poll-seconds", type=int, default=10)
     p.add_argument("--truth_root", default="", help="Optional canonical truth root override.")
+    p.add_argument("--sleeve-id", default="PRIMARY")
     p.add_argument(
         "--log-root",
-        default="constellation_2/runtime/truth/execution_evidence_v1/broker_events",
+        default="",
     )
+    p.add_argument("--disable-legacy-log", action="store_true")
     p.add_argument("--environment", default="PAPER")
     p.add_argument("--day-utc", default="", help="Optional override YYYY-MM-DD. If set, writes under that day dir.")
     p.add_argument("--bootstrap-handshake-only", action="store_true", help="Connect only long enough to capture handshake evidence.")
@@ -272,21 +466,19 @@ def parse_args() -> argparse.Namespace:
 
 
 def _resolve_log_root(*, repo_root: Path, truth_root_value: str, log_root_value: str) -> Path:
+    log_root_raw = str(log_root_value or "").strip()
+    if log_root_raw:
+        raise SystemExit("FATAL: --log-root override is unsupported; canonical truth root only")
     truth_root_raw = str(truth_root_value or "").strip()
     if truth_root_raw:
         return (Path(truth_root_raw).resolve() / "execution_evidence_v1" / "broker_events").resolve()
-    log_root = (repo_root / str(log_root_value or "").strip()).resolve()
-    try:
-        log_root.relative_to(repo_root)
-    except Exception:
-        raise SystemExit(f"FATAL: log_root not under repo: {log_root}")
-    return log_root
+    return (resolve_truth_root(repo_root=repo_root).resolve() / "execution_evidence_v1" / "broker_events").resolve()
 
 
 def _run_bootstrap_handshake_loop(
     *,
     app: Observer,
-    writer: JsonlRawWriter,
+    writer: ObserverFanoutWriter,
     timeout_seconds: int,
     stopping: Dict[str, bool],
 ) -> int:
@@ -295,7 +487,7 @@ def _run_bootstrap_handshake_loop(
     def _watchdog() -> None:
         deadline = time.monotonic() + float(timeout_seconds)
         while not stopping["stop"] and time.monotonic() < deadline:
-            if app.handshake_seen:
+            if app.bootstrap_capture_complete():
                 writer.write_raw("bootstrapHandshakeComplete", [f"timeoutSeconds={timeout_seconds}"])
                 stopping["stop"] = True
                 try:
@@ -320,32 +512,113 @@ def _run_bootstrap_handshake_loop(
         return 3
     finally:
         watcher.join(timeout=1.0)
-    return 0 if app.handshake_seen else 2
+    return 0 if app.bootstrap_capture_complete() else 2
+
+
+def _run_observer_runtime_loop(
+    *,
+    app: Observer,
+    writer: ObserverFanoutWriter,
+    stopping: Dict[str, bool],
+) -> int:
+    def _poller() -> None:
+        while not stopping["stop"]:
+            try:
+                if app.isConnected():
+                    app._poll()
+            except Exception as exc:
+                writer.write_raw("pollLoopError", [repr(exc)])
+            time.sleep(0.2)
+
+    poller = threading.Thread(target=_poller, daemon=True)
+    poller.start()
+    try:
+        app.run()
+    except Exception as exc:
+        writer.write_raw("runtimeRunError", [repr(exc)])
+        return 3
+    finally:
+        stopping["stop"] = True
+        poller.join(timeout=1.0)
+    return 0
 
 
 def main() -> int:
     args = parse_args()
-    repo_root = Path.cwd().resolve()
-    try:
-        log_root = _resolve_log_root(repo_root=repo_root, truth_root_value=args.truth_root, log_root_value=args.log_root)
-    except SystemExit as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
+    repo_root = (
+        Path(str(args.repo_root).strip()).resolve()
+        if str(args.repo_root).strip()
+        else Path.cwd().resolve()
+    )
 
     d_override = str(getattr(args, "day_utc", "") or "").strip()
     if d_override != "":
         if len(d_override) != 10 or d_override[4] != "-" or d_override[7] != "-":
             print(f"FATAL: BAD_DAY_UTC_FORMAT_EXPECTED_YYYY_MM_DD: {d_override!r}", file=sys.stderr)
             return 2
-        day_dir = log_root / d_override
+        target_day = d_override
     else:
-        day_dir = log_root / day_utc()
-
-
-    log_path = day_dir / "broker_event_log.v1.jsonl"
+        target_day = day_utc()
 
     broker = {"client_id": int(args.client_id), "environment": str(args.environment), "name": "INTERACTIVE_BROKERS"}
-    writer = JsonlRawWriter(log_path=log_path, broker=broker)
+    try:
+        governed_identity = resolve_governed_execution_identity_v1(
+            repo_root=repo_root,
+            environment=str(args.environment).strip().upper(),
+            sleeve_id=str(args.sleeve_id).strip().upper(),
+        )
+        governed_roots = resolve_governed_paper_execution_roots(
+            repo_root=repo_root,
+            environment=governed_identity.environment,
+            ib_account=governed_identity.account_id,
+            sleeve_id=governed_identity.sleeve_id,
+        )
+    except ValueError as exc:
+        print(f"FATAL: CANONICAL_OBSERVER_IDENTITY_UNRESOLVED:{exc}", file=sys.stderr)
+        return 2
+
+    source_session_id = (
+        f"ib_observer:{governed_identity.environment}:{governed_identity.sleeve_id}:"
+        f"{governed_identity.client_id_observer}:{target_day}:{uuid.uuid4().hex[:12]}"
+    )
+    legacy_log_root: Path | None = None
+    canonical_writer = BrokerRawEvidenceJournalWriterV1(
+        repo_root=repo_root,
+        execution_root_path=Path(governed_roots.execution_root_path),
+        day_utc=target_day,
+        environment=governed_identity.environment,
+        sleeve_id=governed_identity.sleeve_id,
+        source_adapter_name="ib_execution_observer_v1",
+        source_session_id=source_session_id,
+        source_path=f"observer://interactive_brokers/{governed_identity.sleeve_id}/{governed_identity.environment}",
+    )
+    legacy_writer: JsonlRawWriter | None = None
+    if not bool(args.disable_legacy_log):
+        try:
+            legacy_log_root = _resolve_log_root(
+                repo_root=repo_root,
+                truth_root_value=args.truth_root,
+                log_root_value=args.log_root,
+            )
+        except SystemExit as exc:
+            print(str(exc), file=sys.stderr)
+            canonical_writer.close()
+            return 2
+        legacy_writer = JsonlRawWriter(
+            log_path=(legacy_log_root / target_day / "broker_event_log.v1.jsonl"),
+            broker=broker,
+        )
+    writer = ObserverFanoutWriter(
+        repo_root=repo_root,
+        execution_root_path=Path(governed_roots.execution_root_path),
+        environment=governed_identity.environment,
+        sleeve_id=governed_identity.sleeve_id,
+        canonical_writer=canonical_writer,
+        broker=broker,
+        legacy_writer=legacy_writer,
+        legacy_log_root=legacy_log_root,
+        fixed_day_utc=d_override,
+    )
 
     app = Observer(writer=writer, poll_seconds=int(args.poll_seconds))
 
@@ -386,25 +659,11 @@ def main() -> int:
             writer.write_raw("stopped", ["stopped()"])
             writer.close()
 
-    # Run in a loop so we can poll without extra threads
-    # EClient.run() is blocking; we do lightweight message processing manually.
     try:
-        while not stopping["stop"]:
-            app._poll()  # request executions/open orders periodically
-            time.sleep(0.2)
-            # Process inbound messages
-            try:
-                app.run()
-                break
-            except Exception:
-                # If run() returns quickly or throws, continue loop; errors are captured via callbacks where possible.
-                time.sleep(0.2)
-                continue
+        return _run_observer_runtime_loop(app=app, writer=writer, stopping=stopping)
     finally:
         writer.write_raw("stopped", ["stopped()"])
         writer.close()
-
-    return 0
 
 
 if __name__ == "__main__":

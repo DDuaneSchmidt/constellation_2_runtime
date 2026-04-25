@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -19,12 +20,33 @@ from constellation_2.common.authority_registry_v1 import build_authority_registr
 from constellation_2.common.advisor_bridge.promotion_candidate_v1 import PromotionCandidateV1
 from constellation_2.common.advisor_bridge.promotion_manual_review_v1 import PromotionManualReviewV1
 from constellation_2.common.advisor_bridge.promotion_review_v1 import PromotionReviewV1
+from constellation_2.common.advisory.advisory_storage_v1 import (
+    execution_intent_path_v1,
+    write_immutable_json_v1 as write_advisory_immutable_json_v1,
+)
+from constellation_2.common.advisory.execution_intent_v1 import ExecutionIntentV1
+from constellation_2.common.advisory.household_portfolio_compiler_v1 import trade_action_key_v1
+from constellation_2.common.advisory.household_portfolio_storage_v1 import (
+    portfolio_authorization_path_v1,
+)
+from constellation_2.common.constitutional_runtime_v1 import (
+    FINALITY_FINALIZED,
+    FINALITY_PROVISIONAL,
+    assert_constitutional_writer_allowed_v1,
+    build_artifact_dependency_declaration_v1,
+    build_frozen_decision_input_bundle_v1,
+    build_governed_artifact_lineage_v1,
+)
+from constellation_2.common.execution_build_authority_v1 import _constitutional_dependency_refs, run_execution_build_authority_v1
 from constellation_2.common.metadata_envelope_v1 import metadata_envelope_v1
+from constellation_2.common.runtime_contract_v1 import resolve_truth_sleeves_root
 from constellation_2.common.runtime_base_v1 import advisor_runtime_root
+from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1
+from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
 DEFAULT_PROOF_ROOT = Path("/tmp/constellation_2_foundation/final_readiness_proof_v1").resolve()
-DEFAULT_DAY = "2026-04-02"
-DEFAULT_PRODUCED_UTC = "2026-04-02T14:30:00Z"
+DEFAULT_DAY = "2026-04-14"
+DEFAULT_PRODUCED_UTC = "2026-04-14T14:30:00Z"
 DEFAULT_IB_ACCOUNT = "DUO847203"
 PHASEC_FIXTURE = (REPO_ROOT / "_smoketest_phasec_2026_04_02").resolve()
 FOUNDATION_ROOT = Path("/tmp/constellation_2_foundation").resolve()
@@ -40,6 +62,34 @@ def _read_json(path: Path) -> Dict[str, Any]:
     if not isinstance(obj, dict):
         raise SystemExit(f"FAIL: TOP_LEVEL_NOT_OBJECT: {path}")
     return obj
+
+
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _resolve_capital_authority_allocation_ref(*, truth_root: Path, day: str) -> Dict[str, str]:
+    candidate_paths = [
+        (
+            (resolve_truth_sleeves_root() / "PRIMARY" / "PAPER" / "allocation_v1" / "capital_authority_allocation_v1" / day / "capital_authority_allocation.v1.json")
+            .resolve()
+        ),
+        (truth_root / "allocation_v1" / "capital_authority_allocation_v1" / day / "capital_authority_allocation.v1.json").resolve(),
+    ]
+    for candidate in candidate_paths:
+        if not candidate.exists() or not candidate.is_file():
+            continue
+        candidate_obj = _read_json(candidate)
+        validate_against_repo_schema_v1(
+            candidate_obj,
+            REPO_ROOT,
+            "governance/04_DATA/SCHEMAS/C2/ALLOCATION/capital_authority_allocation.v1.schema.json",
+        )
+        return {"path": str(candidate), "sha256": _sha256_file(candidate)}
+    raise SystemExit(
+        "FAIL: READINESS_CAPITAL_AUTHORITY_ALLOCATION_MISSING:"
+        + "|".join(str(path) for path in candidate_paths)
+    )
 
 
 def _require_repo_prerequisites(*, proof_root: Path) -> None:
@@ -218,6 +268,18 @@ def _seed_submit_prerequisites(*, truth_root: Path, day: str, produced_utc: str,
             },
         },
     )
+    _write_json(
+        truth_root / "allocation_v1" / "capital_authority_allocation_v1" / day / "capital_authority_allocation.v1.json",
+        {
+            "schema_id": "capital_authority_allocation",
+            "schema_version": "v1",
+            "produced_utc": produced_utc,
+            "day_utc": day,
+            "producer": {"module": "run_paper_day_readiness_proof_v1.py"},
+            "input_manifest": [],
+            "status": "OK",
+        },
+    )
     return {
         "plan": plan,
         "intent_hash": intent_hash,
@@ -226,6 +288,649 @@ def _seed_submit_prerequisites(*, truth_root: Path, day: str, produced_utc: str,
         "engine_id": str(plan.get("engine_id") or "C2_TREND_EQ_PRIMARY_V1"),
         "symbol": str(plan.get("symbol") or "SPY"),
     }
+
+
+def _build_execution_intent_for_submit_path(
+    *,
+    day: str,
+    produced_utc: str,
+    ib_account: str,
+    seed: Dict[str, Any],
+    execution_intent_id_override: str = "",
+    intent_hash_override: str = "",
+) -> ExecutionIntentV1:
+    plan = dict(seed.get("plan") or {})
+    intent_id = str(execution_intent_id_override or seed.get("intent_id") or f"proof_intent_{day}").strip()
+    if not intent_id:
+        raise SystemExit("FAIL: READINESS_INTENT_ID_MISSING")
+    action = str(plan.get("action") or "BUY").strip().upper()
+    if action not in {"BUY", "SELL"}:
+        raise SystemExit(f"FAIL: READINESS_INTENT_SIDE_INVALID:{action}")
+    order_terms_src = dict(plan.get("order_terms") or {})
+    order_terms = {
+        "order_type": str(order_terms_src.get("order_type") or "LIMIT").strip().upper(),
+        "limit_price": order_terms_src.get("limit_price"),
+        "time_in_force": str(order_terms_src.get("time_in_force") or "DAY").strip().upper(),
+    }
+    intent_payload = {
+        "schema_id": "execution_intent",
+        "schema_version": "v1",
+        "record_id": intent_id,
+        "execution_intent_id": intent_id,
+        "promotion_record_id": f"paper_day_readiness_proof:{intent_id}",
+        "household_id": "PAPER_READINESS_PROOF",
+        "created_at_utc": produced_utc,
+        "effective_at_utc": produced_utc,
+        "actor_source": "run_paper_day_readiness_proof_v1",
+        "contract_version": "execution_intent_contract_v1",
+        "builder_version": "execution_intent_builder_v1",
+        "idempotency_key": canonical_hash_for_c2_artifact_v1(
+            {
+                "intent_id": intent_id,
+                "day_utc": day,
+                "ib_account": ib_account,
+                "plan_id": str(plan.get("plan_id") or ""),
+                "intent_sha256": str(seed.get("intent_sha256") or ""),
+            }
+        ),
+        "operation_type": "fresh_paper_entry_v1",
+        "day_utc": day,
+        "environment": "PAPER",
+        "sleeve_id": "PRIMARY",
+        "account_id": ib_account,
+        "engine_id": str(seed.get("engine_id") or "C2_TREND_EQ_PRIMARY_V1"),
+        "instrument": {
+            "kind": "EQUITY",
+            "symbol": str(seed.get("symbol") or plan.get("symbol") or "SPY"),
+            "currency": str(plan.get("currency") or "USD"),
+            "ib_conId": None,
+            "ib_localSymbol": str(seed.get("symbol") or plan.get("symbol") or "SPY"),
+        },
+        "side": action,
+        "quantity_shares": int(plan.get("qty_shares") or 1),
+        "order_terms": order_terms,
+        "parent_lineage_refs": [
+            f"proof_seed_intent_id:{intent_id}",
+        ],
+        "source_artifact_refs": [
+            f"phasec_fixture_path:{(PHASEC_FIXTURE / 'equity_order_plan.v2.json').resolve()}",
+            f"phasec_fixture_intent_sha256:{str(seed.get('intent_sha256') or '')}",
+        ],
+        "canonical_json_hash": None,
+    }
+    if str(intent_hash_override).strip():
+        intent_payload["idempotency_key"] = str(intent_hash_override).strip()
+    intent_payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(
+        {**intent_payload, "canonical_json_hash": None}
+    )
+    return ExecutionIntentV1.from_dict(intent_payload)
+
+
+def _execution_build_capital_intent_hash_missing(build_obj: Dict[str, Any]) -> bool:
+    for row in list(build_obj.get("dependency_results") or []):
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("dependency_id") or "").strip() != "capital_authority_allocation_v1":
+            continue
+        detail = str(row.get("detail") or "").strip()
+        return "CAPITAL_AUTHORITY_INTENT_HASH_MISSING" in detail
+    return False
+
+
+def _is_hex_sha256(value: str) -> bool:
+    token = str(value or "").strip().lower()
+    return len(token) == 64 and all(ch in "0123456789abcdef" for ch in token)
+
+
+def _load_capital_lineage_intent_hashes_for_day(*, day: str) -> set[str]:
+    capauth_path = (
+        resolve_truth_sleeves_root()
+        / "PRIMARY"
+        / "PAPER"
+        / "allocation_v1"
+        / "capital_authority_allocation_v1"
+        / day
+        / "capital_authority_allocation.v1.json"
+    ).resolve()
+    if not capauth_path.exists() or not capauth_path.is_file():
+        raise SystemExit(f"FAIL: READINESS_CAPITAL_AUTHORITY_ALLOCATION_MISSING:{capauth_path}")
+    capauth_obj = _read_json(capauth_path)
+    decision_chain = dict(capauth_obj.get("decision_chain") or {})
+    hashes: set[str] = set()
+    for row in list(decision_chain.get("authorized_trade_intents") or []):
+        if not isinstance(row, dict):
+            continue
+        intent_hash = str(row.get("intent_hash") or row.get("intent_sha256") or "").strip().lower()
+        if _is_hex_sha256(intent_hash):
+            hashes.add(intent_hash)
+    if not hashes:
+        raise SystemExit(
+            "FAIL: READINESS_CAPITAL_AUTHORITY_INTENT_SET_EMPTY:"
+            f"path={capauth_path}:reason=authorized_trade_intents_missing_hashes"
+        )
+    return hashes
+
+
+def _extract_package_intent_hash(*, package_obj: Dict[str, Any]) -> str:
+    advisory_submission = dict(package_obj.get("advisory_submission") or {})
+    field_candidates = [
+        str(advisory_submission.get("promotion_idempotency_key") or "").strip(),
+        str(advisory_submission.get("intent_sha256") or "").strip(),
+        str(package_obj.get("intent_hash") or "").strip(),
+        str(package_obj.get("intent_sha256") or "").strip(),
+    ]
+    for candidate in field_candidates:
+        if _is_hex_sha256(candidate):
+            return candidate.lower()
+    selected_plan_ref = dict(package_obj.get("selected_order_plan_ref") or {})
+    selected_plan_path_raw = str(selected_plan_ref.get("path") or "").strip()
+    if not selected_plan_path_raw:
+        return ""
+    selected_plan_path = Path(selected_plan_path_raw).resolve()
+    if not selected_plan_path.exists() or not selected_plan_path.is_file():
+        return ""
+    selected_plan_obj = _read_json(selected_plan_path)
+    plan_hashes = [
+        str(selected_plan_obj.get("intent_sha256") or "").strip(),
+        str(selected_plan_obj.get("intent_hash") or "").strip(),
+    ]
+    for candidate in plan_hashes:
+        if _is_hex_sha256(candidate):
+            return candidate.lower()
+    return ""
+
+
+def _first_blocking_dependency_detail(build_obj: Dict[str, Any]) -> str:
+    for row in list(build_obj.get("dependency_results") or []):
+        if not isinstance(row, dict):
+            continue
+        status = str(row.get("status") or "").strip().upper()
+        detail = str(row.get("detail") or "").strip()
+        if status in {"BLOCKED", "FAILED", "MISSING", "INVALID", "REJECTED"} and detail:
+            return detail
+    for row in list(build_obj.get("dependency_results") or []):
+        if not isinstance(row, dict):
+            continue
+        detail = str(row.get("detail") or "").strip()
+        if detail:
+            return detail
+    return "UNKNOWN_DEPENDENCY_BLOCKER"
+
+
+def _latest_active_attempt_id_for_day(*, day: str) -> str:
+    pointer_path = (
+        resolve_truth_sleeves_root()
+        / "PRIMARY"
+        / "PAPER"
+        / "run_ledgers_v1"
+        / day
+        / "scopes"
+        / "PRIMARY__PAPER__GLOBAL"
+        / "latest_active_attempt.v1.json"
+    ).resolve()
+    if not pointer_path.exists() or not pointer_path.is_file():
+        raise SystemExit(f"FAIL: READINESS_LATEST_ACTIVE_ATTEMPT_POINTER_MISSING:{pointer_path}")
+    pointer_obj = _read_json(pointer_path)
+    attempt_id = str(pointer_obj.get("attempt_id") or "").strip()
+    if not attempt_id:
+        raise SystemExit(f"FAIL: READINESS_LATEST_ACTIVE_ATTEMPT_POINTER_INVALID:{pointer_path}")
+    return attempt_id
+
+
+def _resolve_canonical_phasec_candidate_path_for_day(*, day: str, capital_intent_hashes: set[str]) -> Path:
+    active_attempt_id = _latest_active_attempt_id_for_day(day=day)
+    attempt_dir = (
+        resolve_truth_sleeves_root()
+        / "PRIMARY"
+        / "PAPER"
+        / "phaseC_preflight_v1"
+        / day
+        / f"attempt_{active_attempt_id}"
+    ).resolve()
+    if not attempt_dir.exists() or not attempt_dir.is_dir():
+        raise SystemExit(f"FAIL: READINESS_ACTIVE_ATTEMPT_DIR_MISSING:{attempt_dir}")
+    for intent_hash in sorted(capital_intent_hashes):
+        candidate_dir = (attempt_dir / intent_hash).resolve()
+        if not candidate_dir.exists() or not candidate_dir.is_dir():
+            continue
+        if (candidate_dir / "equity_order_plan.v2.json").exists() or (candidate_dir / "equity_order_plan.v1.json").exists():
+            return candidate_dir
+    raise SystemExit(
+        "FAIL: READINESS_ACTIVE_ATTEMPT_CAPITAL_INTENT_MISMATCH:"
+        f"attempt_id={active_attempt_id}:attempt_dir={attempt_dir}:capital_intent_hashes={','.join(sorted(capital_intent_hashes))}"
+    )
+
+
+def _resolve_existing_submit_pair_for_day(*, day: str) -> Dict[str, Path]:
+    capital_intent_hashes = _load_capital_lineage_intent_hashes_for_day(day=day)
+    execution_root = (resolve_truth_sleeves_root() / "PRIMARY" / "PAPER").resolve()
+    candidate_path = _resolve_canonical_phasec_candidate_path_for_day(day=day, capital_intent_hashes=capital_intent_hashes)
+    build_result = run_execution_build_authority_v1(
+        repo_root=REPO_ROOT,
+        operation_type="fresh_paper_entry_v1",
+        candidate_path=candidate_path,
+        materialize=True,
+        emit_package=True,
+    )
+    build_obj = dict(build_result.get("build_obj") or {})
+    submission_id = str(build_obj.get("submission_id") or "").strip()
+    if not submission_id:
+        raise SystemExit(f"FAIL: READINESS_SUBMISSION_ID_MISSING:build_path={build_result.get('build_path')}")
+    package_path = Path(str(build_result.get("package_path") or "")).resolve()
+    if not str(build_result.get("package_path") or "").strip():
+        package_path = (execution_root / "execution_package_v1" / day / submission_id / "execution_package.v1.json").resolve()
+    submission_record_path = (
+        execution_root / "execution_kernel_v1" / "submission_records" / day / submission_id / "submission_record.v1.json"
+    ).resolve()
+    return {
+        "execution_package_path": package_path,
+        "submission_record_path": submission_record_path,
+        "execution_build_path": Path(str(build_result["build_path"])).resolve(),
+        "submission_id": submission_id,
+    }
+
+
+def _upgrade_legacy_execution_build_v1(
+    *,
+    build_obj: Dict[str, Any],
+    submission_id: str,
+    truth_root: Path,
+    day: str,
+    trade_submit_readiness_override: Path | None = None,
+) -> Dict[str, Any]:
+    has_constitutional_fields = (
+        isinstance(build_obj.get("constitutional_dependency_declaration"), dict)
+        and isinstance(build_obj.get("constitutional_lineage"), dict)
+        and isinstance(build_obj.get("frozen_decision_input_bundle"), dict)
+    )
+    if has_constitutional_fields:
+        return dict(build_obj)
+
+    upgraded = dict(build_obj)
+    dependency_rows = list(upgraded.get("dependency_results") or [])
+    results_by_id: Dict[str, Dict[str, Any]] = {}
+    for row in dependency_rows:
+        if not isinstance(row, dict):
+            continue
+        dependency_id = str(row.get("dependency_id") or "").strip()
+        if dependency_id:
+            results_by_id[dependency_id] = dict(row)
+    for dependency_id, row in list(results_by_id.items()):
+        dep_path_raw = str(row.get("path") or "").strip()
+        if not dep_path_raw:
+            continue
+        dep_path = Path(dep_path_raw).resolve()
+        if not dep_path.exists() or not dep_path.is_file():
+            continue
+        row["path"] = str(dep_path)
+        row["sha256"] = _sha256_file(dep_path)
+        results_by_id[dependency_id] = row
+    upgraded_dependency_rows: list[Dict[str, Any]] = []
+    seen_dependency_ids: set[str] = set()
+    for row in dependency_rows:
+        if not isinstance(row, dict):
+            continue
+        dependency_id = str(row.get("dependency_id") or "").strip()
+        if not dependency_id:
+            continue
+        upgraded_dependency_rows.append(dict(results_by_id.get(dependency_id) or row))
+        seen_dependency_ids.add(dependency_id)
+    if "capital_authority_allocation_v1" not in results_by_id:
+        capital_authority_ref = _resolve_capital_authority_allocation_ref(truth_root=truth_root, day=day)
+        results_by_id["capital_authority_allocation_v1"] = {
+            "dependency_id": "capital_authority_allocation_v1",
+            "path": str(capital_authority_ref["path"]),
+            "sha256": str(capital_authority_ref["sha256"]),
+            "status": "PRESENT",
+            "required": True,
+            "advisory_only": False,
+            "post_submit_only": False,
+        }
+        if "capital_authority_allocation_v1" not in seen_dependency_ids:
+            upgraded_dependency_rows.append(dict(results_by_id["capital_authority_allocation_v1"]))
+    trade_submit_readiness_path = (
+        Path(trade_submit_readiness_override).resolve()
+        if trade_submit_readiness_override is not None
+        else (truth_root / "trade_submit_readiness_c2_v1" / "status.json").resolve()
+    )
+    if trade_submit_readiness_path.exists() and trade_submit_readiness_path.is_file():
+        readiness_row = dict(results_by_id.get("trade_submit_readiness_c2_v1") or {})
+        readiness_row.update(
+            {
+                "dependency_id": "trade_submit_readiness_c2_v1",
+                "path": str(trade_submit_readiness_path),
+                "sha256": _sha256_file(trade_submit_readiness_path),
+                "status": "PRESENT",
+                "required": True,
+                "advisory_only": False,
+                "post_submit_only": False,
+            }
+        )
+        results_by_id["trade_submit_readiness_c2_v1"] = readiness_row
+        replaced = False
+        for idx, row in enumerate(upgraded_dependency_rows):
+            if str(row.get("dependency_id") or "").strip() == "trade_submit_readiness_c2_v1":
+                upgraded_dependency_rows[idx] = dict(readiness_row)
+                replaced = True
+                break
+        if not replaced:
+            upgraded_dependency_rows.append(dict(readiness_row))
+
+    build_contract = assert_constitutional_writer_allowed_v1(
+        REPO_ROOT,
+        "execution_build_v1",
+        "constellation_2.common.execution_build_authority_v1",
+    )
+    required_dependencies = [
+        str(dep).strip()
+        for dep in (build_contract.get("required_upstream_dependencies") or [])
+        if str(dep).strip()
+    ]
+    constitutional_refs = _constitutional_dependency_refs(
+        repo_root=REPO_ROOT,
+        results=results_by_id,
+        dependency_ids=required_dependencies,
+    )
+    artifact_class = str(build_contract.get("artifact_class") or "").strip()
+    generated_at_utc = str(upgraded.get("generated_utc") or "").strip()
+    if not generated_at_utc:
+        generated_at_utc = DEFAULT_PRODUCED_UTC
+    closure_status = str(upgraded.get("closure_status") or "").strip().upper()
+    finality_state = FINALITY_FINALIZED if closure_status == "COMPLETE" else FINALITY_PROVISIONAL
+
+    upgraded["constitutional_dependency_declaration"] = build_artifact_dependency_declaration_v1(
+        artifact_type="execution_build_v1",
+        artifact_class=artifact_class,
+        authority_id="execution_build_v1",
+        declared_dependency_artifacts=required_dependencies,
+        dependency_refs=constitutional_refs,
+    )
+    upgraded["constitutional_lineage"] = build_governed_artifact_lineage_v1(
+        artifact_type="execution_build_v1",
+        artifact_version="v1",
+        artifact_class=artifact_class,
+        authority_id="execution_build_v1",
+        producer_id="constellation_2.common.execution_build_authority_v1",
+        generated_at_utc=generated_at_utc,
+        effective_at_utc=generated_at_utc,
+        finality_state=finality_state,
+        input_artifact_refs=constitutional_refs,
+        policy_snapshot_refs=[],
+        code_version="readiness-proof-legacy-upgrade",
+        run_id=submission_id,
+    )
+    upgraded["frozen_decision_input_bundle"] = build_frozen_decision_input_bundle_v1(
+        artifact_type="execution_build_v1",
+        authority_id="execution_build_v1",
+        generated_at_utc=generated_at_utc,
+        effective_at_utc=generated_at_utc,
+        input_artifact_refs=constitutional_refs,
+        policy_snapshot_refs=[],
+        run_id=submission_id,
+        reason_codes=["CONSTITUTIONAL_RUNTIME_FROZEN_INPUT_BUNDLE_V1"],
+    )
+    upgraded["dependency_results"] = upgraded_dependency_rows
+    upgraded["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1({**upgraded, "canonical_json_hash": None})
+    validate_against_repo_schema_v1(
+        upgraded,
+        REPO_ROOT,
+        "governance/04_DATA/SCHEMAS/C2/REPORTS/execution_build.v1.schema.json",
+    )
+    return upgraded
+
+
+def _materialize_submit_interface_inputs(
+    *,
+    truth_root: Path,
+    day: str,
+    produced_utc: str,
+    ib_account: str,
+    seed: Dict[str, Any],
+) -> Dict[str, Any]:
+    pair = _resolve_existing_submit_pair_for_day(day=day)
+    build_path = Path(str(pair["execution_build_path"])).resolve()
+    if not build_path.exists() or not build_path.is_file():
+        raise SystemExit(f"FAIL: READINESS_EXECUTION_BUILD_MISSING:{build_path}")
+
+    legacy_build_obj = _read_json(build_path)
+    legacy_closure_status = str(legacy_build_obj.get("closure_status") or "").strip().upper()
+    if legacy_closure_status != "COMPLETE":
+        raise SystemExit(
+            "FAIL: READINESS_EXECUTION_BUILD_NOT_COMPLETE:"
+            f"submission_id={pair['submission_id']}:closure_status={legacy_closure_status}:"
+            f"detail={_first_blocking_dependency_detail(legacy_build_obj)}"
+        )
+    execution_package_path = Path(str(pair["execution_package_path"])).resolve()
+    if not execution_package_path.exists() or not execution_package_path.is_file():
+        raise SystemExit(f"FAIL: READINESS_EXECUTION_PACKAGE_MISSING:{execution_package_path}")
+    package_obj = _read_json(execution_package_path)
+
+    local_pair_root = (truth_root / "_readiness_submit_interface_v1" / day / str(pair["submission_id"])).resolve()
+    local_pair_root.mkdir(parents=True, exist_ok=True)
+
+    trade_submit_readiness_source_path: Path | None = None
+    for row in list(package_obj.get("dependency_refs") or []):
+        if not isinstance(row, dict):
+            continue
+        dependency_id = str(row.get("dependency_id") or "").strip()
+        if dependency_id != "trade_submit_readiness_c2_v1":
+            continue
+        candidate = Path(str(row.get("path") or "")).resolve()
+        if candidate.exists() and candidate.is_file():
+            trade_submit_readiness_source_path = candidate
+            break
+    trade_submit_readiness_override_path: Path | None = None
+    if trade_submit_readiness_source_path is not None:
+        patched_readiness = _read_json(trade_submit_readiness_source_path)
+        declaration = dict(patched_readiness.get("constitutional_dependency_declaration") or {})
+        dependency_refs = list(declaration.get("dependency_refs") or [])
+        refreshed_dependency_refs: list[Dict[str, Any]] = []
+        for ref in dependency_refs:
+            if not isinstance(ref, dict):
+                continue
+            refreshed_ref = dict(ref)
+            ref_path_raw = str(refreshed_ref.get("path") or "").strip()
+            if ref_path_raw:
+                ref_path = Path(ref_path_raw).resolve()
+                if ref_path.exists() and ref_path.is_file():
+                    refreshed_ref["path"] = str(ref_path)
+                    refreshed_ref["sha256"] = _sha256_file(ref_path)
+            refreshed_dependency_refs.append(refreshed_ref)
+        declaration["dependency_refs"] = refreshed_dependency_refs
+        patched_readiness["constitutional_dependency_declaration"] = declaration
+        lineage = dict(patched_readiness.get("constitutional_lineage") or {})
+        lineage["input_artifact_refs"] = [dict(ref) for ref in refreshed_dependency_refs]
+        patched_readiness["constitutional_lineage"] = lineage
+        trade_submit_readiness_override_path = (local_pair_root / "trade_submit_readiness.status.v1.json").resolve()
+        _write_json(trade_submit_readiness_override_path, patched_readiness)
+        validate_against_repo_schema_v1(
+            patched_readiness,
+            REPO_ROOT,
+            "governance/04_DATA/SCHEMAS/C2/READINESS/trade_submit_readiness.status.v1.schema.json",
+        )
+    submission_record_path_obj = Path(str(pair["submission_record_path"])).resolve()
+    if not submission_record_path_obj.exists() or not submission_record_path_obj.is_file():
+        raise SystemExit(f"FAIL: READINESS_SUBMISSION_RECORD_MISSING:{submission_record_path_obj}")
+    submission_record_obj = _read_json(submission_record_path_obj)
+    upgraded_build_obj = _upgrade_legacy_execution_build_v1(
+        build_obj=legacy_build_obj,
+        submission_id=str(pair["submission_id"]),
+        truth_root=truth_root,
+        day=day,
+        trade_submit_readiness_override=trade_submit_readiness_override_path,
+    )
+
+    local_build_path = (local_pair_root / "execution_build.v1.json").resolve()
+    local_package_path = (local_pair_root / "execution_package.v1.json").resolve()
+    local_submission_record_path = (local_pair_root / "submission_record.v1.json").resolve()
+    _write_json(local_build_path, upgraded_build_obj)
+    local_build_sha = _sha256_file(local_build_path)
+
+    package_obj["build_ref"] = {"path": str(local_build_path), "sha256": local_build_sha}
+    refreshed_dependency_refs: list[Dict[str, Any]] = []
+    seen_dependency_ids: set[str] = set()
+    for row in list(package_obj.get("dependency_refs") or []):
+        if not isinstance(row, dict):
+            continue
+        refreshed = dict(row)
+        dependency_id = str(refreshed.get("dependency_id") or "").strip()
+        if dependency_id:
+            seen_dependency_ids.add(dependency_id)
+        if dependency_id == "trade_submit_readiness_c2_v1" and trade_submit_readiness_override_path is not None:
+            if trade_submit_readiness_override_path.exists() and trade_submit_readiness_override_path.is_file():
+                refreshed["path"] = str(trade_submit_readiness_override_path)
+                refreshed["sha256"] = _sha256_file(trade_submit_readiness_override_path)
+                refreshed_dependency_refs.append(refreshed)
+                continue
+        if dependency_id == "capital_authority_allocation_v1":
+            capital_ref = _resolve_capital_authority_allocation_ref(truth_root=truth_root, day=day)
+            refreshed["path"] = str(capital_ref["path"])
+            refreshed["sha256"] = str(capital_ref["sha256"])
+            refreshed_dependency_refs.append(refreshed)
+            continue
+        dep_path_raw = str(refreshed.get("path") or "").strip()
+        if dep_path_raw:
+            dep_path = Path(dep_path_raw).resolve()
+            if dep_path.exists() and dep_path.is_file():
+                refreshed["path"] = str(dep_path)
+                refreshed["sha256"] = _sha256_file(dep_path)
+        refreshed_dependency_refs.append(refreshed)
+    if "capital_authority_allocation_v1" not in seen_dependency_ids:
+        capital_ref = _resolve_capital_authority_allocation_ref(truth_root=truth_root, day=day)
+        refreshed_dependency_refs.append(
+            {
+                "dependency_id": "capital_authority_allocation_v1",
+                "owner_ref": "run_capital_authority_allocation_day_v1.py",
+                "path": str(capital_ref["path"]),
+                "role_class": "TRUTH_OWNER",
+                "sha256": str(capital_ref["sha256"]),
+                "status": "PRESENT",
+            }
+        )
+    if refreshed_dependency_refs:
+        package_obj["dependency_refs"] = refreshed_dependency_refs
+    package_obj["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1({**package_obj, "canonical_json_hash": None})
+    validate_against_repo_schema_v1(
+        package_obj,
+        REPO_ROOT,
+        "governance/04_DATA/SCHEMAS/C2/EXECUTION/execution_package.v1.schema.json",
+    )
+    _write_json(local_package_path, package_obj)
+
+    submission_record_obj["execution_build_ref"] = {"path": str(local_build_path), "sha256": local_build_sha}
+    submission_record_obj["execution_package_ref"] = {
+        "path": str(local_package_path),
+        "sha256": str(package_obj.get("canonical_json_hash") or ""),
+    }
+    submission_record_obj["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(
+        {**submission_record_obj, "canonical_json_hash": None}
+    )
+    validate_against_repo_schema_v1(
+        submission_record_obj,
+        REPO_ROOT,
+        "governance/04_DATA/SCHEMAS/C2/EXECUTION/execution_submission_record.v1.schema.json",
+    )
+    _write_json(local_submission_record_path, submission_record_obj)
+
+    advisory_submission = dict(package_obj.get("advisory_submission") or {})
+    execution_intent_id = str(advisory_submission.get("execution_intent_id") or package_obj.get("intent_id") or "").strip()
+    intent_hash = str(advisory_submission.get("promotion_idempotency_key") or "").strip()
+    if not execution_intent_id:
+        raise SystemExit(f"FAIL: READINESS_EXECUTION_INTENT_ID_MISSING:{execution_package_path}")
+    selected_order_plan_ref = dict(package_obj.get("selected_order_plan_ref") or {})
+    selected_order_plan_path = Path(str(selected_order_plan_ref.get("path") or "")).resolve()
+    if not selected_order_plan_path.exists() or not selected_order_plan_path.is_file():
+        raise SystemExit(f"FAIL: READINESS_SELECTED_ORDER_PLAN_MISSING:{selected_order_plan_path}")
+    selected_order_plan = _read_json(selected_order_plan_path)
+    synthetic_seed = {
+        "plan": selected_order_plan,
+        "intent_id": execution_intent_id,
+        "intent_sha256": str(selected_order_plan.get("intent_sha256") or intent_hash or ""),
+        "engine_id": str(selected_order_plan.get("engine_id") or ""),
+        "symbol": str(selected_order_plan.get("symbol") or ""),
+    }
+    execution_intent = _build_execution_intent_for_submit_path(
+        day=day,
+        produced_utc=produced_utc,
+        ib_account=ib_account,
+        seed=synthetic_seed,
+        execution_intent_id_override=execution_intent_id,
+        intent_hash_override=intent_hash,
+    )
+    _seed_portfolio_authorization_for_submit(
+        execution_intent=execution_intent,
+        eval_time_utc=produced_utc,
+    )
+    return {
+        "execution_package_path": local_package_path,
+        "submission_record_path": local_submission_record_path,
+        "submission_id": str(pair["submission_id"]),
+    }
+
+
+def _seed_portfolio_authorization_for_submit(*, execution_intent: ExecutionIntentV1, eval_time_utc: str) -> None:
+    output_root = advisor_runtime_root()
+    execution_intent_obj = execution_intent.to_dict()
+    execution_intent_artifact_path = execution_intent_path_v1(
+        output_root,
+        execution_intent.household_id,
+        execution_intent.execution_intent_id,
+    )
+    write_advisory_immutable_json_v1(execution_intent_artifact_path, execution_intent_obj)
+    validate_against_repo_schema_v1(
+        execution_intent_obj,
+        REPO_ROOT,
+        "governance/04_DATA/SCHEMAS/C2/ADVISORY/execution_intent.v1.schema.json",
+    )
+    allowed_action = {
+        "action_key": trade_action_key_v1(execution_intent=execution_intent),
+        "execution_intent_id": execution_intent.execution_intent_id,
+        "account_id": execution_intent.account_id,
+        "symbol": str(execution_intent.instrument.get("symbol") or "").strip().upper(),
+        "side": str(execution_intent.side or "").strip().upper(),
+        "quantity_shares": int(execution_intent.quantity_shares),
+        "max_notional_cents": "999999999999",
+        "reason_codes": ["AUTH_ACTION_EXPLICITLY_ALLOWED"],
+    }
+    day = str(execution_intent.day_utc)
+    portfolio_authorization_obj = {
+        "schema_id": "portfolio_authorization",
+        "schema_version": "v1",
+        "record_id": execution_intent.execution_intent_id,
+        "portfolio_authorization_id": execution_intent.execution_intent_id,
+        "household_id": execution_intent.household_id,
+        "execution_intent_id": execution_intent.execution_intent_id,
+        "snapshot_refs": {
+            "compiled_constraints_id": "readiness-proof",
+            "allocation_plan_id": "readiness-proof",
+            "risk_envelope_id": "readiness-proof",
+            "tax_adjudicated_rebalance_id": "readiness-proof",
+        },
+        "valid_from": f"{day}T00:00:00Z",
+        "valid_until": f"{day}T23:59:59Z",
+        "authorization_scope": "PAPER_SUBMIT",
+        "allowed_actions": [allowed_action],
+        "blocked_actions": [],
+        "max_incremental_deployment": "1.0",
+        "required_prerequisite_actions": [],
+        "account_route_permissions": [
+            {"account_id": execution_intent.account_id, "route_allowed": True},
+        ],
+        "emergency_mode": False,
+        "reason_codes": ["READINESS_PROOF_AUTH_SEED"],
+        "stale_if_older_than_seconds": 86400,
+    }
+    validate_against_repo_schema_v1(
+        portfolio_authorization_obj,
+        REPO_ROOT,
+        "governance/04_DATA/SCHEMAS/C2/ADVISORY/portfolio_authorization.v1.schema.json",
+    )
+    portfolio_authorization_artifact_path = portfolio_authorization_path_v1(
+        output_root,
+        execution_intent.household_id,
+        execution_intent.execution_intent_id,
+    )
+    write_advisory_immutable_json_v1(portfolio_authorization_artifact_path, portfolio_authorization_obj)
 
 
 def _call(script: Path, args: list[str], *, env: Dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -458,14 +1163,23 @@ def run_readiness_proof(*, proof_root: Path, day: str, produced_utc: str, ib_acc
     )
     env = os.environ.copy()
     env["C2_TRUTH_ROOT"] = str(paths["truth_root"])
+    submit_inputs = _materialize_submit_interface_inputs(
+        truth_root=paths["truth_root"],
+        day=day,
+        produced_utc=produced_utc,
+        ib_account=ib_account,
+        seed=seed,
+    )
     submit_script = REPO_ROOT / "constellation_2" / "phaseD" / "tools" / "c2_submit_paper_v5.py"
     _call(
         submit_script,
         [
             "--eval_time_utc",
             produced_utc,
-            "--phasec_out_dir",
-            str(PHASEC_FIXTURE),
+            "--execution_package_path",
+            str(submit_inputs["execution_package_path"]),
+            "--submission_record_path",
+            str(submit_inputs["submission_record_path"]),
             "--risk_budget",
             str((REPO_ROOT / "constellation_2" / "phaseD" / "inputs" / "sample_risk_budget.v1.json").resolve()),
             "--ib_host",
@@ -478,6 +1192,8 @@ def run_readiness_proof(*, proof_root: Path, day: str, produced_utc: str, ib_acc
             ib_account,
             "--dry_run",
             "YES",
+            "--submissions_root_override",
+            str((paths["truth_root"] / "execution_evidence_v1" / "submissions").resolve()),
         ],
         env=env,
     )

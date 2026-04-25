@@ -5,11 +5,12 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
 from constellation_2.phaseK_struct.lib.k_struct_common_v1 import KStructError, dec, read_json
 
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH = resolve_canonical_truth_root().resolve()
 
 NAV_SERIES_ROOT = (TRUTH / "monitoring_v1/nav_series").resolve()
 ENGINE_METRICS_ROOT = (TRUTH / "monitoring_v1/engine_metrics").resolve()

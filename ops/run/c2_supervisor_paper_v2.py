@@ -15,16 +15,25 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-VENV_PY = (REPO_ROOT / ".venv_c2/bin/python").resolve()
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
+from constellation_2.common.runtime_path_authority_v1 import require_authoritative_repo_runtime_v1
+
+VENV_PY = (REPO_ROOT / ".venv_c2/bin/python").resolve()
+if not VENV_PY.exists():
+    VENV_PY = Path("/home/node/constellation_2_runtime/.venv_c2/bin/python").resolve()
+
+TRUTH = resolve_canonical_truth_root_bridge_v1(caller="ops/run/c2_supervisor_paper_v2.py")
 PHASED_SUBMISSIONS_ROOT = (REPO_ROOT / "constellation_2/phaseD/outputs/submissions").resolve()
 
 STATE_ROOT = (Path.home() / ".local/state/constellation_2").resolve()
@@ -279,7 +288,7 @@ def _cycle_once(*, day_override: str, write_submission_index: bool, write_pillar
                     "--producer_git_sha",
                     producer_sha,
                     "--producer_repo",
-                    "constellation_2_runtime",
+                    "constellation",
                 ]
             )
             if rc != 0:
@@ -366,7 +375,7 @@ def _cycle_once(*, day_override: str, write_submission_index: bool, write_pillar
                         )
                     ran_idx.append(day_utc)
 
-        _write_text_atomic(fp_path, phasd_fp)
+    _write_text_atomic(fp_path, phasd_fp)
 
     return CycleResult(
         phasd_fp=phasd_fp,
@@ -387,6 +396,7 @@ def _cycle_once(*, day_override: str, write_submission_index: bool, write_pillar
 def main() -> int:
     import argparse
 
+    require_authoritative_repo_runtime_v1(REPO_ROOT)
     ap = argparse.ArgumentParser(prog="c2_supervisor_paper_v2")
     ap.add_argument("--poll_seconds", default=str(DEFAULT_POLL_SECONDS))
     ap.add_argument("--run_once", default="false", choices=["true", "false"])
@@ -436,7 +446,7 @@ def main() -> int:
                 "schema_id": "C2_SUPERVISOR_HEALTH_V1",
                 "schema_version": 1,
                 "produced_utc": _utc_now(),
-                "producer": {"git_sha": _git_sha_head(), "repo": "constellation_2_runtime", "module": "ops/run/c2_supervisor_paper_v2.py"},
+                "producer": {"git_sha": _git_sha_head(), "repo": "constellation", "module": "ops/run/c2_supervisor_paper_v2.py"},
                 "status": res.status,
                 "reason": res.reason,
                 "phaseD_submissions_root": {

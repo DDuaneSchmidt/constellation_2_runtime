@@ -11,8 +11,17 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
 
+_THIS_FILE = Path(__file__).resolve()
+_REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
+if str(_REPO_ROOT_FROM_FILE) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
 
-DEFAULT_TRUTH_ROOT = Path("constellation_2/runtime/truth")
+from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
+
+
+DEFAULT_TRUTH_ROOT = resolve_canonical_truth_root_bridge_v1(
+    caller="ops/tools/run_weekly_engine_diagnostic_report_v1.py"
+).resolve()
 DEC6 = Decimal("0.000001")
 DEC2 = Decimal("0.01")
 

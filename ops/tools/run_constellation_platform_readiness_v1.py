@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,9 +15,18 @@ from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH_ROOT = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
-SYSTEM_SNAPSHOT_ROOT = (TRUTH_ROOT / "system_snapshot").resolve()
+THIS_FILE = Path(__file__).resolve()
+REPO_ROOT = THIS_FILE.parents[2].resolve()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.common.release_baseline_common_v1 import resolve_release_baseline_roots_v1  # noqa: E402
+
+
+ROOTS = resolve_release_baseline_roots_v1(REPO_ROOT)
+REPO_ROOT = ROOTS.repo_root
+TRUTH_ROOT = ROOTS.canonical_truth_root
+SYSTEM_SNAPSHOT_ROOT = ROOTS.system_snapshot_root
 
 RUNTIME_STATE_PATH = (SYSTEM_SNAPSHOT_ROOT / "constellation_runtime_state.v1.json").resolve()
 ROOT_CAUSE_PATH = (SYSTEM_SNAPSHOT_ROOT / "constellation_root_cause_report.v1.json").resolve()
@@ -143,10 +153,10 @@ def _run(day: str) -> dict[str, Any]:
     derived_blockers: list[str] = []
     evidence_paths = sorted(
         {
-            str(RUNTIME_STATE_PATH.relative_to(REPO_ROOT)),
-            str(ROOT_CAUSE_PATH.relative_to(REPO_ROOT)),
-            str(REPAIR_PLAN_PATH.relative_to(REPO_ROOT)),
-            str(bug_path.relative_to(REPO_ROOT)),
+            str(RUNTIME_STATE_PATH),
+            str(ROOT_CAUSE_PATH),
+            str(REPAIR_PLAN_PATH),
+            str(bug_path),
         }
     )
 

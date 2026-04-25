@@ -24,12 +24,13 @@ import json
 import subprocess
 from typing import Any, Dict
 
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
 REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH = resolve_canonical_truth_root().resolve()
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/operator_stress_override.v1.schema.json"
 OUT_ROOT = (TRUTH / "reports" / "operator_stress_override_v1").resolve()

@@ -1,0 +1,11 @@
+[Unit]
+Description=Constellation Market Calendar Coverage Authority
+After=default.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/node/constellation_active
+ExecStart=/usr/bin/bash -lc 'set -euo pipefail; exec /home/node/constellation_active/ops/run/c2_market_calendar_coverage_authority_v1.sh'
+
+[Install]
+WantedBy=default.target

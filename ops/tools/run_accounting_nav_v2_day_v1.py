@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import sys
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List
@@ -66,6 +67,9 @@ def _write_nav_report(path: Path, content: bytes) -> None:
     if existing_status == "BOOTSTRAP" and candidate_status == "ACTIVE":
         _atomic_write(path, content)
         return
+    if existing_status == "ACTIVE" and candidate_status == "ACTIVE" and _active_history_backfill_needed(existing):
+        _atomic_write(path, content)
+        return
     _immut_write(path, content)
 
 
@@ -78,7 +82,7 @@ def _existing_bootstrap_can_be_upgraded(*, existing: Dict[str, Any], truth_root:
         return False
 
     cash_path = truth_root / "cash_ledger_v1" / "snapshots" / day_utc / "cash_ledger_snapshot.v1.json"
-    pos_path = truth_root / "positions_v1" / "snapshots" / day_utc / "positions_snapshot.v2.json"
+    pos_path = truth_root / "positions_v1" / "snapshots" / day_utc / "positions_snapshot.v5.json"
     if (not cash_path.exists()) or (not pos_path.exists()):
         return False
 
@@ -93,6 +97,24 @@ def _existing_bootstrap_can_be_upgraded(*, existing: Dict[str, Any], truth_root:
             return len(items) == 0 or marks_path.exists()
     except Exception:
         return False
+    return False
+
+
+def _active_history_backfill_needed(existing: Dict[str, Any]) -> bool:
+    if str(existing.get("status") or "").strip().upper() != "ACTIVE":
+        return False
+    history = existing.get("history")
+    if not isinstance(history, dict):
+        return True
+    drawdown_pct = history.get("drawdown_pct")
+    peak_nav = history.get("peak_nav")
+    drawdown_abs = history.get("drawdown_abs")
+    if not isinstance(drawdown_pct, str) or not drawdown_pct.strip():
+        return True
+    if not isinstance(peak_nav, int):
+        return True
+    if not isinstance(drawdown_abs, int):
+        return True
     return False
 
 
@@ -122,6 +144,9 @@ def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | N
 
     if _existing_bootstrap_can_be_upgraded(existing=existing, truth_root=TRUTH_ROOT, day_utc=expected_day_utc):
         print(f"OK: accounting_nav_v2_existing_bootstrap_upgrade_allowed day_utc={expected_day_utc} path={out_path}")
+        return None
+    if _active_history_backfill_needed(existing):
+        print(f"OK: accounting_nav_v2_existing_history_backfill_allowed day_utc={expected_day_utc} path={out_path}")
         return None
 
     sha = _sha256_file(out_path)
@@ -197,7 +222,11 @@ def _write_bootstrap_stub(*, out_path: Path, day: str, producer_repo: str, produ
             "components": [],
             "notes": ["DAY0_BOOTSTRAP_STUB_NAV_V2"],
         },
-        "history": {},
+        "history": {
+            "peak_nav": 0,
+            "drawdown_abs": 0,
+            "drawdown_pct": "0.000000",
+        },
     }
 
     _write_nav_report(out_path, _json_bytes(out))
@@ -227,7 +256,7 @@ def main() -> int:
         return int(existing_rc)
 
     cash_path = TRUTH_ROOT / "cash_ledger_v1" / "snapshots" / day / "cash_ledger_snapshot.v1.json"
-    pos_path = TRUTH_ROOT / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json"
+    pos_path = TRUTH_ROOT / "positions_v1" / "snapshots" / day / "positions_snapshot.v5.json"
     marks_path = TRUTH_ROOT / "market_data_snapshot_v1" / "broker_marks_v1" / day / "broker_marks.v1.json"
 
     # Required inputs for all days:
@@ -269,12 +298,25 @@ def main() -> int:
             return it2
         return None
 
+    def _item_requires_mark(item: Any) -> bool:
+        if not isinstance(item, dict):
+            return True
+        qty = _d(item.get("qty"))
+        if qty != 0:
+            return True
+        status = str(item.get("status") or "").strip().upper()
+        lifecycle_state = str(item.get("lifecycle_state") or "").strip().upper()
+        if status == "CLOSED" or lifecycle_state == "CLOSED":
+            return False
+        # Fail closed for zero-qty rows with ambiguous status.
+        return True
+
     items = _extract_position_items(pos)
     if items is None:
         # Fail-closed: schema unknown → require broker marks (treat as positions potentially present)
         has_positions = True
     else:
-        has_positions = len(items) > 0
+        has_positions = any(_item_requires_mark(item) for item in items)
 
     # Broker marks are required ONLY if positions exist.
     if has_positions and (not marks_path.exists()):
@@ -336,6 +378,26 @@ def main() -> int:
         )
 
     nav_total = int(cash_total) + int(gross_mv)
+    day_date = date.fromisoformat(day)
+    prev_day = (day_date - timedelta(days=1)).isoformat()
+    prev_nav_path = TRUTH_ROOT / "accounting_v2" / "nav" / prev_day / "nav.v2.json"
+    peak_nav = nav_total
+    if prev_nav_path.exists() and prev_nav_path.is_file():
+        try:
+            prev_nav_obj = _load_json(prev_nav_path)
+            prev_history = prev_nav_obj.get("history") if isinstance(prev_nav_obj.get("history"), dict) else {}
+            prev_peak = prev_history.get("peak_nav")
+            if not isinstance(prev_peak, int):
+                prev_nav_total = ((prev_nav_obj.get("nav") or {}).get("nav_total")) if isinstance(prev_nav_obj.get("nav"), dict) else None
+                prev_peak = prev_nav_total if isinstance(prev_nav_total, int) else nav_total
+            peak_nav = max(int(prev_peak), nav_total)
+        except Exception:
+            peak_nav = nav_total
+    drawdown_abs = int(nav_total - peak_nav)
+    if peak_nav > 0:
+        drawdown_pct = _ds((Decimal(drawdown_abs) / Decimal(peak_nav)).quantize(Decimal("0.000001")))
+    else:
+        drawdown_pct = "0.000000"
 
     input_manifest = [
         {"type": "cash_ledger", "path": str(cash_path), "sha256": _sha256_file(cash_path), "day_utc": day, "producer": "cash_ledger_v1"},
@@ -365,7 +427,11 @@ def main() -> int:
             "components": components,
             "notes": ["marks derived from broker-of-record (IB Flex)"],
         },
-        "history": {},
+        "history": {
+            "peak_nav": int(peak_nav),
+            "drawdown_abs": int(drawdown_abs),
+            "drawdown_pct": str(drawdown_pct),
+        },
     }
 
     _write_nav_report(out_path, _json_bytes(out))

@@ -18,12 +18,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
+from constellation_2.common.truth_root_v1 import resolve_runtime_root
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+REPO_ROOT = Path(__file__).resolve().parents[2]
+RUNTIME_ROOT = resolve_runtime_root()
+TRUTH = (RUNTIME_ROOT / "truth").resolve()
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/operator_future_day_override.v1.schema.json"
 OUT_ROOT = (TRUTH / "reports" / "operator_future_day_override_v1").resolve()

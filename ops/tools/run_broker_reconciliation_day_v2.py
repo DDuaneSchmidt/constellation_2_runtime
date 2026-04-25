@@ -3,12 +3,18 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from constellation_2.common.truth_root_v1 import resolve_truth_root
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime")
+REPO_ROOT = REPO_ROOT.resolve()
 TRUTH_ROOT = resolve_truth_root(repo_root=REPO_ROOT)
 
 SCHEMA_ID = "C2_BROKER_RECONCILIATION_V2"
@@ -117,11 +123,27 @@ def _extract_internal_cash_usd(cash_obj: Dict[str, Any], notes: List[str]) -> Op
 
 
 def _extract_internal_positions(pos_obj: Dict[str, Any], notes: List[str]) -> Optional[List[Dict[str, Any]]]:
-    """
-    Governed positions truth (v2) is:
-      positions_snapshot.v2.json -> positions.items[] (list of dicts)
-    Some legacy producers may emit positions as a top-level list; support that without expanding surfaces.
-    """
+    if isinstance(pos_obj.get("items"), list):
+        rows: List[Dict[str, Any]] = []
+        for item in pos_obj.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("status") or "").strip().upper() != "OPEN":
+                continue
+            instrument = item.get("instrument") if isinstance(item.get("instrument"), dict) else {}
+            kind = str(instrument.get("kind") or "").strip().upper()
+            if kind == "EQUITY":
+                symbol = str(instrument.get("symbol") or "").strip()
+                sec_type = "STK"
+            elif kind.startswith("OPTION"):
+                symbol = str(instrument.get("underlying") or "").strip()
+                sec_type = "OPT"
+            else:
+                symbol = str(instrument.get("symbol") or instrument.get("underlying") or "").strip()
+                sec_type = "OTHER"
+            rows.append({"symbol": symbol, "sec_type": sec_type, "qty": int(item.get("qty") or 0)})
+        return rows
+
     p = pos_obj.get("positions")
     if isinstance(p, list):
         return p
@@ -153,7 +175,7 @@ def main() -> int:
     qty_tol = _dec(args.qty_abs_tol)
 
     broker_path = TRUTH_ROOT / "execution_evidence_v1" / "broker_statement_normalized_v1" / day / "broker_statement_normalized.v1.json"
-    internal_pos_path = TRUTH_ROOT / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json"
+    internal_pos_path = TRUTH_ROOT / "positions_v1" / "snapshots" / day / "positions_snapshot.v5.json"
     internal_cash_path = TRUTH_ROOT / "cash_ledger_v1" / "snapshots" / day / "cash_ledger_snapshot.v1.json"
 
     missing: List[str] = []

@@ -1,0 +1,11 @@
+[Unit]
+Description=Constellation Session Authority Monitor
+After=default.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/node/constellation
+ExecStart=/usr/bin/bash -lc 'set -euo pipefail; exec /home/node/constellation/ops/run/c2_session_authority_monitor_v1.sh'
+
+[Install]
+WantedBy=default.target

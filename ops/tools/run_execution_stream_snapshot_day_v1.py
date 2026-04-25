@@ -100,6 +100,32 @@ def _read_json_obj(p: Path) -> Dict[str, Any]:
     return o
 
 
+def _normalize_side(raw: Any) -> str:
+    side = str(raw or "").strip().upper()
+    if side in {"BUY", "BOT"}:
+        return "BUY"
+    if side in {"SELL", "SLD"}:
+        return "SELL"
+    return side
+
+
+def _fallback_match_key(*, symbol: str, action: str, qty: int) -> str:
+    return f"{str(symbol).strip().upper()}|{_normalize_side(action)}|{int(qty)}"
+
+
+def _orphan_submission_is_post_handoff(subdir: Path) -> bool:
+    veto_p = (subdir / "veto_record.v1.json").resolve()
+    if not veto_p.exists():
+        return False
+    veto = _read_json_obj(veto_p)
+    reason_code = str(veto.get("reason_code") or "").strip()
+    reason_detail = str(veto.get("reason_detail") or "").strip()
+    return (
+        reason_code == "C2_SUBMIT_FAIL_CLOSED_REQUIRED"
+        and "broker_submission_record.v2.schema.json" in reason_detail
+    )
+
+
 def _now_iso_z() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -169,6 +195,14 @@ def _list_submission_dirs(day: str) -> List[Path]:
 
 
 def _order_qty_from_submission_dir(subdir: Path) -> int:
+    plan_v2_p = (subdir / "equity_order_plan.v2.json").resolve()
+    if plan_v2_p.exists():
+        plan = _read_json_obj(plan_v2_p)
+        qty_any = plan.get("qty_shares")
+        if not isinstance(qty_any, int) or qty_any <= 0:
+            raise RuntimeError(f"EQUITY_ORDER_PLAN_V2_QTY_INVALID: {plan_v2_p}")
+        return int(qty_any)
+
     plan_p = (subdir / "equity_order_plan.v1.json").resolve()
     if plan_p.exists():
         plan = _read_json_obj(plan_p)
@@ -193,12 +227,16 @@ def _submission_meta_rows(day: str) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for subdir in _list_submission_dirs(day):
         bsr_p = subdir / "broker_submission_record.v2.json"
-        if not bsr_p.exists():
-            continue
-        bsr = _read_json_obj(bsr_p)
+        has_broker_submission = bsr_p.exists()
+        bsr: Dict[str, Any] = _read_json_obj(bsr_p) if has_broker_submission else {}
 
         submission_id = str(bsr.get("submission_id") or "").strip() or subdir.name
         binding_hash = str(bsr.get("binding_hash") or "").strip()
+        if not binding_hash:
+            binding_p = (subdir / "binding_record.v2.json").resolve()
+            if binding_p.exists():
+                binding = _read_json_obj(binding_p)
+                binding_hash = str(binding.get("canonical_json_hash") or "").strip()
         broker = bsr.get("broker") if isinstance(bsr.get("broker"), dict) else {}
         env = str(broker.get("environment") or "PAPER").strip()
         submitted_at_utc = str(bsr.get("submitted_at_utc") or "").strip()
@@ -207,6 +245,8 @@ def _submission_meta_rows(day: str) -> List[Dict[str, Any]]:
         engine_id = ""
         source_intent_id = ""
         intent_sha256 = ""
+        symbol = ""
+        action = ""
 
         evt_p = subdir / "execution_event_record.v1.json"
         if evt_p.exists():
@@ -216,12 +256,23 @@ def _submission_meta_rows(day: str) -> List[Dict[str, Any]]:
             intent_sha256 = str(evt.get("intent_sha256") or "").strip()
 
         order_qty = 0
-        plan_p = subdir / "equity_order_plan.v1.json"
+        plan_p = subdir / "equity_order_plan.v2.json"
         if plan_p.exists():
             plan = _read_json_obj(plan_p)
             engine_id = engine_id or str(plan.get("engine_id") or "").strip()
             source_intent_id = source_intent_id or str(plan.get("source_intent_id") or "").strip()
             intent_sha256 = intent_sha256 or str(plan.get("intent_sha256") or "").strip()
+            symbol = str(plan.get("symbol") or "").strip().upper()
+            action = _normalize_side(plan.get("action"))
+        else:
+            plan_p = subdir / "equity_order_plan.v1.json"
+        if plan_p.exists():
+            plan = _read_json_obj(plan_p)
+            engine_id = engine_id or str(plan.get("engine_id") or "").strip()
+            source_intent_id = source_intent_id or str(plan.get("source_intent_id") or "").strip()
+            intent_sha256 = intent_sha256 or str(plan.get("intent_sha256") or "").strip()
+            symbol = symbol or str(plan.get("symbol") or "").strip().upper()
+            action = action or _normalize_side(plan.get("action"))
         else:
             plan_p = subdir / "order_plan.v1.json"
             if plan_p.exists():
@@ -236,18 +287,22 @@ def _submission_meta_rows(day: str) -> List[Dict[str, Any]]:
             order_qty = 0
 
         broker_ids = bsr.get("broker_ids") if isinstance(bsr.get("broker_ids"), dict) else {}
+        eligible_orphan_fallback = (not has_broker_submission) and _orphan_submission_is_post_handoff(subdir)
         rows.append({
             "submission_id": submission_id,
             "binding_hash": binding_hash,
             "engine_id": engine_id,
             "source_intent_id": source_intent_id,
             "intent_sha256": intent_sha256,
+            "symbol": symbol,
+            "action": action,
             "broker_env": env,
             "submitted_at_utc": submitted_at_utc,
             "broker_status": status,
             "order_id": broker_ids.get("order_id"),
             "perm_id": broker_ids.get("perm_id"),
             "order_qty": order_qty,
+            "eligible_orphan_fallback": eligible_orphan_fallback,
         })
     return rows
 
@@ -270,6 +325,80 @@ def _build_orderid_index(day: str) -> Dict[str, Dict[str, Any]]:
         if isinstance(perm_id, int) and perm_id >= 0:
             idx[f"perm_id:{perm_id}"] = base
     return idx
+
+
+def _build_orphan_fallback_index(day: str) -> Dict[str, List[Dict[str, Any]]]:
+    idx: Dict[str, List[Dict[str, Any]]] = {}
+    for meta in _submission_meta_rows(day):
+        if not bool(meta.get("eligible_orphan_fallback")):
+            continue
+        symbol = str(meta.get("symbol") or "").strip().upper()
+        action = _normalize_side(meta.get("action"))
+        order_qty = meta.get("order_qty")
+        if not symbol or not action or not isinstance(order_qty, int) or order_qty <= 0:
+            continue
+        idx.setdefault(_fallback_match_key(symbol=symbol, action=action, qty=order_qty), []).append({
+            "submission_id": meta["submission_id"],
+            "binding_hash": meta["binding_hash"],
+            "engine_id": meta["engine_id"],
+            "source_intent_id": meta["source_intent_id"],
+            "intent_sha256": meta["intent_sha256"],
+            "broker_env": meta["broker_env"],
+        })
+    return idx
+
+
+def _resolve_submission_meta_for_event(
+    *,
+    event_type: str,
+    idx: Dict[str, Dict[str, Any]],
+    orphan_fallback_idx: Dict[str, List[Dict[str, Any]]],
+    orphan_claims: Dict[str, Tuple[Optional[int], Optional[int]]],
+    order_id: Optional[int],
+    perm_id: Optional[int],
+    symbol: str = "",
+    action: str = "",
+    order_qty: Optional[int] = None,
+) -> Tuple[Dict[str, Any], List[str]]:
+    if isinstance(perm_id, int):
+        perm_key = f"perm_id:{perm_id}"
+        if perm_key in idx:
+            return idx[perm_key], []
+
+    if isinstance(order_id, int):
+        order_key = f"order_id:{order_id}"
+        if order_key in idx:
+            return idx[order_key], []
+
+    normalized_symbol = str(symbol).strip().upper()
+    normalized_action = _normalize_side(action)
+    if normalized_symbol and normalized_action and isinstance(order_qty, int) and order_qty > 0:
+        fb_key = _fallback_match_key(symbol=normalized_symbol, action=normalized_action, qty=order_qty)
+        candidates = orphan_fallback_idx.get(fb_key, [])
+        if len(candidates) > 1:
+            cand_ids = ",".join(sorted(str(row.get("submission_id") or "") for row in candidates))
+            raise RuntimeError(
+                f"AMBIGUOUS_BROKER_EVENT: event_type={event_type} order_id={order_id} perm_id={perm_id} "
+                f"symbol={normalized_symbol} action={normalized_action} qty={order_qty} candidates={cand_ids}"
+            )
+        if len(candidates) == 1:
+            meta = candidates[0]
+            submission_id = str(meta.get("submission_id") or "")
+            existing = orphan_claims.get(submission_id)
+            current_pair = (order_id, perm_id)
+            if existing is not None and existing != current_pair:
+                raise RuntimeError(
+                    f"AMBIGUOUS_BROKER_EVENT: event_type={event_type} order_id={order_id} perm_id={perm_id} "
+                    f"submission_id={submission_id} existing_claim={existing}"
+                )
+            orphan_claims[submission_id] = current_pair
+            if isinstance(order_id, int):
+                idx[f"order_id:{order_id}"] = meta
+            if isinstance(perm_id, int):
+                idx[f"perm_id:{perm_id}"] = meta
+            return meta, ["ATTRIBUTED_BY_POST_HANDOFF_ORPHAN_FALLBACK"]
+
+    raise RuntimeError(f"UNATTRIBUTABLE_BROKER_EVENT: event_type={event_type} order_id={order_id} perm_id={perm_id}")
 
 
 def main() -> int:
@@ -304,6 +433,7 @@ def main() -> int:
 
     try:
         idx = _build_orderid_index(day)
+        orphan_fallback_idx = _build_orphan_fallback_index(day)
     except Exception as e:
         _write_failure(
             day=day,
@@ -436,28 +566,32 @@ def main() -> int:
     ib.disconnect()
 
     wrote = 0
+    orphan_claims: Dict[str, Tuple[Optional[int], Optional[int]]] = {}
 
     def write_record(
         *,
         event_type: str,
         order_id: Optional[int],
         perm_id: Optional[int],
+        symbol: str,
+        action: str,
+        order_qty: Optional[int],
         order_state: Dict[str, Any],
         fill: Dict[str, Any],
         raw: Dict[str, Any],
     ) -> None:
         nonlocal wrote
-
-        key = None
-        if isinstance(perm_id, int):
-            key = f"perm_id:{perm_id}"
-        elif isinstance(order_id, int):
-            key = f"order_id:{order_id}"
-
-        if (not key) or (key not in idx):
-            raise RuntimeError(f"UNATTRIBUTABLE_BROKER_EVENT: event_type={event_type} order_id={order_id} perm_id={perm_id}")
-
-        meta = idx[key]
+        meta, attribution_reason_codes = _resolve_submission_meta_for_event(
+            event_type=event_type,
+            idx=idx,
+            orphan_fallback_idx=orphan_fallback_idx,
+            orphan_claims=orphan_claims,
+            order_id=order_id,
+            perm_id=perm_id,
+            symbol=symbol,
+            action=action,
+            order_qty=order_qty,
+        )
         submission_id = meta["submission_id"]
         binding_hash = meta["binding_hash"]
         engine_id = meta["engine_id"]
@@ -489,7 +623,7 @@ def main() -> int:
             "day_utc": day,
             "producer": {"repo": "constellation_2_runtime", "git_sha": _git_sha(), "module": "ops/tools/run_execution_stream_snapshot_day_v1.py"},
             "status": "OK",
-            "reason_codes": [],
+            "reason_codes": attribution_reason_codes,
             "submission_id": submission_id,
             "binding_hash": binding_hash,
             "engine_id": engine_id,
@@ -524,6 +658,10 @@ def main() -> int:
             avg_s = str(Decimal(str(avg)))
             order_id = getattr(o, "orderId", None)
             perm_id = getattr(o, "permId", None)
+            action = _normalize_side(getattr(o, "action", ""))
+            qty = getattr(o, "totalQuantity", 0) or 0
+            qty_i = int(qty) if float(qty) > 0 else None
+            symbol = str(getattr(getattr(t, "contract", None), "symbol", "") or "").strip().upper()
 
             order_state = {"status": st, "filled_qty": filled, "remaining_qty": remaining, "avg_fill_price": avg_s}
             fill = {"fill_qty": 0, "fill_price": "0", "commission": "0", "currency": "USD"}
@@ -532,6 +670,9 @@ def main() -> int:
                 event_type="ORDER_STATUS",
                 order_id=order_id if isinstance(order_id, int) else None,
                 perm_id=perm_id if isinstance(perm_id, int) else None,
+                symbol=symbol,
+                action=action,
+                order_qty=qty_i,
                 order_state=order_state,
                 fill=fill,
                 raw=raw,
@@ -567,6 +708,9 @@ def main() -> int:
                 event_type="EXEC_DETAILS",
                 order_id=order_id if isinstance(order_id, int) else None,
                 perm_id=perm_id if isinstance(perm_id, int) else None,
+                symbol="",
+                action="",
+                order_qty=None,
                 order_state=order_state,
                 fill=fill,
                 raw=raw,

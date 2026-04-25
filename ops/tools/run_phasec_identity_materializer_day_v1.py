@@ -8,10 +8,11 @@ import os
 import subprocess
 import sys
 import tempfile
+from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from constellation_2.common.truth_root_v1 import resolve_truth_root  # noqa: E402
+from zoneinfo import ZoneInfo
 
 _THIS_FILE = Path(__file__).resolve()
 _REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
@@ -23,7 +24,8 @@ if not (_REPO_ROOT_FROM_FILE / "constellation_2").exists():
 if not (_REPO_ROOT_FROM_FILE / "governance").exists():
     raise SystemExit(f"FATAL: repo_root_missing_governance: derived={_REPO_ROOT_FROM_FILE}")
 
-from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1  # noqa: E402
+from constellation_2.common.truth_root_v1 import resolve_truth_root  # noqa: E402
+from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1, canonical_hash_for_c2_artifact_v1  # noqa: E402
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1  # noqa: E402
 from constellation_2.common.canonical_fact_store_v1 import (  # noqa: E402
     capture_executed_code_identity,
@@ -34,9 +36,17 @@ from constellation_2.common.canonical_fact_store_v1 import (  # noqa: E402
     write_invariant_result,
 )
 from constellation_2.common.c2_risk_policy_loader_v1 import get_per_trade_notional_pct_max_or_fail  # noqa: E402
+from constellation_2.common.execution_identity_authority_v1 import (  # noqa: E402
+    build_execution_identity_record_v1,
+    classify_duplicate_classification_v1,
+    derive_trade_instance_id_v1,
+    resolve_intent_id_v1,
+)
+from constellation_2.phaseC.lib.validate_against_schema_v1 import validate_against_repo_schema_v1  # noqa: E402
 
 REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
 RUNTIME_DATA_ROOT = Path("/home/node/constellation_runtime_data").resolve()
+NEW_YORK_TZ = ZoneInfo("America/New_York")
 
 def _require_truth_root_allowed(truth_root: Path) -> Path:
     pr = truth_root.expanduser().resolve()
@@ -69,6 +79,13 @@ def _resolve_truth_root(truth_root_arg: str) -> Path:
     return _require_truth_root_allowed(resolve_truth_root(repo_root=REPO_ROOT))
 
 
+def _resolve_execution_truth_root(execution_truth_root_arg: str, *, read_truth_root: Path) -> Path:
+    arg = (execution_truth_root_arg or "").strip()
+    if arg:
+        return _require_truth_root_allowed(Path(arg))
+    return read_truth_root
+
+
 def _intents_root(truth_root: Path) -> Path:
     return (truth_root / "intents_v1" / "snapshots").resolve()
 
@@ -89,6 +106,7 @@ EXPECTED_IDENTITY_FILES = [
     "equity_order_plan.v2.json",
     "mapping_ledger_record.v2.json",
     "binding_record.v2.json",
+    "execution_identity_record.v1.json",
 ]
 
 SOURCE_REASON_FAIL_CLOSED = "C2_SUBMIT_FAIL_CLOSED_REQUIRED"
@@ -275,7 +293,30 @@ def _same_day_market_close_sources(
     truth_root: Path,
     day_utc: str,
     symbol: str,
+    evaluation_time_utc: Optional[str] = None,
 ) -> Tuple[Optional[str], List[Path]]:
+    def _parse_utc_timestamp(text: str) -> Optional[datetime]:
+        raw = str(text or "").strip()
+        if not raw:
+            return None
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except Exception:
+            return None
+        return parsed.astimezone(timezone.utc)
+
+    target_day = date.fromisoformat(day_utc)
+    core_session_open_utc = datetime(
+        target_day.year,
+        target_day.month,
+        target_day.day,
+        9,
+        30,
+        0,
+        tzinfo=NEW_YORK_TZ,
+    ).astimezone(timezone.utc)
+    evaluation_dt = _parse_utc_timestamp(evaluation_time_utc or "")
+
     md_root = (truth_root / "market_data_snapshot_v1").resolve()
     manifest = (md_root / "dataset_manifest.json").resolve()
     if not manifest.exists() or not manifest.is_file():
@@ -319,12 +360,23 @@ def _same_day_market_close_sources(
             return None, [manifest, year_path]
         if str(row.get("timestamp_utc") or "")[:10] != day_utc:
             continue
-        close = row.get("close")
-        if isinstance(close, (int, float)):
-            return str(close), [manifest, year_path]
-        if isinstance(close, str) and close.strip():
-            return close.strip(), [manifest, year_path]
-        return None, [manifest, year_path]
+        ingested_dt = _parse_utc_timestamp(str(row.get("ingested_utc") or ""))
+        if ingested_dt is None:
+            return None, [manifest, year_path]
+        if ingested_dt < core_session_open_utc:
+            return None, [manifest, year_path]
+        if evaluation_dt is not None and ingested_dt > evaluation_dt:
+            return None, [manifest, year_path]
+        close_text = str(row.get("close") or "").strip()
+        if not close_text:
+            return None, [manifest, year_path]
+        try:
+            close_value = Decimal(close_text)
+        except InvalidOperation:
+            return None, [manifest, year_path]
+        if close_value <= Decimal("0"):
+            return None, [manifest, year_path]
+        return format(close_value, "f"), [manifest, year_path]
     return None, [manifest, year_path]
 
 
@@ -481,8 +533,11 @@ def _run(cmd: List[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
 def _materialize_equity_intent(
     *,
     truth_root: Path,
+    execution_truth_root: Path,
     day_utc: str,
     eval_time_utc: str,
+    attempt_id: str,
+    prior_active_attempt_id: Optional[str],
     attempt_day_dir: Path,
     intent_path: Path,
     intent_obj: Dict[str, Any],
@@ -529,7 +584,7 @@ def _materialize_equity_intent(
                 "--equity_reference_price",
                 str(default_equity_reference_price).strip(),
                 "--truth_root",
-                str(truth_root),
+                str(execution_truth_root),
             ]
 
         res_transform = _run(cmd, cwd=REPO_ROOT)
@@ -581,6 +636,18 @@ def _materialize_equity_intent(
             )
             return ("BLOCKED", str(veto_path))
 
+        eq_intent_obj = _read_json_obj(eq_intent_path)
+        intent_id = resolve_intent_id_v1(intent_obj=eq_intent_obj)
+        execution_scope = _ledger_scope_context(execution_truth_root)
+        trade_instance_id = derive_trade_instance_id_v1(
+            day_utc=day_utc,
+            attempt_id=attempt_id,
+            sleeve_id=str(execution_scope.get("sleeve") or "GLOBAL"),
+            environment=str(execution_scope.get("mode") or "GLOBAL"),
+            intent_id=intent_id,
+            intent_hash=intent_hash,
+        )
+
         eq_plan_path: Optional[Path] = None
         preflight_cmd: List[str]
         if eq_plan_v2_path.exists():
@@ -594,6 +661,8 @@ def _materialize_equity_intent(
                 str(eq_plan_path),
                 "--eval_time_utc",
                 eval_time_utc,
+                "--trade_instance_id",
+                trade_instance_id,
                 "--out_dir",
                 str(preflight_out),
             ]
@@ -667,8 +736,10 @@ def _materialize_equity_intent(
         final_identity_dir = (attempt_day_dir / intent_hash).resolve()
         final_identity_dir.mkdir(parents=True, exist_ok=True)
 
-        _immutable_copy_file(eq_intent_path, final_identity_dir / "equity_intent.v1.json")
-        _immutable_copy_file(lineage_envelope_path, final_identity_dir / "lineage_envelope.v1.json")
+        final_eq_intent_path = (final_identity_dir / "equity_intent.v1.json").resolve()
+        final_lineage_path = (final_identity_dir / "lineage_envelope.v1.json").resolve()
+        _immutable_copy_file(eq_intent_path, final_eq_intent_path)
+        _immutable_copy_file(lineage_envelope_path, final_lineage_path)
         preflight_plan_v2 = (preflight_out / "equity_order_plan.v2.json").resolve()
         preflight_plan_v1 = (preflight_out / "equity_order_plan.v1.json").resolve()
         if preflight_plan_v2.exists():
@@ -687,9 +758,83 @@ def _materialize_equity_intent(
                 reason_detail=detail,
             )
             return ("BLOCKED", str(veto_path))
-        _immutable_copy_file(preflight_out / "mapping_ledger_record.v2.json", final_identity_dir / "mapping_ledger_record.v2.json")
-        _immutable_copy_file(preflight_out / "binding_record.v2.json", final_identity_dir / "binding_record.v2.json")
-        _immutable_copy_file(preflight_allow, final_identity_dir / "submit_preflight_decision.v1.json")
+        mapping_path = (final_identity_dir / "mapping_ledger_record.v2.json").resolve()
+        binding_path = (final_identity_dir / "binding_record.v2.json").resolve()
+        decision_path = (final_identity_dir / "submit_preflight_decision.v1.json").resolve()
+        _immutable_copy_file(preflight_out / "mapping_ledger_record.v2.json", mapping_path)
+        _immutable_copy_file(preflight_out / "binding_record.v2.json", binding_path)
+        _immutable_copy_file(preflight_allow, decision_path)
+
+        final_plan_path = (final_identity_dir / "equity_order_plan.v2.json").resolve()
+        if not final_plan_path.exists():
+            final_plan_path = (final_identity_dir / "equity_order_plan.v1.json").resolve()
+        plan_obj = _read_json_obj(final_plan_path)
+        binding_obj = _read_json_obj(binding_path)
+        plan_hash = canonical_hash_for_c2_artifact_v1(plan_obj)
+        binding_hash = canonical_hash_for_c2_artifact_v1(binding_obj)
+        submission_id = str(binding_obj.get("submission_id") or "").strip()
+        if not submission_id:
+            raise MaterializerError("EXECUTION_IDENTITY_SUBMISSION_ID_MISSING")
+
+        prior_trade_instance_id: Optional[str] = None
+        prior_plan_hash: Optional[str] = None
+        source_refs = [
+            _source_ref(ref_type="equity_intent_ref", path=final_eq_intent_path),
+            _source_ref(ref_type="lineage_envelope_ref", path=final_lineage_path),
+            _source_ref(ref_type="equity_order_plan_ref", path=final_plan_path),
+            _source_ref(ref_type="mapping_ledger_record_ref", path=mapping_path),
+            _source_ref(ref_type="binding_record_ref", path=binding_path),
+            _source_ref(ref_type="submit_preflight_decision_ref", path=decision_path),
+        ]
+        if prior_active_attempt_id:
+            prior_identity_dir = (attempt_day_dir.parent / f"attempt_{prior_active_attempt_id}" / intent_hash).resolve()
+            prior_exec_identity_path = (prior_identity_dir / "execution_identity_record.v1.json").resolve()
+            if prior_exec_identity_path.exists() and prior_exec_identity_path.is_file():
+                prior_exec_identity = _read_json_obj(prior_exec_identity_path)
+                prior_trade_instance_id = str(prior_exec_identity.get("trade_instance_id") or "").strip() or None
+                prior_plan_hash = str(prior_exec_identity.get("plan_hash") or "").strip() or None
+                source_refs.append(_source_ref(ref_type="prior_execution_identity_ref", path=prior_exec_identity_path))
+            else:
+                prior_binding_path = (prior_identity_dir / "binding_record.v2.json").resolve()
+                prior_plan_v2_path = (prior_identity_dir / "equity_order_plan.v2.json").resolve()
+                prior_plan_v1_path = (prior_identity_dir / "equity_order_plan.v1.json").resolve()
+                if prior_binding_path.exists() and prior_binding_path.is_file():
+                    prior_binding_obj = _read_json_obj(prior_binding_path)
+                    prior_trade_instance_id = str(prior_binding_obj.get("trade_instance_id") or "").strip() or None
+                    source_refs.append(_source_ref(ref_type="prior_binding_record_ref", path=prior_binding_path))
+                prior_plan_path = prior_plan_v2_path if prior_plan_v2_path.exists() else prior_plan_v1_path
+                if prior_plan_path.exists() and prior_plan_path.is_file():
+                    prior_plan_obj = _read_json_obj(prior_plan_path)
+                    prior_plan_hash = canonical_hash_for_c2_artifact_v1(prior_plan_obj)
+                    source_refs.append(_source_ref(ref_type="prior_equity_order_plan_ref", path=prior_plan_path))
+
+        duplicate_classification = classify_duplicate_classification_v1(
+            prior_trade_instance_id=prior_trade_instance_id,
+            prior_plan_hash=prior_plan_hash,
+            current_trade_instance_id=trade_instance_id,
+            current_plan_hash=plan_hash,
+        )
+        execution_identity_record = build_execution_identity_record_v1(
+            created_at_utc=eval_time_utc,
+            day_utc=day_utc,
+            attempt_id=attempt_id,
+            sleeve_id=str(execution_scope.get("sleeve") or "GLOBAL"),
+            environment=str(execution_scope.get("mode") or "GLOBAL"),
+            intent_id=intent_id,
+            intent_hash=intent_hash,
+            plan_hash=plan_hash,
+            binding_hash=binding_hash,
+            trade_instance_id=trade_instance_id,
+            submission_id=submission_id,
+            duplicate_classification=duplicate_classification,
+            source_refs=source_refs,
+        )
+        validate_against_repo_schema_v1(
+            execution_identity_record,
+            REPO_ROOT,
+            "constellation_2/schemas/execution_identity_record.v1.schema.json",
+        )
+        _immutable_write_json(final_identity_dir / "execution_identity_record.v1.json", execution_identity_record)
 
         allow_dst = (attempt_day_dir / f"{intent_hash}.submit_preflight_decision.v1.json").resolve()
         _immutable_copy_file(preflight_allow, allow_dst)
@@ -704,7 +849,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     ap.add_argument("--day_utc", required=True, help="UTC day key YYYY-MM-DD")
     ap.add_argument("--eval_time_utc", required=True, help="Deterministic evaluation timestamp with Z suffix")
-    ap.add_argument("--truth_root", default="", help="Absolute truth root; defaults to C2_TRUTH_ROOT or repo resolver")    
+    ap.add_argument("--truth_root", default="", help="Absolute read truth root; defaults to C2_TRUTH_ROOT or repo resolver")
+    ap.add_argument(
+        "--execution_truth_root",
+        default="",
+        help="Absolute execution-family truth root for Phase C outputs; defaults to --truth_root when omitted",
+    )
     ap.add_argument(
         "--default_equity_reference_price",
         default="",
@@ -713,27 +863,31 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = ap.parse_args(argv)
 
     truth_root = _resolve_truth_root(args.truth_root)
+    execution_truth_root = _resolve_execution_truth_root(
+        args.execution_truth_root,
+        read_truth_root=truth_root,
+    )
     day_utc = _parse_day(str(args.day_utc))
     eval_time_utc = str(args.eval_time_utc or "").strip()
     if not eval_time_utc.endswith("Z"):
         raise SystemExit("FAIL: EVAL_TIME_UTC_MUST_END_WITH_Z")
 
-    out_day_dir = (_phasec_root(truth_root) / day_utc).resolve()
+    out_day_dir = (_phasec_root(execution_truth_root) / day_utc).resolve()
     out_day_dir.mkdir(parents=True, exist_ok=True)
     attempt_id = _next_attempt_id(out_day_dir)
     attempt_day_dir = _attempt_dir(out_day_dir, attempt_id)
     attempt_day_dir.mkdir(parents=True, exist_ok=True)
     _write_attempt_state(out_day_dir=out_day_dir, attempt_id=attempt_id, day_utc=day_utc, status="ABORTED")
-    ledger_context = _ledger_scope_context(truth_root)
+    ledger_context = _ledger_scope_context(execution_truth_root)
     prior_active = resolve_latest_active_attempt(
-        truth_root=truth_root,
+        truth_root=execution_truth_root,
         invoked_day_utc=day_utc,
         scope_key=_ledger_scope_key(ledger_context),
     )
     prior_active_attempt_id = None if prior_active is None else str(prior_active.get("attempt_id") or "").strip() or None
     run_id = f"phasec_identity_materializer_day_v1:{day_utc}:{attempt_id}"
     ledger = open_or_create_run_ledger(
-        truth_root=truth_root,
+        truth_root=execution_truth_root,
         run_id=run_id,
         attempt_id=attempt_id,
         invoked_day_utc=day_utc,
@@ -749,7 +903,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     except Exception as e:
         _append_invariant_result(
             ledger=ledger,
-            truth_root=truth_root,
+            truth_root=execution_truth_root,
             attempt_id=attempt_id,
             invoked_day_utc=day_utc,
             invariant_name="submission_allowed",
@@ -758,9 +912,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             expected={"intent_files_present": True},
             source_refs=[],
         )
-        finalize_run_ledger(truth_root=truth_root, ledger_payload=ledger, repo_root=REPO_ROOT)
+        finalize_run_ledger(truth_root=execution_truth_root, ledger_payload=ledger, repo_root=REPO_ROOT)
         mark_attempt_state(
-            truth_root=truth_root,
+            truth_root=execution_truth_root,
             invoked_day_utc=day_utc,
             attempt_id=attempt_id,
             context=ledger_context,
@@ -836,7 +990,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                             same_day_market_close_passed = False
                     _append_invariant_result(
                         ledger=ledger,
-                        truth_root=truth_root,
+                        truth_root=execution_truth_root,
                         attempt_id=attempt_id,
                         invoked_day_utc=day_utc,
                         invariant_name="same_day_market_close_exists",
@@ -847,8 +1001,11 @@ def main(argv: Optional[List[str]] = None) -> int:
                     )
                     status, out_path = _materialize_equity_intent(
                         truth_root=truth_root,
+                        execution_truth_root=execution_truth_root,
                         day_utc=day_utc,
                         eval_time_utc=eval_time_utc,
+                        attempt_id=attempt_id,
+                        prior_active_attempt_id=prior_active_attempt_id,
                         attempt_day_dir=attempt_day_dir,
                         intent_path=intent_path,
                         intent_obj=intent_obj,
@@ -867,7 +1024,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                         lineage_source_refs = [intent_source_ref, _source_ref(ref_type="lineage_envelope_ref", path=lineage_path)]
                         _append_invariant_result(
                             ledger=ledger,
-                            truth_root=truth_root,
+                            truth_root=execution_truth_root,
                             attempt_id=attempt_id,
                             invoked_day_utc=day_utc,
                             invariant_name="lineage_complete",
@@ -881,7 +1038,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                         cap_value = get_per_trade_notional_pct_max_or_fail(engine_id)
                         _append_invariant_result(
                             ledger=ledger,
-                            truth_root=truth_root,
+                            truth_root=execution_truth_root,
                             attempt_id=attempt_id,
                             invoked_day_utc=day_utc,
                             invariant_name="intent_within_per_trade_cap",
@@ -892,7 +1049,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                         )
                         _append_invariant_result(
                             ledger=ledger,
-                            truth_root=truth_root,
+                            truth_root=execution_truth_root,
                             attempt_id=attempt_id,
                             invoked_day_utc=day_utc,
                             invariant_name="submission_allowed",
@@ -911,7 +1068,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                             cap_value = get_per_trade_notional_pct_max_or_fail(engine_id)
                             _append_invariant_result(
                                 ledger=ledger,
-                                truth_root=truth_root,
+                                truth_root=execution_truth_root,
                                 attempt_id=attempt_id,
                                 invoked_day_utc=day_utc,
                                 invariant_name="intent_within_per_trade_cap",
@@ -923,7 +1080,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                         if "lineage_envelope.v1.json" in reason_detail or "LINEAGE_" in reason_detail:
                             _append_invariant_result(
                                 ledger=ledger,
-                                truth_root=truth_root,
+                                truth_root=execution_truth_root,
                                 attempt_id=attempt_id,
                                 invoked_day_utc=day_utc,
                                 invariant_name="lineage_complete",
@@ -934,7 +1091,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                             )
                         _append_invariant_result(
                             ledger=ledger,
-                            truth_root=truth_root,
+                            truth_root=execution_truth_root,
                             attempt_id=attempt_id,
                             invoked_day_utc=day_utc,
                             invariant_name="submission_allowed",
@@ -1015,9 +1172,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"FAIL: INTENT_PROCESSING_FAILED intent_file={intent_path} err={e}", file=sys.stderr)
 
     if failed > 0:
-        finalize_run_ledger(truth_root=truth_root, ledger_payload=ledger, repo_root=REPO_ROOT)
+        finalize_run_ledger(truth_root=execution_truth_root, ledger_payload=ledger, repo_root=REPO_ROOT)
         mark_attempt_state(
-            truth_root=truth_root,
+            truth_root=execution_truth_root,
             invoked_day_utc=day_utc,
             attempt_id=attempt_id,
             context=ledger_context,
@@ -1031,11 +1188,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         return 5
 
-    finalize_run_ledger(truth_root=truth_root, ledger_payload=ledger, repo_root=REPO_ROOT)
+    finalize_run_ledger(truth_root=execution_truth_root, ledger_payload=ledger, repo_root=REPO_ROOT)
     if released > 0:
         if prior_active_attempt_id and prior_active_attempt_id != attempt_id:
             mark_attempt_state(
-                truth_root=truth_root,
+                truth_root=execution_truth_root,
                 invoked_day_utc=day_utc,
                 attempt_id=prior_active_attempt_id,
                 context=ledger_context,
@@ -1043,7 +1200,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 repo_root=REPO_ROOT,
             )
         mark_attempt_state(
-            truth_root=truth_root,
+            truth_root=execution_truth_root,
             invoked_day_utc=day_utc,
             attempt_id=attempt_id,
             context=ledger_context,
@@ -1055,7 +1212,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         _write_latest_active_attempt_pointer(out_day_dir=out_day_dir, day_utc=day_utc, attempt_id=attempt_id)
     else:
         mark_attempt_state(
-            truth_root=truth_root,
+            truth_root=execution_truth_root,
             invoked_day_utc=day_utc,
             attempt_id=attempt_id,
             context=ledger_context,

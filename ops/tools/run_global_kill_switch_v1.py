@@ -8,14 +8,8 @@ Deterministic + audit-grade.
 Fail-closed default: if required inputs are missing or invalid => state=ACTIVE.
 
 Decision authority:
-- Kill switch consumes ONLY gate_stack_verdict_v1 as the decision authority when present.
-- If verdict is missing/invalid, fail-closed EXCEPT for Day-0 bootstrap rule.
-
-Day-0 bootstrap (best-practice, audit-grade):
-- Allow entries only if:
-  (a) required inputs are missing/invalid, AND
-  (b) submissions are absent for the day, AND
-  (c) broker_baseline_snapshot_v1 exists for the day (anchor).
+- Kill switch consumes ONLY authorization_gate_verdict_v1 as the entry-decision authority.
+- If the authorization verdict is missing/invalid, kill switch must fail closed.
 
 Rerun-safety:
 - If artifact exists, treat as authoritative (do not rewrite),
@@ -48,23 +42,23 @@ import subprocess
 from typing import Any, Dict, List, Tuple
 
 from constellation_2.common.runtime_contract_v1 import resolve_release_provenance
+from constellation_2.common.runtime_contract_v1 import resolve_truth_sleeves_root
+from constellation_2.common.trade_submit_readiness_authority_v1 import (
+    resolve_governed_sleeve_truth_bindings,
+)
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1
-from constellation_2.common.truth_root_v1 import resolve_truth_root
+from constellation_2.common.truth_root_v1 import resolve_runtime_root
 
 REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
-TRUTH = resolve_truth_root(repo_root=REPO_ROOT)
+TRUTH = (resolve_runtime_root() / "truth").resolve()
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RISK/global_kill_switch_state.v1.schema.json"
 OUT_ROOT = (TRUTH / "risk_v1" / "kill_switch_v1").resolve()
-PATH_GATE_STACK_VERDICT_V1 = (TRUTH / "reports" / "gate_stack_verdict_v1").resolve()
-
-# Day-0 baseline anchor
-PATH_BASELINE_V1 = (TRUTH / "execution_evidence_v1" / "broker_baseline_snapshot_v1").resolve()
-
 RC_BOOTSTRAP_ALLOW = "C2_DAY0_BOOTSTRAP_ALLOW_ENTRIES_BASELINE_OK_NO_SUBMISSIONS"
 RC_MISSING_INPUTS = "C2_KILL_SWITCH_DEFAULT_ACTIVE_MISSING_INPUTS"
 RC_INPUT_INVALID = "C2_KILL_SWITCH_INPUT_SCHEMA_INVALID"
+ENTRY_ALLOWED_STATUSES = {"PASS", "BOOTSTRAP_PASS"}
 
 
 def _git_sha() -> str:
@@ -110,6 +104,28 @@ def _compute_self_sha(obj: Dict[str, Any], field: str) -> str:
     o2 = dict(obj)
     o2[field] = None
     return _sha256_bytes(_canonical_bytes(o2))
+
+
+def _verify_written_report(*, out_path: Path, expected_day_utc: str, expected_payload: Dict[str, Any]) -> None:
+    if not out_path.exists() or not out_path.is_file():
+        raise SystemExit(f"FAIL: GLOBAL_KILL_SWITCH_VERIFY_MISSING:path={out_path}")
+    obj = _read_json_obj(out_path)
+    if str(obj.get("schema_id") or "").strip() != "global_kill_switch_state":
+        raise SystemExit(f"FAIL: GLOBAL_KILL_SWITCH_VERIFY_SCHEMA:path={out_path}")
+    if str(obj.get("schema_version") or "").strip() != "v1":
+        raise SystemExit(f"FAIL: GLOBAL_KILL_SWITCH_VERIFY_SCHEMA_VERSION:path={out_path}")
+    if str(obj.get("day_utc") or "").strip() != expected_day_utc:
+        raise SystemExit(f"FAIL: GLOBAL_KILL_SWITCH_VERIFY_DAY:path={out_path}")
+    for field in ("state", "allow_entries", "allow_exits", "forced_mode"):
+        if obj.get(field) != expected_payload.get(field):
+            raise SystemExit(f"FAIL: GLOBAL_KILL_SWITCH_VERIFY_FIELD:path={out_path}:field={field}")
+    expected_codes = sorted(str(code).strip() for code in (expected_payload.get("reason_codes") or []) if str(code).strip())
+    actual_codes = sorted(str(code).strip() for code in (obj.get("reason_codes") or []) if str(code).strip())
+    if actual_codes != expected_codes:
+        raise SystemExit(f"FAIL: GLOBAL_KILL_SWITCH_VERIFY_REASON_CODES:path={out_path}")
+    expected_sha = _compute_self_sha(obj, "state_sha256")
+    if str(obj.get("state_sha256") or "").strip() != expected_sha:
+        raise SystemExit(f"FAIL: GLOBAL_KILL_SWITCH_VERIFY_SELF_SHA:path={out_path}")
 
 
 def _bootstrap_invariant_ok(existing: Dict[str, Any]) -> bool:
@@ -190,18 +206,93 @@ def _validate_or_quarantine_existing_report(out_path: Path, expected_day_utc: st
         return
 
 
-def _gate_stack_all_required_pass(gs: Dict[str, Any]) -> bool:
-    gates = gs.get("gates", [])
-    if not isinstance(gates, list):
-        return False
-    for g in gates:
-        if not isinstance(g, dict):
-            return False
-        required = bool(g.get("required"))
-        status = str(g.get("status") or "").strip().upper()
-        if required and status not in ("PASS", "OK"):
-            return False
-    return True
+def _discover_sleeve_kill_switch_paths(day: str) -> Tuple[Path, ...]:
+    paths = set()
+    try:
+        truth_sleeves_root = resolve_truth_sleeves_root().resolve()
+    except Exception:
+        truth_sleeves_root = None
+    if truth_sleeves_root is not None:
+        pattern = f"*/*/risk_v1/kill_switch_v1/{day}/global_kill_switch_state.v1.json"
+        paths.update(path.resolve() for path in truth_sleeves_root.glob(pattern) if path.is_file())
+    try:
+        bindings = resolve_governed_sleeve_truth_bindings(
+            repo_root=REPO_ROOT,
+            environment="PAPER",
+            sleeve_id="PRIMARY",
+        )
+    except Exception:
+        bindings = ()
+    for binding in bindings:
+        truth_root = getattr(binding, "truth_root", None)
+        if truth_root is None:
+            continue
+        paths.add((Path(truth_root).resolve() / "risk_v1" / "kill_switch_v1" / day / "global_kill_switch_state.v1.json").resolve())
+    return tuple(sorted(paths))
+
+
+def _quarantine_conflicting_sleeve_kill_switch(path: Path, existing_sha: str, reason: str) -> None:
+    quarantine_dir = (path.parent / "__quarantine__").resolve()
+    quarantine_dir.mkdir(parents=True, exist_ok=True)
+    base = quarantine_dir / f"{path.name}.INVALID_{existing_sha}.json"
+    target = base
+    counter = 1
+    while target.exists():
+        target = quarantine_dir / f"{path.name}.INVALID_{existing_sha}.{counter}.json"
+        counter += 1
+    path.rename(target)
+    print(
+        "WARN: QUARANTINED_CONTRADICTORY_SLEEVE_KILL_SWITCH "
+        f"path={path} quarantined_path={target} sha256={existing_sha} reason={reason}"
+    )
+
+
+def _reconcile_sleeve_kill_switch_mirrors(day: str, canonical_payload: Dict[str, Any]) -> None:
+    canonical_bytes = _canonical_bytes(canonical_payload)
+    for sleeve_path in _discover_sleeve_kill_switch_paths(day):
+        if not sleeve_path.exists():
+            sleeve_path.parent.mkdir(parents=True, exist_ok=True)
+            sleeve_path.write_bytes(canonical_bytes)
+            print(f"WARN: MATERIALIZED_MISSING_SLEEVE_KILL_SWITCH path={sleeve_path} day_utc={day}")
+            continue
+        try:
+            sleeve_payload = _read_json_obj(sleeve_path)
+            sleeve_bytes = _canonical_bytes(sleeve_payload)
+            sleeve_sha = _sha256_file(sleeve_path)
+        except Exception as exc:  # noqa: BLE001
+            sleeve_sha = _sha256_file(sleeve_path) if sleeve_path.exists() and sleeve_path.is_file() else _sha256_bytes(b"")
+            _quarantine_conflicting_sleeve_kill_switch(
+                sleeve_path,
+                sleeve_sha,
+                f"SLEEVE_KILL_SWITCH_UNREADABLE:{type(exc).__name__}:{exc}",
+            )
+            sleeve_path.parent.mkdir(parents=True, exist_ok=True)
+            sleeve_path.write_bytes(canonical_bytes)
+            print(f"WARN: REFRESHED_SLEEVE_KILL_SWITCH_FROM_CANONICAL path={sleeve_path} day_utc={day}")
+            continue
+        if sleeve_bytes != canonical_bytes:
+            _quarantine_conflicting_sleeve_kill_switch(
+                sleeve_path,
+                sleeve_sha,
+                f"SLEEVE_KILL_SWITCH_AUTHORITY_MISMATCH:day_utc={day}",
+            )
+            sleeve_path.parent.mkdir(parents=True, exist_ok=True)
+            sleeve_path.write_bytes(canonical_bytes)
+            print(f"WARN: REFRESHED_SLEEVE_KILL_SWITCH_FROM_CANONICAL path={sleeve_path} day_utc={day}")
+
+
+def _resolve_primary_scoped_authorization_verdict_path(day: str) -> Path:
+    bindings = resolve_governed_sleeve_truth_bindings(
+        repo_root=REPO_ROOT,
+        environment="PAPER",
+        sleeve_id="PRIMARY",
+    )
+    primary = bindings[0]
+    return (primary.truth_root / "reports" / "authorization_gate_verdict_v1" / day / "authorization_gate_verdict.v1.json").resolve()
+
+
+def _resolve_canonical_authorization_verdict_path(day: str) -> Path:
+    return (TRUTH / "reports" / "authorization_gate_verdict_v1" / day / "authorization_gate_verdict.v1.json").resolve()
 
 
 def _load_inputs(day: str) -> Tuple[List[Dict[str, str]], List[str], Dict[str, Any]]:
@@ -209,37 +300,39 @@ def _load_inputs(day: str) -> Tuple[List[Dict[str, str]], List[str], Dict[str, A
     rc: List[str] = []
     decisions: Dict[str, Any] = {}
 
-    gs_type = "gate_stack_verdict_v1_missing"
-    gs_path = (PATH_GATE_STACK_VERDICT_V1 / day / "gate_stack_verdict.v1.json").resolve()
+    verdict_type = "authorization_gate_verdict_v1_missing"
+    try:
+        scoped_verdict_path = _resolve_primary_scoped_authorization_verdict_path(day)
+    except Exception as e:  # noqa: BLE001
+        scoped_verdict_path = _resolve_canonical_authorization_verdict_path(day)
+        decisions["primary_scoped_authorization_verdict_resolution_error"] = str(e)
+    canonical_verdict_path = _resolve_canonical_authorization_verdict_path(day)
 
-    if gs_path.exists() and gs_path.is_file():
-        input_manifest.append({"type": "gate_stack_verdict_v1", "path": str(gs_path), "sha256": _sha256_file(gs_path)})
+    if scoped_verdict_path.exists() and scoped_verdict_path.is_file():
+        verdict_path = scoped_verdict_path
+        verdict_type = "authorization_gate_verdict_v1_scoped"
+    elif canonical_verdict_path.exists() and canonical_verdict_path.is_file():
+        verdict_path = canonical_verdict_path
+        verdict_type = "authorization_gate_verdict_v1_canonical_fallback"
+        decisions["authorization_verdict_fallback"] = "CANONICAL_TRUTH_ROOT"
+    else:
+        verdict_path = scoped_verdict_path
+
+    if verdict_path.exists() and verdict_path.is_file():
+        input_manifest.append({"type": verdict_type, "path": str(verdict_path), "sha256": _sha256_file(verdict_path)})
         try:
-            gs = _read_json_obj(gs_path)
-            decisions["gate_stack_status"] = str(gs.get("status") or "")
-            decisions["gate_stack_required_all_pass"] = bool(_gate_stack_all_required_pass(gs))
+            verdict = _read_json_obj(verdict_path)
+            if str(verdict.get("schema_id") or "").strip() != "authorization_gate_verdict_v1":
+                raise ValueError(f"AUTHORIZATION_VERDICT_SCHEMA_ID_INVALID:{verdict.get('schema_id')!r}")
+            decisions["authorization_verdict_status"] = str(verdict.get("status") or "").strip().upper()
         except Exception as e:  # noqa: BLE001
             rc.append(RC_INPUT_INVALID)
-            decisions["gate_stack_parse_error"] = str(e)
+            decisions["authorization_verdict_parse_error"] = str(e)
     else:
-        input_manifest.append({"type": gs_type, "path": str(gs_path), "sha256": _sha256_bytes(b"")})
+        input_manifest.append({"type": verdict_type, "path": str(verdict_path), "sha256": _sha256_bytes(b"")})
         rc.append(RC_MISSING_INPUTS)
 
     return (input_manifest, rc, decisions)
-
-
-def _submissions_present(day: str) -> bool:
-    subs_dir = (TRUTH / "execution_evidence_v1" / "submissions" / day).resolve()
-    if subs_dir.exists() and subs_dir.is_dir():
-        for p in subs_dir.iterdir():
-            if p.is_dir():
-                return True
-    return False
-
-
-def _baseline_present(day: str) -> bool:
-    p = (PATH_BASELINE_V1 / day / "broker_baseline_snapshot.v1.json").resolve()
-    return bool(p.exists() and p.is_file())
 
 
 def main() -> int:
@@ -261,23 +354,15 @@ def main() -> int:
     input_manifest, reason_codes, decisions = _load_inputs(day)
 
     missing_or_invalid = (RC_MISSING_INPUTS in reason_codes) or (RC_INPUT_INVALID in reason_codes)
-    subs_present = _submissions_present(day)
-    base_present = _baseline_present(day)
+    verdict_status = str(decisions.get("authorization_verdict_status") or "").strip().upper()
 
-    bootstrap_allow_entries = bool(missing_or_invalid and (not subs_present) and base_present)
-
-    if bootstrap_allow_entries:
+    if missing_or_invalid:
+        state = "ACTIVE"
+    elif verdict_status in ENTRY_ALLOWED_STATUSES:
         state = "INACTIVE"
-        reason_codes.append(RC_BOOTSTRAP_ALLOW)
     else:
-        state = "ACTIVE" if missing_or_invalid else "INACTIVE"
-
-    if (not bootstrap_allow_entries) and (state == "INACTIVE"):
-        st = str(decisions.get("gate_stack_status") or "").strip().upper()
-        all_required_pass = bool(decisions.get("gate_stack_required_all_pass") is True)
-        if not (st == "PASS" and all_required_pass):
-            state = "ACTIVE"
-            reason_codes.append("C2_KILL_SWITCH_ACTIVE")
+        state = "ACTIVE"
+        reason_codes.append("C2_KILL_SWITCH_ACTIVE")
 
     allow_entries = (state == "INACTIVE")
     allow_exits = True
@@ -316,6 +401,12 @@ def main() -> int:
             f"WARN: REFRESHED_STALE_KILL_SWITCH day_utc={day} old_sha256={wr.prior_sha256} "
             f"new_sha256={wr.sha256} quarantine={wr.quarantined_path}"
         )
+
+    # Canonical truth is the only governed kill-switch authority surface. If stale
+    # sleeve-scoped copies exist and contradict it, quarantine them so authority
+    # resolution fails closed only on live contradictions, not on non-authoritative residue.
+    _reconcile_sleeve_kill_switch_mirrors(day, payload)
+    _verify_written_report(out_path=out_path, expected_day_utc=day, expected_payload=payload)
 
     print(_canonical_bytes(payload).decode("utf-8"), end="")
     return 0

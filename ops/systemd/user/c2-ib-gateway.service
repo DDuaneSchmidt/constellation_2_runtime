@@ -1,0 +1,32 @@
+[Unit]
+Description=C2 IB Gateway (IBC managed, PAPER, opens 4002)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=2
+
+[Service]
+Type=simple
+ExitType=cgroup
+WorkingDirectory=/home/node/constellation_2_runtime
+Environment=PYTHONUNBUFFERED=1
+
+# Clean up stale IB launcher residue before starting so ownership converges
+# back under this unit after crashes or older mis-tracked boots.
+ExecStartPre=-/usr/bin/pkill -f /opt/ibc/scripts/displaybannerandlaunch.sh
+ExecStartPre=-/usr/bin/pkill -f /opt/ibc/scripts/ibcstart.sh
+ExecStartPre=-/usr/bin/pkill -f ibcalpha.ibc.IbcGateway
+ExecStartPre=/usr/bin/sleep 2
+
+# IMPORTANT: do NOT pass --user/--pw on the command line (blank overrides config.ini).
+# Use /opt/ibc/config.ini for credentials + paper mode + accept warnings.
+ExecStart=/usr/bin/bash -lc 'set -euo pipefail; exec /opt/ibc/scripts/ibcstart.sh 10 -g --tws-path=/opt/ib/ibgateway --tws-settings-path=/home/node/Jts --ibc-path=/opt/ibc --ibc-ini=/opt/ibc/config.ini --java-path=/home/node/.local/share/i4j_jres/Oda-jK0QgTEmVssfllLP/17.0.16.0.101-zulu_64/bin --mode=paper --on2fatimeout=restart'
+
+Restart=always
+RestartSec=10
+TimeoutStopSec=20
+KillSignal=SIGTERM
+KillMode=control-group
+
+[Install]
+WantedBy=default.target

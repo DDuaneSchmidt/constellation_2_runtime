@@ -30,11 +30,12 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1  # type: ignore
 from constellation_2.phaseD.lib.enforce_operational_day_invariant_v1 import enforce_operational_day_key_invariant_v1
 
 REPO_ROOT = _REPO_ROOT_FROM_FILE
-TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+TRUTH = resolve_canonical_truth_root_bridge_v1(caller="ops/tools/run_operator_gate_verdict_v3.py").resolve()
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/operator_gate_verdict.v3.schema.json"
 

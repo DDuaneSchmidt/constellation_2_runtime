@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+raise SystemExit('LEGACY_ADVISOR_TRADE_TRANSLATION_DISABLED_USE_ADVISORY_KERNEL')
+
 try:
     from constellation_2.common.runtime_base_v1 import advisor_runtime_path, advisor_runtime_root, canonical_tools_root, ensure_repo_root_on_sys_path, source_root_from_file
 except ModuleNotFoundError:  # pragma: no cover - direct script execution bootstrap

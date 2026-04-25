@@ -3,460 +3,120 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Constellation 2.0 — Ops Cockpit UI V2 (Read-Only)</title>
-  <link rel="stylesheet" href="/styles.css" />
+  <title>Aegis</title>
+  <!-- Constellation Operator Shell -->
+  <link rel="stylesheet" href="/aegis.css" />
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">
-      <div class="title">C2 Ops Cockpit UI V2</div>
-      <div class="subtitle">Read-only • Deterministic • Orchestrator V2 aware</div>
-    </div>
-
-    <div class="top-controls">
-      <div class="ctrl">
-        <div class="ctrl-label">Refresh</div>
-        <select id="refreshSelect" class="ctrl-input">
-          <option value="15">15s</option>
-          <option value="60" selected>60s</option>
-          <option value="300">300s</option>
-        </select>
+  <div id="app" class="operator-app">
+    <header class="shell-topbar">
+      <div class="topbar-brand">
+        <div id="brandMark"></div>
+        <div class="brand-copy">
+          <div class="section-eyebrow">Aegis / Constellation</div>
+          <div id="environmentBadge" hidden>UNKNOWN</div>
+          <div id="currentDayValue" hidden>UNKNOWN</div>
+          <div id="refreshValue" hidden>UNKNOWN</div>
+          <div id="brokerIndicator" hidden>UNKNOWN</div>
+          <h1>Aegis Command Shell</h1>
+          <div hidden>Constellation Operator Shell</div>
+          <div class="section-eyebrow">Kernel-Aligned Operator Console</div>
+          <p>One unified operator shell over the current governed runtime, advisory, reconciliation, audit, and reporting surfaces.</p>
+        </div>
       </div>
-
-      <div class="ctrl">
-        <div class="ctrl-label">Day (UTC)</div>
-        <select id="daySelect" class="ctrl-input"></select>
-      </div>
-
-      <div class="ctrl">
-        <div class="ctrl-label">Attempt</div>
-        <select id="attemptSelect" class="ctrl-input"></select>
-      </div>
-
-      <button id="btnLatest" class="btn">Latest</button>
-    </div>
-  </header>
-
-  <nav class="tabs">
-    <button class="tab active" id="tabOperations">Operations</button>
-    <button class="tab" id="tabAdvisor">Advisor</button>
-    <button class="tab" id="tabEngines">Engines</button>
-    <button class="tab" id="tabPortfolio">Portfolio</button>
-    <button class="tab" id="tabPositions">Positions</button>
-    <button class="tab" id="tabHistory">History</button>
-    <button class="tab" id="tabTechnical">Advanced</button>
-
-    <div class="tabs-right">
-      <div id="lastRefresh" class="mono tiny muted"></div>
-      <div id="whatChangedBadge" class="badge badge-warn hidden"></div>
-    </div>
-  </nav>
-
-  <main class="main">
-    <!-- OPERATIONS -->
-    <section id="viewOperations" class="view">
-      <div class="cockpit-shell">
-        <div class="cockpit-nav-bar">
-          <button class="cockpit-nav-pill active" id="cockpitViewHome" type="button">Home</button>
-          <button class="cockpit-nav-pill" id="cockpitViewCockpit" type="button">Cockpit</button>
-          <button class="cockpit-nav-pill" id="cockpitViewDiagnostics" type="button">Diagnostics</button>
-          <button class="cockpit-nav-pill" id="cockpitViewRepair" type="button">Repair</button>
-          <button class="cockpit-nav-pill" id="cockpitViewGovernance" type="button">Governance</button>
+      <div class="topbar-controls">
+        <div class="topbar-search">
+          <button id="commandPaletteButton" class="primary-button" type="button">Open Command Palette</button>
+          <button id="refreshButton" class="ghost-button" type="button">Refresh</button>
         </div>
-
-        <div class="cockpit-section cockpit-primary-grid" data-cockpit-view="home">
-          <div class="cockpit-hero cockpit-primary-card" id="operatorHomeStatusCard">
-            <div class="card-head">
-              <div>
-                <div class="card-title">Governed Operator Home</div>
-                <div class="mono tiny muted">Single-entry Batch 3 surface over canonical Batch 0/1/2 outputs.</div>
-              </div>
-              <div id="operatorHomeMeta" class="mono tiny muted"></div>
-            </div>
-            <div id="operatorHomeHeadline"></div>
+        <div class="topbar-stats">
+          <div class="topbar-stat">
+            <div class="topbar-stat-label">Effective Config</div>
+            <div class="topbar-stat-value" id="topConfigVersion">backend gap</div>
           </div>
-          <div class="cockpit-panel cockpit-primary-card" id="operatorTrustCard">
-            <div class="card-head">
-              <div class="card-title">Presentation Trust Gate</div>
-              <div id="operatorTrustMeta" class="mono tiny muted"></div>
-            </div>
-            <div id="operatorTrustBody"></div>
+          <div class="topbar-stat">
+            <div class="topbar-stat-label">Runtime Mode</div>
+            <div class="topbar-stat-value" id="topRuntimeMode">UNKNOWN</div>
           </div>
-        </div>
-
-        <div class="cockpit-section cockpit-ops-grid" data-cockpit-view="home">
-          <div class="cockpit-panel cockpit-compact-panel cockpit-ops-grid-span-2">
-            <div class="card-head">
-              <div class="card-title">Governed Home Panels</div>
-              <div id="operatorPanelsMeta" class="mono tiny muted"></div>
-            </div>
-            <div id="operatorHomePanels"></div>
+          <div class="topbar-stat">
+            <div class="topbar-stat-label">Readiness</div>
+            <div class="topbar-stat-value" id="topReadiness">UNKNOWN</div>
           </div>
-          <div class="cockpit-panel cockpit-compact-panel">
-            <div class="card-head">
-              <div class="card-title">Governed Navigation</div>
-              <div class="mono tiny muted">Registry-backed destinations only.</div>
-            </div>
-            <div id="operatorNavigationBody"></div>
+          <div class="topbar-stat">
+            <div class="topbar-stat-label">Portfolio Value</div>
+            <div class="topbar-stat-value" id="topPortfolioValue">backend gap</div>
           </div>
-          <div class="cockpit-panel cockpit-compact-panel">
-            <div class="card-head">
-              <div class="card-title">Governed Query</div>
-              <div class="mono tiny muted">Policy-bound query classes only.</div>
-            </div>
-            <div class="row" style="margin-bottom:8px;">
-              <input id="operatorQueryInput" class="ctrl-input" type="text" placeholder="e.g. why blocked today" style="flex:1;" />
-              <button id="btnOperatorQuery" class="btn">Run Query</button>
-            </div>
-            <div id="operatorQueryStatus" class="mono tiny muted" style="margin-bottom:8px;"></div>
-            <div id="operatorQueryBody"></div>
-          </div>
-        </div>
-
-        <div class="cockpit-section cockpit-primary-grid" data-cockpit-view="cockpit">
-          <div class="cockpit-hero trading-day-outcome-card cockpit-primary-card" id="tradingDayOutcomeCard"></div>
-          <div class="cockpit-panel signal-activity-card cockpit-primary-card" id="signalActivityCard"></div>
-        </div>
-
-        <div class="cockpit-section cockpit-ops-grid" data-cockpit-view="cockpit">
-          <div class="cockpit-panel cockpit-compact-panel" id="executionHealthCard">
-            <div class="card-head">
-              <div class="card-title">Execution Path Health</div>
-              <div id="executionHealthMeta" class="mono tiny muted"></div>
-            </div>
-            <div id="executionHealthBody"></div>
-          </div>
-          <div class="cockpit-panel cockpit-compact-panel" id="systemMonitoringCard">
-            <div class="card-head">
-              <div class="card-title">System Monitoring</div>
-              <div id="systemMonitoringMeta" class="mono tiny muted"></div>
-            </div>
-            <div id="systemMonitoringBody"></div>
-          </div>
-          <div class="cockpit-panel cockpit-compact-panel cockpit-ops-grid-span-2" id="governedRiskCard">
-            <div class="card-head">
-              <div>
-                <div class="card-title">Governed Risk / Authority</div>
-                <div class="mono tiny muted">Authoritative gate and authority surfaces promoted from diagnostics for operator scanning.</div>
-              </div>
-              <div id="governedRiskMeta" class="mono tiny muted"></div>
-            </div>
-            <div id="governedRiskBody"></div>
-          </div>
-          <details class="cockpit-panel cockpit-compact-panel cockpit-collapsible" id="opsPortfolioSummaryCard">
-            <div class="card-head">
-              <div class="card-title">Portfolio Summary</div>
-              <div id="opsPortfolioSummaryMeta" class="mono tiny muted"></div>
-            </div>
-            <summary>Portfolio Summary</summary>
-            <div id="opsPortfolioSummaryBody"></div>
-          </details>
-          <div class="cockpit-panel cockpit-compact-panel" id="platformReadinessSummaryCard">
-            <div class="card-head">
-              <div class="card-title">Structural Readiness Summary</div>
-              <div id="platformReadinessSummaryMeta" class="mono tiny muted"></div>
-            </div>
-            <div id="platformReadinessSummaryBody"></div>
-          </div>
-        </div>
-
-        <div class="cockpit-section hidden" data-cockpit-view="diagnostics">
-          <div class="cockpit-panel" id="diagnosticsOverviewCard">
-            <div class="card-head">
-              <div class="card-title">Diagnostics Overview</div>
-              <div id="diagnosticsOverviewMeta" class="mono tiny muted"></div>
-            </div>
-            <div id="diagnosticsOverviewBody"></div>
-          </div>
-        </div>
-
-        <div class="cockpit-section hidden" data-cockpit-view="diagnostics">
-          <div class="cockpit-subtle-panel">
-            <div class="card-head">
-              <div class="card-title">Readiness Details</div>
-              <div class="mono tiny muted">Operator-facing diagnostic surfaces</div>
-            </div>
-            <div class="tile-grid" id="tileGrid"></div>
-          </div>
-        </div>
-
-        <div class="cockpit-section hidden" data-cockpit-view="diagnostics">
-          <div class="cockpit-panel" id="lowLevelDiagnosticsCard">
-            <div class="card-head">
-              <div>
-                <div class="card-title">Low-Level Diagnostics</div>
-                <div class="mono tiny muted">For debugging and audit use. Normal operators usually do not need to act on this section.</div>
-              </div>
-              <div id="techSummary" class="mono tiny muted"></div>
-            </div>
-            <div id="techPaths" class="mono tiny"></div>
-          </div>
-        </div>
-
-        <div class="cockpit-section hidden" data-cockpit-view="diagnostics">
-          <div class="changed cockpit-subtle-panel">
-            <div class="card-head">
-              <div class="card-title">What Changed</div>
-              <div class="mono tiny muted" id="whatChangedHash"></div>
-            </div>
-            <div id="whatChangedList" class="changed-list"></div>
-          </div>
-        </div>
-
-        <div class="cockpit-section hidden" data-cockpit-view="governance">
-          <div class="cockpit-panel" id="platformReadinessCard">
-            <div class="card-head">
-              <div class="card-title">Structural Readiness / Diagnostics</div>
-              <div id="platformReadinessMeta" class="mono tiny muted"></div>
-            </div>
-            <div id="platformHeroRow" class="metrics-row"></div>
-            <div id="platformSummaryRow" class="mono tiny muted" style="margin-top:8px;"></div>
-            <div id="platformReadinessHistory" class="cockpit-chart" style="margin-top:10px;"></div>
-          </div>
-        </div>
-
-        <div class="cockpit-section hidden" data-cockpit-view="repair">
-          <div class="cockpit-panel" id="repairSignalsCard">
-            <div class="card-head">
-              <div class="card-title">Self-Heal / Repair Signals</div>
-              <div id="repairSignalsMeta" class="mono tiny muted"></div>
-            </div>
-            <div id="repairSignalsBody"></div>
-          </div>
-        </div>
-
-        <div class="cockpit-section" data-cockpit-view="cockpit">
-          <div class="ops-row2">
-            <div class="ops-left-col">
-              <div class="strip cockpit-subtle-panel" id="sleeveStrip"></div>
-              <div class="cockpit-subtle-panel bond-sleeve-card" id="bondSleeveCard"></div>
-            </div>
-            <div class="funnel cockpit-subtle-panel">
-              <div class="card-head">
-                <div class="card-title">Trade Flow Funnel</div>
-              </div>
-              <div id="funnelExplain" class="mono tiny muted" style="margin-bottom:8px;"></div>
-              <div id="funnelRow" class="funnel-row"></div>
-              <div id="blockedRow" class="blocked-row"></div>
-              <div id="funnelDrilldown" style="margin-top:8px;"></div>
-            </div>
+          <div class="topbar-stat">
+            <div class="topbar-stat-label">Notifications</div>
+            <div class="topbar-stat-value" id="topNotificationCount">0</div>
           </div>
         </div>
       </div>
-    </section>
+    </header>
 
-    <!-- ADVISOR -->
-    <section id="viewAdvisor" class="view hidden">
-      <div class="cockpit-shell">
-        <div class="cockpit-section">
-          <div class="cockpit-hero cockpit-primary-card" id="advisorDecisionShell">
-            <div class="card-head">
-              <div>
-                <div class="card-title">Operational Decision Shell</div>
-                <div class="mono tiny muted">Advisor panel is read-only and artifact-backed</div>
-              </div>
-              <div class="mono tiny muted" id="advisorShellMode"></div>
-            </div>
-            <div class="cockpit-kv-grid">
-              <div>
-                <div class="mono tiny muted">System State</div>
-                <div id="advisorSystemState" class="tile-state state-unknown">UNKNOWN</div>
-              </div>
-              <div>
-                <div class="mono tiny muted">Allowed Action</div>
-                <div id="advisorAllowedAction" class="mono">NO_OPERATOR_ACTION</div>
-              </div>
-              <div>
-                <div class="mono tiny muted">Why</div>
-                <div id="advisorWhy" class="mono tiny">No advisor artifacts found</div>
-              </div>
-              <div>
-                <div class="mono tiny muted">Last Validated</div>
-                <div id="advisorLastValidated" class="mono">n/a</div>
-              </div>
-              <div>
-                <div class="mono tiny muted">Changed Since Last Run</div>
-                <div id="advisorChangedSinceLastRun" class="mono">initial load</div>
-              </div>
-            </div>
-          </div>
-        </div>
+    <div class="shell-frame">
+      <aside class="shell-leftnav">
+        <div id="statusStrip" hidden>Kernel Status</div>
+        <div id="alertTray" hidden>Alert Tray</div>
+        <div class="section-eyebrow">Kernel Workspaces</div>
+        <div class="nav-section-title">Domains</div>
+        <nav id="workspaceNav" class="nav-list"></nav>
+        <div class="nav-section-title" style="margin-top: 22px;">Kernel Status</div>
+        <div id="kernelStatusRail" class="kernel-status-rail"></div>
+      </aside>
 
-        <div class="cockpit-section">
-          <div class="cockpit-panel" id="advisorEvidenceSpine">
-            <div class="card-head">
-              <div>
-                <div class="card-title">Evidence Spine</div>
-                <div class="mono tiny muted">Top-level evidence visibility for execution, authority, replay, trace, and diagnostics.</div>
-              </div>
-            </div>
-            <div class="cockpit-kv-grid">
-              <div id="advisorEvidenceExecutionTruth"></div>
-              <div id="advisorEvidenceGateAuthority"></div>
-              <div id="advisorEvidencePublicationPromotion"></div>
-              <div id="advisorEvidenceReplayIntegrity"></div>
-              <div id="advisorEvidenceTraceIntegrity"></div>
-              <div id="advisorEvidenceDiagnostics"></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="cockpit-section">
-          <div class="cockpit-alert cockpit-info" id="advisorEmptyState">
-            <strong>No advisor artifacts found</strong><br />
-            Advisor panel is read-only and artifact-backed
-          </div>
-        </div>
-
-        <div class="cockpit-section cockpit-ops-grid">
-          <div class="cockpit-panel cockpit-compact-panel">
-            <div class="card-head">
-              <div class="card-title">Decision Plan</div>
-              <div class="mono tiny muted">Read-only summary</div>
-            </div>
-            <div id="advisorDecisionPlanSummary"></div>
-          </div>
-          <div class="cockpit-panel cockpit-compact-panel">
-            <div class="card-head">
-              <div class="card-title">Official Recommendation Set</div>
-              <div class="mono tiny muted">Read-only summary</div>
-            </div>
-            <div id="advisorOfficialRecommendationSetSummary"></div>
-          </div>
-          <div class="cockpit-panel cockpit-compact-panel">
-            <div class="card-head">
-              <div class="card-title">Promotion Candidate</div>
-              <div class="mono tiny muted">Read-only summary</div>
-            </div>
-            <div id="advisorPromotionCandidateSummary"></div>
-          </div>
-          <div class="cockpit-panel cockpit-compact-panel">
-            <div class="card-head">
-              <div class="card-title">Publication Gate Result</div>
-              <div class="mono tiny muted">Read-only summary</div>
-            </div>
-            <div id="advisorPublicationGateResultSummary"></div>
-          </div>
-          <div class="cockpit-panel cockpit-compact-panel cockpit-ops-grid-span-2">
-            <div class="card-head">
-              <div class="card-title">Authority Registry Summary</div>
-              <div class="mono tiny muted">Read-only summary</div>
-            </div>
-            <div id="advisorAuthorityRegistrySummary"></div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ENGINES -->
-    <section id="viewEngines" class="view hidden">
-      <div class="engine-grid" id="engineGrid"></div>
-    </section>
-
-    <!-- PORTFOLIO -->
-    <section id="viewPortfolio" class="view hidden">
-      <div class="portfolio-top card">
-        <div class="card-head">
-          <div class="card-title">Portfolio Summary</div>
-          <div id="portfolioAsOf" class="mono tiny muted"></div>
-        </div>
-        <div class="metrics-row" id="portfolioMetrics"></div>
-        <div id="portfolioNote" class="mono tiny muted" style="margin-top:8px;"></div>
-      </div>
-
-      <div class="grid2" style="margin-top:12px;">
-        <div class="card">
-          <div class="card-head"><div class="card-title">Equity Curve (NAV)</div></div>
-          <div class="row">
-            <div class="ctrl">
-              <div class="ctrl-label">Days</div>
-              <input id="navDays" type="number" min="5" max="365" value="60" class="ctrl-input" />
-            </div>
-            <button id="btnReloadCharts" class="btn">Reload</button>
-          </div>
-          <div id="chartDailyNav"></div>
-        </div>
-        <div class="card">
-          <div class="card-head"><div class="card-title">Exposure / PnL (available truth only)</div></div>
-          <div id="chartExposureStub" class="mono small muted">Charts shown only when data is available via canonical truth.</div>
-        </div>
-      </div>
-    </section>
-
-    <!-- POSITIONS -->
-    <section id="viewPositions" class="view hidden">
-      <div class="card">
-        <div class="card-head">
-          <div class="card-title">Positions & Exposure (Selected Day)</div>
-          <div id="positionsAsOf" class="mono tiny muted"></div>
-        </div>
-        <div id="positionsExplain" class="mono tiny muted" style="margin-bottom:8px;"></div>
-        <div id="positionsLifecycleBanner" class="mono tiny muted" style="margin-bottom:8px;"></div>
-        <div id="positionsSummary" class="metrics-row"></div>
-      </div>
-
-      <div class="card" style="margin-top:12px;">
-        <div class="card-head">
-          <div class="card-title">Pending Orders (Submitted, Unfilled)</div>
-          <div id="pendingOrdersMeta" class="mono tiny muted"></div>
-        </div>
-        <div id="pendingOrdersExplain" class="mono tiny muted" style="margin-bottom:8px;"></div>
-        <div id="pendingOrdersTable" class="mono tiny"></div>
-      </div>
-
-      <div class="grid2" style="margin-top:12px;">
-        <div class="card">
-          <div class="card-head"><div class="card-title">Open Positions</div></div>
-          <div id="positionsTable" class="mono tiny"></div>
-        </div>
-        <div class="card">
-          <div class="card-head"><div class="card-title">Exposure by Engine</div></div>
-          <div id="exposureSummary" class="mono tiny muted"></div>
-          <div id="exposureBars" class="mono tiny" style="margin-top:8px;"></div>
-        </div>
-      </div>
-    </section>
-
-    <!-- HISTORY -->
-    <section id="viewHistory" class="view hidden">
-      <div class="card">
-        <div class="card-head"><div class="card-title">Attempts (Day)</div></div>
-        <div id="historyExplain" class="mono tiny muted" style="margin-bottom:8px;"></div>
-        <div id="historyAttempts" class="mono small"></div>
-      </div>
-    </section>
-
-    <!-- TECHNICAL -->
-    <section id="viewTechnical" class="view hidden">
-      <div class="card">
-        <div class="card-head">
+      <main class="shell-main">
+        <div class="page-toolbar">
           <div>
-            <div class="card-title">Low-Level Diagnostics (Developer / Audit)</div>
-            <div class="mono tiny muted">These diagnostics are primarily for debugging and system audit. Normal operators usually do not need to take action here.</div>
+            <div id="workspaceEyebrow" class="section-eyebrow">Aegis Command</div>
+            <h2 id="workspaceTitle" class="page-title">Loading…</h2>
+            <div id="workspaceMeta" class="page-meta"></div>
           </div>
+          <div class="page-actions"></div>
         </div>
-        <div id="techSummaryStandalone" class="mono small"></div>
-        <div id="techPathsStandalone" class="mono tiny muted" style="margin-top:10px;"></div>
-      </div>
-    </section>
+        <section id="workspaceContent" class="page-content"></section>
+      </main>
 
-    <!-- Evidence modal (raw JSON only via modal) -->
-    <div id="evidenceModal" class="modal hidden">
-      <div id="evidenceBackdrop" class="modal-backdrop"></div>
-      <div class="modal-card">
-        <div class="modal-head">
-          <div>
-            <div id="evidenceTitle" class="mono"></div>
-            <div id="evidencePath" class="mono tiny muted"></div>
+      <aside class="shell-context">
+        <div id="contextRailContent" class="context-scroll"></div>
+        <section id="detailDrawer" class="drawer-panel">
+          <div class="drawer-header">
+            <div>
+              <div class="drawer-eyebrow">Evidence Drawer</div>
+              <h3 id="drawerTitle" class="drawer-title">Select evidence</h3>
+            </div>
+            <button id="drawerClose" class="icon-button" type="button">Close</button>
           </div>
-          <button id="btnEvidenceClose" class="btn btn-mini">Close</button>
-        </div>
-        <div id="evidenceErrors" class="mono tiny"></div>
-        <pre id="evidenceBody" class="modal-body"></pre>
-      </div>
+          <div id="drawerMeta" class="drawer-meta">Artifact content and provenance appear here.</div>
+          <pre id="drawerContent" class="drawer-content"></pre>
+        </section>
+      </aside>
     </div>
-  </main>
 
-  <script src="/app.js"></script>
+    <footer class="bottom-status">
+      <div><span>Effective Config</span><strong id="bottomConfigVersion">backend gap</strong></div>
+      <div><span>Data Freshness</span><strong id="bottomFreshness">n/a</strong></div>
+      <div><span>Readiness</span><strong id="bottomReadiness">UNKNOWN</strong></div>
+      <div><span>Runtime Environment</span><strong id="bottomEnvironment">UNKNOWN</strong></div>
+      <div><span>Session</span><strong id="bottomSession">UNKNOWN</strong></div>
+      <div><span>Top Alert</span><strong id="bottomAlert">No active alert</strong></div>
+    </footer>
+  </div>
+
+  <div id="commandPalette" class="command-palette" hidden>
+    <div class="palette-panel">
+      <div class="palette-header">
+        <div>
+          <div class="section-eyebrow">Command Palette</div>
+          <h3>Navigate Aegis</h3>
+        </div>
+        <button class="ghost-button" type="button" data-command-palette-close>Close</button>
+      </div>
+      <input id="commandPaletteInput" class="palette-input" type="text" placeholder="Search routes and next steps…" />
+      <div id="commandPaletteResults" class="palette-results"></div>
+    </div>
+  </div>
+
+  <script type="module" src="/app.js"></script>
 </body>
 </html>

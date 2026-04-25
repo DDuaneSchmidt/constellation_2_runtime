@@ -152,19 +152,23 @@ RESULT_GROUPS: dict[str, tuple[str, tuple[SuiteConfig, ...]]] = {
         WORKFLOW_RESTART_RESULT_SCHEMA,
         (
             SuiteConfig(
-                suite_id="bond_restart_recovery_v1",
-                subsystem_name="bond",
-                test_paths=("constellation_2/common/tests/test_bond_restart_recovery_v1.py",),
+                suite_id="target_day_attempt_history_v1",
+                subsystem_name="operator_session_replay",
+                test_paths=(
+                    "constellation_2/common/tests/test_session_authority_v1.py::test_build_and_admission_attempt_history_is_immutable_and_day_file_tracks_latest",
+                ),
             ),
             SuiteConfig(
-                suite_id="session_readiness_repair_v1",
+                suite_id="runtime_replay_day_v1",
                 subsystem_name="operator_session_replay",
-                test_paths=("constellation_2/common/tests/test_session_readiness_repair_v1.py",),
+                test_paths=("constellation_2/common/tests/test_runtime_replay_day_v1.py",),
             ),
             SuiteConfig(
-                suite_id="system_restart_replay_v1",
+                suite_id="paper_day_attempt_history_v1",
                 subsystem_name="operator_session_replay",
-                test_paths=("constellation_2/common/tests/test_system_restart_replay_v1.py",),
+                test_paths=(
+                    "constellation_2/common/tests/test_paper_day_control_plane_v1.py::test_paper_day_control_plane_attempt_history_is_immutable_and_day_file_tracks_latest",
+                ),
             ),
         ),
     ),
@@ -245,7 +249,7 @@ def _run_suite(config: SuiteConfig) -> dict[str, Any]:
         "subsystem_name": config.subsystem_name,
         "executed_at": executed_at,
         "scenario_ids": scenario_ids,
-        "test_refs": [str((REPO_ROOT / path).resolve()) for path in config.test_paths],
+        "test_refs": [str((REPO_ROOT / path.split("::", 1)[0]).resolve()) for path in config.test_paths],
         "status": status,
         "pass_count": pass_count,
         "fail_count": fail_count,

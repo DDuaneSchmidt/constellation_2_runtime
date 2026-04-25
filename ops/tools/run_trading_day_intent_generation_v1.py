@@ -25,6 +25,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     producer_block_v1,
     read_json_object_v1,
     resolve_fact_plane_truth_root_v1,
+    resolve_paper_intent_truth_root_v1,
 )
 from constellation_2.common.paper_session_path_alignment_v1 import resolve_trading_day_intent_generation_path
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
@@ -39,6 +40,10 @@ NO_INTENTS_MARKER_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVIT
 NO_INTENTS_MARKER_TOOL = (REPO_ROOT / "ops/tools/run_no_intents_day_marker_v1.py").resolve()
 SIMULATOR_ENGINE_ID = "C2_INTENT_SIMULATOR_V1"
 PAPER_MODE = "PAPER"
+DEFENSIVE_TAIL_ENGINE_ID = "C2_DEFENSIVE_TAIL_V1"
+DEFENSIVE_TAIL_INPUT_BRIDGE_TOOL = (
+    REPO_ROOT / "constellation_2/phaseJ/tools/build_defensive_tail_required_inputs_day_v1.py"
+).resolve()
 
 
 @dataclass(frozen=True)
@@ -94,6 +99,8 @@ def _classify_producer_nonzero_reason(*, stdout: str, stderr: str) -> str:
             lowered = stripped.lower()
             if "missing market data manifest:" in lowered:
                 return "MARKET_DATA_MANIFEST_MISSING"
+            if "missing required source" in lowered:
+                return "MISSING_REQUIRED_INPUTS"
     return "PRODUCER_NONZERO_RC"
 
 
@@ -175,6 +182,17 @@ def _producer_cmd(*, spec: ProducerSpec, day_utc: str, truth_root: Path) -> List
     ]
 
 
+def _defensive_tail_inputs_cmd(*, day_utc: str) -> List[str]:
+    return [
+        sys.executable,
+        str(DEFENSIVE_TAIL_INPUT_BRIDGE_TOOL),
+        "--day_utc",
+        day_utc,
+        "--symbol",
+        "SPY",
+    ]
+
+
 def _producer_result(
     *,
     logical_name: str,
@@ -211,16 +229,20 @@ def main(argv: List[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     day_utc = parse_day_utc_v1(args.day_utc)
-    truth_root = resolve_fact_plane_truth_root_v1(args.truth_root)
+    decision_truth_root = resolve_fact_plane_truth_root_v1(args.truth_root)
+    intent_truth_root = resolve_paper_intent_truth_root_v1(
+        truth_root=decision_truth_root,
+        repo_root=REPO_ROOT,
+    )
     produced_at_utc = now_utc_iso_v1()
     generation_run_id = f"trading_day_intent_generation:{day_utc}:{produced_at_utc}"
-    output_path = resolve_trading_day_intent_generation_path(truth_root=truth_root, day_utc=day_utc)
+    output_path = resolve_trading_day_intent_generation_path(truth_root=decision_truth_root, day_utc=day_utc)
     registry_payload, registry_path, registry_sha = _load_registry()
     producer_specs, skipped_active_engines = _load_required_producer_specs()
 
-    day_dir = _intents_dir(truth_root=truth_root, day_utc=day_utc)
-    marker_path = _marker_path(truth_root=truth_root, day_utc=day_utc)
-    existing_intent_paths = [str(path) for path in collect_intent_files_v1(truth_root=truth_root, day_utc=day_utc)]
+    day_dir = _intents_dir(truth_root=intent_truth_root, day_utc=day_utc)
+    marker_path = _marker_path(truth_root=intent_truth_root, day_utc=day_utc)
+    existing_intent_paths = [str(path) for path in collect_intent_files_v1(truth_root=intent_truth_root, day_utc=day_utc)]
     marker_exists = marker_path.exists() and marker_path.is_file()
     producer_results: List[Dict[str, Any]] = []
     blocking_codes: set[str] = set()
@@ -306,9 +328,37 @@ def main(argv: List[str] | None = None) -> int:
                 )
                 continue
 
-            before = {str(path) for path in collect_intent_files_v1(truth_root=truth_root, day_utc=day_utc)}
-            result = _run(_producer_cmd(spec=spec, day_utc=day_utc, truth_root=truth_root), truth_root=truth_root)
-            after = {str(path) for path in collect_intent_files_v1(truth_root=truth_root, day_utc=day_utc)}
+            if spec.engine_id == DEFENSIVE_TAIL_ENGINE_ID:
+                prep_result = _run(_defensive_tail_inputs_cmd(day_utc=day_utc), truth_root=intent_truth_root)
+                if prep_result["return_code"] != 0:
+                    reason_code = _classify_producer_nonzero_reason(
+                        stdout=prep_result["stdout"],
+                        stderr=prep_result["stderr"],
+                    )
+                    blocking_codes.add(reason_code)
+                    if not first_blocker_code:
+                        first_blocker_code = reason_code
+                        first_blocker_artifact_path = str(DEFENSIVE_TAIL_INPUT_BRIDGE_TOOL)
+                    producer_results.append(
+                        _producer_result(
+                            logical_name=spec.engine_id,
+                            engine_id=spec.engine_id,
+                            script_path=spec.script_path,
+                            script_sha256=script_sha,
+                            registry_runner_sha256=spec.registry_runner_sha256,
+                            status="BLOCKED_BY_DEFECT",
+                            return_code=prep_result["return_code"],
+                            reason_codes=[reason_code],
+                            stdout=prep_result["stdout"],
+                            stderr=prep_result["stderr"],
+                            output_paths=[],
+                        )
+                    )
+                    continue
+
+            before = {str(path) for path in collect_intent_files_v1(truth_root=intent_truth_root, day_utc=day_utc)}
+            result = _run(_producer_cmd(spec=spec, day_utc=day_utc, truth_root=intent_truth_root), truth_root=intent_truth_root)
+            after = {str(path) for path in collect_intent_files_v1(truth_root=intent_truth_root, day_utc=day_utc)}
             new_outputs = sorted(after - before)
             if result["return_code"] != 0:
                 reason_code = _classify_producer_nonzero_reason(
@@ -409,7 +459,7 @@ def main(argv: List[str] | None = None) -> int:
                     )
                 )
 
-        existing_intent_paths = [str(path) for path in collect_intent_files_v1(truth_root=truth_root, day_utc=day_utc)]
+        existing_intent_paths = [str(path) for path in collect_intent_files_v1(truth_root=intent_truth_root, day_utc=day_utc)]
         marker_exists = marker_path.exists() and marker_path.is_file()
 
         if marker_exists and existing_intent_paths:
@@ -430,9 +480,9 @@ def main(argv: List[str] | None = None) -> int:
                     "--day_utc",
                     day_utc,
                     "--truth_root",
-                    str(truth_root),
+                    str(intent_truth_root),
                 ],
-                truth_root=truth_root,
+                truth_root=intent_truth_root,
             )
             marker_exists = marker_path.exists() and marker_path.is_file()
             if marker_result["return_code"] != 0 or not marker_exists:
@@ -482,7 +532,7 @@ def main(argv: List[str] | None = None) -> int:
             final_status = "BLOCKED_BY_DEFECT"
 
     marker_exists = marker_path.exists() and marker_path.is_file()
-    existing_intent_paths = [str(path) for path in collect_intent_files_v1(truth_root=truth_root, day_utc=day_utc)]
+    existing_intent_paths = [str(path) for path in collect_intent_files_v1(truth_root=intent_truth_root, day_utc=day_utc)]
     if not first_blocker_code and final_status.startswith("BLOCKED"):
         first_blocker_code = _first_nonempty(sorted(blocking_codes))
     if not first_blocker_artifact_path and final_status == "VALID_ZERO":
@@ -496,7 +546,7 @@ def main(argv: List[str] | None = None) -> int:
         "generation_run_id": generation_run_id,
         "produced_at_utc": produced_at_utc,
         "producer": producer_block_v1(module="ops/tools/run_trading_day_intent_generation_v1.py"),
-        "truth_root": str(truth_root),
+        "truth_root": str(decision_truth_root),
         "active_engine_registry_path": str(registry_path),
         "active_engine_registry_sha256": registry_sha,
         "producer_topology": producer_topology,

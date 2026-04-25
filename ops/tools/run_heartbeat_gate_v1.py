@@ -39,13 +39,13 @@ if str(REPO_ROOT) not in sys.path:
 from constellation_2.common.paper_session_fact_plane_v1 import resolve_authoritative_repo_root_v1
 from constellation_2.common.runtime_contract_v1 import (
     require_truth_root_under_contract,
-    resolve_canonical_truth_root,
     resolve_release_provenance,
 )
+from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
 from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1
 
 try:
-    DEFAULT_TRUTH_ROOT = resolve_canonical_truth_root()
+    DEFAULT_TRUTH_ROOT = resolve_canonical_truth_root_bridge_v1(caller="ops/tools/run_heartbeat_gate_v1.py")
 except Exception:
     DEFAULT_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
 

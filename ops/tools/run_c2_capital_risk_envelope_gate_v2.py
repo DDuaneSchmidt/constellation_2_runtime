@@ -21,11 +21,11 @@ import argparse
 import hashlib
 import json
 import sys
+import subprocess
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
 
 # Repo-root import bootstrap (required when executed from ops/tools).
 _THIS_FILE = Path(__file__).resolve()
@@ -38,9 +38,24 @@ if not (_REPO_ROOT_FROM_FILE / "constellation_2").exists():
 if not (_REPO_ROOT_FROM_FILE / "governance").exists():
     raise SystemExit(f"FATAL: repo_root_missing_governance: derived={_REPO_ROOT_FROM_FILE}")
 
+from constellation_2.common.constitutional_runtime_v1 import (
+    CLOSURE_STATE_BLOCKED,
+    CLOSURE_STATE_COMPLETE,
+    CLOSURE_STATE_DEGRADED,
+    FINALITY_PROVISIONAL,
+    assert_constitutional_writer_allowed_v1,
+    build_artifact_dependency_declaration_v1,
+    build_governed_artifact_lineage_v1,
+    build_machine_blocker_envelope_v1,
+    validate_governed_artifact_payload_v1,
+)
+from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
+
 
 REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
-DEFAULT_TRUTH_ROOT = (REPO_ROOT / "constellation_2/runtime/truth").resolve()
+DEFAULT_TRUTH_ROOT = resolve_canonical_truth_root_bridge_v1(
+    caller="ops/tools/run_c2_capital_risk_envelope_gate_v2.py"
+).resolve()
 
 SCHEMA_OUT = (REPO_ROOT / "governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v2.schema.json").resolve()
 SCHEMA_ALLOC_SUMMARY = "governance/04_DATA/SCHEMAS/C2/ALLOCATION/allocation_summary.v1.schema.json"
@@ -54,6 +69,7 @@ CAP_RISK_CONTRACT_V2 = (REPO_ROOT / "governance/05_CONTRACTS/C2/capital_risk_env
 BASE_ENVELOPE_PCT = Decimal("0.020000")
 
 DAY0_RC_ALLOC_ALLOWED = "DAY0_BOOTSTRAP_ALLOC_SUMMARY_MISSING_ALLOWED"
+RC_AUTHZ_MISSING_EXPOSURE_BUDGET_NAV_TOTAL_CENTS = "AUTHZ_MISSING_EXPOSURE_BUDGET_NAV_TOTAL_CENTS"
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -102,6 +118,190 @@ def _write_immutable(path: Path, data: bytes) -> str:
 
     path.write_bytes(data)
     return cand_sha
+
+
+def _write_bytes_replace(path: Path, data: bytes) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    if tmp.exists():
+        tmp.unlink()
+    tmp.write_bytes(data)
+    tmp.replace(path)
+    return _sha256_bytes(path.read_bytes())
+
+
+def _positions_manifest_entry(obj: Dict[str, Any]) -> Dict[str, Any]:
+    raw = obj.get("input_manifest")
+    if not isinstance(raw, list):
+        return {}
+    for item in raw:
+        if isinstance(item, dict) and str(item.get("type") or "").strip() == "positions_snapshot":
+            return item
+    return {}
+
+
+def _is_safe_positions_carry_forward_repair(existing: Dict[str, Any], candidate: Dict[str, Any]) -> bool:
+    if str(existing.get("schema_id") or "").strip() != "capital_risk_envelope":
+        return False
+    if str(candidate.get("schema_id") or "").strip() != "capital_risk_envelope":
+        return False
+    if str(existing.get("schema_version") or "").strip() != "v2":
+        return False
+    if str(candidate.get("schema_version") or "").strip() != "v2":
+        return False
+    if str(existing.get("day_utc") or "").strip() != str(candidate.get("day_utc") or "").strip():
+        return False
+
+    existing_pos = _positions_manifest_entry(existing)
+    candidate_pos = _positions_manifest_entry(candidate)
+    if not existing_pos or not candidate_pos:
+        return False
+    if str(existing_pos.get("path") or "").strip() != str(candidate_pos.get("path") or "").strip():
+        return False
+    if str(existing_pos.get("sha256") or "").strip() == str(candidate_pos.get("sha256") or "").strip():
+        return False
+
+    existing_env = existing.get("envelope") if isinstance(existing.get("envelope"), dict) else {}
+    candidate_env = candidate.get("envelope") if isinstance(candidate.get("envelope"), dict) else {}
+    existing_positions = existing_env.get("positions") if isinstance(existing_env, dict) else []
+    candidate_positions = candidate_env.get("positions") if isinstance(candidate_env, dict) else []
+    if not isinstance(existing_positions, list) or not isinstance(candidate_positions, list):
+        return False
+    if existing_positions:
+        return False
+    if not candidate_positions:
+        return False
+
+    existing_checks = existing.get("checks") if isinstance(existing.get("checks"), dict) else {}
+    candidate_checks = candidate.get("checks") if isinstance(candidate.get("checks"), dict) else {}
+    if bool(existing_checks.get("positions_present")) is not True:
+        return False
+    if bool(candidate_checks.get("positions_present")) is not True:
+        return False
+    return True
+
+
+def _is_safe_missing_inputs_recovery(existing: Dict[str, Any], candidate: Dict[str, Any]) -> bool:
+    if str(existing.get("schema_id") or "").strip() != "capital_risk_envelope":
+        return False
+    if str(candidate.get("schema_id") or "").strip() != "capital_risk_envelope":
+        return False
+    if str(existing.get("schema_version") or "").strip() != "v2":
+        return False
+    if str(candidate.get("schema_version") or "").strip() != "v2":
+        return False
+    if str(existing.get("day_utc") or "").strip() != str(candidate.get("day_utc") or "").strip():
+        return False
+
+    existing_status = str(existing.get("status") or "").strip().upper()
+    candidate_status = str(candidate.get("status") or "").strip().upper()
+    if existing_status != "FAIL":
+        return False
+    if candidate_status not in {"PASS", "DEGRADED"}:
+        return False
+
+    existing_reason_codes = {
+        str(code).strip().upper() for code in (existing.get("reason_codes") or []) if str(code).strip()
+    }
+    if "B2_INPUTS_MISSING_FAILCLOSED" not in existing_reason_codes:
+        return False
+
+    candidate_checks = candidate.get("checks") if isinstance(candidate.get("checks"), dict) else {}
+    if bool(candidate_checks.get("allocation_summary_present")) is not True:
+        return False
+    if bool(candidate_checks.get("nav_present")) is not True:
+        return False
+    if bool(candidate_checks.get("positions_present")) is not True:
+        return False
+
+    return True
+
+
+def _is_safe_nav_validation_recovery(existing: Dict[str, Any], candidate: Dict[str, Any]) -> bool:
+    if str(existing.get("schema_id") or "").strip() != "capital_risk_envelope":
+        return False
+    if str(candidate.get("schema_id") or "").strip() != "capital_risk_envelope":
+        return False
+    if str(existing.get("schema_version") or "").strip() != "v2":
+        return False
+    if str(candidate.get("schema_version") or "").strip() != "v2":
+        return False
+    if str(existing.get("day_utc") or "").strip() != str(candidate.get("day_utc") or "").strip():
+        return False
+
+    existing_status = str(existing.get("status") or "").strip().upper()
+    if existing_status != "PASS":
+        return False
+
+    existing_env = existing.get("envelope") if isinstance(existing.get("envelope"), dict) else {}
+    existing_nav_total_cents = existing_env.get("nav_total_cents")
+    if not isinstance(existing_nav_total_cents, int) or existing_nav_total_cents > 0:
+        return False
+
+    candidate_status = str(candidate.get("status") or "").strip().upper()
+    candidate_env = candidate.get("envelope") if isinstance(candidate.get("envelope"), dict) else {}
+    candidate_nav_total_cents = candidate_env.get("nav_total_cents")
+    candidate_reason_codes = {
+        str(code).strip().upper() for code in (candidate.get("reason_codes") or []) if str(code).strip()
+    }
+    candidate_checks = candidate.get("checks") if isinstance(candidate.get("checks"), dict) else {}
+
+    if candidate_status == "PASS":
+        if not isinstance(candidate_nav_total_cents, int) or candidate_nav_total_cents <= 0:
+            return False
+        if bool(candidate_checks.get("nav_present")) is not True:
+            return False
+        return True
+
+    if candidate_status in {"FAIL", "DEGRADED"}:
+        return (
+            "B2_NAV_TOTAL_MISSING_OR_INVALID" in candidate_reason_codes
+            and RC_AUTHZ_MISSING_EXPOSURE_BUDGET_NAV_TOTAL_CENTS in candidate_reason_codes
+        )
+    return False
+
+
+def _finalize_constitutional_capital_risk_report(out: Dict[str, Any]) -> Dict[str, Any]:
+    status = str(out.get("status") or "").strip().upper()
+    closure_state = CLOSURE_STATE_COMPLETE
+    if status == "DEGRADED":
+        closure_state = CLOSURE_STATE_DEGRADED
+    elif status != "PASS":
+        closure_state = CLOSURE_STATE_BLOCKED
+    reason_codes = [str(code).strip() for code in (out.get("reason_codes") or []) if str(code).strip()]
+    blocker_reason_codes = reason_codes if closure_state != CLOSURE_STATE_COMPLETE else []
+    blocker_envelope = build_machine_blocker_envelope_v1(
+        closure_state=closure_state,
+        reason_codes=blocker_reason_codes,
+        missing_dependency_artifacts=[],
+    )
+    out["blocking_codes"] = list(blocker_envelope["blocking_codes"])
+    out["closure_state"] = str(blocker_envelope["closure_state"])
+    out["first_blocker_code"] = str(blocker_envelope["first_blocker_code"])
+    out["missing_dependency_artifacts"] = list(blocker_envelope["missing_dependency_artifacts"])
+    out["constitutional_dependency_declaration"] = build_artifact_dependency_declaration_v1(
+        artifact_type="capital_risk_envelope_v2",
+        artifact_class="admission_result",
+        authority_id="capital_risk_envelope_v2",
+        declared_dependency_artifacts=[],
+        dependency_refs=[],
+    )
+    produced_utc = str(out.get("produced_utc") or "").strip()
+    out["constitutional_lineage"] = build_governed_artifact_lineage_v1(
+        artifact_type="capital_risk_envelope_v2",
+        artifact_version="v2",
+        artifact_class="admission_result",
+        authority_id="capital_risk_envelope_v2",
+        producer_id="ops/tools/run_c2_capital_risk_envelope_gate_v2.py",
+        generated_at_utc=produced_utc,
+        effective_at_utc=produced_utc,
+        finality_state=FINALITY_PROVISIONAL,
+        input_artifact_refs=[],
+        policy_snapshot_refs=[],
+        code_version=_git_sha(),
+        run_id=f"capital_risk_envelope_v2:{str(out.get('day_utc') or '').strip()}",
+    )
+    return out
 
 
 def _git_sha() -> str:
@@ -256,8 +456,9 @@ def _compute(out_day: str, produced_utc: str, inp: Inputs) -> Dict[str, Any]:
 
     # Required: nav_total must be int dollars.
     nav_total = nav_obj.get("nav", {}).get("nav_total")
-    if not isinstance(nav_total, int):
+    if not isinstance(nav_total, int) or nav_total <= 0:
         reason_codes.append("B2_NAV_TOTAL_MISSING_OR_INVALID")
+        reason_codes.append(RC_AUTHZ_MISSING_EXPOSURE_BUDGET_NAV_TOTAL_CENTS)
         checks["nav_present"] = False
         nav_total = 0
 
@@ -402,6 +603,7 @@ def _compute(out_day: str, produced_utc: str, inp: Inputs) -> Dict[str, Any]:
         if isinstance(out["envelope"], dict):
             out["envelope"]["headroom_cents"] = 0
 
+    out = _finalize_constitutional_capital_risk_report(out)
     _validate_against_repo_schema(out, "governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v2.schema.json")
     return out
 
@@ -448,6 +650,7 @@ def _minimal_missing_inputs_report(out_day: str, in_day: str, produced_utc: str,
             "positions": [],
         },
     }
+    out = _finalize_constitutional_capital_risk_report(out)
     _validate_against_repo_schema(out, "governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v2.schema.json")
     return out
 
@@ -511,6 +714,7 @@ def _day0_bootstrap_alloc_missing_report(out_day: str, in_day: str, produced_utc
             "positions": [],
         },
     }
+    out = _finalize_constitutional_capital_risk_report(out)
     _validate_against_repo_schema(out, "governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v2.schema.json")
     return out
 
@@ -531,7 +735,8 @@ def main() -> int:
     out_dir = (truth_root / "reports" / "capital_risk_envelope_v2" / out_day).resolve()
     out_path = (out_dir / "capital_risk_envelope.v2.json").resolve()
 
-    # immutable day-keyed output; allow skip-identical only
+    existing: Optional[Dict[str, Any]] = None
+    existing_sha: Optional[str] = None
     if out_path.exists():
         existing_sha = _sha256_file(out_path)
         existing = _read_json(out_path)
@@ -547,13 +752,6 @@ def main() -> int:
             raise SystemExit(f"FAIL: EXISTING_REPORT_DAY_MISMATCH: day_utc={day_utc!r} expected={out_day!r} path={out_path}")
         if status not in ("PASS", "FAIL", "DEGRADED"):
             raise SystemExit(f"FAIL: EXISTING_REPORT_STATUS_INVALID: status={status!r} path={out_path}")
-
-        print(f"CAPITAL_RISK_ENVELOPE_V2_WRITTEN day_utc={out_day} path={str(out_path)} sha256={existing_sha} action=EXISTS")
-        if status != "PASS":
-            print(f"FAIL: CAPITAL_RISK_ENVELOPE_GATE_V2 status={status} reason_codes={existing.get('reason_codes')}", file=sys.stderr)
-            return 2
-        print("OK: CAPITAL_RISK_ENVELOPE_GATE_V2 PASS")
-        return 0
 
     inp: Optional[Inputs] = None
     missing_err: Optional[str] = None
@@ -577,9 +775,35 @@ def main() -> int:
         else:
             out = _minimal_missing_inputs_report(out_day=out_day, in_day=in_day, produced_utc=produced_utc, missing_err=str(missing_err))
 
-    sha = _write_immutable(out_path, _canonical_json_bytes(out))
+    assert_constitutional_writer_allowed_v1(REPO_ROOT, "capital_risk_envelope_v2", "ops/tools/run_c2_capital_risk_envelope_gate_v2.py")
+    validate_governed_artifact_payload_v1(
+        repo_root=REPO_ROOT,
+        artifact_id="capital_risk_envelope_v2",
+        payload=out,
+        required_finality_states=["provisional", "finalized", "corrected"],
+    )
+    out_bytes = _canonical_json_bytes(out)
+    candidate_sha = _sha256_bytes(out_bytes)
+    action = "WROTE"
+    if existing is not None and existing_sha is not None:
+        if existing_sha == candidate_sha:
+            sha = existing_sha
+            action = "EXISTS"
+        elif (
+            _is_safe_positions_carry_forward_repair(existing, out)
+            or _is_safe_missing_inputs_recovery(existing, out)
+            or _is_safe_nav_validation_recovery(existing, out)
+        ):
+            sha = _write_bytes_replace(out_path, out_bytes)
+            action = "BACKFILL_REPAIRED"
+        else:
+            sha = existing_sha
+            out = existing
+            action = "EXISTS"
+    else:
+        sha = _write_immutable(out_path, out_bytes)
 
-    print(f"CAPITAL_RISK_ENVELOPE_V2_WRITTEN day_utc={out_day} path={str(out_path)} sha256={sha} action=WROTE")
+    print(f"CAPITAL_RISK_ENVELOPE_V2_WRITTEN day_utc={out_day} path={str(out_path)} sha256={sha} action={action}")
     if out.get("status") != "PASS":
         print(f"FAIL: CAPITAL_RISK_ENVELOPE_GATE_V2 status={out.get('status')} reason_codes={out.get('reason_codes')}", file=sys.stderr)
         return 2

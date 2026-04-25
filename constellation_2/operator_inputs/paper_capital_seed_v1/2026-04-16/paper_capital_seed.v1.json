@@ -1,0 +1,21 @@
+{
+  "cash_total": "100000.00",
+  "currency": "USD",
+  "day_utc": "2026-04-16",
+  "environment": "PAPER",
+  "ib_account": "DUO847203",
+  "nlv_total": "100000.00",
+  "notes": [
+    "CAPITAL_SEED_V2: governed paper capital seed",
+    "seed_usd=100000.00"
+  ],
+  "policy_ref": {
+    "path": "/home/node/constellation/governance/02_REGISTRIES/C2_PAPER_CAPITAL_SEED_POLICY_V1.json",
+    "policy_id": "C2_PAPER_CAPITAL_SEED_POLICY_V1",
+    "sha256": "4865c4fcce707b75f2eeb99f207ce64744b026b2bd1dfd6b7d149e6c9eb6cbb8"
+  },
+  "produced_utc": "2026-04-16T00:00:00Z",
+  "schema_id": "C2_PAPER_CAPITAL_SEED",
+  "schema_version": 1,
+  "seed_mode": "EXPLICIT_USD"
+}
