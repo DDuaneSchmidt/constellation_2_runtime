@@ -1,0 +1,294 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/sleeve_edge_snapshot.v1.schema.json",
+  "title": "sleeve_edge_snapshot.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "snapshot_id",
+    "produced_utc",
+    "day_utc",
+    "as_of_ts",
+    "sleeve_id",
+    "strategy_family",
+    "metric_window",
+    "included_trade_ids",
+    "excluded_trade_ids",
+    "exclusion_details",
+    "fact_input_hash",
+    "calculation_version",
+    "policy_version",
+    "fact_ledger_ref",
+    "factual_metrics",
+    "unavailable_metrics",
+    "qualification",
+    "reason_codes",
+    "snapshot_lineage",
+    "input_manifest",
+    "producer"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_SLEEVE_EDGE_SNAPSHOT_V1" },
+    "schema_version": { "const": "v1" },
+    "snapshot_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "as_of_ts": { "type": "string", "format": "date-time" },
+    "sleeve_id": { "type": "string", "minLength": 1 },
+    "strategy_family": { "type": "string", "minLength": 1 },
+    "metric_window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sample_basis", "recent_trade_count", "baseline_trade_count"],
+      "properties": {
+        "sample_basis": { "type": "string", "const": "CLOSED_TRADES_ONLY" },
+        "recent_trade_count": { "type": "integer", "minimum": 1 },
+        "baseline_trade_count": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "included_trade_ids": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+    },
+    "excluded_trade_ids": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+    },
+    "exclusion_details": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["trade_identity_id", "reason_codes"],
+        "properties": {
+          "trade_identity_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "reason_codes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "fact_input_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "calculation_version": { "type": "string", "minLength": 1 },
+    "policy_version": { "type": "string", "minLength": 1 },
+    "fact_ledger_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "factual_metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "native_trade_count",
+        "native_net_pnl",
+        "native_gross_pnl",
+        "native_net_expectancy",
+        "native_expectancy_per_unit_risk",
+        "native_realized_drawdown",
+        "native_capital_efficiency",
+        "native_budget_utilization",
+        "native_recent_vs_baseline_drift",
+        "adopted_trade_count",
+        "adopted_net_pnl",
+        "adopted_management_expectancy",
+        "adopted_drawdown",
+        "adopted_capital_efficiency",
+        "fee_drag",
+        "measured_slippage_drag",
+        "execution_data_completeness",
+        "unknown_attribution_count",
+        "sample_count",
+        "window_coverage",
+        "required_inputs_complete",
+        "invalidity_reasons"
+      ],
+      "properties": {
+        "native_trade_count": { "type": "integer", "minimum": 0 },
+        "native_net_pnl": { "type": "string" },
+        "native_gross_pnl": { "type": "string" },
+        "native_net_expectancy": { "type": "string" },
+        "native_expectancy_per_unit_risk": { "$ref": "#/$defs/optional_metric" },
+        "native_realized_drawdown": { "type": "string" },
+        "native_capital_efficiency": { "$ref": "#/$defs/optional_metric" },
+        "native_budget_utilization": { "$ref": "#/$defs/optional_metric" },
+        "native_recent_vs_baseline_drift": { "$ref": "#/$defs/optional_metric" },
+        "adopted_trade_count": { "type": "integer", "minimum": 0 },
+        "adopted_net_pnl": { "type": "string" },
+        "adopted_management_expectancy": { "type": "string" },
+        "adopted_drawdown": { "type": "string" },
+        "adopted_capital_efficiency": { "$ref": "#/$defs/optional_metric" },
+        "fee_drag": { "type": "string" },
+        "measured_slippage_drag": { "$ref": "#/$defs/optional_metric" },
+        "execution_data_completeness": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["fill_price_complete", "fee_complete", "decision_price_complete", "state"],
+          "properties": {
+            "fill_price_complete": { "type": "boolean" },
+            "fee_complete": { "type": "boolean" },
+            "decision_price_complete": { "type": "boolean" },
+            "state": { "type": "string", "enum": ["PARTIAL", "COMPLETE", "UNAVAILABLE"] }
+          }
+        },
+        "unknown_attribution_count": { "type": "integer", "minimum": 0 },
+        "sample_count": { "type": "integer", "minimum": 0 },
+        "window_coverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "recent_required_trade_count",
+            "recent_available_trade_count",
+            "baseline_required_trade_count",
+            "baseline_available_trade_count"
+          ],
+          "properties": {
+            "recent_required_trade_count": { "type": "integer", "minimum": 1 },
+            "recent_available_trade_count": { "type": "integer", "minimum": 0 },
+            "baseline_required_trade_count": { "type": "integer", "minimum": 1 },
+            "baseline_available_trade_count": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "required_inputs_complete": { "type": "boolean" },
+        "invalidity_reasons": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "unavailable_metrics": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "qualification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "edge_band",
+        "execution_health_band",
+        "sample_sufficiency_band",
+        "drift_band",
+        "qualification_state",
+        "reason_codes"
+      ],
+      "properties": {
+        "edge_band": { "type": "string", "enum": ["NEGATIVE", "WEAK_POSITIVE", "QUALIFIED_POSITIVE", "STRONG_POSITIVE"] },
+        "execution_health_band": { "type": "string", "enum": ["UNKNOWN", "DEGRADED", "ACCEPTABLE", "STRONG"] },
+        "sample_sufficiency_band": { "type": "string", "enum": ["INSUFFICIENT", "LIMITED", "SUFFICIENT"] },
+        "drift_band": { "type": "string", "enum": ["DETERIORATING", "STABLE", "IMPROVING", "UNKNOWN"] },
+        "qualification_state": { "type": "string", "enum": ["MEASUREMENT_INVALID", "INSUFFICIENT_DATA", "QUALIFIED", "WATCHLIST", "THROTTLED", "DISABLED"] },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "snapshot_lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "core2_materialization_set_id",
+        "source_execution_sleeve_id",
+        "previous_snapshot_id",
+        "revision_type",
+        "revision_reason",
+        "prior_snapshot_ref",
+        "state_transition_reason_codes"
+      ],
+      "properties": {
+        "core2_materialization_set_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "source_execution_sleeve_id": { "type": "string", "minLength": 1 },
+        "previous_snapshot_id": {
+          "anyOf": [
+            { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+            { "type": "null" }
+          ]
+        },
+        "revision_type": {
+          "type": "string",
+          "enum": ["INITIAL_PUBLISH", "DATA_CORRECTION", "POLICY_CHANGE", "RECLASSIFICATION", "BACKFILL"]
+        },
+        "revision_reason": { "type": "string" },
+        "prior_snapshot_ref": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["artifact_path", "snapshot_id", "qualification_state"],
+          "properties": {
+            "artifact_path": { "type": "string" },
+            "snapshot_id": { "type": "string" },
+            "qualification_state": { "type": "string" }
+          }
+        },
+        "state_transition_reason_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "input_manifest": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256", "day_utc", "producer"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["reconciled_trade_state_summary", "qualification_policy_manifest", "execution_event_stream_record"]
+          },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "day_utc": {
+            "anyOf": [
+              { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+              { "type": "null" }
+            ]
+          },
+          "producer": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "module": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "optional_metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "value", "reason_codes"],
+      "properties": {
+        "status": { "type": "string", "enum": ["AVAILABLE", "UNAVAILABLE"] },
+        "value": {
+          "anyOf": [
+            { "type": "string" },
+            { "type": "null" }
+          ]
+        },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

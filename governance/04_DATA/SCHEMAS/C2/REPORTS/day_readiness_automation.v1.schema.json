@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/day_readiness_automation.v1.schema.json",
+  "title": "day_readiness_automation.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "target_day",
+    "automation_run_at",
+    "readiness_state",
+    "bootstrap_status",
+    "earliest_failing_prerequisite",
+    "owner_tool",
+    "artifact_path",
+    "blocker_class",
+    "reason_codes",
+    "classification",
+    "canonical_next_step",
+    "bootstrap_report_path",
+    "target_day_build_path",
+    "target_day_build_status",
+    "target_day_admission_path",
+    "target_day_admission_status",
+    "submit_boundary_status_path",
+    "submit_boundary_status",
+    "submit_boundary_submission_authorized",
+    "automation_owner_tool",
+    "automation_scope",
+    "canonical_truth_note",
+    "producer"
+  ],
+  "properties": {
+    "schema_id": { "const": "day_readiness_automation" },
+    "schema_version": { "const": "v1" },
+    "target_day": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "automation_run_at": { "type": "string", "minLength": 20 },
+    "readiness_state": {
+      "type": "string",
+      "enum": ["READY_FOR_DAY", "WAITING_FOR_MARKET_DATA", "BLOCKED_EXTERNAL", "BLOCKED_REPO_FIXABLE"]
+    },
+    "bootstrap_status": { "type": "string", "enum": ["READY", "BLOCKED"] },
+    "earliest_failing_prerequisite": { "type": "string" },
+    "owner_tool": { "type": "string" },
+    "artifact_path": { "type": "string" },
+    "blocker_class": { "type": "string" },
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "classification": {
+      "type": "string",
+      "enum": ["refreshable", "verifiable_only", "external_time_bound"]
+    },
+    "canonical_next_step": { "type": "string", "minLength": 1 },
+    "bootstrap_report_path": { "type": "string" },
+    "target_day_build_path": { "type": "string" },
+    "target_day_build_status": { "type": "string" },
+    "target_day_admission_path": { "type": "string" },
+    "target_day_admission_status": { "type": "string" },
+    "submit_boundary_status_path": { "type": "string" },
+    "submit_boundary_status": { "type": "string" },
+    "submit_boundary_submission_authorized": { "type": "boolean" },
+    "automation_owner_tool": { "const": "ops/tools/run_tomorrow_paper_startup_prep_v1.py" },
+    "automation_scope": { "const": "SUBORDINATE_OPERATOR_PROJECTION" },
+    "canonical_truth_note": { "type": "string", "minLength": 1 },
+    "producer": { "$ref": "#/$defs/producer" }
+  },
+  "$defs": {
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

@@ -11,6 +11,8 @@
     "mode",
     "day_utc",
     "produced_utc",
+    "authority_classification",
+    "control_decision_warning",
     "readiness_state",
     "readiness_summary",
     "promotion_decision_basis",
@@ -61,6 +63,14 @@
     "produced_utc": {
       "type": "string",
       "minLength": 20
+    },
+    "authority_classification": {
+      "type": "string",
+      "const": "NON_CANONICAL_ADVISORY_ONLY"
+    },
+    "control_decision_warning": {
+      "type": "string",
+      "minLength": 1
     },
     "readiness_state": {
       "type": "string",

@@ -18,9 +18,7 @@
     "produced_at_utc",
     "freshness_verdict",
     "linkage_verdict",
-    "path_resolution_evidence",
-    "producer_run_id",
-    "phasec_materializer_result"
+    "producer_run_id"
   ],
   "properties": {
     "schema_id": { "const": "startup_materialization" },
@@ -48,6 +46,28 @@
     "produced_at_utc": { "type": "string", "minLength": 20 },
     "freshness_verdict": { "type": "string", "enum": ["CURRENT", "STALE", "UNKNOWN"] },
     "linkage_verdict": { "type": "string", "enum": ["LINKED", "UNLINKED"] },
+    "materialization_scope": {
+      "type": "string",
+      "enum": ["BOOTSTRAP_SESSION_PREREQUISITES", "PHASEC_IDENTITY_AND_INPUTS"]
+    },
+    "phase_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "phase_status",
+        "startup_authorization_convergence_status",
+        "gate_artifacts_status",
+        "materialized_output_count",
+        "root_blocker_code"
+      ],
+      "properties": {
+        "phase_status": { "type": "string", "enum": ["COMPLETE", "BLOCKED"] },
+        "startup_authorization_convergence_status": { "type": "string" },
+        "gate_artifacts_status": { "type": "string", "enum": ["READY", "BLOCKED"] },
+        "materialized_output_count": { "type": "integer", "minimum": 0 },
+        "root_blocker_code": { "type": "string" }
+      }
+    },
     "path_resolution_evidence": {
       "type": "object",
       "additionalProperties": false,
@@ -59,6 +79,16 @@
     },
     "producer_run_id": { "type": "string", "minLength": 1 },
     "phasec_materializer_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["returncode", "stdout", "stderr"],
+      "properties": {
+        "returncode": { "type": "integer" },
+        "stdout": { "type": "string" },
+        "stderr": { "type": "string" }
+      }
+    },
+    "startup_materialization_input_convergence_result": {
       "type": "object",
       "additionalProperties": false,
       "required": ["returncode", "stdout", "stderr"],

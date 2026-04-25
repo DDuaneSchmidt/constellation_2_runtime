@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/tax_execution_gate_result.v1.schema.json",
+  "title": "tax_execution_gate_result.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "gate_result_id", "decision_id", "decision_family", "scope_id", "snapshot_id", "resolved_policy_set_id", "dependency_fingerprint_id", "execution_subject_ref", "validator_version", "gate_status", "matched", "mismatch_fields", "review_reasons", "blocking_reasons", "produced_utc", "reason_codes"],
+  "properties": {
+    "schema_id": { "const": "tax_execution_gate_result" },
+    "schema_version": { "const": "v1" },
+    "gate_result_id": { "type": "string", "minLength": 1 },
+    "decision_id": { "type": "string", "minLength": 1 },
+    "decision_family": { "type": "string", "minLength": 1 },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "snapshot_id": { "type": "string", "minLength": 1 },
+    "resolved_policy_set_id": { "type": "string", "minLength": 1 },
+    "dependency_fingerprint_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "execution_subject_ref": { "type": "string", "minLength": 1 },
+    "validator_version": { "type": "string", "minLength": 1 },
+    "gate_status": { "type": "string", "enum": ["EXECUTION_ELIGIBLE", "EXECUTION_REVIEW_REQUIRED", "EXECUTION_BLOCKED_STALE", "EXECUTION_BLOCKED_POLICY", "EXECUTION_BLOCKED_TRUTH_MISMATCH"] },
+    "matched": { "type": "boolean" },
+    "mismatch_fields": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "review_reasons": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "blocking_reasons": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}

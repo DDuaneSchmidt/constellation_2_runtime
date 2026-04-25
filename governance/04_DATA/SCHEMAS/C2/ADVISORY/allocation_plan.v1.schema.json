@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisory/allocation_plan.v1.schema.json",
+  "title": "allocation_plan.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_id",
+    "allocation_plan_id",
+    "household_id",
+    "snapshot_refs",
+    "total_capital_assignable_to_constellation",
+    "total_capital_reserved_outside_constellation",
+    "sleeve_allocations",
+    "deployment_throttle",
+    "holdback_capital",
+    "unallocated_capital_reason_codes"
+  ],
+  "properties": {
+    "schema_id": { "const": "allocation_plan" },
+    "schema_version": { "const": "v1" },
+    "record_id": { "type": "string", "minLength": 1 },
+    "allocation_plan_id": { "type": "string", "minLength": 1 },
+    "household_id": { "type": "string", "minLength": 1 },
+    "snapshot_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["household_state_snapshot_id", "compiled_constraints_id"],
+      "properties": {
+        "household_state_snapshot_id": { "type": "string", "minLength": 1 },
+        "compiled_constraints_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "total_capital_assignable_to_constellation": { "type": "string", "minLength": 1 },
+    "total_capital_reserved_outside_constellation": { "type": "string", "minLength": 1 },
+    "sleeve_allocations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sleeve_id", "requested_capital_cents", "allocated_capital_cents"],
+        "properties": {
+          "sleeve_id": { "type": "string", "minLength": 1 },
+          "requested_capital_cents": { "type": "integer" },
+          "allocated_capital_cents": { "type": "integer" }
+        }
+      }
+    },
+    "deployment_throttle": { "type": "string", "minLength": 1 },
+    "holdback_capital": { "type": "string", "minLength": 1 },
+    "unallocated_capital_reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

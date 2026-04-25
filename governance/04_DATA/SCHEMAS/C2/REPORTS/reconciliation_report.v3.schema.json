@@ -42,6 +42,21 @@
       "type": "array",
       "items": { "type": "string", "minLength": 1, "maxLength": 128 }
     },
+    "blocking_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+    },
+    "closure_state": {
+      "type": "string",
+      "enum": ["COMPLETE", "BLOCKED", "DEGRADED", "OPEN"]
+    },
+    "first_blocker_code": { "type": "string" },
+    "missing_dependency_artifacts": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+    },
+    "constitutional_dependency_declaration": { "type": "object" },
+    "constitutional_lineage": { "type": "object" },
 
     "notes": {
       "type": "array",
@@ -135,6 +150,24 @@
             "reason": { "type": "string", "minLength": 1, "maxLength": 256 }
           }
         }
+      }
+    },
+    "runtime_lifecycle_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "runtime_identity_contract_path",
+        "runtime_identity_contract_sha256",
+        "startup_identity_receipt_path",
+        "lifecycle_start_receipt_path"
+      ],
+      "properties": {
+        "run_id": { "type": "string", "minLength": 1 },
+        "runtime_identity_contract_path": { "type": "string", "minLength": 1 },
+        "runtime_identity_contract_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "startup_identity_receipt_path": { "type": "string", "minLength": 1 },
+        "lifecycle_start_receipt_path": { "type": "string", "minLength": 1 }
       }
     }
   }

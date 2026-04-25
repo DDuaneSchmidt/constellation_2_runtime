@@ -63,7 +63,7 @@
           },
           "liquidity_policy": {
             "min_open_interest": 0,
-            "min_volume": 1,
+            "min_volume": 0,
             "max_bid_ask_spread": "0.10"
           },
           "pricing_policy": {

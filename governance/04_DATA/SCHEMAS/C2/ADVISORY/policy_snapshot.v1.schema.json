@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisory/policy_snapshot.v1.schema.json",
+  "title": "policy_snapshot.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_id",
+    "policy_snapshot_id",
+    "policy_id",
+    "household_id",
+    "policy_version",
+    "effective_at",
+    "created_at",
+    "actor_source",
+    "parent_lineage_refs",
+    "household_base_currency",
+    "target_return_band",
+    "max_portfolio_drawdown",
+    "liquidity_floor_cash",
+    "liquidity_floor_months_expenses",
+    "max_single_name_concentration",
+    "max_sleeve_concentration",
+    "max_correlated_cluster_concentration",
+    "allowed_asset_classes",
+    "disallowed_asset_classes",
+    "account_restrictions",
+    "imported_position_policy",
+    "protected_position_rules",
+    "emergency_derisk_policy",
+    "override_policy",
+    "policy_fingerprint",
+    "reason_codes"
+  ],
+  "properties": {
+    "schema_id": { "const": "policy_snapshot" },
+    "schema_version": { "const": "v1" },
+    "record_id": { "type": "string", "minLength": 1 },
+    "policy_snapshot_id": { "type": "string", "minLength": 1 },
+    "policy_id": { "type": "string", "minLength": 1 },
+    "household_id": { "type": "string", "minLength": 1 },
+    "policy_version": { "type": "string", "minLength": 1 },
+    "effective_at": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "minLength": 1 },
+    "actor_source": { "type": "string", "minLength": 1 },
+    "parent_lineage_refs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "household_base_currency": { "type": "string", "minLength": 3, "maxLength": 3 },
+    "target_return_band": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum", "maximum"],
+      "properties": {
+        "minimum": { "type": "string", "minLength": 1 },
+        "maximum": { "type": "string", "minLength": 1 }
+      }
+    },
+    "max_portfolio_drawdown": { "type": "string", "minLength": 1 },
+    "liquidity_floor_cash": { "type": "string", "minLength": 1 },
+    "liquidity_floor_months_expenses": { "type": "string", "minLength": 1 },
+    "max_single_name_concentration": { "type": "string", "minLength": 1 },
+    "max_sleeve_concentration": { "type": "string", "minLength": 1 },
+    "max_correlated_cluster_concentration": { "type": "string", "minLength": 1 },
+    "allowed_asset_classes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "disallowed_asset_classes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "account_restrictions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["account_id", "restriction_type"],
+        "properties": {
+          "account_id": { "type": "string", "minLength": 1 },
+          "restriction_type": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "imported_position_policy": { "type": "object", "additionalProperties": true },
+    "protected_position_rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["symbol", "account_id"],
+        "properties": {
+          "symbol": { "type": "string", "minLength": 1 },
+          "account_id": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "emergency_derisk_policy": { "type": "object", "additionalProperties": true },
+    "override_policy": { "type": "object", "additionalProperties": true },
+    "policy_fingerprint": { "type": "string", "minLength": 1 },
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

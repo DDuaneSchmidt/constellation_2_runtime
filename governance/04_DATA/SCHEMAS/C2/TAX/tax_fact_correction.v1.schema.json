@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/tax_fact_correction.v1.schema.json",
+  "title": "tax_fact_correction.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "correction_id", "scope_id", "superseded_fact_id", "replacement_fact_id", "recorded_at", "correction_reason", "reason_codes"],
+  "properties": {
+    "schema_id": { "const": "tax_fact_correction" },
+    "schema_version": { "const": "v1" },
+    "correction_id": { "type": "string", "minLength": 1 },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "superseded_fact_id": { "type": "string", "minLength": 1 },
+    "replacement_fact_id": { "type": "string", "minLength": 1 },
+    "recorded_at": { "type": "string", "format": "date-time" },
+    "correction_reason": { "type": "string", "minLength": 1 },
+    "affected_snapshot_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "affected_decision_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "reason_codes": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+  }
+}
+

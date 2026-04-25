@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/wash_enforcement_scope.v1.schema.json",
+  "title": "wash_enforcement_scope.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "wash_enforcement_scope_id", "scope_id", "filing_scope_ids", "legal_owner_scope_ids", "produced_utc"],
+  "properties": {
+    "schema_id": { "const": "wash_enforcement_scope" },
+    "schema_version": { "const": "v1" },
+    "wash_enforcement_scope_id": { "type": "string", "minLength": 1 },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "filing_scope_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "legal_owner_scope_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}
+

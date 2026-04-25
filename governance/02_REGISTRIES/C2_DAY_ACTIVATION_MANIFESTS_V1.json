@@ -1,0 +1,73 @@
+{
+  "manifests": {
+    "fresh_paper_entry_v1": {
+      "dependencies": [
+        {
+          "advisory_only": false,
+          "dependency_id": "target_day_admission_v1",
+          "fresh_materialization_required": false,
+          "owner_ref": "run_session_authority_v1.py",
+          "path_pattern": "{canonical_truth_root}/target_day_admission_v1/{day_utc}.json",
+          "post_submit_only": false,
+          "producer_ref": null,
+          "required": true,
+          "reusable": true,
+          "role_class": "TRUTH_OWNER",
+          "semantic_validation": "target_day_admit_binding",
+          "stage_id": "DAY_ACTIVATION",
+          "upstream_dependency_ids": []
+        },
+        {
+          "advisory_only": false,
+          "dependency_id": "canonical_authority_head_v1",
+          "fresh_materialization_required": false,
+          "owner_ref": "run_pointer_heads_materialize_v1.py",
+          "path_pattern": "{canonical_truth_root}/run_pointer_v2/canonical_authority_head.v1.json",
+          "post_submit_only": false,
+          "producer_ref": null,
+          "required": true,
+          "reusable": true,
+          "role_class": "TRUTH_OWNER",
+          "semantic_validation": "day_match_and_authoritative_pass",
+          "stage_id": "DAY_ACTIVATION",
+          "upstream_dependency_ids": [
+            "target_day_admission_v1"
+          ]
+        },
+        {
+          "advisory_only": false,
+          "dependency_id": "authorization_gate_verdict_v1",
+          "fresh_materialization_required": false,
+          "owner_ref": "authorization_gate_verdict_v1",
+          "path_pattern": "{execution_truth_root}/reports/authorization_gate_verdict_v1/{day_utc}/authorization_gate_verdict.v1.json",
+          "post_submit_only": false,
+          "producer_ref": null,
+          "required": true,
+          "reusable": true,
+          "role_class": "TRUTH_OWNER",
+          "semantic_validation": "day_match_and_pass",
+          "stage_id": "DAY_ACTIVATION",
+          "upstream_dependency_ids": [
+            "target_day_admission_v1",
+            "canonical_authority_head_v1"
+          ]
+        }
+      ],
+      "description": "Day activation closure manifest for fresh governed PAPER entry context.",
+      "operation_type": "fresh_paper_entry_v1",
+      "seal_requires": [
+        "target_day_admission_v1",
+        "canonical_authority_head_v1",
+        "authorization_gate_verdict_v1"
+      ],
+      "stage_order": [
+        "DAY_ACTIVATION",
+        "SEAL"
+      ]
+    }
+  },
+  "owner": "day_activation_authority_v1",
+  "registry_id": "C2_DAY_ACTIVATION_MANIFESTS_V1",
+  "schema_id": "c2_day_activation_manifests",
+  "schema_version": "v1"
+}

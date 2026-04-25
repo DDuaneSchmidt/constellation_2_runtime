@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/broker_fact_spine_audit.v1.schema.json",
+  "title": "broker_fact_spine_audit.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "generated_utc",
+    "day_utc",
+    "authority_owner",
+    "execution_root_path",
+    "source_input_ref",
+    "raw_journal_ref",
+    "fact_ledger_refs",
+    "health_ref",
+    "trust_dependency_ref",
+    "current_state",
+    "downstream_consumption_posture",
+    "latest_observed_utc",
+    "summary",
+    "counts",
+    "derived_only"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "broker_fact_spine_audit"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "generated_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "day_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "authority_owner": {
+      "const": "broker_fact_spine_v1"
+    },
+    "execution_root_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_input_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_path",
+        "artifact_sha256"
+      ],
+      "properties": {
+        "artifact_path": {
+          "type": "string"
+        },
+        "artifact_sha256": {
+          "type": "string"
+        }
+      }
+    },
+    "raw_journal_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_path",
+        "artifact_sha256"
+      ],
+      "properties": {
+        "artifact_path": {
+          "type": "string"
+        },
+        "artifact_sha256": {
+          "type": "string"
+        }
+      }
+    },
+    "fact_ledger_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observation_session_fact",
+        "observed_order_fact",
+        "observed_order_status_fact",
+        "observed_fill_fact",
+        "observed_position_fact"
+      ],
+      "properties": {
+        "observation_session_fact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "artifact_path",
+            "artifact_sha256"
+          ],
+          "properties": {
+            "artifact_path": {
+              "type": "string"
+            },
+            "artifact_sha256": {
+              "type": "string"
+            }
+          }
+        },
+        "observed_order_fact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "artifact_path",
+            "artifact_sha256"
+          ],
+          "properties": {
+            "artifact_path": {
+              "type": "string"
+            },
+            "artifact_sha256": {
+              "type": "string"
+            }
+          }
+        },
+        "observed_order_status_fact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "artifact_path",
+            "artifact_sha256"
+          ],
+          "properties": {
+            "artifact_path": {
+              "type": "string"
+            },
+            "artifact_sha256": {
+              "type": "string"
+            }
+          }
+        },
+        "observed_fill_fact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "artifact_path",
+            "artifact_sha256"
+          ],
+          "properties": {
+            "artifact_path": {
+              "type": "string"
+            },
+            "artifact_sha256": {
+              "type": "string"
+            }
+          }
+        },
+        "observed_position_fact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "artifact_path",
+            "artifact_sha256"
+          ],
+          "properties": {
+            "artifact_path": {
+              "type": "string"
+            },
+            "artifact_sha256": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "health_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_path",
+        "artifact_sha256"
+      ],
+      "properties": {
+        "artifact_path": {
+          "type": "string"
+        },
+        "artifact_sha256": {
+          "type": "string"
+        }
+      }
+    },
+    "trust_dependency_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_path",
+        "artifact_sha256"
+      ],
+      "properties": {
+        "artifact_path": {
+          "type": "string"
+        },
+        "artifact_sha256": {
+          "type": "string"
+        }
+      }
+    },
+    "current_state": {
+      "type": "string",
+      "enum": [
+        "TRUSTED",
+        "DEGRADED",
+        "BLOCKED"
+      ]
+    },
+    "downstream_consumption_posture": {
+      "type": "string",
+      "enum": [
+        "NORMAL_CONSUMPTION",
+        "DEGRADED_ONLY",
+        "FAIL_CLOSED"
+      ]
+    },
+    "latest_observed_utc": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "derived_only": {
+      "type": "boolean",
+      "const": true
+    }
+  }
+}

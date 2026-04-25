@@ -17,7 +17,7 @@ This contract introduces a governed topology where **sleeves are first-class** a
 
 - `mode` (PAPER or LIVE)
 - `ib_account`
-- `symbols` (explicit list)
+- `symbols` (explicit sleeve coverage list)
 - a dedicated **truth partition**
 
 This change is strictly **topology + routing + truth partitioning + orchestration**. It MUST NOT change engine strategy logic (signals, sizing, allocation math).
@@ -34,7 +34,7 @@ This change is strictly **topology + routing + truth partitioning + orchestratio
 ### C2_SLEEVE_TOPOLOGY_AUTHORITY_V1
 
 1. **Registry authority**
-   - Sleeve identity, mode, account, symbols, gateway profile, and partition are authoritative only from:
+   - Sleeve identity, mode, account, sleeve coverage list, gateway profile, and partition are authoritative only from:
      - `governance/02_REGISTRIES/C2_SLEEVE_REGISTRY_V1.json`.
 
 2. **No ambiguity**
@@ -43,7 +43,7 @@ This change is strictly **topology + routing + truth partitioning + orchestratio
 
 3. **No mixing across sleeves**
    - No sleeve may write to another sleeve’s truth partition.
-   - No sleeve may write to the global canonical truth root, except explicitly governed global rollups.
+   - No sleeve may write to the global canonical truth root, except explicitly governed global rollups and explicitly governed canonical execution families defined by execution-root authority.
 
 4. **Compatibility with single-account mode**
    - If (and only if) the sleeve registry resolves to exactly one active sleeve, then the system may be considered compatible with the single-sleeve operational model.
@@ -73,3 +73,5 @@ The system MUST ABORT (hard fail) on any of the following:
 
 - This contract does not claim profitability, fill quality, or broker uptime.
 - This contract defines topology, routing, and truth partition authority only.
+- Tradable symbol policy at submit boundary is governed separately by the engine symbol authority contract.
+- Canonical execution-root ownership for live PAPER submission is governed separately by the execution root authority contract.

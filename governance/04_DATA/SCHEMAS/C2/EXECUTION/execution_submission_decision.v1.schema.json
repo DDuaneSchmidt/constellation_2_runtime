@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/execution/execution_submission_decision.v1.schema.json",
+  "title": "execution_submission_decision.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_id",
+    "submission_decision_id",
+    "execution_intent_id",
+    "day_utc",
+    "produced_utc",
+    "contract_version",
+    "outcome",
+    "reason_codes",
+    "predicted_submission_id",
+    "predicted_trade_instance_id",
+    "input_record_refs",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "execution_submission_decision" },
+    "schema_version": { "const": "v1" },
+    "record_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "submission_decision_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "execution_intent_id": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "contract_version": { "type": "string", "minLength": 1 },
+    "outcome": { "type": "string", "enum": ["submit", "blocked", "duplicate", "no_action"] },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "predicted_submission_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "predicted_trade_instance_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "duplicate_submission_record_id": { "type": ["string", "null"] },
+    "duplicate_execution_evidence_path": { "type": ["string", "null"] },
+    "input_record_refs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

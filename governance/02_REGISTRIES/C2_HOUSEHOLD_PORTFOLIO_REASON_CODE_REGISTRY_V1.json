@@ -1,0 +1,153 @@
+{
+  "schema_id": "c2_household_portfolio_reason_code_registry",
+  "schema_version": "v1",
+  "registry_id": "C2_HOUSEHOLD_PORTFOLIO_REASON_CODE_REGISTRY_V1",
+  "owner": "household_policy_compiler_v1",
+  "codes": [
+    {
+      "code": "AUTH_ACTION_NOT_EXPLICITLY_ALLOWED",
+      "family": "authorization",
+      "description": "The requested action is not explicitly authorized by the household portfolio compiler."
+    },
+    {
+      "code": "AUTH_PREREQUISITE_ACTION_REQUIRED",
+      "family": "authorization",
+      "description": "One or more prerequisite reductions or operator actions must occur before the requested action."
+    },
+    {
+      "code": "AUTH_SCOPE_VIOLATION",
+      "family": "authorization",
+      "description": "The requested action falls outside the explicit authorization scope."
+    },
+    {
+      "code": "AUTH_STALE_ARTIFACT",
+      "family": "authorization",
+      "description": "A required upstream artifact is stale and invalidates authorization issuance or use."
+    },
+    {
+      "code": "POLICY_ACCOUNT_RESTRICTION",
+      "family": "policy",
+      "description": "A governed account restriction blocks the requested action or route."
+    },
+    {
+      "code": "POLICY_DISALLOWED_ASSET",
+      "family": "policy",
+      "description": "The asset class or security falls outside the governed policy universe."
+    },
+    {
+      "code": "POLICY_LIQUIDITY_FLOOR",
+      "family": "policy",
+      "description": "The governed liquidity floor reduces deployable capital or forces reductions."
+    },
+    {
+      "code": "POLICY_MAX_CORRELATED_CLUSTER_LIMIT",
+      "family": "policy",
+      "description": "The governed correlated cluster limit is breached or clamped."
+    },
+    {
+      "code": "POLICY_MAX_SINGLE_NAME_LIMIT",
+      "family": "policy",
+      "description": "The governed single-name concentration limit is breached or clamped."
+    },
+    {
+      "code": "POLICY_MAX_SLEEVE_LIMIT",
+      "family": "policy",
+      "description": "The governed sleeve allocation or concentration limit is breached or clamped."
+    },
+    {
+      "code": "POLICY_PROTECTED_POSITION",
+      "family": "policy",
+      "description": "The governed protected-position rule blocks discretionary reductions or liquidation."
+    },
+    {
+      "code": "REBALANCE_CANDIDATE_SUPPRESSED",
+      "family": "rebalance",
+      "description": "A rebalance candidate was suppressed by a downstream control or degraded-state policy."
+    },
+    {
+      "code": "REBALANCE_DRIFT_BAND_NO_ACTION",
+      "family": "rebalance",
+      "description": "The portfolio remains inside the governed drift band and no action is required."
+    },
+    {
+      "code": "REBALANCE_FORCED_REDUCTION_REQUIRED",
+      "family": "rebalance",
+      "description": "A forced reduction is required to restore compliance or reduce risk."
+    },
+    {
+      "code": "RISK_CORRELATION_COMPRESSION",
+      "family": "risk",
+      "description": "Correlation-model absence or correlation compression triggered a conservative clamp."
+    },
+    {
+      "code": "RISK_DRAWDOWN_THROTTLE",
+      "family": "risk",
+      "description": "The household drawdown state triggered a deploy-throttle or emergency mode."
+    },
+    {
+      "code": "RISK_EMERGENCY_DERISK",
+      "family": "risk",
+      "description": "Emergency mode requires risk-reduction actions before discretionary adds."
+    },
+    {
+      "code": "RISK_NEW_DEPLOYMENT_BLOCKED",
+      "family": "risk",
+      "description": "The household risk envelope blocks new risk deployment."
+    },
+    {
+      "code": "RISK_PORTFOLIO_BUDGET_EXCEEDED",
+      "family": "risk",
+      "description": "The total portfolio risk budget is exhausted or exceeded."
+    },
+    {
+      "code": "RISK_SLEEVE_BUDGET_EXCEEDED",
+      "family": "risk",
+      "description": "The sleeve-level risk budget is exhausted or exceeded."
+    },
+    {
+      "code": "STATE_INCOMPLETE_IMPORTED_POSITION",
+      "family": "state_quality",
+      "description": "Imported-position data is incomplete and must be treated conservatively."
+    },
+    {
+      "code": "STATE_MISSING_ACCOUNT_BALANCE",
+      "family": "state_quality",
+      "description": "A required cash or account balance input is missing."
+    },
+    {
+      "code": "STATE_MISSING_LOT_DATA",
+      "family": "state_quality",
+      "description": "Required lot-level truth is unavailable for the requested tax-sensitive action."
+    },
+    {
+      "code": "STATE_STALE_PRICE_INPUT",
+      "family": "state_quality",
+      "description": "Required valuation or price input is stale."
+    },
+    {
+      "code": "STATE_UNMAPPED_POSITION_OWNER",
+      "family": "state_quality",
+      "description": "A position could not be mapped to a governed household owner or account."
+    },
+    {
+      "code": "TAX_COST_EXCESSIVE",
+      "family": "tax",
+      "description": "A non-urgent rebalance was deferred because modeled tax cost was excessive."
+    },
+    {
+      "code": "TAX_DATA_UNAVAILABLE",
+      "family": "tax",
+      "description": "Required tax truth was unavailable so only urgent risk reductions may proceed."
+    },
+    {
+      "code": "TAX_LOT_SELECTION_REQUIRED",
+      "family": "tax",
+      "description": "Lot-level tax truth is required before a tax-sensitive liquidation may proceed."
+    },
+    {
+      "code": "TAX_URGENT_RISK_EXCEPTION",
+      "family": "tax",
+      "description": "A risk-reduction action was allowed despite degraded tax truth because urgency was explicit."
+    }
+  ]
+}

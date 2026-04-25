@@ -24,6 +24,7 @@ startup lifecycle.
 - whether supporting session authority granted or denied
 - what the first true canonical blocker is
 - whether the block is valid or caused by defect
+- what the governed open lifecycle state is after authority aligns
 - what startup/day-start alerts and summaries should say for the touched path
 - what the recorded daily state-transition history is
 
@@ -68,6 +69,7 @@ The state machine must identify:
 - supporting daily control references
 - supporting regeneration results
 - supporting session-authority outcome
+- governed day-open trigger and day-open attempt state
 - structured monotonic state transitions
 - first true blocker with classification
 - final daily start decision
@@ -152,3 +154,29 @@ This contract converges the layered daily startup chain into one top-level daily
 owner without removing the supporting `paper_day_control_plane_v1`,
 `trading_day_control_plane_v1`, `trading_day_execution_control_plane_v1`, or
 `paper_session_ledger_v1` artifacts.
+
+## Governed open lifecycle
+
+When `final_start_decision == READY_NOW`, the state machine must additionally classify the day as
+exactly one of:
+
+- `PRE_OPEN_READY`
+- `OPEN_WAITING_FOR_AUTHORITY`
+- `PAPER_OPEN_AVAILABLE`
+- `OPEN_TRIGGER_EMITTED`
+- `OPEN_ATTEMPTED`
+- `OPEN_SUCCEEDED`
+- `OPEN_MISSED`
+- `OPEN_FAILED`
+
+The state machine must derive those states only from binding authority inputs plus
+`day_open_trigger_v1` and `day_open_attempt_v1`.
+
+Environment-specific open policy qualifiers:
+
+- the state machine must embed the machine-readable `day_open_policy_v1` snapshot
+- for paper mode, it must make explicit that:
+  - paper open availability is governed by current granted readiness and authority
+  - prior same-day paper success does not itself terminate further paper opens
+  - clock-window expiration does not itself terminate further paper opens
+- for non-paper environments, strict open-window and terminal open semantics remain unchanged

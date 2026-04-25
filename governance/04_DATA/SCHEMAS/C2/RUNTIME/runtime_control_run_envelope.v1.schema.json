@@ -1,0 +1,51 @@
+{
+  "$id": "https://constellation.local/schemas/c2/runtime/runtime_control_run_envelope.v1.schema.json",
+  "title": "runtime_control_run_envelope.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_id",
+    "run_id",
+    "day_utc",
+    "produced_utc",
+    "contract_version",
+    "capability_scope",
+    "environment",
+    "ib_account",
+    "sleeve_id",
+    "run_outcome",
+    "stage_status",
+    "artifact_refs",
+    "reason_codes",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "runtime_control_run_envelope" },
+    "schema_version": { "type": "string", "const": "v1" },
+    "record_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
+    "produced_utc": { "type": "string", "minLength": 11 },
+    "contract_version": { "type": "string", "minLength": 1 },
+    "capability_scope": { "type": "string", "minLength": 1 },
+    "environment": { "type": "string", "minLength": 1 },
+    "ib_account": { "type": "string", "minLength": 1 },
+    "sleeve_id": { "type": "string", "minLength": 1 },
+    "run_outcome": { "type": "string", "enum": ["allow", "blocked", "duplicate", "no_action"] },
+    "stage_status": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "artifact_refs": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

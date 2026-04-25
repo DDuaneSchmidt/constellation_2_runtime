@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/runtime/product_summary.v1.schema.json",
+  "title": "product_summary.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "surface_kind",
+    "summary_id",
+    "kernel_version",
+    "selection_model_version",
+    "generated_at_utc",
+    "authority_label",
+    "target_day",
+    "scope_id",
+    "operation_type",
+    "sleeve_id",
+    "environment",
+    "ib_account",
+    "top_actionable_items",
+    "top_blocked_items",
+    "top_review_deltas",
+    "critical_degraded_states",
+    "readiness_summary",
+    "selection_reason_ids",
+    "governing_opportunity_refs",
+    "governing_advisory_refs",
+    "governing_tax_refs",
+    "governing_readiness_refs",
+    "ai_assist_eligibility",
+    "semantic_events"
+  ],
+  "$defs": {
+    "ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_id", "artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_id": { "type": "string", "minLength": 1 },
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "minLength": 1 }
+      }
+    },
+    "summaryItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "item_kind",
+        "item_ref",
+        "label",
+        "summary_message",
+        "selection_reason_id",
+        "actionability_state",
+        "review_priority",
+        "freshness_state",
+        "visibility_state",
+        "blocker_states",
+        "authority_label",
+        "drill_down_route"
+      ],
+      "properties": {
+        "item_id": { "type": "string", "minLength": 1 },
+        "item_kind": { "type": "string", "enum": ["opportunity", "degraded_state"] },
+        "item_ref": { "$ref": "#/$defs/ref" },
+        "label": { "type": "string", "minLength": 1 },
+        "summary_message": { "type": "string", "minLength": 1 },
+        "selection_reason_id": { "type": "string", "minLength": 1 },
+        "actionability_state": { "type": "string", "minLength": 1 },
+        "review_priority": { "type": "string", "minLength": 1 },
+        "freshness_state": { "type": "string", "minLength": 1 },
+        "visibility_state": { "type": "string", "minLength": 1 },
+        "blocker_states": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "delta_state": { "type": "string", "minLength": 1 },
+        "scenario_significance_state": { "type": "string", "minLength": 1 },
+        "authority_label": { "type": "string", "minLength": 1 },
+        "drill_down_route": { "type": "string", "minLength": 1 }
+      }
+    },
+    "readinessSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "blocked", "blocked_state", "authority_label", "governing_refs"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "blocked": { "type": "boolean" },
+        "blocked_state": { "type": "string", "minLength": 1 },
+        "operator_status": { "type": "string", "minLength": 1 },
+        "authority_label": { "type": "string", "minLength": 1 },
+        "governing_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } }
+      }
+    },
+    "aiAssistEligibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eligible", "allowed_summary_types"],
+      "properties": {
+        "eligible": { "type": "boolean" },
+        "allowed_summary_types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "daily_review_brief",
+              "weekly_review_brief",
+              "blocked_explanation_brief",
+              "domain_condensed_summary",
+              "scenario_comparison_brief"
+            ]
+          }
+        }
+      }
+    },
+    "semanticEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_type",
+        "authority_label",
+        "summary_type",
+        "selected_item_refs",
+        "critical_degraded_refs",
+        "governing_refs",
+        "kernel_version"
+      ],
+      "properties": {
+        "event_type": {
+          "type": "string",
+          "enum": [
+            "product_summary_computed",
+            "product_summary_selection_changed",
+            "critical_degraded_state_elevated",
+            "top_blocked_item_elevated",
+            "ai_summary_generated",
+            "ai_summary_fallback_used",
+            "product_snapshot_created"
+          ]
+        },
+        "authority_label": { "type": "string", "minLength": 1 },
+        "summary_type": { "type": "string", "minLength": 1 },
+        "selected_item_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+        "critical_degraded_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+        "governing_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+        "kernel_version": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "properties": {
+    "schema_id": { "const": "product_summary" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "product_summary_v1" },
+    "surface_kind": { "const": "projection" },
+    "summary_id": { "type": "string", "minLength": 1 },
+    "kernel_version": { "type": "string", "minLength": 1 },
+    "selection_model_version": { "type": "string", "minLength": 1 },
+    "generated_at_utc": { "type": "string", "format": "date-time" },
+    "authority_label": { "type": "string", "enum": ["governed_product_summary"] },
+    "target_day": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "operation_type": { "type": "string", "minLength": 1 },
+    "sleeve_id": { "type": "string", "minLength": 1 },
+    "environment": { "type": "string", "minLength": 1 },
+    "ib_account": { "type": "string", "minLength": 1 },
+    "top_actionable_items": { "type": "array", "items": { "$ref": "#/$defs/summaryItem" } },
+    "top_blocked_items": { "type": "array", "items": { "$ref": "#/$defs/summaryItem" } },
+    "top_review_deltas": { "type": "array", "items": { "$ref": "#/$defs/summaryItem" } },
+    "critical_degraded_states": { "type": "array", "items": { "$ref": "#/$defs/summaryItem" } },
+    "readiness_summary": { "$ref": "#/$defs/readinessSummary" },
+    "selection_reason_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "governing_opportunity_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "governing_advisory_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "governing_tax_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "governing_readiness_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "ai_assist_eligibility": { "$ref": "#/$defs/aiAssistEligibility" },
+    "prior_snapshot_ref": { "$ref": "#/$defs/ref" },
+    "supersedes_ref": { "$ref": "#/$defs/ref" },
+    "evidence_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "semantic_events": { "type": "array", "items": { "$ref": "#/$defs/semanticEvent" } }
+  }
+}

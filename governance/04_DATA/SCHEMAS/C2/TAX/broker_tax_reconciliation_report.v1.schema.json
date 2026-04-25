@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/broker_tax_reconciliation_report.v1.schema.json",
+  "title": "broker_tax_reconciliation_report.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "report_id", "scope_id", "snapshot_id", "status", "lot_report_id", "realized_items", "matched_items", "unmatched_items", "mismatch_summary", "reason_codes"],
+  "properties": {
+    "schema_id": { "const": "broker_tax_reconciliation_report" },
+    "schema_version": { "const": "v1" },
+    "report_id": { "type": "string", "minLength": 1 },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "snapshot_id": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["scaffold", "matched", "unmatched"] },
+    "lot_report_id": { "type": "string", "minLength": 1 },
+    "realized_items": { "type": "array", "items": { "type": "object" } },
+    "matched_items": { "type": "array", "items": { "type": "object" } },
+    "unmatched_items": { "type": "array", "items": { "type": "object" } },
+    "mismatch_summary": { "type": "object" },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}

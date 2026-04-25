@@ -12,7 +12,8 @@ scope: constellation_2_0
 canonical:
   repo_root: /home/node/constellation
   governance_root: /home/node/constellation/governance
-  truth_root: /home/node/constellation/constellation_2/runtime/truth
+  truth_root: /home/node/constellation_runtime_data/truth
+  execution_truth_root_basis: /home/node/constellation_runtime_data/truth_sleeves/<sleeve_id>/<mode>
 
 repo_role:
   role: authoritative_source
@@ -25,6 +26,641 @@ repo_role:
   authority_contract: governance/05_CONTRACTS/C2/repo_authority_immutability_v1.contract.md
 
 documents:
+  - id: C2_CONTRACT_CONSTITUTIONAL_RUNTIME_ARCHITECTURE_V1
+    path: governance/05_CONTRACTS/C2/constitutional_runtime_architecture_v1.contract.md
+    class: C2_CONTRACT
+    status: ACTIVE
+
+  - id: C2_CONTRACT_CONSTITUTIONAL_ARTIFACT_TAXONOMY_V1
+    path: governance/05_CONTRACTS/C2/constitutional_artifact_taxonomy_v1.contract.md
+    class: C2_CONTRACT
+    status: ACTIVE
+
+  - id: C2_SCHEMA_CONSTITUTIONAL_ARTIFACT_AUTHORITY_REGISTRY_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/constitutional_artifact_authority_registry.v1.schema.json
+    class: C2_SCHEMA
+    status: ACTIVE
+
+  - id: C2_SCHEMA_GOVERNED_ARTIFACT_LINEAGE_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/governed_artifact_lineage.v1.schema.json
+    class: C2_SCHEMA
+    status: ACTIVE
+
+  - id: C2_SCHEMA_FROZEN_DECISION_INPUT_BUNDLE_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/frozen_decision_input_bundle.v1.schema.json
+    class: C2_SCHEMA
+    status: ACTIVE
+
+  - id: C2_SCHEMA_ARTIFACT_DEPENDENCY_DECLARATION_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/artifact_dependency_declaration.v1.schema.json
+    class: C2_SCHEMA
+    status: ACTIVE
+
+  - id: C2_REGISTRY_TRUTH_LIFECYCLE_PHASE_GRAPH_V1
+    path: governance/02_REGISTRIES/C2_TRUTH_LIFECYCLE_PHASE_GRAPH_V1.json
+    class: C2_REGISTRY
+    status: ACTIVE
+
+  - id: C2_SCHEMA_TRUTH_LIFECYCLE_PHASE_RESULT_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/truth_lifecycle_phase_result.v1.schema.json
+    class: C2_SCHEMA
+    status: ACTIVE
+
+  - id: C2_SCHEMA_TRUTH_DAY_RUN_LEDGER_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/truth_day_run_ledger.v1.schema.json
+    class: C2_SCHEMA
+    status: ACTIVE
+
+  - id: C2_CONTRACT_TRUTH_ROOT_LIFECYCLE_ORCHESTRATOR_V1
+    path: governance/05_CONTRACTS/C2/truth_root_lifecycle_orchestrator_v1.contract.md
+    class: C2_CONTRACT
+    status: ACTIVE
+
+  - id: C2_SCHEMA_RUNTIME_LIFECYCLE_ACTIVE_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/runtime_lifecycle_active.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_RUNTIME_LIFECYCLE_RECEIPT_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/runtime_lifecycle_receipt.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_RUNTIME_LIFECYCLE_EXIT_RECEIPT_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/runtime_lifecycle_exit_receipt.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_SINGLE_NODE_HOSTED_PREFLIGHT_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/single_node_hosted_preflight.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_CONTRACT_CONFIGURATION_ACTIVATION_AUTHORITY_V1
+    path: governance/05_CONTRACTS/C2/configuration_activation_authority_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CONFIGURATION_POLICY_SNAPSHOT_V1
+    path: governance/05_CONTRACTS/C2/configuration_policy_snapshot_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CONFIGURATION_VALIDATION_RESULT_V1
+    path: governance/05_CONTRACTS/C2/configuration_validation_result_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CONFIGURATION_COMPILE_RESULT_V1
+    path: governance/05_CONTRACTS/C2/configuration_compile_result_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CONFIGURATION_REVIEW_DIFF_V1
+    path: governance/05_CONTRACTS/C2/configuration_review_diff_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_COMPILED_ACTIVE_CONFIG_V1
+    path: governance/05_CONTRACTS/C2/compiled_active_config_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CONFIGURATION_ACTIVATION_TRANSACTION_V1
+    path: governance/05_CONTRACTS/C2/configuration_activation_transaction_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CONFIGURATION_STATE_V1
+    path: governance/05_CONTRACTS/C2/configuration_state_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_RELEASE_CURRENT_V1
+    path: governance/05_CONTRACTS/C2/release_current_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_SESSION_CURRENT_V1
+    path: governance/05_CONTRACTS/C2/session_current_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_EXECUTION_CURRENT_V1
+    path: governance/05_CONTRACTS/C2/execution_current_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_SCHEMA_RELEASE_CURRENT_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/release_current.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_CONTRACT_RELEASE_BASELINE_READINESS_V1
+    path: governance/05_CONTRACTS/C2/release_baseline_readiness_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_RUNTIME_AUTHORITY_CLOSURE_V1
+    path: governance/05_CONTRACTS/C2/runtime_authority_closure_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CRITICAL_VALIDATOR_COVERAGE_V1
+    path: governance/05_CONTRACTS/C2/critical_validator_coverage_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CERTIFIED_OPERATIONAL_READINESS_V1
+    path: governance/05_CONTRACTS/C2/certified_operational_readiness_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_BUNDLE7_SEMANTIC_PRESERVATION_V1
+    path: governance/05_CONTRACTS/C2/bundle7_semantic_preservation_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_ADVISORY_DECISION_STATE_KERNEL_V1
+    path: governance/05_CONTRACTS/C2/advisory_decision_state_kernel_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_ADVISORY_DECISION_STATE_V1
+    path: governance/05_CONTRACTS/C2/advisory_decision_state_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_ADVISORY_DECISION_STATE_PRECEDENCE_V1
+    path: governance/05_CONTRACTS/C2/advisory_decision_state_precedence_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_ADVISORY_DECISION_EXPLANATION_MAPPING_V1
+    path: governance/05_CONTRACTS/C2/advisory_decision_explanation_mapping_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_BUNDLE8_SEMANTIC_PRESERVATION_V1
+    path: governance/05_CONTRACTS/C2/bundle8_semantic_preservation_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CRITICAL_PATH_OBLIGATION_PIPELINE_V1
+    path: governance/05_CONTRACTS/C2/critical_path_obligation_pipeline_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_BUNDLE9_DECOMPOSITION_MAP_V1
+    path: governance/05_CONTRACTS/C2/bundle9_decomposition_map_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_BUNDLE9_PERFORMANCE_ENVELOPE_V1
+    path: governance/05_CONTRACTS/C2/bundle9_performance_envelope_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_BUNDLE9_REPLAY_FORENSIC_ESCALATION_V1
+    path: governance/05_CONTRACTS/C2/bundle9_replay_forensic_escalation_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_BUNDLE9_SEMANTIC_PRESERVATION_V1
+    path: governance/05_CONTRACTS/C2/bundle9_semantic_preservation_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_TAX_STATE_KERNEL_V1
+    path: governance/05_CONTRACTS/C2/tax_state_kernel_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_TAX_STATE_V1
+    path: governance/05_CONTRACTS/C2/tax_state_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_TAX_STATE_PRECEDENCE_V1
+    path: governance/05_CONTRACTS/C2/tax_state_precedence_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_TAX_STATE_EXPLANATION_MAPPING_V1
+    path: governance/05_CONTRACTS/C2/tax_state_explanation_mapping_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_TAX_AWARE_ADVISORY_BINDING_V1
+    path: governance/05_CONTRACTS/C2/tax_aware_advisory_binding_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_BUNDLE10_SEMANTIC_PRESERVATION_V1
+    path: governance/05_CONTRACTS/C2/bundle10_semantic_preservation_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_OPPORTUNITY_STATE_KERNEL_V1
+    path: governance/05_CONTRACTS/C2/opportunity_state_kernel_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_OPPORTUNITY_STATE_V1
+    path: governance/05_CONTRACTS/C2/opportunity_state_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_OPPORTUNITY_STATE_PRECEDENCE_V1
+    path: governance/05_CONTRACTS/C2/opportunity_state_precedence_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_OPPORTUNITY_REVIEW_SNAPSHOT_V1
+    path: governance/05_CONTRACTS/C2/opportunity_review_snapshot_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_OPPORTUNITY_SCENARIO_SIGNIFICANCE_V1
+    path: governance/05_CONTRACTS/C2/opportunity_scenario_significance_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_OPPORTUNITY_EXPLANATION_MAPPING_V1
+    path: governance/05_CONTRACTS/C2/opportunity_explanation_mapping_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_BUNDLE11_SEMANTIC_PRESERVATION_V1
+    path: governance/05_CONTRACTS/C2/bundle11_semantic_preservation_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_PRODUCT_SUMMARY_KERNEL_V1
+    path: governance/05_CONTRACTS/C2/product_summary_kernel_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_PRODUCT_SUMMARY_V1
+    path: governance/05_CONTRACTS/C2/product_summary_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_PRODUCT_SUMMARY_PRECEDENCE_V1
+    path: governance/05_CONTRACTS/C2/product_summary_precedence_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_BOUNDED_PRODUCT_AI_CONDENSATION_V1
+    path: governance/05_CONTRACTS/C2/bounded_product_ai_condensation_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_PRODUCT_SHELL_PROFESSIONALISM_V1
+    path: governance/05_CONTRACTS/C2/product_shell_professionalism_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_PRODUCT_SNAPSHOT_V1
+    path: governance/05_CONTRACTS/C2/product_snapshot_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_BUNDLE12_SEMANTIC_PRESERVATION_V1
+    path: governance/05_CONTRACTS/C2/bundle12_semantic_preservation_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_OUTCOME_STATE_KERNEL_V1
+    path: governance/05_CONTRACTS/C2/outcome_state_kernel_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_OUTCOME_STATE_V1
+    path: governance/05_CONTRACTS/C2/outcome_state_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_OUTCOME_CLAIM_STRENGTH_V1
+    path: governance/05_CONTRACTS/C2/outcome_claim_strength_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_OUTCOME_EFFECTIVENESS_ATTRIBUTION_V1
+    path: governance/05_CONTRACTS/C2/outcome_effectiveness_attribution_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_OUTCOME_COMPARISON_V1
+    path: governance/05_CONTRACTS/C2/outcome_comparison_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_OUTCOME_EXPLANATION_MAPPING_V1
+    path: governance/05_CONTRACTS/C2/outcome_explanation_mapping_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_BUNDLE13_SEMANTIC_PRESERVATION_V1
+    path: governance/05_CONTRACTS/C2/bundle13_semantic_preservation_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_VALUE_STATE_KERNEL_V1
+    path: governance/05_CONTRACTS/C2/value_state_kernel_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_VALUE_STATE_V1
+    path: governance/05_CONTRACTS/C2/value_state_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_VALUE_CLAIM_STRENGTH_V1
+    path: governance/05_CONTRACTS/C2/value_claim_strength_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_VALUE_EFFECTIVENESS_ATTRIBUTION_V1
+    path: governance/05_CONTRACTS/C2/value_effectiveness_attribution_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_VALUE_SLEEVE_LINKAGE_V1
+    path: governance/05_CONTRACTS/C2/value_sleeve_linkage_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_VALUE_COMPARISON_V1
+    path: governance/05_CONTRACTS/C2/value_comparison_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_VALUE_EXPLANATION_MAPPING_V1
+    path: governance/05_CONTRACTS/C2/value_explanation_mapping_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_SCHEMA_VALUE_STATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/value_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_CONTRACT_REFINEMENT_STATE_KERNEL_V1
+    path: governance/05_CONTRACTS/C2/refinement_state_kernel_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_REFINEMENT_STATE_V1
+    path: governance/05_CONTRACTS/C2/refinement_state_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_REFINEMENT_THRESHOLD_V1
+    path: governance/05_CONTRACTS/C2/refinement_threshold_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_REFINEMENT_ACTION_MODEL_V1
+    path: governance/05_CONTRACTS/C2/refinement_action_model_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_REFINEMENT_PRODUCT_SAFETY_PRESERVATION_V1
+    path: governance/05_CONTRACTS/C2/refinement_product_safety_preservation_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_REFINEMENT_PROVENANCE_V1
+    path: governance/05_CONTRACTS/C2/refinement_provenance_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_BUNDLE14_SEMANTIC_PRESERVATION_V1
+    path: governance/05_CONTRACTS/C2/bundle14_semantic_preservation_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_SCHEMA_REFINEMENT_STATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/refinement_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_CONTRACT_POLICY_EVOLUTION_STATE_KERNEL_V1
+    path: governance/05_CONTRACTS/C2/policy_evolution_state_kernel_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_POLICY_EVOLUTION_STATE_V1
+    path: governance/05_CONTRACTS/C2/policy_evolution_state_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_POLICY_EVIDENCE_WINDOW_THRESHOLD_V1
+    path: governance/05_CONTRACTS/C2/policy_evidence_window_threshold_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_POLICY_EVOLUTION_ACTION_MODEL_V1
+    path: governance/05_CONTRACTS/C2/policy_evolution_action_model_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_POLICY_TRUST_PRESERVING_OVERRIDE_V1
+    path: governance/05_CONTRACTS/C2/policy_trust_preserving_override_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_POLICY_EVOLUTION_PROVENANCE_V1
+    path: governance/05_CONTRACTS/C2/policy_evolution_provenance_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_BUNDLE15_SEMANTIC_PRESERVATION_V1
+    path: governance/05_CONTRACTS/C2/bundle15_semantic_preservation_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_SCHEMA_POLICY_EVOLUTION_STATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/policy_evolution_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_CONFIGURATION_POLICY_SNAPSHOT_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/configuration_policy_snapshot.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_OPPORTUNITY_STATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/opportunity_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_OPPORTUNITY_REVIEW_SNAPSHOT_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/opportunity_review_snapshot.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_PRODUCT_SUMMARY_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/product_summary.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_PRODUCT_SNAPSHOT_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/product_snapshot.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_OUTCOME_STATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/outcome_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_CONFIGURATION_VALIDATION_RESULT_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/configuration_validation_result.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_CONFIGURATION_COMPILE_RESULT_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/configuration_compile_result.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_CONFIGURATION_REVIEW_DIFF_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/configuration_review_diff.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_COMPILED_ACTIVE_CONFIG_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/compiled_active_config.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_CONFIGURATION_ACTIVATION_TRANSACTION_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/configuration_activation_transaction.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_CONFIGURATION_STATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/configuration_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_ADVISORY_DECISION_STATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/advisory_decision_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_STATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/tax_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_REGISTRY_ARTIFACT_AUTHORITY_V1
+    path: governance/02_REGISTRIES/C2_ARTIFACT_AUTHORITY_REGISTRY_V1.json
+    class: C2_REGISTRY
+    status: ACTIVE
+
+  - id: C2_CONTRACT_DAY_ACTIVATION_AUTHORITY_V1
+    path: governance/05_CONTRACTS/C2/day_activation_authority_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_DAY_ACTIVATION_MANIFEST_FRESH_PAPER_ENTRY_V1
+    path: governance/05_CONTRACTS/C2/day_activation_dependency_manifest_fresh_paper_entry_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_DAY_ACTIVATION_PACKAGE_V1
+    path: governance/05_CONTRACTS/C2/day_activation_package_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_SCHEMA_DAY_ACTIVATION_DEPENDENCY_MANIFEST_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/day_activation_dependency_manifest.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_DAY_ACTIVATION_BUILD_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/day_activation_build.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_DAY_ACTIVATION_PACKAGE_V1
+    path: governance/04_DATA/SCHEMAS/C2/CONTEXT/day_activation_package.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_REGISTRY_DAY_ACTIVATION_MANIFESTS_V1
+    path: governance/02_REGISTRIES/C2_DAY_ACTIVATION_MANIFESTS_V1.json
+    class: C2_REGISTRY
+    status: DRAFT
+
+  - id: C2_TOOL_DAY_ACTIVATION_AUTHORITY_V1
+    path: ops/tools/run_day_activation_authority_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_CONTRACT_RECONCILED_TRADE_STATE_V1
+    path: governance/05_CONTRACTS/C2/reconciled_trade_state_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_TRADE_IDENTITY_RESOLUTION_V1
+    path: governance/05_CONTRACTS/C2/trade_identity_resolution_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_RECONCILIATION_HEALTH_V1
+    path: governance/05_CONTRACTS/C2/reconciliation_health_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_RECONCILED_TRADE_DESCRIPTION_V1
+    path: governance/05_CONTRACTS/C2/reconciled_trade_description_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_RECONCILIATION_PROVENANCE_V1
+    path: governance/05_CONTRACTS/C2/reconciliation_provenance_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_SCHEMA_TRADE_IDENTITY_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/trade_identity.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_INCORPORATED_BROKER_TRADE_STATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/incorporated_broker_trade_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_RECONCILED_TRADE_DESCRIPTION_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/reconciled_trade_description.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_RECONCILIATION_HEALTH_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/reconciliation_health.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_RECONCILIATION_PROVENANCE_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/reconciliation_provenance.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_RECONCILED_TRADE_STATE_SUMMARY_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/reconciled_trade_state_summary.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TOOL_RECONCILED_TRADE_STATE_V1
+    path: ops/tools/run_reconciled_trade_state_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
   - id: C2_PAPER_SESSION_DEFINITION_V1
     path: governance/05_CONTRACTS/C2/paper_session_definition_v1.contract.md
     class: C2_CONTRACT
@@ -71,8 +707,26 @@ documents:
     status: DRAFT
 
   - id: C2_PAPER_DAY_OPERATOR_ENTRYPOINT_V1
+    # Runtime entry-chain ownership is explicit: the systemd entry delegates canonical morning startup to run_paper_session_bootstrap_v1.py before day-open/orchestrator handoff, and blocked mornings must print the earliest failing owned prerequisite plus rerun guidance.
     path: governance/05_CONTRACTS/C2/paper_day_operator_entrypoint_v1.contract.md
     class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_PAPER_SESSION_BOOTSTRAP_V1
+    path: governance/05_CONTRACTS/C2/paper_session_bootstrap_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_DAY_READINESS_AUTOMATION_V1
+    path: governance/05_CONTRACTS/C2/day_readiness_automation_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+    # WAITING_FOR_MARKET_DATA remains the subordinate operator state before 09:30 America/New_York
+    # when a governed same-day positive core-session price has not yet landed in market_data_snapshot_v1.
+
+  - id: C2_SCHEMA_DAY_READINESS_AUTOMATION_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/day_readiness_automation.v1.schema.json
+    class: C2_SCHEMA
     status: DRAFT
 
   - id: C2_PAPER_SESSION_ADMISSION_DEPLOYMENT_CLOSURE_V1
@@ -120,6 +774,11 @@ documents:
     class: C2_SCHEMA
     status: DRAFT
 
+  - id: C2_REPORTS_PAPER_SESSION_BOOTSTRAP_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/paper_session_bootstrap.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
   - id: C2_TOOL_PAPER_SESSION_ADMISSION_V1
     path: ops/tools/run_paper_session_admission_v1.py
     class: C2_TOOL
@@ -150,6 +809,69 @@ documents:
     status: ACTIVE
   - id: C2_TOOL_FRESH_DAY_ADMISSION_V1
     path: ops/tools/run_fresh_day_admission_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_SESSION_AUTHORITY_V1
+    # Session Authority owns target-day build/admission and the explicit startup promotion gate before active_session/current advances.
+    path: ops/tools/run_session_authority_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_PAPER_SESSION_BOOTSTRAP_V1
+    # Canonical operator-facing morning startup tool; it sequences startup materialization, pre-open, Session Authority, and promotion-aware startup gating, and must emit earliest-failing owned prerequisite guidance before deeper progression is blocked.
+    path: ops/tools/run_paper_session_bootstrap_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_PRE_OPEN_MATERIALIZER_V1
+    # Canonical pre-open owner; producer_results[] now normalizes delegated producer outcomes into explicit result-state classifications after single-shot artifact revalidation.
+    path: ops/tools/run_pre_open_materializer_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_DAY_AUTHORITY_DECISION_V1
+    path: ops/tools/run_day_authority_decision_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_TOMORROW_PAPER_STARTUP_PREP_V1
+    path: ops/tools/run_tomorrow_paper_startup_prep_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_PAPER_STARTUP_AUTHORIZATION_CONVERGENCE_V1
+    path: ops/tools/run_paper_startup_authorization_convergence_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_PAPER_STARTUP_INTENT_INPUT_CONVERGENCE_V1
+    path: ops/tools/run_paper_startup_intent_input_convergence_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_STARTUP_MATERIALIZATION_INPUT_CONVERGENCE_V1
+    path: ops/tools/run_startup_materialization_input_convergence_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_SESSION_AUTHORITY_STATUS_V1
+    path: ops/tools/run_session_authority_status_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_SESSION_AUTHORITY_ALERT_V1
+    path: ops/tools/run_session_authority_alert_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_SESSION_AUTHORITY_PRODUCTION_VALIDATION_V1
+    path: ops/tools/run_session_authority_production_validation_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_MARKET_CALENDAR_COVERAGE_AUTHORITY_V1
+    path: ops/tools/run_market_calendar_coverage_authority_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_MARKET_CALENDAR_SOURCE_COVERAGE_CHECK_V1
+    path: ops/tools/run_market_calendar_source_coverage_check_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_MARKET_CALENDAR_COVERAGE_STATUS_V1
+    path: ops/tools/run_market_calendar_coverage_status_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_MARKET_CALENDAR_COVERAGE_REFRESH_V1
+    path: ops/tools/run_market_calendar_coverage_refresh_v1.py
     class: C2_TOOL
     status: ACTIVE
   - id: C2_TOOL_PAPER_SESSION_EVIDENCE_MANIFEST_V1
@@ -204,8 +926,20 @@ documents:
     path: ops/tools/run_trading_day_state_machine_v1.py
     class: C2_TOOL
     status: ACTIVE
+  - id: C2_TOOL_DAY_OPEN_TRIGGER_V1
+    path: ops/tools/run_day_open_trigger_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_DAY_OPEN_ATTEMPT_V1
+    path: ops/tools/run_day_open_attempt_v1.py
+    class: C2_TOOL
+    status: ACTIVE
   - id: C2_TOOL_DEPLOYMENT_STATE_MACHINE_V1
     path: ops/tools/run_deployment_state_machine_v1.py
+    class: C2_TOOL
+    status: DRAFT
+  - id: C2_TOOL_SINGLE_NODE_HOSTED_PREFLIGHT_V1
+    path: ops/tools/run_single_node_hosted_preflight_v1.py
     class: C2_TOOL
     status: DRAFT
   - id: C2_TOOL_EXECUTION_JOURNAL_V1
@@ -241,8 +975,20 @@ documents:
     path: governance/05_CONTRACTS/C2/active_runtime_contract_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
+  - id: C2_RUNTIME_STARTUP_IDENTITY_V1
+    path: governance/05_CONTRACTS/C2/runtime_startup_identity_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_RUNTIME_LIFECYCLE_V1
+    path: governance/05_CONTRACTS/C2/runtime_lifecycle_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
   - id: C2_DEPLOYMENT_STATE_MACHINE_V1
     path: governance/05_CONTRACTS/C2/deployment_state_machine_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_SINGLE_NODE_HOSTED_DEPLOYMENT_FOUNDATION_V1
+    path: governance/05_CONTRACTS/C2/single_node_hosted_deployment_foundation_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
   - id: C2_EXECUTION_JOURNAL_V1
@@ -261,6 +1007,14 @@ documents:
     path: governance/05_CONTRACTS/C2/runtime_path_authority_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
+  - id: C2_RUNTIME_ENVIRONMENT_BOUNDARY_V1
+    path: governance/05_CONTRACTS/C2/runtime_environment_boundary_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_OPERATOR_ALERT_DECISION_V1
+    path: governance/05_CONTRACTS/C2/operator_alert_decision_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
   - id: C2_EXECUTION_OUTCOME_V1
     path: governance/05_CONTRACTS/C2/execution_outcome_v1.contract.md
     class: C2_CONTRACT
@@ -271,6 +1025,73 @@ documents:
     status: DRAFT
   - id: C2_FRESH_DAY_ADMISSION_V1
     path: governance/05_CONTRACTS/C2/fresh_day_admission_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_SESSION_AUTHORITY_V1
+    path: governance/05_CONTRACTS/C2/session_authority_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_PRE_OPEN_MATERIALIZER_V1
+    # Pre-open v1 hardening remains additive: delegated producer outcomes are revalidated from authoritative artifacts and classified explicitly without retries or loops; canonical morning startup must stop before Session Authority/day-open when pre-open is not COMPLETE.
+    path: governance/05_CONTRACTS/C2/pre_open_materializer_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_PRE_OPEN_BUNDLE_V1
+    # Pre-open bundle v1 remains canonical; producer_results[] now carries explicit result_state, reason_codes, freshness, target-day, and deduplicated artifact refs, and blocked bundles must stop deeper morning progression.
+    path: governance/05_CONTRACTS/C2/pre_open_bundle_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_PAPER_STARTUP_AUTHORIZATION_CONVERGENCE_V1
+    path: governance/05_CONTRACTS/C2/paper_startup_authorization_convergence_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_PAPER_STARTUP_INTENT_INPUT_CONVERGENCE_V1
+    path: governance/05_CONTRACTS/C2/paper_startup_intent_input_convergence_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_PAPER_STARTUP_ADMISSION_AUTHORIZATION_BINDING_V1
+    path: governance/05_CONTRACTS/C2/paper_startup_admission_authorization_binding_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_STARTUP_MATERIALIZATION_INPUT_CONVERGENCE_V1
+    path: governance/05_CONTRACTS/C2/startup_materialization_input_convergence_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_SESSION_READINESS_REFRESH_V1
+    path: governance/05_CONTRACTS/C2/session_readiness_refresh_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_TARGET_DAY_BUILD_V1
+    path: governance/05_CONTRACTS/C2/target_day_build_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_TARGET_DAY_ADMISSION_V1
+    path: governance/05_CONTRACTS/C2/target_day_admission_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_SESSION_PROMOTION_DECISION_V1
+    # Canonical startup promotion artifact; morning operator surfaces must stop on non-PROMOTED states and report this artifact path when it is the first blocking surface after pre-open completion.
+    path: governance/05_CONTRACTS/C2/session_promotion_decision_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_ACTIVE_SESSION_V1
+    path: governance/05_CONTRACTS/C2/active_session_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_SESSION_AUTHORITY_STATUS_V1
+    path: governance/05_CONTRACTS/C2/session_authority_status_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_SESSION_AUTHORITY_ALERT_V1
+    path: governance/05_CONTRACTS/C2/session_authority_alert_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_MARKET_CALENDAR_COVERAGE_AUTHORITY_V1
+    path: governance/05_CONTRACTS/C2/market_calendar_coverage_authority_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_MARKET_CALENDAR_COVERAGE_STATUS_V1
+    path: governance/05_CONTRACTS/C2/market_calendar_coverage_status_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
   - id: C2_ALERTS_PROJECTION_V1
@@ -345,6 +1166,43 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/fresh_day_admission.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
+  - id: C2_REPORTS_TARGET_DAY_BUILD_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/target_day_build.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_PRE_OPEN_BUNDLE_SCHEMA_V1
+    # Producer-result hardening remains additive in v1 through explicit producer outcome classification fields.
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/pre_open_bundle.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_PAPER_STARTUP_AUTHORIZATION_CONVERGENCE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/paper_startup_authorization_convergence.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_TARGET_DAY_ADMISSION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/target_day_admission.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_SESSION_PROMOTION_DECISION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/session_promotion_decision.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_ACTIVE_SESSION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/active_session.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_SESSION_AUTHORITY_STATUS_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/session_authority_status.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_SESSION_AUTHORITY_ALERT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/session_authority_alert.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_MARKET_CALENDAR_COVERAGE_STATUS_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/market_calendar_coverage_status.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
   - id: C2_REGISTRY_CAPABILITY_POLICY_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/REGISTRIES/capability_policy_registry.v1.schema.json
     class: C2_SCHEMA
@@ -361,6 +1219,82 @@ documents:
   - id: C2_EXECUTION_JOURNAL_EVENT_TYPE_REGISTRY_FILE_V1
     path: governance/02_REGISTRIES/C2_EXECUTION_JOURNAL_EVENT_TYPE_REGISTRY_V1.json
     class: C2_REGISTRY
+    status: DRAFT
+  - id: C2_SESSION_AUTHORITY_BLOCKER_REASON_REGISTRY_V1
+    path: governance/02_REGISTRIES/C2_SESSION_AUTHORITY_BLOCKER_REASON_REGISTRY_V1.json
+    class: C2_REGISTRY
+    status: DRAFT
+  - id: C2_OPS_RUNBOOK_SESSION_AUTHORITY_WITHHELD_ROLLOVER_V1
+    path: ops/governance/RUNBOOK_SESSION_AUTHORITY_WITHHELD_ROLLOVER_V1.md
+    class: C2_OPERATIONS_DOC
+    status: DRAFT
+  - id: C2_OPS_RUNBOOK_SESSION_AUTHORITY_SOURCE_NOT_EXTENDED_V1
+    path: ops/governance/RUNBOOK_SESSION_AUTHORITY_SOURCE_NOT_EXTENDED_V1.md
+    class: C2_OPERATIONS_DOC
+    status: DRAFT
+  - id: C2_OPS_RUNBOOK_SESSION_AUTHORITY_STALE_ARTIFACT_V1
+    path: ops/governance/RUNBOOK_SESSION_AUTHORITY_STALE_ARTIFACT_V1.md
+    class: C2_OPERATIONS_DOC
+    status: DRAFT
+  - id: C2_OPS_RUNBOOK_SESSION_AUTHORITY_HIDDEN_DEPENDENCY_V1
+    path: ops/governance/RUNBOOK_SESSION_AUTHORITY_HIDDEN_DEPENDENCY_V1.md
+    class: C2_OPERATIONS_DOC
+    status: DRAFT
+  - id: C2_OPS_RUNBOOK_SESSION_AUTHORITY_TRACEABILITY_FAILURE_V1
+    path: ops/governance/RUNBOOK_SESSION_AUTHORITY_TRACEABILITY_FAILURE_V1.md
+    class: C2_OPERATIONS_DOC
+    status: DRAFT
+  - id: C2_OPS_PRODUCTION_READINESS_SESSION_AUTHORITY_V1
+    path: ops/governance/PRODUCTION_READINESS_SESSION_AUTHORITY_V1.md
+    class: C2_OPERATIONS_DOC
+    status: DRAFT
+  - id: C2_OPS_IMPLEMENTATION_SESSION_AUTHORITY_PRODUCTION_READINESS_V1
+    path: ops/governance/IMPLEMENTATION_SESSION_AUTHORITY_PRODUCTION_READINESS_MONITORING_ALERTING_V1.md
+    class: C2_OPERATIONS_DOC
+    status: DRAFT
+  - id: C2_OPS_RUNBOOK_MARKET_CALENDAR_COVERAGE_AUTHORITY_V1
+    path: ops/governance/RUNBOOK_MARKET_CALENDAR_COVERAGE_AUTHORITY_V1.md
+    class: C2_OPERATIONS_DOC
+    status: DRAFT
+  - id: C2_OPS_RUNBOOK_MARKET_CALENDAR_SOURCE_MAINTENANCE_V1
+    path: ops/governance/RUNBOOK_MARKET_CALENDAR_SOURCE_MAINTENANCE_V1.md
+    class: C2_OPERATIONS_DOC
+    status: DRAFT
+  - id: C2_OPS_RUNBOOK_DAY_AUTHORITY_DECISION_MAINTENANCE_V1
+    path: ops/governance/RUNBOOK_DAY_AUTHORITY_DECISION_MAINTENANCE_V1.md
+    class: C2_OPERATIONS_DOC
+    status: DRAFT
+  - id: C2_OPS_RUNBOOK_MARKET_CALENDAR_NEXT_DAY_COVERAGE_V1
+    path: ops/governance/RUNBOOK_MARKET_CALENDAR_NEXT_DAY_COVERAGE_V1.md
+    class: C2_OPERATIONS_DOC
+    status: DRAFT
+  - id: C2_OPS_RUNBOOK_MARKET_CALENDAR_RUNTIME_REFRESH_V1
+    path: ops/governance/RUNBOOK_MARKET_CALENDAR_RUNTIME_REFRESH_V1.md
+    class: C2_OPERATIONS_DOC
+    status: DRAFT
+  - id: C2_OPS_RUNBOOK_SOURCE_NOT_EXTENDED_PREVENTION_V1
+    path: ops/governance/RUNBOOK_SOURCE_NOT_EXTENDED_PREVENTION_V1.md
+    class: C2_OPERATIONS_DOC
+    status: DRAFT
+  - id: C2_OPS_IMPLEMENTATION_MARKET_CALENDAR_SOURCE_NOT_EXTENDED_PREVENTION_V1
+    path: ops/governance/IMPLEMENTATION_MARKET_CALENDAR_SOURCE_NOT_EXTENDED_PREVENTION_V1.md
+    class: C2_OPERATIONS_DOC
+    status: DRAFT
+  - id: C2_OPS_IMPLEMENTATION_PERMANENTIZE_FUTURE_DAY_MARKET_CALENDAR_COVERAGE_V1
+    path: ops/governance/IMPLEMENTATION_PERMANENTIZE_FUTURE_DAY_MARKET_CALENDAR_COVERAGE_V1.md
+    class: C2_OPERATIONS_DOC
+    status: DRAFT
+  - id: C2_OPS_IMPLEMENTATION_EXTEND_GOVERNED_MARKET_CALENDAR_SOURCE_THROUGH_YEAR_END_V1
+    path: ops/governance/IMPLEMENTATION_EXTEND_GOVERNED_MARKET_CALENDAR_SOURCE_THROUGH_YEAR_END_V1.md
+    class: C2_OPERATIONS_DOC
+    status: DRAFT
+  - id: C2_OPS_IMPLEMENTATION_PERMANENTIZE_DAY_AUTHORITY_DECISION_V1
+    path: ops/governance/IMPLEMENTATION_PERMANENTIZE_DAY_AUTHORITY_DECISION_V1.md
+    class: C2_OPERATIONS_DOC
+    status: DRAFT
+  - id: C2_OPS_PAPER_TRADING_TODAY_OPERATOR_PLAYBOOK_V1
+    path: ops/governance/paper_trading_today_operator_playbook_v1.md
+    class: C2_OPERATIONS_DOC
     status: DRAFT
 
   - id: C2_PAPER_SESSION_ADMISSION_DEPLOYMENT_CLOSURE_REGISTRY_V1
@@ -470,7 +1404,12 @@ documents:
     class: C2_CONTRACT
     status: DRAFT
   - id: C2_STARTUP_MATERIALIZATION_V1
+    # Startup materialization remains upstream fact-only; producer self-verification belongs to the pre-open producer layer, not this surface.
     path: governance/05_CONTRACTS/C2/startup_materialization_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_BOD_EXECUTION_ENVIRONMENT_PROOF_V1
+    path: governance/05_CONTRACTS/C2/bod_execution_environment_proof_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
   - id: C2_PAPER_TRADING_POSTURE_V1
@@ -485,6 +1424,42 @@ documents:
     path: governance/05_CONTRACTS/C2/sleeve_rollup_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
+  - id: C2_SLEEVE_EDGE_FACT_LEDGER_V1
+    # Sleeve edge v1 hardening remains in-place: UNKNOWN_ATTRIBUTION is explicit and fail-closed.
+    path: governance/05_CONTRACTS/C2/sleeve_edge_fact_ledger_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_SLEEVE_EDGE_METRIC_V1
+    # Sleeve edge v1 hardening remains in-place: unavailable metrics may be summarized at top level for audit only.
+    path: governance/05_CONTRACTS/C2/sleeve_edge_metric_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_SLEEVE_EDGE_QUALIFICATION_V1
+    path: governance/05_CONTRACTS/C2/sleeve_edge_qualification_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_SLEEVE_EDGE_SNAPSHOT_V1
+    # Sleeve edge v1 hardening remains in-place: revision lineage is explicit, fact-input binding is verified, integrity validation is fail-closed, and historical reads stay frozen.
+    path: governance/05_CONTRACTS/C2/sleeve_edge_snapshot_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_SLEEVE_EDGE_ALLOCATOR_INTEGRATION_V1
+    # Sleeve edge v1 hardening remains in-place: allocator is a read-only consumer with policy/calculation locking, canonical sequence provenance, and snapshot integrity checks.
+    path: governance/05_CONTRACTS/C2/sleeve_edge_allocator_integration_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_GOVERNED_EVALUATION_ARCHITECTURE_V1
+    path: governance/05_CONTRACTS/C2/governed_evaluation_architecture_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_EVALUATION_AUTHORITY_FOUNDATION_V1
+    path: governance/05_CONTRACTS/C2/evaluation_authority_foundation_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_WEEKLY_SCORECARD_VIEW_V1
+    path: governance/05_CONTRACTS/C2/weekly_scorecard_view_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
   - id: C2_PAPER_SESSION_LEDGER_V1
     path: governance/05_CONTRACTS/C2/paper_session_ledger_v1.contract.md
     class: C2_CONTRACT
@@ -495,6 +1470,29 @@ documents:
     status: DRAFT
   - id: C2_OPERATOR_SUMMARY_V1
     path: governance/05_CONTRACTS/C2/operator_summary_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_OPERATOR_DAY_AUTHORITY_SUMMARY_V1
+    path: governance/05_CONTRACTS/C2/operator_day_authority_summary_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_DAY_FAILURE_CAUSALITY_V1
+    path: governance/05_CONTRACTS/C2/day_failure_causality_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_DAY_OPEN_TRIGGER_V1
+    # PAPER semantics updated in-place: readiness-governed same-day opens are unbounded; LIVE remains strict.
+    path: governance/05_CONTRACTS/C2/day_open_trigger_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_DAY_OPEN_ATTEMPT_V1
+    # PAPER semantics updated in-place: repeated same-day paper attempts remain canonical and auditable.
+    path: governance/05_CONTRACTS/C2/day_open_attempt_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_DAY_OPEN_POLICY_V1
+    # PAPER semantics updated in-place: IF PAPER IS READY, LET IT PAPER TRADE.
+    path: governance/05_CONTRACTS/C2/day_open_policy_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
   - id: C2_INTENTS_DAY_COMPLETENESS_V1
@@ -513,6 +1511,8 @@ documents:
     path: governance/05_CONTRACTS/C2/startup_materialization_inputs_prep_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
+    # Default equity reference price now requires a governed positive same-day 09:30+ America/New_York
+    # core-session price; stale prior-day and liquidity-gate fallback prices remain invalid for this purpose.
   - id: C2_PHASEC_RISK_INPUTS_PREP_V1
     path: governance/05_CONTRACTS/C2/phasec_risk_inputs_prep_v1.contract.md
     class: C2_CONTRACT
@@ -594,12 +1594,170 @@ documents:
     class: GOVERNANCE_INDEX
     status: ACTIVE
 
+  - id: C2_META_GOVERNANCE_OVERVIEW_V1
+    path: governance/meta_governance/00_OVERVIEW.md
+    class: C2_CONTRACT
+    status: ACTIVE
+
+  - id: C2_META_GOVERNANCE_TIERS_AND_INVARIANTS_V1
+    path: governance/meta_governance/01_TIERS_AND_INVARIANTS.md
+    class: C2_CONTRACT
+    status: ACTIVE
+
+  - id: C2_META_GOVERNANCE_MUTATION_PROTOCOLS_V1
+    path: governance/meta_governance/02_MUTATION_PROTOCOLS.md
+    class: C2_CONTRACT
+    status: ACTIVE
+
+  - id: C2_META_GOVERNANCE_ACTIVATION_SNAPSHOTS_V1
+    path: governance/meta_governance/03_ACTIVATION_SNAPSHOTS.md
+    class: C2_CONTRACT
+    status: ACTIVE
+
+  - id: C2_META_GOVERNANCE_AUDIT_AND_LINEAGE_V1
+    path: governance/meta_governance/04_AUDIT_AND_LINEAGE.md
+    class: C2_CONTRACT
+    status: ACTIVE
+
+  - id: C2_META_GOVERNANCE_CONTRACT_V1
+    path: governance/meta_governance/05_META_GOVERNANCE_CONTRACT.md
+    class: C2_CONTRACT
+    status: ACTIVE
+
   - id: C2_CONSTELLATION_AI_REASONING_CONTRACT_V1
     path: governance/contracts/constellation_ai_reasoning_contract.v1.md
     class: C2_CONTRACT
     status: DRAFT
   - id: C2_CONSTELLATION_SYSTEM_INVARIANTS_V1
     path: governance/contracts/constellation_system_invariants.v1.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_ADVISORY_INVESTOR_INTENT_CONTRACT_V1
+    path: governance/contracts/INVESTOR_INTENT_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_ADVISORY_POLICY_CONTRACT_V1
+    path: governance/contracts/POLICY_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_ADVISORY_HOUSEHOLD_SNAPSHOT_CONTRACT_V1
+    path: governance/contracts/HOUSEHOLD_SNAPSHOT_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_ADVISORY_ECONOMIC_STATE_KERNEL_BOUNDARY_CONTRACT_V1
+    path: governance/contracts/ECONOMIC_STATE_KERNEL_BOUNDARY_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_ADVISORY_VALUE_BASIS_AUTHORITY_CONTRACT_V1
+    path: governance/contracts/ADVISORY_VALUE_BASIS_AUTHORITY_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_ADVISORY_PORTFOLIO_INTENT_CONTRACT_V1
+    path: governance/contracts/PORTFOLIO_INTENT_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_ADVISORY_ALLOCATION_ADVISORY_CONTRACT_V1
+    path: governance/contracts/ALLOCATION_ADVISORY_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_ADVISORY_ACTIONABILITY_GATE_CONTRACT_V1
+    path: governance/contracts/ADVISORY_ACTIONABILITY_GATE_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_ADVISORY_PROMOTION_RECORD_CONTRACT_V1
+    path: governance/contracts/PROMOTION_RECORD_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_ADVISORY_ALLOCATION_EXECUTION_SHAPING_CONTRACT_V1
+    path: governance/contracts/ALLOCATION_EXECUTION_SHAPING_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_MULTI_DELTA_EXECUTION_KERNEL_BOUNDARY_CONTRACT_V1
+    path: governance/contracts/MULTI_DELTA_EXECUTION_KERNEL_BOUNDARY_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_APPROVED_CHANGE_SET_CONTRACT_V1
+    path: governance/contracts/APPROVED_CHANGE_SET_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_MULTI_DELTA_EXECUTION_DECISION_CONTRACT_V1
+    path: governance/contracts/MULTI_DELTA_EXECUTION_DECISION_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_MULTI_DELTA_EXECUTION_RECORD_CONTRACT_V1
+    path: governance/contracts/MULTI_DELTA_EXECUTION_RECORD_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_EXECUTION_SET_INTENT_CONTRACT_V1
+    path: governance/contracts/EXECUTION_SET_INTENT_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_ADVISORY_DOMAIN_LINEAGE_CONTRACT_V1
+    path: governance/contracts/ADVISORY_DOMAIN_LINEAGE_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_ADVISORY_VALIDITY_TIERS_CONTRACT_V1
+    path: governance/contracts/ADVISORY_VALIDITY_TIERS_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_ADVISORY_ASSUMPTION_MANIFEST_CONTRACT_V1
+    path: governance/contracts/ASSUMPTION_MANIFEST_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_ADVISORY_CLASSIFICATION_MANIFEST_USAGE_CONTRACT_V1
+    path: governance/contracts/CLASSIFICATION_MANIFEST_USAGE_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_ADVISORY_TO_TRADING_PROMOTION_BOUNDARY_V1
+    path: governance/contracts/ADVISORY_TO_TRADING_PROMOTION_BOUNDARY.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_ADVISORY_KERNEL_BOUNDARY_CONTRACT_V1
+    path: governance/contracts/ADVISORY_KERNEL_BOUNDARY_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_ADVISORY_KERNEL_EXECUTION_CONTRACT_V1
+    path: governance/contracts/ADVISORY_KERNEL_EXECUTION_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_EXECUTION_KERNEL_BOUNDARY_CONTRACT_V1
+    path: governance/contracts/EXECUTION_KERNEL_BOUNDARY_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_HOUSEHOLD_POLICY_COMPILER_CONTRACT_V1
+    path: governance/portfolio/household_policy_compiler_contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_PORTFOLIO_AUTHORIZATION_CONTRACT_V1
+    path: governance/portfolio/portfolio_authorization_contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_EXECUTION_SUBMISSION_CONTRACT_V1
+    path: governance/contracts/EXECUTION_SUBMISSION_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_EXECUTION_STATE_KERNEL_BOUNDARY_CONTRACT_V1
+    path: governance/contracts/EXECUTION_STATE_KERNEL_BOUNDARY_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_EXECUTION_STATE_AUTHORITY_CONTRACT_V1
+    path: governance/contracts/EXECUTION_STATE_AUTHORITY_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_OPERATOR_RUNTIME_CONTROL_KERNEL_BOUNDARY_CONTRACT_V1
+    path: governance/contracts/OPERATOR_RUNTIME_CONTROL_KERNEL_BOUNDARY_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_RUNTIME_CONTROL_AUTHORITY_CONTRACT_V1
+    path: governance/contracts/RUNTIME_CONTROL_AUTHORITY_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_UI_OPERATOR_SHELL_BOUNDARY_CONTRACT_V1
+    path: governance/contracts/UI_OPERATOR_SHELL_BOUNDARY_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_UI_AUTHORITY_RENDERING_CONTRACT_V1
+    path: governance/contracts/UI_AUTHORITY_RENDERING_CONTRACT.md
     class: C2_CONTRACT
     status: DRAFT
   # Governed docs/c2 (tracked for traceability; treated as governed only when listed here)
@@ -663,6 +1821,7 @@ documents:
     status: DRAFT
 
   - id: C2_ORCHESTRATOR_V2_CONTRACT
+    # Orchestrator v2 explicitly governs sleeve-edge publication ordering before capital authority allocation for the delegated runtime entry chain.
     path: governance/05_CONTRACTS/ORCHESTRATION/C2_ORCHESTRATOR_V2_CONTRACT.md
     class: C2_CONTRACT
     status: DRAFT
@@ -754,16 +1913,136 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/POSITIONS/portfolio_state_artifact.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
-  - id: C2_ADVISORY_INPUT_ARTIFACT_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/advisory_input_artifact.v1.schema.json
+  - id: C2_ADVISORY_INVESTOR_INTENT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/investor_intent.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
-  - id: C2_ADVISORY_DECISION_ARTIFACT_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/advisory_decision_artifact.v1.schema.json
+  - id: C2_ADVISORY_ASSUMPTION_MANIFEST_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/assumption_manifest.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
-  - id: C2_ADVISORY_COMPARISON_ARTIFACT_SCHEMA_V1
-    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/advisory_comparison_artifact.v1.schema.json
+  - id: C2_ADVISORY_POLICY_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/policy.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_ADVISORY_HOUSEHOLD_SNAPSHOT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/household_snapshot.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_ADVISORY_SNAPSHOT_VALIDATION_DECISION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/snapshot_validation_decision.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_ADVISORY_SNAPSHOT_RUN_ENVELOPE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/snapshot_run_envelope.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_ADVISORY_PORTFOLIO_INTENT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/portfolio_intent.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_ADVISORY_PROMOTION_DECISION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/promotion_decision.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_ADVISORY_EXECUTION_INTENT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/execution_intent.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_ADVISORY_KERNEL_RUN_ENVELOPE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/kernel_run_envelope.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_ADVISORY_POLICY_SNAPSHOT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/policy_snapshot.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_ADVISORY_HOUSEHOLD_STATE_SNAPSHOT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/household_state_snapshot.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_ADVISORY_COMPILED_CONSTRAINTS_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/compiled_constraints.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_ADVISORY_ALLOCATION_PLAN_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/allocation_plan.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_ADVISORY_RISK_ENVELOPE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/risk_envelope.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_ADVISORY_REBALANCE_CANDIDATES_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/rebalance_candidates.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_ADVISORY_TAX_ADJUDICATED_REBALANCE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/tax_adjudicated_rebalance.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_ADVISORY_PORTFOLIO_AUTHORIZATION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/portfolio_authorization.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_ADVISORY_PORTFOLIO_DECISION_RECORD_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ADVISORY/portfolio_decision_record.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_EXECUTION_APPROVED_CHANGE_SET_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION/approved_change_set.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_EXECUTION_MULTI_DELTA_EXECUTION_DECISION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION/multi_delta_execution_decision.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_EXECUTION_MULTI_DELTA_EXECUTION_RECORD_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION/multi_delta_execution_record.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_EXECUTION_EXECUTION_SET_INTENT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION/execution_set_intent.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_EXECUTION_SUBMISSION_DECISION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION/execution_submission_decision.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_EXECUTION_SUBMISSION_RECORD_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION/execution_submission_record.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_EXECUTION_LIFECYCLE_DECISION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION/execution_lifecycle_decision.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_EXECUTION_STATE_RECORD_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION/execution_state_record.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_EXECUTION_LIFECYCLE_RUN_ENVELOPE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION/execution_lifecycle_run_envelope.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_EXECUTION_RUN_ENVELOPE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION/execution_run_envelope.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_RUNTIME_CONTROL_DECISION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/runtime_control_decision.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_RUNTIME_CONTROL_RECORD_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/runtime_control_record.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_RUNTIME_CONTROL_RUN_ENVELOPE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/runtime_control_run_envelope.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_ADVISOR_BRIDGE_PROMOTION_RECORD_SCHEMA_V2
+    path: governance/04_DATA/SCHEMAS/C2/ADVISOR_BRIDGE/promotion_record.v2.schema.json
     class: C2_SCHEMA
     status: DRAFT
   - id: C2_REPORTS_PROMOTION_REGISTRY_ENTRY_SCHEMA_V1
@@ -926,6 +2205,7 @@ documents:
     class: C2_CONTRACT
     status: DRAFT
   - id: C2_SLEEVE_LIVE_READINESS_CONTRACT_V1
+    # Advisory only; not canonical sleeve-edge control truth.
     path: governance/05_CONTRACTS/C2/sleeve_live_readiness_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
@@ -956,6 +2236,15 @@ documents:
     status: ACTIVE
   - id: C2_SLEEVE_LIVE_READINESS_POLICY_V1
     path: governance/02_REGISTRIES/C2_SLEEVE_LIVE_READINESS_POLICY_V1.json
+    class: C2_REGISTRY
+    status: ACTIVE
+  - id: C2_SLEEVE_EDGE_QUALIFICATION_POLICY_V1
+    # Sleeve edge v1 policy hardening remains in-place: unknown-attribution tolerance and allocator calc-version compatibility are governed here.
+    path: governance/02_REGISTRIES/C2_SLEEVE_EDGE_QUALIFICATION_POLICY_V1.json
+    class: C2_REGISTRY
+    status: ACTIVE
+  - id: C2_GOVERNED_EVALUATION_POLICY_V1
+    path: governance/02_REGISTRIES/C2_GOVERNED_EVALUATION_POLICY_V1.json
     class: C2_REGISTRY
     status: ACTIVE
   - id: C2_PLATFORM_READINESS_POLICY_V1
@@ -1130,6 +2419,16 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/sleeve_rollup.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
+  - id: C2_REPORTS_SLEEVE_EDGE_FACT_LEDGER_SCHEMA_V1
+    # Schema extended in-place for explicit UNKNOWN_ATTRIBUTION handling.
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/sleeve_edge_fact_ledger.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_SLEEVE_EDGE_SNAPSHOT_SCHEMA_V1
+    # Schema extended in-place for revision lineage fields.
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/sleeve_edge_snapshot.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
   - id: C2_REPORTS_PAPER_SESSION_LEDGER_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/paper_session_ledger.v1.schema.json
     class: C2_SCHEMA
@@ -1142,8 +2441,16 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/trading_day_intent_generation.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
+  - id: C2_REPORTS_PAPER_STARTUP_INTENT_INPUT_CONVERGENCE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/paper_startup_intent_input_convergence.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
   - id: C2_REPORTS_STARTUP_MATERIALIZATION_INPUTS_PREP_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/REPORTS/startup_materialization_inputs_prep.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_STARTUP_MATERIALIZATION_INPUT_CONVERGENCE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/startup_materialization_input_convergence.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
   - id: C2_REPORTS_PHASEC_RISK_INPUTS_PREP_SCHEMA_V1
@@ -1374,6 +2681,38 @@ documents:
     path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_event_raw.v1.schema.json
     class: C2_SCHEMA
     status: DRAFT
+  - id: C2_EXECUTION_EVIDENCE_BROKER_RAW_EVIDENCE_ENVELOPE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_raw_evidence_envelope.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_FACTS_OBSERVATION_SESSION_FACT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/FACTS/observation_session_fact.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_FACTS_OBSERVED_ORDER_FACT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/FACTS/observed_order_fact.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_FACTS_OBSERVED_ORDER_STATUS_FACT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/FACTS/observed_order_status_fact.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_FACTS_OBSERVED_FILL_FACT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/FACTS/observed_fill_fact.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_FACTS_OBSERVED_POSITION_FACT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/FACTS/observed_position_fact.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_BROKER_OBSERVATION_HEALTH_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/broker_observation_health.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+  - id: C2_REPORTS_BROKER_FACT_SPINE_AUDIT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/broker_fact_spine_audit.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
 
   - id: C2_EXECUTION_EVIDENCE_BROKER_EVENT_DAY_MANIFEST_SCHEMA_V1
     path: governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/broker_event_day_manifest.v1.schema.json
@@ -1429,8 +2768,48 @@ documents:
     class: C2_CONTRACT
     status: DRAFT
 
+  - id: C2_TRADING_SYMBOL_POLICY_AUTHORITY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/trading_symbol_policy_authority_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
   - id: C2_TRADE_SUBMIT_READINESS_C2_CONTRACT_V1
     path: governance/05_CONTRACTS/C2/trade_submit_readiness_c2_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_EXECUTION_ROOT_AUTHORITY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/execution_root_authority_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_EXECUTION_ROOT_ISOLATION_POLICY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/execution_root_isolation_policy_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_EXECUTION_PROFILE_AUTHORITY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/execution_profile_authority_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_EXECUTION_IDENTITY_AUTHORITY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/execution_identity_authority_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_TRADE_INSTANCE_IDENTITY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/trade_instance_identity_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_SUBMISSION_IDENTITY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/submission_identity_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_KILL_SWITCH_ENTRY_POLICY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/kill_switch_entry_policy_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
 
@@ -1439,7 +2818,13 @@ documents:
     class: C2_TOOL
     status: ACTIVE
   - id: C2_TOOL_SLEEVE_LIVE_READINESS_V1
+    # Legacy advisory surface; emitted output must warn that it is non-canonical for control decisions.
     path: ops/tools/run_sleeve_live_readiness_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_SLEEVE_EDGE_MEASUREMENT_V1
+    # Canonical writer remains separate from allocator consumption; snapshot publication is immutable and atomic.
+    path: ops/tools/run_sleeve_edge_measurement_v1.py
     class: C2_TOOL
     status: ACTIVE
   - id: C2_TOOL_CONSTELLATION_BUG_METRICS_V1
@@ -1459,6 +2844,69 @@ documents:
     path: ops/governance/preflight_forbid_operator_gate_verdict_surfaces_v1.sh
     class: OPS_PREFLIGHT
     status: ACTIVE
+
+  - id: OPS_RUNBOOK_TRADING_SYMBOL_POLICY_AUTHORITY_V1
+    path: ops/governance/RUNBOOK_TRADING_SYMBOL_POLICY_AUTHORITY_V1.md
+    class: OPS_RUNBOOK
+    status: DRAFT
+
+  - id: OPS_IMPLEMENTATION_FIX_TRADING_SYMBOL_POLICY_AUTHORITY_V1
+    path: ops/governance/IMPLEMENTATION_FIX_TRADING_SYMBOL_POLICY_AUTHORITY_V1.md
+    class: OPS_REPORT
+    status: DRAFT
+
+  - id: OPS_RUNBOOK_PAPER_EXECUTION_ROOT_AUTHORITY_V1
+    path: ops/governance/RUNBOOK_PAPER_EXECUTION_ROOT_AUTHORITY_V1.md
+    class: OPS_RUNBOOK
+    status: DRAFT
+
+  - id: OPS_RUNBOOK_PAPER_EXECUTION_PROFILE_AUTHORITY_V1
+    path: ops/governance/RUNBOOK_PAPER_EXECUTION_PROFILE_AUTHORITY_V1.md
+    class: OPS_RUNBOOK
+    status: DRAFT
+
+  - id: OPS_RUNBOOK_PAPER_EXECUTION_ROOT_ISOLATION_V1
+    path: ops/governance/RUNBOOK_PAPER_EXECUTION_ROOT_ISOLATION_V1.md
+    class: OPS_RUNBOOK
+    status: DRAFT
+
+  - id: OPS_RUNBOOK_EXECUTION_IDENTITY_AUTHORITY_V1
+    path: ops/governance/RUNBOOK_EXECUTION_IDENTITY_AUTHORITY_V1.md
+    class: OPS_RUNBOOK
+    status: DRAFT
+
+  - id: OPS_IMPLEMENTATION_FIX_PAPER_EXECUTION_ROOT_AND_PROFILE_AUTHORITY_V1
+    path: ops/governance/IMPLEMENTATION_FIX_PAPER_EXECUTION_ROOT_AND_PROFILE_AUTHORITY_V1.md
+    class: OPS_REPORT
+    status: DRAFT
+  - id: OPS_RUNBOOK_BROKER_FACT_SPINE_V1
+    path: ops/governance/RUNBOOK_BROKER_FACT_SPINE_V1.md
+    class: OPS_RUNBOOK
+    status: DRAFT
+  - id: OPS_IMPLEMENTATION_CORE1_BROKER_FACT_SPINE_V1
+    path: ops/governance/IMPLEMENTATION_CORE1_BROKER_FACT_SPINE_V1.md
+    class: OPS_REPORT
+    status: DRAFT
+
+  - id: OPS_RUNBOOK_PAPER_ENTRY_POLICY_V1
+    path: ops/governance/RUNBOOK_PAPER_ENTRY_POLICY_V1.md
+    class: OPS_RUNBOOK
+    status: DRAFT
+
+  - id: OPS_IMPLEMENTATION_RESOLVE_PAPER_ENTRY_AND_EXECUTION_ROOT_POLICY_V1
+    path: ops/governance/IMPLEMENTATION_RESOLVE_PAPER_ENTRY_AND_EXECUTION_ROOT_POLICY_V1.md
+    class: OPS_REPORT
+    status: DRAFT
+
+  - id: OPS_IMPLEMENTATION_ENABLE_GOVERNED_PAPER_ENTRY_POLICY_V1
+    path: ops/governance/IMPLEMENTATION_ENABLE_GOVERNED_PAPER_ENTRY_POLICY_V1.md
+    class: OPS_REPORT
+    status: DRAFT
+
+  - id: OPS_IMPLEMENTATION_EXECUTION_IDENTITY_AUTHORITY_V1
+    path: ops/governance/IMPLEMENTATION_EXECUTION_IDENTITY_AUTHORITY_V1.md
+    class: OPS_REPORT
+    status: DRAFT
 
   - id: C2_LATEST_POINTER_FANOUT_ELIMINATION_V1
     path: governance/05_CONTRACTS/C2/latest_pointer_fanout_elimination_v1.contract.md
@@ -1483,6 +2931,8 @@ documents:
     path: governance/05_CONTRACTS/C2/ib_historical_market_data_snapshot_downloader_v1.contract.md
     class: C2_CONTRACT
     status: DRAFT
+    # Daily-bars-only contract; same-day rows become startup-reference eligible only once ingested_utc
+    # is at or after 09:30 America/New_York and the price is positive.
 
   - id: C2_DEFENSIVE_TAIL_REQUIRED_INPUTS_BRIDGE_CONTRACT_V1
     path: governance/05_CONTRACTS/C2/defensive_tail_required_inputs_bridge_v1.contract.md
@@ -1538,6 +2988,56 @@ documents:
     class: C2_SCHEMA
     status: DRAFT
 
+  - id: C2_RISK_PORTFOLIO_GOVERNANCE_SNAPSHOT_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/RISK/portfolio_governance_snapshot.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_ALLOCATION_SLEEVE_ALLOCATION_EPOCH_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ALLOCATION/sleeve_allocation_epoch.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_ENGINE_ACTIVITY_INTENT_AUTHORIZATION_LEDGER_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/ENGINE_ACTIVITY/intent_authorization_ledger.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_EXPOSURE_LEDGER_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXPOSURE/exposure_ledger.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_PORTFOLIO_RISK_ENVELOPE_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/portfolio_risk_envelope_contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_SLEEVE_GOVERNANCE_POLICY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/sleeve_governance_policy_contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_SLEEVE_ALLOCATION_EPOCH_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/sleeve_allocation_epoch_contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_INTENT_AUTHORIZATION_LEDGER_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/intent_authorization_ledger_contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_EXPOSURE_LEDGER_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/exposure_ledger_contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CANONICAL_SLEEVE_IDENTITY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/canonical_sleeve_identity_contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
   - id: C2_BOOTSTRAP_INTENT_EMITTER_CONTRACT_V1
     path: governance/05_CONTRACTS/C2/bootstrap_intent_emitter_v1.contract.md
     class: C2_CONTRACT
@@ -1576,3 +3076,1056 @@ documents:
     path: governance/02_REGISTRIES/GATE_HIERARCHY_V1.json
     class: C2_REGISTRY
     status: DRAFT
+
+  - id: C2_TOOL_SUBSYSTEM_AUTHORITY_V1
+    path: ops/tools/run_subsystem_authority_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+  - id: C2_TOOL_BROKER_FACT_SPINE_V1
+    path: ops/tools/run_broker_fact_spine_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_SUBSYSTEM_AUTHORITY_MANIFEST_MODEL_V1
+    path: governance/05_CONTRACTS/C2/subsystem_authority_manifest_model_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_EXECUTION_AUTHORITY_MANIFEST_V1
+    path: governance/05_CONTRACTS/C2/execution_authority_manifest_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_EXECUTION_PROFILE_AUTHORITY_MANIFEST_V1
+    path: governance/05_CONTRACTS/C2/execution_profile_authority_manifest_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_EXECUTION_IDENTITY_BINDING_V1
+    path: governance/05_CONTRACTS/C2/execution_identity_binding_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_BROKER_FACT_SPINE_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/broker_fact_spine_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_BROKER_OBSERVATION_HEALTH_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/broker_observation_health_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+  - id: C2_BROKER_FACT_IDENTITY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/broker_fact_identity_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_EXECUTION_IDENTITY_AUTHORITY_MANIFEST_V1
+    path: governance/05_CONTRACTS/C2/execution_identity_authority_manifest_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_ACCOUNT_TRADING_POLICY_AUTHORITY_MANIFEST_V1
+    path: governance/05_CONTRACTS/C2/account_trading_policy_authority_manifest_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_OPERATOR_SUMMARY_AUTHORITY_MANIFEST_V1
+    path: governance/05_CONTRACTS/C2/operator_summary_authority_manifest_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_REPORTS_SUBSYSTEM_AUTHORITY_MANIFEST_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/subsystem_authority_manifest.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_REPORTS_EXECUTION_DOSSIER_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/execution_dossier.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_REPORTS_EXECUTION_PROFILE_DOSSIER_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/execution_profile_dossier.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_REPORTS_EXECUTION_IDENTITY_DOSSIER_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/execution_identity_dossier.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_REPORTS_ACCOUNT_TRADING_POLICY_DOSSIER_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/account_trading_policy_dossier.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_REPORTS_OPERATOR_SUMMARY_DOSSIER_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/operator_summary_dossier.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: OPS_RUNBOOK_SUBSYSTEM_AUTHORITY_PRECEDENCE_V1
+    path: ops/governance/RUNBOOK_SUBSYSTEM_AUTHORITY_PRECEDENCE_V1.md
+    class: OPS_RUNBOOK
+    status: DRAFT
+
+  - id: OPS_IMPLEMENTATION_SUBSYSTEM_AUTHORITY_ARCHITECTURE_V1
+    path: ops/governance/IMPLEMENTATION_SUBSYSTEM_AUTHORITY_ARCHITECTURE_V1.md
+    class: OPS_REPORT
+    status: DRAFT
+
+  - id: C2_GLOBAL_ACTIONABILITY_GATE_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/global_actionability_gate_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_POST_ENTRY_ACTION_POLICY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/post_entry_action_policy_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_ACTION_CONFLICT_RESOLUTION_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/action_conflict_resolution_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_ACTION_DECISION_PROVENANCE_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/action_decision_provenance_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_LIFECYCLE_ACTION_AUTHORITY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/lifecycle_action_authority_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_TRADE_STATE_GLOBAL_ACTIONABILITY_GATE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/global_actionability_gate.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TRADE_STATE_CANDIDATE_ACTION_SET_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/candidate_action_set.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TRADE_STATE_LIFECYCLE_ACTION_AUTHORITY_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/lifecycle_action_authority.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TRADE_STATE_ACTION_DECISION_PROVENANCE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/action_decision_provenance.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TRADE_STATE_LIFECYCLE_ACTION_OPERATOR_SURFACE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/lifecycle_action_operator_surface.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TOOL_LIFECYCLE_ACTION_AUTHORITY_V1
+    path: ops/tools/run_lifecycle_action_authority_v1.py
+    class: C2_TOOL
+    status: DRAFT
+
+  - id: C2_CONTRACT_BROKER_OBSERVATION_TRUST_DEPENDENCY_V1
+    path: governance/05_CONTRACTS/C2/broker_observation_trust_dependency_v1.contract.md
+    class: C2_CONTRACT
+    status: ACTIVE
+
+  - id: C2_REPORTS_BROKER_OBSERVATION_TRUST_DEPENDENCY_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/broker_observation_trust_dependency.v1.schema.json
+    class: C2_SCHEMA
+    status: ACTIVE
+
+  - id: C2_FIXTURE_BROKER_FACT_SPINE_RECONNECT_GAP_SAMPLE_V1
+    path: ops/fixtures/broker_fact_spine_reconnect_gap_sample_v1.jsonl
+    class: C2_FIXTURE
+    status: ACTIVE
+
+
+  - id: C2_CONTRACT_CORE2_CORE1_DEPENDENCY_GATE_V1
+    path: governance/05_CONTRACTS/C2/core2_core1_dependency_gate_v1.contract.md
+    class: C2_CONTRACT
+    status: ACTIVE
+
+  - id: C2_CONTRACT_CORE1_LEGACY_RUNTIME_BOUNDARY_V1
+    path: governance/05_CONTRACTS/C2/core1_legacy_runtime_boundary_v1.contract.md
+    class: C2_CONTRACT
+    status: ACTIVE
+
+  - id: C2_REPORTS_CORE1_PRE_CORE2_READINESS_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/core1_pre_core2_readiness.v1.schema.json
+    class: C2_SCHEMA
+    status: ACTIVE
+
+  - id: C2_TOOL_CORE1_PRE_CORE2_READINESS_V1
+    path: ops/tools/run_core1_pre_core2_readiness_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_POST_ENTRY_SUBMIT_BOUNDARY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/post_entry_submit_boundary_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_POST_ENTRY_ACTION_REQUEST_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/post_entry_action_request_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_POST_ENTRY_BOUNDARY_SNAPSHOT_BINDING_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/post_entry_boundary_snapshot_binding_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_AUTHORIZED_POST_ENTRY_PAYLOAD_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/authorized_post_entry_payload_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_POST_ENTRY_BOUNDARY_PROVENANCE_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/post_entry_boundary_provenance_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_TRADE_STATE_POST_ENTRY_ACTION_REQUEST_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/post_entry_action_request.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TRADE_STATE_POST_ENTRY_BOUNDARY_SNAPSHOT_BINDING_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/post_entry_boundary_snapshot_binding.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TRADE_STATE_POST_ENTRY_SUBMIT_BOUNDARY_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/post_entry_submit_boundary.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TRADE_STATE_AUTHORIZED_POST_ENTRY_PAYLOAD_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/authorized_post_entry_payload.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TRADE_STATE_POST_ENTRY_BOUNDARY_PROVENANCE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/post_entry_boundary_provenance.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TOOL_POST_ENTRY_SUBMIT_BOUNDARY_V1
+    path: ops/tools/run_post_entry_submit_boundary_v1.py
+    class: C2_TOOL
+    status: DRAFT
+  - id: C2_OPERATOR_TRADE_HEALTH_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/operator_trade_health_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_OPERATOR_SNAPSHOT_BINDING_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/operator_snapshot_binding_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_OPERATOR_ROLLUP_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/operator_rollup_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_OPERATOR_SUMMARY_PROVENANCE_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/operator_summary_provenance_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_OPERATOR_NARRATIVE_RENDERING_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/operator_narrative_rendering_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_TRADE_STATE_OPERATOR_SNAPSHOT_BINDING_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/operator_snapshot_binding.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TRADE_STATE_OPERATOR_TRADE_HEALTH_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/operator_trade_health.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TRADE_STATE_OPERATOR_SUMMARY_PROVENANCE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/operator_summary_provenance.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TRADE_STATE_OPERATOR_TIMELINE_VIEW_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/operator_timeline_view.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_REPORTS_OPERATOR_TRADE_HEALTH_QUEUES_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/operator_trade_health_queues.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TOOL_OPERATOR_TRADE_HEALTH_V1
+    path: ops/tools/run_operator_trade_health_v1.py
+    class: C2_TOOL
+    status: DRAFT
+
+  - id: C2_TOOL_OPERATOR_TRADE_HEALTH_QUEUES_V1
+    path: ops/tools/run_operator_trade_health_queues_v1.py
+    class: C2_TOOL
+    status: DRAFT
+
+  - id: C2_STRATEGY_POLICY_PROJECTION_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/strategy_policy_projection_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_ORCHESTRATION_STATE_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/orchestration_state_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_ORCHESTRATION_TRIGGER_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/orchestration_trigger_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_EXCEPTION_STATE_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/exception_state_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_OPERATOR_INTERVENTION_STATE_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/operator_intervention_state_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_UPPER_LAYER_PROVENANCE_SPINE_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/upper_layer_provenance_spine_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_TRADE_STATE_STRATEGY_POLICY_PROJECTION_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/strategy_policy_projection.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TRADE_STATE_ORCHESTRATION_STATE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/orchestration_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TRADE_STATE_ORCHESTRATION_TRIGGER_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/orchestration_trigger.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TRADE_STATE_EXCEPTION_STATE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/exception_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TRADE_STATE_OPERATOR_INTERVENTION_STATE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/operator_intervention_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TRADE_STATE_UPPER_LAYER_PROVENANCE_SPINE_SCHEMA_V1
+    path: governance/04_DATA/SCHEMAS/C2/TRADE_STATE/upper_layer_provenance_spine.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TOOL_STRATEGY_POLICY_PROJECTION_V1
+    path: ops/tools/run_strategy_policy_projection_v1.py
+    class: C2_TOOL
+    status: DRAFT
+
+  - id: C2_TOOL_EXCEPTION_STATE_V1
+    path: ops/tools/run_exception_state_v1.py
+    class: C2_TOOL
+    status: DRAFT
+
+  - id: C2_TOOL_OPERATOR_INTERVENTION_STATE_V1
+    path: ops/tools/run_operator_intervention_state_v1.py
+    class: C2_TOOL
+    status: DRAFT
+
+  - id: C2_TOOL_ORCHESTRATION_PLANE_V1
+    path: ops/tools/run_orchestration_plane_v1.py
+    class: C2_TOOL
+    status: DRAFT
+  - id: C2_REGISTRY_EXECUTION_BUILD_MANIFESTS_V1
+    path: governance/02_REGISTRIES/C2_EXECUTION_BUILD_MANIFESTS_V1.json
+    class: C2_REGISTRY
+    status: DRAFT
+
+  - id: C2_SCHEMA_EXECUTION_DEPENDENCY_MANIFEST_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/execution_dependency_manifest.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_EXECUTION_BUILD_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/execution_build.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_EXECUTION_PACKAGE_V1
+    path: governance/04_DATA/SCHEMAS/C2/EXECUTION/execution_package.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_EXECUTION_BUILD_AUTHORITY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/execution_build_authority_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_EXECUTION_PACKAGE_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/execution_package_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_EXECUTION_DEPENDENCY_MANIFEST_FRESH_PAPER_ENTRY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/execution_dependency_manifest_fresh_paper_entry_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_TOOL_EXECUTION_BUILD_AUTHORITY_V1
+    path: ops/tools/run_execution_build_authority_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: OPS_RUNBOOK_EXECUTION_BUILD_AUTHORITY_V1
+    path: ops/governance/RUNBOOK_EXECUTION_BUILD_AUTHORITY_V1.md
+    class: OPS_RUNBOOK
+    status: DRAFT
+
+  - id: OPS_IMPLEMENTATION_EXECUTION_BUILD_AUTHORITY_V1
+    path: ops/governance/IMPLEMENTATION_EXECUTION_BUILD_AUTHORITY_V1.md
+    class: OPS_REPORT
+    status: DRAFT
+
+
+  - id: C2_ECONOMIC_STATE_MANIFESTS_V1
+    path: governance/02_REGISTRIES/C2_ECONOMIC_STATE_MANIFESTS_V1.json
+    class: C2_REGISTRY
+    status: DRAFT
+
+  - id: C2_SCHEMA_ECONOMIC_DEPENDENCY_MANIFEST_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/economic_dependency_manifest.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_ECONOMIC_STATE_BUILD_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/economic_state_build.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_ECONOMIC_STATE_PACKAGE_V1
+    path: governance/04_DATA/SCHEMAS/C2/ECONOMIC/economic_state_package.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_ECONOMIC_STATE_AUTHORITY_CONTRACT_V1
+    # Economic state authority may still materialize allocation_summary_v1, but that surface is legacy advisory only after control cutover.
+    path: governance/05_CONTRACTS/C2/economic_state_authority_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_ECONOMIC_STATE_PACKAGE_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/economic_state_package_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_ECONOMIC_DEPENDENCY_MANIFEST_FRESH_PAPER_ENTRY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/economic_dependency_manifest_fresh_paper_entry_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_TOOL_ECONOMIC_STATE_AUTHORITY_V1
+    path: ops/tools/run_economic_state_authority_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: OPS_RUNBOOK_ECONOMIC_STATE_AUTHORITY_V1
+    path: ops/governance/RUNBOOK_ECONOMIC_STATE_AUTHORITY_V1.md
+    class: OPS_RUNBOOK
+    status: DRAFT
+
+  - id: OPS_IMPLEMENTATION_ECONOMIC_STATE_AUTHORITY_V1
+    path: ops/governance/IMPLEMENTATION_ECONOMIC_STATE_AUTHORITY_V1.md
+    class: OPS_REPORT
+    status: DRAFT
+
+
+  - id: C2_GLOBAL_CONTEXT_MANIFESTS_V1
+    path: governance/02_REGISTRIES/C2_GLOBAL_CONTEXT_MANIFESTS_V1.json
+    class: C2_REGISTRY
+    status: DRAFT
+
+  - id: C2_SCHEMA_GLOBAL_CONTEXT_DEPENDENCY_MANIFEST_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/global_context_dependency_manifest.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_GLOBAL_CONTEXT_BUILD_V1
+    path: governance/04_DATA/SCHEMAS/C2/REPORTS/global_context_build.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_GLOBAL_CONTEXT_PACKAGE_V1
+    path: governance/04_DATA/SCHEMAS/C2/CONTEXT/global_context_package.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_GLOBAL_CONTEXT_AUTHORITY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/global_context_authority_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_GLOBAL_CONTEXT_PACKAGE_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/global_context_package_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_GLOBAL_CONTEXT_DEPENDENCY_MANIFEST_FRESH_PAPER_ENTRY_CONTRACT_V1
+    path: governance/05_CONTRACTS/C2/global_context_dependency_manifest_fresh_paper_entry_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_TOOL_GLOBAL_CONTEXT_AUTHORITY_V1
+    path: ops/tools/run_global_context_authority_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: OPS_RUNBOOK_GLOBAL_CONTEXT_AUTHORITY_V1
+    path: ops/governance/RUNBOOK_GLOBAL_CONTEXT_AUTHORITY_V1.md
+    class: OPS_RUNBOOK
+    status: DRAFT
+
+  - id: OPS_IMPLEMENTATION_GLOBAL_CONTEXT_AUTHORITY_V1
+    path: ops/governance/IMPLEMENTATION_GLOBAL_CONTEXT_AUTHORITY_V1.md
+    class: OPS_REPORT
+    status: DRAFT
+
+  - id: C2_TAX_SCOPE_AND_TRUTH_MODEL_V1
+    path: governance/tax/01_TAX_SCOPE_AND_TRUTH_MODEL.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_TAX_STATE_AND_SNAPSHOT_CONTRACT_V1
+    path: governance/tax/02_TAX_STATE_AND_SNAPSHOT_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_TAX_POLICY_AND_DECISION_CONTRACT_V1
+    path: governance/tax/03_TAX_POLICY_AND_DECISION_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_TAX_EXECUTION_GATE_AND_REPLAY_CONTRACT_V1
+    path: governance/tax/04_TAX_EXECUTION_GATE_AND_REPLAY_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_TAX_ROUTING_HARVEST_AND_RECONCILIATION_CONTRACT_V1
+    path: governance/tax/05_TAX_ROUTING_HARVEST_AND_RECONCILIATION_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_TAX_CORPORATE_ACTION_PROVISIONAL_FINALIZED_CONTRACT_V1
+    path: governance/tax/06_TAX_CORPORATE_ACTION_PROVISIONAL_FINALIZED_CONTRACT.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_TAX_REASON_CODE_REGISTRY_V1
+    path: governance/02_REGISTRIES/C2_TAX_REASON_CODE_REGISTRY_V1.json
+    class: C2_REGISTRY
+    status: DRAFT
+
+  - id: C2_HOUSEHOLD_PORTFOLIO_REASON_CODE_REGISTRY_V1
+    path: governance/02_REGISTRIES/C2_HOUSEHOLD_PORTFOLIO_REASON_CODE_REGISTRY_V1.json
+    class: C2_REGISTRY
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_SCOPE_REGISTRY_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_scope_registry.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_SCOPE_MEMBERSHIP_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_scope_membership.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_WASH_ENFORCEMENT_SCOPE_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/wash_enforcement_scope.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_OBSERVED_EVENT_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_observed_event.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_CORPORATE_ACTION_OBSERVED_EVENT_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/corporate_action_observed_event.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_FACT_CANDIDATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_fact_candidate.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_FACT_ACCEPTANCE_DECISION_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_fact_acceptance_decision.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_ACCEPTED_TAX_FACT_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/accepted_tax_fact.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_FACT_CORRECTION_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_fact_correction.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_ACCEPTED_TAX_FACT_JOURNAL_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/accepted_tax_fact_journal.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_LOT_STATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_lot_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_WASH_STATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_wash_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_DATA_COMPLETENESS_STATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_data_completeness_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_SNAPSHOT_BUILD_MANIFEST_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_snapshot_build_manifest.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_POSITION_SNAPSHOT_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_position_snapshot.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_DECISION_RANKING_POLICY_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_decision_ranking_policy.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_ROUNDING_POLICY_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_rounding_policy.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_POLICY_REGISTRY_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_policy_registry.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_RESOLVED_TAX_POLICY_SET_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/resolved_tax_policy_set.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_DECISION_DEPENDENCY_FINGERPRINT_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_decision_dependency_fingerprint.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_EXECUTION_GATE_RESULT_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_execution_gate_result.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_CORRECTION_IMPACT_INDEX_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_correction_impact_index.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_DECISION_TIME_TRUTH_VIEW_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_decision_time_truth_view.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_CURRENT_CORRECTED_TRUTH_VIEW_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_current_corrected_truth_view.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_SELL_TAX_DECISION_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/sell_tax_decision.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_BUY_TAX_DECISION_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/buy_tax_decision.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_ACCOUNT_ROUTING_TAX_DECISION_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/account_routing_tax_decision.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_HARVEST_CANDIDATE_DECISION_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/harvest_candidate_decision.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_DECISION_JOURNAL_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_decision_journal.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_REALIZED_TAX_REPORT_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/realized_tax_report.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_ADVISORY_EXPLANATION_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_advisory_explanation.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_DECISION_REPLAY_REPORT_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/decision_replay_report.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_LOT_RECONCILIATION_REPORT_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/lot_reconciliation_report.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_BROKER_TAX_RECONCILIATION_REPORT_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/broker_tax_reconciliation_report.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_CORPORATE_ACTION_CANDIDATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_corporate_action_candidate.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_CORPORATE_ACTION_ACCEPTANCE_DECISION_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_corporate_action_acceptance_decision.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TAX_CORPORATE_ACTION_STATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/TAX/tax_corporate_action_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_EVALUATION_POLICY_SNAPSHOT_V1
+    path: governance/04_DATA/SCHEMAS/C2/EVALUATION/evaluation_policy_snapshot.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_EVALUATION_INPUT_MANIFEST_V1
+    path: governance/04_DATA/SCHEMAS/C2/EVALUATION/evaluation_input_manifest.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_OUTCOME_ATTRIBUTION_SNAPSHOT_V1
+    path: governance/04_DATA/SCHEMAS/C2/EVALUATION/outcome_attribution_snapshot.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_SLEEVE_EDGE_MEASUREMENT_SNAPSHOT_V1
+    path: governance/04_DATA/SCHEMAS/C2/EVALUATION/sleeve_edge_measurement_snapshot.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_ALLOCATION_GOVERNANCE_SNAPSHOT_V1
+    path: governance/04_DATA/SCHEMAS/C2/EVALUATION/allocation_governance_snapshot.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_SLEEVE_OPERATIVE_CONTROL_STATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/EVALUATION/sleeve_operative_control_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_SLEEVE_PERFORMANCE_TRUTH_V1
+    path: governance/04_DATA/SCHEMAS/C2/EVALUATION/sleeve_performance_truth.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_SLEEVE_VALIDITY_STATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/EVALUATION/sleeve_validity_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_SLEEVE_EVALUATION_STATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/EVALUATION/sleeve_evaluation_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_PORTFOLIO_PERFORMANCE_TRUTH_V1
+    path: governance/04_DATA/SCHEMAS/C2/EVALUATION/portfolio_performance_truth.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_PORTFOLIO_VALIDITY_STATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/EVALUATION/portfolio_validity_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_PORTFOLIO_EVALUATION_STATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/EVALUATION/portfolio_evaluation_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_SLEEVE_GOVERNANCE_ACTION_STATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/EVALUATION/sleeve_governance_action_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_PORTFOLIO_GOVERNANCE_ACTION_STATE_V1
+    path: governance/04_DATA/SCHEMAS/C2/EVALUATION/portfolio_governance_action_state.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_WEEKLY_SCORECARD_VIEW_V1
+    path: governance/04_DATA/SCHEMAS/C2/EVALUATION/weekly_scorecard_view.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TOOL_EVALUATION_AUTHORITY_FOUNDATION_DAY_V1
+    path: ops/tools/run_evaluation_authority_foundation_day_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_CONTRACT_LIVE_CONTROL_PLANE_AUTHORITY_INVENTORY_V1
+    path: governance/05_CONTRACTS/C2/live_control_plane_authority_inventory_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CONTROL_PLANE_VALIDATOR_ARCHITECTURE_V1
+    path: governance/05_CONTRACTS/C2/control_plane_validator_architecture_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CONTROL_PLANE_STAGE_ADMISSION_V1
+    path: governance/05_CONTRACTS/C2/control_plane_stage_admission_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_STARTUP_CHAIN_CERTIFICATION_V1
+    path: governance/05_CONTRACTS/C2/startup_chain_certification_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CONTROL_PLANE_BOUNDARY_MIGRATION_QUARANTINE_V1
+    path: governance/05_CONTRACTS/C2/control_plane_boundary_migration_quarantine_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_SCHEMA_CONTROL_STAGE_ADMISSION_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/control_stage_admission.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_CONTROL_STAGE_CERTIFICATION_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/control_stage_certification.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_STARTUP_CHAIN_CERTIFICATION_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/startup_chain_certification.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TOOL_VALIDATE_CONTROL_PLANE_BOUNDARY_V1
+    path: ops/tools/validate_control_plane_boundary_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_TOOL_VALIDATE_DAY_ACTIVATION_FAMILY_V1
+    path: ops/tools/validate_day_activation_family_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_TOOL_VALIDATE_GLOBAL_CONTEXT_FAMILY_V1
+    path: ops/tools/validate_global_context_family_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_TOOL_VALIDATE_SESSION_AUTHORITY_FAMILY_V1
+    path: ops/tools/validate_session_authority_family_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_TOOL_VALIDATE_EXECUTION_BUILD_FAMILY_V1
+    path: ops/tools/validate_execution_build_family_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_TOOL_CERTIFY_STARTUP_CHAIN_V1
+    path: ops/tools/certify_startup_chain_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_CONTRACT_CONTROL_PLANE_TRANSITION_ENGINE_V1
+    path: governance/05_CONTRACTS/C2/control_plane_transition_engine_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CONTROL_STAGE_TRANSITION_RECORD_V1
+    path: governance/05_CONTRACTS/C2/control_stage_transition_record_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CONTROL_PLANE_RECOVERY_RECOMPUTE_LEGALITY_V1
+    path: governance/05_CONTRACTS/C2/control_plane_recovery_recompute_legality_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CONTROL_PLANE_DECOMPOSITION_ANTIPATTERNS_V1
+    path: governance/05_CONTRACTS/C2/control_plane_decomposition_antipatterns_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CONTROL_PLANE_SEMANTIC_PRESERVATION_BUNDLE5_V1
+    path: governance/05_CONTRACTS/C2/control_plane_semantic_preservation_bundle5_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_SCHEMA_CONTROL_STAGE_TRANSITION_RECORD_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/control_stage_transition_record.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TOOL_RUN_CONTROL_PLANE_TRANSITION_V1
+    path: ops/tools/run_control_plane_transition_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_CONTRACT_CONTROL_PLANE_TRUST_PROJECTION_V1
+    path: governance/05_CONTRACTS/C2/control_plane_trust_projection_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CONTROL_PLANE_TRUST_ARTIFACT_FAMILY_V1
+    path: governance/05_CONTRACTS/C2/control_plane_trust_artifact_family_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CONTROL_PLANE_EXPLANATION_MAPPING_V1
+    path: governance/05_CONTRACTS/C2/control_plane_explanation_mapping_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CONTROL_PLANE_ADVISORY_TRUTH_BINDING_V1
+    path: governance/05_CONTRACTS/C2/control_plane_advisory_truth_binding_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CONTROL_PLANE_TRUST_SURFACE_LABELING_V1
+    path: governance/05_CONTRACTS/C2/control_plane_trust_surface_labeling_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CONTROL_PLANE_TRUST_SEMANTIC_PRESERVATION_BUNDLE6_V1
+    path: governance/05_CONTRACTS/C2/control_plane_trust_semantic_preservation_bundle6_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_SCHEMA_CONTROL_PLANE_OPERATOR_STATUS_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/control_plane_operator_status.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_CONTROL_PLANE_BLOCKED_TRANSITION_VIEW_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/control_plane_blocked_transition_view.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_ADVISORY_TRUTH_BINDING_STATUS_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/advisory_truth_binding_status.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_SCHEMA_TRANSITION_TIMELINE_PROJECTION_V1
+    path: governance/04_DATA/SCHEMAS/C2/RUNTIME/transition_timeline_projection.v1.schema.json
+    class: C2_SCHEMA
+    status: DRAFT
+
+  - id: C2_TOOL_RUN_CONTROL_PLANE_OPERATOR_STATUS_V1
+    path: ops/tools/run_control_plane_operator_status_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_TOOL_RUN_CONTROL_PLANE_BLOCKED_TRANSITION_VIEW_V1
+    path: ops/tools/run_control_plane_blocked_transition_view_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_TOOL_RUN_TRANSITION_TIMELINE_PROJECTION_V1
+    path: ops/tools/run_transition_timeline_projection_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_TOOL_RUN_ADVISORY_TRUTH_BINDING_STATUS_V1
+    path: ops/tools/run_advisory_truth_binding_status_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_TOOL_RUN_ADVISORY_DECISION_STATE_V1
+    path: ops/tools/run_advisory_decision_state_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_TOOL_RENDER_ADVISORY_DECISION_STATE_V1
+    path: ops/tools/render_advisory_decision_state_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_TOOL_RUN_C2_OPS_COCKPIT_STATUS_V2_PIPELINE_V1
+    path: ops/tools/run_c2_ops_cockpit_status_v2_pipeline_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_CONTRACT_CONTROL_PLANE_READ_GATEWAY_V1
+    path: governance/05_CONTRACTS/C2/control_plane_read_gateway_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CONTRACT_CONTROL_PLANE_SEMANTIC_SURFACE_V1
+    path: governance/05_CONTRACTS/C2/control_plane_semantic_surface_v1.contract.md
+    class: C2_CONTRACT
+    status: DRAFT
+
+  - id: C2_CODE_CONTROL_PLANE_READ_GATEWAY_V1
+    path: constellation_2/common/control_plane_read_gateway_v1.py
+    class: C2_CODE
+    status: DRAFT
+
+  - id: C2_CODE_CONTROL_PLANE_READ_BOUNDARY_V1
+    path: constellation_2/common/control_plane_read_boundary_v1.py
+    class: C2_CODE
+    status: DRAFT
+
+  - id: C2_TOOL_READ_CONTROL_PLANE_SURFACE_V1
+    path: ops/tools/read_control_plane_surface_v1.py
+    class: C2_TOOL
+    status: ACTIVE

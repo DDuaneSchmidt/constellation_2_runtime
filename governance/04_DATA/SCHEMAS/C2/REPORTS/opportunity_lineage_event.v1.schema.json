@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/opportunity_lineage_event.v1.schema.json",
+  "title": "opportunity_lineage_event.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "event_id",
+    "day_utc",
+    "environment",
+    "sleeve_id",
+    "opportunity_id",
+    "lineage_stage",
+    "stage_status",
+    "observed_at_utc",
+    "reason_code",
+    "reason_detail",
+    "stage_metrics",
+    "evidence_refs",
+    "upstream_refs",
+    "emitted_by"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "opportunity_lineage_event"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "artifact_id": {
+      "const": "opportunity_lineage_event_v1"
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "day_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "environment": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sleeve_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "opportunity_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "lineage_stage": {
+      "type": "string",
+      "enum": [
+        "sleeve_run",
+        "signal_eval",
+        "signal_filtered",
+        "intent_created",
+        "submit_attempted",
+        "order_ack",
+        "fill_event",
+        "order_rejected",
+        "order_cancelled",
+        "attribution_complete"
+      ]
+    },
+    "stage_status": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "FAIL",
+        "SKIPPED",
+        "BLOCKED",
+        "INFO"
+      ]
+    },
+    "observed_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "reason_code": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reason_detail": {
+      "type": "string"
+    },
+    "stage_metrics": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifact_type",
+          "artifact_path",
+          "artifact_sha256"
+        ],
+        "properties": {
+          "artifact_type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "artifact_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "artifact_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "upstream_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifact_type",
+          "artifact_path"
+        ],
+        "properties": {
+          "artifact_type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "artifact_path": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "emitted_by": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/paper_startup_authorization_convergence.v1.schema.json",
+  "title": "paper_startup_authorization_convergence.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "generated_utc",
+    "target_day",
+    "environment",
+    "ib_account",
+    "sleeve_id",
+    "sleeve_truth_root",
+    "authority_root",
+    "convergence_status",
+    "authorization_verdict_ready",
+    "authorization_required_artifacts",
+    "artifact_results",
+    "blocker_chain",
+    "source_refs"
+  ],
+  "properties": {
+    "schema_id": { "const": "paper_startup_authorization_convergence_v1" },
+    "schema_version": { "const": 1 },
+    "binding_classification": { "type": "string", "const": "SUBSET_PROOF_ONLY" },
+    "generated_utc": { "type": "string", "minLength": 20 },
+    "target_day": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "environment": { "type": "string", "enum": ["PAPER", "LIVE"] },
+    "ib_account": { "type": "string", "minLength": 1 },
+    "sleeve_id": { "type": "string", "minLength": 1 },
+    "sleeve_truth_root": { "type": "string", "minLength": 1 },
+    "authority_root": { "type": "string", "minLength": 1 },
+    "convergence_status": { "type": "string", "enum": ["SUCCESS", "BLOCKED"] },
+    "authorization_verdict_ready": { "type": "boolean" },
+    "authorization_required_artifacts": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "artifact_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifact_id",
+          "required",
+          "artifact_path",
+          "schema_id",
+          "target_day_expected",
+          "target_day_observed",
+          "observed_status",
+          "ready",
+          "reason_codes",
+          "blocker_code",
+          "summary"
+        ],
+        "properties": {
+          "artifact_id": { "type": "string", "minLength": 1 },
+          "required": { "type": "boolean" },
+          "artifact_path": { "type": "string", "minLength": 1 },
+          "schema_id": { "type": "string" },
+          "target_day_expected": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+          "target_day_observed": { "type": "string" },
+          "observed_status": { "type": "string", "minLength": 1 },
+          "ready": { "type": "boolean" },
+          "reason_codes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "blocker_code": { "type": "string" },
+          "summary": { "type": "string" }
+        }
+      }
+    },
+    "blocker_chain": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["artifact_id", "blocker_code", "summary"],
+        "properties": {
+          "artifact_id": { "type": "string", "minLength": 1 },
+          "blocker_code": { "type": "string", "minLength": 1 },
+          "summary": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "source_refs": {
+      "type": "array",
+      "items": { "type": "object" }
+    }
+  }
+}

@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/day_open_trigger.v1.schema.json",
+  "title": "day_open_trigger.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "trigger_status",
+    "emitted_at_utc",
+    "trigger_reason_code",
+    "trigger_kind",
+    "environment",
+    "open_policy",
+    "source_authority_refs",
+    "open_window_status",
+    "open_window",
+    "dedupe_key",
+    "trigger_sequence",
+    "trigger_history",
+    "consumed",
+    "consumed_at_utc",
+    "consumed_by",
+    "expires_at_utc",
+    "producer"
+  ],
+  "properties": {
+    "schema_id": { "const": "day_open_trigger" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "trigger_status": {
+      "type": "string",
+      "enum": [
+        "EMITTED",
+        "SUPPRESSED_PRE_OPEN",
+        "SUPPRESSED_OUTSIDE_OPEN_WINDOW",
+        "SUPPRESSED_ADMISSION_NOT_ADMIT",
+        "SUPPRESSED_ACTIVE_SESSION_NOT_BOUND",
+        "SUPPRESSED_AUTHORITY_NOT_GRANTED",
+        "SUPPRESSED_ALREADY_CONSUMED",
+        "SUPPRESSED_TERMINAL_ATTEMPT"
+      ]
+    },
+    "emitted_at_utc": { "type": "string" },
+    "trigger_reason_code": { "type": "string", "minLength": 1 },
+    "trigger_kind": {
+      "type": "string",
+      "enum": ["INITIAL_BOD_TRIGGER", "LATE_OPEN_TRIGGER", "NO_TRIGGER"]
+    },
+    "environment": { "type": "string", "enum": ["PAPER", "LIVE"] },
+    "open_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy_mode",
+        "environment",
+        "max_successful_opens_per_day",
+        "max_late_open_attempts_per_day",
+        "same_day_open_cap_enforced",
+        "time_window_enforced",
+        "successful_open_already_recorded",
+        "prior_success_ref",
+        "initial_open_consumed",
+        "late_open_available",
+        "late_open_consumed",
+        "late_open_consumed_ref",
+        "open_terminal",
+        "terminal_reason_code",
+        "policy_status",
+        "attempt_count",
+        "latest_attempt_kind",
+        "latest_attempt_result",
+        "prior_trigger_kind",
+        "prior_trigger_status"
+      ],
+      "properties": {
+        "policy_mode": { "type": "string", "minLength": 1 },
+        "environment": { "type": "string", "enum": ["PAPER", "LIVE"] },
+        "max_successful_opens_per_day": { "type": "integer", "minimum": 0 },
+        "max_late_open_attempts_per_day": { "type": "integer", "minimum": 0 },
+        "same_day_open_cap_enforced": { "type": "boolean" },
+        "time_window_enforced": { "type": "boolean" },
+        "successful_open_already_recorded": { "type": "boolean" },
+        "prior_success_ref": { "type": "string" },
+        "initial_open_consumed": { "type": "boolean" },
+        "late_open_available": { "type": "boolean" },
+        "late_open_consumed": { "type": "boolean" },
+        "late_open_consumed_ref": { "type": "string" },
+        "open_terminal": { "type": "boolean" },
+        "terminal_reason_code": { "type": "string" },
+        "policy_status": { "type": "string", "minLength": 1 },
+        "attempt_count": { "type": "integer", "minimum": 0 },
+        "latest_attempt_kind": { "type": "string", "minLength": 1 },
+        "latest_attempt_result": { "type": "string" },
+        "prior_trigger_kind": { "type": "string", "minLength": 1 },
+        "prior_trigger_status": { "type": "string" }
+      }
+    },
+    "source_authority_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "active_session_v1",
+        "target_day_admission_v1",
+        "session_authority_status_v1",
+        "paper_session_ledger_v1",
+        "paper_session_authority_v1"
+      ],
+      "properties": {
+        "active_session_v1": { "type": "string", "minLength": 1 },
+        "target_day_admission_v1": { "type": "string", "minLength": 1 },
+        "session_authority_status_v1": { "type": "string", "minLength": 1 },
+        "paper_session_ledger_v1": { "type": "string", "minLength": 1 },
+        "paper_session_authority_v1": { "type": "string", "minLength": 1 }
+      }
+    },
+    "open_window_status": {
+      "type": "string",
+      "enum": ["PRE_OPEN", "OPEN_WINDOW", "POST_OPEN_WINDOW"]
+    },
+    "open_window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "timezone",
+        "bod_time_et",
+        "cutoff_time_et",
+        "bod_time_utc",
+        "cutoff_time_utc",
+        "source_timer_path",
+        "cutoff_timer_path"
+      ],
+      "properties": {
+        "timezone": { "type": "string", "minLength": 1 },
+        "bod_time_et": { "type": "string", "minLength": 1 },
+        "cutoff_time_et": { "type": "string", "minLength": 1 },
+        "bod_time_utc": { "type": "string", "minLength": 1 },
+        "cutoff_time_utc": { "type": "string", "minLength": 1 },
+        "source_timer_path": { "type": "string", "minLength": 1 },
+        "cutoff_timer_path": { "type": "string", "minLength": 1 }
+      }
+    },
+    "dedupe_key": { "type": "string", "minLength": 1 },
+    "trigger_sequence": { "type": "integer", "minimum": 0 },
+    "trigger_history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "trigger_sequence",
+          "trigger_kind",
+          "trigger_status",
+          "trigger_reason_code",
+          "emitted_at_utc",
+          "consumed",
+          "consumed_at_utc",
+          "dedupe_key"
+        ],
+        "properties": {
+          "trigger_sequence": { "type": "integer", "minimum": 0 },
+          "trigger_kind": { "type": "string", "enum": ["INITIAL_BOD_TRIGGER", "LATE_OPEN_TRIGGER", "NO_TRIGGER"] },
+          "trigger_status": { "type": "string", "minLength": 1 },
+          "trigger_reason_code": { "type": "string", "minLength": 1 },
+          "emitted_at_utc": { "type": "string" },
+          "consumed": { "type": "boolean" },
+          "consumed_at_utc": { "type": "string" },
+          "dedupe_key": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "consumed": { "type": "boolean" },
+    "consumed_at_utc": { "type": "string" },
+    "consumed_by": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "actor_name": { "type": "string" },
+        "actor_path": { "type": "string" }
+      }
+    },
+    "expires_at_utc": { "type": "string", "minLength": 1 },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

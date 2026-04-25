@@ -1,0 +1,44 @@
+
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "schema_id": {"const": "economic_state_build"},
+    "schema_version": {"const": "v1"},
+    "day_utc": {"type": "string"},
+    "sleeve_id": {"type": "string"},
+    "mode": {"type": "string"},
+    "account_id": {"type": "string"},
+    "operation_type": {"type": "string"},
+    "context_hash": {"type": "string"},
+    "dependency_results": {"type": "array", "items": {"type": "object"}},
+    "constitutional_dependency_declaration": {"type": "object"},
+    "constitutional_lineage": {"type": "object"},
+    "closure_status": {"type": "string"},
+    "economic_evaluation": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "benchmark_state",
+            "performance_state",
+            "attribution_state",
+            "risk_state",
+            "r_metrics_state",
+            "tax_economic_state",
+            "capital_efficiency_state",
+            "reallocation_signal_state",
+            "input_manifest",
+            "reason_codes",
+            "upstream_truth"
+          ]
+        }
+      ]
+    },
+    "generated_utc": {"type": "string"}
+  },
+  "required": ["schema_id", "schema_version", "day_utc", "sleeve_id", "mode", "account_id", "operation_type", "context_hash", "dependency_results", "constitutional_dependency_declaration", "constitutional_lineage", "closure_status", "economic_evaluation", "generated_utc"]
+}

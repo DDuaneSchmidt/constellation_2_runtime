@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/runtime/transition_timeline_projection.v1.schema.json",
+  "title": "transition_timeline_projection.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "surface_kind",
+    "projection_id",
+    "projection_version",
+    "generated_at_utc",
+    "authority_label",
+    "target_day",
+    "scope_id",
+    "freshness_state",
+    "timeline_rows",
+    "governing_transition_refs",
+    "evidence_refs",
+    "semantic_events"
+  ],
+  "$defs": {
+    "ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_id", "artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_id": { "type": "string", "minLength": 1 },
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "properties": {
+    "schema_id": { "const": "transition_timeline_projection" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "transition_timeline_projection_v1" },
+    "surface_kind": { "const": "projection" },
+    "projection_id": { "type": "string", "minLength": 1 },
+    "projection_version": { "type": "string", "minLength": 1 },
+    "generated_at_utc": { "type": "string", "format": "date-time" },
+    "authority_label": { "type": "string", "enum": ["governed_derived"] },
+    "target_day": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "operation_type": { "type": "string", "minLength": 1 },
+    "sleeve_id": { "type": "string", "minLength": 1 },
+    "environment": { "type": "string", "minLength": 1 },
+    "ib_account": { "type": "string", "minLength": 1 },
+    "freshness_state": { "type": "string", "enum": ["fresh", "stale", "superseded", "uncertified", "historical_only", "unknown"] },
+    "timeline_rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "transition_id",
+          "stage_id",
+          "policy",
+          "transition_status",
+          "generated_at_utc",
+          "freshness_state",
+          "transition_record_ref"
+        ],
+        "properties": {
+          "transition_id": { "type": "string", "minLength": 1 },
+          "stage_id": { "type": "string", "minLength": 1 },
+          "policy": { "type": "string", "minLength": 1 },
+          "transition_status": { "type": "string", "minLength": 1 },
+          "generated_at_utc": { "type": "string", "format": "date-time" },
+          "freshness_state": { "type": "string", "enum": ["fresh", "stale", "superseded", "uncertified", "historical_only", "unknown"] },
+          "blocked_reason_codes": { "type": "array", "items": { "type": "string" } },
+          "supersedes_ref": { "anyOf": [{ "$ref": "#/$defs/ref" }, { "type": "null" }] },
+          "superseded_by_ref": { "anyOf": [{ "$ref": "#/$defs/ref" }, { "type": "null" }] },
+          "stage_ref": { "anyOf": [{ "$ref": "#/$defs/ref" }, { "type": "null" }] },
+          "stage_certification_ref": { "anyOf": [{ "$ref": "#/$defs/ref" }, { "type": "null" }] },
+          "transition_record_ref": { "$ref": "#/$defs/ref" }
+        }
+      }
+    },
+    "governing_stage_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "governing_transition_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "governing_certification_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "evidence_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "semantic_events": { "type": "array", "items": { "type": "object" } }
+  }
+}

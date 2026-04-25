@@ -1,0 +1,303 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/session_authority_status.v1.schema.json",
+  "title": "session_authority_status.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "generated_utc",
+    "environment",
+    "target_day",
+    "active_day",
+    "next_target_day",
+    "blocked_target_day",
+    "rollover_status",
+    "rollover_reason_code",
+    "target_day_admission_status",
+    "target_day_build_status",
+    "closure_status",
+    "hidden_dependency_check_result",
+    "traceability_status",
+    "active_session_generated_utc",
+    "target_day_admission_generated_utc",
+    "target_day_build_generated_utc",
+    "active_session_ref",
+    "target_day_admission_ref",
+    "target_day_build_ref",
+    "market_calendar_coverage_status",
+    "market_calendar_coverage_severity",
+    "market_calendar_required_target_day",
+    "market_calendar_warning_target_day",
+    "market_calendar_source_coverage_end",
+    "market_calendar_runtime_coverage_end",
+    "market_calendar_source_status",
+    "market_calendar_runtime_status",
+    "market_calendar_source_covers_required_target_day",
+    "market_calendar_runtime_covers_required_target_day",
+    "market_calendar_operator_action_code",
+    "market_calendar_coverage_ref",
+    "top_blocker_reason_codes",
+    "blocked_reason_codes",
+    "blocking_codes",
+    "rollover_withheld_seconds",
+    "submission_authorization_status",
+    "submission_authorized",
+    "closure_state",
+    "first_blocker_code",
+    "missing_dependency_artifacts",
+    "first_real_blocker_code",
+    "first_real_blocker_summary",
+    "constitutional_dependency_declaration",
+    "constitutional_lineage",
+    "operator_summary_authority_owner",
+    "operator_summary_authority_manifest_ref",
+    "operator_summary_dossier_ref",
+    "paper_authority_projection",
+    "advisory_only_signals",
+    "ambiguity_state",
+    "is_canonical",
+    "authority_level",
+    "derived_from",
+    "semantic_status",
+    "status_severity",
+    "monitoring_checks",
+    "required_operator_action",
+    "recommended_operator_action"
+  ],
+  "properties": {
+    "schema_id": { "const": "session_authority_status" },
+    "schema_version": { "const": "v1" },
+    "generated_utc": { "type": "string", "minLength": 20 },
+    "environment": { "type": "string", "enum": ["PAPER", "LIVE"] },
+    "target_day": { "type": "string" },
+    "active_day": { "type": "string" },
+    "next_target_day": { "type": "string" },
+    "blocked_target_day": { "type": "string" },
+    "rollover_status": { "type": "string", "minLength": 1 },
+    "rollover_reason_code": { "type": "string" },
+    "target_day_admission_status": { "type": "string", "enum": ["ADMIT", "BLOCKED"] },
+    "target_day_build_status": { "type": "string", "enum": ["COMPLETE", "BLOCKED"] },
+    "closure_status": { "type": "string", "enum": ["CLOSED", "OPEN"] },
+    "hidden_dependency_check_result": { "type": "string", "enum": ["PASS", "FAIL"] },
+    "traceability_status": { "type": "string", "enum": ["VALID", "BROKEN"] },
+    "active_session_generated_utc": { "type": "string" },
+    "target_day_admission_generated_utc": { "type": "string" },
+    "target_day_build_generated_utc": { "type": "string" },
+    "active_session_ref": { "$ref": "#/$defs/artifact_ref" },
+    "target_day_admission_ref": { "$ref": "#/$defs/artifact_ref" },
+    "target_day_build_ref": { "$ref": "#/$defs/artifact_ref" },
+    "market_calendar_coverage_status": { "type": "string", "enum": ["UNKNOWN", "HEALTHY", "WARNING", "BLOCKED"] },
+    "market_calendar_coverage_severity": { "type": "string", "enum": ["INFO", "WARNING", "CRITICAL"] },
+    "market_calendar_required_target_day": { "type": "string" },
+    "market_calendar_warning_target_day": { "type": "string" },
+    "market_calendar_source_coverage_end": { "type": "string" },
+    "market_calendar_runtime_coverage_end": { "type": "string" },
+    "market_calendar_source_status": { "type": "string", "enum": ["UNKNOWN", "HEALTHY", "WARNING", "BLOCKED"] },
+    "market_calendar_runtime_status": { "type": "string", "enum": ["UNKNOWN", "HEALTHY", "WARNING", "BLOCKED"] },
+    "market_calendar_source_covers_required_target_day": { "type": "boolean" },
+    "market_calendar_runtime_covers_required_target_day": { "type": "boolean" },
+    "market_calendar_operator_action_code": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "EXTEND_GOVERNED_SOURCE",
+        "REFRESH_RUNTIME_FROM_SOURCE",
+        "REPAIR_MANIFEST_OR_SCHEMA",
+        "INSPECT_INGEST_REFRESH_FAILURE"
+      ]
+    },
+    "market_calendar_coverage_ref": { "$ref": "#/$defs/artifact_ref" },
+    "top_blocker_reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "blocked_reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "blocking_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "rollover_withheld_seconds": { "type": "integer", "minimum": 0 },
+    "submission_authorization_status": { "type": "string", "enum": ["AUTHORIZED", "DENIED", "BLOCKED", "UNKNOWN"] },
+    "submission_authorized": { "type": "boolean" },
+    "closure_state": {
+      "type": "string",
+      "enum": ["COMPLETE", "BLOCKED", "DEGRADED", "OPEN"]
+    },
+    "first_blocker_code": { "type": "string" },
+    "missing_dependency_artifacts": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "first_real_blocker_code": { "type": "string" },
+    "first_real_blocker_summary": { "type": "string" },
+    "constitutional_dependency_declaration": { "type": "object" },
+    "constitutional_lineage": { "type": "object" },
+    "operator_summary_authority_owner": { "type": "string", "minLength": 1 },
+    "operator_summary_authority_manifest_ref": { "$ref": "#/$defs/artifact_ref" },
+    "operator_summary_dossier_ref": { "$ref": "#/$defs/artifact_ref" },
+    "paper_authority_projection": { "$ref": "#/$defs/paper_authority_projection" },
+    "advisory_only_signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "classification", "state", "summary"],
+        "properties": {
+          "source": { "type": "string", "minLength": 1 },
+          "classification": { "type": "string", "minLength": 1 },
+          "state": { "type": "string", "minLength": 1 },
+          "summary": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "is_canonical": { "type": "boolean" },
+    "authority_level": { "type": "string", "enum": ["canonical", "derived", "advisory"] },
+    "derived_from": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "ambiguity_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "summary", "reason_codes", "conflicting_authorities"],
+      "properties": {
+        "status": { "type": "string", "enum": ["CLEAR", "AMBIGUOUS_AUTHORITY"] },
+        "summary": { "type": "string" },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "conflicting_authorities": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "semantic_status": {
+      "type": "string",
+      "enum": [
+        "NOT_YET_MATERIALIZED",
+        "BLOCKED_BY_UPSTREAM_PREREQUISITE",
+        "PENDING_PROPAGATION",
+        "MATERIALIZED_AND_FAILED",
+        "FULLY_OBSERVED_AND_CONFIRMED"
+      ]
+    },
+    "status_severity": { "type": "string", "enum": ["INFO", "WARNING", "CRITICAL"] },
+    "monitoring_checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "check_name",
+          "status",
+          "severity",
+          "reason_code",
+          "summary",
+          "artifact_ref",
+          "details"
+        ],
+        "properties": {
+          "check_name": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+          "severity": { "type": "string", "enum": ["INFO", "WARNING", "CRITICAL"] },
+          "reason_code": { "type": "string" },
+          "summary": { "type": "string", "minLength": 1 },
+          "artifact_ref": { "$ref": "#/$defs/artifact_ref" },
+          "details": { "type": "object" }
+        }
+      }
+    },
+    "required_operator_action": { "type": "string", "minLength": 1 },
+    "recommended_operator_action": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_path": { "type": "string" },
+        "artifact_sha256": { "type": "string" }
+      }
+    },
+    "paper_authority_projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_used",
+        "authority_owner",
+        "authority_artifact_ref",
+        "authority_status",
+        "paper_open_allowed",
+        "open_state",
+        "degraded_mode",
+        "submission_authorized",
+        "blocker_count",
+        "advisory_count",
+        "blocker_reason_codes",
+        "advisory_reason_codes",
+        "advisory_reason_details",
+        "highest_advisory_severity",
+        "first_blocker_code",
+        "first_blocker_summary",
+        "first_advisory_code"
+      ],
+      "properties": {
+        "contract_used": { "type": "boolean" },
+        "authority_owner": { "type": "string" },
+        "authority_artifact_ref": { "$ref": "#/$defs/artifact_ref" },
+        "authority_status": { "type": "string", "enum": ["UNKNOWN", "GRANTED", "DENIED"] },
+        "paper_open_allowed": { "type": "boolean" },
+        "open_state": { "type": "string", "enum": ["UNKNOWN", "OPEN_ALLOWED", "OPEN_BLOCKED"] },
+        "degraded_mode": { "type": "boolean" },
+        "submission_authorized": { "type": "boolean" },
+        "blocker_count": { "type": "integer", "minimum": 0 },
+        "advisory_count": { "type": "integer", "minimum": 0 },
+        "blocker_reason_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "advisory_reason_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "advisory_reason_details": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/paper_advisory_reason_detail" }
+        },
+        "highest_advisory_severity": {
+          "type": "string",
+          "enum": ["NONE", "INFO", "WARNING", "CRITICAL"]
+        },
+        "first_blocker_code": { "type": "string" },
+        "first_blocker_summary": { "type": "string" },
+        "first_advisory_code": { "type": "string" }
+      }
+    },
+    "paper_advisory_reason_detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason_code",
+        "severity",
+        "check_id",
+        "summary",
+        "artifact_path"
+      ],
+      "properties": {
+        "reason_code": { "type": "string", "minLength": 1 },
+        "severity": { "type": "string", "enum": ["INFO", "WARNING", "CRITICAL"] },
+        "check_id": { "type": "string" },
+        "summary": { "type": "string" },
+        "artifact_path": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/execution/multi_delta_execution_record.v1.schema.json",
+  "title": "multi_delta_execution_record.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_id",
+    "multi_delta_execution_record_id",
+    "approved_change_set_id",
+    "multi_delta_execution_decision_id",
+    "promotion_record_id",
+    "household_id",
+    "day_utc",
+    "produced_utc",
+    "contract_version",
+    "status",
+    "ordered_changes",
+    "input_record_refs",
+    "parent_lineage_refs",
+    "source_artifact_refs",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "multi_delta_execution_record" },
+    "schema_version": { "const": "v1" },
+    "record_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "multi_delta_execution_record_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "approved_change_set_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "multi_delta_execution_decision_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "promotion_record_id": { "type": "string", "minLength": 1 },
+    "household_id": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "contract_version": { "type": "string", "minLength": 1 },
+    "status": { "const": "AUTHORIZED" },
+    "ordered_changes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/change_entry" }
+    },
+    "input_record_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "parent_lineage_refs": {
+      "type": "array",
+      "minItems": 3,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "source_artifact_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "change_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "change_id",
+        "member_order",
+        "account_id",
+        "environment",
+        "sleeve_id",
+        "operation_type",
+        "engine_id",
+        "instrument",
+        "side",
+        "quantity_shares",
+        "order_terms",
+        "reference_price_cents",
+        "delta_value_cents",
+        "routing_account_id",
+        "value_basis_id",
+        "reason_codes",
+        "detail_refs"
+      ],
+      "properties": {
+        "change_id": { "type": "string", "minLength": 1 },
+        "member_order": { "type": "integer", "minimum": 0 },
+        "account_id": { "type": "string", "minLength": 1 },
+        "environment": { "type": "string", "enum": ["PAPER", "LIVE"] },
+        "sleeve_id": { "type": "string", "minLength": 1 },
+        "operation_type": { "type": "string", "minLength": 1 },
+        "engine_id": { "type": "string", "minLength": 1 },
+        "instrument": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "symbol", "currency", "ib_conId", "ib_localSymbol"],
+          "properties": {
+            "kind": { "type": "string", "minLength": 1 },
+            "symbol": { "type": "string", "minLength": 1 },
+            "currency": { "type": "string", "minLength": 1 },
+            "ib_conId": { "type": ["integer", "null"] },
+            "ib_localSymbol": { "type": ["string", "null"] }
+          }
+        },
+        "side": { "type": "string", "enum": ["BUY", "SELL"] },
+        "quantity_shares": { "type": "integer", "minimum": 1 },
+        "order_terms": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["order_type", "limit_price", "time_in_force"],
+          "properties": {
+            "order_type": { "type": "string", "enum": ["LIMIT", "MARKET"] },
+            "limit_price": { "type": ["string", "null"] },
+            "time_in_force": { "type": "string", "enum": ["DAY", "GTC"] }
+          }
+        },
+        "reference_price_cents": { "type": "integer", "minimum": 1 },
+        "delta_value_cents": { "type": "integer" },
+        "routing_account_id": { "type": "string", "minLength": 1 },
+        "value_basis_id": { "type": "string", "minLength": 1 },
+        "reason_codes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "detail_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

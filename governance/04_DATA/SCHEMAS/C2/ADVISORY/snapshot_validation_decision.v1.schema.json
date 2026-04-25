@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisory/snapshot_validation_decision.v1.schema.json",
+  "title": "snapshot_validation_decision.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_id",
+    "snapshot_validation_decision_id",
+    "household_id",
+    "parent_policy_id",
+    "produced_utc",
+    "effective_at",
+    "input_assembly_id",
+    "contract_version",
+    "decision_version",
+    "outcome",
+    "completeness_status",
+    "freshness_status",
+    "reconciliation_status",
+    "validity_tier",
+    "input_record_refs",
+    "reason_codes"
+  ],
+  "properties": {
+    "schema_id": { "const": "snapshot_validation_decision" },
+    "schema_version": { "const": "v1" },
+    "record_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "snapshot_validation_decision_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "household_id": { "type": "string", "minLength": 1 },
+    "parent_policy_id": { "type": "string", "minLength": 1 },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "effective_at": { "type": "string", "format": "date-time" },
+    "input_assembly_id": { "type": "string", "minLength": 1 },
+    "contract_version": { "type": "string", "minLength": 1 },
+    "decision_version": { "type": "string", "minLength": 1 },
+    "outcome": { "type": "string", "enum": ["valid", "blocked"] },
+    "completeness_status": { "type": "string", "enum": ["COMPLETE", "PARTIAL"] },
+    "freshness_status": { "type": "string", "enum": ["CURRENT", "STALE"] },
+    "reconciliation_status": { "type": "string", "enum": ["NOT_PROVIDED"] },
+    "validity_tier": {
+      "type": "string",
+      "enum": [
+        "VALID_EXECUTION_ELIGIBLE",
+        "VALID_ADVISORY_ONLY",
+        "INVALID_REMEDIABLE",
+        "INVALID_HARD_STOP"
+      ]
+    },
+    "input_record_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "reason_codes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

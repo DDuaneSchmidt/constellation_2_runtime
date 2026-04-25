@@ -16,6 +16,8 @@
     "overall_wall_time_ms",
     "per_stage_durations",
     "trend_summary",
+    "constitutional_dependency_declaration",
+    "constitutional_lineage",
     "source_artifacts",
     "informational_only_notice",
     "producer"
@@ -56,15 +58,18 @@
         "history_points": { "type": "integer", "minimum": 0 }
       }
     },
+    "constitutional_dependency_declaration": { "type": "object" },
+    "constitutional_lineage": { "type": "object" },
     "source_artifacts": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["logical_name", "path", "generated_at_utc", "status"],
+        "required": ["logical_name", "path", "sha256", "generated_at_utc", "status"],
         "properties": {
           "logical_name": { "type": "string", "minLength": 1 },
           "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "minLength": 64, "maxLength": 64 },
           "generated_at_utc": { "type": "string" },
           "status": { "type": "string", "minLength": 1 }
         }

@@ -1,10 +1,13 @@
 {
   "type": "object",
-  "required": ["schema_id", "schema_version", "day_utc", "pointers"],
+  "required": ["schema_id", "schema_version", "day_utc", "produced_utc", "status", "reason_codes", "pointers"],
   "properties": {
     "schema_id": { "const": "C2_IB_API_HANDSHAKE_LATEST_POINTER_V1" },
     "schema_version": { "const": 1 },
     "day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
+    "produced_utc": { "type": "string", "minLength": 20 },
+    "status": { "type": "string" },
+    "reason_codes": { "type": "array", "items": { "type": "string" } },
     "pointers": {
       "type": "object",
       "required": ["handshake_path", "handshake_sha256"],

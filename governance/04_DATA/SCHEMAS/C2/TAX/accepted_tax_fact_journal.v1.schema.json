@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/accepted_tax_fact_journal.v1.schema.json",
+  "title": "accepted_tax_fact_journal.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "journal_entry_id", "accepted_fact_id", "scope_id", "fact_family", "recorded_at", "truth_state", "reason_codes"],
+  "properties": {
+    "schema_id": { "const": "accepted_tax_fact_journal" },
+    "schema_version": { "const": "v1" },
+    "journal_entry_id": { "type": "string", "minLength": 1 },
+    "accepted_fact_id": { "type": "string", "minLength": 1 },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "fact_family": { "type": "string", "minLength": 1 },
+    "recorded_at": { "type": "string", "format": "date-time" },
+    "truth_state": { "type": "string", "enum": ["accepted", "provisional", "restricted_use", "corrected"] },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}
+

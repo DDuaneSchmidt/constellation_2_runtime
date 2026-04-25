@@ -42,6 +42,16 @@ Non-goals:
 - price adjustment or dividend/split adjustment (no “adjusted_close” derivation)
 - any UI changes
 
+This contract remains a daily-bars writer only.
+
+However, startup readiness may consume a same-day record from this governed daily spine as the target-day default equity reference price once:
+
+- the row day matches the target day
+- the row `close` is positive
+- the row `ingested_utc` is at or after `09:30 America/New_York`
+
+This does not make the downloader an intraday quote surface; it only defines when a same-day governed daily-spine record becomes acceptable for startup readiness.
+
 ---
 
 ## 2. Authority & Truth Surface

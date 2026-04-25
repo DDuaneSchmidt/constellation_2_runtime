@@ -15,6 +15,11 @@
     "required_boundary_checks",
     "failed_checks",
     "blocking_codes",
+    "closure_state",
+    "first_blocker_code",
+    "missing_dependency_artifacts",
+    "constitutional_dependency_declaration",
+    "constitutional_lineage",
     "producer",
     "produced_at_utc",
     "freshness_verdict",
@@ -44,6 +49,17 @@
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
     },
+    "closure_state": {
+      "type": "string",
+      "enum": ["COMPLETE", "BLOCKED", "DEGRADED", "OPEN"]
+    },
+    "first_blocker_code": { "type": "string" },
+    "missing_dependency_artifacts": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "constitutional_dependency_declaration": { "type": "object" },
+    "constitutional_lineage": { "type": "object" },
     "producer": { "$ref": "#/$defs/producer" },
     "produced_at_utc": { "type": "string", "minLength": 20 },
     "freshness_verdict": { "type": "string", "enum": ["CURRENT", "STALE", "UNKNOWN"] },

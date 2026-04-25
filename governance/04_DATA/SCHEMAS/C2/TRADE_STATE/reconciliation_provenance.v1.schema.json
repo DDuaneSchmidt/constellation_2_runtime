@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/trade_state/reconciliation_provenance.v1.schema.json",
+  "title": "reconciliation_provenance.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_owner",
+    "materialization_set_id",
+    "day_utc",
+    "evaluation_utc",
+    "trade_identity_id",
+    "incorporated_state_ref",
+    "rule_versions",
+    "upstream_core1_evidence_refs",
+    "incorporated_fact_refs",
+    "ignored_fact_refs",
+    "blocked_fact_refs",
+    "prior_state_change_summary",
+    "derived_only"
+  ],
+  "properties": {
+    "schema_id": { "const": "reconciliation_provenance" },
+    "schema_version": { "const": "v1" },
+    "authority_owner": { "const": "reconciliation_provenance_v1" },
+    "materialization_set_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "day_utc": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "evaluation_utc": { "type": "string", "format": "date-time" },
+    "trade_identity_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "incorporated_state_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "rule_versions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["core2_rule_pack", "identity_rules", "description_rules", "health_rules"],
+      "properties": {
+        "core2_rule_pack": { "type": "string", "minLength": 1 },
+        "identity_rules": { "type": "string", "minLength": 1 },
+        "description_rules": { "type": "string", "minLength": 1 },
+        "health_rules": { "type": "string", "minLength": 1 }
+      }
+    },
+    "upstream_core1_evidence_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["raw_journal_ref", "fact_ledger_refs", "health_ref"],
+      "properties": {
+        "raw_journal_ref": { "$ref": "#/$defs/artifact_ref" },
+        "fact_ledger_refs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "observed_order_fact",
+            "observed_order_status_fact",
+            "observed_fill_fact",
+            "observed_position_fact"
+          ],
+          "properties": {
+            "observed_order_fact": { "$ref": "#/$defs/artifact_ref" },
+            "observed_order_status_fact": { "$ref": "#/$defs/artifact_ref" },
+            "observed_fill_fact": { "$ref": "#/$defs/artifact_ref" },
+            "observed_position_fact": { "$ref": "#/$defs/artifact_ref" }
+          }
+        },
+        "health_ref": { "$ref": "#/$defs/artifact_ref" }
+      }
+    },
+    "incorporated_fact_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/fact_ref" }
+    },
+    "ignored_fact_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/fact_ref" }
+    },
+    "blocked_fact_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/fact_ref" }
+    },
+    "prior_state_change_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["change_status", "prior_state_ref", "changed_fields", "summary"],
+      "properties": {
+        "change_status": { "type": "string", "enum": ["INITIAL_MATERIALIZATION", "NO_MATERIAL_CHANGE", "MATERIAL_CHANGE"] },
+        "prior_state_ref": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["artifact_path", "artifact_sha256"],
+          "properties": {
+            "artifact_path": { "type": "string" },
+            "artifact_sha256": { "type": "string" }
+          }
+        },
+        "changed_fields": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "summary": { "type": "string", "minLength": 1 }
+      }
+    },
+    "derived_only": { "const": true }
+  },
+  "$defs": {
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "fact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "fact_record_id", "canonical_event_identity", "reason_code"],
+      "properties": {
+        "schema_id": { "type": "string", "minLength": 1 },
+        "fact_record_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "canonical_event_identity": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "reason_code": { "type": "string", "minLength": 1 },
+        "note": { "type": "string" }
+      }
+    }
+  }
+}
+

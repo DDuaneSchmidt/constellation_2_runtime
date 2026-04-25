@@ -1,0 +1,44 @@
+
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "advisory_submission": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "origin",
+        "execution_intent_id",
+        "execution_intent_canonical_hash",
+        "promotion_record_id",
+        "promotion_idempotency_key"
+      ],
+      "properties": {
+        "origin": {"const": "advisory_kernel_v1"},
+        "execution_intent_id": {"type": "string"},
+        "execution_intent_canonical_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "promotion_record_id": {"type": "string"},
+        "promotion_idempotency_key": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "attempt_id": {"type": ["string", "null"]},
+    "build_ref": {"type": "object"},
+    "candidate_ref": {"type": "object"},
+    "canonical_json_hash": {"type": ["string", "null"]},
+    "dependency_manifest_ref": {"type": ["string", "null"]},
+    "dependency_refs": {"items": {"type": "object"}, "type": "array"},
+    "economic_state_package_ref": {"type": ["object", "null"]},
+    "global_context_package_ref": {"type": ["object", "null"]},
+    "intent_id": {"type": ["string", "null"]},
+    "operation_type": {"type": "string"},
+    "schema_id": {"const": "execution_package"},
+    "schema_version": {"const": "v1"},
+    "seal_basis": {"type": "string"},
+    "sealed": {"type": "boolean"},
+    "sealed_utc": {"type": "string"},
+    "selected_order_plan_ref": {"type": ["object", "null"]},
+    "submission_id": {"type": "string"},
+    "trade_instance_id": {"type": ["string", "null"]}
+  },
+  "required": ["schema_id", "schema_version", "operation_type", "candidate_ref", "submission_id", "sealed", "sealed_utc", "dependency_refs", "build_ref"]
+}

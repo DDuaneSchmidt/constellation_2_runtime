@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/market_calendar_coverage_status.v1.schema.json",
+  "title": "market_calendar_coverage_status.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "generated_utc",
+    "source_coverage_start",
+    "source_coverage_end",
+    "runtime_coverage_start",
+    "runtime_coverage_end",
+    "required_target_day",
+    "required_forward_coverage_policy",
+    "warning_target_day",
+    "source_status",
+    "runtime_status",
+    "source_required_target_day_covered",
+    "runtime_required_target_day_covered",
+    "source_warning_target_day_covered",
+    "runtime_warning_target_day_covered",
+    "coverage_status",
+    "reason_codes",
+    "severity",
+    "operator_action_code",
+    "recommended_action",
+    "status_summary",
+    "source_manifest_ref",
+    "runtime_manifest_ref",
+    "source_root",
+    "truth_root",
+    "writer_owner",
+    "refresh_actions"
+  ],
+  "properties": {
+    "schema_id": { "const": "market_calendar_coverage_status" },
+    "schema_version": { "const": "v1" },
+    "generated_utc": { "type": "string", "minLength": 20 },
+    "source_coverage_start": { "type": "string" },
+    "source_coverage_end": { "type": "string" },
+    "runtime_coverage_start": { "type": "string" },
+    "runtime_coverage_end": { "type": "string" },
+    "required_target_day": { "type": "string", "minLength": 10, "maxLength": 10 },
+    "required_forward_coverage_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy_id",
+        "policy_mode",
+        "base_session_authority_day",
+        "minimum_required_offset_calendar_days",
+        "buffer_calendar_days",
+        "warning_target_day"
+      ],
+      "properties": {
+        "policy_id": { "const": "MARKET_CALENDAR_FORWARD_COVERAGE_POLICY_V1" },
+        "policy_mode": { "const": "SESSION_AUTHORITY_DAY_PLUS_CALENDAR_BUFFER" },
+        "base_session_authority_day": { "type": "string", "minLength": 10, "maxLength": 10 },
+        "minimum_required_offset_calendar_days": { "type": "integer", "minimum": 0 },
+        "buffer_calendar_days": { "type": "integer", "minimum": 0 },
+        "warning_target_day": { "type": "string", "minLength": 10, "maxLength": 10 }
+      }
+    },
+    "warning_target_day": { "type": "string", "minLength": 10, "maxLength": 10 },
+    "source_status": { "type": "string", "enum": ["HEALTHY", "WARNING", "BLOCKED"] },
+    "runtime_status": { "type": "string", "enum": ["HEALTHY", "WARNING", "BLOCKED"] },
+    "source_required_target_day_covered": { "type": "boolean" },
+    "runtime_required_target_day_covered": { "type": "boolean" },
+    "source_warning_target_day_covered": { "type": "boolean" },
+    "runtime_warning_target_day_covered": { "type": "boolean" },
+    "coverage_status": { "type": "string", "enum": ["HEALTHY", "WARNING", "BLOCKED"] },
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "severity": { "type": "string", "enum": ["INFO", "WARNING", "CRITICAL"] },
+    "operator_action_code": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "EXTEND_GOVERNED_SOURCE",
+        "REFRESH_RUNTIME_FROM_SOURCE",
+        "REPAIR_MANIFEST_OR_SCHEMA",
+        "INSPECT_INGEST_REFRESH_FAILURE"
+      ]
+    },
+    "recommended_action": { "type": "string", "minLength": 1 },
+    "status_summary": { "type": "string", "minLength": 1 },
+    "source_manifest_ref": { "$ref": "#/$defs/artifact_ref" },
+    "runtime_manifest_ref": { "$ref": "#/$defs/artifact_ref" },
+    "source_root": { "type": "string", "minLength": 1 },
+    "truth_root": { "type": "string", "minLength": 1 },
+    "writer_owner": { "const": "market_calendar_coverage_authority_v1" },
+    "refresh_actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_file",
+          "source_hash",
+          "coverage_start",
+          "coverage_end",
+          "return_code",
+          "producer"
+        ],
+        "properties": {
+          "source_file": { "type": "string", "minLength": 1 },
+          "source_hash": { "type": "string", "minLength": 64, "maxLength": 64 },
+          "coverage_start": { "type": "string", "minLength": 10, "maxLength": 10 },
+          "coverage_end": { "type": "string", "minLength": 10, "maxLength": 10 },
+          "return_code": { "type": "integer" },
+          "producer": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_path": { "type": "string" },
+        "artifact_sha256": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/runtime/policy_evolution_state.v1.schema.json",
+  "title": "policy_evolution_state.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "surface_kind",
+    "evolution_id",
+    "kernel_version",
+    "threshold_model_version",
+    "action_model_version",
+    "generated_at_utc",
+    "authority_label",
+    "target_day",
+    "scope_id",
+    "operation_type",
+    "sleeve_id",
+    "environment",
+    "ib_account",
+    "evolution_target",
+    "target_policy_scope",
+    "target_label",
+    "proposed_policy_change",
+    "evidence_window_refs",
+    "evidence_basis_refs",
+    "evolution_strength",
+    "threshold_result",
+    "trust_override_state",
+    "reversibility_state",
+    "expiry_state",
+    "preserved_visibility_flags",
+    "readiness_summary",
+    "drill_down_route",
+    "before_policy_state",
+    "after_policy_state",
+    "summary_message",
+    "semantic_events"
+  ],
+  "$defs": {
+    "ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_id", "artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_id": { "type": "string", "minLength": 1 },
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "minLength": 1 }
+      }
+    },
+    "policyChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "effective_visibility_effect", "affected_route"],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "preserve_current_policy",
+            "propose_strengthen_emphasis",
+            "propose_reduce_emphasis",
+            "propose_more_compression",
+            "evolution_withheld",
+            "evolution_expired",
+            "rollback_to_prior_policy"
+          ]
+        },
+        "effective_visibility_effect": {
+          "type": "string",
+          "enum": [
+            "top_level",
+            "top_level_compressed",
+            "secondary",
+            "drilldown_only",
+            "unchanged_due_to_withheld",
+            "expired_re_review_required"
+          ]
+        },
+        "affected_route": { "type": "string", "minLength": 1 }
+      }
+    },
+    "policyState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_action", "visibility_effect", "summary_message"],
+      "properties": {
+        "policy_action": { "type": "string", "minLength": 1 },
+        "visibility_effect": {
+          "type": "string",
+          "enum": [
+            "top_level",
+            "top_level_compressed",
+            "secondary",
+            "drilldown_only",
+            "unchanged_due_to_withheld",
+            "expired_re_review_required"
+          ]
+        },
+        "summary_message": { "type": "string", "minLength": 1 }
+      }
+    },
+    "semanticEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_type",
+        "authority_label",
+        "evolution_target",
+        "proposed_policy_change",
+        "evolution_strength",
+        "threshold_result",
+        "trust_override_state",
+        "evidence_window_refs",
+        "kernel_version"
+      ],
+      "properties": {
+        "event_type": {
+          "type": "string",
+          "enum": [
+            "policy_evolution_state_computed",
+            "policy_change_proposed",
+            "policy_change_withheld_due_to_insufficient_history",
+            "policy_change_blocked_by_trust_override",
+            "policy_change_expired",
+            "policy_rollback_selected",
+            "policy_snapshot_created"
+          ]
+        },
+        "authority_label": { "type": "string", "minLength": 1 },
+        "evolution_target": { "type": "string", "minLength": 1 },
+        "proposed_policy_change": { "$ref": "#/$defs/policyChange" },
+        "evolution_strength": { "type": "string", "minLength": 1 },
+        "threshold_result": { "type": "string", "minLength": 1 },
+        "trust_override_state": { "type": "string", "minLength": 1 },
+        "evidence_window_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+        "before_policy_ref": { "$ref": "#/$defs/ref" },
+        "after_policy_ref": { "$ref": "#/$defs/ref" },
+        "kernel_version": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "properties": {
+    "schema_id": { "const": "policy_evolution_state" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "policy_evolution_state_v1" },
+    "surface_kind": { "const": "projection" },
+    "evolution_id": { "type": "string", "minLength": 1 },
+    "kernel_version": { "type": "string", "minLength": 1 },
+    "threshold_model_version": { "type": "string", "minLength": 1 },
+    "action_model_version": { "type": "string", "minLength": 1 },
+    "generated_at_utc": { "type": "string", "format": "date-time" },
+    "authority_label": { "type": "string", "enum": ["governed_policy_evolution"] },
+    "target_day": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "operation_type": { "type": "string", "minLength": 1 },
+    "sleeve_id": { "type": "string", "minLength": 1 },
+    "environment": { "type": "string", "minLength": 1 },
+    "ib_account": { "type": "string", "minLength": 1 },
+    "evolution_target": { "type": "string", "minLength": 1 },
+    "target_policy_scope": { "type": "string", "enum": ["command_home_policy", "refinement_policy"] },
+    "target_label": { "type": "string", "minLength": 1 },
+    "proposed_policy_change": { "$ref": "#/$defs/policyChange" },
+    "evidence_window_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "evidence_basis_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "evolution_strength": { "type": "string", "enum": ["required", "supported", "limited", "withheld", "expired"] },
+    "threshold_result": {
+      "type": "string",
+      "enum": [
+        "TRUST_OVERRIDE_ACTIVE",
+        "INSUFFICIENT_HISTORY",
+        "UNSTABLE_HISTORY",
+        "CONSISTENT_STRENGTHEN_SUPPORT",
+        "CONSISTENT_REDUCE_SUPPORT",
+        "CONSISTENT_COMPRESSION_SUPPORT",
+        "PRIOR_POLICY_EXPIRED",
+        "PRIOR_POLICY_ROLLBACK_REQUIRED",
+        "NO_EVOLUTION_PRESSURE"
+      ]
+    },
+    "trust_override_state": {
+      "type": "string",
+      "enum": ["none", "block_reduce_emphasis", "block_more_compression", "rollback_required"]
+    },
+    "reversibility_state": {
+      "type": "string",
+      "enum": ["reversible_next_review", "preserve_until_evidence_changes", "rollback_required", "withheld", "expired_re_review_required"]
+    },
+    "expiry_state": {
+      "type": "string",
+      "enum": ["active_until_next_review", "re_review_required", "expired"]
+    },
+    "before_policy_ref": { "$ref": "#/$defs/ref" },
+    "after_policy_ref": { "$ref": "#/$defs/ref" },
+    "preserved_visibility_flags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "readiness_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["blocked", "blocked_state", "operator_status"],
+      "properties": {
+        "blocked": { "type": "boolean" },
+        "blocked_state": { "type": "string", "minLength": 1 },
+        "operator_status": { "type": "string", "minLength": 1 }
+      }
+    },
+    "drill_down_route": { "type": "string", "minLength": 1 },
+    "before_policy_state": { "$ref": "#/$defs/policyState" },
+    "after_policy_state": { "$ref": "#/$defs/policyState" },
+    "supersedes_ref": { "$ref": "#/$defs/ref" },
+    "superseded_by_ref": { "$ref": "#/$defs/ref" },
+    "summary_message": { "type": "string", "minLength": 1 },
+    "semantic_events": { "type": "array", "items": { "$ref": "#/$defs/semanticEvent" } }
+  }
+}

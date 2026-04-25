@@ -10,6 +10,8 @@
     "produced_utc",
     "day_utc",
     "producer",
+    "authority_classification",
+    "control_decision_warning",
     "status",
     "reason_codes",
     "input_manifest",
@@ -33,6 +35,9 @@
         "build": { "type": "object" }
       }
     },
+
+    "authority_classification": { "type": "string", "const": "NON_CANONICAL_ADVISORY_ONLY" },
+    "control_decision_warning": { "type": "string", "minLength": 1 },
 
     "status": {
       "type": "string",

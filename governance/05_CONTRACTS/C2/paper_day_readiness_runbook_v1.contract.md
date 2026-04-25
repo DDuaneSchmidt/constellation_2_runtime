@@ -4,6 +4,15 @@
 
 Authoritative operator runbook for the validated paper-day readiness proof path and the single explicit micro-live boundary proof path in `/home/node/constellation`.
 
+This runbook remains valid for proof-only readiness exercises.
+
+For live governed PAPER execution authority, root and profile ownership are governed separately by:
+
+- `governance/05_CONTRACTS/C2/execution_root_authority_v1.contract.md`
+- `governance/05_CONTRACTS/C2/execution_profile_authority_v1.contract.md`
+
+If this runbook conflicts with those authority contracts, the authority contracts win.
+
 ## Validated Paper-Day Command
 
 ```bash

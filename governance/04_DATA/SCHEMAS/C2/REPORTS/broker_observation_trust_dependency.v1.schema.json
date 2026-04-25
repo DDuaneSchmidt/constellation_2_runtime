@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/broker_observation_trust_dependency.v1.schema.json",
+  "title": "broker_observation_trust_dependency.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "generated_utc",
+    "day_utc",
+    "authority_owner",
+    "health_ref",
+    "trust_verdict",
+    "downstream_consumption_posture",
+    "may_consume_normally",
+    "may_consume_with_degraded_posture",
+    "must_fail_closed",
+    "core2_consumption_mode",
+    "replay_status",
+    "reconnect_status",
+    "gap_status",
+    "attribution_status",
+    "core2_allowed_artifact_families",
+    "core2_forbidden_artifact_families",
+    "blocker_codes",
+    "degraded_codes",
+    "required_operator_action",
+    "summary"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "broker_observation_trust_dependency"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "generated_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "day_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "authority_owner": {
+      "const": "broker_observation_trust_dependency_v1"
+    },
+    "health_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_path",
+        "artifact_sha256"
+      ],
+      "properties": {
+        "artifact_path": {
+          "type": "string"
+        },
+        "artifact_sha256": {
+          "type": "string"
+        }
+      }
+    },
+    "trust_verdict": {
+      "type": "string",
+      "enum": [
+        "TRUSTED",
+        "DEGRADED",
+        "BLOCKED"
+      ]
+    },
+    "downstream_consumption_posture": {
+      "type": "string",
+      "enum": [
+        "NORMAL_CONSUMPTION",
+        "DEGRADED_ONLY",
+        "FAIL_CLOSED"
+      ]
+    },
+    "may_consume_normally": {
+      "type": "boolean"
+    },
+    "may_consume_with_degraded_posture": {
+      "type": "boolean"
+    },
+    "must_fail_closed": {
+      "type": "boolean"
+    },
+    "core2_consumption_mode": {
+      "type": "string",
+      "enum": [
+        "NORMAL_ONLY",
+        "DEGRADED_ALLOWED",
+        "FAIL_CLOSED"
+      ]
+    },
+    "replay_status": {
+      "type": "string",
+      "enum": [
+        "NOT_OBSERVED",
+        "REPLAYING",
+        "REPLAY_COMPLETE",
+        "REPLAY_UNCERTAIN"
+      ]
+    },
+    "reconnect_status": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "RECONNECT_IN_PROGRESS",
+        "RECONNECT_RECOVERED"
+      ]
+    },
+    "gap_status": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "GAP_SUSPECTED",
+        "GAP_UNRESOLVED"
+      ]
+    },
+    "attribution_status": {
+      "type": "string",
+      "enum": [
+        "ATTRIBUTED",
+        "PARTIAL",
+        "AMBIGUOUS",
+        "FOREIGN",
+        "UNRESOLVED"
+      ]
+    },
+    "core2_allowed_artifact_families": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "core2_forbidden_artifact_families": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "blocker_codes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "degraded_codes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "required_operator_action": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

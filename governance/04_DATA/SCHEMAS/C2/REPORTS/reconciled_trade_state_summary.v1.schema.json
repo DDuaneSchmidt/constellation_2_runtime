@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/reconciled_trade_state_summary.v1.schema.json",
+  "title": "reconciled_trade_state_summary.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_owner",
+    "materialization_set_id",
+    "day_utc",
+    "evaluation_utc",
+    "environment",
+    "sleeve_id",
+    "execution_root_path",
+    "counts_by_ownership",
+    "counts_by_health",
+    "blocker_counts",
+    "trade_refs",
+    "derived_only"
+  ],
+  "properties": {
+    "schema_id": { "const": "reconciled_trade_state_summary" },
+    "schema_version": { "const": "v1" },
+    "authority_owner": { "const": "reconciled_trade_state_summary_v1" },
+    "materialization_set_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "day_utc": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "evaluation_utc": { "type": "string", "format": "date-time" },
+    "environment": { "type": "string", "minLength": 1 },
+    "sleeve_id": { "type": "string", "minLength": 1 },
+    "execution_root_path": { "type": "string", "minLength": 1 },
+    "counts_by_ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "CONSTELLATION_OWNED",
+        "FOREIGN_MANUAL",
+        "AMBIGUOUS_OWNERSHIP",
+        "INSUFFICIENT_EVIDENCE"
+      ],
+      "properties": {
+        "CONSTELLATION_OWNED": { "type": "integer", "minimum": 0 },
+        "FOREIGN_MANUAL": { "type": "integer", "minimum": 0 },
+        "AMBIGUOUS_OWNERSHIP": { "type": "integer", "minimum": 0 },
+        "INSUFFICIENT_EVIDENCE": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "counts_by_health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["TRUSTED", "DEGRADED", "BLOCKED"],
+      "properties": {
+        "TRUSTED": { "type": "integer", "minimum": 0 },
+        "DEGRADED": { "type": "integer", "minimum": 0 },
+        "BLOCKED": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "blocker_counts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "count"],
+        "properties": {
+          "code": { "type": "string", "minLength": 1 },
+          "count": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "trade_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "trade_identity_id",
+          "ownership_classification",
+          "health_state",
+          "incorporated_state_path",
+          "description_path",
+          "health_path",
+          "provenance_path"
+        ],
+        "properties": {
+          "trade_identity_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "ownership_classification": { "type": "string", "minLength": 1 },
+          "health_state": { "type": "string", "minLength": 1 },
+          "incorporated_state_path": { "type": "string", "minLength": 1 },
+          "description_path": { "type": "string", "minLength": 1 },
+          "health_path": { "type": "string", "minLength": 1 },
+          "provenance_path": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "derived_only": { "const": true }
+  }
+}

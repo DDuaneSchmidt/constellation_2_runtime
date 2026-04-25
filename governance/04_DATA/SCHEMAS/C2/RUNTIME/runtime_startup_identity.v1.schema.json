@@ -1,0 +1,189 @@
+{
+  "schema_id": "C2_RUNTIME_STARTUP_IDENTITY_SCHEMA_V1",
+  "title": "C2 Runtime Startup Identity V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "startup_id",
+    "status",
+    "generated_at_utc",
+    "entrypoint_name",
+    "entrypoint_path",
+    "service_name",
+    "requested_python",
+    "resolved_python_executable",
+    "cwd",
+    "pid",
+    "runtime_identity"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "runtime_startup_identity.v1" },
+    "schema_version": { "type": "string", "const": "v1" },
+    "startup_id": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["CAPTURED"] },
+    "generated_at_utc": { "type": "string", "minLength": 20 },
+    "entrypoint_name": { "type": "string", "minLength": 1 },
+    "entrypoint_path": { "type": "string", "minLength": 1 },
+    "service_name": { "type": "string" },
+    "requested_python": { "type": "string", "minLength": 1 },
+    "resolved_python_executable": { "type": "string", "minLength": 1 },
+    "cwd": { "type": "string", "minLength": 1 },
+    "pid": { "type": "integer", "minimum": 1 },
+    "runtime_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_path",
+        "contract_sha256",
+        "schema_id",
+        "schema_version",
+        "status",
+        "generated_at_utc",
+        "authoritative_repo_root",
+        "release_id",
+        "git_sha",
+        "release_root",
+        "runtime_data_root",
+        "canonical_truth_root",
+        "truth_sleeves_root",
+        "pointer_index_family",
+        "allowed_truth_roots",
+        "provenance_mode",
+        "runtime_environment",
+        "primary_execution_identity_ref",
+        "resolved_execution_identity",
+        "resolved_execution_roots",
+        "path_authority_snapshot",
+        "release_provenance"
+      ],
+      "properties": {
+        "contract_path": { "type": "string", "minLength": 1 },
+        "contract_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "schema_id": { "type": "string", "const": "active_runtime_contract.v1" },
+        "schema_version": { "type": "string", "const": "v1" },
+        "status": { "type": "string", "enum": ["ACTIVE"] },
+        "generated_at_utc": { "type": "string", "minLength": 11 },
+        "authoritative_repo_root": { "type": "string", "minLength": 1 },
+        "release_id": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "release_root": { "type": "string", "minLength": 1 },
+        "runtime_data_root": { "type": "string", "minLength": 1 },
+        "canonical_truth_root": { "type": "string", "minLength": 1 },
+        "truth_sleeves_root": { "type": "string", "minLength": 1 },
+        "pointer_index_family": { "type": "string", "enum": ["run_pointer_v1"] },
+        "allowed_truth_roots": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "provenance_mode": { "type": "string", "enum": ["release_manifest"] },
+        "runtime_environment": { "type": "string", "enum": ["PAPER"] },
+        "primary_execution_identity_ref": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["authority_owner", "sleeve_id"],
+          "properties": {
+            "authority_owner": { "type": "string", "const": "execution_identity_binding_v1" },
+            "sleeve_id": { "type": "string", "minLength": 1 }
+          }
+        },
+        "resolved_execution_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "authority_owner",
+            "environment",
+            "sleeve_id",
+            "account_id",
+            "client_id_orders",
+            "client_id_observer",
+            "host",
+            "port",
+            "sleeve_registry_path",
+            "account_registry_path"
+          ],
+          "properties": {
+            "authority_owner": { "type": "string", "const": "execution_identity_binding_v1" },
+            "environment": { "type": "string", "enum": ["PAPER"] },
+            "sleeve_id": { "type": "string", "minLength": 1 },
+            "account_id": { "type": "string", "minLength": 1 },
+            "client_id_orders": { "type": "integer", "minimum": 1 },
+            "client_id_observer": { "type": "integer", "minimum": 1 },
+            "host": { "type": "string", "minLength": 1 },
+            "port": { "type": "integer", "minimum": 1 },
+            "sleeve_registry_path": { "type": "string", "minLength": 1 },
+            "account_registry_path": { "type": "string", "minLength": 1 }
+          }
+        },
+        "resolved_execution_roots": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "authority_owner",
+            "environment",
+            "ib_account",
+            "sleeve_id",
+            "mode",
+            "truth_partition",
+            "execution_root_path",
+            "truth_sleeves_root",
+            "sleeve_registry_path"
+          ],
+          "properties": {
+            "authority_owner": { "type": "string", "const": "sleeve_execution_root_v1" },
+            "environment": { "type": "string", "enum": ["PAPER"] },
+            "ib_account": { "type": "string", "minLength": 1 },
+            "sleeve_id": { "type": "string", "minLength": 1 },
+            "mode": { "type": "string", "enum": ["PAPER"] },
+            "truth_partition": { "type": "string", "minLength": 1 },
+            "execution_root_path": { "type": "string", "minLength": 1 },
+            "truth_sleeves_root": { "type": "string", "minLength": 1 },
+            "sleeve_registry_path": { "type": "string", "minLength": 1 }
+          }
+        },
+        "path_authority_snapshot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "authoritative_repo_root",
+            "canonical_runtime_truth_root",
+            "canonical_runtime_truth_sleeves_root",
+            "authoritative_repo_truth_root",
+            "authoritative_repo_truth_sleeves_root",
+            "active_release_root"
+          ],
+          "properties": {
+            "authoritative_repo_root": { "type": "string", "minLength": 1 },
+            "canonical_runtime_truth_root": { "type": "string", "minLength": 1 },
+            "canonical_runtime_truth_sleeves_root": { "type": "string", "minLength": 1 },
+            "authoritative_repo_truth_root": { "type": "string", "minLength": 1 },
+            "authoritative_repo_truth_sleeves_root": { "type": "string", "minLength": 1 },
+            "active_release_root": { "type": "string", "minLength": 1 }
+          }
+        },
+        "release_provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "release_id",
+            "git_sha",
+            "release_root",
+            "release_manifest_path",
+            "provenance_mode",
+            "resolved_at_utc"
+          ],
+          "properties": {
+            "release_id": { "type": "string", "minLength": 1 },
+            "git_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+            "release_root": { "type": "string", "minLength": 1 },
+            "release_manifest_path": { "type": "string", "minLength": 1 },
+            "provenance_mode": { "type": "string", "enum": ["release_manifest"] },
+            "resolved_at_utc": { "type": "string", "minLength": 20 }
+          }
+        }
+      }
+    }
+  }
+}

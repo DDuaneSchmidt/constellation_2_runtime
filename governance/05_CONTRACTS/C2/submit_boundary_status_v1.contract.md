@@ -32,7 +32,12 @@ It is not the submission itself, not session admission, and not paper-session op
 
 - `startup_materialization_v1`
 - `paper_trading_posture_v1`
+- `global_kill_switch_state_v1`
 - `trade_submit_readiness_c2_v1` for the canonical PAPER account
+
+The runtime-control kernel may be used internally by the canonical writer to derive
+submit consequence, but `runtime_control_record_v1` is local submit-boundary evidence
+and must not be promoted as a target-day build/admission dependency.
 
 ## Required meaning
 
@@ -64,6 +69,9 @@ The artifact must identify:
 
 - Missing startup materialization must not yield `AUTHORIZED`.
 - Missing paper-trading posture must not yield `AUTHORIZED`.
+- Missing global kill-switch state must not yield `AUTHORIZED`.
+- `global_kill_switch_state_v1.state != INACTIVE` must not yield `AUTHORIZED`.
+- `global_kill_switch_state_v1.allow_entries != true` must not yield `AUTHORIZED`.
 - Missing or incompatible trade submit readiness must not yield `AUTHORIZED`.
 - `submission_authorized=true` is allowed only when all required boundary checks pass.
 - Missing or unknown checks must not yield authorization.
@@ -88,6 +96,8 @@ The artifact must identify:
 ## Downstream prohibition
 
 Consumers must not infer submit-boundary satisfaction directly from raw startup, posture, or trade-submit-readiness inputs when this governed surface is available.
+Consumers must not treat submit-boundary-local runtime-control evidence as an undeclared
+activation dependency when this governed surface is available.
 
 ## Migration note
 

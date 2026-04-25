@@ -206,6 +206,79 @@
         "non_authority_notice": { "type": "string", "minLength": 1 },
         "blocking_codes": { "$ref": "#/$defs/codeArray" }
       }
+    },
+    "constitutional_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "proposal_hash",
+        "fact_bundle_hash",
+        "decision_enum",
+        "effective_scope",
+        "blocker_rules",
+        "rule_provenance",
+        "negative_evidence",
+        "policy_version"
+      ],
+      "properties": {
+        "proposal_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "fact_bundle_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "decision_enum": {
+          "type": "string",
+          "enum": [
+            "AUTO_EXECUTE",
+            "AUTO_EXECUTE_PROTECTIVE",
+            "REQUIRE_HUMAN_REVIEW",
+            "ADVISORY_ONLY",
+            "DEFER",
+            "BLOCK",
+            "FREEZE_SCOPE"
+          ]
+        },
+        "effective_scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["global", "domain", "account", "sleeve", "action_class", "effective_authority"],
+          "properties": {
+            "global": { "type": "string" },
+            "domain": { "type": "string" },
+            "account": { "type": "string" },
+            "sleeve": { "type": "string" },
+            "action_class": { "type": "string" },
+            "effective_authority": { "type": "string", "minLength": 1 }
+          }
+        },
+        "blocker_rules": { "$ref": "#/$defs/codeArray" },
+        "rule_provenance": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["rule_id", "gate_index", "outcome", "detail"],
+            "properties": {
+              "rule_id": { "type": "string", "minLength": 1 },
+              "gate_index": { "type": "integer", "minimum": 1, "maximum": 10 },
+              "outcome": { "type": "string", "enum": ["PASS", "FAIL"] },
+              "detail": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "negative_evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "fact", "severity", "detail"],
+            "properties": {
+              "type": { "type": "string", "minLength": 1 },
+              "fact": { "type": "string", "minLength": 1 },
+              "severity": { "type": "string", "enum": ["INFO", "NON_BLOCKING", "BLOCKING"] },
+              "detail": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "policy_version": { "type": "string", "minLength": 1 }
+      }
     }
   },
   "$defs": {

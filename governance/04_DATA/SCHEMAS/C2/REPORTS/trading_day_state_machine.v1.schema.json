@@ -20,6 +20,11 @@
     "supporting_daily_control_refs",
     "supporting_regeneration_results",
     "supporting_session_authority",
+    "open_lifecycle_state",
+    "open_lifecycle_reason_code",
+    "open_policy",
+    "day_open_trigger",
+    "day_open_attempt",
     "state_transitions",
     "first_true_blocker",
     "final_start_decision",
@@ -152,6 +157,94 @@
         "submission_authorized": { "type": "boolean" }
       }
     },
+    "open_lifecycle_state": {
+      "type": "string",
+      "enum": [
+        "PRE_OPEN_READY",
+        "OPEN_WAITING_FOR_AUTHORITY",
+        "PAPER_OPEN_AVAILABLE",
+        "OPEN_TRIGGER_EMITTED",
+        "OPEN_ATTEMPTED",
+        "OPEN_SUCCEEDED",
+        "LATE_OPEN_AVAILABLE",
+        "LATE_OPEN_EXHAUSTED",
+        "OPEN_MISSED",
+        "OPEN_FAILED"
+      ]
+    },
+    "open_lifecycle_reason_code": { "type": "string", "minLength": 1 },
+    "open_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy_mode",
+        "environment",
+        "max_successful_opens_per_day",
+        "max_late_open_attempts_per_day",
+        "same_day_open_cap_enforced",
+        "time_window_enforced",
+        "successful_open_already_recorded",
+        "prior_success_ref",
+        "initial_open_consumed",
+        "late_open_available",
+        "late_open_consumed",
+        "late_open_consumed_ref",
+        "open_terminal",
+        "terminal_reason_code",
+        "policy_status",
+        "attempt_count",
+        "latest_attempt_kind",
+        "latest_attempt_result",
+        "prior_trigger_kind",
+        "prior_trigger_status"
+      ],
+      "properties": {
+        "policy_mode": { "type": "string", "minLength": 1 },
+        "environment": { "type": "string", "enum": ["PAPER", "LIVE"] },
+        "max_successful_opens_per_day": { "type": "integer", "minimum": 0 },
+        "max_late_open_attempts_per_day": { "type": "integer", "minimum": 0 },
+        "same_day_open_cap_enforced": { "type": "boolean" },
+        "time_window_enforced": { "type": "boolean" },
+        "successful_open_already_recorded": { "type": "boolean" },
+        "prior_success_ref": { "type": "string" },
+        "initial_open_consumed": { "type": "boolean" },
+        "late_open_available": { "type": "boolean" },
+        "late_open_consumed": { "type": "boolean" },
+        "late_open_consumed_ref": { "type": "string" },
+        "open_terminal": { "type": "boolean" },
+        "terminal_reason_code": { "type": "string" },
+        "policy_status": { "type": "string", "minLength": 1 },
+        "attempt_count": { "type": "integer", "minimum": 0 },
+        "latest_attempt_kind": { "type": "string", "minLength": 1 },
+        "latest_attempt_result": { "type": "string" },
+        "prior_trigger_kind": { "type": "string", "minLength": 1 },
+        "prior_trigger_status": { "type": "string" }
+      }
+    },
+    "day_open_trigger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "trigger_status", "consumed", "dedupe_key", "trigger_kind"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "trigger_status": { "type": "string", "minLength": 1 },
+        "consumed": { "type": "boolean" },
+        "dedupe_key": { "type": "string" },
+        "trigger_kind": { "type": "string", "minLength": 1 }
+      }
+    },
+    "day_open_attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "attempt_status", "open_command_executed", "final_classification", "trigger_kind"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "attempt_status": { "type": "string", "minLength": 1 },
+        "open_command_executed": { "type": "boolean" },
+        "final_classification": { "type": "string", "minLength": 1 },
+        "trigger_kind": { "type": "string", "minLength": 1 }
+      }
+    },
     "state_transitions": {
       "type": "array",
       "minItems": 1,
@@ -160,8 +253,8 @@
         "additionalProperties": false,
         "required": ["from_state", "to_state", "transition_at_utc", "transition_reason_code", "evidence_ref"],
         "properties": {
-          "from_state": { "type": "string", "enum": ["START", "DAY_CREATED", "PREREQUISITE_EVALUATED", "INTENTS_READY", "VALID_ZERO_INTENTS", "INTENTS_BLOCKED", "SUPPORTING_REGEN_COMPLETE", "SUPPORTING_REGEN_BLOCKED", "SESSION_AUTHORITY_GRANTED", "SESSION_AUTHORITY_DENIED", "DAY_OPEN_ALLOWED", "DAY_OPEN_BLOCKED", "DAY_OPENED", "DAY_NOT_OPENED"] },
-          "to_state": { "type": "string", "enum": ["DAY_CREATED", "PREREQUISITE_EVALUATED", "INTENTS_READY", "VALID_ZERO_INTENTS", "INTENTS_BLOCKED", "SUPPORTING_REGEN_COMPLETE", "SUPPORTING_REGEN_BLOCKED", "SESSION_AUTHORITY_GRANTED", "SESSION_AUTHORITY_DENIED", "DAY_OPEN_ALLOWED", "DAY_OPEN_BLOCKED", "DAY_OPENED", "DAY_NOT_OPENED"] },
+          "from_state": { "type": "string", "enum": ["START", "DAY_CREATED", "PREREQUISITE_EVALUATED", "INTENTS_READY", "VALID_ZERO_INTENTS", "INTENTS_BLOCKED", "SUPPORTING_REGEN_COMPLETE", "SUPPORTING_REGEN_BLOCKED", "SESSION_AUTHORITY_GRANTED", "SESSION_AUTHORITY_DENIED", "DAY_OPEN_ALLOWED", "DAY_OPEN_TRIGGER_EMITTED", "DAY_OPEN_ATTEMPTED", "DAY_OPEN_BLOCKED", "DAY_OPENED", "DAY_NOT_OPENED", "DAY_LATE_OPEN_AVAILABLE", "DAY_LATE_OPEN_EXHAUSTED"] },
+          "to_state": { "type": "string", "enum": ["DAY_CREATED", "PREREQUISITE_EVALUATED", "INTENTS_READY", "VALID_ZERO_INTENTS", "INTENTS_BLOCKED", "SUPPORTING_REGEN_COMPLETE", "SUPPORTING_REGEN_BLOCKED", "SESSION_AUTHORITY_GRANTED", "SESSION_AUTHORITY_DENIED", "DAY_OPEN_ALLOWED", "DAY_OPEN_TRIGGER_EMITTED", "DAY_OPEN_ATTEMPTED", "DAY_OPEN_BLOCKED", "DAY_OPENED", "DAY_NOT_OPENED", "DAY_LATE_OPEN_AVAILABLE", "DAY_LATE_OPEN_EXHAUSTED"] },
           "transition_at_utc": { "type": "string", "minLength": 20 },
           "transition_reason_code": { "type": "string", "minLength": 1 },
           "evidence_ref": { "type": "string" }
@@ -217,13 +310,15 @@
     "derived_daily_summary": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["summary_state", "state_machine_id", "day_attempt_id", "first_true_blocker_code", "ledger_id", "non_authority_notice"],
+      "required": ["summary_state", "state_machine_id", "day_attempt_id", "first_true_blocker_code", "ledger_id", "open_lifecycle_state", "open_policy", "non_authority_notice"],
       "properties": {
         "summary_state": { "type": "string", "minLength": 1 },
         "state_machine_id": { "type": "string", "minLength": 1 },
         "day_attempt_id": { "type": "string", "minLength": 1 },
         "first_true_blocker_code": { "type": "string" },
         "ledger_id": { "type": "string" },
+        "open_lifecycle_state": { "type": "string", "minLength": 1 },
+        "open_policy": { "type": "object" },
         "non_authority_notice": { "type": "string", "minLength": 1 }
       }
     }

@@ -46,6 +46,8 @@ Broker side (required only if submissions_total > 0):
 
 - `produced_utc` MUST be deterministic: `<DAY>T00:00:00Z`
 - All lists must be sorted deterministically.
+- when canonical day-open runtime lifecycle provenance already exists for the day, the report MAY
+  carry the same narrow optional `runtime_lifecycle_ref` block as an audit linkage only.
 
 ## 4. SAFE_IDLE rule (required)
 

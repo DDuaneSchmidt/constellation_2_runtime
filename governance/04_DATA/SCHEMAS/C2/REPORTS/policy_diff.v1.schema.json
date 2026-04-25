@@ -40,6 +40,30 @@
         }
       }
     },
+    "override_impact_analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "replay_manifest_count",
+        "override_frequency_by_action_class",
+        "mismatch_count",
+        "block_reasons_distribution",
+        "human_system_divergence_count"
+      ],
+      "properties": {
+        "replay_manifest_count": { "type": "integer", "minimum": 0 },
+        "override_frequency_by_action_class": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 1 }
+        },
+        "mismatch_count": { "type": "integer", "minimum": 0 },
+        "block_reasons_distribution": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 1 }
+        },
+        "human_system_divergence_count": { "type": "integer", "minimum": 0 }
+      }
+    },
     "release_id": { "type": "string" },
     "git_sha": { "type": "string" },
     "generated_at_utc": { "type": "string" }

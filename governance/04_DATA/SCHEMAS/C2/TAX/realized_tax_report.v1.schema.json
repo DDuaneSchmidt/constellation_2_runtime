@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/realized_tax_report.v1.schema.json",
+  "title": "realized_tax_report.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "report_id", "scope_id", "snapshot_id", "realizations", "reason_codes"],
+  "properties": {
+    "schema_id": { "const": "realized_tax_report" },
+    "schema_version": { "const": "v1" },
+    "report_id": { "type": "string", "minLength": 1 },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "snapshot_id": { "type": "string", "minLength": 1 },
+    "realizations": { "type": "array", "items": { "type": "object" } },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}
+

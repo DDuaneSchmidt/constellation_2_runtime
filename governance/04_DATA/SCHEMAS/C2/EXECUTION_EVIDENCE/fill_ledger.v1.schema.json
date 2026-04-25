@@ -45,6 +45,18 @@
 
     "status": { "type": "string", "enum": ["OK", "FAIL_CORRUPT_INPUTS", "FAIL_SCHEMA_VIOLATION"] },
     "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "blocking_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "closure_state": {
+      "type": "string",
+      "enum": ["COMPLETE", "BLOCKED", "DEGRADED", "OPEN"]
+    },
+    "first_blocker_code": { "type": "string" },
+    "missing_dependency_artifacts": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "constitutional_dependency_declaration": { "type": "object" },
+    "constitutional_lineage": { "type": "object" },
 
     "submission_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "binding_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },

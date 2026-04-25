@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisory/kernel_run_envelope.v1.schema.json",
+  "title": "kernel_run_envelope.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_id",
+    "kernel_run_id",
+    "household_id",
+    "produced_utc",
+    "day_utc",
+    "contract_version",
+    "envelope_version",
+    "run_outcome",
+    "stage_status",
+    "artifact_refs",
+    "handoff_status",
+    "reason_codes"
+  ],
+  "properties": {
+    "schema_id": { "const": "kernel_run_envelope" },
+    "schema_version": { "const": "v1" },
+    "record_id": { "type": "string", "minLength": 1 },
+    "kernel_run_id": { "type": "string", "minLength": 1 },
+    "household_id": { "type": "string", "minLength": 1 },
+    "produced_utc": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "contract_version": { "type": "string", "minLength": 1 },
+    "envelope_version": { "type": "string", "minLength": 1 },
+    "run_outcome": { "type": "string", "enum": ["promote", "no_action", "blocked"] },
+    "stage_status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "investor_intent",
+        "policy",
+        "household_snapshot",
+        "portfolio_intent",
+        "promotion_decision",
+        "promotion_record",
+        "execution_intent"
+      ],
+      "properties": {
+        "investor_intent": { "type": "string", "minLength": 1 },
+        "policy": { "type": "string", "minLength": 1 },
+        "household_snapshot": { "type": "string", "minLength": 1 },
+        "portfolio_intent": { "type": "string", "minLength": 1 },
+        "promotion_decision": { "type": "string", "minLength": 1 },
+        "promotion_record": { "type": "string", "minLength": 1 },
+        "execution_intent": { "type": "string", "minLength": 1 }
+      }
+    },
+    "artifact_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "investor_intent_id",
+        "policy_id",
+        "household_snapshot_id",
+        "portfolio_intent_id",
+        "promotion_decision_id",
+        "promotion_record_id",
+        "execution_intent_id",
+        "execution_package_path",
+        "execution_package_sha256"
+      ],
+      "properties": {
+        "investor_intent_id": { "type": ["string", "null"] },
+        "policy_id": { "type": ["string", "null"] },
+        "household_snapshot_id": { "type": ["string", "null"] },
+        "portfolio_intent_id": { "type": ["string", "null"] },
+        "promotion_decision_id": { "type": ["string", "null"] },
+        "promotion_record_id": { "type": ["string", "null"] },
+        "execution_intent_id": { "type": ["string", "null"] },
+        "execution_package_path": { "type": ["string", "null"] },
+        "execution_package_sha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "handoff_status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["package_build", "paper_submit"],
+      "properties": {
+        "package_build": { "type": "string", "minLength": 1 },
+        "paper_submit": { "type": "string", "minLength": 1 }
+      }
+    },
+    "reason_codes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/execution/execution_submission_record.v1.schema.json",
+  "title": "execution_submission_record.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_id",
+    "submission_record_id",
+    "execution_intent_id",
+    "promotion_record_id",
+    "household_id",
+    "day_utc",
+    "produced_utc",
+    "contract_version",
+    "builder_version",
+    "submission_id",
+    "idempotency_key",
+    "status",
+    "candidate_ref",
+    "downstream_payload_ref",
+    "execution_build_ref",
+    "execution_package_ref",
+    "input_record_refs",
+    "parent_lineage_refs",
+    "source_artifact_refs",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "execution_submission_record" },
+    "schema_version": { "const": "v1" },
+    "record_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "submission_record_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "execution_intent_id": { "type": "string", "minLength": 1 },
+    "promotion_record_id": { "type": "string", "minLength": 1 },
+    "household_id": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "contract_version": { "type": "string", "minLength": 1 },
+    "builder_version": { "type": "string", "minLength": 1 },
+    "submission_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "trade_instance_id": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "idempotency_key": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "status": { "type": "string", "enum": ["READY_TO_SUBMIT"] },
+    "candidate_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "minLength": 1 }
+      }
+    },
+    "downstream_payload_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "execution_build_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "minLength": 1 }
+      }
+    },
+    "execution_package_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "input_record_refs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "parent_lineage_refs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "source_artifact_refs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

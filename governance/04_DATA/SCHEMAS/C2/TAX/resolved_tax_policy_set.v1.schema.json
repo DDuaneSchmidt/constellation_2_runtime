@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/resolved_tax_policy_set.v1.schema.json",
+  "title": "resolved_tax_policy_set.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "resolved_policy_set_id", "policy_registry_id", "scope_id", "account_tax_regime", "policy_families", "ranking_policy_hash", "rounding_policy_hash", "reason_codes"],
+  "properties": {
+    "schema_id": { "const": "resolved_tax_policy_set" },
+    "schema_version": { "const": "v1" },
+    "resolved_policy_set_id": { "type": "string", "minLength": 1 },
+    "policy_registry_id": { "type": "string", "minLength": 1 },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "account_tax_regime": { "type": "string", "minLength": 1 },
+    "policy_families": { "type": "object" },
+    "ranking_policy_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "rounding_policy_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}
+

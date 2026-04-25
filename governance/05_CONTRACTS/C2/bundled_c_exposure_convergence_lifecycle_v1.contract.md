@@ -101,14 +101,21 @@ Inputs (all day-keyed; `latest.json` is forbidden for readiness decisions):
 ### 4.4 NAV (optional but constrains numeric convergence)
 - `constellation_2/runtime/truth/accounting_v1/nav/<DAY>/nav.json`
 
-### 4.5 Gates used by kill switch (Single Final Verdict)
+### 4.5 Entry authority used by kill switch
 
-Kill switch consumption is governed by the Single Final Verdict rule.
+Kill switch consumption is governed by the lifecycle-aware entry-authorization rule.
 
 Authoritative final verdict input:
-- `constellation_2/runtime/truth/reports/gate_stack_verdict_v1/<DAY>/gate_stack_verdict.v1.json`
+- `constellation_2/runtime/truth_sleeves/PRIMARY/PAPER/reports/authorization_gate_verdict_v1/<DAY>/authorization_gate_verdict.v1.json`
+
+Kill switch root resolution rule:
+- `global_kill_switch_state.v1.json` is written under canonical truth.
+- The authorization verdict it consumes for live PAPER entry safety is the governed PRIMARY/PAPER sleeve-scoped `authorization_gate_verdict_v1`.
+- If that sleeve-scoped verdict cannot be resolved or is missing/invalid, kill switch MUST default to `ACTIVE`.
+- Gates classified into `economic_health_gate_verdict_v1` remain lifecycle-scoped health gates and must not block fresh PAPER entries unless governance reclassifies them into the authorization verdict.
 
 Prohibited as final-decision inputs (may exist as evidence only during migration):
+- `constellation_2/runtime/truth_sleeves/PRIMARY/PAPER/reports/gate_stack_verdict_v1/<DAY>/gate_stack_verdict.v1.json`
 - `constellation_2/runtime/truth/reports/operator_gate_verdict_v1/<DAY>/operator_gate_verdict.v1.json`
 - `constellation_2/runtime/truth/reports/operator_gate_verdict_v2/<DAY>/operator_gate_verdict.v2.json`
 - `constellation_2/runtime/truth/reports/operator_gate_verdict_v3/<DAY>/operator_gate_verdict.v3.json`

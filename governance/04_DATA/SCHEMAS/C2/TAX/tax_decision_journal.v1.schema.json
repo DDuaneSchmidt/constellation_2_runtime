@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/tax_decision_journal.v1.schema.json",
+  "title": "tax_decision_journal.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "journal_entry_id", "decision_id", "decision_family", "scope_id", "snapshot_id", "resolved_policy_set_id", "dependency_fingerprint_id", "decision_status", "decision_mode", "produced_utc", "reason_codes"],
+  "properties": {
+    "schema_id": { "const": "tax_decision_journal" },
+    "schema_version": { "const": "v1" },
+    "journal_entry_id": { "type": "string", "minLength": 1 },
+    "decision_id": { "type": "string", "minLength": 1 },
+    "decision_family": { "type": "string", "minLength": 1 },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "snapshot_id": { "type": "string", "minLength": 1 },
+    "resolved_policy_set_id": { "type": "string", "minLength": 1 },
+    "dependency_fingerprint_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "decision_status": { "type": "string", "enum": ["approved", "approved_with_warning", "full_optimization_allowed", "safe_execution_allowed", "preview_only", "requires_operator_review", "hard_blocked"] },
+    "decision_mode": { "type": "string", "enum": ["FULL_OPTIMIZATION_ALLOWED", "SAFE_EXECUTION_ALLOWED", "PREVIEW_ONLY", "REQUIRES_OPERATOR_REVIEW", "HARD_BLOCKED"] },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}
+

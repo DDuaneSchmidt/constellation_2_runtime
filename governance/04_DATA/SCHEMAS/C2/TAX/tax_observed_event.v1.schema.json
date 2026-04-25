@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/tax_observed_event.v1.schema.json",
+  "title": "tax_observed_event.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "observed_event_id", "event_family", "truth_state", "scope_ids", "observed_at", "recorded_at", "payload", "source_event_ref", "reason_codes"],
+  "properties": {
+    "schema_id": { "const": "tax_observed_event" },
+    "schema_version": { "const": "v1" },
+    "observed_event_id": { "type": "string", "minLength": 1 },
+    "event_family": { "type": "string", "minLength": 1 },
+    "truth_state": { "const": "observed" },
+    "scope_ids": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "observed_at": { "type": "string", "format": "date-time" },
+    "recorded_at": { "type": "string", "format": "date-time" },
+    "payload": { "type": "object" },
+    "source_event_ref": { "type": "string", "minLength": 1 },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}
+

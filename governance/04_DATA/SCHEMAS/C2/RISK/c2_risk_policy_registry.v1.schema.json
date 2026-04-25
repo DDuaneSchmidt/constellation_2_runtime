@@ -21,7 +21,9 @@
           "additionalProperties": false,
           "required": [
             "target_notional_pct_default",
-            "per_trade_notional_pct_max"
+            "per_trade_notional_pct_max",
+            "stop_loss_bps_default",
+            "allow_entry_only_paper_test"
           ],
           "properties": {
             "target_notional_pct_default": {
@@ -31,6 +33,14 @@
             "per_trade_notional_pct_max": {
               "type": "string",
               "pattern": "^(0(\\.[0-9]+)?|1(\\.0+)?)$"
+            },
+            "stop_loss_bps_default": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            "allow_entry_only_paper_test": {
+              "type": "boolean"
             }
           }
         }

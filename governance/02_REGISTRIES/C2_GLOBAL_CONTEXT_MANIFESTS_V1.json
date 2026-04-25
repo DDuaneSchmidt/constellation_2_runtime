@@ -1,0 +1,38 @@
+{
+  "manifests": {
+    "fresh_paper_entry_v1": {
+      "dependencies": [
+        {
+          "advisory_only": false,
+          "blocking_build_path_pattern": "{canonical_truth_root}/reports/day_activation_build_v1/{day_utc}/{context_hash}/day_activation_build.v1.json",
+          "dependency_id": "day_activation_package_v1",
+          "fresh_materialization_required": false,
+          "owner_ref": "day_activation_authority_v1.py",
+          "path_pattern": "{execution_truth_root}/day_activation_package_v1/{day_utc}/{context_hash}/day_activation_package.v1.json",
+          "post_submit_only": false,
+          "producer_ref": "day_activation_authority_v1",
+          "required": true,
+          "reusable": true,
+          "role_class": "SEALED_CONTROL_PACKAGE",
+          "semantic_validation": "sealed_package_context_match",
+          "stage_id": "DAY_ACTIVATION",
+          "upstream_dependency_ids": []
+        }
+      ],
+      "description": "Global context closure manifest for fresh governed PAPER entry context.",
+      "operation_type": "fresh_paper_entry_v1",
+      "seal_requires": [
+        "day_activation_package_v1"
+      ],
+      "stage_order": [
+        "DAY_ACTIVATION",
+        "GLOBAL_CONTEXT",
+        "SEAL"
+      ]
+    }
+  },
+  "owner": "global_context_authority_v1",
+  "registry_id": "C2_GLOBAL_CONTEXT_MANIFESTS_V1",
+  "schema_id": "c2_global_context_manifests",
+  "schema_version": "v1"
+}

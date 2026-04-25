@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/tax_lot_state.v1.schema.json",
+  "title": "tax_lot_state.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "lot_state_id", "scope_id", "lot_id", "account_id", "security_id", "remaining_quantity", "basis_total", "holding_period_state", "confidence_state", "maturity_state", "restriction_flags", "data_quality_flags", "corporate_action_refs", "reason_codes"],
+  "properties": {
+    "schema_id": { "const": "tax_lot_state" },
+    "schema_version": { "const": "v1" },
+    "lot_state_id": { "type": "string", "minLength": 1 },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "lot_id": { "type": "string", "minLength": 1 },
+    "account_id": { "type": "string", "minLength": 1 },
+    "security_id": { "type": "string", "minLength": 1 },
+    "remaining_quantity": { "type": "string", "minLength": 1 },
+    "basis_total": { "type": "string", "minLength": 1 },
+    "holding_period_state": { "type": "string", "enum": ["short_term", "long_term", "unknown"] },
+    "confidence_state": { "type": "string", "enum": ["exact", "broker_provided", "reconstructed", "unknown"] },
+    "maturity_state": { "type": "string", "enum": ["unverified", "restricted", "decision_eligible", "optimization_ineligible"] },
+    "restriction_flags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "data_quality_flags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "corporate_action_refs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}

@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/runtime/outcome_state.v1.schema.json",
+  "title": "outcome_state.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "surface_kind",
+    "outcome_id",
+    "kernel_version",
+    "claim_ladder_version",
+    "explanation_mapping_version",
+    "generated_at_utc",
+    "authority_label",
+    "target_day",
+    "scope_id",
+    "operation_type",
+    "sleeve_id",
+    "environment",
+    "ib_account",
+    "subject_opportunity_id",
+    "opportunity_type",
+    "realized_state",
+    "observability_state",
+    "effectiveness_state",
+    "attribution_state",
+    "claim_strength",
+    "basis_state",
+    "primary_rule_id",
+    "primary_explanation",
+    "governing_advisory_refs",
+    "governing_tax_refs",
+    "governing_opportunity_refs",
+    "governing_realized_refs",
+    "governing_product_summary_refs",
+    "governing_product_snapshot_refs",
+    "comparison_state",
+    "comparison_refs",
+    "evidence_refs",
+    "semantic_events"
+  ],
+  "$defs": {
+    "ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_id", "artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_id": { "type": "string", "minLength": 1 },
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "minLength": 1 }
+      }
+    },
+    "comparisonState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["comparison_type", "comparison_status", "reason_id", "allowed_claim_strength"],
+      "properties": {
+        "comparison_type": { "type": "string", "minLength": 1 },
+        "comparison_status": { "type": "string", "enum": ["not_requested", "applied", "rejected"] },
+        "reason_id": { "type": "string", "minLength": 1 },
+        "allowed_claim_strength": { "type": "string", "minLength": 1 }
+      }
+    },
+    "explanation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "explanation_id",
+        "realized_state",
+        "observability_state",
+        "effectiveness_state",
+        "attribution_state",
+        "claim_strength",
+        "comparison_state",
+        "short_message",
+        "detail_fields",
+        "evidence_refs",
+        "authority_label"
+      ],
+      "properties": {
+        "explanation_id": { "type": "string", "minLength": 1 },
+        "realized_state": { "type": "string", "minLength": 1 },
+        "observability_state": { "type": "string", "minLength": 1 },
+        "effectiveness_state": { "type": "string", "minLength": 1 },
+        "attribution_state": { "type": "string", "minLength": 1 },
+        "claim_strength": { "type": "string", "minLength": 1 },
+        "comparison_state": { "type": "string", "minLength": 1 },
+        "short_message": { "type": "string", "minLength": 1 },
+        "detail_fields": { "type": "object", "additionalProperties": true },
+        "evidence_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+        "authority_label": { "type": "string", "minLength": 1 },
+        "action_class": {
+          "type": "string",
+          "enum": ["none", "inspect_outcome", "inspect_basis", "inspect_comparison"]
+        }
+      }
+    },
+    "semanticEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_type",
+        "authority_label",
+        "realized_state",
+        "observability_state",
+        "effectiveness_state",
+        "attribution_state",
+        "claim_strength",
+        "governing_refs",
+        "kernel_version"
+      ],
+      "properties": {
+        "event_type": {
+          "type": "string",
+          "enum": [
+            "outcome_state_computed",
+            "claim_strength_assigned",
+            "attribution_withheld_due_to_insufficient_evidence",
+            "effectiveness_classified",
+            "comparison_applied",
+            "comparison_rejected",
+            "product_outcome_snapshot_created"
+          ]
+        },
+        "authority_label": { "type": "string", "minLength": 1 },
+        "realized_state": { "type": "string", "minLength": 1 },
+        "observability_state": { "type": "string", "minLength": 1 },
+        "effectiveness_state": { "type": "string", "minLength": 1 },
+        "attribution_state": { "type": "string", "minLength": 1 },
+        "claim_strength": { "type": "string", "minLength": 1 },
+        "governing_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+        "comparison_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+        "kernel_version": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "properties": {
+    "schema_id": { "const": "outcome_state" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "outcome_state_v1" },
+    "surface_kind": { "const": "projection" },
+    "outcome_id": { "type": "string", "minLength": 1 },
+    "kernel_version": { "type": "string", "minLength": 1 },
+    "claim_ladder_version": { "type": "string", "minLength": 1 },
+    "explanation_mapping_version": { "type": "string", "minLength": 1 },
+    "generated_at_utc": { "type": "string", "format": "date-time" },
+    "authority_label": { "type": "string", "enum": ["governed_certified_outcome"] },
+    "target_day": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "operation_type": { "type": "string", "minLength": 1 },
+    "sleeve_id": { "type": "string", "minLength": 1 },
+    "environment": { "type": "string", "minLength": 1 },
+    "ib_account": { "type": "string", "minLength": 1 },
+    "subject_opportunity_id": { "type": "string", "minLength": 1 },
+    "opportunity_type": { "type": "string", "minLength": 1 },
+    "realized_state": {
+      "type": "string",
+      "enum": [
+        "realized_activity_observed",
+        "no_realized_activity_observed",
+        "blocked_without_realization",
+        "historical_only",
+        "unknown"
+      ]
+    },
+    "observability_state": {
+      "type": "string",
+      "enum": ["observable_now", "not_yet_observable", "insufficient_evidence", "historical_only"]
+    },
+    "effectiveness_state": {
+      "type": "string",
+      "enum": ["helpful", "neutral", "harmful", "protective", "missed", "unproven"]
+    },
+    "attribution_state": {
+      "type": "string",
+      "enum": ["direct", "partial", "bounded", "unsupported"]
+    },
+    "claim_strength": {
+      "type": "string",
+      "enum": [
+        "observed_fact",
+        "bounded_association",
+        "partial_attribution",
+        "direct_attribution",
+        "insufficient_evidence",
+        "not_yet_observable"
+      ]
+    },
+    "basis_state": {
+      "type": "string",
+      "enum": ["complete_realized_basis", "incomplete_realized_basis", "historical_only"]
+    },
+    "primary_rule_id": { "type": "string", "minLength": 1 },
+    "primary_explanation": { "$ref": "#/$defs/explanation" },
+    "governing_advisory_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "governing_tax_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "governing_opportunity_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "governing_realized_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "governing_product_summary_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "governing_product_snapshot_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "comparison_state": { "$ref": "#/$defs/comparisonState" },
+    "comparison_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "supersedes_ref": { "$ref": "#/$defs/ref" },
+    "superseded_by_ref": { "$ref": "#/$defs/ref" },
+    "evidence_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "semantic_events": { "type": "array", "items": { "$ref": "#/$defs/semanticEvent" } }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/tax_policy_registry.v1.schema.json",
+  "title": "tax_policy_registry.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "policy_registry_id", "scope_id", "produced_utc", "policy_families", "ranking_policy", "rounding_policy", "reason_codes"],
+  "properties": {
+    "schema_id": { "const": "tax_policy_registry" },
+    "schema_version": { "const": "v1" },
+    "policy_registry_id": { "type": "string", "minLength": 1 },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "policy_families": { "type": "object" },
+    "ranking_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "schema_version", "ranking_policy_id", "policy_registry_id", "tie_break_sequence", "ranking_weights"],
+      "properties": {
+        "schema_id": { "const": "tax_decision_ranking_policy" },
+        "schema_version": { "const": "v1" },
+        "ranking_policy_id": { "type": "string", "minLength": 1 },
+        "policy_registry_id": { "type": "string", "minLength": 1 },
+        "tie_break_sequence": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "ranking_weights": { "type": "object" }
+      }
+    },
+    "rounding_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "schema_version", "rounding_policy_id", "policy_registry_id", "quantity_precision", "money_precision", "basis_precision", "gain_loss_precision", "hash_serialization_order"],
+      "properties": {
+        "schema_id": { "const": "tax_rounding_policy" },
+        "schema_version": { "const": "v1" },
+        "rounding_policy_id": { "type": "string", "minLength": 1 },
+        "policy_registry_id": { "type": "string", "minLength": 1 },
+        "quantity_precision": { "type": "string", "minLength": 1 },
+        "money_precision": { "type": "string", "minLength": 1 },
+        "basis_precision": { "type": "string", "minLength": 1 },
+        "gain_loss_precision": { "type": "string", "minLength": 1 },
+        "hash_serialization_order": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/tax_corporate_action_acceptance_decision.v1.schema.json",
+  "title": "tax_corporate_action_acceptance_decision.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "decision_id", "candidate_id", "action_key", "decision_status", "fact_state", "produced_utc", "reason_codes"],
+  "properties": {
+    "schema_id": { "const": "tax_corporate_action_acceptance_decision" },
+    "schema_version": { "const": "v1" },
+    "decision_id": { "type": "string", "minLength": 1 },
+    "candidate_id": { "type": "string", "minLength": 1 },
+    "action_key": { "type": "string", "minLength": 1 },
+    "decision_status": { "type": "string", "enum": ["provisional", "finalized", "deferred", "rejected"] },
+    "fact_state": { "type": "string", "enum": ["provisional", "finalized", "deferred", "rejected"] },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}

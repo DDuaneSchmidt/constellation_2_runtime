@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/tax_scope_membership.v1.schema.json",
+  "title": "tax_scope_membership.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "membership_id", "scope_id", "member_ref", "member_type", "produced_utc"],
+  "properties": {
+    "schema_id": { "const": "tax_scope_membership" },
+    "schema_version": { "const": "v1" },
+    "membership_id": { "type": "string", "minLength": 1 },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "member_ref": { "type": "string", "minLength": 1 },
+    "member_type": { "type": "string", "minLength": 1 },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}
+

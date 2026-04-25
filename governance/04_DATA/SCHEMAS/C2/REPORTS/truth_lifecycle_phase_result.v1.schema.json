@@ -1,0 +1,143 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://constellation/governance/04_DATA/SCHEMAS/C2/REPORTS/truth_lifecycle_phase_result.v1.schema.json",
+  "title": "truth_lifecycle_phase_result.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "phase_id",
+    "description",
+    "truth_root",
+    "produced_utc",
+    "status",
+    "first_blocker_code",
+    "first_blocker_artifact_path",
+    "upstream_dependency_id",
+    "upstream_dependency_artifact_path",
+    "reason_codes",
+    "required_inputs",
+    "producer_entrypoints",
+    "produced_artifacts",
+    "declared_artifacts",
+    "blocker_semantics",
+    "skippable",
+    "supports_genesis_bootstrap",
+    "bootstrap_applied",
+    "bootstrap_reason",
+    "producer_invocations",
+    "phase_payload",
+    "phase_result_path"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "truth_lifecycle_phase_result"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "day_utc": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "phase_id": {
+      "type": "string",
+      "pattern": "^[A-Z0-9_]+$"
+    },
+    "description": {
+      "type": "string"
+    },
+    "truth_root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "produced_utc": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "FAIL",
+        "BLOCKED",
+        "SKIPPED",
+        "BOOTSTRAP"
+      ]
+    },
+    "first_blocker_code": {
+      "type": "string"
+    },
+    "first_blocker_artifact_path": {
+      "type": "string"
+    },
+    "upstream_dependency_id": {
+      "type": "string"
+    },
+    "upstream_dependency_artifact_path": {
+      "type": "string"
+    },
+    "reason_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "required_inputs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "producer_entrypoints": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "produced_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "declared_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "blocker_semantics": {
+      "type": "string"
+    },
+    "skippable": {
+      "type": "boolean"
+    },
+    "supports_genesis_bootstrap": {
+      "type": "boolean"
+    },
+    "bootstrap_applied": {
+      "type": "boolean"
+    },
+    "bootstrap_reason": {
+      "type": "string"
+    },
+    "producer_invocations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "phase_payload": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "phase_result_path": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

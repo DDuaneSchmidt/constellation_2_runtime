@@ -1,0 +1,308 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/monthly_performance_summary.v1.schema.json",
+  "title": "monthly_performance_summary.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "month_utc",
+    "status",
+    "data_quality_status",
+    "blocker_codes",
+    "reason_codes",
+    "input_manifest",
+    "report"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "C2_MONTHLY_PERFORMANCE_SUMMARY_V1"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "produced_utc": {
+      "type": "string",
+      "minLength": 1
+    },
+    "month_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "DEGRADED",
+        "BLOCKED"
+      ]
+    },
+    "data_quality_status": {
+      "type": "string",
+      "enum": [
+        "COMPLETE",
+        "DEGRADED",
+        "BLOCKED"
+      ]
+    },
+    "blocker_codes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "reason_codes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "input_manifest": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "path",
+          "sha256"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "month",
+        "starting_nav",
+        "ending_nav",
+        "net_pnl",
+        "monthly_return_pct",
+        "realized_pnl",
+        "unrealized_pnl",
+        "deposits_additions",
+        "withdrawals",
+        "net_external_flow",
+        "return_excluding_external_flows",
+        "max_drawdown_for_month",
+        "trading_days_count",
+        "trades_count",
+        "winning_days_count",
+        "losing_days_count",
+        "rolling_3_month_return_pct",
+        "rolling_6_month_return_pct",
+        "rolling_12_month_return_pct",
+        "rolling_12_month_avg_return_dollars",
+        "best_month_last_12",
+        "worst_month_last_12",
+        "data_quality_status",
+        "blocker_codes"
+      ],
+      "properties": {
+        "month": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}$"
+        },
+        "starting_nav": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "ending_nav": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "net_pnl": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "monthly_return_pct": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "realized_pnl": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "unrealized_pnl": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "deposits_additions": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "withdrawals": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "net_external_flow": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "return_excluding_external_flows": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_drawdown_for_month": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trading_days_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "trades_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "winning_days_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "losing_days_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "rolling_3_month_return_pct": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rolling_6_month_return_pct": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rolling_12_month_return_pct": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rolling_12_month_avg_return_dollars": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "best_month_last_12": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "month",
+            "return_pct",
+            "net_pnl"
+          ],
+          "properties": {
+            "month": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}$"
+            },
+            "return_pct": {
+              "type": "string"
+            },
+            "net_pnl": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          }
+        },
+        "worst_month_last_12": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "month",
+            "return_pct",
+            "net_pnl"
+          ],
+          "properties": {
+            "month": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}$"
+            },
+            "return_pct": {
+              "type": "string"
+            },
+            "net_pnl": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          }
+        },
+        "data_quality_status": {
+          "type": "string",
+          "enum": [
+            "COMPLETE",
+            "DEGRADED",
+            "BLOCKED"
+          ]
+        },
+        "blocker_codes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

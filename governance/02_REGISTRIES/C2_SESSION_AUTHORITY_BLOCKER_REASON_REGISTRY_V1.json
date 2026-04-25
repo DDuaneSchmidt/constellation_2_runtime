@@ -1,0 +1,213 @@
+{
+  "schema_id": "c2_session_authority_blocker_reason_registry",
+  "schema_version": "v1",
+  "registry_id": "C2_SESSION_AUTHORITY_BLOCKER_REASON_REGISTRY_V1",
+  "registry_version": 1,
+  "reason_codes": [
+    {
+      "reason_code": "SOURCE_NOT_EXTENDED",
+      "scope": "market_calendar_coverage_status_v1,target_day_build_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "An upstream source was not extended far enough to cover the target day."
+    },
+    {
+      "reason_code": "RUNTIME_NOT_REFRESHED",
+      "scope": "market_calendar_coverage_status_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "Governed source coverage exists for the required target day, but canonical runtime truth was not refreshed through the approved ingest path."
+    },
+    {
+      "reason_code": "SOURCE_AND_RUNTIME_RANGE_MISMATCH",
+      "scope": "market_calendar_coverage_status_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "The governed source and canonical runtime market-calendar coverage ranges diverged."
+    },
+    {
+      "reason_code": "COVERAGE_BELOW_POLICY_BUFFER",
+      "scope": "market_calendar_coverage_status_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "Market-calendar forward coverage satisfies the immediate target day but falls short of the governed warning buffer."
+    },
+    {
+      "reason_code": "MANIFEST_MISSING",
+      "scope": "market_calendar_coverage_status_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "A required market-calendar source or runtime manifest is missing."
+    },
+    {
+      "reason_code": "INGEST_REFRESH_FAILED",
+      "scope": "market_calendar_coverage_status_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "The approved market-calendar ingest refresh path failed or could not safely extend canonical runtime truth."
+    },
+    {
+      "reason_code": "TARGET_DAY_ARTIFACT_MISSING",
+      "scope": "target_day_build_v1",
+      "meaning": "A required target-day artifact was missing from canonical truth."
+    },
+    {
+      "reason_code": "TARGET_DAY_DATE_MISMATCH",
+      "scope": "target_day_build_v1",
+      "meaning": "A required artifact exists but is bound to the wrong target day."
+    },
+    {
+      "reason_code": "STALE_ARTIFACT",
+      "scope": "target_day_build_v1",
+      "meaning": "A required artifact failed its governed freshness rule."
+    },
+    {
+      "reason_code": "WRONG_AUTHORITY_PATH",
+      "scope": "target_day_build_v1",
+      "meaning": "A required artifact resolved outside canonical runtime truth authority."
+    },
+    {
+      "reason_code": "SCHEMA_INVALID",
+      "scope": "target_day_build_v1",
+      "meaning": "A required artifact failed schema or practical structural validation."
+    },
+    {
+      "reason_code": "PROVENANCE_MISSING",
+      "scope": "target_day_build_v1",
+      "meaning": "A required artifact lacked required provenance fields."
+    },
+    {
+      "reason_code": "REQUIRED_GATE_FAIL",
+      "scope": "target_day_build_v1",
+      "meaning": "A required gate artifact evaluated to a blocking state."
+    },
+    {
+      "reason_code": "HIDDEN_DEPENDENCY_DETECTED",
+      "scope": "target_day_build_v1,target_day_admission_v1",
+      "meaning": "A downstream execution dependency was observed that is not declared in the target-day build contract."
+    },
+    {
+      "reason_code": "PARTIAL_BUILD",
+      "scope": "target_day_build_v1,target_day_admission_v1",
+      "meaning": "One or more target-day build producers returned nonzero during construction."
+    },
+    {
+      "reason_code": "ADMISSION_RULE_BLOCKED",
+      "scope": "target_day_admission_v1",
+      "meaning": "Admission failed closed because build closure was not proven."
+    },
+    {
+      "reason_code": "ROLLOVER_WITHHELD",
+      "scope": "active_session_v1",
+      "meaning": "Session Authority withheld rollover because the target day was not admitted."
+    },
+    {
+      "reason_code": "TRACEABILITY_BROKEN",
+      "scope": "session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "The active-session, admission, or build traceability chain is missing or inconsistent."
+    },
+    {
+      "reason_code": "SESSION_AUTHORITY_ARTIFACT_MISSING",
+      "scope": "session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "A required Session Authority control-plane artifact is missing from canonical truth."
+    },
+    {
+      "reason_code": "SESSION_AUTHORITY_ARTIFACT_INVALID",
+      "scope": "session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "A required Session Authority control-plane artifact is unreadable or invalid."
+    },
+    {
+      "reason_code": "PAPER_STARTUP_INTENT_INPUT_CONVERGENCE_BLOCKED",
+      "scope": "session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "The owned PRIMARY/PAPER startup intent-input convergence layer is blocked before intent generation."
+    },
+    {
+      "reason_code": "STARTUP_MATERIALIZATION_INPUT_CONVERGENCE_BLOCKED",
+      "scope": "session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "The owned canonical startup-materialization input convergence layer is blocked before startup materialization."
+    },
+    {
+      "reason_code": "READINESS_BOOTSTRAP_IBAPI_IMPORT_FAILED",
+      "scope": "session_authority_status_v1,session_authority_alert_v1,session_readiness_refresh_v1",
+      "meaning": "The readiness bootstrap interpreter could not import ibapi, preventing broker-events bootstrap and downstream handshake evidence."
+    },
+    {
+      "reason_code": "EXECUTION_ROOT_AUTHORITY_AMBIGUOUS",
+      "scope": "execution_dossier_v1,operator_summary_dossier_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "Execution root ownership is contradicted across governed sources and must fail closed."
+    },
+    {
+      "reason_code": "EXECUTION_ROOT_SLEEVE_ID_MISSING",
+      "scope": "execution_dossier_v1,operator_summary_dossier_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "Execution root authority could not prove the active sleeve_id and must fail closed."
+    },
+    {
+      "reason_code": "EXECUTION_ROOT_MODE_MISSING",
+      "scope": "execution_dossier_v1,operator_summary_dossier_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "Execution root authority could not prove mode for the active sleeve execution root and must fail closed."
+    },
+    {
+      "reason_code": "EXECUTION_ROOT_PATH_UNRESOLVED",
+      "scope": "execution_dossier_v1,operator_summary_dossier_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "The canonical sleeve execution root path could not be resolved and execution must fail closed."
+    },
+    {
+      "reason_code": "EXECUTION_ROOT_PATH_MISMATCH",
+      "scope": "execution_dossier_v1,operator_summary_dossier_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "A runtime or submit path does not match the canonical sleeve execution root and execution must fail closed."
+    },
+    {
+      "reason_code": "EXECUTION_ROOT_GLOBAL_REFERENCE_FORBIDDEN",
+      "scope": "execution_dossier_v1,operator_summary_dossier_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "A forbidden global/shared execution-root reference remained active and execution must fail closed."
+    },
+    {
+      "reason_code": "EXECUTION_PROFILE_AUTHORITY_AMBIGUOUS",
+      "scope": "execution_profile_dossier_v1,operator_summary_dossier_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "Execution profile ownership is contradicted across governed sources and must fail closed."
+    },
+    {
+      "reason_code": "EXECUTION_IDENTITY_SLEEVE_MISSING",
+      "scope": "execution_identity_dossier_v1,operator_summary_dossier_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "Execution identity binding could not prove the active sleeve_id and must fail closed."
+    },
+    {
+      "reason_code": "EXECUTION_IDENTITY_ENVIRONMENT_MISSING",
+      "scope": "execution_identity_dossier_v1,operator_summary_dossier_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "Execution identity binding could not prove the execution environment and must fail closed."
+    },
+    {
+      "reason_code": "EXECUTION_IDENTITY_SLEEVE_UNREGISTERED",
+      "scope": "execution_identity_dossier_v1,operator_summary_dossier_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "No governed active sleeve/environment binding exists for execution identity resolution."
+    },
+    {
+      "reason_code": "EXECUTION_IDENTITY_ACCOUNT_MISSING",
+      "scope": "execution_identity_dossier_v1,operator_summary_dossier_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "Execution identity binding could not prove one governed IB account for the active sleeve/environment."
+    },
+    {
+      "reason_code": "EXECUTION_IDENTITY_CLIENT_ID_ORDERS_MISSING",
+      "scope": "execution_identity_dossier_v1,operator_summary_dossier_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "Execution identity binding could not prove one governed orders client ID for the active sleeve/environment."
+    },
+    {
+      "reason_code": "EXECUTION_IDENTITY_ACCOUNT_AMBIGUOUS",
+      "scope": "execution_identity_dossier_v1,operator_summary_dossier_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "Multiple governed IB account candidates exist for the active sleeve/environment, so execution identity must fail closed."
+    },
+    {
+      "reason_code": "EXECUTION_IDENTITY_CLIENT_ID_ORDERS_AMBIGUOUS",
+      "scope": "execution_identity_dossier_v1,operator_summary_dossier_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "Multiple governed orders client IDs exist for the active sleeve/environment, so execution identity must fail closed."
+    },
+    {
+      "reason_code": "EXECUTION_IDENTITY_ACCOUNT_MISMATCH",
+      "scope": "execution_identity_dossier_v1,operator_summary_dossier_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "The runtime or dossier account_id does not match the governed execution identity binding."
+    },
+    {
+      "reason_code": "EXECUTION_IDENTITY_CLIENT_ID_ORDERS_MISMATCH",
+      "scope": "execution_identity_dossier_v1,operator_summary_dossier_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "The runtime or dossier client_id_orders does not match the governed execution identity binding."
+    },
+    {
+      "reason_code": "EXECUTION_IDENTITY_FORBIDDEN_COMBINATION",
+      "scope": "execution_identity_dossier_v1,operator_summary_dossier_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "The proposed sleeve/account/client combination is not governed and execution identity must fail closed."
+    },
+    {
+      "reason_code": "ACCOUNT_TRADING_POLICY_AUTHORITY_AMBIGUOUS",
+      "scope": "account_trading_policy_dossier_v1,operator_summary_dossier_v1,session_authority_status_v1,session_authority_alert_v1",
+      "meaning": "Account-trading-policy ownership is not consistently proven across governed contracts or runtime enforcement."
+    }
+  ]
+}

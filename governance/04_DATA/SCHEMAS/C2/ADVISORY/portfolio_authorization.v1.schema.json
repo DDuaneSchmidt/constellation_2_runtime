@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisory/portfolio_authorization.v1.schema.json",
+  "title": "portfolio_authorization.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_id",
+    "portfolio_authorization_id",
+    "household_id",
+    "execution_intent_id",
+    "snapshot_refs",
+    "valid_from",
+    "valid_until",
+    "authorization_scope",
+    "allowed_actions",
+    "blocked_actions",
+    "max_incremental_deployment",
+    "required_prerequisite_actions",
+    "account_route_permissions",
+    "emergency_mode",
+    "reason_codes",
+    "stale_if_older_than_seconds"
+  ],
+  "properties": {
+    "schema_id": { "const": "portfolio_authorization" },
+    "schema_version": { "const": "v1" },
+    "record_id": { "type": "string", "minLength": 1 },
+    "portfolio_authorization_id": { "type": "string", "minLength": 1 },
+    "household_id": { "type": "string", "minLength": 1 },
+    "execution_intent_id": { "type": "string", "minLength": 1 },
+    "snapshot_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["compiled_constraints_id", "allocation_plan_id", "risk_envelope_id", "tax_adjudicated_rebalance_id"],
+      "properties": {
+        "compiled_constraints_id": { "type": "string", "minLength": 1 },
+        "allocation_plan_id": { "type": "string", "minLength": 1 },
+        "risk_envelope_id": { "type": "string", "minLength": 1 },
+        "tax_adjudicated_rebalance_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "valid_from": { "type": "string", "minLength": 1 },
+    "valid_until": { "type": "string", "minLength": 1 },
+    "authorization_scope": { "type": "string", "minLength": 1 },
+    "allowed_actions": { "type": "array", "items": { "$ref": "#/$defs/actionRow" } },
+    "blocked_actions": { "type": "array", "items": { "$ref": "#/$defs/actionRow" } },
+    "max_incremental_deployment": { "type": "string", "minLength": 1 },
+    "required_prerequisite_actions": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "account_route_permissions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["account_id", "route_allowed"],
+        "properties": {
+          "account_id": { "type": "string", "minLength": 1 },
+          "route_allowed": { "type": "boolean" }
+        }
+      }
+    },
+    "emergency_mode": { "type": "boolean" },
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "stale_if_older_than_seconds": { "type": "integer", "minimum": 1 }
+  },
+  "$defs": {
+    "actionRow": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["action_key", "execution_intent_id", "account_id", "symbol", "side", "quantity_shares", "reason_codes"],
+      "properties": {
+        "action_key": { "type": "string", "minLength": 1 },
+        "execution_intent_id": { "type": "string", "minLength": 1 },
+        "account_id": { "type": "string", "minLength": 1 },
+        "symbol": { "type": "string" },
+        "side": { "type": "string", "minLength": 1 },
+        "quantity_shares": { "type": "integer" },
+        "max_notional_cents": { "type": "string" },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

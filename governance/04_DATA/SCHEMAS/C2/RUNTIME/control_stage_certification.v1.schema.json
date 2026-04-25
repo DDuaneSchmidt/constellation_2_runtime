@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/runtime/control_stage_certification.v1.schema.json",
+  "title": "control_stage_certification.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "certification_artifact_id",
+    "stage_id",
+    "target_day",
+    "scope_id",
+    "operation_type",
+    "sleeve_id",
+    "environment",
+    "ib_account",
+    "certified_at_utc",
+    "certification_status",
+    "validator_id",
+    "validator_version",
+    "stage_admission_ref",
+    "validator_result",
+    "evidence_refs",
+    "blocking_reason_codes",
+    "closure_state",
+    "blocking_codes",
+    "first_blocker_code",
+    "missing_dependency_artifacts",
+    "constitutional_dependency_declaration",
+    "constitutional_lineage"
+  ],
+  "properties": {
+    "schema_id": { "const": "control_stage_certification" },
+    "schema_version": { "const": "v1" },
+    "certification_artifact_id": { "type": "string", "minLength": 1 },
+    "stage_id": { "type": "string", "minLength": 1 },
+    "target_day": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "operation_type": { "type": "string", "minLength": 1 },
+    "sleeve_id": { "type": "string", "minLength": 1 },
+    "environment": { "type": "string", "minLength": 1 },
+    "ib_account": { "type": "string", "minLength": 1 },
+    "certified_at_utc": { "type": "string", "minLength": 20 },
+    "certification_status": { "const": "CERTIFIED" },
+    "validator_id": { "type": "string", "minLength": 1 },
+    "validator_version": { "type": "string", "minLength": 1 },
+    "stage_admission_ref": { "$ref": "#/$defs/control_ref" },
+    "validator_result": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["validator_id", "validator_version", "ok", "errors", "warnings", "invariants_checked", "validated_artifacts", "validated_current_surfaces", "forbidden_path_hits"]
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/family_ref" }
+    },
+    "blocking_reason_codes": {
+      "type": "array",
+      "maxItems": 0
+    },
+    "closure_state": { "const": "COMPLETE" },
+    "blocking_codes": {
+      "type": "array",
+      "maxItems": 0
+    },
+    "first_blocker_code": { "type": "string" },
+    "missing_dependency_artifacts": {
+      "type": "array",
+      "maxItems": 0
+    },
+    "constitutional_dependency_declaration": { "type": "object" },
+    "constitutional_lineage": { "type": "object" }
+  },
+  "$defs": {
+    "control_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_id", "artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_id": { "type": "string", "minLength": 1 },
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "minLength": 1 }
+      }
+    },
+    "family_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_id", "path", "sha256", "root_type"],
+      "properties": {
+        "artifact_id": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "minLength": 1 },
+        "root_type": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

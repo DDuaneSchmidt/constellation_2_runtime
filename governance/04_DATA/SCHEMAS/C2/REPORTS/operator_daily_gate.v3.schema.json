@@ -12,8 +12,15 @@
     "producer",
     "status",
     "reason_codes",
+    "blocking_codes",
+    "closure_state",
+    "first_blocker_code",
+    "missing_dependency_artifacts",
+    "constitutional_dependency_declaration",
+    "constitutional_lineage",
     "input_manifest",
-    "checks"
+    "checks",
+    "economic_state"
   ],
   "properties": {
     "schema_id": { "const": "operator_daily_gate" },
@@ -39,6 +46,21 @@
       "type": "array",
       "items": { "type": "string", "minLength": 1, "maxLength": 128 }
     },
+    "blocking_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+    },
+    "closure_state": {
+      "type": "string",
+      "enum": ["COMPLETE", "BLOCKED", "DEGRADED", "OPEN"]
+    },
+    "first_blocker_code": { "type": "string" },
+    "missing_dependency_artifacts": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+    },
+    "constitutional_dependency_declaration": { "type": "object" },
+    "constitutional_lineage": { "type": "object" },
 
     "notes": {
       "type": "array",
@@ -67,19 +89,50 @@
         "reconciliation_v3_status",
         "cash_ledger_integrity_ok",
         "positions_snapshot_present",
-        "allocation_summary_present",
         "capital_risk_envelope_v2_status",
         "exit_reconciliation_present",
-        "exit_intents_satisfied_when_obligations_exist"
+        "exit_intents_satisfied_when_obligations_exist",
+        "previous_day_economic_state_status",
+        "previous_day_drawdown_guard_status"
       ],
       "properties": {
         "reconciliation_v3_status": { "type": "string", "enum": ["OK", "FAIL", "MISSING"] },
         "cash_ledger_integrity_ok": { "type": "boolean" },
         "positions_snapshot_present": { "type": "boolean" },
-        "allocation_summary_present": { "type": "boolean" },
         "capital_risk_envelope_v2_status": { "type": "string", "enum": ["PASS", "FAIL", "MISSING"] },
         "exit_reconciliation_present": { "type": "boolean" },
-        "exit_intents_satisfied_when_obligations_exist": { "type": "boolean" }
+        "exit_intents_satisfied_when_obligations_exist": { "type": "boolean" },
+        "previous_day_economic_state_status": { "type": "string", "enum": ["OK", "UNKNOWN"] },
+        "previous_day_drawdown_guard_status": { "type": "string", "enum": ["PASS", "BLOCKED", "UNKNOWN"] }
+      }
+    },
+    "economic_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "source_day_utc",
+        "artifact_path",
+        "artifact_sha256",
+        "drawdown_pct",
+        "drawdown_guard_status",
+        "policy_baseline_comparison_vs_portfolio_return",
+        "external_benchmark_underperformer_count",
+        "reason_codes"
+      ],
+      "properties": {
+        "status": { "type": "string", "enum": ["OK", "UNKNOWN"] },
+        "source_day_utc": { "type": "string" },
+        "artifact_path": { "type": "string" },
+        "artifact_sha256": { "type": "string" },
+        "drawdown_pct": { "type": ["string", "null"] },
+        "drawdown_guard_status": { "type": "string", "enum": ["PASS", "BLOCKED", "UNKNOWN"] },
+        "policy_baseline_comparison_vs_portfolio_return": { "type": ["string", "null"] },
+        "external_benchmark_underperformer_count": { "type": "integer", "minimum": 0 },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        }
       }
     }
   }

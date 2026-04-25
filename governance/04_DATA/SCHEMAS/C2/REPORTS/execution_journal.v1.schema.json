@@ -77,6 +77,24 @@
         "module": { "type": "string", "minLength": 1 },
         "git_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" }
       }
+    },
+    "runtime_lifecycle_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "runtime_identity_contract_path",
+        "runtime_identity_contract_sha256",
+        "startup_identity_receipt_path",
+        "lifecycle_start_receipt_path"
+      ],
+      "properties": {
+        "run_id": { "type": "string", "minLength": 1 },
+        "runtime_identity_contract_path": { "type": "string", "minLength": 1 },
+        "runtime_identity_contract_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "startup_identity_receipt_path": { "type": "string", "minLength": 1 },
+        "lifecycle_start_receipt_path": { "type": "string", "minLength": 1 }
+      }
     }
   }
 }

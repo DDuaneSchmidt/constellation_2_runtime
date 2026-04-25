@@ -33,6 +33,9 @@ The current governed summary kind is:
 ## Authority classification
 
 - This surface is explicitly non-authoritative.
+- Under Subsystem Authority Architecture it is legacy diagnostic context only.
+- Canonical writer output must set `binding_classification = LEGACY_DERIVED_ONLY`.
+- It must not be promoted over `session_authority_status_v1/current.json` or `operator_summary_dossier_v1/<DAY>/operator_summary_dossier.v1.json`.
 - It must derive from `trading_day_state_machine_v1`.
 - It must not recompute or override control-plane or ledger authority.
 

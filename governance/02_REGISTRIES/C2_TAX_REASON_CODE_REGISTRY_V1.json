@@ -1,0 +1,168 @@
+{
+  "schema_id": "C2_TAX_REASON_CODE_REGISTRY",
+  "schema_version": "v1",
+  "registry_id": "C2_TAX_REASON_CODE_REGISTRY_V1",
+  "title": "C2 Tax Reason Code Registry V1",
+  "codes": [
+    {
+      "code": "TAX_ACCOUNT_REGIME_MISSING",
+      "class": "blocking",
+      "description": "The tax account regime required for the scoped decision or snapshot is not available."
+    },
+    {
+      "code": "TAX_ACCOUNT_ROUTING_SELECTED",
+      "class": "decision",
+      "description": "A governed account-routing decision selected an account deterministically."
+    },
+    {
+      "code": "TAX_ASSET_TAX_CLASSIFICATION_MISSING",
+      "class": "restriction",
+      "description": "Asset tax classification required for optimization was not available explicitly."
+    },
+    {
+      "code": "TAX_DECISION_APPROVED",
+      "class": "decision",
+      "description": "The tax decision passed all governed checks for its current mode."
+    },
+    {
+      "code": "TAX_BASIS_UNKNOWN",
+      "class": "restriction",
+      "description": "Lot basis is not known exactly enough for optimization."
+    },
+    {
+      "code": "TAX_CORP_ACTION_FINALIZED",
+      "class": "corporate_action",
+      "description": "A corporate action has been finalized and may be applied through additive fact flow."
+    },
+    {
+      "code": "TAX_CORP_ACTION_PROVISIONAL",
+      "class": "corporate_action",
+      "description": "A corporate action remains provisional and must restrict optimization where basis or holding period may change."
+    },
+    {
+      "code": "TAX_CORP_ACTION_UNSUPPORTED",
+      "class": "corporate_action",
+      "description": "The observed corporate action class is explicitly unsupported in this bounded implementation slice."
+    },
+    {
+      "code": "TAX_CORP_ACTION_UNRESOLVED",
+      "class": "blocking",
+      "description": "Corporate action impact on basis or holding period is unresolved."
+    },
+    {
+      "code": "TAX_CORRECTION_SUPERSEDES_PRIOR_FACT",
+      "class": "lineage",
+      "description": "A new accepted fact supersedes a prior accepted fact through additive correction."
+    },
+    {
+      "code": "TAX_DECISION_STALE",
+      "class": "staleness",
+      "description": "A tax decision is stale relative to its required dependency fingerprint."
+    },
+    {
+      "code": "TAX_DEPENDENCY_FINGERPRINT_MISMATCH",
+      "class": "staleness",
+      "description": "The dependency fingerprint supplied by a consumer does not match the decision artifact."
+    },
+    {
+      "code": "TAX_EXECUTION_ELIGIBLE",
+      "class": "execution_gate",
+      "description": "The tax decision remained valid for execution consumption at the artifact boundary."
+    },
+    {
+      "code": "TAX_EXECUTION_REVIEW_REQUIRED",
+      "class": "execution_gate",
+      "description": "The tax decision may proceed only with explicit operator review at the execution boundary."
+    },
+    {
+      "code": "TAX_EXECUTION_TRUTH_MISMATCH",
+      "class": "execution_gate",
+      "description": "Execution validation found that the tax decision no longer matches current tax truth inputs."
+    },
+    {
+      "code": "TAX_FACT_ACCEPTED",
+      "class": "truth_state",
+      "description": "A fact candidate passed the acceptance gate as governed tax truth."
+    },
+    {
+      "code": "TAX_FACT_PROVISIONAL",
+      "class": "truth_state",
+      "description": "A fact is accepted only provisionally because exact tax truth is incomplete."
+    },
+    {
+      "code": "TAX_FACT_REJECTED",
+      "class": "truth_state",
+      "description": "A fact candidate failed the acceptance gate and is rejected."
+    },
+    {
+      "code": "TAX_HARVEST_ELIGIBLE",
+      "class": "decision",
+      "description": "A lot met the governed preview requirements for harvest candidacy."
+    },
+    {
+      "code": "TAX_HARVEST_THRESHOLD_NOT_MET",
+      "class": "decision",
+      "description": "A loss lot did not meet the governed minimum-loss threshold for harvest preview."
+    },
+    {
+      "code": "TAX_HOLDING_PERIOD_UNKNOWN",
+      "class": "restriction",
+      "description": "Holding period state is not known exactly enough for ST/LT optimization."
+    },
+    {
+      "code": "TAX_IMPORTED_POSITION_RESTRICTED",
+      "class": "restriction",
+      "description": "An imported or adopted position remains restricted by policy."
+    },
+    {
+      "code": "TAX_POLICY_RESOLVED",
+      "class": "policy",
+      "description": "A tax policy registry or resolved policy set was produced deterministically."
+    },
+    {
+      "code": "TAX_POLICY_BLOCK",
+      "class": "blocking",
+      "description": "Policy does not permit the requested tax behavior."
+    },
+    {
+      "code": "TAX_REPORT_GENERATED",
+      "class": "reporting",
+      "description": "A read-only tax report or explanation artifact was produced deterministically."
+    },
+    {
+      "code": "TAX_REPLAY_DIVERGENCE",
+      "class": "replay",
+      "description": "Replay under current corrected truth diverged from the original tax decision outcome."
+    },
+    {
+      "code": "TAX_REPLAY_REQUIRED",
+      "class": "replay",
+      "description": "A correction or dependency change requires tax decision replay."
+    },
+    {
+      "code": "TAX_SAFE_DEGRADED_MODE",
+      "class": "degraded_mode",
+      "description": "The tax decision degraded safely because optimization truth is incomplete."
+    },
+    {
+      "code": "TAX_SCOPE_MISSING",
+      "class": "blocking",
+      "description": "One or more required tax scope bindings are missing."
+    },
+    {
+      "code": "TAX_STATE_CURRENT",
+      "class": "state",
+      "description": "A tax state artifact was built from the current accepted fact set without additional restrictions."
+    },
+    {
+      "code": "TAX_WASH_RISK_BLOCK",
+      "class": "blocking",
+      "description": "The decision is blocked by governed wash-sale enforcement."
+    },
+    {
+      "code": "TAX_WASH_RISK_WARNING",
+      "class": "warning",
+      "description": "The decision is allowed only with an explicit wash-sale warning."
+    }
+  ]
+}

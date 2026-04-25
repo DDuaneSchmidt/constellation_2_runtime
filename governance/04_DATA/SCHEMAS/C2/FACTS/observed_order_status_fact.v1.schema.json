@@ -1,0 +1,252 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/facts/observed_order_status_fact.v1.schema.json",
+  "title": "observed_order_status_fact.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "fact_record_id",
+    "canonical_event_identity",
+    "duplicate_classification",
+    "replay_classification",
+    "event_identity_rule_version",
+    "observed_utc",
+    "observed_utc_source",
+    "normalized_utc",
+    "raw_record_id",
+    "journal_sequence_number",
+    "source_session_id",
+    "source_sequence_number",
+    "source_event_type",
+    "source_event_identity",
+    "ordering_basis",
+    "ordering_key",
+    "replay_state_hint",
+    "reconnect_state_hint",
+    "gap_state_hint",
+    "environment",
+    "account_id",
+    "client_id_observer",
+    "sleeve_id",
+    "attribution_status",
+    "attribution_reason_codes",
+    "quality_status",
+    "quality_reason_codes",
+    "order_id",
+    "perm_id",
+    "status",
+    "filled_quantity",
+    "remaining_quantity",
+    "avg_fill_price",
+    "last_fill_price"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "observed_order_status_fact"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "fact_record_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "canonical_event_identity": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "duplicate_classification": {
+      "type": "string",
+      "enum": [
+        "UNIQUE",
+        "DUPLICATE_EVENT",
+        "REPLAY_OVERLAP",
+        "CONFLICTING_DUPLICATE_CLASSIFICATION"
+      ]
+    },
+    "replay_classification": {
+      "type": "string",
+      "enum": [
+        "NOT_REPLAY",
+        "REPLAY_SESSION_EVENT",
+        "REPLAY_OVERLAP",
+        "DUPLICATE_CALLBACK",
+        "REPLAY_UNCERTAIN"
+      ]
+    },
+    "event_identity_rule_version": {
+      "const": "broker_fact_identity_v1"
+    },
+    "observed_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "observed_utc_source": {
+      "type": "string"
+    },
+    "normalized_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "raw_record_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "journal_sequence_number": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "source_session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_sequence_number": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "source_event_type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_event_identity": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "ordering_basis": {
+      "type": "string"
+    },
+    "ordering_key": {
+      "type": "string"
+    },
+    "replay_state_hint": {
+      "type": "string",
+      "enum": [
+        "NOT_OBSERVED",
+        "REPLAYING",
+        "REPLAY_COMPLETE",
+        "REPLAY_UNCERTAIN"
+      ]
+    },
+    "reconnect_state_hint": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "RECONNECT_IN_PROGRESS",
+        "RECONNECT_RECOVERED"
+      ]
+    },
+    "gap_state_hint": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "GAP_SUSPECTED",
+        "GAP_UNRESOLVED"
+      ]
+    },
+    "environment": {
+      "type": "string"
+    },
+    "account_id": {
+      "type": "string"
+    },
+    "client_id_observer": {
+      "type": "string"
+    },
+    "sleeve_id": {
+      "type": "string"
+    },
+    "attribution_status": {
+      "type": "string",
+      "enum": [
+        "ATTRIBUTED",
+        "PARTIAL",
+        "AMBIGUOUS",
+        "FOREIGN",
+        "UNRESOLVED"
+      ]
+    },
+    "attribution_reason_codes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "quality_status": {
+      "type": "string",
+      "enum": [
+        "OK",
+        "MALFORMED_PAYLOAD",
+        "UNSUPPORTED_EVENT_TYPE",
+        "MISSING_REQUIRED_IDENTITY"
+      ]
+    },
+    "quality_reason_codes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "order_id": {
+      "type": "string"
+    },
+    "perm_id": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    },
+    "filled_quantity": {
+      "type": "string"
+    },
+    "remaining_quantity": {
+      "type": "string"
+    },
+    "avg_fill_price": {
+      "type": "string"
+    },
+    "last_fill_price": {
+      "type": "string"
+    }
+  },
+  "$defs": {
+    "reason_codes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "contract_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "symbol",
+        "sec_type",
+        "exchange",
+        "currency",
+        "raw_summary"
+      ],
+      "properties": {
+        "symbol": {
+          "type": "string"
+        },
+        "sec_type": {
+          "type": "string"
+        },
+        "exchange": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "raw_summary": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

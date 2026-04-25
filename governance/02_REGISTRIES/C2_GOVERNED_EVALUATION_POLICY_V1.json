@@ -1,0 +1,309 @@
+{
+  "schema_id": "C2_GOVERNED_EVALUATION_POLICY_V1",
+  "schema_version": 1,
+  "policy_version": "v1",
+  "status": "ACTIVE",
+  "created_utc": "2026-04-18T00:00:00Z",
+  "owner": "Constellation",
+  "purpose": "Governed weekly sleeve and portfolio evaluation policy separating measurement truth, validity, evaluation, action, and operator scorecards.",
+  "annual_target_return": "0.10",
+  "window_policy": {
+    "window_kind": "WEEKLY",
+    "sample_basis": "CLOSED_TRADES_ONLY"
+  },
+  "evidence_assembly_policy": {
+    "assembly_mode": "REFERENCE_ONLY_FROZEN_MANIFEST",
+    "measurement_window_kind": "SLEEVE_DAY_SNAPSHOT",
+    "required_source_artifacts": [
+      "day_open_attempt_v1",
+      "execution_reconciliation_v1",
+      "reconciliation_report_v3",
+      "sleeve_edge_fact_ledger_v1",
+      "sleeve_edge_snapshot_v1",
+      "capital_authority_allocation_v1"
+    ],
+    "optional_source_artifacts": [
+      "sleeve_governance_action_state_v1",
+      "operator_intervention_state_v1"
+    ]
+  },
+  "outcome_attribution_policy": {
+    "high_confidence_min_sample_count": 5,
+    "medium_confidence_min_sample_count": 2,
+    "max_unknown_attribution_for_high_confidence": 0,
+    "max_unknown_attribution_for_medium_confidence": 1,
+    "residual_states": [
+      "FULLY_EXPLAINED",
+      "PARTIALLY_EXPLAINED",
+      "UNEXPLAINED",
+      "NOT_ENOUGH_EVIDENCE"
+    ]
+  },
+  "sleeve_edge_measurement_policy": {
+    "legacy_measurement_source_artifact_id": "sleeve_edge_snapshot_v1",
+    "legacy_fact_source_artifact_id": "sleeve_edge_fact_ledger_v1",
+    "stability_from_drift_band": {
+      "DETERIORATING": "unstable",
+      "STABLE": "stable",
+      "IMPROVING": "stable",
+      "UNKNOWN": "unstable"
+    },
+    "confidence_from_sample_band": {
+      "INSUFFICIENT": "LOW",
+      "LIMITED": "MEDIUM",
+      "SUFFICIENT": "HIGH"
+    }
+  },
+  "validity_policy": {
+    "provisional_min_sample_count": 2,
+    "valid_min_sample_count": 5,
+    "execution_contamination_states_blocking": [
+      "execution_contaminated"
+    ],
+    "data_completeness_states_blocking": [
+      "data_incomplete"
+    ]
+  },
+  "benchmark_role_policy": {
+    "directional_equity": {
+      "benchmark_mode": "external_symbol",
+      "benchmark_symbol": "SPY",
+      "benchmark_applicability": "required"
+    },
+    "defensive": {
+      "benchmark_mode": "cash_baseline",
+      "benchmark_symbol": "",
+      "benchmark_applicability": "not_applicable"
+    },
+    "neutral_absolute_return": {
+      "benchmark_mode": "cash_baseline",
+      "benchmark_symbol": "",
+      "benchmark_applicability": "not_applicable"
+    },
+    "diversifier": {
+      "benchmark_mode": "absolute_threshold",
+      "benchmark_symbol": "",
+      "benchmark_applicability": "not_applicable"
+    }
+  },
+  "sleeve_role_assignments": {
+    "C2_TREND_EQ_PRIMARY": "directional_equity",
+    "C2_MEAN_REVERSION_EQ": "directional_equity",
+    "C2_EVENT_DISLOCATION": "directional_equity",
+    "C2_DEFENSIVE_TAIL": "defensive",
+    "C2_MARKET_NEUTRAL_SPREAD": "neutral_absolute_return",
+    "C2_VOL_INCOME_DEFINED_RISK": "neutral_absolute_return",
+    "C2_CROSS_ASSET_TREND": "diversifier"
+  },
+  "sleeve_evaluation_policy": {
+    "edge_positive_unvalidated_min_expectancy": "0.01",
+    "edge_validated_min_expectancy": "25.00",
+    "edge_negative_max_expectancy": "0.00",
+    "edge_deteriorating_max_drift": "-10.00",
+    "retire_min_sample_count": 8
+  },
+  "portfolio_evaluation_policy": {
+    "risk_warning_drawdown_pct": "-0.050000",
+    "risk_breach_drawdown_pct": "-0.100000"
+  },
+  "allocation_governance_policy": {
+    "review_required_measurement_states": [
+      "MEASUREMENT_INVALID",
+      "INSUFFICIENT_DATA",
+      "WATCHLIST"
+    ],
+    "restrictive_measurement_states": [
+      "THROTTLED",
+      "DISABLED"
+    ],
+    "allow_alignment_action_states": [
+      "continue",
+      "watch"
+    ],
+    "restrictive_action_states": [
+      "reduce",
+      "pause",
+      "retire",
+      "no_conclusion"
+    ]
+  },
+  "governance_action_policy": {
+    "validity_forces_no_conclusion": [
+      "insufficient_sample",
+      "execution_contaminated",
+      "benchmark_invalid",
+      "data_incomplete",
+      "provisional"
+    ],
+    "sleeve_action_order": [
+      "continue",
+      "watch",
+      "reduce",
+      "pause",
+      "retire",
+      "no_conclusion"
+    ],
+      "portfolio_action_order": [
+        "continue",
+        "watch",
+        "reduce",
+        "pause",
+        "retire",
+        "no_conclusion"
+      ]
+  },
+  "operative_control_policy": {
+    "state_mode": "PROPOSED_ONLY",
+    "binding_state_default": "NOT_BOUND_LIVE",
+    "state_class_from_action": {
+      "continue": "ACTIVE",
+      "watch": "REVIEW_REQUIRED",
+      "reduce": "RESTRICTED",
+      "pause": "DISABLED",
+      "retire": "DISABLED",
+      "no_conclusion": "REVIEW_REQUIRED"
+    },
+    "override_active_state_class": "OVERRIDE"
+  },
+  "runtime_control_policy": {
+    "capital_authority_allocation_v1": {
+      "consumer_writer": "ops/tools/run_capital_authority_allocation_day_v1.py",
+      "scorecard_control_input_forbidden": true,
+      "paper_discovery_mode": {
+        "policy_id": "BOOTSTRAP_PAPER_TRADING",
+        "enabled": true,
+        "environments": [
+          "PAPER"
+        ],
+        "activation_triggers": [
+          "SLEEVE_EDGE_SNAPSHOT_MISSING",
+          "SLEEVE_EDGE_INSUFFICIENT_EVIDENCE"
+        ],
+        "min_prior_edge_snapshot_days_for_edge_governed": 10,
+        "discovery_headroom_multiplier_bp": 10000,
+        "max_sleeve_headroom_cents": 100000,
+        "discovery_sleeve_governance_multiplier_bp": 10000,
+        "discovery_portfolio_governance_multiplier_bp": 10000,
+        "minimum_executable_trade_risk_cents": 100000,
+        "reason_codes": [
+          "PAPER_DISCOVERY_MODE_ACTIVE",
+          "SLEEVE_EDGE_MEASUREMENT_BOOTSTRAP_ALLOWED",
+          "PAPER_DISCOVERY_SLEEVE_THROTTLE_RELAXED",
+          "PAPER_DISCOVERY_MIN_EXECUTABLE_HEADROOM_ALLOWED"
+        ]
+      },
+      "portfolio_scope": {
+        "control_input_artifact_id": "portfolio_governance_action_state_v1",
+        "action_map": {
+          "continue": {
+            "headroom_multiplier_bp": 10000,
+            "control_state": "allow",
+            "reason_codes": ["PORTFOLIO_ACTION_CONTINUE_ALLOW"]
+          },
+          "watch": {
+            "headroom_multiplier_bp": 10000,
+            "control_state": "allow_watch",
+            "reason_codes": ["PORTFOLIO_ACTION_WATCH_OBSERVE"]
+          },
+          "reduce": {
+            "headroom_multiplier_bp": 5000,
+            "control_state": "conservative_throttle",
+            "reason_codes": ["PORTFOLIO_ACTION_REDUCE_THROTTLE"]
+          },
+          "pause": {
+            "headroom_multiplier_bp": 0,
+            "control_state": "block_new_risk",
+            "reason_codes": ["PORTFOLIO_ACTION_PAUSE_BLOCK_NEW_RISK"]
+          },
+          "retire": {
+            "headroom_multiplier_bp": 0,
+            "control_state": "block_new_risk",
+            "reason_codes": ["PORTFOLIO_ACTION_RETIRE_BLOCK_NEW_RISK"]
+          },
+          "no_conclusion": {
+            "headroom_multiplier_bp": 5000,
+            "control_state": "conservative_throttle",
+            "reason_codes": ["PORTFOLIO_ACTION_NO_CONCLUSION_THROTTLE"]
+          }
+        },
+        "missing_or_invalid_action_artifact": {
+          "headroom_multiplier_bp": 0,
+          "control_state": "fail_safe_block_new_risk",
+          "reason_codes": ["PORTFOLIO_ACTION_ARTIFACT_FAILSAFE_BLOCK"]
+        }
+      },
+      "sleeve_scope": {
+        "control_input_artifact_id": "sleeve_governance_action_state_v1",
+        "adopted_bindings": [
+          {
+            "sleeve_id": "C2_TREND_EQ_PRIMARY",
+            "execution_sleeve_id": "PRIMARY",
+            "mode": "PAPER"
+          },
+          {
+            "sleeve_id": "C2_VOL_INCOME_DEFINED_RISK",
+            "execution_sleeve_id": "PRIMARY",
+            "mode": "PAPER"
+          },
+          {
+            "sleeve_id": "C2_MEAN_REVERSION_EQ",
+            "execution_sleeve_id": "PRIMARY",
+            "mode": "PAPER"
+          },
+          {
+            "sleeve_id": "C2_EVENT_DISLOCATION",
+            "execution_sleeve_id": "PRIMARY",
+            "mode": "PAPER"
+          },
+          {
+            "sleeve_id": "C2_DEFENSIVE_TAIL",
+            "execution_sleeve_id": "PRIMARY",
+            "mode": "PAPER"
+          }
+        ],
+        "action_map": {
+          "continue": {
+            "headroom_multiplier_bp": 10000,
+            "control_state": "allow",
+            "reason_codes": ["SLEEVE_ACTION_CONTINUE_ALLOW"]
+          },
+          "watch": {
+            "headroom_multiplier_bp": 10000,
+            "control_state": "allow_watch",
+            "reason_codes": ["SLEEVE_ACTION_WATCH_OBSERVE"]
+          },
+          "reduce": {
+            "headroom_multiplier_bp": 5000,
+            "control_state": "conservative_throttle",
+            "reason_codes": ["SLEEVE_ACTION_REDUCE_THROTTLE"]
+          },
+          "pause": {
+            "headroom_multiplier_bp": 0,
+            "control_state": "block_new_risk",
+            "reason_codes": ["SLEEVE_ACTION_PAUSE_BLOCK_NEW_RISK"]
+          },
+          "retire": {
+            "headroom_multiplier_bp": 0,
+            "control_state": "block_new_risk",
+            "reason_codes": ["SLEEVE_ACTION_RETIRE_BLOCK_NEW_RISK"]
+          },
+          "no_conclusion": {
+            "headroom_multiplier_bp": 5000,
+            "control_state": "conservative_throttle",
+            "reason_codes": ["SLEEVE_ACTION_NO_CONCLUSION_THROTTLE"]
+          }
+        },
+        "missing_or_invalid_action_artifact": {
+          "headroom_multiplier_bp": 0,
+          "control_state": "fail_safe_block_new_risk",
+          "reason_codes": ["SLEEVE_ACTION_ARTIFACT_FAILSAFE_BLOCK"]
+        },
+        "not_yet_adopted_default": {
+          "headroom_multiplier_bp": 10000,
+          "control_state": "not_adopted_passthrough",
+          "reason_codes": ["SLEEVE_CONTROL_NOT_YET_ADOPTED"]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/trade_state/candidate_action_set.v1.schema.json",
+  "title": "candidate_action_set.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_owner",
+    "materialization_set_id",
+    "day_utc",
+    "evaluated_at_utc",
+    "trade_identity_ref",
+    "gate_ref",
+    "candidate_rows",
+    "rule_version",
+    "derived_only"
+  ],
+  "properties": {
+    "schema_id": { "const": "candidate_action_set" },
+    "schema_version": { "const": "v1" },
+    "authority_owner": { "const": "candidate_action_generator_v1" },
+    "materialization_set_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "day_utc": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "evaluated_at_utc": { "type": "string", "format": "date-time" },
+    "trade_identity_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trade_identity_id", "artifact_path", "artifact_sha256"],
+      "properties": {
+        "trade_identity_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "gate_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "artifact_sha256", "gate_verdict"],
+      "properties": {
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "gate_verdict": { "type": "string", "enum": ["ACTIONABLE", "DEGRADED_REVIEW_REQUIRED", "BLOCKED"] }
+      }
+    },
+    "candidate_rows": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/candidate_row" }
+    },
+    "rule_version": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_contract_id", "policy_contract_version"],
+      "properties": {
+        "policy_contract_id": { "type": "string", "minLength": 1 },
+        "policy_contract_version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "derived_only": { "const": true }
+  },
+  "$defs": {
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "candidate_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_code",
+        "nomination_status",
+        "basis_fields_read",
+        "policy_basis_refs",
+        "restriction_codes"
+      ],
+      "properties": {
+        "action_code": {
+          "type": "string",
+          "enum": [
+            "HOLD",
+            "ADD_INITIAL_PROTECTION",
+            "AMEND_PROTECTION",
+            "REDUCE_POSITION",
+            "CLOSE_POSITION",
+            "CANCEL_ORPHAN_CHILD",
+            "OPERATOR_REVIEW_REQUIRED",
+            "BLOCK_ALL_ACTIONS"
+          ]
+        },
+        "nomination_status": { "type": "string", "enum": ["NOMINATED", "WITHHELD"] },
+        "basis_fields_read": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "policy_basis_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/artifact_ref" }
+        },
+        "restriction_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "note": { "type": "string" }
+      }
+    }
+  }
+}

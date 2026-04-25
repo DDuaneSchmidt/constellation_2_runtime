@@ -19,7 +19,7 @@ The sleeve registry is the authoritative source for:
 
 - sleeve identity and mode
 - IB account binding
-- symbol universe binding (explicit list)
+- declared sleeve symbol coverage (explicit list)
 - truth partition binding
 - IB gateway connection profile binding (host/port/client ids)
 
@@ -36,6 +36,9 @@ Each sleeve entry MUST include:
 - `mode` (`PAPER` or `LIVE`)
 - `ib_account` (string; e.g. DUO... or U...)
 - `symbols` (array of strings; MUST be explicit; empty list is allowed only if the sleeve is explicitly non-trading and the orchestrator treats it as NO_ACTIVITY)
+  - This field is the sleeve coverage declaration for topology/operations.
+  - It is not the submit-boundary trading-symbol authority.
+  - It should remain consistent with the active engine symbol universe assigned to the sleeve/account.
 - `truth_partition` (string; MUST equal `truth_sleeves/<sleeve_id>/<mode>`)
 - `ib_gateway_profile` (object):
   - `host` (string)
@@ -43,6 +46,15 @@ Each sleeve entry MUST include:
   - `client_id_market_data` (integer)
   - `client_id_orders` (integer)
   - `client_id_observer` (integer)
+
+For governed PAPER execution authority, the live-authoritative execution fields are:
+
+- `host`
+- `port`
+- `client_id_orders`
+- `client_id_observer`
+
+`client_id_market_data` remains sleeve topology metadata unless and until a separate market-data authority contract promotes it as binding for execution consumers.
 
 ## Invariants
 
@@ -78,3 +90,4 @@ For each sleeve day:
 
 - This contract does not define strategy logic.
 - This contract defines configuration authority and validation requirements only.
+- Tradable symbol policy at submit boundary is not owned here; it is governed by the engine symbol authority contract.

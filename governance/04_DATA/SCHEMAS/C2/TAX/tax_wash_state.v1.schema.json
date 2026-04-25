@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/tax_wash_state.v1.schema.json",
+  "title": "tax_wash_state.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "wash_state_id", "scope_id", "active_windows", "reason_codes"],
+  "properties": {
+    "schema_id": { "const": "tax_wash_state" },
+    "schema_version": { "const": "v1" },
+    "wash_state_id": { "type": "string", "minLength": 1 },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "active_windows": { "type": "array", "items": { "type": "object" } },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}
+

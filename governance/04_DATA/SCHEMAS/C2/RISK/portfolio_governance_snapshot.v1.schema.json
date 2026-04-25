@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_PORTFOLIO_GOVERNANCE_SNAPSHOT_V1",
+  "title": "C2 Portfolio Governance Snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "portfolio_snapshot_id",
+    "policy_hash",
+    "sleeve_registry_hash",
+    "risk_budget_total",
+    "risk_budget_effective",
+    "drawdown_scaling",
+    "correlation_compression",
+    "hard_stop_state",
+    "reserve_buffer",
+    "input_manifest"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_PORTFOLIO_GOVERNANCE_SNAPSHOT_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "minLength": 1 },
+    "portfolio_snapshot_id": { "type": "string", "minLength": 1 },
+    "policy_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "sleeve_registry_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "risk_budget_total": { "type": "integer", "minimum": 0 },
+    "risk_budget_effective": { "type": "integer", "minimum": 0 },
+    "drawdown_scaling": { "type": "string", "minLength": 1 },
+    "correlation_compression": { "type": "string", "minLength": 1 },
+    "hard_stop_state": { "type": "string", "minLength": 1 },
+    "reserve_buffer": { "type": "integer", "minimum": 0 },
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "path", "sha256", "day_utc", "producer"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "day_utc": {
+            "anyOf": [
+              { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+              { "type": "null" }
+            ]
+          },
+          "producer": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

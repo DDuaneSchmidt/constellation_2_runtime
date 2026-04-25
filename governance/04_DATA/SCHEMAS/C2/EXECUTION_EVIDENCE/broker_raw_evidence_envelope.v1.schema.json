@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/execution_evidence/broker_raw_evidence_envelope.v1.schema.json",
+  "title": "broker_raw_evidence_envelope.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "raw_record_id",
+    "journal_sequence_number",
+    "ingested_utc",
+    "observed_utc",
+    "observed_utc_source",
+    "source_adapter_name",
+    "source_session_id",
+    "source_sequence_number",
+    "source_event_type",
+    "source_event_identity",
+    "source_path",
+    "source_line_number",
+    "source_payload_schema_id",
+    "source_payload_schema_version",
+    "source_payload_sha256",
+    "source_received_utc",
+    "ordering_basis",
+    "ordering_key",
+    "replay_state_hint",
+    "reconnect_state_hint",
+    "gap_state_hint",
+    "event_identity_rule_version",
+    "environment",
+    "account_id",
+    "client_id_observer",
+    "sleeve_id",
+    "host",
+    "port",
+    "attribution_status",
+    "attribution_reason_codes",
+    "quality_status",
+    "quality_reason_codes",
+    "raw_payload_text",
+    "raw_payload_json"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "broker_raw_evidence_envelope"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "raw_record_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "journal_sequence_number": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "ingested_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "observed_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "observed_utc_source": {
+      "type": "string",
+      "enum": [
+        "BROKER_EVENT_UTC",
+        "LEGACY_RECEIVED_UTC",
+        "DETERMINISTIC_SENTINEL_UTC"
+      ]
+    },
+    "source_adapter_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_sequence_number": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "source_event_type": {
+      "type": "string"
+    },
+    "source_event_identity": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "source_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_line_number": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "source_payload_schema_id": {
+      "type": "string"
+    },
+    "source_payload_schema_version": {
+      "type": "string"
+    },
+    "source_payload_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "source_received_utc": {
+      "type": "string"
+    },
+    "ordering_basis": {
+      "type": "string",
+      "enum": [
+        "OBSERVED_UTC",
+        "SOURCE_SEQUENCE_NUMBER",
+        "SOURCE_EVENT_IDENTITY",
+        "UNRESOLVED"
+      ]
+    },
+    "ordering_key": {
+      "type": "string"
+    },
+    "replay_state_hint": {
+      "type": "string",
+      "enum": [
+        "NOT_OBSERVED",
+        "REPLAYING",
+        "REPLAY_COMPLETE",
+        "REPLAY_UNCERTAIN"
+      ]
+    },
+    "reconnect_state_hint": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "RECONNECT_IN_PROGRESS",
+        "RECONNECT_RECOVERED"
+      ]
+    },
+    "gap_state_hint": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "GAP_SUSPECTED",
+        "GAP_UNRESOLVED"
+      ]
+    },
+    "event_identity_rule_version": {
+      "const": "broker_fact_identity_v1"
+    },
+    "environment": {
+      "type": "string"
+    },
+    "account_id": {
+      "type": "string"
+    },
+    "client_id_observer": {
+      "type": "string"
+    },
+    "sleeve_id": {
+      "type": "string"
+    },
+    "host": {
+      "type": "string"
+    },
+    "port": {
+      "type": "string"
+    },
+    "attribution_status": {
+      "type": "string",
+      "enum": [
+        "ATTRIBUTED",
+        "PARTIAL",
+        "AMBIGUOUS",
+        "FOREIGN",
+        "UNRESOLVED"
+      ]
+    },
+    "attribution_reason_codes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "quality_status": {
+      "type": "string",
+      "enum": [
+        "OK",
+        "MALFORMED_PAYLOAD",
+        "UNSUPPORTED_EVENT_TYPE",
+        "MISSING_REQUIRED_IDENTITY"
+      ]
+    },
+    "quality_reason_codes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "raw_payload_text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "raw_payload_json": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  }
+}

@@ -30,6 +30,15 @@
         "constellation_2/runtime/truth/positions_snapshot_v2",
         "constellation_2/runtime/__quarantine_non_authoritative_truth_B__/positions_v1"
       ]
+    },
+    {
+      "family": "reconciled_trade_state",
+      "authoritative_root": "constellation_2/runtime/truth_sleeves/<sleeve_id>/<mode>/reconciled_trade_state_v1",
+      "non_authoritative_roots": [
+        "constellation_2/runtime/truth/position_lifecycle_v1",
+        "constellation_2/runtime/truth/position_lifecycle_v2",
+        "constellation_2/runtime/truth/reports/reconciliation_report_v3"
+      ]
     }
   ]
 }

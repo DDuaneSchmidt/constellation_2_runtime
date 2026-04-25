@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/day_open_attempt.v1.schema.json",
+  "title": "day_open_attempt.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "attempt_sequence",
+    "trigger_kind",
+    "started_at_utc",
+    "finished_at_utc",
+    "trigger_ref",
+    "consumed_trigger_key",
+    "actor_identity",
+    "open_command_executed",
+    "submit_stage_entered",
+    "submit_stage_owner",
+    "result_code",
+    "reason_codes",
+    "consumed_authority_refs",
+    "direct_evidence_refs",
+    "final_classification",
+    "attempt_history",
+    "environment",
+    "open_policy",
+    "producer"
+  ],
+  "properties": {
+    "schema_id": { "const": "day_open_attempt" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "attempt_sequence": { "type": "integer", "minimum": 1 },
+    "trigger_kind": { "type": "string", "enum": ["INITIAL_BOD_TRIGGER", "LATE_OPEN_TRIGGER", "NO_TRIGGER"] },
+    "started_at_utc": { "type": "string", "minLength": 1 },
+    "finished_at_utc": { "type": "string" },
+    "trigger_ref": { "type": "string", "minLength": 1 },
+    "consumed_trigger_key": { "type": "string", "minLength": 1 },
+    "actor_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actor_name", "actor_path"],
+      "properties": {
+        "actor_name": { "type": "string", "minLength": 1 },
+        "actor_path": { "type": "string", "minLength": 1 }
+      }
+    },
+    "open_command_executed": { "type": "boolean" },
+    "submit_stage_entered": { "type": "boolean" },
+    "submit_stage_owner": { "type": "string", "minLength": 1 },
+    "result_code": { "type": "string", "minLength": 1 },
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "consumed_authority_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["paper_session_ledger_v1", "day_open_trigger_v1"],
+      "properties": {
+        "paper_session_ledger_v1": { "type": "string", "minLength": 1 },
+        "day_open_trigger_v1": { "type": "string", "minLength": 1 }
+      }
+    },
+    "direct_evidence_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sleeve_rollup_v1", "orchestrator_run_verdict_v2", "run_pointer_v1"],
+      "properties": {
+        "sleeve_rollup_v1": { "type": "string", "minLength": 1 },
+        "orchestrator_run_verdict_v2": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "run_pointer_v1": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "runtime_lifecycle_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "runtime_identity_contract_path",
+        "runtime_identity_contract_sha256",
+        "startup_identity_receipt_path",
+        "lifecycle_start_receipt_path"
+      ],
+      "properties": {
+        "run_id": { "type": "string", "minLength": 1 },
+        "runtime_identity_contract_path": { "type": "string", "minLength": 1 },
+        "runtime_identity_contract_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "startup_identity_receipt_path": { "type": "string", "minLength": 1 },
+        "lifecycle_start_receipt_path": { "type": "string", "minLength": 1 }
+      }
+    },
+    "final_classification": {
+      "type": "string",
+      "enum": ["NOT_EXECUTED", "OPEN_ATTEMPTED", "OPEN_SUCCEEDED", "OPEN_FAILED", "OPEN_MISSED"]
+    },
+    "attempt_history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "attempt_sequence",
+          "trigger_kind",
+          "final_classification",
+          "result_code",
+          "reason_codes",
+          "started_at_utc",
+          "finished_at_utc",
+          "attempt_ref",
+          "open_command_executed",
+          "submit_stage_entered"
+        ],
+        "properties": {
+          "attempt_sequence": { "type": "integer", "minimum": 1 },
+          "trigger_kind": { "type": "string", "enum": ["INITIAL_BOD_TRIGGER", "LATE_OPEN_TRIGGER", "NO_TRIGGER"] },
+          "final_classification": { "type": "string", "minLength": 1 },
+          "result_code": { "type": "string", "minLength": 1 },
+          "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "started_at_utc": { "type": "string" },
+          "finished_at_utc": { "type": "string" },
+          "attempt_ref": { "type": "string", "minLength": 1 },
+          "open_command_executed": { "type": "boolean" },
+          "submit_stage_entered": { "type": "boolean" }
+        }
+      }
+    },
+    "environment": { "type": "string", "enum": ["PAPER", "LIVE"] },
+    "open_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy_mode",
+        "environment",
+        "max_successful_opens_per_day",
+        "max_late_open_attempts_per_day",
+        "same_day_open_cap_enforced",
+        "time_window_enforced",
+        "successful_open_already_recorded",
+        "prior_success_ref",
+        "initial_open_consumed",
+        "late_open_available",
+        "late_open_consumed",
+        "late_open_consumed_ref",
+        "open_terminal",
+        "terminal_reason_code",
+        "policy_status",
+        "attempt_count",
+        "latest_attempt_kind",
+        "latest_attempt_result",
+        "prior_trigger_kind",
+        "prior_trigger_status"
+      ],
+      "properties": {
+        "policy_mode": { "type": "string", "minLength": 1 },
+        "environment": { "type": "string", "enum": ["PAPER", "LIVE"] },
+        "max_successful_opens_per_day": { "type": "integer", "minimum": 0 },
+        "max_late_open_attempts_per_day": { "type": "integer", "minimum": 0 },
+        "same_day_open_cap_enforced": { "type": "boolean" },
+        "time_window_enforced": { "type": "boolean" },
+        "successful_open_already_recorded": { "type": "boolean" },
+        "prior_success_ref": { "type": "string" },
+        "initial_open_consumed": { "type": "boolean" },
+        "late_open_available": { "type": "boolean" },
+        "late_open_consumed": { "type": "boolean" },
+        "late_open_consumed_ref": { "type": "string" },
+        "open_terminal": { "type": "boolean" },
+        "terminal_reason_code": { "type": "string" },
+        "policy_status": { "type": "string", "minLength": 1 },
+        "attempt_count": { "type": "integer", "minimum": 0 },
+        "latest_attempt_kind": { "type": "string", "minLength": 1 },
+        "latest_attempt_result": { "type": "string" },
+        "prior_trigger_kind": { "type": "string", "minLength": 1 },
+        "prior_trigger_status": { "type": "string" }
+      }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

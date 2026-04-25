@@ -1,0 +1,64 @@
+{
+  "schema_id": "C2_SLEEVE_EDGE_QUALIFICATION_POLICY_V1",
+  "schema_version": 1,
+  "policy_version": "v1",
+  "status": "ACTIVE",
+  "created_utc": "2026-04-15T00:00:00Z",
+  "owner": "Constellation",
+  "notes": [
+    "Canonical threshold policy for sleeve edge factual qualification.",
+    "Deterministic thresholds only.",
+    "No confidence multiplier, trust float, or composite allocation merit score."
+  ],
+  "metric_windows": {
+    "recent_trade_count": 2,
+    "baseline_trade_count": 3
+  },
+  "sample_sufficiency": {
+    "limited_min_sample_count": 2,
+    "sufficient_min_sample_count": 5
+  },
+  "unknown_attribution_thresholds": {
+    "max_unknown_trade_count": 1
+  },
+  "edge_band_thresholds": {
+    "weak_positive_min_net_expectancy": "0.01",
+    "qualified_positive_min_net_expectancy": "25.00",
+    "strong_positive_min_net_expectancy": "75.00"
+  },
+  "drift_band_thresholds": {
+    "improving_min_delta_net_expectancy": "10.00",
+    "deteriorating_max_delta_net_expectancy": "-10.00"
+  },
+  "allocator_compatibility": {
+    "allowed_calculation_versions": [
+      "sleeve_edge_measurement_v1"
+    ]
+  },
+  "allocator_actions": {
+    "MEASUREMENT_INVALID": {
+      "capital_multiplier_bp": 0,
+      "reason_code": "CAPAUTH_SLEEVE_MEASUREMENT_INVALID"
+    },
+    "INSUFFICIENT_DATA": {
+      "capital_multiplier_bp": 0,
+      "reason_code": "CAPAUTH_SLEEVE_INSUFFICIENT_DATA"
+    },
+    "QUALIFIED": {
+      "capital_multiplier_bp": 10000,
+      "reason_code": "CAPAUTH_SLEEVE_QUALIFIED"
+    },
+    "WATCHLIST": {
+      "capital_multiplier_bp": 5000,
+      "reason_code": "CAPAUTH_SLEEVE_WATCHLIST_THROTTLE"
+    },
+    "THROTTLED": {
+      "capital_multiplier_bp": 2500,
+      "reason_code": "CAPAUTH_SLEEVE_POLICY_THROTTLED"
+    },
+    "DISABLED": {
+      "capital_multiplier_bp": 0,
+      "reason_code": "CAPAUTH_SLEEVE_DISABLED"
+    }
+  }
+}

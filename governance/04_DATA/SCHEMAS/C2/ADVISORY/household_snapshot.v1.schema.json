@@ -1,0 +1,406 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisory/household_snapshot.v1.schema.json",
+  "title": "household_snapshot.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_id",
+    "household_snapshot_id",
+    "household_id",
+    "parent_policy_id",
+    "snapshot_version",
+    "created_at",
+    "effective_at",
+    "actor_source",
+    "timestamp_basis",
+    "contract_version",
+    "builder_version",
+    "parent_lineage_refs",
+    "validation_status",
+    "completeness_status",
+    "freshness_status",
+    "reconciliation_status",
+    "coverage_scope",
+    "account_registry_snapshot",
+    "investable_asset_summary",
+    "cash_liquidity_summary",
+    "holdings_by_account",
+    "holdings_by_asset_class",
+    "holdings_by_tax_treatment",
+    "verified_components",
+    "unverified_components",
+    "missing_components",
+    "input_record_refs",
+    "classification_refs",
+    "freshness_attestations",
+    "value_basis",
+    "validity_tier",
+    "reason_codes"
+  ],
+  "properties": {
+    "schema_id": { "const": "household_snapshot" },
+    "schema_version": { "const": "v1" },
+    "record_id": { "type": "string", "minLength": 1 },
+    "household_snapshot_id": { "type": "string", "minLength": 1 },
+    "household_id": { "type": "string", "minLength": 1 },
+    "parent_policy_id": { "type": "string", "minLength": 1 },
+    "snapshot_version": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "minLength": 1 },
+    "effective_at": { "type": "string", "minLength": 1 },
+    "actor_source": { "type": "string", "minLength": 1 },
+    "timestamp_basis": { "type": "string", "minLength": 1 },
+    "contract_version": { "type": "string", "minLength": 1 },
+    "builder_version": { "type": "string", "minLength": 1 },
+    "validation_status": {
+      "type": "string",
+      "enum": ["VALIDATED", "INVALID"]
+    },
+    "completeness_status": {
+      "type": "string",
+      "enum": ["COMPLETE", "PARTIAL"]
+    },
+    "freshness_status": {
+      "type": "string",
+      "enum": ["CURRENT", "STALE"]
+    },
+    "reconciliation_status": {
+      "type": "string",
+      "enum": ["NOT_PROVIDED"]
+    },
+    "parent_lineage_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "coverage_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "included_account_ids",
+        "explicit_account_coverage_count",
+        "explicit_positions_account_count",
+        "explicit_cash_account_count",
+        "external_component_account_count",
+        "partial_coverage"
+      ],
+      "properties": {
+        "included_account_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "explicit_account_coverage_count": { "type": "integer", "minimum": 1 },
+        "explicit_positions_account_count": { "type": "integer", "minimum": 0 },
+        "explicit_cash_account_count": { "type": "integer", "minimum": 0 },
+        "external_component_account_count": { "type": "integer", "minimum": 0 },
+        "partial_coverage": { "type": "boolean" }
+      }
+    },
+    "account_registry_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_refs", "accounts"],
+      "properties": {
+        "source_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "accounts": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/account_scope_entry" }
+        }
+      }
+    },
+    "investable_asset_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verified_open_position_count",
+        "verified_defined_risk_position_count",
+        "verified_undefined_risk_position_count",
+        "unverified_external_holding_count"
+      ],
+      "properties": {
+        "verified_open_position_count": { "type": "integer", "minimum": 0 },
+        "verified_defined_risk_position_count": { "type": "integer", "minimum": 0 },
+        "verified_undefined_risk_position_count": { "type": "integer", "minimum": 0 },
+        "unverified_external_holding_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "cash_liquidity_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verified_cash_total_cents",
+        "verified_available_funds_total_cents",
+        "verified_excess_liquidity_total_cents",
+        "verified_cash_account_count"
+      ],
+      "properties": {
+        "verified_cash_total_cents": { "type": "integer" },
+        "verified_available_funds_total_cents": { "type": ["integer", "null"] },
+        "verified_excess_liquidity_total_cents": { "type": ["integer", "null"] },
+        "verified_cash_account_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "holdings_by_account": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/account_holdings_summary" }
+    },
+    "holdings_by_asset_class": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/classified_summary" }
+    },
+    "holdings_by_tax_treatment": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/classified_summary" }
+    },
+    "verified_components": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/component_entry" }
+    },
+    "unverified_components": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/component_entry" }
+    },
+    "missing_components": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/missing_component" }
+    },
+    "input_record_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "classification_refs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "freshness_attestations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/freshness_attestation" }
+    },
+    "value_basis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value_basis_id",
+        "status",
+        "valuation_mode",
+        "effective_at",
+        "completeness_status",
+        "freshness_status",
+        "source_lineage_refs",
+        "asset_marks",
+        "position_values",
+        "cash_value_cents",
+        "total_portfolio_value_cents",
+        "reason_codes"
+      ],
+      "properties": {
+        "value_basis_id": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "enum": ["VALID", "BLOCKED"] },
+        "valuation_mode": { "type": "string", "minLength": 1 },
+        "effective_at": { "type": ["string", "null"] },
+        "completeness_status": { "type": "string", "enum": ["COMPLETE", "INCOMPLETE"] },
+        "freshness_status": { "type": "string", "enum": ["CURRENT", "STALE", "UNKNOWN"] },
+        "source_lineage_refs": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "asset_marks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/asset_mark_entry" }
+        },
+        "position_values": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/position_value_entry" }
+        },
+        "cash_value_cents": { "type": "integer", "minimum": 0 },
+        "total_portfolio_value_cents": { "type": ["integer", "null"], "minimum": 0 },
+        "reason_codes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "validity_tier": {
+      "type": "string",
+      "enum": [
+        "VALID_EXECUTION_ELIGIBLE",
+        "VALID_ADVISORY_ONLY",
+        "INVALID_REMEDIABLE",
+        "INVALID_HARD_STOP"
+      ]
+    },
+    "reason_codes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "$defs": {
+    "account_scope_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["account_id", "scope_role", "source_ref", "source_type", "verification_status"],
+      "properties": {
+        "account_id": { "type": "string", "minLength": 1 },
+        "scope_role": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "source_type": { "type": "string", "minLength": 1 },
+        "verification_status": { "type": "string", "enum": ["VERIFIED", "UNVERIFIED"] }
+      }
+    },
+    "account_holdings_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "account_id",
+        "scope_role",
+        "verified_position_ids",
+        "verified_positions",
+        "verified_open_position_count",
+        "unverified_external_holding_ids",
+        "unverified_external_holding_count",
+        "verified_cash_total_cents",
+        "source_refs"
+      ],
+      "properties": {
+        "account_id": { "type": "string", "minLength": 1 },
+        "scope_role": { "type": "string", "minLength": 1 },
+        "verified_position_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "verified_positions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/verified_position_entry" }
+        },
+        "verified_open_position_count": { "type": "integer", "minimum": 0 },
+        "unverified_external_holding_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "unverified_external_holding_count": { "type": "integer", "minimum": 0 },
+        "verified_cash_total_cents": { "type": ["integer", "null"] },
+        "source_refs": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "verified_position_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "position_id",
+        "engine_id",
+        "instrument",
+        "qty",
+        "avg_cost_cents",
+        "market_exposure_type",
+        "max_loss_cents",
+        "opened_day_utc",
+        "status",
+        "source_record_ref"
+      ],
+      "properties": {
+        "position_id": { "type": "string", "minLength": 1 },
+        "engine_id": { "type": "string", "minLength": 1 },
+        "instrument": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "symbol", "currency", "ib_conId", "ib_localSymbol"],
+          "properties": {
+            "kind": { "type": "string", "minLength": 1 },
+            "symbol": { "type": "string", "minLength": 1 },
+            "currency": { "type": "string", "minLength": 1 },
+            "ib_conId": { "type": ["integer", "null"] },
+            "ib_localSymbol": { "type": ["string", "null"] }
+          }
+        },
+        "qty": { "type": "integer" },
+        "avg_cost_cents": { "type": "integer" },
+        "market_exposure_type": { "type": "string", "minLength": 1 },
+        "max_loss_cents": { "type": ["integer", "null"] },
+        "opened_day_utc": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "minLength": 1 },
+        "source_record_ref": { "type": "string", "minLength": 1 }
+      }
+    },
+    "classified_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["classification_ref", "label", "item_count"],
+      "properties": {
+        "classification_ref": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "item_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "component_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component_type", "account_id", "record_ref", "source_kind", "freshness_status"],
+      "properties": {
+        "component_type": { "type": "string", "minLength": 1 },
+        "account_id": { "type": "string", "minLength": 1 },
+        "record_ref": { "type": "string", "minLength": 1 },
+        "source_kind": { "type": "string", "minLength": 1 },
+        "freshness_status": { "type": "string", "enum": ["CURRENT", "STALE", "UNKNOWN"] }
+      }
+    },
+    "missing_component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component_type", "account_id", "reason_code"],
+      "properties": {
+        "component_type": { "type": "string", "minLength": 1 },
+        "account_id": { "type": "string", "minLength": 1 },
+        "reason_code": { "type": "string", "minLength": 1 }
+      }
+    },
+    "freshness_attestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component_type", "record_ref", "account_id", "freshness_rule", "freshness_status", "observed_at", "produced_at"],
+      "properties": {
+        "component_type": { "type": "string", "minLength": 1 },
+        "record_ref": { "type": "string", "minLength": 1 },
+        "account_id": { "type": "string", "minLength": 1 },
+        "freshness_rule": { "type": "string", "minLength": 1 },
+        "freshness_status": { "type": "string", "enum": ["CURRENT", "STALE", "UNKNOWN"] },
+        "observed_at": { "type": ["string", "null"] },
+        "produced_at": { "type": ["string", "null"] }
+      }
+    },
+    "asset_mark_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["symbol", "asset_type", "currency", "mark_price_cents", "source_record_ref", "observed_at", "freshness_status"],
+      "properties": {
+        "symbol": { "type": "string", "minLength": 1 },
+        "asset_type": { "type": "string", "minLength": 1 },
+        "currency": { "type": "string", "minLength": 1 },
+        "mark_price_cents": { "type": "integer", "minimum": 1 },
+        "source_record_ref": { "type": "string", "minLength": 1 },
+        "observed_at": { "type": "string", "minLength": 1 },
+        "freshness_status": { "type": "string", "enum": ["CURRENT", "STALE", "UNKNOWN"] }
+      }
+    },
+    "position_value_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["account_id", "position_id", "symbol", "asset_type", "currency", "quantity_shares", "mark_price_cents", "market_value_cents", "source_record_ref"],
+      "properties": {
+        "account_id": { "type": "string", "minLength": 1 },
+        "position_id": { "type": "string", "minLength": 1 },
+        "symbol": { "type": "string", "minLength": 1 },
+        "asset_type": { "type": "string", "minLength": 1 },
+        "currency": { "type": "string", "minLength": 1 },
+        "quantity_shares": { "type": "integer", "minimum": 1 },
+        "mark_price_cents": { "type": "integer", "minimum": 1 },
+        "market_value_cents": { "type": "integer", "minimum": 0 },
+        "source_record_ref": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

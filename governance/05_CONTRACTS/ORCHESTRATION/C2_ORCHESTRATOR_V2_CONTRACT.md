@@ -180,3 +180,14 @@ D) Safety breaches hard-stop: ABORTED + non-zero exit.
 E) Replay hashing derives from attempt manifest (no missing optional expectations).
 F) DUO847203 enforcement is proven and non-bypassable.
 G) Canonical heads derive from append-only pointer indices only.
+
+## 11. Sleeve Edge Ordering
+
+For allocation control-path use, Orchestrator V2 must run canonical sleeve-edge publication before `capital_authority_allocation_day_v1`.
+
+Rules:
+- `ops/tools/run_sleeve_edge_measurement_v1.py` must execute before `ops/tools/run_capital_authority_allocation_day_v1.py`
+- the sleeve-edge publication stage must be blocking
+- if sleeve-edge publication fails, allocation must not run in that orchestrator attempt
+- when Orchestrator V2 invokes `run_capital_authority_allocation_day_v1.py`, it must pass explicit canonical sequence provenance identifying `ops/tools/run_c2_paper_day_orchestrator_v2.py` as the sequencing owner
+- upstream runtime wrappers may delegate into Orchestrator V2, but they must not duplicate or bypass this sequencing ownership

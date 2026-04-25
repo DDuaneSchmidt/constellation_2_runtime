@@ -18,6 +18,8 @@
     "blocking_evidence",
     "missing_or_invalid_prerequisite_refs",
     "authority_attestation_refs_used",
+    "constitutional_dependency_declaration",
+    "constitutional_lineage",
     "compatibility_status",
     "diagnostic_warnings",
     "emitted_at",
@@ -115,6 +117,12 @@
         "type": "string",
         "minLength": 1
       }
+    },
+    "constitutional_dependency_declaration": {
+      "type": "object"
+    },
+    "constitutional_lineage": {
+      "type": "object"
     },
     "compatibility_status": {
       "type": "object",

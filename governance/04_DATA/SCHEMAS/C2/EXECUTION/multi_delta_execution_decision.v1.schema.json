@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/execution/multi_delta_execution_decision.v1.schema.json",
+  "title": "multi_delta_execution_decision.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_id",
+    "multi_delta_execution_decision_id",
+    "approved_change_set_id",
+    "household_id",
+    "day_utc",
+    "produced_utc",
+    "contract_version",
+    "outcome",
+    "reason_codes",
+    "input_record_refs",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "multi_delta_execution_decision" },
+    "schema_version": { "const": "v1" },
+    "record_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "multi_delta_execution_decision_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "approved_change_set_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "household_id": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "contract_version": { "type": "string", "minLength": 1 },
+    "outcome": { "type": "string", "enum": ["promote", "no_action", "blocked", "duplicate"] },
+    "reason_codes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "duplicate_multi_delta_execution_record_id": { "type": ["string", "null"] },
+    "input_record_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

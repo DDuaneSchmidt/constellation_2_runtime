@@ -1,10 +1,18 @@
 # fresh_day_admission_v1
 
-`fresh_day_admission_v1` is the fail-closed Fresh-Day Admission Plane authority.
+`fresh_day_admission_v1` is a legacy admission surface retained for diagnostic continuity.
 
-It decides one question only:
+Binding day-entry authority is now owned by `target_day_admission_v1` under `session_authority_v1`.
 
-- may `target_day_utc` enter live execution at all?
+`fresh_day_admission_v1` may still summarize the legacy three-artifact admission plane, but it is no longer the canonical rollover owner.
+
+In PAPER bootstrap mode, the legacy surface may also summarize a governed bootstrap admission when all of the following exist for the target day:
+
+- governed `paper_capital_seed_v1`
+- governed paper `operator_statement.v1.json`
+- sleeve `capital_risk_envelope_v2` with `status == PASS`
+
+This diagnostic allowance does not transfer ownership away from `target_day_admission_v1`.
 
 ## Allowed outcomes
 
@@ -23,7 +31,7 @@ The following target-day artifacts must already exist before `ADMIT`:
 
 ## Enforcement
 
-No live target-day execution may begin unless `fresh_day_admission_v1.admission_status == ADMIT`.
+No live target-day execution may begin unless `target_day_admission_v1.admission_status == ADMIT`.
 
 ## Non-goals
 

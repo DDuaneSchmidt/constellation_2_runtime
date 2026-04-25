@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_id": { "const": "frozen_decision_input_bundle" },
+    "schema_version": { "const": "v1" },
+    "bundle_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "artifact_type": { "type": "string", "minLength": 1 },
+    "artifact_class": { "const": "decision_proposal" },
+    "authority_id": { "type": "string", "minLength": 1 },
+    "generated_at_utc": { "type": "string", "minLength": 1 },
+    "effective_at_utc": { "type": "string", "minLength": 1 },
+    "frozen": { "const": true },
+    "input_artifact_refs": { "$ref": "#/$defs/artifactRefs" },
+    "policy_snapshot_refs": { "$ref": "#/$defs/artifactRefs" },
+    "run_id": { "type": "string" },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "input_bundle_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "bundle_id",
+    "artifact_type",
+    "artifact_class",
+    "authority_id",
+    "generated_at_utc",
+    "effective_at_utc",
+    "frozen",
+    "input_artifact_refs",
+    "policy_snapshot_refs",
+    "run_id",
+    "reason_codes",
+    "input_bundle_hash"
+  ],
+  "$defs": {
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "artifact_class": { "type": "string" },
+        "finality_state": { "type": "string" }
+      },
+      "required": ["artifact_id", "path", "sha256", "artifact_class", "finality_state"]
+    },
+    "artifactRefs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifactRef" }
+    }
+  }
+}

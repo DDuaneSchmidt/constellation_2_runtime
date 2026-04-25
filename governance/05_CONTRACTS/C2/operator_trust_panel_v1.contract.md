@@ -13,7 +13,7 @@ scope: constellation_2_0
 Provide the governed trust/evidence state for a Batch 3 view or query response.
 
 # Canonical path
-- `constellation_2/runtime/truth/reports/operator_trust_panel_v1/<DAY>/<ID>/operator_trust_panel.v1.json`
+- `/home/node/constellation_runtime_data/truth/reports/operator_trust_panel_v1/<DAY>/<ID>/operator_trust_panel.v1.json`
 
 # Exactness classes
 - `EXACT`

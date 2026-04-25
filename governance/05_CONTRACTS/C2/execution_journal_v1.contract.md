@@ -21,6 +21,11 @@ deployment and paper-day startup path.
 It is not a control plane, not a readiness owner, not a free-form log, and not a generic event
 bus.
 
+When canonical runtime lifecycle provenance has already been established upstream,
+`execution_journal_v1` may carry a narrow optional `runtime_lifecycle_ref` block that references
+the governed runtime identity and startup/lifecycle start receipts without changing journal
+identity ownership.
+
 ## Truth owner
 
 - Truth owner: Constellation governance

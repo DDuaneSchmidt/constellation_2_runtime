@@ -13,6 +13,11 @@
     "entrypoint",
     "overall_exit_code",
     "execution_status",
+    "closure_state",
+    "first_blocker_code",
+    "missing_dependency_artifacts",
+    "constitutional_dependency_declaration",
+    "constitutional_lineage",
     "stages",
     "nonfatal_items",
     "self_heal_items",
@@ -33,6 +38,17 @@
       "type": "string",
       "enum": ["PASS", "FAIL", "PASS_WITH_SELF_HEAL", "PASS_WITH_DEFERRED"]
     },
+    "closure_state": {
+      "type": "string",
+      "enum": ["COMPLETE", "BLOCKED", "DEGRADED", "OPEN"]
+    },
+    "first_blocker_code": { "type": "string" },
+    "missing_dependency_artifacts": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "constitutional_dependency_declaration": { "type": "object" },
+    "constitutional_lineage": { "type": "object" },
     "stages": {
       "type": "array",
       "items": {

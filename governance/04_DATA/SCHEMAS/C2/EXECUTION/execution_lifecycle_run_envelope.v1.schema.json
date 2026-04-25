@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/execution/execution_lifecycle_run_envelope.v1.schema.json",
+  "title": "execution_lifecycle_run_envelope.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_id",
+    "run_id",
+    "day_utc",
+    "produced_utc",
+    "contract_version",
+    "run_outcome",
+    "artifact_refs",
+    "reason_codes",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "execution_lifecycle_run_envelope" },
+    "schema_version": { "const": "v1" },
+    "record_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "contract_version": { "type": "string", "minLength": 1 },
+    "run_outcome": { "type": "string", "enum": ["advance", "duplicate", "blocked", "no_action"] },
+    "artifact_refs": { "type": "object" },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

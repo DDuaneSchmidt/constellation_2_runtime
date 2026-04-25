@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisory/rebalance_candidates.v1.schema.json",
+  "title": "rebalance_candidates.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_id",
+    "rebalance_candidates_id",
+    "household_id",
+    "snapshot_refs",
+    "candidate_actions",
+    "action_priority_order",
+    "urgency_classification",
+    "drift_explanations",
+    "blocked_candidate_reasons",
+    "reason_codes"
+  ],
+  "properties": {
+    "schema_id": { "const": "rebalance_candidates" },
+    "schema_version": { "const": "v1" },
+    "record_id": { "type": "string", "minLength": 1 },
+    "rebalance_candidates_id": { "type": "string", "minLength": 1 },
+    "household_id": { "type": "string", "minLength": 1 },
+    "snapshot_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["household_state_snapshot_id", "allocation_plan_id", "risk_envelope_id"],
+      "properties": {
+        "household_state_snapshot_id": { "type": "string", "minLength": 1 },
+        "allocation_plan_id": { "type": "string", "minLength": 1 },
+        "risk_envelope_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "candidate_actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action_id", "action_type", "symbol", "account_id", "urgency", "risk_impact", "required_risk_reduction", "reason_codes"],
+        "properties": {
+          "action_id": { "type": "string", "minLength": 1 },
+          "action_type": { "type": "string", "minLength": 1 },
+          "symbol": { "type": "string" },
+          "account_id": { "type": "string" },
+          "urgency": { "type": "string", "minLength": 1 },
+          "risk_impact": { "type": "string", "minLength": 1 },
+          "required_risk_reduction": { "type": "boolean" },
+          "reason_codes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "action_priority_order": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "urgency_classification": { "type": "string", "minLength": 1 },
+    "drift_explanations": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "blocked_candidate_reasons": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

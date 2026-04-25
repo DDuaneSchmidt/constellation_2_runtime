@@ -1,0 +1,55 @@
+{
+  "schema_id": "C2_CONFIGURATION_COMPILE_RESULT_SCHEMA_V1",
+  "title": "C2 Configuration Compile Result V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "compile_result_id",
+    "authority_owner",
+    "generated_at_utc",
+    "policy_snapshot_ref",
+    "validation_result_ref",
+    "compiled_active_config_ref",
+    "compile_status",
+    "compiled_entry_count",
+    "required_runtime_entry_count",
+    "blocking_reason_codes",
+    "constitutional_dependency_declaration",
+    "constitutional_lineage"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "configuration_compile_result.v1" },
+    "schema_version": { "type": "string", "const": "v1" },
+    "compile_result_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "authority_owner": { "type": "string", "const": "configuration_activation_authority_v1" },
+    "generated_at_utc": { "type": "string", "minLength": 20 },
+    "policy_snapshot_ref": { "$ref": "#/$defs/artifactRef" },
+    "validation_result_ref": { "$ref": "#/$defs/artifactRef" },
+    "compiled_active_config_ref": { "$ref": "#/$defs/artifactRef" },
+    "compile_status": { "type": "string", "enum": ["COMPILED", "BLOCKED"] },
+    "compiled_entry_count": { "type": "integer", "minimum": 0 },
+    "required_runtime_entry_count": { "type": "integer", "minimum": 0 },
+    "blocking_reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "constitutional_dependency_declaration": { "type": "object" },
+    "constitutional_lineage": { "type": "object" }
+  },
+  "$defs": {
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_id", "path", "sha256", "artifact_class", "finality_state"],
+      "properties": {
+        "artifact_id": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "artifact_class": { "type": "string", "minLength": 1 },
+        "finality_state": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

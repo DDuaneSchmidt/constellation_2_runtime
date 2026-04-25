@@ -16,6 +16,7 @@
     "reason_codes",
     "tool_runs",
     "comparisons",
+    "override_analysis",
     "canonical_json_hash"
   ],
   "properties": {
@@ -49,7 +50,7 @@
         "additionalProperties": false,
         "required": ["artifact_role", "source_path", "replay_path", "comparison_status"],
         "properties": {
-          "artifact_role": {"type": "string", "enum": ["allocation", "authorization_dir", "submission_dir", "execution_stream_dir", "fill_ledger"]},
+          "artifact_role": {"type": "string", "enum": ["allocation", "authorization_dir", "submission_dir", "execution_stream_dir", "fill_ledger", "operator_decision_dir"]},
           "source_path": {"type": "string", "minLength": 1},
           "replay_path": {"type": "string", "minLength": 1},
           "source_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
@@ -58,6 +59,87 @@
         }
       }
     },
+    "override_analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["comparison_status", "source", "replay"],
+      "properties": {
+        "comparison_status": { "type": "string", "enum": ["identical", "different"] },
+        "source": { "$ref": "#/$defs/overrideAnalysis" },
+        "replay": { "$ref": "#/$defs/overrideAnalysis" }
+      }
+    },
     "canonical_json_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  },
+  "$defs": {
+    "overrideAnalysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "review_required_count",
+        "operator_decision_count",
+        "approved_override_count",
+        "override_frequency_by_action_class",
+        "mismatch_count",
+        "mismatch_cases",
+        "block_reasons_distribution",
+        "human_system_divergence_count",
+        "override_cases"
+      ],
+      "properties": {
+        "review_required_count": { "type": "integer", "minimum": 0 },
+        "operator_decision_count": { "type": "integer", "minimum": 0 },
+        "approved_override_count": { "type": "integer", "minimum": 0 },
+        "override_frequency_by_action_class": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 1 }
+        },
+        "mismatch_count": { "type": "integer", "minimum": 0 },
+        "mismatch_cases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["proposal_hash", "artifact_type", "artifact_path", "reason_codes"],
+            "properties": {
+              "proposal_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+              "artifact_type": { "type": "string", "minLength": 1 },
+              "artifact_path": { "type": "string", "minLength": 1 },
+              "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+            }
+          }
+        },
+        "block_reasons_distribution": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 1 }
+        },
+        "human_system_divergence_count": { "type": "integer", "minimum": 0 },
+        "override_cases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "proposal_hash",
+              "action_class",
+              "source_artifact_type",
+              "system_decision_without_override",
+              "operator_action",
+              "human_final_decision",
+              "outcome_difference"
+            ],
+            "properties": {
+              "proposal_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+              "action_class": { "type": "string", "minLength": 1 },
+              "source_artifact_type": { "type": "string", "minLength": 1 },
+              "system_decision_without_override": { "type": "string", "minLength": 1 },
+              "operator_action": { "type": "string", "enum": ["APPROVE", "REJECT", "DEFER"] },
+              "human_final_decision": { "type": "string", "minLength": 1 },
+              "outcome_difference": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    }
   }
 }

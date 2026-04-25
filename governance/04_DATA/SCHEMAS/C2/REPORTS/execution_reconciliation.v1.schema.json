@@ -11,9 +11,12 @@
     "day_utc",
     "producer",
     "status",
+    "semantic_status",
     "reason_codes",
     "input_manifest",
     "checks",
+    "audit_guidance",
+    "runtime_ledger_projection",
     "canonical_json_hash"
   ],
   "properties": {
@@ -35,6 +38,16 @@
     },
 
     "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+    "semantic_status": {
+      "type": "string",
+      "enum": [
+        "NOT_YET_MATERIALIZED",
+        "BLOCKED_BY_UPSTREAM_PREREQUISITE",
+        "PENDING_PROPAGATION",
+        "MATERIALIZED_AND_FAILED",
+        "FULLY_OBSERVED_AND_CONFIRMED"
+      ]
+    },
     "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
 
     "input_manifest": {
@@ -64,6 +77,75 @@
           "pass": { "type": "boolean" },
           "details": { "type": "string", "minLength": 1, "maxLength": 2000 }
         }
+      }
+    },
+
+    "audit_guidance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "preferred_consumption_mode",
+        "versioned_snapshot_root",
+        "alias_path",
+        "alias_is_best_effort"
+      ],
+      "properties": {
+        "preferred_consumption_mode": { "type": "string", "const": "IMMUTABLE_VERSIONED_SNAPSHOT" },
+        "versioned_snapshot_root": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "alias_path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "alias_is_best_effort": { "type": "boolean" }
+      }
+    },
+
+    "runtime_ledger_projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ledger_path",
+        "ledger_sha256",
+        "derived_from_runtime_ledger",
+        "event_types",
+        "event_count",
+        "appended_event_ids",
+        "reused_event_ids",
+        "projection_notice"
+      ],
+      "properties": {
+        "ledger_path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "ledger_sha256": { "type": "string" },
+        "derived_from_runtime_ledger": { "type": "boolean" },
+        "event_types": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "event_count": { "type": "integer", "minimum": 0 },
+        "appended_event_ids": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        },
+        "reused_event_ids": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        },
+        "projection_notice": { "type": "string", "minLength": 1, "maxLength": 2000 }
+      }
+    },
+    "runtime_lifecycle_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "runtime_identity_contract_path",
+        "runtime_identity_contract_sha256",
+        "startup_identity_receipt_path",
+        "lifecycle_start_receipt_path"
+      ],
+      "properties": {
+        "run_id": { "type": "string", "minLength": 1 },
+        "runtime_identity_contract_path": { "type": "string", "minLength": 1 },
+        "runtime_identity_contract_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "startup_identity_receipt_path": { "type": "string", "minLength": 1 },
+        "lifecycle_start_receipt_path": { "type": "string", "minLength": 1 }
       }
     },
 

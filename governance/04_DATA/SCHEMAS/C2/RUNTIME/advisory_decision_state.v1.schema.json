@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/runtime/advisory_decision_state.v1.schema.json",
+  "title": "advisory_decision_state.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "surface_kind",
+    "decision_id",
+    "projection_version",
+    "generated_at_utc",
+    "authority_label",
+    "target_day",
+    "scope_id",
+    "operation_type",
+    "sleeve_id",
+    "environment",
+    "ib_account",
+    "advisory_item_id",
+    "advisory_surface_label",
+    "advisory_authority_class",
+    "decision_state",
+    "actionability_state",
+    "freshness_state",
+    "visibility_state",
+    "promotion_eligibility_state",
+    "invalidation_rule_id",
+    "explanation_mapping_version",
+    "primary_explanation",
+    "historical_visibility",
+    "governing_stage_refs",
+    "governing_transition_refs",
+    "governing_certification_refs",
+    "evidence_refs",
+    "semantic_events"
+  ],
+  "$defs": {
+    "ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_id", "artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_id": { "type": "string", "minLength": 1 },
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "minLength": 1 }
+      }
+    },
+    "explanation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "explanation_id",
+        "decision_state",
+        "actionability_state",
+        "freshness_state",
+        "invalidation_reason",
+        "short_message",
+        "detail_fields",
+        "evidence_refs",
+        "authority_label"
+      ],
+      "properties": {
+        "explanation_id": { "type": "string", "minLength": 1 },
+        "decision_state": { "type": "string", "minLength": 1 },
+        "actionability_state": { "type": "string", "minLength": 1 },
+        "freshness_state": { "type": "string", "minLength": 1 },
+        "visibility_state": { "type": "string", "minLength": 1 },
+        "invalidation_reason": { "type": "string", "minLength": 1 },
+        "short_message": { "type": "string", "minLength": 1 },
+        "detail_fields": { "type": "object", "additionalProperties": true },
+        "evidence_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+        "authority_label": { "type": "string", "minLength": 1 },
+        "action_class": {
+          "type": "string",
+          "enum": [
+            "none",
+            "verify_required_artifact",
+            "review_superseding_transition",
+            "repair_invalid_artifact",
+            "remove_forbidden_root_usage",
+            "historical_only"
+          ]
+        }
+      }
+    },
+    "semantic_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_type",
+        "authority_label",
+        "decision_state",
+        "actionability_state",
+        "freshness_state",
+        "visibility_state",
+        "promotion_eligibility_state",
+        "invalidation_reason",
+        "governing_refs",
+        "projection_version"
+      ],
+      "properties": {
+        "event_type": {
+          "type": "string",
+          "enum": [
+            "advisory_decision_computed",
+            "advisory_downgraded",
+            "advisory_suppressed",
+            "advisory_restored",
+            "promotion_eligibility_changed",
+            "advisory_historical_only",
+            "advisory_blocked"
+          ]
+        },
+        "authority_label": { "type": "string", "minLength": 1 },
+        "decision_state": { "type": "string", "minLength": 1 },
+        "actionability_state": { "type": "string", "minLength": 1 },
+        "freshness_state": { "type": "string", "minLength": 1 },
+        "visibility_state": { "type": "string", "minLength": 1 },
+        "promotion_eligibility_state": { "type": "string", "minLength": 1 },
+        "invalidation_reason": { "type": "string", "minLength": 1 },
+        "governing_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+        "projection_version": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "properties": {
+    "schema_id": { "const": "advisory_decision_state" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "advisory_decision_state_v1" },
+    "surface_kind": { "const": "projection" },
+    "decision_id": { "type": "string", "minLength": 1 },
+    "projection_version": { "type": "string", "minLength": 1 },
+    "generated_at_utc": { "type": "string", "format": "date-time" },
+    "authority_label": { "type": "string", "enum": ["governed_certified_decision"] },
+    "target_day": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "operation_type": { "type": "string", "minLength": 1 },
+    "sleeve_id": { "type": "string", "minLength": 1 },
+    "environment": { "type": "string", "minLength": 1 },
+    "ib_account": { "type": "string", "minLength": 1 },
+    "advisory_item_id": { "type": "string", "minLength": 1 },
+    "advisory_surface_label": { "type": "string", "minLength": 1 },
+    "advisory_authority_class": {
+      "type": "string",
+      "enum": ["informational", "diagnostic", "recommendation", "promotion_eligible"]
+    },
+    "decision_state": {
+      "type": "string",
+      "enum": [
+        "uncertified",
+        "incomplete_basis",
+        "stale",
+        "superseded",
+        "blocked",
+        "historical_only",
+        "actionable",
+        "promotion_eligible"
+      ]
+    },
+    "actionability_state": {
+      "type": "string",
+      "enum": ["blocked", "inspect_only", "actionable", "promotion_eligible"]
+    },
+    "freshness_state": {
+      "type": "string",
+      "enum": ["fresh", "stale", "superseded", "uncertified", "historical_only", "unknown"]
+    },
+    "visibility_state": {
+      "type": "string",
+      "enum": ["current", "current_downgraded", "historical_only", "suppressed"]
+    },
+    "promotion_eligibility_state": {
+      "type": "string",
+      "enum": ["eligible", "revoked", "not_applicable"]
+    },
+    "invalidation_rule_id": { "type": "string", "minLength": 1 },
+    "explanation_mapping_version": { "type": "string", "minLength": 1 },
+    "primary_explanation": { "$ref": "#/$defs/explanation" },
+    "historical_visibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["is_current", "is_historical_only", "is_suppressed"],
+      "properties": {
+        "is_current": { "type": "boolean" },
+        "is_historical_only": { "type": "boolean" },
+        "is_suppressed": { "type": "boolean" }
+      }
+    },
+    "governing_stage_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "governing_transition_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "governing_certification_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "governing_tax_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "governing_opportunity_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "governing_release_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "tax_binding_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "effect_state",
+        "completeness_state",
+        "freshness_state",
+        "blocker_states",
+        "opportunity_states",
+        "binding_reason_id"
+      ],
+      "properties": {
+        "effect_state": { "type": "string", "enum": ["clear", "downgrade", "block"] },
+        "completeness_state": { "type": "string", "minLength": 1 },
+        "freshness_state": { "type": "string", "minLength": 1 },
+        "blocker_states": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "opportunity_states": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "binding_reason_id": { "type": "string", "minLength": 1 },
+        "tax_state_ref": { "$ref": "#/$defs/ref" }
+      }
+    },
+    "opportunity_binding_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "effect_state",
+        "opportunity_state",
+        "review_priority",
+        "visibility_state",
+        "blocker_states",
+        "binding_reason_id"
+      ],
+      "properties": {
+        "effect_state": { "type": "string", "enum": ["clear", "downgrade", "block"] },
+        "opportunity_state": { "type": "string", "minLength": 1 },
+        "review_priority": { "type": "string", "minLength": 1 },
+        "visibility_state": { "type": "string", "minLength": 1 },
+        "blocker_states": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "delta_state": { "type": "string", "minLength": 1 },
+        "scenario_significance_state": { "type": "string", "minLength": 1 },
+        "binding_reason_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "advisory_surface_ref": { "$ref": "#/$defs/ref" },
+    "supersedes_ref": { "$ref": "#/$defs/ref" },
+    "superseded_by_ref": { "$ref": "#/$defs/ref" },
+    "evidence_refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "semantic_events": { "type": "array", "items": { "$ref": "#/$defs/semantic_event" } }
+  }
+}

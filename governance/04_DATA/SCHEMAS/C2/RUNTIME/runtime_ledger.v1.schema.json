@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/runtime/runtime_ledger.v1.schema.json",
+  "title": "runtime_ledger.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "ledger_event_id",
+    "day_utc",
+    "event_type",
+    "produced_utc",
+    "owner_plane",
+    "owner_tool",
+    "owner_run_id",
+    "run_id",
+    "session_id",
+    "submission_id",
+    "order_id",
+    "perm_id",
+    "payload_ref",
+    "payload_hash",
+    "identity_key",
+    "identity_tuple",
+    "event_payload_summary"
+  ],
+  "properties": {
+    "schema_id": { "const": "runtime_ledger" },
+    "schema_version": { "const": "v1" },
+    "ledger_event_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "BOOTSTRAP_STARTED",
+        "STARTUP_MATERIALIZATION_STARTED",
+        "STARTUP_AUTH_CONVERGENCE_COMPLETE",
+        "STARTUP_AUTH_CONVERGENCE_BLOCKED",
+        "STARTUP_GATE_ARTIFACTS_READY",
+        "STARTUP_GATE_ARTIFACTS_BLOCKED",
+        "STARTUP_MATERIALIZATION_COMPLETE",
+        "STARTUP_MATERIALIZATION_BLOCKED",
+        "KILL_SWITCH_EVALUATED_ACTIVE",
+        "KILL_SWITCH_EVALUATED_INACTIVE",
+        "BOOTSTRAP_READY",
+        "BOOTSTRAP_BLOCKED",
+        "ADMISSION_GRANTED",
+        "ADMISSION_BLOCKED",
+        "ACTIVATION_READY",
+        "ACTIVATION_BLOCKED",
+        "SUBMISSION_RECORDED",
+        "BROKER_STATUS_NOT_YET_OBSERVED",
+        "BROKER_STATUS_OBSERVED",
+        "FILL_NOT_YET_OBSERVED",
+        "FILL_OBSERVED",
+        "PROPAGATION_PENDING",
+        "PROPAGATION_COMPLETE",
+        "PROPAGATION_BLOCKED",
+        "POSITION_NORMALIZATION_RECORDED",
+        "EXIT_DECISION_RECORDED",
+        "EXIT_EXECUTION_REQUESTED",
+        "TRADE_RESULT_RECORDED",
+        "INTEGRATION_PASS",
+        "INTEGRATION_FAIL"
+      ]
+    },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "owner_plane": {
+      "type": "string",
+      "enum": [
+        "CANONICAL_CONTROL_PLANE",
+        "STARTUP_MATERIALIZATION_PLANE",
+        "EVALUATION_SAFETY_PLANE",
+        "SESSION_PLANE",
+        "EXECUTION_PLANE",
+        "PROJECTION_PLANE",
+        "POSITION_NORMALIZATION_PLANE",
+        "EXIT_DECISION_PLANE",
+        "TRADE_RESULT_CLOSURE_PLANE"
+      ]
+    },
+    "owner_tool": { "type": "string", "minLength": 1 },
+    "owner_run_id": { "type": "string" },
+    "run_id": { "type": "string" },
+    "session_id": { "type": "string" },
+    "submission_id": { "type": "string" },
+    "order_id": { "type": "string" },
+    "perm_id": { "type": "string" },
+    "payload_ref": { "type": "string" },
+    "payload_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "identity_key": { "type": "string", "minLength": 1 },
+    "identity_tuple": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "day_utc",
+        "owner_plane",
+        "owner_run_id",
+        "session_id",
+        "submission_id",
+        "order_id",
+        "perm_id"
+      ],
+      "properties": {
+        "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "owner_plane": { "type": "string", "minLength": 1 },
+        "owner_run_id": { "type": "string" },
+        "session_id": { "type": "string" },
+        "submission_id": { "type": "string" },
+        "order_id": { "type": "string" },
+        "perm_id": { "type": "string" }
+      }
+    },
+    "event_payload_summary": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

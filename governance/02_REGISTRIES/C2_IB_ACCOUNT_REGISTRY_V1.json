@@ -15,21 +15,20 @@
       "environment": "PAPER",
       "enabled_for_submission": true,
       "allowed_engine_ids": [
+        "C2_INTENT_SIMULATOR_V1",
         "C2_MEAN_REVERSION_EQ_V1",
         "C2_TREND_EQ_PRIMARY_V1",
         "C2_VOL_INCOME_DEFINED_RISK_V1",
         "C2_EVENT_DISLOCATION_V1",
         "C2_DEFENSIVE_TAIL_V1"
       ],
-      "allowed_symbols": [
-        "SPY"
-      ],
+      "allowed_symbols": null,
       "allowed_sleeve_ids": [
         "PRIMARY"
       ],
       "notes": [
         "Discovered from C2 truth: cash_ledger_v1 snapshots embed account_id=DUO847203.",
-        "Policy: DUO847203 is restricted to SPY only via allowed_symbols=[SPY].",
+        "Account registry owns account submission eligibility only; trading symbol policy is governed by ENGINE_MODEL_REGISTRY_V1.",
         "enabled_for_submission=true; allowed_engine_ids enumerates the currently ACTIVE engines in ENGINE_MODEL_REGISTRY_V1."
       ]
     },
@@ -38,6 +37,7 @@
       "environment": "PAPER",
       "enabled_for_submission": true,
       "allowed_engine_ids": [
+        "C2_INTENT_SIMULATOR_V1",
         "C2_MEAN_REVERSION_EQ_V1",
         "C2_TREND_EQ_PRIMARY_V1",
         "C2_VOL_INCOME_DEFINED_RISK_V1",
@@ -47,7 +47,7 @@
       "allowed_symbols": null,
       "notes": [
         "Proven in C2 truth via execution_evidence_v1/broker_baseline_snapshot_v1 (account_id=DUQ154892).",
-        "Policy: DUQ154892 may trade multiple symbols; allowed_symbols=null means no symbol restriction from the registry.",
+        "Account registry owns account submission eligibility only; trading symbol policy is governed by ENGINE_MODEL_REGISTRY_V1.",
         "enabled_for_submission=true; allowed_engine_ids enumerates the currently ACTIVE engines in ENGINE_MODEL_REGISTRY_V1."
       ]
     }

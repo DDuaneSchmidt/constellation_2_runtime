@@ -1,0 +1,71 @@
+{
+  "$id": "https://constellation.local/schemas/c2/runtime/runtime_control_record.v1.schema.json",
+  "title": "runtime_control_record.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_id",
+    "runtime_control_record_id",
+    "day_utc",
+    "produced_utc",
+    "contract_version",
+    "capability_scope",
+    "environment",
+    "ib_account",
+    "sleeve_id",
+    "control_state",
+    "effective_at_utc",
+    "kill_switch_state",
+    "allow_entries",
+    "readiness_state",
+    "readiness_ok",
+    "readiness_as_of_utc",
+    "readiness_expires_utc",
+    "evidence_fingerprint",
+    "source_artifact_refs",
+    "reason_codes",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "runtime_control_record" },
+    "schema_version": { "type": "string", "const": "v1" },
+    "record_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "runtime_control_record_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "day_utc": { "type": "string", "minLength": 10, "maxLength": 10 },
+    "produced_utc": { "type": "string", "minLength": 11 },
+    "contract_version": { "type": "string", "minLength": 1 },
+    "capability_scope": { "type": "string", "minLength": 1 },
+    "environment": { "type": "string", "minLength": 1 },
+    "ib_account": { "type": "string", "minLength": 1 },
+    "sleeve_id": { "type": "string", "minLength": 1 },
+    "control_state": { "type": "string", "enum": ["ALLOW", "BLOCKED"] },
+    "effective_at_utc": { "type": "string", "minLength": 11 },
+    "kill_switch_state": { "type": "string", "minLength": 1 },
+    "allow_entries": { "type": "boolean" },
+    "readiness_state": { "type": "string", "minLength": 1 },
+    "readiness_ok": { "type": "boolean" },
+    "readiness_as_of_utc": { "type": "string", "minLength": 11 },
+    "readiness_expires_utc": { "type": "string" },
+    "evidence_fingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "source_artifact_refs": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

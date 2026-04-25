@@ -48,6 +48,7 @@ The artifact must identify:
 - explicit `freshness_verdict`
 - explicit `linkage_verdict`
 - explicit `authority_scope = NON_AUTHORITY_FACT`
+- explicit `binding_classification = NON_BINDING_DIAGNOSTIC`
 
 Compatibility fields may be retained for existing consumers, but they remain derived-only posture facts:
 

@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "registry_id": { "type": "string", "minLength": 1 },
+    "schema_id": { "const": "constitutional_artifact_authority_registry" },
+    "schema_version": { "const": "v1" },
+    "domains": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "domain_id": { "type": "string", "minLength": 1 },
+          "authoritative_root_type": {
+            "enum": ["canonical_truth_root", "execution_truth_root", "mixed", "read_only"]
+          },
+          "description": { "type": "string", "minLength": 1 }
+        },
+        "required": ["domain_id", "authoritative_root_type", "description"]
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": { "type": "string", "minLength": 1 },
+          "artifact_class": {
+            "enum": [
+              "source_fact",
+              "compiled_state",
+              "policy_snapshot",
+              "policy_interpretation",
+              "decision_proposal",
+              "admission_result",
+              "execution_result",
+              "outcome_record",
+              "override_record",
+              "exception_record",
+              "read_model"
+            ]
+          },
+          "authoritative_writer": { "type": "string", "minLength": 1 },
+          "authoritative_domain": { "type": "string", "minLength": 1 },
+          "authoritative_root_type": {
+            "enum": ["canonical_truth_root", "execution_truth_root", "mixed", "read_only"]
+          },
+          "schema_relpath": { "type": "string", "minLength": 1 },
+          "root_policy": {
+            "enum": ["canonical_only", "execution_only", "mirrored", "read_only_projection"]
+          },
+          "authoritative_path_pattern": { "type": "string", "minLength": 1 },
+          "mirror_paths": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "mirror_id": { "type": "string", "minLength": 1 },
+                "root_type": { "enum": ["canonical_truth_root", "execution_truth_root"] },
+                "path_pattern": { "type": "string", "minLength": 1 },
+                "authoritative_bridge": { "type": "string", "minLength": 1 }
+              },
+              "required": ["mirror_id", "root_type", "path_pattern", "authoritative_bridge"]
+            }
+          },
+          "legal_consumers": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "required_upstream_dependencies": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "initial_finality_state": {
+            "enum": ["provisional", "finalized", "corrected", "superseded", "archived"]
+          },
+          "allowed_finality_states": {
+            "type": "array",
+            "items": { "enum": ["provisional", "finalized", "corrected", "superseded", "archived"] },
+            "minItems": 1
+          },
+          "append_only_audit": { "type": "boolean" },
+          "immutable_policy_snapshot_required": { "type": "boolean" },
+          "frozen_input_bundle_required": { "type": "boolean" },
+          "dependency_law": { "const": "declared_downward_only" },
+          "materialization_policy": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "writer_policy": {
+                "enum": ["produce_only", "consume_only", "may_materialize_if_missing", "must_block_if_missing"]
+              },
+              "default_consumer_policy": {
+                "enum": ["produce_only", "consume_only", "may_materialize_if_missing", "must_block_if_missing"]
+              },
+              "allowed_materializers": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              }
+            },
+            "required": ["writer_policy", "default_consumer_policy", "allowed_materializers"]
+          }
+        },
+        "required": [
+          "artifact_id",
+          "artifact_class",
+          "authoritative_writer",
+          "authoritative_domain",
+          "authoritative_root_type",
+          "schema_relpath",
+          "root_policy",
+          "authoritative_path_pattern",
+          "legal_consumers",
+          "required_upstream_dependencies",
+          "initial_finality_state",
+          "allowed_finality_states",
+          "append_only_audit",
+          "immutable_policy_snapshot_required",
+          "frozen_input_bundle_required",
+          "dependency_law",
+          "materialization_policy"
+        ]
+      }
+    }
+  },
+  "required": ["registry_id", "schema_id", "schema_version", "domains", "artifacts"]
+}

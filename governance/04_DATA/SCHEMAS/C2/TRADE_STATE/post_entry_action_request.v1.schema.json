@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/trade_state/post_entry_action_request.v1.schema.json",
+  "title": "post_entry_action_request.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "request_id",
+    "request_seal_id",
+    "action_class",
+    "trade_identity_id",
+    "execution_identity",
+    "created_at_utc"
+  ],
+  "properties": {
+    "schema_id": { "const": "post_entry_action_request" },
+    "schema_version": { "const": "v1" },
+    "request_id": { "type": "string", "minLength": 1 },
+    "request_seal_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "action_class": {
+      "type": "string",
+      "enum": ["CLOSE_TRADE", "REDUCE_TRADE", "AMEND_PROTECTION", "CANCEL_ORDER"]
+    },
+    "trade_identity_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "requested_quantity": { "type": ["string", "null"] },
+    "order_parameters": {
+      "type": ["object", "null"],
+      "additionalProperties": {
+        "type": ["string", "number", "integer", "boolean", "null"]
+      }
+    },
+    "target_order_linkage": {
+      "type": ["object", "null"],
+      "additionalProperties": { "type": ["string", "integer", "null"] }
+    },
+    "execution_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environment", "sleeve_id", "account_id", "client_id_orders", "execution_root_ref"],
+      "properties": {
+        "environment": { "type": "string", "minLength": 1 },
+        "sleeve_id": { "type": "string", "minLength": 1 },
+        "account_id": { "type": "string", "minLength": 1 },
+        "client_id_orders": { "type": "integer", "minimum": 1 },
+        "execution_root_ref": { "type": "string", "minLength": 1 }
+      }
+    },
+    "created_at_utc": { "type": "string", "format": "date-time" }
+  }
+}

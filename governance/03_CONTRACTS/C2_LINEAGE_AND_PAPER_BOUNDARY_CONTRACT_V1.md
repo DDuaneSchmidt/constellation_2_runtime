@@ -40,16 +40,19 @@ Fail-closed: missing any required field MUST stop the pipeline before broker sub
 
 PAPER mode claims require:
 
-1) A broker raw log exists:
+1) A canonical Core 1 raw journal exists:
+   truth_sleeves/<sleeve_id>/<mode>/broker_fact_spine_v1/raw_journal/<DAY>/broker_raw_evidence_envelope.v1.jsonl
+
+2) A canonical Core 1 health report exists:
+   truth_sleeves/<sleeve_id>/<mode>/reports/broker_observation_health_v1/<DAY>/broker_observation_health.v1.json
+
+3) Legacy global broker-event logs may exist only as source-adapter or diagnostic mirrors:
    constellation_2/runtime/truth/execution_evidence_v1/broker_events/<DAY>/broker_event_log.v1.jsonl
 
-2) A broker day manifest exists and validates the raw log:
-   .../broker_event_day_manifest.v1.json
-
-3) Submission-level execution evidence MUST be derived from broker raw events, not synthetic placeholders.
+4) Submission-level execution evidence MUST be derived from canonical broker raw events, not synthetic placeholders.
    Synthetic statuses (prefix "SYNTH") are forbidden in PAPER readiness.
 
-Fail-closed: if submissions exist for a day and broker raw or manifest is missing, the day is NOT PAPER READY and the pipeline must fail.
+Fail-closed: if submissions exist for a day and canonical broker raw evidence or Core 1 health is missing, the day is NOT PAPER READY and the pipeline must fail.
 
 # Atomic Pointer Requirements
 
@@ -78,7 +81,8 @@ Minimum evidence set for a day with activity:
 - intents_v1 snapshots per engine/day
 - order plan(s) with required lineage
 - broker_submission_record v3 (or higher) with required lineage
-- broker_event_log JSONL + broker_event_day_manifest
+- canonical Core 1 raw journal + broker observation health report
+- legacy broker_event_log JSONL + broker_event_day_manifest only when a source-adapter mirror exists
 - execution_event_record v2 (or higher) linked to broker raw via manifest sha256
 - positions snapshot with engine attribution
 - reconciliation report referencing submission_ids

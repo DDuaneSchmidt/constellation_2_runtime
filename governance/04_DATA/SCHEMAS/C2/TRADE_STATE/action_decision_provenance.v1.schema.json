@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/trade_state/action_decision_provenance.v1.schema.json",
+  "title": "action_decision_provenance.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_owner",
+    "materialization_set_id",
+    "day_utc",
+    "evaluated_at_utc",
+    "trade_identity_id",
+    "core2_input_refs_used",
+    "core2_fields_read",
+    "candidate_actions_generated",
+    "rejected_candidates",
+    "blocker_rules_fired",
+    "conflict_rule_applied",
+    "final_posture_rationale",
+    "policy_versions_used",
+    "prior_state_comparison",
+    "derived_only"
+  ],
+  "properties": {
+    "schema_id": { "const": "action_decision_provenance" },
+    "schema_version": { "const": "v1" },
+    "authority_owner": { "const": "action_decision_provenance_v1" },
+    "materialization_set_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "day_utc": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "evaluated_at_utc": { "type": "string", "format": "date-time" },
+    "trade_identity_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "core2_input_refs_used": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifact_ref" }
+    },
+    "core2_fields_read": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "candidate_actions_generated": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/action_reason_row" }
+    },
+    "rejected_candidates": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/action_reason_row" }
+    },
+    "blocker_rules_fired": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "conflict_rule_applied": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule_id", "summary"],
+      "properties": {
+        "rule_id": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string", "minLength": 1 }
+      }
+    },
+    "final_posture_rationale": { "type": "string", "minLength": 1 },
+    "policy_versions_used": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gate_contract_id",
+        "gate_contract_version",
+        "policy_contract_id",
+        "policy_contract_version",
+        "conflict_contract_id",
+        "conflict_contract_version"
+      ],
+      "properties": {
+        "gate_contract_id": { "type": "string", "minLength": 1 },
+        "gate_contract_version": { "type": "integer", "minimum": 1 },
+        "policy_contract_id": { "type": "string", "minLength": 1 },
+        "policy_contract_version": { "type": "integer", "minimum": 1 },
+        "conflict_contract_id": { "type": "string", "minLength": 1 },
+        "conflict_contract_version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "prior_state_comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["comparison_status", "prior_authority_ref", "changed_fields"],
+      "properties": {
+        "comparison_status": { "type": "string", "enum": ["INITIAL_MATERIALIZATION", "NO_MATERIAL_CHANGE", "MATERIAL_CHANGE"] },
+        "prior_authority_ref": {
+          "oneOf": [
+            { "$ref": "#/$defs/artifact_ref" },
+            { "type": "null" }
+          ]
+        },
+        "changed_fields": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "derived_only": { "const": true }
+  },
+  "$defs": {
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "action_reason_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_code", "reason"],
+      "properties": {
+        "action_code": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisory/risk_envelope.v1.schema.json",
+  "title": "risk_envelope.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_id",
+    "risk_envelope_id",
+    "household_id",
+    "snapshot_refs",
+    "total_portfolio_risk_budget",
+    "total_portfolio_risk_used",
+    "total_portfolio_risk_remaining",
+    "sleeve_risk_budgets",
+    "concentration_overrides",
+    "required_derisk_actions",
+    "new_risk_blocked",
+    "emergency_only_mode",
+    "reason_codes"
+  ],
+  "properties": {
+    "schema_id": { "const": "risk_envelope" },
+    "schema_version": { "const": "v1" },
+    "record_id": { "type": "string", "minLength": 1 },
+    "risk_envelope_id": { "type": "string", "minLength": 1 },
+    "household_id": { "type": "string", "minLength": 1 },
+    "snapshot_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["household_state_snapshot_id", "compiled_constraints_id", "allocation_plan_id"],
+      "properties": {
+        "household_state_snapshot_id": { "type": "string", "minLength": 1 },
+        "compiled_constraints_id": { "type": "string", "minLength": 1 },
+        "allocation_plan_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "total_portfolio_risk_budget": { "type": "string", "minLength": 1 },
+    "total_portfolio_risk_used": { "type": "string", "minLength": 1 },
+    "total_portfolio_risk_remaining": { "type": "string", "minLength": 1 },
+    "sleeve_risk_budgets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sleeve_id", "risk_budget_cents"],
+        "properties": {
+          "sleeve_id": { "type": "string", "minLength": 1 },
+          "risk_budget_cents": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "concentration_overrides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["cluster_id", "breach_status", "reason_codes"],
+        "properties": {
+          "cluster_id": { "type": "string", "minLength": 1 },
+          "breach_status": { "type": "string", "minLength": 1 },
+          "reason_codes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "required_derisk_actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["symbol", "action_type", "reason_codes"],
+        "properties": {
+          "symbol": { "type": "string", "minLength": 1 },
+          "action_type": { "type": "string", "minLength": 1 },
+          "reason_codes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "new_risk_blocked": { "type": "boolean" },
+    "emergency_only_mode": { "type": "boolean" },
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

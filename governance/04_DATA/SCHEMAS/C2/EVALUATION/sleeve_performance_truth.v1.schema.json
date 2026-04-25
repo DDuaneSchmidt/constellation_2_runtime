@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/evaluation/sleeve_performance_truth.v1.schema.json",
+  "title": "sleeve_performance_truth.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "execution_sleeve_id",
+    "mode",
+    "sleeve_id",
+    "strategy_family",
+    "sample_trade_count",
+    "measurement_window",
+    "realized_pnl_truth",
+    "drawdown_truth",
+    "execution_truth",
+    "benchmark_truth",
+    "trade_attribution_truth",
+    "legacy_measurement_refs",
+    "reason_codes",
+    "closure_state",
+    "first_blocker_code",
+    "missing_dependency_artifacts",
+    "constitutional_dependency_declaration",
+    "constitutional_lineage"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_SLEEVE_PERFORMANCE_TRUTH_V1" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "execution_sleeve_id": { "type": "string", "minLength": 1 },
+    "mode": { "type": "string", "minLength": 1 },
+    "sleeve_id": { "type": "string", "minLength": 1 },
+    "strategy_family": { "type": "string", "minLength": 1 },
+    "performance_status": { "type": "string", "minLength": 1 },
+    "sample_trade_count": { "type": "integer", "minimum": 0 },
+    "measurement_window": { "type": "object" },
+    "realized_pnl_truth": { "type": "object" },
+    "drawdown_truth": { "type": "object" },
+    "execution_truth": { "type": "object" },
+    "benchmark_truth": { "type": "object" },
+    "trade_attribution_truth": { "type": "object" },
+    "trade_outcome_truth": { "type": "object" },
+    "legacy_measurement_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["artifact_id", "path", "sha256"],
+        "properties": {
+          "artifact_id": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "closure_state": { "type": "string", "enum": ["COMPLETE", "DEGRADED", "BLOCKED", "OPEN"] },
+    "first_blocker_code": { "type": "string" },
+    "missing_dependency_artifacts": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "constitutional_dependency_declaration": { "type": "object" },
+    "constitutional_lineage": { "type": "object" }
+  }
+}

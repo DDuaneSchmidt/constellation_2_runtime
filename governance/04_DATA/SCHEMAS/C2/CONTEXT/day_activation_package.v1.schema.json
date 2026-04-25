@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "account_id": {
+      "type": "string"
+    },
+    "build_ref": {
+      "type": "object"
+    },
+    "context_hash": {
+      "type": "string"
+    },
+    "day_utc": {
+      "type": "string"
+    },
+    "dependency_refs": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "manifest_ref": {
+      "type": "string"
+    },
+    "mode": {
+      "type": "string"
+    },
+    "operation_type": {
+      "type": "string"
+    },
+    "package_hash": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "schema_id": {
+      "const": "day_activation_package"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "sealed": {
+      "type": "boolean"
+    },
+    "sealed_utc": {
+      "type": "string"
+    },
+    "sleeve_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "sleeve_id",
+    "mode",
+    "account_id",
+    "operation_type",
+    "context_hash",
+    "sealed",
+    "sealed_utc",
+    "build_ref",
+    "manifest_ref",
+    "dependency_refs"
+  ],
+  "type": "object"
+}

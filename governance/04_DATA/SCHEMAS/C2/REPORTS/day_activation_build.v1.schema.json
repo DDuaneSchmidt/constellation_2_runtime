@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "account_id": {
+      "type": "string"
+    },
+    "closure_status": {
+      "type": "string"
+    },
+    "context_hash": {
+      "type": "string"
+    },
+    "day_utc": {
+      "type": "string"
+    },
+    "dependency_results": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "generated_utc": {
+      "type": "string"
+    },
+    "mode": {
+      "type": "string"
+    },
+    "operation_type": {
+      "type": "string"
+    },
+    "schema_id": {
+      "const": "day_activation_build"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "sleeve_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "sleeve_id",
+    "mode",
+    "account_id",
+    "operation_type",
+    "context_hash",
+    "dependency_results",
+    "closure_status",
+    "generated_utc"
+  ],
+  "type": "object"
+}

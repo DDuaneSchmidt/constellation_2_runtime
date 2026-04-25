@@ -123,6 +123,31 @@
       },
       "type": "array"
     },
+    "blocking_codes": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "closure_state": {
+      "type": "string",
+      "enum": ["COMPLETE", "BLOCKED", "DEGRADED", "OPEN"]
+    },
+    "first_blocker_code": {
+      "type": "string"
+    },
+    "missing_dependency_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "constitutional_dependency_declaration": {
+      "type": "object"
+    },
+    "constitutional_lineage": {
+      "type": "object"
+    },
     "schema_id": {
       "const": "gate_stack_verdict"
     },

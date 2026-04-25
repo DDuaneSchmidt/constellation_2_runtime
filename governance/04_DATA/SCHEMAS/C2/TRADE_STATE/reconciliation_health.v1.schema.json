@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/trade_state/reconciliation_health.v1.schema.json",
+  "title": "reconciliation_health.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_owner",
+    "materialization_set_id",
+    "day_utc",
+    "evaluation_utc",
+    "trade_identity_id",
+    "incorporated_state_ref",
+    "current_state",
+    "blocker_reasons",
+    "degraded_reasons",
+    "freshness_status",
+    "ambiguity_status",
+    "drift_status",
+    "insufficient_evidence_status",
+    "downstream_action_posture",
+    "derived_only"
+  ],
+  "properties": {
+    "schema_id": { "const": "reconciliation_health" },
+    "schema_version": { "const": "v1" },
+    "authority_owner": { "const": "reconciliation_health_v1" },
+    "materialization_set_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "day_utc": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "evaluation_utc": { "type": "string", "format": "date-time" },
+    "trade_identity_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "incorporated_state_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "current_state": { "type": "string", "enum": ["TRUSTED", "DEGRADED", "BLOCKED"] },
+    "blocker_reasons": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "degraded_reasons": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "freshness_status": { "type": "string", "enum": ["FRESH", "STALE", "TOO_STALE"] },
+    "ambiguity_status": { "type": "string", "enum": ["CLEAR", "AMBIGUOUS"] },
+    "drift_status": { "type": "string", "enum": ["CLEAR", "DRIFTED"] },
+    "insufficient_evidence_status": { "type": "string", "enum": ["SUFFICIENT", "INSUFFICIENT"] },
+    "downstream_action_posture": { "type": "string", "enum": ["SAFE", "DEGRADED", "BLOCKED"] },
+    "derived_only": { "const": true }
+  }
+}
+

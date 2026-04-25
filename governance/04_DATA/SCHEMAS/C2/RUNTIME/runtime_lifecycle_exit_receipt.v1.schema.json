@@ -1,0 +1,100 @@
+{
+  "schema_id": "C2_RUNTIME_LIFECYCLE_EXIT_RECEIPT_SCHEMA_V1",
+  "title": "C2 Runtime Lifecycle Exit Receipt V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "run_id",
+    "seam_id",
+    "generated_at_utc",
+    "entrypoint_name",
+    "entrypoint_path",
+    "service_name",
+    "launcher_pid",
+    "launch_phase",
+    "exit_disposition",
+    "wrapper_exit_code",
+    "reason_codes",
+    "exit_reason_code",
+    "exit_reason_summary",
+    "active_state_path",
+    "active_state_release_status",
+    "released_at_utc",
+    "runtime_identity_ref"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "runtime_lifecycle_exit_receipt.v1" },
+    "schema_version": { "type": "string", "const": "v1" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "seam_id": { "type": "string", "minLength": 1 },
+    "generated_at_utc": { "type": "string", "minLength": 20 },
+    "entrypoint_name": { "type": "string", "minLength": 1 },
+    "entrypoint_path": { "type": "string", "minLength": 1 },
+    "service_name": { "type": "string" },
+    "launcher_pid": { "type": "integer", "minimum": 1 },
+    "launch_phase": { "type": "string", "enum": ["PRELAUNCH", "RUNTIME"] },
+    "exit_disposition": {
+      "type": "string",
+      "enum": ["NORMAL_EXIT", "NONZERO_EXIT", "SIGNAL_EXIT", "PRELAUNCH_FAILURE"]
+    },
+    "wrapper_exit_code": { "type": "integer", "minimum": 0 },
+    "termination_signal": { "type": "string", "minLength": 1 },
+    "reason_codes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "exit_reason_code": { "type": "string", "minLength": 1 },
+    "exit_reason_summary": { "type": "string", "minLength": 1 },
+    "active_state_path": { "type": "string", "minLength": 1 },
+    "active_state_release_status": { "type": "string", "enum": ["RELEASED"] },
+    "released_at_utc": { "type": "string", "minLength": 20 },
+    "startup_identity_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startup_id", "startup_receipt_path", "startup_receipt_sha256"],
+      "properties": {
+        "startup_id": { "type": "string", "minLength": 1 },
+        "startup_receipt_path": { "type": "string", "minLength": 1 },
+        "startup_receipt_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "lifecycle_start_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["receipt_path", "receipt_sha256"],
+      "properties": {
+        "receipt_path": { "type": "string", "minLength": 1 },
+        "receipt_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "runtime_identity_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_path",
+        "contract_sha256",
+        "authoritative_repo_root",
+        "runtime_environment",
+        "primary_execution_identity_ref"
+      ],
+      "properties": {
+        "contract_path": { "type": "string", "minLength": 1 },
+        "contract_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "authoritative_repo_root": { "type": "string", "minLength": 1 },
+        "runtime_environment": { "type": "string", "minLength": 1 },
+        "primary_execution_identity_ref": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["authority_owner", "sleeve_id"],
+          "properties": {
+            "authority_owner": { "type": "string", "const": "execution_identity_binding_v1" },
+            "sleeve_id": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    }
+  }
+}

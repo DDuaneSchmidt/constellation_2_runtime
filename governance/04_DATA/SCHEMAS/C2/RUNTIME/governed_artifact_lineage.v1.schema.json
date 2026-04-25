@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_id": { "const": "governed_artifact_lineage" },
+    "schema_version": { "const": "v1" },
+    "artifact_type": { "type": "string", "minLength": 1 },
+    "artifact_version": { "type": "string", "minLength": 1 },
+    "artifact_class": {
+      "enum": [
+        "source_fact",
+        "compiled_state",
+        "policy_snapshot",
+        "policy_interpretation",
+        "decision_proposal",
+        "admission_result",
+        "execution_result",
+        "outcome_record",
+        "override_record",
+        "exception_record",
+        "read_model"
+      ]
+    },
+    "authority_id": { "type": "string", "minLength": 1 },
+    "producer_id": { "type": "string", "minLength": 1 },
+    "generated_at_utc": { "type": "string", "minLength": 1 },
+    "effective_at_utc": { "type": "string", "minLength": 1 },
+    "finality_state": { "enum": ["provisional", "finalized", "corrected", "superseded", "archived"] },
+    "input_artifact_refs": { "$ref": "#/$defs/artifactRefs" },
+    "policy_snapshot_refs": { "$ref": "#/$defs/artifactRefs" },
+    "code_version": { "type": "string" },
+    "run_id": { "type": "string" },
+    "corrected_from_ref": { "$ref": "#/$defs/optionalArtifactRef" },
+    "supersedes_ref": { "$ref": "#/$defs/optionalArtifactRef" }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_type",
+    "artifact_version",
+    "artifact_class",
+    "authority_id",
+    "producer_id",
+    "generated_at_utc",
+    "effective_at_utc",
+    "finality_state",
+    "input_artifact_refs",
+    "policy_snapshot_refs",
+    "code_version",
+    "run_id",
+    "corrected_from_ref",
+    "supersedes_ref"
+  ],
+  "$defs": {
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "artifact_class": { "type": "string" },
+        "finality_state": { "type": "string" }
+      },
+      "required": ["artifact_id", "path", "sha256", "artifact_class", "finality_state"]
+    },
+    "optionalArtifactRef": {
+      "anyOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/artifactRef" }
+      ]
+    },
+    "artifactRefs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifactRef" }
+    }
+  }
+}

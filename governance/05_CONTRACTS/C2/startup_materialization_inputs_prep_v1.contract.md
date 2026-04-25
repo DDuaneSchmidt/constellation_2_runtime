@@ -32,7 +32,7 @@ It is not session authority, readiness authority, admission authority, or submit
 
 - same-day paper intents under `constellation_2/runtime/truth/intents_v1/snapshots/<DAY>/`
 - same-day market-data spine under `constellation_2/runtime/truth/market_data_snapshot_v1/`
-- liquidity gate report under `constellation_2/runtime/truth/reports/liquidity_slippage_gate_v1/<DAY>/` when same-day market close is unavailable
+- liquidity gate report under `constellation_2/runtime/truth/reports/liquidity_slippage_gate_v1/<DAY>/` remains an adjacent governed gate surface, but it must not be treated as an allowed stale fallback source for the startup default equity reference price unless a later governed policy explicitly authorizes that exact use
 
 ## Required meaning
 
@@ -49,6 +49,14 @@ The artifact must identify:
 - `produced_at_utc`
 - explicit `authority_scope = NON_AUTHORITY_FACT`
 
+For positive equity-entry intents, the canonical default equity reference price policy is:
+
+- accept the first governed positive same-day `market_data_snapshot_v1` price only when the same-day row exists and its governed `ingested_utc` is at or after `09:30 America/New_York`
+- reject zero, negative, malformed, or prior-day prices
+- reject same-day rows ingested before `09:30 America/New_York`
+- remain fail-closed before `09:30 America/New_York` when no governed same-day price exists
+- remain fail-closed after `09:30 America/New_York` when no governed same-day price exists
+
 ## Allowed status values
 
 - `PASS`
@@ -59,7 +67,8 @@ The artifact must identify:
 
 - Missing same-day intents must not yield `PASS`.
 - Multi-symbol equity entry reference-price ambiguity must not yield `PASS`.
-- Missing or malformed fallback liquidity-gate evidence must not yield `PASS`.
+- Missing or malformed same-day core-session reference-price evidence must not yield `PASS`.
+- Prior-day liquidity-gate or other stale fallback prices must not yield `PASS`.
 - The surface must never claim startup readiness or session authority.
 
 ## Consumers

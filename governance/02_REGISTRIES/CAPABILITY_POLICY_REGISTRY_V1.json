@@ -33,11 +33,25 @@
       "rationale": "A truthful positive IB handshake is required before any paper or production submission capability can be claimed."
     },
     {
-      "capability_id": "core_sleeve_gate_set_ready",
+      "capability_id": "startup_authorization_gate_set_ready",
       "paper_role": "BLOCKING",
       "production_role": "BLOCKING",
       "owner": "Constellation_2",
-      "rationale": "Capital risk, correlation, liquidity, and operator daily gates encode the minimum safe execution envelope for paper and production."
+      "rationale": "PAPER and production startup authorization must bind to the lifecycle-aware authorization_gate_verdict_v1 surface, not the legacy blended gate stack."
+    },
+    {
+      "capability_id": "core_sleeve_gate_set_ready",
+      "paper_role": "ADVISORY",
+      "production_role": "BLOCKING",
+      "owner": "Constellation_2",
+      "rationale": "The legacy blended sleeve gate bundle remains visible for backward-compatible diagnostics, but PAPER startup authorization is governed by the lifecycle-aware authorization verdict instead."
+    },
+    {
+      "capability_id": "economic_health_gate_set_complete",
+      "paper_role": "ADVISORY",
+      "production_role": "BLOCKING",
+      "owner": "Constellation_2",
+      "rationale": "Economic/post-trade gate completion remains lifecycle-scoped and visible, but it must not be blended incorrectly into initial PAPER startup authorization."
     },
     {
       "capability_id": "production_certification_gate_set_complete",

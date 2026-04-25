@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "C2_INTENT_AUTHORIZATION_LEDGER_V1",
+  "title": "C2 Intent Authorization Ledger v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "intent_hash",
+    "intent_id",
+    "engine_id",
+    "canonical_sleeve_id",
+    "allocation_epoch_id",
+    "event_id",
+    "event_utc",
+    "state",
+    "requested_quantity",
+    "authorized_quantity",
+    "reserved_quantity",
+    "committed_quantity",
+    "released_quantity",
+    "remaining_reserved_quantity",
+    "reason_codes",
+    "source_refs",
+    "idempotency_key"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_INTENT_AUTHORIZATION_LEDGER_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "intent_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "intent_id": { "type": "string", "minLength": 1 },
+    "engine_id": { "type": "string", "minLength": 1 },
+    "canonical_sleeve_id": { "type": "string", "minLength": 1 },
+    "allocation_epoch_id": { "type": "string", "minLength": 1 },
+    "event_id": { "type": "string", "minLength": 1 },
+    "event_utc": { "type": "string", "minLength": 1 },
+    "state": {
+      "type": "string",
+      "enum": [
+        "REQUESTED",
+        "AUTHORIZED",
+        "RESERVED",
+        "COMMITTED",
+        "RELEASED",
+        "REJECTED"
+      ]
+    },
+    "requested_quantity": { "type": "integer", "minimum": 0 },
+    "authorized_quantity": { "type": "integer", "minimum": 0 },
+    "reserved_quantity": { "type": "integer", "minimum": 0 },
+    "committed_quantity": { "type": "integer", "minimum": 0 },
+    "released_quantity": { "type": "integer", "minimum": 0 },
+    "remaining_reserved_quantity": { "type": "integer", "minimum": 0 },
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "source_refs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "idempotency_key": { "type": "string", "minLength": 1 }
+  }
+}

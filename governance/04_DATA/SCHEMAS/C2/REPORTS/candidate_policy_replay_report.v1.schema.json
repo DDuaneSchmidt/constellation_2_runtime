@@ -1,0 +1,263 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/candidate_policy_replay_report.v1.schema.json",
+  "title": "candidate_policy_replay_report.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "day_utc",
+    "source_truth_root",
+    "replay_truth_root",
+    "submission_id",
+    "candidate_policy",
+    "historical_override_analysis",
+    "proposal_comparisons",
+    "aggregate_metrics",
+    "risk_flags",
+    "status",
+    "reason_codes",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "candidate_policy_replay_report" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "source_truth_root": { "type": "string", "minLength": 1 },
+    "replay_truth_root": { "type": "string", "minLength": 1 },
+    "submission_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "candidate_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_version", "policy_source", "policy_input_hash", "thresholds"],
+      "properties": {
+        "policy_version": { "type": "string", "minLength": 1 },
+        "policy_source": { "type": "string", "minLength": 1 },
+        "policy_input_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "decision_change_warn_pct",
+            "auto_execute_increase_warn_pct",
+            "block_rate_decrease_warn_pct",
+            "divergence_warn_pct"
+          ],
+          "properties": {
+            "decision_change_warn_pct": { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{4}$" },
+            "auto_execute_increase_warn_pct": { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{4}$" },
+            "block_rate_decrease_warn_pct": { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{4}$" },
+            "divergence_warn_pct": { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{4}$" }
+          }
+        }
+      }
+    },
+    "historical_override_analysis": { "$ref": "#/$defs/overrideAnalysis" },
+    "proposal_comparisons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "proposal_hash",
+          "fact_bundle_hash",
+          "source_artifact_type",
+          "source_artifact_path",
+          "action_type",
+          "action_class",
+          "original_policy_version",
+          "candidate_policy_version",
+          "original_decision",
+          "candidate_decision",
+          "original_authorization_issuable",
+          "candidate_authorization_issuable",
+          "divergence_type",
+          "original_reproduced",
+          "original_reproduction_reason_codes",
+          "override_required_original",
+          "override_required_candidate",
+          "would_system_now_auto_execute",
+          "would_system_now_block",
+          "original_blocker_rules",
+          "candidate_blocker_rules"
+        ],
+        "properties": {
+          "proposal_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "fact_bundle_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "source_artifact_type": { "type": "string", "minLength": 1 },
+          "source_artifact_path": { "type": "string", "minLength": 1 },
+          "action_type": { "type": "string", "minLength": 1 },
+          "action_class": { "type": "string", "minLength": 1 },
+          "original_policy_version": { "type": "string", "minLength": 1 },
+          "candidate_policy_version": { "type": "string", "minLength": 1 },
+          "original_decision": { "type": "string", "minLength": 1 },
+          "candidate_decision": { "type": "string", "minLength": 1 },
+          "original_authorization_issuable": { "type": "boolean" },
+          "candidate_authorization_issuable": { "type": "boolean" },
+          "divergence_type": {
+            "type": "string",
+            "enum": ["SAME", "MORE_PERMISSIVE", "MORE_RESTRICTIVE", "DIFFERENT_CLASSIFICATION"]
+          },
+          "original_reproduced": { "type": "boolean" },
+          "original_reproduction_reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "operator_action": { "type": ["string", "null"], "enum": ["APPROVE", "REJECT", "DEFER", null] },
+          "human_final_decision": { "type": ["string", "null"] },
+          "override_required_original": { "type": "boolean" },
+          "override_required_candidate": { "type": "boolean" },
+          "would_system_now_auto_execute": { "type": "boolean" },
+          "would_system_now_block": { "type": "boolean" },
+          "candidate_matches_human_resolution": { "type": ["boolean", "null"] },
+          "original_blocker_rules": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "candidate_blocker_rules": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "aggregate_metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "proposal_count",
+        "decision_changed_count",
+        "decision_changed_pct",
+        "original_decision_counts",
+        "candidate_decision_counts",
+        "divergence_type_counts",
+        "auto_execute_delta_count",
+        "auto_execute_delta_pct",
+        "block_delta_count",
+        "block_delta_pct",
+        "override_reduction_count",
+        "override_reduction_pct",
+        "mismatch_frequency",
+        "human_system_divergence_count",
+        "candidate_matches_human_resolution_count",
+        "original_block_reasons_distribution",
+        "candidate_block_reasons_distribution",
+        "new_risk_exposure_indicators"
+      ],
+      "properties": {
+        "proposal_count": { "type": "integer", "minimum": 0 },
+        "decision_changed_count": { "type": "integer", "minimum": 0 },
+        "decision_changed_pct": { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{4}$" },
+        "original_decision_counts": { "$ref": "#/$defs/countMap" },
+        "candidate_decision_counts": { "$ref": "#/$defs/countMap" },
+        "divergence_type_counts": { "$ref": "#/$defs/countMap" },
+        "auto_execute_delta_count": { "type": "integer" },
+        "auto_execute_delta_pct": { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{4}$" },
+        "block_delta_count": { "type": "integer" },
+        "block_delta_pct": { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{4}$" },
+        "override_reduction_count": { "type": "integer", "minimum": 0 },
+        "override_reduction_pct": { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{4}$" },
+        "mismatch_frequency": { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{4}$" },
+        "human_system_divergence_count": { "type": "integer", "minimum": 0 },
+        "candidate_matches_human_resolution_count": { "type": "integer", "minimum": 0 },
+        "original_block_reasons_distribution": { "$ref": "#/$defs/countMap" },
+        "candidate_block_reasons_distribution": { "$ref": "#/$defs/countMap" },
+        "new_risk_exposure_indicators": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "constructive_more_permissive_count",
+            "protective_more_permissive_count",
+            "review_to_auto_count",
+            "block_to_auto_count"
+          ],
+          "properties": {
+            "constructive_more_permissive_count": { "type": "integer", "minimum": 0 },
+            "protective_more_permissive_count": { "type": "integer", "minimum": 0 },
+            "review_to_auto_count": { "type": "integer", "minimum": 0 },
+            "block_to_auto_count": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "risk_flags": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["flag", "severity", "detail"],
+        "properties": {
+          "flag": { "type": "string", "minLength": 1 },
+          "severity": { "type": "string", "enum": ["LOW", "MEDIUM", "HIGH"] },
+          "detail": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "status": { "type": "string", "enum": ["OK", "FAIL"] },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "countMap": {
+      "type": "object",
+      "additionalProperties": { "type": "integer" }
+    },
+    "overrideAnalysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "review_required_count",
+        "operator_decision_count",
+        "approved_override_count",
+        "override_frequency_by_action_class",
+        "mismatch_count",
+        "mismatch_cases",
+        "block_reasons_distribution",
+        "human_system_divergence_count",
+        "override_cases"
+      ],
+      "properties": {
+        "review_required_count": { "type": "integer", "minimum": 0 },
+        "operator_decision_count": { "type": "integer", "minimum": 0 },
+        "approved_override_count": { "type": "integer", "minimum": 0 },
+        "override_frequency_by_action_class": { "$ref": "#/$defs/countMap" },
+        "mismatch_count": { "type": "integer", "minimum": 0 },
+        "mismatch_cases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["proposal_hash", "artifact_type", "artifact_path", "reason_codes"],
+            "properties": {
+              "proposal_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+              "artifact_type": { "type": "string", "minLength": 1 },
+              "artifact_path": { "type": "string", "minLength": 1 },
+              "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+            }
+          }
+        },
+        "block_reasons_distribution": { "$ref": "#/$defs/countMap" },
+        "human_system_divergence_count": { "type": "integer", "minimum": 0 },
+        "override_cases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "proposal_hash",
+              "action_class",
+              "source_artifact_type",
+              "system_decision_without_override",
+              "operator_action",
+              "human_final_decision",
+              "outcome_difference"
+            ],
+            "properties": {
+              "proposal_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+              "action_class": { "type": "string", "minLength": 1 },
+              "source_artifact_type": { "type": "string", "minLength": 1 },
+              "system_decision_without_override": { "type": "string", "minLength": 1 },
+              "operator_action": { "type": "string", "enum": ["APPROVE", "REJECT", "DEFER"] },
+              "human_final_decision": { "type": "string", "minLength": 1 },
+              "outcome_difference": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

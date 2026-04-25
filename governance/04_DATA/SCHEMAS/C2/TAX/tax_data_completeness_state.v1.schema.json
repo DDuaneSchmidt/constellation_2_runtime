@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/tax_data_completeness_state.v1.schema.json",
+  "title": "tax_data_completeness_state.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "completeness_state_id", "scope_id", "open_gaps", "resolved_gaps", "restriction_flags", "reason_codes"],
+  "properties": {
+    "schema_id": { "const": "tax_data_completeness_state" },
+    "schema_version": { "const": "v1" },
+    "completeness_state_id": { "type": "string", "minLength": 1 },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "open_gaps": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "resolved_gaps": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "restriction_flags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}
+

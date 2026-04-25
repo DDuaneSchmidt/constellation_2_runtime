@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/decision_replay_report.v1.schema.json",
+  "title": "decision_replay_report.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "report_id", "decision_id", "snapshot_id", "resolved_policy_set_id", "dependency_fingerprint_id", "replayed_equal", "original_truth_view", "current_truth_view", "original_decision", "current_recomputed_decision", "original_decision_valid_under_current_truth", "divergence_reason_codes", "reason_codes"],
+  "properties": {
+    "schema_id": { "const": "decision_replay_report" },
+    "schema_version": { "const": "v1" },
+    "report_id": { "type": "string", "minLength": 1 },
+    "decision_id": { "type": "string", "minLength": 1 },
+    "snapshot_id": { "type": "string", "minLength": 1 },
+    "resolved_policy_set_id": { "type": "string", "minLength": 1 },
+    "dependency_fingerprint_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "replayed_equal": { "type": "boolean" },
+    "original_truth_view": { "type": "object" },
+    "current_truth_view": { "type": "object" },
+    "original_decision": { "type": "object" },
+    "current_recomputed_decision": { "type": "object" },
+    "original_decision_valid_under_current_truth": { "type": "boolean" },
+    "divergence_reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}

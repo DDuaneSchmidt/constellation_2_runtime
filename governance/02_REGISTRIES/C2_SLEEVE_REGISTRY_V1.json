@@ -18,19 +18,27 @@
       "status": "PRODUCTION",
       "ib_account": "DUO847203",
       "symbols": [
+        "GLD",
+        "IWM",
+        "QQQ",
         "SPY"
+        ,
+        "TLT"
       ],
       "truth_partition": "truth_sleeves/PRIMARY/PAPER",
       "ib_gateway_profile": {
         "host": "127.0.0.1",
-        "port": 7497,
+        "port": 4002,
         "client_id_market_data": 1101,
-        "client_id_orders": 1102,
-        "client_id_observer": 1103
+        "client_id_orders": 7,
+        "client_id_observer": 179
       },
       "notes": [
         "Initial migration sleeve: preserves single-account PAPER topology while enabling per-sleeve truth partitioning.",
-        "Truth partition is canonical: truth_sleeves/<sleeve_id>/<mode>."
+        "Truth partition is canonical: truth_sleeves/<sleeve_id>/<mode>.",
+        "symbols is a derived sleeve coverage view from ACTIVE engine symbol policy bound to this sleeve/account; it is not the submit-boundary trading-policy authority.",
+        "For governed PAPER execution, host/port/client_id_orders/client_id_observer reflect the active live execution path already proven by readiness bootstrap, handshake, and orchestrator submit wiring.",
+        "client_id_market_data remains topology metadata for market-data workflows and is not the Phase D submit-boundary execution-policy authority."
       ]
     }
   ]

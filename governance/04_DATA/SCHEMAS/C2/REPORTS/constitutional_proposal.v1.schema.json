@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/constitutional_proposal.v1.schema.json",
+  "title": "constitutional_proposal.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "proposal_id",
+    "proposal_version",
+    "created_at",
+    "source_subsystem",
+    "action_type",
+    "action_class",
+    "target_scope",
+    "target_entities",
+    "requested_effect",
+    "expected_economic_effect",
+    "expected_tax_effect",
+    "expected_risk_effect",
+    "reversibility_class",
+    "urgency_class",
+    "expiration_at",
+    "required_fact_types",
+    "required_dependency_checks",
+    "source_reasoning_reference",
+    "source_policy_bindings",
+    "source_artifact_hashes"
+  ],
+  "properties": {
+    "schema_id": { "const": "constitutional_proposal" },
+    "schema_version": { "const": "v1" },
+    "proposal_id": { "type": "string", "minLength": 1 },
+    "proposal_version": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "minLength": 1 },
+    "source_subsystem": { "type": "string", "minLength": 1 },
+    "action_type": { "type": "string", "minLength": 1 },
+    "action_class": { "type": "string", "minLength": 1 },
+    "target_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["global", "domain", "account", "sleeve", "action_class"],
+      "properties": {
+        "global": { "type": "string" },
+        "domain": { "type": "string" },
+        "account": { "type": "string" },
+        "sleeve": { "type": "string" },
+        "action_class": { "type": "string" }
+      }
+    },
+    "target_entities": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "requested_effect": { "type": "object" },
+    "expected_economic_effect": { "type": "object" },
+    "expected_tax_effect": { "type": "object" },
+    "expected_risk_effect": { "type": "object" },
+    "reversibility_class": { "type": "string", "minLength": 1 },
+    "urgency_class": { "type": "string", "minLength": 1 },
+    "expiration_at": {
+      "anyOf": [
+        { "type": "string", "minLength": 1 },
+        { "type": "null" }
+      ]
+    },
+    "required_fact_types": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "required_dependency_checks": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "source_reasoning_reference": { "type": "string", "minLength": 1 },
+    "source_policy_bindings": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "source_artifact_hashes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["artifact_ref", "sha256"],
+        "properties": {
+          "artifact_ref": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    }
+  }
+}

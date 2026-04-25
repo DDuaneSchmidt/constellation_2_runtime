@@ -1,0 +1,25 @@
+
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "schema_id": {"const": "execution_build"},
+    "schema_version": {"const": "v1"},
+    "operation_type": {"type": "string"},
+    "candidate_ref": {"type": "object"},
+    "attempt_id": {"type": ["string", "null"]},
+    "intent_id": {"type": ["string", "null"]},
+    "trade_instance_id": {"type": ["string", "null"]},
+    "submission_id": {"type": "string"},
+    "global_context_package_ref": {"type": ["object", "null"]},
+    "economic_state_package_ref": {"type": ["object", "null"]},
+    "dependency_results": {"type": "array", "items": {"type": "object"}},
+    "constitutional_dependency_declaration": {"type": "object"},
+    "constitutional_lineage": {"type": "object"},
+    "frozen_decision_input_bundle": {"type": "object"},
+    "closure_status": {"type": "string"},
+    "generated_utc": {"type": "string"}
+  },
+  "required": ["schema_id", "schema_version", "operation_type", "candidate_ref", "submission_id", "dependency_results", "constitutional_dependency_declaration", "constitutional_lineage", "frozen_decision_input_bundle", "closure_status", "generated_utc"]
+}

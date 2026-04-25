@@ -1,0 +1,536 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/paper_session_bootstrap.v1.schema.json",
+  "title": "paper_session_bootstrap.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "environment",
+    "mode",
+    "sleeve_id",
+    "ib_account",
+    "operation_id",
+    "bootstrap_run_id",
+    "owner_run_id",
+    "produced_utc",
+    "producer",
+    "truth_roots",
+    "frozen_inputs",
+    "frozen_input_manifest_sha256",
+    "materialized_steps",
+    "reused_steps",
+    "skipped_steps",
+    "step_results",
+    "shared_control_state",
+    "startup_materialization_phase",
+    "evaluation_phase",
+    "activation_phase",
+    "session_bootstrap",
+    "bootstrap_status",
+    "bootstrap_semantic_status",
+    "root_blocker_class",
+    "admission_basis",
+    "required_prerequisites_status",
+    "paper_advisory_prerequisites_status",
+    "production_only_prerequisites_status",
+    "runtime_prerequisite_verification",
+    "operator_guidance",
+    "day_activation_ready",
+    "smoke_submit_allowed",
+    "blocker_chain",
+    "canonical_stop_surface",
+    "canonical_stop_artifact_path",
+    "canonical_stop_reason_codes",
+    "runtime_ledger_projection"
+  ],
+  "properties": {
+    "schema_id": { "const": "paper_session_bootstrap" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "environment": { "const": "PAPER" },
+    "mode": { "type": "string", "minLength": 1 },
+    "sleeve_id": { "const": "PRIMARY" },
+    "ib_account": { "type": "string", "minLength": 1 },
+    "operation_id": { "type": "string", "minLength": 1 },
+    "bootstrap_run_id": { "type": "string", "minLength": 1 },
+    "owner_run_id": { "type": "string", "minLength": 1 },
+    "produced_utc": { "type": "string", "minLength": 20 },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 1 }
+      }
+    },
+    "truth_roots": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canonical_truth_root", "sleeve_truth_root", "operator_input_root"],
+      "properties": {
+        "canonical_truth_root": { "type": "string", "minLength": 1 },
+        "sleeve_truth_root": { "type": "string", "minLength": 1 },
+        "operator_input_root": { "type": "string", "minLength": 1 }
+      }
+    },
+    "frozen_inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "paper_capital_seed",
+        "operator_statement",
+        "canonical_kill_switch",
+        "sleeve_kill_switch_projection",
+        "capital_risk_envelope",
+        "capital_authority_allocation",
+        "authorization_readiness",
+        "admission"
+      ],
+      "properties": {
+        "paper_capital_seed": { "$ref": "#/$defs/artifactRef" },
+        "operator_statement": { "$ref": "#/$defs/artifactRef" },
+        "canonical_kill_switch": { "$ref": "#/$defs/killSwitchRef" },
+        "sleeve_kill_switch_projection": { "$ref": "#/$defs/killSwitchProjectionRef" },
+        "capital_risk_envelope": { "$ref": "#/$defs/artifactRef" },
+        "capital_authority_allocation": { "$ref": "#/$defs/artifactRef" },
+        "authorization_readiness": { "$ref": "#/$defs/artifactRef" },
+        "admission": { "$ref": "#/$defs/admissionRef" }
+      }
+    },
+    "frozen_input_manifest_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "materialized_steps": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "reused_steps": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "skipped_steps": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "step_results": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/stepResult" }
+    },
+    "shared_control_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canonical_kill_switch", "sleeve_kill_switch_projection"],
+      "properties": {
+        "canonical_kill_switch": { "$ref": "#/$defs/killSwitchRef" },
+        "sleeve_kill_switch_projection": { "$ref": "#/$defs/killSwitchProjectionRef" }
+      }
+    },
+    "startup_materialization_phase": { "$ref": "#/$defs/startupMaterializationPhase" },
+    "evaluation_phase": { "$ref": "#/$defs/evaluationPhase" },
+    "activation_phase": { "$ref": "#/$defs/activationPhase" },
+    "session_bootstrap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cash_ledger_snapshot",
+        "accounting_nav",
+        "startup_materialization",
+        "startup_authorization_convergence",
+        "capital_risk_envelope",
+        "allocation_readiness",
+        "authorization_readiness",
+        "admission",
+        "pointer_refresh",
+        "day_activation"
+      ],
+      "properties": {
+        "cash_ledger_snapshot": { "$ref": "#/$defs/artifactRef" },
+        "accounting_nav": { "$ref": "#/$defs/artifactRef" },
+        "startup_materialization": { "$ref": "#/$defs/artifactRef" },
+        "startup_authorization_convergence": { "$ref": "#/$defs/artifactRef" },
+        "capital_risk_envelope": { "$ref": "#/$defs/artifactRef" },
+        "allocation_readiness": { "$ref": "#/$defs/artifactRef" },
+        "authorization_readiness": { "$ref": "#/$defs/artifactRef" },
+        "admission": { "$ref": "#/$defs/admissionRef" },
+        "promotion_gate": { "$ref": "#/$defs/promotionRef" },
+        "pointer_refresh": { "$ref": "#/$defs/pointerRef" },
+        "day_activation": { "$ref": "#/$defs/dayActivation" }
+      }
+    },
+    "bootstrap_status": { "type": "string", "enum": ["READY", "BLOCKED"] },
+    "bootstrap_semantic_status": {
+      "type": "string",
+      "enum": [
+        "READY",
+        "READY_WITH_ADVISORIES",
+        "READY_PAPER_ONLY",
+        "READY_PAPER_ONLY_WITH_ADVISORIES",
+        "BLOCKED"
+      ]
+    },
+    "root_blocker_class": {
+      "type": "string",
+      "enum": ["NONE", "STARTUP_MATERIALIZATION", "EVALUATION_SAFETY", "ACTIVATION"]
+    },
+    "admission_basis": { "type": "string", "minLength": 1 },
+    "required_prerequisites_status": { "$ref": "#/$defs/prerequisiteGroup" },
+    "paper_advisory_prerequisites_status": { "$ref": "#/$defs/prerequisiteGroup" },
+    "production_only_prerequisites_status": { "$ref": "#/$defs/prerequisiteGroup" },
+    "runtime_prerequisite_verification": { "$ref": "#/$defs/runtimePrerequisiteVerification" },
+    "operator_guidance": { "$ref": "#/$defs/operatorGuidance" },
+    "day_activation_ready": { "type": "boolean" },
+    "smoke_submit_allowed": { "type": "boolean" },
+    "blocker_chain": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "canonical_stop_surface": { "type": "string" },
+    "canonical_stop_artifact_path": { "type": "string" },
+    "canonical_stop_reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "runtime_ledger_projection": { "$ref": "#/$defs/runtimeLedgerProjection" }
+  },
+  "$defs": {
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["path", "exists", "sha256", "status", "reason_codes"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "exists": { "type": "boolean" },
+        "sha256": { "type": "string" },
+        "status": { "type": "string" },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "killSwitchRef": {
+      "allOf": [
+        { "$ref": "#/$defs/artifactRef" },
+        {
+          "type": "object",
+          "required": ["state", "state_sha256", "input_manifest_sha256"],
+          "properties": {
+            "state": { "type": ["string", "null"] },
+            "state_sha256": { "type": ["string", "null"] },
+            "input_manifest_sha256": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "killSwitchProjectionRef": {
+      "allOf": [
+        { "$ref": "#/$defs/killSwitchRef" },
+        {
+          "type": "object",
+          "required": ["synced_from_canonical"],
+          "properties": {
+            "synced_from_canonical": { "type": "boolean" }
+          }
+        }
+      ]
+    },
+    "admissionRef": {
+      "allOf": [
+        { "$ref": "#/$defs/artifactRef" },
+        {
+          "type": "object",
+          "required": ["admission_status", "mode", "reason", "binding", "build_ref", "closure_status", "hidden_dependency_check_result"],
+          "properties": {
+            "admission_status": { "type": ["string", "null"] },
+            "mode": { "type": ["string", "null"] },
+            "reason": { "type": ["string", "null"] },
+            "binding": { "type": ["boolean", "null"] },
+            "build_ref": {},
+            "closure_status": { "type": ["string", "null"] },
+            "hidden_dependency_check_result": {}
+          }
+        }
+      ]
+    },
+    "pointerRef": {
+      "allOf": [
+        { "$ref": "#/$defs/artifactRef" },
+        {
+          "type": "object",
+          "required": ["day_utc", "points_to", "refreshed_for_day"],
+          "properties": {
+            "day_utc": { "type": ["string", "null"] },
+            "points_to": { "type": ["string", "null"] },
+            "refreshed_for_day": { "type": "boolean" }
+          }
+        }
+      ]
+    },
+    "promotionRef": {
+      "allOf": [
+        { "$ref": "#/$defs/artifactRef" },
+        {
+          "type": "object",
+          "required": ["promotion_state", "blocked_reason_codes"],
+          "properties": {
+            "promotion_state": { "type": ["string", "null"] },
+            "blocked_reason_codes": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "startupMaterializationPhase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "materialize_requested",
+        "blocker_chain",
+        "startup_authorization_convergence",
+        "authorization_readiness",
+        "gate_artifacts_materialized"
+      ],
+      "properties": {
+        "status": { "type": "string", "enum": ["COMPLETE", "BLOCKED"] },
+        "materialize_requested": { "type": "boolean" },
+        "blocker_chain": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "startup_authorization_convergence": { "$ref": "#/$defs/artifactRef" },
+        "authorization_readiness": { "$ref": "#/$defs/artifactRef" },
+        "gate_artifacts_materialized": { "type": "boolean" }
+      }
+    },
+    "evaluationPhase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "blocker_chain", "kill_switch_state", "authorization_status", "admission_status"],
+      "properties": {
+        "status": { "type": "string", "enum": ["READY", "BLOCKED"] },
+        "blocker_chain": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "kill_switch_state": { "type": "string" },
+        "authorization_status": { "type": "string" },
+        "admission_status": { "type": "string" }
+      }
+    },
+    "activationPhase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "blocker_chain", "day_activation_ready", "closure_status"],
+      "properties": {
+        "status": { "type": "string", "enum": ["READY", "BLOCKED"] },
+        "blocker_chain": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "day_activation_ready": { "type": "boolean" },
+        "closure_status": { "type": "string" }
+      }
+    },
+    "dayActivation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["build_path", "package_path", "closure_status", "first_real_blocker"],
+      "properties": {
+        "build_path": { "type": "string" },
+        "package_path": { "type": "string" },
+        "closure_status": { "type": "string" },
+        "first_real_blocker": {}
+      }
+    },
+    "prerequisiteCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["check_id", "pass", "details", "ref_path", "reason_codes"],
+      "properties": {
+        "check_id": { "type": "string", "minLength": 1 },
+        "pass": { "type": "boolean" },
+        "details": { "type": "string" },
+        "ref_path": { "type": "string" },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "prerequisiteGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "unmet", "checks"],
+      "properties": {
+        "status": { "type": "string", "minLength": 1 },
+        "unmet": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "checks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/prerequisiteCheck" }
+        }
+      }
+    },
+    "operatorGuidance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recommended_action",
+        "retry_blocker_chain",
+        "escalation_blocker_chain",
+        "first_blocker_stage",
+        "first_blocker_prerequisite_id",
+        "first_blocker_owner_tool",
+        "first_blocker_artifact_path",
+        "first_blocker_class",
+        "first_blocker_reason_codes",
+        "first_blocker_action_summary",
+        "fix_then_rerun_rule",
+        "do_not_run_manually"
+      ],
+      "properties": {
+        "recommended_action": { "type": "string", "enum": ["PROCEED", "RETRY", "ESCALATE"] },
+        "retry_blocker_chain": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "escalation_blocker_chain": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "first_blocker_stage": { "type": "string" },
+        "first_blocker_prerequisite_id": { "type": "string" },
+        "first_blocker_owner_tool": { "type": "string" },
+        "first_blocker_artifact_path": { "type": "string" },
+        "first_blocker_class": { "type": "string" },
+        "first_blocker_reason_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "first_blocker_action_summary": { "type": "string" },
+        "fix_then_rerun_rule": { "type": "string", "minLength": 1 },
+        "do_not_run_manually": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "runtimePrerequisite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prerequisite_id",
+        "stage",
+        "status",
+        "blocker_class",
+        "owner_tool",
+        "consumer_tool",
+        "artifact_path",
+        "reason_codes",
+        "action_summary"
+      ],
+      "properties": {
+        "prerequisite_id": { "type": "string", "minLength": 1 },
+        "stage": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "minLength": 1 },
+        "blocker_class": { "type": "string", "minLength": 1 },
+        "owner_tool": { "type": "string", "minLength": 1 },
+        "consumer_tool": { "type": "string", "minLength": 1 },
+        "artifact_path": { "type": "string" },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "action_summary": { "type": "string", "minLength": 1 }
+      }
+    },
+    "runtimePrerequisiteVerification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "stage",
+        "fix_then_rerun_rule",
+        "do_not_run_manually",
+        "prerequisites",
+        "earliest_failing_prerequisite"
+      ],
+      "properties": {
+        "status": { "type": "string", "enum": ["READY", "BLOCKED"] },
+        "stage": { "type": "string", "minLength": 1 },
+        "fix_then_rerun_rule": { "type": "string", "minLength": 1 },
+        "do_not_run_manually": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "prerequisites": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/runtimePrerequisite" }
+        },
+        "earliest_failing_prerequisite": {
+          "anyOf": [
+            { "$ref": "#/$defs/runtimePrerequisite" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "stepResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["step_id", "scope", "owner_tool", "action", "return_code", "path", "status", "stdout", "stderr"],
+      "properties": {
+        "step_id": { "type": "string", "minLength": 1 },
+        "scope": { "type": "string", "minLength": 1 },
+        "owner_tool": { "type": "string", "minLength": 1 },
+        "action": { "type": "string", "enum": ["MATERIALIZED", "REUSED", "SKIPPED", "FAILED"] },
+        "return_code": { "type": ["integer", "null"] },
+        "path": { "type": "string" },
+        "status": { "type": "string", "minLength": 1 },
+        "stdout": { "type": "string" },
+        "stderr": { "type": "string" }
+      }
+    },
+    "runtimeLedgerProjection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ledger_path",
+        "ledger_sha256",
+        "derived_from_runtime_ledger",
+        "event_types",
+        "event_count",
+        "appended_event_ids",
+        "reused_event_ids",
+        "projection_notice"
+      ],
+      "properties": {
+        "ledger_path": { "type": "string", "minLength": 1 },
+        "ledger_sha256": { "type": "string" },
+        "derived_from_runtime_ledger": { "type": "boolean" },
+        "event_types": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "event_count": { "type": "integer", "minimum": 0 },
+        "appended_event_ids": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        },
+        "reused_event_ids": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        },
+        "projection_notice": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

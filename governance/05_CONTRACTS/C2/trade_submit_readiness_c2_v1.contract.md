@@ -5,22 +5,27 @@ title: "Constellation 2.0 — Trade Submit Readiness (C2-native) v1"
 version: 1
 status: DRAFT
 created_utc: 2026-02-28T00:00:00Z
-repo_root_authoritative: /home/node/constellation_2_runtime
-canonical_truth_root: /home/node/constellation_2_runtime/constellation_2/runtime/truth
+repo_root_authoritative: /home/node/constellation
+canonical_execution_root_owner: sleeve_execution_root_v1
 scope:
   - "Defines the C2-native readiness artifact required before Phase D broker submission."
-  - "Eliminates cross-repo readiness leakage by binding provenance.truth_root to C2 canonical truth root."
+  - "Binds readiness provenance.truth_root to the canonical sleeve-scoped execution root."
 non_goals:
   - "Does not replace gate_stack_verdict or kill switch enforcement (those remain mandatory in Phase D)."
   - "Does not attempt to infer broker readiness from external systemctl state."
 ---
 
-# 1) Authoritative outputs (C2 truth)
+# 1) Authoritative outputs (C2 execution root)
 
 This contract introduces a C2-native readiness spine written ONLY under:
 
-- `constellation_2/runtime/truth/trade_submit_readiness_c2_v1/status.json`
-- `constellation_2/runtime/truth/trade_submit_readiness_c2_v1/latest_pointer.v1.json`
+- `truth_sleeves/<sleeve_id>/<mode>/trade_submit_readiness_c2_v1/<mode>/<ib_account>/status.json`
+- `truth_sleeves/<sleeve_id>/<mode>/trade_submit_readiness_c2_v1/<mode>/<ib_account>/latest_pointer.v1.json`
+
+Operator convenience only:
+
+- the writer MAY emit `trade_submit_readiness_c2_v1/status.json` and `latest_pointer.v1.json` as current-day aliases
+- these aliases are non-authoritative conveniences and MUST NOT be the Phase D lookup target
 
 # 2) Governed schemas
 
@@ -33,7 +38,7 @@ These outputs MUST validate against:
 
 The readiness tool MUST consume the C2 handshake spine:
 
-- `constellation_2/runtime/truth/ib_api_handshake/latest_pointer.v1.json`
+- `truth_sleeves/<sleeve_id>/<mode>/ib_api_handshake/latest_pointer.v1.json`
 - and the referenced day artifact `ib_api_handshake.v1.json`
 
 Readiness MUST be FAIL (fail-closed) if:
@@ -53,7 +58,7 @@ The readiness tool MUST record `provenance.registry_sha256` as the sha256 of tha
 
 The readiness status MUST include:
 
-- `provenance.truth_root == /home/node/constellation_2_runtime/constellation_2/runtime/truth`
+- `provenance.truth_root == /home/node/constellation_runtime_data/truth_sleeves/<sleeve_id>/<mode>`
 
 Any readiness artifact whose provenance.truth_root differs is NON-AUTHORITATIVE and MUST NOT be accepted by Phase D submission logic.
 
@@ -61,11 +66,16 @@ Any readiness artifact whose provenance.truth_root differs is NON-AUTHORITATIVE 
 
 Phase D submission boundary MUST fail closed (no broker call) unless:
 
-- C2-native readiness file exists at `trade_submit_readiness_c2_v1/status.json`,
+- C2-native readiness file exists at `trade_submit_readiness_c2_v1/<mode>/<ib_account>/status.json`,
 - `ok == true` and `state == "OK"`,
 - `environment == "PAPER"` for paper mode,
 - `ib_account` matches the submission ib_account,
-- and `provenance.truth_root` equals the canonical truth root.
+- and `provenance.truth_root` equals the canonical sleeve execution root.
+
+# 6a) Execution-root precedence
+
+- `sleeve_execution_root_v1` is the single canonical owner for readiness output root selection.
+- older global/shared readiness roots are legacy only and MUST NOT be used for active submission authorization.
 
 # 7) Determinism
 

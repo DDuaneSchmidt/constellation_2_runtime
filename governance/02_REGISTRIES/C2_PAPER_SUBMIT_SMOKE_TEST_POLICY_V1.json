@@ -1,0 +1,50 @@
+{
+  "schema_id": "C2_PAPER_SUBMIT_SMOKE_TEST_POLICY_V1",
+  "schema_version": "v1",
+  "policy_id": "c2_paper_submit_smoke_test_policy_v1",
+  "produced_utc": "2026-04-14T00:00:00Z",
+  "producer": {
+    "repo": "constellation",
+    "module": "governance/02_REGISTRIES/C2_PAPER_SUBMIT_SMOKE_TEST_POLICY_V1.json",
+    "git_sha": "PENDING_WORKTREE"
+  },
+  "scope": {
+    "environment": "PAPER",
+    "sleeve_id": "PRIMARY",
+    "engine_id": "C2_INTENT_SIMULATOR_V1",
+    "currency": "USD"
+  },
+  "smoke_test_rules": {
+    "test_only": true,
+    "allow_non_paper": false,
+    "require_explicit_broker_transmit": true,
+    "allow_same_day": true,
+    "instrument": {
+      "kind": "EQUITY",
+      "symbol": "SPY",
+      "currency": "USD",
+      "ib_conId": 756733,
+      "ib_localSymbol": "SPY"
+    },
+    "side": "BUY",
+    "quantity_shares": 1,
+    "order_terms": {
+      "order_type": "LIMIT",
+      "limit_price": "500.00",
+      "time_in_force": "DAY"
+    },
+    "request_notes_prefix": "PAPER_SUBMIT_SMOKE_TEST_V1",
+    "authorization_reason_code": "PAPER_SUBMIT_SMOKE_TEST_AUTHORIZED",
+    "authorization_constraint_codes": [
+      "PAPER_ONLY",
+      "TEST_ONLY",
+      "SMOKE_TEST_ONLY"
+    ]
+  },
+  "notes": [
+    "Governed paper-only submit/evidence smoke path.",
+    "Writes explicit smoke request and explicit smoke authorization artifacts.",
+    "Normal production orchestrator, allocation, and authorization paths remain unchanged.",
+    "Broker submission is permitted only in PAPER and only with explicit operator transmit enablement."
+  ]
+}

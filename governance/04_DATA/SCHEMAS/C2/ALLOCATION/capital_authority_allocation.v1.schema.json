@@ -14,6 +14,9 @@
     "reason_codes",
     "input_manifest",
     "portfolio",
+    "allocation_state",
+    "sleeve_account_authority_state",
+    "decision_chain",
     "per_sleeve",
     "per_intent"
   ],
@@ -65,6 +68,8 @@
             "enum": [
               "exposure_net",
               "policy_manifest",
+              "qualification_policy_manifest",
+              "sleeve_edge_snapshot",
               "intents_snapshot",
               "positions_snapshot",
               "cash_ledger_snapshot",
@@ -95,6 +100,410 @@
       }
     },
 
+    "governed_evaluation_control_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "consumer_seam",
+        "policy_registry_ref",
+        "scorecard_control_input_forbidden",
+        "portfolio_control",
+        "sleeve_controls",
+        "portfolio_headroom_multiplier_bp",
+        "sleeve_headroom_multiplier_bp_by_sleeve"
+      ],
+      "properties": {
+        "consumer_seam": { "const": "capital_authority_allocation_v1" },
+        "policy_registry_ref": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1 },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        },
+        "scorecard_control_input_forbidden": { "type": "boolean" },
+        "portfolio_headroom_multiplier_bp": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "sleeve_headroom_multiplier_bp_by_sleeve": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 10000 }
+        },
+        "portfolio_control": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scope_kind",
+            "scope_id",
+            "execution_sleeve_id",
+            "mode",
+            "adoption_state",
+            "artifact_status",
+            "action_state",
+            "mandatory_or_advisory",
+            "headroom_multiplier_bp",
+            "control_state",
+            "reason_codes",
+            "action_reason_codes",
+            "action_ref",
+            "evaluation_ref",
+            "policy_snapshot_ref",
+            "diagnostic",
+            "raw_headroom_cents",
+            "effective_headroom_cents"
+          ],
+          "properties": {
+            "scope_kind": { "const": "portfolio" },
+            "scope_id": { "type": "string", "minLength": 1 },
+            "execution_sleeve_id": { "type": "string" },
+            "mode": { "type": "string" },
+            "adoption_state": { "type": "string", "enum": ["ADOPTED", "NOT_ADOPTED"] },
+            "artifact_status": { "type": "string", "enum": ["OK", "MISSING", "INVALID", "NOT_ADOPTED"] },
+            "action_state": { "type": "string" },
+            "mandatory_or_advisory": { "type": "string" },
+            "headroom_multiplier_bp": { "type": "integer", "minimum": 0, "maximum": 10000 },
+            "control_state": { "type": "string", "minLength": 1 },
+            "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "action_reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "action_ref": { "type": "object" },
+            "evaluation_ref": { "type": "object" },
+            "policy_snapshot_ref": { "type": "object" },
+            "diagnostic": { "type": "string" },
+            "raw_headroom_cents": { "type": "integer", "minimum": 0 },
+            "effective_headroom_cents": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "sleeve_controls": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "scope_kind",
+              "scope_id",
+              "execution_sleeve_id",
+              "mode",
+              "adoption_state",
+              "artifact_status",
+              "action_state",
+              "mandatory_or_advisory",
+              "headroom_multiplier_bp",
+              "control_state",
+              "reason_codes",
+              "action_reason_codes",
+              "action_ref",
+              "evaluation_ref",
+              "policy_snapshot_ref",
+              "diagnostic",
+              "pre_governance_headroom_cents",
+              "effective_headroom_cents"
+            ],
+            "properties": {
+              "scope_kind": { "const": "sleeve" },
+              "scope_id": { "type": "string", "minLength": 1 },
+              "execution_sleeve_id": { "type": "string" },
+              "mode": { "type": "string" },
+              "adoption_state": { "type": "string", "enum": ["ADOPTED", "NOT_ADOPTED"] },
+              "artifact_status": { "type": "string", "enum": ["OK", "MISSING", "INVALID", "NOT_ADOPTED"] },
+              "action_state": { "type": "string" },
+              "mandatory_or_advisory": { "type": "string" },
+              "headroom_multiplier_bp": { "type": "integer", "minimum": 0, "maximum": 10000 },
+              "control_state": { "type": "string", "minLength": 1 },
+              "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+              "action_reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+              "action_ref": { "type": "object" },
+              "evaluation_ref": { "type": "object" },
+              "policy_snapshot_ref": { "type": "object" },
+              "diagnostic": { "type": "string" },
+              "pre_governance_headroom_cents": { "type": "integer", "minimum": 0 },
+              "effective_headroom_cents": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+
+    "allocation_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_basis",
+        "actual_basis",
+        "portfolio_nav_basis_cents",
+        "portfolio_target_notional_pct",
+        "portfolio_actual_notional_pct",
+        "max_abs_drift_notional_pct",
+        "reallocation_state",
+        "target_rows"
+      ],
+      "properties": {
+        "target_basis": { "type": "string", "minLength": 1 },
+        "actual_basis": { "type": "string", "minLength": 1 },
+        "portfolio_nav_basis_cents": { "type": "integer", "minimum": 0 },
+        "portfolio_target_notional_pct": { "type": "string", "minLength": 1 },
+        "portfolio_actual_notional_pct": { "type": "string", "minLength": 1 },
+        "max_abs_drift_notional_pct": { "type": "string", "minLength": 1 },
+        "reallocation_state": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason_codes"],
+          "properties": {
+            "status": { "type": "string", "enum": ["ACTION_NEEDED", "STABLE"] },
+            "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "bundle_c_signal_status": { "type": "string", "enum": ["OK", "UNKNOWN"] },
+            "bundle_c_signal_source_day_utc": { "type": "string" },
+            "bundle_c_signal_artifact_path": { "type": "string" },
+            "bundle_c_signal_artifact_sha256": { "type": "string" },
+            "per_sleeve_signals": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["sleeve_id", "signal", "reason_code", "capital_multiplier_bp", "observed_return", "portfolio_return"],
+                "properties": {
+                  "sleeve_id": { "type": "string", "minLength": 1 },
+                  "signal": { "type": "string", "enum": ["INCREASE", "MAINTAIN", "DECREASE", "UNKNOWN"] },
+                  "reason_code": { "type": "string" },
+                  "capital_multiplier_bp": { "type": "integer", "minimum": 0, "maximum": 10000 },
+                  "observed_return": { "type": ["string", "null"] },
+                  "portfolio_return": { "type": ["string", "null"] }
+                }
+              }
+            }
+          }
+        },
+        "target_rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "intent_hash",
+              "intent_id",
+              "engine_id",
+              "symbol",
+              "strategy_sleeve_id",
+              "execution_sleeve_id",
+              "account_id",
+              "target_notional_pct",
+              "actual_notional_pct",
+              "drift_notional_pct",
+              "action_type",
+              "position_id"
+            ],
+            "properties": {
+              "intent_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "intent_id": { "type": "string", "minLength": 1 },
+              "engine_id": { "type": "string", "minLength": 1 },
+              "symbol": { "type": "string", "minLength": 1 },
+              "strategy_sleeve_id": { "type": "string", "minLength": 1 },
+              "execution_sleeve_id": { "type": "string" },
+              "account_id": { "type": "string" },
+              "target_notional_pct": { "type": ["string", "null"] },
+              "actual_notional_pct": { "type": "string", "minLength": 1 },
+              "drift_notional_pct": { "type": ["string", "null"] },
+              "action_type": { "type": "string", "enum": ["OPEN", "ADD", "REDUCE", "CLOSE", "HOLD"] },
+              "position_id": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+
+    "sleeve_account_authority_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode_source", "bindings"],
+      "properties": {
+        "mode_source": { "type": "string", "minLength": 1 },
+        "bindings": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "execution_sleeve_id",
+              "mode",
+              "enabled",
+              "account_id",
+              "allowed_engine_ids",
+              "allowed_execution_sleeve_ids"
+            ],
+            "properties": {
+              "execution_sleeve_id": { "type": "string", "minLength": 1 },
+              "mode": { "type": "string", "enum": ["PAPER", "LIVE", "INACTIVE"] },
+              "enabled": { "type": "boolean" },
+              "account_id": { "type": "string", "minLength": 1 },
+              "allowed_engine_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+              "allowed_execution_sleeve_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+            }
+          }
+        }
+      }
+    },
+
+    "decision_chain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_actions", "trade_intents", "authorized_trade_intents"],
+      "properties": {
+        "candidate_actions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "candidate_id",
+              "intent_hash",
+              "intent_id",
+              "engine_id",
+              "requested_mode",
+              "strategy_sleeve_id",
+              "execution_sleeve_id",
+              "account_id",
+              "position_id",
+              "symbol",
+              "action_type",
+              "lifecycle_intent",
+              "target_notional_pct",
+              "actual_notional_pct",
+              "drift_notional_pct",
+              "reason_codes"
+            ],
+            "properties": {
+              "candidate_id": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "intent_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "intent_id": { "type": "string", "minLength": 1 },
+              "engine_id": { "type": "string", "minLength": 1 },
+              "requested_mode": { "type": "string", "enum": ["PAPER", "LIVE"] },
+              "strategy_sleeve_id": { "type": "string", "minLength": 1 },
+              "execution_sleeve_id": { "type": "string" },
+              "account_id": { "type": "string" },
+              "position_id": { "type": "string" },
+              "symbol": { "type": "string", "minLength": 1 },
+              "action_type": { "type": "string", "enum": ["OPEN", "ADD", "REDUCE", "CLOSE", "HOLD"] },
+	              "lifecycle_intent": { "type": "string", "enum": ["OPEN", "ADD", "REDUCE", "CLOSE", "HOLD"] },
+	              "target_notional_pct": { "type": ["string", "null"] },
+	              "actual_notional_pct": { "type": "string", "minLength": 1 },
+	              "drift_notional_pct": { "type": ["string", "null"] },
+	              "economic_signal": { "type": "string", "enum": ["INCREASE", "MAINTAIN", "DECREASE", "UNKNOWN"] },
+	              "economic_signal_reason_code": { "type": "string" },
+	              "economic_signal_source_day_utc": { "type": "string" },
+	              "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+	            }
+	          }
+	        },
+        "trade_intents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "trade_intent_id",
+              "candidate_id",
+              "intent_hash",
+              "intent_id",
+              "engine_id",
+              "symbol",
+              "strategy_sleeve_id",
+              "execution_sleeve_id",
+              "account_id",
+              "position_id",
+              "action_type",
+              "lifecycle_intent",
+              "requested_quantity",
+              "requested_quantity_basis",
+              "target_notional_pct",
+              "actual_notional_pct",
+              "drift_notional_pct",
+              "reason_codes"
+            ],
+            "properties": {
+              "trade_intent_id": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "candidate_id": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "intent_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "intent_id": { "type": "string", "minLength": 1 },
+              "engine_id": { "type": "string", "minLength": 1 },
+              "symbol": { "type": "string", "minLength": 1 },
+              "strategy_sleeve_id": { "type": "string", "minLength": 1 },
+              "execution_sleeve_id": { "type": "string" },
+              "account_id": { "type": "string" },
+              "position_id": { "type": "string" },
+              "action_type": { "type": "string", "enum": ["OPEN", "ADD", "REDUCE", "CLOSE"] },
+              "lifecycle_intent": { "type": "string", "enum": ["OPEN", "ADD", "REDUCE", "CLOSE"] },
+              "requested_quantity": { "type": "integer", "minimum": 0 },
+	              "requested_quantity_basis": { "type": "string", "minLength": 1 },
+	              "target_notional_pct": { "type": ["string", "null"] },
+	              "actual_notional_pct": { "type": "string", "minLength": 1 },
+	              "drift_notional_pct": { "type": ["string", "null"] },
+	              "economic_signal": { "type": "string", "enum": ["INCREASE", "MAINTAIN", "DECREASE", "UNKNOWN"] },
+	              "economic_signal_reason_code": { "type": "string" },
+	              "economic_signal_source_day_utc": { "type": "string" },
+	              "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+	            }
+	          }
+	        },
+        "authorized_trade_intents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "authorized_trade_intent_id",
+              "trade_intent_id",
+              "candidate_id",
+              "intent_hash",
+              "intent_id",
+              "engine_id",
+              "symbol",
+              "strategy_sleeve_id",
+              "execution_sleeve_id",
+              "account_id",
+              "position_id",
+              "action_type",
+              "lifecycle_intent",
+              "requested_quantity",
+              "requested_quantity_basis",
+              "authorized_quantity",
+              "authorization_outcome",
+              "reason_codes"
+            ],
+            "properties": {
+              "authorized_trade_intent_id": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "trade_intent_id": { "type": "string" },
+              "candidate_id": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "intent_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "intent_id": { "type": "string", "minLength": 1 },
+              "engine_id": { "type": "string", "minLength": 1 },
+              "symbol": { "type": "string", "minLength": 1 },
+              "strategy_sleeve_id": { "type": "string", "minLength": 1 },
+              "execution_sleeve_id": { "type": "string" },
+              "account_id": { "type": "string" },
+              "position_id": { "type": "string" },
+              "action_type": { "type": "string", "enum": ["OPEN", "ADD", "REDUCE", "CLOSE", "HOLD"] },
+              "lifecycle_intent": { "type": "string", "enum": ["OPEN", "ADD", "REDUCE", "CLOSE", "HOLD"] },
+              "requested_quantity": { "type": "integer", "minimum": 0 },
+	              "requested_quantity_basis": { "type": "string", "minLength": 1 },
+	              "authorized_quantity": { "type": "integer", "minimum": 0 },
+	              "authorization_outcome": { "type": "string", "enum": ["APPROVED", "RESIZED", "REJECTED", "BLOCKED"] },
+	              "risk_per_unit_cents": { "type": "integer", "minimum": 0 },
+	              "required_risk_cents": { "type": "integer", "minimum": 0 },
+	              "available_sleeve_headroom_cents": { "type": "integer", "minimum": 0 },
+	              "available_portfolio_headroom_cents": { "type": "integer", "minimum": 0 },
+	              "allowed_capital_at_risk_cents": { "type": "integer", "minimum": 0 },
+	              "headroom_cents": { "type": "integer", "minimum": 0 },
+	              "rejected_quantity": { "type": "integer", "minimum": 0 },
+	              "economic_signal": { "type": "string", "enum": ["INCREASE", "MAINTAIN", "DECREASE", "UNKNOWN"] },
+	              "economic_signal_reason_code": { "type": "string" },
+	              "economic_signal_source_day_utc": { "type": "string" },
+	              "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+	            }
+	          }
+	        }
+      }
+    },
+
     "per_sleeve": {
       "type": "array",
       "minItems": 1,
@@ -107,10 +516,26 @@
           "engine_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
           "allowed_capital_at_risk_cents": { "type": "integer", "minimum": 0 },
           "used_capital_at_risk_cents": { "type": "integer", "minimum": 0 },
-          "headroom_cents": { "type": "integer" }
-        }
-      }
-    },
+          "headroom_cents": { "type": "integer" },
+          "actual_value_cents": { "type": "integer", "minimum": 0 },
+	          "actual_notional_pct": { "type": "string", "minLength": 1 },
+	          "qualification_state": { "type": "string", "enum": ["MEASUREMENT_INVALID", "INSUFFICIENT_DATA", "QUALIFIED", "WATCHLIST", "THROTTLED", "DISABLED", ""] },
+	          "edge_band": { "type": "string", "enum": ["NEGATIVE", "WEAK_POSITIVE", "QUALIFIED_POSITIVE", "STRONG_POSITIVE", ""] },
+	          "execution_health_band": { "type": "string", "enum": ["UNKNOWN", "DEGRADED", "ACCEPTABLE", "STRONG", ""] },
+	          "sample_sufficiency_band": { "type": "string", "enum": ["INSUFFICIENT", "LIMITED", "SUFFICIENT", ""] },
+          "drift_band": { "type": "string", "enum": ["DETERIORATING", "STABLE", "IMPROVING", "UNKNOWN", ""] },
+          "qualification_reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+	          "qualification_snapshot_path": { "type": "string" },
+	          "qualification_snapshot_sha256": { "type": "string" },
+	          "qualification_action_multiplier_bp": { "type": "integer", "minimum": 0 },
+	          "qualification_action_reason_code": { "type": "string" },
+	          "economic_signal": { "type": "string", "enum": ["INCREASE", "MAINTAIN", "DECREASE", "UNKNOWN"] },
+	          "economic_signal_reason_code": { "type": "string" },
+	          "economic_signal_source_day_utc": { "type": "string" },
+	          "economic_signal_capital_multiplier_bp": { "type": "integer", "minimum": 0, "maximum": 10000 }
+	        }
+	      }
+	    },
 
     "per_intent": {
       "type": "array",
@@ -134,7 +559,8 @@
           "sleeve_id": { "type": "string", "minLength": 1 },
           "decision": { "type": "string", "enum": ["AUTHORIZED", "REJECTED", "PARTIAL"] },
           "authorized_quantity": { "type": "integer", "minimum": 0 },
-          "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+          "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "qualification_state": { "type": "string", "enum": ["MEASUREMENT_INVALID", "INSUFFICIENT_DATA", "QUALIFIED", "WATCHLIST", "THROTTLED", "DISABLED", ""] }
         }
       }
     },

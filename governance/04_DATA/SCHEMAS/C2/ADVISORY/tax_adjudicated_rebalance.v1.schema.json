@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisory/tax_adjudicated_rebalance.v1.schema.json",
+  "title": "tax_adjudicated_rebalance.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_id",
+    "tax_adjudicated_rebalance_id",
+    "household_id",
+    "snapshot_refs",
+    "approved_actions",
+    "deferred_actions",
+    "rejected_actions",
+    "tax_reason_codes",
+    "urgent_risk_exceptions"
+  ],
+  "properties": {
+    "schema_id": { "const": "tax_adjudicated_rebalance" },
+    "schema_version": { "const": "v1" },
+    "record_id": { "type": "string", "minLength": 1 },
+    "tax_adjudicated_rebalance_id": { "type": "string", "minLength": 1 },
+    "household_id": { "type": "string", "minLength": 1 },
+    "snapshot_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["household_state_snapshot_id", "rebalance_candidates_id"],
+      "properties": {
+        "household_state_snapshot_id": { "type": "string", "minLength": 1 },
+        "rebalance_candidates_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "approved_actions": { "type": "array", "items": { "$ref": "#/$defs/actionRow" } },
+    "deferred_actions": { "type": "array", "items": { "$ref": "#/$defs/actionRow" } },
+    "rejected_actions": { "type": "array", "items": { "$ref": "#/$defs/actionRow" } },
+    "tax_reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "urgent_risk_exceptions": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "$defs": {
+    "actionRow": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["action_id", "reason_codes"],
+      "properties": {
+        "action_id": { "type": "string", "minLength": 1 },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

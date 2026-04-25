@@ -1,0 +1,177 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://constellation/governance/04_DATA/SCHEMAS/C2/REPORTS/truth_day_run_ledger.v1.schema.json",
+  "title": "truth_day_run_ledger.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "mode",
+    "truth_root",
+    "produced_utc",
+    "phase_graph_id",
+    "phase_graph_version",
+    "phase_graph_ref",
+    "overall_status",
+    "first_blocker_code",
+    "first_blocker_artifact_path",
+    "upstream_dependency_id",
+    "upstream_dependency_artifact_path",
+    "bootstrap_applied",
+    "phase_results",
+    "producer_invocations",
+    "structural_readiness_reached",
+    "business_no_trade",
+    "execution_readiness_reached",
+    "execution_reached",
+    "day_close_reached",
+    "run_ledger_path"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "truth_day_run_ledger"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "day_utc": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "PAPER",
+        "LIVE"
+      ]
+    },
+    "truth_root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "produced_utc": {
+      "type": "string",
+      "minLength": 1
+    },
+    "phase_graph_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "phase_graph_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "phase_graph_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "overall_status": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "BLOCKED"
+      ]
+    },
+    "first_blocker_code": {
+      "type": "string"
+    },
+    "first_blocker_artifact_path": {
+      "type": "string"
+    },
+    "upstream_dependency_id": {
+      "type": "string"
+    },
+    "upstream_dependency_artifact_path": {
+      "type": "string"
+    },
+    "bootstrap_applied": {
+      "type": "boolean"
+    },
+    "phase_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "phase_id",
+          "status",
+          "phase_result_path",
+          "first_blocker_code",
+          "first_blocker_artifact_path",
+          "bootstrap_applied"
+        ],
+        "properties": {
+          "phase_id": {
+            "type": "string",
+            "pattern": "^[A-Z0-9_]+$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PASS",
+              "FAIL",
+              "BLOCKED",
+              "SKIPPED",
+              "BOOTSTRAP"
+            ]
+          },
+          "phase_result_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "first_blocker_code": {
+            "type": "string"
+          },
+          "first_blocker_artifact_path": {
+            "type": "string"
+          },
+          "bootstrap_applied": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "producer_invocations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "structural_readiness_reached": {
+      "type": "boolean"
+    },
+    "business_no_trade": {
+      "type": "boolean"
+    },
+    "execution_readiness_reached": {
+      "type": "boolean"
+    },
+    "execution_reached": {
+      "type": "boolean"
+    },
+    "day_close_reached": {
+      "type": "boolean"
+    },
+    "run_ledger_path": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

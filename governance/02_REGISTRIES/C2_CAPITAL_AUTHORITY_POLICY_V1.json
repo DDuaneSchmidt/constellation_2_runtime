@@ -7,7 +7,7 @@
   "notes": [
     "Governance-owned policy manifest for Bundle A (Capital Authority Layer).",
     "Constellation 2.0 canonical engine_ids ONLY (no legacy sleeve codes).",
-    "5 engines ACTIVE, 2 engines INACTIVE per ENGINE_MODEL_REGISTRY_V1.",
+    "6 engines ACTIVE, 2 engines INACTIVE per ENGINE_MODEL_REGISTRY_V1.",
     "Inactive engines are hard-capped (max_capital_at_risk_cents=0; notional caps=0).",
     "All numeric values are interpreted as decimal strings or integer cents by runtime code; no floats are authoritative."
   ],
@@ -15,7 +15,7 @@
     {
       "sleeve_id": "C2_TREND_EQ_PRIMARY",
       "display_name": "Trend Sleeve (Equity Primary)",
-      "engine_ids": ["C2_TREND_EQ_PRIMARY_V1"],
+      "engine_ids": ["C2_TREND_EQ_PRIMARY_V1", "C2_INTENT_SIMULATOR_V1"],
       "priority_rank": 10,
       "limits": {
         "max_gross_notional_usd": "0",

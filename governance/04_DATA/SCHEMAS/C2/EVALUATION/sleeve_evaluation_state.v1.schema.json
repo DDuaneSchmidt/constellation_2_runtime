@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/evaluation/sleeve_evaluation_state.v1.schema.json",
+  "title": "sleeve_evaluation_state.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "execution_sleeve_id",
+    "mode",
+    "sleeve_id",
+    "window",
+    "expectancy",
+    "win_rate",
+    "payoff_ratio",
+    "outlier_concentration",
+    "stability_state",
+    "edge_state",
+    "outcome_state",
+    "validity_ref",
+    "benchmark_ref",
+    "upstream_refs",
+    "reason_codes",
+    "closure_state",
+    "first_blocker_code",
+    "missing_dependency_artifacts",
+    "constitutional_dependency_declaration",
+    "constitutional_lineage"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_SLEEVE_EVALUATION_STATE_V1" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "execution_sleeve_id": { "type": "string", "minLength": 1 },
+    "mode": { "type": "string", "minLength": 1 },
+    "sleeve_id": { "type": "string", "minLength": 1 },
+    "window": { "type": "object" },
+    "expectancy": { "type": "string", "minLength": 1 },
+    "win_rate": { "type": "object" },
+    "payoff_ratio": { "type": "object" },
+    "outlier_concentration": { "type": "object" },
+    "stability_state": { "type": "string", "enum": ["stable", "unstable", "not_enough_evidence"] },
+    "edge_state": {
+      "type": "string",
+      "enum": [
+        "edge_positive_unvalidated",
+        "edge_validated",
+        "edge_deteriorating",
+        "edge_negative",
+        "not_enough_evidence"
+      ]
+    },
+    "outcome_state": {
+      "type": "string",
+      "enum": [
+        "edge_positive_unvalidated",
+        "edge_validated",
+        "edge_deteriorating",
+        "edge_negative",
+        "not_enough_evidence"
+      ]
+    },
+    "validity_ref": { "type": "object" },
+    "benchmark_ref": { "type": "object" },
+    "upstream_refs": { "type": "array", "items": { "type": "object" } },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "closure_state": { "type": "string", "enum": ["COMPLETE", "DEGRADED", "BLOCKED", "OPEN"] },
+    "first_blocker_code": { "type": "string" },
+    "missing_dependency_artifacts": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "constitutional_dependency_declaration": { "type": "object" },
+    "constitutional_lineage": { "type": "object" }
+  }
+}

@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/operator_summary_dossier.v1.schema.json",
+  "title": "operator_summary_dossier.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "generated_utc",
+    "day_utc",
+    "subsystem_id",
+    "current_state",
+    "owner_ref",
+    "first_blocker",
+    "upstream_evidence_refs",
+    "ambiguity_state",
+    "recommended_operator_action",
+    "authority_owner",
+    "active_day",
+    "admission_status",
+    "submission_authorization_status",
+    "submission_authorized",
+    "advisory_only_signals",
+    "is_canonical",
+    "authority_level",
+    "derived_from",
+    "legacy_surface_classification",
+    "subsystem_dossier_refs"
+  ],
+  "properties": {
+    "schema_id": { "const": "operator_summary_dossier" },
+    "schema_version": { "const": "v1" },
+    "generated_utc": { "type": "string", "minLength": 20 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "subsystem_id": { "const": "operator_summary_authority" },
+    "current_state": { "type": "string", "enum": ["READY", "BLOCKED"] },
+    "owner_ref": { "$ref": "#/$defs/artifact_ref" },
+    "first_blocker": { "$ref": "#/$defs/first_blocker" },
+    "upstream_evidence_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/evidence_ref" }
+    },
+    "ambiguity_state": { "$ref": "#/$defs/ambiguity_state" },
+    "recommended_operator_action": { "type": "string", "minLength": 1 },
+    "authority_owner": { "type": "string", "minLength": 1 },
+    "active_day": { "type": "string" },
+    "admission_status": { "type": "string", "minLength": 1 },
+    "submission_authorization_status": { "type": "string", "minLength": 1 },
+    "submission_authorized": { "type": "boolean" },
+    "advisory_only_signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "classification", "state", "summary"],
+        "properties": {
+          "source": { "type": "string", "minLength": 1 },
+          "classification": { "type": "string", "minLength": 1 },
+          "state": { "type": "string", "minLength": 1 },
+          "summary": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "is_canonical": { "type": "boolean" },
+    "authority_level": { "type": "string", "enum": ["canonical", "derived", "advisory"] },
+    "derived_from": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "legacy_surface_classification": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "subsystem_dossier_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifact_ref" }
+    },
+    "blocking_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "closure_state": {
+      "type": "string",
+      "enum": ["COMPLETE", "BLOCKED", "DEGRADED", "OPEN"]
+    },
+    "first_blocker_code": { "type": "string" },
+    "missing_dependency_artifacts": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "constitutional_dependency_declaration": { "type": "object" },
+    "constitutional_lineage": { "type": "object" }
+  },
+  "$defs": {
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_path": { "type": "string" },
+        "artifact_sha256": { "type": "string" }
+      }
+    },
+    "first_blocker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason_code", "summary", "source"],
+      "properties": {
+        "reason_code": { "type": "string" },
+        "summary": { "type": "string" },
+        "source": { "type": "string" }
+      }
+    },
+    "evidence_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref_id", "ref_type", "artifact_path", "artifact_sha256"],
+      "properties": {
+        "ref_id": { "type": "string", "minLength": 1 },
+        "ref_type": { "type": "string", "minLength": 1 },
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string" }
+      }
+    },
+    "ambiguity_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "summary", "reason_codes", "conflicting_authorities"],
+      "properties": {
+        "status": { "type": "string", "enum": ["CLEAR", "AMBIGUOUS_AUTHORITY"] },
+        "summary": { "type": "string" },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "conflicting_authorities": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

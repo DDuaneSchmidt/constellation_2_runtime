@@ -24,16 +24,16 @@ If an order is *attempted*, the system MUST be able to prove:
 
 **No silent failure points. No parallel evidence surfaces treated as authoritative.**
 
-The authoritative output surface is runtime truth:
+The authoritative output surface for active execution evidence is sleeve-partitioned runtime truth:
 
-- `constellation_2/runtime/truth/`
+- `truth_sleeves/<sleeve_id>/<mode>/`
 
-Any output outside runtime truth is **non-authoritative** and MUST NOT be used to assert broker activity in audits.
+Any output outside the canonical sleeve execution root is **non-authoritative** and MUST NOT be used to assert broker activity in audits.
 
 ## 2. Canonical truth root and directories
 
 ### 2.1 Canonical root
-- `constellation_2/runtime/truth/execution_evidence_v1/`
+- `truth_sleeves/<sleeve_id>/<mode>/execution_evidence_v1/`
 
 ### 2.2 Required directory set
 The following directories MUST exist (writers may create them as needed):
@@ -41,6 +41,12 @@ The following directories MUST exist (writers may create them as needed):
 - `execution_evidence_v1/submissions/{DAY_UTC}/{SUBMISSION_ID}/`
 - `execution_evidence_v1/manifests/{DAY_UTC}/`
 - `execution_evidence_v1/failures/{DAY_UTC}/`
+- `broker_fact_spine_v1/raw_journal/{DAY_UTC}/`
+- `broker_fact_spine_v1/fact_ledger/{DAY_UTC}/`
+- `reports/broker_observation_health_v1/{DAY_UTC}/`
+- `reports/broker_fact_spine_audit_v1/{DAY_UTC}/`
+
+Legacy global/shared execution-evidence roots and legacy global broker-event logs are non-canonical for active execution and may remain only for historical reference or source-adapter mirroring.
 
 ### 2.3 Day key
 - `{DAY_UTC}` MUST be `YYYY-MM-DD` (UTC day key).
@@ -113,10 +119,17 @@ For a given `{DAY_UTC}` and `{SUBMISSION_ID}`, the producing `git_sha` is locked
 ## 5. Deterministic identification (submission id)
 
 ### 5.1 Submission id must be deterministic
-`{SUBMISSION_ID}` MUST be derived deterministically from the immutable identity of the upstream authorization and normalized order plan, such that:
+`{SUBMISSION_ID}` MUST be derived deterministically from:
 
-- a re-run of the same day with the same upstream authorization produces the same `{SUBMISSION_ID}`,
-- and different authorizations produce different ids.
+- `intent_id`
+- normalized order-plan identity (`plan_hash`)
+- governed `trade_instance_id`
+
+Such that:
+
+- re-run of the same governed trade instance produces the same `{SUBMISSION_ID}`,
+- a new governed same-day trade instance with the same plan may produce a different `{SUBMISSION_ID}`,
+- and different plans still produce different ids.
 
 ### 5.2 No "latest" ambiguity
 A submission directory MUST be discoverable by deterministic enumeration of the day directory.

@@ -1,0 +1,236 @@
+{
+  "phase_graph_id": "C2_TRUTH_LIFECYCLE_PHASE_GRAPH_V1",
+  "phase_graph_version": "v1",
+  "truth_root_owner": "/home/node/constellation_runtime_data/truth",
+  "phases": [
+    {
+      "phase_id": "GENESIS_BOOTSTRAP",
+      "description": "Governed first-day continuity bootstrap when prior-day economic state chain is absent.",
+      "truth_root_ownership": "CANONICAL_TRUTH_ROOT",
+      "required_inputs": [
+        "economic_state_build_v1:<day-1>"
+      ],
+      "producer_entrypoints": [
+        "ops/tools/run_economic_state_authority_v1.py"
+      ],
+      "produced_artifacts": [
+        "reports/economic_state_build_v1/<day-1>/<context_hash>/economic_state_build.v1.json"
+      ],
+      "blocker_semantics": "Fail closed unless prior-day continuity exists or governed bootstrap succeeds.",
+      "skippable": false,
+      "supports_genesis_bootstrap": true
+    },
+    {
+      "phase_id": "PRIOR_DAY_CLOSE",
+      "description": "Materialize prior-day reconciliation dependencies required for day-open operator gating.",
+      "truth_root_ownership": "CANONICAL_TRUTH_ROOT",
+      "required_inputs": [
+        "execution_evidence_v1:<day-1>"
+      ],
+      "producer_entrypoints": [
+        "ops/tools/run_reconciliation_report_v3.py",
+        "constellation_2/phaseI/exit_reconciliation/run/run_exit_reconciliation_day_v1.py"
+      ],
+      "produced_artifacts": [
+        "reports/reconciliation_report_v3/<day-1>/reconciliation_report.v3.json",
+        "exit_reconciliation_v1/<day-1>/exit_reconciliation.v1.json"
+      ],
+      "blocker_semantics": "Fail closed when required closeout dependency producers fail.",
+      "skippable": true,
+      "supports_genesis_bootstrap": false
+    },
+    {
+      "phase_id": "DAY_ADMISSION",
+      "description": "Day-level admission boundary before authority materialization.",
+      "truth_root_ownership": "CANONICAL_TRUTH_ROOT",
+      "required_inputs": [
+        "target_day_admission_v1"
+      ],
+      "producer_entrypoints": [
+        "ops/tools/run_session_readiness_refresh_v1.py"
+      ],
+      "produced_artifacts": [
+        "reports/day_authority_decision_v1/<day>/day_authority_decision.v1.json"
+      ],
+      "blocker_semantics": "Fail closed on missing admission authorization evidence.",
+      "skippable": true,
+      "supports_genesis_bootstrap": false
+    },
+    {
+      "phase_id": "CONTEXT_AUTHORITY",
+      "description": "Context authority inputs for day execution and gating.",
+      "truth_root_ownership": "CANONICAL_TRUTH_ROOT",
+      "required_inputs": [
+        "day_activation_package_v1",
+        "global_context_package_v1"
+      ],
+      "producer_entrypoints": [
+        "ops/tools/run_day_activation_authority_v1.py",
+        "ops/tools/run_global_context_authority_v1.py"
+      ],
+      "produced_artifacts": [
+        "reports/day_activation_build_v1/<day>/day_activation_build.v1.json",
+        "reports/global_context_build_v1/<day>/<context_hash>/global_context_build.v1.json"
+      ],
+      "blocker_semantics": "Fail closed on missing context authority package dependencies.",
+      "skippable": true,
+      "supports_genesis_bootstrap": false
+    },
+    {
+      "phase_id": "GATE_INPUTS",
+      "description": "Refresh canonical gate input artifacts before gate evaluations.",
+      "truth_root_ownership": "CANONICAL_TRUTH_ROOT",
+      "required_inputs": [
+        "allocation_v1",
+        "engine_activity"
+      ],
+      "producer_entrypoints": [
+        "ops/tools/run_c2_capital_risk_envelope_gate_v2.py",
+        "constellation_2/phaseJ/monitoring/run/run_engine_correlation_matrix_day_v1.py",
+        "ops/tools/run_engine_heartbeat_emit_v1.py"
+      ],
+      "produced_artifacts": [
+        "reports/capital_risk_envelope_v2/<day>/capital_risk_envelope.v2.json",
+        "monitoring_v1/engine_correlation_matrix_v1/<day>/engine_correlation_matrix.v1.json",
+        "monitoring_v1/engine_heartbeat_v1/<day>/<engine_id>/engine_heartbeat.v1.json"
+      ],
+      "blocker_semantics": "Fail closed on missing canonical gate input artifacts.",
+      "skippable": false,
+      "supports_genesis_bootstrap": false
+    },
+    {
+      "phase_id": "GATE_PRODUCTION",
+      "description": "Produce required gate artifacts from canonical truth inputs.",
+      "truth_root_ownership": "CANONICAL_TRUTH_ROOT",
+      "required_inputs": [
+        "gate_inputs"
+      ],
+      "producer_entrypoints": [
+        "ops/tools/run_correlation_envelope_gate_v1.py",
+        "ops/tools/run_feed_attestation_gate_v1.py",
+        "ops/tools/run_heartbeat_gate_v1.py",
+        "ops/tools/run_liquidity_slippage_gate_v1.py",
+        "ops/tools/run_operator_daily_gate_v3.py"
+      ],
+      "produced_artifacts": [
+        "reports/correlation_envelope_gate_v1/<day>/correlation_envelope_gate.v1.json",
+        "reports/feed_attestation_gate_v1/<day>/feed_attestation_gate.v1.json",
+        "reports/heartbeat_gate_v1/<day>/heartbeat_gate.v1.json",
+        "reports/liquidity_slippage_gate_v1/<day>/liquidity_slippage_gate.v1.json",
+        "reports/operator_daily_gate_v3/<day>/operator_daily_gate.v3.json"
+      ],
+      "blocker_semantics": "Fail closed if any required gate artifact is missing or invalid.",
+      "skippable": false,
+      "supports_genesis_bootstrap": false
+    },
+    {
+      "phase_id": "GATE_AGGREGATION",
+      "description": "Aggregate gate outcomes into canonical gate-stack verdict.",
+      "truth_root_ownership": "CANONICAL_TRUTH_ROOT",
+      "required_inputs": [
+        "required_gate_artifacts"
+      ],
+      "producer_entrypoints": [
+        "ops/tools/run_gate_stack_verdict_v1.py"
+      ],
+      "produced_artifacts": [
+        "reports/gate_stack_verdict_v1/<day>/gate_stack_verdict.v1.json"
+      ],
+      "blocker_semantics": "Fail closed when gate stack cannot be materialized from required inputs.",
+      "skippable": false,
+      "supports_genesis_bootstrap": false
+    },
+    {
+      "phase_id": "AUTHORIZATION",
+      "description": "Derive canonical authorization and lifecycle authority verdicts from gate stack.",
+      "truth_root_ownership": "CANONICAL_TRUTH_ROOT",
+      "required_inputs": [
+        "gate_stack_verdict_v1"
+      ],
+      "producer_entrypoints": [
+        "constellation_2/common/gate_authority_foundation_v1.py"
+      ],
+      "produced_artifacts": [
+        "reports/authorization_gate_verdict_v1/<day>/authorization_gate_verdict.v1.json",
+        "reports/lifecycle_state_authority_v1/<day>/lifecycle_state_authority.v1.json",
+        "reports/economic_health_gate_verdict_v1/<day>/economic_health_gate_verdict.v1.json",
+        "reports/gate_decision_ledger_v1/<day>/gate_decision_ledger.v1.json"
+      ],
+      "blocker_semantics": "Fail closed when authorization verdict cannot be derived from canonical gate stack.",
+      "skippable": false,
+      "supports_genesis_bootstrap": false
+    },
+    {
+      "phase_id": "EXECUTION_READINESS",
+      "description": "Translate authorization verdict into execution readiness classification.",
+      "truth_root_ownership": "CANONICAL_TRUTH_ROOT",
+      "required_inputs": [
+        "authorization_gate_verdict_v1"
+      ],
+      "producer_entrypoints": [
+        "ops/tools/run_execution_readiness_gate_v1.py"
+      ],
+      "produced_artifacts": [
+        "reports/execution_readiness_gate_v1/<day>/execution_readiness_gate.v1.json"
+      ],
+      "blocker_semantics": "Block progression when authorization verdict is not PASS.",
+      "skippable": true,
+      "supports_genesis_bootstrap": false
+    },
+    {
+      "phase_id": "EXECUTION",
+      "description": "Execution phase boundary; no execution side effects are fabricated by lifecycle orchestration.",
+      "truth_root_ownership": "CANONICAL_TRUTH_ROOT",
+      "required_inputs": [
+        "execution_readiness"
+      ],
+      "producer_entrypoints": [
+        "constellation_2/phaseD/tools/c2_submit_paper_v5.py"
+      ],
+      "produced_artifacts": [
+        "execution_evidence_v1/submissions/<day>/<submission_id>/broker_submission_record.v2.json",
+        "fill_ledger_v1/<day>/<submission_id>.fill_ledger.v1.json"
+      ],
+      "blocker_semantics": "Skip when readiness is not achieved; never bypass authorization.",
+      "skippable": true,
+      "supports_genesis_bootstrap": false
+    },
+    {
+      "phase_id": "POST_EXECUTION_RECONCILIATION",
+      "description": "Post-execution reconciliation and canonicalization boundary.",
+      "truth_root_ownership": "CANONICAL_TRUTH_ROOT",
+      "required_inputs": [
+        "execution_evidence_v1"
+      ],
+      "producer_entrypoints": [
+        "ops/tools/run_execution_reconciliation_day_v1.py",
+        "ops/tools/run_canonical_lifecycle_closure_day_v1.py"
+      ],
+      "produced_artifacts": [
+        "reports/execution_reconciliation_v1/<day>/execution_reconciliation.v1.json",
+        "reports/canonical_lifecycle_closure_v1/<day>/<submission_id>/canonical_lifecycle_closure.v1.json"
+      ],
+      "blocker_semantics": "Fail closed if reconciliation cannot be materialized after execution.",
+      "skippable": true,
+      "supports_genesis_bootstrap": false
+    },
+    {
+      "phase_id": "DAY_CLOSE",
+      "description": "Day close lifecycle boundary and closure evidence publication.",
+      "truth_root_ownership": "CANONICAL_TRUTH_ROOT",
+      "required_inputs": [
+        "post_execution_reconciliation"
+      ],
+      "producer_entrypoints": [
+        "ops/tools/run_paper_session_ledger_v1.py"
+      ],
+      "produced_artifacts": [
+        "reports/paper_session_ledger_v1/<day>/paper_session_ledger.v1.json",
+        "reports/paper_session_closure_v1/<day>/paper_session_closure.v1.json"
+      ],
+      "blocker_semantics": "Skip until explicit day-close flow is invoked.",
+      "skippable": true,
+      "supports_genesis_bootstrap": false
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "schema_id": "C2_RUNTIME_LIFECYCLE_ACTIVE_SCHEMA_V1",
+  "title": "C2 Runtime Lifecycle Active State V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "seam_id",
+    "status",
+    "run_id",
+    "admission_decision",
+    "admitted_at_utc",
+    "entrypoint_name",
+    "entrypoint_path",
+    "service_name",
+    "launcher_pid",
+    "runtime_identity_ref"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "runtime_lifecycle_active.v1" },
+    "schema_version": { "type": "string", "const": "v1" },
+    "seam_id": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["ACTIVE"] },
+    "run_id": { "type": "string", "minLength": 1 },
+    "admission_decision": { "type": "string", "enum": ["ADMITTED"] },
+    "admitted_at_utc": { "type": "string", "minLength": 20 },
+    "entrypoint_name": { "type": "string", "minLength": 1 },
+    "entrypoint_path": { "type": "string", "minLength": 1 },
+    "service_name": { "type": "string" },
+    "launcher_pid": { "type": "integer", "minimum": 1 },
+    "startup_id": { "type": "string", "minLength": 1 },
+    "startup_receipt_path": { "type": "string", "minLength": 1 },
+    "startup_receipt_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "lifecycle_receipt_path": { "type": "string", "minLength": 1 },
+    "lifecycle_receipt_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "runtime_identity_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_path",
+        "contract_sha256",
+        "authoritative_repo_root",
+        "runtime_environment",
+        "primary_execution_identity_ref"
+      ],
+      "properties": {
+        "contract_path": { "type": "string", "minLength": 1 },
+        "contract_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "authoritative_repo_root": { "type": "string", "minLength": 1 },
+        "runtime_environment": { "type": "string", "minLength": 1 },
+        "primary_execution_identity_ref": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["authority_owner", "sleeve_id"],
+          "properties": {
+            "authority_owner": { "type": "string", "const": "execution_identity_binding_v1" },
+            "sleeve_id": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    }
+  }
+}

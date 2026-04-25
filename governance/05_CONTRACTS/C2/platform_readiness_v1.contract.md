@@ -23,7 +23,7 @@ Platform readiness is separate from:
 
 ## Artifact surface
 
-- `constellation_2/runtime/truth/readiness_v1/constellation_platform_readiness_v1/<DAY_UTC>/constellation_platform_readiness.v1.json`
+- `/home/node/constellation_runtime_data/truth/readiness_v1/constellation_platform_readiness_v1/<DAY_UTC>/constellation_platform_readiness.v1.json`
 
 ## Required policy binding
 

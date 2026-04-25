@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/trade_state/reconciled_trade_description.v1.schema.json",
+  "title": "reconciled_trade_description.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_owner",
+    "materialization_set_id",
+    "day_utc",
+    "evaluation_utc",
+    "trade_identity_id",
+    "incorporated_state_ref",
+    "lifecycle_status",
+    "protection_status",
+    "reconciliation_descriptive_status",
+    "downstream_posture",
+    "derived_from_incorporated_state",
+    "derived_only"
+  ],
+  "properties": {
+    "schema_id": { "const": "reconciled_trade_description" },
+    "schema_version": { "const": "v1" },
+    "authority_owner": { "const": "reconciled_trade_description_v1" },
+    "materialization_set_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "day_utc": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "evaluation_utc": { "type": "string", "format": "date-time" },
+    "trade_identity_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "incorporated_state_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "lifecycle_status": {
+      "type": "string",
+      "enum": [
+        "UNRESOLVED",
+        "FLAT",
+        "WORKING_ENTRY",
+        "OPEN_LONG",
+        "OPEN_SHORT",
+        "OPEN_LONG_WITH_WORKING_EXIT",
+        "OPEN_SHORT_WITH_WORKING_EXIT",
+        "CLOSED",
+        "AMBIGUOUS"
+      ]
+    },
+    "protection_status": {
+      "type": "string",
+      "enum": [
+        "NOT_APPLICABLE",
+        "PROTECTION_WORKING_PRESENT",
+        "PROTECTION_NOT_OBSERVED",
+        "PROTECTION_UNKNOWN"
+      ]
+    },
+    "reconciliation_descriptive_status": { "type": "string", "enum": ["TRUSTED", "DEGRADED", "BLOCKED", "AMBIGUOUS"] },
+    "downstream_posture": { "type": "string", "enum": ["SAFE", "DEGRADED", "BLOCKED"] },
+    "derived_from_incorporated_state": { "const": true },
+    "derived_only": { "const": true }
+  }
+}
+

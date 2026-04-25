@@ -36,6 +36,12 @@ This reduces accidental cross-symbol activation, prevents unintended exposure, a
    - Only `ACTIVE` engines are eligible for selection.
 4) Enforcement MUST occur before invoking the engine runner.
 5) Enforcement MUST be deterministic (no wall-clock, no external IO).
+6) Phase D submit boundary MUST re-validate the final order-plan symbol against the same engine registry authority:
+   - resolve `lineage.engine_id`
+   - load `governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json`
+   - if `allowed_symbols` is `null`, no symbol restriction is applied
+   - if `allowed_symbols` is a list, the final order-plan symbol MUST be present
+   - any mismatch or malformed engine row MUST FAIL-CLOSED
 
 ## Audit evidence
 
@@ -46,6 +52,7 @@ This reduces accidental cross-symbol activation, prevents unintended exposure, a
 
 - This contract does not require engines to independently enforce universes when invoked directly.
   (Optional future hardening may add engine-side checks.)
+- This contract does not define account eligibility or broker connectivity; those remain governed elsewhere.
 
 ## Future extension (non-binding)
 

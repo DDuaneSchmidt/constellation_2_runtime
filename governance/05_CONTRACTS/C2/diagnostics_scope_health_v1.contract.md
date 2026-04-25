@@ -18,7 +18,7 @@ Make diagnostics and operator state scope-aware in PAPER mode.
 Authority split is explicit:
 
 - Execution authority: sleeve truth (`truth_sleeves/<sleeve_id>/PAPER`)
-- Monitoring authority: global truth (`runtime/truth` monitoring and control-panel input surfaces)
+- Monitoring authority: global truth (`/home/node/constellation_runtime_data/truth` monitoring and control-panel input surfaces)
 
 ## Required scope outputs
 

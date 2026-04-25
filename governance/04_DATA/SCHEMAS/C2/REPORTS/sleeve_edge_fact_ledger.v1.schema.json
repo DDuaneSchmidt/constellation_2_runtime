@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/sleeve_edge_fact_ledger.v1.schema.json",
+  "title": "sleeve_edge_fact_ledger.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "produced_utc",
+    "day_utc",
+    "as_of_ts",
+    "sleeve_id",
+    "strategy_family",
+    "source_execution_sleeve_id",
+    "source_execution_root_path",
+    "calculation_version",
+    "core2_materialization_set_id",
+    "engine_ids",
+    "fact_input_hash",
+    "input_manifest",
+    "trade_facts",
+    "included_trade_ids",
+    "excluded_trade_ids",
+    "exclusion_details",
+    "invalidity_reasons",
+    "producer"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_SLEEVE_EDGE_FACT_LEDGER_V1" },
+    "schema_version": { "const": "v1" },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "as_of_ts": { "type": "string", "format": "date-time" },
+    "sleeve_id": { "type": "string", "minLength": 1 },
+    "strategy_family": { "type": "string", "minLength": 1 },
+    "source_execution_sleeve_id": { "type": "string", "minLength": 1 },
+    "source_execution_root_path": { "type": "string", "minLength": 1 },
+    "calculation_version": { "type": "string", "minLength": 1 },
+    "core2_materialization_set_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "engine_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "fact_input_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "input_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/input_ref" }
+    },
+    "trade_facts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/trade_fact" }
+    },
+    "included_trade_ids": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+    },
+    "excluded_trade_ids": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+    },
+    "exclusion_details": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["trade_identity_id", "reason_codes"],
+        "properties": {
+          "trade_identity_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "reason_codes": { "$ref": "#/$defs/string_array" }
+        }
+      }
+    },
+    "invalidity_reasons": { "$ref": "#/$defs/string_array" },
+    "producer": { "$ref": "#/$defs/producer" }
+  },
+  "$defs": {
+    "string_array": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "git_sha", "module"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "module": { "type": "string", "minLength": 1 }
+      }
+    },
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "input_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "path", "sha256", "day_utc", "producer"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["reconciled_trade_state_summary"]
+        },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "producer": { "type": "string", "minLength": 1 }
+      }
+    },
+    "trade_fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trade_identity_id",
+        "measurement_class",
+        "ownership_classification",
+        "continuity_status",
+        "engine_id",
+        "source_intent_ids",
+        "trade_identity_path",
+        "trade_identity_sha256",
+        "incorporated_state_path",
+        "incorporated_state_sha256",
+        "reconciliation_provenance_path",
+        "reconciliation_provenance_sha256",
+        "lineage_attachment_refs",
+        "incorporated_fact_refs",
+        "ignored_fact_refs",
+        "blocked_fact_refs",
+        "current_quantity",
+        "average_cost",
+        "side",
+        "fill_count",
+        "first_fill_utc",
+        "last_fill_utc",
+        "total_fees",
+        "included_in_metrics",
+        "exclusion_reason_codes",
+        "execution_evidence_refs"
+      ],
+      "properties": {
+        "trade_identity_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "measurement_class": { "type": "string", "enum": ["", "NATIVE_ENTRY", "ADOPTED_POSITION_MANAGEMENT", "UNKNOWN_ATTRIBUTION"] },
+        "ownership_classification": { "type": "string", "minLength": 1 },
+        "continuity_status": { "type": "string", "minLength": 1 },
+        "engine_id": { "type": "string" },
+        "source_intent_ids": { "$ref": "#/$defs/string_array" },
+        "trade_identity_path": { "type": "string", "minLength": 1 },
+        "trade_identity_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "incorporated_state_path": { "type": "string", "minLength": 1 },
+        "incorporated_state_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "reconciliation_provenance_path": { "type": "string", "minLength": 1 },
+        "reconciliation_provenance_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "lineage_attachment_refs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["order_ids", "perm_ids", "execution_ids", "fact_record_ids"],
+          "properties": {
+            "order_ids": { "$ref": "#/$defs/string_array" },
+            "perm_ids": { "$ref": "#/$defs/string_array" },
+            "execution_ids": { "$ref": "#/$defs/string_array" },
+            "fact_record_ids": {
+              "type": "array",
+              "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+            }
+          }
+        },
+        "incorporated_fact_refs": { "type": "array", "items": { "type": "object" } },
+        "ignored_fact_refs": { "type": "array", "items": { "type": "object" } },
+        "blocked_fact_refs": { "type": "array", "items": { "type": "object" } },
+        "current_quantity": { "type": "string" },
+        "average_cost": { "type": "string" },
+        "side": { "type": "string" },
+        "fill_count": { "type": "integer", "minimum": 0 },
+        "first_fill_utc": { "type": "string" },
+        "last_fill_utc": { "type": "string" },
+        "total_fees": { "type": "string" },
+        "included_in_metrics": { "type": "boolean" },
+        "exclusion_reason_codes": { "$ref": "#/$defs/string_array" },
+        "execution_evidence_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/artifact_ref" }
+        }
+      }
+    }
+  }
+}

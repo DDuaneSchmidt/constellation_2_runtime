@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/session_authority_alert.v1.schema.json",
+  "title": "session_authority_alert.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "generated_utc",
+    "alert_status",
+    "severity",
+    "environment",
+    "active_day",
+    "target_day",
+    "blocked_target_day",
+    "alert_reason_codes",
+    "alert_summary",
+    "recommended_operator_action",
+    "dedupe_key",
+    "previous_dedupe_key",
+    "recovery_of_dedupe_key",
+    "repeat_count",
+    "first_seen_utc",
+    "last_seen_utc",
+    "source_status_ref",
+    "source_active_session_ref",
+    "source_admission_ref",
+    "source_build_ref",
+    "source_market_calendar_coverage_ref"
+  ],
+  "properties": {
+    "schema_id": { "const": "session_authority_alert" },
+    "schema_version": { "const": "v1" },
+    "generated_utc": { "type": "string", "minLength": 20 },
+    "alert_status": { "type": "string", "enum": ["ALERT", "DEDUPED", "ESCALATED", "CLEAR", "HEALTHY"] },
+    "severity": { "type": "string", "enum": ["INFO", "WARNING", "ERROR", "CRITICAL"] },
+    "environment": { "type": "string", "enum": ["PAPER", "LIVE"] },
+    "active_day": { "type": "string" },
+    "target_day": { "type": "string" },
+    "blocked_target_day": { "type": "string" },
+    "alert_reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "alert_summary": { "type": "string", "minLength": 1 },
+    "recommended_operator_action": { "type": "string", "minLength": 1 },
+    "dedupe_key": { "type": "string", "minLength": 64, "maxLength": 64 },
+    "previous_dedupe_key": { "type": "string" },
+    "recovery_of_dedupe_key": { "type": "string" },
+    "repeat_count": { "type": "integer", "minimum": 0 },
+    "first_seen_utc": { "type": "string" },
+    "last_seen_utc": { "type": "string" },
+    "source_status_ref": { "$ref": "#/$defs/artifact_ref" },
+    "source_active_session_ref": { "$ref": "#/$defs/artifact_ref" },
+    "source_admission_ref": { "$ref": "#/$defs/artifact_ref" },
+    "source_build_ref": { "$ref": "#/$defs/artifact_ref" },
+    "source_market_calendar_coverage_ref": { "$ref": "#/$defs/artifact_ref" }
+  },
+  "$defs": {
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_path": { "type": "string" },
+        "artifact_sha256": { "type": "string" }
+      }
+    }
+  }
+}

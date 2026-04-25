@@ -1,0 +1,386 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/broker_observation_health.v1.schema.json",
+  "title": "broker_observation_health.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "generated_utc",
+    "day_utc",
+    "evaluation_utc",
+    "authority_owner",
+    "trust_rule_owner",
+    "execution_root_path",
+    "raw_journal_ref",
+    "fact_ledger_refs",
+    "current_state",
+    "downstream_trust_verdict",
+    "downstream_consumption_posture",
+    "may_consume_normally",
+    "may_consume_with_degraded_posture",
+    "must_fail_closed",
+    "freshness_status",
+    "freshness_age_seconds",
+    "session_status",
+    "sequence_status",
+    "replay_status",
+    "reconnect_status",
+    "gap_status",
+    "attribution_status",
+    "event_identity_rule_version",
+    "blocker_codes",
+    "degraded_codes",
+    "counts",
+    "summary",
+    "recommended_operator_action"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "broker_observation_health"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "generated_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "day_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "evaluation_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "authority_owner": {
+      "const": "broker_observation_health_v1"
+    },
+    "trust_rule_owner": {
+      "const": "broker_observation_health_v1"
+    },
+    "execution_root_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "raw_journal_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_path",
+        "artifact_sha256"
+      ],
+      "properties": {
+        "artifact_path": {
+          "type": "string"
+        },
+        "artifact_sha256": {
+          "type": "string"
+        }
+      }
+    },
+    "fact_ledger_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observation_session_fact",
+        "observed_order_fact",
+        "observed_order_status_fact",
+        "observed_fill_fact",
+        "observed_position_fact"
+      ],
+      "properties": {
+        "observation_session_fact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "artifact_path",
+            "artifact_sha256"
+          ],
+          "properties": {
+            "artifact_path": {
+              "type": "string"
+            },
+            "artifact_sha256": {
+              "type": "string"
+            }
+          }
+        },
+        "observed_order_fact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "artifact_path",
+            "artifact_sha256"
+          ],
+          "properties": {
+            "artifact_path": {
+              "type": "string"
+            },
+            "artifact_sha256": {
+              "type": "string"
+            }
+          }
+        },
+        "observed_order_status_fact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "artifact_path",
+            "artifact_sha256"
+          ],
+          "properties": {
+            "artifact_path": {
+              "type": "string"
+            },
+            "artifact_sha256": {
+              "type": "string"
+            }
+          }
+        },
+        "observed_fill_fact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "artifact_path",
+            "artifact_sha256"
+          ],
+          "properties": {
+            "artifact_path": {
+              "type": "string"
+            },
+            "artifact_sha256": {
+              "type": "string"
+            }
+          }
+        },
+        "observed_position_fact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "artifact_path",
+            "artifact_sha256"
+          ],
+          "properties": {
+            "artifact_path": {
+              "type": "string"
+            },
+            "artifact_sha256": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "current_state": {
+      "type": "string",
+      "enum": [
+        "TRUSTED",
+        "DEGRADED",
+        "BLOCKED"
+      ]
+    },
+    "downstream_trust_verdict": {
+      "type": "string",
+      "enum": [
+        "TRUSTED",
+        "DEGRADED",
+        "BLOCKED"
+      ]
+    },
+    "downstream_consumption_posture": {
+      "type": "string",
+      "enum": [
+        "NORMAL_CONSUMPTION",
+        "DEGRADED_ONLY",
+        "FAIL_CLOSED"
+      ]
+    },
+    "may_consume_normally": {
+      "type": "boolean"
+    },
+    "may_consume_with_degraded_posture": {
+      "type": "boolean"
+    },
+    "must_fail_closed": {
+      "type": "boolean"
+    },
+    "freshness_status": {
+      "type": "string",
+      "enum": [
+        "FRESH",
+        "STALE",
+        "UNAVAILABLE"
+      ]
+    },
+    "freshness_age_seconds": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "session_status": {
+      "type": "string",
+      "enum": [
+        "HEALTHY",
+        "RECONNECT_IN_PROGRESS",
+        "UNAVAILABLE"
+      ]
+    },
+    "sequence_status": {
+      "type": "string",
+      "enum": [
+        "OK",
+        "UNCERTAIN"
+      ]
+    },
+    "replay_status": {
+      "type": "string",
+      "enum": [
+        "NOT_OBSERVED",
+        "REPLAYING",
+        "REPLAY_COMPLETE",
+        "REPLAY_UNCERTAIN"
+      ]
+    },
+    "reconnect_status": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "RECONNECT_IN_PROGRESS",
+        "RECONNECT_RECOVERED"
+      ]
+    },
+    "gap_status": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "GAP_SUSPECTED",
+        "GAP_UNRESOLVED"
+      ]
+    },
+    "attribution_status": {
+      "type": "string",
+      "enum": [
+        "ATTRIBUTED",
+        "PARTIAL",
+        "AMBIGUOUS",
+        "FOREIGN",
+        "UNRESOLVED"
+      ]
+    },
+    "event_identity_rule_version": {
+      "const": "broker_fact_identity_v1"
+    },
+    "blocker_codes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "degraded_codes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "raw_record_count",
+        "observation_session_fact_count",
+        "observed_order_fact_count",
+        "observed_order_status_fact_count",
+        "observed_fill_fact_count",
+        "observed_position_fact_count",
+        "attributed_raw_record_count",
+        "partial_raw_record_count",
+        "ambiguous_raw_record_count",
+        "foreign_raw_record_count",
+        "unresolved_raw_record_count",
+        "duplicate_fact_count",
+        "replay_overlap_fact_count",
+        "conflicting_duplicate_fact_count",
+        "replay_session_fact_count",
+        "replay_uncertain_fact_count"
+      ],
+      "properties": {
+        "raw_record_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observation_session_fact_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observed_order_fact_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observed_order_status_fact_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observed_fill_fact_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observed_position_fact_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attributed_raw_record_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "partial_raw_record_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ambiguous_raw_record_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "foreign_raw_record_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unresolved_raw_record_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duplicate_fact_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "replay_overlap_fact_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "conflicting_duplicate_fact_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "replay_session_fact_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "replay_uncertain_fact_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recommended_operator_action": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

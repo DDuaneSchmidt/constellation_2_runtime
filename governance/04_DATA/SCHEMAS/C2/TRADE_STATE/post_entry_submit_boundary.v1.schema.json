@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/trade_state/post_entry_submit_boundary.v1.schema.json",
+  "title": "post_entry_submit_boundary.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_owner",
+    "truth_owner_status",
+    "boundary_verdict_id",
+    "request_ref",
+    "snapshot_binding_ref",
+    "trade_identity_id",
+    "action_class",
+    "environment",
+    "sleeve_id",
+    "account_id",
+    "client_id_orders",
+    "transmission_authorization_status",
+    "boundary_posture",
+    "validated_quantity",
+    "validated_order_parameters",
+    "first_blocker",
+    "blocker_codes",
+    "review_codes",
+    "ambiguity_state",
+    "upstream_core2_refs",
+    "upstream_core3_refs",
+    "identity_refs",
+    "rule_version_set",
+    "evaluated_at_utc",
+    "enforcement_applied",
+    "enforcement_scope",
+    "enforcement_result",
+    "enforcement_reason",
+    "constitutional_enforcement"
+  ],
+  "properties": {
+    "schema_id": { "const": "post_entry_submit_boundary" },
+    "schema_version": { "const": "v1" },
+    "authority_owner": { "const": "post_entry_submit_boundary_v1" },
+    "truth_owner_status": { "const": "CANONICAL_POST_ENTRY_TRANSMIT_AUTHORITY" },
+    "boundary_verdict_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "request_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "request_seal_id"],
+      "properties": {
+        "request_id": { "type": "string", "minLength": 1 },
+        "request_seal_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "snapshot_binding_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["binding_id"],
+      "properties": {
+        "binding_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "trade_identity_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "action_class": {
+      "type": "string",
+      "enum": ["CLOSE_TRADE", "REDUCE_TRADE", "AMEND_PROTECTION", "CANCEL_ORDER"]
+    },
+    "environment": { "type": "string", "minLength": 1 },
+    "sleeve_id": { "type": "string", "minLength": 1 },
+    "account_id": { "type": "string", "minLength": 1 },
+    "client_id_orders": { "type": "integer", "minimum": 1 },
+    "transmission_authorization_status": {
+      "type": "string",
+      "enum": ["AUTHORIZED", "BLOCKED", "REVIEW_REQUIRED", "STALE_INVALIDATED", "MALFORMED"]
+    },
+    "boundary_posture": {
+      "type": "string",
+      "enum": ["AUTHORIZED", "BLOCKED", "REVIEW_REQUIRED", "STALE_INVALIDATED", "MALFORMED"]
+    },
+    "validated_quantity": { "type": ["string", "null"] },
+    "validated_order_parameters": {
+      "type": ["object", "null"],
+      "additionalProperties": {
+        "type": ["string", "number", "integer", "boolean", "null"]
+      }
+    },
+    "first_blocker": { "type": ["string", "null"] },
+    "blocker_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "review_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "ambiguity_state": { "type": "string", "minLength": 1 },
+    "upstream_core2_refs": { "$ref": "#/$defs/artifactRef" },
+    "upstream_core3_refs": { "$ref": "#/$defs/artifactRef" },
+    "identity_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshot_id", "snapshot_sha256", "authority_owner", "execution_root_ref"],
+      "properties": {
+        "snapshot_id": { "type": "string", "minLength": 1 },
+        "snapshot_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "authority_owner": { "type": "string", "minLength": 1 },
+        "execution_root_ref": { "type": "string", "minLength": 1 }
+      }
+    },
+    "rule_version_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["core4_rule_pack", "boundary_contract"],
+      "properties": {
+        "core4_rule_pack": { "type": "string", "minLength": 1 },
+        "boundary_contract": { "type": "string", "minLength": 1 }
+      }
+    },
+    "evaluated_at_utc": { "type": "string", "format": "date-time" },
+    "enforcement_applied": { "type": "boolean" },
+    "enforcement_scope": { "type": "string", "minLength": 1 },
+    "enforcement_result": { "type": "string", "enum": ["ALLOWED", "BLOCKED", "NOT_APPLIED"] },
+    "enforcement_reason": { "type": "string", "minLength": 1 },
+    "constitutional_enforcement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enforcement_applied",
+        "enforcement_scope",
+        "enforcement_result",
+        "enforcement_reason",
+        "reason_codes",
+        "mismatch",
+        "legacy_status",
+        "legacy_decision",
+        "legacy_authorized_quantity",
+        "decision_enum",
+        "proposal_hash",
+        "fact_bundle_hash",
+        "authorization_expires_at",
+        "metrics"
+      ],
+      "properties": {
+        "enforcement_applied": { "type": "boolean" },
+        "enforcement_scope": { "type": "string", "minLength": 1 },
+        "enforcement_result": { "type": "string", "enum": ["ALLOWED", "BLOCKED", "NOT_APPLIED"] },
+        "enforcement_reason": { "type": "string", "minLength": 1 },
+        "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "mismatch": { "type": "boolean" },
+        "legacy_status": { "type": "string", "minLength": 1 },
+        "legacy_decision": { "type": "string", "minLength": 1 },
+        "legacy_authorized_quantity": { "type": "integer", "minimum": 0 },
+        "decision_enum": { "type": "string", "minLength": 1 },
+        "proposal_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "fact_bundle_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "authorization_expires_at": { "type": ["string", "null"], "format": "date-time" },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enforced_proposal_count",
+            "allowed_count",
+            "blocked_count",
+            "mismatch_count",
+            "block_reasons",
+            "blocked_ratio",
+            "warning_threshold_ratio",
+            "warning_triggered",
+            "warning_codes"
+          ],
+          "properties": {
+            "enforced_proposal_count": { "type": "integer", "minimum": 0 },
+            "allowed_count": { "type": "integer", "minimum": 0 },
+            "blocked_count": { "type": "integer", "minimum": 0 },
+            "mismatch_count": { "type": "integer", "minimum": 0 },
+            "block_reasons": {
+              "type": "object",
+              "additionalProperties": { "type": "integer", "minimum": 1 }
+            },
+            "blocked_ratio": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{4}$" },
+            "warning_threshold_ratio": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{4}$" },
+            "warning_triggered": { "type": "boolean" },
+            "warning_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+          }
+        }
+      }
+    },
+    "constitutional_shadow": {
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "artifact_sha256", "snapshot_id", "snapshot_status"],
+      "properties": {
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "snapshot_id": { "type": "string", "minLength": 1 },
+        "snapshot_status": { "type": "string", "enum": ["CURRENT", "STALE", "SUPERSEDED", "MISSING"] }
+      }
+    }
+  }
+}

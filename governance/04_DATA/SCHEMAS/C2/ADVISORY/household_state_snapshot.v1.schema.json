@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisory/household_state_snapshot.v1.schema.json",
+  "title": "household_state_snapshot.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_id",
+    "household_state_snapshot_id",
+    "household_id",
+    "source_household_snapshot_id",
+    "snapshot_at",
+    "valuation_timestamp",
+    "total_household_gross_market_value",
+    "total_household_net_liquid_value",
+    "total_cash_available",
+    "total_cash_reserved",
+    "accounts",
+    "positions",
+    "imported_positions",
+    "lot_rows",
+    "exposures_by_symbol",
+    "exposures_by_sector",
+    "exposures_by_sleeve",
+    "concentration_metrics",
+    "drawdown_state",
+    "stale_inputs",
+    "completeness_flags",
+    "reason_codes"
+  ],
+  "properties": {
+    "schema_id": { "const": "household_state_snapshot" },
+    "schema_version": { "const": "v1" },
+    "record_id": { "type": "string", "minLength": 1 },
+    "household_state_snapshot_id": { "type": "string", "minLength": 1 },
+    "household_id": { "type": "string", "minLength": 1 },
+    "source_household_snapshot_id": { "type": "string", "minLength": 1 },
+    "snapshot_at": { "type": "string", "minLength": 1 },
+    "valuation_timestamp": { "type": "string", "minLength": 1 },
+    "total_household_gross_market_value": { "type": "string", "minLength": 1 },
+    "total_household_net_liquid_value": { "type": ["string", "null"] },
+    "total_cash_available": { "type": "string", "minLength": 1 },
+    "total_cash_reserved": { "type": "string", "minLength": 1 },
+    "accounts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["account_id", "scope_role", "verified_cash_total_cents"],
+        "properties": {
+          "account_id": { "type": "string", "minLength": 1 },
+          "scope_role": { "type": "string", "minLength": 1 },
+          "verified_cash_total_cents": { "type": "integer" }
+        }
+      }
+    },
+    "positions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["position_id", "account_id", "symbol", "asset_class", "currency", "quantity", "market_value_cents", "market_exposure_type"],
+        "properties": {
+          "position_id": { "type": "string", "minLength": 1 },
+          "account_id": { "type": "string", "minLength": 1 },
+          "symbol": { "type": "string", "minLength": 1 },
+          "asset_class": { "type": "string", "minLength": 1 },
+          "currency": { "type": "string", "minLength": 1 },
+          "quantity": { "type": "integer" },
+          "market_value_cents": { "type": "integer" },
+          "market_exposure_type": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "imported_positions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["position_id", "symbol", "account_id", "owner_account_id", "asset_class", "market_value_cents", "currency", "lifecycle_status", "management_mode", "data_complete", "lot_truth_available"],
+        "properties": {
+          "position_id": { "type": "string", "minLength": 1 },
+          "symbol": { "type": "string", "minLength": 1 },
+          "account_id": { "type": "string", "minLength": 1 },
+          "owner_account_id": { "type": "string" },
+          "asset_class": { "type": "string", "minLength": 1 },
+          "market_value_cents": { "type": "integer" },
+          "currency": { "type": "string", "minLength": 1 },
+          "lifecycle_status": { "type": "string", "minLength": 1 },
+          "management_mode": { "type": "string", "minLength": 1 },
+          "data_complete": { "type": "boolean" },
+          "lot_truth_available": { "type": "boolean" }
+        }
+      }
+    },
+    "lot_rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "exposures_by_symbol": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["symbol", "market_value_cents", "account_ids"],
+        "properties": {
+          "symbol": { "type": "string", "minLength": 1 },
+          "market_value_cents": { "type": "integer" },
+          "account_ids": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "exposures_by_sector": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sector", "market_value_cents"],
+        "properties": {
+          "sector": { "type": "string", "minLength": 1 },
+          "market_value_cents": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "exposures_by_sleeve": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sleeve_id", "market_value_cents"],
+        "properties": {
+          "sleeve_id": { "type": "string", "minLength": 1 },
+          "market_value_cents": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "concentration_metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["symbol", "market_value_cents", "weight"],
+        "properties": {
+          "symbol": { "type": "string", "minLength": 1 },
+          "market_value_cents": { "type": "integer" },
+          "weight": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "drawdown_state": { "type": ["object", "null"], "additionalProperties": true },
+    "stale_inputs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "completeness_flags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

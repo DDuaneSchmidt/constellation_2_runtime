@@ -17,7 +17,7 @@ Define a governed, artifact-backed bug metrics surface derived from runtime diag
 
 ## Artifact surface
 
-- `constellation_2/runtime/truth/readiness_v1/constellation_bug_metrics_v1/<DAY_UTC>/constellation_bug_metrics.v1.json`
+- `/home/node/constellation_runtime_data/truth/readiness_v1/constellation_bug_metrics_v1/<DAY_UTC>/constellation_bug_metrics.v1.json`
 
 This artifact is platform-level (global truth) and must not be derived from UI state.
 
@@ -25,12 +25,12 @@ This artifact is platform-level (global truth) and must not be derived from UI s
 
 Bug metrics MUST use artifact-backed diagnostics evidence only:
 
-- `constellation_2/runtime/truth/system_snapshot/constellation_runtime_state.v1.json`
-- `constellation_2/runtime/truth/system_snapshot/constellation_root_cause_report.v1.json`
-- `constellation_2/runtime/truth/system_snapshot/constellation_repair_plan.v1.json`
-- `constellation_2/runtime/truth/monitoring_v1/lifecycle_monitor/<DAY>/lifecycle_monitor_report.v1.json`
-- `constellation_2/runtime/truth/monitoring_v1/paper_readiness/<DAY>/paper_readiness_report.v1.json`
-- `constellation_2/runtime/truth/reports/orchestrator_run_verdict_v2/<DAY>/*/orchestrator_run_verdict.v2.json`
+- `/home/node/constellation_runtime_data/truth/system_snapshot/constellation_runtime_state.v1.json`
+- `/home/node/constellation_runtime_data/truth/system_snapshot/constellation_root_cause_report.v1.json`
+- `/home/node/constellation_runtime_data/truth/system_snapshot/constellation_repair_plan.v1.json`
+- `/home/node/constellation_runtime_data/truth/monitoring_v1/lifecycle_monitor/<DAY>/lifecycle_monitor_report.v1.json`
+- `/home/node/constellation_runtime_data/truth/monitoring_v1/paper_readiness/<DAY>/paper_readiness_report.v1.json`
+- `/home/node/constellation_runtime_data/truth/reports/orchestrator_run_verdict_v2/<DAY>/*/orchestrator_run_verdict.v2.json`
 
 ## Required outputs
 

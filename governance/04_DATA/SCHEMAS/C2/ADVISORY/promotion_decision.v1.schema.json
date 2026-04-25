@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisory/promotion_decision.v1.schema.json",
+  "title": "promotion_decision.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_id",
+    "promotion_decision_id",
+    "household_id",
+    "parent_policy_id",
+    "parent_portfolio_intent_id",
+    "created_at",
+    "effective_at",
+    "actor_source",
+    "contract_version",
+    "evaluator_version",
+    "parent_lineage_refs",
+    "approved_change_ids",
+    "blocked_change_ids",
+    "outcome",
+    "reason_codes",
+    "input_record_refs"
+  ],
+  "properties": {
+    "schema_id": { "const": "promotion_decision" },
+    "schema_version": { "const": "v1" },
+    "record_id": { "type": "string", "minLength": 1 },
+    "promotion_decision_id": { "type": "string", "minLength": 1 },
+    "household_id": { "type": "string", "minLength": 1 },
+    "parent_policy_id": { "type": "string", "minLength": 1 },
+    "parent_portfolio_intent_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "minLength": 1 },
+    "effective_at": { "type": "string", "minLength": 1 },
+    "actor_source": { "type": "string", "minLength": 1 },
+    "contract_version": { "type": "string", "minLength": 1 },
+    "evaluator_version": { "type": "string", "minLength": 1 },
+    "parent_lineage_refs": {
+      "type": "array",
+      "minItems": 2,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "approved_change_ids": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "blocked_change_ids": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["promote", "no_action", "blocked"]
+    },
+    "reason_codes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "input_record_refs": {
+      "type": "array",
+      "minItems": 2,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

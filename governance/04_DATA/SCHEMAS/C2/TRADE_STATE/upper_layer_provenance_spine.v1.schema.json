@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/trade_state/upper_layer_provenance_spine.v1.schema.json",
+  "title": "upper_layer_provenance_spine.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_owner",
+    "artifact_family",
+    "artifact_id",
+    "day_utc",
+    "evaluated_at_utc",
+    "trade_identity_ref",
+    "core2_refs",
+    "core3_refs",
+    "core4_refs",
+    "core5_refs",
+    "cross_upper_plane_refs",
+    "executable_reentry_path_refs",
+    "rule_versions",
+    "provenance_status",
+    "blocker_codes",
+    "degraded_codes"
+  ],
+  "properties": {
+    "schema_id": { "const": "upper_layer_provenance_spine" },
+    "schema_version": { "const": "v1" },
+    "authority_owner": { "const": "upper_layer_provenance_spine_v1" },
+    "artifact_family": { "type": "string", "minLength": 1 },
+    "artifact_id": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "evaluated_at_utc": { "type": "string", "format": "date-time" },
+    "trade_identity_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trade_identity_id", "artifact_path", "artifact_sha256"],
+      "properties": {
+        "trade_identity_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "core2_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trade_identity_ref",
+        "incorporated_state_ref",
+        "reconciled_description_ref",
+        "reconciliation_health_ref",
+        "reconciliation_provenance_ref"
+      ],
+      "properties": {
+        "trade_identity_ref": { "$ref": "#/$defs/artifact_ref" },
+        "incorporated_state_ref": { "$ref": "#/$defs/artifact_ref" },
+        "reconciled_description_ref": { "$ref": "#/$defs/artifact_ref" },
+        "reconciliation_health_ref": { "$ref": "#/$defs/artifact_ref" },
+        "reconciliation_provenance_ref": { "$ref": "#/$defs/artifact_ref" }
+      }
+    },
+    "core3_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/logical_artifact_ref" }
+    },
+    "core4_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/logical_artifact_ref" }
+    },
+    "core5_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/logical_artifact_ref" }
+    },
+    "cross_upper_plane_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/logical_artifact_ref" }
+    },
+    "executable_reentry_path_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reentry_required",
+        "reentry_status",
+        "core3_contract_ref",
+        "core4_contract_ref",
+        "current_core3_refs",
+        "current_core4_refs"
+      ],
+      "properties": {
+        "reentry_required": { "const": true },
+        "reentry_status": {
+          "type": "string",
+          "enum": [
+            "REQUIRED_BEFORE_EXECUTION",
+            "CURRENT_PATH_COMPLETE"
+          ]
+        },
+        "core3_contract_ref": { "$ref": "#/$defs/artifact_ref" },
+        "core4_contract_ref": { "$ref": "#/$defs/artifact_ref" },
+        "current_core3_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/logical_artifact_ref" }
+        },
+        "current_core4_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/logical_artifact_ref" }
+        }
+      }
+    },
+    "rule_versions": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "provenance_status": {
+      "type": "string",
+      "enum": ["COMPLETE", "DEGRADED", "BLOCKED"]
+    },
+    "blocker_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "degraded_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "$defs": {
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "logical_artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["logical_name", "artifact_path", "artifact_sha256"],
+      "properties": {
+        "logical_name": { "type": "string", "minLength": 1 },
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  }
+}

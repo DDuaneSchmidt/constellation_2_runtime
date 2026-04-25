@@ -15,13 +15,17 @@ scope: constellation_2_0
 
 Define a governed future-grade surface for PAPER to LIVE promotion readiness, separate from raw execution PASS/FAIL.
 
+This surface is non-canonical for sleeve-edge control decisions.
+
 ## Artifact surface
 
 Target artifact path:
 
-- `constellation_2/runtime/truth_sleeves/<sleeve_id>/PAPER/readiness_v1/sleeve_live_readiness_v1/<DAY_UTC>/sleeve_live_readiness.v1.json`
+- `/home/node/constellation_runtime_data/truth_sleeves/<sleeve_id>/PAPER/readiness_v1/sleeve_live_readiness_v1/<DAY_UTC>/sleeve_live_readiness.v1.json`
 
 This artifact is advisory for promotion governance and is not a substitute for execution authority or gate-stack verdict.
+
+It must carry an explicit non-canonical warning and must not be used as allocator or qualification control truth.
 
 ## Separation from execution status
 

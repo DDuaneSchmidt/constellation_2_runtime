@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/buy_tax_decision.v1.schema.json",
+  "title": "buy_tax_decision.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "decision_id", "scope_id", "snapshot_id", "resolved_policy_set_id", "decision_status", "decision_mode", "algorithm_version", "dependency_fingerprint_id", "request", "wash_sale_evaluation", "account_regime_evaluation", "restriction_evaluation", "reason_codes"],
+  "properties": {
+    "schema_id": { "const": "buy_tax_decision" },
+    "schema_version": { "const": "v1" },
+    "decision_id": { "type": "string", "minLength": 1 },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "snapshot_id": { "type": "string", "minLength": 1 },
+    "resolved_policy_set_id": { "type": "string", "minLength": 1 },
+    "decision_status": { "type": "string", "enum": ["approved", "approved_with_warning", "full_optimization_allowed", "safe_execution_allowed", "preview_only", "requires_operator_review", "hard_blocked"] },
+    "decision_mode": { "type": "string", "enum": ["FULL_OPTIMIZATION_ALLOWED", "SAFE_EXECUTION_ALLOWED", "PREVIEW_ONLY", "REQUIRES_OPERATOR_REVIEW", "HARD_BLOCKED"] },
+    "algorithm_version": { "type": "string", "minLength": 1 },
+    "dependency_fingerprint_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "request": { "type": "object" },
+    "wash_sale_evaluation": { "type": "object" },
+    "account_regime_evaluation": { "type": "object" },
+    "restriction_evaluation": { "type": "object" },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}
+

@@ -17,6 +17,9 @@
     "input_manifest",
     "producer",
     "provenance",
+    "constitutional_dependency_declaration",
+    "constitutional_lineage",
+    "economic_state",
     "session_authority_attestation",
     "run_state_authority_attestation"
   ],
@@ -63,6 +66,8 @@
         "git_sha": { "type": "string" }
       }
     },
+    "constitutional_dependency_declaration": { "type": "object" },
+    "constitutional_lineage": { "type": "object" },
 
     "provenance": {
       "type": "object",
@@ -72,6 +77,39 @@
         "truth_root": { "type": "string" },
         "registry_sha256": { "type": "string" },
         "sleeve_registry_sha256": { "type": "string" }
+      }
+    },
+    "economic_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "source_day_utc",
+        "package_path",
+        "package_sha256",
+        "build_path",
+        "build_sha256",
+        "drawdown_pct",
+        "drawdown_guard_status",
+        "policy_baseline_comparison_vs_portfolio_return",
+        "external_benchmark_underperformer_count",
+        "reason_codes"
+      ],
+      "properties": {
+        "status": { "type": "string", "enum": ["OK", "UNKNOWN"] },
+        "source_day_utc": { "type": "string" },
+        "package_path": { "type": "string" },
+        "package_sha256": { "type": "string" },
+        "build_path": { "type": "string" },
+        "build_sha256": { "type": "string" },
+        "drawdown_pct": { "type": ["string", "null"] },
+        "drawdown_guard_status": { "type": "string", "enum": ["PASS", "BLOCKED", "UNKNOWN"] },
+        "policy_baseline_comparison_vs_portfolio_return": { "type": ["string", "null"] },
+        "external_benchmark_underperformer_count": { "type": "integer", "minimum": 0 },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
       }
     },
     "session_authority_attestation": {

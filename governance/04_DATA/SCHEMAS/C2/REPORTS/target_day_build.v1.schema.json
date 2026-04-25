@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/target_day_build.v1.schema.json",
+  "title": "target_day_build.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "generated_utc",
+    "target_day",
+    "authority_root",
+    "build_status",
+    "required_artifacts",
+    "artifact_results",
+    "blocker_chain",
+    "completeness_result",
+    "closure_status",
+    "hidden_dependency_check_result",
+    "source_refs"
+  ],
+  "properties": {
+    "schema_id": { "const": "target_day_build" },
+    "schema_version": { "const": "v1" },
+    "generated_utc": { "type": "string", "minLength": 20 },
+    "target_day": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "authority_root": { "type": "string", "minLength": 1 },
+    "build_status": { "type": "string", "enum": ["COMPLETE", "BLOCKED"] },
+    "required_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifact_id",
+          "artifact_name",
+          "role_class",
+          "required_status",
+          "canonical_path",
+          "authority_path",
+          "path_family",
+          "target_day_expected",
+          "freshness_rule",
+          "provenance_required"
+        ],
+        "properties": {
+          "artifact_id": { "type": "string", "minLength": 1 },
+          "artifact_name": { "type": "string", "minLength": 1 },
+          "role_class": {
+            "type": "string",
+            "enum": ["REQUIRED_BINDING_INPUT", "REQUIRED_DERIVED_GATE", "REQUIRED_EXECUTION_BOUNDARY"]
+          },
+          "required_status": { "type": "string", "const": "PASS" },
+          "canonical_path": { "type": "string", "minLength": 1 },
+          "authority_path": { "type": "string", "minLength": 1 },
+          "path_family": { "type": "string", "minLength": 1 },
+          "target_day_expected": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+          "freshness_rule": { "type": "string", "minLength": 1 },
+          "provenance_required": { "type": "boolean" }
+        }
+      }
+    },
+    "artifact_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifact_id",
+          "artifact_name",
+          "required",
+          "role_class",
+          "classification",
+          "canonical_path",
+          "authority_path",
+          "path_family",
+          "observed_status",
+          "result_status",
+          "blocker_codes",
+          "blocking_reason_code",
+          "schema_status",
+          "schema_ref",
+          "freshness_rule",
+          "freshness_status",
+          "target_day_expected",
+          "target_day_observed",
+          "date_binding_status",
+          "date_binding_value",
+          "provenance_required",
+          "provenance_summary",
+          "closure_status",
+          "producer",
+          "source_refs",
+          "observed_dependency_artifacts"
+        ],
+        "properties": {
+          "artifact_id": { "type": "string", "minLength": 1 },
+          "artifact_name": { "type": "string", "minLength": 1 },
+          "required": { "type": "boolean" },
+          "role_class": {
+            "type": "string",
+            "enum": ["REQUIRED_BINDING_INPUT", "REQUIRED_DERIVED_GATE", "REQUIRED_EXECUTION_BOUNDARY"]
+          },
+          "classification": { "type": "string", "minLength": 1 },
+          "canonical_path": { "type": "string", "minLength": 1 },
+          "authority_path": { "type": "string", "minLength": 1 },
+          "path_family": { "type": "string", "minLength": 1 },
+          "observed_status": { "type": "string", "minLength": 1 },
+          "result_status": { "type": "string", "enum": ["PASS", "FAIL"] },
+          "blocker_codes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "blocking_reason_code": { "type": "string" },
+          "schema_status": { "type": "string", "minLength": 1 },
+          "schema_ref": { "type": "string" },
+          "freshness_rule": { "type": "string", "minLength": 1 },
+          "freshness_status": { "type": "string", "minLength": 1 },
+          "target_day_expected": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+          "target_day_observed": { "type": "string" },
+          "date_binding_status": { "type": "string", "minLength": 1 },
+          "date_binding_value": { "type": "string" },
+          "provenance_required": { "type": "boolean" },
+          "provenance_summary": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["required", "present", "fields_present", "source"],
+            "properties": {
+              "required": { "type": "boolean" },
+              "present": { "type": "boolean" },
+              "fields_present": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "source": { "type": "string" }
+            }
+          },
+          "closure_status": { "type": "string", "enum": ["CLOSED", "OPEN"] },
+          "producer": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["module", "git_sha"],
+            "properties": {
+              "module": { "type": "string" },
+              "git_sha": { "type": "string" }
+            }
+          },
+          "source_refs": {
+            "type": "array",
+            "items": { "type": "object" }
+          },
+          "observed_dependency_artifacts": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "blocker_chain": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["artifact_id", "artifact_name", "blocker_code", "classification", "artifact_path", "role_class"],
+        "properties": {
+          "artifact_id": { "type": "string", "minLength": 1 },
+          "artifact_name": { "type": "string", "minLength": 1 },
+          "blocker_code": { "type": "string", "minLength": 1 },
+          "classification": { "type": "string", "minLength": 1 },
+          "artifact_path": { "type": "string", "minLength": 1 },
+          "role_class": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "completeness_result": { "type": "string", "enum": ["COMPLETE", "INCOMPLETE"] },
+    "closure_status": { "type": "string", "enum": ["CLOSED", "OPEN"] },
+    "hidden_dependency_check_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "blocking_reason_code",
+        "summary",
+        "declared_inventory_artifacts",
+        "observed_dependency_artifacts",
+        "undeclared_dependency_artifacts",
+        "failing_producers"
+      ],
+      "properties": {
+        "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+        "blocking_reason_code": { "type": "string" },
+        "summary": { "type": "string" },
+        "declared_inventory_artifacts": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "observed_dependency_artifacts": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "undeclared_dependency_artifacts": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "failing_producers": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "source_refs": {
+      "type": "array",
+      "items": { "type": "object" }
+    }
+  }
+}

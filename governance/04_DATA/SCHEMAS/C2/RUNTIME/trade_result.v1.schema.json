@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/runtime/trade_result.v1.schema.json",
+  "title": "trade_result.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "position_id",
+    "decision_id",
+    "origin",
+    "risk_basis",
+    "entry_price",
+    "initial_stop_price",
+    "exit_price",
+    "realized_r",
+    "mfe_r",
+    "mae_r",
+    "holding_time_seconds",
+    "scoring_eligibility",
+    "analytics_eligibility",
+    "synthetic_risk_labeled",
+    "reason_codes",
+    "produced_at_utc",
+    "producer",
+    "provenance_refs"
+  ],
+  "properties": {
+    "schema_id": { "const": "trade_result" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "position_id": { "type": "string", "minLength": 1 },
+    "decision_id": { "type": "string", "minLength": 1 },
+    "origin": { "type": "string", "enum": ["NATIVE", "IMPORTED"] },
+    "risk_basis": { "type": "string", "enum": ["R_NATIVE", "R_SYNTHETIC", "UNMANAGED"] },
+    "entry_price": { "type": "string" },
+    "initial_stop_price": { "type": "string" },
+    "exit_price": { "type": "string" },
+    "realized_r": { "type": "string" },
+    "mfe_r": { "type": "string" },
+    "mae_r": { "type": "string" },
+    "holding_time_seconds": { "type": "integer", "minimum": 0 },
+    "scoring_eligibility": {
+      "type": "string",
+      "enum": ["INCLUDED", "EXCLUDED_BY_DEFAULT", "EXCLUDED_PERMANENT"]
+    },
+    "analytics_eligibility": { "type": "string", "enum": ["INCLUDED", "EXCLUDED_BY_DEFAULT"] },
+    "synthetic_risk_labeled": { "type": "boolean" },
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "produced_at_utc": { "type": "string", "format": "date-time" },
+    "producer": { "$ref": "#/$defs/producer" },
+    "provenance_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/provenanceRef" }
+    }
+  },
+  "$defs": {
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 1 }
+      }
+    },
+    "provenanceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["logical_name", "artifact_path", "artifact_sha256"],
+      "properties": {
+        "logical_name": { "type": "string" },
+        "artifact_path": { "type": "string" },
+        "artifact_sha256": { "type": "string" }
+      }
+    }
+  }
+}

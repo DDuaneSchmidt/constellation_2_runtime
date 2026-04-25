@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/constitutional_authorization.v1.schema.json",
+  "title": "constitutional_authorization.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authorization_id",
+    "proposal_hash",
+    "fact_bundle_hash",
+    "policy_version",
+    "effective_scope",
+    "decision_enum",
+    "issued_at",
+    "expires_at",
+    "authorization_source",
+    "issuer_identity"
+  ],
+  "properties": {
+    "schema_id": { "const": "constitutional_authorization" },
+    "schema_version": { "const": "v1" },
+    "authorization_id": { "type": "string", "minLength": 1 },
+    "proposal_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "fact_bundle_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "policy_version": { "type": "string", "minLength": 1 },
+    "effective_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["global", "domain", "account", "sleeve", "action_class", "effective_authority"],
+      "properties": {
+        "global": { "type": "string" },
+        "domain": { "type": "string" },
+        "account": { "type": "string" },
+        "sleeve": { "type": "string" },
+        "action_class": { "type": "string" },
+        "effective_authority": { "type": "string", "minLength": 1 }
+      }
+    },
+    "decision_enum": {
+      "type": "string",
+      "enum": [
+        "AUTO_EXECUTE",
+        "AUTO_EXECUTE_PROTECTIVE",
+        "REQUIRE_HUMAN_REVIEW",
+        "ADVISORY_ONLY",
+        "DEFER",
+        "BLOCK",
+        "FREEZE_SCOPE"
+      ]
+    },
+    "issued_at": { "type": "string", "minLength": 1 },
+    "expires_at": {
+      "anyOf": [
+        { "type": "string", "minLength": 1 },
+        { "type": "null" }
+      ]
+    },
+    "authorization_source": {
+      "type": "string",
+      "enum": ["SYSTEM", "HUMAN_OVERRIDE"]
+    },
+    "issuer_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issuer", "producer_module", "git_sha"],
+      "properties": {
+        "issuer": { "type": "string", "minLength": 1 },
+        "producer_module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

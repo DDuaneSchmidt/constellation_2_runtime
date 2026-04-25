@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/tax_correction_impact_index.v1.schema.json",
+  "title": "tax_correction_impact_index.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "impact_index_id", "correction_id", "scope_id", "superseded_fact_id", "correction_fact_id", "affected_snapshot_ids", "affected_decision_ids", "replay_required", "impact_class", "produced_utc", "reason_codes"],
+  "properties": {
+    "schema_id": { "const": "tax_correction_impact_index" },
+    "schema_version": { "const": "v1" },
+    "impact_index_id": { "type": "string", "minLength": 1 },
+    "correction_id": { "type": "string", "minLength": 1 },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "superseded_fact_id": { "type": "string", "minLength": 1 },
+    "correction_fact_id": { "type": "string", "minLength": 1 },
+    "affected_snapshot_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "affected_decision_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "replay_required": { "type": "boolean" },
+    "impact_class": { "type": "string", "enum": ["none", "state_only", "decision_affecting", "report_affecting"] },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}

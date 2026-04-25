@@ -1,0 +1,141 @@
+{
+  "schema_id": "C2_SINGLE_NODE_HOSTED_PREFLIGHT_SCHEMA_V1",
+  "title": "C2 Single-Node Hosted Preflight V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "preflight_id",
+    "status",
+    "generated_at_utc",
+    "hosting_mode",
+    "entrypoint_name",
+    "entrypoint_ref",
+    "service_name",
+    "service_unit_ref",
+    "requested_python",
+    "resolved_python_executable",
+    "python_selection_mode",
+    "required_python_modules",
+    "runtime_identity_ref",
+    "runtime_root_snapshot",
+    "tool_refs",
+    "checks",
+    "blocking_codes"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "single_node_hosted_preflight.v1" },
+    "schema_version": { "type": "string", "const": "v1" },
+    "preflight_id": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+    "generated_at_utc": { "type": "string", "minLength": 20 },
+    "hosting_mode": { "type": "string", "enum": ["SYSTEMD_SINGLE_NODE"] },
+    "entrypoint_name": { "type": "string", "minLength": 1 },
+    "entrypoint_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "service_name": { "type": "string", "minLength": 1 },
+    "service_unit_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "requested_python": { "type": "string", "minLength": 1 },
+    "resolved_python_executable": { "type": "string", "minLength": 1 },
+    "python_selection_mode": {
+      "type": "string",
+      "enum": ["ENV_OVERRIDE", "REPO_LOCAL_VENV", "SYSTEM_PYTHON3"]
+    },
+    "required_python_modules": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "runtime_identity_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_path",
+        "contract_sha256",
+        "authoritative_repo_root",
+        "runtime_environment",
+        "primary_execution_identity_ref"
+      ],
+      "properties": {
+        "contract_path": { "type": "string", "minLength": 1 },
+        "contract_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "authoritative_repo_root": { "type": "string", "minLength": 1 },
+        "runtime_environment": { "type": "string", "minLength": 1 },
+        "primary_execution_identity_ref": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["authority_owner", "sleeve_id"],
+          "properties": {
+            "authority_owner": { "type": "string", "const": "execution_identity_binding_v1" },
+            "sleeve_id": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "runtime_root_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtime_data_root",
+        "canonical_truth_root",
+        "truth_sleeves_root",
+        "release_root"
+      ],
+      "properties": {
+        "runtime_data_root": { "type": "string", "minLength": 1 },
+        "canonical_truth_root": { "type": "string", "minLength": 1 },
+        "truth_sleeves_root": { "type": "string", "minLength": 1 },
+        "release_root": { "type": "string", "minLength": 1 }
+      }
+    },
+    "tool_refs": {
+      "type": "array",
+      "minItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "path", "sha256"],
+        "properties": {
+          "role": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["check_id", "status", "detail"],
+        "properties": {
+          "check_id": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+          "detail": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "blocking_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    }
+  }
+}

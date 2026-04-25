@@ -1,0 +1,258 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/core1_pre_core2_readiness.v1.schema.json",
+  "title": "core1_pre_core2_readiness.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "generated_utc",
+    "day_utc",
+    "authority_owner",
+    "execution_root_path",
+    "current_state",
+    "safe_for_core2_consumption",
+    "core2_allowed_input_refs",
+    "core2_forbidden_direct_inputs",
+    "compatibility_mode",
+    "legacy_boundary_status",
+    "identity_stability_status",
+    "identity_stability_details",
+    "trust_verdict",
+    "downstream_consumption_posture",
+    "replay_status",
+    "reconnect_status",
+    "gap_status",
+    "attribution_status",
+    "first_blocker",
+    "blocker_codes",
+    "degraded_codes",
+    "missing_artifacts",
+    "legacy_boundary_details",
+    "summary"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "core1_pre_core2_readiness"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "generated_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "day_utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "authority_owner": {
+      "const": "core2_core1_dependency_gate_v1"
+    },
+    "execution_root_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "current_state": {
+      "type": "string",
+      "enum": [
+        "READY",
+        "DEGRADED_ONLY",
+        "BLOCKED"
+      ]
+    },
+    "safe_for_core2_consumption": {
+      "type": "boolean"
+    },
+    "core2_allowed_input_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "broker_observation_health_v1",
+        "broker_observation_trust_dependency_v1",
+        "observation_session_fact.v1",
+        "observed_order_fact.v1",
+        "observed_order_status_fact.v1",
+        "observed_fill_fact.v1",
+        "observed_position_fact.v1"
+      ],
+      "properties": {
+        "broker_observation_health_v1": {
+          "$ref": "#/$defs/artifactRef"
+        },
+        "broker_observation_trust_dependency_v1": {
+          "$ref": "#/$defs/artifactRef"
+        },
+        "observation_session_fact.v1": {
+          "$ref": "#/$defs/artifactRef"
+        },
+        "observed_order_fact.v1": {
+          "$ref": "#/$defs/artifactRef"
+        },
+        "observed_order_status_fact.v1": {
+          "$ref": "#/$defs/artifactRef"
+        },
+        "observed_fill_fact.v1": {
+          "$ref": "#/$defs/artifactRef"
+        },
+        "observed_position_fact.v1": {
+          "$ref": "#/$defs/artifactRef"
+        }
+      }
+    },
+    "core2_forbidden_direct_inputs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "compatibility_mode": {
+      "const": "HARD_CUT_HARDENED_ONLY"
+    },
+    "legacy_boundary_status": {
+      "type": "string",
+      "enum": [
+        "HARDENED_RUNTIME_DAY",
+        "LEGACY_RUNTIME_DAY_NON_CONSUMABLE",
+        "MIXED_RUNTIME_DAY_BLOCKED",
+        "RAW_JOURNAL_MISSING"
+      ]
+    },
+    "identity_stability_status": {
+      "type": "string",
+      "enum": [
+        "STABLE",
+        "UNSTABLE"
+      ]
+    },
+    "identity_stability_details": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "trust_verdict": {
+      "type": "string",
+      "enum": [
+        "TRUSTED",
+        "DEGRADED",
+        "BLOCKED"
+      ]
+    },
+    "downstream_consumption_posture": {
+      "type": "string",
+      "enum": [
+        "NORMAL_CONSUMPTION",
+        "DEGRADED_ONLY",
+        "FAIL_CLOSED"
+      ]
+    },
+    "replay_status": {
+      "type": "string",
+      "enum": [
+        "NOT_OBSERVED",
+        "REPLAYING",
+        "REPLAY_COMPLETE",
+        "REPLAY_UNCERTAIN",
+        ""
+      ]
+    },
+    "reconnect_status": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "RECONNECT_IN_PROGRESS",
+        "RECONNECT_RECOVERED",
+        ""
+      ]
+    },
+    "gap_status": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "GAP_SUSPECTED",
+        "GAP_UNRESOLVED",
+        ""
+      ]
+    },
+    "attribution_status": {
+      "type": "string",
+      "enum": [
+        "ATTRIBUTED",
+        "PARTIAL",
+        "AMBIGUOUS",
+        "FOREIGN",
+        "UNRESOLVED",
+        ""
+      ]
+    },
+    "first_blocker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason_code",
+        "summary"
+      ],
+      "properties": {
+        "reason_code": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      }
+    },
+    "blocker_codes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "degraded_codes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "missing_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "legacy_boundary_details": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "$defs": {
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_path",
+        "artifact_sha256"
+      ],
+      "properties": {
+        "artifact_path": {
+          "type": "string"
+        },
+        "artifact_sha256": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

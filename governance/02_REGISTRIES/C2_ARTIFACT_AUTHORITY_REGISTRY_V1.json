@@ -1,0 +1,2604 @@
+{
+  "registry_id": "C2_ARTIFACT_AUTHORITY_REGISTRY_V1",
+  "schema_id": "constitutional_artifact_authority_registry",
+  "schema_version": "v1",
+  "domains": [
+    {
+      "domain_id": "canonical_portfolio",
+      "authoritative_root_type": "canonical_truth_root",
+      "description": "Canonical portfolio state, lifecycle, cash, and reconciled holdings truth."
+    },
+    {
+      "domain_id": "execution",
+      "authoritative_root_type": "execution_truth_root",
+      "description": "Sleeve execution truth, authorization artifacts, and execution-scoped mirrors."
+    },
+    {
+      "domain_id": "economic",
+      "authoritative_root_type": "mixed",
+      "description": "Canonical economic builds plus sealed execution-root economic packages."
+    },
+    {
+      "domain_id": "authority",
+      "authoritative_root_type": "mixed",
+      "description": "Readiness, target-day build, session authority, operator gate, and final gate verdicts."
+    }
+  ],
+  "artifacts": [
+    {
+      "artifact_id": "cash_ledger_snapshot_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.phaseF.cash_ledger.run.run_cash_ledger_snapshot_day_v1",
+      "authoritative_domain": "canonical_portfolio",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/CASH_LEDGER/cash_ledger_snapshot.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/cash_ledger_v1/snapshots/{day_utc}/cash_ledger_snapshot.v1.json",
+      "legal_consumers": [
+        "positions_snapshot_day_v5",
+        "economic_state_authority_v1",
+        "accounting_nav_v2_day_v1"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.phaseF.cash_ledger.run.run_cash_ledger_snapshot_day_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "positions_snapshot_v5",
+      "artifact_class": "decision_proposal",
+      "authoritative_writer": "constellation_2.phaseF.positions.run.run_positions_snapshot_day_v5",
+      "authoritative_domain": "canonical_portfolio",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/POSITIONS/positions_snapshot.v5.schema.json",
+      "root_policy": "mirrored",
+      "authoritative_path_pattern": "{canonical_truth_root}/positions_v1/snapshots/{day_utc}/positions_snapshot.v5.json",
+      "mirror_paths": [
+        {
+          "mirror_id": "execution_positions_snapshot_v5",
+          "root_type": "execution_truth_root",
+          "path_pattern": "{execution_truth_root}/positions_v1/snapshots/{day_utc}/positions_snapshot.v5.json",
+          "authoritative_bridge": "ops/tools/run_execution_positions_snapshot_v5_bridge_v1.py"
+        }
+      ],
+      "legal_consumers": [
+        "position_lifecycle_snapshot_v2",
+        "capital_authority_allocation_v1",
+        "economic_state_authority_v1",
+        "broker_reconciliation_day_v2",
+        "session_readiness_refresh_v1",
+        "execution_positions_snapshot_v5_bridge_v1"
+      ],
+      "required_upstream_dependencies": [
+        "cash_ledger_snapshot_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.phaseF.positions.run.run_positions_snapshot_day_v5",
+          "ops/tools/run_execution_positions_snapshot_v5_bridge_v1.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "position_lifecycle_snapshot_v2",
+      "artifact_class": "decision_proposal",
+      "authoritative_writer": "ops/tools/run_position_lifecycle_snapshot_v2.py",
+      "authoritative_domain": "canonical_portfolio",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/POSITION_LIFECYCLE/position_lifecycle_snapshot.v2.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/position_lifecycle_v2/{day_utc}/position_lifecycle_snapshot.v2.json",
+      "legal_consumers": [
+        "economic_state_authority_v1",
+        "exit_obligations_v1",
+        "lifecycle_monitor_v1"
+      ],
+      "required_upstream_dependencies": [
+        "positions_snapshot_v5"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_position_lifecycle_snapshot_v2.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "capital_authority_allocation_v1",
+      "artifact_class": "decision_proposal",
+      "authoritative_writer": "ops/tools/run_capital_authority_allocation_day_v1.py",
+      "authoritative_domain": "execution",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/ALLOCATION/capital_authority_allocation.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/allocation_v1/capital_authority_allocation_v1/{day_utc}/capital_authority_allocation.v1.json",
+      "legal_consumers": [
+        "economic_state_authority_v1",
+        "trade_submit_readiness_c2_v1",
+        "execution_build_authority_v1",
+        "submit_boundary_paper_v4",
+        "session_readiness_refresh_v1",
+        "evaluation_input_manifest_v1",
+        "allocation_governance_snapshot_v1"
+      ],
+      "required_upstream_dependencies": [
+        "positions_snapshot_v5"
+      ],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": true,
+      "frozen_input_bundle_required": true,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_capital_authority_allocation_day_v1.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "economic_state_build_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.common.economic_state_authority_v1",
+      "authoritative_domain": "economic",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/economic_state_build.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/economic_state_build_v1/{day_utc}/{economic_context_hash}/economic_state_build.v1.json",
+      "legal_consumers": [
+        "economic_state_authority_v1",
+        "trade_submit_readiness_c2_v1",
+        "session_authority_v1",
+        "operator_daily_gate_v3"
+      ],
+      "required_upstream_dependencies": [
+        "cash_ledger_snapshot_v1",
+        "positions_snapshot_v5",
+        "position_lifecycle_snapshot_v2",
+        "capital_authority_allocation_v1"
+      ],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.economic_state_authority_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "economic_state_package_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.common.economic_state_authority_v1",
+      "authoritative_domain": "economic",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/ECONOMIC/economic_state_package.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/economic_state_package_v1/{day_utc}/{economic_context_hash}/economic_state_package.v1.json",
+      "legal_consumers": [
+        "trade_submit_readiness_c2_v1",
+        "session_authority_v1",
+        "execution_build_authority_v1",
+        "submit_boundary_paper_v4"
+      ],
+      "required_upstream_dependencies": [
+        "economic_state_build_v1"
+      ],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.economic_state_authority_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "execution_journal_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "ops/tools/run_execution_journal_v1.py",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/execution_journal.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/execution_journal_v1/{day_utc}/execution_journal.v1.json",
+      "legal_consumers": [
+        "performance_projection_v1"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_execution_journal_v1.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "execution_outcome_v1",
+      "artifact_class": "execution_result",
+      "authoritative_writer": "constellation_2.common.execution_outcome_v1",
+      "authoritative_domain": "execution",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/execution_outcome.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/execution_outcome_v1/{day_utc}/execution_outcome.v1.json",
+      "legal_consumers": [
+        "performance_projection_v1",
+        "ops/tools/run_paper_session_admission_v1.py",
+        "ops/tools/run_execution_outcome_v1.py"
+      ],
+      "required_upstream_dependencies": [
+        "submit_boundary_status_v1",
+        "execution_journal_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.execution_outcome_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "fill_ledger_v1",
+      "artifact_class": "execution_result",
+      "authoritative_writer": "ops/tools/run_fill_ledger_day_v1.py",
+      "authoritative_domain": "execution",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/fill_ledger.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/fill_ledger_v1/{day_utc}/{submission_id}.fill_ledger.v1.json",
+      "legal_consumers": [
+        "economic_state_authority_v1",
+        "execution_truth_foundation_v1",
+        "submission_lifecycle_refresh_v1"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_fill_ledger_day_v1.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "performance_projection_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "ops/tools/run_performance_projection_v1.py",
+      "authoritative_domain": "economic",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/performance_projection.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/performance_projection_v1/{day_utc}/performance_projection.v1.json",
+      "legal_consumers": [],
+      "required_upstream_dependencies": [
+        "execution_journal_v1"
+      ],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_performance_projection_v1.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "session_readiness_refresh_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "ops/tools/run_session_readiness_refresh_v1.py",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/session_readiness_refresh.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/session_readiness_refresh_v1/{day_utc}/session_readiness_refresh.v1.json",
+      "legal_consumers": [
+        "day_authority_decision_v1"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_session_readiness_refresh_v1.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "day_authority_decision_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "ops/tools/run_day_authority_decision_v1.py",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/day_authority_decision.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/day_authority_decision_v1/{day_utc}/day_authority_decision.v1.json",
+      "legal_consumers": [
+        "trade_submit_readiness_c2_v1",
+        "session_authority_v1"
+      ],
+      "required_upstream_dependencies": [
+        "session_readiness_refresh_v1"
+      ],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_day_authority_decision_v1.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "active_session_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "constellation_2.common.session_authority_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/active_session.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/active_session_v1/current.json",
+      "legal_consumers": [
+        "session_authority_status_v1",
+        "day_open_trigger_v1",
+        "operator_summary_dossier_v1"
+      ],
+      "required_upstream_dependencies": [
+        "target_day_admission_v1",
+        "target_day_build_v1"
+      ],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.session_authority_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "configuration_policy_snapshot_v1",
+      "artifact_class": "policy_snapshot",
+      "authoritative_writer": "configuration_activation_authority_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/configuration_policy_snapshot.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/configuration_policy_snapshot_v1/{policy_snapshot_id}/configuration_policy_snapshot.v1.json",
+      "legal_consumers": [
+        "configuration_validation_result_v1",
+        "configuration_compile_result_v1",
+        "compiled_active_config_v1",
+        "configuration_state_v1"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "configuration_activation_authority_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "configuration_validation_result_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "configuration_activation_authority_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/configuration_validation_result.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/configuration_validation_result_v1/{validation_result_id}/configuration_validation_result.v1.json",
+      "legal_consumers": [
+        "configuration_compile_result_v1",
+        "compiled_active_config_v1",
+        "configuration_activation_transaction_v1"
+      ],
+      "required_upstream_dependencies": [
+        "configuration_policy_snapshot_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": true,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "configuration_activation_authority_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "compiled_active_config_v1",
+      "artifact_class": "decision_proposal",
+      "authoritative_writer": "configuration_activation_authority_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/compiled_active_config.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/compiled_active_config_v1/{compiled_config_id}/compiled_active_config.v1.json",
+      "legal_consumers": [
+        "configuration_compile_result_v1",
+        "configuration_review_diff_v1",
+        "configuration_activation_transaction_v1",
+        "configuration_state_v1"
+      ],
+      "required_upstream_dependencies": [
+        "configuration_policy_snapshot_v1",
+        "configuration_validation_result_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": true,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "configuration_activation_authority_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "configuration_compile_result_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "configuration_activation_authority_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/configuration_compile_result.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/configuration_compile_result_v1/{compile_result_id}/configuration_compile_result.v1.json",
+      "legal_consumers": [
+        "configuration_activation_transaction_v1",
+        "configuration_state_v1"
+      ],
+      "required_upstream_dependencies": [
+        "configuration_policy_snapshot_v1",
+        "configuration_validation_result_v1",
+        "compiled_active_config_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": true,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "configuration_activation_authority_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "configuration_review_diff_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "configuration_activation_authority_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/configuration_review_diff.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/configuration_review_diff_v1/{review_diff_id}/configuration_review_diff.v1.json",
+      "legal_consumers": [
+        "configuration_activation_transaction_v1",
+        "configuration_state_v1"
+      ],
+      "required_upstream_dependencies": [
+        "compiled_active_config_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "configuration_activation_authority_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "configuration_activation_transaction_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "configuration_activation_authority_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/configuration_activation_transaction.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/configuration_activation_transaction_v1/{activation_transaction_id}/configuration_activation_transaction.v1.json",
+      "legal_consumers": [
+        "configuration_state_v1"
+      ],
+      "required_upstream_dependencies": [
+        "configuration_validation_result_v1",
+        "configuration_compile_result_v1",
+        "configuration_review_diff_v1",
+        "compiled_active_config_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": true,
+      "frozen_input_bundle_required": true,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "configuration_activation_authority_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "configuration_state_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "configuration_activation_authority_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/configuration_state.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/configuration_state_v1/current.json",
+      "legal_consumers": [],
+      "required_upstream_dependencies": [
+        "configuration_policy_snapshot_v1",
+        "compiled_active_config_v1",
+        "configuration_activation_transaction_v1"
+      ],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "configuration_activation_authority_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "target_day_admission_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "constellation_2.common.session_authority_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/target_day_admission.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/target_day_admission_v1/{day_utc}.json",
+      "legal_consumers": [
+        "session_authority_status_v1",
+        "active_session_v1",
+        "operator_summary_dossier_v1",
+        "day_open_trigger_v1"
+      ],
+      "required_upstream_dependencies": [
+        "target_day_build_v1"
+      ],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.session_authority_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "operator_summary_dossier_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "constellation_2.common.subsystem_authority_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/operator_summary_dossier.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/operator_summary_dossier_v1/{day_utc}/operator_summary_dossier.v1.json",
+      "legal_consumers": [
+        "session_authority_status_v1",
+        "operator_day_authority_summary_v1"
+      ],
+      "required_upstream_dependencies": [
+        "active_session_v1",
+        "target_day_admission_v1",
+        "target_day_build_v1",
+        "submit_boundary_status_v1"
+      ],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.subsystem_authority_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "reconciliation_report_v3",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "ops/tools/run_reconciliation_report_v3.py",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/reconciliation_report.v3.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/reports/reconciliation_report_v3/{day_utc}/reconciliation_report.v3.json",
+      "legal_consumers": [
+        "operator_daily_gate_v3",
+        "evaluation_input_manifest_v1"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_reconciliation_report_v3.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "capital_risk_envelope_v2",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "ops/tools/run_c2_capital_risk_envelope_gate_v2.py",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/capital_risk_envelope.v2.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/reports/capital_risk_envelope_v2/{day_utc}/capital_risk_envelope.v2.json",
+      "legal_consumers": [
+        "operator_daily_gate_v3",
+        "gate_stack_verdict_v1"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_c2_capital_risk_envelope_gate_v2.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "exit_reconciliation_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.phaseI.exit_reconciliation.run.run_exit_reconciliation_day_v1",
+      "authoritative_domain": "execution",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/EXIT_OBLIGATIONS/exit_reconciliation.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/exit_reconciliation_v1/{day_utc}/exit_reconciliation.v1.json",
+      "legal_consumers": [
+        "operator_daily_gate_v3"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.phaseI.exit_reconciliation.run.run_exit_reconciliation_day_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "trade_submit_readiness_c2_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "ops/tools/run_trade_submit_readiness_c2_v1.py",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/READINESS/trade_submit_readiness.status.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/trade_submit_readiness_c2_v1/PAPER/{ib_account}/status.json",
+      "legal_consumers": [
+        "submit_boundary_status_v1",
+        "session_authority_v1",
+        "submit_boundary_paper_v4"
+      ],
+      "required_upstream_dependencies": [
+        "day_authority_decision_v1"
+      ],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "may_materialize_if_missing",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_trade_submit_readiness_c2_v1.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "trade_readiness_decision_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "ops/tools/run_trade_readiness_reducer_v1.py",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/trade_readiness_decision.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/trade_readiness_decision_v1/{day_utc}/trade_readiness_decision.v1.json",
+      "legal_consumers": [
+        "submit_boundary_paper_v4",
+        "operator_day_authority_summary_v1"
+      ],
+      "required_upstream_dependencies": [
+        "paper_session_authority_v1",
+        "trade_submit_readiness_c2_v1"
+      ],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "may_materialize_if_missing",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_trade_readiness_reducer_v1.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "target_day_build_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "ops/tools/run_session_authority_v1.py",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/target_day_build.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/target_day_build_v1/{day_utc}.json",
+      "legal_consumers": [
+        "submit_boundary_status_v1",
+        "session_authority_v1"
+      ],
+      "required_upstream_dependencies": [
+        "trade_submit_readiness_c2_v1",
+        "submit_boundary_status_v1"
+      ],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_session_authority_v1.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "submit_boundary_status_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "ops/tools/run_submit_boundary_status_v1.py",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/submit_boundary_status.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/submit_boundary_status_v1/{day_utc}/submit_boundary_status.v1.json",
+      "legal_consumers": [
+        "session_authority_v1",
+        "day_authority_decision_v1"
+      ],
+      "required_upstream_dependencies": [
+        "target_day_build_v1",
+        "trade_submit_readiness_c2_v1"
+      ],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "may_materialize_if_missing",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_submit_boundary_status_v1.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "execution_build_v1",
+      "artifact_class": "decision_proposal",
+      "authoritative_writer": "constellation_2.common.execution_build_authority_v1",
+      "authoritative_domain": "execution",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/execution_build.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/execution_build_v1/{day_utc}/{submission_id}/execution_build.v1.json",
+      "legal_consumers": [
+        "execution_build_authority_v1",
+        "submit_boundary_paper_v4",
+        "execution_kernel_v1"
+      ],
+      "required_upstream_dependencies": [
+        "economic_state_package_v1",
+        "trade_submit_readiness_c2_v1",
+        "capital_authority_allocation_v1"
+      ],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": true,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.execution_build_authority_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "execution_package_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "constellation_2.common.execution_build_authority_v1",
+      "authoritative_domain": "execution",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/EXECUTION/execution_package.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/execution_package_v1/{day_utc}/{submission_id}/execution_package.v1.json",
+      "legal_consumers": [
+        "submit_boundary_paper_v4",
+        "execution_kernel_v1"
+      ],
+      "required_upstream_dependencies": [
+        "execution_build_v1"
+      ],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": true,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.execution_build_authority_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "paper_session_authority_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "constellation_2.common.paper_session_authority_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/paper_session_authority.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/paper_session_authority_v1/{day_utc}/paper_session_authority.v1.json",
+      "legal_consumers": [
+        "ops/tools/run_paper_session_ledger_v1.py",
+        "constellation_2.common.day_open_trigger_v1",
+        "constellation_2.common.session_authority_monitor_v1"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.paper_session_authority_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "session_authority_status_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "constellation_2.common.session_authority_monitor_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/session_authority_status.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/session_authority_status_v1/current.json",
+      "legal_consumers": [
+        "c2_paper_day_orchestrator_systemd_entry_v1.sh",
+        "c2_session_authority_monitor_v1.sh"
+      ],
+      "required_upstream_dependencies": [
+        "active_session_v1",
+        "target_day_admission_v1",
+        "target_day_build_v1",
+        "operator_summary_dossier_v1",
+        "paper_session_authority_v1"
+      ],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.session_authority_monitor_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "operator_daily_gate_v3",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "ops/tools/run_operator_daily_gate_v3.py",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/operator_daily_gate.v3.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/reports/operator_daily_gate_v3/{day_utc}/operator_daily_gate.v3.json",
+      "legal_consumers": [
+        "gate_stack_verdict_v1",
+        "session_authority_v1"
+      ],
+      "required_upstream_dependencies": [
+        "reconciliation_report_v3",
+        "positions_snapshot_v5",
+        "capital_risk_envelope_v2",
+        "cash_ledger_snapshot_v1",
+        "exit_reconciliation_v1",
+        "economic_state_build_v1"
+      ],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_operator_daily_gate_v3.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "feed_attestation_gate_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "ops/tools/run_feed_attestation_gate_v1.py",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/feed_attestation_gate.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/reports/feed_attestation_gate_v1/{day_utc}/feed_attestation_gate.v1.json",
+      "legal_consumers": [
+        "gate_stack_verdict_v1",
+        "paper_session_admission_v1"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_feed_attestation_gate_v1.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "heartbeat_gate_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "ops/tools/run_heartbeat_gate_v1.py",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/heartbeat_gate.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/reports/heartbeat_gate_v1/{day_utc}/heartbeat_gate.v1.json",
+      "legal_consumers": [
+        "gate_stack_verdict_v1",
+        "paper_session_admission_v1"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_heartbeat_gate_v1.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "correlation_envelope_gate_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "ops/tools/run_correlation_envelope_gate_v1.py",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/correlation_envelope_gate.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/reports/correlation_envelope_gate_v1/{day_utc}/correlation_envelope_gate.v1.json",
+      "legal_consumers": [
+        "gate_stack_verdict_v1",
+        "paper_session_admission_v1",
+        "capital_authority_allocation_v1"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_correlation_envelope_gate_v1.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "liquidity_slippage_gate_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "ops/tools/run_liquidity_slippage_gate_v1.py",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/liquidity_slippage_gate.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/reports/liquidity_slippage_gate_v1/{day_utc}/liquidity_slippage_gate.v1.json",
+      "legal_consumers": [
+        "gate_stack_verdict_v1",
+        "paper_session_admission_v1",
+        "startup_materialization_inputs_prep_v1"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_liquidity_slippage_gate_v1.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "replay_certification_gate_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "ops/tools/run_replay_certification_gate_v1.py",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/replay_certification_gate.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/reports/replay_certification_gate_v1/{day_utc}/replay_certification_gate.v1.json",
+      "legal_consumers": [
+        "gate_stack_verdict_v1",
+        "paper_session_admission_v1"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_replay_certification_gate_v1.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "gate_stack_verdict_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "ops/tools/run_gate_stack_verdict_v1.py",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/gate_stack_verdict.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/reports/gate_stack_verdict_v1/{day_utc}/gate_stack_verdict.v1.json",
+      "legal_consumers": [
+        "operator_daily_gate_v3",
+        "session_authority_v1",
+        "day_authority_decision_v1"
+      ],
+      "required_upstream_dependencies": [
+        "operator_daily_gate_v3",
+        "feed_attestation_gate_v1",
+        "heartbeat_gate_v1",
+        "capital_risk_envelope_v2",
+        "correlation_envelope_gate_v1",
+        "liquidity_slippage_gate_v1",
+        "replay_certification_gate_v1"
+      ],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_gate_stack_verdict_v1.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "sleeve_edge_fact_ledger_v1",
+      "artifact_class": "source_fact",
+      "authoritative_writer": "ops/tools/run_sleeve_edge_measurement_v1.py",
+      "authoritative_domain": "execution",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/sleeve_edge_fact_ledger.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/reports/sleeve_edge_fact_ledger_v1/{day_utc}/{sleeve_id}/{snapshot_id}/sleeve_edge_fact_ledger.v1.json",
+      "legal_consumers": [
+        "sleeve_performance_truth_v1",
+        "evaluation_input_manifest_v1",
+        "outcome_attribution_snapshot_v1",
+        "ops/tools/run_sleeve_edge_measurement_v1.py"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_sleeve_edge_measurement_v1.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "sleeve_edge_snapshot_v1",
+      "artifact_class": "policy_interpretation",
+      "authoritative_writer": "ops/tools/run_sleeve_edge_measurement_v1.py",
+      "authoritative_domain": "execution",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/sleeve_edge_snapshot.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/reports/sleeve_edge_snapshot_v1/{day_utc}/{sleeve_id}/{snapshot_id}/sleeve_edge_snapshot.v1.json",
+      "legal_consumers": [
+        "sleeve_performance_truth_v1",
+        "evaluation_input_manifest_v1",
+        "outcome_attribution_snapshot_v1",
+        "sleeve_edge_measurement_snapshot_v1",
+        "ops/tools/run_capital_authority_allocation_day_v1.py"
+      ],
+      "required_upstream_dependencies": [
+        "sleeve_edge_fact_ledger_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": true,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_sleeve_edge_measurement_v1.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "evaluation_policy_snapshot_v1",
+      "artifact_class": "policy_snapshot",
+      "authoritative_writer": "constellation_2.common.governed_evaluation_v1",
+      "authoritative_domain": "economic",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/EVALUATION/evaluation_policy_snapshot.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/evaluation_policy_snapshot_v1/{day_utc}/evaluation_policy_snapshot.v1.json",
+      "legal_consumers": [
+        "sleeve_validity_state_v1",
+        "sleeve_evaluation_state_v1",
+        "portfolio_validity_state_v1",
+        "portfolio_evaluation_state_v1",
+        "sleeve_governance_action_state_v1",
+        "portfolio_governance_action_state_v1",
+        "evaluation_input_manifest_v1",
+        "outcome_attribution_snapshot_v1",
+        "sleeve_edge_measurement_snapshot_v1",
+        "allocation_governance_snapshot_v1",
+        "sleeve_operative_control_state_v1",
+        "ops/tools/run_evaluation_authority_foundation_day_v1.py",
+        "ops/tools/run_governed_evaluation_day_v1.py"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.governed_evaluation_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "evaluation_input_manifest_v1",
+      "artifact_class": "decision_proposal",
+      "authoritative_writer": "constellation_2.common.evaluation_authority_foundation_v1",
+      "authoritative_domain": "economic",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/EVALUATION/evaluation_input_manifest.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/reports/evaluation_input_manifest_v1/{day_utc}/{sleeve_id}/evaluation_input_manifest.v1.json",
+      "legal_consumers": [
+        "outcome_attribution_snapshot_v1",
+        "sleeve_edge_measurement_snapshot_v1",
+        "allocation_governance_snapshot_v1",
+        "ops/tools/run_evaluation_authority_foundation_day_v1.py"
+      ],
+      "required_upstream_dependencies": [
+        "reconciliation_report_v3",
+        "sleeve_edge_fact_ledger_v1",
+        "sleeve_edge_snapshot_v1",
+        "capital_authority_allocation_v1",
+        "evaluation_policy_snapshot_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": true,
+      "frozen_input_bundle_required": true,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.evaluation_authority_foundation_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "outcome_attribution_snapshot_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.common.evaluation_authority_foundation_v1",
+      "authoritative_domain": "economic",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/EVALUATION/outcome_attribution_snapshot.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/reports/outcome_attribution_snapshot_v1/{day_utc}/{sleeve_id}/outcome_attribution_snapshot.v1.json",
+      "legal_consumers": [
+        "sleeve_edge_measurement_snapshot_v1",
+        "ops/tools/run_evaluation_authority_foundation_day_v1.py"
+      ],
+      "required_upstream_dependencies": [
+        "evaluation_input_manifest_v1",
+        "evaluation_policy_snapshot_v1",
+        "sleeve_edge_snapshot_v1",
+        "sleeve_edge_fact_ledger_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": true,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.evaluation_authority_foundation_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "sleeve_edge_measurement_snapshot_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.common.evaluation_authority_foundation_v1",
+      "authoritative_domain": "economic",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/EVALUATION/sleeve_edge_measurement_snapshot.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/reports/sleeve_edge_measurement_snapshot_v1/{day_utc}/{sleeve_id}/sleeve_edge_measurement_snapshot.v1.json",
+      "legal_consumers": [
+        "allocation_governance_snapshot_v1",
+        "sleeve_operative_control_state_v1",
+        "ops/tools/run_evaluation_authority_foundation_day_v1.py"
+      ],
+      "required_upstream_dependencies": [
+        "evaluation_input_manifest_v1",
+        "outcome_attribution_snapshot_v1",
+        "evaluation_policy_snapshot_v1",
+        "sleeve_edge_snapshot_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": true,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.evaluation_authority_foundation_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "allocation_governance_snapshot_v1",
+      "artifact_class": "decision_proposal",
+      "authoritative_writer": "constellation_2.common.evaluation_authority_foundation_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/EVALUATION/allocation_governance_snapshot.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/reports/allocation_governance_snapshot_v1/{day_utc}/{sleeve_id}/allocation_governance_snapshot.v1.json",
+      "legal_consumers": [
+        "sleeve_operative_control_state_v1",
+        "ops/tools/run_evaluation_authority_foundation_day_v1.py"
+      ],
+      "required_upstream_dependencies": [
+        "evaluation_input_manifest_v1",
+        "sleeve_edge_measurement_snapshot_v1",
+        "evaluation_policy_snapshot_v1",
+        "capital_authority_allocation_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": true,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.evaluation_authority_foundation_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "sleeve_operative_control_state_v1",
+      "artifact_class": "decision_proposal",
+      "authoritative_writer": "constellation_2.common.evaluation_authority_foundation_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/EVALUATION/sleeve_operative_control_state.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/reports/sleeve_operative_control_state_v1/{day_utc}/{sleeve_id}/sleeve_operative_control_state.v1.json",
+      "legal_consumers": [],
+      "required_upstream_dependencies": [
+        "allocation_governance_snapshot_v1",
+        "sleeve_edge_measurement_snapshot_v1",
+        "evaluation_policy_snapshot_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": true,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.evaluation_authority_foundation_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "sleeve_performance_truth_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.common.governed_evaluation_v1",
+      "authoritative_domain": "economic",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/EVALUATION/sleeve_performance_truth.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/reports/sleeve_performance_truth_v1/{day_utc}/{sleeve_id}/sleeve_performance_truth.v1.json",
+      "legal_consumers": [
+        "sleeve_validity_state_v1",
+        "sleeve_evaluation_state_v1",
+        "weekly_scorecard_view_v1"
+      ],
+      "required_upstream_dependencies": [
+        "sleeve_edge_fact_ledger_v1",
+        "sleeve_edge_snapshot_v1",
+        "liquidity_slippage_gate_v1",
+        "exit_reconciliation_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.governed_evaluation_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "sleeve_validity_state_v1",
+      "artifact_class": "decision_proposal",
+      "authoritative_writer": "constellation_2.common.governed_evaluation_v1",
+      "authoritative_domain": "economic",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/EVALUATION/sleeve_validity_state.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/reports/sleeve_validity_state_v1/{day_utc}/{sleeve_id}/sleeve_validity_state.v1.json",
+      "legal_consumers": [
+        "sleeve_evaluation_state_v1",
+        "sleeve_governance_action_state_v1",
+        "weekly_scorecard_view_v1"
+      ],
+      "required_upstream_dependencies": [
+        "sleeve_performance_truth_v1",
+        "evaluation_policy_snapshot_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.governed_evaluation_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "sleeve_evaluation_state_v1",
+      "artifact_class": "decision_proposal",
+      "authoritative_writer": "constellation_2.common.governed_evaluation_v1",
+      "authoritative_domain": "economic",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/EVALUATION/sleeve_evaluation_state.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/reports/sleeve_evaluation_state_v1/{day_utc}/{sleeve_id}/sleeve_evaluation_state.v1.json",
+      "legal_consumers": [
+        "sleeve_governance_action_state_v1",
+        "weekly_scorecard_view_v1"
+      ],
+      "required_upstream_dependencies": [
+        "sleeve_performance_truth_v1",
+        "sleeve_validity_state_v1",
+        "evaluation_policy_snapshot_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.governed_evaluation_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "portfolio_performance_truth_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.common.governed_evaluation_v1",
+      "authoritative_domain": "economic",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/EVALUATION/portfolio_performance_truth.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/portfolio_performance_truth_v1/{day_utc}/portfolio_performance_truth.v1.json",
+      "legal_consumers": [
+        "portfolio_validity_state_v1",
+        "portfolio_evaluation_state_v1",
+        "weekly_scorecard_view_v1"
+      ],
+      "required_upstream_dependencies": [
+        "economic_state_build_v1",
+        "capital_risk_envelope_v2"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.governed_evaluation_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "portfolio_validity_state_v1",
+      "artifact_class": "decision_proposal",
+      "authoritative_writer": "constellation_2.common.governed_evaluation_v1",
+      "authoritative_domain": "economic",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/EVALUATION/portfolio_validity_state.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/portfolio_validity_state_v1/{day_utc}/portfolio_validity_state.v1.json",
+      "legal_consumers": [
+        "portfolio_evaluation_state_v1",
+        "portfolio_governance_action_state_v1",
+        "weekly_scorecard_view_v1"
+      ],
+      "required_upstream_dependencies": [
+        "portfolio_performance_truth_v1",
+        "evaluation_policy_snapshot_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.governed_evaluation_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "portfolio_evaluation_state_v1",
+      "artifact_class": "decision_proposal",
+      "authoritative_writer": "constellation_2.common.governed_evaluation_v1",
+      "authoritative_domain": "economic",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/EVALUATION/portfolio_evaluation_state.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/portfolio_evaluation_state_v1/{day_utc}/portfolio_evaluation_state.v1.json",
+      "legal_consumers": [
+        "portfolio_governance_action_state_v1",
+        "weekly_scorecard_view_v1"
+      ],
+      "required_upstream_dependencies": [
+        "portfolio_performance_truth_v1",
+        "portfolio_validity_state_v1",
+        "evaluation_policy_snapshot_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.governed_evaluation_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "sleeve_governance_action_state_v1",
+      "artifact_class": "decision_proposal",
+      "authoritative_writer": "constellation_2.common.governed_evaluation_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "execution_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/EVALUATION/sleeve_governance_action_state.v1.schema.json",
+      "root_policy": "execution_only",
+      "authoritative_path_pattern": "{execution_truth_root}/reports/sleeve_governance_action_state_v1/{day_utc}/{scope_id}/sleeve_governance_action_state.v1.json",
+      "legal_consumers": [
+        "weekly_scorecard_view_v1"
+      ],
+      "required_upstream_dependencies": [
+        "sleeve_evaluation_state_v1",
+        "evaluation_policy_snapshot_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": true,
+      "frozen_input_bundle_required": true,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.governed_evaluation_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "portfolio_governance_action_state_v1",
+      "artifact_class": "decision_proposal",
+      "authoritative_writer": "constellation_2.common.governed_evaluation_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/EVALUATION/portfolio_governance_action_state.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/portfolio_governance_action_state_v1/{day_utc}/portfolio_governance_action_state.v1.json",
+      "legal_consumers": [
+        "weekly_scorecard_view_v1"
+      ],
+      "required_upstream_dependencies": [
+        "portfolio_evaluation_state_v1",
+        "evaluation_policy_snapshot_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": true,
+      "frozen_input_bundle_required": true,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.governed_evaluation_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "weekly_scorecard_view_v1",
+      "artifact_class": "read_model",
+      "authoritative_writer": "constellation_2.common.governed_evaluation_v1",
+      "authoritative_domain": "read_layer",
+      "authoritative_root_type": "read_only",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/EVALUATION/weekly_scorecard_view.v1.schema.json",
+      "root_policy": "read_only_projection",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/weekly_scorecard_view_v1/{day_utc}/weekly_scorecard_view.v1.json",
+      "legal_consumers": [],
+      "required_upstream_dependencies": [
+        "evaluation_policy_snapshot_v1",
+        "portfolio_evaluation_state_v1",
+        "portfolio_governance_action_state_v1",
+        "sleeve_evaluation_state_v1",
+        "sleeve_governance_action_state_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "consume_only",
+        "allowed_materializers": [
+          "constellation_2.common.governed_evaluation_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "deployment_state_machine_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "ops/tools/run_deployment_state_machine_v1.py",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/deployment_state_machine.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/deployment_state_machine_v1/{day_utc}/deployment_state_machine.v1.json",
+      "legal_consumers": [
+        "constellation_2.common.release_baseline_gate_v1",
+        "constellation_2.common.advisory_decision_state_kernel_v1"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_deployment_state_machine_v1.py"
+        ]
+      }
+    },
+    {
+      "artifact_id": "control_stage_day_admitted_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "constellation_2.common.control_plane_stage_admission_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/control_stage_admission.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/control_stage_day_admitted_v1/{day_utc}/{scope_id}/control_stage_day_admitted.v1.json",
+      "legal_consumers": [
+        "control_stage_context_admitted_v1",
+        "control_stage_day_certification_v1",
+        "startup_chain_certification_v1"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.control_plane_stage_admission_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "control_stage_context_admitted_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "constellation_2.common.control_plane_stage_admission_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/control_stage_admission.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/control_stage_context_admitted_v1/{day_utc}/{scope_id}/control_stage_context_admitted.v1.json",
+      "legal_consumers": [
+        "control_stage_session_admitted_v1",
+        "control_stage_context_certification_v1",
+        "startup_chain_certification_v1"
+      ],
+      "required_upstream_dependencies": [
+        "control_stage_day_admitted_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.control_plane_stage_admission_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "control_stage_session_admitted_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "constellation_2.common.control_plane_stage_admission_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/control_stage_admission.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/control_stage_session_admitted_v1/{day_utc}/{scope_id}/control_stage_session_admitted.v1.json",
+      "legal_consumers": [
+        "control_stage_execution_build_admitted_v1",
+        "control_stage_session_certification_v1",
+        "startup_chain_certification_v1"
+      ],
+      "required_upstream_dependencies": [
+        "control_stage_context_admitted_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.control_plane_stage_admission_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "control_stage_execution_build_admitted_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "constellation_2.common.control_plane_stage_admission_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/control_stage_admission.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/control_stage_execution_build_admitted_v1/{day_utc}/{scope_id}/control_stage_execution_build_admitted.v1.json",
+      "legal_consumers": [
+        "control_stage_execution_build_certification_v1",
+        "startup_chain_certification_v1"
+      ],
+      "required_upstream_dependencies": [
+        "control_stage_session_admitted_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.control_plane_stage_admission_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "control_stage_day_certification_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.common.control_plane_stage_admission_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/control_stage_certification.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/control_stage_day_certification_v1/{day_utc}/{scope_id}/control_stage_day_certification.v1.json",
+      "legal_consumers": [
+        "startup_chain_certification_v1"
+      ],
+      "required_upstream_dependencies": [
+        "control_stage_day_admitted_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.control_plane_stage_admission_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "control_stage_context_certification_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.common.control_plane_stage_admission_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/control_stage_certification.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/control_stage_context_certification_v1/{day_utc}/{scope_id}/control_stage_context_certification.v1.json",
+      "legal_consumers": [
+        "startup_chain_certification_v1"
+      ],
+      "required_upstream_dependencies": [
+        "control_stage_context_admitted_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.control_plane_stage_admission_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "control_stage_session_certification_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.common.control_plane_stage_admission_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/control_stage_certification.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/control_stage_session_certification_v1/{day_utc}/{scope_id}/control_stage_session_certification.v1.json",
+      "legal_consumers": [
+        "startup_chain_certification_v1"
+      ],
+      "required_upstream_dependencies": [
+        "control_stage_session_admitted_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.control_plane_stage_admission_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "control_stage_execution_build_certification_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.common.control_plane_stage_admission_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/control_stage_certification.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/control_stage_execution_build_certification_v1/{day_utc}/{scope_id}/control_stage_execution_build_certification.v1.json",
+      "legal_consumers": [
+        "startup_chain_certification_v1"
+      ],
+      "required_upstream_dependencies": [
+        "control_stage_execution_build_admitted_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.control_plane_stage_admission_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "startup_chain_certification_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.common.control_plane_stage_admission_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/startup_chain_certification.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/startup_chain_certification_v1/{day_utc}/{scope_id}/startup_chain_certification.v1.json",
+      "legal_consumers": [
+        "ops/tools/certify_startup_chain_v1.py"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.control_plane_stage_admission_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "control_stage_transition_record_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.common.control_plane_transition_engine_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/control_stage_transition_record.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/control_stage_transition_record_v1/{day_utc}/{stage_id}/{scope_id}/{transition_id}/control_stage_transition_record.v1.json",
+      "legal_consumers": [
+        "ops/tools/run_control_plane_transition_v1.py",
+        "ops/tools/certify_startup_chain_v1.py"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.control_plane_transition_engine_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "control_plane_operator_status_v1",
+      "artifact_class": "read_model",
+      "authoritative_writer": "constellation_2.common.control_plane_trust_projection_kernel_v1",
+      "authoritative_domain": "read_layer",
+      "authoritative_root_type": "read_only",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/control_plane_operator_status.v1.schema.json",
+      "root_policy": "read_only_projection",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/control_plane_operator_status_v1/{day_utc}/{scope_id}/control_plane_operator_status.v1.json",
+      "legal_consumers": [
+        "ops/tools/run_control_plane_operator_status_v1.py"
+      ],
+      "required_upstream_dependencies": [
+        "startup_chain_certification_v1",
+        "control_stage_transition_record_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.control_plane_trust_projection_kernel_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "control_plane_blocked_transition_view_v1",
+      "artifact_class": "read_model",
+      "authoritative_writer": "constellation_2.common.control_plane_trust_projection_kernel_v1",
+      "authoritative_domain": "read_layer",
+      "authoritative_root_type": "read_only",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/control_plane_blocked_transition_view.v1.schema.json",
+      "root_policy": "read_only_projection",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/control_plane_blocked_transition_view_v1/{day_utc}/{scope_id}/{transition_id}/control_plane_blocked_transition_view.v1.json",
+      "legal_consumers": [
+        "ops/tools/run_control_plane_blocked_transition_view_v1.py"
+      ],
+      "required_upstream_dependencies": [
+        "control_stage_transition_record_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.control_plane_trust_projection_kernel_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "advisory_truth_binding_status_v1",
+      "artifact_class": "read_model",
+      "authoritative_writer": "constellation_2.common.control_plane_trust_projection_kernel_v1",
+      "authoritative_domain": "read_layer",
+      "authoritative_root_type": "read_only",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/advisory_truth_binding_status.v1.schema.json",
+      "root_policy": "read_only_projection",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/advisory_truth_binding_status_v1/{day_utc}/{scope_id}/{binding_id}/advisory_truth_binding_status.v1.json",
+      "legal_consumers": [
+        "ops/tools/run_advisory_truth_binding_status_v1.py"
+      ],
+      "required_upstream_dependencies": [
+        "control_stage_transition_record_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.control_plane_trust_projection_kernel_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "tax_state_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.common.tax_state_kernel_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/tax_state.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/tax_state_v1/{day_utc}/{scope_id}/{tax_state_id}/tax_state.v1.json",
+      "legal_consumers": [
+        "ops/tools/run_tax_state_v1.py",
+        "ops/tools/render_tax_state_v1.py",
+        "constellation_2/phaseL/ui_api/tax_state_read_model.py",
+        "constellation_2.common.advisory_decision_state_kernel_v1"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.tax_state_kernel_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "advisory_decision_state_v1",
+      "artifact_class": "read_model",
+      "authoritative_writer": "constellation_2.common.advisory_decision_state_kernel_v1",
+      "authoritative_domain": "read_layer",
+      "authoritative_root_type": "read_only",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/advisory_decision_state.v1.schema.json",
+      "root_policy": "read_only_projection",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/advisory_decision_state_v1/{day_utc}/{scope_id}/{decision_id}/advisory_decision_state.v1.json",
+      "legal_consumers": [
+        "ops/tools/run_advisory_decision_state_v1.py",
+        "ops/tools/render_advisory_decision_state_v1.py",
+        "constellation_2/phaseL/ui_api/advisory_read_model.py"
+      ],
+      "required_upstream_dependencies": [
+        "control_stage_day_admitted_v1",
+        "control_stage_context_admitted_v1",
+        "control_stage_session_admitted_v1",
+        "control_stage_execution_build_admitted_v1",
+        "control_stage_day_certification_v1",
+        "control_stage_context_certification_v1",
+        "control_stage_session_certification_v1",
+        "control_stage_execution_build_certification_v1",
+        "startup_chain_certification_v1",
+        "control_stage_transition_record_v1",
+        "deployment_state_machine_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.advisory_decision_state_kernel_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "opportunity_state_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.common.opportunity_state_kernel_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/opportunity_state.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/opportunity_state_v1/{day_utc}/{scope_id}/{opportunity_state_id}/opportunity_state.v1.json",
+      "legal_consumers": [
+        "ops/tools/run_opportunity_state_v1.py",
+        "ops/tools/render_opportunity_state_v1.py",
+        "constellation_2/phaseL/ui_api/opportunity_state_read_model.py",
+        "constellation_2.common.advisory_decision_state_kernel_v1"
+      ],
+      "required_upstream_dependencies": [
+        "tax_state_v1",
+        "control_stage_transition_record_v1",
+        "deployment_state_machine_v1",
+        "startup_chain_certification_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.opportunity_state_kernel_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "opportunity_review_snapshot_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.common.opportunity_state_kernel_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/opportunity_review_snapshot.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/opportunity_review_snapshot_v1/{day_utc}/{scope_id}/{review_snapshot_id}/opportunity_review_snapshot.v1.json",
+      "legal_consumers": [
+        "ops/tools/run_opportunity_state_v1.py",
+        "ops/tools/render_opportunity_state_v1.py",
+        "constellation_2/phaseL/ui_api/opportunity_state_read_model.py",
+        "constellation_2.common.opportunity_state_kernel_v1"
+      ],
+      "required_upstream_dependencies": [
+        "tax_state_v1",
+        "control_stage_transition_record_v1",
+        "deployment_state_machine_v1",
+        "startup_chain_certification_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.opportunity_state_kernel_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "product_summary_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.common.product_summary_kernel_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/product_summary.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/product_summary_v1/{day_utc}/{scope_id}/{summary_id}/product_summary.v1.json",
+      "legal_consumers": [
+        "ops/tools/run_product_summary_v1.py",
+        "ops/tools/render_product_summary_v1.py",
+        "constellation_2.phaseL.ui_api.product_summary_read_model.py",
+        "constellation_2.phaseL.ui_api.system_summary_read_model.py"
+      ],
+      "required_upstream_dependencies": [
+        "tax_state_v1",
+        "opportunity_state_v1",
+        "opportunity_review_snapshot_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.product_summary_kernel_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "product_snapshot_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.common.product_summary_kernel_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/product_snapshot.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/product_snapshot_v1/{day_utc}/{scope_id}/{snapshot_id}/product_snapshot.v1.json",
+      "legal_consumers": [
+        "ops/tools/run_product_summary_v1.py",
+        "ops/tools/render_product_summary_v1.py",
+        "constellation_2.phaseL.ui_api.product_summary_read_model.py",
+        "constellation_2.phaseL.ui_api.system_summary_read_model.py"
+      ],
+      "required_upstream_dependencies": [
+        "product_summary_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.product_summary_kernel_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "outcome_state_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.common.outcome_state_kernel_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/outcome_state.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/outcome_state_v1/{day_utc}/{scope_id}/{outcome_id}/outcome_state.v1.json",
+      "legal_consumers": [
+        "ops/tools/run_outcome_state_v1.py",
+        "ops/tools/render_outcome_state_v1.py",
+        "constellation_2.phaseL.ui_api.outcome_state_read_model.py"
+      ],
+      "required_upstream_dependencies": [
+        "tax_state_v1",
+        "opportunity_state_v1",
+        "opportunity_review_snapshot_v1",
+        "product_summary_v1",
+        "product_snapshot_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.outcome_state_kernel_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "value_state_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.common.value_state_kernel_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/value_state.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/value_state_v1/{day_utc}/{scope_id}/{value_id}/value_state.v1.json",
+      "legal_consumers": [
+        "ops/tools/run_value_state_v1.py",
+        "ops/tools/render_value_state_v1.py",
+        "constellation_2.phaseL.ui_api.value_state_read_model.py",
+        "constellation_2.phaseL.ui_api.outcome_state_read_model.py"
+      ],
+      "required_upstream_dependencies": [
+        "tax_state_v1",
+        "opportunity_state_v1",
+        "opportunity_review_snapshot_v1",
+        "product_summary_v1",
+        "product_snapshot_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.value_state_kernel_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "refinement_state_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.common.refinement_state_kernel_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/refinement_state.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/refinement_state_v1/{day_utc}/{scope_id}/{refinement_id}/refinement_state.v1.json",
+      "legal_consumers": [
+        "ops/tools/run_refinement_state_v1.py",
+        "ops/tools/render_refinement_state_v1.py",
+        "constellation_2.phaseL.ui_api.refinement_state_read_model.py",
+        "constellation_2.phaseL.ui_api.system_summary_read_model.py"
+      ],
+      "required_upstream_dependencies": [
+        "product_summary_v1",
+        "product_snapshot_v1",
+        "value_state_v1",
+        "opportunity_state_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.refinement_state_kernel_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "policy_evolution_state_v1",
+      "artifact_class": "outcome_record",
+      "authoritative_writer": "constellation_2.common.policy_evolution_state_kernel_v1",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/policy_evolution_state.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/policy_evolution_state_v1/{day_utc}/{scope_id}/{evolution_id}/policy_evolution_state.v1.json",
+      "legal_consumers": [
+        "ops/tools/run_policy_evolution_state_v1.py",
+        "ops/tools/render_policy_evolution_state_v1.py",
+        "constellation_2.phaseL.ui_api.policy_evolution_state_read_model.py",
+        "constellation_2.phaseL.ui_api.system_summary_read_model.py"
+      ],
+      "required_upstream_dependencies": [
+        "value_state_v1",
+        "refinement_state_v1",
+        "product_summary_v1",
+        "product_snapshot_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.policy_evolution_state_kernel_v1"
+        ]
+      }
+    },
+    {
+      "artifact_id": "transition_timeline_projection_v1",
+      "artifact_class": "read_model",
+      "authoritative_writer": "constellation_2.common.control_plane_trust_projection_kernel_v1",
+      "authoritative_domain": "read_layer",
+      "authoritative_root_type": "read_only",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/RUNTIME/transition_timeline_projection.v1.schema.json",
+      "root_policy": "read_only_projection",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/transition_timeline_projection_v1/{day_utc}/{scope_id}/transition_timeline_projection.v1.json",
+      "legal_consumers": [
+        "ops/tools/run_transition_timeline_projection_v1.py"
+      ],
+      "required_upstream_dependencies": [
+        "control_stage_transition_record_v1"
+      ],
+      "initial_finality_state": "finalized",
+      "allowed_finality_states": ["finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "produce_only",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "constellation_2.common.control_plane_trust_projection_kernel_v1"
+        ]
+      }
+    }
+  ]
+}

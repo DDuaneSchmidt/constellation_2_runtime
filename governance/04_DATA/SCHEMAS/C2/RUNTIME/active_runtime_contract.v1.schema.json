@@ -8,6 +8,7 @@
     "schema_version",
     "release_id",
     "git_sha",
+    "authoritative_repo_root",
     "release_root",
     "runtime_data_root",
     "canonical_truth_root",
@@ -15,6 +16,8 @@
     "pointer_index_family",
     "allowed_truth_roots",
     "provenance_mode",
+    "runtime_environment",
+    "primary_execution_identity_ref",
     "generated_at_utc",
     "status"
   ],
@@ -23,6 +26,7 @@
     "schema_version": { "type": "string", "const": "v1" },
     "release_id": { "type": "string", "minLength": 1 },
     "git_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "authoritative_repo_root": { "type": "string", "minLength": 1 },
     "release_root": { "type": "string", "minLength": 1 },
     "runtime_data_root": { "type": "string", "minLength": 1 },
     "canonical_truth_root": { "type": "string", "minLength": 1 },
@@ -34,6 +38,16 @@
       "items": { "type": "string", "minLength": 1 }
     },
     "provenance_mode": { "type": "string", "enum": ["release_manifest"] },
+    "runtime_environment": { "type": "string", "enum": ["PAPER"] },
+    "primary_execution_identity_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority_owner", "sleeve_id"],
+      "properties": {
+        "authority_owner": { "type": "string", "const": "execution_identity_binding_v1" },
+        "sleeve_id": { "type": "string", "minLength": 1 }
+      }
+    },
     "generated_at_utc": { "type": "string", "minLength": 11 },
     "status": { "type": "string", "enum": ["ACTIVE"] }
   }

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "dependencies": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "operation_type": {
+      "type": "string"
+    },
+    "schema_id": {
+      "const": "day_activation_dependency_manifest"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "seal_requires": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "stage_order": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "operation_type",
+    "dependencies",
+    "seal_requires",
+    "stage_order"
+  ],
+  "type": "object"
+}

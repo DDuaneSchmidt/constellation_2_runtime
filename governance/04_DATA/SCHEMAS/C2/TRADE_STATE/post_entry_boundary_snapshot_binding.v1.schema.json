@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/trade_state/post_entry_boundary_snapshot_binding.v1.schema.json",
+  "title": "post_entry_boundary_snapshot_binding.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "binding_id",
+    "request_ref",
+    "core2_snapshot_ref",
+    "core3_snapshot_ref",
+    "execution_identity_snapshot_ref",
+    "rule_version_set",
+    "binding_status",
+    "invalidation_status",
+    "invalidation_reason_codes",
+    "created_at_utc",
+    "evaluated_at_utc"
+  ],
+  "properties": {
+    "schema_id": { "const": "post_entry_boundary_snapshot_binding" },
+    "schema_version": { "const": "v1" },
+    "binding_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "request_ref": { "$ref": "#/$defs/requestRef" },
+    "core2_snapshot_ref": { "$ref": "#/$defs/artifactRef" },
+    "core3_snapshot_ref": { "$ref": "#/$defs/artifactRef" },
+    "execution_identity_snapshot_ref": { "$ref": "#/$defs/identityRef" },
+    "rule_version_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "core4_rule_pack",
+        "request_contract",
+        "snapshot_binding_contract",
+        "boundary_contract",
+        "authorized_payload_contract",
+        "provenance_contract"
+      ],
+      "properties": {
+        "core4_rule_pack": { "type": "string", "minLength": 1 },
+        "request_contract": { "type": "string", "minLength": 1 },
+        "snapshot_binding_contract": { "type": "string", "minLength": 1 },
+        "boundary_contract": { "type": "string", "minLength": 1 },
+        "authorized_payload_contract": { "type": "string", "minLength": 1 },
+        "provenance_contract": { "type": "string", "minLength": 1 }
+      }
+    },
+    "binding_status": { "type": "string", "enum": ["BOUND", "INVALIDATED"] },
+    "invalidation_status": {
+      "type": "string",
+      "enum": ["NONE", "MISSING_REQUIRED_SNAPSHOT", "STALE_SNAPSHOT", "SUPERSEDED_SNAPSHOT", "MISMATCHED_SNAPSHOT"]
+    },
+    "invalidation_reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "created_at_utc": { "type": "string", "format": "date-time" },
+    "evaluated_at_utc": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "requestRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "request_seal_id"],
+      "properties": {
+        "request_id": { "type": "string", "minLength": 1 },
+        "request_seal_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "artifact_sha256", "snapshot_id", "snapshot_status"],
+      "properties": {
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "snapshot_id": { "type": "string", "minLength": 1 },
+        "snapshot_status": { "type": "string", "enum": ["CURRENT", "STALE", "SUPERSEDED", "MISSING"] },
+        "trade_identity_id": { "type": "string" },
+        "superseded_by_snapshot_id": { "type": ["string", "null"] }
+      }
+    },
+    "identityRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authority_owner",
+        "snapshot_id",
+        "snapshot_sha256",
+        "snapshot_status",
+        "environment",
+        "sleeve_id",
+        "account_id",
+        "client_id_orders",
+        "execution_root_ref"
+      ],
+      "properties": {
+        "authority_owner": { "type": "string", "minLength": 1 },
+        "snapshot_id": { "type": "string", "minLength": 1 },
+        "snapshot_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "snapshot_status": { "type": "string", "enum": ["CURRENT", "STALE", "SUPERSEDED", "MISSING"] },
+        "environment": { "type": "string", "minLength": 1 },
+        "sleeve_id": { "type": "string", "minLength": 1 },
+        "account_id": { "type": "string", "minLength": 1 },
+        "client_id_orders": { "type": "integer", "minimum": 1 },
+        "execution_root_ref": { "type": "string", "minLength": 1 },
+        "artifact_path": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

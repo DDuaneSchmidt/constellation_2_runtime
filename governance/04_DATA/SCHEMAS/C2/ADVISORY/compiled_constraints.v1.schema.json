@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisory/compiled_constraints.v1.schema.json",
+  "title": "compiled_constraints.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_id",
+    "compiled_constraints_id",
+    "household_id",
+    "snapshot_refs",
+    "deployable_capital_cap",
+    "blocked_symbols",
+    "blocked_accounts",
+    "asset_class_scopes",
+    "concentration_limit_results",
+    "correlated_cluster_results",
+    "liquidity_floor_result",
+    "imported_position_restrictions",
+    "protected_position_restrictions",
+    "drawdown_throttle_level",
+    "emergency_mode",
+    "hard_blocks",
+    "warnings"
+  ],
+  "properties": {
+    "schema_id": { "const": "compiled_constraints" },
+    "schema_version": { "const": "v1" },
+    "record_id": { "type": "string", "minLength": 1 },
+    "compiled_constraints_id": { "type": "string", "minLength": 1 },
+    "household_id": { "type": "string", "minLength": 1 },
+    "snapshot_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_snapshot_id", "household_state_snapshot_id"],
+      "properties": {
+        "policy_snapshot_id": { "type": "string", "minLength": 1 },
+        "household_state_snapshot_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "deployable_capital_cap": { "type": "string", "minLength": 1 },
+    "blocked_symbols": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "blocked_accounts": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "asset_class_scopes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed_asset_classes", "disallowed_asset_classes"],
+      "properties": {
+        "allowed_asset_classes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "disallowed_asset_classes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "concentration_limit_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["symbol", "current_weight", "limit_weight", "breach_status", "excess_weight"],
+        "properties": {
+          "symbol": { "type": "string", "minLength": 1 },
+          "current_weight": { "type": "string", "minLength": 1 },
+          "limit_weight": { "type": "string", "minLength": 1 },
+          "breach_status": { "type": "string", "minLength": 1 },
+          "excess_weight": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "correlated_cluster_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["cluster_id", "current_weight", "limit_weight", "breach_status", "excess_weight"],
+        "properties": {
+          "cluster_id": { "type": "string", "minLength": 1 },
+          "current_weight": { "type": "string", "minLength": 1 },
+          "limit_weight": { "type": "string", "minLength": 1 },
+          "breach_status": { "type": "string", "minLength": 1 },
+          "excess_weight": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "liquidity_floor_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required_cash_cents", "available_cash_cents", "liquidity_floor_met"],
+      "properties": {
+        "required_cash_cents": { "type": "string", "minLength": 1 },
+        "available_cash_cents": { "type": "string", "minLength": 1 },
+        "liquidity_floor_met": { "type": "boolean" }
+      }
+    },
+    "imported_position_restrictions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["symbol", "account_id", "lifecycle_status", "management_mode", "discretionary_trade_blocked"],
+        "properties": {
+          "symbol": { "type": "string", "minLength": 1 },
+          "account_id": { "type": "string", "minLength": 1 },
+          "lifecycle_status": { "type": "string", "minLength": 1 },
+          "management_mode": { "type": "string", "minLength": 1 },
+          "discretionary_trade_blocked": { "type": "boolean" }
+        }
+      }
+    },
+    "protected_position_restrictions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["symbol", "account_id", "restriction"],
+        "properties": {
+          "symbol": { "type": "string", "minLength": 1 },
+          "account_id": { "type": "string", "minLength": 1 },
+          "restriction": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "drawdown_throttle_level": { "type": "string", "minLength": 1 },
+    "emergency_mode": { "type": "boolean" },
+    "hard_blocks": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

@@ -66,6 +66,12 @@ Readiness MUST NOT require submission_index when pillars decisions exist.
 Canonical readiness surfaces are:
 - `pipeline_manifest_v2`
 - `operator_gate_verdict_v2`
+- `replay_certification_bundle_v1` / `replay_certification_gate_v1`
+
+When replay certification evaluates submission evidence, it MUST consume the same preferred order from section 4.1.
+Replay certification MUST NOT treat legacy submission index and pillars decisions as co-equal authorities for the same day.
+For the no-submissions case, replay/readiness consumers MUST key submission existence to authoritative broker submission evidence
+(`execution_evidence_v1/submissions/<DAY>/*/broker_submission_record.v2.json`), not placeholder submission directories alone.
 
 ## 5. Auditor note
 

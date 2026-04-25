@@ -1,0 +1,20 @@
+
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "schema_id": {"const": "global_context_build"},
+    "schema_version": {"const": "v1"},
+    "day_utc": {"type": "string"},
+    "sleeve_id": {"type": "string"},
+    "mode": {"type": "string"},
+    "account_id": {"type": "string"},
+    "operation_type": {"type": "string"},
+    "context_hash": {"type": "string"},
+    "dependency_results": {"type": "array", "items": {"type": "object"}},
+    "closure_status": {"type": "string"},
+    "generated_utc": {"type": "string"}
+  },
+  "required": ["schema_id", "schema_version", "day_utc", "sleeve_id", "mode", "account_id", "operation_type", "context_hash", "dependency_results", "closure_status", "generated_utc"]
+}

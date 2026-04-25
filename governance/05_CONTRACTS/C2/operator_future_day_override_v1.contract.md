@@ -5,7 +5,7 @@ title: "Constellation 2.0 — Operator Future-Day Override v1 (PAPER-only, expli
 version: 1
 status: draft
 created_utc: 2026-02-28T00:00:00Z
-repo_root_authoritative: /home/node/constellation_2_runtime
+repo_root_authoritative: /home/node/constellation
 scope:
   - "Allows a PAPER-only, explicit override to permit future-day operational writes for a specific DAY_UTC"
 non_goals:
@@ -26,7 +26,7 @@ However, paper-trading operations can encounter a *poisoned today* where immutab
 ### 1) Override artifact (authoritative)
 
 Path:
-- `constellation_2/runtime/truth/reports/operator_future_day_override_v1/<DAY_UTC>/operator_future_day_override.v1.json`
+- `/home/node/constellation_runtime_data/truth/reports/operator_future_day_override_v1/<DAY_UTC>/operator_future_day_override.v1.json`
 
 Schema:
 - `governance/04_DATA/SCHEMAS/C2/REPORTS/operator_future_day_override.v1.schema.json`

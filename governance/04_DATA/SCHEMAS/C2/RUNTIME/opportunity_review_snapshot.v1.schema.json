@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/runtime/opportunity_review_snapshot.v1.schema.json",
+  "title": "opportunity_review_snapshot.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "surface_kind",
+    "review_snapshot_id",
+    "kernel_version",
+    "generated_at_utc",
+    "authority_label",
+    "target_day",
+    "scope_id",
+    "opportunity_rows",
+    "resolved_rows",
+    "summary"
+  ],
+  "$defs": {
+    "ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_id", "artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_id": { "type": "string", "minLength": 1 },
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "minLength": 1 }
+      }
+    },
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "opportunity_id",
+        "opportunity_type",
+        "opportunity_state",
+        "review_priority",
+        "delta_state",
+        "summary_fingerprint"
+      ],
+      "properties": {
+        "opportunity_id": { "type": "string", "minLength": 1 },
+        "opportunity_type": { "type": "string", "minLength": 1 },
+        "opportunity_state": { "type": "string", "minLength": 1 },
+        "review_priority": { "type": "string", "minLength": 1 },
+        "delta_state": { "type": "string", "minLength": 1 },
+        "summary_fingerprint": { "type": "string", "minLength": 1 },
+        "opportunity_ref": { "$ref": "#/$defs/ref" }
+      }
+    }
+  },
+  "properties": {
+    "schema_id": { "const": "opportunity_review_snapshot" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "opportunity_review_snapshot_v1" },
+    "surface_kind": { "const": "projection" },
+    "review_snapshot_id": { "type": "string", "minLength": 1 },
+    "kernel_version": { "type": "string", "minLength": 1 },
+    "generated_at_utc": { "type": "string", "format": "date-time" },
+    "authority_label": { "type": "string", "enum": ["governed_certified_opportunity_review"] },
+    "target_day": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "prior_review_snapshot_ref": { "$ref": "#/$defs/ref" },
+    "opportunity_rows": { "type": "array", "items": { "$ref": "#/$defs/row" } },
+    "resolved_rows": { "type": "array", "items": { "$ref": "#/$defs/row" } },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["current_count", "new_count", "changed_count", "resolved_count", "review_now_count"],
+      "properties": {
+        "current_count": { "type": "integer", "minimum": 0 },
+        "new_count": { "type": "integer", "minimum": 0 },
+        "changed_count": { "type": "integer", "minimum": 0 },
+        "resolved_count": { "type": "integer", "minimum": 0 },
+        "review_now_count": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

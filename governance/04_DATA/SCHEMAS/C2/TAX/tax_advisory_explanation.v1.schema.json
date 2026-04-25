@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/tax_advisory_explanation.v1.schema.json",
+  "title": "tax_advisory_explanation.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "explanation_id", "scope_id", "decision_id", "summary", "reason_codes"],
+  "properties": {
+    "schema_id": { "const": "tax_advisory_explanation" },
+    "schema_version": { "const": "v1" },
+    "explanation_id": { "type": "string", "minLength": 1 },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "decision_id": { "type": "string", "minLength": 1 },
+    "summary": { "type": "string", "minLength": 1 },
+    "details": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}
+

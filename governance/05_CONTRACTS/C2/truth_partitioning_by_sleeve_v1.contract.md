@@ -41,7 +41,7 @@ This rollup MUST be derived from sleeve partition pointer heads (read-only) and 
    - A sleeve MUST NOT write outside its `truth_sleeves/<sleeve_id>/<mode>` root.
 
 2. **No global writes by sleeves**
-   - Sleeve pipelines MUST NOT write into `constellation_2/runtime/truth/...` except via a dedicated governed rollup producer tool.
+   - Sleeve pipelines MUST NOT write into `constellation_2/runtime/truth/...` except via a dedicated governed rollup producer tool or an explicitly governed canonical execution family defined by execution-root authority.
 
 3. **Pointer indices are sleeve-scoped**
    - Latest-pointer indices and canonical pointer indices MUST live under the sleeve partition and MUST NOT be shared across sleeves.
@@ -64,3 +64,4 @@ This rollup MUST be derived from sleeve partition pointer heads (read-only) and 
 
 - This contract does not specify the content schemas of all artifacts.
 - This contract defines directory authority and isolation semantics only.
+- Canonical execution-root ownership for Phase C, readiness, and execution evidence is governed separately by the execution root authority contract.

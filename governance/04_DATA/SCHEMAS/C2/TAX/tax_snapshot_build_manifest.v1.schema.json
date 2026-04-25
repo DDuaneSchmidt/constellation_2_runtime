@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/tax_snapshot_build_manifest.v1.schema.json",
+  "title": "tax_snapshot_build_manifest.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "build_manifest_id", "snapshot_id", "scope_id", "as_of_effective_at", "facts_included_through_recorded_at", "accepted_fact_set_hash", "build_ruleset_id", "policy_dependency_version_set", "algorithm_version_set"],
+  "properties": {
+    "schema_id": { "const": "tax_snapshot_build_manifest" },
+    "schema_version": { "const": "v1" },
+    "build_manifest_id": { "type": "string", "minLength": 1 },
+    "snapshot_id": { "type": "string", "minLength": 1 },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "as_of_effective_at": { "type": "string", "format": "date-time" },
+    "facts_included_through_recorded_at": { "type": "string", "format": "date-time" },
+    "accepted_fact_set_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "build_ruleset_id": { "type": "string", "minLength": 1 },
+    "policy_dependency_version_set": { "type": "object" },
+    "algorithm_version_set": { "type": "object" }
+  }
+}
+

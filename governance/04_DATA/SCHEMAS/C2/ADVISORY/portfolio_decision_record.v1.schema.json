@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisory/portfolio_decision_record.v1.schema.json",
+  "title": "portfolio_decision_record.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_id",
+    "decision_id",
+    "household_id",
+    "execution_intent_id",
+    "created_at",
+    "policy_snapshot_ref",
+    "household_state_snapshot_ref",
+    "compiled_constraints_ref",
+    "allocation_plan_ref",
+    "risk_envelope_ref",
+    "rebalance_candidates_ref",
+    "tax_adjudicated_rebalance_ref",
+    "portfolio_authorization_ref",
+    "operator_overrides_applied",
+    "final_decision_summary",
+    "all_reason_codes",
+    "artifact_fingerprints"
+  ],
+  "properties": {
+    "schema_id": { "const": "portfolio_decision_record" },
+    "schema_version": { "const": "v1" },
+    "record_id": { "type": "string", "minLength": 1 },
+    "decision_id": { "type": "string", "minLength": 1 },
+    "household_id": { "type": "string", "minLength": 1 },
+    "execution_intent_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "minLength": 1 },
+    "policy_snapshot_ref": { "$ref": "#/$defs/artifactRef" },
+    "household_state_snapshot_ref": { "$ref": "#/$defs/artifactRef" },
+    "compiled_constraints_ref": { "$ref": "#/$defs/artifactRef" },
+    "allocation_plan_ref": { "$ref": "#/$defs/artifactRef" },
+    "risk_envelope_ref": { "$ref": "#/$defs/artifactRef" },
+    "rebalance_candidates_ref": { "$ref": "#/$defs/artifactRef" },
+    "tax_adjudicated_rebalance_ref": { "$ref": "#/$defs/artifactRef" },
+    "portfolio_authorization_ref": { "$ref": "#/$defs/artifactRef" },
+    "operator_overrides_applied": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "final_decision_summary": { "type": "string", "minLength": 1 },
+    "all_reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "artifact_fingerprints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy_snapshot_id",
+        "household_state_snapshot_id",
+        "compiled_constraints_id",
+        "allocation_plan_id",
+        "risk_envelope_id",
+        "rebalance_candidates_id",
+        "tax_adjudicated_rebalance_id",
+        "portfolio_authorization_id"
+      ],
+      "properties": {
+        "policy_snapshot_id": { "type": "string", "minLength": 1 },
+        "household_state_snapshot_id": { "type": "string", "minLength": 1 },
+        "compiled_constraints_id": { "type": "string", "minLength": 1 },
+        "allocation_plan_id": { "type": "string", "minLength": 1 },
+        "risk_envelope_id": { "type": "string", "minLength": 1 },
+        "rebalance_candidates_id": { "type": "string", "minLength": 1 },
+        "tax_adjudicated_rebalance_id": { "type": "string", "minLength": 1 },
+        "portfolio_authorization_id": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_id", "artifact_type", "schema_version"],
+      "properties": {
+        "artifact_id": { "type": "string", "minLength": 1 },
+        "artifact_type": { "type": "string", "minLength": 1 },
+        "schema_version": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

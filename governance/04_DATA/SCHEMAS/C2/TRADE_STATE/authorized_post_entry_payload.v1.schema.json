@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/trade_state/authorized_post_entry_payload.v1.schema.json",
+  "title": "authorized_post_entry_payload.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "payload_id",
+    "request_ref",
+    "boundary_verdict_ref",
+    "approved_payload",
+    "payload_fingerprint",
+    "rule_version",
+    "generated_at_utc"
+  ],
+  "properties": {
+    "schema_id": { "const": "authorized_post_entry_payload" },
+    "schema_version": { "const": "v1" },
+    "payload_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "request_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "request_seal_id"],
+      "properties": {
+        "request_id": { "type": "string", "minLength": 1 },
+        "request_seal_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "boundary_verdict_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boundary_verdict_id"],
+      "properties": {
+        "boundary_verdict_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "approved_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_class",
+        "trade_identity_id",
+        "execution_identity",
+        "requested_quantity",
+        "order_parameters",
+        "target_order_linkage"
+      ],
+      "properties": {
+        "action_class": { "type": "string", "minLength": 1 },
+        "trade_identity_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "execution_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["environment", "sleeve_id", "account_id", "client_id_orders", "execution_root_ref"],
+          "properties": {
+            "environment": { "type": "string", "minLength": 1 },
+            "sleeve_id": { "type": "string", "minLength": 1 },
+            "account_id": { "type": "string", "minLength": 1 },
+            "client_id_orders": { "type": "integer", "minimum": 1 },
+            "execution_root_ref": { "type": "string", "minLength": 1 }
+          }
+        },
+        "requested_quantity": { "type": ["string", "null"] },
+        "order_parameters": {
+          "type": ["object", "null"],
+          "additionalProperties": {
+            "type": ["string", "number", "integer", "boolean", "null"]
+          }
+        },
+        "target_order_linkage": {
+          "type": ["object", "null"],
+          "additionalProperties": { "type": ["string", "integer", "null"] }
+        }
+      }
+    },
+    "payload_fingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "rule_version": { "type": "string", "minLength": 1 },
+    "generated_at_utc": { "type": "string", "format": "date-time" }
+  }
+}

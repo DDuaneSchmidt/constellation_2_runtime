@@ -30,7 +30,7 @@ execution path.
 - Truth owner: Constellation governance
 - Canonical writer: `ops/tools/run_deployment_state_machine_v1.py`
 - Canonical artifact path:
-  - `constellation_2/runtime/truth/reports/deployment_state_machine_v1/<DAY>/deployment_state_machine.v1.json`
+  - `/home/node/constellation_runtime_data/truth/reports/deployment_state_machine_v1/<DAY>/deployment_state_machine.v1.json`
 - Canonical schema:
   - `governance/04_DATA/SCHEMAS/C2/REPORTS/deployment_state_machine.v1.schema.json`
 

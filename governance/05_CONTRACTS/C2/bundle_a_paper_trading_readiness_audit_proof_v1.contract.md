@@ -106,17 +106,32 @@ constellation_2/runtime/truth/pillars_v1r1/DAY/decisions/*.submission_decision_r
 
 #### B3 (no submissions case)
 
-If there are **no submission directories** under:
+If there are **zero authoritative broker submission records** under:
+
+`constellation_2/runtime/truth/execution_evidence_v1/submissions/DAY/*/broker_submission_record.v2.json`
+
+then submission evidence is considered satisfied for DAY.
+
+Placeholder or pre-submit directories under:
 
 constellation_2/runtime/truth/execution_evidence_v1/submissions/DAY/
 
-
-then submission evidence is considered satisfied for DAY.
+do not, by themselves, establish that submissions exist for readiness/replay certification.
 
 Purpose:
 - provide a canonical ledger for all submissions with lineage to broker outcome,
 - classify execution realism (`REAL_IB_PAPER_ONLY`),
 - reduce audit surface by collapsing multi-file submission evidence into atomic decision records.
+
+Consumers of submission evidence MUST use a deterministic authority order:
+
+1. `pillars_v1r1/<DAY>/decisions/*.submission_decision_record.v1.json`
+2. `pillars_v1/<DAY>/decisions/*.submission_decision_record.v1.json`
+3. legacy `execution_evidence_v1/submission_index/<DAY>/submission_index.v1.json` only if pillars evidence is absent
+4. the no-submissions case from B3
+
+Replay certification MUST use the same authority order and MUST NOT require legacy submission index when authoritative pillars evidence exists.
+Dual authority is forbidden: if pillars evidence exists for DAY, replay/readiness consumers MUST ignore legacy submission index for that day.
 
 ---
 

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/tax_decision_dependency_fingerprint.v1.schema.json",
+  "title": "tax_decision_dependency_fingerprint.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "fingerprint_id", "snapshot_id", "resolved_policy_set_id", "accepted_fact_set_hash", "lot_state_hashes", "wash_state_hash", "account_tax_regime_hash", "ranking_policy_hash", "rounding_policy_hash", "algorithm_version"],
+  "properties": {
+    "schema_id": { "const": "tax_decision_dependency_fingerprint" },
+    "schema_version": { "const": "v1" },
+    "fingerprint_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "snapshot_id": { "type": "string", "minLength": 1 },
+    "resolved_policy_set_id": { "type": "string", "minLength": 1 },
+    "accepted_fact_set_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "lot_state_hashes": { "type": "array", "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" } },
+    "wash_state_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "account_tax_regime_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "ranking_policy_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "rounding_policy_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "algorithm_version": { "type": "string", "minLength": 1 }
+  }
+}
+

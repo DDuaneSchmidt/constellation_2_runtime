@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/evaluation/portfolio_evaluation_state.v1.schema.json",
+  "title": "portfolio_evaluation_state.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "portfolio_scope",
+    "window",
+    "return",
+    "drawdown",
+    "risk_state",
+    "benchmark_relative_state",
+    "outcome_state",
+    "validity_ref",
+    "upstream_refs",
+    "reason_codes",
+    "closure_state",
+    "first_blocker_code",
+    "missing_dependency_artifacts",
+    "constitutional_dependency_declaration",
+    "constitutional_lineage"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_PORTFOLIO_EVALUATION_STATE_V1" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "portfolio_scope": { "type": "string", "minLength": 1 },
+    "window": { "type": "object" },
+    "return": { "type": "object" },
+    "drawdown": { "type": "object" },
+    "risk_state": { "type": "string", "enum": ["risk_within_policy", "risk_warning", "risk_breach", "not_enough_evidence"] },
+    "benchmark_relative_state": {
+      "type": "string",
+      "enum": ["outperforming_benchmark", "at_benchmark", "underperforming_benchmark", "benchmark_not_applicable", "not_enough_evidence"]
+    },
+    "outcome_state": {
+      "type": "string",
+      "enum": ["edge_validated", "edge_positive_unvalidated", "edge_negative", "risk_warning", "risk_breach", "not_enough_evidence"]
+    },
+    "validity_ref": { "type": "object" },
+    "upstream_refs": { "type": "array", "items": { "type": "object" } },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "closure_state": { "type": "string", "enum": ["COMPLETE", "DEGRADED", "BLOCKED", "OPEN"] },
+    "first_blocker_code": { "type": "string" },
+    "missing_dependency_artifacts": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "constitutional_dependency_declaration": { "type": "object" },
+    "constitutional_lineage": { "type": "object" }
+  }
+}

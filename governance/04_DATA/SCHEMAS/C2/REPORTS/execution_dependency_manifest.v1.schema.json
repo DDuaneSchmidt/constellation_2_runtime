@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "dependencies": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "advisory_only": {
+            "type": "boolean"
+          },
+          "dependency_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "fresh_materialization_required": {
+            "type": "boolean"
+          },
+          "owner_ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path_pattern": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "post_submit_only": {
+            "type": "boolean"
+          },
+          "producer_ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "reusable": {
+            "type": "boolean"
+          },
+          "role_class": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "stage_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "upstream_dependency_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "dependency_id",
+          "stage_id",
+          "role_class",
+          "path_pattern",
+          "required",
+          "advisory_only",
+          "post_submit_only",
+          "upstream_dependency_ids"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "description": {
+      "type": "string"
+    },
+    "operation_type": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "schema_id": {
+      "const": "execution_dependency_manifest"
+    },
+    "schema_version": {
+      "const": "v1"
+    },
+    "seal_requires": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "stage_order": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "operation_type",
+    "stage_order",
+    "seal_requires",
+    "dependencies"
+  ],
+  "type": "object"
+}

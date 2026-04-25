@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/trade_state/operator_summary_provenance.v1.schema.json",
+  "title": "operator_summary_provenance.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_owner",
+    "materialization_set_id",
+    "trade_identity_id",
+    "day_utc",
+    "evaluated_at_utc",
+    "snapshot_binding_ref",
+    "lower_core_artifacts_read",
+    "lower_core_fields_consumed",
+    "rollup_rules_fired",
+    "severity_rules_fired",
+    "required_action_rules_fired",
+    "omitted_or_degraded_elements",
+    "snapshot_coherence_result",
+    "prior_state_comparison",
+    "traceability_claims",
+    "derived_only"
+  ],
+  "properties": {
+    "schema_id": { "const": "operator_summary_provenance" },
+    "schema_version": { "const": "v1" },
+    "authority_owner": { "const": "operator_summary_provenance_v1" },
+    "materialization_set_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "trade_identity_id": { "type": "string", "pattern": "^$|^[a-f0-9]{64}$" },
+    "day_utc": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "evaluated_at_utc": { "type": "string", "format": "date-time" },
+    "snapshot_binding_ref": { "$ref": "#/$defs/artifact_ref" },
+    "lower_core_artifacts_read": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifact_read_row" }
+    },
+    "lower_core_fields_consumed": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/field_row" }
+    },
+    "rollup_rules_fired": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "severity_rules_fired": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "required_action_rules_fired": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "omitted_or_degraded_elements": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/degraded_row" }
+    },
+    "snapshot_coherence_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["binding_status", "coherence_status", "invalidation_status", "degradation_codes"],
+      "properties": {
+        "binding_status": { "type": "string", "minLength": 1 },
+        "coherence_status": { "type": "string", "minLength": 1 },
+        "invalidation_status": { "type": "string", "minLength": 1 },
+        "degradation_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "prior_state_comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["comparison_status", "prior_operator_health_ref", "changed_fields"],
+      "properties": {
+        "comparison_status": {
+          "type": "string",
+          "enum": ["INITIAL_MATERIALIZATION", "NO_MATERIAL_CHANGE", "MATERIAL_CHANGE"]
+        },
+        "prior_operator_health_ref": { "$ref": "#/$defs/artifact_link" },
+        "changed_fields": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "traceability_claims": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/claim_row" }
+    },
+    "derived_only": { "const": true }
+  },
+  "$defs": {
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "artifact_link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "logical_name",
+        "source_family",
+        "present",
+        "artifact_path",
+        "artifact_sha256",
+        "missing_reason_code"
+      ],
+      "properties": {
+        "logical_name": { "type": "string", "minLength": 1 },
+        "source_family": { "type": "string", "minLength": 1 },
+        "present": { "type": "boolean" },
+        "artifact_path": { "type": "string" },
+        "artifact_sha256": { "type": "string", "pattern": "^$|^[a-f0-9]{64}$" },
+        "missing_reason_code": { "type": "string" }
+      }
+    },
+    "artifact_read_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_role", "artifact_link", "read_status"],
+      "properties": {
+        "artifact_role": { "type": "string", "minLength": 1 },
+        "artifact_link": { "$ref": "#/$defs/artifact_link" },
+        "read_status": { "type": "string", "enum": ["READ", "OMITTED", "MISSING", "INVALID"] }
+      }
+    },
+    "field_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_role", "fields"],
+      "properties": {
+        "artifact_role": { "type": "string", "minLength": 1 },
+        "fields": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "degraded_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "summary"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string", "minLength": 1 }
+      }
+    },
+    "claim_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_id",
+        "conclusion_field",
+        "conclusion_value",
+        "source_refs",
+        "source_fields",
+        "rule_ids"
+      ],
+      "properties": {
+        "claim_id": { "type": "string", "minLength": 1 },
+        "conclusion_field": { "type": "string", "minLength": 1 },
+        "conclusion_value": { "type": "string", "minLength": 1 },
+        "source_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/artifact_link" }
+        },
+        "source_fields": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "rule_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

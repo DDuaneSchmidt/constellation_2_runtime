@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/constitutional_review_packet.v1.schema.json",
+  "title": "constitutional_review_packet.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "packet_hash",
+    "proposal_hash",
+    "fact_bundle_hash",
+    "policy_version",
+    "created_at",
+    "action_type",
+    "action_class",
+    "target_entities",
+    "expected_economic_effect",
+    "expected_tax_effect",
+    "expected_risk_effect",
+    "admissibility_summary",
+    "missing_facts",
+    "dependency_issues",
+    "decision_enum",
+    "blocker_rules",
+    "negative_evidence",
+    "consequence_of_no_action",
+    "suggested_options",
+    "effective_scope",
+    "authorization_expires_at",
+    "visible_fact_summary",
+    "visible_facts"
+  ],
+  "properties": {
+    "schema_id": { "const": "constitutional_review_packet" },
+    "schema_version": { "const": "v1" },
+    "packet_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "proposal_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "fact_bundle_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "policy_version": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "minLength": 1 },
+    "action_type": { "type": "string", "minLength": 1 },
+    "action_class": { "type": "string", "enum": ["PROTECTIVE", "CONSTRUCTIVE"] },
+    "target_entities": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "expected_economic_effect": { "type": "object" },
+    "expected_tax_effect": { "type": "object" },
+    "expected_risk_effect": { "type": "object" },
+    "admissibility_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "general_admissibility",
+        "tax_admissibility",
+        "dependency_health",
+        "state_coherence"
+      ],
+      "properties": {
+        "general_admissibility": { "type": "string", "minLength": 1 },
+        "tax_admissibility": { "type": "string", "minLength": 1 },
+        "dependency_health": { "type": "string", "minLength": 1 },
+        "state_coherence": { "type": "string", "minLength": 1 }
+      }
+    },
+    "missing_facts": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "dependency_issues": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "decision_enum": {
+      "type": "string",
+      "enum": [
+        "AUTO_EXECUTE",
+        "AUTO_EXECUTE_PROTECTIVE",
+        "REQUIRE_HUMAN_REVIEW",
+        "ADVISORY_ONLY",
+        "DEFER",
+        "BLOCK",
+        "FREEZE_SCOPE"
+      ]
+    },
+    "blocker_rules": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "negative_evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "fact", "severity", "detail"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1 },
+          "fact": { "type": "string", "minLength": 1 },
+          "severity": { "type": "string", "enum": ["INFO", "NON_BLOCKING", "BLOCKING"] },
+          "detail": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "consequence_of_no_action": { "type": "string", "minLength": 1 },
+    "suggested_options": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["APPROVE", "REJECT", "DEFER"] },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "effective_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["global", "domain", "account", "sleeve", "action_class", "effective_authority"],
+      "properties": {
+        "global": { "type": "string" },
+        "domain": { "type": "string" },
+        "account": { "type": "string" },
+        "sleeve": { "type": "string" },
+        "action_class": { "type": "string" },
+        "effective_authority": { "type": "string", "minLength": 1 }
+      }
+    },
+    "authorization_expires_at": {
+      "anyOf": [
+        { "type": "string", "minLength": 1 },
+        { "type": "null" }
+      ]
+    },
+    "visible_fact_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required_fact_types", "fact_types_present"],
+      "properties": {
+        "required_fact_types": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "fact_types_present": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "visible_facts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "fact_id",
+          "fact_type",
+          "logical_name",
+          "observed_at",
+          "captured_at",
+          "freshness_class",
+          "provenance_class",
+          "content_hash",
+          "general_admissibility",
+          "tax_admissibility",
+          "dependency_health",
+          "state_coherence",
+          "artifact_path"
+        ],
+        "properties": {
+          "fact_id": { "type": "string", "minLength": 1 },
+          "fact_type": { "type": "string", "minLength": 1 },
+          "logical_name": { "type": "string", "minLength": 1 },
+          "observed_at": { "type": "string", "minLength": 1 },
+          "captured_at": { "type": "string", "minLength": 1 },
+          "freshness_class": { "type": "string", "minLength": 1 },
+          "provenance_class": { "type": "string", "minLength": 1 },
+          "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "general_admissibility": { "type": "string", "minLength": 1 },
+          "tax_admissibility": { "type": "string", "minLength": 1 },
+          "dependency_health": { "type": "string", "minLength": 1 },
+          "state_coherence": { "type": "string", "minLength": 1 },
+          "artifact_path": { "type": "string" }
+        }
+      }
+    }
+  }
+}

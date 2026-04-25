@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/tax/tax_position_snapshot.v1.schema.json",
+  "title": "tax_position_snapshot.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "snapshot_id", "scope_id", "as_of_effective_at", "build_manifest_id", "accepted_fact_set_hash", "account_tax_regimes", "lot_states", "wash_state", "data_completeness_state", "restriction_flags", "data_quality_flags", "reason_codes"],
+  "properties": {
+    "schema_id": { "const": "tax_position_snapshot" },
+    "schema_version": { "const": "v1" },
+    "snapshot_id": { "type": "string", "minLength": 1 },
+    "scope_id": { "type": "string", "minLength": 1 },
+    "as_of_effective_at": { "type": "string", "format": "date-time" },
+    "build_manifest_id": { "type": "string", "minLength": 1 },
+    "accepted_fact_set_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "account_tax_regimes": { "type": "array", "items": { "type": "object" } },
+    "lot_states": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schema_id", "schema_version", "lot_state_id", "scope_id", "lot_id", "account_id", "security_id", "remaining_quantity", "basis_total", "holding_period_state", "confidence_state", "maturity_state", "restriction_flags", "data_quality_flags", "corporate_action_refs", "reason_codes"],
+        "properties": {
+          "schema_id": { "const": "tax_lot_state" },
+          "schema_version": { "const": "v1" },
+          "lot_state_id": { "type": "string", "minLength": 1 },
+          "scope_id": { "type": "string", "minLength": 1 },
+          "lot_id": { "type": "string", "minLength": 1 },
+          "account_id": { "type": "string", "minLength": 1 },
+          "security_id": { "type": "string", "minLength": 1 },
+          "remaining_quantity": { "type": "string", "minLength": 1 },
+          "basis_total": { "type": "string", "minLength": 1 },
+          "holding_period_state": { "type": "string", "enum": ["short_term", "long_term", "unknown"] },
+          "confidence_state": { "type": "string", "enum": ["exact", "broker_provided", "reconstructed", "unknown"] },
+          "maturity_state": { "type": "string", "enum": ["unverified", "restricted", "decision_eligible", "optimization_ineligible"] },
+          "restriction_flags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "data_quality_flags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "corporate_action_refs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "wash_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "schema_version", "wash_state_id", "scope_id", "active_windows", "reason_codes"],
+      "properties": {
+        "schema_id": { "const": "tax_wash_state" },
+        "schema_version": { "const": "v1" },
+        "wash_state_id": { "type": "string", "minLength": 1 },
+        "scope_id": { "type": "string", "minLength": 1 },
+        "active_windows": { "type": "array", "items": { "type": "object" } },
+        "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "data_completeness_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "schema_version", "completeness_state_id", "scope_id", "open_gaps", "resolved_gaps", "restriction_flags", "reason_codes"],
+      "properties": {
+        "schema_id": { "const": "tax_data_completeness_state" },
+        "schema_version": { "const": "v1" },
+        "completeness_state_id": { "type": "string", "minLength": 1 },
+        "scope_id": { "type": "string", "minLength": 1 },
+        "open_gaps": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "resolved_gaps": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "restriction_flags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "restriction_flags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "data_quality_flags": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}

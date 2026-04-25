@@ -1,0 +1,226 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/paper_trading_integration.v1.schema.json",
+  "title": "paper_trading_integration.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "environment",
+    "produced_utc",
+    "producer",
+    "bootstrap_ref",
+    "request_ref",
+    "smoke_report_ref",
+    "broker_observation_ref",
+    "fill_observation_ref",
+    "canonical_lifecycle_ref",
+    "canonical_reconciliation_ref",
+    "canonical_reconciliation_alias_ref",
+    "submission_id",
+    "order_id",
+    "perm_id",
+    "sleeve_submission_status",
+    "canonical_lifecycle_status",
+    "lifecycle_states",
+    "broker_status_observed",
+    "broker_observation_state",
+    "fill_observation_state",
+    "broker_observation_basis",
+    "fill_observation_basis",
+    "fill_status_observed",
+    "propagation_state",
+    "canonical_reconciliation_status",
+    "audit_guidance",
+    "verdict_basis",
+    "integration_verdict",
+    "blocker_chain",
+    "runtime_ledger_projection"
+  ],
+  "properties": {
+    "schema_id": { "const": "paper_trading_integration" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "environment": { "const": "PAPER" },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 1 }
+      }
+    },
+    "bootstrap_ref": { "$ref": "#/$defs/artifactRef" },
+    "request_ref": { "$ref": "#/$defs/artifactRef" },
+    "smoke_report_ref": { "$ref": "#/$defs/artifactRef" },
+    "broker_observation_ref": { "$ref": "#/$defs/artifactRef" },
+    "fill_observation_ref": { "$ref": "#/$defs/artifactRef" },
+    "canonical_lifecycle_ref": { "$ref": "#/$defs/artifactRef" },
+    "canonical_reconciliation_ref": { "$ref": "#/$defs/artifactRef" },
+    "canonical_reconciliation_alias_ref": { "$ref": "#/$defs/artifactRef" },
+    "submission_id": { "type": "string", "minLength": 1 },
+    "order_id": { "type": "string", "minLength": 1 },
+    "perm_id": { "type": "string", "minLength": 1 },
+    "sleeve_submission_status": { "type": "string", "minLength": 1 },
+    "canonical_lifecycle_status": { "type": "string", "minLength": 1 },
+    "lifecycle_states": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "broker_status_observed": { "type": "string", "minLength": 1 },
+    "broker_observation_state": { "type": "string", "minLength": 1 },
+    "fill_observation_state": { "type": "string", "minLength": 1 },
+    "broker_observation_basis": {
+      "type": "string",
+      "enum": ["NONE", "EXECUTION_EVENT_ONLY", "BROKER_FACT_ONLY", "BROKER_FACT_AND_EXECUTION_EVENT"]
+    },
+    "fill_observation_basis": {
+      "type": "string",
+      "enum": ["NONE", "EXECUTION_EVENT_ONLY", "BROKER_FACT_ONLY", "BROKER_FACT_AND_EXECUTION_EVENT"]
+    },
+    "fill_status_observed": { "$ref": "#/$defs/fillStatus" },
+    "propagation_state": { "$ref": "#/$defs/propagationState" },
+    "canonical_reconciliation_status": { "type": "string", "minLength": 1 },
+    "broker_status_advanced_observed": { "type": "boolean" },
+    "explicit_terminal_broker_state_observed": { "type": "boolean" },
+    "audit_guidance": { "$ref": "#/$defs/auditGuidance" },
+    "verdict_basis": { "$ref": "#/$defs/verdictBasis" },
+    "integration_verdict": { "type": "string", "enum": ["PASS", "FAIL"] },
+    "blocker_chain": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "runtime_ledger_projection": { "$ref": "#/$defs/runtimeLedgerProjection" }
+  },
+  "$defs": {
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "exists", "sha256", "status", "reason_codes"],
+      "properties": {
+        "path": { "type": "string" },
+        "exists": { "type": "boolean" },
+        "sha256": { "type": "string" },
+        "status": { "type": "string" },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "fillStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["filled_qty", "avg_price"],
+      "properties": {
+        "filled_qty": { "type": "integer", "minimum": 0 },
+        "avg_price": { "type": "string", "minLength": 1 }
+      }
+    },
+    "propagationState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "blocker_chain"],
+      "properties": {
+        "status": { "type": "string", "minLength": 1 },
+        "fill_ledger_ref": { "$ref": "#/$defs/artifactRef" },
+        "positions_snapshot_ref": { "$ref": "#/$defs/artifactRef" },
+        "positions_effective_ref": { "$ref": "#/$defs/artifactRef" },
+        "nav_ref": { "$ref": "#/$defs/artifactRef" },
+        "positions_item_count": { "type": "integer", "minimum": 0 },
+        "positions_effective_snapshot_path": { "type": "string" },
+        "nav_total_observed": { "type": "boolean" },
+        "blocker_chain": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "verdictBasis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "broker_submission_record_exists",
+        "broker_id_linkage_exists",
+        "canonical_lifecycle_exists",
+        "canonical_reconciliation_exists",
+        "canonical_reconciliation_no_submissions_clear",
+        "canonical_reconciliation_ref_is_versioned",
+        "broker_observation_explicit",
+        "fill_observation_explicit",
+        "propagation_state_explicit",
+        "broker_status_advanced_observed",
+        "fill_observed",
+        "explicit_terminal_broker_state_observed",
+        "propagation_complete"
+      ],
+      "properties": {
+        "broker_submission_record_exists": { "type": "boolean" },
+        "broker_id_linkage_exists": { "type": "boolean" },
+        "canonical_lifecycle_exists": { "type": "boolean" },
+        "canonical_reconciliation_exists": { "type": "boolean" },
+        "canonical_reconciliation_no_submissions_clear": { "type": "boolean" },
+        "canonical_reconciliation_ref_is_versioned": { "type": "boolean" },
+        "broker_observation_explicit": { "type": "boolean" },
+        "fill_observation_explicit": { "type": "boolean" },
+        "propagation_state_explicit": { "type": "boolean" },
+        "broker_status_advanced_observed": { "type": "boolean" },
+        "fill_observed": { "type": "boolean" },
+        "explicit_terminal_broker_state_observed": { "type": "boolean" },
+        "propagation_complete": { "type": "boolean" }
+      }
+    },
+    "auditGuidance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "immutable_snapshot_refs_preferred",
+        "preferred_canonical_reconciliation_ref",
+        "alias_refs_best_effort_only"
+      ],
+      "properties": {
+        "immutable_snapshot_refs_preferred": { "type": "boolean" },
+        "preferred_canonical_reconciliation_ref": { "type": "string", "const": "canonical_reconciliation_ref" },
+        "alias_refs_best_effort_only": { "type": "boolean" }
+      }
+    },
+    "runtimeLedgerProjection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ledger_path",
+        "ledger_sha256",
+        "derived_from_runtime_ledger",
+        "event_types",
+        "event_count",
+        "appended_event_ids",
+        "reused_event_ids",
+        "projection_notice"
+      ],
+      "properties": {
+        "ledger_path": { "type": "string", "minLength": 1 },
+        "ledger_sha256": { "type": "string" },
+        "derived_from_runtime_ledger": { "type": "boolean" },
+        "event_types": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "event_count": { "type": "integer", "minimum": 0 },
+        "appended_event_ids": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        },
+        "reused_event_ids": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        },
+        "projection_notice": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

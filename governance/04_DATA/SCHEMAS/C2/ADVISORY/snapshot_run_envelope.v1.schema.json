@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/advisory/snapshot_run_envelope.v1.schema.json",
+  "title": "snapshot_run_envelope.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_id",
+    "snapshot_run_id",
+    "household_id",
+    "produced_utc",
+    "effective_at",
+    "contract_version",
+    "envelope_version",
+    "run_outcome",
+    "artifact_refs",
+    "reason_codes"
+  ],
+  "properties": {
+    "schema_id": { "const": "snapshot_run_envelope" },
+    "schema_version": { "const": "v1" },
+    "record_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "snapshot_run_id": { "type": "string", "minLength": 1 },
+    "household_id": { "type": "string", "minLength": 1 },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "effective_at": { "type": "string", "format": "date-time" },
+    "contract_version": { "type": "string", "minLength": 1 },
+    "envelope_version": { "type": "string", "minLength": 1 },
+    "run_outcome": { "type": "string", "enum": ["success", "blocked"] },
+    "artifact_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot_validation_decision_id",
+        "snapshot_validation_decision_path",
+        "input_assembly_id",
+        "household_snapshot_id",
+        "household_snapshot_path"
+      ],
+      "properties": {
+        "snapshot_validation_decision_id": { "type": "string", "minLength": 1 },
+        "snapshot_validation_decision_path": { "type": "string", "minLength": 1 },
+        "input_assembly_id": { "type": "string", "minLength": 1 },
+        "household_snapshot_id": { "type": ["string", "null"], "minLength": 1 },
+        "household_snapshot_path": { "type": ["string", "null"], "minLength": 1 }
+      }
+    },
+    "reason_codes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

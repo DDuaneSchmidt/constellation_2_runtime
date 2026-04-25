@@ -54,5 +54,6 @@ Define one top-level machine-readable legality gate that answers whether a paper
 # Boundaries
 
 - The gate is declarative only in this contract pass.
-- Service wiring is not modified here.
+- Session Authority owns rollover and active-day publication.
+- Service wiring and wrappers must consume Session Authority instead of promoting wall-clock day directly.
 - The gate must fail closed on missing or malformed required inputs.

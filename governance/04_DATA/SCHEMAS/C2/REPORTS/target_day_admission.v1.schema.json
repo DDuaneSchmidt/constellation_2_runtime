@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/target_day_admission.v1.schema.json",
+  "title": "target_day_admission.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "generated_utc",
+    "target_day",
+    "admission_status",
+    "blocker_chain",
+    "blocking_reason_codes",
+    "build_ref",
+    "closure_status",
+    "hidden_dependency_check_result",
+    "rules_version",
+    "binding"
+  ],
+  "properties": {
+    "schema_id": { "const": "target_day_admission" },
+    "schema_version": { "const": "v1" },
+    "generated_utc": { "type": "string", "minLength": 20 },
+    "target_day": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "admission_status": { "type": "string", "enum": ["ADMIT", "BLOCKED"] },
+    "mode": { "type": "string", "enum": ["PAPER_BOOTSTRAP"] },
+    "reason": { "type": "string", "enum": ["PAPER_BOOTSTRAP_SESSION_ADMISSION"] },
+    "blocker_chain": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["artifact_id", "artifact_name", "blocker_code", "classification", "artifact_path", "role_class"],
+        "properties": {
+          "artifact_id": { "type": "string", "minLength": 1 },
+          "artifact_name": { "type": "string", "minLength": 1 },
+          "blocker_code": { "type": "string", "minLength": 1 },
+          "classification": { "type": "string", "minLength": 1 },
+          "artifact_path": { "type": "string", "minLength": 1 },
+          "role_class": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "blocking_reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "build_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_path", "artifact_sha256"],
+      "properties": {
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "minLength": 64 }
+      }
+    },
+    "closure_status": { "type": "string", "enum": ["CLOSED", "OPEN"] },
+    "blocking_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "closure_state": {
+      "type": "string",
+      "enum": ["COMPLETE", "BLOCKED", "DEGRADED", "OPEN"]
+    },
+    "first_blocker_code": { "type": "string" },
+    "missing_dependency_artifacts": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "constitutional_dependency_declaration": { "type": "object" },
+    "constitutional_lineage": { "type": "object" },
+    "hidden_dependency_check_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "blocking_reason_code",
+        "summary",
+        "declared_inventory_artifacts",
+        "observed_dependency_artifacts",
+        "undeclared_dependency_artifacts",
+        "failing_producers"
+      ],
+      "properties": {
+        "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+        "blocking_reason_code": { "type": "string" },
+        "summary": { "type": "string" },
+        "declared_inventory_artifacts": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "observed_dependency_artifacts": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "undeclared_dependency_artifacts": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "failing_producers": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "rules_version": { "type": "string", "minLength": 1 },
+    "binding": { "type": "boolean", "const": true }
+  }
+}
