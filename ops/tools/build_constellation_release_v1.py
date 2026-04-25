@@ -14,6 +14,7 @@ _THIS_FILE = Path(__file__).resolve()
 REPO_ROOT = _THIS_FILE.parents[2].resolve()
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+from ops.tools.repo_protection_common_v1 import CANONICAL_REPO_ROOT, git_status_porcelain_paths_v1
 RELEASES_ROOT = Path("/home/node/constellation_releases").resolve()
 
 INCLUDED_ROOTS = [
@@ -21,10 +22,15 @@ INCLUDED_ROOTS = [
     "constellation_2",
     "governance",
 ]
-OPTIONAL_FILES = [
+REQUIRED_FILES = [
+    "package.json",
     "repo_role.v1.json",
 ]
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RELEASES/release_manifest.v1.schema.json"
+FORBIDDEN_RUNTIME_INPUTS = (
+    "runtime/event_log.jsonl",
+    "runtime/exports",
+)
 
 
 def _utc_now_compact() -> str:
@@ -73,15 +79,40 @@ def _copy_required_release_files(*, repo_root: Path, release_root: Path) -> List
         if not src.exists() or not src.is_dir():
             raise SystemExit(f"FAIL: required release root missing: {src}")
         copied.extend(_copy_tree_filtered(src, release_root))
-    for rel in OPTIONAL_FILES:
+    for rel in REQUIRED_FILES:
         src = (repo_root / rel).resolve()
         if not src.exists() or not src.is_file():
-            continue
+            raise SystemExit(f"FAIL: required release file missing: {src}")
         dst = (release_root / rel).resolve()
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
         copied.append(rel)
     return sorted(set(copied))
+
+
+def _guard_runtime_generated_inputs_or_fail(repo_root: Path) -> None:
+    for rel in FORBIDDEN_RUNTIME_INPUTS:
+        candidate = (repo_root / rel).resolve()
+        if not candidate.exists():
+            continue
+        if candidate.is_file():
+            raise SystemExit(f"FAIL: generated runtime artifact present in source tree: {candidate}")
+        if candidate.is_dir():
+            if any(candidate.iterdir()):
+                raise SystemExit(f"FAIL: generated runtime artifact directory non-empty: {candidate}")
+
+
+def _require_release_source_clean_or_fail(repo_root: Path) -> None:
+    if repo_root != CANONICAL_REPO_ROOT:
+        raise SystemExit(
+            f"FAIL: release build must run from canonical root {CANONICAL_REPO_ROOT}, got {repo_root}"
+        )
+    dirty = git_status_porcelain_paths_v1(repo_root)
+    if dirty:
+        raise SystemExit(
+            "FAIL: canonical repo dirty; release build requires clean committed source "
+            f"dirty_path_count={len(dirty)}"
+        )
 
 
 def _included_file_hashes(*, release_root: Path, included_files: Iterable[str]) -> Dict[str, str]:
@@ -97,11 +128,20 @@ def _included_file_hashes(*, release_root: Path, included_files: Iterable[str]) 
 def main() -> int:
     ap = argparse.ArgumentParser(prog="build_constellation_release_v1")
     ap.add_argument("--release_id", default="", help="Optional explicit release id")
+    ap.add_argument(
+        "--allow_worktree_source",
+        action="store_true",
+        help="Only for controlled diagnostics; production release build remains canonical-root only.",
+    )
     args = ap.parse_args()
 
     from constellation_2.common.deployment_state_machine_v1 import require_clean_git_worktree_or_fail
 
+    if str(REPO_ROOT).startswith("/home/node/constellation_worktrees/") and not args.allow_worktree_source:
+        raise SystemExit("FAIL: release build from worktree source is blocked unless --allow_worktree_source")
+    _require_release_source_clean_or_fail(REPO_ROOT)
     require_clean_git_worktree_or_fail(REPO_ROOT)
+    _guard_runtime_generated_inputs_or_fail(REPO_ROOT)
     git_sha = _git_sha_or_fail(REPO_ROOT)
     release_id = str(args.release_id or "").strip() or f"{_utc_now_compact()}__{git_sha[:12]}"
     release_root = (RELEASES_ROOT / release_id).resolve()

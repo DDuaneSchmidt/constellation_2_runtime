@@ -960,3 +960,12 @@ Economic-state hardening note:
 - `constellation_2/common/control_plane_read_gateway_v1.py`
 - `ops/tools/read_control_plane_surface_v1.py`
 - `constellation_2/common/control_plane_read_boundary_v1.py`
+
+### Canonical Repo Protection + Patch Intake (governed)
+- `governance/03_RUNTIME/CANONICAL_REPO_PROTECTION_AND_PATCH_INTAKE_V1.md`
+- `ops/tools/require_canonical_repo_clean_v1.py`
+- `ops/tools/create_codex_agent_workspace_v1.py`
+- `ops/tools/verify_codex_agent_workspace_v1.py`
+- `ops/tools/apply_codex_patch_bundle_v1.py`
+- `ops/tools/protect_canonical_repo_v1.py`
+- `ops/tools/unprotect_canonical_repo_for_intake_v1.py`

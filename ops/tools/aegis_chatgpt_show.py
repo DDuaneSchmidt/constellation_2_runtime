@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from ops.tools.repo_protection_common_v1 import RUNTIME_DATA_ROOT
+
 LATEST_PACKET_PATH = (
-    REPO_ROOT / "runtime" / "exports" / "aegis_state" / "latest" / "chatgpt_aegis_packet.md"
+    RUNTIME_DATA_ROOT / "exports" / "aegis_state" / "latest" / "chatgpt_aegis_packet.md"
 ).resolve()
 
 

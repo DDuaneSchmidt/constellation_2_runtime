@@ -4129,3 +4129,38 @@ documents:
     path: ops/tools/read_control_plane_surface_v1.py
     class: C2_TOOL
     status: ACTIVE
+
+  - id: C2_CONTRACT_CANONICAL_REPO_PROTECTION_AND_PATCH_INTAKE_V1
+    path: governance/03_RUNTIME/CANONICAL_REPO_PROTECTION_AND_PATCH_INTAKE_V1.md
+    class: C2_CONTRACT
+    status: ACTIVE
+
+  - id: C2_TOOL_REQUIRE_CANONICAL_REPO_CLEAN_V1
+    path: ops/tools/require_canonical_repo_clean_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_TOOL_CREATE_CODEX_AGENT_WORKSPACE_V1
+    path: ops/tools/create_codex_agent_workspace_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_TOOL_VERIFY_CODEX_AGENT_WORKSPACE_V1
+    path: ops/tools/verify_codex_agent_workspace_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_TOOL_APPLY_CODEX_PATCH_BUNDLE_V1
+    path: ops/tools/apply_codex_patch_bundle_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_TOOL_PROTECT_CANONICAL_REPO_V1
+    path: ops/tools/protect_canonical_repo_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_TOOL_UNPROTECT_CANONICAL_REPO_FOR_INTAKE_V1
+    path: ops/tools/unprotect_canonical_repo_for_intake_v1.py
+    class: C2_TOOL
+    status: ACTIVE

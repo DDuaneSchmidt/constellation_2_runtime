@@ -10,17 +10,24 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from ops.tools.repo_protection_common_v1 import (
+    PROTECTION_STATUS_PATH,
+    RUNTIME_DATA_ROOT,
+    read_protection_status_v1,
+    require_runtime_output_outside_repo_runtime_v1,
+)
+from ops.tools.require_canonical_repo_clean_v1 import evaluate_canonical_cleanliness_v1
+
 LATEST_PACKET_PATH = (
-    REPO_ROOT / "runtime" / "exports" / "aegis_state" / "latest" / "chatgpt_aegis_packet.md"
+    RUNTIME_DATA_ROOT / "exports" / "aegis_state" / "latest" / "chatgpt_aegis_packet.md"
 ).resolve()
-ARCHIVE_ROOT = (REPO_ROOT / "runtime" / "exports" / "aegis_state" / "archive").resolve()
+ARCHIVE_ROOT = (RUNTIME_DATA_ROOT / "exports" / "aegis_state" / "archive").resolve()
 ACTIVE_RUNTIME_CONTRACT_PATH = (
-    Path("/home/node/constellation_runtime_data")
+    RUNTIME_DATA_ROOT
     / "runtime_contract_v1"
     / "active_runtime_contract.v1.json"
 ).resolve()
@@ -797,9 +804,21 @@ def _build_packet() -> tuple[str, str]:
     generated_at_utc = _iso_utc(now)
     commit = _git_commit()
     branch = _git_branch()
+    cleanliness = evaluate_canonical_cleanliness_v1(REPO_ROOT)
     status_lines = _git_status_short_lines()
     diff_lines = _git_diff_name_only_lines()
     dirty = "DIRTY" if status_lines else "CLEAN"
+    dirty_path_count = int(cleanliness.get("dirty_path_count") or len(status_lines))
+    protection_status_payload = read_protection_status_v1()
+    canonical_repo_protection_status = str(
+        protection_status_payload.get("status") or "UNKNOWN"
+    ).strip() or "UNKNOWN"
+    if dirty == "DIRTY":
+        source_reproducibility_status = "NOT_REPRODUCIBLE_DIRTY_WORKTREE"
+    elif canonical_repo_protection_status == "PROTECTED":
+        source_reproducibility_status = "REPRODUCIBLE_CLEAN_SOURCE"
+    else:
+        source_reproducibility_status = "REPRODUCIBLE_CLEAN_SOURCE_UNPROTECTED"
     export_id = f"{now.strftime('%Y%m%dT%H%M%SZ')}_{(commit[:12] if commit != 'UNKNOWN' else 'nogit')}"
 
     roots = _resolve_truth_roots()
@@ -814,6 +833,10 @@ def _build_packet() -> tuple[str, str]:
         "- git_branch: " + branch,
         "- git_commit: " + commit,
         "- git_dirty_status: " + dirty,
+        "- dirty_path_count: " + str(dirty_path_count),
+        "- source_reproducibility_status: " + source_reproducibility_status,
+        "- canonical_repo_protection_status: " + canonical_repo_protection_status,
+        "- canonical_repo_protection_status_path: " + str(PROTECTION_STATUS_PATH),
         "- freshness_status: " + paper_status.freshness_status,
         "- packet_freshness_policy: max_age=48h; stale/contradictory/unproven state => UNKNOWN or NOT_READY",
         "",
@@ -864,6 +887,8 @@ def _secret_scan_or_fail(packet_text: str) -> None:
 def _write_outputs(export_id: str, packet_text: str) -> tuple[Path, Path]:
     latest_dir = LATEST_PACKET_PATH.parent
     archive_dir = (ARCHIVE_ROOT / export_id).resolve()
+    require_runtime_output_outside_repo_runtime_v1(latest_dir)
+    require_runtime_output_outside_repo_runtime_v1(archive_dir)
     latest_dir.mkdir(parents=True, exist_ok=True)
     archive_dir.mkdir(parents=True, exist_ok=True)
     archive_path = (archive_dir / "chatgpt_aegis_packet.md").resolve()
