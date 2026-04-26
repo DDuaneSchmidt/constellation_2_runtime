@@ -17,6 +17,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.common.attempt_history_v1 import build_attempt_id_v1
+from constellation_2.common.aegis_day_closure_authority_v1 import closure_authority_output_path
+from constellation_2.common.execution_evidence_current_head_v1 import current_head_output_path
 from constellation_2.common.paper_session_fact_plane_v1 import (
     atomic_write_validated_json_v1,
     now_utc_iso_v1,
@@ -37,6 +39,8 @@ from constellation_2.common.session_authority_monitor_v1 import (
     build_session_authority_status_payload_v1,
     write_session_authority_status_v1,
 )
+from constellation_2.common.sleeve_execution_root_v1 import resolve_sleeve_execution_root_v1
+from constellation_2.common.submission_index_v1 import submission_index_output_path
 from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_intents_day_completeness_path,
     resolve_paper_day_control_plane_attempt_path,
@@ -93,6 +97,93 @@ def _artifact_payload(path: Path) -> dict[str, Any] | None:
         return None
     payload = read_json_object_v1(path)
     return payload
+
+
+def _first_reason_code(entries: Any) -> str:
+    if not isinstance(entries, list):
+        return ""
+    for entry in entries:
+        if isinstance(entry, dict):
+            for key in ("code", "reason", "reason_code", "blocker_code"):
+                value = str(entry.get(key) or "").strip()
+                if value:
+                    return value
+        else:
+            value = str(entry).strip()
+            if value:
+                return value
+    return ""
+
+
+def _evaluate_closure_lineage_gate(*, truth_root: Path, day_utc: str) -> dict[str, str]:
+    gate = {
+        "gate_decision": "PASS",
+        "blocker_code": "",
+        "blocker_path": "",
+    }
+    try:
+        execution_root = resolve_sleeve_execution_root_v1(
+            repo_root=REPO_ROOT,
+            environment="PAPER",
+            ib_account="",
+            sleeve_id="PRIMARY",
+        ).execution_root_path
+    except Exception:
+        gate["gate_decision"] = "BLOCKED_BY_DEFECT"
+        gate["blocker_code"] = "PAPER_DAY_CONTROL_PLANE_EXECUTION_ROOT_UNRESOLVED"
+        return gate
+
+    closure_path = closure_authority_output_path(truth_root=truth_root, day_utc=day_utc)
+    submission_index_path = submission_index_output_path(execution_root=execution_root, day_utc=day_utc)
+    current_head_path = current_head_output_path(execution_root=execution_root, day_utc=day_utc)
+
+    closure_payload = _artifact_payload(closure_path)
+    if closure_payload is None:
+        gate["gate_decision"] = "BLOCKED_BY_DEFECT"
+        gate["blocker_code"] = "PAPER_DAY_CONTROL_PLANE_CLOSURE_AUTHORITY_MISSING"
+        gate["blocker_path"] = str(closure_path)
+        return gate
+    closure_status = str(closure_payload.get("status") or "").strip().upper() or "UNKNOWN"
+    if closure_status != "PASS":
+        gate["gate_decision"] = "BLOCKED_VALID"
+        gate["blocker_code"] = (
+            str(closure_payload.get("canonical_blocker") or "").strip()
+            or _first_reason_code(closure_payload.get("blocking_evidence"))
+            or "AEGIS_DAY_CLOSURE_NOT_PASS"
+        )
+        gate["blocker_path"] = str(closure_path)
+        return gate
+
+    submission_index_payload = _artifact_payload(submission_index_path)
+    if submission_index_payload is None:
+        gate["gate_decision"] = "BLOCKED_BY_DEFECT"
+        gate["blocker_code"] = "PAPER_DAY_CONTROL_PLANE_SUBMISSION_INDEX_MISSING"
+        gate["blocker_path"] = str(submission_index_path)
+        return gate
+    submission_index_status = str(submission_index_payload.get("status") or "").strip().upper() or "UNKNOWN"
+    if submission_index_status != "PASS":
+        gate["gate_decision"] = "BLOCKED_VALID"
+        gate["blocker_code"] = (
+            _first_reason_code(submission_index_payload.get("blocking_evidence")) or "POST_SUBMIT_LINEAGE_GAP"
+        )
+        gate["blocker_path"] = str(submission_index_path)
+        return gate
+
+    current_head_payload = _artifact_payload(current_head_path)
+    if current_head_payload is None:
+        gate["gate_decision"] = "BLOCKED_BY_DEFECT"
+        gate["blocker_code"] = "PAPER_DAY_CONTROL_PLANE_CURRENT_HEAD_MISSING"
+        gate["blocker_path"] = str(current_head_path)
+        return gate
+    current_head_status = str(current_head_payload.get("status") or "").strip().upper() or "UNKNOWN"
+    if current_head_status != "PASS":
+        gate["gate_decision"] = "BLOCKED_VALID"
+        gate["blocker_code"] = (
+            _first_reason_code(current_head_payload.get("rejected_candidates")) or "STALE_EXECUTION_POINTER"
+        )
+        gate["blocker_path"] = str(current_head_path)
+        return gate
+    return gate
 
 
 def _artifact_result(*, logical_name: str, path: Path, result: dict[str, Any], status_field: str) -> dict[str, Any]:
@@ -437,6 +528,11 @@ def main(argv: list[str] | None = None) -> int:
             regeneration_defect = True
             blocking_codes.add("PAPER_DAY_CONTROL_PLANE_STARTUP_PROOF_OUTPUT_MISSING")
 
+        closure_lineage_gate = _evaluate_closure_lineage_gate(
+            truth_root=truth_root,
+            day_utc=day,
+        )
+
         if regeneration_defect:
             decision = "BLOCKED_BY_DEFECT"
         elif (
@@ -444,7 +540,24 @@ def main(argv: list[str] | None = None) -> int:
             and startup_proof_result["startup_proof_validation_status"] == "STARTUP_READY"
             and startup_proof_result["agreement_with_ledger"] is True
         ):
-            decision = "READY_NOW"
+            gate_decision = closure_lineage_gate["gate_decision"]
+            gate_blocker_code = closure_lineage_gate["blocker_code"]
+            gate_blocker_path = closure_lineage_gate["blocker_path"]
+            if gate_decision == "PASS":
+                decision = "READY_NOW"
+            elif gate_decision == "BLOCKED_VALID":
+                decision = "BLOCKED_VALID"
+                if gate_blocker_code:
+                    blocking_codes.add(gate_blocker_code)
+                authority_result["first_true_blocker_code"] = gate_blocker_code
+                authority_result["first_true_blocker_artifact_path"] = gate_blocker_path
+            else:
+                decision = "BLOCKED_BY_DEFECT"
+                blocking_codes.add(gate_blocker_code or "PAPER_DAY_CONTROL_PLANE_CLOSURE_LINEAGE_GATE_DEFECT")
+                authority_result["first_true_blocker_code"] = (
+                    gate_blocker_code or "PAPER_DAY_CONTROL_PLANE_CLOSURE_LINEAGE_GATE_DEFECT"
+                )
+                authority_result["first_true_blocker_artifact_path"] = gate_blocker_path
         elif authority_result["ledger_authority_status"] == "DENIED":
             decision = "BLOCKED_VALID"
         else:

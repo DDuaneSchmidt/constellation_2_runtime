@@ -360,7 +360,7 @@ def main(argv: list[str] | None = None) -> int:
                 and agreement
             ):
                 final_start_decision = "READY_NOW"
-            elif paper_day_decision == "BLOCKED_VALID" and ledger_status == "DENIED":
+            elif paper_day_decision == "BLOCKED_VALID":
                 final_start_decision = "BLOCKED_VALID"
             elif paper_day_decision == "BLOCKED_BY_DEFECT" or paper_day_result["return_code"] == 3:
                 final_start_decision = "BLOCKED_BY_DEFECT"
