@@ -81,17 +81,38 @@ def _state_machine_effective_state(payload: dict[str, Any]) -> str:
     return "UNKNOWN"
 
 
+def _ledger_lineage_status(payload: dict[str, Any]) -> str:
+    post_submit = payload.get("post_submit_lifecycle") if isinstance(payload.get("post_submit_lifecycle"), dict) else {}
+    nested_lineage_status = str(post_submit.get("lineage_status") or "").strip().upper()
+    legacy_lineage_status = str(payload.get("lineage_status") or "").strip().upper()
+    return nested_lineage_status or legacy_lineage_status
+
+
+def _ledger_has_explicit_lifecycle_failure(submit_lifecycle: dict[str, Any]) -> bool:
+    finalization_status = str(submit_lifecycle.get("finalization_status") or "").strip().upper()
+    submit_result_status = str(submit_lifecycle.get("submit_result_status") or "").strip().upper()
+    submit_attempt_status = str(submit_lifecycle.get("submit_attempt_status") or "").strip().upper()
+
+    if finalization_status in {"FAIL", "FAILED", "ERROR", "REJECTED"}:
+        return True
+    if submit_result_status in {"REJECTED", "DENIED", "ERROR", "FAILED"}:
+        return True
+    if submit_attempt_status in {"FAILED", "REJECTED"}:
+        return True
+    return False
+
+
 def _ledger_effective_state(payload: dict[str, Any]) -> str:
     control_state = payload.get("control_state") if isinstance(payload.get("control_state"), dict) else {}
-    post_submit = payload.get("post_submit_lifecycle") if isinstance(payload.get("post_submit_lifecycle"), dict) else {}
     submit_lifecycle = payload.get("submit_lifecycle") if isinstance(payload.get("submit_lifecycle"), dict) else {}
 
     authority_status = str(control_state.get("authority_status") or "").strip().upper()
     submission_authorized = control_state.get("submission_authorized")
-    lineage_status = str(post_submit.get("lineage_status") or "").strip().upper()
-    submit_result_status = str(submit_lifecycle.get("submit_result_status") or "").strip().upper()
+    lineage_status = _ledger_lineage_status(payload)
 
-    if lineage_status == "GAP" or submit_result_status == "FAIL":
+    if lineage_status != "BOUND":
+        return "BLOCKED"
+    if _ledger_has_explicit_lifecycle_failure(submit_lifecycle):
         return "BLOCKED"
     if submission_authorized is False:
         return "BLOCKED"
@@ -220,7 +241,12 @@ def evaluate_aegis_day_closure_authority_v1(
     )
     post_submit = ledger.get("post_submit_lifecycle") if isinstance(ledger.get("post_submit_lifecycle"), dict) else {}
     submit_lifecycle = ledger.get("submit_lifecycle") if isinstance(ledger.get("submit_lifecycle"), dict) else {}
-    lineage_status = str(post_submit.get("lineage_status") or "").strip().upper()
+    lineage_status = _ledger_lineage_status(ledger)
+    lineage_status_path = (
+        "post_submit_lifecycle.lineage_status"
+        if str(post_submit.get("lineage_status") or "").strip()
+        else ("lineage_status" if str(ledger.get("lineage_status") or "").strip() else "post_submit_lifecycle.lineage_status|lineage_status")
+    )
     submit_result_status = str(submit_lifecycle.get("submit_result_status") or "").strip().upper()
     source_surfaces["paper_session_ledger"] = {
         "path": str(ledger_path),
@@ -228,20 +254,20 @@ def evaluate_aegis_day_closure_authority_v1(
         "effective_state": ledger_effective_state,
         "canonical_blocker": ledger_blocker,
     }
-    if lineage_status == "GAP":
+    if lineage_status != "BOUND":
         blocking_evidence.append(
             _block(
                 "POST_SUBMIT_LINEAGE_GAP",
                 ledger_path,
-                "paper_session_ledger post_submit_lifecycle.lineage_status=GAP",
+                f"paper_session_ledger {lineage_status_path}={lineage_status or 'MISSING'}",
             )
         )
-    if submit_result_status == "FAIL":
+    if _ledger_has_explicit_lifecycle_failure(submit_lifecycle):
         blocking_evidence.append(
             _block(
-                "POST_SUBMIT_LINEAGE_GAP",
+                "POST_SUBMIT_LIFECYCLE_FAILURE",
                 ledger_path,
-                "paper_session_ledger submit_lifecycle.submit_result_status=FAIL",
+                "paper_session_ledger submit_lifecycle indicates explicit lifecycle failure state",
             )
         )
 

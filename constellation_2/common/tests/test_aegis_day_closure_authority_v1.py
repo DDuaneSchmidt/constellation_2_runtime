@@ -134,6 +134,60 @@ def test_lineage_gap_fails(tmp_path: Path) -> None:
     assert any(item["code"] == "POST_SUBMIT_LINEAGE_GAP" for item in payload["blocking_evidence"])
 
 
+def test_fail_submit_result_with_bound_lineage_and_open_finalization_is_not_lineage_gap(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth"
+    execution_root = tmp_path / "exec"
+    readiness_path = _seed_base(truth_root, execution_root)
+    _write_json(
+        truth_root / "reports" / "paper_session_ledger_v1" / DAY / "paper_session_ledger.v1.json",
+        {
+            "control_state": {"authority_status": "GRANTED", "submission_authorized": True},
+            "post_submit_lifecycle": {"lineage_status": "BOUND"},
+            "submit_lifecycle": {
+                "submit_result_status": "FAIL",
+                "submit_attempt_status": "ATTEMPTED",
+                "finalization_status": "OPEN",
+            },
+        },
+    )
+    payload = evaluate_aegis_day_closure_authority_v1(
+        day_utc=DAY,
+        truth_root=truth_root,
+        execution_root=execution_root,
+        trade_submit_readiness_path=readiness_path,
+    )
+    assert payload["status"] == "PASS"
+    assert payload["source_surfaces"]["paper_session_ledger"]["effective_state"] == "PERMISSIVE"
+    assert not any(item["code"] == "POST_SUBMIT_LINEAGE_GAP" for item in payload["blocking_evidence"])
+    assert not any(item["code"] == "AEGIS_STATE_CONTRADICTORY_CONTROL_SURFACES" for item in payload["blocking_evidence"])
+
+
+def test_missing_lineage_fails_closed(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth"
+    execution_root = tmp_path / "exec"
+    readiness_path = _seed_base(truth_root, execution_root)
+    _write_json(
+        truth_root / "reports" / "paper_session_ledger_v1" / DAY / "paper_session_ledger.v1.json",
+        {
+            "control_state": {"authority_status": "GRANTED", "submission_authorized": True},
+            "submit_lifecycle": {
+                "submit_result_status": "OPEN",
+                "submit_attempt_status": "ATTEMPTED",
+                "finalization_status": "OPEN",
+            },
+        },
+    )
+    payload = evaluate_aegis_day_closure_authority_v1(
+        day_utc=DAY,
+        truth_root=truth_root,
+        execution_root=execution_root,
+        trade_submit_readiness_path=readiness_path,
+    )
+    assert payload["status"] == "FAIL"
+    assert payload["source_surfaces"]["paper_session_ledger"]["effective_state"] == "BLOCKED"
+    assert any(item["code"] == "POST_SUBMIT_LINEAGE_GAP" for item in payload["blocking_evidence"])
+
+
 def test_latest_pointer_old_day_fails(tmp_path: Path) -> None:
     truth_root = tmp_path / "truth"
     execution_root = tmp_path / "exec"
