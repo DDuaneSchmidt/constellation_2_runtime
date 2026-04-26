@@ -4135,6 +4135,11 @@ documents:
     class: C2_CONTRACT
     status: ACTIVE
 
+  - id: C2_CONTRACT_PATCH_BASE_COMMIT_AND_READINESS_FREEZE_V1
+    path: governance/03_RUNTIME/PATCH_BASE_COMMIT_AND_READINESS_FREEZE_CONTRACT_V1.md
+    class: C2_CONTRACT
+    status: ACTIVE
+
   - id: C2_CONTRACT_IB_RECONCILIATION_LOOP_CONTRACT_V1
     path: governance/03_RUNTIME/IB_RECONCILIATION_LOOP_CONTRACT_V1.md
     class: C2_CONTRACT
@@ -4162,6 +4167,16 @@ documents:
 
   - id: C2_TOOL_APPLY_CODEX_PATCH_BUNDLE_V1
     path: ops/tools/apply_codex_patch_bundle_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_TOOL_VERIFY_PATCH_BUNDLE_BASE_COMMIT_V1
+    path: ops/tools/verify_patch_bundle_base_commit_v1.py
+    class: C2_TOOL
+    status: ACTIVE
+
+  - id: C2_TOOL_RUN_READINESS_FREEZE_PREFLIGHT_V1
+    path: ops/tools/run_readiness_freeze_preflight_v1.py
     class: C2_TOOL
     status: ACTIVE
 

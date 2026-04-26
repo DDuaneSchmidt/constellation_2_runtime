@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-SOURCE_ROOT = Path("/home/node/constellation")
+SOURCE_ROOT = Path(__file__).resolve().parents[3]
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
@@ -23,6 +23,19 @@ from ops.tools.repo_protection_common_v1 import (
 
 def _run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, check=False)
+
+
+def _manifest_payload(*, repo: Path, task_id: str) -> dict:
+    head = _run(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+    return {
+        "task_id": task_id,
+        "base_commit": head,
+        "created_utc": "2026-04-26T00:00:00Z",
+        "forbidden_paths_touched": [],
+        "validation_scope": "READINESS_FREEZE",
+        "authoritative_runtime_validation": False,
+        "tests": [],
+    }
 
 
 def _init_git_repo(tmp_path: Path) -> Path:
@@ -88,7 +101,10 @@ def test_patch_intake_rejects_runtime_paths(monkeypatch: pytest.MonkeyPatch, tmp
     inbox = (tmp_path / "inbox").resolve()
     bundle = (inbox / "task").resolve()
     bundle.mkdir(parents=True, exist_ok=True)
-    (bundle / "manifest.json").write_text("{}", encoding="utf-8")
+    (bundle / "manifest.json").write_text(
+        json.dumps(_manifest_payload(repo=repo, task_id="task"), sort_keys=True),
+        encoding="utf-8",
+    )
     (bundle / "changes.patch").write_text(
         "diff --git a/runtime/exports/bad.txt b/runtime/exports/bad.txt\n",
         encoding="utf-8",
@@ -134,6 +150,11 @@ def test_release_builder_scope_excludes_top_level_docs() -> None:
 
 
 def test_packet_reports_dirty_source_not_reproducible(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        packet_tool,
+        "evaluate_canonical_cleanliness_v1",
+        lambda _repo_root: {"status": "DIRTY", "dirty_path_count": 1, "dirty_paths": ["dirty.py"]},
+    )
     monkeypatch.setattr(packet_tool, "_git_status_short_lines", lambda: [" M dirty.py"])
     monkeypatch.setattr(packet_tool, "_git_diff_name_only_lines", lambda: ["dirty.py"])
     monkeypatch.setattr(
@@ -164,6 +185,11 @@ def test_packet_reports_dirty_source_not_reproducible(monkeypatch: pytest.Monkey
 
 
 def test_packet_reports_clean_protected_source_reproducible(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        packet_tool,
+        "evaluate_canonical_cleanliness_v1",
+        lambda _repo_root: {"status": "CLEAN", "dirty_path_count": 0, "dirty_paths": []},
+    )
     monkeypatch.setattr(packet_tool, "_git_status_short_lines", lambda: [])
     monkeypatch.setattr(packet_tool, "_git_diff_name_only_lines", lambda: [])
     monkeypatch.setattr(

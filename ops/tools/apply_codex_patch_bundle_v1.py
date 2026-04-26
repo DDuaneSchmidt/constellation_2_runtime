@@ -26,6 +26,15 @@ FORBIDDEN_PATCH_PREFIXES = (
     "/home/node/constellation_2_runtime",
 )
 
+REQUIRED_MANIFEST_FIELDS = (
+    "task_id",
+    "base_commit",
+    "created_utc",
+    "forbidden_paths_touched",
+    "validation_scope",
+    "authoritative_runtime_validation",
+)
+
 
 def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
@@ -58,6 +67,62 @@ def _is_forbidden(path: str) -> bool:
         normalized == prefix.rstrip("/") or normalized.startswith(prefix)
         for prefix in FORBIDDEN_PATCH_PREFIXES
     )
+
+
+def _canonical_head_commit_v1() -> str:
+    proc = _run(["git", "rev-parse", "HEAD"])
+    if proc.returncode != 0:
+        raise SystemExit(
+            "FAIL: PATCH_BUNDLE_CANONICAL_HEAD_UNAVAILABLE: "
+            f"{proc.stderr.strip() or proc.stdout.strip()}"
+        )
+    head = proc.stdout.strip()
+    if not head:
+        raise SystemExit("FAIL: PATCH_BUNDLE_CANONICAL_HEAD_EMPTY")
+    return head
+
+
+def _load_manifest_v1(*, manifest_path: Path) -> dict:
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise SystemExit(f"FAIL: PATCH_BUNDLE_MANIFEST_INVALID_JSON:{type(exc).__name__}:{exc}") from exc
+    if not isinstance(manifest, dict):
+        raise SystemExit("FAIL: PATCH_BUNDLE_MANIFEST_NOT_OBJECT")
+
+    for field in REQUIRED_MANIFEST_FIELDS:
+        if field not in manifest:
+            raise SystemExit(f"FAIL: PATCH_BUNDLE_MANIFEST_FIELD_MISSING:{field}")
+
+    task_id = str(manifest.get("task_id") or "").strip()
+    if not task_id:
+        raise SystemExit("FAIL: PATCH_BUNDLE_MANIFEST_TASK_ID_EMPTY")
+
+    base_commit = str(manifest.get("base_commit") or "").strip()
+    if not base_commit:
+        raise SystemExit("FAIL: PATCH_BUNDLE_MANIFEST_BASE_COMMIT_EMPTY")
+
+    created_utc = str(manifest.get("created_utc") or "").strip()
+    if not created_utc:
+        raise SystemExit("FAIL: PATCH_BUNDLE_MANIFEST_CREATED_UTC_EMPTY")
+
+    validation_scope = str(manifest.get("validation_scope") or "").strip()
+    if not validation_scope:
+        raise SystemExit("FAIL: PATCH_BUNDLE_MANIFEST_VALIDATION_SCOPE_EMPTY")
+
+    forbidden_paths = manifest.get("forbidden_paths_touched")
+    if not isinstance(forbidden_paths, list):
+        raise SystemExit("FAIL: PATCH_BUNDLE_MANIFEST_FORBIDDEN_PATHS_NOT_LIST")
+    if any(not isinstance(item, str) for item in forbidden_paths):
+        raise SystemExit("FAIL: PATCH_BUNDLE_MANIFEST_FORBIDDEN_PATHS_INVALID_ENTRY")
+
+    authoritative_runtime_validation = manifest.get("authoritative_runtime_validation")
+    if not isinstance(authoritative_runtime_validation, bool):
+        raise SystemExit(
+            "FAIL: PATCH_BUNDLE_MANIFEST_AUTHORITATIVE_RUNTIME_VALIDATION_NOT_BOOL"
+        )
+
+    return manifest
 
 
 def _unprotect_for_intake(task_id: str) -> None:
@@ -98,9 +163,26 @@ def main(argv: list[str] | None = None) -> int:
     if not patch_path.exists() or not patch_path.is_file():
         raise SystemExit(f"FAIL: patch missing: {patch_path}")
 
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if not isinstance(manifest, dict):
-        raise SystemExit("FAIL: manifest must be a JSON object")
+    manifest = _load_manifest_v1(manifest_path=manifest_path)
+    manifest_task_id = str(manifest.get("task_id") or "").strip()
+    if manifest_task_id != task_id:
+        raise SystemExit(
+            "FAIL: PATCH_BUNDLE_TASK_ID_MISMATCH:"
+            f"manifest_task_id={manifest_task_id}:requested_task_id={task_id}"
+        )
+
+    canonical_head = _canonical_head_commit_v1()
+    manifest_base_commit = str(manifest.get("base_commit") or "").strip()
+    if manifest_base_commit != canonical_head:
+        mismatch_payload = {
+            "status": "FAIL",
+            "code": "PATCH_BUNDLE_BASE_COMMIT_MISMATCH",
+            "manifest_base_commit": manifest_base_commit,
+            "canonical_head": canonical_head,
+            "instruction": "regenerate bundle from current canonical HEAD",
+            "task_id": task_id,
+        }
+        raise SystemExit("FAIL: " + json.dumps(mismatch_payload, sort_keys=True))
 
     patch_text = patch_path.read_text(encoding="utf-8")
     touched_paths = _parse_patch_paths(patch_text)

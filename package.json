@@ -10,7 +10,9 @@
     "workspace:create": "python3 ops/tools/create_codex_agent_workspace_v1.py --task_id default",
     "workspace:verify": "python3 ops/tools/verify_codex_agent_workspace_v1.py",
     "patch:apply": "python3 ops/tools/apply_codex_patch_bundle_v1.py --task_id recovery_dirty_tree_preserve_v1",
+    "patch:verify-base": "python3 ops/tools/verify_patch_bundle_base_commit_v1.py",
     "repo:protect": "python3 ops/tools/protect_canonical_repo_v1.py",
-    "repo:unprotect-for-intake": "python3 ops/tools/unprotect_canonical_repo_for_intake_v1.py --reason apply_codex_patch_bundle_v1:manual"
+    "repo:unprotect-for-intake": "python3 ops/tools/unprotect_canonical_repo_for_intake_v1.py --reason apply_codex_patch_bundle_v1:manual",
+    "readiness:freeze:preflight": "python3 ops/tools/run_readiness_freeze_preflight_v1.py"
   }
 }

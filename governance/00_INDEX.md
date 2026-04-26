@@ -963,10 +963,13 @@ Economic-state hardening note:
 
 ### Canonical Repo Protection + Patch Intake (governed)
 - `governance/03_RUNTIME/CANONICAL_REPO_PROTECTION_AND_PATCH_INTAKE_V1.md`
+- `governance/03_RUNTIME/PATCH_BASE_COMMIT_AND_READINESS_FREEZE_CONTRACT_V1.md`
 - `ops/tools/require_canonical_repo_clean_v1.py`
 - `ops/tools/create_codex_agent_workspace_v1.py`
 - `ops/tools/verify_codex_agent_workspace_v1.py`
 - `ops/tools/apply_codex_patch_bundle_v1.py`
+- `ops/tools/verify_patch_bundle_base_commit_v1.py`
+- `ops/tools/run_readiness_freeze_preflight_v1.py`
 - `ops/tools/protect_canonical_repo_v1.py`
 - `ops/tools/unprotect_canonical_repo_for_intake_v1.py`
 
