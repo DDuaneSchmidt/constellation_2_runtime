@@ -26,6 +26,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     read_submit_boundary_status_ref_v1,
     read_sleeve_rollup_ref_v1,
     resolve_fact_plane_truth_root_v1,
+    resolve_paper_intent_truth_root_v1,
     resolve_market_calendar_record_v1,
     sha256_file_v1,
 )
@@ -51,6 +52,8 @@ from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_startup_materialization_path,
     resolve_submit_boundary_status_path,
 )
+from constellation_2.common.execution_evidence_current_head_v1 import current_head_output_path
+from constellation_2.common.submission_index_v1 import submission_index_output_path
 from constellation_2.common.runtime_path_authority_v1 import resolve_decision_truth_root_v1
 
 GATE_HIERARCHY_POLICY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/GATE_HIERARCHY_V1.json").resolve()
@@ -304,12 +307,20 @@ def _post_submit_lifecycle(
     day_utc: str,
     rollup_row: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    execution_evidence_root = (Path(truth_root).resolve() / "execution_evidence_v1").resolve()
+    execution_root = resolve_paper_intent_truth_root_v1(
+        truth_root=Path(truth_root).resolve(),
+        repo_root=REPO_ROOT,
+    )
+    execution_evidence_root = (execution_root / "execution_evidence_v1").resolve()
     submissions_dir = (execution_evidence_root / "submissions" / day_utc).resolve()
     latest_path = (execution_evidence_root / "latest_pointer.v1.json").resolve()
+    current_head_path = current_head_output_path(execution_root=execution_root, day_utc=day_utc)
+    submission_index_path = submission_index_output_path(execution_root=execution_root, day_utc=day_utc)
     reconciliation_path = (Path(truth_root).resolve() / "reports" / "execution_reconciliation_v1" / day_utc / "execution_reconciliation.v1.json").resolve()
     submissions_present = submissions_dir.exists() and submissions_dir.is_dir() and any(submissions_dir.iterdir())
     latest_present = latest_path.exists() and latest_path.is_file()
+    current_head_present = current_head_path.exists() and current_head_path.is_file()
+    submission_index_present = submission_index_path.exists() and submission_index_path.is_file()
     reconciliation_present = reconciliation_path.exists() and reconciliation_path.is_file()
     latest_payload: dict[str, Any] = {}
     if latest_present:
@@ -317,12 +328,42 @@ def _post_submit_lifecycle(
             latest_payload = read_json_object_v1(latest_path)
         except Exception:
             latest_payload = {}
+    current_head_payload: dict[str, Any] = {}
+    if current_head_present:
+        try:
+            current_head_payload = read_json_object_v1(current_head_path)
+        except Exception:
+            current_head_payload = {}
+    submission_index_payload: dict[str, Any] = {}
+    if submission_index_present:
+        try:
+            submission_index_payload = read_json_object_v1(submission_index_path)
+        except Exception:
+            submission_index_payload = {}
     latest_day_utc = str(latest_payload.get("day_utc") or latest_payload.get("asof_day_utc") or "").strip() if latest_present else ""
     latest_day_matches = latest_day_utc == str(day_utc).strip() if latest_day_utc else False
+    current_head_status = str(current_head_payload.get("status") or "").strip().upper() if current_head_present else ""
+    submission_index_status = str(submission_index_payload.get("status") or "").strip().upper() if submission_index_present else ""
+    selected_attempt_id = str(current_head_payload.get("selected_attempt_id") or "").strip() if current_head_present else ""
+
+    submission_index_attempt_ids: set[str] = set()
+    if isinstance(submission_index_payload.get("attempts"), list):
+        for item in submission_index_payload.get("attempts") or []:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("lineage_status") or "").strip().upper() != "PASS":
+                continue
+            attempt_id = str(item.get("attempt_id") or "").strip()
+            if attempt_id:
+                submission_index_attempt_ids.add(attempt_id)
+    attempt_lineage_match = bool(selected_attempt_id) and selected_attempt_id in submission_index_attempt_ids
 
     if rollup_row is None or rollup_row.get("presence_verdict") != "PRESENT":
         status = "NOT_OBSERVED_AT_EVALUATION"
         gap_codes = ["PAPER_SESSION_LEDGER_POST_SUBMIT_NOT_OBSERVED"]
+    elif current_head_status == "PASS" and submission_index_status == "PASS" and attempt_lineage_match:
+        status = "BOUND"
+        gap_codes = []
     elif submissions_present and latest_present and latest_day_matches:
         status = "BOUND"
         gap_codes = []
@@ -337,6 +378,22 @@ def _post_submit_lifecycle(
             gap_codes.append("PAPER_SESSION_LEDGER_EXECUTION_LATEST_POINTER_MALFORMED")
         elif not latest_day_matches:
             gap_codes.append("PAPER_SESSION_LEDGER_EXECUTION_LATEST_POINTER_DAY_MISMATCH")
+        if not current_head_present:
+            gap_codes.append("PAPER_SESSION_LEDGER_EXECUTION_CURRENT_HEAD_MISSING")
+        elif not current_head_payload:
+            gap_codes.append("PAPER_SESSION_LEDGER_EXECUTION_CURRENT_HEAD_MALFORMED")
+        elif current_head_status != "PASS":
+            gap_codes.append("PAPER_SESSION_LEDGER_EXECUTION_CURRENT_HEAD_NOT_PASS")
+        if not submission_index_present:
+            gap_codes.append("PAPER_SESSION_LEDGER_SUBMISSION_INDEX_MISSING")
+        elif not submission_index_payload:
+            gap_codes.append("PAPER_SESSION_LEDGER_SUBMISSION_INDEX_MALFORMED")
+        elif submission_index_status != "PASS":
+            gap_codes.append("PAPER_SESSION_LEDGER_SUBMISSION_INDEX_NOT_PASS")
+        elif not selected_attempt_id:
+            gap_codes.append("PAPER_SESSION_LEDGER_CURRENT_HEAD_ATTEMPT_ID_MISSING")
+        elif selected_attempt_id not in submission_index_attempt_ids:
+            gap_codes.append("PAPER_SESSION_LEDGER_CURRENT_HEAD_SUBMISSION_INDEX_ATTEMPT_MISMATCH")
         if not reconciliation_present:
             gap_codes.append("PAPER_SESSION_LEDGER_EXECUTION_RECONCILIATION_MISSING")
     refs = []
@@ -348,10 +405,18 @@ def _post_submit_lifecycle(
         refs.append(str(reconciliation_path))
     if submissions_present:
         refs.append(str(submissions_dir))
+    if current_head_present:
+        refs.append(str(current_head_path))
+    if submission_index_present:
+        refs.append(str(submission_index_path))
+    authoritative_lineage_path = current_head_path if current_head_present else latest_path
+    authoritative_lineage_present = current_head_present or latest_present
     return {
         "lineage_status": status,
-        "latest_authoritative_lineage_ref": str(latest_path) if latest_present else "",
-        "latest_authoritative_lineage_sha256": sha256_file_v1(latest_path) if latest_present else "",
+        "latest_authoritative_lineage_ref": str(authoritative_lineage_path) if authoritative_lineage_present else "",
+        "latest_authoritative_lineage_sha256": (
+            sha256_file_v1(authoritative_lineage_path) if authoritative_lineage_present else ""
+        ),
         "execution_evidence_refs": sorted(set(refs)),
         "reconciliation_refs": [str(reconciliation_path)] if reconciliation_present else [],
         "gap_codes": sorted(set(gap_codes)),

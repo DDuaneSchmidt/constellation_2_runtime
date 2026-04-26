@@ -639,6 +639,10 @@ def main() -> int:
     replay_raw_broker_status = ""
     replay_normalized_lifecycle_status = ""
     replay_submission_record_path = ""
+    replay_selected_attempt_id = ""
+    replay_attempt_id = ""
+    replay_linkage_method = ""
+    replay_linkage_confidence = ""
 
     def emit_replay_summary(status_value: str) -> None:
         if not replay_enabled or replay_artifact_path is None:
@@ -651,6 +655,10 @@ def main() -> int:
             "source_submission_record_path": replay_submission_record_path,
             "raw_broker_status": replay_raw_broker_status,
             "normalized_lifecycle_status": replay_normalized_lifecycle_status,
+            "selected_attempt_id": replay_selected_attempt_id,
+            "attempt_id": replay_attempt_id,
+            "linkage_method": replay_linkage_method,
+            "linkage_confidence": replay_linkage_confidence,
             "immutable_history_preserved": True,
             "status": str(status_value).strip().upper() or "FAIL",
             "generated_at_utc": observed_at,
@@ -877,6 +885,8 @@ def main() -> int:
         raw: Dict[str, Any],
     ) -> None:
         nonlocal wrote
+        nonlocal replay_attempt_id, replay_linkage_confidence, replay_linkage_method, replay_selected_attempt_id
+        nonlocal replay_submission_record_path
         meta, attribution_reason_codes, event_attribution = _resolve_submission_meta_for_event(
             event_type=event_type,
             idx=idx,
@@ -908,6 +918,42 @@ def main() -> int:
         if not replay_raw_broker_status:
             replay_raw_broker_status = str(order_state.get("raw_broker_status") or "")
             replay_normalized_lifecycle_status = str(order_state.get("normalized_lifecycle_status") or "")
+
+        if not replay_submission_record_path:
+            replay_submission_record_path = str(
+                (
+                    SUBMISSIONS_DAY_ROOT
+                    / day
+                    / str(submission_id)
+                    / "broker_submission_record.v2.json"
+                ).resolve()
+            )
+
+        attribution_method = str(event_attribution.get("attribution_method") or "").strip().upper()
+        attribution_confidence = str(event_attribution.get("attribution_confidence") or "").strip().upper()
+        if (
+            not replay_selected_attempt_id
+            and attribution_method in {ATTRIBUTION_METHOD_PERM_ID_BRIDGE, "PERM_ID_BACKFILL_FROM_ACK"}
+            and attribution_confidence in {"EXACT_SINGLE_MATCH", "DERIVED_EXACT", "EXACT"}
+        ):
+            exact_attempt_id = str(
+                event_attribution.get("matched_attempt_id")
+                or event_attribution.get("attempt_id")
+                or ""
+            ).strip()
+            if exact_attempt_id:
+                replay_selected_attempt_id = exact_attempt_id
+                replay_attempt_id = exact_attempt_id
+                replay_linkage_method = attribution_method
+                replay_linkage_confidence = attribution_confidence
+                replay_submission_record_path = str(
+                    (
+                        SUBMISSIONS_DAY_ROOT
+                        / day
+                        / str(submission_id)
+                        / "broker_submission_record.v2.json"
+                    ).resolve()
+                )
 
         event_hash = _event_hash_key(
             [

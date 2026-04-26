@@ -85,6 +85,56 @@ def _selected_attempt_id(target: Path) -> str:
     return ""
 
 
+def _attempt_id_from_submission_record_path(*, source_submission_record_path: str, day_utc: str) -> str:
+    path_text = str(source_submission_record_path or "").strip()
+    if not path_text:
+        return ""
+    record_path = Path(path_text).resolve()
+    if not record_path.exists() or not record_path.is_file():
+        return ""
+    if record_path.name != "broker_submission_record.v2.json":
+        return ""
+    try:
+        record_obj = _read_json(record_path)
+    except Exception:
+        return ""
+
+    attempt_id = str(record_obj.get("attempt_id") or "").strip()
+    if attempt_id:
+        return attempt_id
+
+    submission_id = str(record_obj.get("submission_id") or "").strip()
+    if not submission_id:
+        return ""
+
+    parts = list(record_path.parts)
+    try:
+        submissions_idx = parts.index("submissions")
+    except ValueError:
+        return ""
+    if submissions_idx + 2 >= len(parts):
+        return ""
+    path_day = str(parts[submissions_idx + 1]).strip()
+    path_submission_id = str(parts[submissions_idx + 2]).strip()
+    if path_day != str(day_utc).strip():
+        return ""
+    if path_submission_id != submission_id:
+        return ""
+    if record_path.parent.name != submission_id:
+        return ""
+    return submission_id
+
+
+def _selected_attempt_id_from_replay(*, replay_obj: dict[str, Any], day_utc: str) -> str:
+    direct = str(replay_obj.get("selected_attempt_id") or replay_obj.get("attempt_id") or "").strip()
+    if direct:
+        return direct
+    return _attempt_id_from_submission_record_path(
+        source_submission_record_path=str(replay_obj.get("source_submission_record_path") or ""),
+        day_utc=day_utc,
+    )
+
+
 def evaluate_execution_evidence_current_head_v1(
     *,
     day_utc: str,
@@ -161,7 +211,7 @@ def evaluate_execution_evidence_current_head_v1(
             str(replay_obj.get("generated_at_utc") or replay_obj.get("produced_utc") or ""),
             fallback=fallback_ts,
         )
-        selected_attempt = str(replay_obj.get("selected_attempt_id") or replay_obj.get("attempt_id") or "").strip()
+        selected_attempt = _selected_attempt_id_from_replay(replay_obj=replay_obj, day_utc=day_utc)
         valid.append((produced, replay_path, replay_path, selected_attempt))
 
     valid.sort(key=lambda item: item[0], reverse=True)
@@ -182,13 +232,29 @@ def evaluate_execution_evidence_current_head_v1(
     for _, pointer_path, _, _ in valid[1:]:
         rejected_candidates.append({"path": str(pointer_path), "reason": "STALE_DAY"})
 
+    resolved_selected_attempt_id = selected_attempt_id or _selected_attempt_id(selected_target)
+    if not resolved_selected_attempt_id:
+        rejected_candidates.append({"path": str(selected_pointer), "reason": "ATTEMPT_ID_MISSING"})
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "day": day_utc,
+            "sleeve": sleeve,
+            "environment": environment,
+            "status": "FAIL",
+            "selected_attempt_id": "",
+            "selected_artifact_path": str(selected_target),
+            "selected_pointer_path": str(selected_pointer),
+            "rejected_candidates": rejected_candidates,
+            "generated_at_utc": _utc_now_iso(),
+        }
+
     return {
         "schema_version": SCHEMA_VERSION,
         "day": day_utc,
         "sleeve": sleeve,
         "environment": environment,
         "status": "PASS",
-        "selected_attempt_id": selected_attempt_id or _selected_attempt_id(selected_target),
+        "selected_attempt_id": resolved_selected_attempt_id,
         "selected_artifact_path": str(selected_target),
         "selected_pointer_path": str(selected_pointer),
         "rejected_candidates": rejected_candidates,

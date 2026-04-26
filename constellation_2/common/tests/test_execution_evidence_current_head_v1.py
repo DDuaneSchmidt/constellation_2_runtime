@@ -127,6 +127,51 @@ def test_replay_snapshot_can_become_current_head_when_pointer_is_stale(tmp_path:
         / "replay_20260426_034644"
         / "execution_stream_snapshot.v1.json"
     )
+    submission_id = "a" * 64
+    submission_record = (
+        execution_root
+        / "execution_evidence_v1"
+        / "submissions"
+        / DAY
+        / submission_id
+        / "broker_submission_record.v2.json"
+    )
+    _write_json(
+        submission_record,
+        {
+            "submission_id": submission_id,
+            "attempt_id": "",
+            "status": "PENDINGSUBMIT",
+            "broker_ids": {"order_id": 1, "perm_id": 1},
+        },
+    )
+    _write_json(
+        replay_snapshot,
+        {
+            "schema_version": "execution_stream_snapshot_replay.v1",
+            "day": DAY,
+            "status": "PASS",
+            "generated_at_utc": "2026-04-24T10:00:00Z",
+            "source_submission_record_path": str(submission_record.resolve()),
+        },
+    )
+
+    payload = evaluate_execution_evidence_current_head_v1(day_utc=DAY, execution_root=execution_root)
+    assert payload["status"] == "PASS"
+    assert payload["selected_artifact_path"] == str(replay_snapshot.resolve())
+    assert payload["selected_attempt_id"] == submission_id
+
+
+def test_replay_snapshot_fails_closed_when_attempt_id_missing_and_unproven(tmp_path: Path) -> None:
+    execution_root = tmp_path
+    replay_snapshot = (
+        execution_root
+        / "execution_stream_v1"
+        / "replays"
+        / DAY
+        / "replay_20260426_034644"
+        / "execution_stream_snapshot.v1.json"
+    )
     _write_json(
         replay_snapshot,
         {
@@ -138,5 +183,6 @@ def test_replay_snapshot_can_become_current_head_when_pointer_is_stale(tmp_path:
     )
 
     payload = evaluate_execution_evidence_current_head_v1(day_utc=DAY, execution_root=execution_root)
-    assert payload["status"] == "PASS"
-    assert payload["selected_artifact_path"] == str(replay_snapshot.resolve())
+    assert payload["status"] == "FAIL"
+    assert payload["selected_attempt_id"] == ""
+    assert any(item["reason"] == "ATTEMPT_ID_MISSING" for item in payload["rejected_candidates"])

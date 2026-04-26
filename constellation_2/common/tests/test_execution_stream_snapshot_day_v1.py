@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import sys
+import types
 
 import pytest
 
@@ -407,6 +408,122 @@ def test_perm_id_bridge_order_id_zero_fails_when_multiple_matches(
             action="BUY",
             order_qty=1,
         )
+
+
+def test_governed_replay_summary_carries_attempt_id_for_exact_perm_id_bridge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    day = "2026-04-24"
+    truth_root = tmp_path / "truth"
+    submission_id = "f6" * 32
+    day_root = truth_root / "execution_evidence_v1" / "submissions" / day
+    _write_bound_submission(day_root, submission_id, order_id=90, perm_id=0)
+    _write_json(
+        day_root / submission_id / "broker_submission_record.v2.json",
+        {
+            "submission_id": submission_id,
+            "binding_hash": "b" * 64,
+            "broker": {"environment": "PAPER"},
+            "status": "PENDINGSUBMIT",
+            "broker_ids": {"order_id": 90, "perm_id": 0},
+        },
+    )
+    _write_json(
+        day_root / submission_id / "equity_order_plan.v2.json",
+        {
+            "schema_version": "v2",
+            "engine_id": "ENGINE",
+            "source_intent_id": "intent-source-id-0001",
+            "intent_sha256": "c" * 64,
+            "symbol": "SPY",
+            "action": "BUY",
+            "qty_shares": 1,
+        },
+    )
+    submission_record_path = (
+        day_root / submission_id / "broker_submission_record.v2.json"
+    ).resolve()
+    _write_submission_index(
+        truth_root,
+        day,
+        attempts=[
+            {
+                "attempt_id": submission_id,
+                "submission_record_path": str(submission_record_path),
+                "execution_stream_path": "/tmp/exec.json",
+                "fill_ledger_path": "/tmp/fill.json",
+                "broker_order_id": 90,
+                "broker_perm_id": 764621016,
+                "lineage_status": "PASS",
+                "blocking_evidence": [],
+            }
+        ],
+    )
+
+    class _OrderStatus:
+        status = "PendingSubmit"
+        filled = 0
+        remaining = 1
+        avgFillPrice = 0
+
+    class _Order:
+        orderId = 0
+        permId = 764621016
+        action = "BUY"
+        totalQuantity = 1
+
+    class _Contract:
+        symbol = "SPY"
+
+    class _Trade:
+        orderStatus = _OrderStatus()
+        order = _Order()
+        contract = _Contract()
+
+    class _FakeIB:
+        def connect(self, *_args, **_kwargs):  # type: ignore[no-untyped-def]
+            return True
+
+        def trades(self):  # type: ignore[no-untyped-def]
+            return [_Trade()]
+
+        def executions(self):  # type: ignore[no-untyped-def]
+            return []
+
+        def disconnect(self):  # type: ignore[no-untyped-def]
+            return None
+
+    monkeypatch.setitem(sys.modules, "ib_insync", types.SimpleNamespace(IB=_FakeIB))
+
+    with pytest.MonkeyPatch.context() as m:
+        m.setattr(
+            sys,
+            "argv",
+            [
+                "run_execution_stream_snapshot_day_v1.py",
+                "--day_utc",
+                day,
+                "--truth_root",
+                str(truth_root),
+                "--replay_mode",
+                "governed_new_attempt",
+            ],
+        )
+        rc = module.main()
+    assert rc == 0
+
+    replay_root = truth_root / "execution_stream_v1" / "replays" / day
+    replay_dirs = [p for p in replay_root.iterdir() if p.is_dir()]
+    assert replay_dirs
+    replay_dir = sorted(replay_dirs)[-1]
+    replay_artifact = replay_dir / "execution_stream_snapshot.v1.json"
+    replay_payload = json.loads(replay_artifact.read_text(encoding="utf-8"))
+    assert replay_payload["status"] == "PASS"
+    assert replay_payload["selected_attempt_id"] == submission_id
+    assert replay_payload["attempt_id"] == submission_id
+    assert replay_payload["linkage_method"] == "PERM_ID_BRIDGE"
+    assert replay_payload["linkage_confidence"] == "EXACT_SINGLE_MATCH"
+    assert replay_payload["source_submission_record_path"] == str(submission_record_path)
 
 
 def test_write_immutable_refuses_overwrite_different_bytes(tmp_path: Path) -> None:
