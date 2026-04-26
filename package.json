@@ -5,6 +5,7 @@
     "aegis:ui:refresh": "python3 ops/tools/run_c2_global_monitoring_refresh_v1.py --include-ui-data --ui-only",
     "aegis:chatgpt:packet": "python3 ops/tools/aegis_chatgpt_packet.py",
     "aegis:chatgpt:show": "python3 ops/tools/aegis_chatgpt_show.py",
+    "aegis:alerts": "python3 ops/tools/run_aegis_alert_authority_v1.py",
     "repo:require-clean": "python3 ops/tools/require_canonical_repo_clean_v1.py",
     "workspace:create": "python3 ops/tools/create_codex_agent_workspace_v1.py --task_id default",
     "workspace:verify": "python3 ops/tools/verify_codex_agent_workspace_v1.py",
@@ -13,4 +14,3 @@
     "repo:unprotect-for-intake": "python3 ops/tools/unprotect_canonical_repo_for_intake_v1.py --reason apply_codex_patch_bundle_v1:manual"
   }
 }
-
