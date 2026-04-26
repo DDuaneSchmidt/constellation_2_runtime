@@ -5,9 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/node/constellation_2_runtime
+WorkingDirectory=/home/node/constellation_active
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/home/node/constellation_2_runtime/ops/run/c2_operator_gate_run_v1.sh
+ExecStart=/home/node/constellation_active/ops/run/c2_operator_gate_run_v1.sh
 
 [Install]
 WantedBy=default.target
