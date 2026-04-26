@@ -44,6 +44,10 @@ from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_submit_boundary_status_path,
 )
 from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
+from constellation_2.common.session_authority_monitor_v1 import (
+    build_session_authority_status_payload_v1,
+    write_session_authority_status_v1,
+)
 from constellation_2.common.session_authority_v1 import (
     resolve_active_session_path,
     resolve_target_day_admission_path,
@@ -56,6 +60,8 @@ STATE_ROOT = (Path.home() / ".local/state/constellation_2").resolve()
 SUBMIT_BOUNDARY_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/submit_boundary_status.v1.schema.json"
 PAPER_SESSION_LEDGER_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/paper_session_ledger.v1.schema.json"
 PAPER_DAY_CONTROL_PLANE_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/paper_day_control_plane.v1.schema.json"
+SESSION_AUTHORITY_STALE = "SESSION_AUTHORITY_STATUS_STALE"
+NON_TRADING_SESSION_BLOCKERS = {"NON_TRADING_DAY", "NO_ACTIVE_PAPER_SESSION"}
 
 
 def _utc_now() -> str:
@@ -140,6 +146,28 @@ def _reason_codes_from_surfaces(*, boundary_payload: Dict[str, Any], ledger_payl
     return deduped
 
 
+def _consistency_has_reason(consistency_result: Any, reason_code: str) -> bool:
+    wanted = str(reason_code).strip().upper()
+    if not wanted:
+        return False
+    for code in consistency_result.blocking_reason_codes:
+        if str(code).strip().upper() == wanted:
+            return True
+    for issue in consistency_result.issues:
+        if str(issue.reason_code).strip().upper() == wanted:
+            return True
+    return False
+
+
+def _refresh_session_authority_status(truth_root: Path) -> None:
+    payload = build_session_authority_status_payload_v1(
+        truth_root=truth_root,
+        environment="PAPER",
+        now=datetime.now(timezone.utc),
+    )
+    write_session_authority_status_v1(truth_root=truth_root, payload=payload)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="run_c2_daily_operator_gate_v1")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD (UTC)")
@@ -151,8 +179,17 @@ def main(argv: list[str] | None = None) -> int:
     ledger_path = resolve_paper_session_ledger_path(truth_root=TRUTH, day_utc=day)
     control_path = resolve_paper_day_control_plane_path(truth_root=TRUTH, day_utc=day)
 
-    consistency_result = evaluate_next_day_readiness_consistency_gate_v1(truth_root=TRUTH, day_utc=day)
     session_day_blocker = _session_day_blocker(day_utc=day, truth_root=TRUTH)
+    consistency_result = evaluate_next_day_readiness_consistency_gate_v1(truth_root=TRUTH, day_utc=day)
+
+    # On non-trading/no-active-session days, stale session-authority status is usually an
+    # ordering artifact. Refresh it once before enforcing consistency.
+    if (
+        session_day_blocker in NON_TRADING_SESSION_BLOCKERS
+        and _consistency_has_reason(consistency_result, SESSION_AUTHORITY_STALE)
+    ):
+        _refresh_session_authority_status(TRUTH)
+        consistency_result = evaluate_next_day_readiness_consistency_gate_v1(truth_root=TRUTH, day_utc=day)
 
     reasons: List[str] = []
     notes: List[str] = []
