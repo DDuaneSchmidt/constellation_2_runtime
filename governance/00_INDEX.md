@@ -969,3 +969,10 @@ Economic-state hardening note:
 - `ops/tools/apply_codex_patch_bundle_v1.py`
 - `ops/tools/protect_canonical_repo_v1.py`
 - `ops/tools/unprotect_canonical_repo_for_intake_v1.py`
+
+### IB Reconciliation Loop v1 (governed)
+- `governance/03_RUNTIME/IB_RECONCILIATION_LOOP_CONTRACT_V1.md`
+- `ops/tools/run_ib_flex_normalize_v1.py`
+- `ops/tools/run_aegis_expected_activity_extract_v1.py`
+- `ops/tools/run_ib_reconciliation_v1.py`
+- `ops/tools/run_ib_reconciliation_ai_packet_v1.py`

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FlexQueryResponse>
+  <Trades>
+    <Trade
+      accountId="DU12345"
+      symbol="AAPL"
+      assetClass="STK"
+      buySell="BUY"
+      quantity="10"
+      tradePrice="189.50"
+      currency="USD"
+      dateTime="2026-04-24T14:30:00Z"
+      orderID="111"
+      permID="222"
+      ibCommission="1.25"
+      orderRef="submission-abc"
+    />
+  </Trades>
+  <OpenPositions>
+    <OpenPosition
+      accountId="DU12345"
+      symbol="AAPL"
+      assetClass="STK"
+      quantity="10"
+      marketPrice="190.00"
+      marketValue="1900.00"
+      currency="USD"
+    />
+  </OpenPositions>
+  <CashReport>
+    <CashReportCurrency
+      accountId="DU12345"
+      currency="USD"
+      cashBalance="10000.00"
+      netLiquidationValue="25000.00"
+    />
+  </CashReport>
+</FlexQueryResponse>

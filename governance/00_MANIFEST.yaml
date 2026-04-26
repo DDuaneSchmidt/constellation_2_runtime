@@ -4135,6 +4135,11 @@ documents:
     class: C2_CONTRACT
     status: ACTIVE
 
+  - id: C2_CONTRACT_IB_RECONCILIATION_LOOP_CONTRACT_V1
+    path: governance/03_RUNTIME/IB_RECONCILIATION_LOOP_CONTRACT_V1.md
+    class: C2_CONTRACT
+    status: ACTIVE
+
   - id: C2_TOOL_REQUIRE_CANONICAL_REPO_CLEAN_V1
     path: ops/tools/require_canonical_repo_clean_v1.py
     class: C2_TOOL
