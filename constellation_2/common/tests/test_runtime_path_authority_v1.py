@@ -41,7 +41,7 @@ def test_active_release_root_is_accepted(monkeypatch: pytest.MonkeyPatch) -> Non
     active_release_root = Path("/home/node/constellation_releases/release-123")
     monkeypatch.setattr(runtime_path_module, "resolve_authoritative_repo_root_v1", lambda _repo: Path("/home/node/constellation"))
     monkeypatch.setattr(runtime_path_module, "load_release_current_runtime_authority_v1", lambda caller: {"release_root": str(active_release_root)})
-    assert require_authoritative_repo_runtime_v1(active_release_root) == active_release_root
+    assert require_authoritative_repo_runtime_v1(active_release_root) == Path("/home/node/constellation")
 
 
 def test_non_current_release_root_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:

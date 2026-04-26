@@ -27,6 +27,81 @@ def _block(code: str, path: Path, detail: str) -> dict[str, str]:
     return {"code": code, "path": str(path), "detail": detail}
 
 
+def _first_nonempty(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _first_code_from_list(values: Any) -> str:
+    if not isinstance(values, list):
+        return ""
+    for item in values:
+        text = str(item or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _surface_blocker(payload: dict[str, Any], *field_paths: tuple[str, ...]) -> str:
+    for field_path in field_paths:
+        cursor: Any = payload
+        for key in field_path:
+            if not isinstance(cursor, dict):
+                cursor = None
+                break
+            cursor = cursor.get(key)
+        if isinstance(cursor, list):
+            code = _first_code_from_list(cursor)
+        else:
+            code = str(cursor or "").strip()
+        if code:
+            return code
+    return ""
+
+
+def _submit_boundary_effective_state(payload: dict[str, Any]) -> str:
+    boundary_status = str(payload.get("boundary_status") or "").strip().upper()
+    if boundary_status == "AUTHORIZED":
+        return "PERMISSIVE"
+    if boundary_status in {"BLOCKED", "DENIED", "FAIL", "NOT_READY"}:
+        return "BLOCKED"
+    return "UNKNOWN"
+
+
+def _state_machine_effective_state(payload: dict[str, Any]) -> str:
+    final_start_decision = str(payload.get("final_start_decision") or "").strip().upper()
+    status = str(payload.get("status") or "").strip().upper()
+    if final_start_decision.startswith("BLOCKED") or status in {"NOT_READY", "BLOCKED", "FAIL"}:
+        return "BLOCKED"
+    if final_start_decision.startswith("READY") or status in {"READY", "PASS"}:
+        return "PERMISSIVE"
+    return "UNKNOWN"
+
+
+def _ledger_effective_state(payload: dict[str, Any]) -> str:
+    control_state = payload.get("control_state") if isinstance(payload.get("control_state"), dict) else {}
+    post_submit = payload.get("post_submit_lifecycle") if isinstance(payload.get("post_submit_lifecycle"), dict) else {}
+    submit_lifecycle = payload.get("submit_lifecycle") if isinstance(payload.get("submit_lifecycle"), dict) else {}
+
+    authority_status = str(control_state.get("authority_status") or "").strip().upper()
+    submission_authorized = control_state.get("submission_authorized")
+    lineage_status = str(post_submit.get("lineage_status") or "").strip().upper()
+    submit_result_status = str(submit_lifecycle.get("submit_result_status") or "").strip().upper()
+
+    if lineage_status == "GAP" or submit_result_status == "FAIL":
+        return "BLOCKED"
+    if submission_authorized is False:
+        return "BLOCKED"
+    if authority_status in {"DENIED", "BLOCKED", "FAIL", "NOT_READY"}:
+        return "BLOCKED"
+    if submission_authorized is True and authority_status in {"GRANTED", "AUTHORIZED", "PASS"}:
+        return "PERMISSIVE"
+    return "UNKNOWN"
+
+
 def closure_authority_output_path(*, truth_root: Path, day_utc: str) -> Path:
     return (Path(truth_root).resolve() / "reports" / "aegis_day_closure_authority_v1" / day_utc / "aegis_day_closure_authority.v1.json").resolve()
 
@@ -86,35 +161,63 @@ def evaluate_aegis_day_closure_authority_v1(
 
     state_machine = payloads.get("trading_day_state_machine", {})
     state_machine_status = str(state_machine.get("final_start_decision") or "").strip().upper()
+    state_machine_effective_state = _state_machine_effective_state(state_machine)
+    state_machine_blocker = _surface_blocker(
+        state_machine,
+        ("canonical_blocker",),
+        ("first_true_blocker", "first_true_blocker_code"),
+        ("first_blocker_code",),
+        ("blocking_codes",),
+    )
     source_surfaces["trading_day_state_machine"] = {
         "path": str(state_machine_path),
         "observed_status": state_machine_status,
+        "effective_state": state_machine_effective_state,
+        "canonical_blocker": state_machine_blocker,
     }
-    if state_machine_status == "BLOCKED_BY_DEFECT":
+    if state_machine_effective_state == "BLOCKED":
         blocking_evidence.append(
             _block(
-                "AEGIS_STATE_CONTRADICTORY_CONTROL_SURFACES",
+                state_machine_blocker or "TRADING_DAY_STATE_MACHINE_BLOCKED",
                 state_machine_path,
-                "trading_day_state_machine final_start_decision=BLOCKED_BY_DEFECT",
+                f"trading_day_state_machine final_start_decision={state_machine_status or 'MISSING'}",
             )
         )
 
     submit_boundary = payloads.get("submit_boundary_status", {})
     submit_boundary_status = str(submit_boundary.get("boundary_status") or "").strip().upper()
+    submit_boundary_effective_state = _submit_boundary_effective_state(submit_boundary)
+    submit_boundary_blocker = _surface_blocker(
+        submit_boundary,
+        ("canonical_blocker",),
+        ("first_blocker_code",),
+        ("blocking_codes",),
+    )
     source_surfaces["submit_boundary_status"] = {
         "path": str(submit_boundary_path),
         "observed_status": submit_boundary_status,
+        "effective_state": submit_boundary_effective_state,
+        "canonical_blocker": submit_boundary_blocker,
     }
-    if submit_boundary_status == "AUTHORIZED" and state_machine_status == "BLOCKED_BY_DEFECT":
+    if submit_boundary_effective_state == "BLOCKED":
         blocking_evidence.append(
             _block(
-                "AEGIS_STATE_CONTRADICTORY_CONTROL_SURFACES",
+                submit_boundary_blocker or "SUBMIT_BOUNDARY_BLOCKED",
                 submit_boundary_path,
-                "submit_boundary_status=AUTHORIZED while trading_day_state_machine=BLOCKED_BY_DEFECT",
+                f"submit_boundary_status boundary_status={submit_boundary_status or 'MISSING'}",
             )
         )
 
     ledger = payloads.get("paper_session_ledger", {})
+    ledger_effective_state = _ledger_effective_state(ledger)
+    ledger_blocker = _surface_blocker(
+        ledger,
+        ("canonical_blocker",),
+        ("first_blocker_code",),
+        ("control_state", "blocking_codes"),
+        ("post_submit_lifecycle", "gap_codes"),
+        ("submit_lifecycle", "reason_codes"),
+    )
     post_submit = ledger.get("post_submit_lifecycle") if isinstance(ledger.get("post_submit_lifecycle"), dict) else {}
     submit_lifecycle = ledger.get("submit_lifecycle") if isinstance(ledger.get("submit_lifecycle"), dict) else {}
     lineage_status = str(post_submit.get("lineage_status") or "").strip().upper()
@@ -122,6 +225,8 @@ def evaluate_aegis_day_closure_authority_v1(
     source_surfaces["paper_session_ledger"] = {
         "path": str(ledger_path),
         "observed_status": lineage_status or submit_result_status,
+        "effective_state": ledger_effective_state,
+        "canonical_blocker": ledger_blocker,
     }
     if lineage_status == "GAP":
         blocking_evidence.append(
@@ -204,6 +309,7 @@ def evaluate_aegis_day_closure_authority_v1(
 
     submission_index = payloads.get("submission_index", {})
     submission_index_status = str(submission_index.get("status") or "").strip().upper()
+    submission_index_blocker = "POST_SUBMIT_LINEAGE_GAP" if submission_index_status != "PASS" else ""
     source_surfaces["submission_index"] = {
         "path": str(submission_index_path),
         "observed_status": submission_index_status,
@@ -219,6 +325,7 @@ def evaluate_aegis_day_closure_authority_v1(
 
     current_head = payloads.get("execution_current_head", {})
     current_head_status = str(current_head.get("status") or "").strip().upper()
+    current_head_blocker = "STALE_EXECUTION_POINTER" if current_head_status != "PASS" else ""
     source_surfaces["execution_current_head"] = {
         "path": str(current_head_path),
         "observed_status": current_head_status,
@@ -232,8 +339,49 @@ def evaluate_aegis_day_closure_authority_v1(
             )
         )
 
+    effective_surface_rows = [
+        {"name": "submit_boundary_status", "state": submit_boundary_effective_state, "path": str(submit_boundary_path)},
+        {"name": "trading_day_state_machine", "state": state_machine_effective_state, "path": str(state_machine_path)},
+        {"name": "paper_session_ledger", "state": ledger_effective_state, "path": str(ledger_path)},
+    ]
+    known_effective_surfaces = [
+        row for row in effective_surface_rows if row["state"] in {"PERMISSIVE", "BLOCKED"}
+    ]
+    has_permissive_surface = any(row["state"] == "PERMISSIVE" for row in known_effective_surfaces)
+    has_blocked_surface = any(row["state"] == "BLOCKED" for row in known_effective_surfaces)
+    contradiction_present = has_permissive_surface and has_blocked_surface
+    if contradiction_present:
+        permissive_rows = [row for row in known_effective_surfaces if row["state"] == "PERMISSIVE"]
+        blocked_rows = [row for row in known_effective_surfaces if row["state"] == "BLOCKED"]
+        blocking_evidence.insert(
+            0,
+            _block(
+                "AEGIS_STATE_CONTRADICTORY_CONTROL_SURFACES",
+                state_machine_path,
+                "permissive_surfaces="
+                + ",".join(f"{row['name']}@{row['path']}" for row in permissive_rows)
+                + " blocked_surfaces="
+                + ",".join(f"{row['name']}@{row['path']}" for row in blocked_rows),
+            ),
+        )
+
+    all_effective_surfaces_blocked = bool(known_effective_surfaces) and all(
+        row["state"] == "BLOCKED" for row in known_effective_surfaces
+    )
     status = "PASS" if not blocking_evidence else "FAIL"
-    canonical_blocker = blocking_evidence[0]["code"] if blocking_evidence else None
+    canonical_blocker = None
+    if contradiction_present:
+        canonical_blocker = "AEGIS_STATE_CONTRADICTORY_CONTROL_SURFACES"
+    elif all_effective_surfaces_blocked:
+        canonical_blocker = _first_nonempty(
+            submit_boundary_blocker,
+            state_machine_blocker,
+            ledger_blocker,
+            submission_index_blocker,
+            current_head_blocker,
+        )
+    if not canonical_blocker and blocking_evidence:
+        canonical_blocker = blocking_evidence[0]["code"]
     return {
         "schema_version": SCHEMA_VERSION,
         "day": day_utc,

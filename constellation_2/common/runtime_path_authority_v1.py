@@ -140,9 +140,17 @@ def require_authoritative_repo_runtime_v1(repo_root: Path | None = None) -> Path
     runtime_authority = load_release_current_runtime_authority_v1(
         caller="constellation_2/common/runtime_path_authority_v1.py::require_authoritative_repo_runtime_v1"
     )
-    release_root = Path(str(runtime_authority.get("release_root") or "")).resolve()
+    release_root_text = str(runtime_authority.get("release_root") or "").strip()
+    if not release_root_text:
+        raise SystemExit(
+            "FAIL: AUTHORITATIVE_REPO_RUNTIME_REQUIRED:"
+            f"runtime_repo={resolved_repo_root}:authoritative_repo={authoritative_repo_root}:active_release_root=MISSING"
+        )
+    release_root = Path(release_root_text).resolve()
     if release_root == resolved_repo_root:
-        return release_root
+        # Runtime may execute from the active release root while metadata authority
+        # remains anchored at the governed authoritative source root.
+        return authoritative_repo_root
 
     raise SystemExit(
         "FAIL: AUTHORITATIVE_REPO_RUNTIME_REQUIRED:"
