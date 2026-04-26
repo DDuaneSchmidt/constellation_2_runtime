@@ -61,13 +61,28 @@ cd "${REPO_ROOT}"
 command -v "${PY}" >/dev/null 2>&1
 CONTROL_PLANE_READ_TOOL="${REPO_ROOT}/ops/tools/read_control_plane_surface_v1.py"
 
-HOSTED_PREFLIGHT_OUTPUT="$("${PY}" "${REPO_ROOT}/ops/tools/run_single_node_hosted_preflight_v1.py" \
+HOSTED_PREFLIGHT_RC=0
+HOSTED_PREFLIGHT_OUTPUT=""
+if HOSTED_PREFLIGHT_OUTPUT="$("${PY}" "${REPO_ROOT}/ops/tools/run_single_node_hosted_preflight_v1.py" \
   --entrypoint_name "${ENTRYPOINT_NAME}" \
   --entrypoint_path "${ENTRYPOINT_PATH}" \
   --service_name "${SERVICE_NAME}" \
-  --requested_python "${PY}")"
+  --requested_python "${PY}" 2>&1)"; then
+  HOSTED_PREFLIGHT_RC=0
+else
+  HOSTED_PREFLIGHT_RC=$?
+fi
 if [[ -n "${HOSTED_PREFLIGHT_OUTPUT}" ]]; then
   echo "${HOSTED_PREFLIGHT_OUTPUT}"
+fi
+if (( HOSTED_PREFLIGHT_RC != 0 )); then
+  PREFLIGHT_STATUS="$(printf '%s\n' "${HOSTED_PREFLIGHT_OUTPUT}" | jq -r '.status // empty' 2>/dev/null || true)"
+  PREFLIGHT_BLOCKERS="$(printf '%s\n' "${HOSTED_PREFLIGHT_OUTPUT}" | jq -r '(.blocking_codes // []) | join(",")' 2>/dev/null || true)"
+  if [[ -z "${PREFLIGHT_BLOCKERS}" ]]; then
+    PREFLIGHT_BLOCKERS="SESSION_AUTHORITY_MISSING"
+  fi
+  echo "FAIL: PAPER_ORCHESTRATOR_STARTUP_PREFLIGHT_FAILED status=${PREFLIGHT_STATUS:-UNKNOWN} blocking_codes=${PREFLIGHT_BLOCKERS}" >&2
+  exit "${HOSTED_PREFLIGHT_RC}"
 fi
 
 RUNTIME_IDENTITY_JSON="$("${PY}" -c 'import json; from pathlib import Path; from constellation_2.common.runtime_identity_v1 import load_active_runtime_identity_snapshot_v1; print(json.dumps(load_active_runtime_identity_snapshot_v1(repo_root=Path().resolve())))')"

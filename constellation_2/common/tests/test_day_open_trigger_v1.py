@@ -202,6 +202,63 @@ def _window(status: str) -> SimpleNamespace:
     )
 
 
+def test_day_open_trigger_materializes_non_trading_day_fallback_authority(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth"
+    (truth_root / "market_calendar_v1" / "NYSE").mkdir(parents=True, exist_ok=True)
+    (truth_root / "market_calendar_v1" / "NYSE" / "2026.jsonl").write_text(
+        json.dumps({"day_utc": DAY, "is_trading_session": False}) + "\n",
+        encoding="utf-8",
+    )
+    _write_json(
+        truth_root / "active_session_v1" / "current.json",
+        {"active_day": "2026-04-13", "rollover_status": "ROLLOVER_WITHHELD"},
+    )
+    _write_json(
+        truth_root / "target_day_admission_v1" / f"{DAY}.json",
+        {"admission_status": "BLOCKED", "blocking_reason_codes": ["NON_TRADING_DAY"]},
+    )
+
+    with patch.object(trigger_module, "build_day_open_window_v1", return_value=_window("OPEN_WINDOW")):
+        payload = trigger_module.build_day_open_trigger_payload(
+            repo_root=REPO_ROOT,
+            truth_root=truth_root,
+            day_utc=DAY,
+            environment="PAPER",
+        )
+
+    authority_path = truth_root / "reports" / "paper_session_authority_v1" / DAY / "paper_session_authority.v1.json"
+    authority_payload = json.loads(authority_path.read_text(encoding="utf-8"))
+
+    assert authority_path.exists()
+    assert authority_payload["authority_status"] == "DENIED"
+    assert authority_payload["blocking_reason_codes"] == ["NON_TRADING_DAY"]
+    assert payload["trigger_status"] == "SUPPRESSED_AUTHORITY_NOT_GRANTED"
+
+
+def test_day_open_trigger_materializes_session_authority_missing_fallback(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth"
+    _write_json(
+        truth_root / "active_session_v1" / "current.json",
+        {"active_day": "", "rollover_status": "ROLLOVER_WITHHELD"},
+    )
+
+    with patch.object(trigger_module, "build_day_open_window_v1", return_value=_window("OPEN_WINDOW")):
+        payload = trigger_module.build_day_open_trigger_payload(
+            repo_root=REPO_ROOT,
+            truth_root=truth_root,
+            day_utc=DAY,
+            environment="PAPER",
+        )
+
+    authority_path = truth_root / "reports" / "paper_session_authority_v1" / DAY / "paper_session_authority.v1.json"
+    authority_payload = json.loads(authority_path.read_text(encoding="utf-8"))
+
+    assert authority_path.exists()
+    assert authority_payload["authority_status"] == "DENIED"
+    assert authority_payload["blocking_reason_codes"] == ["SESSION_AUTHORITY_MISSING"]
+    assert payload["trigger_status"] == "SUPPRESSED_AUTHORITY_NOT_GRANTED"
+
+
 def test_day_open_trigger_suppresses_without_authority(tmp_path: Path) -> None:
     truth_root = tmp_path / "truth"
     _authority_surfaces(truth_root, authority_status="DENIED")

@@ -57,6 +57,59 @@ def _status_for_rc(rc: int) -> str:
     return "FAIL"
 
 
+def _stdout_json(result: dict[str, Any]) -> dict[str, Any]:
+    raw = str(result.get("stdout") or "").strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _detect_session_day_blocker(*, day_utc: str, session_reentry_result: dict[str, Any] | None) -> str:
+    if not isinstance(session_reentry_result, dict):
+        return ""
+    if str(session_reentry_result.get("status") or "").strip().upper() == "FAIL":
+        return "SESSION_AUTHORITY_MISSING"
+    payload = _stdout_json(session_reentry_result)
+    if not payload:
+        return ""
+    target_day_admission = payload.get("target_day_admission") if isinstance(payload.get("target_day_admission"), dict) else {}
+    active_session = payload.get("active_session") if isinstance(payload.get("active_session"), dict) else {}
+    active_day = str(active_session.get("active_day") or "").strip()
+    admission_status = str(
+        target_day_admission.get("admission_status")
+        or active_session.get("target_day_admission_status")
+        or ""
+    ).strip().upper()
+    blocking_codes = (
+        [str(item or "").strip().upper() for item in (target_day_admission.get("blocking_reason_codes") or [])]
+        if isinstance(target_day_admission.get("blocking_reason_codes"), list)
+        else []
+    )
+    if "NON_TRADING_DAY" in blocking_codes:
+        return "NON_TRADING_DAY"
+    if active_day and active_day != day_utc:
+        return "NO_ACTIVE_PAPER_SESSION"
+    if admission_status and admission_status != "ADMIT":
+        return "NO_ACTIVE_PAPER_SESSION"
+    return ""
+
+
+def _skipped_step(name: str, cmd: list[str], blocker_code: str) -> dict[str, Any]:
+    reason = str(blocker_code or "NO_ACTIVE_PAPER_SESSION").strip()
+    return {
+        "name": name,
+        "cmd": cmd,
+        "returncode": 2,
+        "status": "DEGRADED",
+        "stdout": "",
+        "stderr": f"SKIPPED_NO_ACTIVE_PAPER_SESSION:{reason}",
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     require_authoritative_repo_runtime_v1(REPO_ROOT)
     ap = argparse.ArgumentParser(prog="run_c2_global_monitoring_refresh_v1")
@@ -88,9 +141,8 @@ def main(argv: list[str] | None = None) -> int:
                 ],
             )
         )
-    steps.extend(
-        [
-            (
+    open_phase_steps = [
+        (
             "day_open_trigger",
             [
                 "python3",
@@ -120,6 +172,8 @@ def main(argv: list[str] | None = None) -> int:
                 "PAPER",
             ],
         ),
+    ]
+    trading_only_steps = [
         (
             "position_lifecycle_v2",
             [
@@ -188,28 +242,50 @@ def main(argv: list[str] | None = None) -> int:
                 "PAPER",
             ],
         ),
-        ]
-    )
+    ]
 
+    diagnostic_steps: list[tuple[str, list[str]]] = []
     if args.with_diagnostics:
-        steps.extend(
-            [
-                ("runtime_state_snapshot", ["python3", "ops/tools/run_constellation_runtime_state_snapshot_v1.py"]),
-                ("root_cause_classifier", ["python3", "ops/tools/run_constellation_root_cause_classifier_v1.py"]),
-                ("repair_plan", ["python3", "ops/tools/run_constellation_repair_plan_v1.py"]),
-            ]
-        )
+        diagnostic_steps = [
+            ("runtime_state_snapshot", ["python3", "ops/tools/run_constellation_runtime_state_snapshot_v1.py"]),
+            ("root_cause_classifier", ["python3", "ops/tools/run_constellation_root_cause_classifier_v1.py"]),
+            ("repair_plan", ["python3", "ops/tools/run_constellation_repair_plan_v1.py"]),
+        ]
 
     results: list[dict[str, Any]] = []
     degraded_steps: list[str] = []
     hard_failures: list[str] = []
-    for name, cmd in steps:
-        result = _run_step(name, cmd)
+
+    def _append_result(result: dict[str, Any]) -> None:
         results.append(result)
         if str(result["status"]) == "DEGRADED":
-            degraded_steps.append(name)
+            degraded_steps.append(str(result["name"]))
         elif str(result["status"]) == "FAIL":
-            hard_failures.append(name)
+            hard_failures.append(str(result["name"]))
+
+    session_reentry_result: dict[str, Any] | None = None
+    if steps:
+        name, cmd = steps[0]
+        session_reentry_result = _run_step(name, cmd)
+        _append_result(session_reentry_result)
+
+    session_day_blocker = _detect_session_day_blocker(day_utc=day, session_reentry_result=session_reentry_result)
+
+    for name, cmd in open_phase_steps:
+        result = _run_step(name, cmd)
+        _append_result(result)
+
+    if session_day_blocker:
+        for name, cmd in trading_only_steps:
+            _append_result(_skipped_step(name, cmd, session_day_blocker))
+    else:
+        for name, cmd in trading_only_steps:
+            result = _run_step(name, cmd)
+            _append_result(result)
+
+    for name, cmd in diagnostic_steps:
+        result = _run_step(name, cmd)
+        _append_result(result)
 
     status = "FAIL" if hard_failures else "DEGRADED" if degraded_steps else "OK"
 
@@ -218,6 +294,7 @@ def main(argv: list[str] | None = None) -> int:
         "truth_root": truth_root,
         "with_diagnostics": bool(args.with_diagnostics),
         "session_authority_reentry_skipped": skip_session_authority_reentry,
+        "session_day_blocker": session_day_blocker,
         "status": status,
         "results": results,
         "degraded_steps": degraded_steps,

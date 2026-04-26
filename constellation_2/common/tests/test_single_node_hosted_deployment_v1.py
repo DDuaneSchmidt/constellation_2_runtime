@@ -119,6 +119,77 @@ def test_derive_hosted_preflight_payload_fails_on_legacy_runtime_python(
     assert "HOSTED_PREFLIGHT_LEGACY_RUNTIME_PYTHON_FORBIDDEN" in payload["blocking_codes"]
 
 
+def test_derive_hosted_preflight_payload_accepts_release_root_as_runtime_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release_root = tmp_path / "release_root"
+    runtime_identity = _runtime_identity(tmp_path)
+    runtime_identity["release_root"] = str(release_root)
+    Path(runtime_identity["runtime_data_root"]).mkdir(parents=True)
+    Path(runtime_identity["canonical_truth_root"]).mkdir(parents=True)
+    Path(runtime_identity["truth_sleeves_root"]).mkdir(parents=True)
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        single_node_hosted_deployment_v1,
+        "load_active_runtime_identity_snapshot_v1",
+        lambda repo_root=None: runtime_identity,
+    )
+    monkeypatch.setattr(
+        single_node_hosted_deployment_v1,
+        "resolve_hosted_python_selection_v1",
+        lambda **_: {
+            "requested_python": "python3",
+            "resolved_python_executable": "/usr/bin/python3.12",
+            "python_selection_mode": "SYSTEM_PYTHON3",
+        },
+    )
+
+    def _capture_repo_authority(**kwargs: object) -> tuple[bool, str]:
+        captured.update(kwargs)
+        return True, "PASS"
+
+    monkeypatch.setattr(
+        single_node_hosted_deployment_v1,
+        "_run_repo_authority_proof",
+        _capture_repo_authority,
+    )
+    monkeypatch.setattr(
+        single_node_hosted_deployment_v1,
+        "_probe_python_modules",
+        lambda **_: (True, "modules importable"),
+    )
+    monkeypatch.setattr(
+        single_node_hosted_deployment_v1,
+        "_check_service_unit_alignment",
+        lambda **_: (True, "aligned"),
+    )
+    monkeypatch.setattr(
+        single_node_hosted_deployment_v1,
+        "_file_ref",
+        lambda path: {"path": str(Path(path).resolve()), "sha256": "a" * 64},
+    )
+    monkeypatch.setattr(
+        single_node_hosted_deployment_v1,
+        "_require_release_current_startup_guarantee_v1",
+        lambda: {"path": str(tmp_path / "runtime_data" / "truth" / "release_current_v1/current.json"), "release_current_id": "f" * 64},
+    )
+
+    payload = single_node_hosted_deployment_v1.derive_single_node_hosted_preflight_payload_v1(
+        repo_root=release_root,
+        entrypoint_name="c2_paper_day_orchestrator_systemd_entry_v1.sh",
+        entrypoint_path=release_root / "ops/run/c2_paper_day_orchestrator_systemd_entry_v1.sh",
+        service_name="c2-paper-day-orchestrator.service",
+        requested_python="python3",
+        required_python_modules=[],
+    )
+
+    assert payload["status"] == "PASS"
+    assert captured["repo_root"] == release_root
+    assert Path(str(captured["authoritative_repo_root"])) == Path(str(runtime_identity["authoritative_repo_root"]))
+
+
 def test_write_hosted_preflight_receipt_round_trip(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

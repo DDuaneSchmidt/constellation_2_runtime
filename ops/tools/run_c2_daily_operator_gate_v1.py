@@ -44,6 +44,10 @@ from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_submit_boundary_status_path,
 )
 from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
+from constellation_2.common.session_authority_v1 import (
+    resolve_active_session_path,
+    resolve_target_day_admission_path,
+)
 
 
 TRUTH = resolve_canonical_truth_root_bridge_v1(caller="ops/tools/run_c2_daily_operator_gate_v1.py").resolve()
@@ -70,6 +74,38 @@ def _write_json_atomic(path: Path, obj: Dict[str, Any]) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(obj, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
     tmp.replace(path)
+
+
+def _read_optional_json(path: Path) -> Dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _session_day_blocker(*, day_utc: str, truth_root: Path) -> str:
+    active_session_path = resolve_active_session_path(truth_root=truth_root)
+    target_day_admission_path = resolve_target_day_admission_path(truth_root=truth_root, target_day=day_utc)
+    active_session = _read_optional_json(active_session_path)
+    target_day_admission = _read_optional_json(target_day_admission_path)
+    if not active_session:
+        return "SESSION_AUTHORITY_MISSING"
+    if not target_day_admission:
+        return "SESSION_AUTHORITY_MISSING"
+    blocking_reason_codes = (
+        [str(item or "").strip().upper() for item in (target_day_admission.get("blocking_reason_codes") or [])]
+        if isinstance(target_day_admission.get("blocking_reason_codes"), list)
+        else []
+    )
+    if "NON_TRADING_DAY" in blocking_reason_codes:
+        return "NON_TRADING_DAY"
+    active_day = str(active_session.get("active_day") or "").strip()
+    admission_status = str(target_day_admission.get("admission_status") or "").strip().upper()
+    rollover_status = str(active_session.get("rollover_status") or "").strip().upper()
+    if active_day != day_utc or admission_status != "ADMIT" or rollover_status == "ROLLOVER_WITHHELD":
+        return "NO_ACTIVE_PAPER_SESSION"
+    return ""
 
 
 def _reason_codes_from_surfaces(*, boundary_payload: Dict[str, Any], ledger_payload: Dict[str, Any], control_payload: Dict[str, Any]) -> List[str]:
@@ -116,6 +152,7 @@ def main(argv: list[str] | None = None) -> int:
     control_path = resolve_paper_day_control_plane_path(truth_root=TRUTH, day_utc=day)
 
     consistency_result = evaluate_next_day_readiness_consistency_gate_v1(truth_root=TRUTH, day_utc=day)
+    session_day_blocker = _session_day_blocker(day_utc=day, truth_root=TRUTH)
 
     reasons: List[str] = []
     notes: List[str] = []
@@ -156,19 +193,26 @@ def main(argv: list[str] | None = None) -> int:
         and str((control_payload.get("authority_result") or {}).get("ledger_authority_status") or "").strip().upper() == "GRANTED"
     )
 
-    if not canonical_ready and boundary_payload and ledger_payload and control_payload:
-        reasons.extend(_reason_codes_from_surfaces(boundary_payload=boundary_payload, ledger_payload=ledger_payload, control_payload=control_payload))
+    if session_day_blocker:
+        deduped_reasons = [session_day_blocker]
+        status = "FAIL"
+        notes.append(f"session_day_blocker={session_day_blocker}")
+        notes.append("canonical_day_open_projection=WITHHELD")
+    else:
+        if not canonical_ready and boundary_payload and ledger_payload and control_payload:
+            reasons.extend(_reason_codes_from_surfaces(boundary_payload=boundary_payload, ledger_payload=ledger_payload, control_payload=control_payload))
 
-    deduped_reasons: List[str] = []
-    seen: set[str] = set()
-    for reason in reasons:
-        text = str(reason).strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        deduped_reasons.append(text)
+        deduped_reasons = []
+        seen: set[str] = set()
+        for reason in reasons:
+            text = str(reason).strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            deduped_reasons.append(text)
 
-    status = "PASS" if canonical_ready and not deduped_reasons else "FAIL"
+        status = "PASS" if canonical_ready and not deduped_reasons else "FAIL"
+
     notes.append(f"consistency_gate_status={consistency_result.status}")
     notes.append(f"submit_boundary_status={str(boundary_payload.get('boundary_status') or 'MISSING').strip() or 'MISSING'}")
     notes.append(f"paper_session_ledger_authority_status={str((ledger_payload.get('control_state') or {}).get('authority_status') or 'MISSING').strip() or 'MISSING'}")
@@ -191,6 +235,7 @@ def main(argv: list[str] | None = None) -> int:
         "status": status,
         "reason_codes": deduped_reasons,
         "notes": notes,
+        "session_day_blocker": session_day_blocker,
         "consistency_gate": {
             "status": consistency_result.status,
             "blocking_reason_codes": list(consistency_result.blocking_reason_codes),

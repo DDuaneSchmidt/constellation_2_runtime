@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
@@ -24,10 +25,14 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
 from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_day_open_attempt_path,
     resolve_day_open_trigger_path,
+    resolve_paper_session_bootstrap_path,
     resolve_paper_session_authority_path,
     resolve_paper_session_ledger_path,
 )
-from constellation_2.common.paper_session_authority_v1 import read_paper_session_authority_ref_v1
+from constellation_2.common.paper_session_authority_v1 import (
+    read_paper_session_authority_ref_v1,
+    write_paper_session_authority_v1,
+)
 from constellation_2.common.session_authority_monitor_v1 import resolve_session_authority_status_path
 from constellation_2.common.session_authority_v1 import (
     resolve_active_session_path,
@@ -36,6 +41,176 @@ from constellation_2.common.session_authority_v1 import (
 
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/day_open_trigger.v1.schema.json"
+
+_FALLBACK_BLOCKER_NON_TRADING_DAY = "NON_TRADING_DAY"
+_FALLBACK_BLOCKER_NO_ACTIVE_PAPER_SESSION = "NO_ACTIVE_PAPER_SESSION"
+_FALLBACK_BLOCKER_SESSION_AUTHORITY_MISSING = "SESSION_AUTHORITY_MISSING"
+
+
+def _read_json_if_exists(path: Path) -> Dict[str, Any] | None:
+    if not path.exists() or not path.is_file():
+        return None
+    payload = read_json_object_v1(path)
+    return payload if isinstance(payload, dict) else None
+
+
+def _market_calendar_session_flag_for_day(*, truth_root: Path, day_utc: str) -> tuple[bool | None, str]:
+    year = str(day_utc).strip()[:4]
+    calendar_path = (Path(truth_root).resolve() / "market_calendar_v1" / "NYSE" / f"{year}.jsonl").resolve()
+    if not calendar_path.exists() or not calendar_path.is_file():
+        return None, str(calendar_path)
+    try:
+        lines = calendar_path.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return None, str(calendar_path)
+    for line in lines:
+        text = str(line).strip()
+        if not text:
+            continue
+        try:
+            row = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("day_utc") or "").strip() != day_utc:
+            continue
+        value = row.get("is_trading_session")
+        if isinstance(value, bool):
+            return value, str(calendar_path)
+        return None, str(calendar_path)
+    return None, str(calendar_path)
+
+
+def _fallback_paper_session_authority_payload(
+    *,
+    truth_root: Path,
+    day_utc: str,
+    produced_utc: str,
+) -> Dict[str, Any]:
+    active_session_path = resolve_active_session_path(truth_root=truth_root)
+    admission_path = resolve_target_day_admission_path(truth_root=truth_root, target_day=day_utc)
+    bootstrap_path = resolve_paper_session_bootstrap_path(truth_root=truth_root, day_utc=day_utc)
+    pre_open_bundle_path = (Path(truth_root).resolve() / "reports" / "pre_open_bundle_v1" / day_utc / "pre_open_bundle.v1.json").resolve()
+    kill_switch_path = (Path(truth_root).resolve() / "risk_v1" / "kill_switch_v1" / day_utc / "global_kill_switch_state.v1.json").resolve()
+    paper_capital_seed_path = (Path(truth_root).resolve() / "paper_capital_seed_v1" / f"{day_utc}.json").resolve()
+
+    active_session_payload = _read_json_if_exists(active_session_path) or {}
+    admission_payload = _read_json_if_exists(admission_path) or {}
+    admission_status = str(admission_payload.get("admission_status") or "").strip().upper()
+    active_day = str(active_session_payload.get("active_day") or "").strip()
+
+    market_is_trading_session, market_calendar_path = _market_calendar_session_flag_for_day(
+        truth_root=truth_root,
+        day_utc=day_utc,
+    )
+
+    blocker_code = _FALLBACK_BLOCKER_SESSION_AUTHORITY_MISSING
+    blocker_summary = "paper_session_authority fallback could not prove current-day open authority."
+    blocker_artifact_path = str(admission_path)
+    if market_is_trading_session is False:
+        blocker_code = _FALLBACK_BLOCKER_NON_TRADING_DAY
+        blocker_summary = "market calendar authority marks the requested day as non-trading."
+        blocker_artifact_path = market_calendar_path
+    elif not admission_payload:
+        blocker_code = _FALLBACK_BLOCKER_SESSION_AUTHORITY_MISSING
+        blocker_summary = "target_day_admission authority artifact is missing for requested day."
+        blocker_artifact_path = str(admission_path)
+    elif admission_status != "ADMIT":
+        blocker_code = _FALLBACK_BLOCKER_NO_ACTIVE_PAPER_SESSION
+        blocker_summary = "target_day_admission is not ADMIT; no active paper session for requested day."
+        blocker_artifact_path = str(admission_path)
+    elif active_day != day_utc:
+        blocker_code = _FALLBACK_BLOCKER_NO_ACTIVE_PAPER_SESSION
+        blocker_summary = "active_session does not bind requested day as active trading session."
+        blocker_artifact_path = str(active_session_path)
+
+    safety_checks = [
+        {
+            "check_id": "MARKET_CALENDAR_DAY_CLASSIFIED",
+            "status": "PASS" if market_is_trading_session is not None else "FAIL",
+            "reason_code": "" if market_is_trading_session is not None else _FALLBACK_BLOCKER_SESSION_AUTHORITY_MISSING,
+            "summary": "MARKET_DAY_FOUND" if market_is_trading_session is not None else "MARKET_DAY_MISSING",
+            "artifact_path": str(market_calendar_path),
+        },
+        {
+            "check_id": "TARGET_DAY_ADMISSION_PRESENT",
+            "status": "PASS" if bool(admission_payload) else "FAIL",
+            "reason_code": "" if admission_payload else _FALLBACK_BLOCKER_SESSION_AUTHORITY_MISSING,
+            "summary": admission_status or "MISSING",
+            "artifact_path": str(admission_path),
+        },
+        {
+            "check_id": "ACTIVE_SESSION_PRESENT",
+            "status": "PASS" if bool(active_session_payload) else "FAIL",
+            "reason_code": "" if active_session_payload else _FALLBACK_BLOCKER_SESSION_AUTHORITY_MISSING,
+            "summary": active_day or "MISSING",
+            "artifact_path": str(active_session_path),
+        },
+        {
+            "check_id": "ACTIVE_SESSION_DAY_BINDING",
+            "status": "PASS" if active_day == day_utc else "FAIL",
+            "reason_code": "" if active_day == day_utc else _FALLBACK_BLOCKER_NO_ACTIVE_PAPER_SESSION,
+            "summary": f"active_day={active_day or 'MISSING'} expected={day_utc}",
+            "artifact_path": str(active_session_path),
+        },
+        {
+            "check_id": "PAPER_SESSION_AUTHORITY_DECISION",
+            "status": "FAIL",
+            "reason_code": blocker_code,
+            "summary": blocker_summary,
+            "artifact_path": blocker_artifact_path,
+        },
+    ]
+
+    return {
+        "schema_id": "paper_session_authority",
+        "schema_version": "v1",
+        "authority_scope": "CANONICAL_PAPER_SESSION_AUTHORITY",
+        "day_utc": day_utc,
+        "produced_utc": produced_utc,
+        "mode": "PAPER",
+        "authority_status": "DENIED",
+        "paper_open_allowed": False,
+        "blocking_reason_codes": [blocker_code],
+        "blocking_reason_details": [
+            {
+                "reason_code": blocker_code,
+                "blocker_class": "SAFETY_CRITICAL",
+                "check_id": "PAPER_SESSION_AUTHORITY_DECISION",
+                "summary": blocker_summary,
+                "artifact_path": blocker_artifact_path,
+            }
+        ],
+        "safety_checks": safety_checks,
+        "advisory_checks": [],
+        "degraded_mode": False,
+        "submission_authorized": False,
+        "upstream_refs": {
+            "paper_session_bootstrap_v1": str(bootstrap_path),
+            "paper_capital_seed": str(paper_capital_seed_path),
+            "operator_statement": "",
+            "pre_open_bundle_v1": str(pre_open_bundle_path),
+            "canonical_kill_switch_v1": str(kill_switch_path),
+        },
+        "producer": producer_block_v1(module="constellation_2/common/day_open_trigger_v1.py"),
+    }
+
+
+def _ensure_paper_session_authority_ref_v1(*, truth_root: Path, day_utc: str) -> SurfaceRefV1:
+    try:
+        return read_paper_session_authority_ref_v1(truth_root=truth_root, day_utc=day_utc)
+    except Exception:
+        payload = _fallback_paper_session_authority_payload(
+            truth_root=truth_root,
+            day_utc=day_utc,
+            produced_utc=now_utc_iso_v1(),
+        )
+        write_paper_session_authority_v1(
+            truth_root=truth_root,
+            payload=payload,
+        )
+        return read_paper_session_authority_ref_v1(truth_root=truth_root, day_utc=day_utc)
 
 
 def _load_existing_trigger(*, truth_root: Path, day_utc: str) -> Dict[str, Any] | None:
@@ -104,6 +279,14 @@ def _kind_for_window(window_status: str) -> str:
     return INITIAL_TRIGGER_KIND if window_status == "OPEN_WINDOW" else NO_TRIGGER_KIND
 
 
+def _read_json_if_present(path: Path) -> Dict[str, Any]:
+    try:
+        payload = read_json_object_v1(path)
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def build_day_open_trigger_payload(
     *,
     repo_root: Path,
@@ -114,32 +297,22 @@ def build_day_open_trigger_payload(
 ) -> Dict[str, Any]:
     root = resolve_fact_plane_truth_root_v1(truth_root)
     normalized_environment = normalize_day_open_environment(environment)
-    paper_session_authority_ref = (
-        read_paper_session_authority_ref_v1(truth_root=root, day_utc=day_utc)
-        if normalized_environment == "PAPER"
-        else None
-    )
+    paper_session_authority_ref = None
+    paper_session_authority_missing = False
+    if normalized_environment == "PAPER":
+        try:
+            paper_session_authority_ref = _ensure_paper_session_authority_ref_v1(
+                truth_root=root,
+                day_utc=day_utc,
+            )
+        except Exception:
+            paper_session_authority_ref = None
+            paper_session_authority_missing = True
     paper_session_authority_payload = dict(paper_session_authority_ref.payload) if paper_session_authority_ref is not None else {}
-    active_session = (
-        read_json_object_v1(resolve_active_session_path(truth_root=root))
-        if normalized_environment != "PAPER"
-        else {}
-    )
-    admission = (
-        read_json_object_v1(resolve_target_day_admission_path(truth_root=root, target_day=day_utc))
-        if normalized_environment != "PAPER"
-        else {}
-    )
-    session_status = (
-        read_json_object_v1(resolve_session_authority_status_path(truth_root=root))
-        if normalized_environment != "PAPER"
-        else {}
-    )
-    ledger = (
-        read_json_object_v1(resolve_paper_session_ledger_path(truth_root=root, day_utc=day_utc))
-        if normalized_environment != "PAPER"
-        else {}
-    )
+    active_session = _read_json_if_present(resolve_active_session_path(truth_root=root))
+    admission = _read_json_if_present(resolve_target_day_admission_path(truth_root=root, target_day=day_utc))
+    session_status = _read_json_if_present(resolve_session_authority_status_path(truth_root=root))
+    ledger = _read_json_if_present(resolve_paper_session_ledger_path(truth_root=root, day_utc=day_utc))
     existing = _load_existing_trigger(truth_root=root, day_utc=day_utc)
     attempt = _load_attempt(truth_root=root, day_utc=day_utc)
     attempt_path = resolve_day_open_attempt_path(truth_root=root, day_utc=day_utc)
@@ -169,6 +342,11 @@ def build_day_open_trigger_payload(
         bool(paper_session_authority_payload.get("paper_open_allowed") is True)
         if normalized_environment == "PAPER"
         else ledger_authority_status == "GRANTED"
+    )
+    admission_blocking_codes = (
+        [str(item or "").strip().upper() for item in (admission.get("blocking_reason_codes") or [])]
+        if isinstance(admission.get("blocking_reason_codes"), list)
+        else []
     )
 
     emitted_at_utc = str((existing or {}).get("emitted_at_utc") or "").strip()
@@ -207,6 +385,16 @@ def build_day_open_trigger_payload(
     elif normalized_environment != "PAPER" and (active_day != day_utc or rollover_status != "ACTIVE_SESSION_CONFIRMED"):
         trigger_status = "SUPPRESSED_ACTIVE_SESSION_NOT_BOUND"
         trigger_reason_code = "OPEN_TRIGGER_ACTIVE_SESSION_NOT_BOUND"
+    elif normalized_environment == "PAPER" and paper_session_authority_missing:
+        trigger_status = "SUPPRESSED_AUTHORITY_NOT_GRANTED"
+        if "NON_TRADING_DAY" in admission_blocking_codes:
+            trigger_reason_code = "NON_TRADING_DAY"
+        elif active_day and active_day != day_utc:
+            trigger_reason_code = "NO_ACTIVE_PAPER_SESSION"
+        elif admission_status and admission_status != "ADMIT":
+            trigger_reason_code = "NO_ACTIVE_PAPER_SESSION"
+        else:
+            trigger_reason_code = "SESSION_AUTHORITY_MISSING"
     elif normalized_environment == "PAPER" and (ledger_authority_status != "GRANTED" or not paper_open_allowed):
         trigger_status = "SUPPRESSED_AUTHORITY_NOT_GRANTED"
         trigger_reason_code = "OPEN_TRIGGER_AUTHORITY_NOT_GRANTED"

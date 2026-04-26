@@ -167,12 +167,15 @@ def _run_repo_authority_proof(
     *,
     resolved_python_executable: str,
     repo_root: Path,
+    authoritative_repo_root: Path,
 ) -> tuple[bool, str]:
     cmd = [
         str(Path(resolved_python_executable).resolve()),
         str((Path(repo_root).resolve() / "ops/tools/run_repo_authority_proof_v1.py").resolve()),
         "--mode",
         "authoritative_source_only",
+        "--authoritative_repo_root",
+        str(Path(authoritative_repo_root).resolve()),
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
@@ -222,6 +225,10 @@ def derive_single_node_hosted_preflight_payload_v1(
     repo_root = Path(repo_root).resolve()
     release_current_guarantee = _require_release_current_startup_guarantee_v1()
     runtime_identity = load_active_runtime_identity_snapshot_v1(repo_root=repo_root)
+    runtime_identity_authoritative_repo_root = Path(
+        str(runtime_identity.get("authoritative_repo_root") or "")
+    ).resolve()
+    runtime_identity_release_root = Path(str(runtime_identity.get("release_root") or "")).resolve()
     python_selection = resolve_hosted_python_selection_v1(repo_root=repo_root, requested_python=requested_python)
     resolved_python_executable = python_selection["resolved_python_executable"]
     service_unit_path = _service_unit_path(repo_root, service_name)
@@ -260,8 +267,12 @@ def derive_single_node_hosted_preflight_payload_v1(
     )
     add_check(
         "authoritative_repo_root_match",
-        str(runtime_identity.get("authoritative_repo_root") or "").strip() == str(repo_root),
-        f"runtime_identity_repo_root={runtime_identity.get('authoritative_repo_root')}",
+        repo_root in {runtime_identity_authoritative_repo_root, runtime_identity_release_root},
+        (
+            f"runtime_identity_authoritative_repo_root={runtime_identity_authoritative_repo_root};"
+            f"runtime_identity_release_root={runtime_identity_release_root};"
+            f"observed_repo_root={repo_root}"
+        ),
         "HOSTED_PREFLIGHT_RUNTIME_IDENTITY_REPO_MISMATCH",
     )
     add_check(
@@ -321,6 +332,7 @@ def derive_single_node_hosted_preflight_payload_v1(
     repo_authority_ok, repo_authority_detail = _run_repo_authority_proof(
         resolved_python_executable=resolved_python_executable,
         repo_root=repo_root,
+        authoritative_repo_root=runtime_identity_authoritative_repo_root,
     )
     add_check(
         "repo_authority_proof",
