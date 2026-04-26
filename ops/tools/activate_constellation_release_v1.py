@@ -25,6 +25,7 @@ RELEASE_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RELEASES/release_manifes
 ACTIVATION_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RELEASES/activation_receipt.v1.schema.json"
 WRITE_RUNTIME_CONTRACT_TOOL = (REPO_ROOT / "ops/tools/write_active_runtime_contract_v1.py").resolve()
 REDUCE_RELEASE_CURRENT_TOOL = (REPO_ROOT / "ops/tools/run_release_current_reducer_v1.py").resolve()
+ACTIVATION_IN_PROGRESS_LOCK = (RUNTIME_DATA_ROOT / "activations_v1" / ".activation_in_progress.lock").resolve()
 
 
 def _sha256_file(path: Path) -> str:
@@ -45,6 +46,22 @@ def _utc_now_compact() -> str:
 
 def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _latest_release_id_or_fail() -> str:
+    if not RELEASES_ROOT.exists() or not RELEASES_ROOT.is_dir():
+        raise SystemExit(f"FAIL: releases root missing: {RELEASES_ROOT}")
+    candidates: list[str] = []
+    for child in RELEASES_ROOT.iterdir():
+        if not child.is_dir():
+            continue
+        manifest_path = (child / "release_manifest.v1.json").resolve()
+        if not manifest_path.exists() or not manifest_path.is_file():
+            continue
+        candidates.append(child.name)
+    if not candidates:
+        raise SystemExit("FAIL: no release directories with release_manifest.v1.json found")
+    return sorted(candidates)[-1]
 
 
 def _require_manifest_for_release(release_root: Path) -> dict:
@@ -107,6 +124,31 @@ def _restore_prior_active_pointer_or_fail(prior_target: Path | None) -> None:
     _atomic_activate_symlink(prior_target)
 
 
+def _acquire_activation_lock_or_fail(*, release_id: str, release_root: Path) -> None:
+    ACTIVATION_IN_PROGRESS_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    if ACTIVATION_IN_PROGRESS_LOCK.exists():
+        raise SystemExit(f"FAIL: activation_in_progress_lock_present path={ACTIVATION_IN_PROGRESS_LOCK}")
+    payload = {
+        "schema_id": "activation_in_progress.lock.v1",
+        "release_id": str(release_id),
+        "release_root": str(release_root.resolve()),
+        "created_at_utc": _utc_now_iso(),
+        "pid": os.getpid(),
+    }
+    ACTIVATION_IN_PROGRESS_LOCK.write_text(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _clear_activation_lock() -> None:
+    try:
+        if ACTIVATION_IN_PROGRESS_LOCK.exists():
+            ACTIVATION_IN_PROGRESS_LOCK.unlink()
+    except Exception:
+        pass
+
+
 def _write_active_runtime_contract_or_fail() -> None:
     proc = subprocess.run(
         [sys.executable, str(WRITE_RUNTIME_CONTRACT_TOOL)],
@@ -165,25 +207,34 @@ def _post_activation_verify_or_fail(*, release_root: Path) -> None:
         )
 
 
-def _activate_runtime_authority_stack_or_fail(*, release_root: Path, prior_target: Path | None) -> None:
-    _atomic_activate_symlink(release_root)
+def _activate_runtime_authority_stack_or_fail(*, release_id: str, release_root: Path, prior_target: Path | None) -> None:
+    _acquire_activation_lock_or_fail(release_id=release_id, release_root=release_root)
     try:
-        _write_active_runtime_contract_or_fail()
-        _materialize_release_current_or_fail()
-        _post_activation_verify_or_fail(release_root=release_root)
-    except SystemExit:
-        _restore_prior_active_pointer_or_fail(prior_target)
-        if prior_target is not None:
+        _atomic_activate_symlink(release_root)
+        try:
             _write_active_runtime_contract_or_fail()
-        raise
+            _materialize_release_current_or_fail()
+            _post_activation_verify_or_fail(release_root=release_root)
+        except SystemExit:
+            _restore_prior_active_pointer_or_fail(prior_target)
+            if prior_target is not None:
+                _write_active_runtime_contract_or_fail()
+            raise
+    finally:
+        _clear_activation_lock()
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(prog="activate_constellation_release_v1")
-    ap.add_argument("--release_id", required=True)
+    selection = ap.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--release_id", default="")
+    selection.add_argument("--latest", action="store_true")
     args = ap.parse_args()
 
-    release_id = str(args.release_id).strip()
+    if bool(args.latest):
+        release_id = _latest_release_id_or_fail()
+    else:
+        release_id = str(args.release_id).strip()
     if not release_id:
         raise SystemExit("FAIL: release_id empty")
     release_root = (RELEASES_ROOT / release_id).resolve()
@@ -197,6 +248,7 @@ def main() -> int:
     RUNTIME_DATA_ROOT.mkdir(parents=True, exist_ok=True)
     prior_target = ACTIVE_POINTER.resolve() if ACTIVE_POINTER.exists() else None
     _activate_runtime_authority_stack_or_fail(
+        release_id=release_id,
         release_root=release_root,
         prior_target=prior_target,
     )

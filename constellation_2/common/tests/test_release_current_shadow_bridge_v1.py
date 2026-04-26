@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -16,6 +17,7 @@ from constellation_2.common.runtime_contract_v1 import (
     load_active_runtime_contract_or_fail,
     resolve_release_provenance,
 )
+import constellation_2.common.runtime_contract_v1 as runtime_contract_module
 from constellation_2.phaseC.lib.canon_json_v1 import canonical_json_bytes_v1
 
 
@@ -398,3 +400,108 @@ def test_load_active_runtime_contract_fails_closed_on_malformed_release_current(
 
     with pytest.raises(SystemExit, match="release_current_shadow_invalid"):
         load_active_runtime_contract_or_fail()
+
+
+def test_runtime_contract_loader_retries_sha_mismatch_during_activation_lock(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    lock_path = (tmp_path / "activations_v1" / ".activation_in_progress.lock").resolve()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text("in-progress\n", encoding="utf-8")
+    monkeypatch.setattr(runtime_contract_module, "ACTIVATION_IN_PROGRESS_LOCK", lock_path)
+
+    runtime_payload = {
+        "release_id": "release-x",
+        "git_sha": "a" * 40,
+        "authoritative_repo_root": "/home/node/constellation",
+        "release_root": "/tmp/release",
+        "runtime_data_root": "/tmp/runtime_data",
+        "canonical_truth_root": "/tmp/truth",
+        "truth_sleeves_root": "/tmp/truth_sleeves",
+        "pointer_index_family": "run_pointer_v1",
+        "allowed_truth_roots": ["/tmp/truth", "/tmp/truth_sleeves"],
+        "runtime_environment": "PAPER",
+        "primary_execution_identity_ref": {"authority_owner": "execution_identity_binding_v1", "sleeve_id": "PRIMARY"},
+    }
+    monkeypatch.setattr(
+        runtime_contract_module,
+        "_load_active_runtime_contract_ref_or_fail",
+        lambda **_: SimpleNamespace(payload=dict(runtime_payload)),
+    )
+    monkeypatch.setattr(
+        runtime_contract_module,
+        "_load_release_current_ref_or_fail",
+        lambda **_: SimpleNamespace(payload={"release_id": "release-x"}),
+    )
+    calls = {"n": 0}
+
+    def _maybe_mismatch(*, release_current_payload: dict[str, object]):  # noqa: ARG001
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise SystemExit(
+                "FAIL: release_current_active_runtime_contract_ref_sha256_mismatch "
+                "path=/tmp/runtime_contract expected=1 actual=2"
+            )
+        return SimpleNamespace(payload=dict(runtime_payload))
+
+    monkeypatch.setattr(
+        runtime_contract_module,
+        "_load_active_runtime_contract_ref_from_release_current_or_fail",
+        _maybe_mismatch,
+    )
+    monkeypatch.setattr(runtime_contract_module, "_assert_release_current_contract_alignment", lambda **_: None)
+    monkeypatch.setattr(runtime_contract_module, "_log_active_runtime_contract_cutover_mismatch", lambda **_: None)
+    monkeypatch.setattr(runtime_contract_module.time, "sleep", lambda _: None)
+
+    ref = runtime_contract_module._load_active_runtime_contract_ref_release_current_first_or_fail(
+        validate_shadow=False
+    )
+    assert ref.payload["release_id"] == "release-x"
+    assert calls["n"] == 2
+
+
+def test_runtime_contract_loader_fails_sha_mismatch_without_activation_lock(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    lock_path = (tmp_path / "activations_v1" / ".activation_in_progress.lock").resolve()
+    monkeypatch.setattr(runtime_contract_module, "ACTIVATION_IN_PROGRESS_LOCK", lock_path)
+    runtime_payload = {
+        "release_id": "release-x",
+        "git_sha": "a" * 40,
+        "authoritative_repo_root": "/home/node/constellation",
+        "release_root": "/tmp/release",
+        "runtime_data_root": "/tmp/runtime_data",
+        "canonical_truth_root": "/tmp/truth",
+        "truth_sleeves_root": "/tmp/truth_sleeves",
+        "pointer_index_family": "run_pointer_v1",
+        "allowed_truth_roots": ["/tmp/truth", "/tmp/truth_sleeves"],
+        "runtime_environment": "PAPER",
+        "primary_execution_identity_ref": {"authority_owner": "execution_identity_binding_v1", "sleeve_id": "PRIMARY"},
+    }
+    monkeypatch.setattr(
+        runtime_contract_module,
+        "_load_active_runtime_contract_ref_or_fail",
+        lambda **_: SimpleNamespace(payload=dict(runtime_payload)),
+    )
+    monkeypatch.setattr(
+        runtime_contract_module,
+        "_load_release_current_ref_or_fail",
+        lambda **_: SimpleNamespace(payload={"release_id": "release-x"}),
+    )
+    monkeypatch.setattr(
+        runtime_contract_module,
+        "_load_active_runtime_contract_ref_from_release_current_or_fail",
+        lambda **_: (_ for _ in ()).throw(
+            SystemExit(
+                "FAIL: release_current_active_runtime_contract_ref_sha256_mismatch "
+                "path=/tmp/runtime_contract expected=1 actual=2"
+            )
+        ),
+    )
+
+    with pytest.raises(SystemExit, match="release_current_active_runtime_contract_ref_sha256_mismatch"):
+        runtime_contract_module._load_active_runtime_contract_ref_release_current_first_or_fail(
+            validate_shadow=False
+        )

@@ -105,6 +105,7 @@ def test_activate_runtime_authority_stack_rolls_back_when_materialization_fails(
 
     with pytest.raises(SystemExit, match="release_current reducer failed"):
         activate_module._activate_runtime_authority_stack_or_fail(
+            release_id="release-test",
             release_root=(tmp_path / "new_release").resolve(),
             prior_target=prior_target,
         )
@@ -141,6 +142,7 @@ def test_activate_runtime_authority_stack_success_includes_release_current_mater
     )
 
     activate_module._activate_runtime_authority_stack_or_fail(
+        release_id="release-test",
         release_root=(tmp_path / "new_release").resolve(),
         prior_target=None,
     )
@@ -151,3 +153,28 @@ def test_activate_runtime_authority_stack_success_includes_release_current_mater
         "materialize_release_current",
         "post_verify",
     ]
+
+
+def test_activate_runtime_authority_stack_clears_lock_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    lock_path = (tmp_path / "activations_v1" / ".activation_in_progress.lock").resolve()
+    monkeypatch.setattr(activate_module, "ACTIVATION_IN_PROGRESS_LOCK", lock_path)
+    monkeypatch.setattr(activate_module, "_atomic_activate_symlink", lambda _: None)
+    monkeypatch.setattr(activate_module, "_write_active_runtime_contract_or_fail", lambda: None)
+    monkeypatch.setattr(
+        activate_module,
+        "_materialize_release_current_or_fail",
+        lambda: (_ for _ in ()).throw(SystemExit("FAIL: reducer")),
+    )
+    monkeypatch.setattr(activate_module, "_restore_prior_active_pointer_or_fail", lambda _: None)
+
+    with pytest.raises(SystemExit, match="reducer"):
+        activate_module._activate_runtime_authority_stack_or_fail(
+            release_id="release-test",
+            release_root=(tmp_path / "new_release").resolve(),
+            prior_target=None,
+        )
+
+    assert not lock_path.exists()

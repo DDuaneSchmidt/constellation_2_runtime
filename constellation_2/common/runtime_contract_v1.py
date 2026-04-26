@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping
@@ -26,6 +27,11 @@ ACTIVE_RUNTIME_CONTRACT_SCHEMA_RELPATH = (
 )
 RELEASE_MANIFEST_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RELEASES/release_manifest.v1.schema.json"
 CANONICAL_POINTER_INDEX_NAME = "canonical_pointer_index.v1.jsonl"
+ACTIVATION_IN_PROGRESS_LOCK = (
+    Path("/home/node/constellation_runtime_data")
+    / "activations_v1"
+    / ".activation_in_progress.lock"
+).resolve()
 
 
 def _utc_now() -> str:
@@ -95,6 +101,10 @@ def _require_authoritative_repo_root(contract: dict[str, Any]) -> Path:
         Path(str(contract.get("authoritative_repo_root") or "")),
         label="authoritative_repo_root",
     )
+
+
+def _activation_in_progress() -> bool:
+    return ACTIVATION_IN_PROGRESS_LOCK.exists() and ACTIVATION_IN_PROGRESS_LOCK.is_file()
 
 
 def _repo_local_truth_roots(authoritative_repo_root: Path) -> tuple[Path, Path]:
@@ -320,27 +330,38 @@ def _log_active_runtime_contract_cutover_mismatch(
 
 
 def _load_active_runtime_contract_ref_release_current_first_or_fail(*, validate_shadow: bool) -> Any:
-    legacy_contract_ref = _load_active_runtime_contract_ref_or_fail(validate_shadow=False)
-    legacy_contract_payload = dict(legacy_contract_ref.payload)
-    release_current_ref = _load_release_current_ref_or_fail(contract_payload=legacy_contract_payload)
-    if release_current_ref is None:
-        release_current_path = _release_current_path_for_contract(legacy_contract_payload)
-        raise SystemExit(f"FAIL: release_current_required_missing path={release_current_path}")
+    deadline = time.monotonic() + 5.0
+    while True:
+        legacy_contract_ref = _load_active_runtime_contract_ref_or_fail(validate_shadow=False)
+        legacy_contract_payload = dict(legacy_contract_ref.payload)
+        release_current_ref = _load_release_current_ref_or_fail(contract_payload=legacy_contract_payload)
+        if release_current_ref is None:
+            release_current_path = _release_current_path_for_contract(legacy_contract_payload)
+            raise SystemExit(f"FAIL: release_current_required_missing path={release_current_path}")
 
-    release_current_payload = dict(release_current_ref.payload)
-    release_current_contract_ref = _load_active_runtime_contract_ref_from_release_current_or_fail(
-        release_current_payload=release_current_payload
-    )
-    release_current_contract_payload = dict(release_current_contract_ref.payload)
-    _assert_release_current_contract_alignment(
-        release_current_payload=release_current_payload,
-        runtime_contract_payload=release_current_contract_payload,
-    )
-    _log_active_runtime_contract_cutover_mismatch(
-        legacy_contract_payload=legacy_contract_payload,
-        release_current_contract_payload=release_current_contract_payload,
-        release_current_payload=release_current_payload,
-    )
+        release_current_payload = dict(release_current_ref.payload)
+        try:
+            release_current_contract_ref = _load_active_runtime_contract_ref_from_release_current_or_fail(
+                release_current_payload=release_current_payload
+            )
+            release_current_contract_payload = dict(release_current_contract_ref.payload)
+            _assert_release_current_contract_alignment(
+                release_current_payload=release_current_payload,
+                runtime_contract_payload=release_current_contract_payload,
+            )
+            _log_active_runtime_contract_cutover_mismatch(
+                legacy_contract_payload=legacy_contract_payload,
+                release_current_contract_payload=release_current_contract_payload,
+                release_current_payload=release_current_payload,
+            )
+            break
+        except SystemExit as exc:
+            message = str(exc)
+            transient_mismatch = "release_current_active_runtime_contract_ref_sha256_mismatch" in message
+            if transient_mismatch and _activation_in_progress() and time.monotonic() < deadline:
+                time.sleep(0.2)
+                continue
+            raise
 
     if validate_shadow:
         manifest_ref = read_control_plane_surface_v1(domain="release", surface="release_manifest_active")
