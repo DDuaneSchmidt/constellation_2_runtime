@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-SOURCE_ROOT = Path("/home/node/constellation")
+SOURCE_ROOT = Path(__file__).resolve().parents[3]
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
@@ -70,61 +70,71 @@ def _write_paper_trading_posture(truth_root: Path) -> None:
     )
 
 
-def _write_trade_submit_status(truth_root: Path) -> None:
+def _write_trade_submit_status(
+    truth_root: Path,
+    *,
+    ok: bool = True,
+    state: str = "OK",
+    reasons: list[str] | None = None,
+    submit_allowed: bool | None = None,
+) -> None:
+    payload = {
+        "schema_id": "trade_submit_readiness_c2",
+        "schema_version": "v1",
+        "day_utc": DAY,
+        "as_of_utc": f"{DAY}T00:00:00Z",
+        "expires_utc": f"{DAY}T00:02:00Z",
+        "ok": bool(ok),
+        "state": str(state),
+        "environment": "PAPER",
+        "ib_account": ACCOUNT,
+        "reasons": list(reasons or []),
+        "input_manifest": [],
+        "producer": {"repo": "constellation", "module": "test", "git_sha": "abc1234"},
+        "provenance": {
+            "truth_root": str(truth_root.resolve()),
+            "registry_sha256": "a" * 64,
+            "sleeve_registry_sha256": "b" * 64,
+        },
+        "session_authority_attestation": {
+            "decision_artifact_path": "/tmp/day_authority.json",
+            "decision_artifact_sha256": "c" * 64,
+            "policy_version": "validation_result_only",
+            "evaluator_version": "validation_result_only",
+            "venue": "C2",
+            "session_date": DAY,
+            "decision_status": "OK",
+            "session_class": None,
+            "stage_id": "PRE_ORCHESTRATION_PREFLIGHT",
+            "policy_action": "SKIP",
+            "stage_execution_status": "OK",
+            "reason_codes": [],
+        },
+        "run_state_authority_attestation": {
+            "authority_family": "day_authority_decision_v1",
+            "authority_artifact_path": "/tmp/day_authority.json",
+            "authority_artifact_sha256": "d" * 64,
+            "policy_version": "validation_result_only",
+            "evaluator_version": "validation_result_only",
+            "decision_status": "OK",
+            "classification_field": "decision_state",
+            "classification_value": "OPEN",
+            "cycle_snapshot_family": "gate_stack_verdict_v1",
+            "cycle_snapshot_artifact_path": "/tmp/gate_stack.json",
+            "cycle_snapshot_artifact_sha256": "e" * 64,
+            "cycle_id": f"{DAY}:OK",
+            "cycle_coherence_status": "COHERENT",
+            "stage_id": "TRADE_SUBMIT_READINESS",
+            "stage_execution_status": "OK",
+            "reason_codes": [],
+            "upstream_authority_refs": [],
+        },
+    }
+    if isinstance(submit_allowed, bool):
+        payload["submit_allowed"] = submit_allowed
     _write_json(
         truth_root / "trade_submit_readiness_c2_v1" / "_history" / "PAPER" / ACCOUNT / DAY / "status.json",
-        {
-            "schema_id": "trade_submit_readiness_c2",
-            "schema_version": "v1",
-            "day_utc": DAY,
-            "as_of_utc": f"{DAY}T00:00:00Z",
-            "expires_utc": f"{DAY}T00:02:00Z",
-            "ok": True,
-            "state": "OK",
-            "environment": "PAPER",
-            "ib_account": ACCOUNT,
-            "reasons": [],
-            "input_manifest": [],
-            "producer": {"repo": "constellation", "module": "test", "git_sha": "abc1234"},
-            "provenance": {
-                "truth_root": str(truth_root.resolve()),
-                "registry_sha256": "a" * 64,
-                "sleeve_registry_sha256": "b" * 64,
-            },
-            "session_authority_attestation": {
-                "decision_artifact_path": "/tmp/day_authority.json",
-                "decision_artifact_sha256": "c" * 64,
-                "policy_version": "validation_result_only",
-                "evaluator_version": "validation_result_only",
-                "venue": "C2",
-                "session_date": DAY,
-                "decision_status": "OK",
-                "session_class": None,
-                "stage_id": "PRE_ORCHESTRATION_PREFLIGHT",
-                "policy_action": "SKIP",
-                "stage_execution_status": "OK",
-                "reason_codes": [],
-            },
-            "run_state_authority_attestation": {
-                "authority_family": "day_authority_decision_v1",
-                "authority_artifact_path": "/tmp/day_authority.json",
-                "authority_artifact_sha256": "d" * 64,
-                "policy_version": "validation_result_only",
-                "evaluator_version": "validation_result_only",
-                "decision_status": "OK",
-                "classification_field": "decision_state",
-                "classification_value": "OPEN",
-                "cycle_snapshot_family": "gate_stack_verdict_v1",
-                "cycle_snapshot_artifact_path": "/tmp/gate_stack.json",
-                "cycle_snapshot_artifact_sha256": "e" * 64,
-                "cycle_id": f"{DAY}:OK",
-                "cycle_coherence_status": "COHERENT",
-                "stage_id": "TRADE_SUBMIT_READINESS",
-                "stage_execution_status": "OK",
-                "reason_codes": [],
-                "upstream_authority_refs": [],
-            },
-        },
+        payload,
     )
 
 
@@ -254,6 +264,9 @@ def _run_submit_boundary(
     admission_payload: dict,
     startup_status: str = "SUCCESS",
     startup_blocking_codes: list[str] | None = None,
+    readiness_payload: dict | None = None,
+    presubmit_payload: dict | None = None,
+    decision_payload: dict | None = None,
 ) -> dict:
     with tempfile.TemporaryDirectory() as td:
         repo_root = Path(td)
@@ -268,13 +281,20 @@ def _run_submit_boundary(
         startup_path = truth_root / "reports" / "startup_materialization_v1" / DAY / "startup_materialization.v1.json"
         posture_path = truth_root / "reports" / "paper_trading_posture_v1" / DAY / "paper_trading_posture.v1.json"
         readiness_path = truth_root / "trade_submit_readiness_c2_v1" / "_history" / "PAPER" / ACCOUNT / DAY / "status.json"
+        presubmit_path = truth_root / "reports" / "trade_readiness_presubmit_v1" / DAY / "trade_readiness_presubmit.v1.json"
+        decision_path = truth_root / "reports" / "trade_readiness_decision_v1" / DAY / "trade_readiness_decision.v1.json"
         build_path = (truth_root / "target_day_build_v1" / f"{DAY}.json").resolve()
         admission_path = (truth_root / "target_day_admission_v1" / f"{DAY}.json").resolve()
         _write_json(build_path, dict(build_payload))
         _write_json(admission_path, dict(admission_payload))
+        if isinstance(presubmit_payload, dict):
+            _write_json(presubmit_path, dict(presubmit_payload))
+        if isinstance(decision_payload, dict):
+            _write_json(decision_path, dict(decision_payload))
         _write_closure_lineage_pass(truth_root=truth_root)
         _write_trading_day_calendar_row(truth_root=truth_root)
         startup_codes = list(startup_blocking_codes or [])
+        effective_readiness_payload = dict(readiness_payload or {"ok": True, "state": "OK", "reasons": []})
         with patch.object(boundary_module, "REPO_ROOT", repo_root), patch.object(
             boundary_module, "resolve_decision_truth_root_bridge_v1", return_value=truth_root.resolve()
         ), patch.object(
@@ -348,7 +368,7 @@ def _run_submit_boundary(
                 (),
                 {
                     "path": readiness_path,
-                    "payload": {"ok": True, "state": "OK", "reasons": []},
+                    "payload": effective_readiness_payload,
                     "sha256": "3" * 64,
                 },
             )(),
@@ -593,3 +613,210 @@ def test_startup_materialization_failure_still_blocks_submit_boundary() -> None:
         assert boundary["boundary_status"] == "BLOCKED"
         assert boundary["submission_authorized"] is False
         assert "STARTUP_MATERIALIZATION_FAIL:PHASEC_VETO:C2_SUBMIT_FAIL_CLOSED_REQUIRED" in boundary["blocking_codes"]
+
+
+def test_submit_boundary_respects_trade_readiness_presubmit_yes_and_submit_allowed_true() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        _write_startup_materialization(truth_root)
+        _write_paper_trading_posture(truth_root)
+        _write_trade_submit_status(
+            truth_root,
+            ok=True,
+            state="OK",
+            reasons=["INFO:PRODUCTION_POLICY_NOT_PASS"],
+        )
+        _write_kill_switch(truth_root)
+        boundary = _run_submit_boundary(
+            truth_root,
+            build_payload={
+                "build_status": "COMPLETE",
+                "completeness_result": "COMPLETE",
+                "closure_status": "CLOSED",
+                "hidden_dependency_check_result": {"status": "PASS"},
+                "blocker_chain": [],
+            },
+            admission_payload={
+                "admission_status": "ADMIT",
+                "binding": True,
+                "blocking_reason_codes": [],
+            },
+            readiness_payload={
+                "ok": True,
+                "state": "OK",
+                "reasons": ["INFO:PRODUCTION_POLICY_NOT_PASS"],
+            },
+            presubmit_payload={
+                "schema_version": "trade_readiness_presubmit.v1",
+                "day_utc": DAY,
+                "decision": "YES",
+                "submit_allowed": True,
+                "all_blockers": [],
+            },
+        )
+        assert boundary["boundary_status"] == "AUTHORIZED"
+        assert boundary["submit_allowed"] is True
+        assert boundary["readiness_submit_allowed"] is True
+        assert boundary["readiness_decision"] == "YES"
+        assert "SUBMIT_BOUNDARY_READINESS_POLICY_NOT_PASS" not in boundary["blocking_codes"]
+
+
+def test_submit_boundary_blocks_when_trade_readiness_policy_decision_is_no() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        _write_startup_materialization(truth_root)
+        _write_paper_trading_posture(truth_root)
+        _write_trade_submit_status(truth_root, ok=True, state="OK", reasons=[])
+        _write_kill_switch(truth_root)
+        boundary = _run_submit_boundary(
+            truth_root,
+            build_payload={
+                "build_status": "COMPLETE",
+                "completeness_result": "COMPLETE",
+                "closure_status": "CLOSED",
+                "hidden_dependency_check_result": {"status": "PASS"},
+                "blocker_chain": [],
+            },
+            admission_payload={
+                "admission_status": "ADMIT",
+                "binding": True,
+                "blocking_reason_codes": [],
+            },
+            readiness_payload={"ok": True, "state": "OK", "reasons": []},
+            presubmit_payload={
+                "schema_version": "trade_readiness_presubmit.v1",
+                "day_utc": DAY,
+                "decision": "NO",
+                "submit_allowed": False,
+                "all_blockers": ["RISK_POLICY_BLOCKED"],
+            },
+        )
+        assert boundary["boundary_status"] == "BLOCKED"
+        assert boundary["canonical_blocker"] == "SUBMIT_BOUNDARY_READINESS_POLICY_NOT_PASS"
+        assert boundary["failed_conditions"]
+        assert boundary["blocking_evidence"]
+        assert any(
+            item.get("condition") in {"READINESS_POLICY_DECISION_NO", "READINESS_POLICY_SUBMIT_ALLOWED_FALSE"}
+            for item in boundary["failed_conditions"]
+        )
+
+
+def test_submit_boundary_generic_readiness_blocker_has_source_path_and_failed_condition() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        _write_startup_materialization(truth_root)
+        _write_paper_trading_posture(truth_root)
+        _write_trade_submit_status(truth_root, ok=False, state="FAIL", reasons=["FAIL:HEADROOM_INSUFFICIENT"])
+        _write_kill_switch(truth_root)
+        boundary = _run_submit_boundary(
+            truth_root,
+            build_payload={
+                "build_status": "COMPLETE",
+                "completeness_result": "COMPLETE",
+                "closure_status": "CLOSED",
+                "hidden_dependency_check_result": {"status": "PASS"},
+                "blocker_chain": [],
+            },
+            admission_payload={
+                "admission_status": "ADMIT",
+                "binding": True,
+                "blocking_reason_codes": [],
+            },
+            readiness_payload={
+                "ok": False,
+                "state": "FAIL",
+                "reasons": ["FAIL:HEADROOM_INSUFFICIENT"],
+            },
+        )
+        assert boundary["boundary_status"] == "BLOCKED"
+        assert boundary["source_surface_path"]
+        assert boundary["failed_conditions"]
+        assert boundary["blocking_evidence"]
+        assert any(
+            evidence.get("logical_name") == "trade_submit_readiness_c2_v1"
+            for evidence in boundary["blocking_evidence"]
+        )
+
+
+def test_submit_boundary_does_not_treat_not_attempted_presubmit_gates_as_failure() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        _write_startup_materialization(truth_root)
+        _write_paper_trading_posture(truth_root)
+        _write_trade_submit_status(truth_root, ok=True, state="OK", reasons=[])
+        _write_kill_switch(truth_root)
+        boundary = _run_submit_boundary(
+            truth_root,
+            build_payload={
+                "build_status": "COMPLETE",
+                "completeness_result": "COMPLETE",
+                "closure_status": "CLOSED",
+                "hidden_dependency_check_result": {"status": "PASS"},
+                "blocker_chain": [],
+            },
+            admission_payload={
+                "admission_status": "ADMIT",
+                "binding": True,
+                "blocking_reason_codes": [],
+            },
+            readiness_payload={"ok": True, "state": "OK", "reasons": []},
+            presubmit_payload={
+                "schema_version": "trade_readiness_presubmit.v1",
+                "day_utc": DAY,
+                "decision": "YES",
+                "submit_allowed": True,
+                "ordered_gate_results": [
+                    {"gate": "Broker Submission Result", "status": "NOT_ATTEMPTED"},
+                    {"gate": "Lifecycle & Outcome Tracking", "status": "NOT_ATTEMPTED"},
+                ],
+                "all_blockers": [],
+            },
+        )
+        assert boundary["boundary_status"] == "AUTHORIZED"
+        assert boundary["submit_allowed"] is True
+        assert "SUBMIT_BOUNDARY_READINESS_POLICY_NOT_PASS" not in boundary["blocking_codes"]
+
+
+def test_submit_boundary_ignores_stale_presubmit_policy_surface_and_uses_current_decision_surface() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        _write_startup_materialization(truth_root)
+        _write_paper_trading_posture(truth_root)
+        _write_trade_submit_status(truth_root, ok=True, state="OK", reasons=[])
+        _write_kill_switch(truth_root)
+        boundary = _run_submit_boundary(
+            truth_root,
+            build_payload={
+                "build_status": "COMPLETE",
+                "completeness_result": "COMPLETE",
+                "closure_status": "CLOSED",
+                "hidden_dependency_check_result": {"status": "PASS"},
+                "blocker_chain": [],
+            },
+            admission_payload={
+                "admission_status": "ADMIT",
+                "binding": True,
+                "blocking_reason_codes": [],
+            },
+            readiness_payload={"ok": True, "state": "OK", "reasons": []},
+            presubmit_payload={
+                "schema_version": "trade_readiness_presubmit.v1",
+                "day_utc": "2026-04-12",
+                "decision": "NO",
+                "submit_allowed": False,
+                "all_blockers": ["RISK_POLICY_BLOCKED"],
+            },
+            decision_payload={
+                "schema_version": "trade_readiness_decision.v1",
+                "day_utc": DAY,
+                "decision": "YES",
+                "submit_allowed": True,
+                "status": "READY",
+                "all_blockers": [],
+            },
+        )
+        assert boundary["boundary_status"] == "AUTHORIZED"
+        assert boundary["readiness_decision"] == "YES"
+        assert boundary["source_paths"]["trade_readiness_decision_v1"].endswith(
+            f"/trade_readiness_decision_v1/{DAY}/trade_readiness_decision.v1.json"
+        )

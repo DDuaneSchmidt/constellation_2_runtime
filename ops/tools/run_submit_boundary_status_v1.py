@@ -109,6 +109,276 @@ def _normalize_reason_codes(values: List[Any]) -> List[str]:
     return out
 
 
+def _is_informational_reason_code_v1(code: str) -> bool:
+    normalized = str(code or "").strip().upper()
+    return normalized.startswith("INFO:") or normalized.startswith("WARN:") or normalized.startswith("ADVISORY:")
+
+
+def _read_json_object_if_exists_v1(path: Path) -> Tuple[Dict[str, Any] | None, str]:
+    if not path.exists() or not path.is_file():
+        return None, "MISSING"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return None, f"JSON_PARSE_ERROR:{type(exc).__name__}"
+    if not isinstance(payload, dict):
+        return None, "TOP_LEVEL_NOT_OBJECT"
+    return payload, ""
+
+
+def _load_trade_readiness_policy_view_v1(*, truth_root: Path, day_utc: str) -> Dict[str, Any]:
+    presubmit_path = (
+        truth_root / "reports" / "trade_readiness_presubmit_v1" / day_utc / "trade_readiness_presubmit.v1.json"
+    ).resolve()
+    decision_path = (
+        truth_root / "reports" / "trade_readiness_decision_v1" / day_utc / "trade_readiness_decision.v1.json"
+    ).resolve()
+    sources = (
+        ("trade_readiness_presubmit_v1", presubmit_path),
+        ("trade_readiness_decision_v1", decision_path),
+    )
+    source_paths = {name: str(path) for name, path in sources}
+    failed_conditions: List[Dict[str, str]] = []
+
+    for logical_name, path in sources:
+        payload, error_code = _read_json_object_if_exists_v1(path)
+        if payload is None:
+            if error_code != "MISSING":
+                failed_conditions.append(
+                    {
+                        "condition": "READINESS_POLICY_SURFACE_INVALID",
+                        "logical_name": logical_name,
+                        "path": str(path),
+                        "detail": error_code,
+                    }
+                )
+            continue
+
+        observed_day = str(payload.get("day_utc") or payload.get("day") or "").strip()
+        if observed_day and observed_day != day_utc:
+            failed_conditions.append(
+                {
+                    "condition": "READINESS_POLICY_SURFACE_DAY_MISMATCH",
+                    "logical_name": logical_name,
+                    "path": str(path),
+                    "detail": f"observed_day={observed_day}",
+                }
+            )
+            continue
+
+        decision = str(payload.get("decision") or "").strip().upper()
+        status = str(payload.get("status") or "").strip().upper()
+        submit_allowed_raw = payload.get("submit_allowed")
+        submit_allowed: bool | None = submit_allowed_raw if isinstance(submit_allowed_raw, bool) else None
+        if submit_allowed is None and decision in {"YES", "NO"}:
+            submit_allowed = decision == "YES"
+
+        return {
+            "selected_logical_name": logical_name,
+            "selected_path": str(path),
+            "status": status,
+            "decision": decision,
+            "submit_allowed": submit_allowed,
+            "source_paths": source_paths,
+            "failed_conditions": failed_conditions,
+        }
+
+    return {
+        "selected_logical_name": "",
+        "selected_path": "",
+        "status": "",
+        "decision": "",
+        "submit_allowed": None,
+        "source_paths": source_paths,
+        "failed_conditions": failed_conditions,
+    }
+
+
+def _evaluate_paper_session_ledger_surface_v1(*, truth_root: Path, day_utc: str) -> Dict[str, Any]:
+    ledger_path = (
+        truth_root / "reports" / "paper_session_ledger_v1" / day_utc / "paper_session_ledger.v1.json"
+    ).resolve()
+    payload, _error_code = _read_json_object_if_exists_v1(ledger_path)
+    if payload is None:
+        return {
+            "ok": True,
+            "logical_name": "paper_session_ledger_v1",
+            "path": str(ledger_path),
+            "reason_codes": [],
+            "failed_conditions": [],
+        }
+
+    submit_lifecycle = payload.get("submit_lifecycle")
+    if not isinstance(submit_lifecycle, dict):
+        submit_lifecycle = {}
+    control_state = payload.get("control_state")
+    if not isinstance(control_state, dict):
+        control_state = {}
+
+    submit_result_status = str(submit_lifecycle.get("submit_result_status") or "").strip().upper()
+    lineage_status = str(payload.get("lineage_status") or "").strip().upper()
+    control_state_blockers = _normalize_reason_codes(list(control_state.get("blocking_codes") or []))
+
+    reason_codes: List[str] = []
+    failed_conditions: List[Dict[str, str]] = []
+    if submit_result_status == "FAIL":
+        reason_codes.append("POST_SUBMIT_LINEAGE_GAP")
+        failed_conditions.append(
+            {
+                "logical_name": "paper_session_ledger_v1",
+                "path": str(ledger_path),
+                "condition": "LEDGER_SUBMIT_RESULT_FAIL",
+                "code": "POST_SUBMIT_LINEAGE_GAP",
+                "detail": "paper_session_ledger submit_lifecycle.submit_result_status=FAIL",
+            }
+        )
+    if lineage_status == "GAP":
+        reason_codes.append("POST_SUBMIT_LINEAGE_GAP")
+        failed_conditions.append(
+            {
+                "logical_name": "paper_session_ledger_v1",
+                "path": str(ledger_path),
+                "condition": "LEDGER_LINEAGE_GAP",
+                "code": "POST_SUBMIT_LINEAGE_GAP",
+                "detail": "paper_session_ledger lineage_status=GAP",
+            }
+        )
+    for blocker in control_state_blockers:
+        reason_codes.append(blocker)
+        failed_conditions.append(
+            {
+                "logical_name": "paper_session_ledger_v1",
+                "path": str(ledger_path),
+                "condition": "LEDGER_CONTROL_BLOCKING_CODE",
+                "code": blocker,
+                "detail": f"paper_session_ledger control_state blocking code: {blocker}",
+            }
+        )
+
+    normalized_codes = _normalize_reason_codes(reason_codes)
+    return {
+        "ok": len(normalized_codes) == 0,
+        "logical_name": "paper_session_ledger_v1",
+        "path": str(ledger_path),
+        "reason_codes": normalized_codes,
+        "failed_conditions": failed_conditions,
+    }
+
+
+def _evaluate_trade_submit_readiness_payload_v1(payload: Dict[str, Any]) -> Dict[str, Any]:
+    reasons = [str(code).strip() for code in (payload.get("reasons") or []) if str(code).strip()]
+    readiness_ok_claimed = bool(payload.get("ok") is True)
+    readiness_status = str(payload.get("state") or payload.get("status") or "").strip().upper()
+    readiness_decision = str(payload.get("decision") or "").strip().upper()
+    submit_allowed_raw = payload.get("submit_allowed")
+    readiness_submit_allowed: bool | None = submit_allowed_raw if isinstance(submit_allowed_raw, bool) else None
+
+    reason_codes: List[str] = []
+    failed_conditions: List[Dict[str, str]] = []
+    for reason_code in reasons:
+        upper = reason_code.upper()
+        if upper.startswith("FAIL:"):
+            reason_codes.append(reason_code)
+            failed_conditions.append(
+                {
+                    "condition": "READINESS_REASON_FAIL",
+                    "source_reason_code": reason_code,
+                    "detail": "trade_submit_readiness_c2_v1 reason code is fail-prefixed.",
+                }
+            )
+            continue
+        if "NOT_PASS" in upper and not _is_informational_reason_code_v1(reason_code):
+            reason_codes.append("SUBMIT_BOUNDARY_READINESS_POLICY_NOT_PASS")
+            failed_conditions.append(
+                {
+                    "condition": "READINESS_REASON_NOT_PASS",
+                    "source_reason_code": reason_code,
+                    "detail": "trade_submit_readiness_c2_v1 reason code indicates not-pass.",
+                }
+            )
+
+    if isinstance(readiness_submit_allowed, bool) and not readiness_submit_allowed:
+        reason_codes.append("SUBMIT_BOUNDARY_READINESS_SUBMIT_NOT_ALLOWED")
+        failed_conditions.append(
+            {
+                "condition": "READINESS_SUBMIT_ALLOWED_FALSE",
+                "source_reason_code": "submit_allowed=false",
+                "detail": "trade_submit_readiness_c2_v1 submit_allowed is false.",
+            }
+        )
+
+    if not readiness_ok_claimed:
+        reason_codes.append("SUBMIT_BOUNDARY_READINESS_NOT_OK")
+        failed_conditions.append(
+            {
+                "condition": "READINESS_OK_FALSE",
+                "source_reason_code": "ok=false",
+                "detail": "trade_submit_readiness_c2_v1 ok field is false.",
+            }
+        )
+
+    normalized_codes = sorted(set(reason_codes))
+    return {
+        "ok": readiness_ok_claimed and not normalized_codes,
+        "status": readiness_status,
+        "decision": readiness_decision,
+        "submit_allowed": readiness_submit_allowed,
+        "reason_codes": normalized_codes,
+        "failed_conditions": failed_conditions,
+    }
+
+
+def _build_failed_conditions_v1(*, failed_checks: List[Dict[str, Any]], extra_conditions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    dedupe = set()
+    merged: List[Dict[str, Any]] = []
+    for condition in list(extra_conditions):
+        logical_name = str(condition.get("logical_name") or "").strip()
+        code = str(condition.get("code") or condition.get("source_reason_code") or condition.get("condition") or "").strip()
+        path = str(condition.get("path") or "").strip()
+        key = (logical_name, code, path)
+        if key in dedupe:
+            continue
+        dedupe.add(key)
+        merged.append(dict(condition))
+    for row in failed_checks:
+        logical_name = str(row.get("logical_name") or "").strip()
+        absolute_path = str(row.get("absolute_path") or "").strip()
+        status = str(row.get("status") or "").strip().upper()
+        row_reason_codes = [str(code).strip() for code in (row.get("reason_codes") or []) if str(code).strip()]
+        if not row_reason_codes:
+            row_reason_codes = [f"{logical_name}_FAILED"]
+        for code in row_reason_codes:
+            key = (logical_name, code, absolute_path)
+            if key in dedupe:
+                continue
+            dedupe.add(key)
+            merged.append(
+                {
+                    "logical_name": logical_name,
+                    "path": absolute_path,
+                    "status": status,
+                    "condition": "BOUNDARY_CHECK_FAILED",
+                    "code": code,
+                    "detail": f"{logical_name} reported {status}.",
+                }
+            )
+    return merged
+
+
+def _build_blocking_evidence_v1(*, failed_checks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    evidence: List[Dict[str, Any]] = []
+    for row in failed_checks:
+        evidence.append(
+            {
+                "logical_name": str(row.get("logical_name") or "").strip(),
+                "path": str(row.get("absolute_path") or "").strip(),
+                "status": str(row.get("status") or "").strip(),
+                "reason_codes": [str(code).strip() for code in (row.get("reason_codes") or []) if str(code).strip()],
+            }
+        )
+    return evidence
+
+
 def _extract_intent_authorization_reason_codes(payload: Dict[str, Any]) -> List[str]:
     out: List[str] = []
     out.extend(_normalize_reason_codes(list(payload.get("reason_codes") or [])))
@@ -352,9 +622,24 @@ def main(argv: List[str] | None = None) -> int:
     freshness_verdict = "CURRENT"
     linkage_verdict = "LINKED"
     build_path = resolve_target_day_build_path(truth_root=truth_root, target_day=day_utc)
+    admission_path = resolve_target_day_admission_path(truth_root=truth_root, target_day=day_utc)
     build_sha256 = ""
     readiness_path = (execution_truth_root / "trade_submit_readiness_c2_v1" / "_history" / "PAPER" / paper_account / day_utc / "status.json").resolve()
     readiness_sha256 = ""
+    readiness_status = ""
+    readiness_decision = ""
+    readiness_submit_allowed: bool | None = None
+    source_paths: Dict[str, str] = {
+        "target_day_build_v1": str(build_path),
+        "target_day_admission_v1": str(admission_path),
+        "trade_submit_readiness_c2_v1": str(readiness_path),
+    }
+    readiness_policy_view = _load_trade_readiness_policy_view_v1(truth_root=truth_root, day_utc=day_utc)
+    source_paths.update(dict(readiness_policy_view.get("source_paths") or {}))
+    extra_failed_conditions: List[Dict[str, Any]] = list(readiness_policy_view.get("failed_conditions") or [])
+    ledger_surface_eval = _evaluate_paper_session_ledger_surface_v1(truth_root=truth_root, day_utc=day_utc)
+    source_paths["paper_session_ledger_v1"] = str(ledger_surface_eval.get("path") or "")
+    extra_failed_conditions.extend(list(ledger_surface_eval.get("failed_conditions") or []))
     session_day_blocker, session_day_source_path = _resolve_session_day_blocker_v1(truth_root=truth_root, day_utc=day_utc)
     if session_day_blocker:
         session_block_row = _check_row(
@@ -374,6 +659,7 @@ def main(argv: List[str] | None = None) -> int:
         build_ref = read_target_day_build_ref_v1(truth_root=truth_root, target_day=day_utc)
         build_payload = dict(build_ref.payload)
         build_path = build_ref.path.resolve()
+        source_paths["target_day_build_v1"] = str(build_path)
         if build_path.exists() and build_path.is_file():
             build_sha256 = _sha256_file(build_path)
         build_blocker_codes = _blocker_codes_from_chain(list(build_payload.get("blocker_chain") or []))
@@ -421,6 +707,8 @@ def main(argv: List[str] | None = None) -> int:
     try:
         admission_ref = read_target_day_admission_ref_v1(truth_root=truth_root, target_day=day_utc)
         admission_payload = dict(admission_ref.payload)
+        admission_path = admission_ref.path.resolve()
+        source_paths["target_day_admission_v1"] = str(admission_path)
         admission_codes = [
             str(code).strip()
             for code in (admission_payload.get("blocking_reason_codes") or [])
@@ -495,6 +783,7 @@ def main(argv: List[str] | None = None) -> int:
                 environment="PAPER",
             )
             readiness_path = readiness_ref.path.resolve()
+            source_paths["trade_submit_readiness_c2_v1"] = str(readiness_path)
             readiness_sha256 = _sha256_file(readiness_path)
             validate_governed_artifact_payload_v1(
                 repo_root=SOURCE_REPO_ROOT,
@@ -503,21 +792,19 @@ def main(argv: List[str] | None = None) -> int:
                 consumer_id="submit_boundary_status_v1",
                 required_finality_states=["provisional", "finalized", "corrected"],
             )
-            readiness_reasons = [
-                str(code).strip()
-                for code in (readiness_ref.payload.get("reasons") or [])
-                if str(code).strip()
-            ]
-            readiness_ok = bool(readiness_ref.payload.get("ok") is True)
-            readiness_codes = [
-                code
-                for code in readiness_reasons
-                if code.startswith("FAIL:")
-            ]
-            if any("NOT_PASS" in code.upper() for code in readiness_reasons):
-                readiness_ok = False
-                readiness_codes.append("SUBMIT_BOUNDARY_READINESS_POLICY_NOT_PASS")
-            readiness_codes = sorted(set(readiness_codes))
+            readiness_eval = _evaluate_trade_submit_readiness_payload_v1(dict(readiness_ref.payload))
+            readiness_ok = bool(readiness_eval.get("ok") is True)
+            readiness_codes = [str(code).strip() for code in (readiness_eval.get("reason_codes") or []) if str(code).strip()]
+            readiness_status = str(readiness_eval.get("status") or "").strip().upper()
+            readiness_decision = str(readiness_eval.get("decision") or "").strip().upper()
+            submit_allowed_value = readiness_eval.get("submit_allowed")
+            if isinstance(submit_allowed_value, bool):
+                readiness_submit_allowed = submit_allowed_value
+            for condition in list(readiness_eval.get("failed_conditions") or []):
+                merged_condition = dict(condition)
+                merged_condition.setdefault("logical_name", "trade_submit_readiness_c2_v1")
+                merged_condition.setdefault("path", str(readiness_path))
+                extra_failed_conditions.append(merged_condition)
             required_checks.append(
                 _check_row(
                     logical_name="trade_submit_readiness_c2_v1",
@@ -547,6 +834,78 @@ def main(argv: List[str] | None = None) -> int:
             freshness_verdict = "UNKNOWN"
             linkage_verdict = "UNLINKED"
             blocking_codes.extend(row["reason_codes"])
+
+    policy_logical_name = str(readiness_policy_view.get("selected_logical_name") or "").strip()
+    policy_path = Path(str(readiness_policy_view.get("selected_path") or "").strip() or str(admission_path)).resolve()
+    if policy_logical_name:
+        source_paths["trade_readiness_policy_surface"] = str(policy_path)
+        policy_status = str(readiness_policy_view.get("status") or "").strip().upper()
+        policy_decision = str(readiness_policy_view.get("decision") or "").strip().upper()
+        policy_submit_allowed = readiness_policy_view.get("submit_allowed")
+        if not readiness_status and policy_status:
+            readiness_status = policy_status
+        if not readiness_decision and policy_decision:
+            readiness_decision = policy_decision
+        if readiness_submit_allowed is None and isinstance(policy_submit_allowed, bool):
+            readiness_submit_allowed = policy_submit_allowed
+
+        policy_not_pass = False
+        policy_reason_codes: List[str] = []
+        if isinstance(policy_submit_allowed, bool) and not policy_submit_allowed:
+            policy_not_pass = True
+            policy_reason_codes.append("SUBMIT_BOUNDARY_READINESS_POLICY_NOT_PASS")
+            extra_failed_conditions.append(
+                {
+                    "logical_name": policy_logical_name,
+                    "path": str(policy_path),
+                    "condition": "READINESS_POLICY_SUBMIT_ALLOWED_FALSE",
+                    "code": "SUBMIT_BOUNDARY_READINESS_POLICY_NOT_PASS",
+                    "detail": "readiness policy surface submit_allowed=false",
+                }
+            )
+        if policy_decision == "NO":
+            policy_not_pass = True
+            policy_reason_codes.append("SUBMIT_BOUNDARY_READINESS_POLICY_NOT_PASS")
+            extra_failed_conditions.append(
+                {
+                    "logical_name": policy_logical_name,
+                    "path": str(policy_path),
+                    "condition": "READINESS_POLICY_DECISION_NO",
+                    "code": "SUBMIT_BOUNDARY_READINESS_POLICY_NOT_PASS",
+                    "detail": "readiness policy surface decision=NO",
+                }
+            )
+        policy_reason_codes = sorted(set(policy_reason_codes))
+        required_checks.append(
+            _check_row(
+                logical_name=policy_logical_name,
+                path=policy_path,
+                status="FAIL" if policy_not_pass else "PASS",
+                day_utc=day_utc,
+                reason_codes=policy_reason_codes,
+            )
+        )
+        if policy_not_pass:
+            submission_authorized = False
+            boundary_status = "BLOCKED"
+            failed_checks.append(required_checks[-1])
+            blocking_codes.extend(policy_reason_codes)
+
+    ledger_reason_codes = [str(code).strip() for code in (ledger_surface_eval.get("reason_codes") or []) if str(code).strip()]
+    required_checks.append(
+        _check_row(
+            logical_name="paper_session_ledger_v1",
+            path=Path(str(ledger_surface_eval.get("path") or "")).resolve(),
+            status="PASS" if bool(ledger_surface_eval.get("ok") is True) else "FAIL",
+            day_utc=day_utc,
+            reason_codes=ledger_reason_codes,
+        )
+    )
+    if not bool(ledger_surface_eval.get("ok") is True):
+        submission_authorized = False
+        boundary_status = "BLOCKED"
+        failed_checks.append(required_checks[-1])
+        blocking_codes.extend(ledger_reason_codes)
 
     try:
         startup_ref = read_startup_materialization_ref_v1(truth_root=truth_root, day_utc=day_utc)
@@ -784,7 +1143,21 @@ def main(argv: List[str] | None = None) -> int:
     ]
     blocking_codes_sorted = sorted(set(blocking_codes))
     effective_boundary_status = "AUTHORIZED" if submission_authorized else boundary_status
+    effective_readiness_status = readiness_status or "UNKNOWN"
+    effective_readiness_decision = readiness_decision
+    effective_readiness_submit_allowed = readiness_submit_allowed
+    if not submission_authorized:
+        effective_readiness_submit_allowed = False
+        if not effective_readiness_decision or effective_readiness_decision == "YES":
+            effective_readiness_decision = "NO"
+        if effective_readiness_status in {"UNKNOWN", "OK", "PASS", "READY"}:
+            effective_readiness_status = "NOT_READY"
     canonical_blocker = _canonical_blocker_for_boundary_v1(blocking_codes_sorted)
+    failed_conditions = _build_failed_conditions_v1(
+        failed_checks=failed_checks,
+        extra_conditions=extra_failed_conditions,
+    )
+    blocking_evidence = _build_blocking_evidence_v1(failed_checks=failed_checks)
     source_surface_path = _source_surface_path_for_blocker_v1(
         blocker_code=canonical_blocker,
         rows=(failed_checks + required_checks),
@@ -826,6 +1199,12 @@ def main(argv: List[str] | None = None) -> int:
         "canonical_blocker": canonical_blocker or None,
         "reason_codes": blocking_codes_sorted,
         "source_surface_path": source_surface_path,
+        "source_paths": source_paths,
+        "readiness_status": effective_readiness_status,
+        "readiness_decision": effective_readiness_decision,
+        "readiness_submit_allowed": effective_readiness_submit_allowed,
+        "failed_conditions": failed_conditions,
+        "blocking_evidence": blocking_evidence,
         "generated_at_utc": produced_at_utc,
         "boundary_status": effective_boundary_status,
         "required_boundary_checks": required_checks,

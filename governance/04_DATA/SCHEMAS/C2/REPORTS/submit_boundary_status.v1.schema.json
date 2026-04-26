@@ -41,6 +41,37 @@
       "items": { "type": "string", "minLength": 1 }
     },
     "source_surface_path": { "type": "string" },
+    "source_paths": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "readiness_status": { "type": "string" },
+    "readiness_decision": { "type": "string" },
+    "readiness_submit_allowed": { "type": ["boolean", "null"] },
+    "failed_conditions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "blocking_evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["logical_name", "path", "status", "reason_codes"],
+        "properties": {
+          "logical_name": { "type": "string" },
+          "path": { "type": "string" },
+          "status": { "type": "string" },
+          "reason_codes": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
     "generated_at_utc": { "type": "string", "minLength": 20 },
     "boundary_status": {
       "type": "string",
