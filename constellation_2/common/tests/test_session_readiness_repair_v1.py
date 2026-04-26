@@ -759,6 +759,10 @@ class SessionReadinessRepairTests(unittest.TestCase):
             ), patch.object(
                 session_refresh_module, "_resolve_paper_sleeve_truth_bindings", return_value=[]
             ), patch.object(
+                session_refresh_module,
+                "_active_execution_observer_service_status",
+                return_value={"active": False, "state": "INACTIVE"},
+            ), patch.object(
                 session_refresh_module, "validate_against_repo_schema_v1", lambda *args, **kwargs: None
             ), patch.object(
                 session_refresh_module, "_authority_lifecycle_result", return_value={"status": "OK", "incident_count": 0, "incidents": []}
