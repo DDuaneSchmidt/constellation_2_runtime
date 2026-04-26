@@ -26,6 +26,7 @@ LATEST_PACKET_PATH = (
     RUNTIME_DATA_ROOT / "exports" / "aegis_state" / "latest" / "chatgpt_aegis_packet.md"
 ).resolve()
 ARCHIVE_ROOT = (RUNTIME_DATA_ROOT / "exports" / "aegis_state" / "archive").resolve()
+OPERATOR_GATE_STATE_ROOT = (Path.home() / ".local" / "state" / "constellation_2").resolve()
 ACTIVE_RUNTIME_CONTRACT_PATH = (
     RUNTIME_DATA_ROOT
     / "runtime_contract_v1"
@@ -63,6 +64,31 @@ class PaperStatus:
     status: str
     freshness_status: str
     day_utc: str
+
+
+@dataclass(frozen=True)
+class CurrentCalendarDayStatus:
+    day_utc: str
+    is_trading_session: str
+    expected_non_trading_day: bool
+    paper_session_authority_path: str
+    paper_session_status: str
+    status: str
+    canonical_blocker: str
+    service_status_summary: str
+    evidence: str
+
+
+@dataclass(frozen=True)
+class LatestTradingDayEvidenceStatus:
+    evidence_day_utc: str
+    status: str
+    canonical_blocker: str
+    submit_boundary_status_path: str
+    closure_authority_path: str
+    current_head_path: str
+    submission_index_path: str
+    evidence: str
 
 
 @dataclass(frozen=True)
@@ -228,6 +254,121 @@ def _latest_day_with_file(
         if candidate.exists() and candidate.is_file():
             return day, candidate
     return None, None
+
+
+def _today_utc_day() -> str:
+    return _utc_now().date().isoformat()
+
+
+def _reason_codes(payload: dict[str, Any] | None, key: str = "blocking_reason_codes") -> list[str]:
+    if not isinstance(payload, dict):
+        return []
+    raw = payload.get(key)
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw:
+        code = str(item or "").strip()
+        if code:
+            out.append(code)
+    return out
+
+
+def _first_reason_code(payload: dict[str, Any] | None, key: str = "blocking_reason_codes") -> str:
+    codes = _reason_codes(payload, key=key)
+    return codes[0] if codes else ""
+
+
+def _market_calendar_record_for_day(
+    canonical_truth_root: Path | None,
+    day_utc: str,
+) -> tuple[dict[str, Any] | None, Path | None]:
+    if canonical_truth_root is None or not DATE_RE.match(day_utc):
+        return None, None
+    year = day_utc[:4]
+    for exchange in ("NYSE", "NASDAQ"):
+        path = (
+            canonical_truth_root
+            / "market_calendar_v1"
+            / exchange
+            / f"{year}.jsonl"
+        ).resolve()
+        if not path.exists() or not path.is_file():
+            continue
+        try:
+            for raw in path.read_text(encoding="utf-8").splitlines():
+                raw = raw.strip()
+                if not raw:
+                    continue
+                obj = json.loads(raw)
+                if isinstance(obj, dict) and str(obj.get("day_utc") or "").strip() == day_utc:
+                    return obj, path
+        except Exception:
+            continue
+    return None, None
+
+
+def _market_is_trading_session(
+    canonical_truth_root: Path | None,
+    day_utc: str,
+) -> tuple[bool | None, Path | None]:
+    record, path = _market_calendar_record_for_day(canonical_truth_root, day_utc)
+    if not isinstance(record, dict):
+        return None, path
+    raw = record.get("is_trading_session")
+    if isinstance(raw, bool):
+        return raw, path
+    value = str(raw or "").strip().lower()
+    if value in {"true", "1", "yes"}:
+        return True, path
+    if value in {"false", "0", "no"}:
+        return False, path
+    return None, path
+
+
+def _latest_trading_day_from_calendar(
+    canonical_truth_root: Path | None,
+) -> tuple[str | None, Path | None]:
+    if canonical_truth_root is None:
+        return None, None
+    today = _today_utc_day()
+    best_day = ""
+    best_path: Path | None = None
+    years = sorted({_utc_now().year, _utc_now().year - 1}, reverse=True)
+    for exchange in ("NYSE", "NASDAQ"):
+        for year in years:
+            path = (
+                canonical_truth_root
+                / "market_calendar_v1"
+                / exchange
+                / f"{year}.jsonl"
+            ).resolve()
+            if not path.exists() or not path.is_file():
+                continue
+            try:
+                for raw in path.read_text(encoding="utf-8").splitlines():
+                    raw = raw.strip()
+                    if not raw:
+                        continue
+                    obj = json.loads(raw)
+                    if not isinstance(obj, dict):
+                        continue
+                    day_utc = str(obj.get("day_utc") or "").strip()
+                    if not DATE_RE.match(day_utc) or day_utc > today:
+                        continue
+                    if obj.get("is_trading_session") is True and day_utc > best_day:
+                        best_day = day_utc
+                        best_path = path
+            except Exception:
+                continue
+        if best_day:
+            return best_day, best_path
+    return (best_day if best_day else None), best_path
+
+
+def _read_operator_gate_status_for_day(day_utc: str) -> tuple[dict[str, Any] | None, Path]:
+    path = (OPERATOR_GATE_STATE_ROOT / f"operator_gate_{day_utc}.v1.json").resolve()
+    return _read_json(path), path
 
 
 def _status_from_evidence(path: Path | None, *, fresh_days: int = MAX_PROVEN_DAYS) -> str:
@@ -592,90 +733,335 @@ def _build_current_functionality(roots: RootResolution) -> str:
     return "\n".join(lines)
 
 
-def _build_paper_status(roots: RootResolution) -> PaperStatus:
+def _build_current_calendar_day_runtime_status(roots: RootResolution) -> CurrentCalendarDayStatus:
+    day_utc = _today_utc_day()
+    is_trading_session, market_calendar_path = _market_is_trading_session(
+        roots.canonical_truth_root, day_utc
+    )
+    expected_non_trading_day = is_trading_session is False
+
+    authority_path = (
+        roots.canonical_truth_root
+        / "reports"
+        / "paper_session_authority_v1"
+        / day_utc
+        / "paper_session_authority.v1.json"
+    ).resolve() if roots.canonical_truth_root else None
+    authority_payload = _read_json(authority_path)
+    authority_status = str(
+        (authority_payload or {}).get("authority_status") or "MISSING"
+    ).strip().upper()
+    authority_blocker = _first_reason_code(authority_payload)
+
+    boundary_path = (
+        roots.canonical_truth_root
+        / "reports"
+        / "submit_boundary_status_v1"
+        / day_utc
+        / "submit_boundary_status.v1.json"
+    ).resolve() if roots.canonical_truth_root else None
+    boundary_payload = _read_json(boundary_path)
+    boundary_status = str((boundary_payload or {}).get("boundary_status") or "").strip().upper()
+    boundary_submission_authorized = (boundary_payload or {}).get("submission_authorized")
+    boundary_blocker = str((boundary_payload or {}).get("first_blocker_code") or "").strip()
+
+    bootstrap_path = (
+        roots.canonical_truth_root
+        / "reports"
+        / "paper_session_bootstrap_v1"
+        / day_utc
+        / "paper_session_bootstrap.v1.json"
+    ).resolve() if roots.canonical_truth_root else None
+    bootstrap_payload = _read_json(bootstrap_path)
+    bootstrap_status = str((bootstrap_payload or {}).get("bootstrap_status") or "").strip().upper()
+    bootstrap_reason_codes = (bootstrap_payload or {}).get("canonical_stop_reason_codes")
+    bootstrap_blocker = (
+        str(bootstrap_reason_codes[0]).strip()
+        if isinstance(bootstrap_reason_codes, list) and bootstrap_reason_codes
+        else ""
+    )
+
+    status = "NOT_READY"
+    canonical_blocker = "SESSION_AUTHORITY_MISSING"
+    if is_trading_session is None:
+        status = "NOT_READY"
+        canonical_blocker = "SESSION_AUTHORITY_MISSING"
+    elif is_trading_session is False:
+        status = "NOT_READY"
+        canonical_blocker = authority_blocker or bootstrap_blocker or "NON_TRADING_DAY"
+    else:
+        authority_allows = authority_status in {"GRANTED", "AUTHORIZED"} and (
+            (authority_payload or {}).get("submission_authorized") is True
+        )
+        boundary_allows = boundary_status == "AUTHORIZED" and boundary_submission_authorized is True
+        if boundary_payload is not None:
+            if authority_allows and boundary_allows:
+                status = "READY"
+                canonical_blocker = ""
+            else:
+                status = "NOT_READY"
+                canonical_blocker = boundary_blocker or authority_blocker or "NO_ACTIVE_PAPER_SESSION"
+        elif authority_payload is not None:
+            if authority_allows:
+                status = "READY"
+                canonical_blocker = ""
+            else:
+                status = "NOT_READY"
+                canonical_blocker = authority_blocker or "NO_ACTIVE_PAPER_SESSION"
+        else:
+            status = "NOT_READY"
+            canonical_blocker = "SESSION_AUTHORITY_MISSING"
+
+    operator_gate_payload, operator_gate_path = _read_operator_gate_status_for_day(day_utc)
+    operator_gate_status = str((operator_gate_payload or {}).get("status") or "UNKNOWN").strip().upper()
+    operator_gate_blocker = str((operator_gate_payload or {}).get("session_day_blocker") or "").strip()
+    if not operator_gate_blocker:
+        operator_gate_blocker = _first_reason_code(operator_gate_payload, key="reason_codes")
+
+    paper_orchestrator_status = bootstrap_status or ("READY" if status == "READY" else "BLOCKED")
+    paper_orchestrator_blocker = bootstrap_blocker or canonical_blocker or "UNKNOWN"
+
+    global_monitoring_status = "UNKNOWN"
+    global_monitoring_blocker = ""
+    if canonical_blocker in {"NON_TRADING_DAY", "NO_ACTIVE_PAPER_SESSION"}:
+        global_monitoring_status = "DEGRADED"
+        global_monitoring_blocker = "NO_ACTIVE_PAPER_SESSION"
+    elif operator_gate_status == "FAIL" and operator_gate_blocker:
+        global_monitoring_status = "DEGRADED"
+        global_monitoring_blocker = operator_gate_blocker
+
+    service_status_summary = (
+        f"paper_orchestrator={paper_orchestrator_status}/{paper_orchestrator_blocker or '<none>'}; "
+        f"global_monitoring={global_monitoring_status}/{global_monitoring_blocker or '<none>'}; "
+        f"operator_gate={operator_gate_status}/{operator_gate_blocker or '<none>'}"
+    )
+
+    evidence_parts = [
+        str(path)
+        for path in (
+            market_calendar_path,
+            authority_path,
+            boundary_path,
+            bootstrap_path,
+            operator_gate_path if operator_gate_path.exists() else None,
+        )
+        if path is not None
+    ]
+    evidence = " ; ".join(evidence_parts) if evidence_parts else "NOT_FOUND"
+
+    if is_trading_session is True:
+        is_trading_session_text = "true"
+    elif is_trading_session is False:
+        is_trading_session_text = "false"
+    else:
+        is_trading_session_text = "UNKNOWN"
+
+    return CurrentCalendarDayStatus(
+        day_utc=day_utc,
+        is_trading_session=is_trading_session_text,
+        expected_non_trading_day=expected_non_trading_day,
+        paper_session_authority_path=str(authority_path) if authority_path else "NOT_FOUND",
+        paper_session_status=authority_status,
+        status=status,
+        canonical_blocker=canonical_blocker,
+        service_status_summary=service_status_summary,
+        evidence=evidence,
+    )
+
+
+def _build_latest_trading_day_evidence_status(roots: RootResolution) -> LatestTradingDayEvidenceStatus:
+    evidence_day_utc, _calendar_source = _latest_trading_day_from_calendar(
+        roots.canonical_truth_root
+    )
+    if not evidence_day_utc:
+        evidence_day_utc, _unused = _latest_day_with_file(
+            roots.canonical_truth_root,
+            "reports/submit_boundary_status_v1",
+            "submit_boundary_status.v1.json",
+        )
+    if not evidence_day_utc:
+        return LatestTradingDayEvidenceStatus(
+            evidence_day_utc="UNKNOWN",
+            status="UNKNOWN",
+            canonical_blocker="AEGIS_STATE_NOT_PROVEN",
+            submit_boundary_status_path="NOT_FOUND",
+            closure_authority_path="NOT_FOUND",
+            current_head_path="NOT_FOUND",
+            submission_index_path="NOT_FOUND",
+            evidence="NOT_FOUND",
+        )
+
+    submit_boundary_path = (
+        roots.canonical_truth_root
+        / "reports"
+        / "submit_boundary_status_v1"
+        / evidence_day_utc
+        / "submit_boundary_status.v1.json"
+    ).resolve() if roots.canonical_truth_root else None
+    closure_authority_path = (
+        roots.canonical_truth_root
+        / "reports"
+        / "aegis_day_closure_authority_v1"
+        / evidence_day_utc
+        / "aegis_day_closure_authority.v1.json"
+    ).resolve() if roots.canonical_truth_root else None
+    current_head_path = (
+        roots.runtime_truth_root
+        / "execution_evidence_v1"
+        / "current_head"
+        / evidence_day_utc
+        / "current_head.v1.json"
+    ).resolve() if roots.runtime_truth_root else None
+    submission_index_path = (
+        roots.runtime_truth_root
+        / "submission_index_v1"
+        / evidence_day_utc
+        / "submission_index.v1.json"
+    ).resolve() if roots.runtime_truth_root else None
+
+    submit_boundary_payload = _read_json(submit_boundary_path)
+    closure_payload = _read_json(closure_authority_path)
+    current_head_payload = _read_json(current_head_path)
+    submission_index_payload = _read_json(submission_index_path)
+
     status = "UNKNOWN"
     canonical_blocker = "AEGIS_STATE_NOT_PROVEN"
-    owning_subsystem = "UNKNOWN"
-    owning_gate = "UNKNOWN"
-    evidence = "NOT_FOUND"
-    reason = "submit boundary evidence not found"
-    day_utc = "UNKNOWN"
-
-    boundary_day, boundary_path = _latest_day_with_file(
-        roots.canonical_truth_root,
-        "reports/submit_boundary_status_v1",
-        "submit_boundary_status.v1.json",
-    )
-    boundary = _read_json(boundary_path)
-
-    control_plane_path: Path | None = None
-    control_plane: dict[str, Any] | None = None
-    if boundary_day and roots.canonical_truth_root:
-        control_plane_path = (
-            roots.canonical_truth_root
-            / "reports"
-            / "trading_day_control_plane_v1"
-            / boundary_day
-            / "trading_day_control_plane.v1.json"
-        ).resolve()
-        control_plane = _read_json(control_plane_path)
-
-    if boundary_day and isinstance(boundary, dict):
-        day_utc = boundary_day
-        evidence = str(boundary_path) if boundary_path else "NOT_FOUND"
-        boundary_status = str(boundary.get("boundary_status") or "").strip().upper()
-        submission_authorized = boundary.get("submission_authorized")
-        first_blocker = str(boundary.get("first_blocker_code") or "").strip()
-        control_plane_decision = str((control_plane or {}).get("final_start_decision") or "").strip().upper()
-        contradiction = (
-            boundary_status == "AUTHORIZED"
-            and submission_authorized is True
-            and control_plane_decision == "BLOCKED_BY_DEFECT"
-        )
-        freshness = _freshness_status_for_day(boundary_day)
-
-        if contradiction:
-            status = "NOT_READY"
-            canonical_blocker = "AEGIS_STATE_CONTRADICTORY_CONTROL_SURFACES"
-            owning_subsystem = "trading_day_control_plane_v1"
-            owning_gate = "consistency_surface_reconciliation"
-            evidence = f"{boundary_path} ; {control_plane_path}" if control_plane_path else str(boundary_path)
-            reason = "submit boundary says AUTHORIZED but trading_day_control_plane reports BLOCKED_BY_DEFECT"
-        elif freshness == "STALE":
-            status = "NOT_READY"
-            canonical_blocker = "AEGIS_STATE_STALE_EVIDENCE"
-            owning_subsystem = "submit_boundary_status_v1"
-            owning_gate = "freshness_policy"
-            reason = f"latest submit boundary day_utc={boundary_day} is stale"
-        elif boundary_status == "AUTHORIZED" and submission_authorized is True:
+    if isinstance(closure_payload, dict):
+        closure_status = str(closure_payload.get("status") or "").strip().upper()
+        closure_blocker = str(closure_payload.get("canonical_blocker") or "").strip()
+        if closure_status in {"PASS", "READY", "AUTHORIZED"}:
             status = "READY"
             canonical_blocker = ""
-            owning_subsystem = "submit_boundary_status_v1"
-            owning_gate = "boundary_status"
-            reason = "submit boundary reports AUTHORIZED and submission_authorized=true"
+        else:
+            status = "NOT_READY"
+            canonical_blocker = closure_blocker or "AEGIS_STATE_NOT_PROVEN"
+    elif isinstance(submit_boundary_payload, dict):
+        boundary_status = str(submit_boundary_payload.get("boundary_status") or "").strip().upper()
+        submission_authorized = submit_boundary_payload.get("submission_authorized")
+        first_blocker = str(submit_boundary_payload.get("first_blocker_code") or "").strip()
+        if boundary_status == "AUTHORIZED" and submission_authorized is True:
+            status = "READY"
+            canonical_blocker = ""
         else:
             status = "NOT_READY"
             canonical_blocker = first_blocker or "SUBMIT_BOUNDARY_NOT_AUTHORIZED"
-            owning_subsystem = "submit_boundary_status_v1"
-            owning_gate = "boundary_status"
-            reason = f"boundary_status={boundary_status or 'UNKNOWN'} submission_authorized={submission_authorized!r}"
+    elif (
+        str((current_head_payload or {}).get("status") or "").strip().upper() == "PASS"
+        and str((submission_index_payload or {}).get("status") or "").strip().upper() == "PASS"
+    ):
+        status = "READY"
+        canonical_blocker = ""
+    elif current_head_payload is not None or submission_index_payload is not None:
+        status = "NOT_READY"
+        canonical_blocker = "LATEST_TRADING_DAY_EVIDENCE_INCOMPLETE"
+
+    evidence_parts = [
+        str(path)
+        for path in (
+            submit_boundary_path,
+            closure_authority_path,
+            current_head_path,
+            submission_index_path,
+        )
+        if path is not None and path.exists()
+    ]
+    evidence = " ; ".join(evidence_parts) if evidence_parts else "NOT_FOUND"
+    return LatestTradingDayEvidenceStatus(
+        evidence_day_utc=evidence_day_utc,
+        status=status,
+        canonical_blocker=canonical_blocker,
+        submit_boundary_status_path=str(submit_boundary_path) if submit_boundary_path else "NOT_FOUND",
+        closure_authority_path=str(closure_authority_path) if closure_authority_path else "NOT_FOUND",
+        current_head_path=str(current_head_path) if current_head_path else "NOT_FOUND",
+        submission_index_path=str(submission_index_path) if submission_index_path else "NOT_FOUND",
+        evidence=evidence,
+    )
+
+
+def _build_paper_status(roots: RootResolution) -> PaperStatus:
+    current_day = _build_current_calendar_day_runtime_status(roots)
+    latest_trading_day = _build_latest_trading_day_evidence_status(roots)
+
+    overall_status = current_day.status
+    overall_canonical_blocker = current_day.canonical_blocker
+    owning_subsystem = "current_calendar_day_runtime_status"
+    owning_gate = "market_calendar_session_authority"
+    reason = (
+        f"current_day={current_day.day_utc} "
+        f"is_trading_session={current_day.is_trading_session} "
+        f"paper_session_status={current_day.paper_session_status}"
+    )
+
+    if current_day.expected_non_trading_day:
+        overall_status = "NOT_READY"
+        overall_canonical_blocker = current_day.canonical_blocker or "NON_TRADING_DAY"
+        owning_subsystem = "current_calendar_day_runtime_status"
+        owning_gate = "market_calendar_session_authority"
+        reason = f"current day {current_day.day_utc} is non-trading or no active paper session"
+    elif current_day.status == "READY":
+        overall_status = "READY"
+        overall_canonical_blocker = ""
+        owning_subsystem = "current_calendar_day_runtime_status"
+        owning_gate = "current_day_readiness_surfaces"
+        reason = f"current trading day {current_day.day_utc} readiness surfaces report READY"
+    else:
+        overall_status = "NOT_READY"
+        overall_canonical_blocker = current_day.canonical_blocker or "CURRENT_DAY_NOT_READY"
+        owning_subsystem = "current_calendar_day_runtime_status"
+        owning_gate = "current_day_readiness_surfaces"
+        reason = f"current trading day {current_day.day_utc} is not authorized for submission"
+
+    if current_day.expected_non_trading_day and overall_status == "READY":
+        overall_status = "NOT_READY"
+        overall_canonical_blocker = "NON_TRADING_DAY"
+
+    freshness_day = (
+        current_day.day_utc
+        if DATE_RE.match(current_day.day_utc)
+        else latest_trading_day.evidence_day_utc
+    )
+    freshness_status = _freshness_status_for_day(freshness_day)
 
     section_lines = [
+        "## Current Calendar Day Runtime Status",
+        "",
+        f"- day_utc: {current_day.day_utc}",
+        f"- is_trading_session: {current_day.is_trading_session}",
+        f"- paper_session_authority_path: {current_day.paper_session_authority_path}",
+        f"- paper_session_status: {current_day.paper_session_status}",
+        f"- service_status_summary: {current_day.service_status_summary}",
+        f"- status: {current_day.status}",
+        f"- canonical_blocker: {current_day.canonical_blocker}",
+        f"- expected_non_trading_day: {'true' if current_day.expected_non_trading_day else 'false'}",
+        "",
+        "## Latest Trading Day Evidence Status",
+        "",
+        f"- evidence_day_utc: {latest_trading_day.evidence_day_utc}",
+        f"- submit_boundary_status_path: {latest_trading_day.submit_boundary_status_path}",
+        f"- closure_authority_path: {latest_trading_day.closure_authority_path}",
+        f"- current_head_path: {latest_trading_day.current_head_path}",
+        f"- submission_index_path: {latest_trading_day.submission_index_path}",
+        f"- status: {latest_trading_day.status}",
+        f"- canonical_blocker: {latest_trading_day.canonical_blocker}",
+        "",
         "## Aegis Paper-Trading Status",
         "",
-        f"- status: {status}",
-        f"- canonical_blocker: {canonical_blocker}",
+        f"- status: {overall_status}",
+        f"- canonical_blocker: {overall_canonical_blocker}",
+        f"- latest_trading_day_blocker: {latest_trading_day.canonical_blocker}",
         f"- owning_subsystem: {owning_subsystem}",
         f"- owning_gate: {owning_gate}",
-        f"- evidence: {evidence}",
+        (
+            f"- evidence: {current_day.evidence} ; latest_trading_day={latest_trading_day.evidence_day_utc}:{latest_trading_day.evidence}"
+        ),
         f"- reason: {reason}",
         "",
     ]
     return PaperStatus(
         section="\n".join(section_lines),
-        status=status,
-        freshness_status=_freshness_status_for_day(day_utc),
-        day_utc=day_utc,
+        status=overall_status,
+        freshness_status=freshness_status,
+        day_utc=current_day.day_utc,
     )
 
 
@@ -911,6 +1297,8 @@ def _validate_packet_or_fail(packet_text: str, latest_path: Path, archive_path: 
         "## ChatGPT Closed-World Rules",
         "## Current Aegis Functionality",
         "## Current Active Components",
+        "## Current Calendar Day Runtime Status",
+        "## Latest Trading Day Evidence Status",
         "## Aegis Paper-Trading Status",
     ]
     missing = [marker for marker in required_markers if marker not in packet_text]
