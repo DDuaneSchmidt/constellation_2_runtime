@@ -976,3 +976,4 @@ Economic-state hardening note:
 - `ops/tools/run_aegis_expected_activity_extract_v1.py`
 - `ops/tools/run_ib_reconciliation_v1.py`
 - `ops/tools/run_ib_reconciliation_ai_packet_v1.py`
+- `ops/tools/run_ib_reconciliation_daily_loop_v1.py`

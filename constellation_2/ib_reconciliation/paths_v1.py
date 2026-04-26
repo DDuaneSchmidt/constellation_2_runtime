@@ -11,6 +11,7 @@ DEFAULT_IB_RECONCILIATION_ROOT = (RUNTIME_DATA_ROOT / "ib_reconciliation").resol
 TRUTH_SURFACE_REPORT_ROOT = (RUNTIME_DATA_ROOT / "truth" / "reports" / "ib_reconciliation_v1").resolve()
 RUNTIME_ROOT_ENV_VAR = "IB_RECONCILIATION_RUNTIME_ROOT"
 ALLOW_ANY_RUNTIME_ROOT_ENV_VAR = "IB_RECONCILIATION_ALLOW_ANY_RUNTIME_ROOT"
+TRUTH_SURFACE_ROOT_ENV_VAR = "IB_RECONCILIATION_TRUTH_SURFACE_ROOT"
 
 DAY_SUBDIRS = (
     "ib_raw",
@@ -74,8 +75,10 @@ def runtime_root_v1() -> Path:
 
 def truth_surface_report_path_v1(day_utc: str) -> Path:
     day = validate_day_utc_v1(day_utc)
+    root_raw = str(os.environ.get(TRUTH_SURFACE_ROOT_ENV_VAR) or "").strip()
+    truth_root = Path(root_raw).expanduser().resolve() if root_raw else TRUTH_SURFACE_REPORT_ROOT
     return _require_absolute_under_runtime_data(
-        (TRUTH_SURFACE_REPORT_ROOT / day / "ib_reconciliation.v1.json").resolve(),
+        (truth_root / day / "ib_reconciliation.v1.json").resolve(),
         label="TRUTH_SURFACE_REPORT_PATH",
     )
 
@@ -98,6 +101,14 @@ def alert_candidate_path_v1() -> Path:
     return _require_absolute_under_runtime_data(
         (runtime_root_v1() / "alerts" / "ib_reconciliation_alert_candidate.v1.json").resolve(),
         label="ALERT_CANDIDATE_PATH",
+    )
+
+
+def daily_alert_candidate_path_v1(day_utc: str) -> Path:
+    day = validate_day_utc_v1(day_utc)
+    return _require_absolute_under_runtime_data(
+        (runtime_root_v1() / "alerts" / day / "ib_reconciliation_alert_candidate.v1.json").resolve(),
+        label="DAILY_ALERT_CANDIDATE_PATH",
     )
 
 

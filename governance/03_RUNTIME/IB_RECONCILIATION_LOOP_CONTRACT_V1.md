@@ -31,3 +31,11 @@ Define the v1 operating contract for deterministic IB reconciliation between bro
 - Deterministic matching precedence is mandatory: `PERM_ID_EXACT`, `ORDER_ID_EXACT`, `SUBMISSION_ID_REFERENCE`, then low-confidence fallback.
 - Symbol-only, timestamp-only, quantity-only, and AI-proposed matching are forbidden.
 - Reconciliation must fail closed on malformed IB input artifacts.
+
+## Daily Operation Note
+
+After the IB Flex report is downloaded after market close, run:
+
+`python3 ops/tools/run_ib_reconciliation_daily_loop_v1.py --day_utc <YYYY-MM-DD> --ib_flex_xml <path>`
+
+Future automation may trigger this command when the IB report file appears. This v1 task does not install cron/systemd timers.
