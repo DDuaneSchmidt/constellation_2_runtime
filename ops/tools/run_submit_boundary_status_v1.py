@@ -406,12 +406,21 @@ def main(argv: List[str] | None = None) -> int:
                 consumer_id="submit_boundary_status_v1",
                 required_finality_states=["provisional", "finalized", "corrected"],
             )
-            readiness_ok = bool(readiness_ref.payload.get("ok") is True)
-            readiness_codes = [
+            readiness_reasons = [
                 str(code).strip()
                 for code in (readiness_ref.payload.get("reasons") or [])
-                if str(code).strip().startswith("FAIL:")
+                if str(code).strip()
             ]
+            readiness_ok = bool(readiness_ref.payload.get("ok") is True)
+            readiness_codes = [
+                code
+                for code in readiness_reasons
+                if code.startswith("FAIL:")
+            ]
+            if any("NOT_PASS" in code.upper() for code in readiness_reasons):
+                readiness_ok = False
+                readiness_codes.append("SUBMIT_BOUNDARY_READINESS_POLICY_NOT_PASS")
+            readiness_codes = sorted(set(readiness_codes))
             required_checks.append(
                 _check_row(
                     logical_name="trade_submit_readiness_c2_v1",
