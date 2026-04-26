@@ -742,22 +742,30 @@ class SessionReadinessRepairTests(unittest.TestCase):
             calls.append(cmd)
             return {"cmd": cmd, "returncode": 0, "stdout": "", "stderr": ""}
 
-        with patch.object(session_refresh_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value="DUO847203"), patch.object(
-            session_refresh_module, "_load_accounts", return_value={"PAPER": ["DUO847203"], "LIVE": []}
-        ), patch.object(
-            session_refresh_module, "_run", side_effect=fake_run
-        ), patch.object(
-            session_refresh_module, "_git_sha", return_value="abc1234"
-        ), patch.object(
-            session_refresh_module, "_resolve_paper_sleeve_truth_bindings", return_value=[]
-        ), patch.object(
-            session_refresh_module, "validate_against_repo_schema_v1", lambda *args, **kwargs: None
-        ), patch.object(
-            session_refresh_module, "_authority_lifecycle_result", return_value={"status": "OK", "incident_count": 0, "incidents": []}
-        ), patch(
-            "sys.argv", ["run_session_readiness_refresh_v1.py", "--day_utc", DAY]
-        ):
-            rc = session_refresh_module.main()
+        with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
+            root = Path(td)
+            global_truth = root / "constellation_2" / "runtime" / "truth"
+            self._write_minimal_registries(root)
+            with patch.object(session_refresh_module, "REPO_ROOT", root), patch.object(
+                session_refresh_module, "GLOBAL_TRUTH_ROOT", global_truth
+            ), patch.object(
+                session_refresh_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value="DUO847203"
+            ), patch.object(
+                session_refresh_module, "_load_accounts", return_value={"PAPER": ["DUO847203"], "LIVE": []}
+            ), patch.object(
+                session_refresh_module, "_run", side_effect=fake_run
+            ), patch.object(
+                session_refresh_module, "_git_sha", return_value="abc1234"
+            ), patch.object(
+                session_refresh_module, "_resolve_paper_sleeve_truth_bindings", return_value=[]
+            ), patch.object(
+                session_refresh_module, "validate_against_repo_schema_v1", lambda *args, **kwargs: None
+            ), patch.object(
+                session_refresh_module, "_authority_lifecycle_result", return_value={"status": "OK", "incident_count": 0, "incidents": []}
+            ), patch(
+                "sys.argv", ["run_session_readiness_refresh_v1.py", "--day_utc", DAY]
+            ):
+                rc = session_refresh_module.main()
 
         self.assertIn(rc, (0, 2))
         self.assertGreaterEqual(len(calls), 5)
@@ -794,18 +802,28 @@ class SessionReadinessRepairTests(unittest.TestCase):
                 return {"cmd": cmd, "returncode": 0, "stdout": json.dumps({"authority_status": "GRANTED"}), "stderr": ""}
             return {"cmd": cmd, "returncode": 0, "stdout": "", "stderr": ""}
 
-        with patch.object(session_refresh_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value="DUO847203"), patch.object(
-            session_refresh_module, "_load_accounts", return_value={"PAPER": ["DUO847203"], "LIVE": []}
-        ), patch.object(
-            session_refresh_module, "_run", side_effect=fake_run
-        ), patch.object(
-            session_refresh_module, "_resolve_paper_sleeve_truth_bindings", return_value=[]
-        ), patch.object(
-            session_refresh_module, "_authority_lifecycle_result", return_value={"status": "OK", "incident_count": 0, "incidents": []}
-        ), patch(
-            "sys.argv", ["run_session_readiness_refresh_v1.py", "--day_utc", DAY]
-        ):
-            rc = session_refresh_module.main()
+        with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
+            root = Path(td)
+            global_truth = root / "constellation_2" / "runtime" / "truth"
+            self._write_minimal_registries(root)
+            with patch.object(session_refresh_module, "REPO_ROOT", root), patch.object(
+                session_refresh_module, "GLOBAL_TRUTH_ROOT", global_truth
+            ), patch.object(
+                session_refresh_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value="DUO847203"
+            ), patch.object(
+                session_refresh_module, "_load_accounts", return_value={"PAPER": ["DUO847203"], "LIVE": []}
+            ), patch.object(
+                session_refresh_module, "_run", side_effect=fake_run
+            ), patch.object(
+                session_refresh_module, "_resolve_paper_sleeve_truth_bindings", return_value=[]
+            ), patch.object(
+                session_refresh_module, "validate_against_repo_schema_v1", lambda *args, **kwargs: None
+            ), patch.object(
+                session_refresh_module, "_authority_lifecycle_result", return_value={"status": "OK", "incident_count": 0, "incidents": []}
+            ), patch(
+                "sys.argv", ["run_session_readiness_refresh_v1.py", "--day_utc", DAY]
+            ):
+                rc = session_refresh_module.main()
 
         self.assertEqual(rc, 0)
         self.assertEqual(session_refresh_module.GLOBAL_GATE_REFRESH_TOOL.name, "run_gate_authority_plane_v1.py")
@@ -833,18 +851,28 @@ class SessionReadinessRepairTests(unittest.TestCase):
                 return {"cmd": cmd, "returncode": 0, "stdout": json.dumps({"authority_status": "GRANTED"}), "stderr": ""}
             return {"cmd": cmd, "returncode": 0, "stdout": "", "stderr": ""}
 
-        with patch.object(session_refresh_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value="DUO847203"), patch.object(
-            session_refresh_module, "_load_accounts", return_value={"PAPER": ["DUO847203"], "LIVE": []}
-        ), patch.object(
-            session_refresh_module, "_run", side_effect=fake_run
-        ), patch.object(
-            session_refresh_module, "_resolve_paper_sleeve_truth_bindings", return_value=[]
-        ), patch.object(
-            session_refresh_module, "_authority_lifecycle_result", return_value={"status": "OK", "incident_count": 0, "incidents": []}
-        ), patch(
-            "sys.argv", ["run_session_readiness_refresh_v1.py", "--day_utc", DAY]
-        ):
-            rc = session_refresh_module.main()
+        with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
+            root = Path(td)
+            global_truth = root / "constellation_2" / "runtime" / "truth"
+            self._write_minimal_registries(root)
+            with patch.object(session_refresh_module, "REPO_ROOT", root), patch.object(
+                session_refresh_module, "GLOBAL_TRUTH_ROOT", global_truth
+            ), patch.object(
+                session_refresh_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value="DUO847203"
+            ), patch.object(
+                session_refresh_module, "_load_accounts", return_value={"PAPER": ["DUO847203"], "LIVE": []}
+            ), patch.object(
+                session_refresh_module, "_run", side_effect=fake_run
+            ), patch.object(
+                session_refresh_module, "_resolve_paper_sleeve_truth_bindings", return_value=[]
+            ), patch.object(
+                session_refresh_module, "validate_against_repo_schema_v1", lambda *args, **kwargs: None
+            ), patch.object(
+                session_refresh_module, "_authority_lifecycle_result", return_value={"status": "OK", "incident_count": 0, "incidents": []}
+            ), patch(
+                "sys.argv", ["run_session_readiness_refresh_v1.py", "--day_utc", DAY]
+            ):
+                rc = session_refresh_module.main()
 
         self.assertEqual(rc, 0)
         build_index = next(
@@ -871,18 +899,28 @@ class SessionReadinessRepairTests(unittest.TestCase):
                 return {"cmd": cmd, "returncode": 0, "stdout": json.dumps({"authority_status": "GRANTED"}), "stderr": ""}
             return {"cmd": cmd, "returncode": 0, "stdout": "", "stderr": ""}
 
-        with patch.object(session_refresh_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value="DUO847203"), patch.object(
-            session_refresh_module, "_load_accounts", return_value={"PAPER": ["DUO847203"], "LIVE": []}
-        ), patch.object(
-            session_refresh_module, "_run", side_effect=fake_run
-        ), patch.object(
-            session_refresh_module, "_resolve_paper_sleeve_truth_bindings", return_value=[]
-        ), patch.object(
-            session_refresh_module, "_authority_lifecycle_result", return_value={"status": "OK", "incident_count": 0, "incidents": []}
-        ), patch(
-            "sys.argv", ["run_session_readiness_refresh_v1.py", "--day_utc", DAY]
-        ):
-            rc = session_refresh_module.main()
+        with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
+            root = Path(td)
+            global_truth = root / "constellation_2" / "runtime" / "truth"
+            self._write_minimal_registries(root)
+            with patch.object(session_refresh_module, "REPO_ROOT", root), patch.object(
+                session_refresh_module, "GLOBAL_TRUTH_ROOT", global_truth
+            ), patch.object(
+                session_refresh_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value="DUO847203"
+            ), patch.object(
+                session_refresh_module, "_load_accounts", return_value={"PAPER": ["DUO847203"], "LIVE": []}
+            ), patch.object(
+                session_refresh_module, "_run", side_effect=fake_run
+            ), patch.object(
+                session_refresh_module, "_resolve_paper_sleeve_truth_bindings", return_value=[]
+            ), patch.object(
+                session_refresh_module, "validate_against_repo_schema_v1", lambda *args, **kwargs: None
+            ), patch.object(
+                session_refresh_module, "_authority_lifecycle_result", return_value={"status": "OK", "incident_count": 0, "incidents": []}
+            ), patch(
+                "sys.argv", ["run_session_readiness_refresh_v1.py", "--day_utc", DAY]
+            ):
+                rc = session_refresh_module.main()
 
         self.assertEqual(rc, 0)
         readiness_indexes = [
@@ -914,18 +952,28 @@ class SessionReadinessRepairTests(unittest.TestCase):
                 return {"cmd": cmd, "returncode": 0, "stdout": json.dumps({"authority_status": "GRANTED"}), "stderr": ""}
             return {"cmd": cmd, "returncode": 0, "stdout": "", "stderr": ""}
 
-        with patch.object(session_refresh_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value="DUO847203"), patch.object(
-            session_refresh_module, "_load_accounts", return_value={"PAPER": ["DUO847203"], "LIVE": []}
-        ), patch.object(
-            session_refresh_module, "_run", side_effect=fake_run
-        ), patch.object(
-            session_refresh_module, "_resolve_paper_sleeve_truth_bindings", return_value=[]
-        ), patch.object(
-            session_refresh_module, "_authority_lifecycle_result", return_value={"status": "OK", "incident_count": 0, "incidents": []}
-        ), patch(
-            "sys.argv", ["run_session_readiness_refresh_v1.py", "--day_utc", DAY]
-        ):
-            rc = session_refresh_module.main()
+        with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
+            root = Path(td)
+            global_truth = root / "constellation_2" / "runtime" / "truth"
+            self._write_minimal_registries(root)
+            with patch.object(session_refresh_module, "REPO_ROOT", root), patch.object(
+                session_refresh_module, "GLOBAL_TRUTH_ROOT", global_truth
+            ), patch.object(
+                session_refresh_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value="DUO847203"
+            ), patch.object(
+                session_refresh_module, "_load_accounts", return_value={"PAPER": ["DUO847203"], "LIVE": []}
+            ), patch.object(
+                session_refresh_module, "_run", side_effect=fake_run
+            ), patch.object(
+                session_refresh_module, "_resolve_paper_sleeve_truth_bindings", return_value=[]
+            ), patch.object(
+                session_refresh_module, "validate_against_repo_schema_v1", lambda *args, **kwargs: None
+            ), patch.object(
+                session_refresh_module, "_authority_lifecycle_result", return_value={"status": "OK", "incident_count": 0, "incidents": []}
+            ), patch(
+                "sys.argv", ["run_session_readiness_refresh_v1.py", "--day_utc", DAY]
+            ):
+                rc = session_refresh_module.main()
 
         self.assertEqual(rc, 0)
         build_index = next(
@@ -961,25 +1009,33 @@ class SessionReadinessRepairTests(unittest.TestCase):
                     }
             return {"cmd": cmd, "returncode": 0, "stdout": "", "stderr": ""}
 
-        with patch.object(session_refresh_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value="DUO847203"), patch.object(
-            session_refresh_module, "_load_accounts", return_value={"PAPER": ["DUO847203"], "LIVE": []}
-        ), patch.object(
-            session_refresh_module, "_run", side_effect=fake_run
-        ), patch.object(
-            session_refresh_module, "_resolve_paper_sleeve_truth_bindings", return_value=[]
-        ), patch.object(
-            session_refresh_module, "_authority_lifecycle_result", return_value={"status": "OK", "incident_count": 0, "incidents": []}
-        ), patch(
-            "sys.argv", ["run_session_readiness_refresh_v1.py", "--day_utc", DAY]
-        ):
-            rc = session_refresh_module.main()
+        with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
+            root = Path(td)
+            global_truth = root / "constellation_2" / "runtime" / "truth"
+            self._write_minimal_registries(root)
+            with patch.object(session_refresh_module, "REPO_ROOT", root), patch.object(
+                session_refresh_module, "GLOBAL_TRUTH_ROOT", global_truth
+            ), patch.object(
+                session_refresh_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value="DUO847203"
+            ), patch.object(
+                session_refresh_module, "_load_accounts", return_value={"PAPER": ["DUO847203"], "LIVE": []}
+            ), patch.object(
+                session_refresh_module, "_run", side_effect=fake_run
+            ), patch.object(
+                session_refresh_module, "_resolve_paper_sleeve_truth_bindings", return_value=[]
+            ), patch.object(
+                session_refresh_module, "validate_against_repo_schema_v1", lambda *args, **kwargs: None
+            ), patch.object(
+                session_refresh_module, "_authority_lifecycle_result", return_value={"status": "OK", "incident_count": 0, "incidents": []}
+            ), patch(
+                "sys.argv", ["run_session_readiness_refresh_v1.py", "--day_utc", DAY]
+            ):
+                rc = session_refresh_module.main()
 
         self.assertIn(rc, (0, 2))
 
     def test_session_refresh_runs_scoped_gate_refresh_before_trade_submit_readiness(self) -> None:
         calls = []
-        primary_truth = REPO_ROOT / "tmp" / "fake_primary_truth"
-        tail_truth = REPO_ROOT / "tmp" / "fake_tail_truth"
 
         def fake_run(cmd, **kwargs):
             calls.append(cmd)
@@ -995,20 +1051,32 @@ class SessionReadinessRepairTests(unittest.TestCase):
                 self.truth_root = truth_root
                 self.truth_partition = f'truth_sleeves/{sleeve_id}/PAPER'
 
-        with patch.object(session_refresh_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value="DUO847203"), patch.object(
-            session_refresh_module, "_load_accounts", return_value={"PAPER": ["DUO847203"], "LIVE": []}
-        ), patch.object(
-            session_refresh_module, "_run", side_effect=fake_run
-        ), patch.object(
-            session_refresh_module, "_authority_lifecycle_result", return_value={"status": "OK", "incident_count": 0, "incidents": []}
-        ), patch.object(
-            session_refresh_module,
-            "_resolve_paper_sleeve_truth_bindings",
-            return_value=[_Binding('PRIMARY', primary_truth), _Binding('C2_DEFENSIVE_TAIL', tail_truth)],
-        ), patch(
-            "sys.argv", ["run_session_readiness_refresh_v1.py", "--day_utc", DAY]
-        ):
-            rc = session_refresh_module.main()
+        with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
+            root = Path(td)
+            global_truth = root / "constellation_2" / "runtime" / "truth"
+            primary_truth = root / "tmp" / "fake_primary_truth"
+            tail_truth = root / "tmp" / "fake_tail_truth"
+            self._write_minimal_registries(root)
+            with patch.object(session_refresh_module, "REPO_ROOT", root), patch.object(
+                session_refresh_module, "GLOBAL_TRUTH_ROOT", global_truth
+            ), patch.object(
+                session_refresh_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value="DUO847203"
+            ), patch.object(
+                session_refresh_module, "_load_accounts", return_value={"PAPER": ["DUO847203"], "LIVE": []}
+            ), patch.object(
+                session_refresh_module, "_run", side_effect=fake_run
+            ), patch.object(
+                session_refresh_module, "validate_against_repo_schema_v1", lambda *args, **kwargs: None
+            ), patch.object(
+                session_refresh_module, "_authority_lifecycle_result", return_value={"status": "OK", "incident_count": 0, "incidents": []}
+            ), patch.object(
+                session_refresh_module,
+                "_resolve_paper_sleeve_truth_bindings",
+                return_value=[_Binding('PRIMARY', primary_truth), _Binding('C2_DEFENSIVE_TAIL', tail_truth)],
+            ), patch(
+                "sys.argv", ["run_session_readiness_refresh_v1.py", "--day_utc", DAY]
+            ):
+                rc = session_refresh_module.main()
 
         self.assertIn(rc, (0, 2))
         trade_submit_index = next(
@@ -1036,20 +1104,30 @@ class SessionReadinessRepairTests(unittest.TestCase):
                 return {"cmd": cmd, "returncode": 0, "stdout": json.dumps({"authority_status": "GRANTED"}), "stderr": ""}
             return {"cmd": cmd, "returncode": 0, "stdout": "", "stderr": ""}
 
-        with patch.object(session_refresh_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value="DUO847203"), patch.object(
-            session_refresh_module, "_load_accounts", return_value={"PAPER": ["DUO847203"], "LIVE": []}
-        ), patch.object(
-            session_refresh_module, "_run", side_effect=fake_run
-        ), patch.object(
-            session_refresh_module, "_git_sha", return_value="abc1234"
-        ), patch.object(
-            session_refresh_module, "_resolve_paper_sleeve_truth_bindings", return_value=[]
-        ), patch.object(
-            session_refresh_module, "_authority_lifecycle_result", return_value={"status": "OK", "incident_count": 0, "incidents": []}
-        ), patch(
-            "sys.argv", ["run_session_readiness_refresh_v1.py", "--day_utc", DAY]
-        ):
-            rc = session_refresh_module.main()
+        with tempfile.TemporaryDirectory(dir=str(REPO_ROOT / "tmp")) as td:
+            root = Path(td)
+            global_truth = root / "constellation_2" / "runtime" / "truth"
+            self._write_minimal_registries(root)
+            with patch.object(session_refresh_module, "REPO_ROOT", root), patch.object(
+                session_refresh_module, "GLOBAL_TRUTH_ROOT", global_truth
+            ), patch.object(
+                session_refresh_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value="DUO847203"
+            ), patch.object(
+                session_refresh_module, "_load_accounts", return_value={"PAPER": ["DUO847203"], "LIVE": []}
+            ), patch.object(
+                session_refresh_module, "_run", side_effect=fake_run
+            ), patch.object(
+                session_refresh_module, "_git_sha", return_value="abc1234"
+            ), patch.object(
+                session_refresh_module, "_resolve_paper_sleeve_truth_bindings", return_value=[]
+            ), patch.object(
+                session_refresh_module, "validate_against_repo_schema_v1", lambda *args, **kwargs: None
+            ), patch.object(
+                session_refresh_module, "_authority_lifecycle_result", return_value={"status": "OK", "incident_count": 0, "incidents": []}
+            ), patch(
+                "sys.argv", ["run_session_readiness_refresh_v1.py", "--day_utc", DAY]
+            ):
+                rc = session_refresh_module.main()
 
         self.assertEqual(rc, 0)
         positions_index = next(
