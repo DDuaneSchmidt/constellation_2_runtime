@@ -16,6 +16,34 @@ export function renderError(message) {
   return `<div class="error-state">${escapeHtml(message)}</div>`;
 }
 
+export function renderOperatorDiagnosticPanel(diagnostic = {}) {
+  const endpointAttempted = diagnostic.endpointAttempted || "unknown";
+  const failureClass = diagnostic.failureClass || "UNKNOWN";
+  const backendUnreachable = diagnostic.backendUnreachable ? "yes" : "no";
+  const routeMissing = diagnostic.routeMissing ? "yes" : "no";
+  const payloadInvalid = diagnostic.payloadInvalid ? "yes" : "no";
+  const statusCode = diagnostic.statusCode === null || diagnostic.statusCode === undefined
+    ? "n/a"
+    : String(diagnostic.statusCode);
+  const nextAction = diagnostic.nextAction || "Inspect backend logs and browser network traces.";
+
+  return `
+    <article class="stack-card error-state">
+      <div class="stack-card-title">Capital API Diagnostic</div>
+      <div class="stack-card-subtitle">Fail-closed operator guidance for transport and payload contract failures.</div>
+      <div class="line-list">
+        <div><strong>Endpoint attempted:</strong> <span class="mono">${escapeHtml(endpointAttempted)}</span></div>
+        <div><strong>Failure class:</strong> ${escapeHtml(failureClass)}</div>
+        <div><strong>HTTP status:</strong> ${escapeHtml(statusCode)}</div>
+        <div><strong>Backend unreachable:</strong> ${escapeHtml(backendUnreachable)}</div>
+        <div><strong>Route missing:</strong> ${escapeHtml(routeMissing)}</div>
+        <div><strong>Payload invalid:</strong> ${escapeHtml(payloadInvalid)}</div>
+      </div>
+      <div class="stack-card-subtitle">${escapeHtml(nextAction)}</div>
+    </article>
+  `;
+}
+
 export function renderEvidenceRefs(refs = []) {
   if (!refs.length) return renderEmpty("No evidence refs.");
   return `<div class="evidence-list">${refs.map((ref) => `

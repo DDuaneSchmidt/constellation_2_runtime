@@ -1567,9 +1567,33 @@ class OpsHandler(SimpleHTTPRequestHandler):
         "/lifecycle",
     }
 
+    @staticmethod
+    def _local_cors_origin(origin: Optional[str]) -> Optional[str]:
+        if not isinstance(origin, str) or not origin.strip():
+            return None
+        try:
+            parsed = urlparse(origin)
+        except Exception:
+            return None
+        scheme = (parsed.scheme or "").lower()
+        hostname = (parsed.hostname or "").lower()
+        if scheme not in {"http", "https"}:
+            return None
+        if hostname not in {"127.0.0.1", "localhost"}:
+            return None
+        if not parsed.netloc:
+            return None
+        return f"{scheme}://{parsed.netloc}"
+
     def end_headers(self) -> None:
         # Prevent stale browser assets; dashboard is operational truth UI.
         self.send_header("Cache-Control", "no-store")
+        cors_origin = self._local_cors_origin(self.headers.get("Origin"))
+        if cors_origin:
+            self.send_header("Access-Control-Allow-Origin", cors_origin)
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Vary", "Origin")
         super().end_headers()
 
     def _send_json(self, code: int, obj: Any) -> None:
@@ -2162,6 +2186,11 @@ class OpsHandler(SimpleHTTPRequestHandler):
         if self._route_api():
             return
         return super().do_GET()
+
+    def do_OPTIONS(self) -> None:
+        self.send_response(HTTPStatus.NO_CONTENT)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def do_POST(self) -> None:
         if self._route_action_post():

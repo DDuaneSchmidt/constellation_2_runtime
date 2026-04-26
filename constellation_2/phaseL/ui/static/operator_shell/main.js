@@ -1,4 +1,4 @@
-import { escapeHtml, renderError } from "/operator_shell/shared_components/dom.js";
+import { escapeHtml, renderError, renderOperatorDiagnosticPanel } from "/operator_shell/shared_components/dom.js";
 import { renderAegisMark, renderStatusPill } from "/operator_shell/aegis_components/index.js";
 import {
   ROUTES,
@@ -203,7 +203,13 @@ async function renderRoute() {
     mainHost.innerHTML = view.html;
     contextHost.innerHTML = view.contextHtml || `<div class="empty-state">No contextual evidence for this surface.</div>`;
   } catch (error) {
-    mainHost.innerHTML = renderError(error.message || "Route render failed.");
+    const routePath = String(route.path || "");
+    const isCapitalRoute = routePath === "/capital" || routePath.startsWith("/capital/");
+    if (isCapitalRoute && error?.operatorSafe) {
+      mainHost.innerHTML = renderOperatorDiagnosticPanel(error.operatorSafe);
+    } else {
+      mainHost.innerHTML = renderError(error.message || "Route render failed.");
+    }
     contextHost.innerHTML = "";
   }
 }
