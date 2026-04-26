@@ -22,6 +22,7 @@
     "event_time_utc",
     "observed_at_utc",
     "broker_ids",
+    "event_attribution",
     "order_state",
     "fill",
     "canonical_json_hash"
@@ -87,6 +88,37 @@
       }
     },
 
+    "event_attribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "raw_order_id",
+        "raw_perm_id",
+        "attribution_method",
+        "attribution_confidence"
+      ],
+      "properties": {
+        "raw_order_id": { "type": ["integer", "null"], "minimum": 0 },
+        "raw_perm_id": { "type": ["integer", "null"], "minimum": 0 },
+        "attribution_method": {
+          "type": "string",
+          "enum": [
+            "DIRECT_BROKER_IDS",
+            "PERM_ID_BRIDGE",
+            "POST_HANDOFF_ORPHAN_FALLBACK",
+            "SYNTHETIC_SUBMISSION_SNAPSHOT"
+          ]
+        },
+        "attribution_confidence": {
+          "type": "string",
+          "enum": ["HIGH", "MEDIUM", "EXACT_SINGLE_MATCH"]
+        },
+        "attempt_id": { "type": "string", "minLength": 1 },
+        "matched_attempt_id": { "type": "string", "minLength": 1 },
+        "bridge_source_path": { "type": "string", "minLength": 1 }
+      }
+    },
+
     "order_state": {
       "type": "object",
       "additionalProperties": false,
@@ -95,7 +127,17 @@
         "status": {
           "type": "string",
           "enum": [
+            "OPEN_PENDING_SUBMIT",
+            "OPEN_PRE_SUBMITTED",
+            "OPEN_SUBMITTED",
+            "OPEN_PENDING_CANCEL",
+            "TERMINAL_FILLED",
+            "TERMINAL_CANCELLED",
+            "TERMINAL_INACTIVE",
+            "TERMINAL_REJECTED",
             "PRESUBMITTED",
+            "PENDINGSUBMIT",
+            "PENDINGCANCEL",
             "SUBMITTED",
             "ACKNOWLEDGED",
             "INACTIVE",
@@ -106,6 +148,21 @@
             "UNKNOWN"
           ]
         },
+        "raw_broker_status": { "type": "string", "minLength": 1 },
+        "normalized_lifecycle_status": {
+          "type": "string",
+          "enum": [
+            "OPEN_PENDING_SUBMIT",
+            "OPEN_PRE_SUBMITTED",
+            "OPEN_SUBMITTED",
+            "OPEN_PENDING_CANCEL",
+            "TERMINAL_FILLED",
+            "TERMINAL_CANCELLED",
+            "TERMINAL_INACTIVE",
+            "TERMINAL_REJECTED"
+          ]
+        },
+        "is_terminal": { "type": "boolean" },
         "filled_qty": { "type": "integer", "minimum": 0 },
         "remaining_qty": { "type": "integer", "minimum": 0 },
         "avg_fill_price": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" }

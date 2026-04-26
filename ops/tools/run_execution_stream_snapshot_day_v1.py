@@ -41,11 +41,24 @@ if str(REPO_ROOT) not in sys.path:
 from typing import Any, Dict, List, Optional, Tuple
 
 from constellation_2.common.runtime_guardrails_v1 import classify_failure, format_failure_line
+from constellation_2.common.execution_status_normalization_v1 import (
+    UNKNOWN_BROKER_ORDER_STATUS,
+    normalize_broker_order_status_v1,
+)
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
 SCHEMA_STREAM = "governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/execution_event_stream_record.v1.schema.json"
 SCHEMA_FAILURE = "governance/04_DATA/SCHEMAS/C2/EXECUTION_EVIDENCE/execution_evidence_failure.v1.schema.json"
+REPLAY_MODE_DEFAULT = "default"
+REPLAY_MODE_GOVERNED_NEW_ATTEMPT = "governed_new_attempt"
+ATTRIBUTION_METHOD_DIRECT_BROKER_IDS = "DIRECT_BROKER_IDS"
+ATTRIBUTION_METHOD_PERM_ID_BRIDGE = "PERM_ID_BRIDGE"
+ATTRIBUTION_METHOD_POST_HANDOFF_ORPHAN_FALLBACK = "POST_HANDOFF_ORPHAN_FALLBACK"
+ATTRIBUTION_METHOD_SYNTHETIC_SUBMISSION_SNAPSHOT = "SYNTHETIC_SUBMISSION_SNAPSHOT"
+ATTRIBUTION_CONFIDENCE_HIGH = "HIGH"
+ATTRIBUTION_CONFIDENCE_MEDIUM = "MEDIUM"
+ATTRIBUTION_CONFIDENCE_EXACT_SINGLE_MATCH = "EXACT_SINGLE_MATCH"
 
 SUBMISSIONS_DAY_ROOT: Path | None = None
 OUT_ROOT: Path | None = None
@@ -109,6 +122,25 @@ def _normalize_side(raw: Any) -> str:
     return side
 
 
+def _build_order_state_v1(
+    *,
+    raw_broker_status: str,
+    filled_qty: int,
+    remaining_qty: int,
+    avg_fill_price: str,
+) -> Dict[str, Any]:
+    normalized = normalize_broker_order_status_v1(raw_broker_status)
+    return {
+        "status": normalized.normalized_lifecycle_status,
+        "raw_broker_status": normalized.raw_broker_status,
+        "normalized_lifecycle_status": normalized.normalized_lifecycle_status,
+        "is_terminal": bool(normalized.is_terminal),
+        "filled_qty": int(filled_qty),
+        "remaining_qty": int(remaining_qty),
+        "avg_fill_price": str(avg_fill_price),
+    }
+
+
 def _fallback_match_key(*, symbol: str, action: str, qty: int) -> str:
     return f"{str(symbol).strip().upper()}|{_normalize_side(action)}|{int(qty)}"
 
@@ -162,13 +194,14 @@ def _write_failure(
     details: Dict[str, Any],
     input_manifest: List[Dict[str, Any]],
     attempted_outputs: List[Dict[str, Any]],
+    failure_path_override: Path | None = None,
 ) -> None:
     fail_obj: Dict[str, Any] = {
         "schema_id": "C2_EXECUTION_EVIDENCE_FAILURE_V1",
         "schema_version": 1,
         "produced_utc": produced_utc,
         "day_utc": day,
-        "producer": {"repo": "constellation_2_runtime", "git_sha": _git_sha(), "module": "ops/tools/run_execution_stream_snapshot_day_v1.py"},
+        "producer": {"repo": "constellation", "git_sha": _git_sha(), "module": "ops/tools/run_execution_stream_snapshot_day_v1.py"},
         "status": "FAIL_CORRUPT_INPUTS",
         "reason_codes": [code],
         "input_manifest": list(input_manifest),
@@ -181,8 +214,19 @@ def _write_failure(
     }
     validate_against_repo_schema_v1(fail_obj, REPO_ROOT, SCHEMA_FAILURE)
     payload = canonical_json_bytes_v1(fail_obj) + b"\n"
-    out_path = (FAIL_ROOT / day / "failure.json").resolve()
+    out_path = (
+        failure_path_override.resolve()
+        if failure_path_override is not None
+        else (FAIL_ROOT / day / "failure.json").resolve()
+    )
     _write_immutable(out_path, payload)
+
+
+def _build_replay_id(now_utc: str) -> str:
+    normalized = str(now_utc).strip().replace(":", "").replace("-", "").replace("T", "_").replace("Z", "")
+    if not normalized:
+        normalized = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return f"replay_{normalized}"
 
 
 def _list_submission_dirs(day: str) -> List[Path]:
@@ -290,6 +334,7 @@ def _submission_meta_rows(day: str) -> List[Dict[str, Any]]:
         eligible_orphan_fallback = (not has_broker_submission) and _orphan_submission_is_post_handoff(subdir)
         rows.append({
             "submission_id": submission_id,
+            "submission_record_path": str(bsr_p.resolve()),
             "binding_hash": binding_hash,
             "engine_id": engine_id,
             "source_intent_id": source_intent_id,
@@ -348,55 +393,207 @@ def _build_orphan_fallback_index(day: str) -> Dict[str, List[Dict[str, Any]]]:
     return idx
 
 
+def _build_perm_id_bridge_candidates(
+    *,
+    day: str,
+    truth_root: Path,
+    submission_meta_rows: List[Dict[str, Any]],
+) -> Tuple[Dict[int, List[Dict[str, Any]]], str]:
+    candidates_by_perm_id: Dict[int, List[Dict[str, Any]]] = {}
+    submission_index_path = (Path(truth_root).resolve() / "submission_index_v1" / day / "submission_index.v1.json").resolve()
+    if not submission_index_path.exists() or not submission_index_path.is_file():
+        return candidates_by_perm_id, f"SUBMISSION_INDEX_MISSING:{submission_index_path}"
+    try:
+        submission_index_obj = _read_json_obj(submission_index_path)
+    except Exception as exc:  # noqa: BLE001
+        return candidates_by_perm_id, (
+            f"SUBMISSION_INDEX_INVALID:{submission_index_path}:{type(exc).__name__}:{exc}"
+        )
+    attempts = submission_index_obj.get("attempts")
+    if not isinstance(attempts, list):
+        return candidates_by_perm_id, f"SUBMISSION_INDEX_INVALID_ATTEMPTS:{submission_index_path}"
+
+    by_submission_id: Dict[str, List[Dict[str, Any]]] = {}
+    by_submission_record_path: Dict[str, List[Dict[str, Any]]] = {}
+    for row in submission_meta_rows:
+        submission_id = str(row.get("submission_id") or "").strip()
+        if submission_id:
+            by_submission_id.setdefault(submission_id, []).append(row)
+        submission_record_path = str(row.get("submission_record_path") or "").strip()
+        if submission_record_path:
+            by_submission_record_path.setdefault(str(Path(submission_record_path).resolve()), []).append(row)
+
+    for attempt_row in attempts:
+        if not isinstance(attempt_row, dict):
+            continue
+        broker_perm_id = attempt_row.get("broker_perm_id")
+        if not isinstance(broker_perm_id, int) or broker_perm_id == 0:
+            continue
+        attempt_id = str(attempt_row.get("attempt_id") or "").strip()
+        if not attempt_id:
+            continue
+        submission_record_path = str(attempt_row.get("submission_record_path") or "").strip()
+        raw_candidates: List[Dict[str, Any]] = []
+        raw_candidates.extend(by_submission_id.get(attempt_id, []))
+        if submission_record_path:
+            raw_candidates.extend(
+                by_submission_record_path.get(str(Path(submission_record_path).resolve()), [])
+            )
+        unique_candidates: Dict[str, Dict[str, Any]] = {}
+        for row in raw_candidates:
+            candidate_submission_id = str(row.get("submission_id") or "").strip()
+            if candidate_submission_id:
+                unique_candidates[candidate_submission_id] = row
+        for row in unique_candidates.values():
+            candidates_by_perm_id.setdefault(broker_perm_id, []).append(
+                {
+                    "submission_id": row["submission_id"],
+                    "binding_hash": row["binding_hash"],
+                    "engine_id": row["engine_id"],
+                    "source_intent_id": row["source_intent_id"],
+                    "intent_sha256": row["intent_sha256"],
+                    "broker_env": row["broker_env"],
+                    "attempt_id": attempt_id,
+                    "bridge_source_path": str(submission_index_path),
+                    "broker_order_id": attempt_row.get("broker_order_id"),
+                    "broker_perm_id": attempt_row.get("broker_perm_id"),
+                }
+            )
+    for broker_perm_id, rows in list(candidates_by_perm_id.items()):
+        deduped: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        for row in rows:
+            deduped[(str(row.get("submission_id") or ""), str(row.get("attempt_id") or ""))] = row
+        candidates_by_perm_id[broker_perm_id] = list(deduped.values())
+    return candidates_by_perm_id, ""
+
+
+def _build_event_attribution(
+    *,
+    raw_order_id: Optional[int],
+    raw_perm_id: Optional[int],
+    attribution_method: str,
+    attribution_confidence: str,
+    attempt_id: str = "",
+    matched_attempt_id: str = "",
+    bridge_source_path: str = "",
+) -> Dict[str, Any]:
+    attribution: Dict[str, Any] = {
+        "raw_order_id": raw_order_id if isinstance(raw_order_id, int) else None,
+        "raw_perm_id": raw_perm_id if isinstance(raw_perm_id, int) else None,
+        "attribution_method": str(attribution_method).strip(),
+        "attribution_confidence": str(attribution_confidence).strip(),
+    }
+    if attempt_id:
+        attribution["attempt_id"] = attempt_id
+    if matched_attempt_id:
+        attribution["matched_attempt_id"] = matched_attempt_id
+    if bridge_source_path:
+        attribution["bridge_source_path"] = bridge_source_path
+    return attribution
+
+
 def _resolve_submission_meta_for_event(
     *,
     event_type: str,
     idx: Dict[str, Dict[str, Any]],
     orphan_fallback_idx: Dict[str, List[Dict[str, Any]]],
     orphan_claims: Dict[str, Tuple[Optional[int], Optional[int]]],
+    perm_id_bridge_candidates: Dict[int, List[Dict[str, Any]]],
+    perm_id_bridge_error: str,
     order_id: Optional[int],
     perm_id: Optional[int],
     symbol: str = "",
     action: str = "",
     order_qty: Optional[int] = None,
-) -> Tuple[Dict[str, Any], List[str]]:
+) -> Tuple[Dict[str, Any], List[str], Dict[str, Any]]:
+    if isinstance(order_id, int) and order_id != 0:
+        order_key = f"order_id:{order_id}"
+        if order_key in idx:
+            return (
+                idx[order_key],
+                [],
+                _build_event_attribution(
+                    raw_order_id=order_id,
+                    raw_perm_id=perm_id,
+                    attribution_method=ATTRIBUTION_METHOD_DIRECT_BROKER_IDS,
+                    attribution_confidence=ATTRIBUTION_CONFIDENCE_HIGH,
+                ),
+            )
+
+    if isinstance(order_id, int) and order_id == 0 and isinstance(perm_id, int) and perm_id != 0:
+        perm_key = f"perm_id:{perm_id}"
+        if perm_key in idx:
+            return (
+                idx[perm_key],
+                [],
+                _build_event_attribution(
+                    raw_order_id=order_id,
+                    raw_perm_id=perm_id,
+                    attribution_method=ATTRIBUTION_METHOD_DIRECT_BROKER_IDS,
+                    attribution_confidence=ATTRIBUTION_CONFIDENCE_HIGH,
+                ),
+            )
+        if perm_id_bridge_error:
+            raise RuntimeError(
+                "UNATTRIBUTABLE_BROKER_EVENT: "
+                f"event_type={event_type} order_id={order_id} perm_id={perm_id} "
+                f"perm_bridge_error={perm_id_bridge_error}"
+            )
+        bridge_matches = perm_id_bridge_candidates.get(perm_id, [])
+        if len(bridge_matches) == 0:
+            raise RuntimeError(
+                "UNATTRIBUTABLE_BROKER_EVENT: "
+                f"event_type={event_type} order_id={order_id} perm_id={perm_id} "
+                f"perm_bridge_match_count={len(bridge_matches)}"
+            )
+        if len(bridge_matches) > 1:
+            raise RuntimeError(
+                "AMBIGUOUS_BROKER_EVENT_ATTRIBUTION: "
+                f"event_type={event_type} order_id={order_id} perm_id={perm_id} "
+                f"perm_bridge_match_count={len(bridge_matches)}"
+            )
+        bridge_meta = bridge_matches[0]
+        return (
+            bridge_meta,
+            ["ATTRIBUTED_BY_PERM_ID_BRIDGE"],
+            _build_event_attribution(
+                raw_order_id=order_id,
+                raw_perm_id=perm_id,
+                attribution_method=ATTRIBUTION_METHOD_PERM_ID_BRIDGE,
+                attribution_confidence=ATTRIBUTION_CONFIDENCE_EXACT_SINGLE_MATCH,
+                attempt_id=str(bridge_meta.get("attempt_id") or ""),
+                matched_attempt_id=str(bridge_meta.get("attempt_id") or ""),
+                bridge_source_path=str(bridge_meta.get("bridge_source_path") or ""),
+            ),
+        )
+
     if isinstance(perm_id, int):
         perm_key = f"perm_id:{perm_id}"
         if perm_key in idx:
-            return idx[perm_key], []
+            return (
+                idx[perm_key],
+                [],
+                _build_event_attribution(
+                    raw_order_id=order_id,
+                    raw_perm_id=perm_id,
+                    attribution_method=ATTRIBUTION_METHOD_DIRECT_BROKER_IDS,
+                    attribution_confidence=ATTRIBUTION_CONFIDENCE_HIGH,
+                ),
+            )
 
     if isinstance(order_id, int):
         order_key = f"order_id:{order_id}"
         if order_key in idx:
-            return idx[order_key], []
-
-    normalized_symbol = str(symbol).strip().upper()
-    normalized_action = _normalize_side(action)
-    if normalized_symbol and normalized_action and isinstance(order_qty, int) and order_qty > 0:
-        fb_key = _fallback_match_key(symbol=normalized_symbol, action=normalized_action, qty=order_qty)
-        candidates = orphan_fallback_idx.get(fb_key, [])
-        if len(candidates) > 1:
-            cand_ids = ",".join(sorted(str(row.get("submission_id") or "") for row in candidates))
-            raise RuntimeError(
-                f"AMBIGUOUS_BROKER_EVENT: event_type={event_type} order_id={order_id} perm_id={perm_id} "
-                f"symbol={normalized_symbol} action={normalized_action} qty={order_qty} candidates={cand_ids}"
+            return (
+                idx[order_key],
+                [],
+                _build_event_attribution(
+                    raw_order_id=order_id,
+                    raw_perm_id=perm_id,
+                    attribution_method=ATTRIBUTION_METHOD_DIRECT_BROKER_IDS,
+                    attribution_confidence=ATTRIBUTION_CONFIDENCE_HIGH,
+                ),
             )
-        if len(candidates) == 1:
-            meta = candidates[0]
-            submission_id = str(meta.get("submission_id") or "")
-            existing = orphan_claims.get(submission_id)
-            current_pair = (order_id, perm_id)
-            if existing is not None and existing != current_pair:
-                raise RuntimeError(
-                    f"AMBIGUOUS_BROKER_EVENT: event_type={event_type} order_id={order_id} perm_id={perm_id} "
-                    f"submission_id={submission_id} existing_claim={existing}"
-                )
-            orphan_claims[submission_id] = current_pair
-            if isinstance(order_id, int):
-                idx[f"order_id:{order_id}"] = meta
-            if isinstance(perm_id, int):
-                idx[f"perm_id:{perm_id}"] = meta
-            return meta, ["ATTRIBUTED_BY_POST_HANDOFF_ORPHAN_FALLBACK"]
 
     raise RuntimeError(f"UNATTRIBUTABLE_BROKER_EVENT: event_type={event_type} order_id={order_id} perm_id={perm_id}")
 
@@ -408,6 +605,11 @@ def main() -> int:
     ap.add_argument("--ib_host", default="127.0.0.1")
     ap.add_argument("--ib_port", type=int, default=4002)
     ap.add_argument("--ib_client_id", type=int, default=7)
+    ap.add_argument(
+        "--replay_mode",
+        default=REPLAY_MODE_DEFAULT,
+        choices=[REPLAY_MODE_DEFAULT, REPLAY_MODE_GOVERNED_NEW_ATTEMPT],
+    )
     args = ap.parse_args()
 
     day = str(args.day_utc).strip()
@@ -415,15 +617,49 @@ def main() -> int:
     observed_at = _now_iso_z()
 
     truth_root = _require_truth_root(args.truth_root)
+    replay_mode = str(args.replay_mode or REPLAY_MODE_DEFAULT).strip().lower()
+    replay_enabled = replay_mode == REPLAY_MODE_GOVERNED_NEW_ATTEMPT
+    replay_id = _build_replay_id(observed_at) if replay_enabled else ""
     global SUBMISSIONS_DAY_ROOT, OUT_ROOT, FAIL_ROOT
     SUBMISSIONS_DAY_ROOT = (truth_root / "execution_evidence_v1" / "submissions").resolve()
     OUT_ROOT = (truth_root / "execution_stream_v1").resolve()
     FAIL_ROOT = (OUT_ROOT / "failures").resolve()
 
-    out_day = (OUT_ROOT / day).resolve()
+    out_day = (
+        (OUT_ROOT / "replays" / day / replay_id).resolve()
+        if replay_enabled
+        else (OUT_ROOT / day).resolve()
+    )
     out_day.mkdir(parents=True, exist_ok=True)
+    replay_artifact_path = (out_day / "execution_stream_snapshot.v1.json").resolve() if replay_enabled else None
+    replay_failure_override = (out_day / "failure.json").resolve() if replay_enabled else None
+    source_failure_artifact_path = (OUT_ROOT / "failures" / day / "failure.json").resolve()
     attempted_outputs = [{"path": str(out_day), "sha256": None}]
     input_manifest: List[Dict[str, Any]] = []
+    replay_raw_broker_status = ""
+    replay_normalized_lifecycle_status = ""
+    replay_submission_record_path = ""
+
+    def emit_replay_summary(status_value: str) -> None:
+        if not replay_enabled or replay_artifact_path is None:
+            return
+        payload = {
+            "schema_version": "execution_stream_snapshot_replay.v1",
+            "day": day,
+            "replay_id": replay_id,
+            "source_failure_artifact_path": str(source_failure_artifact_path),
+            "source_submission_record_path": replay_submission_record_path,
+            "raw_broker_status": replay_raw_broker_status,
+            "normalized_lifecycle_status": replay_normalized_lifecycle_status,
+            "immutable_history_preserved": True,
+            "status": str(status_value).strip().upper() or "FAIL",
+            "generated_at_utc": observed_at,
+        }
+        replay_artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        replay_artifact_path.write_text(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
 
     # Inputs: phaseD submissions root + day dir hash
     day_dir = (SUBMISSIONS_DAY_ROOT / day).resolve()
@@ -443,62 +679,113 @@ def main() -> int:
             details={"error": str(e), "day_dir": str(day_dir)},
             input_manifest=input_manifest,
             attempted_outputs=attempted_outputs,
+            failure_path_override=replay_failure_override,
         )
+        emit_replay_summary("FAIL")
         print(f"FAIL: {e}", file=sys.stderr)  # type: ignore[name-defined]
         return 2
 
+    submission_meta_rows = _submission_meta_rows(day)
+    perm_id_bridge_candidates, perm_id_bridge_error = _build_perm_id_bridge_candidates(
+        day=day,
+        truth_root=truth_root,
+        submission_meta_rows=submission_meta_rows,
+    )
+    if submission_meta_rows:
+        first_submission_id = str(submission_meta_rows[0].get("submission_id") or "").strip()
+        if first_submission_id:
+            replay_submission_record_path = str(
+                (
+                    SUBMISSIONS_DAY_ROOT
+                    / day
+                    / first_submission_id
+                    / "broker_submission_record.v2.json"
+                ).resolve()
+            )
+
     synthetic_rows = [
         row
-        for row in _submission_meta_rows(day)
+        for row in submission_meta_rows
         if row.get("engine_id") and row.get("source_intent_id") and row.get("intent_sha256") and isinstance(row.get("order_qty"), int) and int(row.get("order_qty")) > 0
     ]
     if not idx and synthetic_rows:
         wrote = 0
-        for meta in synthetic_rows:
-            event_hash = _event_hash_key([
-                day,
-                "ORDER_STATUS",
-                str(meta["submission_id"]),
-                "",
-                "",
-                str(meta.get("broker_status") or "UNKNOWN"),
-                "0",
-                "0",
-                "0",
-                str(meta.get("submitted_at_utc") or produced_utc),
-            ])
-            rec: Dict[str, Any] = {
-                "schema_id": "C2_EXECUTION_EVENT_STREAM_RECORD_V1",
-                "schema_version": 1,
-                "produced_utc": str(meta.get("submitted_at_utc") or produced_utc),
-                "day_utc": day,
-                "producer": {"repo": "constellation_2_runtime", "git_sha": _git_sha(), "module": "ops/tools/run_execution_stream_snapshot_day_v1.py"},
-                "status": "OK",
-                "reason_codes": ["DRY_RUN_SUBMISSION_SNAPSHOT"],
-                "submission_id": str(meta["submission_id"]),
-                "binding_hash": str(meta["binding_hash"]),
-                "engine_id": str(meta["engine_id"]),
-                "source_intent_id": str(meta["source_intent_id"]),
-                "intent_sha256": str(meta["intent_sha256"]),
-                "broker": {"name": "INTERACTIVE_BROKERS", "environment": str(meta.get("broker_env") or "PAPER")},
-                "event_type": "ORDER_STATUS",
-                "event_time_utc": str(meta.get("submitted_at_utc") or produced_utc),
-                "observed_at_utc": str(meta.get("submitted_at_utc") or produced_utc),
-                "broker_ids": {"order_id": None, "perm_id": None},
-                "order_state": {
-                    "status": str(meta.get("broker_status") or "UNKNOWN"),
-                    "filled_qty": 0,
-                    "remaining_qty": int(meta.get("order_qty") or 0),
-                    "avg_fill_price": "0",
-                },
-                "fill": {"fill_qty": 0, "fill_price": "0", "commission": "0", "currency": "USD"},
-                "canonical_json_hash": "",
-            }
-            rec["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(rec)
-            validate_against_repo_schema_v1(rec, REPO_ROOT, SCHEMA_STREAM)
-            out_path = (out_day / f"{event_hash}.execution_event_stream_record.v1.json").resolve()
-            _write_immutable(out_path, canonical_json_bytes_v1(rec) + b"\n")
-            wrote += 1
+        try:
+            for meta in synthetic_rows:
+                event_hash = _event_hash_key([
+                    day,
+                    "ORDER_STATUS",
+                    str(meta["submission_id"]),
+                    "",
+                    "",
+                    str(meta.get("broker_status") or "UNKNOWN"),
+                    "0",
+                    "0",
+                    "0",
+                    str(meta.get("submitted_at_utc") or produced_utc),
+                ])
+                raw_status = str(meta.get("broker_status") or "UNKNOWN").strip()
+                rec: Dict[str, Any] = {
+                    "schema_id": "C2_EXECUTION_EVENT_STREAM_RECORD_V1",
+                    "schema_version": 1,
+                    "produced_utc": str(meta.get("submitted_at_utc") or produced_utc),
+                    "day_utc": day,
+                    "producer": {"repo": "constellation", "git_sha": _git_sha(), "module": "ops/tools/run_execution_stream_snapshot_day_v1.py"},
+                    "status": "OK",
+                    "reason_codes": ["DRY_RUN_SUBMISSION_SNAPSHOT"],
+                    "submission_id": str(meta["submission_id"]),
+                    "binding_hash": str(meta["binding_hash"]),
+                    "engine_id": str(meta["engine_id"]),
+                    "source_intent_id": str(meta["source_intent_id"]),
+                    "intent_sha256": str(meta["intent_sha256"]),
+                    "broker": {"name": "INTERACTIVE_BROKERS", "environment": str(meta.get("broker_env") or "PAPER")},
+                    "event_type": "ORDER_STATUS",
+                    "event_time_utc": str(meta.get("submitted_at_utc") or produced_utc),
+                    "observed_at_utc": str(meta.get("submitted_at_utc") or produced_utc),
+                    "broker_ids": {"order_id": None, "perm_id": None},
+                    "event_attribution": _build_event_attribution(
+                        raw_order_id=None,
+                        raw_perm_id=None,
+                        attribution_method=ATTRIBUTION_METHOD_SYNTHETIC_SUBMISSION_SNAPSHOT,
+                        attribution_confidence=ATTRIBUTION_CONFIDENCE_HIGH,
+                    ),
+                    "order_state": _build_order_state_v1(
+                        raw_broker_status=raw_status,
+                        filled_qty=0,
+                        remaining_qty=int(meta.get("order_qty") or 0),
+                        avg_fill_price="0",
+                    ),
+                    "fill": {"fill_qty": 0, "fill_price": "0", "commission": "0", "currency": "USD"},
+                    "canonical_json_hash": "",
+                }
+                rec["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(rec)
+                if not replay_raw_broker_status:
+                    replay_raw_broker_status = str(rec["order_state"].get("raw_broker_status") or "")
+                    replay_normalized_lifecycle_status = str(rec["order_state"].get("normalized_lifecycle_status") or "")
+                validate_against_repo_schema_v1(rec, REPO_ROOT, SCHEMA_STREAM)
+                out_path = (out_day / f"{event_hash}.execution_event_stream_record.v1.json").resolve()
+                _write_immutable(out_path, canonical_json_bytes_v1(rec) + b"\n")
+                wrote += 1
+        except Exception as e:
+            failure_code = (
+                UNKNOWN_BROKER_ORDER_STATUS
+                if UNKNOWN_BROKER_ORDER_STATUS in str(e).upper()
+                else "EXEC_STREAM_TRADE_PARSE_OR_ATTRIBUTION_FAILED"
+            )
+            _write_failure(
+                day=day,
+                produced_utc=produced_utc,
+                code=failure_code,
+                message="Synthetic submission snapshot failed",
+                details={"error": str(e)},
+                input_manifest=input_manifest,
+                attempted_outputs=attempted_outputs,
+                failure_path_override=replay_failure_override,
+            )
+            emit_replay_summary("FAIL")
+            print(f"FAIL: {e}", file=sys.stderr)
+            return 2
+        emit_replay_summary("PASS")
         print(f"OK: EXECUTION_STREAM_SNAPSHOT_WRITTEN day={day} wrote={wrote} out_dir={out_day}")
         return 0
 
@@ -514,7 +801,9 @@ def main() -> int:
             details={"error": repr(e)},
             input_manifest=input_manifest,
             attempted_outputs=attempted_outputs,
+            failure_path_override=replay_failure_override,
         )
+        emit_replay_summary("FAIL")
         print(f"FAIL: ib_insync import failed: {e!r}")
         return 2
 
@@ -541,7 +830,9 @@ def main() -> int:
             details={"host": str(args.ib_host), "port": int(args.ib_port), "client_id": int(args.ib_client_id), "error": last_err},
             input_manifest=input_manifest,
             attempted_outputs=attempted_outputs,
+            failure_path_override=replay_failure_override,
         )
+        emit_replay_summary("FAIL")
         print(f"FAIL: BROKER_CONNECT_FAILED: {last_err}")
         return 2
 
@@ -559,7 +850,9 @@ def main() -> int:
             details={"error": repr(e)},
             input_manifest=input_manifest,
             attempted_outputs=attempted_outputs,
+            failure_path_override=replay_failure_override,
         )
+        emit_replay_summary("FAIL")
         print(f"FAIL: BROKER_PULL_FAILED: {e!r}")
         return 2
 
@@ -576,16 +869,21 @@ def main() -> int:
         symbol: str,
         action: str,
         order_qty: Optional[int],
-        order_state: Dict[str, Any],
+        raw_broker_status: str,
+        filled_qty: int,
+        remaining_qty: int,
+        avg_fill_price: str,
         fill: Dict[str, Any],
         raw: Dict[str, Any],
     ) -> None:
         nonlocal wrote
-        meta, attribution_reason_codes = _resolve_submission_meta_for_event(
+        meta, attribution_reason_codes, event_attribution = _resolve_submission_meta_for_event(
             event_type=event_type,
             idx=idx,
             orphan_fallback_idx=orphan_fallback_idx,
             orphan_claims=orphan_claims,
+            perm_id_bridge_candidates=perm_id_bridge_candidates,
+            perm_id_bridge_error=perm_id_bridge_error,
             order_id=order_id,
             perm_id=perm_id,
             symbol=symbol,
@@ -600,6 +898,16 @@ def main() -> int:
 
         if not (engine_id and source_intent_id and intent_sha256):
             raise RuntimeError(f"MISSING_LINEAGE_FOR_SUBMISSION: submission_id={submission_id}")
+        order_state = _build_order_state_v1(
+            raw_broker_status=raw_broker_status,
+            filled_qty=filled_qty,
+            remaining_qty=remaining_qty,
+            avg_fill_price=avg_fill_price,
+        )
+        nonlocal replay_raw_broker_status, replay_normalized_lifecycle_status
+        if not replay_raw_broker_status:
+            replay_raw_broker_status = str(order_state.get("raw_broker_status") or "")
+            replay_normalized_lifecycle_status = str(order_state.get("normalized_lifecycle_status") or "")
 
         event_hash = _event_hash_key(
             [
@@ -616,12 +924,22 @@ def main() -> int:
             ]
         )
 
+        attributed_order_id = order_id
+        attributed_perm_id = perm_id
+        if str(event_attribution.get("attribution_method") or "").strip() == ATTRIBUTION_METHOD_PERM_ID_BRIDGE:
+            bridged_order_id = meta.get("broker_order_id")
+            bridged_perm_id = meta.get("broker_perm_id")
+            if isinstance(bridged_order_id, int) and bridged_order_id >= 0:
+                attributed_order_id = bridged_order_id
+            if isinstance(bridged_perm_id, int) and bridged_perm_id >= 0:
+                attributed_perm_id = bridged_perm_id
+
         rec: Dict[str, Any] = {
             "schema_id": "C2_EXECUTION_EVENT_STREAM_RECORD_V1",
             "schema_version": 1,
             "produced_utc": produced_utc,
             "day_utc": day,
-            "producer": {"repo": "constellation_2_runtime", "git_sha": _git_sha(), "module": "ops/tools/run_execution_stream_snapshot_day_v1.py"},
+            "producer": {"repo": "constellation", "git_sha": _git_sha(), "module": "ops/tools/run_execution_stream_snapshot_day_v1.py"},
             "status": "OK",
             "reason_codes": attribution_reason_codes,
             "submission_id": submission_id,
@@ -633,7 +951,8 @@ def main() -> int:
             "event_type": event_type,
             "event_time_utc": str(raw.get("event_time_utc") or observed_at),
             "observed_at_utc": observed_at,
-            "broker_ids": {"order_id": order_id, "perm_id": perm_id},
+            "broker_ids": {"order_id": attributed_order_id, "perm_id": attributed_perm_id},
+            "event_attribution": event_attribution,
             "order_state": order_state,
             "fill": fill,
             "canonical_json_hash": "",
@@ -663,7 +982,6 @@ def main() -> int:
             qty_i = int(qty) if float(qty) > 0 else None
             symbol = str(getattr(getattr(t, "contract", None), "symbol", "") or "").strip().upper()
 
-            order_state = {"status": st, "filled_qty": filled, "remaining_qty": remaining, "avg_fill_price": avg_s}
             fill = {"fill_qty": 0, "fill_price": "0", "commission": "0", "currency": "USD"}
             raw = {"event_time_utc": observed_at, "trade": str(t)}
             write_record(
@@ -673,20 +991,30 @@ def main() -> int:
                 symbol=symbol,
                 action=action,
                 order_qty=qty_i,
-                order_state=order_state,
+                raw_broker_status=st,
+                filled_qty=filled,
+                remaining_qty=remaining,
+                avg_fill_price=avg_s,
                 fill=fill,
                 raw=raw,
             )
     except Exception as e:
+        failure_code = (
+            UNKNOWN_BROKER_ORDER_STATUS
+            if UNKNOWN_BROKER_ORDER_STATUS in str(e).upper()
+            else "EXEC_STREAM_TRADE_PARSE_OR_ATTRIBUTION_FAILED"
+        )
         _write_failure(
             day=day,
             produced_utc=produced_utc,
-            code="EXEC_STREAM_TRADE_PARSE_OR_ATTRIBUTION_FAILED",
+            code=failure_code,
             message="Trade parse/attribution failed (day purity violation or malformed trade)",
             details={"error": str(e)},
             input_manifest=input_manifest,
             attempted_outputs=attempted_outputs,
+            failure_path_override=replay_failure_override,
         )
+        emit_replay_summary("FAIL")
         print(f"FAIL: {e}")
         return 2
 
@@ -702,7 +1030,6 @@ def main() -> int:
             event_time = str(time_s) if time_s is not None else observed_at
 
             fill = {"fill_qty": int(shares), "fill_price": str(Decimal(str(price))), "commission": "0", "currency": "USD"}
-            order_state = {"status": "UNKNOWN", "filled_qty": int(shares), "remaining_qty": 0, "avg_fill_price": str(Decimal(str(price)))}
             raw = {"event_time_utc": event_time, "execution": str(exec_obj)}
             write_record(
                 event_type="EXEC_DETAILS",
@@ -711,7 +1038,10 @@ def main() -> int:
                 symbol="",
                 action="",
                 order_qty=None,
-                order_state=order_state,
+                raw_broker_status="FILLED",
+                filled_qty=int(shares),
+                remaining_qty=0,
+                avg_fill_price=str(Decimal(str(price))),
                 fill=fill,
                 raw=raw,
             )
@@ -724,10 +1054,13 @@ def main() -> int:
             details={"error": str(e)},
             input_manifest=input_manifest,
             attempted_outputs=attempted_outputs,
+            failure_path_override=replay_failure_override,
         )
+        emit_replay_summary("FAIL")
         print(f"FAIL: {e}")
         return 2
 
+    emit_replay_summary("PASS")
     print(f"OK: EXECUTION_STREAM_SNAPSHOT_WRITTEN day={day} wrote={wrote} out_dir={str(out_day)}")
     return 0
 

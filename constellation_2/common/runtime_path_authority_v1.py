@@ -132,13 +132,22 @@ def resolve_execution_truth_root_v1(
 def require_authoritative_repo_runtime_v1(repo_root: Path | None = None) -> Path:
     resolved_repo_root = Path(repo_root or REPO_ROOT).resolve()
     authoritative_repo_root = resolve_authoritative_repo_root_v1(resolved_repo_root)
-    if resolved_repo_root != authoritative_repo_root:
-        raise SystemExit(
-            "FAIL: AUTHORITATIVE_REPO_RUNTIME_REQUIRED:"
-            f"runtime_repo={resolved_repo_root}:authoritative_repo={authoritative_repo_root}"
-        )
-    return authoritative_repo_root
+    if resolved_repo_root == authoritative_repo_root:
+        return authoritative_repo_root
 
+    # Services execute from /home/node/constellation_active -> /home/node/constellation_releases/*.
+    # Accept only the currently activated release root from runtime authority.
+    runtime_authority = load_release_current_runtime_authority_v1(
+        caller="constellation_2/common/runtime_path_authority_v1.py::require_authoritative_repo_runtime_v1"
+    )
+    release_root = Path(str(runtime_authority.get("release_root") or "")).resolve()
+    if release_root == resolved_repo_root:
+        return release_root
+
+    raise SystemExit(
+        "FAIL: AUTHORITATIVE_REPO_RUNTIME_REQUIRED:"
+        f"runtime_repo={resolved_repo_root}:authoritative_repo={authoritative_repo_root}:active_release_root={release_root}"
+    )
 
 def resolve_runtime_path_authority_snapshot_v1(*, repo_root: Path | None = None) -> Dict[str, str]:
     authority = load_runtime_path_authority_v1(repo_root=repo_root)
