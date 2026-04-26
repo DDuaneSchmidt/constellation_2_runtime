@@ -157,7 +157,10 @@ fi
 
 SHA="$(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || true)"
 if [[ -z "${SHA}" || "${SHA}" == "null" ]]; then
-  echo "FAIL: unable to resolve authoritative repo git SHA from ${REPO_ROOT}" >&2
+  SHA="$(printf '%s' "${RUNTIME_IDENTITY_JSON}" | jq -r '.git_sha // .release_provenance.git_sha // empty' 2>/dev/null || true)"
+fi
+if [[ -z "${SHA}" || "${SHA}" == "null" ]]; then
+  echo "FAIL: unable to resolve authoritative repo git SHA from repo root or runtime identity metadata repo_root=${REPO_ROOT}" >&2
   exit 2
 fi
 ACTIVE_SESSION_PATH=""
