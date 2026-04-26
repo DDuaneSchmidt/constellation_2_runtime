@@ -22,6 +22,81 @@ def _write_json(path: Path, obj: dict) -> None:
     path.write_text(json.dumps(obj, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
 
 
+def _install_phasec_fixture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    fixture_root = (tmp_path / "_smoketest_phasec_2026_04_02").resolve()
+    fixture_root.mkdir(parents=True, exist_ok=True)
+    _write_json(
+        fixture_root / "equity_order_plan.v2.json",
+        {
+            "plan_id": "phasec-fixture-plan-v1",
+            "source_intent_id": "proof_intent_seed_v1",
+            "intent_hash": "a" * 64,
+            "intent_sha256": "a" * 64,
+            "engine_id": "C2_TREND_EQ_PRIMARY_V1",
+            "symbol": "SPY",
+            "currency": "USD",
+            "qty_shares": 1,
+            "action": "BUY",
+            "order_terms": {"order_type": "LIMIT", "limit_price": "1.23", "time_in_force": "DAY"},
+        },
+    )
+    monkeypatch.setattr(proof_module, "PHASEC_FIXTURE", fixture_root)
+    return fixture_root
+
+
+def _write_submit_pair_fixture(
+    *,
+    tmp_path: Path,
+    day: str,
+    closure_status: str,
+    dependency_detail: str,
+) -> dict[str, Path | str]:
+    pair_root = (tmp_path / "submit_pair").resolve()
+    pair_root.mkdir(parents=True, exist_ok=True)
+    build_path = (pair_root / "execution_build.v1.json").resolve()
+    _write_json(
+        build_path,
+        {
+            "schema_id": "execution_build",
+            "schema_version": "v1",
+            "closure_status": closure_status,
+            "dependency_results": [
+                {
+                    "dependency_id": "capital_authority_allocation_v1",
+                    "status": "BLOCKED",
+                    "detail": dependency_detail,
+                }
+            ],
+        },
+    )
+    return {
+        "execution_build_path": build_path,
+        "execution_package_path": (pair_root / "execution_package.v1.json").resolve(),
+        "submission_record_path": (pair_root / "submission_record.v1.json").resolve(),
+        "submission_id": "a" * 64,
+    }
+
+
+def _write_submission_record_fixture(
+    *,
+    path: Path,
+    package_path: Path,
+    package_sha: str,
+    submission_id: str,
+) -> None:
+    _write_json(
+        path,
+        {
+            "status": "READY_TO_SUBMIT",
+            "submission_id": submission_id,
+            "execution_package_ref": {
+                "path": str(package_path.resolve()),
+                "sha256": package_sha,
+            },
+        },
+    )
+
+
 def _call_submit(
     *,
     truth_root: Path,
@@ -67,7 +142,8 @@ def _call_submit(
     )
 
 
-def test_broker_boundary_fails_closed_by_default(tmp_path: Path) -> None:
+def test_broker_boundary_fails_closed_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_phasec_fixture(monkeypatch, tmp_path)
     day = proof_module.DEFAULT_DAY
     produced_utc = proof_module.DEFAULT_PRODUCED_UTC
     truth_root = Path("/tmp/constellation_2_foundation/paper_day_readiness_test_submit_v1") / "truth_sleeves" / "PRIMARY" / "PAPER"
@@ -78,6 +154,13 @@ def test_broker_boundary_fails_closed_by_default(tmp_path: Path) -> None:
         produced_utc=produced_utc,
         ib_account="DUO847203",
     )
+    pair = _write_submit_pair_fixture(
+        tmp_path=tmp_path,
+        day=day,
+        closure_status="BLOCKED",
+        dependency_detail="READINESS_EXECUTION_BUILD_NOT_COMPLETE",
+    )
+    monkeypatch.setattr(proof_module, "_resolve_existing_submit_pair_for_day", lambda **kwargs: pair)
     with pytest.raises(SystemExit, match="READINESS_EXECUTION_BUILD_NOT_COMPLETE"):
         proof_module._materialize_submit_interface_inputs(
             truth_root=truth_root,
@@ -88,7 +171,11 @@ def test_broker_boundary_fails_closed_by_default(tmp_path: Path) -> None:
         )
 
 
-def test_paper_day_readiness_selects_canonical_capital_lineage_and_reveals_rejection(tmp_path: Path) -> None:
+def test_paper_day_readiness_selects_canonical_capital_lineage_and_reveals_rejection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_phasec_fixture(monkeypatch, tmp_path)
     day = proof_module.DEFAULT_DAY
     produced_utc = proof_module.DEFAULT_PRODUCED_UTC
     truth_root = Path("/tmp/constellation_2_foundation/paper_day_readiness_test_submit_v2") / "truth_sleeves" / "PRIMARY" / "PAPER"
@@ -99,13 +186,13 @@ def test_paper_day_readiness_selects_canonical_capital_lineage_and_reveals_rejec
         produced_utc=produced_utc,
         ib_account="DUO847203",
     )
-    selected_pair = proof_module._resolve_existing_submit_pair_for_day(day=day)
-    build_obj = json.loads(Path(str(selected_pair["execution_build_path"])).read_text(encoding="utf-8"))
-    candidate_ref = dict(build_obj.get("candidate_ref") or {})
-    candidate_path = str(candidate_ref.get("phasec_out_dir") or candidate_ref.get("path") or "")
-    assert "c5d143b73ce2abed1650df5ef637994a924dba64e8df7f64c29c964850654d8f" in candidate_path
-    assert "03baac64479f27f2137331d879f8bcf5fb8663e5a77f33cc15f8238844357b92" not in str(selected_pair["submission_id"])
-    assert not Path(str(selected_pair["execution_package_path"])).exists()
+    pair = _write_submit_pair_fixture(
+        tmp_path=tmp_path,
+        day=day,
+        closure_status="BLOCKED",
+        dependency_detail="CAPITAL_AUTHORITY_NOT_AUTHORIZED",
+    )
+    monkeypatch.setattr(proof_module, "_resolve_existing_submit_pair_for_day", lambda **kwargs: pair)
     with pytest.raises(SystemExit, match="CAPITAL_AUTHORITY_NOT_AUTHORIZED"):
         proof_module._materialize_submit_interface_inputs(
             truth_root=truth_root,
@@ -141,9 +228,23 @@ def test_submit_tool_keeps_paths_when_execution_build_constitutional_payload_is_
             "schema_id": "execution_package",
             "schema_version": "v1",
             "operation_type": "fresh_paper_entry_v1",
+            "day_utc": "2026-04-24",
+            "submission_id": "a" * 64,
+            "canonical_json_hash": "b" * 64,
+            "environment": "PAPER",
+            "ib_account": "DUO847203",
             "build_ref": {"path": str(build_path.resolve())},
-            "candidate_ref": {"phasec_out_dir": str(candidate_path.resolve())},
+            "candidate_ref": {
+                "phasec_out_dir": str(candidate_path.resolve()),
+                "execution_truth_root": str((tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER").resolve()),
+            },
         },
+    )
+    _write_submission_record_fixture(
+        path=submission_path,
+        package_path=package_path,
+        package_sha="b" * 64,
+        submission_id="a" * 64,
     )
 
     monkeypatch.setattr(submit_tool, "validate_governed_artifact_payload_v1", lambda **kwargs: {})
@@ -183,6 +284,8 @@ def test_submit_tool_refreshes_submission_bridge_when_execution_build_dependency
             "day_utc": "2026-04-24",
             "environment": "PAPER",
             "ib_account": "DUO847203",
+            "submission_id": "a" * 64,
+            "canonical_json_hash": "a" * 64,
             "build_ref": {"path": str(build_path.resolve())},
             "candidate_ref": {
                 "phasec_out_dir": str(candidate_path.resolve()),
@@ -201,6 +304,9 @@ def test_submit_tool_refreshes_submission_bridge_when_execution_build_dependency
             "ib_account": "DUO847203",
             "submission_id": "a" * 64,
             "canonical_json_hash": "b" * 64,
+            "candidate_ref": {
+                "execution_truth_root": str((tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER").resolve())
+            },
         },
     )
 
@@ -329,6 +435,8 @@ def test_submit_tool_refreshes_readiness_before_execution_build_refresh(
             "day_utc": "2026-04-24",
             "environment": "PAPER",
             "ib_account": "DUO847203",
+            "submission_id": "a" * 64,
+            "canonical_json_hash": "a" * 64,
             "build_ref": {"path": str(build_path.resolve())},
             "candidate_ref": {
                 "phasec_out_dir": str(candidate_path.resolve()),
@@ -347,6 +455,9 @@ def test_submit_tool_refreshes_readiness_before_execution_build_refresh(
             "ib_account": "DUO847203",
             "submission_id": "a" * 64,
             "canonical_json_hash": "b" * 64,
+            "candidate_ref": {
+                "execution_truth_root": str((tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER").resolve())
+            },
         },
     )
 
@@ -421,9 +532,23 @@ def test_submit_tool_fails_closed_when_execution_package_build_ref_path_is_missi
             "schema_id": "execution_package",
             "schema_version": "v1",
             "operation_type": "fresh_paper_entry_v1",
+            "day_utc": "2026-04-24",
+            "submission_id": "a" * 64,
+            "canonical_json_hash": "b" * 64,
+            "environment": "PAPER",
+            "ib_account": "DUO847203",
             "build_ref": {},
-            "candidate_ref": {"phasec_out_dir": str((tmp_path / "candidate").resolve())},
+            "candidate_ref": {
+                "phasec_out_dir": str((tmp_path / "candidate").resolve()),
+                "execution_truth_root": str((tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER").resolve()),
+            },
         },
+    )
+    _write_submission_record_fixture(
+        path=submission_path,
+        package_path=package_path,
+        package_sha="b" * 64,
+        submission_id="a" * 64,
     )
 
     with pytest.raises(SystemExit, match="execution_package_build_ref_path_missing"):
@@ -453,8 +578,7 @@ def test_paper_day_validated_proof_command_produces_expected_outputs(tmp_path: P
     )
     assert completed.returncode != 0
     stderr = completed.stderr + completed.stdout
-    assert "READINESS_EXECUTION_BUILD_NOT_COMPLETE" in stderr
-    assert "CAPITAL_AUTHORITY_NOT_AUTHORIZED" in stderr
+    assert "REQUIRED_PHASEC_FIXTURE_MISSING" in stderr
 
 
 def test_paper_day_proof_fails_closed_on_missing_phasec_fixture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

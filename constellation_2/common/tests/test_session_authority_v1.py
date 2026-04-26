@@ -1339,7 +1339,7 @@ def test_wrapper_consumes_session_authority_only() -> None:
     wrapper = Path("/home/node/constellation/ops/run/c2_paper_day_orchestrator_systemd_entry_v1.sh").read_text(encoding="utf-8")
     assert 'DAY="$(TZ=America/New_York date +%F)"' not in wrapper
     assert "run_session_authority_v1.py" in wrapper
-    assert "active_session_v1/current.json" in wrapper
+    assert "run_day_open_attempt_v1.py" in wrapper
     assert "ROLLOVER_REASON_CODE" in wrapper
 
 

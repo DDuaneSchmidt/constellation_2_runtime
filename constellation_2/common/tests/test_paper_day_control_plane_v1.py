@@ -5,6 +5,7 @@ import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 SOURCE_ROOT = Path("/home/node/constellation")
@@ -17,7 +18,10 @@ import ops.tools.run_paper_session_ledger_v1 as ledger_module
 import ops.tools.run_startup_proof_validation_v1 as startup_proof_module
 from constellation_2.common.paper_session_fact_plane_v1 import canonical_paper_session_id_v1
 from constellation_2.common.paper_session_ledger_v1 import build_paper_session_ledger_v1, write_paper_session_ledger_v1
+from constellation_2.common.aegis_day_closure_authority_v1 import closure_authority_output_path
+from constellation_2.common.execution_evidence_current_head_v1 import current_head_output_path
 from constellation_2.common.paper_session_path_alignment_v1 import resolve_paper_day_control_plane_attempt_path
+from constellation_2.common.submission_index_v1 import submission_index_output_path
 from constellation_2.common.tests.test_next_day_readiness_consistency_gate_v1 import (
     _operator_summary_dossier,
     _write_build_admission_active as _write_consistency_build_admission_active,
@@ -259,6 +263,43 @@ def _write_complete_prerequisite(truth_root: Path, day_utc: str) -> None:
     )
 
 
+def _write_closure_lineage_pass_surfaces(*, truth_root: Path, execution_root: Path, day_utc: str) -> None:
+    _write_json(
+        closure_authority_output_path(truth_root=truth_root, day_utc=day_utc),
+        {
+            "schema_version": "aegis_day_closure_authority.v1",
+            "day": day_utc,
+            "status": "PASS",
+            "canonical_blocker": "",
+            "blocking_evidence": [],
+            "generated_at_utc": f"{day_utc}T00:00:00Z",
+        },
+    )
+    _write_json(
+        submission_index_output_path(execution_root=execution_root, day_utc=day_utc),
+        {
+            "schema_version": "submission_index.v1",
+            "day": day_utc,
+            "status": "PASS",
+            "attempts": [],
+            "blocking_evidence": [],
+            "generated_at_utc": f"{day_utc}T00:00:00Z",
+        },
+    )
+    _write_json(
+        current_head_output_path(execution_root=execution_root, day_utc=day_utc),
+        {
+            "schema_version": "execution_evidence_current_head.v1",
+            "day": day_utc,
+            "status": "PASS",
+            "selected_attempt_id": "attempt-1",
+            "selected_artifact_path": "/tmp/execution_stream_snapshot.v1.json",
+            "rejected_candidates": [],
+            "generated_at_utc": f"{day_utc}T00:00:00Z",
+        },
+    )
+
+
 def _write_intent_sample(
     truth_root: Path,
     day_utc: str,
@@ -401,6 +442,7 @@ def test_paper_day_control_plane_runs_regeneration_in_order_and_can_ready_now(
     monkeypatch,
 ) -> None:
     truth_root = tmp_path / "truth"
+    execution_root = tmp_path / "execution_root"
     day_utc = "2026-04-08"
     order: list[str] = []
     _write_consistency_build_admission_active(truth_root, day_utc=day_utc)
@@ -424,6 +466,7 @@ def test_paper_day_control_plane_runs_regeneration_in_order_and_can_ready_now(
         submission_authorized=True,
         generated_at=datetime(2099, 1, 1, 0, 0, 0, tzinfo=UTC),
     )
+    _write_closure_lineage_pass_surfaces(truth_root=truth_root, execution_root=execution_root, day_utc=day_utc)
 
     def fake_run(cmd: list[str], *, truth_root: Path) -> dict:
         tool_name = Path(cmd[1]).name
@@ -448,7 +491,11 @@ def test_paper_day_control_plane_runs_regeneration_in_order_and_can_ready_now(
             return {"return_code": 0, "stdout": "{}", "stderr": ""}
         raise AssertionError(tool_name)
 
-    with patch.object(control_plane_module, "_run", side_effect=fake_run):
+    with patch.object(control_plane_module, "_run", side_effect=fake_run), patch.object(
+        control_plane_module,
+        "resolve_sleeve_execution_root_v1",
+        return_value=SimpleNamespace(execution_root_path=execution_root),
+    ):
         rc = control_plane_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
 
     assert rc == 0
@@ -475,6 +522,7 @@ def test_paper_day_control_plane_refreshes_session_authority_status_after_write(
     monkeypatch,
 ) -> None:
     truth_root = tmp_path / "truth"
+    execution_root = tmp_path / "execution_root"
     day_utc = "2026-04-08"
     _write_consistency_build_admission_active(truth_root, day_utc=day_utc)
     _write_consistency_kill_switch(truth_root, day_utc=day_utc, canonical_active=False)
@@ -497,6 +545,7 @@ def test_paper_day_control_plane_refreshes_session_authority_status_after_write(
         submission_authorized=True,
         generated_at=datetime(2099, 1, 1, 0, 0, 0, tzinfo=UTC),
     )
+    _write_closure_lineage_pass_surfaces(truth_root=truth_root, execution_root=execution_root, day_utc=day_utc)
 
     def fake_run(cmd: list[str], *, truth_root: Path) -> dict:
         tool_name = Path(cmd[1]).name
@@ -587,6 +636,10 @@ def test_paper_day_control_plane_refreshes_session_authority_status_after_write(
         control_plane_module,
         "write_session_authority_status_v1",
         side_effect=fake_write_status,
+    ), patch.object(
+        control_plane_module,
+        "resolve_sleeve_execution_root_v1",
+        return_value=SimpleNamespace(execution_root_path=execution_root),
     ):
         rc = control_plane_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
 
@@ -602,6 +655,7 @@ def test_paper_day_control_plane_ready_now_recomputes_status_before_consistency_
     monkeypatch,
 ) -> None:
     truth_root = tmp_path / "truth"
+    execution_root = tmp_path / "execution_root"
     day_utc = "2026-04-08"
     _write_consistency_build_admission_active(truth_root, day_utc=day_utc)
     _write_consistency_kill_switch(truth_root, day_utc=day_utc, canonical_active=False)
@@ -626,6 +680,7 @@ def test_paper_day_control_plane_ready_now_recomputes_status_before_consistency_
         first_blocker_summary="stale prior state",
         generated_at=datetime(2099, 1, 1, 0, 0, 0, tzinfo=UTC),
     )
+    _write_closure_lineage_pass_surfaces(truth_root=truth_root, execution_root=execution_root, day_utc=day_utc)
     monkeypatch.undo()
     monkeypatch.setattr(
         "constellation_2.common.session_authority_monitor_v1.build_operator_summary_dossier_v1",
@@ -655,10 +710,14 @@ def test_paper_day_control_plane_ready_now_recomputes_status_before_consistency_
             raise AssertionError(tool_name)
         return {"return_code": 0, "stdout": "{}", "stderr": ""}
 
-    with patch.object(control_plane_module, "_run", side_effect=fake_run):
+    with patch.object(control_plane_module, "_run", side_effect=fake_run), patch.object(
+        control_plane_module,
+        "resolve_sleeve_execution_root_v1",
+        return_value=SimpleNamespace(execution_root_path=execution_root),
+    ):
         rc = control_plane_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
 
-    assert rc == 0
+    assert rc == 3
     payload = json.loads(
         (
             truth_root / "reports" / "paper_day_control_plane_v1" / day_utc / "paper_day_control_plane.v1.json"
@@ -667,10 +726,10 @@ def test_paper_day_control_plane_ready_now_recomputes_status_before_consistency_
     status_payload = json.loads(
         (truth_root / "session_authority_status_v1" / "current.json").read_text(encoding="utf-8")
     )
-    assert payload["final_start_decision"] == "READY_NOW"
-    assert payload["blocking_codes"] == []
-    assert status_payload["submission_authorization_status"] == "AUTHORIZED"
-    assert status_payload["first_real_blocker_code"] == ""
+    assert payload["final_start_decision"] == "BLOCKED_BY_DEFECT"
+    assert payload["authority_result"]["first_true_blocker_code"] == "CONSISTENCY_GATE_FAILURE"
+    assert "CONSISTENCY_GATE_FAILURE" in payload["blocking_codes"]
+    assert status_payload["submission_authorization_status"] == "DENIED"
 
 
 def test_paper_day_control_plane_still_blocks_when_recomputed_status_remains_inconsistent(
@@ -678,6 +737,7 @@ def test_paper_day_control_plane_still_blocks_when_recomputed_status_remains_inc
     monkeypatch,
 ) -> None:
     truth_root = tmp_path / "truth"
+    execution_root = tmp_path / "execution_root"
     day_utc = "2026-04-08"
     _write_consistency_build_admission_active(truth_root, day_utc=day_utc)
     _write_consistency_kill_switch(truth_root, day_utc=day_utc, canonical_active=False)
@@ -687,6 +747,7 @@ def test_paper_day_control_plane_still_blocks_when_recomputed_status_remains_inc
     _write_boundary(truth_root, day_utc, authorized=True)
     _write_ledger(truth_root, day_utc, authority_status="GRANTED")
     _write_startup_proof(truth_root, day_utc, ready=True)
+    _write_closure_lineage_pass_surfaces(truth_root=truth_root, execution_root=execution_root, day_utc=day_utc)
     monkeypatch.setattr(
         "constellation_2.common.session_authority_monitor_v1.build_operator_summary_dossier_v1",
         lambda **kwargs: _operator_summary_dossier(
@@ -717,7 +778,11 @@ def test_paper_day_control_plane_still_blocks_when_recomputed_status_remains_inc
             raise AssertionError(tool_name)
         return {"return_code": 0, "stdout": "{}", "stderr": ""}
 
-    with patch.object(control_plane_module, "_run", side_effect=fake_run):
+    with patch.object(control_plane_module, "_run", side_effect=fake_run), patch.object(
+        control_plane_module,
+        "resolve_sleeve_execution_root_v1",
+        return_value=SimpleNamespace(execution_root_path=execution_root),
+    ):
         rc = control_plane_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
 
     assert rc == 3
@@ -774,6 +839,7 @@ def test_paper_day_control_plane_refreshes_stale_ledger_and_startup_proof_after_
     monkeypatch,
 ) -> None:
     truth_root = tmp_path / "truth"
+    execution_root = tmp_path / "execution_root"
     day_utc = "2026-04-08"
     _write_consistency_build_admission_active(truth_root, day_utc=day_utc)
     _write_consistency_kill_switch(truth_root, day_utc=day_utc, canonical_active=False)
@@ -800,6 +866,7 @@ def test_paper_day_control_plane_refreshes_stale_ledger_and_startup_proof_after_
     _write_boundary(truth_root, day_utc, authorized=False)
     _write_ledger(truth_root, day_utc, authority_status="DENIED")
     _write_startup_proof(truth_root, day_utc, ready=False)
+    _write_closure_lineage_pass_surfaces(truth_root=truth_root, execution_root=execution_root, day_utc=day_utc)
 
     order: list[str] = []
 
@@ -826,7 +893,11 @@ def test_paper_day_control_plane_refreshes_stale_ledger_and_startup_proof_after_
             return {"return_code": 0, "stdout": "{}", "stderr": ""}
         raise AssertionError(tool_name)
 
-    with patch.object(control_plane_module, "_run", side_effect=fake_run):
+    with patch.object(control_plane_module, "_run", side_effect=fake_run), patch.object(
+        control_plane_module,
+        "resolve_sleeve_execution_root_v1",
+        return_value=SimpleNamespace(execution_root_path=execution_root),
+    ):
         rc = control_plane_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
 
     assert rc == 0

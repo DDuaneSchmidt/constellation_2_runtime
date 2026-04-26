@@ -12,6 +12,9 @@ if str(SOURCE_ROOT) not in sys.path:
 
 import ops.tools.run_paper_session_ledger_v1 as ledger_module
 import ops.tools.run_submit_boundary_status_v1 as boundary_module
+from constellation_2.common.aegis_day_closure_authority_v1 import closure_authority_output_path
+from constellation_2.common.execution_evidence_current_head_v1 import current_head_output_path
+from constellation_2.common.submission_index_v1 import submission_index_output_path
 
 
 DAY = "2026-04-13"
@@ -198,6 +201,52 @@ def _paper_session_authority_payload(*, authority_status: str = "GRANTED") -> di
     }
 
 
+def _write_closure_lineage_pass(*, truth_root: Path) -> None:
+    _write_json(
+        closure_authority_output_path(truth_root=truth_root, day_utc=DAY),
+        {
+            "schema_version": "aegis_day_closure_authority.v1",
+            "day": DAY,
+            "status": "PASS",
+            "canonical_blocker": "",
+            "blocking_evidence": [],
+            "generated_at_utc": f"{DAY}T00:00:00Z",
+        },
+    )
+    _write_json(
+        submission_index_output_path(execution_root=truth_root.resolve(), day_utc=DAY),
+        {
+            "schema_version": "submission_index.v1",
+            "day": DAY,
+            "status": "PASS",
+            "attempts": [],
+            "blocking_evidence": [],
+            "generated_at_utc": f"{DAY}T00:00:00Z",
+        },
+    )
+    _write_json(
+        current_head_output_path(execution_root=truth_root.resolve(), day_utc=DAY),
+        {
+            "schema_version": "execution_evidence_current_head.v1",
+            "day": DAY,
+            "status": "PASS",
+            "selected_attempt_id": "attempt-1",
+            "selected_artifact_path": "/tmp/execution_stream_snapshot.v1.json",
+            "rejected_candidates": [],
+            "generated_at_utc": f"{DAY}T00:00:00Z",
+        },
+    )
+
+
+def _write_trading_day_calendar_row(*, truth_root: Path) -> None:
+    calendar_path = truth_root / "market_calendar_v1" / "NYSE" / f"{DAY[:4]}.jsonl"
+    calendar_path.parent.mkdir(parents=True, exist_ok=True)
+    calendar_path.write_text(
+        json.dumps({"day_utc": DAY, "is_trading_session": True}, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _run_submit_boundary(
     truth_root: Path,
     *,
@@ -223,6 +272,8 @@ def _run_submit_boundary(
         admission_path = (truth_root / "target_day_admission_v1" / f"{DAY}.json").resolve()
         _write_json(build_path, dict(build_payload))
         _write_json(admission_path, dict(admission_payload))
+        _write_closure_lineage_pass(truth_root=truth_root)
+        _write_trading_day_calendar_row(truth_root=truth_root)
         startup_codes = list(startup_blocking_codes or [])
         with patch.object(boundary_module, "REPO_ROOT", repo_root), patch.object(
             boundary_module, "resolve_decision_truth_root_bridge_v1", return_value=truth_root.resolve()
