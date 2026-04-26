@@ -47,3 +47,11 @@ The system must return non-success status when any of the following are true:
 - commit step fails,
 - reprotection cannot be restored after intake.
 
+
+## Release Packaging Scope Expectations
+
+- Release artifacts are intentionally limited to `ops/`, `constellation_2/`, `governance/`, plus required root files declared by `ops/tools/build_constellation_release_v1.py`.
+- Top-level `docs/` is source-only documentation and is not release-packaged by default.
+- Validation and smoke checks for active releases must not require files under top-level `docs/`.
+- Research AI hypothesis intake/queue tools are not allowed to depend on top-level `docs/` at runtime.
+- If a prompt template ever becomes a runtime dependency, it must live under a packaged path such as `constellation_2/research_lab/templates/` and corresponding tools/tests must reference that packaged path.

@@ -128,6 +128,11 @@ def test_release_builder_refuses_dirty_source(monkeypatch: pytest.MonkeyPatch) -
         build_tool._require_release_source_clean_or_fail(build_tool.CANONICAL_REPO_ROOT)
 
 
+def test_release_builder_scope_excludes_top_level_docs() -> None:
+    assert set(build_tool.INCLUDED_ROOTS) == {"ops", "constellation_2", "governance"}
+    assert "docs" not in build_tool.INCLUDED_ROOTS
+
+
 def test_packet_reports_dirty_source_not_reproducible(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(packet_tool, "_git_status_short_lines", lambda: [" M dirty.py"])
     monkeypatch.setattr(packet_tool, "_git_diff_name_only_lines", lambda: ["dirty.py"])

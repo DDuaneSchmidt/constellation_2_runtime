@@ -1,5 +1,7 @@
 # AI Hypothesis Output Prompt V1
 
+> Source-only note: This top-level docs file is for human authoring workflow and is not required in release artifacts at runtime.
+
 ## Input Material
 1. Read `research_ai_packet.md` for the target day.
 2. Use only evidence and constraints in that packet.
