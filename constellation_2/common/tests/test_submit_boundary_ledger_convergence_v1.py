@@ -158,6 +158,13 @@ def _write_kill_switch(truth_root: Path) -> None:
     )
 
 
+def _write_paper_session_ledger_surface(truth_root: Path, payload: dict) -> None:
+    _write_json(
+        truth_root / "reports" / "paper_session_ledger_v1" / DAY / "paper_session_ledger.v1.json",
+        payload,
+    )
+
+
 def _paper_session_authority_payload(*, authority_status: str = "GRANTED") -> dict:
     allowed = authority_status == "GRANTED"
     blocker_codes = [] if allowed else ["PAPER_SESSION_AUTHORITY_DENIED"]
@@ -820,3 +827,113 @@ def test_submit_boundary_ignores_stale_presubmit_policy_surface_and_uses_current
         assert boundary["source_paths"]["trade_readiness_decision_v1"].endswith(
             f"/trade_readiness_decision_v1/{DAY}/trade_readiness_decision.v1.json"
         )
+
+
+def test_submit_boundary_accepts_nested_bound_lineage_without_legacy_top_level_field() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        _write_startup_materialization(truth_root)
+        _write_paper_trading_posture(truth_root)
+        _write_trade_submit_status(truth_root, ok=True, state="OK", reasons=[])
+        _write_kill_switch(truth_root)
+        _write_paper_session_ledger_surface(
+            truth_root,
+            {
+                "submit_lifecycle": {
+                    "submit_result_status": "FAIL",
+                    "submit_attempt_status": "ATTEMPTED",
+                    "finalization_status": "OPEN",
+                },
+                "post_submit_lifecycle": {"lineage_status": "BOUND"},
+            },
+        )
+        boundary = _run_submit_boundary(
+            truth_root,
+            build_payload={
+                "build_status": "COMPLETE",
+                "completeness_result": "COMPLETE",
+                "closure_status": "CLOSED",
+                "hidden_dependency_check_result": {"status": "PASS"},
+                "blocker_chain": [],
+            },
+            admission_payload={
+                "admission_status": "ADMIT",
+                "binding": True,
+                "blocking_reason_codes": [],
+            },
+        )
+        assert boundary["boundary_status"] == "AUTHORIZED"
+        assert "POST_SUBMIT_LINEAGE_GAP" not in (boundary.get("blocking_codes") or [])
+
+
+def test_submit_boundary_supports_legacy_top_level_bound_lineage_status() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        _write_startup_materialization(truth_root)
+        _write_paper_trading_posture(truth_root)
+        _write_trade_submit_status(truth_root, ok=True, state="OK", reasons=[])
+        _write_kill_switch(truth_root)
+        _write_paper_session_ledger_surface(
+            truth_root,
+            {
+                "submit_lifecycle": {
+                    "submit_result_status": "FAIL",
+                    "submit_attempt_status": "ATTEMPTED",
+                    "finalization_status": "OPEN",
+                },
+                "lineage_status": "BOUND",
+            },
+        )
+        boundary = _run_submit_boundary(
+            truth_root,
+            build_payload={
+                "build_status": "COMPLETE",
+                "completeness_result": "COMPLETE",
+                "closure_status": "CLOSED",
+                "hidden_dependency_check_result": {"status": "PASS"},
+                "blocker_chain": [],
+            },
+            admission_payload={
+                "admission_status": "ADMIT",
+                "binding": True,
+                "blocking_reason_codes": [],
+            },
+        )
+        assert boundary["boundary_status"] == "AUTHORIZED"
+        assert "POST_SUBMIT_LINEAGE_GAP" not in (boundary.get("blocking_codes") or [])
+
+
+def test_submit_boundary_fails_closed_when_lineage_status_missing_from_both_paths() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        _write_startup_materialization(truth_root)
+        _write_paper_trading_posture(truth_root)
+        _write_trade_submit_status(truth_root, ok=True, state="OK", reasons=[])
+        _write_kill_switch(truth_root)
+        _write_paper_session_ledger_surface(
+            truth_root,
+            {
+                "submit_lifecycle": {
+                    "submit_result_status": "OPEN",
+                    "submit_attempt_status": "ATTEMPTED",
+                    "finalization_status": "OPEN",
+                },
+            },
+        )
+        boundary = _run_submit_boundary(
+            truth_root,
+            build_payload={
+                "build_status": "COMPLETE",
+                "completeness_result": "COMPLETE",
+                "closure_status": "CLOSED",
+                "hidden_dependency_check_result": {"status": "PASS"},
+                "blocker_chain": [],
+            },
+            admission_payload={
+                "admission_status": "ADMIT",
+                "binding": True,
+                "blocking_reason_codes": [],
+            },
+        )
+        assert boundary["boundary_status"] == "BLOCKED"
+        assert "POST_SUBMIT_LINEAGE_GAP" in (boundary.get("blocking_codes") or [])

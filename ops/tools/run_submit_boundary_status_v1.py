@@ -216,12 +216,22 @@ def _evaluate_paper_session_ledger_surface_v1(*, truth_root: Path, day_utc: str)
         control_state = {}
 
     submit_result_status = str(submit_lifecycle.get("submit_result_status") or "").strip().upper()
-    lineage_status = str(payload.get("lineage_status") or "").strip().upper()
+    post_submit_lifecycle = payload.get("post_submit_lifecycle")
+    if not isinstance(post_submit_lifecycle, dict):
+        post_submit_lifecycle = {}
+    nested_lineage_status = str(post_submit_lifecycle.get("lineage_status") or "").strip().upper()
+    legacy_lineage_status = str(payload.get("lineage_status") or "").strip().upper()
+    lineage_status = nested_lineage_status or legacy_lineage_status
+    lineage_status_path = (
+        "post_submit_lifecycle.lineage_status"
+        if nested_lineage_status
+        else ("lineage_status" if legacy_lineage_status else "post_submit_lifecycle.lineage_status|lineage_status")
+    )
     control_state_blockers = _normalize_reason_codes(list(control_state.get("blocking_codes") or []))
 
     reason_codes: List[str] = []
     failed_conditions: List[Dict[str, str]] = []
-    if submit_result_status == "FAIL":
+    if submit_result_status == "FAIL" and lineage_status != "BOUND":
         reason_codes.append("POST_SUBMIT_LINEAGE_GAP")
         failed_conditions.append(
             {
@@ -229,10 +239,27 @@ def _evaluate_paper_session_ledger_surface_v1(*, truth_root: Path, day_utc: str)
                 "path": str(ledger_path),
                 "condition": "LEDGER_SUBMIT_RESULT_FAIL",
                 "code": "POST_SUBMIT_LINEAGE_GAP",
-                "detail": "paper_session_ledger submit_lifecycle.submit_result_status=FAIL",
+                "detail": (
+                    "paper_session_ledger submit_lifecycle.submit_result_status=FAIL without "
+                    "post_submit_lifecycle.lineage_status=BOUND"
+                ),
             }
         )
-    if lineage_status == "GAP":
+    if not lineage_status:
+        reason_codes.append("POST_SUBMIT_LINEAGE_GAP")
+        failed_conditions.append(
+            {
+                "logical_name": "paper_session_ledger_v1",
+                "path": str(ledger_path),
+                "condition": "LEDGER_LINEAGE_STATUS_MISSING",
+                "code": "POST_SUBMIT_LINEAGE_GAP",
+                "detail": (
+                    "paper_session_ledger post-submit lineage status missing at "
+                    "post_submit_lifecycle.lineage_status and legacy lineage_status"
+                ),
+            }
+        )
+    elif lineage_status == "GAP":
         reason_codes.append("POST_SUBMIT_LINEAGE_GAP")
         failed_conditions.append(
             {
@@ -240,7 +267,18 @@ def _evaluate_paper_session_ledger_surface_v1(*, truth_root: Path, day_utc: str)
                 "path": str(ledger_path),
                 "condition": "LEDGER_LINEAGE_GAP",
                 "code": "POST_SUBMIT_LINEAGE_GAP",
-                "detail": "paper_session_ledger lineage_status=GAP",
+                "detail": f"paper_session_ledger {lineage_status_path}=GAP",
+            }
+        )
+    elif lineage_status != "BOUND":
+        reason_codes.append("POST_SUBMIT_LINEAGE_GAP")
+        failed_conditions.append(
+            {
+                "logical_name": "paper_session_ledger_v1",
+                "path": str(ledger_path),
+                "condition": "LEDGER_LINEAGE_STATUS_UNBOUND",
+                "code": "POST_SUBMIT_LINEAGE_GAP",
+                "detail": f"paper_session_ledger {lineage_status_path}={lineage_status}",
             }
         )
     for blocker in control_state_blockers:
