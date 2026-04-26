@@ -268,7 +268,7 @@ def _write_execution_intent_and_authorization(
     )
 
 
-def _run_boundary(truth_root: Path) -> tuple[int, dict]:
+def _run_boundary(truth_root: Path, *, session_day_blocker: str = "") -> tuple[int, dict]:
     with tempfile.TemporaryDirectory() as td:
         repo_root = Path(td)
         execution_root = (truth_root.parent / "truth_sleeves" / "PRIMARY" / "PAPER").resolve()
@@ -298,6 +298,13 @@ def _run_boundary(truth_root: Path) -> tuple[int, dict]:
             boundary_module, "resolve_decision_truth_root_bridge_v1", return_value=truth_root.resolve()
         ), patch.object(
             boundary_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value=ACCOUNT
+        ), patch.object(
+            boundary_module,
+            "_resolve_session_day_blocker_v1",
+            return_value=(
+                str(session_day_blocker or "").strip().upper(),
+                (truth_root / "reports" / "paper_session_authority_v1" / DAY / "paper_session_authority.v1.json").resolve(),
+            ),
         ), patch.object(
             boundary_module,
             "read_target_day_build_ref_v1",
@@ -368,6 +375,7 @@ def _run_boundary_with_upstream(
     *,
     build_payload: dict,
     admission_payload: dict,
+    session_day_blocker: str = "",
 ) -> tuple[int, dict]:
     with tempfile.TemporaryDirectory() as td:
         repo_root = Path(td)
@@ -390,6 +398,13 @@ def _run_boundary_with_upstream(
             boundary_module, "resolve_decision_truth_root_bridge_v1", return_value=truth_root.resolve()
         ), patch.object(
             boundary_module, "resolve_single_paper_ib_account_from_sleeve_registry", return_value=ACCOUNT
+        ), patch.object(
+            boundary_module,
+            "_resolve_session_day_blocker_v1",
+            return_value=(
+                str(session_day_blocker or "").strip().upper(),
+                (truth_root / "reports" / "paper_session_authority_v1" / DAY / "paper_session_authority.v1.json").resolve(),
+            ),
         ), patch.object(
             boundary_module, "_refresh_trade_submit_readiness_artifact_v1", return_value=0
         ), patch.object(
@@ -627,7 +642,7 @@ def test_submit_boundary_status_end_to_end_propagates_fail_closed_resolver_reaso
         assert RC_KILL_SWITCH_AUTHORITY_MISMATCH in failed["global_kill_switch_state_v1"]["reason_codes"]
 
 
-def test_submit_boundary_blocks_when_upstream_build_and_admission_are_blocked() -> None:
+def test_submit_boundary_keeps_build_and_admission_advisory_when_submit_local_checks_pass() -> None:
     with tempfile.TemporaryDirectory() as td:
         truth_root = Path(td) / "truth"
         _write_startup_materialization(truth_root)
@@ -649,13 +664,13 @@ def test_submit_boundary_blocks_when_upstream_build_and_admission_are_blocked() 
                 "blocking_reason_codes": ["PARTIAL_BUILD"],
             },
         )
-        assert rc == 2
-        assert payload["boundary_status"] == "BLOCKED"
-        assert payload["submission_authorized"] is False
-        failed = {row["logical_name"]: row for row in payload["failed_checks"]}
-        assert failed["target_day_build_v1"]["status"] == "FAIL"
-        assert failed["target_day_admission_v1"]["status"] == "FAIL"
-        assert "PARTIAL_BUILD" in payload["blocking_codes"]
+        assert rc == 0
+        assert payload["boundary_status"] == "AUTHORIZED"
+        assert payload["submission_authorized"] is True
+        required = {row["logical_name"]: row for row in payload["required_boundary_checks"]}
+        assert required["target_day_build_v1"]["status"] == "ADVISORY_FAIL"
+        assert required["target_day_admission_v1"]["status"] == "ADVISORY_FAIL"
+        assert payload["blocking_codes"] == []
 
 
 def test_submit_boundary_emits_uniform_closure_fields() -> None:
@@ -684,3 +699,35 @@ def test_submit_boundary_emits_uniform_closure_fields() -> None:
         assert payload["closure_state"] == "COMPLETE"
         assert payload["first_blocker_code"] == ""
         assert payload["missing_dependency_artifacts"] == []
+
+
+def test_submit_boundary_non_trading_day_emits_blocked_surface() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        _write_startup_materialization(truth_root)
+        _write_paper_trading_posture(truth_root)
+        _write_trade_submit_status(truth_root)
+        _write_kill_switch(truth_root, state="INACTIVE", allow_entries=True)
+        rc, payload = _run_boundary(truth_root, session_day_blocker="NON_TRADING_DAY")
+        assert rc == 2
+        assert payload["boundary_status"] == "BLOCKED"
+        assert payload["submit_allowed"] is False
+        assert payload["canonical_blocker"] == "NON_TRADING_DAY"
+        assert "NON_TRADING_DAY" in payload["reason_codes"]
+        assert payload["status"] == "NOT_READY"
+        assert payload["source_surface_path"].endswith("/paper_session_authority.v1.json")
+
+
+def test_submit_boundary_missing_session_authority_fails_closed() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        _write_startup_materialization(truth_root)
+        _write_paper_trading_posture(truth_root)
+        _write_trade_submit_status(truth_root)
+        _write_kill_switch(truth_root, state="INACTIVE", allow_entries=True)
+        rc, payload = _run_boundary(truth_root, session_day_blocker="SESSION_AUTHORITY_MISSING")
+        assert rc == 2
+        assert payload["boundary_status"] == "BLOCKED"
+        assert payload["submit_allowed"] is False
+        assert payload["canonical_blocker"] == "SESSION_AUTHORITY_MISSING"
+        assert "SESSION_AUTHORITY_MISSING" in payload["reason_codes"]

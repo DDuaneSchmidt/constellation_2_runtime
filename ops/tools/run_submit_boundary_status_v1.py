@@ -5,7 +5,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 _THIS_FILE = Path(__file__).resolve()
 REPO_ROOT = _THIS_FILE.parents[2]
@@ -234,6 +234,89 @@ def _refresh_trade_submit_readiness_artifact_v1(*, truth_root: Path, day_utc: st
         readiness_module.OUT_ROOT = original_out_root
 
 
+def _resolve_session_day_blocker_v1(*, truth_root: Path, day_utc: str) -> Tuple[str, Path]:
+    authority_path = (truth_root / "reports" / "paper_session_authority_v1" / day_utc / "paper_session_authority.v1.json").resolve()
+    if authority_path.exists() and authority_path.is_file():
+        try:
+            payload = json.loads(authority_path.read_text(encoding="utf-8"))
+        except Exception:
+            return "SESSION_AUTHORITY_MISSING", authority_path
+        if isinstance(payload, dict):
+            reason_codes = _normalize_reason_codes(list(payload.get("blocking_reason_codes") or []))
+            for code in reason_codes:
+                if code in {"NON_TRADING_DAY", "NO_ACTIVE_PAPER_SESSION"}:
+                    return code, authority_path
+
+    calendar_path = (truth_root / "market_calendar_v1" / "NYSE" / f"{day_utc[:4]}.jsonl").resolve()
+    if not calendar_path.exists() or not calendar_path.is_file():
+        return "SESSION_AUTHORITY_MISSING", calendar_path
+    try:
+        for raw in calendar_path.read_text(encoding="utf-8").splitlines():
+            line = str(raw).strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("day_utc") or "").strip() != day_utc:
+                continue
+            if row.get("is_trading_session") is False:
+                return "NON_TRADING_DAY", calendar_path
+            return "", calendar_path
+    except Exception:
+        return "SESSION_AUTHORITY_MISSING", calendar_path
+    return "SESSION_AUTHORITY_MISSING", calendar_path
+
+
+def _ensure_dependency_ref_v1(
+    *,
+    artifact_id: str,
+    path: Path,
+    sha256: str,
+    day_utc: str,
+) -> Dict[str, str]:
+    path_text = str(path).strip()
+    sha_text = str(sha256 or "").strip()
+    if not sha_text:
+        sha_text = canonical_hash_for_c2_artifact_v1(
+            {
+                "artifact_id": artifact_id,
+                "path": path_text,
+                "day_utc": day_utc,
+                "availability": "UNAVAILABLE",
+            }
+        )
+    return {
+        "artifact_id": artifact_id,
+        "path": path_text,
+        "sha256": sha_text,
+        "artifact_class": "admission_result",
+        "finality_state": "provisional",
+    }
+
+
+def _canonical_blocker_for_boundary_v1(blocking_codes: List[str]) -> str:
+    normalized = _normalize_reason_codes(blocking_codes)
+    for preferred in ("NON_TRADING_DAY", "NO_ACTIVE_PAPER_SESSION", "SESSION_AUTHORITY_MISSING"):
+        if preferred in normalized:
+            return preferred
+    return normalized[0] if normalized else ""
+
+
+def _source_surface_path_for_blocker_v1(*, blocker_code: str, rows: List[Dict[str, Any]]) -> str:
+    blocker = str(blocker_code or "").strip().upper()
+    if blocker:
+        for row in rows:
+            reason_codes = _normalize_reason_codes(list(row.get("reason_codes") or []))
+            if blocker in reason_codes:
+                return str(row.get("absolute_path") or "").strip()
+    for row in rows:
+        path = str(row.get("absolute_path") or "").strip()
+        if path:
+            return path
+    return ""
+
+
 def main(argv: List[str] | None = None) -> int:
     require_authoritative_repo_runtime_v1(REPO_ROOT)
     ap = argparse.ArgumentParser(prog="run_submit_boundary_status_v1")
@@ -272,6 +355,20 @@ def main(argv: List[str] | None = None) -> int:
     build_sha256 = ""
     readiness_path = (execution_truth_root / "trade_submit_readiness_c2_v1" / "_history" / "PAPER" / paper_account / day_utc / "status.json").resolve()
     readiness_sha256 = ""
+    session_day_blocker, session_day_source_path = _resolve_session_day_blocker_v1(truth_root=truth_root, day_utc=day_utc)
+    if session_day_blocker:
+        session_block_row = _check_row(
+            logical_name="target_day_session_authority_v1",
+            path=session_day_source_path,
+            status="FAIL",
+            day_utc=day_utc,
+            reason_codes=[session_day_blocker],
+        )
+        required_checks.append(session_block_row)
+        failed_checks.append(session_block_row)
+        submission_authorized = False
+        boundary_status = "BLOCKED"
+        blocking_codes.extend([session_day_blocker])
 
     try:
         build_ref = read_target_day_build_ref_v1(truth_root=truth_root, target_day=day_utc)
@@ -672,21 +769,26 @@ def main(argv: List[str] | None = None) -> int:
         "ops/tools/run_submit_boundary_status_v1.py",
     )
     constitutional_dependency_refs = [
-        {
-            "artifact_id": "target_day_build_v1",
-            "path": str(build_path),
-            "sha256": str(build_sha256),
-            "artifact_class": "admission_result",
-            "finality_state": "provisional",
-        },
-        {
-            "artifact_id": "trade_submit_readiness_c2_v1",
-            "path": str(readiness_path),
-            "sha256": str(readiness_sha256),
-            "artifact_class": "admission_result",
-            "finality_state": "provisional",
-        },
+        _ensure_dependency_ref_v1(
+            artifact_id="target_day_build_v1",
+            path=build_path,
+            sha256=build_sha256,
+            day_utc=day_utc,
+        ),
+        _ensure_dependency_ref_v1(
+            artifact_id="trade_submit_readiness_c2_v1",
+            path=readiness_path,
+            sha256=readiness_sha256,
+            day_utc=day_utc,
+        ),
     ]
+    blocking_codes_sorted = sorted(set(blocking_codes))
+    effective_boundary_status = "AUTHORIZED" if submission_authorized else boundary_status
+    canonical_blocker = _canonical_blocker_for_boundary_v1(blocking_codes_sorted)
+    source_surface_path = _source_surface_path_for_blocker_v1(
+        blocker_code=canonical_blocker,
+        rows=(failed_checks + required_checks),
+    )
     constitutional_dependency_declaration = build_artifact_dependency_declaration_v1(
         artifact_type="submit_boundary_status_v1",
         artifact_class=str(boundary_contract.get("artifact_class") or "").strip(),
@@ -719,15 +821,21 @@ def main(argv: List[str] | None = None) -> int:
         "day_utc": day_utc,
         "session_id": session_id,
         "submission_authorized": bool(submission_authorized),
-        "boundary_status": "AUTHORIZED" if submission_authorized else boundary_status,
+        "submit_allowed": bool(submission_authorized),
+        "status": "READY" if submission_authorized else ("DENIED" if effective_boundary_status == "DENIED" else "NOT_READY"),
+        "canonical_blocker": canonical_blocker or None,
+        "reason_codes": blocking_codes_sorted,
+        "source_surface_path": source_surface_path,
+        "generated_at_utc": produced_at_utc,
+        "boundary_status": effective_boundary_status,
         "required_boundary_checks": required_checks,
         "failed_checks": failed_checks,
-        "blocking_codes": sorted(set(blocking_codes)),
+        "blocking_codes": blocking_codes_sorted,
         "closure_state": _closure_state_for_boundary(
-            "AUTHORIZED" if submission_authorized else boundary_status,
-            sorted(set(blocking_codes)),
+            effective_boundary_status,
+            blocking_codes_sorted,
         ),
-        "first_blocker_code": (sorted(set(blocking_codes))[0] if blocking_codes else ""),
+        "first_blocker_code": canonical_blocker,
         "missing_dependency_artifacts": sorted(
             {
                 str(row.get("logical_name") or "").strip()
