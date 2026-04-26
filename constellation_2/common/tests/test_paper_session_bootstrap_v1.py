@@ -499,6 +499,11 @@ def _bootstrap_monkeypatch(
     monkeypatch.setattr(bootstrap_module, "resolve_single_paper_ib_account_from_sleeve_registry", lambda repo_root: ACCOUNT)
     monkeypatch.setattr(bootstrap_module, "repo_git_sha_v1", lambda: "a" * 40)
     monkeypatch.setattr(
+        bootstrap_module,
+        "_session_day_blocker_from_market_calendar",
+        lambda canonical_truth_root, day_utc: ("", ""),
+    )
+    monkeypatch.setattr(
         bootstrap_module.subprocess,
         "run",
         _fake_subprocess_run_factory(
@@ -1292,3 +1297,66 @@ def test_bootstrap_activation_phase_blocks_after_materialization_and_evaluation_
     assert payload["smoke_submit_allowed"] is False
     assert paper_authority_payload["authority_status"] == "GRANTED"
     assert paper_authority_payload["submission_authorized"] is False
+
+
+def test_bootstrap_non_trading_day_blocks_with_session_authority_not_nav_budget(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    canonical_truth_root = tmp_path / "truth"
+    sleeve_truth_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    operator_input_root = tmp_path / "operator_root"
+    canonical_truth_root.mkdir(parents=True, exist_ok=True)
+    sleeve_truth_root.mkdir(parents=True, exist_ok=True)
+    operator_input_root.mkdir(parents=True, exist_ok=True)
+
+    called_tools: list[str] = []
+    _bootstrap_monkeypatch(
+        monkeypatch,
+        canonical_truth_root=canonical_truth_root,
+        sleeve_truth_root=sleeve_truth_root,
+        operator_input_root=operator_input_root,
+        called_tools=called_tools,
+    )
+    monkeypatch.setattr(
+        bootstrap_module,
+        "_session_day_blocker_from_market_calendar",
+        lambda canonical_truth_root, day_utc: (
+            "NON_TRADING_DAY",
+            str(Path(canonical_truth_root) / "market_calendar_v1" / "NYSE" / "2026.jsonl"),
+        ),
+    )
+
+    rc = bootstrap_module.main(
+        [
+            "--day_utc",
+            DAY,
+            "--truth_root",
+            str(canonical_truth_root),
+            "--operator_input_root",
+            str(operator_input_root),
+            "--environment",
+            "PAPER",
+            "--seed_usd",
+            "5000000.00",
+        ]
+    )
+    assert rc == 2
+
+    payload = json.loads(
+        resolve_paper_session_bootstrap_path(truth_root=canonical_truth_root, day_utc=DAY).read_text(encoding="utf-8")
+    )
+    assert payload["bootstrap_status"] == "BLOCKED"
+    assert payload["required_prerequisites_status"]["status"] == "FAIL"
+    assert payload["required_prerequisites_status"]["unmet"] == ["NON_TRADING_DAY"]
+    assert payload["runtime_prerequisite_verification"]["status"] == "BLOCKED"
+    assert payload["runtime_prerequisite_verification"]["earliest_failing_prerequisite"]["reason_codes"] == [
+        "NON_TRADING_DAY"
+    ]
+    assert payload["canonical_stop_surface"] == "market_calendar_day"
+    assert payload["canonical_stop_reason_codes"] == ["NON_TRADING_DAY"]
+    assert str(payload["canonical_stop_artifact_path"]).endswith("market_calendar_v1/NYSE/2026.jsonl")
+    assert "B2_NAV_TOTAL_MISSING_OR_INVALID" not in payload["blocker_chain"]
+    assert "AUTHZ_MISSING_EXPOSURE_BUDGET_NAV_TOTAL_CENTS" not in payload["blocker_chain"]
+    assert str(bootstrap_module.RUN_CAPITAL_RISK_ENVELOPE_TOOL) not in called_tools
+    assert str(bootstrap_module.RUN_PRE_OPEN_MATERIALIZER_TOOL) not in called_tools

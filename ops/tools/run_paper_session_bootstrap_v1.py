@@ -116,6 +116,39 @@ def _json_or_empty(path: Path) -> dict[str, Any]:
     return read_json_object_v1(path)
 
 
+def _session_day_blocker_from_market_calendar(
+    *,
+    canonical_truth_root: Path,
+    day_utc: str,
+) -> tuple[str, str]:
+    normalized_day = str(day_utc or "").strip()
+    year = normalized_day[:4]
+    calendar_path = (Path(canonical_truth_root).resolve() / "market_calendar_v1" / "NYSE" / f"{year}.jsonl").resolve()
+    if not calendar_path.exists() or not calendar_path.is_file():
+        return "SESSION_AUTHORITY_MISSING", str(calendar_path)
+    try:
+        lines = calendar_path.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return "SESSION_AUTHORITY_MISSING", str(calendar_path)
+    for line in lines:
+        text = str(line or "").strip()
+        if not text:
+            continue
+        try:
+            row = json.loads(text)
+        except Exception:
+            continue
+        if not isinstance(row, Mapping):
+            continue
+        if str(row.get("day_utc") or "").strip() != normalized_day:
+            continue
+        is_trading_session = row.get("is_trading_session")
+        if isinstance(is_trading_session, bool):
+            return ("", str(calendar_path)) if is_trading_session else ("NON_TRADING_DAY", str(calendar_path))
+        return "SESSION_AUTHORITY_MISSING", str(calendar_path)
+    return "SESSION_AUTHORITY_MISSING", str(calendar_path)
+
+
 def _first_nonempty(values: Iterable[Any]) -> str:
     for value in values:
         text = str(value or "").strip()
@@ -250,7 +283,33 @@ def _runtime_prerequisite_verification(
     admission_ref: Mapping[str, Any],
     promotion_ref: Mapping[str, Any],
     day_activation_summary: Mapping[str, Any],
+    session_day_blocker: str = "",
+    session_day_authority_path: str = "",
 ) -> dict[str, Any]:
+    normalized_session_day_blocker = str(session_day_blocker or "").strip().upper()
+    if normalized_session_day_blocker:
+        earliest_failing = _runtime_prerequisite_row(
+            prerequisite_id="target_day_session_authority",
+            stage="SESSION_ADMISSION",
+            owner_tool=RUN_SESSION_AUTHORITY_TOOL,
+            consumer_tool=Path("ops/tools/run_paper_session_bootstrap_v1.py"),
+            artifact_path=str(session_day_authority_path or ""),
+            ready=False,
+            reason_codes=[normalized_session_day_blocker],
+            action_summary=(
+                "Do not run trading-session startup prerequisites on non-trading/no-session days; "
+                "rerun the canonical entrypoint when the next active paper session is eligible."
+            ),
+        )
+        return {
+            "status": "BLOCKED",
+            "stage": str(earliest_failing.get("stage") or ""),
+            "fix_then_rerun_rule": CANONICAL_FIX_THEN_RERUN_RULE,
+            "do_not_run_manually": list(DO_NOT_RUN_MANUALLY),
+            "prerequisites": [earliest_failing],
+            "earliest_failing_prerequisite": earliest_failing,
+        }
+
     rows: list[dict[str, Any]] = []
     canonical_kill_switch = shared_control_state.get("canonical_kill_switch", {})
     sleeve_projection = shared_control_state.get("sleeve_kill_switch_projection", {})
@@ -922,8 +981,58 @@ def _required_prerequisites_status(
     operator_statement_ref: Mapping[str, Any],
     pre_open_ref: Mapping[str, Any],
     shared_control_state: Mapping[str, Any],
+    session_day_blocker: str = "",
+    session_day_authority_path: str = "",
 ) -> dict[str, Any]:
     canonical_kill_switch = shared_control_state.get("canonical_kill_switch", {})
+    normalized_session_day_blocker = str(session_day_blocker or "").strip().upper()
+    if normalized_session_day_blocker:
+        checks = [
+            _prerequisite_check(
+                check_id="TARGET_DAY_TRADING_SESSION_REQUIRED",
+                passed=False,
+                details=normalized_session_day_blocker,
+                ref_path=str(session_day_authority_path or ""),
+                reason_codes=[normalized_session_day_blocker],
+            ),
+            _prerequisite_check(
+                check_id="PAPER_CAPITAL_SEED_READY",
+                passed=True,
+                details=f"SKIPPED:{normalized_session_day_blocker}",
+                ref_path=str(seed_ref.get("path") or ""),
+                reason_codes=[],
+            ),
+            _prerequisite_check(
+                check_id="OPERATOR_STATEMENT_READY",
+                passed=True,
+                details=f"SKIPPED:{normalized_session_day_blocker}",
+                ref_path=str(operator_statement_ref.get("path") or ""),
+                reason_codes=[],
+            ),
+            _prerequisite_check(
+                check_id="PRE_OPEN_BUNDLE_COMPLETE",
+                passed=True,
+                details=f"SKIPPED:{normalized_session_day_blocker}",
+                ref_path=str(pre_open_ref.get("path") or ""),
+                reason_codes=[],
+            ),
+            _prerequisite_check(
+                check_id="CANONICAL_KILL_SWITCH_PRESENT",
+                passed=True,
+                details=f"SKIPPED:{normalized_session_day_blocker}",
+                ref_path=str(canonical_kill_switch.get("path") or ""),
+                reason_codes=[],
+            ),
+            _prerequisite_check(
+                check_id="CANONICAL_KILL_SWITCH_INACTIVE",
+                passed=True,
+                details=f"SKIPPED:{normalized_session_day_blocker}",
+                ref_path=str(canonical_kill_switch.get("path") or ""),
+                reason_codes=[],
+            ),
+        ]
+        return _group_status(passing_label="PASS", failing_label="FAIL", checks=checks)
+
     pre_open_status = str(pre_open_ref.get("materialization_state") or pre_open_ref.get("status") or "").strip().upper()
     pre_open_reason_codes = [
         str(code).strip()
@@ -984,7 +1093,22 @@ def _startup_materialization_phase_status(
     allocation_ref: Mapping[str, Any],
     startup_authorization_convergence_ref: Mapping[str, Any],
     authorization_ref: Mapping[str, Any],
+    session_day_blocker: str = "",
+    session_day_authority_path: str = "",
 ) -> dict[str, Any]:
+    normalized_session_day_blocker = str(session_day_blocker or "").strip().upper()
+    if normalized_session_day_blocker:
+        checks = [
+            _prerequisite_check(
+                check_id="TRADING_SESSION_PREREQUISITES_SKIPPED",
+                passed=True,
+                details=f"SKIPPED:{normalized_session_day_blocker}",
+                ref_path=str(session_day_authority_path or ""),
+                reason_codes=[normalized_session_day_blocker],
+            )
+        ]
+        return _group_status(passing_label="COMPLETE", failing_label="BLOCKED", checks=checks)
+
     convergence_status = str(startup_authorization_convergence_ref.get("status") or "").strip().upper()
     checks = [
         _prerequisite_check(
@@ -1056,7 +1180,22 @@ def _evaluation_phase_status(
     authorization_ref: Mapping[str, Any],
     admission_ref: Mapping[str, Any],
     include_admission: bool = True,
+    session_day_blocker: str = "",
+    session_day_authority_path: str = "",
 ) -> dict[str, Any]:
+    normalized_session_day_blocker = str(session_day_blocker or "").strip().upper()
+    if normalized_session_day_blocker:
+        checks = [
+            _prerequisite_check(
+                check_id="TARGET_DAY_TRADING_SESSION_REQUIRED",
+                passed=False,
+                details=normalized_session_day_blocker,
+                ref_path=str(session_day_authority_path or ""),
+                reason_codes=[normalized_session_day_blocker],
+            )
+        ]
+        return _group_status(passing_label="READY", failing_label="BLOCKED", checks=checks)
+
     canonical_kill_switch = shared_control_state.get("canonical_kill_switch", {})
     sleeve_projection = shared_control_state.get("sleeve_kill_switch_projection", {})
     auth_status = str(authorization_ref.get("status") or "").strip().upper()
@@ -1600,6 +1739,11 @@ def main(argv: list[str] | None = None) -> int:
     producer_git_sha = repo_git_sha_v1()
     report_path = resolve_paper_session_bootstrap_path(truth_root=canonical_truth_root, day_utc=day_utc)
     operation_id = f"paper_session_bootstrap:{day_utc}:{environment}"
+    session_day_blocker, session_day_authority_path = _session_day_blocker_from_market_calendar(
+        canonical_truth_root=canonical_truth_root,
+        day_utc=day_utc,
+    )
+    materialize_trading_prereqs = materialize and not bool(str(session_day_blocker or "").strip())
 
     seed_path = resolve_paper_capital_seed_path(operator_input_root=operator_input_root, day_utc=day_utc)
     operator_statement_path = resolve_operator_statement_path(operator_input_root=operator_input_root, day_utc=day_utc)
@@ -1747,7 +1891,7 @@ def main(argv: list[str] | None = None) -> int:
             producer_git_sha,
         ],
         env=runtime_env,
-    ) if materialize else None
+    ) if materialize_trading_prereqs else None
     step_results.append(
         _step_result(
             step_id="positions_snapshot",
@@ -1757,7 +1901,7 @@ def main(argv: list[str] | None = None) -> int:
             before_exists=positions_before,
             run_result=positions_run,
             status_fields=("status",),
-            materialize=materialize,
+            materialize=materialize_trading_prereqs,
         )
     )
 
@@ -1777,7 +1921,7 @@ def main(argv: list[str] | None = None) -> int:
             producer_git_sha,
         ],
         env=runtime_env,
-    ) if materialize else None
+    ) if materialize_trading_prereqs else None
     step_results.append(
         _step_result(
             step_id="cash_ledger_snapshot",
@@ -1787,7 +1931,7 @@ def main(argv: list[str] | None = None) -> int:
             before_exists=cash_before,
             run_result=cash_run,
             status_fields=("status",),
-            materialize=materialize,
+            materialize=materialize_trading_prereqs,
         )
     )
 
@@ -1805,7 +1949,7 @@ def main(argv: list[str] | None = None) -> int:
             "--producer_git_sha",
             producer_git_sha,
         ]
-    ) if materialize else None
+    ) if materialize_trading_prereqs else None
     step_results.append(
         _step_result(
             step_id="accounting_nav",
@@ -1815,7 +1959,7 @@ def main(argv: list[str] | None = None) -> int:
             before_exists=nav_before,
             run_result=nav_run,
             status_fields=("status", "nav_total"),
-            materialize=materialize,
+            materialize=materialize_trading_prereqs,
         )
     )
 
@@ -1833,7 +1977,7 @@ def main(argv: list[str] | None = None) -> int:
             "--producer_git_sha",
             producer_git_sha,
         ]
-    ) if materialize else None
+    ) if materialize_trading_prereqs else None
     step_results.append(
         _step_result(
             step_id="allocation_summary",
@@ -1843,7 +1987,7 @@ def main(argv: list[str] | None = None) -> int:
             before_exists=allocation_before,
             run_result=allocation_run,
             status_fields=("status",),
-            materialize=materialize,
+            materialize=materialize_trading_prereqs,
         )
     )
 
@@ -1861,7 +2005,7 @@ def main(argv: list[str] | None = None) -> int:
             "--truth_root",
             str(sleeve_truth_root),
         ]
-    ) if materialize else None
+    ) if materialize_trading_prereqs else None
     step_results.append(
         _step_result(
             step_id="capital_risk_envelope",
@@ -1871,13 +2015,13 @@ def main(argv: list[str] | None = None) -> int:
             before_exists=envelope_before,
             run_result=envelope_run,
             status_fields=("status",),
-            materialize=materialize,
+            materialize=materialize_trading_prereqs,
         )
     )
 
     exposure_before = exposure_net_path.exists()
     exposure_run = None
-    if materialize:
+    if materialize_trading_prereqs:
         if exposure_before:
             exposure_run = {"return_code": 0, "stdout": "REUSED_EXISTING_ARTIFACT", "stderr": ""}
         else:
@@ -1900,13 +2044,13 @@ def main(argv: list[str] | None = None) -> int:
             before_exists=exposure_before,
             run_result=exposure_run,
             status_fields=("status",),
-            materialize=materialize,
+            materialize=materialize_trading_prereqs,
         )
     )
 
     startup_authorization_convergence_before = startup_authorization_convergence_path.exists()
     startup_authorization_convergence_run = None
-    if materialize:
+    if materialize_trading_prereqs:
         startup_authorization_convergence_run = _run_command(
             [
                 sys.executable,
@@ -1930,7 +2074,7 @@ def main(argv: list[str] | None = None) -> int:
             before_exists=startup_authorization_convergence_before,
             run_result=startup_authorization_convergence_run,
             status_fields=("status", "convergence_status"),
-            materialize=materialize,
+            materialize=materialize_trading_prereqs,
         )
     )
 
@@ -1948,7 +2092,7 @@ def main(argv: list[str] | None = None) -> int:
             "--authority_verdict_path",
             str(authorization_gate_path),
         ]
-    ) if materialize else None
+    ) if materialize_trading_prereqs else None
     step_results.append(
         _step_result(
             step_id="capital_authority_allocation",
@@ -1958,7 +2102,7 @@ def main(argv: list[str] | None = None) -> int:
             before_exists=capital_authority_before,
             run_result=capital_authority_run,
             status_fields=("status",),
-            materialize=materialize,
+            materialize=materialize_trading_prereqs,
         )
     )
 
@@ -2017,6 +2161,8 @@ def main(argv: list[str] | None = None) -> int:
         allocation_ref=allocation_ref,
         startup_authorization_convergence_ref=startup_authorization_convergence_ref,
         authorization_ref=authorization_ref,
+        session_day_blocker=session_day_blocker,
+        session_day_authority_path=session_day_authority_path,
     )
     session_id = canonical_paper_session_id_v1(day_utc)
     bootstrap_run_id = f"{day_utc}__{producer_git_sha[:12]}__{produced_utc.replace(':', '').replace('-', '')}"
@@ -2087,6 +2233,8 @@ def main(argv: list[str] | None = None) -> int:
         authorization_ref=authorization_ref,
         admission_ref=admission_ref,
         include_admission=False,
+        session_day_blocker=session_day_blocker,
+        session_day_authority_path=session_day_authority_path,
     )
 
     core_prereqs_ready = (
@@ -2239,6 +2387,8 @@ def main(argv: list[str] | None = None) -> int:
         authorization_ref=authorization_ref,
         admission_ref=admission_ref,
         include_admission=True,
+        session_day_blocker=session_day_blocker,
+        session_day_authority_path=session_day_authority_path,
     )
     admission_granted = str(admission_ref.get("admission_status") or "").strip().upper() == "ADMIT"
     startup_materialization_ref = _report_ref(path=startup_materialization_path, status_fields=("status",))
@@ -2316,6 +2466,8 @@ def main(argv: list[str] | None = None) -> int:
         admission_ref=admission_ref,
         promotion_ref=promotion_ref,
         day_activation_summary=day_activation_summary,
+        session_day_blocker=session_day_blocker,
+        session_day_authority_path=session_day_authority_path,
     )
 
     activation_phase = _activation_phase_status(day_activation_result=day_activation_summary)
@@ -2325,6 +2477,8 @@ def main(argv: list[str] | None = None) -> int:
         operator_statement_ref=operator_statement_ref,
         pre_open_ref=pre_open_ref,
         shared_control_state=shared_control_state,
+        session_day_blocker=session_day_blocker,
+        session_day_authority_path=session_day_authority_path,
     )
     paper_advisory_prerequisites_status = _paper_advisory_prerequisites_status(
         startup_materialization_ref=startup_materialization_ref,
@@ -2373,7 +2527,12 @@ def main(argv: list[str] | None = None) -> int:
     canonical_stop_artifact_path = ""
     canonical_stop_reason_codes: list[str] = []
     if bootstrap_status != "READY":
-        if pre_open_materialization_state != "COMPLETE":
+        normalized_session_day_blocker = str(session_day_blocker or "").strip().upper()
+        if normalized_session_day_blocker:
+            canonical_stop_surface = "market_calendar_day"
+            canonical_stop_artifact_path = str(session_day_authority_path or "")
+            canonical_stop_reason_codes = [normalized_session_day_blocker]
+        elif pre_open_materialization_state != "COMPLETE":
             canonical_stop_surface = "pre_open_bundle_v1"
             canonical_stop_artifact_path = str(pre_open_ref.get("path") or "")
             canonical_stop_reason_codes = [
