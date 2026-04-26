@@ -79,6 +79,13 @@
         "authority_status": { "type": "string", "enum": ["GRANTED", "DENIED"] },
         "system_ready": { "type": "boolean" },
         "submission_authorized": { "type": "boolean" },
+        "status": { "type": "string" },
+        "canonical_blocker": { "type": ["string", "null"] },
+        "closure_authority_path": { "type": ["string", "null"] },
+        "closure_authority_status": { "type": ["string", "null"] },
+        "permissive_state_suppressed": { "type": ["boolean", "null"] },
+        "suppressed_prior_state": { "type": ["string", "null"] },
+        "blocking_evidence": { "type": ["array", "null"], "items": { "type": "object" } },
         "blocking_codes": { "$ref": "#/$defs/codeArray" },
         "transition_history": {
           "type": "array",
