@@ -13,6 +13,12 @@
     "patch:verify-base": "python3 ops/tools/verify_patch_bundle_base_commit_v1.py",
     "repo:protect": "python3 ops/tools/protect_canonical_repo_v1.py",
     "repo:unprotect-for-intake": "python3 ops/tools/unprotect_canonical_repo_for_intake_v1.py --reason apply_codex_patch_bundle_v1:manual",
-    "readiness:freeze:preflight": "python3 ops/tools/run_readiness_freeze_preflight_v1.py"
+    "readiness:freeze:preflight": "python3 ops/tools/run_readiness_freeze_preflight_v1.py",
+    "app:start": "python3 ops/runtime/supervisor.py start",
+    "app:stop": "python3 ops/runtime/supervisor.py stop",
+    "app:restart": "python3 ops/runtime/supervisor.py restart",
+    "app:status": "python3 ops/runtime/supervisor.py status",
+    "app:doctor": "python3 ops/runtime/healthcheck.py",
+    "app:logs": "python3 ops/runtime/supervisor.py logs"
   }
 }

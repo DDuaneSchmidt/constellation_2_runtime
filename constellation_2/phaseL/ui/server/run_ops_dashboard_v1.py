@@ -114,6 +114,7 @@ THIS_FILE = Path(__file__).resolve()
 # parents: [server, ui, phaseL, constellation_2, <repo_root>, ...]
 REPO_ROOT = THIS_FILE.parents[4]
 TRUTH_ROOT = SLEEVE_TRUTH_ROOT
+RUNTIME_ROOT = (REPO_ROOT / "runtime").resolve()
 
 
 def _known_truth_roots() -> List[Path]:
@@ -179,6 +180,22 @@ def _instance_config_path() -> Path:
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _service_version() -> Optional[str]:
+    import os
+
+    env_version = (os.environ.get("C2_SERVICE_VERSION") or "").strip()
+    if env_version:
+        return env_version
+
+    package_path = (REPO_ROOT / "package.json").resolve()
+    payload, _ = _safe_read_json(package_path)
+    if isinstance(payload, dict):
+        raw_version = payload.get("version")
+        if isinstance(raw_version, str) and raw_version.strip():
+            return raw_version.strip()
+    return None
 
 
 def _safe_read_json(path: Path) -> Tuple[Optional[Any], Optional[str]]:
@@ -1605,6 +1622,38 @@ class OpsHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b)
 
+    def _health_payload(self) -> Dict[str, Any]:
+        host = ""
+        port = 0
+        try:
+            host = str(self.server.server_address[0])
+            port = int(self.server.server_address[1])
+        except Exception:
+            host = "127.0.0.1"
+            port = 0
+
+        checks: Dict[str, Any] = {
+            "static_dir_exists": OpsHandler.STATIC_DIR.exists(),
+            "truth_root_exists": TRUTH_ROOT.exists(),
+            "truth_root_is_dir": TRUTH_ROOT.is_dir(),
+            "runtime_root_exists": RUNTIME_ROOT.exists(),
+            "runtime_root_is_dir": RUNTIME_ROOT.is_dir(),
+        }
+        status = "READY" if all(bool(v) for v in checks.values()) else "DEGRADED"
+        payload: Dict[str, Any] = {
+            "service": "ops_dashboard",
+            "status": status,
+            "timestamp_utc": _utc_now_iso(),
+            "host": host,
+            "port": port,
+            "checks": checks,
+            "runtime_root": str(RUNTIME_ROOT),
+        }
+        version = _service_version()
+        if isinstance(version, str) and version:
+            payload["version"] = version
+        return payload
+
     def translate_path(self, path: str) -> str:
         u = urlparse(path)
         normalized = u.path.rstrip("/") or "/"
@@ -2183,6 +2232,9 @@ class OpsHandler(SimpleHTTPRequestHandler):
         return True
 
     def do_GET(self) -> None:
+        if urlparse(self.path).path == "/health":
+            self._send_json(HTTPStatus.OK, self._health_payload())
+            return
         if self._route_api():
             return
         return super().do_GET()

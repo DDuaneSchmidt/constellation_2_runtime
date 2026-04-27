@@ -1,0 +1,11 @@
+schema_version: 1
+runtime_name: constellation_local_runtime
+services:
+  - name: ops_dashboard
+    required: true
+    host: 127.0.0.1
+    port: 8787
+    entrypoint: constellation_2/phaseL/ui/server/run_ops_dashboard_v1.py
+    health_url: http://127.0.0.1:8787/health
+    start_timeout_seconds: 45
+    stop_timeout_seconds: 15
