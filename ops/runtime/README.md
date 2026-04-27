@@ -41,3 +41,16 @@ The supervisor ensures these paths exist:
 - `runtime/logs/`
 
 Service PIDs are stored in `runtime/process_state/<service>.pid` and used for stop/restart ownership checks.
+
+## Manual Trading Morning Flow
+
+Paper trading readiness is manual and operator-driven. No scheduler, timer, or cron job auto-runs readiness.
+
+Run from repo root:
+
+- `npm run app:restart`
+- `npm run trading:prepare`
+- `npm run trading:preflight`
+
+`trading:prepare` writes `runtime/process_state/trading_readiness_decision.json`.
+`trading:preflight` fails closed if the decision is missing, expired, wrong-day, non-PAPER, non-GO, or missing required gate evidence.

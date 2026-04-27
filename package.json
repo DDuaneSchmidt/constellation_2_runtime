@@ -19,6 +19,9 @@
     "app:restart": "python3 ops/runtime/supervisor.py restart",
     "app:status": "python3 ops/runtime/supervisor.py status",
     "app:doctor": "python3 ops/runtime/healthcheck.py",
-    "app:logs": "python3 ops/runtime/supervisor.py logs"
+    "app:logs": "python3 ops/runtime/supervisor.py logs",
+    "trading:prepare": "python3 ops/tools/run_trading_prepare_v1.py",
+    "trading:preflight": "python3 ops/tools/run_trading_preflight_v1.py",
+    "trading:preflight:json": "python3 ops/tools/run_trading_preflight_v1.py --json"
   }
 }
