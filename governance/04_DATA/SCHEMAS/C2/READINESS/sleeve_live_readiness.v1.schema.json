@@ -93,6 +93,40 @@
       "type": "string",
       "enum": ["A", "B", "C", "D", "UNKNOWN"]
     },
+    "readiness_grade_scale": {
+      "type": "string",
+      "enum": ["1_to_7"]
+    },
+    "readiness_grade_1_to_7": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 7
+    },
+    "score_threshold_grade_1_to_7": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 7
+    },
+    "grading_thresholds_1_to_7": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["grade", "min_score"],
+        "properties": {
+          "grade": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 7
+          },
+          "min_score": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          }
+        }
+      }
+    },
     "score_threshold": {
       "type": "integer",
       "minimum": 0,

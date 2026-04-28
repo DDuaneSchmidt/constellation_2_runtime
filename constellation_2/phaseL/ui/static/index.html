@@ -11,6 +11,7 @@
   <div id="app" class="operator-app">
     <header class="shell-topbar">
       <div class="topbar-brand">
+        <button id="headerBackButton" class="icon-button" type="button" aria-label="Back" onclick="history.back()">‹</button>
         <div id="brandMark"></div>
         <div class="brand-copy">
           <div class="section-eyebrow">Aegis / Constellation</div>
@@ -18,18 +19,24 @@
           <div id="currentDayValue" hidden>UNKNOWN</div>
           <div id="refreshValue" hidden>UNKNOWN</div>
           <div id="brokerIndicator" hidden>UNKNOWN</div>
-          <h1>Aegis Command Shell</h1>
+          <h1 id="headerPageTitle">Command / Overview</h1>
           <div hidden>Constellation Operator Shell</div>
           <div class="section-eyebrow">Kernel-Aligned Operator Console</div>
-          <p>One unified operator shell over the current governed runtime, advisory, reconciliation, audit, and reporting surfaces.</p>
         </div>
       </div>
       <div class="topbar-controls">
-        <div class="topbar-search">
-          <button id="commandPaletteButton" class="primary-button" type="button">Open Command Palette</button>
-          <button id="refreshButton" class="ghost-button" type="button">Refresh</button>
+        <div class="header-truth-row">
+          <span id="headerEnvironment" class="environment-pill">PRODUCTION</span>
+          <span id="headerDataTimestamp" class="header-timestamp">Data as of: Apr 27, 2026 3:58 PM EDT</span>
         </div>
-        <div class="topbar-stats">
+        <div class="topbar-actions">
+          <button id="refreshButton" class="icon-button" type="button" aria-label="Refresh">↻</button>
+          <button id="commandPaletteButton" class="primary-button" type="button">Quick Actions</button>
+          <button class="icon-button notification-button" type="button" aria-label="Notifications">◇<span id="notificationBadge" class="button-badge">3</span></button>
+          <button class="icon-button" type="button" aria-label="Help">?</button>
+          <button class="avatar-button" type="button" aria-label="User menu">AG</button>
+        </div>
+        <div class="topbar-stats compact">
           <div class="topbar-stat">
             <div class="topbar-stat-label">Effective Config</div>
             <div class="topbar-stat-value" id="topConfigVersion">backend gap</div>
@@ -42,11 +49,11 @@
             <div class="topbar-stat-label">Readiness</div>
             <div class="topbar-stat-value" id="topReadiness">UNKNOWN</div>
           </div>
-          <div class="topbar-stat">
+          <div class="topbar-stat" hidden>
             <div class="topbar-stat-label">Portfolio Value</div>
             <div class="topbar-stat-value" id="topPortfolioValue">backend gap</div>
           </div>
-          <div class="topbar-stat">
+          <div class="topbar-stat" hidden>
             <div class="topbar-stat-label">Notifications</div>
             <div class="topbar-stat-value" id="topNotificationCount">0</div>
           </div>
@@ -59,9 +66,16 @@
         <div id="statusStrip" hidden>Kernel Status</div>
         <div id="alertTray" hidden>Alert Tray</div>
         <div class="section-eyebrow">Kernel Workspaces</div>
-        <div class="nav-section-title">Domains</div>
+        <label class="sidebar-search">
+          <span>Search</span>
+          <input id="sidebarSearch" type="search" placeholder="Find domain or truth owner" autocomplete="off" />
+        </label>
         <nav id="workspaceNav" class="nav-list"></nav>
-        <div class="nav-section-title" style="margin-top: 22px;">Kernel Status</div>
+        <button class="sidebar-collapse-button" type="button" data-sidebar-collapse>
+          <span>Collapse</span>
+          <strong>‹</strong>
+        </button>
+        <div class="nav-section-title kernel-title">Kernel Status</div>
         <div id="kernelStatusRail" class="kernel-status-rail"></div>
       </aside>
 
@@ -94,12 +108,34 @@
     </div>
 
     <footer class="bottom-status">
-      <div><span>Effective Config</span><strong id="bottomConfigVersion">backend gap</strong></div>
-      <div><span>Data Freshness</span><strong id="bottomFreshness">n/a</strong></div>
-      <div><span>Readiness</span><strong id="bottomReadiness">UNKNOWN</strong></div>
-      <div><span>Runtime Environment</span><strong id="bottomEnvironment">UNKNOWN</strong></div>
-      <div><span>Session</span><strong id="bottomSession">UNKNOWN</strong></div>
-      <div><span>Top Alert</span><strong id="bottomAlert">No active alert</strong></div>
+      <div class="shortcut-group">
+        <span>Shortcuts</span>
+        <a href="/operations" data-route="/operations">Active Exceptions</a>
+        <a href="/audit" data-route="/audit">Latest Decisions</a>
+        <a href="/policy" data-route="/policy">Policy Library</a>
+        <a href="/reports" data-route="/reports">Evidence Store</a>
+        <a href="/reliability" data-route="/reliability">Health Monitor</a>
+      </div>
+      <label class="bottom-search">
+        <span>Global Search</span>
+        <input type="search" placeholder="Search evidence, policy, accounts" />
+      </label>
+      <div class="domain-jump">
+        <a href="/" data-route="/">Command</a>
+        <a href="/capital" data-route="/capital">Capital</a>
+        <a href="/portfolio" data-route="/portfolio">Portfolio</a>
+        <a href="/advisory" data-route="/advisory">Advisory</a>
+        <a href="/tax" data-route="/tax">Taxes</a>
+        <a href="/audit" data-route="/audit">Audit</a>
+      </div>
+      <div class="bottom-hidden" hidden>
+        <strong id="bottomConfigVersion">backend gap</strong>
+        <strong id="bottomFreshness">n/a</strong>
+        <strong id="bottomReadiness">UNKNOWN</strong>
+        <strong id="bottomEnvironment">UNKNOWN</strong>
+        <strong id="bottomSession">UNKNOWN</strong>
+        <strong id="bottomAlert">No active alert</strong>
+      </div>
     </footer>
   </div>
 

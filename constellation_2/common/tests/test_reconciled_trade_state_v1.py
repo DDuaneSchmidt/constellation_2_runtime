@@ -10,6 +10,9 @@ from constellation_2.common.reconciled_trade_state_v1 import (
     OWN_CONSTELLATION,
     OWN_FOREIGN,
     RC_CONFLICTING_INCORPORATED_FILLS,
+    RC_ENGINE_ATTRIBUTION_AMBIGUOUS,
+    RC_ENGINE_ATTRIBUTION_LINEAGE_MISSING,
+    RC_ENGINE_ATTRIBUTION_UNRESOLVED,
     RC_FOREIGN_MANUAL_ACTIVITY_SUSPECTED,
     RC_MIXED_OWNERSHIP_EVIDENCE,
     RC_POSITION_ORDER_FILL_INCONSISTENCY,
@@ -346,6 +349,59 @@ def _load_json(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _write_execution_stream_record(
+    *,
+    execution_root: Path,
+    day_utc: str,
+    filename: str,
+    engine_id: str,
+    source_intent_id: str,
+    order_id: int | None,
+    perm_id: int | None,
+) -> None:
+    payload = {
+        "schema_id": "C2_EXECUTION_EVENT_STREAM_RECORD_V1",
+        "schema_version": 1,
+        "engine_id": engine_id,
+        "source_intent_id": source_intent_id,
+        "intent_sha256": "a" * 64,
+        "broker_ids": {"order_id": order_id, "perm_id": perm_id},
+    }
+    _write_json(execution_root / "execution_stream_v1" / day_utc / filename, payload)
+
+
+def _write_submission_evidence(
+    *,
+    execution_root: Path,
+    day_utc: str,
+    submission_id: str,
+    engine_id: str,
+    source_intent_id: str,
+    order_id: int,
+    perm_id: int,
+) -> None:
+    submission_dir = execution_root / "execution_evidence_v1" / "submissions" / day_utc / submission_id
+    _write_json(
+        submission_dir / "equity_order_plan.v1.json",
+        {
+            "schema_id": "equity_order_plan",
+            "schema_version": "v1",
+            "engine_id": engine_id,
+            "source_intent_id": source_intent_id,
+            "intent_sha256": "b" * 64,
+        },
+    )
+    _write_json(
+        submission_dir / "broker_submission_record.v2.json",
+        {
+            "schema_id": "broker_submission_record",
+            "schema_version": "v2",
+            "submission_id": submission_id,
+            "broker_ids": {"order_id": order_id, "perm_id": perm_id},
+        },
+    )
+
+
 def test_trade_identity_and_incorporated_state_are_deterministic(tmp_path: Path, monkeypatch) -> None:
     execution_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
     execution_root.mkdir(parents=True)
@@ -392,6 +448,185 @@ def test_trade_identity_and_incorporated_state_are_deterministic(tmp_path: Path,
     assert state["current_quantity"] == "10"
     assert state["side"] == "LONG"
     assert first.summary["counts_by_health"]["TRUSTED"] == 1
+
+
+def test_engine_attribution_is_persisted_from_execution_stream_lineage(tmp_path: Path, monkeypatch) -> None:
+    execution_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    execution_root.mkdir(parents=True)
+    day_utc = "2026-04-14"
+    _prepare_core1(
+        execution_root=execution_root,
+        day_utc=day_utc,
+        rows_by_schema={
+            "observed_order_fact": [_order_fact(seq=1, observed_utc="2026-04-14T14:30:03Z")],
+            "observed_order_status_fact": [_order_status_fact(seq=2, observed_utc="2026-04-14T14:30:04Z")],
+            "observed_fill_fact": [_fill_fact(seq=3, observed_utc="2026-04-14T14:30:05Z", execution_id="E-1")],
+            "observed_position_fact": [_position_fact(seq=4, observed_utc="2026-04-14T14:30:06Z", position_quantity="10")],
+        },
+    )
+    _write_execution_stream_record(
+        execution_root=execution_root,
+        day_utc=day_utc,
+        filename="record.execution_event_stream_record.v1.json",
+        engine_id="C2_TREND_EQ_PRIMARY_V1",
+        source_intent_id="intent-123",
+        order_id=101,
+        perm_id=555001,
+    )
+    monkeypatch.setattr(
+        "constellation_2.common.reconciled_trade_state_v1.resolve_governed_execution_identity_v1",
+        lambda **_: _governed_identity(),
+    )
+    monkeypatch.setattr(
+        "constellation_2.common.reconciled_trade_state_v1.resolve_governed_paper_execution_roots",
+        lambda **_: _governed_roots(execution_root),
+    )
+
+    materialization = materialize_reconciled_trade_state_v1(
+        repo_root=Path("/home/node/constellation"),
+        day_utc=day_utc,
+        environment="PAPER",
+        sleeve_id="PRIMARY",
+        evaluation_utc="2026-04-14T14:31:00Z",
+    )
+
+    identity = _load_json(materialization.trade_artifacts[0].trade_identity_path)
+    state = _load_json(materialization.trade_artifacts[0].incorporated_state_path)
+    assert identity["native_engine_id"] == "C2_TREND_EQ_PRIMARY_V1"
+    assert identity["strategy_engine_id"] == "C2_TREND_EQ_PRIMARY_V1"
+    assert identity["source_intent_id"] == "intent-123"
+    assert identity["attribution_diagnostics"]["status"] == "RESOLVED"
+    assert state["engine_id"] == "C2_TREND_EQ_PRIMARY_V1"
+    assert state["attribution_diagnostics"]["status"] == "RESOLVED"
+
+
+def test_engine_attribution_is_resolved_from_submission_evidence_alias(tmp_path: Path, monkeypatch) -> None:
+    execution_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    execution_root.mkdir(parents=True)
+    day_utc = "2026-04-14"
+    _prepare_core1(
+        execution_root=execution_root,
+        day_utc=day_utc,
+        rows_by_schema={
+            "observed_order_fact": [_order_fact(seq=1, observed_utc="2026-04-14T14:30:03Z")],
+            "observed_order_status_fact": [_order_status_fact(seq=2, observed_utc="2026-04-14T14:30:04Z")],
+            "observed_fill_fact": [_fill_fact(seq=3, observed_utc="2026-04-14T14:30:05Z", execution_id="E-1")],
+            "observed_position_fact": [_position_fact(seq=4, observed_utc="2026-04-14T14:30:06Z", position_quantity="10")],
+        },
+    )
+    _write_submission_evidence(
+        execution_root=execution_root,
+        day_utc=day_utc,
+        submission_id="s" * 64,
+        engine_id="C2_TREND_EQ_PRIMARY_V1",
+        source_intent_id="intent-submission",
+        order_id=101,
+        perm_id=555001,
+    )
+    monkeypatch.setattr(
+        "constellation_2.common.reconciled_trade_state_v1.resolve_governed_execution_identity_v1",
+        lambda **_: _governed_identity(),
+    )
+    monkeypatch.setattr(
+        "constellation_2.common.reconciled_trade_state_v1.resolve_governed_paper_execution_roots",
+        lambda **_: _governed_roots(execution_root),
+    )
+
+    materialization = materialize_reconciled_trade_state_v1(
+        repo_root=Path("/home/node/constellation"),
+        day_utc=day_utc,
+        evaluation_utc="2026-04-14T14:31:00Z",
+    )
+    identity = _load_json(materialization.trade_artifacts[0].trade_identity_path)
+    assert identity["engine_id"] == "C2_TREND_EQ_PRIMARY_V1"
+    assert identity["source_intent_id"] == "intent-submission"
+
+
+def test_missing_engine_attribution_remains_unresolved_without_fake_defaults(tmp_path: Path, monkeypatch) -> None:
+    execution_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    execution_root.mkdir(parents=True)
+    day_utc = "2026-04-16"
+    _prepare_core1(
+        execution_root=execution_root,
+        day_utc=day_utc,
+        rows_by_schema={
+            "observed_position_fact": [
+                _position_fact(seq=1, observed_utc="2026-04-16T05:15:07Z", position_quantity="3"),
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        "constellation_2.common.reconciled_trade_state_v1.resolve_governed_execution_identity_v1",
+        lambda **_: _governed_identity(),
+    )
+    monkeypatch.setattr(
+        "constellation_2.common.reconciled_trade_state_v1.resolve_governed_paper_execution_roots",
+        lambda **_: _governed_roots(execution_root),
+    )
+
+    materialization = materialize_reconciled_trade_state_v1(
+        repo_root=Path("/home/node/constellation"),
+        day_utc=day_utc,
+        evaluation_utc="2026-04-16T14:31:00Z",
+    )
+    identity = _load_json(materialization.trade_artifacts[0].trade_identity_path)
+    assert identity["engine_id"] == ""
+    assert identity["native_engine_id"] == ""
+    assert identity["strategy_engine_id"] == ""
+    reason_codes = set(identity["attribution_diagnostics"]["reason_codes"])
+    assert RC_ENGINE_ATTRIBUTION_UNRESOLVED in reason_codes
+    assert RC_ENGINE_ATTRIBUTION_LINEAGE_MISSING in reason_codes
+
+
+def test_ambiguous_engine_attribution_does_not_pick_default(tmp_path: Path, monkeypatch) -> None:
+    execution_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    execution_root.mkdir(parents=True)
+    day_utc = "2026-04-14"
+    _prepare_core1(
+        execution_root=execution_root,
+        day_utc=day_utc,
+        rows_by_schema={
+            "observed_order_fact": [_order_fact(seq=1, observed_utc="2026-04-14T14:30:03Z")],
+            "observed_order_status_fact": [_order_status_fact(seq=2, observed_utc="2026-04-14T14:30:04Z")],
+            "observed_fill_fact": [_fill_fact(seq=3, observed_utc="2026-04-14T14:30:05Z", execution_id="E-1")],
+            "observed_position_fact": [_position_fact(seq=4, observed_utc="2026-04-14T14:30:06Z", position_quantity="10")],
+        },
+    )
+    _write_execution_stream_record(
+        execution_root=execution_root,
+        day_utc=day_utc,
+        filename="record-a.execution_event_stream_record.v1.json",
+        engine_id="C2_TREND_EQ_PRIMARY_V1",
+        source_intent_id="intent-a",
+        order_id=101,
+        perm_id=555001,
+    )
+    _write_execution_stream_record(
+        execution_root=execution_root,
+        day_utc=day_utc,
+        filename="record-b.execution_event_stream_record.v1.json",
+        engine_id="C2_INTENT_SIMULATOR_V1",
+        source_intent_id="intent-b",
+        order_id=101,
+        perm_id=555001,
+    )
+    monkeypatch.setattr(
+        "constellation_2.common.reconciled_trade_state_v1.resolve_governed_execution_identity_v1",
+        lambda **_: _governed_identity(),
+    )
+    monkeypatch.setattr(
+        "constellation_2.common.reconciled_trade_state_v1.resolve_governed_paper_execution_roots",
+        lambda **_: _governed_roots(execution_root),
+    )
+
+    materialization = materialize_reconciled_trade_state_v1(
+        repo_root=Path("/home/node/constellation"),
+        day_utc=day_utc,
+        evaluation_utc="2026-04-14T14:31:00Z",
+    )
+    identity = _load_json(materialization.trade_artifacts[0].trade_identity_path)
+    assert identity["engine_id"] == ""
+    assert RC_ENGINE_ATTRIBUTION_AMBIGUOUS in set(identity["attribution_diagnostics"]["reason_codes"])
 
 
 def test_foreign_manual_path_is_explicit_and_blocked(tmp_path: Path, monkeypatch) -> None:

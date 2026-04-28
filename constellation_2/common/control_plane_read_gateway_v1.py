@@ -56,6 +56,12 @@ PAPER_SESSION_KERNEL_SCHEMA = (
 PAPER_DAY_CONTROL_PLANE_SCHEMA = (
     "governance/04_DATA/SCHEMAS/C2/REPORTS/paper_day_control_plane.v1.schema.json"
 )
+PAPER_TRADING_DAY_AUTHORITY_SCHEMA = (
+    "governance/04_DATA/SCHEMAS/C2/REPORTS/paper_trading_day_authority.v1.schema.json"
+)
+TRADE_READINESS_DECISION_SCHEMA = (
+    "governance/04_DATA/SCHEMAS/C2/REPORTS/trade_readiness_decision.v1.schema.json"
+)
 PAPER_TRADING_POSTURE_SCHEMA = (
     "governance/04_DATA/SCHEMAS/C2/REPORTS/paper_trading_posture.v1.schema.json"
 )
@@ -541,6 +547,36 @@ def _paper_session_kernel_path(*, truth_root: Path, day_utc: str) -> Path:
 def _paper_day_control_plane_path(*, truth_root: Path, day_utc: str) -> Path:
     return (
         truth_root / "reports" / "paper_day_control_plane_v1" / str(day_utc).strip() / "paper_day_control_plane.v1.json"
+    ).resolve()
+
+
+def _paper_trading_day_authority_path(*, truth_root: Path, day_utc: str) -> Path:
+    return (
+        truth_root
+        / "reports"
+        / "paper_trading_day_authority_v1"
+        / str(day_utc).strip()
+        / "paper_trading_day_authority.v1.json"
+    ).resolve()
+
+
+def _trade_readiness_decision_path(*, truth_root: Path, day_utc: str) -> Path:
+    return (
+        truth_root
+        / "reports"
+        / "trade_readiness_decision_v1"
+        / str(day_utc).strip()
+        / "trade_readiness_decision.v1.json"
+    ).resolve()
+
+
+def _trade_readiness_presubmit_path(*, truth_root: Path, day_utc: str) -> Path:
+    return (
+        truth_root
+        / "reports"
+        / "trade_readiness_presubmit_v1"
+        / str(day_utc).strip()
+        / "trade_readiness_presubmit.v1.json"
     ).resolve()
 
 
@@ -1831,6 +1867,26 @@ def read_control_plane_surface_v1(
             schema_relpath=PAPER_DAY_CONTROL_PLANE_SCHEMA,
             metadata={"truth_root": str(root), "day_utc": day},
         )
+    if normalized_domain == "execution" and normalized_surface == "paper_trading_day_authority":
+        root = _global_truth_root(global_root)
+        day = _require_day(day_utc, surface=surface)
+        return _read_validated_json(
+            domain="execution",
+            surface="paper_trading_day_authority",
+            path=_paper_trading_day_authority_path(truth_root=root, day_utc=day),
+            schema_relpath=PAPER_TRADING_DAY_AUTHORITY_SCHEMA,
+            metadata={"truth_root": str(root), "day_utc": day},
+        )
+    if normalized_domain == "execution" and normalized_surface == "trade_readiness_decision":
+        root = _global_truth_root(global_root)
+        day = _require_day(day_utc, surface=surface)
+        return _read_validated_json(
+            domain="execution",
+            surface="trade_readiness_decision",
+            path=_trade_readiness_decision_path(truth_root=root, day_utc=day),
+            schema_relpath=TRADE_READINESS_DECISION_SCHEMA,
+            metadata={"truth_root": str(root), "day_utc": day},
+        )
     if normalized_domain == "execution" and normalized_surface == "paper_trading_posture":
         root = _global_truth_root(global_root)
         day = _require_day(day_utc, surface=surface)
@@ -1995,6 +2051,16 @@ def read_control_plane_surface_v1(
                 "environment": str(environment).strip().upper(),
                 "ib_account": str(ib_account).strip(),
             },
+        )
+    if normalized_domain == "execution" and normalized_surface == "trade_readiness_presubmit":
+        root = _global_truth_root(global_root)
+        day = _require_day(day_utc, surface=surface)
+        return _read_validated_json(
+            domain="execution",
+            surface="trade_readiness_presubmit",
+            path=_trade_readiness_presubmit_path(truth_root=root, day_utc=day),
+            schema_relpath=None,
+            metadata={"truth_root": str(root), "day_utc": day},
         )
     if normalized_domain == "execution" and normalized_surface == "capital_risk_envelope":
         root = _global_truth_root(sleeve_root or global_root)

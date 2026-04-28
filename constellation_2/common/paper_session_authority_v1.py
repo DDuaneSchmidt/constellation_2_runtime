@@ -49,7 +49,12 @@ def _validate_semantics_v1(payload: Mapping[str, Any]) -> None:
         raise ValueError("PAPER_SESSION_AUTHORITY_SAFETY_CHECKS_REQUIRED")
 
 
-def write_paper_session_authority_v1(*, truth_root: Path, payload: Mapping[str, Any]) -> SurfaceRefV1:
+def write_paper_session_authority_v1(
+    *,
+    truth_root: Path,
+    payload: Mapping[str, Any],
+    refresh_semantic_noop: bool = False,
+) -> SurfaceRefV1:
     root = resolve_fact_plane_truth_root_v1(truth_root)
     obj = dict(payload)
     _validate_semantics_v1(obj)
@@ -61,6 +66,7 @@ def write_paper_session_authority_v1(*, truth_root: Path, payload: Mapping[str, 
         payload=obj,
         schema_relpath=SCHEMA_RELPATH_V1,
         volatile_field_names=("produced_utc",),
+        refresh_semantic_noop=refresh_semantic_noop,
     )
 
 

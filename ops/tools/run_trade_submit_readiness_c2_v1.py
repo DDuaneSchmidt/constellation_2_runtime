@@ -25,6 +25,7 @@ import sys
 from typing import Any, Dict, List, Tuple
 
 from constellation_2.common.day_authority_decision_v1 import read_day_authority_decision_v1
+from constellation_2.common.paper_session_fact_plane_v1 import resolve_market_calendar_record_v1
 from constellation_2.common.constitutional_runtime_v1 import (
     FINALITY_PROVISIONAL,
     assert_constitutional_writer_allowed_v1,
@@ -123,6 +124,28 @@ def _runtime_freshness_ts(*, freshness_window_minutes: int, now_utc: datetime | 
 
 def _prior_day_utc(day_utc: str) -> str:
     return (date.fromisoformat(day_utc) - timedelta(days=1)).isoformat()
+
+
+def _prior_trading_day_utc(day_utc: str) -> str:
+    current = date.fromisoformat(day_utc)
+    for offset in range(1, 15):
+        candidate = (current - timedelta(days=offset)).isoformat()
+        try:
+            calendar_state = resolve_market_calendar_record_v1(truth_root=TRUTH_ROOT, day_utc=candidate)
+        except Exception:
+            calendar_state = {"status": "ERROR", "record": None}
+        record = calendar_state.get("record") if isinstance(calendar_state, dict) else None
+        if (
+            isinstance(calendar_state, dict)
+            and str(calendar_state.get("status") or "").strip().upper() == "OK"
+            and isinstance(record, dict)
+            and record.get("is_trading_session") is True
+        ):
+            return candidate
+
+    # Fail conservative if the governed calendar is unavailable: preserve the
+    # prior behavior so missing calendar coverage cannot silently skip evidence.
+    return _prior_day_utc(day_utc)
 
 
 def _dedupe_reason_codes(reason_codes: List[str]) -> List[str]:
@@ -501,7 +524,7 @@ def _materialize_previous_day_economic_package(
     environment: str,
     ib_account: str,
 ) -> Dict[str, Any]:
-    prev_day_utc = _prior_day_utc(day_utc)
+    prev_day_utc = _prior_trading_day_utc(day_utc)
     try:
         result = run_economic_state_authority_v1(
             repo_root=repo_root,
@@ -550,7 +573,7 @@ def _load_previous_day_economic_package_state(
 ) -> Dict[str, Any]:
     assert_artifact_consumer_allowed_v1(_CONSTITUTIONAL_REPO_ROOT, "economic_state_package_v1", "trade_submit_readiness_c2_v1")
     assert_artifact_consumer_allowed_v1(_CONSTITUTIONAL_REPO_ROOT, "economic_state_build_v1", "trade_submit_readiness_c2_v1")
-    prev_day_utc = _prior_day_utc(day_utc)
+    prev_day_utc = _prior_trading_day_utc(day_utc)
     package_root = (execution_truth_root / ECONOMIC_PACKAGE_FAMILY / prev_day_utc).resolve()
     unknown = {
         "status": "UNKNOWN",
@@ -1072,16 +1095,10 @@ def main() -> int:
         cycle_coherence_status=cycle_coherence_status,
         upstream_refs=cycle_upstream_refs,
     )
-    try:
-        day_authority_ref = _build_day_authority_constitutional_ref(
-            day_utc=day,
-            day_authority_path=day_authority_path,
-            day_authority_sha256=day_authority_sha256,
-        )
-    except ValueError as exc:
-        print(f"FAIL_CLOSED:{exc}", file=sys.stderr)
-        return 2
-    constitutional_dependency_refs = [day_authority_ref]
+    # paper_trading_day_authority_v1 now owns paper day readiness. The legacy
+    # day_authority_decision_v1 surface is diagnostic/compatibility-only and
+    # must not veto current-day trade-submit readiness when absent.
+    constitutional_dependency_refs: List[Dict[str, str]] = []
     constitutional_dependency_declaration = build_artifact_dependency_declaration_v1(
         artifact_type="trade_submit_readiness_c2_v1",
         artifact_class=str(readiness_contract.get("artifact_class") or "").strip(),

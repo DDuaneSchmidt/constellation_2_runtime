@@ -106,6 +106,10 @@ RC_MIXED_OWNERSHIP_EVIDENCE = "TRADE_OWNERSHIP_MIXED_EVIDENCE"
 RC_CURRENT_TRUTH_TOO_STALE = "TRADE_RECON_CURRENT_TRUTH_TOO_STALE_FOR_DOWNSTREAM_ACTION_USE"
 RC_LAST_SUCCESSFUL_OUTSIDE_WINDOW = "TRADE_RECON_LAST_SUCCESSFUL_RECONCILIATION_OUTSIDE_ALLOWED_WINDOW"
 RC_CORE1_HEALTH_SCHEMA_NONCOMPLIANT = "TRADE_RECON_CORE1_HEALTH_SCHEMA_NONCOMPLIANT"
+RC_ENGINE_ATTRIBUTION_UNRESOLVED = "TRADE_NATIVE_ENGINE_ATTRIBUTION_UNRESOLVED"
+RC_ENGINE_ATTRIBUTION_AMBIGUOUS = "TRADE_NATIVE_ENGINE_ATTRIBUTION_AMBIGUOUS"
+RC_ENGINE_ATTRIBUTION_LINEAGE_MISSING = "TRADE_NATIVE_ENGINE_ATTRIBUTION_LINEAGE_MISSING"
+RC_ENGINE_ATTRIBUTION_SOURCE_MISSING = "TRADE_NATIVE_ENGINE_ATTRIBUTION_SOURCE_MISSING"
 
 CORE1_TO_CORE2_REASON_MAP = {
     "BROKER_OBSERVATION_STREAM_STALE": RC_UPSTREAM_OBSERVATION_STALE,
@@ -205,6 +209,255 @@ def _decimal_text(value: Decimal) -> str:
     if normalized == normalized.to_integral():
         return format(normalized.quantize(Decimal("1")), "f")
     return format(normalized, "f")
+
+
+def _safe_int(value: Any) -> int | None:
+    if isinstance(value, int):
+        return value
+    try:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        return int(text)
+    except Exception:
+        return None
+
+
+def _sha256_file_optional(path: Path) -> str:
+    try:
+        return sha256_file_v1(path)
+    except Exception:
+        return ""
+
+
+def _normalize_intent_sha(payload: Mapping[str, Any]) -> str:
+    candidates = [
+        str(payload.get("intent_sha256") or "").strip(),
+        str(payload.get("intent_hash") or "").strip(),
+    ]
+    for item in candidates:
+        if len(item) == 64 and all(ch in "0123456789abcdef" for ch in item.lower()):
+            return item.lower()
+    return ""
+
+
+def _extract_engine_meta(payload: Mapping[str, Any], *, source_path: Path) -> Dict[str, str]:
+    engine_id = str(payload.get("engine_id") or "").strip()
+    if not engine_id:
+        engine_obj = payload.get("engine")
+        if isinstance(engine_obj, dict):
+            engine_id = str(engine_obj.get("engine_id") or "").strip()
+    return {
+        "engine_id": engine_id,
+        "source_intent_id": str(payload.get("source_intent_id") or payload.get("intent_id") or "").strip(),
+        "intent_sha256": _normalize_intent_sha(payload),
+        "source_path": str(source_path.resolve()),
+        "source_sha256": _sha256_file_optional(source_path),
+    }
+
+
+def _load_execution_attribution_index(*, execution_root_path: Path, max_day_utc: str) -> Dict[str, Dict[str, List[Dict[str, str]]]]:
+    indexes: Dict[str, Dict[str, List[Dict[str, str]]]] = {"order_id": {}, "perm_id": {}}
+    root = Path(execution_root_path).resolve()
+    max_day = parse_day_utc_v1(max_day_utc)
+
+    stream_root = (root / "execution_stream_v1").resolve()
+    if stream_root.exists() and stream_root.is_dir():
+        for day_dir in sorted(path for path in stream_root.iterdir() if path.is_dir() and path.name <= max_day):
+            for path in sorted(day_dir.glob("*.execution_event_stream_record.v1.json")):
+                try:
+                    payload = _read_json_obj(path)
+                except Exception:
+                    continue
+                meta = _extract_engine_meta(payload, source_path=path)
+                if not meta["engine_id"]:
+                    continue
+                broker_ids = payload.get("broker_ids")
+                if not isinstance(broker_ids, dict):
+                    continue
+                order_id = _safe_int(broker_ids.get("order_id"))
+                perm_id = _safe_int(broker_ids.get("perm_id"))
+                if isinstance(order_id, int) and order_id >= 0:
+                    indexes["order_id"].setdefault(str(order_id), []).append(dict(meta))
+                if isinstance(perm_id, int) and perm_id > 0:
+                    indexes["perm_id"].setdefault(str(perm_id), []).append(dict(meta))
+
+    submissions_root = (root / "execution_evidence_v1" / "submissions").resolve()
+    if submissions_root.exists() and submissions_root.is_dir():
+        for day_dir in sorted(path for path in submissions_root.iterdir() if path.is_dir() and path.name <= max_day and path.name[:1].isdigit()):
+            for submission_dir in sorted(path for path in day_dir.iterdir() if path.is_dir()):
+                plan_payload: Dict[str, Any] | None = None
+                plan_path: Path | None = None
+                for candidate in (
+                    "equity_order_plan.v2.json",
+                    "equity_order_plan.v1.json",
+                    "order_plan.v1.json",
+                ):
+                    path = (submission_dir / candidate).resolve()
+                    if not path.exists() or not path.is_file():
+                        continue
+                    try:
+                        plan_payload = _read_json_obj(path)
+                        plan_path = path
+                        break
+                    except Exception:
+                        continue
+                if plan_payload is None or plan_path is None:
+                    continue
+                meta = _extract_engine_meta(plan_payload, source_path=plan_path)
+                if not meta["engine_id"]:
+                    continue
+
+                broker_id_paths = [
+                    submission_dir / "broker_submission_record.v2.json",
+                    submission_dir / "broker_submission_record.v1.json",
+                    submission_dir / "execution_event_record.v1.json",
+                ]
+                for broker_path in broker_id_paths:
+                    broker_path = broker_path.resolve()
+                    if not broker_path.exists() or not broker_path.is_file():
+                        continue
+                    try:
+                        broker_payload = _read_json_obj(broker_path)
+                    except Exception:
+                        continue
+                    broker_ids = broker_payload.get("broker_ids")
+                    if not isinstance(broker_ids, dict):
+                        continue
+                    order_id = _safe_int(broker_ids.get("order_id"))
+                    perm_id = _safe_int(broker_ids.get("perm_id"))
+                    meta_with_ref = dict(meta)
+                    meta_with_ref["source_path"] = str(broker_path)
+                    meta_with_ref["source_sha256"] = _sha256_file_optional(broker_path)
+                    if isinstance(order_id, int) and order_id >= 0:
+                        indexes["order_id"].setdefault(str(order_id), []).append(dict(meta_with_ref))
+                    if isinstance(perm_id, int) and perm_id > 0:
+                        indexes["perm_id"].setdefault(str(perm_id), []).append(dict(meta_with_ref))
+    return indexes
+
+
+def _sample_attribution_records(rows: Sequence[Mapping[str, Any]], *, limit: int = 3) -> List[Dict[str, Any]]:
+    samples: List[Dict[str, Any]] = []
+    for row in sorted(rows, key=_fact_sort_key):
+        if len(samples) >= limit:
+            break
+        contract_identity = row.get("contract_identity") if isinstance(row.get("contract_identity"), dict) else {}
+        samples.append(
+            {
+                "schema_id": str(row.get("schema_id") or ""),
+                "fact_record_id": str(row.get("fact_record_id") or ""),
+                "order_id": str(row.get("order_id") or ""),
+                "perm_id": str(row.get("perm_id") or ""),
+                "execution_id": str(row.get("execution_id") or ""),
+                "symbol": str(contract_identity.get("symbol") or ""),
+                "sec_type": str(contract_identity.get("sec_type") or ""),
+                "currency": str(contract_identity.get("currency") or ""),
+            }
+        )
+    return samples
+
+
+def _resolve_engine_attribution(
+    *,
+    rows: Sequence[Mapping[str, Any]],
+    execution_index: Mapping[str, Mapping[str, List[Dict[str, str]]]],
+) -> Dict[str, Any]:
+    order_ids = _unique_strings(str(row.get("order_id") or "") for row in rows)
+    perm_ids = _unique_strings(str(row.get("perm_id") or "") for row in rows)
+    execution_ids = _unique_strings(str(row.get("execution_id") or "") for row in rows)
+
+    direct_engine_candidates = _unique_strings(
+        [
+            str(row.get("native_engine_id") or "").strip()
+            for row in rows
+        ]
+        + [
+            str(row.get("engine_id") or "").strip()
+            for row in rows
+        ]
+        + [
+            str(row.get("strategy_engine_id") or "").strip()
+            for row in rows
+        ]
+    )
+
+    matched: List[Dict[str, str]] = []
+    for order_id in order_ids:
+        matched.extend(list((execution_index.get("order_id") or {}).get(order_id, [])))
+    for perm_id in perm_ids:
+        matched.extend(list((execution_index.get("perm_id") or {}).get(perm_id, [])))
+    deduped_matches: Dict[tuple[str, str], Dict[str, str]] = {}
+    for match in matched:
+        engine_id = str(match.get("engine_id") or "").strip()
+        source_path = str(match.get("source_path") or "").strip()
+        if not engine_id or not source_path:
+            continue
+        deduped_matches[(engine_id, source_path)] = dict(match)
+
+    matched_engine_candidates = sorted({item[0] for item in deduped_matches.keys()})
+    source_paths = sorted({item[1] for item in deduped_matches.keys()})
+    source_intent_candidates = _unique_strings(
+        str(item.get("source_intent_id") or "") for item in deduped_matches.values()
+    )
+    intent_sha_candidates = _unique_strings(
+        str(item.get("intent_sha256") or "") for item in deduped_matches.values()
+    )
+
+    reason_codes: List[str] = []
+    fields_present: List[str] = []
+    if order_ids:
+        fields_present.append("lineage_attachment_refs.order_ids")
+    if perm_ids:
+        fields_present.append("lineage_attachment_refs.perm_ids")
+    if execution_ids:
+        fields_present.append("lineage_attachment_refs.execution_ids")
+    if direct_engine_candidates:
+        fields_present.append("fact_rows.native_engine_id|engine_id|strategy_engine_id")
+
+    resolved_engine_id = ""
+    resolved_source_intent_id = ""
+    resolved_intent_sha = ""
+
+    if len(matched_engine_candidates) > 1:
+        reason_codes.append(RC_ENGINE_ATTRIBUTION_AMBIGUOUS)
+    elif len(matched_engine_candidates) == 1:
+        resolved_engine_id = matched_engine_candidates[0]
+        if source_intent_candidates:
+            resolved_source_intent_id = source_intent_candidates[0]
+        if intent_sha_candidates:
+            resolved_intent_sha = intent_sha_candidates[0]
+    elif len(direct_engine_candidates) > 1:
+        reason_codes.append(RC_ENGINE_ATTRIBUTION_AMBIGUOUS)
+    elif len(direct_engine_candidates) == 1:
+        resolved_engine_id = direct_engine_candidates[0]
+    else:
+        if not order_ids and not perm_ids and not execution_ids:
+            reason_codes.append(RC_ENGINE_ATTRIBUTION_LINEAGE_MISSING)
+        if not source_paths:
+            reason_codes.append(RC_ENGINE_ATTRIBUTION_SOURCE_MISSING)
+        reason_codes.append(RC_ENGINE_ATTRIBUTION_UNRESOLVED)
+
+    status = "RESOLVED" if resolved_engine_id else "UNRESOLVED"
+    diagnostics = {
+        "status": status,
+        "reason_codes": _unique_strings(reason_codes),
+        "source_artifact_paths": source_paths,
+        "lineage_order_id_count": len(order_ids),
+        "lineage_perm_id_count": len(perm_ids),
+        "lineage_execution_id_count": len(execution_ids),
+        "matched_candidate_count": len(deduped_matches),
+        "expected_attribution_field": "engine_id via execution_stream_v1 or execution_evidence_v1 using order_id/perm_id lineage",
+        "fields_actually_present": sorted(fields_present),
+        "sample_records": _sample_attribution_records(rows),
+    }
+    return {
+        "native_engine_id": resolved_engine_id,
+        "engine_id": resolved_engine_id,
+        "strategy_engine_id": resolved_engine_id,
+        "source_intent_id": resolved_source_intent_id,
+        "intent_sha256": resolved_intent_sha,
+        "diagnostics": diagnostics,
+    }
 
 
 def _fact_sort_key(row: Mapping[str, Any]) -> tuple[datetime, int, str, str]:
@@ -494,6 +747,7 @@ def _build_trade_identity_payload(
     governed_identity: GovernedExecutionIdentityV1,
     rows: Sequence[Mapping[str, Any]],
     segment_index: int,
+    engine_attribution: Mapping[str, Any],
 ) -> Dict[str, Any]:
     sorted_rows = sorted(rows, key=_fact_sort_key)
     ownership_classification, ownership_reason_codes, ambiguity_state, blocker_codes = _classify_ownership(sorted_rows)
@@ -537,6 +791,16 @@ def _build_trade_identity_payload(
                     continuity_status = "CLOSED"
     if blocker_codes and continuity_status == "OPEN":
         continuity_status = "UNRESOLVED"
+    native_engine_id = str(engine_attribution.get("native_engine_id") or "").strip()
+    engine_id = str(engine_attribution.get("engine_id") or "").strip()
+    strategy_engine_id = str(engine_attribution.get("strategy_engine_id") or "").strip()
+    source_intent_id = str(engine_attribution.get("source_intent_id") or "").strip()
+    intent_sha256 = str(engine_attribution.get("intent_sha256") or "").strip()
+    attribution_diagnostics = (
+        dict(engine_attribution.get("diagnostics") or {})
+        if isinstance(engine_attribution.get("diagnostics"), dict)
+        else {}
+    )
     return {
         "schema_id": "trade_identity",
         "schema_version": "v1",
@@ -567,6 +831,12 @@ def _build_trade_identity_payload(
         "ambiguity_state": ambiguity_state,
         "blocker_state": BLOCKER_BLOCKED if blocker_codes else BLOCKER_CLEAR,
         "blocker_codes": _unique_strings(blocker_codes),
+        "native_engine_id": native_engine_id,
+        "engine_id": engine_id,
+        "strategy_engine_id": strategy_engine_id,
+        "source_intent_id": source_intent_id,
+        "intent_sha256": intent_sha256,
+        "attribution_diagnostics": attribution_diagnostics,
         "derived_only": False,
     }
 
@@ -873,6 +1143,7 @@ def _resolve_identity_groups(
     materialization_set_id: str,
     governed_identity: GovernedExecutionIdentityV1,
     fact_rows: Mapping[str, Sequence[Mapping[str, Any]]],
+    execution_attribution_index: Mapping[str, Mapping[str, List[Dict[str, str]]]],
 ) -> List[Dict[str, Any]]:
     grouped: Dict[tuple[str, str], List[Mapping[str, Any]]] = defaultdict(list)
     all_rows: List[Mapping[str, Any]] = []
@@ -890,6 +1161,10 @@ def _resolve_identity_groups(
     results: List[Dict[str, Any]] = []
     for (_, _), rows in sorted(grouped.items(), key=lambda item: item[0]):
         for index, segment in enumerate(_split_continuity_segments(rows), start=1):
+            engine_attribution = _resolve_engine_attribution(
+                rows=segment,
+                execution_index=execution_attribution_index,
+            )
             identity_payload = _build_trade_identity_payload(
                 day_utc=day_utc,
                 evaluation_utc=evaluation_utc,
@@ -897,8 +1172,15 @@ def _resolve_identity_groups(
                 governed_identity=governed_identity,
                 rows=segment,
                 segment_index=index,
+                engine_attribution=engine_attribution,
             )
-            results.append({"identity_payload": identity_payload, "segment_rows": segment})
+            results.append(
+                {
+                    "identity_payload": identity_payload,
+                    "segment_rows": segment,
+                    "engine_attribution": engine_attribution,
+                }
+            )
     return results
 
 
@@ -910,6 +1192,7 @@ def _materialize_state(
     rows: Sequence[Mapping[str, Any]],
     core1_health: Mapping[str, Any],
     core1_refs: Mapping[str, Any],
+    engine_attribution: Mapping[str, Any],
 ) -> tuple[Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]]]:
     incorporated_fills, ignored_fills, blocked_fills, fill_reason_codes = _merge_fills(rows)
     working_orders, terminal_orders, orphan_orders, ignored_orders, order_reason_codes, blocked_orders = _build_orders(rows)
@@ -968,6 +1251,16 @@ def _materialize_state(
     elif current_quantity_decimal == 0:
         side = "FLAT"
     max_sequence = max((int(row.get("journal_sequence_number") or 0) for row in rows), default=0)
+    native_engine_id = str(engine_attribution.get("native_engine_id") or "").strip()
+    engine_id = str(engine_attribution.get("engine_id") or "").strip()
+    strategy_engine_id = str(engine_attribution.get("strategy_engine_id") or "").strip()
+    source_intent_id = str(engine_attribution.get("source_intent_id") or "").strip()
+    intent_sha256 = str(engine_attribution.get("intent_sha256") or "").strip()
+    attribution_diagnostics = (
+        dict(engine_attribution.get("diagnostics") or {})
+        if isinstance(engine_attribution.get("diagnostics"), dict)
+        else {}
+    )
     state_payload = {
         "schema_id": "incorporated_broker_trade_state",
         "schema_version": "v1",
@@ -1014,6 +1307,12 @@ def _materialize_state(
         "blocker_codes": blocker_codes,
         "degraded_codes": degraded_codes,
         "last_successful_reconciliation_utc": "" if blocker_codes else _coerce_utc_text(evaluation_utc),
+        "native_engine_id": native_engine_id,
+        "engine_id": engine_id,
+        "strategy_engine_id": strategy_engine_id,
+        "source_intent_id": source_intent_id,
+        "intent_sha256": intent_sha256,
+        "attribution_diagnostics": attribution_diagnostics,
         "upstream_core1_evidence_refs": dict(core1_refs),
         "derived_only": False,
     }
@@ -1222,12 +1521,17 @@ def materialize_reconciled_trade_state_v1(
         separators=(",", ":"),
     )
     materialization_set_id = _sha256_text(materialization_seed)
+    execution_attribution_index = _load_execution_attribution_index(
+        execution_root_path=execution_root_path,
+        max_day_utc=day,
+    )
     groups = _resolve_identity_groups(
         day_utc=day,
         evaluation_utc=effective_evaluation_utc,
         materialization_set_id=materialization_set_id,
         governed_identity=governed_identity,
         fact_rows=fact_rows,
+        execution_attribution_index=execution_attribution_index,
     )
     trade_artifacts: List[Core2TradeArtifactsV1] = []
     summary_refs: List[Dict[str, Any]] = []
@@ -1263,6 +1567,7 @@ def materialize_reconciled_trade_state_v1(
             rows=group["segment_rows"],
             core1_health=core1_health,
             core1_refs=core1_refs,
+            engine_attribution=dict(group.get("engine_attribution") or {}),
         )
         state_payload["trade_identity_ref"] = {
             "trade_identity_id": str(identity_payload["trade_identity_id"]),

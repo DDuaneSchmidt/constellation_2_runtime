@@ -23,7 +23,9 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 PACKET_GENERATED_RE = re.compile(r"^- generated_at_utc:\s*(\S+)\s*$", re.MULTILINE)
 READY_VALUES = {"READY", "AUTHORIZED", "PASS", "OK", "HEALTHY", "INACTIVE"}
 NY_TZ = ZoneInfo("America/New_York")
-PREPARE_DECISION_PATH = (REPO_ROOT / "runtime" / "process_state" / "trading_readiness_decision.json").resolve()
+PREPARE_DECISION_PATH = (
+    RUNTIME_DATA_ROOT / "runtime" / "process_state" / "trading_readiness_decision.json"
+).resolve()
 PREPARE_DECISION_SCHEMA = "trading_readiness_decision.v1"
 PREPARE_REQUIRED_GATE_KEYS = [
     "submit_boundary_status",
@@ -498,7 +500,7 @@ def main(argv: list[str] | None = None) -> int:
                 gate="app_runtime_status_ready",
                 passed=runtime_ok,
                 reason_code="APP_RUNTIME_READY" if runtime_ok else "APP_RUNTIME_NOT_READY",
-                evidence_path=str((REPO_ROOT / "runtime" / "process_state" / "service_status.json").resolve()),
+                evidence_path=str((RUNTIME_DATA_ROOT / "runtime" / "process_state" / "service_status.json").resolve()),
                 detail=f"overall_status={overall_status}",
             )
         )

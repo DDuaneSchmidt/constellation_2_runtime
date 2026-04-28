@@ -1,0 +1,37 @@
+{
+  "$id": "https://constellation.local/schemas/c2/reports/strategy_decision_authority.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Strategy Decision Authority v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_id", "schema_version", "day_utc", "produced_utc", "authority_scope", "status", "strategy_decision_state", "enabled_strategy_count", "intent_count", "zero_intent_reason", "strategies", "intent_mappings", "first_blocker", "input_evidence", "canonical_json_hash"],
+  "properties": {
+    "schema_id": { "const": "C2_STRATEGY_DECISION_AUTHORITY_V1" },
+    "schema_version": { "const": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string" },
+    "authority_scope": { "const": "STRATEGY_DECISIONING" },
+    "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+    "strategy_decision_state": { "type": "string", "enum": ["NO_STRATEGIES_ENABLED", "EVALUATED_NO_INTENT", "INTENT_CREATED", "INTENT_SUPPRESSED", "STRATEGY_DISABLED", "SIGNAL_MISSING", "MARKET_DATA_BLOCKED", "STRATEGY_ERROR", "UNKNOWN"] },
+    "enabled_strategy_count": { "type": "integer", "minimum": 0 },
+    "intent_count": { "type": "integer", "minimum": 0 },
+    "zero_intent_reason": { "type": "string" },
+    "strategies": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+    "intent_mappings": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+    "first_blocker": { "type": "string" },
+    "input_evidence": { "type": "array", "items": { "$ref": "#/$defs/input_evidence" } },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "input_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_type", "path", "exists"],
+      "properties": {
+        "artifact_type": { "type": "string" },
+        "path": { "type": "string" },
+        "exists": { "type": "boolean" }
+      }
+    }
+  }
+}

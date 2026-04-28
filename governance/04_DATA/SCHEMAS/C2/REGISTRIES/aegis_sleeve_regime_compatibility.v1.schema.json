@@ -1,0 +1,43 @@
+{
+  "$id": "https://constellation.local/schemas/c2/registries/aegis_sleeve_regime_compatibility.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Aegis Sleeve Regime Compatibility Registry v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "status", "produced_utc", "owner", "regimes", "sleeves"],
+  "properties": {
+    "schema_id": { "const": "c2_aegis_sleeve_regime_compatibility_registry" },
+    "schema_version": { "const": "v1" },
+    "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"] },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "owner": { "type": "string", "minLength": 1 },
+    "regimes": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": { "type": "string", "enum": ["TRENDING", "CHOPPY", "HIGH_VOL_UNSTABLE"] },
+      "uniqueItems": true
+    },
+    "sleeves": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sleeve_id", "sleeve_name", "classification", "compatible_regimes", "fail_closed_if_unknown"],
+        "properties": {
+          "sleeve_id": { "type": "string", "minLength": 1 },
+          "sleeve_name": { "type": "string", "minLength": 1 },
+          "classification": { "type": "string", "minLength": 1 },
+          "compatible_regimes": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "enum": ["TRENDING", "CHOPPY", "HIGH_VOL_UNSTABLE"] },
+            "uniqueItems": true
+          },
+          "fail_closed_if_unknown": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

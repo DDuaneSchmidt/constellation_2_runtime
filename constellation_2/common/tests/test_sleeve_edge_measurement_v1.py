@@ -179,6 +179,47 @@ def _trade_bundle(
     }
 
 
+def _patch_trade_artifacts(
+    root: Path,
+    *,
+    materialization_set_id: str,
+    trade_identity_id: str,
+    trade_identity_updates: dict[str, object] | None = None,
+    state_updates: dict[str, object] | None = None,
+    clear_lineage: bool = False,
+    clear_fill_linkage: bool = False,
+) -> None:
+    trade_dir = root / "reconciled_trade_state_v1" / "materializations" / DAY / materialization_set_id / "trades" / trade_identity_id
+    trade_identity_path = trade_dir / "trade_identity.v1.json"
+    state_path = trade_dir / "incorporated_broker_trade_state.v1.json"
+
+    trade_identity_payload = json.loads(trade_identity_path.read_text(encoding="utf-8"))
+    if clear_lineage:
+        trade_identity_payload["lineage_attachment_refs"] = {
+            "order_ids": [],
+            "perm_ids": [],
+            "execution_ids": [],
+            "fact_record_ids": [],
+        }
+    if trade_identity_updates:
+        trade_identity_payload.update(trade_identity_updates)
+    _write_json(trade_identity_path, trade_identity_payload)
+
+    state_payload = json.loads(state_path.read_text(encoding="utf-8"))
+    if clear_fill_linkage:
+        fills = state_payload.get("incorporated_fills")
+        if isinstance(fills, list):
+            for fill in fills:
+                if not isinstance(fill, dict):
+                    continue
+                fill["order_id"] = ""
+                fill["perm_id"] = ""
+                fill["execution_id"] = ""
+    if state_updates:
+        state_payload.update(state_updates)
+    _write_json(state_path, state_payload)
+
+
 def _summary(root: Path, *, materialization_set_id: str, evaluation_utc: str, trade_refs: list[dict[str, str]]) -> None:
     _write_json(
         root / "reports" / "reconciled_trade_state_summary_v1" / DAY / materialization_set_id / "reconciled_trade_state_summary.v1.json",
@@ -271,6 +312,134 @@ def test_missing_native_engine_bridge_yields_measurement_invalid(tmp_path: Path)
     qualification = snapshot["qualification"]
     assert qualification["qualification_state"] == "MEASUREMENT_INVALID"
     assert "SLEEVE_EDGE_NATIVE_ENGINE_ATTRIBUTION_UNAVAILABLE" in qualification["reason_codes"]
+    fact_ledger = json.loads(Path(str(snapshot["fact_ledger_ref"]["artifact_path"])).read_text(encoding="utf-8"))
+    trade_fact = fact_ledger["trade_facts"][0]
+    diagnostics = fact_ledger["attribution_diagnostics"]
+    assert trade_fact["engine_id"] == ""
+    assert trade_fact["engine_id"] != SLEEVE_ID
+    assert diagnostics["source_fact_count"] == 1
+    assert diagnostics["attributed_fact_count"] == 0
+    assert diagnostics["unattributed_fact_count"] == 1
+    assert "engine_id" in diagnostics["expected_attribution_field"]
+    assert diagnostics["sample_records"][0]["trade_identity_id"] == "3" * 64
+    assert diagnostics["upstream_artifact_path"].endswith("reconciled_trade_state_summary.v1.json")
+
+
+def test_position_only_unattributed_inputs_emit_lineage_requirement_diagnostic(tmp_path: Path) -> None:
+    mat = "8" * 64
+    trade = _trade_bundle(
+        tmp_path,
+        materialization_set_id=mat,
+        trade_identity_id="8" * 64,
+        ownership="CONSTELLATION_OWNED",
+        continuity_status="CLOSED",
+        order_id=3801,
+        perm_id=9801,
+        buy_price="100",
+        sell_price="130",
+        close_utc=f"{DAY}T15:30:00Z",
+    )
+    _patch_trade_artifacts(
+        tmp_path,
+        materialization_set_id=mat,
+        trade_identity_id="8" * 64,
+        clear_lineage=True,
+        clear_fill_linkage=True,
+    )
+    _summary(tmp_path, materialization_set_id=mat, evaluation_utc=f"{DAY}T16:00:00Z", trade_refs=[trade])
+
+    snapshot = _materialize(tmp_path)
+    qualification = snapshot["qualification"]
+    assert qualification["qualification_state"] == "MEASUREMENT_INVALID"
+    assert "SLEEVE_EDGE_NATIVE_ENGINE_ATTRIBUTION_UNAVAILABLE" in qualification["reason_codes"]
+
+    fact_ledger = json.loads(Path(str(snapshot["fact_ledger_ref"]["artifact_path"])).read_text(encoding="utf-8"))
+    diagnostics = fact_ledger["attribution_diagnostics"]
+    assert diagnostics["attributed_fact_count"] == 0
+    assert diagnostics["unattributed_fact_count"] == 1
+    assert (
+        diagnostics["lineage_requirement_diagnostic"]
+        == "Position facts have no order/engine lineage; sleeve grading requires order/fill attributed facts."
+    )
+
+
+def test_direct_native_engine_alias_preserves_attribution_without_execution_join(tmp_path: Path) -> None:
+    mat = "9" * 64
+    trade = _trade_bundle(
+        tmp_path,
+        materialization_set_id=mat,
+        trade_identity_id="9" * 64,
+        ownership="CONSTELLATION_OWNED",
+        continuity_status="CLOSED",
+        order_id=3901,
+        perm_id=9901,
+        buy_price="100",
+        sell_price="130",
+        close_utc=f"{DAY}T15:30:00Z",
+    )
+    _patch_trade_artifacts(
+        tmp_path,
+        materialization_set_id=mat,
+        trade_identity_id="9" * 64,
+        trade_identity_updates={"strategy_engine_id": ENGINE_ID, "source_intent_id": "intent-direct"},
+        clear_lineage=True,
+        clear_fill_linkage=True,
+    )
+    _summary(tmp_path, materialization_set_id=mat, evaluation_utc=f"{DAY}T16:00:00Z", trade_refs=[trade])
+    snapshot = _materialize(tmp_path)
+    qualification = snapshot["qualification"]
+    assert qualification["qualification_state"] == "INSUFFICIENT_DATA"
+    assert "SLEEVE_EDGE_NATIVE_ENGINE_ATTRIBUTION_UNAVAILABLE" not in qualification["reason_codes"]
+    fact_ledger = json.loads(Path(str(snapshot["fact_ledger_ref"]["artifact_path"])).read_text(encoding="utf-8"))
+    trade_fact = fact_ledger["trade_facts"][0]
+    diagnostics = fact_ledger["attribution_diagnostics"]
+    assert trade_fact["engine_id"] == ENGINE_ID
+    assert trade_fact["source_intent_ids"] == ["intent-direct"]
+    assert diagnostics["attributed_fact_count"] == 1
+    assert diagnostics["unattributed_fact_count"] == 0
+
+
+def test_closed_state_exclusions_do_not_strip_valid_engine_attribution(tmp_path: Path) -> None:
+    mat = "a" * 64
+    trade = _trade_bundle(
+        tmp_path,
+        materialization_set_id=mat,
+        trade_identity_id="a" * 64,
+        ownership="CONSTELLATION_OWNED",
+        continuity_status="CLOSED",
+        order_id=4002,
+        perm_id=9402,
+        buy_price="100",
+        sell_price="130",
+        close_utc=f"{DAY}T15:35:00Z",
+    )
+    _summary(tmp_path, materialization_set_id=mat, evaluation_utc=f"{DAY}T16:00:00Z", trade_refs=[trade])
+    _execution_record(tmp_path / "execution_stream_v1" / DAY / "closed-state.execution_event_stream_record.v1.json", order_id=4002, perm_id=9402, engine_id=ENGINE_ID)
+    _patch_trade_artifacts(
+        tmp_path,
+        materialization_set_id=mat,
+        trade_identity_id="a" * 64,
+        trade_identity_updates={
+            "open_close_continuity": {
+                "continuity_key": "continuity-open",
+                "segment_index": 1,
+                "continuity_status": "OPEN",
+                "opened_by_fact_record_id": "1" * 64,
+                "closed_by_fact_record_id": "",
+            }
+        },
+        state_updates={"current_quantity": "1", "side": "LONG"},
+    )
+    snapshot = _materialize(tmp_path)
+    fact_ledger = json.loads(Path(str(snapshot["fact_ledger_ref"]["artifact_path"])).read_text(encoding="utf-8"))
+    trade_fact = fact_ledger["trade_facts"][0]
+    diagnostics = fact_ledger["attribution_diagnostics"]
+    assert trade_fact["engine_id"] == ENGINE_ID
+    assert trade_fact["included_in_metrics"] is False
+    assert "SLEEVE_EDGE_OPEN_POSITION_EXCLUDED" in trade_fact["exclusion_reason_codes"]
+    assert "SLEEVE_EDGE_CLOSED_STATE_REQUIRED" in trade_fact["exclusion_reason_codes"]
+    assert diagnostics["attributed_fact_count"] == 1
+    assert diagnostics["unattributed_fact_count"] == 0
 
 
 def test_insufficient_sample_yields_insufficient_data_and_reason_codes(tmp_path: Path) -> None:
@@ -652,14 +821,17 @@ def test_allocator_reads_existing_snapshot_without_publishing_one(tmp_path: Path
 
 
 def test_allocator_fails_closed_when_snapshot_is_missing(tmp_path: Path) -> None:
-    with pytest.raises(SystemExit, match="SLEEVE_EDGE_SNAPSHOT_DEPENDENCY"):
-        capalloc._load_sleeve_edge_allocator_meta(
-            truth_root=tmp_path,
-            day_utc=DAY,
-            sleeve_id=SLEEVE_ID,
-            sleeve_edge_policy=POLICY,
-            canonical_sequence_owner=capalloc.CANONICAL_SEQUENCE_OWNER,
-        )
+    meta = capalloc._load_sleeve_edge_allocator_meta(
+        truth_root=tmp_path,
+        day_utc=DAY,
+        sleeve_id=SLEEVE_ID,
+        sleeve_edge_policy=POLICY,
+        canonical_sequence_owner=capalloc.CANONICAL_SEQUENCE_OWNER,
+    )
+    assert meta["qualification_state"] == "MEASUREMENT_INVALID"
+    assert meta["capital_multiplier_bp"] == 0
+    assert meta["snapshot_path"] == ""
+    assert any("SLEEVE_EDGE_SNAPSHOT_MISSING" in code for code in meta["reason_codes"])
 
 
 def test_policy_version_lock_match_and_mismatch(tmp_path: Path) -> None:

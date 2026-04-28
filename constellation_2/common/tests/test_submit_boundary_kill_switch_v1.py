@@ -268,7 +268,14 @@ def _write_execution_intent_and_authorization(
     )
 
 
-def _run_boundary(truth_root: Path, *, session_day_blocker: str = "") -> tuple[int, dict]:
+def _run_boundary(
+    truth_root: Path,
+    *,
+    session_day_blocker: str = "",
+    day_authority_state: str = "OPEN_READY",
+    day_authority_can_submit: bool = True,
+    day_authority_reason_codes: list[str] | None = None,
+) -> tuple[int, dict]:
     with tempfile.TemporaryDirectory() as td:
         repo_root = Path(td)
         execution_root = (truth_root.parent / "truth_sleeves" / "PRIMARY" / "PAPER").resolve()
@@ -284,6 +291,15 @@ def _run_boundary(truth_root: Path, *, session_day_blocker: str = "") -> tuple[i
         posture_path = truth_root / "reports" / "paper_trading_posture_v1" / DAY / "paper_trading_posture.v1.json"
         readiness_path = truth_root / "trade_submit_readiness_c2_v1" / "_history" / "PAPER" / ACCOUNT / DAY / "status.json"
         build_path = (truth_root / "target_day_build_v1" / f"{DAY}.json").resolve()
+        day_authority_path = (
+            truth_root
+            / "reports"
+            / "paper_trading_day_authority_v1"
+            / DAY
+            / "paper_trading_day_authority.v1.json"
+        ).resolve()
+        authority_reason_codes = list(day_authority_reason_codes or [])
+        authority_canonical_blocker = authority_reason_codes[0] if authority_reason_codes else ""
         _write_json(
             build_path,
             {
@@ -340,9 +356,27 @@ def _run_boundary(truth_root: Path, *, session_day_blocker: str = "") -> tuple[i
         ), patch.object(
             boundary_module, "_refresh_trade_submit_readiness_artifact_v1", return_value=0
         ), patch.object(
+            boundary_module, "_refresh_paper_trading_day_authority_artifact_v1", return_value=0
+        ), patch.object(
             boundary_module,
             "resolve_sleeve_execution_root_v1",
             return_value=type("ExecutionRoot", (), {"execution_root_path": execution_root})(),
+        ), patch.object(
+            boundary_module,
+            "read_validated_surface_v1",
+            return_value=type(
+                "Ref",
+                (),
+                {
+                    "path": day_authority_path,
+                    "payload": {
+                        "state": str(day_authority_state).strip().upper(),
+                        "can_submit_paper_orders": bool(day_authority_can_submit),
+                        "reason_codes": authority_reason_codes,
+                        "canonical_blocker": authority_canonical_blocker,
+                    },
+                },
+            )(),
         ), patch.object(
             boundary_module,
             "read_startup_materialization_ref_v1",
@@ -376,6 +410,9 @@ def _run_boundary_with_upstream(
     build_payload: dict,
     admission_payload: dict,
     session_day_blocker: str = "",
+    day_authority_state: str = "OPEN_READY",
+    day_authority_can_submit: bool = True,
+    day_authority_reason_codes: list[str] | None = None,
 ) -> tuple[int, dict]:
     with tempfile.TemporaryDirectory() as td:
         repo_root = Path(td)
@@ -393,6 +430,15 @@ def _run_boundary_with_upstream(
         readiness_path = truth_root / "trade_submit_readiness_c2_v1" / "_history" / "PAPER" / ACCOUNT / DAY / "status.json"
         build_path = (truth_root / "target_day_build_v1" / f"{DAY}.json").resolve()
         admission_path = (truth_root / "target_day_admission_v1" / f"{DAY}.json").resolve()
+        day_authority_path = (
+            truth_root
+            / "reports"
+            / "paper_trading_day_authority_v1"
+            / DAY
+            / "paper_trading_day_authority.v1.json"
+        ).resolve()
+        authority_reason_codes = list(day_authority_reason_codes or [])
+        authority_canonical_blocker = authority_reason_codes[0] if authority_reason_codes else ""
         _write_json(build_path, build_payload)
         with patch.object(boundary_module, "REPO_ROOT", repo_root), patch.object(
             boundary_module, "resolve_decision_truth_root_bridge_v1", return_value=truth_root.resolve()
@@ -408,9 +454,27 @@ def _run_boundary_with_upstream(
         ), patch.object(
             boundary_module, "_refresh_trade_submit_readiness_artifact_v1", return_value=0
         ), patch.object(
+            boundary_module, "_refresh_paper_trading_day_authority_artifact_v1", return_value=0
+        ), patch.object(
             boundary_module,
             "resolve_sleeve_execution_root_v1",
             return_value=type("ExecutionRoot", (), {"execution_root_path": execution_root})(),
+        ), patch.object(
+            boundary_module,
+            "read_validated_surface_v1",
+            return_value=type(
+                "Ref",
+                (),
+                {
+                    "path": day_authority_path,
+                    "payload": {
+                        "state": str(day_authority_state).strip().upper(),
+                        "can_submit_paper_orders": bool(day_authority_can_submit),
+                        "reason_codes": authority_reason_codes,
+                        "canonical_blocker": authority_canonical_blocker,
+                    },
+                },
+            )(),
         ), patch.object(
             boundary_module,
             "read_startup_materialization_ref_v1",
@@ -731,3 +795,24 @@ def test_submit_boundary_missing_session_authority_fails_closed() -> None:
         assert payload["submit_allowed"] is False
         assert payload["canonical_blocker"] == "SESSION_AUTHORITY_MISSING"
         assert "SESSION_AUTHORITY_MISSING" in payload["reason_codes"]
+
+
+def test_submit_boundary_refuses_orders_when_day_authority_not_open_ready() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        _write_startup_materialization(truth_root)
+        _write_paper_trading_posture(truth_root)
+        _write_trade_submit_status(truth_root)
+        _write_kill_switch(truth_root, state="INACTIVE", allow_entries=True)
+        rc, payload = _run_boundary(
+            truth_root,
+            day_authority_state="PREFLIGHT_BLOCKED",
+            day_authority_can_submit=False,
+            day_authority_reason_codes=["REPLAY_CERTIFICATION_GATE_V1_MISSING"],
+        )
+        assert rc == 2
+        assert payload["boundary_status"] == "BLOCKED"
+        assert payload["submission_authorized"] is False
+        failed = {row["logical_name"]: row for row in payload["failed_checks"]}
+        assert "paper_trading_day_authority_v1" in failed
+        assert "REPLAY_CERTIFICATION_GATE_V1_MISSING" in failed["paper_trading_day_authority_v1"]["reason_codes"]

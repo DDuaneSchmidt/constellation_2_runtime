@@ -12,6 +12,7 @@ import {
   fetchCapitalHistory,
   fetchCapitalOverview,
   fetchCapitalValidation,
+  fetchCommandOverview,
   fetchConfigurationCatalog,
   fetchConfigurationCurrent,
   fetchConfigurationDraft,
@@ -20,6 +21,7 @@ import {
   fetchRefinement,
   fetchIntegrity,
   fetchOutcomes,
+  fetchStatusV2,
   fetchValue,
   fetchOperations,
   fetchOpportunities,
@@ -29,11 +31,34 @@ import {
   fetchSleeves,
   fetchTax,
   fetchSystemActions,
+  fetchLatestReliabilityReadiness,
+  fetchReliabilityNextActions,
+  fetchReliabilityIssue,
+  fetchReliabilityIssueVerifications,
+  fetchReliabilityIssueWorkOrders,
+  fetchReliabilityIssues,
+  fetchReliabilityObservations,
+  fetchReliabilityVerifications,
+  fetchReliabilityWorkOrder,
+  fetchReliabilityWorkOrders,
+  fetchReliabilityFixAttempts,
+  assessReliabilityReadiness,
+  createWorkOrderFromIssue,
+  draftReliabilityIssue,
+  linkReliabilityObservation,
+  recordReliabilityFixAttempt,
+  updateReliabilityIssue,
+  verifyReliabilityIssue,
   rejectConfigurationDraft,
   reviewConfigurationDraft,
   validateConfigurationDraft,
 } from "/operator_shell/domain_client/index.js";
 import { escapeHtml, renderEvidenceRefs } from "/operator_shell/shared_components/dom.js";
+import { COMMAND_OVERVIEW_MOCK } from "/operator_shell/fixtures/mockData.js";
+import {
+  ContextRail,
+  renderCommandOverview,
+} from "/operator_shell/components/command_overview.js";
 import {
   formatTimestamp,
   renderAegisMark,
@@ -180,6 +205,62 @@ export const ROUTES = [
     subtitle: "Governed draft/validate/review/activate workflow for safe authority-input configuration changes.",
   },
   {
+    path: "/reliability",
+    id: "reliability_dashboard",
+    label: "Reliability",
+    eyebrow: "Reliability Ledger",
+    subtitle: "Deterministic readiness scoring and blockers for live-trading trust decisions.",
+  },
+  {
+    path: "/reliability/issues",
+    id: "reliability_issues",
+    label: "Reliability Issues",
+    eyebrow: "Issues",
+    subtitle: "Structured issue ledger with recurrence, blocker state, and Codex workflow status.",
+  },
+  {
+    path: "/reliability/issues/detail",
+    id: "reliability_issue_detail",
+    label: "Issue Detail",
+    eyebrow: "Issue Detail",
+    subtitle: "Single-issue evidence, recurrence timeline, codex task contract, and verification details.",
+  },
+  {
+    path: "/reliability/observations",
+    id: "reliability_observations",
+    label: "Observations",
+    eyebrow: "Observations Ledger",
+    subtitle: "Append-only reliability observations with source/environment filters.",
+  },
+  {
+    path: "/reliability/work-orders",
+    id: "reliability_work_orders",
+    label: "Work Orders",
+    eyebrow: "Codex Queue",
+    subtitle: "Actionable reliability repair requests with queue and assignment state.",
+  },
+  {
+    path: "/reliability/work-orders/detail",
+    id: "reliability_work_order_detail",
+    label: "Work Order Detail",
+    eyebrow: "Work Order",
+    subtitle: "Work-order objective, constraints, codex prompt, and fix-attempt ledger.",
+  },
+  {
+    path: "/reliability/verifications",
+    id: "reliability_verifications",
+    label: "Verifications",
+    eyebrow: "Verification Ledger",
+    subtitle: "Verification evidence and status across fix attempts.",
+  },
+  {
+    path: "/reliability/ai",
+    id: "reliability_ai",
+    label: "AI Draft",
+    eyebrow: "AI Draft Issue",
+    subtitle: "Operator-assisted drafting and optional issue creation from incident descriptions.",
+  },
+  {
     path: "/audit",
     id: "audit",
     label: "Audit",
@@ -200,6 +281,8 @@ export const LEGACY_ROUTE_ALIASES = {
   "/state": "/reports",
   "/submission": "/operations",
   "/lifecycle": "/audit",
+  "/reliability/readiness": "/reliability",
+  "/reliability/ai-draft": "/reliability/ai",
 };
 
 const TARGET_SURFACE_ROUTE = {
@@ -212,6 +295,7 @@ const TARGET_SURFACE_ROUTE = {
   advisory: "/advisory",
   reports: "/reports",
   outcomes: "/outcomes",
+  reliability: "/reliability",
 };
 
 function routeForId(routeId) {
@@ -230,6 +314,391 @@ function routeHrefFromSurface(targetSurface) {
 
 function safeList(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function currentSearchParams() {
+  if (typeof window === "undefined") {
+    return new URLSearchParams();
+  }
+  return new URLSearchParams(window.location.search || "");
+}
+
+function currentPathname() {
+  if (typeof window === "undefined") {
+    return "/";
+  }
+  return String(window.location.pathname || "/");
+}
+
+function currentWorkOrderId() {
+  const search = currentSearchParams();
+  const searchId = String(search.get("work_order_id") || "").trim();
+  if (searchId) {
+    return searchId;
+  }
+  const path = currentPathname();
+  const prefix = "/reliability/work-orders/";
+  if (!path.startsWith(prefix)) {
+    return "";
+  }
+  const remainder = path.slice(prefix.length).split("/")[0];
+  if (!remainder || remainder === "detail") {
+    return "";
+  }
+  return decodeURIComponent(remainder);
+}
+
+function truthyText(value) {
+  return value ? "true" : "false";
+}
+
+function reliabilityIdCore(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  return raw.includes(":") ? raw.split(":").pop() : raw;
+}
+
+function shortReliabilityId(value, prefix = "ID") {
+  const core = reliabilityIdCore(value);
+  return `${prefix}-${(core || "n/a").slice(0, 6)}`;
+}
+
+function shortIssueId(value) {
+  return shortReliabilityId(value, "ISSUE");
+}
+
+function shortWorkOrderId(value) {
+  return shortReliabilityId(value, "WO");
+}
+
+function shortVerificationId(value) {
+  return shortReliabilityId(value, "VER");
+}
+
+function shortObservationId(value) {
+  return shortReliabilityId(value, "OBS");
+}
+
+function shortFixAttemptId(value) {
+  return shortReliabilityId(value, "FIX");
+}
+
+function reliabilityStatusBadge(status, palette = {}) {
+  const normalized = String(status || "unknown").trim().toLowerCase() || "unknown";
+  const defaultPalette = {
+    queued: { bg: "#d1d5db", text: "#1f2937" },
+    in_progress: { bg: "#3b82f6", text: "#ffffff" },
+    tests_passed: { bg: "#f59e0b", text: "#111827" },
+    needs_review: { bg: "#fb923c", text: "#111827" },
+    accepted: { bg: "#16a34a", text: "#ffffff" },
+    rejected: { bg: "#dc2626", text: "#ffffff" },
+    pending: { bg: "#d1d5db", text: "#1f2937" },
+    passed: { bg: "#16a34a", text: "#ffffff" },
+    failed: { bg: "#dc2626", text: "#ffffff" },
+    inconclusive: { bg: "#fb923c", text: "#111827" },
+    open: { bg: "#d1d5db", text: "#1f2937" },
+    triaged: { bg: "#9ca3af", text: "#111827" },
+    fix_proposed: { bg: "#93c5fd", text: "#111827" },
+    fix_submitted: { bg: "#fde68a", text: "#111827" },
+    verification_pending: { bg: "#fcd34d", text: "#111827" },
+    verified: { bg: "#16a34a", text: "#ffffff" },
+    closed: { bg: "#10b981", text: "#ffffff" },
+    duplicate: { bg: "#a3a3a3", text: "#111827" },
+    wont_fix: { bg: "#6b7280", text: "#ffffff" },
+    started: { bg: "#93c5fd", text: "#111827" },
+    patch_submitted: { bg: "#fde68a", text: "#111827" },
+    tests_failed: { bg: "#f87171", text: "#111827" },
+    abandoned: { bg: "#9ca3af", text: "#111827" },
+  };
+  const colors = palette[normalized] || defaultPalette[normalized] || { bg: "#9ca3af", text: "#111827" };
+  return `<span style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;background:${colors.bg};color:${colors.text};">${escapeHtml(normalized)}</span>`;
+}
+
+function readinessBlockerBadge(value) {
+  return value
+    ? `<span style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700;background:#dc2626;color:#ffffff;">BLOCKER</span>`
+    : `<span style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700;background:#e5e7eb;color:#374151;">non-blocker</span>`;
+}
+
+function nextActionForWorkOrder(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "queued") {
+    return "Start fix";
+  }
+  if (normalized === "in_progress") {
+    return "Continue fix";
+  }
+  if (normalized === "tests_passed") {
+    return "Verify";
+  }
+  if (normalized === "needs_review") {
+    return "Review";
+  }
+  if (normalized === "accepted") {
+    return "Done";
+  }
+  if (normalized === "rejected") {
+    return "Fix again";
+  }
+  return "Inspect";
+}
+
+function nextActionForVerification(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "pending") {
+    return "Review evidence";
+  }
+  if (normalized === "passed") {
+    return "Close issue if verified";
+  }
+  if (normalized === "failed") {
+    return "Create new work order";
+  }
+  if (normalized === "inconclusive") {
+    return "Investigate";
+  }
+  return "Inspect";
+}
+
+function nextActionForFixAttempt(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "started") {
+    return "Continue fix";
+  }
+  if (normalized === "patch_submitted") {
+    return "Run tests";
+  }
+  if (normalized === "tests_failed") {
+    return "Fix again";
+  }
+  if (normalized === "tests_passed") {
+    return "Verify";
+  }
+  if (normalized === "abandoned" || normalized === "rejected") {
+    return "Create new attempt";
+  }
+  return "Inspect";
+}
+
+function issueRowNextAction(issue = {}) {
+  const status = String(issue.status || "");
+  if (status === "fix_submitted" || status === "verification_pending") {
+    return "Record verification";
+  }
+  if (status === "fix_in_progress") {
+    return "Continue fix";
+  }
+  if (status === "fix_proposed" || status === "triaged" || status === "open") {
+    return "Create/assign work order";
+  }
+  if (status === "verified") {
+    return "Close if confirmed";
+  }
+  if (status === "accepted" || status === "closed" || status === "duplicate" || status === "wont_fix") {
+    return "Done";
+  }
+  return "Inspect";
+}
+
+function truncatedCell(value, maxWidthPx = 360) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "n/a";
+  }
+  return `<span title="${escapeHtml(text)}" style="display:inline-block;max-width:${maxWidthPx}px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom;">${escapeHtml(text)}</span>`;
+}
+
+function actionChip(label) {
+  return `<span style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700;background:#111827;color:#f9fafb;">${escapeHtml(label || "Inspect")}</span>`;
+}
+
+function intOrNull(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number.parseInt(value.trim(), 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function sleeveReadinessGradeBadge(grade, tooltip = "") {
+  const normalized = intOrNull(grade);
+  if (normalized === null) {
+    return `<span style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700;background:#9ca3af;color:#111827;">n/a</span>`;
+  }
+  const bg = normalized >= 6 ? "#16a34a" : normalized >= 4 ? "#f59e0b" : "#dc2626";
+  const text = normalized >= 4 ? "#111827" : "#ffffff";
+  const titleAttr = tooltip ? ` title="${escapeHtml(tooltip)}"` : "";
+  return `<span${titleAttr} style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${bg};color:${text};">${escapeHtml(`${normalized} / 7`)}</span>`;
+}
+
+function sleeveReadinessWhyText({
+  readiness_score,
+  readiness_score_threshold,
+  readiness_contributing_factors,
+  readiness_grade_reason,
+  readiness_grade_next_step,
+} = {}) {
+  const score = intOrNull(readiness_score);
+  const threshold = intOrNull(readiness_score_threshold);
+  const factors = safeList(readiness_contributing_factors)
+    .map((item) => inlineText(item))
+    .filter(Boolean);
+  const scoreLine = `Score: ${score === null ? "n/a" : score}`;
+  const thresholdLine = `Threshold: ${threshold === null ? "n/a" : threshold}`;
+  const factorsLine = `Contributing factors: ${factors.length ? factors.join(", ") : "n/a"}`;
+  const reasonLine = `Reason: ${inlineText(readiness_grade_reason) || "n/a"}`;
+  const nextStepLine = `Next step: ${inlineText(readiness_grade_next_step) || "n/a"}`;
+  return `${scoreLine}\n${thresholdLine}\n${factorsLine}\n${reasonLine}\n${nextStepLine}`;
+}
+
+function sleeveThresholdStatusLabel(grade, threshold) {
+  const normalizedGrade = intOrNull(grade);
+  const normalizedThreshold = intOrNull(threshold);
+  if (normalizedGrade === null || normalizedThreshold === null) {
+    return "Unavailable";
+  }
+  return normalizedGrade >= normalizedThreshold ? "Meets promotion threshold" : "Below promotion threshold";
+}
+
+function renderSleeveReadinessCell(row = {}) {
+  const grade = intOrNull(row.readiness_grade_1_to_7);
+  const thresholdGrade = intOrNull(row.score_threshold_grade_1_to_7);
+  const why = sleeveReadinessWhyText(row);
+  const reason = inlineText(row.readiness_grade_reason);
+  const nextStep = inlineText(row.readiness_grade_next_step);
+  const thresholdText = thresholdGrade === null ? "Threshold n/a" : `Threshold ${thresholdGrade} / 7`;
+  const status = sleeveThresholdStatusLabel(grade, thresholdGrade);
+  return `
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      ${sleeveReadinessGradeBadge(grade, why)}
+      <span style="font-size:11px;opacity:0.78;">${escapeHtml(thresholdText)}</span>
+      <span title="${escapeHtml(why)}" style="font-size:11px;text-decoration:underline;text-decoration-style:dotted;cursor:help;">Why</span>
+      <span style="font-size:11px;opacity:0.82;">${escapeHtml(status)}</span>
+      ${reason ? `<span style="font-size:11px;opacity:0.82;">${escapeHtml(reason)}</span>` : ""}
+      ${nextStep ? `<span style="font-size:11px;opacity:0.78;">Next: ${escapeHtml(nextStep)}</span>` : ""}
+    </div>
+  `;
+}
+
+function inlineText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function ellipsisText(value, maxChars = 120) {
+  const text = inlineText(value);
+  if (!text) {
+    return "n/a";
+  }
+  if (text.length <= maxChars) {
+    return text;
+  }
+  return `${text.slice(0, Math.max(1, maxChars - 3)).trimEnd()}...`;
+}
+
+function objectiveIsVague(value) {
+  const text = inlineText(value).toLowerCase();
+  if (!text || text.length < 18) {
+    return true;
+  }
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  if (wordCount < 4) {
+    return true;
+  }
+  const vagueTokens = ["smoke", "todo", "tbd", "wip", "issue", "fix attempt", "create-work-order", "work order"];
+  return vagueTokens.some((token) => text.includes(token)) && text.length < 64;
+}
+
+function workOrderFixLabel(workOrder = {}, issue = {}) {
+  const objective = inlineText(workOrder.objective);
+  const issueTitle = inlineText(issue.title);
+  if (!objective || objectiveIsVague(objective)) {
+    return issueTitle || objective || "Investigate and resolve issue";
+  }
+  return objective;
+}
+
+function includesAnyKeyword(value, keywords = []) {
+  const text = inlineText(value).toLowerCase();
+  if (!text) {
+    return false;
+  }
+  return keywords.some((keyword) => text.includes(String(keyword || "").toLowerCase()));
+}
+
+function isSleeveLiveReadinessContext(workOrder = {}, issue = {}) {
+  const keywords = [
+    "sleeve",
+    "grading",
+    "scoring",
+    "readiness",
+    "live",
+    "promotion",
+    "scored every sleeve",
+    "sleeve 1-7",
+    "1-7",
+    "promotion from paper to live",
+    "ready to be promoted",
+  ];
+  const content = [
+    issue.title,
+    issue.actual_behavior,
+    issue.expected_behavior,
+    issue.impact_summary,
+    workOrder.objective,
+    workOrder.actual_behavior,
+    workOrder.expected_behavior,
+  ].filter(Boolean).join(" ");
+  return includesAnyKeyword(content, keywords);
+}
+
+function isSystemSmokeTestWork(workOrder = {}, issue = {}) {
+  const smokeTerms = [
+    "smoke",
+    "endpoint smoke",
+    "workflow smoke",
+    "create-work-order endpoint smoke",
+  ];
+  const content = [
+    issue.title,
+    issue.actual_behavior,
+    issue.expected_behavior,
+    issue.impact_summary,
+    workOrder.objective,
+    workOrder.actual_behavior,
+    workOrder.expected_behavior,
+  ].filter(Boolean).join(" ");
+  const lowValueSmokeData = inlineText(workOrder.actual_behavior).toLowerCase() === "actual"
+    && inlineText(workOrder.expected_behavior).toLowerCase() === "expected"
+    && inlineText(issue.impact_summary).toLowerCase() === "smoke";
+  return lowValueSmokeData || includesAnyKeyword(content, smokeTerms);
+}
+
+function workOrderNextStepLabel(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "queued") {
+    return "Run Codex";
+  }
+  if (normalized === "in_progress") {
+    return "Continue Codex fix";
+  }
+  if (normalized === "tests_passed") {
+    return "Record verification";
+  }
+  if (normalized === "needs_review") {
+    return "Review fix";
+  }
+  if (normalized === "accepted") {
+    return "Done";
+  }
+  if (normalized === "rejected") {
+    return "Revise fix";
+  }
+  return "Inspect";
 }
 
 export function formatUsd(value) {
@@ -439,194 +908,30 @@ function renderAlertSection(alertsPayload = {}, semantics = {}) {
 }
 
 async function renderCommandPage(state) {
-  const financialState = await fetchFinancialState();
-  const summary = state.shell.systemSummary || {};
-  const readiness = summary.readiness_summary || {};
-  const topLevel = safeList(summary.top_level_items);
-  const compressed = safeList(summary.compressed_items);
-  const secondary = safeList(summary.secondary_items);
-  const drilldownOnly = safeList(summary.drilldown_only_items);
-  const trustPreserved = safeList(summary.trust_preserved_items);
-  const withheld = safeList(summary.withheld_items);
-  const expiring = safeList(summary.expiring_items);
-  const rollback = safeList(summary.rollback_items);
-  const active = safeList(summary.active_policy_evolutions);
-
-  const heroCards = `
-    <div class="hero-band">
-      <div class="hero-brand">
-        ${renderAegisMark({ size: "lg", label: "Aegis Command" })}
-        <div>
-          <div class="section-eyebrow">Certified Policy Evolution Plane</div>
-          <h2>Aegis Command</h2>
-          <p>One governed temporal policy layer over refinement and value proof, with explicit proposals, expiry, rollback, and trust-preserving overrides instead of hidden adaptation.</p>
-        </div>
-      </div>
-      <div class="metric-grid">
-        ${renderMetricCard({
-          label: "Top level",
-          value: String(topLevel.length),
-          badge: `<span class="support-chip">policy_evolution_state_v1</span>`,
-        })}
-        ${renderMetricCard({
-          label: "Environment",
-          value: summary.environment || "UNKNOWN",
-          detail: summary.current_day ? `Day ${summary.current_day}` : "",
-        })}
-        ${renderMetricCard({
-          label: "Active policy",
-          value: String(active.length),
-          detail: rollback.length ? `${rollback.length} rollback candidate(s)` : "No rollback candidate",
-        })}
-        ${renderMetricCard({
-          label: "Trust preserved",
-          value: String(trustPreserved.length),
-          detail: withheld.length ? `${withheld.length} withheld evolution(s)` : "No withheld evolution",
-        })}
-        ${renderMetricCard({
-          label: "Readiness",
-          value: readiness.blocked ? readiness.blocked_state || "BLOCKED" : "READY",
-          semantic: readiness.blocked ? "blocked" : "healthy",
-          semantics: state.semantics,
-        })}
-        ${renderMetricCard({
-          label: "Investable assets",
-          value: formatUsd(financialState.investable_summary?.investable_assets_total_usd),
-          detail: financialState.as_of_utc ? `As of ${formatTimestamp(financialState.as_of_utc)}` : "",
-        })}
-        ${renderMetricCard({
-          label: "Re-review",
-          value: String(expiring.length),
-          detail: drilldownOnly.length ? `${drilldownOnly.length} drill-down only` : "No drill-down-only item",
-        })}
-      </div>
-    </div>
-  `;
-
+  let overview;
+  try {
+    overview = await fetchCommandOverview();
+  } catch (error) {
+    overview = {
+      ...COMMAND_OVERVIEW_MOCK,
+      data_source_state: "MOCK / UNAVAILABLE",
+      fallback_badge: "MOCK / UNAVAILABLE",
+      as_of_label: "Data as of: MOCK / UNAVAILABLE",
+      context: {
+        ...(COMMAND_OVERVIEW_MOCK.context || {}),
+        sourceOfTruth: "MOCK / UNAVAILABLE",
+        freshness: "MOCK / UNAVAILABLE",
+        dataQuality: "MOCK / UNAVAILABLE",
+        dataSourceState: "MOCK / UNAVAILABLE",
+      },
+    };
+  }
   return {
-    title: "Aegis Command",
-    meta: "One governed policy-evolution summary over already-certified refinement, value, and product artifacts.",
-    html: [
-      heroCards,
-      renderCardSection({
-        eyebrow: "Top Level",
-        title: "What Matters Now",
-        subtitle: "Top-level visibility now comes from governed policy snapshots only; the shell does not adapt prominence locally.",
-        body: renderSimpleTable({
-          columns: [
-            { key: "target_label", label: "Item" },
-            { key: "proposed_policy_change", label: "Policy action", render: (row) => escapeHtml(row.proposed_policy_change?.action || "UNKNOWN") },
-            { key: "summary_message", label: "Summary" },
-            { key: "drill_down_route", label: "Drill-down" },
-          ],
-          rows: topLevel,
-          emptyMessage: "No top-level policy rows were returned.",
-        }),
-      }),
-      renderCardSection({
-        eyebrow: "Trust",
-        title: "Trust-Preserved Visibility",
-        subtitle: "Blocked, degraded, claim-strength, and insufficient-evidence distinctions stay visible when the policy-evolution plane says they must.",
-        body: renderSimpleTable({
-          columns: [
-            { key: "target_label", label: "Item" },
-            { key: "preserved_visibility_flags", label: "Protected", render: (row) => escapeHtml(safeList(row.preserved_visibility_flags).join(", ") || "None") },
-            { key: "threshold_result", label: "Threshold" },
-            { key: "summary_message", label: "Summary" },
-          ],
-          rows: trustPreserved,
-          emptyMessage: "No trust-preserved policy rows were returned.",
-        }),
-      }),
-      renderCardSection({
-        eyebrow: "Compressed",
-        title: "Compressed Summaries",
-        subtitle: "Compression proposals are governed and reversible; they cannot hide a trust-critical distinction.",
-        body: renderSimpleTable({
-          columns: [
-            { key: "target_label", label: "Item" },
-            { key: "evolution_strength", label: "Strength" },
-            { key: "summary_message", label: "Summary" },
-          ],
-          rows: compressed,
-          emptyMessage: "No compressed policy rows were returned.",
-        }),
-      }),
-      renderCardSection({
-        eyebrow: "Secondary",
-        title: "Demoted To Secondary",
-        subtitle: "Secondary rows remain visible and drillable; demotion proposals are evidence-bound rather than route-local cleanup.",
-        body: renderSimpleTable({
-          columns: [
-            { key: "target_label", label: "Item" },
-            { key: "proposed_policy_change", label: "Policy action", render: (row) => escapeHtml(row.proposed_policy_change?.action || "UNKNOWN") },
-            { key: "summary_message", label: "Summary" },
-            { key: "drill_down_route", label: "Drill-down" },
-          ],
-          rows: secondary,
-          emptyMessage: "No secondary policy rows were returned.",
-        }),
-      }),
-      renderCardSection({
-        eyebrow: "Drill-Down",
-        title: "Preserved Drill-Down Only",
-        subtitle: "These items are no longer top-level, but governed drill-down access remains explicit, trust-preserving, and reversible.",
-        body: renderSimpleTable({
-          columns: [
-            { key: "target_label", label: "Item" },
-            { key: "proposed_policy_change", label: "Policy action", render: (row) => escapeHtml(row.proposed_policy_change?.action || "UNKNOWN") },
-            { key: "summary_message", label: "Summary" },
-            { key: "drill_down_route", label: "Drill-down" },
-          ],
-          rows: drilldownOnly,
-          emptyMessage: "No drill-down-only policy rows were returned.",
-        }),
-      }),
-      renderCardSection({
-        eyebrow: "Re-review",
-        title: "Expiring Or Withheld Evolutions",
-        subtitle: "Weak or stale history does not silently mutate product behavior; proposals are withheld or forced back to review explicitly.",
-        body: renderSimpleTable({
-          columns: [
-            { key: "target_label", label: "Target" },
-            { key: "threshold_result", label: "Threshold" },
-            { key: "expiry_state", label: "Expiry" },
-            { key: "summary_message", label: "Summary" },
-          ],
-          rows: [...expiring, ...withheld],
-          emptyMessage: "No expiring or withheld policy rows were returned.",
-        }),
-      }),
-    ].join(""),
-    contextHtml: [
-      renderCardSection({
-        eyebrow: "Readiness",
-        title: "Readiness Summary",
-        subtitle: "The product summary preserves readiness state as a drillable governed field.",
-        body: renderDefinitionRows([
-          { label: "Blocked", value: readiness.blocked ? "yes" : "no" },
-          { label: "Blocked state", value: readiness.blocked_state || "READY" },
-          { label: "Operator status", value: readiness.operator_status || "UNKNOWN" },
-        ]),
-      }),
-      renderSourceRefCard(safeList(summary.source_refs), "Policy Evidence", "Governed refs backing the current active policy-evolution decisions."),
-      renderCardSection({
-        eyebrow: "Policy Proof",
-        title: "Why These Policy Decisions Were Made",
-        subtitle: "Evidence windows, trust overrides, expiry, rollback, and before/after state stay explicit instead of living in UI-only temporal tuning.",
-        body: renderSimpleTable({
-          columns: [
-            { key: "target_label", label: "Target" },
-            { key: "proposed_policy_change", label: "Action", render: (row) => escapeHtml(row.proposed_policy_change?.action || "UNKNOWN") },
-            { key: "threshold_result", label: "Threshold" },
-            { key: "expiry_state", label: "Expiry" },
-            { key: "reversibility_state", label: "Reversible" },
-          ],
-          rows: safeList(summary.proof_rows),
-          emptyMessage: "No policy proof rows were returned.",
-        }),
-      }),
-    ].join(""),
+    title: "Command / Overview",
+    meta: "Governed overview of operating truth, exceptions, policy state, evidence, and source lineage.",
+    dataTimestamp: overview.as_of_label,
+    html: renderCommandOverview(overview),
+    contextHtml: ContextRail({ context: overview.context }),
   };
 }
 
@@ -1382,6 +1687,19 @@ async function renderSleevesPage() {
   const valuePayload = await fetchValue();
   const sleeves = safeList(sleevesPayload.sleeves);
   const evaluatedSleeves = sleeves.filter((row) => row.recommendation?.recommendation_state !== "unavailable").length;
+  const sleeveReadinessSummary = sleevesPayload.sleeve_live_readiness_summary || {};
+  const summaryGrade = intOrNull(sleeveReadinessSummary.readiness_grade_1_to_7);
+  const summaryThresholdGrade = intOrNull(sleeveReadinessSummary.score_threshold_grade_1_to_7);
+  const summaryReason = inlineText(sleeveReadinessSummary.diagnostic_reason);
+  const summaryNextStep = inlineText(sleeveReadinessSummary.diagnostic_next_step);
+  const summaryWhy = sleeveReadinessWhyText({
+    readiness_score: sleeveReadinessSummary.readiness_score,
+    readiness_score_threshold: sleeveReadinessSummary.score_threshold,
+    readiness_contributing_factors: sleeveReadinessSummary.contributing_factors,
+    readiness_grade_reason: summaryReason,
+    readiness_grade_next_step: summaryNextStep,
+  });
+  const summaryThresholdStatus = sleeveThresholdStatusLabel(summaryGrade, summaryThresholdGrade);
 
   return {
     title: "Sleeves",
@@ -1398,6 +1716,24 @@ async function renderSleevesPage() {
           ${renderMetricCard({ label: "Current evaluation day", value: sleevesPayload.current_day || "UNKNOWN" })}
         </div>`,
       }),
+      renderCardSection({
+        eyebrow: "Readiness",
+        title: "Sleeve Live Readiness Summary",
+        subtitle: "Advisory-only sleeve grade and threshold status for Paper-to-Live promotion readiness.",
+        body: `
+          <div class="metric-grid">
+            ${renderMetricCard({ label: "Sleeve readiness grade", value: summaryGrade === null ? "n/a" : `${summaryGrade} / 7` })}
+            ${renderMetricCard({ label: "Promotion threshold", value: summaryThresholdGrade === null ? "n/a" : `${summaryThresholdGrade} / 7` })}
+            ${renderMetricCard({ label: "Threshold status", value: summaryThresholdStatus })}
+            ${renderMetricCard({ label: "Promotion candidate", value: typeof sleeveReadinessSummary.promotion_candidate === "boolean" ? truthyText(Boolean(sleeveReadinessSummary.promotion_candidate)) : "unknown" })}
+          </div>
+          <div style="margin-top:10px;">
+            <span title="${escapeHtml(summaryWhy)}" style="font-size:12px;text-decoration:underline;text-decoration-style:dotted;cursor:help;">Why</span>
+          </div>
+          ${summaryReason ? `<div style="margin-top:8px;font-size:12px;opacity:0.82;">Reason: ${escapeHtml(summaryReason)}</div>` : ""}
+          ${summaryNextStep ? `<div style="margin-top:4px;font-size:12px;opacity:0.82;">Next step: ${escapeHtml(summaryNextStep)}</div>` : ""}
+        `,
+      }),
       renderSimpleTable({
         columns: [
           { key: "display_name", label: "Sleeve" },
@@ -1406,6 +1742,7 @@ async function renderSleevesPage() {
           { key: "actual_allocation_pct", label: "Actual Allocation", render: (row) => escapeHtml(formatPercent(row.actual_allocation_pct)) },
           { key: "effective_risk_budget_usd", label: "Risk Budget", render: (row) => escapeHtml(formatUsd(row.effective_risk_budget_usd)) },
           { key: "qualification_state", label: "Qualification" },
+          { key: "readiness_grade_1_to_7", label: "Readiness Grade", render: (row) => renderSleeveReadinessCell(row) },
           { key: "edge_band", label: "Edge Band" },
           { key: "recommendation", label: "Recommendation", render: (row) => escapeHtml(row.recommendation?.recommendation_state || "unavailable") },
         ],
@@ -1950,12 +2287,52 @@ async function renderAdvisoryPage() {
 }
 
 async function renderOperationsPage(state) {
-  const [operations, alertsPayload, integrity, actions] = await Promise.all([
+  const [operations, alertsPayload, integrity, actions, statusV2Payload, sleevesPayload] = await Promise.all([
     fetchOperations(),
     fetchAlerts(),
     fetchIntegrity(),
     fetchSystemActions(),
+    fetchStatusV2().catch(() => ({})),
+    fetchSleeves().catch(() => ({})),
   ]);
+  const statusV2SleeveReadiness = statusV2Payload?.sleeve_live_readiness || {};
+  const sleevesSummaryReadiness = sleevesPayload?.sleeve_live_readiness_summary || {};
+  const statusV2HasGrade =
+    intOrNull(statusV2SleeveReadiness.readiness_grade_1_to_7) !== null ||
+    intOrNull(statusV2SleeveReadiness.score_threshold_grade_1_to_7) !== null;
+  const sleeveReadiness = statusV2HasGrade ? statusV2SleeveReadiness : sleevesSummaryReadiness;
+  const opsFactors = safeList(sleeveReadiness?.calibration_support?.score_contribution)
+    .map((row) => {
+      if (!row || typeof row !== "object") {
+        return "";
+      }
+      const checkId = inlineText(row.check_id || "check");
+      const scoreAwarded = intOrNull(row.score_awarded);
+      const weight = intOrNull(row.weight);
+      if (scoreAwarded !== null && weight !== null) {
+        return `${checkId}:${scoreAwarded}/${weight}`;
+      }
+      if (scoreAwarded !== null) {
+        return `${checkId}:${scoreAwarded}`;
+      }
+      return checkId;
+    })
+    .filter(Boolean);
+  const normalizedOpsFactors = opsFactors.length
+    ? opsFactors
+    : safeList(sleeveReadiness?.contributing_factors).map((item) => inlineText(item)).filter(Boolean);
+  const opsReason = inlineText(sleeveReadiness.diagnostic_reason || sleeveReadiness.readiness_grade_reason);
+  const opsNextStep = inlineText(sleeveReadiness.diagnostic_next_step || sleeveReadiness.readiness_grade_next_step);
+  const opsGrade = intOrNull(sleeveReadiness.readiness_grade_1_to_7);
+  const opsThresholdGrade = intOrNull(sleeveReadiness.score_threshold_grade_1_to_7);
+  const opsWhy = sleeveReadinessWhyText({
+    readiness_score: sleeveReadiness.readiness_score,
+    readiness_score_threshold: sleeveReadiness.score_threshold,
+    readiness_contributing_factors: normalizedOpsFactors,
+    readiness_grade_reason: opsReason,
+    readiness_grade_next_step: opsNextStep,
+  });
+  const opsThresholdStatus = sleeveThresholdStatusLabel(opsGrade, opsThresholdGrade);
 
   return {
     title: "Operations",
@@ -1973,6 +2350,24 @@ async function renderOperationsPage(state) {
             semantics: state.semantics,
           })).join("")}
         </div>`,
+      }),
+      renderCardSection({
+        eyebrow: "Readiness",
+        title: "Sleeve Promotion Readiness",
+        subtitle: "Advisory sleeve grade and threshold status from sleeve live-readiness artifacts.",
+        body: `
+          <div class="metric-grid">
+            ${renderMetricCard({ label: "Sleeve readiness grade", value: opsGrade === null ? "n/a" : `${opsGrade} / 7` })}
+            ${renderMetricCard({ label: "Promotion threshold", value: opsThresholdGrade === null ? "n/a" : `${opsThresholdGrade} / 7` })}
+            ${renderMetricCard({ label: "Threshold status", value: opsThresholdStatus })}
+            ${renderMetricCard({ label: "Promotion candidate", value: typeof sleeveReadiness.promotion_candidate === "boolean" ? truthyText(Boolean(sleeveReadiness.promotion_candidate)) : "unknown" })}
+          </div>
+          <div style="margin-top:10px;">
+            <span title="${escapeHtml(opsWhy)}" style="font-size:12px;text-decoration:underline;text-decoration-style:dotted;cursor:help;">Why</span>
+          </div>
+          ${opsReason ? `<div style="margin-top:8px;font-size:12px;opacity:0.82;">Reason: ${escapeHtml(opsReason)}</div>` : ""}
+          ${opsNextStep ? `<div style="margin-top:4px;font-size:12px;opacity:0.82;">Next step: ${escapeHtml(opsNextStep)}</div>` : ""}
+        `,
       }),
       renderCardSection({
         eyebrow: "Blocking Conditions",
@@ -2365,6 +2760,1431 @@ async function renderConfigurationPage(state) {
   };
 }
 
+function openIssueStatus(issue = {}) {
+  return ["open", "triaged", "fix_proposed", "fix_in_progress", "fix_submitted", "verification_pending"].includes(
+    String(issue.status || ""),
+  );
+}
+
+async function renderReliabilityDashboardPage(state) {
+  const [latest, issuesPayload, workOrdersPayload, fixAttemptsPayload, verificationsPayload, nextActionsPayload] = await Promise.all([
+    fetchLatestReliabilityReadiness(),
+    fetchReliabilityIssues(),
+    fetchReliabilityWorkOrders(),
+    fetchReliabilityFixAttempts(),
+    fetchReliabilityVerifications(),
+    fetchReliabilityNextActions(),
+  ]);
+  const assessment = latest.assessment || null;
+  const issues = safeList(issuesPayload.issues);
+  const workOrders = safeList(workOrdersPayload.work_orders);
+  const fixAttempts = safeList(fixAttemptsPayload.fix_attempts);
+  const verifications = safeList(verificationsPayload.verifications);
+  const nextActions = safeList(nextActionsPayload.actions);
+  const openIssues = issues.filter((item) => openIssueStatus(item));
+  const openCritical = openIssues.filter((item) => item.severity === "critical");
+  const openHigh = openIssues.filter((item) => item.severity === "high");
+  const openReadinessBlockers = openIssues.filter((item) => Boolean(item.readiness_blocker));
+  const recurringIssues = openIssues.filter((item) => Number(item.occurrence_count || 0) > 1);
+  const unverifiedFixes = issues.filter(
+    (item) => ["fix_submitted", "verification_pending"].includes(String(item.status || ""))
+      || (item.resolved_at && !item.verified_at),
+  );
+  const blockingIds = safeList(assessment?.blocking_issue_ids);
+  const blockingIssues = issues.filter((item) => blockingIds.includes(item.id)).slice(0, 8);
+  const queuedWorkOrders = workOrders.filter((item) => String(item.status || "") === "queued");
+  const failedFixAttempts = fixAttempts.filter((item) => String(item.status || "") === "tests_failed");
+  const awaitingVerification = fixAttempts.filter((item) => ["patch_submitted", "tests_passed"].includes(String(item.status || "")));
+  const verifiedReadyToClose = issues.filter((item) => String(item.status || "") === "verified");
+  const nextRecommended = nextActions[0] || null;
+  const recentAction = state.reliabilityWorkflow?.lastAction || "";
+  const recentMessage = state.reliabilityWorkflow?.lastError
+    ? `Last action error: ${state.reliabilityWorkflow.lastError}`
+    : recentAction
+      ? `Last action: ${recentAction}`
+      : "No reliability workflow action has been run from this session.";
+
+  return {
+    title: "Reliability Dashboard",
+    meta: "Deterministic rule-based readiness result with explicit blockers and verification debt.",
+    html: [
+      renderCardSection({
+        eyebrow: "Readiness",
+        title: "Current Reliability Readiness",
+        subtitle: "Readiness is derived from deterministic rules and persisted issue state only.",
+        body: `<div class="metric-grid">
+          ${renderMetricCard({ label: "Status", value: assessment?.status || "not_assessed" })}
+          ${renderMetricCard({ label: "Score", value: String(assessment?.score ?? "n/a") })}
+          ${renderMetricCard({ label: "Open critical", value: String(openCritical.length) })}
+          ${renderMetricCard({ label: "Open high", value: String(openHigh.length) })}
+          ${renderMetricCard({ label: "Open blockers", value: String(openReadinessBlockers.length) })}
+          ${renderMetricCard({ label: "Recurring open", value: String(recurringIssues.length) })}
+          ${renderMetricCard({ label: "Unverified fixes", value: String(unverifiedFixes.length) })}
+          ${renderMetricCard({ label: "Queued work orders", value: String(queuedWorkOrders.length) })}
+          ${renderMetricCard({ label: "Failed fix attempts", value: String(failedFixAttempts.length) })}
+          ${renderMetricCard({ label: "Awaiting verification", value: String(awaitingVerification.length) })}
+          ${renderMetricCard({ label: "Verified ready to close", value: String(verifiedReadyToClose.length) })}
+          ${renderMetricCard({ label: "Blocking issue refs", value: String(blockingIds.length) })}
+        </div>`,
+      }),
+      renderCardSection({
+        eyebrow: "Reason",
+        title: "Latest Assessment Reason",
+        subtitle: "Explains why the current readiness state was assigned.",
+        body: `
+          <div class="line-list">
+            <div>${escapeHtml(assessment?.decision_reason || "No readiness assessment exists yet.")}</div>
+            <div>Assessment id: ${escapeHtml(assessment?.id || "n/a")}</div>
+            <div>Rule version: ${escapeHtml(assessment?.rule_version || "n/a")}</div>
+            <div>Generated by: ${escapeHtml(assessment?.generated_by || "n/a")}</div>
+            <div>Next recommended action: ${escapeHtml(nextRecommended?.action_type || "none")}</div>
+            <div>${escapeHtml(recentMessage)}</div>
+          </div>
+          <form class="reliability-action-form">
+            <input type="hidden" name="reliability_action" value="assess_readiness" />
+            <button type="submit">Run Fresh Assessment</button>
+          </form>
+        `,
+      }),
+      renderCardSection({
+        eyebrow: "Blockers",
+        title: "Top Blocking Issues",
+        subtitle: "These issues currently prevent readiness according to the latest assessment.",
+        body: renderSimpleTable({
+          columns: [
+            {
+              key: "id",
+              label: "Issue",
+              render: (row) => {
+                const route = `/reliability/issues/detail?issue_id=${encodeURIComponent(String(row.id || ""))}`;
+                const title = String(row.title || "").trim();
+                const label = title
+                  ? `${title} (${shortIssueId(row.id)})`
+                  : shortIssueId(row.id);
+                return `<a href="${escapeHtml(route)}" data-route="${escapeHtml(route)}">${truncatedCell(label, 300)}</a>`;
+              },
+            },
+            { key: "severity", label: "Severity", render: (row) => truncatedCell(row.severity || "n/a", 100) },
+            { key: "status", label: "Status", render: (row) => reliabilityStatusBadge(row.status) },
+            { key: "category", label: "Category", render: (row) => truncatedCell(row.category || "n/a", 130) },
+            { key: "readiness_blocker", label: "Readiness", render: (row) => readinessBlockerBadge(Boolean(row.readiness_blocker)) },
+          ],
+          rows: blockingIssues,
+          emptyMessage: "No blocking issue ids are attached to the latest readiness assessment.",
+        }),
+      }),
+    ].join(""),
+    contextHtml: [
+      renderCardSection({
+        eyebrow: "Rules",
+        title: "Rule Evaluation Results",
+        subtitle: "Every rule is persisted with pass/fail and explicit details.",
+        body: renderSimpleTable({
+          columns: [
+            { key: "rule_id", label: "Rule" },
+            { key: "rule_name", label: "Rule Name" },
+            { key: "passed", label: "Passed", render: (row) => (row.passed ? "yes" : "no") },
+            {
+              key: "blocking_issue_ids",
+              label: "Blocking IDs",
+              render: (row) => escapeHtml(safeList(row.blocking_issue_ids).map((value) => shortIssueId(value)).join(", ") || "none"),
+            },
+          ],
+          rows: safeList(latest.rule_results),
+          emptyMessage: "No rule results are available.",
+        }),
+      }),
+      renderCardSection({
+        eyebrow: "Operator Questions",
+        title: "Operational Answers",
+        subtitle: "The ledger surfaces what is open, why not ready, and what remains unverified.",
+        body: renderDefinitionRows([
+          { label: "Open issues", value: String(openIssues.length) },
+          { label: "Blocking live-trading issues", value: String(openReadinessBlockers.length) },
+          { label: "Codex fixes awaiting verification", value: String(unverifiedFixes.length) },
+          { label: "Work orders queued", value: String(queuedWorkOrders.length) },
+          { label: "Failed fix attempts", value: String(failedFixAttempts.length) },
+          { label: "Verification records", value: String(verifications.length) },
+          { label: "Latest assessment timestamp", value: assessment?.created_at || "n/a" },
+        ]),
+      }),
+      renderCardSection({
+        eyebrow: "Next Actions",
+        title: "Prioritized Queue",
+        subtitle: "Operator-visible next steps generated from reliability workflow state.",
+        body: renderSimpleTable({
+          columns: [
+            { key: "priority", label: "Priority" },
+            { key: "action_type", label: "Action" },
+            { key: "issue_id", label: "Issue", render: (row) => escapeHtml(shortIssueId(row.issue_id)) },
+            { key: "work_order_id", label: "Work Order", render: (row) => escapeHtml(shortWorkOrderId(row.work_order_id)) },
+            { key: "fix_attempt_id", label: "Fix Attempt", render: (row) => escapeHtml(shortFixAttemptId(row.fix_attempt_id)) },
+            { key: "reason", label: "Reason", render: (row) => truncatedCell(row.reason || "n/a", 320) },
+          ],
+          rows: nextActions.slice(0, 12),
+          emptyMessage: "No queued actions.",
+        }),
+      }),
+    ].join(""),
+  };
+}
+
+async function renderReliabilityIssuesPage() {
+  const search = currentSearchParams();
+  const filters = {
+    status: search.get("status") || "",
+    type: search.get("type") || "",
+    category: search.get("category") || "",
+    severity: search.get("severity") || "",
+    readiness_blocker: search.get("readiness_blocker") || "",
+    canonical_key: search.get("canonical_key") || "",
+    environment: search.get("environment") || "",
+    date_from: search.get("date_from") || "",
+    date_to: search.get("date_to") || "",
+  };
+  const payload = await fetchReliabilityIssues(filters);
+  const issues = safeList(payload.issues);
+  const issueRows = issues.map((row) => {
+    const route = `/reliability/issues/detail?issue_id=${encodeURIComponent(String(row.id || ""))}`;
+    const shortId = shortIssueId(row.id);
+    const action = issueRowNextAction(row);
+    return `
+      <tr data-route="${escapeHtml(route)}" style="cursor:pointer;">
+        <td>
+          <div style="display:flex;flex-direction:column;gap:2px;">
+            <strong>${truncatedCell(row.title || "Untitled issue", 280)}</strong>
+            <span style="font-size:11px;opacity:0.78;">${escapeHtml(shortId)}</span>
+          </div>
+        </td>
+        <td>${reliabilityStatusBadge(row.status)}</td>
+        <td>${readinessBlockerBadge(Boolean(row.readiness_blocker))}</td>
+        <td>${actionChip(action)}</td>
+        <td>${truncatedCell(row.category || "n/a", 120)}</td>
+        <td>${truncatedCell(row.severity || "n/a", 110)}</td>
+        <td>${escapeHtml(String(row.occurrence_count ?? "n/a"))}</td>
+        <td>${truncatedCell(row.last_seen_at || "n/a", 180)}</td>
+      </tr>
+    `;
+  }).join("");
+  const issuesTable = issues.length
+    ? `
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Issue</th>
+              <th>Status</th>
+              <th>Readiness</th>
+              <th>Next Action</th>
+              <th>Category</th>
+              <th>Severity</th>
+              <th>Occurrences</th>
+              <th>Updated</th>
+            </tr>
+          </thead>
+          <tbody>${issueRows}</tbody>
+        </table>
+      </div>
+    `
+    : `<div class="empty-state">No reliability issues matched the active filters.</div>`;
+  return {
+    title: "Reliability Issues",
+    meta: "Structured issue ledger with recurrence, blocker flags, severity, and codex workflow progress.",
+    html: [
+      renderCardSection({
+        eyebrow: "Filters",
+        title: "Issue Filters",
+        subtitle: "Filter by status, type, category, severity, blocker flag, environment, and date range.",
+        body: `
+          <form class="reliability-filter-form" data-base-path="/reliability/issues">
+            <div class="line-list"><label>Status <input type="text" name="status" value="${escapeHtml(filters.status)}" /></label></div>
+            <div class="line-list"><label>Type <input type="text" name="type" value="${escapeHtml(filters.type)}" /></label></div>
+            <div class="line-list"><label>Category <input type="text" name="category" value="${escapeHtml(filters.category)}" /></label></div>
+            <div class="line-list"><label>Severity <input type="text" name="severity" value="${escapeHtml(filters.severity)}" /></label></div>
+            <div class="line-list"><label>Readiness blocker <input type="text" name="readiness_blocker" value="${escapeHtml(filters.readiness_blocker)}" /></label></div>
+            <div class="line-list"><label>Canonical key <input type="text" name="canonical_key" value="${escapeHtml(filters.canonical_key)}" /></label></div>
+            <div class="line-list"><label>Environment <input type="text" name="environment" value="${escapeHtml(filters.environment)}" /></label></div>
+            <div class="line-list"><label>Date from <input type="text" name="date_from" value="${escapeHtml(filters.date_from)}" placeholder="YYYY-MM-DD" /></label></div>
+            <div class="line-list"><label>Date to <input type="text" name="date_to" value="${escapeHtml(filters.date_to)}" placeholder="YYYY-MM-DD" /></label></div>
+            <button type="submit">Apply Filters</button>
+          </form>
+        `,
+      }),
+      renderCardSection({
+        eyebrow: "Issues",
+        title: "Issue List",
+        subtitle: "Click a row to open issue detail. IDs are shortened for readability.",
+        body: issuesTable,
+      }),
+    ].join(""),
+    contextHtml: renderCardSection({
+      eyebrow: "Summary",
+      title: "Issue Ledger Summary",
+      subtitle: "Quick counts for triage and blocking review.",
+      body: renderDefinitionRows([
+        { label: "Total matching issues", value: String(payload.total_count || issues.length) },
+        { label: "Open issues", value: String(issues.filter((item) => openIssueStatus(item)).length) },
+        { label: "Open blockers", value: String(issues.filter((item) => openIssueStatus(item) && item.readiness_blocker).length) },
+      ]),
+    }),
+  };
+}
+
+async function renderReliabilityIssueDetailPage() {
+  const search = currentSearchParams();
+  const issueId = String(search.get("issue_id") || "").trim();
+  if (!issueId) {
+    return {
+      title: "Issue Detail",
+      meta: "Select an issue from Reliability Issues to view detail.",
+      html: `<div class="empty-state">Missing issue_id query parameter.</div>`,
+      contextHtml: "",
+    };
+  }
+
+  const [payload, workOrdersPayload, verificationsPayload, fixAttemptsPayload, nextActionsPayload] = await Promise.all([
+    fetchReliabilityIssue(issueId),
+    fetchReliabilityIssueWorkOrders(issueId),
+    fetchReliabilityIssueVerifications(issueId),
+    fetchReliabilityFixAttempts({ issue_id: issueId }),
+    fetchReliabilityNextActions(),
+  ]);
+  const issue = payload.issue || {};
+  const linked = safeList(payload.linked_observations);
+  const timeline = safeList(payload.recurrence_timeline);
+  const codexTask = payload.codex_task || {};
+  const workOrders = safeList(workOrdersPayload.work_orders);
+  const fixAttempts = safeList(fixAttemptsPayload.fix_attempts);
+  const verifications = safeList(verificationsPayload.verifications);
+  const nextActions = safeList(nextActionsPayload.actions).filter((item) => String(item.issue_id || "") === issueId);
+  const issueLabel = shortIssueId(issue.id || issueId);
+
+  const workOrdersTable = workOrders.length
+    ? `
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Work Order</th>
+              <th>Status</th>
+              <th>Next Action</th>
+              <th>Objective</th>
+              <th>Assigned</th>
+              <th>Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${workOrders.map((row) => {
+              const rowId = String(row.id || "");
+              const detailRoute = `/reliability/work-orders/${encodeURIComponent(rowId)}`;
+              return `
+                <tr data-route="${escapeHtml(detailRoute)}" style="cursor:pointer;">
+                  <td>${escapeHtml(shortWorkOrderId(rowId))}</td>
+                  <td>${reliabilityStatusBadge(row.status)}</td>
+                  <td>${actionChip(nextActionForWorkOrder(row.status))}</td>
+                  <td>${truncatedCell(row.objective || "n/a", 300)}</td>
+                  <td>${truncatedCell(row.assigned_agent || "unassigned", 140)}</td>
+                  <td>${truncatedCell(row.updated_at || "n/a", 170)}</td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    `
+    : `<div class="empty-state">No work orders are linked to this issue.</div>`;
+
+  const fixAttemptsTable = fixAttempts.length
+    ? `
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Fix Attempt</th>
+              <th>Work Order</th>
+              <th>Status</th>
+              <th>Next Action</th>
+              <th>Diff Ref</th>
+              <th>Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${fixAttempts.map((row) => {
+              const workOrderId = String(row.work_order_id || "");
+              const detailRoute = workOrderId ? `/reliability/work-orders/${encodeURIComponent(workOrderId)}` : "";
+              const routeAttrs = detailRoute ? ` data-route="${escapeHtml(detailRoute)}" style="cursor:pointer;"` : "";
+              return `
+                <tr${routeAttrs}>
+                  <td>${escapeHtml(shortFixAttemptId(row.id))}</td>
+                  <td>${escapeHtml(shortWorkOrderId(workOrderId))}</td>
+                  <td>${reliabilityStatusBadge(row.status)}</td>
+                  <td>${actionChip(nextActionForFixAttempt(row.status))}</td>
+                  <td>${truncatedCell(row.diff_ref || "n/a", 220)}</td>
+                  <td>${truncatedCell(row.completed_at || row.started_at || "n/a", 170)}</td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    `
+    : `<div class="empty-state">No fix attempts recorded for this issue.</div>`;
+
+  const verificationsTable = verifications.length
+    ? `
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Verification</th>
+              <th>Status</th>
+              <th>Method</th>
+              <th>Work Order</th>
+              <th>Fix Attempt</th>
+              <th>Verified</th>
+              <th>Next Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${verifications.map((row) => `
+              <tr data-route="/reliability/issues/detail?issue_id=${encodeURIComponent(String(issue.id || issueId))}" style="cursor:pointer;">
+                <td>${escapeHtml(shortVerificationId(row.id))}</td>
+                <td>${reliabilityStatusBadge(row.status)}</td>
+                <td>${truncatedCell(row.method || "n/a", 160)}</td>
+                <td>${escapeHtml(shortWorkOrderId(row.work_order_id))}</td>
+                <td>${escapeHtml(shortFixAttemptId(row.fix_attempt_id))}</td>
+                <td>${truncatedCell(row.verified_at || row.created_at || "n/a", 170)}</td>
+                <td>${actionChip(nextActionForVerification(row.status))}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    `
+    : `<div class="empty-state">No verification records for this issue.</div>`;
+
+  const nextActionsTable = nextActions.length
+    ? `
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Priority</th>
+              <th>Action</th>
+              <th>Work Order</th>
+              <th>Fix Attempt</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${nextActions.map((row) => {
+              const workOrderId = String(row.work_order_id || "");
+              const route = workOrderId ? `/reliability/work-orders/${encodeURIComponent(workOrderId)}` : `/reliability/issues/detail?issue_id=${encodeURIComponent(String(issue.id || issueId))}`;
+              return `
+                <tr data-route="${escapeHtml(route)}" style="cursor:pointer;">
+                  <td>${escapeHtml(String(row.priority ?? "n/a"))}</td>
+                  <td>${truncatedCell(row.action_type || "n/a", 180)}</td>
+                  <td>${escapeHtml(shortWorkOrderId(workOrderId))}</td>
+                  <td>${escapeHtml(shortFixAttemptId(row.fix_attempt_id))}</td>
+                  <td>${truncatedCell(row.reason || "n/a", 340)}</td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    `
+    : `<div class="empty-state">No queued actions for this issue.</div>`;
+
+  const linkedObservationsTable = linked.length
+    ? `
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Observation</th>
+              <th>Link Type</th>
+              <th>Observed</th>
+              <th>Source</th>
+              <th>Environment</th>
+              <th>Summary</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${linked.map((row) => `
+              <tr>
+                <td>${escapeHtml(shortObservationId(row.observation_id))}</td>
+                <td>${truncatedCell(row.link_type || "n/a", 130)}</td>
+                <td>${truncatedCell(row.observed_at || "n/a", 170)}</td>
+                <td>${truncatedCell(row.source || "n/a", 140)}</td>
+                <td>${truncatedCell(row.environment || "n/a", 120)}</td>
+                <td>${truncatedCell(row.summary || "n/a", 320)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    `
+    : `<div class="empty-state">No linked observations for this issue.</div>`;
+
+  const timelineTable = timeline.length
+    ? `
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Observed At</th>
+              <th>Observation</th>
+              <th>Link Type</th>
+              <th>Summary</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${timeline.map((row) => `
+              <tr>
+                <td>${truncatedCell(row.observed_at || "n/a", 170)}</td>
+                <td>${escapeHtml(shortObservationId(row.observation_id))}</td>
+                <td>${truncatedCell(row.link_type || "n/a", 130)}</td>
+                <td>${truncatedCell(row.summary || "n/a", 340)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    `
+    : `<div class="empty-state">No recurrence timeline entries.</div>`;
+
+  return {
+    title: `Issue Detail ${issueLabel}`,
+    meta: "Issue fields, evidence links, work orders, fix attempts, verification records, and next action.",
+    html: [
+      renderCardSection({
+        eyebrow: "Issue",
+        title: "Issue Fields",
+        subtitle: "Canonical issue state and lifecycle markers.",
+        body: renderDefinitionRows([
+          { label: "Id", value: issueLabel },
+          { label: "Title", value: issue.title || "n/a" },
+          { label: "Type", value: issue.type || "n/a" },
+          { label: "Category", value: issue.category || "n/a" },
+          { label: "Severity", value: issue.severity || "n/a" },
+          { label: "Status", value: issue.status || "n/a" },
+          { label: "Canonical key", value: issue.canonical_key || "n/a" },
+          { label: "Occurrence count", value: String(issue.occurrence_count ?? "n/a") },
+          { label: "Readiness blocker", value: truthyText(Boolean(issue.readiness_blocker)) },
+          { label: "Codex status", value: issue.codex_status || "n/a" },
+          { label: "Resolved at", value: issue.resolved_at || "n/a" },
+          { label: "Verified at", value: issue.verified_at || "n/a" },
+          { label: "Verification method", value: issue.verification_method || "n/a" },
+          { label: "Resolution summary", value: issue.resolution_summary || "n/a" },
+          { label: "Next action", value: payload.next_action || "none" },
+        ]),
+      }),
+      renderCardSection({
+        eyebrow: "Technical",
+        title: "Technical Details",
+        subtitle: "Full identifiers are kept here for diagnostics.",
+        body: `
+          <details>
+            <summary>Technical details</summary>
+            <div class="line-list" style="margin-top:8px;">
+              <div>Issue id: ${escapeHtml(issue.id || "n/a")}</div>
+              <div>Canonical key: ${escapeHtml(issue.canonical_key || "n/a")}</div>
+            </div>
+          </details>
+        `,
+      }),
+      renderCardSection({
+        eyebrow: "Issue Actions",
+        title: "Update Issue / Work Queue Actions",
+        subtitle: "Move issue workflow, create work orders, record fix attempts, and record verification evidence.",
+        body: `
+          <form class="reliability-action-form">
+            <input type="hidden" name="reliability_action" value="update_issue" />
+            <input type="hidden" name="issue_id" value="${escapeHtml(issue.id || issueId)}" />
+            <div class="line-list"><label>Status <input type="text" name="status" value="${escapeHtml(issue.status || "")}" /></label></div>
+            <div class="line-list"><label>Codex status <input type="text" name="codex_status" value="${escapeHtml(issue.codex_status || "")}" /></label></div>
+            <div class="line-list"><label>Verification method <input type="text" name="verification_method" value="${escapeHtml(issue.verification_method || "")}" /></label></div>
+            <div class="line-list"><label>Resolution summary <input type="text" name="resolution_summary" value="${escapeHtml(issue.resolution_summary || "")}" /></label></div>
+            <div class="line-list"><label>Readiness blocker <input type="text" name="readiness_blocker" value="${truthyText(Boolean(issue.readiness_blocker))}" /></label></div>
+            <button type="submit">Update Issue</button>
+          </form>
+          <form class="reliability-action-form">
+            <input type="hidden" name="reliability_action" value="link_observation" />
+            <input type="hidden" name="issue_id" value="${escapeHtml(issue.id || issueId)}" />
+            <div class="line-list"><label>Observation id <input type="text" name="observation_id" /></label></div>
+            <div class="line-list"><label>Link type <input type="text" name="link_type" value="verification" /></label></div>
+            <button type="submit">Link Observation</button>
+          </form>
+          <form class="reliability-action-form">
+            <input type="hidden" name="reliability_action" value="create_work_order_from_issue" />
+            <input type="hidden" name="issue_id" value="${escapeHtml(issue.id || issueId)}" />
+            <div class="line-list"><label>Assigned agent <input type="text" name="assigned_agent" value="codex" /></label></div>
+            <div class="line-list"><label>Operator instruction <input type="text" name="operator_instruction" placeholder="Optional instruction override" /></label></div>
+            <button type="submit">Create Work Order</button>
+          </form>
+          <form class="reliability-action-form">
+            <input type="hidden" name="reliability_action" value="record_fix_attempt" />
+            <input type="hidden" name="issue_id" value="${escapeHtml(issue.id || issueId)}" />
+            <div class="line-list"><label>Work order id <input type="text" name="work_order_id" /></label></div>
+            <div class="line-list"><label>Status <input type="text" name="status" value="started" /></label></div>
+            <div class="line-list"><label>Files changed (comma/newline) <textarea name="files_changed" rows="2"></textarea></label></div>
+            <div class="line-list"><label>Diff ref <input type="text" name="diff_ref" /></label></div>
+            <div class="line-list"><label>Tests run (comma/newline) <textarea name="tests_run" rows="2"></textarea></label></div>
+            <div class="line-list"><label>Test results JSON <textarea name="test_results" rows="3">{}</textarea></label></div>
+            <div class="line-list"><label>Codex summary <textarea name="codex_summary" rows="3"></textarea></label></div>
+            <div class="line-list"><label>Risk notes <textarea name="risk_notes" rows="2"></textarea></label></div>
+            <button type="submit">Record Fix Attempt</button>
+          </form>
+          <form class="reliability-action-form">
+            <input type="hidden" name="reliability_action" value="record_verification" />
+            <input type="hidden" name="issue_id" value="${escapeHtml(issue.id || issueId)}" />
+            <div class="line-list"><label>Method <input type="text" name="method" value="manual_review" /></label></div>
+            <div class="line-list"><label>Status <input type="text" name="status" value="pending" /></label></div>
+            <div class="line-list"><label>Work order id <input type="text" name="work_order_id" /></label></div>
+            <div class="line-list"><label>Fix attempt id <input type="text" name="fix_attempt_id" /></label></div>
+            <div class="line-list"><label>Evidence JSON <textarea name="evidence" rows="3">{}</textarea></label></div>
+            <div class="line-list"><label>Notes <textarea name="notes" rows="2"></textarea></label></div>
+            <button type="submit">Record Verification</button>
+          </form>
+        `,
+      }),
+      renderCardSection({
+        eyebrow: "Work Orders",
+        title: "Issue Work Orders",
+        subtitle: "Actionable repair requests linked to this issue.",
+        body: workOrdersTable,
+      }),
+      renderCardSection({
+        eyebrow: "Fix Attempts",
+        title: "Issue Fix Attempts",
+        subtitle: "Codex attempt records remain advisory until verification evidence is passed.",
+        body: fixAttemptsTable,
+      }),
+      `<div id="issue-verifications-section">${
+        renderCardSection({
+          eyebrow: "Verifications",
+          title: "Issue Verifications",
+          subtitle: "Verification is independent evidence and is required before closure.",
+          body: verificationsTable,
+        })
+      }</div>`,
+      renderCardSection({
+        eyebrow: "Next Action",
+        title: "Next Recommended Action",
+        subtitle: "Prioritized reliability queue entries for this issue.",
+        body: nextActionsTable,
+      }),
+      renderCardSection({
+        eyebrow: "Evidence",
+        title: "Linked Observations",
+        subtitle: "Evidence links from observation ledger to this issue.",
+        body: linkedObservationsTable,
+      }),
+    ].join(""),
+    contextHtml: [
+      renderCardSection({
+        eyebrow: "Timeline",
+        title: "Recurrence Timeline",
+        subtitle: "Observation chronology tied to this issue.",
+        body: timelineTable,
+      }),
+      renderCardSection({
+        eyebrow: "Codex",
+        title: "Codex Task Contract",
+        subtitle: "Codex status is advisory; verification evidence is still required for closure.",
+        body: renderDefinitionRows([
+          { label: "Issue id", value: shortIssueId(codexTask.issue_id || issue.id || issueId) },
+          { label: "Title", value: codexTask.title || issue.title || "n/a" },
+          { label: "Affected component", value: codexTask.affected_component || issue.category || "n/a" },
+          { label: "Required tests", value: safeList(codexTask.required_tests).join(", ") || "n/a" },
+          { label: "Verification criteria", value: safeList(codexTask.verification_criteria).join(", ") || "n/a" },
+          { label: "Forbidden changes", value: safeList(codexTask.forbidden_changes).join(", ") || "n/a" },
+        ]),
+      }),
+    ].join(""),
+  };
+}
+
+async function renderReliabilityObservationsPage() {
+  const search = currentSearchParams();
+  const filters = {
+    source: search.get("source") || "",
+    component: search.get("component") || "",
+    environment: search.get("environment") || "",
+    run_id: search.get("run_id") || "",
+    event_type: search.get("event_type") || "",
+    severity_hint: search.get("severity_hint") || "",
+    date_from: search.get("date_from") || "",
+    date_to: search.get("date_to") || "",
+  };
+  const payload = await fetchReliabilityObservations(filters);
+  const observations = safeList(payload.observations);
+  const observationRows = observations.map((row) => `
+    <tr>
+      <td>
+        <div style="display:flex;flex-direction:column;gap:2px;">
+          <strong>${escapeHtml(shortObservationId(row.id))}</strong>
+          <span style="font-size:11px;opacity:0.78;">${truncatedCell(row.event_type || "observation", 200)}</span>
+        </div>
+      </td>
+      <td>${truncatedCell(row.source || "n/a", 130)}</td>
+      <td>${truncatedCell(row.environment || "n/a", 120)}</td>
+      <td>${truncatedCell(row.component || "n/a", 130)}</td>
+      <td>${truncatedCell(row.severity_hint || "n/a", 100)}</td>
+      <td>${truncatedCell(row.summary || "n/a", 340)}</td>
+      <td>${truncatedCell(row.observed_at || "n/a", 170)}</td>
+      <td>${truthyText(Boolean(row.ai_detected))}</td>
+    </tr>
+  `).join("");
+  const observationTable = observations.length
+    ? `
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Observation</th>
+              <th>Source</th>
+              <th>Environment</th>
+              <th>Component</th>
+              <th>Severity</th>
+              <th>Summary</th>
+              <th>Observed</th>
+              <th>AI</th>
+            </tr>
+          </thead>
+          <tbody>${observationRows}</tbody>
+        </table>
+      </div>
+    `
+    : `<div class="empty-state">No observations matched the active filters.</div>`;
+  return {
+    title: "Observations Ledger",
+    meta: "Append-only reliability observations for incidents, recurrences, and verification evidence.",
+    html: [
+      renderCardSection({
+        eyebrow: "Filters",
+        title: "Observation Filters",
+        subtitle: "Filter observation ledger by source/component/environment/run/event/severity/date.",
+        body: `
+          <form class="reliability-filter-form" data-base-path="/reliability/observations">
+            <div class="line-list"><label>Source <input type="text" name="source" value="${escapeHtml(filters.source)}" /></label></div>
+            <div class="line-list"><label>Component <input type="text" name="component" value="${escapeHtml(filters.component)}" /></label></div>
+            <div class="line-list"><label>Environment <input type="text" name="environment" value="${escapeHtml(filters.environment)}" /></label></div>
+            <div class="line-list"><label>Run id <input type="text" name="run_id" value="${escapeHtml(filters.run_id)}" /></label></div>
+            <div class="line-list"><label>Event type <input type="text" name="event_type" value="${escapeHtml(filters.event_type)}" /></label></div>
+            <div class="line-list"><label>Severity hint <input type="text" name="severity_hint" value="${escapeHtml(filters.severity_hint)}" /></label></div>
+            <div class="line-list"><label>Date from <input type="text" name="date_from" value="${escapeHtml(filters.date_from)}" placeholder="YYYY-MM-DD" /></label></div>
+            <div class="line-list"><label>Date to <input type="text" name="date_to" value="${escapeHtml(filters.date_to)}" placeholder="YYYY-MM-DD" /></label></div>
+            <button type="submit">Apply Filters</button>
+          </form>
+        `,
+      }),
+      renderCardSection({
+        eyebrow: "Ledger",
+        title: "Append-Only Observations",
+        subtitle: "Observations are immutable facts and cannot be edited in place.",
+        body: observationTable,
+      }),
+    ].join(""),
+    contextHtml: renderCardSection({
+      eyebrow: "Integrity",
+      title: "Ledger Constraints",
+      subtitle: "Corrections are represented by new observations, never edits to existing records.",
+      body: renderDefinitionRows([
+        { label: "Total matching observations", value: String(payload.total_count || observations.length) },
+        { label: "Append-only policy", value: "enforced" },
+      ]),
+    }),
+  };
+}
+
+async function renderReliabilityWorkOrdersPage() {
+  const search = currentSearchParams();
+  const showSmokeTests = String(search.get("show_smoke") || "").trim() === "1";
+  const queryText = inlineText(search.get("q") || "");
+  const queryLower = queryText.toLowerCase();
+  const [workOrdersPayload, issuesPayload, verificationsPayload] = await Promise.all([
+    fetchReliabilityWorkOrders(),
+    fetchReliabilityIssues(),
+    fetchReliabilityVerifications(),
+  ]);
+  const allWorkOrders = safeList(workOrdersPayload.work_orders);
+  const issues = safeList(issuesPayload.issues);
+  const verifications = safeList(verificationsPayload.verifications);
+  const issueById = new Map(issues.map((item) => [String(item.id || ""), item]));
+  const passedVerificationIssueIds = new Set(
+    verifications
+      .filter((item) => String(item.status || "") === "passed")
+      .map((item) => String(item.issue_id || "")),
+  );
+
+  const statusAction = (entry) => {
+    const status = String(entry.workOrder.status || "").toLowerCase();
+    if (status === "queued" || status === "in_progress") {
+      return { label: "Open Prompt", route: entry.workOrderRoute };
+    }
+    if (status === "tests_passed") {
+      return { label: "Verify", route: entry.issueVerificationRoute };
+    }
+    if (status === "needs_review") {
+      return { label: "Review", route: entry.workOrderRoute };
+    }
+    return { label: "Open", route: entry.workOrderRoute };
+  };
+
+  const entries = allWorkOrders.map((workOrder) => {
+    const issueId = String(workOrder.issue_id || "");
+    const issue = issueById.get(issueId) || {};
+    const issueStatus = String(issue.status || "");
+    const issueOpen = openIssueStatus(issue);
+    const hasPassedVerification = passedVerificationIssueIds.has(issueId);
+    const isSleeve = isSleeveLiveReadinessContext(workOrder, issue);
+    const isSmoke = isSystemSmokeTestWork(workOrder, issue);
+    const isUserRelevant = String(issue.created_by || "").toLowerCase() === "operator" || Boolean(issue.ai_assisted);
+    const isReadinessBlocker = Boolean(issue.readiness_blocker);
+    const isOpenWithoutPassedVerification = issueOpen && !hasPassedVerification;
+    const isTestsPassedAwaitingVerification = String(workOrder.status || "") === "tests_passed";
+    const isInfrastructureSmoke = isSmoke && String(issue.category || "").toLowerCase() === "infrastructure";
+    const workOrderRoute = `/reliability/work-orders/${encodeURIComponent(String(workOrder.id || ""))}`;
+    const issueVerificationRoute = `/reliability/issues/detail?issue_id=${encodeURIComponent(issueId)}#issue-verifications-section`;
+    const whyFallback = isSleeve
+      ? "Determines whether a sleeve is ready to promote from Paper to Live."
+      : "Impact summary not recorded.";
+    const whyItMatters = inlineText(issue.impact_summary)
+      || (isSmoke ? "System smoke test coverage." : whyFallback);
+    const searchCorpus = [
+      issue.title,
+      issue.actual_behavior,
+      issue.expected_behavior,
+      issue.impact_summary,
+      workOrder.objective,
+      workOrder.actual_behavior,
+      workOrder.expected_behavior,
+      workOrder.id,
+      workOrder.issue_id,
+    ].filter(Boolean).join(" ").toLowerCase();
+    const priorityTuple = [
+      isSleeve ? 0 : 1,
+      isUserRelevant ? 0 : 1,
+      isReadinessBlocker ? 0 : 1,
+      isOpenWithoutPassedVerification ? 0 : 1,
+      isTestsPassedAwaitingVerification ? 0 : 1,
+      isSmoke ? 1 : 0,
+      isInfrastructureSmoke ? 1 : 0,
+    ];
+    return {
+      workOrder,
+      issue,
+      issueStatus,
+      isSleeve,
+      isSmoke,
+      isUserRelevant,
+      isReadinessBlocker,
+      isOpenWithoutPassedVerification,
+      isTestsPassedAwaitingVerification,
+      isInfrastructureSmoke,
+      whyItMatters,
+      searchCorpus,
+      priorityTuple,
+      workOrderRoute,
+      issueVerificationRoute,
+    };
+  });
+
+  const prioritizedAll = [...entries].sort((a, b) => {
+    for (let index = 0; index < a.priorityTuple.length; index += 1) {
+      const diff = a.priorityTuple[index] - b.priorityTuple[index];
+      if (diff !== 0) {
+        return diff;
+      }
+    }
+    return String(b.workOrder.updated_at || "").localeCompare(String(a.workOrder.updated_at || ""));
+  });
+  const nonSmokePriority = prioritizedAll.filter((entry) => !entry.isSmoke);
+  const primaryEntry = nonSmokePriority[0] || prioritizedAll[0] || null;
+
+  const smokeFiltered = showSmokeTests ? prioritizedAll : prioritizedAll.filter((entry) => !entry.isSmoke);
+  const visibleEntries = queryLower
+    ? smokeFiltered.filter((entry) => entry.searchCorpus.includes(queryLower))
+    : smokeFiltered;
+  const myOpenReliabilityWork = visibleEntries.filter((entry) => openIssueStatus(entry.issue)).slice(0, 8);
+
+  const sleeveIssues = issues
+    .filter((issue) => openIssueStatus(issue) && isSleeveLiveReadinessContext({}, issue))
+    .sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
+  const sleeveIssue = sleeveIssues[0] || null;
+  const sleeveWorkOrder = prioritizedAll.find((entry) => entry.isSleeve && !entry.isSmoke) || null;
+
+  let sleeveCodexPrompt = "";
+  if (sleeveWorkOrder) {
+    try {
+      const detail = await fetchReliabilityWorkOrder(sleeveWorkOrder.workOrder.id);
+      sleeveCodexPrompt = String(detail.codex_ready_prompt || "").trim();
+    } catch {
+      sleeveCodexPrompt = "";
+    }
+  }
+
+  const focusPanel = sleeveWorkOrder
+    ? `
+      <div class="line-list">
+        <div><strong>Primary Action:</strong></div>
+        <div style="font-size:20px;font-weight:700;line-height:1.35;">Fix sleeve grading for LIVE readiness</div>
+        <div style="margin-top:10px;"><strong>Why:</strong></div>
+        <div>Sleeves need deterministic 1–7 grading to decide when they can be promoted from Paper to Live.</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;">
+          <a href="${escapeHtml(sleeveWorkOrder.workOrderRoute)}" data-route="${escapeHtml(sleeveWorkOrder.workOrderRoute)}" class="support-chip">Open Work Order</a>
+          ${sleeveCodexPrompt
+            ? `<textarea id="focusSleeveCodexPrompt" hidden readonly>${escapeHtml(sleeveCodexPrompt)}</textarea>
+               <button type="button" data-copy-source="focusSleeveCodexPrompt">Copy Codex Prompt</button>`
+            : `<button type="button" disabled>Copy Codex Prompt</button>`}
+        </div>
+      </div>
+    `
+    : sleeveIssue
+      ? `
+        <div class="line-list">
+          <div><strong>Primary Action:</strong></div>
+          <div style="font-size:20px;font-weight:700;line-height:1.35;">Create work order for sleeve grading issue</div>
+          <form class="reliability-action-form" style="margin-top:12px;">
+            <input type="hidden" name="reliability_action" value="create_work_order_from_issue" />
+            <input type="hidden" name="issue_id" value="${escapeHtml(String(sleeveIssue.id || ""))}" />
+            <input type="hidden" name="assigned_agent" value="codex" />
+            <input type="hidden" name="operator_instruction" value="Fix sleeve grading for LIVE readiness (deterministic 1-7 scoring)." />
+            <button type="submit">Create Work Order</button>
+          </form>
+        </div>
+      `
+      : `
+        <div class="line-list">
+          <div><strong>Primary Action:</strong></div>
+          <div style="font-size:20px;font-weight:700;line-height:1.35;">Create sleeve grading issue</div>
+          <div style="margin-top:12px;">
+            <a href="/reliability/ai" data-route="/reliability/ai" class="support-chip">Open AI Draft</a>
+          </div>
+        </div>
+      `;
+
+  const sleeveCallout = sleeveIssue
+    ? renderCardSection({
+        eyebrow: "Sleeve Focus",
+        title: "Sleeve LIVE Readiness Work",
+        subtitle: "Operator shortcut for the sleeve promotion readiness gap.",
+        body: `
+          <div class="line-list">
+            <div>Missing sleeve grading prevents determining when a sleeve is ready for LIVE.</div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+              ${sleeveWorkOrder
+                ? `<a href="${escapeHtml(sleeveWorkOrder.workOrderRoute)}" data-route="${escapeHtml(sleeveWorkOrder.workOrderRoute)}" class="support-chip">Open Work Order</a>`
+                : `<form class="reliability-action-form">
+                    <input type="hidden" name="reliability_action" value="create_work_order_from_issue" />
+                    <input type="hidden" name="issue_id" value="${escapeHtml(String(sleeveIssue.id || ""))}" />
+                    <input type="hidden" name="assigned_agent" value="codex" />
+                    <input type="hidden" name="operator_instruction" value="Fix sleeve grading for LIVE readiness (deterministic 1-7 scoring)." />
+                    <button type="submit">Create Work Order</button>
+                  </form>`}
+              ${sleeveWorkOrder && sleeveCodexPrompt
+                ? `<textarea id="sleeveCalloutCodexPrompt" hidden readonly>${escapeHtml(sleeveCodexPrompt)}</textarea>
+                   <button type="button" data-copy-source="sleeveCalloutCodexPrompt">Copy Codex Prompt</button>`
+                : ""}
+            </div>
+          </div>
+        `,
+      })
+    : "";
+
+  const listCards = myOpenReliabilityWork.map((entry) => {
+    const issueTitle = inlineText(entry.issue.title) || "Untitled issue";
+    const fixText = workOrderFixLabel(entry.workOrder, entry.issue);
+    const smokeBadge = entry.isSmoke
+      ? `<span style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700;background:#9ca3af;color:#111827;">System smoke test</span>`
+      : "";
+    return `
+      <article class="stack-card">
+        <div class="stack-card-header">
+          <div>
+            <div class="stack-card-title">${escapeHtml(ellipsisText(issueTitle, 120))}</div>
+            <div class="stack-card-subtitle">${escapeHtml(ellipsisText(fixText, 140))}</div>
+          </div>
+          ${reliabilityStatusBadge(entry.workOrder.status)}
+        </div>
+        <div class="chip-list" style="margin-top:8px;">
+          ${actionChip(workOrderNextStepLabel(entry.workOrder.status))}
+          ${smokeBadge}
+          <span class="support-chip">${escapeHtml(shortWorkOrderId(entry.workOrder.id))}</span>
+        </div>
+      </article>
+    `;
+  }).join("");
+  const myOpenPanel = myOpenReliabilityWork.length
+    ? listCards
+    : `<div class="empty-state">${showSmokeTests ? "No open work orders match the search." : "No open non-smoke work orders match the search."}</div>`;
+
+  const tableRows = visibleEntries.map((entry) => {
+    const row = entry.workOrder;
+    const rowId = String(row.id || "");
+    const issueId = String(row.issue_id || "");
+    const issue = entry.issue;
+    const issueTitle = inlineText(issue.title) || "Untitled issue";
+    const fixText = workOrderFixLabel(row, issue);
+    const action = statusAction(entry);
+    const smokeBadge = entry.isSmoke
+      ? `<div style="margin-top:4px;"><span style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700;background:#9ca3af;color:#111827;">System smoke test</span></div>`
+      : "";
+    return `
+      <tr data-route="${escapeHtml(entry.workOrderRoute)}" style="cursor:pointer;">
+        <td>
+          <div style="display:flex;flex-direction:column;gap:2px;">
+            <strong>${escapeHtml(ellipsisText(issueTitle, 120))}</strong>
+            <span style="font-size:11px;opacity:0.78;">${escapeHtml(shortWorkOrderId(rowId))} · ${escapeHtml(shortIssueId(issueId))}</span>
+            ${smokeBadge}
+          </div>
+        </td>
+        <td>
+          <span title="${escapeHtml(entry.whyItMatters)}">${escapeHtml(ellipsisText(entry.whyItMatters, 120))}</span>
+        </td>
+        <td>${reliabilityStatusBadge(row.status)}</td>
+        <td>${actionChip(workOrderNextStepLabel(row.status))}</td>
+        <td><a href="${escapeHtml(action.route)}" data-route="${escapeHtml(action.route)}">${escapeHtml(action.label)}</a></td>
+      </tr>
+    `;
+  }).join("");
+
+  const tableMarkup = visibleEntries.length
+    ? `
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Problem</th>
+              <th>Why it matters</th>
+              <th>Status</th>
+              <th>Next Step</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>
+    `
+    : `<div class="empty-state">No work orders match the current filters.</div>`;
+
+  return {
+    title: "Reliability Work Orders",
+    meta: "Actionable reliability repair queue with ownership, objective, and workflow status.",
+    html: [
+      renderCardSection({
+        eyebrow: "Operator Work",
+        title: "My Open Reliability Work",
+        subtitle: "Prioritized for user-relevant issues; smoke-test work is deprioritized.",
+        body: myOpenPanel,
+      }),
+      renderCardSection({
+        eyebrow: "Primary",
+        title: "What Needs Attention?",
+        subtitle: "Sleeve readiness actions are prioritized above smoke-test tasks.",
+        body: focusPanel,
+      }),
+      sleeveCallout,
+      renderCardSection({
+        eyebrow: "Queue",
+        title: "Work Order Queue",
+        subtitle: "Click a row to open work-order detail. Use filters to focus on real operator work.",
+        body: `
+          <form class="reliability-filter-form" data-base-path="/reliability/work-orders">
+            <label style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
+              <span>Search</span>
+              <input type="text" name="q" value="${escapeHtml(queryText)}" placeholder="Search issues or work orders..." />
+            </label>
+            <label style="display:inline-flex;align-items:center;gap:8px;margin-bottom:12px;">
+              <input type="checkbox" name="show_smoke" value="1" ${showSmokeTests ? "checked" : ""} />
+              <span>Show system smoke tests</span>
+            </label>
+            <button type="submit">Apply</button>
+          </form>
+          ${tableMarkup}
+        `,
+      }),
+    ].join(""),
+    contextHtml: renderCardSection({
+      eyebrow: "Summary",
+      title: "Queue Summary",
+      subtitle: "Current reliability work-order state distribution.",
+      body: renderDefinitionRows([
+        { label: "Total work orders", value: String(workOrdersPayload.total_count || allWorkOrders.length) },
+        { label: "Visible rows", value: String(visibleEntries.length) },
+        { label: "Non-smoke prioritized rows", value: String(nonSmokePriority.length) },
+        { label: "Sleeve-related work orders", value: String(prioritizedAll.filter((entry) => entry.isSleeve).length) },
+        { label: "Queued", value: String(allWorkOrders.filter((item) => item.status === "queued").length) },
+        { label: "In progress", value: String(allWorkOrders.filter((item) => item.status === "in_progress").length) },
+        { label: "Tests passed", value: String(allWorkOrders.filter((item) => item.status === "tests_passed").length) },
+        { label: "Needs review", value: String(allWorkOrders.filter((item) => item.status === "needs_review").length) },
+        { label: "Smoke-test rows", value: String(prioritizedAll.filter((entry) => entry.isSmoke).length) },
+        { label: "Primary highlighted work order", value: primaryEntry ? shortWorkOrderId(primaryEntry.workOrder.id) : "none" },
+      ]),
+    }),
+  };
+}
+
+async function renderReliabilityWorkOrderDetailPage() {
+  const workOrderId = currentWorkOrderId();
+  if (!workOrderId) {
+    return {
+      title: "Work Order Detail",
+      meta: "Select a work order from the queue.",
+      html: `<div class="empty-state">Missing work order id.</div>`,
+      contextHtml: "",
+    };
+  }
+  const payload = await fetchReliabilityWorkOrder(workOrderId);
+  const workOrder = payload.work_order || {};
+  const issue = payload.issue || {};
+  const fixAttempts = safeList(payload.fix_attempts);
+  const verifications = safeList(payload.verifications);
+  const codexPrompt = String(payload.codex_ready_prompt || "").trim();
+  const promptSourceId = `codex-prompt-${reliabilityIdCore(workOrder.id || workOrderId) || "work-order"}`;
+  const workOrderLabel = shortWorkOrderId(workOrder.id || workOrderId);
+  const issueLabel = shortIssueId(issue.id);
+
+  const fixAttemptsTable = fixAttempts.length
+    ? `
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Fix Attempt</th>
+              <th>Status</th>
+              <th>Next Action</th>
+              <th>Diff Ref</th>
+              <th>Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${fixAttempts.map((row) => `
+              <tr>
+                <td>${escapeHtml(shortFixAttemptId(row.id))}</td>
+                <td>${reliabilityStatusBadge(row.status)}</td>
+                <td>${actionChip(nextActionForFixAttempt(row.status))}</td>
+                <td>${truncatedCell(row.diff_ref || "n/a", 260)}</td>
+                <td>${truncatedCell(row.completed_at || row.started_at || "n/a", 170)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    `
+    : `<div class="empty-state">No attempts recorded for this work order.</div>`;
+
+  const verificationsTable = verifications.length
+    ? `
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Verification</th>
+              <th>Status</th>
+              <th>Method</th>
+              <th>Fix Attempt</th>
+              <th>Verified</th>
+              <th>Next Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${verifications.map((row) => {
+              const route = issue.id ? `/reliability/issues/detail?issue_id=${encodeURIComponent(String(issue.id || ""))}` : "";
+              const routeAttrs = route ? ` data-route="${escapeHtml(route)}" style="cursor:pointer;"` : "";
+              return `
+                <tr${routeAttrs}>
+                  <td>${escapeHtml(shortVerificationId(row.id))}</td>
+                  <td>${reliabilityStatusBadge(row.status)}</td>
+                  <td>${truncatedCell(row.method || "n/a", 150)}</td>
+                  <td>${escapeHtml(shortFixAttemptId(row.fix_attempt_id))}</td>
+                  <td>${truncatedCell(row.verified_at || row.created_at || "n/a", 170)}</td>
+                  <td>${actionChip(nextActionForVerification(row.status))}</td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    `
+    : `<div class="empty-state">No verification records for this work order.</div>`;
+
+  return {
+    title: `Work Order ${workOrderLabel}`,
+    meta: "Work-order objective, constraints, codex prompt, related issue, and fix attempts.",
+    html: [
+      renderCardSection({
+        eyebrow: "Work Order",
+        title: "Work Order Fields",
+        subtitle: "Deterministic workflow contract for reliability repair execution.",
+        body: renderDefinitionRows([
+          { label: "Id", value: workOrderLabel },
+          { label: "Issue", value: issueLabel },
+          { label: "Status", value: workOrder.status || "n/a" },
+          { label: "Objective", value: workOrder.objective || "n/a" },
+          { label: "Affected component", value: workOrder.affected_component || "n/a" },
+          { label: "Assigned agent", value: workOrder.assigned_agent || "n/a" },
+          { label: "Updated", value: workOrder.updated_at || "n/a" },
+        ]),
+      }),
+      renderCardSection({
+        eyebrow: "Technical",
+        title: "Technical Details",
+        subtitle: "Full identifiers are available here for diagnostics only.",
+        body: `
+          <details>
+            <summary>Technical details</summary>
+            <div class="line-list" style="margin-top:8px;">
+              <div>Work order id: ${escapeHtml(workOrder.id || workOrderId)}</div>
+              <div>Issue id: ${escapeHtml(issue.id || "n/a")}</div>
+            </div>
+          </details>
+        `,
+      }),
+      renderCardSection({
+        eyebrow: "Codex",
+        title: "Run with Codex",
+        subtitle: "Prepare and execute a manual Codex fix loop from this work order.",
+        body: `
+          <div class="line-list" style="gap:10px;">
+            <div>Paste this prompt into Codex. After Codex finishes, return here and record the fix attempt.</div>
+            <textarea id="${escapeHtml(promptSourceId)}" rows="20" readonly style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace;">${escapeHtml(codexPrompt || "No prompt available.")}</textarea>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+              <button type="button" data-copy-source="${escapeHtml(promptSourceId)}">Copy Codex Prompt</button>
+              <button type="button" data-scroll-target="work-order-record-fix-attempt">Record Fix Attempt</button>
+            </div>
+          </div>
+        `,
+      }),
+      `<div id="work-order-record-fix-attempt">${
+        renderCardSection({
+          eyebrow: "Record Attempt",
+          title: "Record Fix Attempt",
+          subtitle: "Capture codex attempt output and tests without auto-verifying/closing the issue.",
+          body: `
+            <form class="reliability-action-form">
+              <input type="hidden" name="reliability_action" value="record_fix_attempt" />
+              <input type="hidden" name="issue_id" value="${escapeHtml(issue.id || "")}" />
+              <input type="hidden" name="work_order_id" value="${escapeHtml(workOrder.id || workOrderId)}" />
+              <div class="line-list"><label>Status <input type="text" name="status" value="patch_submitted" /></label></div>
+              <div class="line-list"><label>Files changed (comma/newline) <textarea name="files_changed" rows="2"></textarea></label></div>
+              <div class="line-list"><label>Diff ref <input type="text" name="diff_ref" /></label></div>
+              <div class="line-list"><label>Tests run (comma/newline) <textarea name="tests_run" rows="2"></textarea></label></div>
+              <div class="line-list"><label>Test results JSON <textarea name="test_results" rows="3">{}</textarea></label></div>
+              <div class="line-list"><label>Codex summary <textarea name="codex_summary" rows="3"></textarea></label></div>
+              <div class="line-list"><label>Risk notes <textarea name="risk_notes" rows="2"></textarea></label></div>
+              <button type="submit">Record Fix Attempt</button>
+            </form>
+          `,
+        })
+      }</div>`,
+    ].join(""),
+    contextHtml: [
+      renderCardSection({
+        eyebrow: "Fix Attempts",
+        title: "Fix Attempts",
+        subtitle: "Attempt history for this work order.",
+        body: fixAttemptsTable,
+      }),
+      renderCardSection({
+        eyebrow: "Verifications",
+        title: "Linked Verifications",
+        subtitle: "Verification evidence linked to this work order.",
+        body: verificationsTable,
+      }),
+    ].join(""),
+  };
+}
+
+async function renderReliabilityVerificationsPage() {
+  const [payload, issuesPayload] = await Promise.all([
+    fetchReliabilityVerifications(),
+    fetchReliabilityIssues(),
+  ]);
+  const verifications = safeList(payload.verifications);
+  const issues = safeList(issuesPayload.issues);
+  const issueById = new Map(issues.map((issue) => [String(issue.id || ""), issue]));
+
+  const rankStatus = (status) => {
+    const normalized = String(status || "").toLowerCase();
+    if (normalized === "failed") {
+      return 0;
+    }
+    if (normalized === "pending") {
+      return 1;
+    }
+    if (normalized === "inconclusive") {
+      return 2;
+    }
+    if (normalized === "passed") {
+      return 3;
+    }
+    return 4;
+  };
+
+  const prioritized = [...verifications].sort((a, b) => {
+    const rankDiff = rankStatus(a.status) - rankStatus(b.status);
+    if (rankDiff !== 0) {
+      return rankDiff;
+    }
+    const aTs = String(a.verified_at || a.created_at || "");
+    const bTs = String(b.verified_at || b.created_at || "");
+    return bTs.localeCompare(aTs);
+  });
+  const attention = prioritized[0] || null;
+  const attentionIssue = attention ? issueById.get(String(attention.issue_id || "")) : null;
+  const attentionIssueLabel = attentionIssue?.title || shortIssueId(attention?.issue_id || "");
+  const attentionText = attention
+    ? `Next Action: ${nextActionForVerification(attention.status)} ${attentionIssueLabel}`
+    : "";
+
+  const rows = prioritized.map((row) => {
+    const issueId = String(row.issue_id || "");
+    const workOrderId = String(row.work_order_id || "");
+    const issue = issueById.get(issueId) || null;
+    const issueTitle = String(issue?.title || "").trim();
+    const issueRoute = issueId
+      ? `/reliability/issues/detail?issue_id=${encodeURIComponent(issueId)}`
+      : "/reliability/verifications";
+    const issueLabel = issueTitle
+      ? `${issueTitle} (${shortIssueId(issueId)})`
+      : shortIssueId(issueId);
+    return `
+      <tr data-route="${escapeHtml(issueRoute)}" style="cursor:pointer;">
+        <td>${reliabilityStatusBadge(row.status)}</td>
+        <td>${truncatedCell(row.method || "n/a", 150)}</td>
+        <td>${truncatedCell(issueLabel, 280)}</td>
+        <td>${escapeHtml(shortWorkOrderId(workOrderId))}</td>
+        <td>${truncatedCell(row.verified_at || row.created_at || "n/a", 180)}</td>
+        <td>${actionChip(nextActionForVerification(row.status))}</td>
+      </tr>
+    `;
+  }).join("");
+  const tableMarkup = prioritized.length
+    ? `
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Method</th>
+              <th>Issue</th>
+              <th>Work Order</th>
+              <th>Verified</th>
+              <th>Next Action</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `
+    : `<div class="empty-state">No verification records exist.</div>`;
+  return {
+    title: "Reliability Verifications",
+    meta: "Verification evidence across reliability issues and fix attempts.",
+    html: [
+      attentionText
+        ? renderCardSection({
+            eyebrow: "Attention",
+            title: "What Needs Attention?",
+            subtitle: "Highest-priority verification action to execute now.",
+            body: `<div style="font-size:20px;font-weight:700;line-height:1.35;">${escapeHtml(attentionText)}</div>`,
+          })
+        : "",
+      renderCardSection({
+        eyebrow: "Verification Ledger",
+        title: "Verification Records",
+        subtitle: "Click any row to open the related issue. Verification remains evidence-first and independent.",
+        body: tableMarkup,
+      }),
+    ].join(""),
+    contextHtml: renderCardSection({
+      eyebrow: "Summary",
+      title: "Verification Summary",
+      subtitle: "Current verification totals by status.",
+      body: renderDefinitionRows([
+        { label: "Total verifications", value: String(payload.total_count || prioritized.length) },
+        { label: "Passed", value: String(prioritized.filter((item) => item.status === "passed").length) },
+        { label: "Failed", value: String(prioritized.filter((item) => item.status === "failed").length) },
+        { label: "Pending", value: String(prioritized.filter((item) => item.status === "pending").length) },
+      ]),
+    }),
+  };
+}
+
+async function renderReliabilityAiDraftPage(state) {
+  const workflow = state.reliabilityWorkflow || {};
+  const draft = workflow.lastDraft || null;
+  const createdIssue = workflow.lastIssue || null;
+  return {
+    title: "AI Create Issue / Draft Review",
+    meta: "Draft structured issues from operator incident text and optionally create issue + evidence links.",
+    html: [
+      renderCardSection({
+        eyebrow: "AI Draft",
+        title: "Draft Or Create Reliability Issue",
+        subtitle: "Submit operator message, logs, and optional observation ids for structured issue output.",
+        body: `
+          <form class="reliability-action-form">
+            <input type="hidden" name="reliability_action" value="ai_draft_issue" />
+            <div class="line-list"><label>Operator message <textarea name="operator_message" rows="5" placeholder="Describe what happened and what is broken."></textarea></label></div>
+            <div class="line-list"><label>Observation ids (comma or newline separated) <textarea name="observation_ids" rows="3"></textarea></label></div>
+            <div class="line-list"><label>Raw log refs (comma or newline separated) <textarea name="raw_log_refs" rows="3"></textarea></label></div>
+            <div class="line-list"><label>Environment <input type="text" name="environment" value="PAPER" /></label></div>
+            <div class="line-list"><label>Component <input type="text" name="component" value="unspecified" /></label></div>
+            <div class="line-list"><label>Run id <input type="text" name="run_id" /></label></div>
+            <div class="line-list"><label><input type="checkbox" name="create" value="true" /> Create issue immediately</label></div>
+            <button type="submit">Generate Draft</button>
+          </form>
+        `,
+      }),
+      renderCardSection({
+        eyebrow: "Draft Result",
+        title: "Latest Draft Output",
+        subtitle: "Structured issue fields returned by the deterministic draft endpoint.",
+        body: draft
+          ? renderDefinitionRows([
+              { label: "Title", value: draft.title || "n/a" },
+              { label: "Type", value: draft.type || "n/a" },
+              { label: "Category", value: draft.category || "n/a" },
+              { label: "Severity", value: draft.severity || "n/a" },
+              { label: "Canonical key", value: draft.canonical_key || "n/a" },
+              { label: "Readiness blocker", value: truthyText(Boolean(draft.readiness_blocker)) },
+              { label: "Confidence", value: String(draft.confidence ?? "n/a") },
+              { label: "Expected behavior", value: draft.expected_behavior || "n/a" },
+              { label: "Actual behavior", value: draft.actual_behavior || "n/a" },
+              { label: "Impact summary", value: draft.impact_summary || "n/a" },
+              { label: "Linked observations", value: safeList(draft.linked_observation_ids).join(", ") || "none" },
+            ])
+          : `<div class="empty-state">No draft generated in this session.</div>`,
+      }),
+      createdIssue
+        ? renderCardSection({
+            eyebrow: "Created",
+            title: "Issue Created From Draft",
+            subtitle: "The AI draft was accepted into the reliability ledger.",
+            body: `<div class="line-list">
+              <div>Issue id: <a href="/reliability/issues/detail?issue_id=${encodeURIComponent(String(createdIssue.id || ""))}" data-route="/reliability/issues/detail?issue_id=${encodeURIComponent(String(createdIssue.id || ""))}">${escapeHtml(shortIssueId(createdIssue.id))}</a></div>
+              <div>Status: ${escapeHtml(createdIssue.status || "n/a")}</div>
+              <div>Codex status: ${escapeHtml(createdIssue.codex_status || "n/a")}</div>
+            </div>`,
+          })
+        : "",
+    ].join(""),
+    contextHtml: renderCardSection({
+      eyebrow: "Constraints",
+      title: "Codex Safety Constraints",
+      subtitle: "AI/Codex output remains advisory and cannot close issues without verification evidence.",
+      body: renderDefinitionRows([
+        { label: "Close issue on patch submit", value: "forbidden" },
+        { label: "Verification evidence required", value: "yes" },
+      ]),
+    }),
+  };
+}
+
 function renderBlockedDomain(routeId) {
   const route = routeForId(routeId);
   return {
@@ -2448,6 +4268,22 @@ export async function loadRouteView(routeId, state) {
       return renderReportsPage(state);
     case "configuration":
       return renderConfigurationPage(state);
+    case "reliability_dashboard":
+      return renderReliabilityDashboardPage(state);
+    case "reliability_issues":
+      return renderReliabilityIssuesPage(state);
+    case "reliability_issue_detail":
+      return renderReliabilityIssueDetailPage(state);
+    case "reliability_observations":
+      return renderReliabilityObservationsPage(state);
+    case "reliability_work_orders":
+      return renderReliabilityWorkOrdersPage(state);
+    case "reliability_work_order_detail":
+      return renderReliabilityWorkOrderDetailPage(state);
+    case "reliability_verifications":
+      return renderReliabilityVerificationsPage(state);
+    case "reliability_ai":
+      return renderReliabilityAiDraftPage(state);
     default:
       return {
         title: "Unknown Route",
@@ -2493,6 +4329,125 @@ export async function executeConfigurationWorkflow(formData, state) {
     latestDraft: result?.draft || null,
     latestResult: result || null,
     lastAction: action,
+    lastError: null,
+  };
+}
+
+function _parseDelimitedList(raw) {
+  return String(raw || "")
+    .split(/[\n,]/g)
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+}
+
+function _parseBooleanText(raw) {
+  return ["1", "true", "yes", "on"].includes(String(raw || "").trim().toLowerCase());
+}
+
+function _parseJsonInput(raw, fallback) {
+  const text = String(raw || "").trim();
+  if (!text) {
+    return fallback;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+}
+
+export async function executeReliabilityWorkflow(formData, state) {
+  const action = String(formData?.get("reliability_action") || "").trim();
+  let result = null;
+  let lastIssue = null;
+  let lastDraft = null;
+
+  if (action === "assess_readiness") {
+    result = await assessReliabilityReadiness({});
+  } else if (action === "ai_draft_issue") {
+    const payload = {
+      operator_message: String(formData?.get("operator_message") || "").trim(),
+      observation_ids: _parseDelimitedList(formData?.get("observation_ids")),
+      raw_log_refs: _parseDelimitedList(formData?.get("raw_log_refs")),
+      environment: String(formData?.get("environment") || "").trim(),
+      component: String(formData?.get("component") || "").trim(),
+      run_id: String(formData?.get("run_id") || "").trim(),
+      create: _parseBooleanText(formData?.get("create")),
+    };
+    result = await draftReliabilityIssue(payload);
+    lastDraft = result?.draft_issue || null;
+    lastIssue = result?.issue || null;
+  } else if (action === "update_issue") {
+    const issueId = String(formData?.get("issue_id") || "").trim();
+    const patch = {};
+    for (const key of ["status", "codex_status", "verification_method", "resolution_summary"]) {
+      const value = String(formData?.get(key) || "").trim();
+      if (value) {
+        patch[key] = value;
+      }
+    }
+    const readinessBlockerValue = String(formData?.get("readiness_blocker") || "").trim();
+    if (readinessBlockerValue) {
+      patch.readiness_blocker = _parseBooleanText(readinessBlockerValue);
+    }
+    result = await updateReliabilityIssue(issueId, patch);
+    lastIssue = result?.issue || null;
+  } else if (action === "link_observation") {
+    const issueId = String(formData?.get("issue_id") || "").trim();
+    const observationId = String(formData?.get("observation_id") || "").trim();
+    const linkType = String(formData?.get("link_type") || "related").trim();
+    result = await linkReliabilityObservation(issueId, {
+      observation_id: observationId,
+      link_type: linkType,
+    });
+    lastIssue = result?.issue || null;
+  } else if (action === "create_work_order_from_issue") {
+    const issueId = String(formData?.get("issue_id") || "").trim();
+    result = await createWorkOrderFromIssue(issueId, {
+      operator_instruction: String(formData?.get("operator_instruction") || "").trim(),
+      assigned_agent: String(formData?.get("assigned_agent") || "").trim(),
+    });
+    lastIssue = result?.issue || null;
+  } else if (action === "record_fix_attempt") {
+    const issueId = String(formData?.get("issue_id") || "").trim();
+    const workOrderId = String(formData?.get("work_order_id") || "").trim();
+    result = await recordReliabilityFixAttempt(workOrderId, {
+      status: String(formData?.get("status") || "started").trim(),
+      files_changed: _parseDelimitedList(formData?.get("files_changed")),
+      diff_ref: String(formData?.get("diff_ref") || "").trim(),
+      tests_run: _parseDelimitedList(formData?.get("tests_run")),
+      test_results: _parseJsonInput(formData?.get("test_results"), {}),
+      codex_summary: String(formData?.get("codex_summary") || "").trim(),
+      risk_notes: String(formData?.get("risk_notes") || "").trim(),
+    });
+    if (issueId) {
+      const refreshed = await fetchReliabilityIssue(issueId);
+      lastIssue = refreshed?.issue || null;
+    } else {
+      lastIssue = result?.issue || null;
+    }
+  } else if (action === "record_verification") {
+    const issueId = String(formData?.get("issue_id") || "").trim();
+    result = await verifyReliabilityIssue(issueId, {
+      method: String(formData?.get("method") || "manual_review").trim(),
+      status: String(formData?.get("status") || "pending").trim(),
+      work_order_id: String(formData?.get("work_order_id") || "").trim(),
+      fix_attempt_id: String(formData?.get("fix_attempt_id") || "").trim(),
+      evidence: _parseJsonInput(formData?.get("evidence"), {}),
+      notes: String(formData?.get("notes") || "").trim(),
+    });
+    lastIssue = result?.issue || null;
+  } else {
+    throw new Error("Unsupported reliability action.");
+  }
+
+  state.reliabilityWorkflow = {
+    ...(state.reliabilityWorkflow || {}),
+    lastAction: action,
+    lastResult: result,
+    lastAssessment: result?.assessment || state.reliabilityWorkflow?.lastAssessment || null,
+    lastIssue: lastIssue || state.reliabilityWorkflow?.lastIssue || null,
+    lastDraft: lastDraft || state.reliabilityWorkflow?.lastDraft || null,
     lastError: null,
   };
 }

@@ -1,0 +1,265 @@
+{
+  "$id": "https://constellation.local/schemas/c2/reports/aegis_decision_trace.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Aegis Decision Trace v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "regime_state",
+    "trace_sources",
+    "decision_reason_codes_supported",
+    "structure_reason_codes_supported",
+    "candidates",
+    "summary",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_AEGIS_DECISION_TRACE_V1" },
+    "schema_version": { "const": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string" },
+    "regime_state": { "$ref": "#/$defs/regime_state" },
+    "trace_sources": { "$ref": "#/$defs/trace_sources" },
+    "decision_reason_codes_supported": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "structure_reason_codes_supported": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "candidates": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/candidate" }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "regime",
+        "active_sleeves",
+        "disabled_sleeves",
+        "candidates_generated",
+        "candidates_rejected_by_regime",
+        "candidates_rejected_by_risk",
+        "candidates_regime_allowed",
+        "execution_failures",
+        "structure_decisions_evaluated"
+      ],
+      "properties": {
+        "regime": { "type": "string" },
+        "active_sleeves": { "type": "array", "items": { "type": "string" } },
+        "disabled_sleeves": { "type": "array", "items": { "type": "string" } },
+        "candidates_generated": { "type": "integer", "minimum": 0 },
+        "candidates_rejected_by_regime": { "type": "integer", "minimum": 0 },
+        "candidates_rejected_by_risk": { "type": "integer", "minimum": 0 },
+        "candidates_regime_allowed": { "type": "integer", "minimum": 0 },
+        "execution_failures": { "type": "integer", "minimum": 0 },
+        "structure_decisions_evaluated": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "sha_or_empty": {
+      "type": "string",
+      "anyOf": [
+        { "const": "" },
+        { "pattern": "^[a-f0-9]{64}$" }
+      ]
+    },
+    "regime_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "regime",
+        "confidence",
+        "trend_strength",
+        "volatility_level",
+        "breadth_participation",
+        "reason_codes"
+      ],
+      "properties": {
+        "regime": { "type": "string" },
+        "confidence": { "type": "string" },
+        "trend_strength": { "type": "string" },
+        "volatility_level": { "type": "string" },
+        "breadth_participation": { "type": ["string", "null"] },
+        "reason_codes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "trace_sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "registry_path",
+        "registry_sha256",
+        "regime_source_path",
+        "regime_source_sha256",
+        "producer_result_path",
+        "producer_result_sha256"
+      ],
+      "properties": {
+        "registry_path": { "type": "string" },
+        "registry_sha256": { "$ref": "#/$defs/sha_or_empty" },
+        "regime_source_path": { "type": "string" },
+        "regime_source_sha256": { "$ref": "#/$defs/sha_or_empty" },
+        "producer_result_path": { "type": "string" },
+        "producer_result_sha256": { "$ref": "#/$defs/sha_or_empty" }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "candidate_id",
+        "timestamp",
+        "sleeve_id",
+        "sleeve_name",
+        "symbol",
+        "direction",
+        "entry_type",
+        "thesis",
+        "confidence",
+        "expected_holding_period",
+        "invalidation_reason",
+        "raw_signal_payload",
+        "compatible_regimes",
+        "current_regime",
+        "regime_compatible",
+        "decision_status",
+        "decision_reason_codes",
+        "risk_status",
+        "execution_status",
+        "structure_input",
+        "structure_decision",
+        "source_intent_path",
+        "source_intent_sha256",
+        "producer_result_path",
+        "producer_result_sha256",
+        "registry_path",
+        "registry_sha256",
+        "regime_source_path",
+        "regime_source_sha256"
+      ],
+      "properties": {
+        "candidate_id": { "type": "string", "minLength": 1 },
+        "timestamp": { "type": "string" },
+        "sleeve_id": { "type": "string", "minLength": 1 },
+        "sleeve_name": { "type": "string" },
+        "symbol": { "type": "string" },
+        "direction": { "type": "string" },
+        "entry_type": { "type": "string" },
+        "thesis": { "type": "string" },
+        "confidence": { "type": "string" },
+        "expected_holding_period": { "type": "string" },
+        "invalidation_reason": { "type": "string" },
+        "raw_signal_payload": { "type": "object" },
+        "compatible_regimes": { "type": "array", "items": { "type": "string" } },
+        "current_regime": { "type": "string" },
+        "regime_compatible": { "type": "boolean" },
+        "decision_status": { "type": "string", "enum": ["proposed", "regime_allowed", "regime_rejected"] },
+        "decision_reason_codes": { "type": "array", "items": { "type": "string" } },
+        "risk_status": { "type": "string" },
+        "execution_status": { "type": "string" },
+        "structure_input": { "$ref": "#/$defs/structure_input" },
+        "structure_decision": { "$ref": "#/$defs/structure_decision" },
+        "source_intent_path": { "type": "string" },
+        "source_intent_sha256": { "$ref": "#/$defs/sha_or_empty" },
+        "producer_result_path": { "type": "string" },
+        "producer_result_sha256": { "$ref": "#/$defs/sha_or_empty" },
+        "registry_path": { "type": "string" },
+        "registry_sha256": { "$ref": "#/$defs/sha_or_empty" },
+        "regime_source_path": { "type": "string" },
+        "regime_source_sha256": { "$ref": "#/$defs/sha_or_empty" }
+      }
+    },
+    "structure_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "original_direction",
+        "normalized_direction",
+        "current_regime",
+        "confidence",
+        "fallback_used"
+      ],
+      "properties": {
+        "original_direction": { "type": "string" },
+        "normalized_direction": { "type": "string", "enum": ["bullish", "bearish", "neutral", "UNKNOWN"] },
+        "current_regime": { "type": "string" },
+        "confidence": { "type": "string" },
+        "signal_strength": { "type": "string" },
+        "expected_move": { "type": "string" },
+        "holding_period": { "type": "string" },
+        "fallback_used": { "type": "boolean" }
+      }
+    },
+    "structure_decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "structure_decision_id",
+        "candidate_id",
+        "timestamp",
+        "sleeve_id",
+        "symbol",
+        "original_direction",
+        "normalized_direction",
+        "current_regime",
+        "confidence",
+        "fallback_used",
+        "selected_structure",
+        "rejected_structures",
+        "structure_status",
+        "reason_codes",
+        "structure_reason",
+        "risk_defined",
+        "max_loss_known",
+        "max_gain_known_or_bounded",
+        "risk_status",
+        "execution_status",
+        "raw_candidate_payload"
+      ],
+      "properties": {
+        "structure_decision_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "candidate_id": { "type": "string", "minLength": 1 },
+        "timestamp": { "type": "string" },
+        "sleeve_id": { "type": "string", "minLength": 1 },
+        "symbol": { "type": "string", "minLength": 1 },
+        "original_direction": { "type": "string", "minLength": 1 },
+        "normalized_direction": { "type": "string", "enum": ["bullish", "bearish", "neutral", "UNKNOWN"] },
+        "current_regime": { "type": "string", "minLength": 1 },
+        "confidence": { "type": "string", "minLength": 1 },
+        "signal_strength": { "type": "string" },
+        "expected_move": { "type": "string" },
+        "holding_period": { "type": "string" },
+        "fallback_used": { "type": "boolean" },
+        "selected_structure": {
+          "type": "string",
+          "enum": ["STOCK_ETF", "LONG_OPTION", "VERTICAL_SPREAD", "CREDIT_SPREAD", "IRON_CONDOR", "NO_TRADE"]
+        },
+        "rejected_structures": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["STOCK_ETF", "LONG_OPTION", "VERTICAL_SPREAD", "CREDIT_SPREAD", "IRON_CONDOR"] },
+          "uniqueItems": true
+        },
+        "structure_status": { "type": "string", "enum": ["structure_selected", "structure_rejected"] },
+        "reason_codes": { "type": "array", "minItems": 1, "items": { "type": "string" }, "uniqueItems": true },
+        "structure_reason": { "type": "string" },
+        "risk_defined": { "type": "boolean" },
+        "max_loss_known": { "type": "boolean" },
+        "max_gain_known_or_bounded": { "type": "boolean" },
+        "risk_status": { "const": "not_evaluated" },
+        "execution_status": { "const": "not_evaluated" },
+        "raw_candidate_payload": { "type": "object" }
+      }
+    }
+  }
+}

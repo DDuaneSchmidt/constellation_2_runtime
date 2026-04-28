@@ -380,6 +380,27 @@ def test_ensure_governed_submit_inputs_materializes_execution_build_when_missing
     assert Path(str(writer_calls[0]["truth_root"])).resolve() == truth_root
 
 
+def test_identity_submit_payload_falls_back_to_execution_identity_submission_id(tmp_path: Path) -> None:
+    truth_root = (tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER").resolve()
+    day = "2026-04-14"
+    submission_id = "b" * 64
+    identity_dir = truth_root / "phaseC_preflight_v1" / day / "attempt_A0001" / ("c" * 64)
+    identity_dir.mkdir(parents=True, exist_ok=True)
+
+    _write_json(identity_dir / "order_plan.v1.json", {"schema_id": "order_plan", "schema_version": "v1"})
+    _write_json(identity_dir / "mapping_ledger_record.v1.json", {"schema_id": "mapping_ledger_record", "schema_version": "v1"})
+    _write_json(identity_dir / "binding_record.v1.json", {"schema_id": "binding_record", "schema_version": "v1"})
+    _write_json(
+        identity_dir / "execution_identity_record.v1.json",
+        {"schema_id": "execution_identity_record", "schema_version": "v1", "submission_id": submission_id},
+    )
+
+    payload = orchestrator_module._load_identity_submit_payload(identity_dir)  # noqa: SLF001
+
+    assert payload["submission_id"] == submission_id
+    assert payload["binding_obj"]["submission_id"] == submission_id
+
+
 def test_ensure_governed_submit_inputs_fails_when_submission_record_materialization_fails(monkeypatch, tmp_path: Path) -> None:
     truth_root = (tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER").resolve()
     day = "2026-04-14"

@@ -1,0 +1,150 @@
+{
+  "$id": "https://constellation.local/schemas/c2/reports/aegis_eod_advisory.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Aegis EOD Advisory v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "current_regime",
+    "regime_confidence",
+    "active_sleeves",
+    "disabled_sleeves",
+    "candidates_proposed",
+    "candidates_regime_allowed",
+    "candidates_regime_rejected",
+    "rejection_reasons",
+    "risk_status_summary",
+    "execution_status_summary",
+    "structure_selection_summary",
+    "source_trace_refs",
+    "advisory_only",
+    "controls_phasec_materialization",
+    "controls_broker_execution",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_AEGIS_EOD_ADVISORY_V1" },
+    "schema_version": { "const": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string" },
+    "current_regime": { "type": "string" },
+    "regime_confidence": { "type": "string" },
+    "active_sleeves": { "type": "array", "items": { "type": "string" } },
+    "disabled_sleeves": { "type": "array", "items": { "type": "string" } },
+    "candidates_proposed": { "type": "integer", "minimum": 0 },
+    "candidates_regime_allowed": { "type": "integer", "minimum": 0 },
+    "candidates_regime_rejected": { "type": "integer", "minimum": 0 },
+    "rejection_reasons": { "$ref": "#/$defs/counts" },
+    "risk_status_summary": { "$ref": "#/$defs/counts" },
+    "execution_status_summary": { "$ref": "#/$defs/counts" },
+    "structure_selection_summary": { "$ref": "#/$defs/structure_selection_summary" },
+    "source_trace_refs": { "$ref": "#/$defs/source_trace_refs" },
+    "advisory_only": { "const": true },
+    "controls_phasec_materialization": { "const": false },
+    "controls_broker_execution": { "const": false },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "sha_or_empty": {
+      "type": "string",
+      "anyOf": [
+        { "const": "" },
+        { "pattern": "^[a-f0-9]{64}$" }
+      ]
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "structure_selection_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidates_evaluated",
+        "structures_selected_count",
+        "structures_rejected_count",
+        "selected_structure_counts",
+        "rejection_reason_counts",
+        "fallback_used_count",
+        "advisory_only",
+        "controls_broker_execution",
+        "controls_phasec_materialization"
+      ],
+      "properties": {
+        "candidates_evaluated": { "type": "integer", "minimum": 0 },
+        "structures_selected_count": { "type": "integer", "minimum": 0 },
+        "structures_rejected_count": { "type": "integer", "minimum": 0 },
+        "selected_structure_counts": { "$ref": "#/$defs/counts" },
+        "rejection_reason_counts": { "$ref": "#/$defs/counts" },
+        "fallback_used_count": { "type": "integer", "minimum": 0 },
+        "advisory_only": { "const": true },
+        "controls_broker_execution": { "const": false },
+        "controls_phasec_materialization": { "const": false }
+      }
+    },
+    "source_trace_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision_trace_path",
+        "decision_trace_sha256",
+        "registry_path",
+        "registry_sha256",
+        "regime_source_path",
+        "regime_source_sha256",
+        "producer_result_path",
+        "producer_result_sha256",
+        "candidate_source_refs"
+      ],
+      "properties": {
+        "decision_trace_path": { "type": "string" },
+        "decision_trace_sha256": { "$ref": "#/$defs/sha_or_empty" },
+        "registry_path": { "type": "string" },
+        "registry_sha256": { "$ref": "#/$defs/sha_or_empty" },
+        "regime_source_path": { "type": "string" },
+        "regime_source_sha256": { "$ref": "#/$defs/sha_or_empty" },
+        "producer_result_path": { "type": "string" },
+        "producer_result_sha256": { "$ref": "#/$defs/sha_or_empty" },
+        "candidate_source_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/candidate_source_ref" }
+        }
+      }
+    },
+    "candidate_source_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_id",
+        "sleeve_id",
+        "source_intent_path",
+        "source_intent_sha256",
+        "producer_result_path",
+        "producer_result_sha256",
+        "registry_path",
+        "registry_sha256",
+        "regime_source_path",
+        "regime_source_sha256"
+      ],
+      "properties": {
+        "candidate_id": { "type": "string" },
+        "sleeve_id": { "type": "string" },
+        "source_intent_path": { "type": "string" },
+        "source_intent_sha256": { "$ref": "#/$defs/sha_or_empty" },
+        "producer_result_path": { "type": "string" },
+        "producer_result_sha256": { "$ref": "#/$defs/sha_or_empty" },
+        "registry_path": { "type": "string" },
+        "registry_sha256": { "$ref": "#/$defs/sha_or_empty" },
+        "regime_source_path": { "type": "string" },
+        "regime_source_sha256": { "$ref": "#/$defs/sha_or_empty" }
+      }
+    }
+  }
+}

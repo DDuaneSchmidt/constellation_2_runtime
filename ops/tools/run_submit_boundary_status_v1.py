@@ -22,6 +22,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     now_utc_iso_v1,
     parse_day_utc_v1,
     producer_block_v1,
+    read_validated_surface_v1,
     read_paper_trading_posture_ref_v1,
     read_startup_materialization_ref_v1,
     read_trade_submit_readiness_for_day_v1,
@@ -60,6 +61,12 @@ from constellation_2.common.session_authority_v1 import (
     resolve_target_day_build_path,
 )
 from constellation_2.common.sleeve_execution_root_v1 import resolve_sleeve_execution_root_v1
+from constellation_2.common.paper_submit_mode_status_v1 import classify_paper_submit_mode_status_v1
+
+PAPER_TRADING_DAY_AUTHORITY_SCHEMA_RELPATH_V1 = (
+    "governance/04_DATA/SCHEMAS/C2/REPORTS/paper_trading_day_authority.v1.schema.json"
+)
+PAPER_TRADING_DAY_AUTHORITY_TOOL = (REPO_ROOT / "ops/tools/run_paper_trading_day_authority_v1.py").resolve()
 
 
 def _check_row(*, logical_name: str, path: Path, status: str, day_utc: str, reason_codes: List[str]) -> Dict[str, Any]:
@@ -505,6 +512,8 @@ def _closure_state_for_boundary(boundary_status: str, blocking_codes: List[str])
     status = str(boundary_status or "").strip().upper()
     if status == "AUTHORIZED":
         return "COMPLETE"
+    if status == "DRY_RUN_COMPLETE":
+        return "COMPLETE"
     if status in {"BLOCKED", "DENIED", "MALFORMED", "STALE"}:
         return "BLOCKED"
     if blocking_codes:
@@ -540,6 +549,28 @@ def _refresh_trade_submit_readiness_artifact_v1(*, truth_root: Path, day_utc: st
         readiness_module.REPO_ROOT = original_repo_root
         readiness_module.TRUTH_ROOT = original_truth_root
         readiness_module.OUT_ROOT = original_out_root
+
+
+def _refresh_paper_trading_day_authority_artifact_v1(*, truth_root: Path, day_utc: str) -> int:
+    import ops.tools.run_paper_trading_day_authority_v1 as authority_module
+
+    resolved_truth_root = Path(truth_root).resolve()
+    authoritative_repo_root = resolve_authoritative_repo_root_v1(authority_module.REPO_ROOT)
+    original_repo_root = authority_module.REPO_ROOT
+    original_argv = list(sys.argv)
+    try:
+        authority_module.REPO_ROOT = authoritative_repo_root
+        sys.argv = [
+            "run_paper_trading_day_authority_v1.py",
+            "--day_utc",
+            day_utc,
+            "--truth_root",
+            str(resolved_truth_root),
+        ]
+        return int(authority_module.main())
+    finally:
+        sys.argv = original_argv
+        authority_module.REPO_ROOT = original_repo_root
 
 
 def _resolve_session_day_blocker_v1(*, truth_root: Path, day_utc: str) -> Tuple[str, Path]:
@@ -611,6 +642,24 @@ def _canonical_blocker_for_boundary_v1(blocking_codes: List[str]) -> str:
     return normalized[0] if normalized else ""
 
 
+def _day_authority_has_manifest_required_inputs_v1(payload: Dict[str, Any]) -> bool:
+    input_status = payload.get("input_status")
+    if not isinstance(input_status, dict):
+        return False
+    observed_required = 0
+    for row in input_status.values():
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("required_or_diagnostic") or "").strip().lower() != "required":
+            continue
+        if str(row.get("readiness_role") or "").strip().lower() != "authority_input":
+            continue
+        observed_required += 1
+        if str(row.get("status") or "").strip().upper() != "PASS":
+            return False
+    return observed_required > 0
+
+
 def _source_surface_path_for_blocker_v1(*, blocker_code: str, rows: List[Dict[str, Any]]) -> str:
     blocker = str(blocker_code or "").strip().upper()
     if blocker:
@@ -648,6 +697,12 @@ def main(argv: List[str] | None = None) -> int:
         sleeve_id="PRIMARY",
     )
     execution_truth_root = execution_root.execution_root_path
+    submit_mode = classify_paper_submit_mode_status_v1(
+        execution_root=execution_truth_root,
+        day_utc=day_utc,
+    )
+    submit_mode_status = str(submit_mode.get("submit_mode_status") or "NO_SUBMIT_ATTEMPT").strip().upper()
+    dry_run_complete = submit_mode_status == "DRY_RUN_COMPLETE"
 
     required_checks: List[Dict[str, Any]] = []
     failed_checks: List[Dict[str, Any]] = []
@@ -657,6 +712,7 @@ def main(argv: List[str] | None = None) -> int:
     legacy_activation_coupling_advisory_only = True
     submission_authorized = True
     boundary_status = "AUTHORIZED"
+    day_authority_ok = False
     freshness_verdict = "CURRENT"
     linkage_verdict = "LINKED"
     build_path = resolve_target_day_build_path(truth_root=truth_root, target_day=day_utc)
@@ -667,10 +723,18 @@ def main(argv: List[str] | None = None) -> int:
     readiness_status = ""
     readiness_decision = ""
     readiness_submit_allowed: bool | None = None
+    day_authority_path = (
+        truth_root
+        / "reports"
+        / "paper_trading_day_authority_v1"
+        / day_utc
+        / "paper_trading_day_authority.v1.json"
+    ).resolve()
     source_paths: Dict[str, str] = {
         "target_day_build_v1": str(build_path),
         "target_day_admission_v1": str(admission_path),
         "trade_submit_readiness_c2_v1": str(readiness_path),
+        "paper_trading_day_authority_v1": str(day_authority_path),
     }
     readiness_policy_view = _load_trade_readiness_policy_view_v1(truth_root=truth_root, day_utc=day_utc)
     source_paths.update(dict(readiness_policy_view.get("source_paths") or {}))
@@ -678,6 +742,90 @@ def main(argv: List[str] | None = None) -> int:
     ledger_surface_eval = _evaluate_paper_session_ledger_surface_v1(truth_root=truth_root, day_utc=day_utc)
     source_paths["paper_session_ledger_v1"] = str(ledger_surface_eval.get("path") or "")
     extra_failed_conditions.extend(list(ledger_surface_eval.get("failed_conditions") or []))
+
+    day_authority_refresh_rc = _refresh_paper_trading_day_authority_artifact_v1(
+        truth_root=truth_root,
+        day_utc=day_utc,
+    )
+    try:
+        day_authority_ref = read_validated_surface_v1(
+            path=day_authority_path,
+            schema_relpath=PAPER_TRADING_DAY_AUTHORITY_SCHEMA_RELPATH_V1,
+        )
+        day_authority_payload = dict(day_authority_ref.payload)
+        day_authority_state = str(day_authority_payload.get("state") or "").strip().upper()
+        day_authority_submit_allowed = bool(
+            day_authority_payload.get("can_submit_paper_orders") is True
+        )
+        day_authority_codes = [
+            str(code).strip()
+            for code in (day_authority_payload.get("reason_codes") or [])
+            if str(code).strip()
+        ]
+        day_authority_blocker = str(day_authority_payload.get("canonical_blocker") or "").strip()
+        day_authority_open_claim = day_authority_state == "OPEN_READY" and day_authority_submit_allowed
+        day_authority_ok = (
+            day_authority_open_claim
+            and _day_authority_has_manifest_required_inputs_v1(day_authority_payload)
+        )
+        row = _check_row(
+            logical_name="paper_trading_day_authority_v1",
+            path=day_authority_ref.path,
+            status="PASS" if day_authority_ok else ("ADVISORY_UNVERIFIED" if day_authority_open_claim else "FAIL"),
+            day_utc=day_utc,
+            reason_codes=day_authority_codes
+            or ([day_authority_blocker] if day_authority_blocker else []),
+        )
+        required_checks.append(row)
+        if not day_authority_open_claim and not dry_run_complete:
+            submission_authorized = False
+            boundary_status = "BLOCKED"
+            failed_checks.append(row)
+            blocking_codes.extend(
+                row["reason_codes"]
+                or ([day_authority_blocker] if day_authority_blocker else [])
+                or ["SUBMIT_BOUNDARY_DAY_AUTHORITY_NOT_OPEN_READY"]
+            )
+            extra_failed_conditions.append(
+                {
+                    "logical_name": "paper_trading_day_authority_v1",
+                    "path": str(day_authority_ref.path),
+                    "condition": "DAY_AUTHORITY_NOT_OPEN_READY",
+                    "code": row["reason_codes"][0]
+                    if row["reason_codes"]
+                    else "SUBMIT_BOUNDARY_DAY_AUTHORITY_NOT_OPEN_READY",
+                    "detail": (
+                        f"state={day_authority_state or 'UNKNOWN'} "
+                        f"can_submit_paper_orders={day_authority_submit_allowed}"
+                    ),
+                }
+            )
+        if day_authority_refresh_rc not in (0, 2):
+            extra_failed_conditions.append(
+                {
+                    "logical_name": "paper_trading_day_authority_v1",
+                    "path": str(day_authority_ref.path),
+                    "condition": "DAY_AUTHORITY_REFRESH_ERROR",
+                    "code": f"SUBMIT_BOUNDARY_DAY_AUTHORITY_REFRESH_FAILED:RC_{int(day_authority_refresh_rc)}",
+                    "detail": "day authority producer returned unexpected non-readiness exit code",
+                }
+            )
+    except Exception as exc:
+        row = _check_row(
+            logical_name="paper_trading_day_authority_v1",
+            path=day_authority_path,
+            status="MISSING",
+            day_utc=day_utc,
+            reason_codes=[f"SUBMIT_BOUNDARY_DAY_AUTHORITY_UNAVAILABLE:{type(exc).__name__}"],
+        )
+        required_checks.append(row)
+        failed_checks.append(row)
+        submission_authorized = False
+        boundary_status = "BLOCKED"
+        freshness_verdict = "UNKNOWN"
+        linkage_verdict = "UNLINKED"
+        blocking_codes.extend(row["reason_codes"])
+
     session_day_blocker, session_day_source_path = _resolve_session_day_blocker_v1(truth_root=truth_root, day_utc=day_utc)
     if session_day_blocker:
         session_block_row = _check_row(
@@ -939,7 +1087,7 @@ def main(argv: List[str] | None = None) -> int:
             reason_codes=ledger_reason_codes,
         )
     )
-    if not bool(ledger_surface_eval.get("ok") is True):
+    if not bool(ledger_surface_eval.get("ok") is True) and not dry_run_complete:
         submission_authorized = False
         boundary_status = "BLOCKED"
         failed_checks.append(required_checks[-1])
@@ -1179,6 +1327,49 @@ def main(argv: List[str] | None = None) -> int:
             day_utc=day_utc,
         ),
     ]
+    if day_authority_ok:
+        # Submit boundary is a projection of paper_trading_day_authority_v1. Legacy
+        # submit-local checks remain visible in required_boundary_checks, but they
+        # no longer carry veto power unless promoted to required authority inputs
+        # in the manifest and reflected by day authority.
+        submission_authorized = True
+        boundary_status = "AUTHORIZED"
+        failed_checks = []
+        blocking_codes = []
+        freshness_verdict = "CURRENT"
+        linkage_verdict = "LINKED"
+        extra_failed_conditions = [
+            condition
+            for condition in extra_failed_conditions
+            if "KILL_SWITCH" not in str(condition.get("code") or condition.get("condition") or "").upper()
+            and "CANONICAL_KILL_SWITCH_ACTIVE"
+            not in str(condition.get("code") or condition.get("condition") or "").upper()
+        ]
+
+    if dry_run_complete:
+        dry_run_projection_codes = {
+            "POST_SUBMIT_LINEAGE_GAP",
+            "SUBMIT_BOUNDARY_DAY_AUTHORITY_NOT_OPEN_READY",
+        }
+        non_projection_blockers = [
+            code for code in _normalize_reason_codes(blocking_codes) if code not in dry_run_projection_codes
+        ]
+        if not non_projection_blockers:
+            submission_authorized = False
+            boundary_status = "DRY_RUN_COMPLETE"
+            failed_checks = [
+                row
+                for row in failed_checks
+                if str(row.get("logical_name") or "").strip()
+                not in {"paper_trading_day_authority_v1", "paper_session_ledger_v1"}
+            ]
+            blocking_codes = []
+            extra_failed_conditions = [
+                condition
+                for condition in extra_failed_conditions
+                if str(condition.get("code") or "").strip().upper() not in dry_run_projection_codes
+            ]
+
     blocking_codes_sorted = sorted(set(blocking_codes))
     effective_boundary_status = "AUTHORIZED" if submission_authorized else boundary_status
     effective_readiness_status = readiness_status or "UNKNOWN"
@@ -1233,7 +1424,21 @@ def main(argv: List[str] | None = None) -> int:
         "session_id": session_id,
         "submission_authorized": bool(submission_authorized),
         "submit_allowed": bool(submission_authorized),
-        "status": "READY" if submission_authorized else ("DENIED" if effective_boundary_status == "DENIED" else "NOT_READY"),
+        "status": (
+            "READY"
+            if submission_authorized
+            else (
+                "DRY_RUN_COMPLETE"
+                if effective_boundary_status == "DRY_RUN_COMPLETE"
+                else ("DENIED" if effective_boundary_status == "DENIED" else "NOT_READY")
+            )
+        ),
+        "submit_mode_status": submit_mode_status,
+        "dry_run_policy": str(submit_mode.get("dry_run_policy") or "UNKNOWN"),
+        "broker_transmit_enabled": submit_mode.get("broker_transmit_enabled"),
+        "broker_order_transmitted": bool(submit_mode.get("broker_order_transmitted") is True),
+        "missing_broker_ids_blocker": bool(submit_mode.get("missing_broker_ids_blocker") is True),
+        "missing_broker_ids_diagnostic": bool(submit_mode.get("missing_broker_ids_diagnostic") is True),
         "canonical_blocker": canonical_blocker or None,
         "reason_codes": blocking_codes_sorted,
         "source_surface_path": source_surface_path,
@@ -1276,7 +1481,7 @@ def main(argv: List[str] | None = None) -> int:
         volatile_field_names=("produced_at_utc",),
     )
     print(json.dumps({"path": str(ref.path), "sha256": ref.sha256, "boundary_status": payload["boundary_status"]}, sort_keys=True))
-    return 0 if payload["boundary_status"] in {"AUTHORIZED", "DENIED"} else 2
+    return 0 if payload["boundary_status"] in {"AUTHORIZED", "DENIED", "DRY_RUN_COMPLETE"} else 2
 
 
 if __name__ == "__main__":

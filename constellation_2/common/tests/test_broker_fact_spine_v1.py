@@ -456,6 +456,78 @@ def test_normalize_broker_fact_records_handles_missing_timestamps_deterministica
     assert session_rows[0]["canonical_event_identity"] == session_rows[1]["canonical_event_identity"]
 
 
+def test_position_fact_preserves_available_lineage_fields() -> None:
+    identity = _governed_identity()
+    raw_row = build_raw_evidence_envelope_from_payload_v1(
+        day_utc="2026-04-14",
+        raw_payload=_legacy_event(
+            event_type="position",
+            received_utc="2026-04-14T14:30:01Z",
+            args=[
+                "account=DUO847203",
+                "contract=SPY-STK-SMART-USD",
+                "position=10",
+                "avgCost=500.30",
+                "marketPrice=501.00",
+                "orderId=101",
+                "permId=555001",
+                "native_engine_id=C2_NATIVE_ENGINE_V1",
+                "engine_id=C2_NATIVE_ENGINE_V1",
+                "strategy_engine_id=C2_TREND_EQ_PRIMARY_V1",
+            ],
+        ),
+        source_adapter_name="legacy",
+        source_session_id="session-1",
+        source_path="/tmp/source.jsonl",
+        source_line_number=1,
+        governed_identity=identity,
+    )
+    raw_row["journal_sequence_number"] = 1
+
+    normalized = normalize_broker_fact_records_v1(raw_rows=[raw_row])
+    position_row = normalized["observed_position_fact"][0]
+
+    assert position_row["order_id"] == "101"
+    assert position_row["perm_id"] == "555001"
+    assert position_row["native_engine_id"] == "C2_NATIVE_ENGINE_V1"
+    assert position_row["engine_id"] == "C2_NATIVE_ENGINE_V1"
+    assert position_row["strategy_engine_id"] == "C2_TREND_EQ_PRIMARY_V1"
+
+
+def test_position_fact_without_lineage_does_not_synthesize_attribution() -> None:
+    identity = _governed_identity()
+    raw_row = build_raw_evidence_envelope_from_payload_v1(
+        day_utc="2026-04-14",
+        raw_payload=_legacy_event(
+            event_type="position",
+            received_utc="2026-04-14T14:30:01Z",
+            args=[
+                "account=DUO847203",
+                "contract=SPY-STK-SMART-USD",
+                "position=10",
+                "avgCost=500.30",
+                "marketPrice=501.00",
+            ],
+        ),
+        source_adapter_name="legacy",
+        source_session_id="session-1",
+        source_path="/tmp/source.jsonl",
+        source_line_number=1,
+        governed_identity=identity,
+    )
+    raw_row["journal_sequence_number"] = 1
+
+    normalized = normalize_broker_fact_records_v1(raw_rows=[raw_row])
+    position_row = normalized["observed_position_fact"][0]
+
+    assert position_row["order_id"] == ""
+    assert position_row["perm_id"] == ""
+    assert position_row["native_engine_id"] == ""
+    assert position_row["engine_id"] == ""
+    assert position_row["strategy_engine_id"] == ""
+    assert position_row["engine_id"] != position_row["sleeve_id"]
+
+
 def test_materialize_broker_fact_spine_blocks_foreign_manual_observation(tmp_path: Path, monkeypatch) -> None:
     execution_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
     execution_root.mkdir(parents=True)

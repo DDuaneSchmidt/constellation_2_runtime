@@ -143,6 +143,12 @@
     "blocker_codes": { "$ref": "#/$defs/string_array" },
     "degraded_codes": { "$ref": "#/$defs/string_array" },
     "last_successful_reconciliation_utc": { "type": "string" },
+    "native_engine_id": { "type": "string" },
+    "engine_id": { "type": "string" },
+    "strategy_engine_id": { "type": "string" },
+    "source_intent_id": { "type": "string" },
+    "intent_sha256": { "type": "string" },
+    "attribution_diagnostics": { "$ref": "#/$defs/attribution_diagnostics" },
     "upstream_core1_evidence_refs": {
       "type": "object",
       "additionalProperties": false,
@@ -267,7 +273,61 @@
         "fact_record_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
         "reason_code": { "type": "string", "minLength": 1 }
       }
+    },
+    "attribution_sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_id",
+        "fact_record_id",
+        "order_id",
+        "perm_id",
+        "execution_id",
+        "symbol",
+        "sec_type",
+        "currency"
+      ],
+      "properties": {
+        "schema_id": { "type": "string" },
+        "fact_record_id": { "type": "string" },
+        "order_id": { "type": "string" },
+        "perm_id": { "type": "string" },
+        "execution_id": { "type": "string" },
+        "symbol": { "type": "string" },
+        "sec_type": { "type": "string" },
+        "currency": { "type": "string" }
+      }
+    },
+    "attribution_diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "reason_codes",
+        "source_artifact_paths",
+        "lineage_order_id_count",
+        "lineage_perm_id_count",
+        "lineage_execution_id_count",
+        "matched_candidate_count",
+        "expected_attribution_field",
+        "fields_actually_present",
+        "sample_records"
+      ],
+      "properties": {
+        "status": { "type": "string", "enum": ["RESOLVED", "UNRESOLVED"] },
+        "reason_codes": { "$ref": "#/$defs/string_array" },
+        "source_artifact_paths": { "$ref": "#/$defs/string_array" },
+        "lineage_order_id_count": { "type": "integer", "minimum": 0 },
+        "lineage_perm_id_count": { "type": "integer", "minimum": 0 },
+        "lineage_execution_id_count": { "type": "integer", "minimum": 0 },
+        "matched_candidate_count": { "type": "integer", "minimum": 0 },
+        "expected_attribution_field": { "type": "string", "minLength": 1 },
+        "fields_actually_present": { "$ref": "#/$defs/string_array" },
+        "sample_records": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/attribution_sample" }
+        }
+      }
     }
   }
 }
-

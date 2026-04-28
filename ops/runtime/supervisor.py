@@ -29,7 +29,7 @@ from urllib.request import Request, urlopen
 THIS_FILE = Path(__file__).resolve()
 OPS_RUNTIME_ROOT = THIS_FILE.parent
 REPO_ROOT = THIS_FILE.parents[2]
-RUNTIME_ROOT = (REPO_ROOT / "runtime").resolve()
+RUNTIME_ROOT = Path(os.environ.get("C2_RUNTIME_STATE_ROOT", "/home/node/constellation_runtime_data/runtime")).resolve()
 PROCESS_STATE_ROOT = (RUNTIME_ROOT / "process_state").resolve()
 LOG_ROOT = (RUNTIME_ROOT / "logs").resolve()
 DEFAULT_MANIFEST_PATH = (OPS_RUNTIME_ROOT / "runtime_manifest.yaml").resolve()

@@ -19,7 +19,9 @@ from ops.tools.repo_protection_common_v1 import RUNTIME_DATA_ROOT
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 NY_TZ = ZoneInfo("America/New_York")
-DECISION_PATH = (REPO_ROOT / "runtime" / "process_state" / "trading_readiness_decision.json").resolve()
+DECISION_PATH = (
+    RUNTIME_DATA_ROOT / "runtime" / "process_state" / "trading_readiness_decision.json"
+).resolve()
 
 
 def _utc_now() -> datetime:

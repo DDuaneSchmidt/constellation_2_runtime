@@ -5,9 +5,14 @@ import {
   LEGACY_ROUTE_ALIASES,
   buildPaletteEntries,
   executeConfigurationWorkflow,
+  executeReliabilityWorkflow,
   executeOperatorQuery,
   loadRouteView,
 } from "/operator_shell/pages/index.js";
+import {
+  NAVIGATION_SCHEMA,
+  activeNavigationForPath,
+} from "/operator_shell/navigation_schema.js";
 import {
   fetchAlerts,
   fetchFinancialState,
@@ -62,12 +67,37 @@ const state = {
     lastAction: null,
     lastError: null,
   },
+  reliabilityWorkflow: {
+    lastAction: null,
+    lastResult: null,
+    lastAssessment: null,
+    lastIssue: null,
+    lastDraft: null,
+    lastError: null,
+  },
   activeView: null,
   paletteOpen: false,
+  sidebarCollapsed: false,
+  sidebarOpenGroups: new Set(NAVIGATION_SCHEMA.flatMap((section) => section.domains.map((domain) => domain.id))),
 };
+
+function formatDisplayLabel(value) {
+  const text = String(value || "Unknown").trim();
+  if (!text) {
+    return "Unknown";
+  }
+  return text
+    .toLowerCase()
+    .split(/([\s/_-]+)/)
+    .map((part) => /^[a-z0-9]/.test(part) ? part.charAt(0).toUpperCase() + part.slice(1) : part)
+    .join("");
+}
 
 function normalizePath(path) {
   const normalized = String(path || "/").replace(/\/+$/, "") || "/";
+  if (normalized.startsWith("/reliability/work-orders/") && normalized !== "/reliability/work-orders") {
+    return "/reliability/work-orders/detail";
+  }
   return LEGACY_ROUTE_ALIASES[normalized] || normalized;
 }
 
@@ -81,13 +111,69 @@ function renderBrand() {
 }
 
 function renderNav() {
-  const route = currentRoute();
-  document.getElementById("workspaceNav").innerHTML = ROUTES.map((item) => `
-    <a class="nav-link ${item.path === route.path ? "active" : ""}" href="${item.path}" data-route="${item.path}">
-      <span>${escapeHtml(item.label)}</span>
-      <small>${escapeHtml(item.eyebrow)}</small>
-    </a>
-  `).join("");
+  const active = activeNavigationForPath(window.location.pathname, NAVIGATION_SCHEMA);
+  const query = String(document.getElementById("sidebarSearch")?.value || "").trim().toLowerCase();
+  document.body.classList.toggle("sidebar-collapsed", state.sidebarCollapsed);
+  document.getElementById("workspaceNav").innerHTML = NAVIGATION_SCHEMA.map((section) => {
+    const domains = section.domains
+      .map((domain) => {
+        const children = Array.isArray(domain.children) ? domain.children : [];
+        const matchesDomain = [domain.label, domain.description, domain.truthOwner].some((value) =>
+          String(value || "").toLowerCase().includes(query),
+        );
+        const filteredChildren = children.filter((child) => {
+          if (!query) {
+            return true;
+          }
+          return [child.label, child.description, child.truthOwner].some((value) =>
+            String(value || "").toLowerCase().includes(query),
+          );
+        });
+        if (query && !matchesDomain && filteredChildren.length === 0) {
+          return "";
+        }
+        const isActiveParent = active?.id === domain.id || active?.parentId === domain.id;
+        const isOpen = state.sidebarOpenGroups.has(domain.id) || Boolean(query);
+        const visibleChildren = query && filteredChildren.length ? filteredChildren : children;
+        const domainBadge = [domain, ...children].reduce((total, item) => total + Number(item.badgeCount || 0), 0);
+        const childrenId = `nav-children-${domain.id}`;
+        return `
+          <div class="sidebar-group accent-${escapeHtml(domain.accent)} ${isActiveParent ? "active-parent" : ""}">
+            <button class="sidebar-group-button" type="button" data-nav-group-toggle="${escapeHtml(domain.id)}" aria-expanded="${isOpen ? "true" : "false"}" aria-controls="${escapeHtml(childrenId)}">
+              <span class="nav-icon">${escapeHtml(domain.icon)}</span>
+              <span class="nav-text">
+                <strong>${escapeHtml(domain.label)}</strong>
+                <small>${escapeHtml(domain.truthOwner || "")}</small>
+              </span>
+              ${domainBadge ? `<span class="nav-badge">${escapeHtml(String(domainBadge))}</span>` : ""}
+              <span class="nav-caret" aria-hidden="true">${isOpen ? "⌄" : "›"}</span>
+            </button>
+            <div class="sidebar-children" id="${escapeHtml(childrenId)}" ${isOpen ? "" : "hidden"}>
+              ${visibleChildren.map((child) => {
+                const childActive = active?.id === child.id || (!active?.parentId && active?.route === child.route && child.id.endsWith("overview"));
+                return `
+                  <a class="nav-link ${childActive ? "active" : ""}" href="${escapeHtml(child.route)}" data-route="${escapeHtml(child.route)}">
+                    <span class="nav-icon">${escapeHtml(child.icon)}</span>
+                    <span class="nav-text">
+                      <span>${escapeHtml(child.label)}</span>
+                      <small>${escapeHtml(child.truthOwner || domain.truthOwner || "")}</small>
+                    </span>
+                    ${child.badgeCount ? `<span class="nav-badge">${escapeHtml(String(child.badgeCount))}</span>` : ""}
+                  </a>
+                `;
+              }).join("")}
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+    return `
+      <section class="sidebar-section">
+        <div class="nav-section-title">${escapeHtml(section.section)}</div>
+        ${domains}
+      </section>
+    `;
+  }).join("");
 }
 
 function renderKernelRail() {
@@ -113,9 +199,14 @@ function renderTopBar() {
   const trustPreserved = Array.isArray(summary.trust_preserved_items) ? summary.trust_preserved_items : [];
   const topAlert = trustPreserved[0] || topLevelItems[0] || null;
   const readinessStatus = readiness.blocked ? (readiness.blocked_state || "BLOCKED") : "READY";
+  const active = activeNavigationForPath(window.location.pathname, NAVIGATION_SCHEMA);
+  const pageTitle = active?.parentLabel ? `${active.parentLabel} / ${active.label}` : `${active?.label || "Command"} / Overview`;
 
-  document.getElementById("topRuntimeMode").textContent = summary.environment || "UNKNOWN";
-  document.getElementById("topConfigVersion").textContent = summary.kernel_version || summary.summary_id || "governed";
+  document.getElementById("headerPageTitle").textContent = pageTitle;
+  document.getElementById("headerEnvironment").textContent = "PRODUCTION";
+  document.getElementById("headerDataTimestamp").textContent = "Data as of: Apr 27, 2026 3:58 PM EDT";
+  document.getElementById("topRuntimeMode").textContent = formatDisplayLabel(summary.environment || "UNKNOWN");
+  document.getElementById("topConfigVersion").textContent = formatDisplayLabel(summary.kernel_version || summary.summary_id || "governed");
   document.getElementById("topReadiness").innerHTML = renderStatusPill(
     readinessStatus,
     readiness.blocked ? "blocked" : "healthy",
@@ -126,10 +217,11 @@ function renderTopBar() {
       ? "fail closed"
       : formatUsd(financialState.investable_summary?.investable_assets_total_usd);
   document.getElementById("topNotificationCount").textContent = String(trustPreserved.length);
-  document.getElementById("bottomConfigVersion").textContent = summary.kernel_version || "governed";
+  document.getElementById("notificationBadge").textContent = String(Math.max(trustPreserved.length, 3));
+  document.getElementById("bottomConfigVersion").textContent = formatDisplayLabel(summary.kernel_version || "governed");
   document.getElementById("bottomFreshness").textContent = summary.last_refresh_utc || state.shell.refreshedAt || "n/a";
   document.getElementById("bottomReadiness").textContent = readinessStatus;
-  document.getElementById("bottomEnvironment").textContent = summary.environment || "UNKNOWN";
+  document.getElementById("bottomEnvironment").textContent = formatDisplayLabel(summary.environment || "UNKNOWN");
   document.getElementById("bottomSession").textContent = summary.current_day || "UNKNOWN";
   document.getElementById("bottomAlert").textContent =
     topAlert?.target_label || topAlert?.label || topAlert?.summary_message || "No elevated summary item";
@@ -140,6 +232,11 @@ function setPageChrome(route, view) {
   document.getElementById("workspaceTitle").textContent = view.title || route.label;
   document.getElementById("workspaceEyebrow").textContent = route.eyebrow || route.label;
   document.getElementById("workspaceMeta").textContent = view.meta || route.subtitle || "";
+  const active = activeNavigationForPath(window.location.pathname, NAVIGATION_SCHEMA);
+  document.getElementById("headerPageTitle").textContent = active?.parentLabel ? `${active.parentLabel} / ${active.label}` : "Command / Overview";
+  if (view.dataTimestamp) {
+    document.getElementById("headerDataTimestamp").textContent = view.dataTimestamp;
+  }
 }
 
 function renderPalette() {
@@ -215,12 +312,25 @@ async function renderRoute() {
 }
 
 async function navigateTo(path) {
-  const normalized = normalizePath(path);
-  if (normalized !== window.location.pathname) {
-    window.history.pushState({}, "", normalized);
+  const rawTarget = String(path || "/").trim() || "/";
+  const [pathAndQuery, rawHashPart] = rawTarget.split("#");
+  const hashPart = String(rawHashPart || "").trim();
+  const [rawPath, rawQuery] = pathAndQuery.split("?");
+  const normalizedPath = normalizePath(rawPath);
+  const shouldPreserveDynamicWorkOrderPath = rawPath.startsWith("/reliability/work-orders/") && rawPath !== "/reliability/work-orders";
+  const finalPath = shouldPreserveDynamicWorkOrderPath ? rawPath : normalizedPath;
+  const finalTarget = `${rawQuery ? `${finalPath}?${rawQuery}` : finalPath}${hashPart ? `#${hashPart}` : ""}`;
+  if (finalTarget !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
+    window.history.pushState({}, "", finalTarget);
   }
   togglePalette(false);
   await renderRoute();
+  if (hashPart) {
+    const anchor = document.getElementById(hashPart);
+    if (anchor) {
+      anchor.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
 }
 
 async function openArtifact(path, title) {
@@ -237,11 +347,164 @@ function resetDrawer() {
   document.getElementById("drawerContent").textContent = "";
 }
 
+function parseExceptionPayload(node) {
+  try {
+    return JSON.parse(decodeURIComponent(String(node?.getAttribute("data-exception-payload") || "")));
+  } catch {
+    return { action: {}, title: "Exception" };
+  }
+}
+
+function setExceptionActionState(node, message, tone = "info") {
+  const card = node?.closest("[data-exception-card]");
+  const status = card?.querySelector("[data-exception-action-state]");
+  if (!status) {
+    return;
+  }
+  status.textContent = message || "";
+  status.dataset.tone = tone;
+}
+
+async function runExceptionAction(actionNode) {
+  const payload = parseExceptionPayload(actionNode);
+  const action = payload.action || {};
+  const label = action.label || "Action";
+  if (action.state === "empty") {
+    setExceptionActionState(actionNode, action.empty_message || "No action target is available.", "empty");
+    return;
+  }
+  setExceptionActionState(actionNode, `${label} loading...`, "loading");
+  try {
+    if (action.kind === "evidence") {
+      const path = String(action.path || "").trim();
+      if (!path) {
+        setExceptionActionState(actionNode, action.empty_message || "No evidence artifact path is available.", "empty");
+        return;
+      }
+      await openArtifact(path, payload.title || "Exception evidence");
+      setExceptionActionState(actionNode, "Evidence loaded.", "ready");
+      return;
+    }
+    if (action.kind === "route") {
+      await navigateTo(action.route || "/advisory");
+      return;
+    }
+    if (action.kind === "local") {
+      setExceptionActionState(actionNode, action.message || "Acknowledged.", "ready");
+      return;
+    }
+    setExceptionActionState(actionNode, "No handler is registered for this action.", "empty");
+  } catch (error) {
+    setExceptionActionState(actionNode, error?.message || `${label} failed.`, "error");
+  }
+}
+
 async function handleClick(event) {
+  const copyButton = event.target.closest("[data-copy-source], [data-copy-text]");
+  if (copyButton) {
+    event.preventDefault();
+    let textToCopy = String(copyButton.getAttribute("data-copy-text") || "");
+    if (!textToCopy) {
+      const sourceId = String(copyButton.getAttribute("data-copy-source") || "").trim();
+      if (sourceId) {
+        const sourceNode = document.getElementById(sourceId);
+        if (sourceNode) {
+          textToCopy = "value" in sourceNode ? String(sourceNode.value || "") : String(sourceNode.textContent || "");
+        }
+      }
+    }
+    textToCopy = String(textToCopy || "").trim();
+    if (textToCopy) {
+      try {
+        if (navigator?.clipboard?.writeText) {
+          await navigator.clipboard.writeText(textToCopy);
+        } else {
+          const temp = document.createElement("textarea");
+          temp.value = textToCopy;
+          document.body.appendChild(temp);
+          temp.select();
+          document.execCommand("copy");
+          temp.remove();
+        }
+        const original = copyButton.dataset.originalLabel || copyButton.textContent || "Copy";
+        copyButton.dataset.originalLabel = original;
+        copyButton.textContent = "Copied";
+        window.setTimeout(() => {
+          copyButton.textContent = copyButton.dataset.originalLabel || original;
+        }, 1400);
+      } catch {
+        // Keep UI fail-closed; no throwing on clipboard failures.
+      }
+    }
+    return;
+  }
+
+  const scrollButton = event.target.closest("[data-scroll-target]");
+  if (scrollButton) {
+    event.preventDefault();
+    const targetId = String(scrollButton.getAttribute("data-scroll-target") || "").trim();
+    if (targetId) {
+      const target = document.getElementById(targetId);
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+    return;
+  }
+
+  const expandableRow = event.target.closest("[data-expand-row]");
+  if (expandableRow && !event.target.closest("a,button,input,textarea,select,label")) {
+    const targetId = String(expandableRow.getAttribute("data-expand-row") || "").trim();
+    if (targetId) {
+      const detailRow = document.getElementById(targetId);
+      if (detailRow) {
+        detailRow.hidden = !detailRow.hidden;
+        expandableRow.setAttribute("aria-expanded", detailRow.hidden ? "false" : "true");
+      }
+    }
+    event.preventDefault();
+    return;
+  }
+
   const routeLink = event.target.closest("[data-route]");
   if (routeLink) {
     event.preventDefault();
     await navigateTo(routeLink.getAttribute("data-route"));
+    return;
+  }
+
+  const exceptionAction = event.target.closest("[data-exception-action]");
+  if (exceptionAction) {
+    event.preventDefault();
+    await runExceptionAction(exceptionAction);
+    return;
+  }
+
+  const exceptionCard = event.target.closest("[data-exception-card]");
+  if (exceptionCard && !event.target.closest("a,button,input,textarea,select,label")) {
+    event.preventDefault();
+    await runExceptionAction(exceptionCard);
+    return;
+  }
+
+  const groupToggle = event.target.closest("[data-nav-group-toggle]");
+  if (groupToggle) {
+    event.preventDefault();
+    const groupId = String(groupToggle.getAttribute("data-nav-group-toggle") || "").trim();
+    if (state.sidebarOpenGroups.has(groupId)) {
+      state.sidebarOpenGroups.delete(groupId);
+    } else {
+      state.sidebarOpenGroups.add(groupId);
+    }
+    renderNav();
+    return;
+  }
+
+  const sidebarCollapse = event.target.closest("[data-sidebar-collapse]");
+  if (sidebarCollapse) {
+    event.preventDefault();
+    state.sidebarCollapsed = !state.sidebarCollapsed;
+    renderNav();
     return;
   }
 
@@ -261,7 +524,61 @@ async function handleClick(event) {
   }
 }
 
+async function handleKeydown(event) {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    togglePalette(true);
+    return;
+  }
+  if (event.key === "Escape") {
+    togglePalette(false);
+    return;
+  }
+  const exceptionCard = event.target.closest?.("[data-exception-card]");
+  if (exceptionCard && (event.key === "Enter" || event.key === " ")) {
+    event.preventDefault();
+    await runExceptionAction(exceptionCard);
+  }
+}
+
 async function handleSubmit(event) {
+  const reliabilityFilterForm = event.target.closest(".reliability-filter-form");
+  if (reliabilityFilterForm) {
+    event.preventDefault();
+    const formData = new FormData(reliabilityFilterForm);
+    const search = new URLSearchParams();
+    for (const [key, value] of formData.entries()) {
+      const normalized = String(value || "").trim();
+      if (!normalized) {
+        continue;
+      }
+      search.set(key, normalized);
+    }
+    const basePath = String(reliabilityFilterForm.getAttribute("data-base-path") || window.location.pathname || "/reliability");
+    const href = search.toString() ? `${basePath}?${search.toString()}` : basePath;
+    await navigateTo(href);
+    return;
+  }
+
+  const reliabilityActionForm = event.target.closest(".reliability-action-form");
+  if (reliabilityActionForm) {
+    event.preventDefault();
+    const formData = new FormData(reliabilityActionForm);
+    try {
+      await executeReliabilityWorkflow(formData, state);
+    } catch (error) {
+      state.reliabilityWorkflow = {
+        ...(state.reliabilityWorkflow || {}),
+        lastError: error?.payload?.errors?.join(", ")
+          || error?.payload?.reason_codes?.join(", ")
+          || error?.message
+          || "Reliability action failed.",
+      };
+    }
+    await renderRoute();
+    return;
+  }
+
   const configurationForm = event.target.closest(".configuration-workflow-form");
   if (configurationForm) {
     event.preventDefault();
@@ -319,6 +636,9 @@ export async function bootOperatorShell() {
   document.getElementById("commandPaletteInput").addEventListener("input", () => {
     renderPalette();
   });
+  document.getElementById("sidebarSearch").addEventListener("input", () => {
+    renderNav();
+  });
   document.getElementById("drawerClose").addEventListener("click", () => {
     resetDrawer();
   });
@@ -326,13 +646,7 @@ export async function bootOperatorShell() {
     renderRoute();
   });
   window.addEventListener("keydown", (event) => {
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-      event.preventDefault();
-      togglePalette(true);
-    }
-    if (event.key === "Escape") {
-      togglePalette(false);
-    }
+    handleKeydown(event);
   });
   document.body.addEventListener("click", (event) => {
     handleClick(event);

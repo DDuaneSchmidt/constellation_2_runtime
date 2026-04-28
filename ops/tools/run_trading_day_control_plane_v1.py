@@ -20,6 +20,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     now_utc_iso_v1,
     parse_day_utc_v1,
     producer_block_v1,
+    read_validated_surface_v1,
     read_json_object_v1,
     read_intents_day_completeness_ref_v1,
     read_paper_day_control_plane_ref_v1,
@@ -32,6 +33,7 @@ from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_intents_day_completeness_path,
     resolve_paper_day_control_plane_path,
     resolve_paper_session_ledger_path,
+    resolve_paper_trading_day_authority_path,
     resolve_startup_proof_validation_path,
     resolve_trading_day_control_plane_path,
 )
@@ -39,6 +41,9 @@ from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 
 
 OUTPUT_SCHEMA_RELPATH_V1 = "governance/04_DATA/SCHEMAS/C2/REPORTS/trading_day_control_plane.v1.schema.json"
+PAPER_TRADING_DAY_AUTHORITY_SCHEMA_RELPATH_V1 = (
+    "governance/04_DATA/SCHEMAS/C2/REPORTS/paper_trading_day_authority.v1.schema.json"
+)
 INTENTS_DAY_COMPLETENESS_TOOL = (REPO_ROOT / "ops/tools/run_intents_day_completeness_v1.py").resolve()
 PAPER_DAY_CONTROL_PLANE_TOOL = (REPO_ROOT / "ops/tools/run_paper_day_control_plane_v1.py").resolve()
 
@@ -166,6 +171,7 @@ def main(argv: list[str] | None = None) -> int:
     paper_day_path = resolve_paper_day_control_plane_path(truth_root=truth_root, day_utc=day)
     ledger_path = resolve_paper_session_ledger_path(truth_root=truth_root, day_utc=day)
     startup_proof_path = resolve_startup_proof_validation_path(truth_root=truth_root, day_utc=day)
+    day_authority_path = resolve_paper_trading_day_authority_path(truth_root=truth_root, day_utc=day)
 
     completeness_result = _run(
         [sys.executable, str(INTENTS_DAY_COMPLETENESS_TOOL), "--day_utc", day, "--truth_root", str(truth_root)],
@@ -413,6 +419,46 @@ def main(argv: list[str] | None = None) -> int:
             first_true_blocker["blocker_classification"] = "REGENERATION_DEFECT"
         elif final_start_decision == "BLOCKED_VALID" and upstream_completeness["completeness_status"] != "COMPLETE":
             first_true_blocker["blocker_classification"] = "UPSTREAM_PREREQUISITE"
+
+    # Canonical projection: when same-day paper_trading_day_authority exists,
+    # it owns readiness and blocker semantics for this supporting surface.
+    try:
+        day_authority_ref = read_validated_surface_v1(
+            path=day_authority_path,
+            schema_relpath=PAPER_TRADING_DAY_AUTHORITY_SCHEMA_RELPATH_V1,
+        )
+        day_authority_payload = dict(day_authority_ref.payload)
+        day_authority_state = str(day_authority_payload.get("state") or "").strip().upper()
+        day_authority_can_submit = bool(day_authority_payload.get("can_submit_paper_orders") is True)
+        day_authority_blocker = str(day_authority_payload.get("canonical_blocker") or "").strip()
+        if not day_authority_blocker:
+            day_authority_blocker = _first_nonempty(
+                [str(code).strip() for code in (day_authority_payload.get("reason_codes") or []) if str(code).strip()]
+            )
+
+        if day_authority_state == "OPEN_READY" and day_authority_can_submit:
+            final_start_decision = "READY_NOW"
+            blocking_codes = set()
+            first_true_blocker = {
+                "first_true_blocker_code": "",
+                "first_true_blocker_artifact_path": "",
+                "blocker_classification": "UNKNOWN",
+            }
+        else:
+            projection_blocker = day_authority_blocker or "TRADING_DAY_CONTROL_PLANE_DAY_AUTHORITY_NOT_OPEN_READY"
+            final_start_decision = "BLOCKED_VALID"
+            blocking_codes.add(projection_blocker)
+            first_true_blocker = {
+                "first_true_blocker_code": projection_blocker,
+                "first_true_blocker_artifact_path": str(day_authority_ref.path),
+                "blocker_classification": "CANONICAL_POLICY_OR_INPUT",
+            }
+            if day_authority_state == "UNKNOWN":
+                final_start_decision = "BLOCKED_BY_DEFECT"
+                first_true_blocker["blocker_classification"] = "REGENERATION_DEFECT"
+    except Exception:
+        # Preserve historical fallback when day authority is absent or invalid.
+        pass
 
     supersession = {
         "semantics": "LATEST_AUTHORITATIVE_SAME_DAY_PATH",

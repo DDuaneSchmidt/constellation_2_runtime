@@ -40,6 +40,7 @@ from constellation_2.common.next_day_readiness_consistency_gate_v1 import (
 from constellation_2.common.paper_session_fact_plane_v1 import read_validated_surface_v1
 from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_paper_day_control_plane_path,
+    resolve_paper_trading_day_authority_path,
     resolve_paper_session_ledger_path,
     resolve_submit_boundary_status_path,
 )
@@ -60,6 +61,9 @@ STATE_ROOT = (Path.home() / ".local/state/constellation_2").resolve()
 SUBMIT_BOUNDARY_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/submit_boundary_status.v1.schema.json"
 PAPER_SESSION_LEDGER_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/paper_session_ledger.v1.schema.json"
 PAPER_DAY_CONTROL_PLANE_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/paper_day_control_plane.v1.schema.json"
+PAPER_TRADING_DAY_AUTHORITY_SCHEMA = (
+    "governance/04_DATA/SCHEMAS/C2/REPORTS/paper_trading_day_authority.v1.schema.json"
+)
 SESSION_AUTHORITY_STALE = "SESSION_AUTHORITY_STATUS_STALE"
 NON_TRADING_SESSION_BLOCKERS = {"NON_TRADING_DAY", "NO_ACTIVE_PAPER_SESSION"}
 
@@ -168,6 +172,30 @@ def _refresh_session_authority_status(truth_root: Path) -> None:
     write_session_authority_status_v1(truth_root=truth_root, payload=payload)
 
 
+def _day_authority_has_manifest_required_inputs_v1(payload: Dict[str, Any]) -> bool:
+    input_status = payload.get("input_status")
+    if not isinstance(input_status, dict):
+        return False
+    required_inputs = {
+        "correlation_envelope_gate_v1",
+        "replay_certification_gate_v1",
+        "authorization_gate_verdict_v1",
+        "global_kill_switch_state_v1",
+        "paper_session_authority_v1",
+    }
+    for logical_name in required_inputs:
+        row = input_status.get(logical_name)
+        if not isinstance(row, dict):
+            return False
+        if str(row.get("required_or_diagnostic") or "").strip().lower() != "required":
+            return False
+        if str(row.get("readiness_role") or "").strip().lower() != "authority_input":
+            return False
+        if str(row.get("status") or "").strip().upper() != "PASS":
+            return False
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="run_c2_daily_operator_gate_v1")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD (UTC)")
@@ -178,8 +206,9 @@ def main(argv: list[str] | None = None) -> int:
     boundary_path = resolve_submit_boundary_status_path(truth_root=TRUTH, day_utc=day)
     ledger_path = resolve_paper_session_ledger_path(truth_root=TRUTH, day_utc=day)
     control_path = resolve_paper_day_control_plane_path(truth_root=TRUTH, day_utc=day)
+    day_authority_path = resolve_paper_trading_day_authority_path(truth_root=TRUTH, day_utc=day)
 
-    session_day_blocker = _session_day_blocker(day_utc=day, truth_root=TRUTH)
+    session_day_blocker = ""
     consistency_result = evaluate_next_day_readiness_consistency_gate_v1(truth_root=TRUTH, day_utc=day)
 
     # On non-trading/no-active-session days, stale session-authority status is usually an
@@ -193,6 +222,10 @@ def main(argv: list[str] | None = None) -> int:
 
     reasons: List[str] = []
     notes: List[str] = []
+    day_authority_payload: Dict[str, Any] = {}
+    day_authority_state = ""
+    day_authority_can_submit = False
+    day_authority_manifest_backed = False
 
     try:
         boundary_ref = read_validated_surface_v1(path=boundary_path, schema_relpath=SUBMIT_BOUNDARY_SCHEMA)
@@ -218,16 +251,43 @@ def main(argv: list[str] | None = None) -> int:
         control_payload = {}
         reasons.append("MISSING_PAPER_DAY_CONTROL_PLANE_V1")
 
-    if consistency_result.status != CONSISTENCY_GATE_STATUS_PASS:
+    try:
+        day_authority_ref = read_validated_surface_v1(
+            path=day_authority_path,
+            schema_relpath=PAPER_TRADING_DAY_AUTHORITY_SCHEMA,
+        )
+        day_authority_payload = dict(day_authority_ref.payload)
+        day_authority_state = str(day_authority_payload.get("state") or "").strip().upper()
+        day_authority_can_submit = bool(day_authority_payload.get("can_submit_paper_orders") is True)
+        day_authority_manifest_backed = _day_authority_has_manifest_required_inputs_v1(day_authority_payload)
+        session_day_blocker = str(day_authority_payload.get("canonical_blocker") or "").strip()
+        if not session_day_blocker:
+            reason_codes = day_authority_payload.get("reason_codes")
+            if isinstance(reason_codes, list):
+                for code in reason_codes:
+                    text = str(code or "").strip()
+                    if text:
+                        session_day_blocker = text
+                        break
+    except Exception:
+        day_authority_payload = {}
+        day_authority_state = ""
+        day_authority_can_submit = False
+        day_authority_manifest_backed = False
+        session_day_blocker = _session_day_blocker(day_utc=day, truth_root=TRUTH)
+        reasons.append("MISSING_PAPER_TRADING_DAY_AUTHORITY_V1")
+
+    day_authority_present = bool(day_authority_payload)
+    if (not day_authority_present or not day_authority_manifest_backed) and consistency_result.status != CONSISTENCY_GATE_STATUS_PASS:
         reasons.extend(str(code).strip() for code in consistency_result.blocking_reason_codes if str(code).strip())
 
     canonical_ready = (
-        consistency_result.status == CONSISTENCY_GATE_STATUS_PASS
-        and bool(boundary_payload.get("submission_authorized") is True)
-        and bool((ledger_payload.get("control_state") or {}).get("submission_authorized") is True)
-        and str((ledger_payload.get("control_state") or {}).get("authority_status") or "").strip().upper() == "GRANTED"
-        and str(control_payload.get("final_start_decision") or "").strip().upper() == "READY_NOW"
-        and str((control_payload.get("authority_result") or {}).get("ledger_authority_status") or "").strip().upper() == "GRANTED"
+        day_authority_state == "OPEN_READY"
+        and day_authority_can_submit
+        and (
+            day_authority_manifest_backed
+            or consistency_result.status == CONSISTENCY_GATE_STATUS_PASS
+        )
     )
 
     if session_day_blocker:
@@ -236,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
         notes.append(f"session_day_blocker={session_day_blocker}")
         notes.append("canonical_day_open_projection=WITHHELD")
     else:
-        if not canonical_ready and boundary_payload and ledger_payload and control_payload:
+        if (not day_authority_present or not day_authority_manifest_backed) and not canonical_ready and boundary_payload and ledger_payload and control_payload:
             reasons.extend(_reason_codes_from_surfaces(boundary_payload=boundary_payload, ledger_payload=ledger_payload, control_payload=control_payload))
 
         deduped_reasons = []
@@ -251,6 +311,11 @@ def main(argv: list[str] | None = None) -> int:
         status = "PASS" if canonical_ready and not deduped_reasons else "FAIL"
 
     notes.append(f"consistency_gate_status={consistency_result.status}")
+    if day_authority_manifest_backed:
+        notes.append("legacy_consistency_gate_projection=DIAGNOSTIC_ONLY")
+    elif day_authority_present:
+        notes.append("legacy_consistency_gate_projection=ENFORCED_UNTIL_MANIFEST_BACKED_DAY_AUTHORITY")
+    notes.append(f"paper_trading_day_authority_state={day_authority_state or 'MISSING'}")
     notes.append(f"submit_boundary_status={str(boundary_payload.get('boundary_status') or 'MISSING').strip() or 'MISSING'}")
     notes.append(f"paper_session_ledger_authority_status={str((ledger_payload.get('control_state') or {}).get('authority_status') or 'MISSING').strip() or 'MISSING'}")
     notes.append(f"paper_day_control_plane_decision={str(control_payload.get('final_start_decision') or 'MISSING').strip() or 'MISSING'}")
@@ -268,6 +333,7 @@ def main(argv: list[str] | None = None) -> int:
             "submit_boundary_status_path": str(boundary_path),
             "paper_session_ledger_path": str(ledger_path),
             "paper_day_control_plane_path": str(control_path),
+            "paper_trading_day_authority_path": str(day_authority_path),
         },
         "status": status,
         "reason_codes": deduped_reasons,
@@ -290,6 +356,8 @@ def main(argv: list[str] | None = None) -> int:
             ],
         },
         "canonical_truth": {
+            "paper_trading_day_authority_state": day_authority_state,
+            "paper_trading_day_authority_can_submit_paper_orders": day_authority_can_submit,
             "submission_authorized": bool(boundary_payload.get("submission_authorized") is True),
             "submit_boundary_status": str(boundary_payload.get("boundary_status") or "").strip(),
             "paper_session_ledger_authority_status": str((ledger_payload.get("control_state") or {}).get("authority_status") or "").strip(),

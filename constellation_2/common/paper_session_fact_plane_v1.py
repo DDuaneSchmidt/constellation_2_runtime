@@ -102,6 +102,9 @@ PAPER_SESSION_LEDGER_SCHEMA_RELPATH_V1 = (
 PAPER_DAY_CONTROL_PLANE_SCHEMA_RELPATH_V1 = (
     "governance/04_DATA/SCHEMAS/C2/REPORTS/paper_day_control_plane.v1.schema.json"
 )
+PAPER_TRADING_DAY_AUTHORITY_SCHEMA_RELPATH_V1 = (
+    "governance/04_DATA/SCHEMAS/C2/REPORTS/paper_trading_day_authority.v1.schema.json"
+)
 TRADING_DAY_CONTROL_PLANE_SCHEMA_RELPATH_V1 = (
     "governance/04_DATA/SCHEMAS/C2/REPORTS/trading_day_control_plane.v1.schema.json"
 )
@@ -310,6 +313,7 @@ def atomic_write_idempotent_validated_json_v1(
     payload: Dict[str, Any],
     schema_relpath: str,
     volatile_field_names: Iterable[str],
+    refresh_semantic_noop: bool = False,
 ) -> SurfaceRefV1:
     validate_against_repo_schema_v1(payload, REPO_ROOT, schema_relpath)
     normalized_volatile_names = {
@@ -332,7 +336,7 @@ def atomic_write_idempotent_validated_json_v1(
                 payload,
                 volatile_field_names=normalized_volatile_names,
             )
-            if existing_normalized == candidate_normalized:
+            if existing_normalized == candidate_normalized and not refresh_semantic_noop:
                 raw = canonical_json_bytes_v1(existing_payload) + b"\n"
                 return SurfaceRefV1(
                     path=path,
@@ -827,6 +831,10 @@ def validate_paper_day_control_plane_obj_v1(obj: Dict[str, Any]) -> None:
     validate_against_repo_schema_v1(obj, REPO_ROOT, PAPER_DAY_CONTROL_PLANE_SCHEMA_RELPATH_V1)
 
 
+def validate_paper_trading_day_authority_obj_v1(obj: Dict[str, Any]) -> None:
+    validate_against_repo_schema_v1(obj, REPO_ROOT, PAPER_TRADING_DAY_AUTHORITY_SCHEMA_RELPATH_V1)
+
+
 def validate_trading_day_control_plane_obj_v1(obj: Dict[str, Any]) -> None:
     validate_against_repo_schema_v1(obj, REPO_ROOT, TRADING_DAY_CONTROL_PLANE_SCHEMA_RELPATH_V1)
 
@@ -938,6 +946,16 @@ def read_paper_day_control_plane_ref_v1(*, truth_root: Path, day_utc: str) -> Su
     ref = read_control_plane_surface_v1(
         domain="execution",
         surface="paper_day_control_plane",
+        truth_root=Path(truth_root).resolve(),
+        day_utc=day_utc,
+    )
+    return SurfaceRefV1(path=ref.path, payload=ref.payload, sha256=ref.sha256)
+
+
+def read_paper_trading_day_authority_ref_v1(*, truth_root: Path, day_utc: str) -> SurfaceRefV1:
+    ref = read_control_plane_surface_v1(
+        domain="execution",
+        surface="paper_trading_day_authority",
         truth_root=Path(truth_root).resolve(),
         day_utc=day_utc,
     )

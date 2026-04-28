@@ -91,6 +91,9 @@ RC_CALCULATION_VERSION_MISMATCH = "SLEEVE_EDGE_CALCULATION_VERSION_MISMATCH"
 RC_SNAPSHOT_INTEGRITY_FAILURE = "SLEEVE_EDGE_SNAPSHOT_INTEGRITY_FAILURE"
 RC_POLICY_REGISTRY_INVALID = "SLEEVE_EDGE_POLICY_REGISTRY_INVALID"
 RC_STATE_TRANSITION_PREFIX = "SLEEVE_EDGE_STATE_TRANSITION"
+POSITION_FACT_LINEAGE_DIAGNOSTIC = (
+    "Position facts have no order/engine lineage; sleeve grading requires order/fill attributed facts."
+)
 
 
 @dataclass(frozen=True)
@@ -297,6 +300,37 @@ def _resolve_engine_bridge(
             "artifact_sha256": str(match.get("artifact_sha256") or "").strip(),
         }
     if not normalized:
+        direct_engine_candidates = _unique_strings(
+            [
+                str(trade_identity_payload.get("native_engine_id") or "").strip(),
+                str(trade_identity_payload.get("engine_id") or "").strip(),
+                str(trade_identity_payload.get("strategy_engine_id") or "").strip(),
+                str(state_payload.get("native_engine_id") or "").strip(),
+                str(state_payload.get("engine_id") or "").strip(),
+                str(state_payload.get("strategy_engine_id") or "").strip(),
+            ]
+        )
+        if len(direct_engine_candidates) > 1:
+            reasons.append(RC_NATIVE_ENGINE_ATTRIBUTION_AMBIGUOUS)
+            return None, reasons
+        if len(direct_engine_candidates) == 1:
+            source_intent_ids = _unique_strings(
+                [
+                    str(trade_identity_payload.get("source_intent_id") or "").strip(),
+                    str(state_payload.get("source_intent_id") or "").strip(),
+                ]
+            )
+            return {
+                "engine_id": direct_engine_candidates[0],
+                "source_intent_ids": source_intent_ids,
+                "intent_sha256": _unique_strings(
+                    [
+                        str(trade_identity_payload.get("intent_sha256") or "").strip(),
+                        str(state_payload.get("intent_sha256") or "").strip(),
+                    ]
+                ),
+                "evidence_refs": [],
+            }, reasons
         return None, reasons
     engines = sorted({item["engine_id"] for item in normalized.values()})
     if len(engines) != 1:
@@ -649,8 +683,9 @@ def _fact_input_descriptor_from_trade_rows(
     engine_ids: Sequence[str],
     as_of_ts: str,
     trade_rows: Sequence[Mapping[str, Any]],
+    lineage_requirement_diagnostic: Optional[str],
 ) -> Dict[str, Any]:
-    return {
+    descriptor = {
         "core2_summary_path": str(core2_summary_path),
         "core2_summary_sha256": str(core2_summary_sha256),
         "materialization_set_id": materialization_set_id,
@@ -668,6 +703,10 @@ def _fact_input_descriptor_from_trade_rows(
             for row in sorted(trade_rows, key=lambda item: str(item.get("trade_identity_id") or ""))
         ],
     }
+    diagnostic_text = str(lineage_requirement_diagnostic or "").strip()
+    if diagnostic_text:
+        descriptor["lineage_requirement_diagnostic"] = diagnostic_text
+    return descriptor
 
 
 def _build_fact_ledger(
@@ -686,6 +725,8 @@ def _build_fact_ledger(
     included_trade_ids: List[str] = []
     excluded_trade_ids: List[str] = []
     excluded_trade_details: List[Dict[str, Any]] = []
+    unattributed_samples: List[Dict[str, Any]] = []
+    fields_present: set[str] = set()
     trade_refs = core2_summary_payload.get("trade_refs") or []
     if not isinstance(trade_refs, list):
         raise ValueError(RC_CORE2_SUMMARY_EMPTY)
@@ -782,6 +823,53 @@ def _build_fact_ledger(
             "exclusion_reason_codes": _unique_strings(exclusion_reason_codes),
             "execution_evidence_refs": evidence_refs,
         }
+        if measurement_class == MEASUREMENT_NATIVE and not engine_id:
+            lineage = trade_identity_payload.get("lineage_attachment_refs")
+            lineage_values = lineage if isinstance(lineage, dict) else {}
+            lineage_nonempty = [
+                key
+                for key in ("order_ids", "perm_ids", "execution_ids", "fact_record_ids")
+                if isinstance(lineage_values.get(key), list) and bool(lineage_values.get(key))
+            ]
+            fill_keys_present: List[str] = []
+            fill_ids = state_payload.get("incorporated_fills")
+            if isinstance(fill_ids, list):
+                for key in ("order_id", "perm_id", "execution_id"):
+                    if any(str((fill or {}).get(key) or "").strip() for fill in fill_ids if isinstance(fill, dict)):
+                        fill_keys_present.append(key)
+            trade_identity_nonempty = [
+                key
+                for key in ("native_engine_id", "engine_id", "strategy_engine_id", "source_intent_id", "intent_sha256", "sleeve_id")
+                if str(trade_identity_payload.get(key) or "").strip()
+            ]
+            state_nonempty = [
+                key
+                for key in ("native_engine_id", "engine_id", "strategy_engine_id", "source_intent_id", "intent_sha256")
+                if str(state_payload.get(key) or "").strip()
+            ]
+            for key in trade_identity_nonempty:
+                fields_present.add(f"trade_identity.{key}")
+            for key in state_nonempty:
+                fields_present.add(f"incorporated_state.{key}")
+            for key in lineage_nonempty:
+                fields_present.add(f"lineage_attachment_refs.{key}")
+            for key in fill_keys_present:
+                fields_present.add(f"incorporated_fills.{key}")
+            if len(unattributed_samples) < 3:
+                unattributed_samples.append(
+                    {
+                        "trade_identity_id": trade_identity_id,
+                        "measurement_class": measurement_class,
+                        "continuity_status": continuity_status,
+                        "current_quantity": _decimal_text(realized["current_quantity"]),
+                        "fields_present": {
+                            "trade_identity": trade_identity_nonempty,
+                            "incorporated_state": state_nonempty,
+                            "lineage_attachment_refs": lineage_nonempty,
+                            "incorporated_fills": fill_keys_present,
+                        },
+                    }
+                )
         trade_rows.append(trade_row)
         if included_in_metrics:
             included_trade_ids.append(trade_identity_id)
@@ -795,6 +883,30 @@ def _build_fact_ledger(
             )
     as_of_ts = _coerce_utc_text(str(core2_summary_payload.get("evaluation_utc") or "1970-01-01T00:00:00Z"))
     materialization_set_id = str(core2_summary_payload.get("materialization_set_id") or "")
+    attributed_fact_count = sum(1 for row in trade_rows if str(row.get("engine_id") or "").strip())
+    unattributed_fact_count = sum(
+        1
+        for row in trade_rows
+        if str(row.get("measurement_class") or "") == MEASUREMENT_NATIVE
+        and not str(row.get("engine_id") or "").strip()
+    )
+    lineage_signal_fields = {
+        "lineage_attachment_refs.order_ids",
+        "lineage_attachment_refs.perm_ids",
+        "lineage_attachment_refs.execution_ids",
+        "incorporated_fills.order_id",
+        "incorporated_fills.perm_id",
+        "incorporated_fills.execution_id",
+        "trade_identity.native_engine_id",
+        "trade_identity.engine_id",
+        "trade_identity.strategy_engine_id",
+        "incorporated_state.native_engine_id",
+        "incorporated_state.engine_id",
+        "incorporated_state.strategy_engine_id",
+    }
+    lineage_requirement_diagnostic = ""
+    if unattributed_fact_count > 0 and not any(field in fields_present for field in lineage_signal_fields):
+        lineage_requirement_diagnostic = POSITION_FACT_LINEAGE_DIAGNOSTIC
     fact_input_descriptor = _fact_input_descriptor_from_trade_rows(
         core2_summary_path=core2_summary_path,
         core2_summary_sha256=_sha256_file(core2_summary_path),
@@ -803,6 +915,9 @@ def _build_fact_ledger(
         engine_ids=sorted(target_engine_ids),
         as_of_ts=as_of_ts,
         trade_rows=trade_rows,
+        lineage_requirement_diagnostic=(
+            lineage_requirement_diagnostic if str(lineage_requirement_diagnostic or "").strip() else None
+        ),
     )
     fact_input_hash = _sha256_bytes(canonical_json_bytes_v1(fact_input_descriptor))
     producer = {"repo": REPO_ROOT.name, "git_sha": _git_sha_failclosed(), "module": "constellation_2/common/sleeve_edge_measurement_v1.py"}
@@ -834,6 +949,16 @@ def _build_fact_ledger(
         "excluded_trade_ids": sorted(excluded_trade_ids),
         "exclusion_details": sorted(excluded_trade_details, key=lambda item: item["trade_identity_id"]),
         "invalidity_reasons": _unique_strings(invalidity_reasons),
+        "attribution_diagnostics": {
+            "source_fact_count": len(trade_rows),
+            "attributed_fact_count": attributed_fact_count,
+            "unattributed_fact_count": unattributed_fact_count,
+            "expected_attribution_field": "engine_id via execution stream join on lineage_attachment_refs.order_ids/perm_ids or incorporated_fills.order_id/perm_id",
+            "fields_actually_present": sorted(fields_present),
+            "sample_records": unattributed_samples,
+            "upstream_artifact_path": str(core2_summary_path),
+            "lineage_requirement_diagnostic": lineage_requirement_diagnostic,
+        },
         "producer": producer,
     }
     return fact_ledger, {
@@ -870,6 +995,10 @@ def _fact_input_descriptor_from_fact_ledger(fact_ledger: Mapping[str, Any]) -> D
         engine_ids=list(fact_ledger.get("engine_ids") or []),
         as_of_ts=str(fact_ledger.get("as_of_ts") or ""),
         trade_rows=trade_facts,
+        lineage_requirement_diagnostic=(
+            str((((fact_ledger.get("attribution_diagnostics") or {}).get("lineage_requirement_diagnostic")) or "")).strip()
+            or None
+        ),
     )
 
 
@@ -1183,10 +1312,20 @@ def _iter_snapshot_paths(*, truth_root: Path, sleeve_id: str, day_utc: Optional[
 
 
 def _read_latest_snapshot_for_day(*, truth_root: Path, sleeve_id: str, day_utc: str) -> Optional[Dict[str, Any]]:
-    candidates: List[Tuple[Tuple[datetime, str], Dict[str, Any]]] = []
+    candidates: List[Tuple[Tuple[datetime, datetime, int, str], Dict[str, Any]]] = []
     for path in _iter_snapshot_paths(truth_root=truth_root, sleeve_id=sleeve_id, day_utc=day_utc):
         payload = _load_snapshot_candidate_strict(path)
-        key = (_utc_sort_key(str(payload.get("as_of_ts") or "1970-01-01T00:00:00Z"))[0], str(payload.get("snapshot_id") or ""))
+        lineage_diagnostic_rank = (
+            1
+            if str((((payload.get("attribution_diagnostics") or {}).get("lineage_requirement_diagnostic")) or "")).strip()
+            else 0
+        )
+        key = (
+            _utc_sort_key(str(payload.get("as_of_ts") or "1970-01-01T00:00:00Z"))[0],
+            _utc_sort_key(str(payload.get("produced_utc") or payload.get("as_of_ts") or "1970-01-01T00:00:00Z"))[0],
+            lineage_diagnostic_rank,
+            str(payload.get("snapshot_id") or ""),
+        )
         candidates.append((key, payload))
     if not candidates:
         return None
@@ -1231,10 +1370,20 @@ def read_sleeve_edge_snapshot_for_day_v1(
 
 
 def _read_latest_snapshot_for_lineage(*, truth_root: Path, sleeve_id: str) -> Optional[Dict[str, Any]]:
-    candidates: List[Tuple[Tuple[datetime, str], Dict[str, Any]]] = []
+    candidates: List[Tuple[Tuple[datetime, datetime, int, str], Dict[str, Any]]] = []
     for path in _iter_snapshot_paths(truth_root=truth_root, sleeve_id=sleeve_id):
         payload = _load_snapshot_candidate_strict(path)
-        key = (_utc_sort_key(str(payload.get("as_of_ts") or "1970-01-01T00:00:00Z"))[0], str(payload.get("snapshot_id") or ""))
+        lineage_diagnostic_rank = (
+            1
+            if str((((payload.get("attribution_diagnostics") or {}).get("lineage_requirement_diagnostic")) or "")).strip()
+            else 0
+        )
+        key = (
+            _utc_sort_key(str(payload.get("as_of_ts") or "1970-01-01T00:00:00Z"))[0],
+            _utc_sort_key(str(payload.get("produced_utc") or payload.get("as_of_ts") or "1970-01-01T00:00:00Z"))[0],
+            lineage_diagnostic_rank,
+            str(payload.get("snapshot_id") or ""),
+        )
         candidates.append((key, payload))
     if not candidates:
         return None
@@ -1243,11 +1392,21 @@ def _read_latest_snapshot_for_lineage(*, truth_root: Path, sleeve_id: str) -> Op
 
 
 def _read_prior_snapshot(*, truth_root: Path, sleeve_id: str, before_as_of_ts: str) -> Optional[Dict[str, Any]]:
-    candidates: List[Tuple[Tuple[datetime, str], Dict[str, Any]]] = []
+    candidates: List[Tuple[Tuple[datetime, datetime, int, str], Dict[str, Any]]] = []
     cutoff = _utc_sort_key(before_as_of_ts)[0]
     for path in _iter_snapshot_paths(truth_root=truth_root, sleeve_id=sleeve_id):
         payload = _load_snapshot_candidate_strict(path)
-        key = (_utc_sort_key(str(payload.get("as_of_ts") or "1970-01-01T00:00:00Z"))[0], str(payload.get("snapshot_id") or ""))
+        lineage_diagnostic_rank = (
+            1
+            if str((((payload.get("attribution_diagnostics") or {}).get("lineage_requirement_diagnostic")) or "")).strip()
+            else 0
+        )
+        key = (
+            _utc_sort_key(str(payload.get("as_of_ts") or "1970-01-01T00:00:00Z"))[0],
+            _utc_sort_key(str(payload.get("produced_utc") or payload.get("as_of_ts") or "1970-01-01T00:00:00Z"))[0],
+            lineage_diagnostic_rank,
+            str(payload.get("snapshot_id") or ""),
+        )
         if key[0] >= cutoff:
             continue
         candidates.append((key, payload))
@@ -1290,12 +1449,19 @@ def materialize_sleeve_edge_snapshot_v1(
     existing_snapshot = _read_latest_snapshot_for_day(truth_root=truth_root, sleeve_id=sleeve_id, day_utc=day)
     current_policy_version = _policy_version(policy)
     current_fact_input_hash = str(ledger_aux["fact_input_hash"])
+    current_lineage_requirement_diagnostic = str(
+        ((fact_ledger.get("attribution_diagnostics") or {}).get("lineage_requirement_diagnostic") or "")
+    ).strip()
+    existing_lineage_requirement_diagnostic = str(
+        (((existing_snapshot or {}).get("attribution_diagnostics") or {}).get("lineage_requirement_diagnostic") or "")
+    ).strip()
     if (
         existing_snapshot is not None
         and str(existing_snapshot.get("as_of_ts") or "") == as_of_ts
         and str(existing_snapshot.get("fact_input_hash") or "") == current_fact_input_hash
         and str(existing_snapshot.get("policy_version") or "") == current_policy_version
         and str(existing_snapshot.get("calculation_version") or "") == CALCULATION_VERSION
+        and existing_lineage_requirement_diagnostic == current_lineage_requirement_diagnostic
     ):
         fact_ledger_ref = existing_snapshot.get("fact_ledger_ref")
         if not isinstance(fact_ledger_ref, dict):
@@ -1388,6 +1554,7 @@ def materialize_sleeve_edge_snapshot_v1(
         "unavailable_metrics": unavailable_metrics,
         "qualification": qualification,
         "reason_codes": snapshot_reason_codes,
+        "attribution_diagnostics": dict(fact_ledger.get("attribution_diagnostics") or {}),
         "snapshot_lineage": {
             "core2_materialization_set_id": str(fact_ledger.get("core2_materialization_set_id") or ""),
             "source_execution_sleeve_id": str(fact_ledger.get("source_execution_sleeve_id") or ""),

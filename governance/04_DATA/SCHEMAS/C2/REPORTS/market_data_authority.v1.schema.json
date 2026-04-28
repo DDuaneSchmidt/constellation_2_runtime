@@ -1,0 +1,58 @@
+{
+  "$id": "https://constellation.local/schemas/c2/reports/market_data_authority.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Market Data Authority v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "produced_utc",
+    "authority_scope",
+    "status",
+    "market_data_state",
+    "phase_context",
+    "operator_impact",
+    "active_intent_count",
+    "active_options_intent_count",
+    "required_symbols",
+    "coverage",
+    "first_blocker",
+    "input_evidence",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_MARKET_DATA_AUTHORITY_V1" },
+    "schema_version": { "const": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string" },
+    "authority_scope": { "const": "ACTIVE_INTENT_MARKET_DATA" },
+    "status": { "type": "string", "enum": ["PASS", "WARN", "FAIL"] },
+    "market_data_state": {
+      "type": "string",
+      "enum": ["NO_INTENTS", "NOT_REQUIRED", "READY", "PARTIAL", "STALE", "MISSING_REQUIRED_DATA", "COVERAGE_GAP", "INVALID_SCHEMA"]
+    },
+    "phase_context": { "type": "string", "enum": ["PRE_SUBMIT", "POST_SUBMIT_DRY_RUN_COMPLETE"] },
+    "operator_impact": { "type": "string", "enum": ["PRE_SUBMIT_BLOCKER", "POST_SUBMIT_DIAGNOSTIC"] },
+    "active_intent_count": { "type": "integer", "minimum": 0 },
+    "active_options_intent_count": { "type": "integer", "minimum": 0 },
+    "required_symbols": { "type": "array", "items": { "type": "string" } },
+    "coverage": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+    "first_blocker": { "type": "string" },
+    "input_evidence": { "type": "array", "items": { "$ref": "#/$defs/input_evidence" } },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "input_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_type", "path", "exists"],
+      "properties": {
+        "artifact_type": { "type": "string" },
+        "path": { "type": "string" },
+        "exists": { "type": "boolean" }
+      }
+    }
+  }
+}

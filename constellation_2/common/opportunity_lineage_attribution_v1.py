@@ -307,11 +307,54 @@ def _load_intent_generation_report(*, truth_root: Path, day_utc: str) -> tuple[d
     return _read_json_object(report_path), report_path
 
 
-def _list_intent_snapshots(*, truth_root: Path, day_utc: str) -> list[Path]:
-    root = (truth_root / "intents_v1" / "snapshots" / day_utc).resolve()
-    if not root.exists() or not root.is_dir():
-        return []
-    return sorted(root.glob("*.exposure_intent.v1.json"))
+def _intent_snapshot_roots(*, truth_root: Path, day_utc: str, environment: str) -> list[Path]:
+    day = str(day_utc).strip()
+    roots: list[Path] = [((truth_root / "intents_v1" / "snapshots" / day).resolve())]
+    if str(environment).strip().upper() == "PAPER":
+        canonical_truth_root: Path | None = None
+        try:
+            canonical_truth_root = resolve_canonical_truth_root_bridge_v1(
+                caller="constellation_2.common.opportunity_lineage_attribution_v1"
+            ).resolve()
+        except Exception:
+            canonical_truth_root = None
+        try:
+            sleeves_root = (
+                resolve_truth_sleeves_root_bridge_v1(
+                    caller="constellation_2.common.opportunity_lineage_attribution_v1"
+                ).resolve()
+                if canonical_truth_root is not None and truth_root.resolve() == canonical_truth_root
+                else None
+            )
+        except Exception:
+            sleeves_root = None
+        if sleeves_root is not None and sleeves_root.exists() and sleeves_root.is_dir():
+            for sleeve_dir in sorted(path for path in sleeves_root.iterdir() if path.is_dir()):
+                roots.append((sleeve_dir / "PAPER" / "intents_v1" / "snapshots" / day).resolve())
+    out: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        token = str(root)
+        if token in seen:
+            continue
+        seen.add(token)
+        out.append(root)
+    return out
+
+
+def _list_intent_snapshots(*, truth_root: Path, day_utc: str, environment: str = "PAPER") -> list[Path]:
+    out: list[Path] = []
+    seen: set[str] = set()
+    for root in _intent_snapshot_roots(truth_root=truth_root, day_utc=day_utc, environment=environment):
+        if not root.exists() or not root.is_dir():
+            continue
+        for path in sorted(root.glob("*.exposure_intent.v1.json")):
+            token = str(path.resolve())
+            if token in seen:
+                continue
+            seen.add(token)
+            out.append(path.resolve())
+    return out
 
 
 def _submission_day_roots(*, truth_root: Path, day_utc: str, environment: str) -> list[Path]:
@@ -798,7 +841,7 @@ def materialize_submit_decision_traces_v1(
         truth_root=root,
         day_utc=day,
     )
-    intent_paths = _list_intent_snapshots(truth_root=root, day_utc=day)
+    intent_paths = _list_intent_snapshots(truth_root=root, day_utc=day, environment=env)
     submission_dirs = _list_submission_dirs(truth_root=root, day_utc=day, environment=env)
 
     intent_rows: dict[tuple[str, str], dict[str, Any]] = {}
@@ -1031,7 +1074,7 @@ def materialize_opportunity_lineage_events_v1(
     max_observed_at = fallback_time
 
     intent_report, intent_report_path = _load_intent_generation_report(truth_root=root, day_utc=day)
-    intent_paths = _list_intent_snapshots(truth_root=root, day_utc=day)
+    intent_paths = _list_intent_snapshots(truth_root=root, day_utc=day, environment=env)
     submission_dirs = _list_submission_dirs(truth_root=root, day_utc=day, environment=env)
     stream_paths = _list_execution_stream_records(truth_root=root, day_utc=day)
     fill_paths = _list_fill_ledgers(truth_root=root, day_utc=day)

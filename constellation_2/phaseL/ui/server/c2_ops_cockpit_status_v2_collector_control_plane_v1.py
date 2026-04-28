@@ -39,6 +39,25 @@ def _surface_failure(prefix: str, exc: Exception) -> Tuple[Optional[Dict[str, An
     return None, missing, source_paths, {}, warnings
 
 
+def _grade_1_to_7_from_score_value(score: Any) -> Optional[int]:
+    if not isinstance(score, (int, float)):
+        return None
+    clamped = max(0, min(100, int(score)))
+    if clamped >= 95:
+        return 7
+    if clamped >= 85:
+        return 6
+    if clamped >= 75:
+        return 5
+    if clamped >= 65:
+        return 4
+    if clamped >= 50:
+        return 3
+    if clamped >= 30:
+        return 2
+    return 1
+
+
 def _platform_readiness_view(payload: Dict[str, Any], metadata: Dict[str, Any], path: str) -> Dict[str, Any]:
     return {
         "present": True,
@@ -288,13 +307,25 @@ def load_status_collector_control_plane_bundle_v1(
             day_utc=day,
         )
         payload = dict(sleeve_ref.payload)
+        readiness_score = payload.get("readiness_score")
+        score_threshold = payload.get("score_threshold")
+        readiness_grade_1_to_7 = payload.get("readiness_grade_1_to_7")
+        if not isinstance(readiness_grade_1_to_7, int):
+            readiness_grade_1_to_7 = _grade_1_to_7_from_score_value(readiness_score)
+        score_threshold_grade_1_to_7 = payload.get("score_threshold_grade_1_to_7")
+        if not isinstance(score_threshold_grade_1_to_7, int):
+            score_threshold_grade_1_to_7 = _grade_1_to_7_from_score_value(score_threshold)
         bundle["sleeve_live_readiness"] = {
             "state": str(payload.get("readiness_state") or "UNKNOWN"),
             "readiness_summary": str(payload.get("readiness_summary") or ""),
             "promotion_decision_basis": str(payload.get("promotion_decision_basis") or ""),
-            "readiness_score": payload.get("readiness_score"),
-            "score_threshold": payload.get("score_threshold"),
+            "readiness_score": readiness_score,
+            "score_threshold": score_threshold,
             "readiness_grade": payload.get("readiness_grade", payload.get("grade_band")),
+            "readiness_grade_scale": payload.get("readiness_grade_scale") or "1_to_7",
+            "readiness_grade_1_to_7": readiness_grade_1_to_7,
+            "score_threshold_grade_1_to_7": score_threshold_grade_1_to_7,
+            "grading_thresholds_1_to_7": payload.get("grading_thresholds_1_to_7") if isinstance(payload.get("grading_thresholds_1_to_7"), list) else [],
             "grade_band": payload.get("grade_band", payload.get("readiness_grade")),
             "promotion_candidate": payload.get("promotion_candidate"),
             "promotion_blockers": payload.get("promotion_blockers") if isinstance(payload.get("promotion_blockers"), list) else [],

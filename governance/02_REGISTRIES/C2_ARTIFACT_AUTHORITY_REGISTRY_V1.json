@@ -813,9 +813,7 @@
         "session_authority_v1",
         "submit_boundary_paper_v4"
       ],
-      "required_upstream_dependencies": [
-        "day_authority_decision_v1"
-      ],
+      "required_upstream_dependencies": [],
       "initial_finality_state": "provisional",
       "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
       "append_only_audit": true,

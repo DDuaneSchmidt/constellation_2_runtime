@@ -622,6 +622,25 @@ def _load_trading_day_state_v1(day: str, *, global_truth_root: Path) -> Tuple[Op
     return obj, [], [str(path)], ({str(path): mt} if mt is not None else {}), []
 
 
+def _grade_1_to_7_from_score_value(score: Any) -> Optional[int]:
+    if not isinstance(score, (int, float)):
+        return None
+    clamped = max(0, min(100, int(score)))
+    if clamped >= 95:
+        return 7
+    if clamped >= 85:
+        return 6
+    if clamped >= 75:
+        return 5
+    if clamped >= 65:
+        return 4
+    if clamped >= 50:
+        return 3
+    if clamped >= 30:
+        return 2
+    return 1
+
+
 def load_sleeve_live_readiness_v1(truth_root: Path, day: str) -> Dict[str, Any]:
     p = (
         truth_root
@@ -638,13 +657,25 @@ def load_sleeve_live_readiness_v1(truth_root: Path, day: str) -> Dict[str, Any]:
             "path": str(p),
             "present": False,
         }
+    readiness_score = obj.get("readiness_score")
+    score_threshold = obj.get("score_threshold")
+    readiness_grade_1_to_7 = obj.get("readiness_grade_1_to_7")
+    if not isinstance(readiness_grade_1_to_7, int):
+        readiness_grade_1_to_7 = _grade_1_to_7_from_score_value(readiness_score)
+    score_threshold_grade_1_to_7 = obj.get("score_threshold_grade_1_to_7")
+    if not isinstance(score_threshold_grade_1_to_7, int):
+        score_threshold_grade_1_to_7 = _grade_1_to_7_from_score_value(score_threshold)
     return {
         "state": str(obj.get("readiness_state") or "UNKNOWN"),
         "readiness_summary": str(obj.get("readiness_summary") or ""),
         "promotion_decision_basis": str(obj.get("promotion_decision_basis") or ""),
-        "readiness_score": obj.get("readiness_score"),
-        "score_threshold": obj.get("score_threshold"),
+        "readiness_score": readiness_score,
+        "score_threshold": score_threshold,
         "readiness_grade": obj.get("readiness_grade", obj.get("grade_band")),
+        "readiness_grade_scale": obj.get("readiness_grade_scale") or "1_to_7",
+        "readiness_grade_1_to_7": readiness_grade_1_to_7,
+        "score_threshold_grade_1_to_7": score_threshold_grade_1_to_7,
+        "grading_thresholds_1_to_7": obj.get("grading_thresholds_1_to_7") if isinstance(obj.get("grading_thresholds_1_to_7"), list) else [],
         "grade_band": obj.get("grade_band", obj.get("readiness_grade")),
         "promotion_candidate": obj.get("promotion_candidate"),
         "promotion_blockers": obj.get("promotion_blockers") if isinstance(obj.get("promotion_blockers"), list) else [],

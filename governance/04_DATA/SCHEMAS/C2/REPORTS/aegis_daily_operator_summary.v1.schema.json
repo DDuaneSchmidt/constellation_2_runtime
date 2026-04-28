@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/aegis_daily_operator_summary.v1.schema.json",
+  "title": "aegis_daily_operator_summary.v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_id", "schema_version", "day_utc", "mode", "run_style", "no_silent_day_outcome", "did_aegis_trade_today", "dry_run", "transmitted", "intents_created", "submissions_created", "broker_orders_transmitted", "closure_clean", "first_blocker", "evidence_paths"],
+  "properties": {
+    "schema_id": { "const": "aegis_daily_operator_summary" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "mode": { "type": "string", "enum": ["DRY_RUN", "PAPER_TRANSMIT", "LIVE"] },
+    "run_style": { "type": "string", "enum": ["MANUAL", "AUTO"] },
+    "no_silent_day_outcome": { "type": "string", "enum": ["SUCCESS_DRY_RUN", "SUCCESS_TRANSMITTED", "NO_INTENT_EXPECTED", "BLOCKED_WITH_REASON", "FAILED_WITH_OWNER"] },
+    "did_aegis_trade_today": { "type": "boolean" },
+    "dry_run": { "type": "boolean" },
+    "transmitted": { "type": "boolean" },
+    "intents_created": { "type": "boolean" },
+    "submissions_created": { "type": "boolean" },
+    "broker_orders_transmitted": { "type": "boolean" },
+    "closure_clean": { "type": "boolean" },
+    "first_blocker": { "type": "object" },
+    "evidence_paths": { "type": "object" }
+  }
+}

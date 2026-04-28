@@ -727,6 +727,18 @@ def _sleeve_live_readiness_payload(day_utc: str) -> dict[str, object]:
         "promotion_decision_basis": "All checks passed",
         "readiness_score": 95,
         "readiness_grade": "A",
+        "readiness_grade_scale": "1_to_7",
+        "readiness_grade_1_to_7": 7,
+        "score_threshold_grade_1_to_7": 6,
+        "grading_thresholds_1_to_7": [
+            {"grade": 7, "min_score": 95},
+            {"grade": 6, "min_score": 85},
+            {"grade": 5, "min_score": 75},
+            {"grade": 4, "min_score": 65},
+            {"grade": 3, "min_score": 50},
+            {"grade": 2, "min_score": 30},
+            {"grade": 1, "min_score": 0},
+        ],
         "score_threshold": 80,
         "promotion_candidate": True,
         "promotion_blockers": [],
@@ -1232,6 +1244,8 @@ def test_gateway_secondary_surfaces_happy_path(tmp_path: Path) -> None:
     assert refs["day_start_blocked"].payload["schema_id"] == "day_start_blocked"
     assert refs["trading_day_state"].payload["schema_id"] == "trading_day_state"
     assert refs["sleeve_live_readiness"].payload["schema_id"] == "C2_SLEEVE_LIVE_READINESS_V1"
+    assert refs["sleeve_live_readiness"].payload["readiness_grade_1_to_7"] == 7
+    assert refs["sleeve_live_readiness"].payload["score_threshold_grade_1_to_7"] == 6
     assert refs["deployment_state_machine"].payload["schema_id"] == "deployment_state_machine"
     assert refs["platform_bug_metrics"].payload["schema_id"] == "C2_BUG_METRICS_V1"
     assert refs["economic_state_build"].payload["schema_id"] == "economic_state_build"

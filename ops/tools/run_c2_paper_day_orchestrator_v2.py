@@ -1945,6 +1945,14 @@ def _load_identity_submit_payload(identity_dir: Path) -> Dict[str, Any]:
     binding_obj = _read_json_obj(binding_path)
     submission_id = str(binding_obj.get("submission_id") or "").strip().lower()
     if not _is_64hex(submission_id):
+        identity_path = (identity_dir / "execution_identity_record.v1.json").resolve()
+        if identity_path.exists() and identity_path.is_file():
+            identity_obj = _read_json_obj(identity_path)
+            submission_id = str(identity_obj.get("submission_id") or "").strip().lower()
+            if _is_64hex(submission_id):
+                binding_obj = dict(binding_obj)
+                binding_obj.setdefault("submission_id", submission_id)
+    if not _is_64hex(submission_id):
         raise RuntimeError(f"GOV_SUBMIT_IDENTITY_SET_MISSING_SUBMISSION_ID:{identity_dir}")
     return {
         "plan_path": plan_path,

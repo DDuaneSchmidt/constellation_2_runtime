@@ -49,6 +49,16 @@ DATE_FMT = "%Y-%m-%d"
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 DENY_NAME_TOKENS = (".INVALID_", ".QUARANTINED_")
 DENY_DIR_PREFIXES = ("__quarantine", "__quarantined", "__archived")
+SLEEVE_GRADE_SCALE = "1_to_7"
+SLEEVE_GRADE_THRESHOLDS_1_TO_7: tuple[tuple[int, int], ...] = (
+    (7, 95),
+    (6, 85),
+    (5, 75),
+    (4, 65),
+    (3, 50),
+    (2, 30),
+    (1, 0),
+)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -147,6 +157,14 @@ def _grade_for_score(score: int, bands: list[dict[str, Any]]) -> str:
         if score >= int(b["min_score"]):
             return str(b["grade"])
     return "UNKNOWN"
+
+
+def _grade_1_to_7_for_score(score: int) -> int:
+    clamped = max(0, min(100, int(score)))
+    for grade, min_score in SLEEVE_GRADE_THRESHOLDS_1_TO_7:
+        if clamped >= min_score:
+            return int(grade)
+    return 1
 
 
 def _load_policy() -> dict[str, Any]:
@@ -474,6 +492,8 @@ def _run(day: str, sleeve_id: str, mode: str, sleeve_truth_root: Path) -> dict[s
 
     score = sum(c.score_awarded for c in checks)
     readiness_grade = _grade_for_score(score, grade_bands)
+    readiness_grade_1_to_7 = _grade_1_to_7_for_score(score)
+    score_threshold_grade_1_to_7 = _grade_1_to_7_for_score(score_threshold)
 
     required_checks_ok = all(c.status == "PASS" for c in checks if c.required)
     if not required_checks_ok and not promotion_blockers:
@@ -740,6 +760,8 @@ def _run(day: str, sleeve_id: str, mode: str, sleeve_truth_root: Path) -> dict[s
             "readiness_state": readiness_state,
             "readiness_score": int(score),
             "readiness_grade": readiness_grade,
+            "readiness_grade_1_to_7": int(readiness_grade_1_to_7),
+            "score_threshold_grade_1_to_7": int(score_threshold_grade_1_to_7),
             "promotion_candidate": bool(promotion_candidate),
         },
         "failed_checks": [
@@ -775,6 +797,7 @@ def _run(day: str, sleeve_id: str, mode: str, sleeve_truth_root: Path) -> dict[s
         "informational_conditions": [
             f"derived_blockers={len(derived_blockers)}",
             f"readiness_grade={readiness_grade}",
+            f"readiness_grade_1_to_7={readiness_grade_1_to_7}",
             f"score={score}/{score_threshold}",
         ],
     }
@@ -796,6 +819,13 @@ def _run(day: str, sleeve_id: str, mode: str, sleeve_truth_root: Path) -> dict[s
         "promotion_decision_basis": promotion_decision_basis,
         "readiness_score": int(score),
         "readiness_grade": readiness_grade,
+        "readiness_grade_scale": SLEEVE_GRADE_SCALE,
+        "readiness_grade_1_to_7": int(readiness_grade_1_to_7),
+        "score_threshold_grade_1_to_7": int(score_threshold_grade_1_to_7),
+        "grading_thresholds_1_to_7": [
+            {"grade": int(grade), "min_score": int(min_score)}
+            for grade, min_score in SLEEVE_GRADE_THRESHOLDS_1_TO_7
+        ],
         "score_threshold": int(score_threshold),
         "grade_band": readiness_grade,
         "promotion_candidate": bool(promotion_candidate),

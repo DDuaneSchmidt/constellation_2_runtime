@@ -40,6 +40,9 @@ OUTCOME_ATTRIBUTION_SCHEMA = "governance/04_DATA/SCHEMAS/C2/EVALUATION/outcome_a
 EDGE_MEASUREMENT_SCHEMA = "governance/04_DATA/SCHEMAS/C2/EVALUATION/sleeve_edge_measurement_snapshot.v1.schema.json"
 ALLOCATION_GOVERNANCE_SCHEMA = "governance/04_DATA/SCHEMAS/C2/EVALUATION/allocation_governance_snapshot.v1.schema.json"
 OPERATIVE_CONTROL_SCHEMA = "governance/04_DATA/SCHEMAS/C2/EVALUATION/sleeve_operative_control_state.v1.schema.json"
+POSITION_FACT_LINEAGE_DIAGNOSTIC = (
+    "Position facts have no order/engine lineage; sleeve grading requires order/fill attributed facts."
+)
 
 
 @dataclass(frozen=True)
@@ -497,8 +500,125 @@ def _build_edge_measurement_payload(
     day = _parse_day(day_utc)
     produced_utc = _now_utc()
     snapshot = _read_json(inputs.sleeve_edge_snapshot_path)
+    fact_ledger = _read_json(inputs.sleeve_edge_fact_ledger_path)
     qualification = snapshot.get("qualification") if isinstance(snapshot.get("qualification"), dict) else {}
     factual_metrics = snapshot.get("factual_metrics") if isinstance(snapshot.get("factual_metrics"), dict) else {}
+    snapshot_attr_diag = snapshot.get("attribution_diagnostics") if isinstance(snapshot.get("attribution_diagnostics"), dict) else {}
+    if not snapshot_attr_diag:
+        trade_facts = list(fact_ledger.get("trade_facts") or [])
+        fields_present: set[str] = set()
+        unattributed_samples: list[dict[str, Any]] = []
+        for row in trade_facts:
+            if not isinstance(row, dict):
+                continue
+            measurement_class = str(row.get("measurement_class") or "").strip()
+            engine_id = str(row.get("engine_id") or "").strip()
+            if measurement_class != "NATIVE_ENTRY" or engine_id:
+                continue
+            trade_identity_present: list[str] = []
+            state_present: list[str] = []
+            lineage_present: list[str] = []
+            fill_present: list[str] = []
+
+            trade_identity_path = Path(str(row.get("trade_identity_path") or "")).resolve()
+            if trade_identity_path.exists() and trade_identity_path.is_file():
+                trade_identity_payload = _read_json(trade_identity_path)
+                for key in ("native_engine_id", "engine_id", "strategy_engine_id", "source_intent_id", "intent_sha256", "sleeve_id"):
+                    if str(trade_identity_payload.get(key) or "").strip():
+                        trade_identity_present.append(key)
+                        fields_present.add(f"trade_identity.{key}")
+            state_path = Path(str(row.get("incorporated_state_path") or "")).resolve()
+            state_payload: Dict[str, Any] = {}
+            if state_path.exists() and state_path.is_file():
+                state_payload = _read_json(state_path)
+                for key in ("native_engine_id", "engine_id", "strategy_engine_id", "source_intent_id", "intent_sha256"):
+                    if str(state_payload.get(key) or "").strip():
+                        state_present.append(key)
+                        fields_present.add(f"incorporated_state.{key}")
+            lineage = row.get("lineage_attachment_refs")
+            if isinstance(lineage, dict):
+                for key in ("order_ids", "perm_ids", "execution_ids", "fact_record_ids"):
+                    value = lineage.get(key)
+                    if isinstance(value, list) and value:
+                        lineage_present.append(key)
+                        fields_present.add(f"lineage_attachment_refs.{key}")
+            fills = state_payload.get("incorporated_fills")
+            if isinstance(fills, list):
+                for key in ("order_id", "perm_id", "execution_id"):
+                    if any(str((fill or {}).get(key) or "").strip() for fill in fills if isinstance(fill, dict)):
+                        fill_present.append(key)
+                        fields_present.add(f"incorporated_fills.{key}")
+
+            if len(unattributed_samples) < 3:
+                unattributed_samples.append(
+                    {
+                        "trade_identity_id": str(row.get("trade_identity_id") or ""),
+                        "measurement_class": measurement_class,
+                        "continuity_status": str(row.get("continuity_status") or ""),
+                        "current_quantity": str(row.get("current_quantity") or ""),
+                        "fields_present": {
+                            "trade_identity": trade_identity_present,
+                            "incorporated_state": state_present,
+                            "lineage_attachment_refs": lineage_present,
+                            "incorporated_fills": fill_present,
+                        },
+                    }
+                )
+        input_manifest = list(fact_ledger.get("input_manifest") or [])
+        summary_ref = next(
+            (item for item in input_manifest if isinstance(item, dict) and str(item.get("type") or "") == "reconciled_trade_state_summary"),
+            {},
+        )
+        snapshot_attr_diag = {
+            "source_fact_count": len([row for row in trade_facts if isinstance(row, dict)]),
+            "attributed_fact_count": sum(
+                1
+                for row in trade_facts
+                if isinstance(row, dict) and str(row.get("engine_id") or "").strip()
+            ),
+            "unattributed_fact_count": sum(
+                1
+                for row in trade_facts
+                if isinstance(row, dict)
+                and str(row.get("measurement_class") or "").strip() == "NATIVE_ENTRY"
+                and not str(row.get("engine_id") or "").strip()
+            ),
+            "expected_attribution_field": "engine_id via execution stream join on lineage_attachment_refs.order_ids/perm_ids or incorporated_fills.order_id/perm_id",
+            "fields_actually_present": sorted(fields_present),
+            "sample_records": unattributed_samples,
+            "upstream_artifact_path": str(summary_ref.get("path") or inputs.sleeve_edge_snapshot_path),
+        }
+        if snapshot_attr_diag["unattributed_fact_count"] > 0:
+            lineage_signal_fields = {
+                "lineage_attachment_refs.order_ids",
+                "lineage_attachment_refs.perm_ids",
+                "lineage_attachment_refs.execution_ids",
+                "incorporated_fills.order_id",
+                "incorporated_fills.perm_id",
+                "incorporated_fills.execution_id",
+                "trade_identity.native_engine_id",
+                "trade_identity.engine_id",
+                "trade_identity.strategy_engine_id",
+                "incorporated_state.native_engine_id",
+                "incorporated_state.engine_id",
+                "incorporated_state.strategy_engine_id",
+            }
+            if not any(field in fields_present for field in lineage_signal_fields):
+                snapshot_attr_diag["lineage_requirement_diagnostic"] = POSITION_FACT_LINEAGE_DIAGNOSTIC
+    attribution_diagnostics = {
+        "source_fact_count": int(snapshot_attr_diag.get("source_fact_count") or int(factual_metrics.get("sample_count") or 0)),
+        "attributed_fact_count": int(snapshot_attr_diag.get("attributed_fact_count") or 0),
+        "unattributed_fact_count": int(snapshot_attr_diag.get("unattributed_fact_count") or 0),
+        "expected_attribution_field": str(snapshot_attr_diag.get("expected_attribution_field") or "engine_id"),
+        "fields_actually_present": [
+            str(field).strip()
+            for field in list(snapshot_attr_diag.get("fields_actually_present") or [])
+            if str(field).strip()
+        ],
+        "sample_records": list(snapshot_attr_diag.get("sample_records") or []),
+        "upstream_artifact_path": str(snapshot_attr_diag.get("upstream_artifact_path") or inputs.sleeve_edge_snapshot_path),
+        "lineage_requirement_diagnostic": str(snapshot_attr_diag.get("lineage_requirement_diagnostic") or ""),
+    }
     measurement_policy = dict(policy_ref.payload.get("sleeve_edge_measurement_policy") or {})
     stability_map = dict(measurement_policy.get("stability_from_drift_band") or {})
     confidence_map = dict(measurement_policy.get("confidence_from_sample_band") or {})
@@ -551,6 +671,7 @@ def _build_edge_measurement_payload(
         "legacy_measurement_ref": _plain_ref("sleeve_edge_snapshot_v1", inputs.sleeve_edge_snapshot_path),
         "measurement_window": dict(snapshot.get("metric_window") or {}),
         "sample_trade_count": int(factual_metrics.get("sample_count") or 0),
+        "attribution_diagnostics": attribution_diagnostics,
         "edge_measurement": {
             "native_net_expectancy": str(factual_metrics.get("native_net_expectancy") or "0"),
             "adopted_management_expectancy": str(factual_metrics.get("adopted_management_expectancy") or "0"),

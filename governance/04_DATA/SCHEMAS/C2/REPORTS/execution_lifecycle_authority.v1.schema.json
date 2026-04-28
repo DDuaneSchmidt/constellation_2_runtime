@@ -1,0 +1,135 @@
+{
+  "$id": "https://constellation.local/schemas/c2/reports/execution_lifecycle_authority.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Execution Lifecycle Authority v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "sleeve",
+    "environment",
+    "produced_utc",
+    "authority_scope",
+    "status",
+    "current_lifecycle_state",
+    "first_blocker_or_gap",
+    "submission_count",
+    "submissions",
+    "projection_consistency",
+    "input_evidence",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_EXECUTION_LIFECYCLE_AUTHORITY_V1" },
+    "schema_version": { "const": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "sleeve": { "type": "string", "minLength": 1 },
+    "environment": { "type": "string", "enum": ["PAPER", "LIVE"] },
+    "produced_utc": { "type": "string", "format": "date-time" },
+    "authority_scope": { "const": "POST_SUBMIT_EXECUTION_LIFECYCLE" },
+    "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+    "current_lifecycle_state": { "$ref": "#/$defs/lifecycle_state" },
+    "first_blocker_or_gap": { "type": "string" },
+    "submission_count": { "type": "integer", "minimum": 0 },
+    "submissions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/submission" }
+    },
+    "projection_consistency": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/projection_consistency" }
+    },
+    "input_evidence": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/input_evidence" }
+    },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "lifecycle_state": {
+      "type": "string",
+      "enum": [
+        "NO_SUBMISSION",
+        "DRY_RUN_COMPLETE",
+        "SUBMITTED_PENDING_ACK",
+        "ACKNOWLEDGED_OPEN",
+        "PARTIALLY_FILLED",
+        "FILLED",
+        "CANCELED",
+        "REJECTED",
+        "FAILED",
+        "RECONCILED",
+        "LINEAGE_GAP"
+      ]
+    },
+    "path_map": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "submission": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "submission_id",
+        "current_lifecycle_state",
+        "was_simulated",
+        "was_transmitted",
+        "broker_transmit_expected",
+        "broker_order_id_assigned",
+        "broker_perm_id_assigned",
+        "missing_broker_ids_expected_diagnostic",
+        "missing_broker_ids_failure",
+        "fills_status",
+        "reconciliation_complete",
+        "first_blocker_or_gap",
+        "evidence_paths"
+      ],
+      "properties": {
+        "submission_id": { "type": "string", "minLength": 1 },
+        "current_lifecycle_state": { "$ref": "#/$defs/lifecycle_state" },
+        "symbol": { "type": ["string", "null"] },
+        "side": { "type": ["string", "null"] },
+        "quantity": { "type": ["integer", "number", "string", "null"] },
+        "was_simulated": { "type": "boolean" },
+        "was_transmitted": { "type": "boolean" },
+        "broker_transmit_expected": { "type": "boolean" },
+        "broker_order_id_assigned": { "type": "boolean" },
+        "broker_perm_id_assigned": { "type": "boolean" },
+        "broker_order_id": { "type": ["integer", "null"] },
+        "broker_perm_id": { "type": ["integer", "null"] },
+        "missing_broker_ids_expected_diagnostic": { "type": "boolean" },
+        "missing_broker_ids_failure": { "type": "boolean" },
+        "fills_status": { "type": "string", "enum": ["NOT_EXPECTED", "MISSING", "PARTIAL", "COMPLETE"] },
+        "filled_qty": { "type": ["integer", "null"] },
+        "order_qty": { "type": ["integer", "null"] },
+        "reconciliation_complete": { "type": "boolean" },
+        "first_blocker_or_gap": { "type": "string" },
+        "broker_submission_record_path": { "type": "string" },
+        "evidence_paths": { "$ref": "#/$defs/path_map" }
+      }
+    },
+    "projection_consistency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projection", "path", "status", "reason_code"],
+      "properties": {
+        "projection": { "type": "string" },
+        "path": { "type": "string" },
+        "status": { "type": "string", "enum": ["AGREE", "CONFLICT"] },
+        "reason_code": { "type": "string" }
+      }
+    },
+    "input_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_type", "path", "exists"],
+      "properties": {
+        "artifact_type": { "type": "string" },
+        "path": { "type": "string" },
+        "exists": { "type": "boolean" }
+      }
+    }
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "schema_id": "c2_aegis_sleeve_regime_compatibility_registry",
+  "schema_version": "v1",
+  "status": "ACTIVE",
+  "produced_utc": "2026-04-28T00:00:00Z",
+  "owner": "Aegis",
+  "regimes": [
+    "TRENDING",
+    "CHOPPY",
+    "HIGH_VOL_UNSTABLE"
+  ],
+  "sleeves": [
+    {
+      "sleeve_id": "C2_TREND_EQ_PRIMARY_V1",
+      "sleeve_name": "Trend Equity Primary",
+      "classification": "TREND_MOMENTUM",
+      "compatible_regimes": [
+        "TRENDING"
+      ],
+      "fail_closed_if_unknown": true
+    },
+    {
+      "sleeve_id": "C2_CROSS_ASSET_TREND_V1",
+      "sleeve_name": "Cross Asset Trend",
+      "classification": "COMPOSITE_TREND",
+      "compatible_regimes": [
+        "TRENDING"
+      ],
+      "fail_closed_if_unknown": true
+    },
+    {
+      "sleeve_id": "C2_MEAN_REVERSION_EQ_V1",
+      "sleeve_name": "Mean Reversion Equity",
+      "classification": "MEAN_REVERSION",
+      "compatible_regimes": [
+        "CHOPPY"
+      ],
+      "fail_closed_if_unknown": true
+    },
+    {
+      "sleeve_id": "C2_MARKET_NEUTRAL_SPREAD_V1",
+      "sleeve_name": "Market Neutral Spread",
+      "classification": "RANGE_CONSOLIDATION",
+      "compatible_regimes": [
+        "CHOPPY"
+      ],
+      "fail_closed_if_unknown": true
+    },
+    {
+      "sleeve_id": "C2_VOL_INCOME_DEFINED_RISK_V1",
+      "sleeve_name": "Vol Income Defined Risk",
+      "classification": "VOLATILITY_SENSITIVE_TREND_FILTERED",
+      "compatible_regimes": [
+        "TRENDING"
+      ],
+      "fail_closed_if_unknown": true
+    },
+    {
+      "sleeve_id": "C2_EVENT_DISLOCATION_V1",
+      "sleeve_name": "Event Dislocation",
+      "classification": "EVENT_CONDITIONAL_DISLOCATION",
+      "compatible_regimes": [
+        "TRENDING",
+        "HIGH_VOL_UNSTABLE"
+      ],
+      "fail_closed_if_unknown": true
+    },
+    {
+      "sleeve_id": "C2_DEFENSIVE_TAIL_V1",
+      "sleeve_name": "Defensive Tail",
+      "classification": "DEFENSIVE_HIGH_VOL_OVERLAY",
+      "compatible_regimes": [
+        "HIGH_VOL_UNSTABLE"
+      ],
+      "fail_closed_if_unknown": true
+    }
+  ]
+}

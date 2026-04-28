@@ -309,6 +309,9 @@ def test_materialize_evaluation_authority_slice_emits_linked_artifacts(monkeypat
     ]
     assert attribution["evaluation_input_manifest_ref"]["path"] == result["evaluation_input_manifest_ref"]["path"]
     assert measurement["outcome_attribution_ref"]["path"] == result["outcome_attribution_ref"]["path"]
+    assert measurement["attribution_diagnostics"]["source_fact_count"] == 4
+    assert "engine_id" in measurement["attribution_diagnostics"]["expected_attribution_field"]
+    assert measurement["attribution_diagnostics"]["upstream_artifact_path"].endswith("reconciled_trade_state_summary.v1.json")
     assert allocation["measurement_ref"]["path"] == result["sleeve_edge_measurement_ref"]["path"]
     assert operative["allocation_governance_ref"]["path"] == result["allocation_governance_ref"]["path"]
     assert operative["state_class"] == "ACTIVE"

@@ -1,0 +1,37 @@
+{
+  "$id": "https://constellation.local/schemas/c2/reports/risk_sizing_authority.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Risk Sizing Authority v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_id", "schema_version", "day_utc", "produced_utc", "authority_scope", "status", "risk_sizing_state", "intent_count", "account_values_used", "risk_envelope", "sizing_decisions", "final_size_summary", "first_blocker", "input_evidence", "canonical_json_hash"],
+  "properties": {
+    "schema_id": { "const": "C2_RISK_SIZING_AUTHORITY_V1" },
+    "schema_version": { "const": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string" },
+    "authority_scope": { "const": "RISK_SIZING_DECISIONS" },
+    "status": { "type": "string", "enum": ["PASS", "FAIL"] },
+    "risk_sizing_state": { "type": "string", "enum": ["NO_INTENTS", "SIZED", "CLIPPED", "ROUNDED", "ZERO_SIZED", "RISK_BLOCKED", "ACCOUNT_DATA_MISSING", "SIZING_ERROR", "UNKNOWN"] },
+    "intent_count": { "type": "integer", "minimum": 0 },
+    "account_values_used": { "type": "object", "additionalProperties": true },
+    "risk_envelope": { "type": "object", "additionalProperties": true },
+    "sizing_decisions": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+    "final_size_summary": { "type": "object", "additionalProperties": true },
+    "first_blocker": { "type": "string" },
+    "input_evidence": { "type": "array", "items": { "$ref": "#/$defs/input_evidence" } },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "input_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_type", "path", "exists"],
+      "properties": {
+        "artifact_type": { "type": "string" },
+        "path": { "type": "string" },
+        "exists": { "type": "boolean" }
+      }
+    }
+  }
+}

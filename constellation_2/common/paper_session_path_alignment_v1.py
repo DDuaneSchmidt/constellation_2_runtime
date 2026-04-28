@@ -169,6 +169,15 @@ def resolve_submit_boundary_status_path(*, truth_root: Path, day_utc: str) -> Pa
     )
 
 
+def resolve_paper_trading_day_authority_path(*, truth_root: Path, day_utc: str) -> Path:
+    return resolve_report_artifact_path(
+        truth_root=truth_root,
+        artifact_family="paper_trading_day_authority_v1",
+        day_utc=day_utc,
+        filename="paper_trading_day_authority.v1.json",
+    )
+
+
 def resolve_trade_readiness_decision_path(*, truth_root: Path, day_utc: str) -> Path:
     return resolve_report_artifact_path(
         truth_root=truth_root,
@@ -247,6 +256,15 @@ def resolve_execution_reconciliation_path(*, truth_root: Path, day_utc: str) -> 
         artifact_family="execution_reconciliation_v1",
         day_utc=day_utc,
         filename="execution_reconciliation.v1.json",
+    )
+
+
+def resolve_execution_lifecycle_authority_path(*, truth_root: Path, day_utc: str) -> Path:
+    return resolve_report_artifact_path(
+        truth_root=truth_root,
+        artifact_family="execution_lifecycle_authority_v1",
+        day_utc=day_utc,
+        filename="execution_lifecycle_authority.v1.json",
     )
 
 

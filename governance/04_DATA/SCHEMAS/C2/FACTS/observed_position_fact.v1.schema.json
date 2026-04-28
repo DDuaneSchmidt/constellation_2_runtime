@@ -223,6 +223,21 @@
     },
     "market_price": {
       "type": "string"
+    },
+    "order_id": {
+      "type": "string"
+    },
+    "perm_id": {
+      "type": "string"
+    },
+    "native_engine_id": {
+      "type": "string"
+    },
+    "engine_id": {
+      "type": "string"
+    },
+    "strategy_engine_id": {
+      "type": "string"
     }
   },
   "$defs": {

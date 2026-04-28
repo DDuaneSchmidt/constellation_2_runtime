@@ -1,0 +1,37 @@
+{
+  "$id": "https://constellation.local/schemas/c2/reports/portfolio_account_authority.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Portfolio Account Authority v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_id", "schema_version", "day_utc", "produced_utc", "authority_scope", "status", "account_state", "source_type", "operator_statement_acceptable", "account_values", "conflicts", "reconciliation_required", "first_blocker", "input_evidence", "canonical_json_hash"],
+  "properties": {
+    "schema_id": { "const": "C2_PORTFOLIO_ACCOUNT_AUTHORITY_V1" },
+    "schema_version": { "const": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "produced_utc": { "type": "string" },
+    "authority_scope": { "const": "PORTFOLIO_ACCOUNT_STATE" },
+    "status": { "type": "string", "enum": ["PASS", "WARN", "FAIL"] },
+    "account_state": { "type": "string", "enum": ["READY", "STALE", "MISSING_ACCOUNT_SNAPSHOT", "CONFLICTING_ACCOUNT_STATE", "OPERATOR_STATEMENT_ONLY", "RECONCILIATION_REQUIRED", "UNKNOWN"] },
+    "source_type": { "type": "string" },
+    "operator_statement_acceptable": { "type": "boolean" },
+    "account_values": { "type": "object", "additionalProperties": true },
+    "conflicts": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+    "reconciliation_required": { "type": "boolean" },
+    "first_blocker": { "type": "string" },
+    "input_evidence": { "type": "array", "items": { "$ref": "#/$defs/input_evidence" } },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "input_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_type", "path", "exists"],
+      "properties": {
+        "artifact_type": { "type": "string" },
+        "path": { "type": "string" },
+        "exists": { "type": "boolean" }
+      }
+    }
+  }
+}

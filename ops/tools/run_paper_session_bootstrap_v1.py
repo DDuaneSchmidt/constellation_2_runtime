@@ -2522,6 +2522,7 @@ def main(argv: list[str] | None = None) -> int:
     paper_session_authority_ref = write_paper_session_authority_v1(
         truth_root=canonical_truth_root,
         payload=paper_session_authority_payload,
+        refresh_semantic_noop=True,
     )
     canonical_stop_surface = ""
     canonical_stop_artifact_path = ""

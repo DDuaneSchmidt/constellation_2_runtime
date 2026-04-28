@@ -194,6 +194,7 @@
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
     },
+    "attribution_diagnostics": { "$ref": "#/$defs/attribution_diagnostics" },
     "snapshot_lineage": {
       "type": "object",
       "additionalProperties": false,
@@ -272,6 +273,69 @@
     }
   },
   "$defs": {
+    "attribution_diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_fact_count",
+        "attributed_fact_count",
+        "unattributed_fact_count",
+        "expected_attribution_field",
+        "fields_actually_present",
+        "sample_records",
+        "upstream_artifact_path"
+      ],
+      "properties": {
+        "source_fact_count": { "type": "integer", "minimum": 0 },
+        "attributed_fact_count": { "type": "integer", "minimum": 0 },
+        "unattributed_fact_count": { "type": "integer", "minimum": 0 },
+        "expected_attribution_field": { "type": "string", "minLength": 1 },
+        "fields_actually_present": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "sample_records": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/attribution_sample" }
+        },
+        "upstream_artifact_path": { "type": "string", "minLength": 1 },
+        "lineage_requirement_diagnostic": { "type": "string" }
+      }
+    },
+    "attribution_sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trade_identity_id", "measurement_class", "continuity_status", "current_quantity", "fields_present"],
+      "properties": {
+        "trade_identity_id": { "type": "string", "minLength": 1 },
+        "measurement_class": { "type": "string", "minLength": 1 },
+        "continuity_status": { "type": "string" },
+        "current_quantity": { "type": "string" },
+        "fields_present": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["trade_identity", "incorporated_state", "lineage_attachment_refs", "incorporated_fills"],
+          "properties": {
+            "trade_identity": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "incorporated_state": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "lineage_attachment_refs": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "incorporated_fills": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
     "optional_metric": {
       "type": "object",
       "additionalProperties": false,

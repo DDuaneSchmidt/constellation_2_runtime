@@ -14,13 +14,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import date, datetime, timezone
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 _BOOTSTRAP_REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(_BOOTSTRAP_REPO_ROOT) not in sys.path:
@@ -44,6 +45,7 @@ from constellation_2.phaseL.ui_api import (
     build_capital_overview_view,
     build_capital_query_surface_v1,
     build_capital_validation_view,
+    build_command_overview_view,
     build_configuration_catalog_v1,
     build_configuration_current_v1,
     build_financial_state_view,
@@ -65,15 +67,48 @@ from constellation_2.phaseL.ui_api import (
     build_value_state_view,
     build_workspace_view,
     create_configuration_draft_v1,
+    create_reliability_fix_attempt_v1,
+    create_reliability_issue_v1,
+    create_reliability_issue_verification_v1,
+    create_reliability_issue_work_order_v1,
+    create_reliability_observation_v1,
+    create_reliability_verification_v1,
+    create_reliability_work_order_fix_attempt_v1,
+    create_reliability_work_order_from_issue_v1,
+    create_reliability_work_order_v1,
     dispatch_kernel_command,
+    draft_reliability_issue_v1,
+    get_reliability_fix_attempt_v1,
+    get_latest_reliability_readiness_v1,
     get_configuration_draft_v1,
+    get_reliability_issue_v1,
+    get_reliability_readiness_v1,
+    get_reliability_verification_v1,
+    get_reliability_work_order_v1,
     list_action_audit_entries,
+    list_reliability_fix_attempts_v1,
+    list_reliability_issue_verifications_v1,
+    list_reliability_issue_work_orders_v1,
+    list_reliability_next_actions_v1,
+    link_reliability_issue_observation_v1,
+    list_reliability_issues_v1,
+    list_reliability_observations_v1,
+    list_reliability_verifications_v1,
+    list_reliability_work_order_fix_attempts_v1,
+    list_reliability_work_orders_v1,
+    record_reliability_fix_attempt_v1,
     reject_configuration_draft_v1,
     resolve_effective_capital_cashflow_inputs_v1,
     review_configuration_draft_v1,
     run_action,
+    assess_reliability_readiness_v1,
+    update_reliability_fix_attempt_v1,
+    update_reliability_issue_v1,
+    update_reliability_verification_v1,
+    update_reliability_work_order_v1,
     validate_configuration_draft_v1,
     activate_configuration_draft_v1,
+    verify_reliability_issue_v1,
 )
 from constellation_2.phaseL.ui_api.configuration_workflow_v1 import ConfigurationWorkflowApiError
 from constellation_2.phaseL.ui_api.common import ADVISORY_RUNTIME_ROOT, GLOBAL_TRUTH_ROOT, SLEEVE_TRUTH_ROOT
@@ -114,7 +149,7 @@ THIS_FILE = Path(__file__).resolve()
 # parents: [server, ui, phaseL, constellation_2, <repo_root>, ...]
 REPO_ROOT = THIS_FILE.parents[4]
 TRUTH_ROOT = SLEEVE_TRUTH_ROOT
-RUNTIME_ROOT = (REPO_ROOT / "runtime").resolve()
+RUNTIME_ROOT = Path(os.environ.get("C2_RUNTIME_STATE_ROOT", "/home/node/constellation_runtime_data/runtime")).resolve()
 
 
 def _known_truth_roots() -> List[Path]:
@@ -1189,11 +1224,49 @@ def build_operational_truth_v1(truth_root: Path, day: str) -> Dict[str, Any]:
 
     submissions_root = (truth_root / "execution_evidence_v1" / "submissions" / day).resolve()
     fill_ledger_root = (truth_root / "fill_ledger_v1" / day).resolve()
+    lifecycle_authority_path = (
+        truth_root
+        / "reports"
+        / "execution_lifecycle_authority_v1"
+        / day
+        / "execution_lifecycle_authority.v1.json"
+    ).resolve()
+    lifecycle_authority = read_json(lifecycle_authority_path)
+    lifecycle_by_submission = {
+        str(row.get("submission_id") or "").strip(): row
+        for row in ((lifecycle_authority or {}).get("submissions") or [])
+        if isinstance(row, dict) and str(row.get("submission_id") or "").strip()
+    }
+    lineage_candidates = [
+        (
+            truth_root
+            / "reports"
+            / "trade_lineage_graph_v1"
+            / day
+            / "trade_lineage_graph.v1.json"
+        ).resolve(),
+        (
+            GLOBAL_TRUTH_ROOT
+            / "reports"
+            / "trade_lineage_graph_v1"
+            / day
+            / "trade_lineage_graph.v1.json"
+        ).resolve(),
+    ]
+    lineage_authority_path = next((path for path in lineage_candidates if path.exists()), lineage_candidates[0])
+    lineage_authority = read_json(lineage_authority_path)
+    lineage_by_submission = {
+        str(row.get("submission_id") or "").strip(): row
+        for row in ((lineage_authority or {}).get("lineages") or [])
+        if isinstance(row, dict) and str(row.get("submission_id") or "").strip()
+    }
     if submissions_root.exists() and submissions_root.is_dir():
         for submission_dir in sorted([p for p in submissions_root.iterdir() if p.is_dir()], key=lambda p: p.name):
             if submission_dir.name.startswith("__"):
                 continue
             submission_id = submission_dir.name
+            lifecycle_row = lifecycle_by_submission.get(submission_id) or {}
+            lineage_row = lineage_by_submission.get(submission_id) or {}
             broker_record_path = (submission_dir / "broker_submission_record.v2.json").resolve()
             execution_event_path = (submission_dir / "execution_event_record.v1.json").resolve()
             broker_record = read_json(broker_record_path)
@@ -1204,14 +1277,20 @@ def build_operational_truth_v1(truth_root: Path, day: str) -> Dict[str, Any]:
             latest_stream = latest_stream_by_submission.get(submission_id)
 
             broker_ids = {}
-            if isinstance(broker_record, dict) and isinstance(broker_record.get("broker_ids"), dict):
+            if lifecycle_row:
+                broker_ids = {
+                    "order_id": lifecycle_row.get("broker_order_id"),
+                    "perm_id": lifecycle_row.get("broker_perm_id"),
+                }
+            elif isinstance(broker_record, dict) and isinstance(broker_record.get("broker_ids"), dict):
                 broker_ids = broker_record.get("broker_ids") or {}
             elif isinstance(latest_stream, dict) and isinstance(latest_stream.get("broker_ids"), dict):
                 broker_ids = latest_stream.get("broker_ids") or {}
 
             order_terms = extract_order_terms(order_plan)
             order_status = (
-                (((latest_stream.get("order_state") or {}) if isinstance((latest_stream or {}).get("order_state"), dict) else {}).get("status"))
+                lifecycle_row.get("current_lifecycle_state")
+                or (((latest_stream.get("order_state") or {}) if isinstance((latest_stream or {}).get("order_state"), dict) else {}).get("status"))
                 or (execution_event.get("raw_broker_status") if isinstance(execution_event, dict) else None)
                 or (broker_record.get("status") if isinstance(broker_record, dict) else None)
                 or (fill_ledger.get("lifecycle_status") if isinstance(fill_ledger, dict) else None)
@@ -1240,6 +1319,8 @@ def build_operational_truth_v1(truth_root: Path, day: str) -> Dict[str, Any]:
                 "filled_qty": (fill_ledger.get("filled_qty") if isinstance(fill_ledger, dict) else None),
                 "remaining_qty": (fill_ledger.get("remaining_qty") if isinstance(fill_ledger, dict) else None),
                 "lifecycle_status": (fill_ledger.get("lifecycle_status") if isinstance(fill_ledger, dict) else None),
+                "identity_state": lineage_row.get("identity_state") if lineage_row else "UNKNOWN",
+                "trade_lineage_id": lineage_row.get("trade_lineage_id") if lineage_row else None,
                 "artifact_paths": {
                     "submission_dir": str(submission_dir.resolve()),
                     "broker_submission_record": str(broker_record_path),
@@ -1247,6 +1328,8 @@ def build_operational_truth_v1(truth_root: Path, day: str) -> Dict[str, Any]:
                     "order_plan": order_plan_path,
                     "fill_ledger": str(fill_ledger_path),
                     "latest_stream": latest_stream.get("_artifact_path") if isinstance(latest_stream, dict) else None,
+                    "execution_lifecycle_authority": str(lifecycle_authority_path),
+                    "trade_lineage_graph": str(lineage_authority_path),
                 },
             }
             resp["orders_panel"]["rows"].append(row)
@@ -1275,6 +1358,7 @@ def build_operational_truth_v1(truth_root: Path, day: str) -> Dict[str, Any]:
     boundary_ref = None
     ledger_ref = None
     control_plane_ref = None
+    day_authority_ref = None
     session_status_ref = None
     try:
         build_ref = read_control_plane_surface_v1(domain="session", surface="target_day_build", truth_root=truth_root, day_utc=day)
@@ -1297,6 +1381,15 @@ def build_operational_truth_v1(truth_root: Path, day: str) -> Dict[str, Any]:
     except Exception:
         pass
     try:
+        day_authority_ref = read_control_plane_surface_v1(
+            domain="execution",
+            surface="paper_trading_day_authority",
+            truth_root=truth_root,
+            day_utc=day,
+        )
+    except Exception:
+        pass
+    try:
         session_status_ref = read_control_plane_surface_v1(domain="session", surface="session_authority_status_current", truth_root=truth_root)
     except Exception:
         pass
@@ -1305,8 +1398,24 @@ def build_operational_truth_v1(truth_root: Path, day: str) -> Dict[str, Any]:
     boundary_path = boundary_ref.path if boundary_ref is not None else (truth_root / "reports" / "submit_boundary_status_v1" / day / "submit_boundary_status.v1.json").resolve()
     ledger_path = ledger_ref.path if ledger_ref is not None else (truth_root / "reports" / "paper_session_ledger_v1" / day / "paper_session_ledger.v1.json").resolve()
     control_plane_path = control_plane_ref.path if control_plane_ref is not None else (truth_root / "reports" / "paper_day_control_plane_v1" / day / "paper_day_control_plane.v1.json").resolve()
+    day_authority_path = (
+        day_authority_ref.path
+        if day_authority_ref is not None
+        else (truth_root / "reports" / "paper_trading_day_authority_v1" / day / "paper_trading_day_authority.v1.json").resolve()
+    )
     session_status_path = session_status_ref.path if session_status_ref is not None else (truth_root / "session_authority_status_v1" / "current.json").resolve()
     execution_recon_path = (truth_root / "reports" / "execution_reconciliation_v1" / day / "execution_reconciliation.v1.json").resolve()
+    runtime_service_authority_path = (truth_root / "reports" / "runtime_service_authority_v1" / day / "runtime_service_authority.v1.json").resolve()
+    market_data_authority_path = (truth_root / "reports" / "market_data_authority_v1" / day / "market_data_authority.v1.json").resolve()
+    strategy_decision_authority_path = (truth_root / "reports" / "strategy_decision_authority_v1" / day / "strategy_decision_authority.v1.json").resolve()
+    portfolio_account_authority_path = (truth_root / "reports" / "portfolio_account_authority_v1" / day / "portfolio_account_authority.v1.json").resolve()
+    risk_sizing_authority_path = (truth_root / "reports" / "risk_sizing_authority_v1" / day / "risk_sizing_authority.v1.json").resolve()
+    execution_mode_authority_path = (truth_root / "reports" / "execution_mode_authority_v1" / day / "execution_mode_authority.v1.json").resolve()
+    trading_day_closure_authority_path = (truth_root / "reports" / "trading_day_closure_authority_v1" / day / "trading_day_closure_authority.v1.json").resolve()
+    aegis_operating_contract_path = (truth_root / "reports" / "aegis_operating_contract_v1" / day / "aegis_operating_contract.v1.json").resolve()
+    aegis_authority_graph_path = (truth_root / "reports" / "aegis_authority_graph_v1" / day / "aegis_authority_graph.v1.json").resolve()
+    aegis_day_evidence_ledger_path = (truth_root / "reports" / "aegis_day_evidence_ledger_v1" / day / "aegis_day_evidence_ledger.v1.json").resolve()
+    aegis_daily_operator_summary_path = (truth_root / "reports" / "aegis_daily_operator_summary_v1" / day / "aegis_daily_operator_summary.v1.json").resolve()
     try:
         replay_gate_ref = read_control_plane_surface_v1(domain="execution", surface="replay_certification_gate", truth_root=truth_root, day_utc=day)
     except Exception:
@@ -1318,13 +1427,25 @@ def build_operational_truth_v1(truth_root: Path, day: str) -> Dict[str, Any]:
     replay_gate_path = replay_gate_ref.path if replay_gate_ref is not None else (truth_root / "reports" / "replay_certification_gate_v1" / day / "replay_certification_gate.v1.json").resolve()
     replay_bundle_path = replay_bundle_ref.path if replay_bundle_ref is not None else (truth_root / "reports" / "replay_certification_bundle_v1" / day / "replay_certification_bundle.v1.json").resolve()
 
-    build_doc = dict(build_ref.payload) if build_ref is not None else None
-    admission_doc = dict(admission_ref.payload) if admission_ref is not None else None
-    boundary_doc = dict(boundary_ref.payload) if boundary_ref is not None else None
-    ledger_doc = dict(ledger_ref.payload) if ledger_ref is not None else None
-    control_plane_doc = dict(control_plane_ref.payload) if control_plane_ref is not None else None
-    session_status_doc = dict(session_status_ref.payload) if session_status_ref is not None else None
+    build_doc = dict(build_ref.payload) if build_ref is not None else read_json(build_path)
+    admission_doc = dict(admission_ref.payload) if admission_ref is not None else read_json(admission_path)
+    boundary_doc = dict(boundary_ref.payload) if boundary_ref is not None else read_json(boundary_path)
+    ledger_doc = dict(ledger_ref.payload) if ledger_ref is not None else read_json(ledger_path)
+    control_plane_doc = dict(control_plane_ref.payload) if control_plane_ref is not None else read_json(control_plane_path)
+    day_authority_doc = dict(day_authority_ref.payload) if day_authority_ref is not None else read_json(day_authority_path)
+    session_status_doc = dict(session_status_ref.payload) if session_status_ref is not None else read_json(session_status_path)
     execution_recon_doc = read_json(execution_recon_path)
+    runtime_service_authority_doc = read_json(runtime_service_authority_path)
+    market_data_authority_doc = read_json(market_data_authority_path)
+    strategy_decision_authority_doc = read_json(strategy_decision_authority_path)
+    portfolio_account_authority_doc = read_json(portfolio_account_authority_path)
+    risk_sizing_authority_doc = read_json(risk_sizing_authority_path)
+    execution_mode_authority_doc = read_json(execution_mode_authority_path)
+    trading_day_closure_authority_doc = read_json(trading_day_closure_authority_path)
+    aegis_operating_contract_doc = read_json(aegis_operating_contract_path)
+    aegis_authority_graph_doc = read_json(aegis_authority_graph_path)
+    aegis_day_evidence_ledger_doc = read_json(aegis_day_evidence_ledger_path)
+    aegis_daily_operator_summary_doc = read_json(aegis_daily_operator_summary_path)
     replay_gate_doc = dict(replay_gate_ref.payload) if replay_gate_ref is not None else None
     replay_bundle_doc = dict(replay_bundle_ref.payload) if replay_bundle_ref is not None else None
 
@@ -1345,6 +1466,143 @@ def build_operational_truth_v1(truth_root: Path, day: str) -> Dict[str, Any]:
             f"closure={admission_doc.get('closure_status', 'n/a')}",
             str(admission_path),
             admission_doc.get("generated_utc"),
+        )
+    if isinstance(day_authority_doc, dict):
+        add_system_row(
+            "day_authority",
+            "Day Authority",
+            day_authority_doc.get("state"),
+            (
+                f"submit={day_authority_doc.get('can_submit_paper_orders')} "
+                f"trade_today={day_authority_doc.get('can_paper_trade_today')} "
+                f"blocker={day_authority_doc.get('canonical_blocker') or '<none>'}"
+            ),
+            str(day_authority_path),
+            day_authority_doc.get("produced_at_utc"),
+        )
+    if isinstance(aegis_daily_operator_summary_doc, dict):
+        add_system_row(
+            "aegis_daily_operator_summary",
+            "Aegis Daily Summary",
+            aegis_daily_operator_summary_doc.get("no_silent_day_outcome"),
+            (
+                f"mode={aegis_daily_operator_summary_doc.get('mode')} "
+                f"run_style={aegis_daily_operator_summary_doc.get('run_style')} "
+                f"dry_run={aegis_daily_operator_summary_doc.get('dry_run')} "
+                f"transmitted={aegis_daily_operator_summary_doc.get('broker_orders_transmitted')} "
+                f"first_blocker={(aegis_daily_operator_summary_doc.get('first_blocker') or {}).get('code', '<none>') if isinstance(aegis_daily_operator_summary_doc.get('first_blocker'), dict) else '<none>'}"
+            ),
+            str(aegis_daily_operator_summary_path),
+            aegis_daily_operator_summary_doc.get("produced_utc"),
+        )
+    if isinstance(aegis_operating_contract_doc, dict):
+        add_system_row(
+            "aegis_operating_contract",
+            "Operating Contract",
+            aegis_operating_contract_doc.get("mode"),
+            f"run_style={aegis_operating_contract_doc.get('run_style')} target={aegis_operating_contract_doc.get('target_sleeve')}",
+            str(aegis_operating_contract_path),
+            aegis_operating_contract_doc.get("produced_utc"),
+        )
+    if isinstance(aegis_authority_graph_doc, dict):
+        graph_nodes = aegis_authority_graph_doc.get("authority_nodes") if isinstance(aegis_authority_graph_doc.get("authority_nodes"), list) else []
+        graph_blockers = aegis_authority_graph_doc.get("blocking_nodes") if isinstance(aegis_authority_graph_doc.get("blocking_nodes"), list) else []
+        add_system_row(
+            "aegis_authority_graph",
+            "Authority Graph",
+            "BLOCKED" if graph_blockers else "CLEAR",
+            f"nodes={len(graph_nodes)} blockers={len(graph_blockers)}",
+            str(aegis_authority_graph_path),
+            aegis_authority_graph_doc.get("produced_utc"),
+        )
+    if isinstance(aegis_day_evidence_ledger_doc, dict):
+        commands = aegis_day_evidence_ledger_doc.get("commands") if isinstance(aegis_day_evidence_ledger_doc.get("commands"), list) else []
+        add_system_row(
+            "aegis_day_evidence_ledger",
+            "Evidence Ledger",
+            aegis_day_evidence_ledger_doc.get("final_daily_outcome"),
+            f"commands={len(commands)} blockers={len(aegis_day_evidence_ledger_doc.get('blockers') or [])}",
+            str(aegis_day_evidence_ledger_path),
+            aegis_day_evidence_ledger_doc.get("finished_utc"),
+        )
+    if isinstance(runtime_service_authority_doc, dict):
+        add_system_row(
+            "runtime_service_authority",
+            "Runtime Services",
+            runtime_service_authority_doc.get("service_state"),
+            f"mode={runtime_service_authority_doc.get('expected_run_mode')} submit_creator={runtime_service_authority_doc.get('submit_creator_available')}",
+            str(runtime_service_authority_path),
+            runtime_service_authority_doc.get("produced_utc"),
+        )
+    if isinstance(market_data_authority_doc, dict):
+        market_impact = str(market_data_authority_doc.get("operator_impact") or "UNKNOWN")
+        add_system_row(
+            "market_data_authority",
+            "Market Data",
+            market_data_authority_doc.get("market_data_state"),
+            f"impact={market_impact} symbols={','.join(str(x) for x in market_data_authority_doc.get('required_symbols', []))} blocker={market_data_authority_doc.get('first_blocker') or '<none>'}",
+            str(market_data_authority_path),
+            market_data_authority_doc.get("produced_utc"),
+        )
+    if isinstance(strategy_decision_authority_doc, dict):
+        add_system_row(
+            "strategy_decision_authority",
+            "Strategy Decision",
+            strategy_decision_authority_doc.get("strategy_decision_state"),
+            (
+                f"intent_count={strategy_decision_authority_doc.get('intent_count')} "
+                f"zero_reason={strategy_decision_authority_doc.get('zero_intent_reason') or '<none>'}"
+            ),
+            str(strategy_decision_authority_path),
+            strategy_decision_authority_doc.get("produced_utc"),
+        )
+    if isinstance(portfolio_account_authority_doc, dict):
+        account_values = portfolio_account_authority_doc.get("account_values") if isinstance(portfolio_account_authority_doc.get("account_values"), dict) else {}
+        add_system_row(
+            "portfolio_account_authority",
+            "Portfolio Account",
+            portfolio_account_authority_doc.get("account_state"),
+            (
+                f"source={portfolio_account_authority_doc.get('source_type')} "
+                f"cash_cents={account_values.get('cash_total_cents')} "
+                f"nlv_cents={account_values.get('net_liquidation_cents')}"
+            ),
+            str(portfolio_account_authority_path),
+            portfolio_account_authority_doc.get("produced_utc"),
+        )
+    if isinstance(risk_sizing_authority_doc, dict):
+        final_size = risk_sizing_authority_doc.get("final_size_summary") if isinstance(risk_sizing_authority_doc.get("final_size_summary"), dict) else {}
+        final_qty = final_size.get("final_quantity") if isinstance(final_size, dict) else None
+        final_risk = final_size.get("final_risk_cents") if isinstance(final_size, dict) else None
+        add_system_row(
+            "risk_sizing_authority",
+            "Risk Sizing",
+            risk_sizing_authority_doc.get("risk_sizing_state"),
+            (
+                f"final_qty={final_qty} final_risk_cents={final_risk} "
+                f"reason={risk_sizing_authority_doc.get('first_sizing_reason') or '<none>'} "
+                f"blocker={risk_sizing_authority_doc.get('first_blocker') or '<none>'}"
+            ),
+            str(risk_sizing_authority_path),
+            risk_sizing_authority_doc.get("produced_utc"),
+        )
+    if isinstance(execution_mode_authority_doc, dict):
+        add_system_row(
+            "execution_mode_authority",
+            "Execution Mode",
+            execution_mode_authority_doc.get("mode_state"),
+            f"broker_transmit_enabled={execution_mode_authority_doc.get('broker_transmit_enabled')} ids_expected={execution_mode_authority_doc.get('broker_ids_expected')}",
+            str(execution_mode_authority_path),
+            execution_mode_authority_doc.get("produced_utc"),
+        )
+    if isinstance(trading_day_closure_authority_doc, dict):
+        add_system_row(
+            "trading_day_closure_authority",
+            "Trading Day Closure",
+            trading_day_closure_authority_doc.get("closure_state"),
+            f"closure_safe={str(trading_day_closure_authority_doc.get('closure_state') == 'DRY_RUN_CLOSED').lower()} submissions={trading_day_closure_authority_doc.get('submission_count')} blocker={trading_day_closure_authority_doc.get('first_blocker') or '<none>'}",
+            str(trading_day_closure_authority_path),
+            trading_day_closure_authority_doc.get("produced_utc"),
         )
     if isinstance(boundary_doc, dict):
         add_system_row(
@@ -1467,17 +1725,33 @@ def build_operational_truth_v1(truth_root: Path, day: str) -> Dict[str, Any]:
     resp["system_state_panel"]["rows"].sort(key=lambda row: [
         "build",
         "admission",
+        "day_authority",
+        "runtime_service_authority",
+        "market_data_authority",
+        "strategy_decision_authority",
+        "portfolio_account_authority",
+        "risk_sizing_authority",
+        "execution_mode_authority",
         "boundary",
         "ledger",
         "control_plane",
+        "trading_day_closure_authority",
         "session_status",
         "consistency_gate",
     ].index(str(row.get("key")) if str(row.get("key")) in {
         "build",
         "admission",
+        "day_authority",
+        "runtime_service_authority",
+        "market_data_authority",
+        "strategy_decision_authority",
+        "portfolio_account_authority",
+        "risk_sizing_authority",
+        "execution_mode_authority",
         "boundary",
         "ledger",
         "control_plane",
+        "trading_day_closure_authority",
         "session_status",
         "consistency_gate",
     } else "consistency_gate"))
@@ -1490,9 +1764,12 @@ def build_operational_truth_v1(truth_root: Path, day: str) -> Dict[str, Any]:
     resp["summary"]["working_orders"] = sum(1 for row in order_rows if str(row.get("status") or "").upper() not in {"FILLED", "CANCELLED", "INACTIVE"})
     resp["summary"]["alerts_total"] = len(resp["alerts_panel"]["rows"])
     readiness_rows = {str(row.get("key")): row for row in resp["system_state_panel"]["rows"]}
+    day_authority_state = str((readiness_rows.get("day_authority") or {}).get("status") or "UNKNOWN")
     control_status = str((readiness_rows.get("control_plane") or {}).get("status") or "UNKNOWN")
     session_state = str((readiness_rows.get("session_status") or {}).get("status") or "UNKNOWN")
-    if control_status == "READY_NOW" and session_state == "AUTHORIZED":
+    if day_authority_state == "OPEN_READY":
+        resp["summary"]["readiness_status"] = "OPEN_READY"
+    elif control_status == "READY_NOW" and session_state == "AUTHORIZED":
         resp["summary"]["readiness_status"] = "READY_NOW"
     elif control_status and control_status != "UNKNOWN":
         resp["summary"]["readiness_status"] = control_status
@@ -1576,6 +1853,16 @@ class OpsHandler(SimpleHTTPRequestHandler):
         "/tax",
         "/operations",
         "/configuration",
+        "/reliability",
+        "/reliability/readiness",
+        "/reliability/issues",
+        "/reliability/issues/detail",
+        "/reliability/observations",
+        "/reliability/work-orders",
+        "/reliability/work-orders/detail",
+        "/reliability/verifications",
+        "/reliability/ai",
+        "/reliability/ai-draft",
         "/audit",
         "/reports",
         "/control",
@@ -1608,7 +1895,7 @@ class OpsHandler(SimpleHTTPRequestHandler):
         cors_origin = self._local_cors_origin(self.headers.get("Origin"))
         if cors_origin:
             self.send_header("Access-Control-Allow-Origin", cors_origin)
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type")
             self.send_header("Vary", "Origin")
         super().end_headers()
@@ -1621,6 +1908,264 @@ class OpsHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(b)))
         self.end_headers()
         self.wfile.write(b)
+
+    @staticmethod
+    def _single_query_values(qs: Dict[str, List[str]]) -> Dict[str, str]:
+        result: Dict[str, str] = {}
+        for key, values in (qs or {}).items():
+            if not values:
+                continue
+            result[key] = str(values[0])
+        return result
+
+    def _send_reliability_error(self, exc: Exception) -> None:
+        code = str(exc) or "RELIABILITY_REQUEST_INVALID"
+        status = HTTPStatus.BAD_REQUEST
+        if code.endswith("_NOT_FOUND"):
+            status = HTTPStatus.NOT_FOUND
+        self._send_json(
+            status,
+            {
+                "ok": False,
+                "message": code,
+                "errors": [code],
+            },
+        )
+
+    def _route_reliability_get(self, path: str, qs: Dict[str, List[str]]) -> bool:
+        try:
+            if path == "/api/reliability/observations":
+                payload = list_reliability_observations_v1(self._single_query_values(qs))
+                self._send_json(HTTPStatus.OK, payload)
+                return True
+            if path == "/api/reliability/issues":
+                payload = list_reliability_issues_v1(self._single_query_values(qs))
+                self._send_json(HTTPStatus.OK, payload)
+                return True
+            if path == "/api/reliability/work-orders":
+                payload = list_reliability_work_orders_v1(self._single_query_values(qs))
+                self._send_json(HTTPStatus.OK, payload)
+                return True
+            if path == "/api/reliability/fix-attempts":
+                payload = list_reliability_fix_attempts_v1(self._single_query_values(qs))
+                self._send_json(HTTPStatus.OK, payload)
+                return True
+            if path == "/api/reliability/verifications":
+                payload = list_reliability_verifications_v1(self._single_query_values(qs))
+                self._send_json(HTTPStatus.OK, payload)
+                return True
+            if path == "/api/reliability/next-actions":
+                payload = list_reliability_next_actions_v1()
+                self._send_json(HTTPStatus.OK, payload)
+                return True
+            if path.startswith("/api/reliability/issues/"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 5 and parts[4] == "work-orders":
+                    issue_id = unquote(parts[3])
+                    payload = list_reliability_issue_work_orders_v1(issue_id)
+                    self._send_json(HTTPStatus.OK, payload)
+                    return True
+                if len(parts) == 5 and parts[4] == "verifications":
+                    issue_id = unquote(parts[3])
+                    payload = list_reliability_issue_verifications_v1(issue_id)
+                    self._send_json(HTTPStatus.OK, payload)
+                    return True
+                if len(parts) == 4:
+                    issue_id = unquote(parts[3])
+                    payload = get_reliability_issue_v1(issue_id)
+                    self._send_json(HTTPStatus.OK, payload)
+                    return True
+            if path.startswith("/api/reliability/work-orders/"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 5 and parts[4] == "fix-attempts":
+                    work_order_id = unquote(parts[3])
+                    payload = list_reliability_work_order_fix_attempts_v1(work_order_id)
+                    self._send_json(HTTPStatus.OK, payload)
+                    return True
+                if len(parts) == 4:
+                    work_order_id = unquote(parts[3])
+                    payload = get_reliability_work_order_v1(work_order_id)
+                    self._send_json(HTTPStatus.OK, payload)
+                    return True
+            if path.startswith("/api/reliability/fix-attempts/"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 4:
+                    fix_attempt_id = unquote(parts[3])
+                    payload = get_reliability_fix_attempt_v1(fix_attempt_id)
+                    self._send_json(HTTPStatus.OK, payload)
+                    return True
+            if path.startswith("/api/reliability/verifications/"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 4:
+                    verification_id = unquote(parts[3])
+                    payload = get_reliability_verification_v1(verification_id)
+                    self._send_json(HTTPStatus.OK, payload)
+                    return True
+            if path == "/api/reliability/readiness/latest":
+                payload = get_latest_reliability_readiness_v1()
+                self._send_json(HTTPStatus.OK, payload)
+                return True
+            if path.startswith("/api/reliability/readiness/"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 4 and parts[2] == "readiness":
+                    assessment_id = unquote(parts[3])
+                    payload = get_reliability_readiness_v1(assessment_id)
+                    self._send_json(HTTPStatus.OK, payload)
+                    return True
+        except ValueError as exc:
+            self._send_reliability_error(exc)
+            return True
+        return False
+
+    def _route_reliability_post(self, path: str) -> bool:
+        try:
+            if path == "/api/reliability/observations":
+                body = self._read_json_body()
+                payload = create_reliability_observation_v1(body)
+                self._send_json(HTTPStatus.CREATED, {"ok": True, "observation": payload})
+                return True
+            if path == "/api/reliability/issues":
+                body = self._read_json_body()
+                payload = create_reliability_issue_v1(body)
+                self._send_json(HTTPStatus.CREATED, payload)
+                return True
+            if path == "/api/reliability/work-orders":
+                body = self._read_json_body()
+                payload = create_reliability_work_order_v1(body)
+                self._send_json(HTTPStatus.CREATED, payload)
+                return True
+            if path == "/api/reliability/fix-attempts":
+                body = self._read_json_body()
+                payload = create_reliability_fix_attempt_v1(body)
+                self._send_json(HTTPStatus.CREATED, payload)
+                return True
+            if path == "/api/reliability/verifications":
+                body = self._read_json_body()
+                payload = create_reliability_verification_v1(body)
+                self._send_json(HTTPStatus.CREATED, payload)
+                return True
+            if path.startswith("/api/reliability/issues/"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 5 and parts[4] == "link-observation":
+                    issue_id = unquote(parts[3])
+                    body = self._read_json_body()
+                    payload = link_reliability_issue_observation_v1(issue_id, body)
+                    self._send_json(HTTPStatus.OK, payload)
+                    return True
+                if len(parts) == 5 and parts[4] == "work-orders":
+                    issue_id = unquote(parts[3])
+                    body = self._read_json_body()
+                    payload = create_reliability_issue_work_order_v1(issue_id, body)
+                    self._send_json(HTTPStatus.CREATED, payload)
+                    return True
+                if len(parts) == 5 and parts[4] == "verifications":
+                    issue_id = unquote(parts[3])
+                    body = self._read_json_body()
+                    payload = create_reliability_issue_verification_v1(issue_id, body)
+                    self._send_json(HTTPStatus.CREATED, payload)
+                    return True
+                if len(parts) == 5 and parts[4] == "create-work-order":
+                    issue_id = unquote(parts[3])
+                    body = self._read_json_body()
+                    payload = create_reliability_work_order_from_issue_v1(issue_id, body)
+                    self._send_json(HTTPStatus.CREATED, payload)
+                    return True
+                if len(parts) == 5 and parts[4] == "verify":
+                    issue_id = unquote(parts[3])
+                    body = self._read_json_body()
+                    payload = verify_reliability_issue_v1(issue_id, body)
+                    self._send_json(HTTPStatus.CREATED, payload)
+                    return True
+            if path.startswith("/api/reliability/work-orders/"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 5 and parts[4] == "fix-attempts":
+                    work_order_id = unquote(parts[3])
+                    body = self._read_json_body()
+                    payload = create_reliability_work_order_fix_attempt_v1(work_order_id, body)
+                    self._send_json(HTTPStatus.CREATED, payload)
+                    return True
+                if len(parts) == 5 and parts[4] == "record-fix-attempt":
+                    work_order_id = unquote(parts[3])
+                    body = self._read_json_body()
+                    payload = record_reliability_fix_attempt_v1(work_order_id, body)
+                    self._send_json(HTTPStatus.CREATED, payload)
+                    return True
+            if path == "/api/reliability/ai/draft-issue":
+                body = self._read_json_body()
+                payload = draft_reliability_issue_v1(body)
+                status = HTTPStatus.CREATED if payload.get("created") else HTTPStatus.OK
+                self._send_json(status, payload)
+                return True
+            if path == "/api/reliability/readiness/assess":
+                body = self._read_json_body()
+                payload = assess_reliability_readiness_v1(body)
+                self._send_json(HTTPStatus.CREATED, payload)
+                return True
+        except ConfigurationWorkflowApiError as exc:
+            self._send_json(
+                exc.status_code,
+                {
+                    "ok": False,
+                    "message": str(exc),
+                    "reason_codes": exc.reason_codes,
+                    "details": exc.details,
+                },
+            )
+            return True
+        except ValueError as exc:
+            self._send_reliability_error(exc)
+            return True
+        return False
+
+    def _route_reliability_patch(self, path: str) -> bool:
+        try:
+            if path.startswith("/api/reliability/issues/"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 4 and parts[2] == "issues":
+                    issue_id = unquote(parts[3])
+                    body = self._read_json_body()
+                    payload = update_reliability_issue_v1(issue_id, body)
+                    self._send_json(HTTPStatus.OK, payload)
+                    return True
+            if path.startswith("/api/reliability/work-orders/"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 4 and parts[2] == "work-orders":
+                    work_order_id = unquote(parts[3])
+                    body = self._read_json_body()
+                    payload = update_reliability_work_order_v1(work_order_id, body)
+                    self._send_json(HTTPStatus.OK, payload)
+                    return True
+            if path.startswith("/api/reliability/fix-attempts/"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 4 and parts[2] == "fix-attempts":
+                    fix_attempt_id = unquote(parts[3])
+                    body = self._read_json_body()
+                    payload = update_reliability_fix_attempt_v1(fix_attempt_id, body)
+                    self._send_json(HTTPStatus.OK, payload)
+                    return True
+            if path.startswith("/api/reliability/verifications/"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 4 and parts[2] == "verifications":
+                    verification_id = unquote(parts[3])
+                    body = self._read_json_body()
+                    payload = update_reliability_verification_v1(verification_id, body)
+                    self._send_json(HTTPStatus.OK, payload)
+                    return True
+        except ConfigurationWorkflowApiError as exc:
+            self._send_json(
+                exc.status_code,
+                {
+                    "ok": False,
+                    "message": str(exc),
+                    "reason_codes": exc.reason_codes,
+                    "details": exc.details,
+                },
+            )
+            return True
+        except ValueError as exc:
+            self._send_reliability_error(exc)
+            return True
+        return False
 
     def _health_payload(self) -> Dict[str, Any]:
         host = ""
@@ -1657,7 +2202,9 @@ class OpsHandler(SimpleHTTPRequestHandler):
     def translate_path(self, path: str) -> str:
         u = urlparse(path)
         normalized = u.path.rstrip("/") or "/"
-        if normalized in self.SHELL_ROUTES:
+        if normalized.startswith("/reliability/work-orders/") and normalized != "/reliability/work-orders":
+            rel = "index.html"
+        elif normalized in self.SHELL_ROUTES:
             rel = "index.html"
         else:
             rel = u.path.lstrip("/")
@@ -1677,6 +2224,10 @@ class OpsHandler(SimpleHTTPRequestHandler):
         qs = parse_qs(u.query)
         raw_day = (qs.get("day") or [None])[0]
         requested_day = raw_day if isinstance(raw_day, str) and raw_day and _is_day_str(raw_day) else None
+
+        if path.startswith("/api/reliability/"):
+            if self._route_reliability_get(path, qs):
+                return True
 
         if path == "/api/shared/status-semantics":
             self._send_json(HTTPStatus.OK, {"ok": True, "status_semantics": STATUS_SEMANTICS})
@@ -1715,6 +2266,10 @@ class OpsHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/operations":
             self._send_json(HTTPStatus.OK, build_operations_view(requested_day))
+            return True
+
+        if path == "/api/command/overview":
+            self._send_json(HTTPStatus.OK, build_command_overview_view(requested_day))
             return True
 
         if path == "/api/operator-workflow":
@@ -2181,6 +2736,8 @@ class OpsHandler(SimpleHTTPRequestHandler):
         path = u.path
         if path.startswith("/api/configuration/"):
             return self._route_configuration_post()
+        if path.startswith("/api/reliability/"):
+            return self._route_reliability_post(path)
         if path.startswith("/api/commands/"):
             try:
                 content_length = int(self.headers.get("Content-Length") or "0")
@@ -2246,6 +2803,12 @@ class OpsHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         if self._route_action_post():
+            return
+        self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "errors": ["ENDPOINT_NOT_FOUND"], "path": self.path})
+
+    def do_PATCH(self) -> None:
+        path = urlparse(self.path).path
+        if path.startswith("/api/reliability/") and self._route_reliability_patch(path):
             return
         self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "errors": ["ENDPOINT_NOT_FOUND"], "path": self.path})
 

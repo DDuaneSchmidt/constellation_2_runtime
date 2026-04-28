@@ -9,6 +9,7 @@ from constellation_2.common.execution_evidence_current_head_v1 import (
     evaluate_execution_evidence_current_head_v1,
     write_execution_evidence_current_head_v1,
 )
+from constellation_2.common.paper_submit_mode_status_v1 import classify_paper_submit_mode_status_v1
 
 
 SCHEMA_VERSION = "submission_index.v1"
@@ -178,6 +179,9 @@ def evaluate_submission_index_v1(
 
     attempts: list[dict[str, Any]] = []
     blocking_evidence: list[dict[str, str]] = []
+    diagnostic_evidence: list[dict[str, str]] = []
+    submit_mode = classify_paper_submit_mode_status_v1(execution_root=execution_root, day_utc=day_utc)
+    dry_run_complete = str(submit_mode.get("submit_mode_status") or "").strip().upper() == "DRY_RUN_COMPLETE"
 
     for submission_dir in _submission_attempts(submissions_day_dir):
         submission_record_path = (submission_dir / "broker_submission_record.v2.json").resolve()
@@ -212,6 +216,13 @@ def evaluate_submission_index_v1(
                 submit_attempt_payload = _read_json(submit_attempt_path)
             except Exception:
                 submit_attempt_payload = {}
+        submission_is_dry_run = bool(
+            submit_attempt_payload.get("dry_run") is True
+            or str((record_payload.get("error") or {}).get("code") if isinstance(record_payload.get("error"), dict) else "")
+            .strip()
+            .upper()
+            == "DRY_RUN_NO_BROKER_ID"
+        )
 
         execution_event_payload: dict[str, Any] = {}
         if execution_event_path.exists() and execution_event_path.is_file():
@@ -242,22 +253,26 @@ def evaluate_submission_index_v1(
             execution_event_payload=execution_event_payload,
         )
         if not isinstance(broker_order_id, int):
-            submission_blockers.append(
-                _blocking_entry(
-                    "BROKER_ORDER_ID_MISSING",
-                    str(submission_record_path),
-                    "broker_ids.order_id is missing",
-                )
+            entry = _blocking_entry(
+                "BROKER_ORDER_ID_MISSING",
+                str(submission_record_path),
+                "broker_ids.order_id is missing",
             )
+            if submission_is_dry_run:
+                diagnostic_evidence.append(entry)
+            else:
+                submission_blockers.append(entry)
 
         if not broker_perm_field_present:
-            submission_blockers.append(
-                _blocking_entry(
-                    "BROKER_PERM_ID_FIELD_MISSING",
-                    str(submission_record_path),
-                    "broker_ids.perm_id field is missing",
-                )
+            entry = _blocking_entry(
+                "BROKER_PERM_ID_FIELD_MISSING",
+                str(submission_record_path),
+                "broker_ids.perm_id field is missing",
             )
+            if submission_is_dry_run:
+                diagnostic_evidence.append(entry)
+            else:
+                submission_blockers.append(entry)
 
         submission_status = str(record_payload.get("status") or "").strip().upper()
         if broker_perm_id == 0 and submission_status not in {"PENDINGSUBMIT", "PRESUBMITTED", "SUBMITTED", "PENDINGCANCEL"}:
@@ -270,7 +285,7 @@ def evaluate_submission_index_v1(
             )
 
         stream_records = _stream_records_for_submission(stream_day_dir, submission_id)
-        if not stream_records:
+        if not stream_records and not submission_is_dry_run:
             if stream_failure_path.exists() and stream_failure_path.is_file():
                 submission_blockers.append(
                     _blocking_entry(
@@ -291,13 +306,22 @@ def evaluate_submission_index_v1(
         fill_path = (fill_day_dir / f"{submission_id}.fill_ledger.v1.json").resolve()
         fill_payload: dict[str, Any] = {}
         if not fill_path.exists() or not fill_path.is_file():
-            submission_blockers.append(
-                _blocking_entry(
-                    "FILL_LEDGER_MISSING",
-                    str(fill_path),
-                    "fill ledger artifact is missing",
+            if submission_is_dry_run:
+                diagnostic_evidence.append(
+                    _blocking_entry(
+                        "FILL_LEDGER_MISSING",
+                        str(fill_path),
+                        "fill ledger artifact is missing for dry-run submit",
+                    )
                 )
-            )
+            else:
+                submission_blockers.append(
+                    _blocking_entry(
+                        "FILL_LEDGER_MISSING",
+                        str(fill_path),
+                        "fill ledger artifact is missing",
+                    )
+                )
         else:
             try:
                 fill_payload = _read_json(fill_path)
@@ -425,7 +449,7 @@ def evaluate_submission_index_v1(
             cross_surface_match_count = len(attempt_id_bridge_evidence) - (1 if record_matches_submission else 0)
             if record_matches_submission and cross_surface_match_count >= 2:
                 attempt_id_source = "SUBMISSION_ID_BRIDGE_PROVEN"
-            else:
+            elif not submission_is_dry_run:
                 attempt_id_source = "SUBMISSION_ID_BRIDGE_UNPROVEN"
                 submission_blockers.append(
                     _blocking_entry(
@@ -449,13 +473,16 @@ def evaluate_submission_index_v1(
                 "broker_perm_id_source": broker_perm_id_source,
                 "linkage_method": linkage_method,
                 "linkage_confidence": linkage_confidence,
+                "submit_mode_status": "DRY_RUN_COMPLETE" if submission_is_dry_run else submit_mode.get("submit_mode_status", ""),
+                "broker_transmit_enabled": False if submission_is_dry_run else submit_mode.get("broker_transmit_enabled"),
+                "broker_order_transmitted": False if submission_is_dry_run else submit_mode.get("broker_order_transmitted"),
                 "lineage_status": "PASS" if not submission_blockers else "GAP",
                 "blocking_evidence": submission_blockers,
             }
         )
         blocking_evidence.extend(submission_blockers)
 
-    if str(current_head.get("status") or "").strip().upper() != "PASS":
+    if str(current_head.get("status") or "").strip().upper() != "PASS" and not dry_run_complete:
         rejected = current_head.get("rejected_candidates") if isinstance(current_head.get("rejected_candidates"), list) else []
         reasons = {str(item.get("reason") or "").strip().upper() for item in rejected if isinstance(item, dict)}
         if "STALE_DAY" in reasons or "DAY_MISMATCH" in reasons:
@@ -482,8 +509,15 @@ def evaluate_submission_index_v1(
         "sleeve": sleeve,
         "environment": environment,
         "status": status,
+        "submit_mode_status": submit_mode.get("submit_mode_status", "NO_SUBMIT_ATTEMPT"),
+        "dry_run_policy": submit_mode.get("dry_run_policy", "UNKNOWN"),
+        "broker_transmit_enabled": submit_mode.get("broker_transmit_enabled"),
+        "broker_order_transmitted": submit_mode.get("broker_order_transmitted"),
+        "missing_broker_ids_blocker": submit_mode.get("missing_broker_ids_blocker"),
+        "missing_broker_ids_diagnostic": submit_mode.get("missing_broker_ids_diagnostic"),
         "attempts": attempts,
         "blocking_evidence": blocking_evidence,
+        "diagnostic_evidence": diagnostic_evidence,
         "generated_at_utc": _utc_now_iso(),
     }
 

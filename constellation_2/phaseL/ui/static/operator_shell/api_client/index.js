@@ -1,5 +1,3 @@
-const LOCAL_OPERATOR_API_ORIGIN = "http://127.0.0.1:8787";
-
 function normalizeBaseUrl(value) {
   const trimmed = String(value || "").trim();
   if (!trimmed) {
@@ -18,12 +16,6 @@ function resolveApiBaseUrl() {
     return explicitBase;
   }
 
-  const hostname = String(window.location?.hostname || "").toLowerCase();
-  const port = String(window.location?.port || "");
-  const isLocalHost = hostname === "127.0.0.1" || hostname === "localhost";
-  if (isLocalHost && port && port !== "8787") {
-    return LOCAL_OPERATOR_API_ORIGIN;
-  }
   return "";
 }
 
@@ -157,6 +149,14 @@ export async function fetchJson(path) {
 export async function postJson(path, body) {
   return requestJson(path, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+}
+
+export async function patchJson(path, body) {
+  return requestJson(path, {
+    method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body || {}),
   });

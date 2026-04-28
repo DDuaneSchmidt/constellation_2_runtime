@@ -21,6 +21,7 @@ from ops.tools.repo_protection_common_v1 import (
     require_runtime_output_outside_repo_runtime_v1,
 )
 from ops.tools.require_canonical_repo_clean_v1 import evaluate_canonical_cleanliness_v1
+from constellation_2.common.paper_submit_mode_status_v1 import classify_paper_submit_mode_status_v1
 
 LATEST_PACKET_PATH = (
     RUNTIME_DATA_ROOT / "exports" / "aegis_state" / "latest" / "chatgpt_aegis_packet.md"
@@ -67,6 +68,51 @@ class PaperStatus:
 
 
 @dataclass(frozen=True)
+class SourceIntegrityGate:
+    raw_git_dirty_status: str
+    raw_dirty_path_count: int
+    raw_source_reproducibility_status: str
+    raw_canonical_repo_protection_status: str
+    effective_status: str
+    effective_blocker: str
+    effective_owner: str
+    effective_gate: str
+
+
+@dataclass(frozen=True)
+class ReadinessSignal:
+    input_name: str
+    classification: str
+    status: str
+    code: str
+    owner: str
+    gate: str
+    root_cause_id: str
+
+
+@dataclass(frozen=True)
+class GradeProfile:
+    overall_grade: int
+    readiness_grade: int
+    functional_completeness_grade: int
+    architecture_operational_integrity_grade: int
+    grade_cap: int
+    cap_reason: str
+    unique_root_cause_count: int
+
+
+@dataclass(frozen=True)
+class FinalReadinessDecision:
+    status: str
+    canonical_blocker: str
+    owning_subsystem: str
+    owning_gate: str
+    reason: str
+    signals: list[ReadinessSignal]
+    grade_profile: GradeProfile
+
+
+@dataclass(frozen=True)
 class CurrentCalendarDayStatus:
     day_utc: str
     is_trading_session: str
@@ -86,6 +132,30 @@ class LatestTradingDayEvidenceStatus:
     canonical_blocker: str
     submit_boundary_status_path: str
     closure_authority_path: str
+    trade_lineage_graph_path: str
+    execution_lifecycle_authority_path: str
+    runtime_service_authority_path: str
+    market_data_authority_path: str
+    strategy_decision_authority_path: str
+    portfolio_account_authority_path: str
+    risk_sizing_authority_path: str
+    execution_mode_authority_path: str
+    trading_day_closure_authority_path: str
+    runtime_service_state: str
+    market_data_state: str
+    market_data_operator_impact: str
+    strategy_decision_state: str
+    strategy_intent_count: str
+    strategy_zero_intent_reason: str
+    portfolio_account_state: str
+    portfolio_cash_total_cents: str
+    portfolio_net_liquidation_cents: str
+    risk_sizing_state: str
+    risk_final_size: str
+    execution_mode_state: str
+    execution_mode_environment: str
+    broker_transmit_enabled: str
+    trading_day_closure_state: str
     current_head_path: str
     submission_index_path: str
     evidence: str
@@ -454,6 +524,44 @@ def _find_execution_stream_records_for_submission(
     return sorted(set(out))
 
 
+def _trade_lineage_graph_path(canonical_truth_root: Path | None, day_utc: str) -> Path | None:
+    if canonical_truth_root is None or not DATE_RE.match(str(day_utc or "")):
+        return None
+    return (
+        canonical_truth_root
+        / "reports"
+        / "trade_lineage_graph_v1"
+        / day_utc
+        / "trade_lineage_graph.v1.json"
+    ).resolve()
+
+
+def _trade_lineage_row_for_submission(
+    canonical_truth_root: Path | None,
+    day_utc: str,
+    submission_id: str,
+) -> tuple[Path | None, dict[str, Any] | None]:
+    path = _trade_lineage_graph_path(canonical_truth_root, day_utc)
+    graph = _read_json(path)
+    if not isinstance(graph, dict):
+        return path, None
+    for row in graph.get("lineages", []):
+        if isinstance(row, dict) and str(row.get("submission_id") or "").strip() == submission_id:
+            return path, row
+    return path, None
+
+
+def _report_authority_path(
+    canonical_truth_root: Path | None,
+    family: str,
+    day_utc: str,
+    filename: str,
+) -> Path | None:
+    if canonical_truth_root is None or not DATE_RE.match(str(day_utc or "")):
+        return None
+    return (canonical_truth_root / "reports" / family / day_utc / filename).resolve()
+
+
 def _build_active_components(roots: RootResolution) -> str:
     rows: list[ComponentRow] = []
     rows.append(
@@ -638,6 +746,51 @@ def _build_current_functionality(roots: RootResolution) -> str:
         last_validated_at_utc=_mtime_utc(submit_boundary_path),
     )
 
+    _, lifecycle_authority_path = _latest_day_with_file(
+        roots.runtime_truth_root,
+        "reports/execution_lifecycle_authority_v1",
+        "execution_lifecycle_authority.v1.json",
+    )
+    _, trade_lineage_graph_path = _latest_day_with_file(
+        roots.canonical_truth_root,
+        "reports/trade_lineage_graph_v1",
+        "trade_lineage_graph.v1.json",
+    )
+    _, runtime_service_authority_path = _latest_day_with_file(
+        roots.canonical_truth_root,
+        "reports/runtime_service_authority_v1",
+        "runtime_service_authority.v1.json",
+    )
+    _, market_data_authority_path = _latest_day_with_file(
+        roots.canonical_truth_root,
+        "reports/market_data_authority_v1",
+        "market_data_authority.v1.json",
+    )
+    _, execution_mode_authority_path = _latest_day_with_file(
+        roots.canonical_truth_root,
+        "reports/execution_mode_authority_v1",
+        "execution_mode_authority.v1.json",
+    )
+    _, strategy_decision_authority_path = _latest_day_with_file(
+        roots.canonical_truth_root,
+        "reports/strategy_decision_authority_v1",
+        "strategy_decision_authority.v1.json",
+    )
+    _, portfolio_account_authority_path = _latest_day_with_file(
+        roots.canonical_truth_root,
+        "reports/portfolio_account_authority_v1",
+        "portfolio_account_authority.v1.json",
+    )
+    _, risk_sizing_authority_path = _latest_day_with_file(
+        roots.canonical_truth_root,
+        "reports/risk_sizing_authority_v1",
+        "risk_sizing_authority.v1.json",
+    )
+    _, trading_day_closure_authority_path = _latest_day_with_file(
+        roots.canonical_truth_root,
+        "reports/trading_day_closure_authority_v1",
+        "trading_day_closure_authority.v1.json",
+    )
     latest_broker = _find_latest_broker_submission_record(
         canonical_truth_root=roots.canonical_truth_root,
         runtime_truth_root=roots.runtime_truth_root,
@@ -661,20 +814,59 @@ def _build_current_functionality(roots: RootResolution) -> str:
         last_validated_at_utc=_mtime_utc(latest_broker),
     )
 
-    latest_fill = None
-    if latest_broker and DATE_RE.match(latest_broker.parent.parent.name):
-        sid = str((latest_broker_obj or {}).get("submission_id") or latest_broker.parent.name)
-        latest_fill = _find_fill_ledger_for_submission(
-            sid,
-            latest_broker.parent.parent.name,
-            roots.canonical_truth_root,
-            roots.runtime_truth_root,
-        )
     add(
         capability="lifecycle tracking",
-        status=_status_for_capability(latest_fill) if latest_fill else ("PRESENT_UNPROVEN" if latest_broker else "UNKNOWN"),
-        evidence=str(latest_fill) if latest_fill else (str(latest_broker) if latest_broker else "NOT_FOUND"),
-        last_validated_at_utc=_mtime_utc(latest_fill if latest_fill else latest_broker),
+        status=_status_for_capability(lifecycle_authority_path) if lifecycle_authority_path else ("PRESENT_UNPROVEN" if latest_broker else "UNKNOWN"),
+        evidence=str(lifecycle_authority_path) if lifecycle_authority_path else (str(latest_broker) if latest_broker else "NOT_FOUND"),
+        last_validated_at_utc=_mtime_utc(lifecycle_authority_path if lifecycle_authority_path else latest_broker),
+    )
+    add(
+        capability="trade identity lineage",
+        status=_status_for_capability(trade_lineage_graph_path),
+        evidence=str(trade_lineage_graph_path) if trade_lineage_graph_path else "NOT_FOUND",
+        last_validated_at_utc=_mtime_utc(trade_lineage_graph_path),
+    )
+    add(
+        capability="runtime service authority",
+        status=_status_for_capability(runtime_service_authority_path),
+        evidence=str(runtime_service_authority_path) if runtime_service_authority_path else "NOT_FOUND",
+        last_validated_at_utc=_mtime_utc(runtime_service_authority_path),
+    )
+    add(
+        capability="market data authority",
+        status=_status_for_capability(market_data_authority_path),
+        evidence=str(market_data_authority_path) if market_data_authority_path else "NOT_FOUND",
+        last_validated_at_utc=_mtime_utc(market_data_authority_path),
+    )
+    add(
+        capability="execution mode authority",
+        status=_status_for_capability(execution_mode_authority_path),
+        evidence=str(execution_mode_authority_path) if execution_mode_authority_path else "NOT_FOUND",
+        last_validated_at_utc=_mtime_utc(execution_mode_authority_path),
+    )
+    add(
+        capability="strategy decision authority",
+        status=_status_for_capability(strategy_decision_authority_path),
+        evidence=str(strategy_decision_authority_path) if strategy_decision_authority_path else "NOT_FOUND",
+        last_validated_at_utc=_mtime_utc(strategy_decision_authority_path),
+    )
+    add(
+        capability="portfolio account authority",
+        status=_status_for_capability(portfolio_account_authority_path),
+        evidence=str(portfolio_account_authority_path) if portfolio_account_authority_path else "NOT_FOUND",
+        last_validated_at_utc=_mtime_utc(portfolio_account_authority_path),
+    )
+    add(
+        capability="risk sizing authority",
+        status=_status_for_capability(risk_sizing_authority_path),
+        evidence=str(risk_sizing_authority_path) if risk_sizing_authority_path else "NOT_FOUND",
+        last_validated_at_utc=_mtime_utc(risk_sizing_authority_path),
+    )
+    add(
+        capability="trading day closure authority",
+        status=_status_for_capability(trading_day_closure_authority_path),
+        evidence=str(trading_day_closure_authority_path) if trading_day_closure_authority_path else "NOT_FOUND",
+        last_validated_at_utc=_mtime_utc(trading_day_closure_authority_path),
     )
 
     _, reconciliation_path = _latest_day_with_file(
@@ -752,6 +944,22 @@ def _build_current_calendar_day_runtime_status(roots: RootResolution) -> Current
         (authority_payload or {}).get("authority_status") or "MISSING"
     ).strip().upper()
     authority_blocker = _first_reason_code(authority_payload)
+    day_authority_path = (
+        roots.canonical_truth_root
+        / "reports"
+        / "paper_trading_day_authority_v1"
+        / day_utc
+        / "paper_trading_day_authority.v1.json"
+    ).resolve() if roots.canonical_truth_root else None
+    day_authority_payload = _read_json(day_authority_path)
+    day_authority_state = str((day_authority_payload or {}).get("state") or "").strip().upper()
+    day_authority_can_submit = bool(
+        (day_authority_payload or {}).get("can_submit_paper_orders") is True
+    )
+    day_authority_blocker = str((day_authority_payload or {}).get("canonical_blocker") or "").strip()
+    day_authority_submit_mode = str((day_authority_payload or {}).get("submit_mode_status") or "").strip().upper()
+    if not day_authority_blocker:
+        day_authority_blocker = _first_reason_code(day_authority_payload, key="reason_codes")
 
     boundary_path = (
         roots.canonical_truth_root
@@ -783,7 +991,17 @@ def _build_current_calendar_day_runtime_status(roots: RootResolution) -> Current
 
     status = "NOT_READY"
     canonical_blocker = "SESSION_AUTHORITY_MISSING"
-    if is_trading_session is None:
+    if day_authority_payload is not None:
+        if day_authority_submit_mode == "DRY_RUN_COMPLETE":
+            status = "DRY_RUN_COMPLETE"
+            canonical_blocker = ""
+        elif day_authority_state == "OPEN_READY" and day_authority_can_submit:
+            status = "READY"
+            canonical_blocker = ""
+        else:
+            status = "NOT_READY"
+            canonical_blocker = day_authority_blocker or "CURRENT_DAY_NOT_READY"
+    elif is_trading_session is None:
         status = "NOT_READY"
         canonical_blocker = "SESSION_AUTHORITY_MISSING"
     elif is_trading_session is False:
@@ -817,15 +1035,28 @@ def _build_current_calendar_day_runtime_status(roots: RootResolution) -> Current
     operator_gate_blocker = str((operator_gate_payload or {}).get("session_day_blocker") or "").strip()
     if not operator_gate_blocker:
         operator_gate_blocker = _first_reason_code(operator_gate_payload, key="reason_codes")
+    operator_gate_produced = str((operator_gate_payload or {}).get("produced_utc") or "").strip()
+    day_authority_produced = str((day_authority_payload or {}).get("produced_at_utc") or "").strip()
+    operator_gate_is_stale = bool(
+        operator_gate_produced and day_authority_produced and operator_gate_produced < day_authority_produced
+    )
+    if operator_gate_is_stale:
+        operator_gate_status = "STALE_DIAGNOSTIC_ONLY"
+        operator_gate_blocker = "IGNORED_CANONICAL_DAY_AUTHORITY_NEWER"
 
     paper_orchestrator_status = bootstrap_status or ("READY" if status == "READY" else "BLOCKED")
     paper_orchestrator_blocker = bootstrap_blocker or canonical_blocker or "UNKNOWN"
 
     global_monitoring_status = "UNKNOWN"
     global_monitoring_blocker = ""
-    if canonical_blocker in {"NON_TRADING_DAY", "NO_ACTIVE_PAPER_SESSION"}:
+    if status == "READY":
+        global_monitoring_status = "OK"
+    elif canonical_blocker in {"NON_TRADING_DAY", "NO_ACTIVE_PAPER_SESSION"}:
         global_monitoring_status = "DEGRADED"
         global_monitoring_blocker = "NO_ACTIVE_PAPER_SESSION"
+    elif canonical_blocker:
+        global_monitoring_status = "DEGRADED"
+        global_monitoring_blocker = canonical_blocker
     elif operator_gate_status == "FAIL" and operator_gate_blocker:
         global_monitoring_status = "DEGRADED"
         global_monitoring_blocker = operator_gate_blocker
@@ -841,6 +1072,7 @@ def _build_current_calendar_day_runtime_status(roots: RootResolution) -> Current
         for path in (
             market_calendar_path,
             authority_path,
+            day_authority_path,
             boundary_path,
             bootstrap_path,
             operator_gate_path if operator_gate_path.exists() else None,
@@ -873,6 +1105,16 @@ def _build_latest_trading_day_evidence_status(roots: RootResolution) -> LatestTr
     evidence_day_utc, _calendar_source = _latest_trading_day_from_calendar(
         roots.canonical_truth_root
     )
+    if evidence_day_utc and roots.canonical_truth_root:
+        calendar_submit_boundary = (
+            roots.canonical_truth_root
+            / "reports"
+            / "submit_boundary_status_v1"
+            / evidence_day_utc
+            / "submit_boundary_status.v1.json"
+        )
+        if not calendar_submit_boundary.exists():
+            evidence_day_utc = None
     if not evidence_day_utc:
         evidence_day_utc, _unused = _latest_day_with_file(
             roots.canonical_truth_root,
@@ -886,6 +1128,30 @@ def _build_latest_trading_day_evidence_status(roots: RootResolution) -> LatestTr
             canonical_blocker="AEGIS_STATE_NOT_PROVEN",
             submit_boundary_status_path="NOT_FOUND",
             closure_authority_path="NOT_FOUND",
+            trade_lineage_graph_path="NOT_FOUND",
+            execution_lifecycle_authority_path="NOT_FOUND",
+            runtime_service_authority_path="NOT_FOUND",
+            market_data_authority_path="NOT_FOUND",
+            strategy_decision_authority_path="NOT_FOUND",
+            portfolio_account_authority_path="NOT_FOUND",
+            risk_sizing_authority_path="NOT_FOUND",
+            execution_mode_authority_path="NOT_FOUND",
+            trading_day_closure_authority_path="NOT_FOUND",
+            runtime_service_state="UNKNOWN",
+            market_data_state="UNKNOWN",
+            market_data_operator_impact="UNKNOWN",
+            strategy_decision_state="UNKNOWN",
+            strategy_intent_count="UNKNOWN",
+            strategy_zero_intent_reason="UNKNOWN",
+            portfolio_account_state="UNKNOWN",
+            portfolio_cash_total_cents="UNKNOWN",
+            portfolio_net_liquidation_cents="UNKNOWN",
+            risk_sizing_state="UNKNOWN",
+            risk_final_size="UNKNOWN",
+            execution_mode_state="UNKNOWN",
+            execution_mode_environment="UNKNOWN",
+            broker_transmit_enabled="UNKNOWN",
+            trading_day_closure_state="UNKNOWN",
             current_head_path="NOT_FOUND",
             submission_index_path="NOT_FOUND",
             evidence="NOT_FOUND",
@@ -905,6 +1171,56 @@ def _build_latest_trading_day_evidence_status(roots: RootResolution) -> LatestTr
         / evidence_day_utc
         / "aegis_day_closure_authority.v1.json"
     ).resolve() if roots.canonical_truth_root else None
+    execution_lifecycle_authority_path = (
+        roots.runtime_truth_root
+        / "reports"
+        / "execution_lifecycle_authority_v1"
+        / evidence_day_utc
+        / "execution_lifecycle_authority.v1.json"
+    ).resolve() if roots.runtime_truth_root else None
+    trade_lineage_graph_path = _trade_lineage_graph_path(roots.canonical_truth_root, evidence_day_utc)
+    runtime_service_authority_path = _report_authority_path(
+        roots.canonical_truth_root,
+        "runtime_service_authority_v1",
+        evidence_day_utc,
+        "runtime_service_authority.v1.json",
+    )
+    market_data_authority_path = _report_authority_path(
+        roots.canonical_truth_root,
+        "market_data_authority_v1",
+        evidence_day_utc,
+        "market_data_authority.v1.json",
+    )
+    execution_mode_authority_path = _report_authority_path(
+        roots.canonical_truth_root,
+        "execution_mode_authority_v1",
+        evidence_day_utc,
+        "execution_mode_authority.v1.json",
+    )
+    strategy_decision_authority_path = _report_authority_path(
+        roots.canonical_truth_root,
+        "strategy_decision_authority_v1",
+        evidence_day_utc,
+        "strategy_decision_authority.v1.json",
+    )
+    portfolio_account_authority_path = _report_authority_path(
+        roots.canonical_truth_root,
+        "portfolio_account_authority_v1",
+        evidence_day_utc,
+        "portfolio_account_authority.v1.json",
+    )
+    risk_sizing_authority_path = _report_authority_path(
+        roots.canonical_truth_root,
+        "risk_sizing_authority_v1",
+        evidence_day_utc,
+        "risk_sizing_authority.v1.json",
+    )
+    trading_day_closure_authority_path = _report_authority_path(
+        roots.canonical_truth_root,
+        "trading_day_closure_authority_v1",
+        evidence_day_utc,
+        "trading_day_closure_authority.v1.json",
+    )
     current_head_path = (
         roots.runtime_truth_root
         / "execution_evidence_v1"
@@ -921,6 +1237,13 @@ def _build_latest_trading_day_evidence_status(roots: RootResolution) -> LatestTr
 
     submit_boundary_payload = _read_json(submit_boundary_path)
     closure_payload = _read_json(closure_authority_path)
+    runtime_service_payload = _read_json(runtime_service_authority_path)
+    market_data_payload = _read_json(market_data_authority_path)
+    strategy_decision_payload = _read_json(strategy_decision_authority_path)
+    portfolio_account_payload = _read_json(portfolio_account_authority_path)
+    risk_sizing_payload = _read_json(risk_sizing_authority_path)
+    execution_mode_payload = _read_json(execution_mode_authority_path)
+    trading_day_closure_payload = _read_json(trading_day_closure_authority_path)
     current_head_payload = _read_json(current_head_path)
     submission_index_payload = _read_json(submission_index_path)
 
@@ -939,7 +1262,11 @@ def _build_latest_trading_day_evidence_status(roots: RootResolution) -> LatestTr
         boundary_status = str(submit_boundary_payload.get("boundary_status") or "").strip().upper()
         submission_authorized = submit_boundary_payload.get("submission_authorized")
         first_blocker = str(submit_boundary_payload.get("first_blocker_code") or "").strip()
-        if boundary_status == "AUTHORIZED" and submission_authorized is True:
+        submit_mode_status = str(submit_boundary_payload.get("submit_mode_status") or "").strip().upper()
+        if submit_mode_status == "DRY_RUN_COMPLETE" or boundary_status == "DRY_RUN_COMPLETE":
+            status = "DRY_RUN_COMPLETE"
+            canonical_blocker = ""
+        elif boundary_status == "AUTHORIZED" and submission_authorized is True:
             status = "READY"
             canonical_blocker = ""
         else:
@@ -960,6 +1287,15 @@ def _build_latest_trading_day_evidence_status(roots: RootResolution) -> LatestTr
         for path in (
             submit_boundary_path,
             closure_authority_path,
+            trade_lineage_graph_path,
+            execution_lifecycle_authority_path,
+            runtime_service_authority_path,
+            market_data_authority_path,
+            strategy_decision_authority_path,
+            portfolio_account_authority_path,
+            risk_sizing_authority_path,
+            execution_mode_authority_path,
+            trading_day_closure_authority_path,
             current_head_path,
             submission_index_path,
         )
@@ -972,48 +1308,420 @@ def _build_latest_trading_day_evidence_status(roots: RootResolution) -> LatestTr
         canonical_blocker=canonical_blocker,
         submit_boundary_status_path=str(submit_boundary_path) if submit_boundary_path else "NOT_FOUND",
         closure_authority_path=str(closure_authority_path) if closure_authority_path else "NOT_FOUND",
+        trade_lineage_graph_path=str(trade_lineage_graph_path) if trade_lineage_graph_path else "NOT_FOUND",
+        execution_lifecycle_authority_path=str(execution_lifecycle_authority_path) if execution_lifecycle_authority_path else "NOT_FOUND",
+        runtime_service_authority_path=str(runtime_service_authority_path) if runtime_service_authority_path else "NOT_FOUND",
+        market_data_authority_path=str(market_data_authority_path) if market_data_authority_path else "NOT_FOUND",
+        strategy_decision_authority_path=str(strategy_decision_authority_path) if strategy_decision_authority_path else "NOT_FOUND",
+        portfolio_account_authority_path=str(portfolio_account_authority_path) if portfolio_account_authority_path else "NOT_FOUND",
+        risk_sizing_authority_path=str(risk_sizing_authority_path) if risk_sizing_authority_path else "NOT_FOUND",
+        execution_mode_authority_path=str(execution_mode_authority_path) if execution_mode_authority_path else "NOT_FOUND",
+        trading_day_closure_authority_path=str(trading_day_closure_authority_path) if trading_day_closure_authority_path else "NOT_FOUND",
+        runtime_service_state=str((runtime_service_payload or {}).get("service_state") or "UNKNOWN").strip().upper(),
+        market_data_state=str((market_data_payload or {}).get("market_data_state") or "UNKNOWN").strip().upper(),
+        market_data_operator_impact=str((market_data_payload or {}).get("operator_impact") or "UNKNOWN").strip().upper(),
+        strategy_decision_state=str((strategy_decision_payload or {}).get("strategy_decision_state") or "UNKNOWN").strip().upper(),
+        strategy_intent_count=str((strategy_decision_payload or {}).get("intent_count") if isinstance(strategy_decision_payload, dict) else "UNKNOWN"),
+        strategy_zero_intent_reason=str((strategy_decision_payload or {}).get("zero_intent_reason") or "<none>").strip() if isinstance(strategy_decision_payload, dict) else "UNKNOWN",
+        portfolio_account_state=str((portfolio_account_payload or {}).get("account_state") or "UNKNOWN").strip().upper(),
+        portfolio_cash_total_cents=str(((portfolio_account_payload or {}).get("account_values") or {}).get("cash_total_cents") if isinstance((portfolio_account_payload or {}).get("account_values"), dict) else "UNKNOWN"),
+        portfolio_net_liquidation_cents=str(((portfolio_account_payload or {}).get("account_values") or {}).get("net_liquidation_cents") if isinstance((portfolio_account_payload or {}).get("account_values"), dict) else "UNKNOWN"),
+        risk_sizing_state=str((risk_sizing_payload or {}).get("risk_sizing_state") or "UNKNOWN").strip().upper(),
+        risk_final_size=json.dumps((risk_sizing_payload or {}).get("final_size_summary") or {}, sort_keys=True) if isinstance(risk_sizing_payload, dict) else "UNKNOWN",
+        execution_mode_state=str((execution_mode_payload or {}).get("mode_state") or "UNKNOWN").strip().upper(),
+        execution_mode_environment=str((execution_mode_payload or {}).get("environment") or "UNKNOWN").strip().upper(),
+        broker_transmit_enabled=str((execution_mode_payload or {}).get("broker_transmit_enabled")).lower() if isinstance((execution_mode_payload or {}).get("broker_transmit_enabled"), bool) else "UNKNOWN",
+        trading_day_closure_state=str((trading_day_closure_payload or {}).get("closure_state") or "UNKNOWN").strip().upper(),
         current_head_path=str(current_head_path) if current_head_path else "NOT_FOUND",
         submission_index_path=str(submission_index_path) if submission_index_path else "NOT_FOUND",
         evidence=evidence,
     )
 
 
-def _build_paper_status(roots: RootResolution) -> PaperStatus:
-    current_day = _build_current_calendar_day_runtime_status(roots)
-    latest_trading_day = _build_latest_trading_day_evidence_status(roots)
-
-    overall_status = current_day.status
-    overall_canonical_blocker = current_day.canonical_blocker
-    owning_subsystem = "current_calendar_day_runtime_status"
-    owning_gate = "market_calendar_session_authority"
-    reason = (
-        f"current_day={current_day.day_utc} "
-        f"is_trading_session={current_day.is_trading_session} "
-        f"paper_session_status={current_day.paper_session_status}"
+def _build_source_integrity_gate(
+    *,
+    git_dirty_status: str,
+    dirty_path_count: int,
+    source_reproducibility_status: str,
+    canonical_repo_protection_status: str,
+) -> SourceIntegrityGate:
+    raw_git_dirty_status = str(git_dirty_status or "UNKNOWN").strip().upper() or "UNKNOWN"
+    raw_source_reproducibility_status = (
+        str(source_reproducibility_status or "UNKNOWN").strip().upper() or "UNKNOWN"
+    )
+    raw_canonical_repo_protection_status = (
+        str(canonical_repo_protection_status or "UNKNOWN").strip().upper() or "UNKNOWN"
+    )
+    if raw_git_dirty_status != "CLEAN" or raw_source_reproducibility_status != "REPRODUCIBLE":
+        return SourceIntegrityGate(
+            raw_git_dirty_status=raw_git_dirty_status,
+            raw_dirty_path_count=int(dirty_path_count),
+            raw_source_reproducibility_status=raw_source_reproducibility_status,
+            raw_canonical_repo_protection_status=raw_canonical_repo_protection_status,
+            effective_status="BLOCKED",
+            effective_blocker="SOURCE_REPRODUCIBILITY_BLOCKED",
+            effective_owner="source_reproducibility_authority",
+            effective_gate="pre_submit_source_integrity_gate",
+        )
+    if raw_canonical_repo_protection_status != "PROTECTED":
+        return SourceIntegrityGate(
+            raw_git_dirty_status=raw_git_dirty_status,
+            raw_dirty_path_count=int(dirty_path_count),
+            raw_source_reproducibility_status=raw_source_reproducibility_status,
+            raw_canonical_repo_protection_status=raw_canonical_repo_protection_status,
+            effective_status="BLOCKED",
+            effective_blocker="CANONICAL_REPO_PROTECTION_BLOCKED",
+            effective_owner="canonical_repo_protection_authority",
+            effective_gate="pre_submit_source_integrity_gate",
+        )
+    return SourceIntegrityGate(
+        raw_git_dirty_status=raw_git_dirty_status,
+        raw_dirty_path_count=int(dirty_path_count),
+        raw_source_reproducibility_status=raw_source_reproducibility_status,
+        raw_canonical_repo_protection_status=raw_canonical_repo_protection_status,
+        effective_status="PASSED",
+        effective_blocker="",
+        effective_owner="",
+        effective_gate="pre_submit_source_integrity_gate",
     )
 
-    if current_day.expected_non_trading_day:
-        overall_status = "NOT_READY"
-        overall_canonical_blocker = current_day.canonical_blocker or "NON_TRADING_DAY"
-        owning_subsystem = "current_calendar_day_runtime_status"
-        owning_gate = "market_calendar_session_authority"
-        reason = f"current day {current_day.day_utc} is non-trading or no active paper session"
-    elif current_day.status == "READY":
-        overall_status = "READY"
-        overall_canonical_blocker = ""
-        owning_subsystem = "current_calendar_day_runtime_status"
-        owning_gate = "current_day_readiness_surfaces"
-        reason = f"current trading day {current_day.day_utc} readiness surfaces report READY"
-    else:
-        overall_status = "NOT_READY"
-        overall_canonical_blocker = current_day.canonical_blocker or "CURRENT_DAY_NOT_READY"
-        owning_subsystem = "current_calendar_day_runtime_status"
-        owning_gate = "current_day_readiness_surfaces"
-        reason = f"current trading day {current_day.day_utc} is not authorized for submission"
 
-    if current_day.expected_non_trading_day and overall_status == "READY":
-        overall_status = "NOT_READY"
-        overall_canonical_blocker = "NON_TRADING_DAY"
+def _signal(
+    *,
+    input_name: str,
+    classification: str,
+    status: str,
+    code: str,
+    owner: str,
+    gate: str,
+    root_cause_id: str,
+) -> ReadinessSignal:
+    return ReadinessSignal(
+        input_name=input_name,
+        classification=classification,
+        status=status,
+        code=code,
+        owner=owner,
+        gate=gate,
+        root_cause_id=root_cause_id,
+    )
+
+
+def _runtime_artifact_status_lines_under_repo(status_lines: list[str]) -> list[str]:
+    out: list[str] = []
+    for line in status_lines:
+        path = line[3:].strip() if len(line) >= 4 else line.strip()
+        if path.startswith("runtime/logs/") or path.startswith("runtime/process_state/"):
+            out.append(path)
+    return out
+
+
+def _collect_readiness_signals(
+    *,
+    roots: RootResolution,
+    current_day: CurrentCalendarDayStatus,
+    latest_trading_day: LatestTradingDayEvidenceStatus,
+    source_integrity_gate: SourceIntegrityGate | None,
+    freshness_status: str,
+    status_lines: list[str],
+) -> list[ReadinessSignal]:
+    signals: list[ReadinessSignal] = []
+    if source_integrity_gate is not None and source_integrity_gate.effective_status == "BLOCKED":
+        signals.append(
+            _signal(
+                input_name="source_integrity_gate",
+                classification="HARD_SAFETY_INVARIANT",
+                status="FAIL",
+                code=source_integrity_gate.effective_blocker,
+                owner=source_integrity_gate.effective_owner,
+                gate=source_integrity_gate.effective_gate,
+                root_cause_id="source_integrity",
+            )
+        )
+    if roots.canonical_truth_root is None or roots.runtime_truth_root is None:
+        signals.append(
+            _signal(
+                input_name="truth_root_resolution",
+                classification="HARD_SAFETY_INVARIANT",
+                status="FAIL",
+                code="TRUTH_ROOT_UNRESOLVED",
+                owner="runtime_truth_root_authority",
+                gate="pre_submit_truth_root_gate",
+                root_cause_id="truth_root_resolution",
+            )
+        )
+    if current_day.status == "READY" and freshness_status != "FRESH":
+        signals.append(
+            _signal(
+                input_name="packet_freshness",
+                classification="HARD_SAFETY_INVARIANT",
+                status="FAIL",
+                code="CURRENT_DAY_PACKET_FRESHNESS_BLOCKED",
+                owner="packet_freshness_authority",
+                gate="pre_submit_packet_freshness_gate",
+                root_cause_id="packet_freshness",
+            )
+        )
+    if latest_trading_day.execution_mode_state == "UNKNOWN":
+        signals.append(
+            _signal(
+                input_name="execution_mode_state",
+                classification="HARD_SAFETY_INVARIANT",
+                status="FAIL",
+                code="EXECUTION_MODE_UNKNOWN_BLOCKED",
+                owner="execution_mode_authority",
+                gate="pre_submit_execution_mode_gate",
+                root_cause_id="execution_mode_unknown",
+            )
+        )
+    if (
+        latest_trading_day.broker_transmit_enabled == "true"
+        and (
+            latest_trading_day.execution_mode_state != "PAPER_TRANSMIT_ENABLED"
+            or latest_trading_day.execution_mode_environment != "PAPER"
+        )
+    ):
+        signals.append(
+            _signal(
+                input_name="broker_transmit_paper_mode_authority",
+                classification="HARD_SAFETY_INVARIANT",
+                status="FAIL",
+                code="BROKER_TRANSMIT_WITHOUT_PAPER_MODE_AUTHORITY",
+                owner="execution_mode_authority",
+                gate="pre_submit_execution_mode_gate",
+                root_cause_id="broker_transmit_without_paper_authority",
+            )
+        )
+    if latest_trading_day.runtime_service_state == "MISSING_REQUIRED_SERVICE":
+        signals.append(
+            _signal(
+                input_name="runtime_service_state",
+                classification="HARD_SAFETY_INVARIANT",
+                status="FAIL",
+                code="MISSING_REQUIRED_RUNTIME_SERVICE",
+                owner="runtime_service_authority",
+                gate="pre_submit_runtime_service_gate",
+                root_cause_id="runtime_service_missing",
+            )
+        )
+    if current_day.status == "READY" and source_integrity_gate is not None and source_integrity_gate.effective_status == "BLOCKED":
+        signals.append(
+            _signal(
+                input_name="submit_path_source_integrity_consistency",
+                classification="HARD_SAFETY_INVARIANT",
+                status="FAIL",
+                code="SUBMIT_PATH_ENABLED_WHILE_SOURCE_INTEGRITY_BLOCKED",
+                owner="source_reproducibility_authority",
+                gate="pre_submit_source_integrity_gate",
+                root_cause_id="source_integrity",
+            )
+        )
+    if _runtime_artifact_status_lines_under_repo(status_lines):
+        signals.append(
+            _signal(
+                input_name="repo_runtime_artifacts",
+                classification="HARD_SAFETY_INVARIANT",
+                status="FAIL",
+                code="SOURCE_REPRODUCIBILITY_BLOCKED",
+                owner="source_reproducibility_authority",
+                gate="pre_submit_source_integrity_gate",
+                root_cause_id="source_integrity",
+            )
+        )
+    if current_day.status not in {"READY", "DRY_RUN_COMPLETE"} and current_day.canonical_blocker:
+        signals.append(
+            _signal(
+                input_name="current_day_readiness_surfaces",
+                classification="OPERATIONAL_BLOCKER",
+                status="FAIL",
+                code=current_day.canonical_blocker,
+                owner="current_calendar_day_runtime_status",
+                gate="current_day_readiness_surfaces",
+                root_cause_id=f"current_day:{current_day.canonical_blocker}",
+            )
+        )
+    if latest_trading_day.status == "NOT_READY" and latest_trading_day.canonical_blocker:
+        signals.append(
+            _signal(
+                input_name="latest_trading_day_evidence_status",
+                classification="OPERATIONAL_BLOCKER",
+                status="FAIL",
+                code=latest_trading_day.canonical_blocker,
+                owner="latest_trading_day_evidence_status",
+                gate="latest_trading_day_evidence_gate",
+                root_cause_id=f"latest_trading_day:{latest_trading_day.canonical_blocker}",
+            )
+        )
+    if (
+        latest_trading_day.market_data_state == "STALE"
+        and latest_trading_day.market_data_operator_impact != "OPERATIONAL_BLOCKER"
+    ):
+        signals.append(
+            _signal(
+                input_name="market_data_state",
+                classification="DEGRADATION_SIGNAL",
+                status="WARN",
+                code="MARKET_DATA_STALE_DIAGNOSTIC",
+                owner="market_data_authority",
+                gate="market_data_degradation_gate",
+                root_cause_id="market_data_stale",
+            )
+        )
+    if (
+        latest_trading_day.market_data_state == "STALE"
+        and latest_trading_day.market_data_operator_impact == "OPERATIONAL_BLOCKER"
+    ):
+        signals.append(
+            _signal(
+                input_name="market_data_state",
+                classification="OPERATIONAL_BLOCKER",
+                status="FAIL",
+                code="MARKET_DATA_STALE_OPERATIONAL_BLOCKER",
+                owner="market_data_authority",
+                gate="market_data_operational_gate",
+                root_cause_id="market_data_stale",
+            )
+        )
+    signals.append(
+        _signal(
+            input_name="latest_paper_trade_attempt",
+            classification="DIAGNOSTIC_ONLY",
+            status="INFO",
+            code="BROKER_PATH_OBSERVATION_ONLY",
+            owner="broker_observation_authority",
+            gate="broker_attempt_diagnostic",
+            root_cause_id="broker_observation",
+        )
+    )
+    signals.append(
+        _signal(
+            input_name="files_changed_since_last_commit",
+            classification="REPORTING_ONLY",
+            status="INFO",
+            code="DIRTY_PATH_LIST_REPORTING_ONLY",
+            owner="packet_reporting",
+            gate="files_changed_section",
+            root_cause_id="dirty_path_reporting",
+        )
+    )
+    return signals
+
+
+def _dedupe_enforcing_signals(signals: list[ReadinessSignal]) -> list[ReadinessSignal]:
+    out: list[ReadinessSignal] = []
+    seen: set[tuple[str, str]] = set()
+    for signal in signals:
+        if signal.classification in {"DIAGNOSTIC_ONLY", "REPORTING_ONLY"}:
+            continue
+        key = (signal.classification, signal.root_cause_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(signal)
+    return out
+
+
+def _build_grade_profile(signals: list[ReadinessSignal]) -> GradeProfile:
+    enforcing = _dedupe_enforcing_signals(signals)
+    classes = {signal.classification for signal in enforcing}
+    if "HARD_SAFETY_INVARIANT" in classes:
+        cap = 40
+        cap_reason = "HARD_SAFETY_INVARIANT"
+    elif "OPERATIONAL_BLOCKER" in classes:
+        cap = 65
+        cap_reason = "OPERATIONAL_BLOCKER"
+    elif "DEGRADATION_SIGNAL" in classes:
+        cap = 85
+        cap_reason = "DEGRADATION_SIGNAL"
+    else:
+        cap = 92
+        cap_reason = "READY_BASELINE"
+
+    root_causes = {signal.root_cause_id for signal in enforcing}
+    deductions = 0
+    for signal in enforcing:
+        if signal.classification == "HARD_SAFETY_INVARIANT":
+            deductions += 8
+        elif signal.classification == "OPERATIONAL_BLOCKER":
+            deductions += 6
+        elif signal.classification == "DEGRADATION_SIGNAL":
+            deductions += 3
+    overall = min(92 - deductions, cap)
+    overall = max(0, overall)
+    readiness = min(overall, cap)
+    functional = max(0, min(88 - sum(4 for s in enforcing if s.classification == "OPERATIONAL_BLOCKER"), cap))
+    architecture = max(0, min(88 - sum(5 for s in enforcing if s.classification == "HARD_SAFETY_INVARIANT"), cap))
+    return GradeProfile(
+        overall_grade=int(overall),
+        readiness_grade=int(readiness),
+        functional_completeness_grade=int(functional),
+        architecture_operational_integrity_grade=int(architecture),
+        grade_cap=int(cap),
+        cap_reason=cap_reason,
+        unique_root_cause_count=len(root_causes),
+    )
+
+
+def _decide_final_readiness(
+    *,
+    current_day: CurrentCalendarDayStatus,
+    latest_trading_day: LatestTradingDayEvidenceStatus,
+    signals: list[ReadinessSignal],
+) -> FinalReadinessDecision:
+    enforcing = _dedupe_enforcing_signals(signals)
+    hard = [s for s in enforcing if s.classification == "HARD_SAFETY_INVARIANT"]
+    operational = [s for s in enforcing if s.classification == "OPERATIONAL_BLOCKER"]
+    degradation = [s for s in enforcing if s.classification == "DEGRADATION_SIGNAL"]
+    if hard:
+        first = hard[0]
+        status = "BLOCKED"
+        reason = f"hard safety invariant failed: {first.code}"
+    elif operational:
+        first = operational[0]
+        status = "NOT_READY"
+        reason = f"operational blocker failed: {first.code}"
+    elif degradation:
+        first = degradation[0]
+        status = "DEGRADED_READY" if current_day.status == "READY" else "NOT_READY"
+        reason = f"degradation signal present: {first.code}"
+    elif current_day.status == "READY" and latest_trading_day.status == "READY":
+        first = None
+        status = "READY"
+        reason = f"current trading day {current_day.day_utc} readiness surfaces report READY"
+    elif current_day.status == "DRY_RUN_COMPLETE":
+        first = None
+        status = "NOT_READY"
+        reason = f"current trading day {current_day.day_utc} completed in dry-run mode"
+    else:
+        first = _signal(
+            input_name="current_day_readiness_surfaces",
+            classification="OPERATIONAL_BLOCKER",
+            status="FAIL",
+            code=current_day.canonical_blocker or "CURRENT_DAY_NOT_READY",
+            owner="current_calendar_day_runtime_status",
+            gate="current_day_readiness_surfaces",
+            root_cause_id=f"current_day:{current_day.canonical_blocker or 'CURRENT_DAY_NOT_READY'}",
+        )
+        status = "NOT_READY"
+        reason = f"current trading day {current_day.day_utc} is not authorized for submission"
+    return FinalReadinessDecision(
+        status=status,
+        canonical_blocker=first.code if first is not None else "",
+        owning_subsystem=first.owner if first is not None else "current_calendar_day_runtime_status",
+        owning_gate=first.gate if first is not None else "current_day_readiness_surfaces",
+        reason=reason,
+        signals=signals,
+        grade_profile=_build_grade_profile(signals),
+    )
+
+
+def _build_paper_status(
+    roots: RootResolution,
+    source_integrity_gate: SourceIntegrityGate | None = None,
+    status_lines: list[str] | None = None,
+) -> PaperStatus:
+    current_day = _build_current_calendar_day_runtime_status(roots)
+    latest_trading_day = _build_latest_trading_day_evidence_status(roots)
 
     freshness_day = (
         current_day.day_utc
@@ -1021,6 +1729,19 @@ def _build_paper_status(roots: RootResolution) -> PaperStatus:
         else latest_trading_day.evidence_day_utc
     )
     freshness_status = _freshness_status_for_day(freshness_day)
+    signals = _collect_readiness_signals(
+        roots=roots,
+        current_day=current_day,
+        latest_trading_day=latest_trading_day,
+        source_integrity_gate=source_integrity_gate,
+        freshness_status=freshness_status,
+        status_lines=status_lines or [],
+    )
+    final_decision = _decide_final_readiness(
+        current_day=current_day,
+        latest_trading_day=latest_trading_day,
+        signals=signals,
+    )
 
     section_lines = [
         "## Current Calendar Day Runtime Status",
@@ -1039,6 +1760,30 @@ def _build_paper_status(roots: RootResolution) -> PaperStatus:
         f"- evidence_day_utc: {latest_trading_day.evidence_day_utc}",
         f"- submit_boundary_status_path: {latest_trading_day.submit_boundary_status_path}",
         f"- closure_authority_path: {latest_trading_day.closure_authority_path}",
+        f"- trade_lineage_graph_path: {latest_trading_day.trade_lineage_graph_path}",
+        f"- execution_lifecycle_authority_path: {latest_trading_day.execution_lifecycle_authority_path}",
+        f"- runtime_service_authority_path: {latest_trading_day.runtime_service_authority_path}",
+        f"- market_data_authority_path: {latest_trading_day.market_data_authority_path}",
+        f"- strategy_decision_authority_path: {latest_trading_day.strategy_decision_authority_path}",
+        f"- portfolio_account_authority_path: {latest_trading_day.portfolio_account_authority_path}",
+        f"- risk_sizing_authority_path: {latest_trading_day.risk_sizing_authority_path}",
+        f"- execution_mode_authority_path: {latest_trading_day.execution_mode_authority_path}",
+        f"- trading_day_closure_authority_path: {latest_trading_day.trading_day_closure_authority_path}",
+        f"- runtime_service_state: {latest_trading_day.runtime_service_state}",
+        f"- market_data_state: {latest_trading_day.market_data_state}",
+        f"- market_data_operator_impact: {latest_trading_day.market_data_operator_impact}",
+        f"- strategy_decision_state: {latest_trading_day.strategy_decision_state}",
+        f"- strategy_intent_count: {latest_trading_day.strategy_intent_count}",
+        f"- strategy_zero_intent_reason: {latest_trading_day.strategy_zero_intent_reason}",
+        f"- portfolio_account_state: {latest_trading_day.portfolio_account_state}",
+        f"- portfolio_cash_total_cents: {latest_trading_day.portfolio_cash_total_cents}",
+        f"- portfolio_net_liquidation_cents: {latest_trading_day.portfolio_net_liquidation_cents}",
+        f"- risk_sizing_state: {latest_trading_day.risk_sizing_state}",
+        f"- risk_final_size: {latest_trading_day.risk_final_size}",
+        f"- execution_mode_state: {latest_trading_day.execution_mode_state}",
+        f"- execution_mode_environment: {latest_trading_day.execution_mode_environment}",
+        f"- broker_transmit_enabled: {latest_trading_day.broker_transmit_enabled}",
+        f"- trading_day_closure_state: {latest_trading_day.trading_day_closure_state}",
         f"- current_head_path: {latest_trading_day.current_head_path}",
         f"- submission_index_path: {latest_trading_day.submission_index_path}",
         f"- status: {latest_trading_day.status}",
@@ -1046,20 +1791,65 @@ def _build_paper_status(roots: RootResolution) -> PaperStatus:
         "",
         "## Aegis Paper-Trading Status",
         "",
-        f"- status: {overall_status}",
-        f"- canonical_blocker: {overall_canonical_blocker}",
+        f"- status: {final_decision.status}",
+        f"- canonical_blocker: {final_decision.canonical_blocker}",
         f"- latest_trading_day_blocker: {latest_trading_day.canonical_blocker}",
-        f"- owning_subsystem: {owning_subsystem}",
-        f"- owning_gate: {owning_gate}",
+        f"- owning_subsystem: {final_decision.owning_subsystem}",
+        f"- owning_gate: {final_decision.owning_gate}",
+        (
+            f"- effective_source_integrity_gate_status: "
+            f"{source_integrity_gate.effective_status if source_integrity_gate else 'UNKNOWN'}"
+        ),
+        (
+            f"- effective_source_integrity_gate_blocker: "
+            f"{source_integrity_gate.effective_blocker if source_integrity_gate else 'UNKNOWN'}"
+        ),
+        (
+            f"- effective_source_integrity_gate_owner: "
+            f"{source_integrity_gate.effective_owner if source_integrity_gate else 'UNKNOWN'}"
+        ),
         (
             f"- evidence: {current_day.evidence} ; latest_trading_day={latest_trading_day.evidence_day_utc}:{latest_trading_day.evidence}"
         ),
-        f"- reason: {reason}",
+        f"- reason: {final_decision.reason}",
         "",
+        "## Aegis Brittleness Map",
+        "",
+        "- final_readiness_authority: packet_final_readiness_authority_v1",
+        "- decision_model: HARD_SAFETY_INVARIANT => BLOCKED; OPERATIONAL_BLOCKER => NOT_READY; DEGRADATION_SIGNAL => DEGRADED_READY; DIAGNOSTIC_ONLY/REPORTING_ONLY => non-decisional",
+        "- inputs:",
     ]
+    for signal in signals:
+        section_lines.extend(
+            [
+                f"  - input: {signal.input_name}",
+                f"    - classification: {signal.classification}",
+                f"    - status: {signal.status}",
+                f"    - code: {signal.code}",
+                f"    - owner: {signal.owner}",
+                f"    - gate: {signal.gate}",
+                f"    - root_cause_id: {signal.root_cause_id}",
+            ]
+        )
+    section_lines.extend(
+        [
+            "",
+            "## Aegis Grade Stabilization",
+            "",
+            f"- overall_grade: {final_decision.grade_profile.overall_grade}",
+            f"- readiness_grade: {final_decision.grade_profile.readiness_grade}",
+            f"- functional_completeness_grade: {final_decision.grade_profile.functional_completeness_grade}",
+            f"- architecture_operational_integrity_grade: {final_decision.grade_profile.architecture_operational_integrity_grade}",
+            f"- grade_cap: {final_decision.grade_profile.grade_cap}",
+            f"- cap_reason: {final_decision.grade_profile.cap_reason}",
+            f"- unique_root_cause_count: {final_decision.grade_profile.unique_root_cause_count}",
+            "- double_count_policy: one deduction per unique enforcing root_cause_id; diagnostic/reporting signals do not affect status or caps",
+            "",
+        ]
+    )
     return PaperStatus(
         section="\n".join(section_lines),
-        status=overall_status,
+        status=final_decision.status,
         freshness_status=freshness_status,
         day_utc=current_day.day_utc,
     )
@@ -1090,6 +1880,32 @@ def _build_latest_attempt_section(roots: RootResolution) -> str:
     broker = _read_json(broker_path) or {}
     submission_id = str(broker.get("submission_id") or broker_path.parent.name).strip() or "UNKNOWN"
     day_utc = broker_path.parent.parent.name if DATE_RE.match(broker_path.parent.parent.name) else "UNKNOWN"
+    submit_mode = (
+        classify_paper_submit_mode_status_v1(execution_root=roots.runtime_truth_root, day_utc=day_utc)
+        if roots.runtime_truth_root is not None and DATE_RE.match(day_utc)
+        else {}
+    )
+    execution_mode_path = _report_authority_path(
+        roots.canonical_truth_root,
+        "execution_mode_authority_v1",
+        day_utc,
+        "execution_mode_authority.v1.json",
+    )
+    execution_mode_doc = _read_json(execution_mode_path)
+    submit_mode_status = str(submit_mode.get("submit_mode_status") or "UNKNOWN").strip().upper()
+    dry_run_policy = str(submit_mode.get("dry_run_policy") or "UNKNOWN").strip().upper()
+    broker_transmit_enabled = submit_mode.get("broker_transmit_enabled")
+    broker_order_transmitted = bool(submit_mode.get("broker_order_transmitted") is True)
+    missing_broker_ids_blocker = bool(submit_mode.get("missing_broker_ids_blocker") is True)
+    missing_broker_ids_diagnostic = bool(submit_mode.get("missing_broker_ids_diagnostic") is True)
+    execution_mode_state = "UNKNOWN"
+    if isinstance(execution_mode_doc, dict):
+        execution_mode_state = str(execution_mode_doc.get("mode_state") or "UNKNOWN").strip().upper()
+        dry_run_policy = str(execution_mode_doc.get("dry_run_policy") or dry_run_policy).strip().upper()
+        broker_transmit_enabled = execution_mode_doc.get("broker_transmit_enabled")
+        broker_order_transmitted = bool(execution_mode_doc.get("broker_transmit_enabled") is True)
+        missing_broker_ids_blocker = bool(execution_mode_doc.get("missing_broker_ids_blocker") is True)
+        missing_broker_ids_diagnostic = bool(execution_mode_doc.get("missing_broker_ids_diagnostic") is True)
     broker_ids = broker.get("broker_ids") if isinstance(broker.get("broker_ids"), dict) else {}
     order_id = broker_ids.get("order_id")
     perm_id = broker_ids.get("perm_id")
@@ -1115,11 +1931,20 @@ def _build_latest_attempt_section(roots: RootResolution) -> str:
         canonical_truth_root=roots.canonical_truth_root,
         runtime_truth_root=roots.runtime_truth_root,
     )
+    trade_lineage_path, trade_lineage_row = _trade_lineage_row_for_submission(
+        roots.canonical_truth_root,
+        day_utc,
+        submission_id,
+    )
+    identity_state = str((trade_lineage_row or {}).get("identity_state") or "UNKNOWN").strip().upper()
+    authority_lifecycle_state = str((trade_lineage_row or {}).get("lifecycle_state") or "").strip().upper()
 
     lifecycle_updated = "YES" if fill_path is not None or bool(stream_paths) else "NO"
-    lifecycle_status = str((fill or {}).get("lifecycle_status") or "").strip().upper()
+    lifecycle_status = authority_lifecycle_state or str((fill or {}).get("lifecycle_status") or "").strip().upper()
     filled_qty = (fill or {}).get("filled_qty")
-    if lifecycle_status == "OPEN" and filled_qty == 0:
+    if submit_mode_status == "DRY_RUN_COMPLETE":
+        failure_stage = "NONE"
+    elif lifecycle_status == "OPEN" and filled_qty == 0:
         failure_stage = "LIFECYCLE_OPEN_NO_FILL"
     elif lifecycle_status in {"PARTIAL", "FILLED"}:
         failure_stage = "NONE"
@@ -1131,6 +1956,10 @@ def _build_latest_attempt_section(roots: RootResolution) -> str:
         failure_stage = "SUBMISSION_EVIDENCE_INCOMPLETE"
 
     evidence_paths = [str(broker_path)]
+    if execution_mode_path is not None and execution_mode_path.exists():
+        evidence_paths.append(str(execution_mode_path))
+    if trade_lineage_path is not None and trade_lineage_path.exists():
+        evidence_paths.append(str(trade_lineage_path))
     if fill_path:
         evidence_paths.append(str(fill_path))
     if stream_paths:
@@ -1145,12 +1974,86 @@ def _build_latest_attempt_section(roots: RootResolution) -> str:
             f"- symbol: {str(broker.get('symbol') or 'UNKNOWN').strip() or 'UNKNOWN'}",
             f"- side: {str(broker.get('side') or 'UNKNOWN').strip() or 'UNKNOWN'}",
             f"- quantity: {str(broker.get('quantity') or 'UNKNOWN').strip() or 'UNKNOWN'}",
+            f"- dry_run_policy: {dry_run_policy}",
+            f"- broker_transmit_enabled: {str(broker_transmit_enabled).lower() if isinstance(broker_transmit_enabled, bool) else 'UNKNOWN'}",
+            f"- execution_mode: {execution_mode_state}",
+            f"- submit_mode_status: {submit_mode_status}",
+            f"- broker_order_transmitted: {'YES' if broker_order_transmitted else 'NO'}",
             f"- IB received order: {ib_received}",
             f"- broker order_id: {order_id if isinstance(order_id, int) else 'UNKNOWN'}",
             f"- broker perm_id: {perm_id if isinstance(perm_id, int) else 'UNKNOWN'}",
+            f"- identity_state: {identity_state}",
+            f"- lifecycle_state: {lifecycle_status or 'UNKNOWN'}",
+            f"- missing_broker_ids: {'BLOCKER' if missing_broker_ids_blocker else ('DIAGNOSTIC' if missing_broker_ids_diagnostic else 'NO')}",
             f"- lifecycle updated: {lifecycle_updated}",
             f"- failure_stage: {failure_stage}",
             f"- evidence: {' ; '.join(evidence_paths)}",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _build_operating_contract_section(roots: RootResolution) -> str:
+    lines = ["## Aegis Operating Contract", ""]
+    if roots.canonical_truth_root is None:
+        lines.extend(["- status: UNKNOWN", "- evidence: NOT_FOUND", ""])
+        return "\n".join(lines)
+    day_utc = _today_utc_day()
+    today_summary = roots.canonical_truth_root / "reports" / "aegis_daily_operator_summary_v1" / day_utc / "aegis_daily_operator_summary.v1.json"
+    if not today_summary.exists():
+        latest_day, _latest_path = _latest_day_with_file(
+            roots.canonical_truth_root,
+            "reports/aegis_daily_operator_summary_v1",
+            "aegis_daily_operator_summary.v1.json",
+        )
+        if latest_day:
+            day_utc = latest_day
+    contract_path = roots.canonical_truth_root / "reports" / "aegis_operating_contract_v1" / day_utc / "aegis_operating_contract.v1.json"
+    graph_path = roots.canonical_truth_root / "reports" / "aegis_authority_graph_v1" / day_utc / "aegis_authority_graph.v1.json"
+    ledger_path = roots.canonical_truth_root / "reports" / "aegis_day_evidence_ledger_v1" / day_utc / "aegis_day_evidence_ledger.v1.json"
+    summary_path = roots.canonical_truth_root / "reports" / "aegis_daily_operator_summary_v1" / day_utc / "aegis_daily_operator_summary.v1.json"
+    contract = _read_json(contract_path)
+    graph = _read_json(graph_path)
+    ledger = _read_json(ledger_path)
+    summary = _read_json(summary_path)
+    if not any(isinstance(item, dict) for item in (contract, graph, ledger, summary)):
+        lines.extend(
+            [
+                f"- day_utc: {day_utc}",
+                "- status: NOT_RECORDED",
+                f"- operating_contract_path: {contract_path}",
+                f"- authority_graph_path: {graph_path}",
+                f"- evidence_ledger_path: {ledger_path}",
+                f"- operator_summary_path: {summary_path}",
+                "",
+            ]
+        )
+        return "\n".join(lines)
+
+    graph_nodes = graph.get("authority_nodes") if isinstance(graph, dict) else []
+    graph_blockers = graph.get("blocking_nodes") if isinstance(graph, dict) else []
+    ledger_commands = ledger.get("commands") if isinstance(ledger, dict) else []
+    first_blocker = summary.get("first_blocker") if isinstance(summary, dict) and isinstance(summary.get("first_blocker"), dict) else {}
+    lines.extend(
+        [
+            f"- day_utc: {day_utc}",
+            f"- mode: {str((contract or summary or {}).get('mode') or 'UNKNOWN')}",
+            f"- run_style: {str((contract or summary or {}).get('run_style') or 'UNKNOWN')}",
+            f"- final_no_silent_day_outcome: {str((summary or ledger or {}).get('no_silent_day_outcome') or (ledger or {}).get('final_daily_outcome') or 'UNKNOWN')}",
+            f"- authority_graph_nodes: {len(graph_nodes) if isinstance(graph_nodes, list) else 0}",
+            f"- authority_graph_blockers: {len(graph_blockers) if isinstance(graph_blockers, list) else 0}",
+            f"- evidence_ledger_command_count: {len(ledger_commands) if isinstance(ledger_commands, list) else 0}",
+            f"- first_blocker: {str(first_blocker.get('code') or '<none>')}",
+            f"- first_blocker_owner: {str(first_blocker.get('owner') or first_blocker.get('owning_subsystem') or '<none>')}",
+            f"- dry_run: {str((summary or {}).get('dry_run') if isinstance(summary, dict) else 'UNKNOWN').lower()}",
+            f"- broker_transmit_enabled: {str((summary or {}).get('broker_transmit_enabled') if isinstance(summary, dict) else 'UNKNOWN').lower()}",
+            f"- broker_orders_transmitted: {str((summary or {}).get('broker_orders_transmitted') if isinstance(summary, dict) else 'UNKNOWN').lower()}",
+            f"- closure_status: {str((summary or {}).get('closure_status') if isinstance(summary, dict) else 'UNKNOWN')}",
+            f"- operating_contract_path: {contract_path}",
+            f"- authority_graph_path: {graph_path}",
+            f"- evidence_ledger_path: {ledger_path}",
+            f"- operator_summary_path: {summary_path}",
             "",
         ]
     )
@@ -1201,14 +2104,18 @@ def _build_packet() -> tuple[str, str]:
     ).strip() or "UNKNOWN"
     if dirty == "DIRTY":
         source_reproducibility_status = "NOT_REPRODUCIBLE_DIRTY_WORKTREE"
-    elif canonical_repo_protection_status == "PROTECTED":
-        source_reproducibility_status = "REPRODUCIBLE_CLEAN_SOURCE"
     else:
-        source_reproducibility_status = "REPRODUCIBLE_CLEAN_SOURCE_UNPROTECTED"
+        source_reproducibility_status = "REPRODUCIBLE"
+    source_integrity_gate = _build_source_integrity_gate(
+        git_dirty_status=dirty,
+        dirty_path_count=dirty_path_count,
+        source_reproducibility_status=source_reproducibility_status,
+        canonical_repo_protection_status=canonical_repo_protection_status,
+    )
     export_id = f"{now.strftime('%Y%m%dT%H%M%SZ')}_{(commit[:12] if commit != 'UNKNOWN' else 'nogit')}"
 
     roots = _resolve_truth_roots()
-    paper_status = _build_paper_status(roots)
+    paper_status = _build_paper_status(roots, source_integrity_gate, status_lines)
 
     lines: list[str] = [
         "# Aegis ChatGPT State Packet",
@@ -1222,6 +2129,13 @@ def _build_packet() -> tuple[str, str]:
         "- dirty_path_count: " + str(dirty_path_count),
         "- source_reproducibility_status: " + source_reproducibility_status,
         "- canonical_repo_protection_status: " + canonical_repo_protection_status,
+        "- raw_git_dirty_status: " + source_integrity_gate.raw_git_dirty_status,
+        "- raw_dirty_path_count: " + str(source_integrity_gate.raw_dirty_path_count),
+        "- raw_source_reproducibility_status: " + source_integrity_gate.raw_source_reproducibility_status,
+        "- raw_canonical_repo_protection_status: " + source_integrity_gate.raw_canonical_repo_protection_status,
+        "- effective_source_integrity_gate_status: " + source_integrity_gate.effective_status,
+        "- effective_source_integrity_gate_blocker: " + source_integrity_gate.effective_blocker,
+        "- effective_source_integrity_gate_owner: " + source_integrity_gate.effective_owner,
         "- canonical_repo_protection_status_path: " + str(PROTECTION_STATUS_PATH),
         "- freshness_status: " + paper_status.freshness_status,
         "- packet_freshness_policy: max_age=48h; stale/contradictory/unproven state => UNKNOWN or NOT_READY",
@@ -1252,6 +2166,7 @@ def _build_packet() -> tuple[str, str]:
         "",
         _build_current_functionality(roots),
         _build_active_components(roots),
+        _build_operating_contract_section(roots),
         paper_status.section,
         _build_latest_attempt_section(roots),
         _build_files_changed_section(status_lines, diff_lines),
@@ -1297,6 +2212,7 @@ def _validate_packet_or_fail(packet_text: str, latest_path: Path, archive_path: 
         "## ChatGPT Closed-World Rules",
         "## Current Aegis Functionality",
         "## Current Active Components",
+        "## Aegis Operating Contract",
         "## Current Calendar Day Runtime Status",
         "## Latest Trading Day Evidence Status",
         "## Aegis Paper-Trading Status",

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/aegis_day_evidence_ledger.v1.schema.json",
+  "title": "aegis_day_evidence_ledger.v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_id", "schema_version", "day_utc", "mode", "run_style", "commands", "phases", "blockers", "diagnostics", "artifact_paths", "no_silent_day_outcome", "final_daily_outcome"],
+  "properties": {
+    "schema_id": { "const": "aegis_day_evidence_ledger" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "mode": { "type": "string" },
+    "run_style": { "type": "string" },
+    "commands": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+    "phases": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+    "blockers": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+    "diagnostics": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+    "artifact_paths": { "type": "object" },
+    "no_silent_day_outcome": { "type": "string", "enum": ["", "SUCCESS_DRY_RUN", "SUCCESS_TRANSMITTED", "NO_INTENT_EXPECTED", "BLOCKED_WITH_REASON", "FAILED_WITH_OWNER"] },
+    "final_daily_outcome": { "type": "string", "enum": ["", "SUCCESS_DRY_RUN", "SUCCESS_TRANSMITTED", "NO_INTENT_EXPECTED", "BLOCKED_WITH_REASON", "FAILED_WITH_OWNER"] }
+  }
+}

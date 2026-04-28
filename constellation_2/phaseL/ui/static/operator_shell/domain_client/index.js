@@ -1,4 +1,4 @@
-import { fetchJson, postJson } from "/operator_shell/api_client/index.js";
+import { fetchJson, patchJson, postJson } from "/operator_shell/api_client/index.js";
 
 function query(path, params = {}) {
   const search = new URLSearchParams();
@@ -22,6 +22,10 @@ export function fetchStatusRail() {
 
 export function fetchSystemSummary() {
   return query("/api/system/summary");
+}
+
+export function fetchStatusV2(params = {}) {
+  return query("/api/status_v2", params);
 }
 
 export function fetchRefinement() {
@@ -50,6 +54,10 @@ export function fetchAlerts() {
 
 export function fetchOperations() {
   return query("/api/operations");
+}
+
+export function fetchCommandOverview(params = {}) {
+  return query("/api/command/overview", params);
 }
 
 export function fetchIntegrity() {
@@ -166,4 +174,139 @@ export function activateConfigurationDraft(draftId) {
 
 export function rejectConfigurationDraft(draftId, payload = {}) {
   return postJson(`/api/configuration/drafts/${encodeURIComponent(String(draftId || ""))}/reject`, payload);
+}
+
+export function fetchReliabilityObservations(params = {}) {
+  return query("/api/reliability/observations", params);
+}
+
+export function createReliabilityObservation(payload = {}) {
+  return postJson("/api/reliability/observations", payload);
+}
+
+export function fetchReliabilityIssues(params = {}) {
+  return query("/api/reliability/issues", params);
+}
+
+export function createReliabilityIssue(payload = {}) {
+  return postJson("/api/reliability/issues", payload);
+}
+
+export function fetchReliabilityIssue(issueId) {
+  return query(`/api/reliability/issues/${encodeURIComponent(String(issueId || ""))}`);
+}
+
+export function updateReliabilityIssue(issueId, payload = {}) {
+  return patchJson(`/api/reliability/issues/${encodeURIComponent(String(issueId || ""))}`, payload);
+}
+
+export function linkReliabilityObservation(issueId, payload = {}) {
+  return postJson(
+    `/api/reliability/issues/${encodeURIComponent(String(issueId || ""))}/link-observation`,
+    payload,
+  );
+}
+
+export function draftReliabilityIssue(payload = {}) {
+  return postJson("/api/reliability/ai/draft-issue", payload);
+}
+
+export function assessReliabilityReadiness(payload = {}) {
+  return postJson("/api/reliability/readiness/assess", payload);
+}
+
+export function fetchLatestReliabilityReadiness() {
+  return query("/api/reliability/readiness/latest");
+}
+
+export function fetchReliabilityReadiness(assessmentId) {
+  return query(`/api/reliability/readiness/${encodeURIComponent(String(assessmentId || ""))}`);
+}
+
+export function fetchReliabilityWorkOrders(params = {}) {
+  return query("/api/reliability/work-orders", params);
+}
+
+export function createReliabilityWorkOrder(payload = {}) {
+  return postJson("/api/reliability/work-orders", payload);
+}
+
+export function fetchReliabilityWorkOrder(workOrderId) {
+  return query(`/api/reliability/work-orders/${encodeURIComponent(String(workOrderId || ""))}`);
+}
+
+export function updateReliabilityWorkOrder(workOrderId, payload = {}) {
+  return patchJson(`/api/reliability/work-orders/${encodeURIComponent(String(workOrderId || ""))}`, payload);
+}
+
+export function fetchReliabilityIssueWorkOrders(issueId) {
+  return query(`/api/reliability/issues/${encodeURIComponent(String(issueId || ""))}/work-orders`);
+}
+
+export function createReliabilityIssueWorkOrder(issueId, payload = {}) {
+  return postJson(`/api/reliability/issues/${encodeURIComponent(String(issueId || ""))}/work-orders`, payload);
+}
+
+export function createWorkOrderFromIssue(issueId, payload = {}) {
+  return postJson(`/api/reliability/issues/${encodeURIComponent(String(issueId || ""))}/create-work-order`, payload);
+}
+
+export function fetchReliabilityFixAttempts(params = {}) {
+  return query("/api/reliability/fix-attempts", params);
+}
+
+export function createReliabilityFixAttempt(payload = {}) {
+  return postJson("/api/reliability/fix-attempts", payload);
+}
+
+export function fetchReliabilityFixAttempt(fixAttemptId) {
+  return query(`/api/reliability/fix-attempts/${encodeURIComponent(String(fixAttemptId || ""))}`);
+}
+
+export function updateReliabilityFixAttempt(fixAttemptId, payload = {}) {
+  return patchJson(`/api/reliability/fix-attempts/${encodeURIComponent(String(fixAttemptId || ""))}`, payload);
+}
+
+export function fetchReliabilityWorkOrderFixAttempts(workOrderId) {
+  return query(`/api/reliability/work-orders/${encodeURIComponent(String(workOrderId || ""))}/fix-attempts`);
+}
+
+export function createReliabilityWorkOrderFixAttempt(workOrderId, payload = {}) {
+  return postJson(`/api/reliability/work-orders/${encodeURIComponent(String(workOrderId || ""))}/fix-attempts`, payload);
+}
+
+export function recordReliabilityFixAttempt(workOrderId, payload = {}) {
+  return postJson(`/api/reliability/work-orders/${encodeURIComponent(String(workOrderId || ""))}/record-fix-attempt`, payload);
+}
+
+export function fetchReliabilityVerifications(params = {}) {
+  return query("/api/reliability/verifications", params);
+}
+
+export function createReliabilityVerification(payload = {}) {
+  return postJson("/api/reliability/verifications", payload);
+}
+
+export function fetchReliabilityVerification(verificationId) {
+  return query(`/api/reliability/verifications/${encodeURIComponent(String(verificationId || ""))}`);
+}
+
+export function updateReliabilityVerification(verificationId, payload = {}) {
+  return patchJson(`/api/reliability/verifications/${encodeURIComponent(String(verificationId || ""))}`, payload);
+}
+
+export function fetchReliabilityIssueVerifications(issueId) {
+  return query(`/api/reliability/issues/${encodeURIComponent(String(issueId || ""))}/verifications`);
+}
+
+export function createReliabilityIssueVerification(issueId, payload = {}) {
+  return postJson(`/api/reliability/issues/${encodeURIComponent(String(issueId || ""))}/verifications`, payload);
+}
+
+export function verifyReliabilityIssue(issueId, payload = {}) {
+  return postJson(`/api/reliability/issues/${encodeURIComponent(String(issueId || ""))}/verify`, payload);
+}
+
+export function fetchReliabilityNextActions() {
+  return query("/api/reliability/next-actions");
 }

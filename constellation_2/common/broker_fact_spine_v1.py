@@ -493,6 +493,38 @@ def _kv_from_args(args: Sequence[str]) -> dict[str, str]:
     return mapping
 
 
+def _nonempty_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _extract_lineage_text(
+    *,
+    raw_payload: Mapping[str, Any] | None,
+    args_mapping: Mapping[str, str],
+    aliases: Sequence[str],
+) -> str:
+    for alias in aliases:
+        value = _nonempty_text(args_mapping.get(alias))
+        if value:
+            return value
+
+    if not isinstance(raw_payload, Mapping):
+        return ""
+
+    containers: list[Mapping[str, Any]] = [raw_payload]
+    for key in ("lineage", "attribution", "execution", "engine", "metadata", "ib_fields"):
+        nested = raw_payload.get(key)
+        if isinstance(nested, Mapping):
+            containers.append(nested)
+
+    for container in containers:
+        for alias in aliases:
+            value = _nonempty_text(container.get(alias))
+            if value:
+                return value
+    return ""
+
+
 def _event_type(raw_payload: Mapping[str, Any] | None) -> str:
     if not isinstance(raw_payload, Mapping):
         return ""
@@ -1047,6 +1079,7 @@ def _build_fill_fact(raw_row: Mapping[str, Any]) -> dict[str, Any]:
 
 def _build_position_fact(raw_row: Mapping[str, Any]) -> dict[str, Any]:
     payload_json = raw_row.get("raw_payload_json")
+    payload_map = payload_json if isinstance(payload_json, Mapping) else None
     args = _source_args(payload_json if isinstance(payload_json, Mapping) else None)
     mapping = _kv_from_args(args)
     contract_identity, contract_quality = _contract_identity_from_args(args)
@@ -1057,6 +1090,31 @@ def _build_position_fact(raw_row: Mapping[str, Any]) -> dict[str, Any]:
             "position_quantity": str(mapping.get("position") or mapping.get("quantity") or ""),
             "average_cost": str(mapping.get("avgCost") or ""),
             "market_price": str(mapping.get("marketPrice") or ""),
+            "order_id": _extract_lineage_text(
+                raw_payload=payload_map,
+                args_mapping=mapping,
+                aliases=("orderId", "order_id"),
+            ),
+            "perm_id": _extract_lineage_text(
+                raw_payload=payload_map,
+                args_mapping=mapping,
+                aliases=("permId", "perm_id"),
+            ),
+            "native_engine_id": _extract_lineage_text(
+                raw_payload=payload_map,
+                args_mapping=mapping,
+                aliases=("native_engine_id", "nativeEngineId", "nativeEngineID"),
+            ),
+            "engine_id": _extract_lineage_text(
+                raw_payload=payload_map,
+                args_mapping=mapping,
+                aliases=("engine_id", "engineId", "engineID"),
+            ),
+            "strategy_engine_id": _extract_lineage_text(
+                raw_payload=payload_map,
+                args_mapping=mapping,
+                aliases=("strategy_engine_id", "strategyEngineId", "strategyEngineID"),
+            ),
         }
     )
     payload["quality_reason_codes"] = list(payload["quality_reason_codes"]) + contract_quality

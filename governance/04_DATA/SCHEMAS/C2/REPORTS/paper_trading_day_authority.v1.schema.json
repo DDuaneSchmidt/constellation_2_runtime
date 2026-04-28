@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/paper_trading_day_authority.v1.schema.json",
+  "title": "paper_trading_day_authority.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "authority_scope",
+    "day_utc",
+    "state",
+    "status",
+    "can_paper_trade_today",
+    "can_submit_paper_orders",
+    "canonical_blocker",
+    "reason_codes",
+    "blocker_tree",
+    "missing_or_stale_inputs",
+    "input_status",
+    "evidence_paths",
+    "producer",
+    "produced_at_utc"
+  ],
+  "properties": {
+    "schema_id": { "const": "paper_trading_day_authority" },
+    "schema_version": { "const": "v1" },
+    "authority_scope": { "const": "CANONICAL_DAY_READINESS_AUTHORITY" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "state": {
+      "type": "string",
+      "enum": [
+        "UNKNOWN",
+        "PREFLIGHT_REQUIRED",
+        "PREFLIGHT_BLOCKED",
+        "AUTHORIZED_NOT_OPEN",
+        "OPEN_READY",
+        "SUBMITTING",
+        "CLOSED",
+        "INVALIDATED"
+      ]
+    },
+    "status": { "type": "string", "enum": ["READY", "NOT_READY"] },
+    "can_paper_trade_today": { "type": "boolean" },
+    "can_submit_paper_orders": { "type": "boolean" },
+    "submit_mode_status": { "type": "string" },
+    "dry_run_policy": { "type": "string" },
+    "broker_transmit_enabled": { "type": ["boolean", "null"] },
+    "broker_order_transmitted": { "type": "boolean" },
+    "missing_broker_ids_blocker": { "type": "boolean" },
+    "missing_broker_ids_diagnostic": { "type": "boolean" },
+    "canonical_blocker": { "type": "string" },
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "blocker_tree": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "blocker_class",
+          "summary",
+          "logical_name",
+          "owning_gate",
+          "source_path",
+          "required_producer_command",
+          "operator_actionable"
+        ],
+        "properties": {
+          "code": { "type": "string", "minLength": 1 },
+          "blocker_class": { "type": "string", "minLength": 1 },
+          "summary": { "type": "string", "minLength": 1 },
+          "logical_name": { "type": "string", "minLength": 1 },
+          "owning_gate": { "type": "string", "minLength": 1 },
+          "source_path": { "type": "string", "minLength": 1 },
+          "required_producer_command": { "type": "string", "minLength": 1 },
+          "operator_actionable": { "type": "boolean" }
+          ,
+          "causal_parent": { "type": "string" }
+        }
+      }
+    },
+    "missing_or_stale_inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "logical_name",
+          "path",
+          "missing_or_stale",
+          "owning_gate",
+          "required_producer_command",
+          "operator_actionable"
+        ],
+        "properties": {
+          "logical_name": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "missing_or_stale": { "type": "string", "enum": ["MISSING", "STALE", "INVALID"] },
+          "owning_gate": { "type": "string", "minLength": 1 },
+          "required_producer_command": { "type": "string", "minLength": 1 },
+          "operator_actionable": { "type": "boolean" },
+          "required_or_diagnostic": { "type": "string" },
+          "causal_parent": { "type": "string" }
+        }
+      }
+    },
+    "input_status": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "exists", "status", "reason_codes"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "exists": { "type": "boolean" },
+          "status": { "type": "string", "minLength": 1 },
+          "freshness_status": { "type": "string" },
+          "schema_status": { "type": "string" },
+          "required_or_diagnostic": { "type": "string" },
+          "readiness_role": { "type": "string" },
+          "owning_subsystem": { "type": "string" },
+          "producer_command": { "type": "string" },
+          "causal_parent": { "type": "string" },
+          "condition": { "type": "string" },
+          "market_data_state": { "type": "string" },
+          "operator_impact": { "type": "string" },
+          "strategy_decision_state": { "type": "string" },
+          "account_state": { "type": "string" },
+          "risk_sizing_state": { "type": "string" },
+          "required_symbols": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "covered_symbols": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "reason_codes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "evidence_paths": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "module", "git_sha"],
+      "properties": {
+        "repo": { "type": "string", "minLength": 1 },
+        "module": { "type": "string", "minLength": 1 },
+        "git_sha": { "type": "string", "minLength": 1 }
+      }
+    },
+    "produced_at_utc": { "type": "string", "minLength": 20 }
+  }
+}

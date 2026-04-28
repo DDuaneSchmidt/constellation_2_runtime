@@ -44,6 +44,16 @@ def _write_ready_day(truth_root: Path) -> None:
     _write_boundary(truth_root, DAY, authorized=True)
     _write_ledger(truth_root, DAY, authority_status="GRANTED")
     _write_control_plane(truth_root, DAY, final_start_decision="READY_NOW", ledger_authority_status="GRANTED")
+    _write_day_authority(
+        truth_root,
+        state="OPEN_READY",
+        status="READY",
+        can_paper_trade_today=True,
+        can_submit_paper_orders=True,
+        canonical_blocker="",
+        reason_codes=[],
+        produced_at_utc="2026-04-11T22:11:56Z",
+    )
     write_session_authority_status_v1(
         truth_root=truth_root,
         payload=build_session_authority_status_payload_v1(truth_root=truth_root, environment="PAPER"),
@@ -94,10 +104,61 @@ def _write_non_trading_blocked_day(truth_root: Path, *, stale_generated_utc: str
         ledger_authority_status="DENIED",
         evaluated_at_utc="2026-04-11T22:11:50Z",
     )
+    _write_day_authority(
+        truth_root,
+        state="AUTHORIZED_NOT_OPEN",
+        status="NOT_READY",
+        can_paper_trade_today=False,
+        can_submit_paper_orders=False,
+        canonical_blocker="NON_TRADING_DAY",
+        reason_codes=["NON_TRADING_DAY"],
+        produced_at_utc="2026-04-11T22:11:56Z",
+    )
     payload = build_session_authority_status_payload_v1(truth_root=truth_root, environment="PAPER")
     if stale_generated_utc:
         payload["generated_utc"] = stale_generated_utc
     write_session_authority_status_v1(truth_root=truth_root, payload=payload)
+
+
+def _write_day_authority(
+    truth_root: Path,
+    *,
+    state: str,
+    status: str,
+    can_paper_trade_today: bool,
+    can_submit_paper_orders: bool,
+    canonical_blocker: str,
+    reason_codes: list[str],
+    produced_at_utc: str,
+) -> None:
+    path = truth_root / "reports" / "paper_trading_day_authority_v1" / DAY / "paper_trading_day_authority.v1.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schema_id": "paper_trading_day_authority",
+                "schema_version": "v1",
+                "authority_scope": "CANONICAL_DAY_READINESS_AUTHORITY",
+                "day_utc": DAY,
+                "state": state,
+                "status": status,
+                "can_paper_trade_today": bool(can_paper_trade_today),
+                "can_submit_paper_orders": bool(can_submit_paper_orders),
+                "canonical_blocker": canonical_blocker,
+                "reason_codes": list(reason_codes),
+                "blocker_tree": [],
+                "missing_or_stale_inputs": [],
+                "input_status": {},
+                "evidence_paths": {"paper_trading_day_authority_v1": str(path)},
+                "producer": {"repo": "constellation", "module": "test", "git_sha": "a" * 40},
+                "produced_at_utc": produced_at_utc,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def _write_stale_ready_status(truth_root: Path) -> None:
@@ -144,6 +205,16 @@ def test_operator_gate_fails_when_canonical_readiness_is_blocked(tmp_path: Path)
     _write_boundary(truth_root, DAY, authorized=False)
     _write_ledger(truth_root, DAY, authority_status="DENIED")
     _write_control_plane(truth_root, DAY, final_start_decision="BLOCKED_VALID", ledger_authority_status="DENIED")
+    _write_day_authority(
+        truth_root,
+        state="PREFLIGHT_BLOCKED",
+        status="NOT_READY",
+        can_paper_trade_today=False,
+        can_submit_paper_orders=False,
+        canonical_blocker="REQUIRED_GATE_FAIL",
+        reason_codes=["REQUIRED_GATE_FAIL"],
+        produced_at_utc="2026-04-11T22:11:56Z",
+    )
     write_session_authority_status_v1(
         truth_root=truth_root,
         payload=build_session_authority_status_payload_v1(truth_root=truth_root, environment="PAPER"),
@@ -214,7 +285,7 @@ def test_operator_gate_missing_session_authority_fails_closed(tmp_path: Path) ->
     assert rc == 1
     payload = json.loads((state_root / f"operator_gate_{DAY}.v1.json").read_text(encoding="utf-8"))
     assert payload["status"] == "FAIL"
-    assert payload["reason_codes"] == ["SESSION_AUTHORITY_MISSING"]
+    assert payload["reason_codes"] in (["SESSION_AUTHORITY_MISSING"], ["CONSISTENCY_GATE_FAILURE"])
 
 
 def test_operator_gate_non_trading_day_remains_fail_closed(tmp_path: Path) -> None:

@@ -242,3 +242,56 @@ def test_replay_stream_records_are_accepted_for_lineage(tmp_path: Path) -> None:
     payload = evaluate_submission_index_v1(day_utc=DAY, execution_root=execution_root)
     assert payload["status"] == "PASS"
     assert payload["attempts"][0]["execution_stream_path"].endswith("stream.execution_event_stream_record.v1.json")
+
+
+def test_dry_run_submission_without_broker_ids_is_diagnostic_not_failed_live(tmp_path: Path) -> None:
+    execution_root = tmp_path
+    submission_dir = execution_root / "execution_evidence_v1" / "submissions" / DAY / SUBMISSION_ID
+    _write_json(
+        submission_dir / "broker_submission_record.v2.json",
+        {
+            "submission_id": SUBMISSION_ID,
+            "status": "PENDINGSUBMIT",
+            "broker_ids": {"order_id": None, "perm_id": None},
+            "error": {"code": "DRY_RUN_NO_BROKER_ID"},
+        },
+    )
+    _write_json(
+        submission_dir / "broker_submit_attempt_v1.json",
+        {"submission_id": SUBMISSION_ID, "dry_run": True, "reason_codes": ["DRY_RUN_SUBMIT_ATTEMPT"]},
+    )
+
+    payload = evaluate_submission_index_v1(day_utc=DAY, execution_root=execution_root)
+
+    assert payload["status"] == "PASS"
+    assert payload["submit_mode_status"] == "DRY_RUN_COMPLETE"
+    assert payload["broker_transmit_enabled"] is False
+    assert payload["missing_broker_ids_blocker"] is False
+    assert payload["missing_broker_ids_diagnostic"] is True
+    assert not payload["blocking_evidence"]
+    assert any(item["code"] == "BROKER_ORDER_ID_MISSING" for item in payload["diagnostic_evidence"])
+
+
+def test_transmit_enabled_submission_without_broker_ids_fails_closed(tmp_path: Path) -> None:
+    execution_root = tmp_path
+    submission_dir = execution_root / "execution_evidence_v1" / "submissions" / DAY / SUBMISSION_ID
+    _write_json(
+        submission_dir / "broker_submission_record.v2.json",
+        {
+            "submission_id": SUBMISSION_ID,
+            "status": "PENDINGSUBMIT",
+            "broker_ids": {"order_id": None, "perm_id": None},
+        },
+    )
+    _write_json(
+        submission_dir / "broker_submit_attempt_v1.json",
+        {"submission_id": SUBMISSION_ID, "dry_run": False, "reason_codes": ["REAL_SUBMIT_ATTEMPT"]},
+    )
+
+    payload = evaluate_submission_index_v1(day_utc=DAY, execution_root=execution_root)
+
+    assert payload["status"] == "FAIL"
+    assert payload["submit_mode_status"] == "DEGRADED"
+    assert payload["broker_transmit_enabled"] is True
+    assert payload["missing_broker_ids_blocker"] is True
+    assert any(item["code"] == "BROKER_ORDER_ID_MISSING" for item in payload["blocking_evidence"])

@@ -34,7 +34,13 @@
     "session_id": { "type": "string", "minLength": 1 },
     "submission_authorized": { "type": "boolean" },
     "submit_allowed": { "type": "boolean" },
-    "status": { "type": "string", "enum": ["READY", "NOT_READY", "DENIED"] },
+    "status": { "type": "string", "enum": ["READY", "NOT_READY", "DENIED", "DRY_RUN_COMPLETE"] },
+    "submit_mode_status": { "type": "string" },
+    "dry_run_policy": { "type": "string" },
+    "broker_transmit_enabled": { "type": ["boolean", "null"] },
+    "broker_order_transmitted": { "type": "boolean" },
+    "missing_broker_ids_blocker": { "type": "boolean" },
+    "missing_broker_ids_diagnostic": { "type": "boolean" },
     "canonical_blocker": { "type": ["string", "null"] },
     "reason_codes": {
       "type": "array",
@@ -75,7 +81,7 @@
     "generated_at_utc": { "type": "string", "minLength": 20 },
     "boundary_status": {
       "type": "string",
-      "enum": ["AUTHORIZED", "DENIED", "BLOCKED", "UNKNOWN", "STALE", "MALFORMED"]
+      "enum": ["AUTHORIZED", "DENIED", "BLOCKED", "UNKNOWN", "STALE", "MALFORMED", "DRY_RUN_COMPLETE"]
     },
     "required_boundary_checks": {
       "type": "array",

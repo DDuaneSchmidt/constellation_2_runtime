@@ -937,3 +937,4 @@ def test_submit_boundary_fails_closed_when_lineage_status_missing_from_both_path
         )
         assert boundary["boundary_status"] == "BLOCKED"
         assert "POST_SUBMIT_LINEAGE_GAP" in (boundary.get("blocking_codes") or [])
+

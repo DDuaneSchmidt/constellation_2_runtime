@@ -1,0 +1,66 @@
+export const COMMAND_OVERVIEW_MOCK = {
+  generatedAt: "MOCK / UNAVAILABLE",
+  environment: "MOCK / UNAVAILABLE",
+  data_source_state: "MOCK / UNAVAILABLE",
+  fallback_badge: "MOCK / UNAVAILABLE",
+  as_of_label: "Data as of: MOCK / UNAVAILABLE",
+  summary: [
+    { label: "System Status", value: "UNAVAILABLE", detail: "MOCK / UNAVAILABLE", tone: "muted" },
+    { label: "Exceptions", value: "UNAVAILABLE", detail: "MOCK / UNAVAILABLE", tone: "muted" },
+    { label: "Policy State", value: "UNAVAILABLE", detail: "MOCK / UNAVAILABLE", tone: "muted" },
+    { label: "Data Quality", value: "UNAVAILABLE", detail: "MOCK / UNAVAILABLE", tone: "muted" },
+    { label: "Next Review", value: "UNAVAILABLE", detail: "MOCK / UNAVAILABLE", tone: "muted" },
+  ],
+  exceptions: [
+    {
+      severity: "LOW",
+      title: "Authority Artifacts Unavailable",
+      body: "Command Overview is using the explicit MOCK / UNAVAILABLE fallback because the authority API did not return data.",
+      source: "MOCK / UNAVAILABLE",
+      timestamp: "MOCK / UNAVAILABLE",
+      icon: "!",
+    },
+  ],
+  readiness: {
+    score: "0%",
+    tiles: [
+      { label: "Governance", value: "UNAVAILABLE", tone: "muted" },
+      { label: "Strategy", value: "UNAVAILABLE", tone: "muted" },
+      { label: "Portfolio", value: "UNAVAILABLE", tone: "muted" },
+      { label: "Risk", value: "UNAVAILABLE", tone: "muted" },
+      { label: "Policy", value: "UNAVAILABLE", tone: "muted" },
+      { label: "Data", value: "UNAVAILABLE", tone: "muted" },
+      { label: "Controls", value: "UNAVAILABLE", tone: "muted" },
+      { label: "Monitoring", value: "UNAVAILABLE", tone: "muted" },
+      { label: "Reporting", value: "UNAVAILABLE", tone: "muted" },
+    ],
+  },
+  policy: [
+    { label: "Active", value: 0, tone: "muted" },
+    { label: "Pending", value: 0, tone: "muted" },
+    { label: "Draft", value: 0, tone: "muted" },
+    { label: "Expired", value: 0, tone: "muted" },
+  ],
+  decisions: [
+    { title: "Authority Data Unavailable", description: "No authority-backed governed action data is available in the mock fallback.", timestamp: "MOCK / UNAVAILABLE", actor: "MOCK / UNAVAILABLE", status: "UNAVAILABLE" },
+  ],
+  evidence: [
+    { label: "Total References", value: "UNAVAILABLE" },
+    { label: "Diagnostics", value: "UNAVAILABLE" },
+    { label: "Failed Checks", value: "UNAVAILABLE" },
+    { label: "Last Ingestion", value: "UNAVAILABLE" },
+  ],
+  lineage: [
+    { name: "authority_graph_unavailable", description: "MOCK / UNAVAILABLE", status: "UNAVAILABLE" },
+  ],
+  context: {
+    answer: "This view answers: Are we operating within our governed intent?",
+    can: ["Review authority-owned readiness", "Investigate blockers and diagnostics", "Open supporting evidence", "Compare source-of-truth artifacts"],
+    sourceOfTruth: "MOCK / UNAVAILABLE",
+    freshness: "MOCK / UNAVAILABLE",
+    dataQuality: "MOCK / UNAVAILABLE",
+    access: "View Only",
+    dataSourceState: "MOCK / UNAVAILABLE",
+    sourceRefs: [],
+  },
+};
