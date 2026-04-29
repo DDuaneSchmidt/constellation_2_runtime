@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import signal
 import shutil
 import subprocess
 import sys
@@ -29,20 +31,109 @@ from constellation_2.common.runtime_path_authority_v1 import require_authoritati
 from constellation_2.common.sleeve_execution_root_v1 import resolve_sleeve_execution_root_v1
 
 
+DEFAULT_STEP_TIMEOUT_SECONDS = 300
+
+
+def _child_pids(parent_pid: int) -> list[int]:
+    direct: list[int] = []
+    proc_root = Path("/proc")
+    for path in proc_root.iterdir():
+        if not path.name.isdigit():
+            continue
+        stat_path = path / "stat"
+        try:
+            stat_text = stat_path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        try:
+            ppid = int(stat_text.rsplit(")", 1)[1].split()[1])
+        except (IndexError, ValueError):
+            continue
+        if ppid == parent_pid:
+            direct.append(int(path.name))
+    out = list(direct)
+    for pid in direct:
+        out.extend(_child_pids(pid))
+    return out
+
+
+def _terminate_process_tree(root_pid: int, sig: int) -> None:
+    for pid in reversed(_child_pids(root_pid)):
+        try:
+            os.kill(pid, sig)
+        except ProcessLookupError:
+            continue
+    try:
+        os.killpg(root_pid, sig)
+    except ProcessLookupError:
+        return
+
+
+def _step_timeout_seconds() -> int:
+    raw = str(os.environ.get("AEGIS_PREFLIGHT_STEP_TIMEOUT_SECONDS") or "").strip()
+    if not raw:
+        return DEFAULT_STEP_TIMEOUT_SECONDS
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return DEFAULT_STEP_TIMEOUT_SECONDS
+    return parsed if parsed > 0 else DEFAULT_STEP_TIMEOUT_SECONDS
+
+
 def _run_step(name: str, cmd: List[str]) -> Dict[str, Any]:
-    proc = subprocess.run(
+    timeout_seconds = _step_timeout_seconds()
+    proc = subprocess.Popen(
         cmd,
         cwd=str(REPO_ROOT),
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        check=False,
+        start_new_session=True,
     )
+    timed_out = False
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        try:
+            _terminate_process_tree(proc.pid, signal.SIGTERM)
+            stdout, stderr = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            _terminate_process_tree(proc.pid, signal.SIGKILL)
+            stdout, stderr = proc.communicate()
+        except ProcessLookupError:
+            stdout, stderr = proc.communicate()
+        stderr = "\n".join(
+            item
+            for item in [
+                str(stderr or "").strip(),
+                f"PREFLIGHT_STEP_TIMEOUT:name={name}:timeout_seconds={timeout_seconds}",
+            ]
+            if item
+        )
     return {
         "name": name,
         "cmd": cmd,
-        "return_code": int(proc.returncode),
-        "stdout": str(proc.stdout or "").strip(),
-        "stderr": str(proc.stderr or "").strip(),
+        "return_code": 124 if timed_out else int(proc.returncode),
+        "stdout": str(stdout or "").strip(),
+        "stderr": str(stderr or "").strip(),
+        "timed_out": timed_out,
+        "timeout_seconds": timeout_seconds,
+    }
+
+
+def _preflight_timeout_blocked_payload(*, day_utc: str, steps: List[Dict[str, Any]]) -> Dict[str, Any]:
+    timed_out = next((step for step in steps if bool(step.get("timed_out") is True)), {})
+    return {
+        "status": "PREFLIGHT_BLOCKED",
+        "day_utc": day_utc,
+        "canonical_blocker": "PREFLIGHT_STEP_TIMEOUT",
+        "owning_subsystem": "aegis_paper_preflight",
+        "owning_gate": "paper_preflight_step_timeout_gate",
+        "timed_out_step": str(timed_out.get("name") or ""),
+        "timed_out_cmd": timed_out.get("cmd") if isinstance(timed_out.get("cmd"), list) else [],
+        "timeout_seconds": int(timed_out.get("timeout_seconds") or 0),
+        "steps": steps,
     }
 
 
@@ -737,23 +828,25 @@ def main(argv: List[str] | None = None) -> int:
             ],
         )
     )
-    steps.append(
-        _run_step(
-            "session_authority_v1.refresh_target_day",
-            [
-                sys.executable,
-                "ops/tools/run_session_authority_v1.py",
-                "--target_day",
-                day_utc,
-                "--truth_root",
-                str(truth_root),
-                "--environment",
-                "PAPER",
-                "--phase",
-                "all",
-            ],
-        )
+    session_authority_step = _run_step(
+        "session_authority_v1.refresh_target_day",
+        [
+            sys.executable,
+            "ops/tools/run_session_authority_v1.py",
+            "--target_day",
+            day_utc,
+            "--truth_root",
+            str(truth_root),
+            "--environment",
+            "PAPER",
+            "--phase",
+            "all",
+        ],
     )
+    steps.append(session_authority_step)
+    if bool(session_authority_step.get("timed_out") is True):
+        print(json.dumps(_preflight_timeout_blocked_payload(day_utc=day_utc, steps=steps), sort_keys=True))
+        return 2
     if bool(args.reset_dry_run_submission_evidence):
         if not _append_reset_dry_run_submission_evidence_step(
             steps=steps,
