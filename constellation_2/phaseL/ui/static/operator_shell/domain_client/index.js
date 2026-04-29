@@ -56,6 +56,10 @@ export function fetchOperations() {
   return query("/api/operations");
 }
 
+export function fetchReadinessKernel(params = {}) {
+  return query("/api/readiness-kernel", params);
+}
+
 export function fetchCommandOverview(params = {}) {
   return query("/api/command/overview", params);
 }

@@ -27,6 +27,7 @@ import {
   fetchOpportunities,
   fetchOperatorHome,
   fetchOperatorQuery,
+  fetchReadinessKernel,
   fetchReconciliation,
   fetchSleeves,
   fetchTax,
@@ -606,6 +607,46 @@ function ellipsisText(value, maxChars = 120) {
     return text;
   }
   return `${text.slice(0, Math.max(1, maxChars - 3)).trimEnd()}...`;
+}
+
+function renderReadinessKernelLadder(readinessKernel, state) {
+  const layers = safeList(readinessKernel?.layers);
+  if (!layers.length) {
+    return `<div class="empty-state">Readiness kernel did not return source layers.</div>`;
+  }
+  return `
+    <div class="metric-grid">
+      ${layers.map((row) => renderMetricCard({
+        label: row.label || row.layer_id,
+        value: row.status || "UNKNOWN",
+        semantic: row.semantic || "unknown",
+        semantics: state.semantics,
+      })).join("")}
+    </div>
+    <div style="margin-top:12px;" class="stack-list">
+      ${layers.map((row) => {
+        const label = inlineText(row.label || row.layer_id || "Layer");
+        const status = inlineText(row.status || "UNKNOWN");
+        const classification = inlineText(row.classification || "UNKNOWN");
+        const blocker = inlineText(row.canonical_blocker || "");
+        const nextAction = inlineText(row.next_action || "");
+        const sourcePath = inlineText(row.source_path || "");
+        return `
+          <div class="evidence-row">
+            <div>
+              <strong>${escapeHtml(label)}</strong>
+              <div style="font-size:12px;opacity:0.78;">${escapeHtml(classification)}${blocker ? ` · ${escapeHtml(blocker)}` : ""}</div>
+              ${nextAction ? `<div style="font-size:12px;opacity:0.82;">Next: ${escapeHtml(nextAction)}</div>` : ""}
+            </div>
+            <div style="text-align:right;min-width:160px;">
+              ${renderSemanticBadge(status, row.semantic || "unknown", state.semantics)}
+              ${sourcePath ? `<div title="${escapeHtml(sourcePath)}" style="font-size:11px;opacity:0.62;margin-top:4px;">${escapeHtml(ellipsisText(sourcePath, 52))}</div>` : ""}
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
 }
 
 function objectiveIsVague(value) {
@@ -2338,8 +2379,14 @@ async function renderAdvisoryPage() {
 }
 
 async function renderOperationsPage(state) {
-  const [operations, alertsPayload, integrity, actions, statusV2Payload, sleevesPayload] = await Promise.all([
+  const [operations, readinessKernel, alertsPayload, integrity, actions, statusV2Payload, sleevesPayload] = await Promise.all([
     fetchOperations(),
+    fetchReadinessKernel().catch(() => ({
+      overall_status: "UNKNOWN",
+      canonical_blocker: "READINESS_KERNEL_UNAVAILABLE",
+      layers: [],
+      warnings: [{ code: "READINESS_KERNEL_UNAVAILABLE" }],
+    })),
     fetchAlerts(),
     fetchIntegrity(),
     fetchSystemActions(),
@@ -2392,15 +2439,8 @@ async function renderOperationsPage(state) {
       renderCardSection({
         eyebrow: "Readiness",
         title: "Runtime Readiness Ladder",
-        subtitle: "Directly rendered from the operations workspace composition.",
-        body: `<div class="metric-grid">
-          ${safeList(operations.readiness_ladder).map((row) => renderMetricCard({
-            label: row.label || row.key,
-            value: row.status || "UNKNOWN",
-            semantic: row.semantic || "unknown",
-            semantics: state.semantics,
-          })).join("")}
-        </div>`,
+        subtitle: "Directly rendered from readiness_kernel_v1 source artifact reads.",
+        body: renderReadinessKernelLadder(readinessKernel, state),
       }),
       renderCardSection({
         eyebrow: "Readiness",

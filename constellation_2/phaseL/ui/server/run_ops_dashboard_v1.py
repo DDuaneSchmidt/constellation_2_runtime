@@ -62,6 +62,7 @@ from constellation_2.phaseL.ui_api import (
     build_policy_evolution_view,
     build_positions_view,
     build_reconciliation_view,
+    build_readiness_kernel_v1,
     build_refinement_state_view,
     build_sleeve_evaluation_view,
     build_system_summary_view,
@@ -2289,6 +2290,10 @@ class OpsHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/refinement":
             self._send_json(HTTPStatus.OK, build_refinement_state_view(requested_day))
+            return True
+
+        if path == "/api/readiness-kernel":
+            self._send_json(HTTPStatus.OK, build_readiness_kernel_v1(requested_day))
             return True
 
         if path == "/api/system/actions":

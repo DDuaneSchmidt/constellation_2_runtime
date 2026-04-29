@@ -10,6 +10,7 @@ from .orders_read_model import build_orders_view
 from .policy_evolution_state_read_model import build_policy_evolution_view
 from .positions_read_model import build_positions_view
 from .product_summary_read_model import build_product_summary_view
+from .readiness_kernel_v1 import build_readiness_kernel_v1
 from .refinement_state_read_model import build_refinement_state_view
 from .reconciliation_read_model import build_reconciliation_view
 from .sleeve_evaluation_read_model import build_sleeve_evaluation_view
@@ -103,6 +104,7 @@ __all__ = [
     "build_operator_work_queue_view",
     "build_positions_view",
     "build_product_summary_view",
+    "build_readiness_kernel_v1",
     "build_refinement_state_view",
     "build_reconciliation_view",
     "build_sleeve_evaluation_view",
