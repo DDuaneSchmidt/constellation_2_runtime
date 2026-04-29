@@ -230,12 +230,21 @@ def _is_safe_nav_validation_recovery(existing: Dict[str, Any], candidate: Dict[s
         return False
 
     existing_status = str(existing.get("status") or "").strip().upper()
-    if existing_status != "PASS":
-        return False
+    existing_reason_codes = {
+        str(code).strip().upper() for code in (existing.get("reason_codes") or []) if str(code).strip()
+    }
 
     existing_env = existing.get("envelope") if isinstance(existing.get("envelope"), dict) else {}
     existing_nav_total_cents = existing_env.get("nav_total_cents")
-    if not isinstance(existing_nav_total_cents, int) or existing_nav_total_cents > 0:
+    existing_has_missing_nav = (
+        "B2_NAV_TOTAL_MISSING_OR_INVALID" in existing_reason_codes
+        or RC_AUTHZ_MISSING_EXPOSURE_BUDGET_NAV_TOTAL_CENTS in existing_reason_codes
+    )
+    if existing_status == "PASS" and (not isinstance(existing_nav_total_cents, int) or existing_nav_total_cents > 0):
+        return False
+    if existing_status == "FAIL" and not existing_has_missing_nav:
+        return False
+    if existing_status not in {"PASS", "FAIL"}:
         return False
 
     candidate_status = str(candidate.get("status") or "").strip().upper()
@@ -454,15 +463,24 @@ def _compute(out_day: str, produced_utc: str, inp: Inputs) -> Dict[str, Any]:
         {"type": "output_schema", "path": str(SCHEMA_OUT), "sha256": _sha256_file(SCHEMA_OUT)},
     ]
 
-    # Required: nav_total must be int dollars.
-    nav_total = nav_obj.get("nav", {}).get("nav_total")
-    if not isinstance(nav_total, int) or nav_total <= 0:
+    # Required: positive NAV. Adapter-backed accounting_v2 can provide exact
+    # cent precision; legacy accounting falls back to integer-dollar nav_total.
+    nav_block = nav_obj.get("nav") if isinstance(nav_obj.get("nav"), dict) else {}
+    nav_total = nav_block.get("nav_total")
+    explicit_nav_total_cents = nav_block.get("nav_total_cents")
+    if isinstance(explicit_nav_total_cents, int) and explicit_nav_total_cents > 0:
+        if not isinstance(nav_total, int) or nav_total <= 0:
+            nav_total = int(Decimal(explicit_nav_total_cents) / Decimal("100"))
+    elif isinstance(nav_total, int) and nav_total > 0:
+        explicit_nav_total_cents = int(nav_total) * 100
+    else:
         reason_codes.append("B2_NAV_TOTAL_MISSING_OR_INVALID")
         reason_codes.append(RC_AUTHZ_MISSING_EXPOSURE_BUDGET_NAV_TOTAL_CENTS)
         checks["nav_present"] = False
         nav_total = 0
+        explicit_nav_total_cents = 0
 
-    nav_total_cents = int(nav_total) * 100
+    nav_total_cents = int(explicit_nav_total_cents)
 
     # Drawdown inputs:
     # - accounting_v1 always provides history fields (required)

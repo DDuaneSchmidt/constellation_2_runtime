@@ -71,6 +71,23 @@ def _intent(ctx: bod.BodContext, *, target: str = "0.01") -> Path:
     )
 
 
+def _positions_v2(ctx: bod.BodContext) -> Path:
+    return _write_json(
+        ctx.execution_root / "positions_v1" / "snapshots" / ctx.day_utc / "positions_snapshot.v2.json",
+        {
+            "schema_id": "C2_POSITIONS_SNAPSHOT_V2",
+            "schema_version": 2,
+            "produced_utc": f"{ctx.day_utc}T00:00:00Z",
+            "day_utc": ctx.day_utc,
+            "producer": {"repo": "constellation", "git_sha": "a" * 40, "module": "test"},
+            "status": "OK",
+            "reason_codes": ["TEST"],
+            "input_manifest": [{"type": "other", "path": str(ctx.execution_root), "sha256": "0" * 64, "day_utc": ctx.day_utc, "producer": "test"}],
+            "positions": {"currency": "USD", "asof_utc": f"{ctx.day_utc}T00:00:00Z", "items": [], "notes": []},
+        },
+    )
+
+
 def _pass_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         supply,
@@ -99,10 +116,55 @@ def test_valid_capital_supply_broker_nav_plus_policy_passes(monkeypatch: pytest.
     assert payload["risk_sizing_export"]["usable_for_risk_sizing"] is True
 
 
+def test_valid_risk_budget_nav_materializes_capital_risk_adapter_input(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _capital_supply(ctx, nav=101_283_531, cash=100_766_465)
+    _intent(ctx)
+    _pass_envelope(monkeypatch)
+
+    payload = supply.build_risk_budget_supply(ctx)
+    adapter_path = Path(payload["capital_risk_envelope_adapter"]["path"])
+    adapter = json.loads(adapter_path.read_text(encoding="utf-8"))
+    nav = json.loads((ctx.execution_root / "accounting_v2" / "nav" / ctx.day_utc / "nav.v2.json").read_text(encoding="utf-8"))
+
+    assert adapter["nav_total_cents"] == 101_283_531
+    assert adapter["cash_total_cents"] == 100_766_465
+    assert nav["nav"]["nav_total_cents"] == 101_283_531
+
+
+def test_valid_intent_budget_materializes_exposure_budget_adapter_fields(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _capital_supply(ctx, nav=101_283_531)
+    _intent(ctx, target="0.01")
+    _pass_envelope(monkeypatch)
+
+    payload = supply.build_risk_budget_supply(ctx)
+    adapter = json.loads(Path(payload["capital_risk_envelope_adapter"]["path"]).read_text(encoding="utf-8"))
+
+    assert adapter["intent_budgets"][0]["allowed_risk_cents"] == 1_012_835
+    assert adapter["intent_budgets"][0]["nav_total_cents"] == 101_283_531
+    assert adapter["intent_budgets"][0]["target_pct"] == "0.01"
+
+
 def test_missing_capital_supply_blocks(tmp_path: Path) -> None:
     payload = supply.build_risk_budget_supply(_ctx(tmp_path))
     assert payload["status"] == "BLOCKED"
     assert payload["canonical_blocker"] == "CAPITAL_SUPPLY_MISSING"
+
+
+def test_missing_capital_supply_blocks_before_capital_risk_envelope_runs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    called = False
+
+    def _unexpected(ctx):  # noqa: ANN001
+        nonlocal called
+        called = True
+        return {"status": "FAIL"}, "CAPITAL_RISK_ENVELOPE_BLOCKED"
+
+    monkeypatch.setattr(supply, "_run_capital_risk_envelope", _unexpected)
+    payload = supply.build_risk_budget_supply(_ctx(tmp_path))
+
+    assert payload["canonical_blocker"] == "CAPITAL_SUPPLY_MISSING"
+    assert called is False
 
 
 def test_blocked_capital_supply_blocks(tmp_path: Path) -> None:
@@ -157,10 +219,25 @@ def test_capital_risk_envelope_failure_preserves_reason_codes(monkeypatch: pytes
     ctx = _ctx(tmp_path)
     _capital_supply(ctx)
     _intent(ctx)
-    monkeypatch.setattr(supply, "_run_capital_risk_envelope", lambda ctx: ({"status": "FAIL", "reason_codes": ["B2_NAV_TOTAL_MISSING_OR_INVALID"]}, "CAPITAL_RISK_ENVELOPE_BLOCKED"))
+    monkeypatch.setattr(supply, "_run_capital_risk_envelope", lambda ctx: ({"status": "FAIL", "reason_codes": ["B2_PORTFOLIO_CAPITAL_AT_RISK_EXCEEDS_ENVELOPE"]}, "CAPITAL_RISK_ENVELOPE_BLOCKED"))
     payload = supply.build_risk_budget_supply(ctx)
     assert payload["canonical_blocker"] == "CAPITAL_RISK_ENVELOPE_BLOCKED"
-    assert payload["capital_risk_envelope"]["reason_codes"] == ["B2_NAV_TOTAL_MISSING_OR_INVALID"]
+    assert payload["capital_risk_envelope"]["reason_codes"] == ["B2_PORTFOLIO_CAPITAL_AT_RISK_EXCEEDS_ENVELOPE"]
+    assert "B2_NAV_TOTAL_MISSING_OR_INVALID" not in payload["capital_risk_envelope"]["reason_codes"]
+
+
+def test_capital_risk_envelope_no_longer_reports_missing_nav_with_valid_risk_budget(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _capital_supply(ctx, nav=101_283_531, cash=100_766_465)
+    _intent(ctx)
+    _positions_v2(ctx)
+
+    payload = supply.build_risk_budget_supply(ctx)
+
+    assert payload["capital_risk_envelope"]["status"] == "PASS"
+    assert "B2_NAV_TOTAL_MISSING_OR_INVALID" not in payload["capital_risk_envelope"]["reason_codes"]
+    assert "AUTHZ_MISSING_EXPOSURE_BUDGET_NAV_TOTAL_CENTS" not in payload["capital_risk_envelope"]["reason_codes"]
+    assert payload["risk_sizing_export"]["usable_for_risk_sizing"] is True
 
 
 def test_risk_sizing_export_only_when_budget_and_envelope_pass(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -227,6 +304,22 @@ def test_wrong_day_capital_supply_cannot_satisfy_current_day(tmp_path: Path) -> 
     _capital_supply(ctx, day="2026-04-28")
     payload = supply.build_risk_budget_supply(ctx)
     assert payload["canonical_blocker"] == "CAPITAL_SUPPLY_MISSING"
+
+
+def test_wrong_day_existing_adapter_cannot_feed_current_day_envelope(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    adapter_path = supply.capital_risk_envelope_adapter_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    _write_json(adapter_path, {"day_utc": "2026-04-28", "nav_total_cents": 1})
+    _capital_supply(ctx, nav=101_283_531)
+    _intent(ctx)
+    _pass_envelope(monkeypatch)
+
+    payload = supply.build_risk_budget_supply(ctx)
+    adapter = json.loads(adapter_path.read_text(encoding="utf-8"))
+
+    assert payload["capital_risk_envelope_adapter"]["status"] == "PASS"
+    assert adapter["day_utc"] == ctx.day_utc
+    assert adapter["nav_total_cents"] == 101_283_531
 
 
 def test_risk_budget_supply_writes_only_runtime_artifact(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

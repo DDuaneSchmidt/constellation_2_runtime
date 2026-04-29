@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -54,6 +55,16 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n", encoding="utf-8")
 
 
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    if not path.exists() or not path.is_file():
+        return "0" * 64
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def _int(value: Any) -> int | None:
     if isinstance(value, bool) or value is None:
         return None
@@ -74,6 +85,10 @@ def _decimal(value: Any) -> Decimal | None:
 
 def risk_budget_supply_path(*, truth_root: Path, day_utc: str) -> Path:
     return (truth_root / "reports" / "risk_budget_supply_v1" / day_utc / "risk_budget_supply.v1.json").resolve()
+
+
+def capital_risk_envelope_adapter_path(*, truth_root: Path, day_utc: str) -> Path:
+    return (truth_root / "reports" / "risk_budget_supply_v1" / day_utc / "capital_risk_envelope_adapter.v1.json").resolve()
 
 
 def _capital_supply_path(ctx: bod.BodContext) -> Path:
@@ -211,6 +226,189 @@ def _intent_budgets(ctx: bod.BodContext, nav_total_cents: int) -> tuple[list[dic
     return budgets, blocker
 
 
+def _cents_to_floor_dollars(cents: int) -> int:
+    return int((Decimal(cents) / Decimal("100")).to_integral_value(rounding=ROUND_FLOOR))
+
+
+def _git_sha() -> str:
+    try:
+        proc = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT), capture_output=True, text=True, check=False, timeout=10)
+    except Exception:
+        return "0" * 40
+    sha = str(proc.stdout or "").strip()
+    return sha if len(sha) == 40 else "0" * 40
+
+
+def _source_ref(path: Path, *, day_utc: str, producer: str) -> dict[str, Any]:
+    return {
+        "type": "other",
+        "path": str(path),
+        "sha256": _sha256_file(path),
+        "day_utc": day_utc,
+        "producer": producer,
+    }
+
+
+def _materialize_capital_risk_envelope_adapter(
+    ctx: bod.BodContext,
+    *,
+    nav_basis: dict[str, Any],
+    budget_policy: dict[str, Any],
+    intent_budgets: list[dict[str, Any]],
+) -> dict[str, Any]:
+    nav_total_cents = _int(nav_basis.get("net_liquidation_cents"))
+    cash_total_cents = _int(nav_basis.get("cash_total_cents"))
+    if not isinstance(nav_total_cents, int) or nav_total_cents <= 0:
+        raise ValueError("NAV_BASIS_INVALID")
+    if not isinstance(cash_total_cents, int) or cash_total_cents < 0:
+        raise ValueError("NAV_BASIS_INVALID")
+
+    adapter_path = capital_risk_envelope_adapter_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    risk_budget_path = risk_budget_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    nav_path = (ctx.execution_root / "accounting_v2" / "nav" / ctx.day_utc / "nav.v2.json").resolve()
+    summary_path = (ctx.execution_root / "allocation_v1" / "summary" / ctx.day_utc / "summary.json").resolve()
+    produced = f"{ctx.day_utc}T00:00:00Z"
+    git_sha = _git_sha()
+
+    adapter_payload = {
+        "schema_id": "capital_risk_envelope_adapter",
+        "schema_version": "capital_risk_envelope_adapter.v1",
+        "day_utc": ctx.day_utc,
+        "environment": ctx.environment,
+        "produced_utc": produced,
+        "source_path": str(risk_budget_path),
+        "source_trust_level": str(nav_basis.get("trust_level") or ""),
+        "account": ctx.ib_account,
+        "nav_total_cents": nav_total_cents,
+        "cash_total_cents": cash_total_cents,
+        "budget_policy": budget_policy,
+        "intent_budgets": intent_budgets,
+        "legacy_input_paths": {
+            "accounting_nav_v2": str(nav_path),
+            "allocation_summary": str(summary_path),
+            "positions_snapshot_v2": str((ctx.execution_root / "positions_v1" / "snapshots" / ctx.day_utc / "positions_snapshot.v2.json").resolve()),
+            "capital_risk_envelope_v2": str((ctx.execution_root / "reports" / "capital_risk_envelope_v2" / ctx.day_utc / "capital_risk_envelope.v2.json").resolve()),
+        },
+    }
+    _write_json(adapter_path, adapter_payload)
+
+    nav_total = _cents_to_floor_dollars(nav_total_cents)
+    cash_total = _cents_to_floor_dollars(cash_total_cents)
+    nav_payload = {
+        "schema_id": "C2_ACCOUNTING_NAV_V2",
+        "schema_version": 2,
+        "day_utc": ctx.day_utc,
+        "produced_utc": produced,
+        "producer": {"repo": "constellation", "git_sha": git_sha, "module": "ops/tools/run_risk_budget_supply_v1.py"},
+        "status": "ACTIVE",
+        "reason_codes": ["RISK_BUDGET_SUPPLY_CAPITAL_RISK_ENVELOPE_ADAPTER"],
+        "input_manifest": [_source_ref(adapter_path, day_utc=ctx.day_utc, producer="risk_budget_supply_v1")],
+        "history": {
+            "peak_nav": nav_total,
+            "drawdown_abs": 0,
+            "drawdown_pct": "0.000000",
+        },
+        "nav": {
+            "currency": "USD",
+            "cash_total": cash_total,
+            "cash_total_cents": cash_total_cents,
+            "gross_positions_value": 0,
+            "nav_total": nav_total,
+            "nav_total_cents": nav_total_cents,
+            "realized_pnl_to_date": 0,
+            "unrealized_pnl": 0,
+            "components": [
+                {
+                    "kind": "CASH",
+                    "symbol": "USD",
+                    "qty": "0",
+                    "mv": cash_total,
+                    "mark": {
+                        "source": "RISK_BUDGET_SUPPLY",
+                        "asof_utc": produced,
+                        "bid": None,
+                        "ask": None,
+                        "last": None,
+                    },
+                }
+            ],
+            "notes": ["capital risk envelope adapter from verified Risk Budget Supply NAV basis"],
+        },
+    }
+    _write_json(nav_path, nav_payload)
+
+    decisions = []
+    for row in intent_budgets:
+        if not isinstance(row, dict):
+            continue
+        source_path = Path(str(row.get("source_path") or adapter_path)).resolve()
+        decisions.append(
+            {
+                "intent_id": str(row.get("intent_id") or ""),
+                "status": "ALLOW" if row.get("status") == "PASS" else "BLOCK",
+                "path": str(source_path),
+                "sha256": _sha256_file(source_path),
+            }
+        )
+    summary_payload = {
+        "schema_id": "C2_ALLOCATION_SUMMARY_V1",
+        "schema_version": 1,
+        "produced_utc": produced,
+        "day_utc": ctx.day_utc,
+        "producer": {"repo": "constellation", "git_sha": git_sha, "module": "ops/tools/run_risk_budget_supply_v1.py"},
+        "authority_classification": "NON_CANONICAL_ADVISORY_ONLY",
+        "control_decision_warning": "DO_NOT_USE_FOR_CONTROL_DECISIONS; adapter input for capital_risk_envelope_v2 from Risk Budget Supply",
+        "status": "OK",
+        "reason_codes": ["RISK_BUDGET_SUPPLY_CAPITAL_RISK_ENVELOPE_ADAPTER"],
+        "input_manifest": [_source_ref(adapter_path, day_utc=ctx.day_utc, producer="risk_budget_supply_v1")],
+        "summary": {
+            "decisions": decisions,
+            "counts": {
+                "allow": sum(1 for row in decisions if row.get("status") == "ALLOW"),
+                "block": sum(1 for row in decisions if row.get("status") == "BLOCK"),
+            },
+            "notes": ["exposure budget adapter generated from Risk Budget Supply intent budgets"],
+            "drawdown_enforcement": {
+                "contract_id": "C2_DRAWDOWN_CONVENTION_V1",
+                "nav_source_path": str(nav_path),
+                "nav_source_sha256": _sha256_file(nav_path),
+                "nav_asof_day_utc": ctx.day_utc,
+                "rolling_peak_nav": nav_total,
+                "nav_total": nav_total,
+                "drawdown_abs": 0,
+                "drawdown_pct": "0.000000",
+                "multiplier": "1.00",
+                "thresholds": [
+                    {"drawdown_pct": "0.000000", "multiplier": "1.00"},
+                    {"drawdown_pct": "-0.050000", "multiplier": "0.75"},
+                    {"drawdown_pct": "-0.100000", "multiplier": "0.50"},
+                    {"drawdown_pct": "-0.150000", "multiplier": "0.25"},
+                ],
+            },
+            "sleeves": [
+                {
+                    "sleeve_id": "PRIMARY",
+                    "truth_root": str(ctx.execution_root),
+                    "decision_count": len(decisions),
+                    "allow": sum(1 for row in decisions if row.get("status") == "ALLOW"),
+                    "block": sum(1 for row in decisions if row.get("status") == "BLOCK"),
+                }
+            ],
+        },
+    }
+    _write_json(summary_path, summary_payload)
+
+    return {
+        "path": str(adapter_path),
+        "status": "PASS",
+        "nav_path": str(nav_path),
+        "allocation_summary_path": str(summary_path),
+        "nav_total_cents": nav_total_cents,
+        "cash_total_cents": cash_total_cents,
+        "intent_budget_count": len(intent_budgets),
+    }
+
+
 def _run_capital_risk_envelope(ctx: bod.BodContext) -> tuple[dict[str, Any], str]:
     cmd = [
         sys.executable,
@@ -265,6 +463,7 @@ def build_risk_budget_supply(ctx: bod.BodContext) -> dict[str, Any]:
     nav_basis: dict[str, Any] = {}
     policy: dict[str, Any] = {}
     budgets: list[dict[str, Any]] = []
+    adapter: dict[str, Any] = {}
     envelope: dict[str, Any] = {}
     export: dict[str, Any] = {
         "usable_for_risk_sizing": False,
@@ -291,6 +490,12 @@ def build_risk_budget_supply(ctx: bod.BodContext) -> dict[str, Any]:
             budgets, blocker = _intent_budgets(ctx, nav_total)
             if blocker:
                 status = "BLOCKED"
+    if not blocker:
+        try:
+            adapter = _materialize_capital_risk_envelope_adapter(ctx, nav_basis=nav_basis, budget_policy=policy, intent_budgets=budgets)
+        except Exception:
+            blocker = "RISK_SIZING_EXPORT_MISSING"
+            status = "BLOCKED"
     if not blocker:
         envelope, blocker = _run_capital_risk_envelope(ctx)
         if blocker:
@@ -321,6 +526,7 @@ def build_risk_budget_supply(ctx: bod.BodContext) -> dict[str, Any]:
         "nav_basis": nav_basis,
         "budget_policy": policy,
         "intent_budgets": budgets,
+        "capital_risk_envelope_adapter": adapter,
         "capital_risk_envelope": envelope,
         "risk_sizing_export": export,
         "operator_next_action": _operator_action(canonical_blocker, ctx, capital_supply),
