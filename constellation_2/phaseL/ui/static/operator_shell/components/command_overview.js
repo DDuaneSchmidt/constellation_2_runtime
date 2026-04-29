@@ -25,12 +25,165 @@ function statusClass(value, fallback = "muted") {
   return "status-muted";
 }
 
+function semanticStatusClass(semantic) {
+  const normalized = String(semantic || "").toLowerCase();
+  if (normalized === "healthy") {
+    return "status-ready";
+  }
+  if (normalized === "warning") {
+    return "status-warning";
+  }
+  if (normalized === "blocked") {
+    return "status-error";
+  }
+  if (normalized === "info") {
+    return "status-info";
+  }
+  return statusClass(normalized || "muted");
+}
+
 function numericPercent(value) {
   const parsed = Number.parseFloat(String(value || "0").replace("%", ""));
   if (!Number.isFinite(parsed)) {
     return 0;
   }
   return Math.max(0, Math.min(100, parsed));
+}
+
+function easternMarketSessionState(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now).reduce((acc, part) => {
+    acc[part.type] = part.value;
+    return acc;
+  }, {});
+  const weekday = parts.weekday || "";
+  const hour = Number.parseInt(parts.hour || "0", 10);
+  const minute = Number.parseInt(parts.minute || "0", 10);
+  const minutes = hour * 60 + minute;
+  const isWeekday = !["Sat", "Sun"].includes(weekday);
+  const isOpen = isWeekday && minutes >= 570 && minutes < 960;
+  return {
+    code: isOpen ? "IN_SESSION" : "OUT_OF_SESSION",
+    label: isOpen ? "Market session is open." : "Market is closed or outside the regular evaluation session.",
+  };
+}
+
+function hasMeaningfulUnavailable(data) {
+  const sourceState = String(data?.data_source_state || "");
+  if (sourceState.includes("UNAVAILABLE")) {
+    return true;
+  }
+  const summary = Array.isArray(data?.summary) ? data.summary : [];
+  const tiles = Array.isArray(data?.readiness?.tiles) ? data.readiness.tiles : [];
+  return [...summary, ...tiles].filter((item) => String(item?.value || "").includes("UNAVAILABLE")).length >= 3;
+}
+
+function isStaleFreshness(freshness) {
+  const parsed = Date.parse(String(freshness || ""));
+  if (!Number.isFinite(parsed)) {
+    return false;
+  }
+  return Date.now() - parsed > 6 * 60 * 60 * 1000;
+}
+
+function classifyOperatorState(data = {}) {
+  const session = easternMarketSessionState();
+  const sourceState = String(data.data_source_state || "");
+  const fallbackBadge = String(data.fallback_badge || "");
+  const summary = Array.isArray(data.summary) ? data.summary : [];
+  const exceptions = Array.isArray(data.exceptions) ? data.exceptions : [];
+  const combinedText = JSON.stringify({
+    sourceState,
+    fallbackBadge,
+    summary,
+    exceptions,
+    context: data.context || {},
+  }).toUpperCase();
+  const hasAuthorityData = sourceState === "REAL";
+  const unavailable = hasMeaningfulUnavailable(data);
+  const stale = isStaleFreshness(data.context?.freshness);
+  const hasRealBlockers = exceptions.some((exception) => {
+    const title = String(exception?.title || "").toUpperCase();
+    return title && title !== "NO ACTIVE BLOCKERS";
+  }) || summary.some((item) => /BLOCK|FAIL|REJECT|ERROR/.test(String(item?.value || "").toUpperCase()));
+  const marketClosed = session.code === "OUT_OF_SESSION" || /MARKET_CLOSED|MARKET_NOT_OPEN|OUT_OF_SESSION|SESSION_CLOSED/.test(combinedText);
+
+  if (marketClosed && (unavailable || !hasAuthorityData || hasRealBlockers)) {
+    return {
+      state: "MARKET_CLOSED / OUT_OF_SESSION",
+      semantic: "info",
+      why: "System is not currently evaluating readiness because the market is closed.",
+      nextAction: "Reopen Command / Overview during the next market session or inspect raw artifacts if reviewing prior evidence.",
+      collapseSecondary: unavailable || !hasAuthorityData,
+    };
+  }
+  if (stale) {
+    return {
+      state: "STALE_DATA",
+      semantic: "warning",
+      why: `Latest command authority freshness is ${data.context?.freshness}.`,
+      nextAction: "Refresh the runtime authorities before using this surface for current operational decisions.",
+      collapseSecondary: false,
+    };
+  }
+  if (unavailable || !hasAuthorityData) {
+    return {
+      state: "PARTIAL_STATE",
+      semantic: "warning",
+      why: "One or more command authority artifacts are missing or unavailable.",
+      nextAction: "Open raw artifacts or rerun the relevant authority producer before treating readiness as current.",
+      collapseSecondary: true,
+    };
+  }
+  if (hasRealBlockers) {
+    const first = exceptions.find((exception) => String(exception?.title || "").toUpperCase() !== "NO ACTIVE BLOCKERS");
+    return {
+      state: "BLOCKED",
+      semantic: "blocked",
+      why: first?.body || first?.title || "A runtime authority reported a blocker.",
+      nextAction: first?.primary_action ? String(first.primary_action) : "Review the first active exception and its supporting artifact.",
+      collapseSecondary: false,
+    };
+  }
+  return {
+    state: "READY",
+    semantic: "healthy",
+    why: "Current command authority payload is complete and no active blocker is reported.",
+    nextAction: "Continue with the governed operator workflow for the current session.",
+    collapseSecondary: false,
+  };
+}
+
+export function OperatorStateSummary({ state = {} } = {}) {
+  return `
+    <section class="command-section operator-state-summary ${semanticStatusClass(state.semantic)}">
+      <div class="command-section-header">
+        <div>
+          <div class="section-eyebrow">Operator State</div>
+          <h2>${escapeHtml(state.state || "PARTIAL_STATE")}</h2>
+        </div>
+      </div>
+      <div class="metric-grid">
+        <article class="metric-card">
+          <div class="metric-label">State</div>
+          <div class="metric-value">${escapeHtml(state.state || "PARTIAL_STATE")}</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">Why</div>
+          <div class="metric-value" style="font-size:16px;line-height:1.35;">${escapeHtml(state.why || "No explanation available.")}</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">Next Action</div>
+          <div class="metric-value" style="font-size:16px;line-height:1.35;">${escapeHtml(state.nextAction || "Inspect raw artifacts.")}</div>
+        </article>
+      </div>
+    </section>
+  `;
 }
 
 function actionPayload(exception, action) {
@@ -243,10 +396,13 @@ export function renderCommandOverview(data) {
   const summary = Array.isArray(data.summary) ? data.summary : [];
   const readiness = data.readiness || { score: "0%", tiles: [] };
   const readinessTiles = Array.isArray(readiness.tiles) ? readiness.tiles : [];
+  const operatorState = classifyOperatorState(data);
+  const collapsedSecondary = operatorState.collapseSecondary;
   return `
     <div class="command-overview">
-      ${sourceState && sourceState !== "REAL" ? `<div class="command-source-banner">${escapeHtml(fallbackBadge || sourceState)} data source: Command Overview is not fully authority-backed for this day.</div>` : ""}
-      ${StatusStrip({ summary })}
+      ${OperatorStateSummary({ state: operatorState })}
+      ${sourceState && sourceState !== "REAL" ? `<div class="command-source-banner">${escapeHtml(fallbackBadge || sourceState)} data source: Command Overview is not fully authority-backed for this day. Secondary tiles are collapsed to avoid implying live readiness.</div>` : ""}
+      ${collapsedSecondary ? "" : StatusStrip({ summary })}
       <section class="command-section what-matters">
         <div class="command-section-header">
           <div>
@@ -268,12 +424,16 @@ export function renderCommandOverview(data) {
             </div>
             <div class="readiness-score">${escapeHtml(readiness.score)}</div>
           </div>
-          <div class="readiness-progress" style="--readiness-score:${numericPercent(readiness.score)}" aria-label="Readiness ${escapeHtml(readiness.score)}">
-            <span></span>
-          </div>
-          <div class="readiness-grid">
-            ${readinessTiles.map((tile) => ReadinessTile({ tile })).join("")}
-          </div>
+          ${collapsedSecondary
+            ? `<div class="empty-state">Secondary readiness tiles are hidden because the primary operator state is ${escapeHtml(operatorState.state)}. Raw artifact evidence remains available in the context rail.</div>`
+            : `
+              <div class="readiness-progress" style="--readiness-score:${numericPercent(readiness.score)}" aria-label="Readiness ${escapeHtml(readiness.score)}">
+                <span></span>
+              </div>
+              <div class="readiness-grid">
+                ${readinessTiles.map((tile) => ReadinessTile({ tile })).join("")}
+              </div>
+            `}
         </div>
         ${PolicyState({ policy: Array.isArray(data.policy) ? data.policy : [], runtime: data.policy_runtime || {} })}
       </section>
