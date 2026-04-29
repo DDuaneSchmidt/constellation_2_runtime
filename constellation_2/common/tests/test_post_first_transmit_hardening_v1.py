@@ -13,11 +13,19 @@ if str(SOURCE_ROOT) not in sys.path:
 
 from constellation_2.phaseD.lib.submit_boundary_paper_v4 import (  # noqa: E402
     RC_FINAL_SNAPSHOT_LINEAGE_MISMATCH,
+    RC_SECOND_ATTEMPT_CLEARANCE_REQUIRED,
+    RC_SECOND_ATTEMPT_IDENTICAL_PLAN_HASH,
+    RC_SECOND_ATTEMPT_IDENTICAL_STRUCTURE_PRICING,
     SubmitBoundaryV4Error,
     _combo_preview_blocker,
     _enforce_final_snapshot_lineage_gate,
+    _enforce_second_attempt_clearance_gate,
     _sha256_file,
     _write_ib_order_payload_artifact,
+)
+from constellation_2.common.paper_second_attempt_clearance_v1 import (  # noqa: E402
+    OPERATOR_SCHEMA_ID,
+    sha256_file_v1,
 )
 
 
@@ -27,6 +35,53 @@ DAY = "2026-04-29"
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+
+
+def _seed_prior_submission_with_clearance(tmp_path: Path) -> tuple[Path, Path, str, Path]:
+    truth = tmp_path / "truth"
+    execution = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    prior_id = "prior-submission"
+    submission_dir = execution / "execution_evidence_v1" / "submissions" / DAY / prior_id
+    prior_plan = {
+        "schema_id": "order_plan",
+        "schema_version": "v1",
+        "plan_hash": "a" * 64,
+        "legs": [{"right": "P", "strike": "693", "action": "SELL"}],
+        "order_terms": {"limit_price": "1.00"},
+    }
+    _write_json(submission_dir / "order_plan.v1.json", prior_plan)
+    _write_json(submission_dir / "broker_submission_record.v2.json", {"submission_id": prior_id, "status": "CANCELLED", "broker_ids": {"order_id": 94, "perm_id": 0}})
+    _write_json(submission_dir / "broker_submit_attempt_v1.json", {"ib_account": "DUO847203"})
+    _write_json(submission_dir / "broker_order_outcome_v1.json", {"outcome_state": "BROKER_REJECTED", "reason_codes": ["IB_ERROR_201_RISKLESS_COMBINATION"], "ib_account": "DUO847203"})
+    _write_json(submission_dir / "execution_event_record.v1.json", {"status": "BROKER_REJECTED", "filled_qty": 0, "broker_order_id": "94", "perm_id": "0"})
+    _write_json(submission_dir / "broker_acknowledgement_v1.json", {"ib_account": "DUO847203"})
+    closure_path = truth / "reports" / "trading_day_closure_authority_v1" / DAY / "trading_day_closure_authority.v1.json"
+    _write_json(closure_path, {"status": "PASS", "closure_state": "NO_TRADES_CLOSED", "unresolved_submissions": []})
+    clearance_path = truth / "reports" / "paper_second_attempt_clearance_v1" / DAY / prior_id / "paper_second_attempt_clearance.v1.json"
+    _write_json(
+        clearance_path,
+        {
+            "schema_id": "paper_second_attempt_clearance",
+            "schema_version": "v1",
+            "day_utc": DAY,
+            "environment": "PAPER",
+            "status": "CLEARED",
+            "canonical_blocker": "",
+            "prior_submission": {
+                "submission_id": prior_id,
+                "account": "DUO847203",
+                "order_plan_path": str(submission_dir / "order_plan.v1.json"),
+                "order_plan_sha256": sha256_file_v1(submission_dir / "order_plan.v1.json"),
+            },
+            "closure_evidence": {"trading_day_closure_authority_path": str(closure_path)},
+            "operator_clearance": {"schema_id": OPERATOR_SCHEMA_ID},
+            "policy": {"requires_ib_preview_pass": True},
+            "new_attempt_requirements": ["fresh_snapshot_lineage", "ib_combo_preview_pass"],
+            "operator_next_action": "",
+            "produced_at_utc": "2026-04-29T15:00:00Z",
+        },
+    )
+    return truth, execution, prior_id, clearance_path
 
 
 def _seed_lineage(tmp_path: Path, *, structure_snapshot: Path | None = None) -> tuple[Path, Path, Path, Path, dict, dict, list[str]]:
@@ -141,3 +196,112 @@ def test_exact_ib_payload_is_persisted_before_transmit(tmp_path: Path) -> None:
     assert payload["payload"]["bag"]["secType"] == "BAG"
     assert payload["payload"]["order"]["action"] == "BUY"
     assert payload["canonical_json_hash"]
+
+
+def test_second_attempt_missing_clearance_blocks_submit(tmp_path: Path) -> None:
+    truth, execution, prior_id, clearance_path = _seed_prior_submission_with_clearance(tmp_path)
+    clearance_path.unlink()
+
+    with pytest.raises(SubmitBoundaryV4Error, match=RC_SECOND_ATTEMPT_CLEARANCE_REQUIRED):
+        _enforce_second_attempt_clearance_gate(
+            canonical_truth_root=truth,
+            execution_truth_root=execution,
+            day_utc=DAY,
+            submission_id="new-submission",
+            plan_obj={"schema_id": "order_plan", "schema_version": "v1", "plan_hash": "b" * 64, "legs": []},
+            final_lineage_gate={"status": "PASS"},
+            pointers=[],
+        )
+
+
+def test_second_attempt_valid_clearance_with_different_plan_allows_submit_readiness_to_proceed(tmp_path: Path) -> None:
+    truth, execution, prior_id, clearance_path = _seed_prior_submission_with_clearance(tmp_path)
+
+    payload = _enforce_second_attempt_clearance_gate(
+        canonical_truth_root=truth,
+        execution_truth_root=execution,
+        day_utc=DAY,
+        submission_id="new-submission",
+        plan_obj={
+            "schema_id": "order_plan",
+            "schema_version": "v1",
+            "plan_hash": "b" * 64,
+            "legs": [{"right": "P", "strike": "692", "action": "SELL"}],
+            "order_terms": {"limit_price": "0.80"},
+        },
+        final_lineage_gate={"status": "PASS"},
+        pointers=[],
+    )
+
+    assert payload["status"] == "PASS"
+    assert payload["prior_submission_id"] == prior_id
+    assert payload["clearance_path"] == str(clearance_path)
+    assert payload["requires_ib_preview_pass"] is True
+
+
+def test_second_attempt_same_submission_id_reuse_defers_to_idempotency_guard(tmp_path: Path) -> None:
+    truth, execution, prior_id, _clearance_path = _seed_prior_submission_with_clearance(tmp_path)
+
+    payload = _enforce_second_attempt_clearance_gate(
+        canonical_truth_root=truth,
+        execution_truth_root=execution,
+        day_utc=DAY,
+        submission_id=prior_id,
+        plan_obj={"schema_id": "order_plan", "schema_version": "v1", "plan_hash": "b" * 64, "legs": []},
+        final_lineage_gate={"status": "PASS"},
+        pointers=[],
+    )
+
+    assert payload["status"] == "NOT_REQUIRED"
+    assert payload["reason"] == "current_submission_id_matches_prior_idempotency_guard_applies"
+
+
+def test_second_attempt_identical_plan_hash_blocks_submit(tmp_path: Path) -> None:
+    truth, execution, _prior_id, _clearance_path = _seed_prior_submission_with_clearance(tmp_path)
+
+    with pytest.raises(SubmitBoundaryV4Error, match=RC_SECOND_ATTEMPT_IDENTICAL_PLAN_HASH):
+        _enforce_second_attempt_clearance_gate(
+            canonical_truth_root=truth,
+            execution_truth_root=execution,
+            day_utc=DAY,
+            submission_id="new-submission",
+            plan_obj={"schema_id": "order_plan", "schema_version": "v1", "plan_hash": "a" * 64, "legs": []},
+            final_lineage_gate={"status": "PASS"},
+            pointers=[],
+        )
+
+
+def test_second_attempt_identical_structure_pricing_blocks_submit(tmp_path: Path) -> None:
+    truth, execution, _prior_id, _clearance_path = _seed_prior_submission_with_clearance(tmp_path)
+
+    with pytest.raises(SubmitBoundaryV4Error, match=RC_SECOND_ATTEMPT_IDENTICAL_STRUCTURE_PRICING):
+        _enforce_second_attempt_clearance_gate(
+            canonical_truth_root=truth,
+            execution_truth_root=execution,
+            day_utc=DAY,
+            submission_id="new-submission",
+            plan_obj={
+                "schema_id": "order_plan",
+                "schema_version": "v1",
+                "plan_hash": "b" * 64,
+                "legs": [{"right": "P", "strike": "693", "action": "SELL"}],
+                "order_terms": {"limit_price": "1.00"},
+            },
+            final_lineage_gate={"status": "PASS"},
+            pointers=[],
+        )
+
+
+def test_second_attempt_requires_fresh_snapshot_lineage(tmp_path: Path) -> None:
+    truth, execution, _prior_id, _clearance_path = _seed_prior_submission_with_clearance(tmp_path)
+
+    with pytest.raises(SubmitBoundaryV4Error, match=RC_FINAL_SNAPSHOT_LINEAGE_MISMATCH):
+        _enforce_second_attempt_clearance_gate(
+            canonical_truth_root=truth,
+            execution_truth_root=execution,
+            day_utc=DAY,
+            submission_id="new-submission",
+            plan_obj={"schema_id": "order_plan", "schema_version": "v1", "plan_hash": "b" * 64, "legs": []},
+            final_lineage_gate={"status": "BLOCKED"},
+            pointers=[],
+        )

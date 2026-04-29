@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/paper_second_attempt_clearance.v1.schema.json",
+  "title": "paper_second_attempt_clearance.v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "environment",
+    "status",
+    "canonical_blocker",
+    "prior_submission",
+    "closure_evidence",
+    "operator_clearance",
+    "policy",
+    "new_attempt_requirements",
+    "operator_next_action",
+    "produced_at_utc",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "paper_second_attempt_clearance" },
+    "schema_version": { "const": "v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "environment": { "const": "PAPER" },
+    "status": { "type": "string", "enum": ["CLEARED", "BLOCKED"] },
+    "canonical_blocker": { "type": "string" },
+    "prior_submission": { "type": "object", "additionalProperties": true },
+    "closure_evidence": { "type": "object", "additionalProperties": true },
+    "operator_clearance": { "type": "object", "additionalProperties": true },
+    "policy": { "type": "object", "additionalProperties": true },
+    "new_attempt_requirements": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "operator_next_action": { "type": "string" },
+    "produced_at_utc": { "type": "string", "minLength": 20 },
+    "canonical_json_hash": { "type": ["string", "null"] }
+  }
+}

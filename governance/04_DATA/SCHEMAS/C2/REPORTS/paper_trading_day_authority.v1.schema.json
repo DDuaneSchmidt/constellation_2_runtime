@@ -47,6 +47,12 @@
     "dry_run_policy": { "type": "string" },
     "broker_transmit_enabled": { "type": ["boolean", "null"] },
     "broker_order_transmitted": { "type": "boolean" },
+    "second_attempt_clearance_status": { "type": "string" },
+    "second_attempt_clearance_path": { "type": "string" },
+    "second_attempt_clearance": {
+      "type": "object",
+      "additionalProperties": true
+    },
     "missing_broker_ids_blocker": { "type": "boolean" },
     "missing_broker_ids_diagnostic": { "type": "boolean" },
     "canonical_blocker": { "type": "string" },

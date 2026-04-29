@@ -143,6 +143,14 @@ from constellation_2.common.trade_readiness_reducer_v1 import (
 from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_trade_readiness_presubmit_path,
 )
+from constellation_2.common.paper_second_attempt_clearance_v1 import (
+    PaperSecondAttemptClearanceError,
+    latest_broker_submission_record_path_v1,
+    load_clearance_for_submission_v1,
+    load_prior_order_plan_from_clearance_v1,
+    plan_hash_v1,
+    structure_pricing_signature_v1,
+)
 from constellation_2.common.c2_risk_policy_loader_v1 import (
     RiskPolicyLoaderError,
     get_allow_entry_only_paper_test_or_fail,
@@ -187,6 +195,9 @@ RC_EXECUTION_SUBMISSION_RECORD_MISMATCH = "C2_SUBMIT_EXECUTION_SUBMISSION_RECORD
 RC_RAW_CANDIDATE_SUBMIT_DISABLED = "C2_SUBMIT_RAW_CANDIDATE_DISABLED"
 RC_FINAL_SNAPSHOT_LINEAGE_MISMATCH = "C2_FINAL_SNAPSHOT_LINEAGE_MISMATCH"
 RC_BROKER_COMBO_PREVIEW_NOT_PASS = "C2_BROKER_COMBO_PREVIEW_NOT_PASS"
+RC_SECOND_ATTEMPT_CLEARANCE_REQUIRED = "C2_SECOND_ATTEMPT_CLEARANCE_REQUIRED"
+RC_SECOND_ATTEMPT_IDENTICAL_PLAN_HASH = "C2_SECOND_ATTEMPT_IDENTICAL_PLAN_HASH"
+RC_SECOND_ATTEMPT_IDENTICAL_STRUCTURE_PRICING = "C2_SECOND_ATTEMPT_IDENTICAL_STRUCTURE_PRICING"
 BROKER_TRANSMIT_ENABLEMENT_MSG = (
     "explicit micro-live path requires C2_ENABLE_BROKER_TRANSMIT=YES with dry_run=False"
 )
@@ -433,6 +444,74 @@ def _enforce_final_snapshot_lineage_gate(
     if mismatches:
         raise SubmitBoundaryV4Error(f"{RC_FINAL_SNAPSHOT_LINEAGE_MISMATCH}:{mismatches[0]['name']}")
     return payload
+
+
+def _enforce_second_attempt_clearance_gate(
+    *,
+    canonical_truth_root: Path,
+    execution_truth_root: Path,
+    day_utc: str,
+    submission_id: str,
+    plan_obj: Dict[str, Any],
+    final_lineage_gate: Dict[str, Any],
+    pointers: List[str],
+) -> Dict[str, Any]:
+    latest_record = latest_broker_submission_record_path_v1(
+        execution_root=execution_truth_root,
+        day_utc=day_utc,
+    )
+    if latest_record is None:
+        return {"status": "NOT_REQUIRED", "canonical_blocker": "", "reason": "no_prior_broker_submission"}
+    prior_submission_id = latest_record.parent.name
+    if prior_submission_id == submission_id:
+        return {
+            "status": "NOT_REQUIRED",
+            "canonical_blocker": "",
+            "reason": "current_submission_id_matches_prior_idempotency_guard_applies",
+            "prior_submission_id": prior_submission_id,
+            "broker_submission_record_path": str(latest_record),
+        }
+    clearance = load_clearance_for_submission_v1(
+        truth_root=canonical_truth_root,
+        day_utc=day_utc,
+        prior_submission_id=prior_submission_id,
+    )
+    clearance_path = str(clearance.get("_path") or clearance.get("path") or "")
+    pointers.append(clearance_path)
+    if str(clearance.get("status") or "").strip().upper() != "CLEARED":
+        blocker = str(clearance.get("canonical_blocker") or "OPERATOR_CLEARANCE_MISSING").strip()
+        raise SubmitBoundaryV4Error(
+            f"{RC_SECOND_ATTEMPT_CLEARANCE_REQUIRED}:{blocker}:prior_submission_id={prior_submission_id}:path={clearance_path}"
+        )
+    if str(final_lineage_gate.get("status") or "").strip().upper() != "PASS":
+        raise SubmitBoundaryV4Error(f"{RC_FINAL_SNAPSHOT_LINEAGE_MISMATCH}:second_attempt_requires_fresh_snapshot_lineage")
+    try:
+        prior_plan = load_prior_order_plan_from_clearance_v1(clearance)
+    except PaperSecondAttemptClearanceError as exc:
+        raise SubmitBoundaryV4Error(f"{RC_SECOND_ATTEMPT_CLEARANCE_REQUIRED}:{exc}") from exc
+    prior_plan_hash = plan_hash_v1(prior_plan)
+    current_plan_hash = plan_hash_v1(plan_obj)
+    if prior_plan_hash == current_plan_hash:
+        raise SubmitBoundaryV4Error(
+            f"{RC_SECOND_ATTEMPT_IDENTICAL_PLAN_HASH}:prior_submission_id={prior_submission_id}:plan_hash={current_plan_hash}"
+        )
+    prior_signature = structure_pricing_signature_v1(prior_plan)
+    current_signature = structure_pricing_signature_v1(plan_obj)
+    if prior_signature == current_signature:
+        raise SubmitBoundaryV4Error(
+            f"{RC_SECOND_ATTEMPT_IDENTICAL_STRUCTURE_PRICING}:prior_submission_id={prior_submission_id}:signature={current_signature}"
+        )
+    return {
+        "status": "PASS",
+        "canonical_blocker": "",
+        "prior_submission_id": prior_submission_id,
+        "clearance_path": clearance_path,
+        "prior_plan_hash": prior_plan_hash,
+        "current_plan_hash": current_plan_hash,
+        "prior_structure_pricing_signature": prior_signature,
+        "current_structure_pricing_signature": current_signature,
+        "requires_ib_preview_pass": True,
+    }
 
 
 def _preview_payload_from_whatif(whatif: Any) -> Dict[str, Any]:
@@ -966,6 +1045,9 @@ def _extract_reason_code_and_detail(error: Exception, *, default_code: str) -> T
             RC_BRACKET_SUBMISSION_FAILED,
             RC_FINAL_SNAPSHOT_LINEAGE_MISMATCH,
             RC_BROKER_COMBO_PREVIEW_NOT_PASS,
+            RC_SECOND_ATTEMPT_CLEARANCE_REQUIRED,
+            RC_SECOND_ATTEMPT_IDENTICAL_PLAN_HASH,
+            RC_SECOND_ATTEMPT_IDENTICAL_STRUCTURE_PRICING,
         }:
             return possible_code, remainder.strip() or message
     return default_code, message
@@ -1830,6 +1912,23 @@ def run_submit_boundary_paper_v4(
             actual_path=day_dir,
         )
     day_dir.mkdir(parents=True, exist_ok=True)
+
+    if mode == "OPTIONS":
+        second_attempt_gate = _enforce_second_attempt_clearance_gate(
+            canonical_truth_root=canonical_control_truth_root,
+            execution_truth_root=execution_root.execution_root_path.resolve(),
+            day_utc=day,
+            submission_id=submission_id,
+            plan_obj=plan_obj,
+            final_lineage_gate=final_lineage_gate,
+            pointers=pointers,
+        )
+        if str(second_attempt_gate.get("status") or "").strip().upper() == "PASS":
+            pointers.append(
+                "SECOND_ATTEMPT_CLEARANCE_PASS:"
+                f"prior_submission_id={second_attempt_gate.get('prior_submission_id')}:"
+                f"path={second_attempt_gate.get('clearance_path')}"
+            )
 
     try:
         idempotency_check = assert_idempotent_or_raise_v1(submissions_root=day_dir, submission_id=submission_id)

@@ -33,6 +33,10 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
 from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_paper_trading_day_authority_path,
 )
+from constellation_2.common.paper_second_attempt_clearance_v1 import (
+    clearance_path_v1,
+    load_clearance_for_submission_v1,
+)
 from constellation_2.common.paper_submit_mode_status_v1 import classify_paper_submit_mode_status_v1
 from constellation_2.common.runtime_path_authority_v1 import require_authoritative_repo_runtime_v1
 from constellation_2.common.sleeve_execution_root_v1 import resolve_sleeve_execution_root_v1
@@ -946,7 +950,36 @@ def main(argv: List[str] | None = None) -> int:
     missing_broker_ids_blocker = bool(submit_mode.get("missing_broker_ids_blocker") is True)
     missing_broker_ids_diagnostic = bool(submit_mode.get("missing_broker_ids_diagnostic") is True)
     dry_run_complete = submit_mode_status.upper() == "DRY_RUN_COMPLETE"
-    terminal_submit_evidence = bool(dry_run_complete or broker_order_transmitted)
+    prior_submission_id = str(submit_mode.get("submission_id") or "").strip()
+    second_attempt_clearance: Dict[str, Any] = {}
+    second_attempt_clearance_valid = False
+    second_attempt_clearance_path = ""
+    if broker_order_transmitted and prior_submission_id:
+        second_attempt_clearance = load_clearance_for_submission_v1(
+            truth_root=truth_root,
+            day_utc=day_utc,
+            prior_submission_id=prior_submission_id,
+        )
+        second_attempt_clearance_path = str(
+            second_attempt_clearance.get("_path")
+            or second_attempt_clearance.get("path")
+            or clearance_path_v1(
+                truth_root=truth_root,
+                day_utc=day_utc,
+                prior_submission_id=prior_submission_id,
+            )
+        )
+        second_attempt_clearance_valid = str(second_attempt_clearance.get("status") or "").strip().upper() == "CLEARED"
+        evidence_paths["paper_second_attempt_clearance_v1"] = second_attempt_clearance_path
+        input_status["paper_second_attempt_clearance_v1"] = {
+            "path": second_attempt_clearance_path,
+            "exists": bool(second_attempt_clearance_path and Path(second_attempt_clearance_path).exists()),
+            "status": "PASS" if second_attempt_clearance_valid else "MISSING" if str(second_attempt_clearance.get("status") or "").upper() == "MISSING" else "FAIL",
+            "reason_codes": []
+            if second_attempt_clearance_valid
+            else [str(second_attempt_clearance.get("canonical_blocker") or "OPERATOR_CLEARANCE_MISSING")],
+        }
+    terminal_submit_evidence = bool(dry_run_complete or (broker_order_transmitted and not second_attempt_clearance_valid))
 
     kill_switch_active = bool(
         input_status["global_kill_switch_state_v1"]["status"] == "FAIL"
@@ -979,7 +1012,7 @@ def main(argv: List[str] | None = None) -> int:
             submission_root.exists()
             and submission_root.is_dir()
             and any(item.is_dir() for item in submission_root.iterdir())
-        )
+        ) and not second_attempt_clearance_valid
         boundary_authorized = bool(
             boundary_payload is not None
             and str(boundary_payload.get("boundary_status") or "").strip().upper() == "AUTHORIZED"
@@ -1023,8 +1056,8 @@ def main(argv: List[str] | None = None) -> int:
         preferred_codes.extend(input_status["global_kill_switch_state_v1"]["reason_codes"])
     if dry_run_complete:
         preferred_codes.append("DRY_RUN_COMPLETE_ALREADY_SUBMITTED")
-    elif broker_order_transmitted:
-        preferred_codes.append("BROKER_ORDER_ALREADY_TRANSMITTED")
+    elif broker_order_transmitted and not second_attempt_clearance_valid:
+        preferred_codes.append("BROKER_ORDER_ALREADY_TRANSMITTED_UNREVIEWED")
     preferred_codes.extend(reason_codes)
     if not preferred_codes and state == "AUTHORIZED_NOT_OPEN":
         preferred_codes = session_codes or ["NO_ACTIVE_PAPER_SESSION"]
@@ -1091,6 +1124,11 @@ def main(argv: List[str] | None = None) -> int:
         "dry_run_policy": dry_run_policy,
         "broker_transmit_enabled": broker_transmit_enabled,
         "broker_order_transmitted": bool(broker_order_transmitted),
+        "second_attempt_clearance_status": str(second_attempt_clearance.get("status") or "NOT_REQUIRED"),
+        "second_attempt_clearance_path": second_attempt_clearance_path,
+        "second_attempt_clearance": second_attempt_clearance
+        if second_attempt_clearance
+        else {"status": "NOT_REQUIRED"},
         "missing_broker_ids_blocker": bool(missing_broker_ids_blocker),
         "missing_broker_ids_diagnostic": bool(missing_broker_ids_diagnostic),
         "canonical_blocker": canonical_blocker,
