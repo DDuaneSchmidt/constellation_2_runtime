@@ -241,6 +241,10 @@ def _market_data_supply_path(ctx: PhaseContext) -> Path:
     return _artifact(ctx, "market_data_supply_v1", "market_data_supply.v1.json")
 
 
+def _capital_supply_path(ctx: PhaseContext) -> Path:
+    return _artifact(ctx, "capital_supply_v1", "capital_supply.v1.json")
+
+
 def _load_requirement_graph_root(ctx: PhaseContext) -> dict[str, Any]:
     graph = _read_json(_requirement_graph_path(ctx))
     if str(graph.get("day_utc") or "").strip() != ctx.day_utc:
@@ -419,23 +423,58 @@ def _phase_market_data(ctx: PhaseContext, env: dict[str, str]) -> dict[str, Any]
 def _phase_strategy_and_risk(ctx: PhaseContext, env: dict[str, str]) -> dict[str, Any]:
     py = sys.executable
     started = _now_iso()
-    commands = [
+    pre_capital_commands = [
         ("trading_day_intent_generation", [py, "ops/tools/run_trading_day_intent_generation_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.truth_root)], 1),
         ("strategy_decision_authority", [py, "ops/tools/run_strategy_decision_authority_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.truth_root), "--execution_root", str(ctx.execution_root)], 1),
         ("portfolio_account_authority", [py, "ops/tools/run_portfolio_account_authority_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.truth_root), "--execution_root", str(ctx.execution_root)], 1),
         ("phasec_risk_inputs_prep", [py, "ops/tools/run_phasec_risk_inputs_prep_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.truth_root)], 1),
-        ("capital_risk_envelope", [py, "ops/tools/run_c2_capital_risk_envelope_gate_v2.py", "--out_day_utc", ctx.day_utc, "--input_day_utc", ctx.day_utc, "--produced_utc", f"{ctx.day_utc}T00:00:00Z", "--truth_root", str(ctx.execution_root)], 1),
-        ("risk_sizing_authority", [py, "ops/tools/run_risk_sizing_authority_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.truth_root), "--execution_root", str(ctx.execution_root)], 1),
     ]
-    steps, outputs, blockers = _run_steps("STRATEGY_AND_RISK", commands, env=env)
+    steps, outputs, blockers = _run_steps("STRATEGY_AND_RISK", pre_capital_commands, env=env)
+    capital_path = _capital_supply_path(ctx)
+    if not blockers:
+        capital_steps, capital_outputs, capital_blockers = _run_steps(
+            "STRATEGY_AND_RISK",
+            [("capital_supply", [py, "ops/tools/run_capital_supply_v1.py", "--day_utc", ctx.day_utc, "--environment", ctx.environment], 1)],
+            env=env,
+        )
+        steps.extend(capital_steps)
+        outputs.extend(capital_outputs or [str(capital_path)])
+        blockers.extend(capital_blockers)
+        capital_payload = _read_json(capital_path)
+        capital_status = str(capital_payload.get("status") or "").strip().upper()
+        capital_blocker = str(capital_payload.get("canonical_blocker") or "").strip()
+        if capital_status == "BLOCKED":
+            blockers = [capital_blocker or "CAPITAL_SOURCE_MISSING"]
+        elif capital_status == "DEGRADED":
+            blockers = [capital_blocker or "BOOTSTRAP_CAPITAL_ONLY"]
+        elif capital_status == "PASS":
+            risk_steps, risk_outputs, risk_blockers = _run_steps(
+                "STRATEGY_AND_RISK",
+                [("risk_sizing_authority", [py, "ops/tools/run_risk_sizing_authority_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.truth_root), "--execution_root", str(ctx.execution_root)], 1)],
+                env=env,
+            )
+            steps.extend(risk_steps)
+            outputs.extend(risk_outputs)
+            blockers.extend(risk_blockers)
+        else:
+            blockers = ["CAPITAL_SOURCE_MISSING"]
     completed = _now_iso()
+    capital_payload = _read_json(capital_path)
+    blocker_detail = "strategy, portfolio, capital supply, or risk sizing failed" if blockers else ""
+    if blockers and capital_payload:
+        selected = capital_payload.get("selected_source") if isinstance(capital_payload.get("selected_source"), dict) else {}
+        blocker_detail = (
+            f"capital_supply_status={capital_payload.get('status', 'MISSING')} "
+            f"selected_source={selected.get('source_type', '')} "
+            f"trust_level={selected.get('trust_level', '')}"
+        )
     return _empty_phase(
         "STRATEGY_AND_RISK",
         status="BLOCKED" if blockers else "PASS",
         canonical_blocker=blockers[0] if blockers else "",
-        blocker_detail="strategy, portfolio, capital envelope, or risk sizing failed" if blockers else "",
+        blocker_detail=blocker_detail,
         outputs=outputs,
-        producer_command="run intent generation; strategy; portfolio; PhaseC prep; capital envelope; risk sizing",
+        producer_command="run intent generation; strategy; portfolio; PhaseC prep; capital supply; risk sizing",
         started_at_utc=started,
         completed_at_utc=completed,
         duration_ms=sum(int(s.get("duration_ms") or 0) for s in steps),

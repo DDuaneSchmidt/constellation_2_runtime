@@ -200,6 +200,19 @@ class MarketDataSupplyStatus:
 
 
 @dataclass(frozen=True)
+class CapitalSupplyStatus:
+    exists: bool
+    path: str
+    day_utc: str
+    status: str
+    canonical_blocker: str
+    selected_source: dict[str, Any]
+    exposure_budget: dict[str, Any]
+    capital_risk_envelope: dict[str, Any]
+    operator_next_action: str
+
+
+@dataclass(frozen=True)
 class CapabilityRow:
     capability: str
     status: str
@@ -402,6 +415,41 @@ def _market_data_supply_path(roots: RootResolution, day_utc: str) -> Path | None
         / day_utc
         / "market_data_supply.v1.json"
     ).resolve()
+
+
+def _capital_supply_path(roots: RootResolution, day_utc: str) -> Path | None:
+    if roots.canonical_truth_root is None or not DATE_RE.match(str(day_utc or "")):
+        return None
+    return (
+        roots.canonical_truth_root
+        / "reports"
+        / "capital_supply_v1"
+        / day_utc
+        / "capital_supply.v1.json"
+    ).resolve()
+
+
+def _load_capital_supply_status(roots: RootResolution, day_utc: str) -> CapitalSupplyStatus:
+    path = _capital_supply_path(roots, day_utc)
+    payload = _read_json(path)
+    if not isinstance(payload, dict):
+        return CapitalSupplyStatus(False, str(path) if path else "NOT_FOUND", day_utc, "MISSING", "CAPITAL_SUPPLY_MISSING", {}, {}, {}, "")
+    if str(payload.get("day_utc") or "").strip() != day_utc:
+        return CapitalSupplyStatus(True, str(path), day_utc, "WRONG_DAY", "WRONG_DAY_CAPITAL_SUPPLY", {}, {}, {}, f"Regenerate capital supply for {day_utc}.")
+    selected = payload.get("selected_source") if isinstance(payload.get("selected_source"), dict) else {}
+    exposure = payload.get("exposure_budget") if isinstance(payload.get("exposure_budget"), dict) else {}
+    envelope = payload.get("capital_risk_envelope") if isinstance(payload.get("capital_risk_envelope"), dict) else {}
+    return CapitalSupplyStatus(
+        True,
+        str(path),
+        str(payload.get("day_utc") or day_utc),
+        str(payload.get("status") or "").strip().upper(),
+        str(payload.get("canonical_blocker") or "").strip(),
+        selected,
+        exposure,
+        envelope,
+        str(payload.get("operator_next_action") or "").strip(),
+    )
 
 
 def _load_market_data_supply_status(roots: RootResolution, day_utc: str) -> MarketDataSupplyStatus:
@@ -1932,6 +1980,7 @@ def _build_paper_status(
     day_run = _load_day_run_ledger_status(roots, current_day.day_utc)
     requirement_graph = _load_requirement_graph_status(roots, current_day.day_utc)
     market_data_supply = _load_market_data_supply_status(roots, current_day.day_utc)
+    capital_supply = _load_capital_supply_status(roots, current_day.day_utc)
 
     freshness_day = (
         current_day.day_utc
@@ -2125,6 +2174,22 @@ def _build_paper_status(
         f"- IB evidence: {json.dumps(market_data_supply.provider_check.get('evidence', []), sort_keys=True)}",
         f"- operator_next_action: {market_data_supply.operator_next_action}",
         "",
+        "## Capital Supply",
+        "",
+        f"- capital_supply_path: {capital_supply.path}",
+        f"- capital_supply_exists: {'true' if capital_supply.exists else 'false'}",
+        f"- capital_supply_status: {capital_supply.status}",
+        f"- capital_supply_canonical_blocker: {capital_supply.canonical_blocker}",
+        f"- selected_capital_source: {capital_supply.selected_source.get('source_type', '')}",
+        f"- source_trust_level: {capital_supply.selected_source.get('trust_level', '')}",
+        f"- cash_total_cents: {capital_supply.selected_source.get('cash_total_cents', '')}",
+        f"- net_liquidation_cents: {capital_supply.selected_source.get('net_liquidation_cents', '')}",
+        f"- exposure_budget_status: {capital_supply.exposure_budget.get('status', '')}",
+        f"- exposure_budget_nav_total_cents: {capital_supply.exposure_budget.get('nav_total_cents', '')}",
+        f"- capital_risk_envelope_status: {capital_supply.capital_risk_envelope.get('status', '')}",
+        f"- capital_risk_envelope_reason_codes: {json.dumps(capital_supply.capital_risk_envelope.get('reason_codes', []), sort_keys=True)}",
+        f"- operator_next_action: {capital_supply.operator_next_action}",
+        "",
         "## Aegis Paper-Trading Status",
         "",
         f"- status: {final_decision.status}",
@@ -2142,6 +2207,16 @@ def _build_paper_status(
         f"- market_data_supply_provider_status: {market_data_supply.provider_check.get('status', '')}",
         f"- market_data_supply_IB_evidence: {json.dumps(market_data_supply.provider_check.get('evidence', []), sort_keys=True)}",
         f"- market_data_supply_operator_next_action: {market_data_supply.operator_next_action}",
+        f"- capital_supply_path: {capital_supply.path}",
+        f"- capital_supply_status: {capital_supply.status}",
+        f"- capital_supply_canonical_blocker: {capital_supply.canonical_blocker}",
+        f"- capital_supply_selected_source: {capital_supply.selected_source.get('source_type', '')}",
+        f"- capital_supply_source_trust_level: {capital_supply.selected_source.get('trust_level', '')}",
+        f"- capital_supply_cash_total_cents: {capital_supply.selected_source.get('cash_total_cents', '')}",
+        f"- capital_supply_net_liquidation_cents: {capital_supply.selected_source.get('net_liquidation_cents', '')}",
+        f"- capital_supply_exposure_budget_status: {capital_supply.exposure_budget.get('status', '')}",
+        f"- capital_supply_capital_risk_envelope_status: {capital_supply.capital_risk_envelope.get('status', '')}",
+        f"- capital_supply_operator_next_action: {capital_supply.operator_next_action}",
         f"- requirement_graph_path: {requirement_graph.path}",
         f"- requirement_owner_phase: {requirement_graph.root_requirement.get('owner_phase', '')}",
         f"- requirement_id: {requirement_graph.root_requirement.get('requirement_id', '')}",
