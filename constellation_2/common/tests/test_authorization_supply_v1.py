@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 import sys
 
@@ -40,6 +41,10 @@ def _write(path: Path, payload: dict) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
     return path
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _intent(ctx: bod.BodContext, *, intent_id: str = "intent-1", structure: bool = True, day: str | None = None) -> Path:
@@ -87,15 +92,69 @@ def _strategy(ctx: bod.BodContext, state: str = "INTENT_CREATED") -> Path:
     )
 
 
-def _identity(ctx: bod.BodContext, *, defined: bool = True, day: str | None = None) -> Path:
+def _order_plan(
+    ctx: bod.BodContext,
+    *,
+    day: str | None = None,
+    defined: bool = True,
+    max_loss_usd: object = "73.00",
+    width_points: object = "1",
+    contracts: object = 1,
+    risk_proof: dict | None | object = None,
+) -> Path:
+    identity_dir = ctx.execution_root / "phaseC_preflight_v1" / (day or ctx.day_utc) / "attempt_000001" / ("a" * 64)
+    if risk_proof is None:
+        risk_payload = {
+            "defined_risk_proven": defined,
+            "max_loss_usd": max_loss_usd,
+            "width_points": width_points,
+            "contracts": contracts,
+            "multiplier": 100,
+        }
+    elif isinstance(risk_proof, dict):
+        risk_payload = risk_proof
+    else:
+        risk_payload = None
+    payload = {
+        "schema_id": "order_plan",
+        "schema_version": "v1",
+        "structure": "VERTICAL_SPREAD",
+        "legs": [
+            {"action": "SELL", "expiry_utc": "2026-04-30T00:00:00Z", "right": "PUT", "strike": "706.00", "ratio": 1, "ib_conId": 1},
+            {"action": "BUY", "expiry_utc": "2026-04-30T00:00:00Z", "right": "PUT", "strike": "705.00", "ratio": 1, "ib_conId": 2},
+        ],
+    }
+    if risk_payload is not None:
+        payload["risk_proof"] = risk_payload
+    return _write(identity_dir / "order_plan.v1.json", payload)
+
+
+def _identity(
+    ctx: bod.BodContext,
+    *,
+    defined: bool = True,
+    day: str | None = None,
+    order_plan: Path | None = None,
+    order_plan_sha: str | None = None,
+    include_order_plan_ref: bool = True,
+    identity_risk_fields: bool = False,
+) -> Path:
+    if order_plan is None and include_order_plan_ref:
+        order_plan = _order_plan(ctx, defined=defined, day=day)
+    source_refs = []
+    if include_order_plan_ref and order_plan is not None:
+        source_refs.append({"ref_type": "order_plan_ref", "path": str(order_plan), "sha256": order_plan_sha or _sha256(order_plan)})
+    payload = {
+        "schema_id": "execution_identity_record",
+        "day_utc": day or ctx.day_utc,
+        "intent_id": "intent-1",
+        "source_refs": source_refs,
+    }
+    if identity_risk_fields:
+        payload["risk_proof"] = {"defined_risk_proven": defined}
     return _write(
         ctx.execution_root / "phaseC_preflight_v1" / (day or ctx.day_utc) / "attempt_000001" / ("a" * 64) / "execution_identity_record.v1.json",
-        {
-            "schema_id": "execution_identity_record",
-            "day_utc": day or ctx.day_utc,
-            "intent_id": "intent-1",
-            "risk_proof": {"defined_risk_proven": defined},
-        },
+        payload,
     )
 
 
@@ -329,6 +388,110 @@ def test_defined_risk_false_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     _identity(ctx, defined=False)
     payload = auth.build_authorization_supply_v1(ctx)
     assert payload["canonical_blocker"] == "PHASEC_DEFINED_RISK_NOT_PROVEN"
+    assert payload["phasec_defined_risk"]["risk_proof"]["blocker"] == "ORDER_PLAN_DEFINED_RISK_NOT_TRUE"
+
+
+def test_phasec_order_plan_ref_risk_proof_passes_without_identity_risk_fields(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _no_external(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _intent(ctx)
+    _market_supply(ctx)
+    _risk_budget(ctx)
+    _strategy(ctx)
+    _identity(ctx, identity_risk_fields=False)
+    _authorization(ctx)
+    payload = auth.build_authorization_supply_v1(ctx)
+    assert payload["status"] == "PASS"
+    assert payload["phasec_defined_risk"]["status"] == "PASS"
+    assert payload["phasec_defined_risk"]["defined_risk_proven"] is True
+
+
+def test_missing_order_plan_ref_blocks_defined_risk(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _no_external(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _intent(ctx)
+    _market_supply(ctx)
+    _risk_budget(ctx)
+    _strategy(ctx)
+    _identity(ctx, include_order_plan_ref=False, identity_risk_fields=True)
+    payload = auth.build_authorization_supply_v1(ctx)
+    assert payload["canonical_blocker"] == "PHASEC_DEFINED_RISK_NOT_PROVEN"
+    assert payload["phasec_defined_risk"]["risk_proof"]["blocker"] == "ORDER_PLAN_REF_MISSING"
+
+
+def test_missing_order_plan_file_blocks_defined_risk(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _no_external(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _intent(ctx)
+    _market_supply(ctx)
+    _risk_budget(ctx)
+    _strategy(ctx)
+    order_plan = _order_plan(ctx)
+    order_plan_hash = _sha256(order_plan)
+    order_plan.unlink()
+    _identity(ctx, order_plan=order_plan, order_plan_sha=order_plan_hash)
+    payload = auth.build_authorization_supply_v1(ctx)
+    assert payload["canonical_blocker"] == "PHASEC_DEFINED_RISK_NOT_PROVEN"
+    assert payload["phasec_defined_risk"]["risk_proof"]["blocker"] == "ORDER_PLAN_REF_UNREADABLE"
+
+
+def test_order_plan_hash_mismatch_blocks_defined_risk(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _no_external(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _intent(ctx)
+    _market_supply(ctx)
+    _risk_budget(ctx)
+    _strategy(ctx)
+    order_plan = _order_plan(ctx)
+    _identity(ctx, order_plan=order_plan, order_plan_sha="0" * 64)
+    payload = auth.build_authorization_supply_v1(ctx)
+    assert payload["canonical_blocker"] == "PHASEC_DEFINED_RISK_NOT_PROVEN"
+    assert payload["phasec_defined_risk"]["risk_proof"]["blocker"] == "ORDER_PLAN_REF_HASH_MISMATCH"
+
+
+def test_missing_order_plan_risk_proof_blocks_defined_risk(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _no_external(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _intent(ctx)
+    _market_supply(ctx)
+    _risk_budget(ctx)
+    _strategy(ctx)
+    order_plan = _order_plan(ctx, risk_proof={})
+    _identity(ctx, order_plan=order_plan)
+    payload = auth.build_authorization_supply_v1(ctx)
+    assert payload["canonical_blocker"] == "PHASEC_DEFINED_RISK_NOT_PROVEN"
+    assert payload["phasec_defined_risk"]["risk_proof"]["blocker"] == "ORDER_PLAN_RISK_PROOF_MISSING"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "blocker"),
+    [
+        ("max_loss_usd", "0", "max_loss_usd_INVALID"),
+        ("max_loss_usd", "not-a-number", "max_loss_usd_INVALID"),
+        ("width_points", "0", "width_points_INVALID"),
+        ("width_points", "not-a-number", "width_points_INVALID"),
+        ("contracts", 0, "contracts_INVALID"),
+    ],
+)
+def test_invalid_order_plan_risk_proof_numeric_fields_block_defined_risk(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    field: str,
+    value: object,
+    blocker: str,
+) -> None:
+    _no_external(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _intent(ctx)
+    _market_supply(ctx)
+    _risk_budget(ctx)
+    _strategy(ctx)
+    kwargs = {"max_loss_usd": "73.00", "width_points": "1", "contracts": 1}
+    kwargs[field] = value
+    _identity(ctx, order_plan=_order_plan(ctx, **kwargs))
+    payload = auth.build_authorization_supply_v1(ctx)
+    assert payload["canonical_blocker"] == "PHASEC_DEFINED_RISK_NOT_PROVEN"
+    assert payload["phasec_defined_risk"]["risk_proof"]["blocker"] == blocker
 
 
 def test_missing_authorization_evidence_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

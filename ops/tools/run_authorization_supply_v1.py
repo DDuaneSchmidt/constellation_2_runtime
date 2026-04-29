@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
 import sys
+from decimal import Decimal, InvalidOperation
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -51,6 +53,20 @@ def _read_json(path: Path) -> dict[str, Any]:
     except Exception:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _positive_decimal(value: Any, field_name: str) -> Decimal:
+    try:
+        parsed = Decimal(str(value).strip())
+    except (InvalidOperation, AttributeError) as exc:
+        raise ValueError(f"{field_name}_INVALID") from exc
+    if parsed <= Decimal("0"):
+        raise ValueError(f"{field_name}_INVALID")
+    return parsed
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -351,16 +367,62 @@ def _identity_for_intent(ctx: bod.BodContext, intent: dict[str, Any]) -> tuple[P
     return None, {}
 
 
-def _defined_risk_proven(payload: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
-    risk_proof = payload.get("risk_proof") if isinstance(payload.get("risk_proof"), dict) else {}
-    nested = payload.get("defined_risk_proof") if isinstance(payload.get("defined_risk_proof"), dict) else {}
-    if risk_proof.get("defined_risk_proven") is True:
-        return True, risk_proof
-    if nested.get("defined_risk_proven") is True:
-        return True, nested
-    if payload.get("defined_risk_proven") is True:
-        return True, {"defined_risk_proven": True}
-    return False, risk_proof or nested
+def _order_plan_ref_from_identity(payload: dict[str, Any]) -> dict[str, Any]:
+    source_refs = payload.get("source_refs")
+    if not isinstance(source_refs, list):
+        return {}
+    for ref in source_refs:
+        if not isinstance(ref, dict):
+            continue
+        if str(ref.get("ref_type") or "").strip() == "order_plan_ref":
+            return ref
+    return {}
+
+
+def _defined_risk_proven(identity_path: Path, payload: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+    ref = _order_plan_ref_from_identity(payload)
+    if not ref:
+        return False, {"blocker": "ORDER_PLAN_REF_MISSING"}
+
+    ref_path_raw = str(ref.get("path") or "").strip()
+    ref_hash = str(ref.get("sha256") or "").strip().lower()
+    if not ref_path_raw:
+        return False, {"blocker": "ORDER_PLAN_REF_PATH_MISSING"}
+    order_plan_path = Path(ref_path_raw).expanduser().resolve()
+    if not order_plan_path.exists() or not order_plan_path.is_file():
+        return False, {"blocker": "ORDER_PLAN_REF_UNREADABLE", "order_plan_path": str(order_plan_path)}
+    if not ref_hash:
+        return False, {"blocker": "ORDER_PLAN_REF_HASH_MISSING", "order_plan_path": str(order_plan_path)}
+
+    actual_hash = _sha256_file(order_plan_path)
+    if actual_hash.lower() != ref_hash:
+        return False, {
+            "blocker": "ORDER_PLAN_REF_HASH_MISMATCH",
+            "order_plan_path": str(order_plan_path),
+            "expected_sha256": ref_hash,
+            "actual_sha256": actual_hash,
+        }
+
+    order_plan = _read_json(order_plan_path)
+    if not order_plan:
+        return False, {"blocker": "ORDER_PLAN_UNREADABLE", "order_plan_path": str(order_plan_path)}
+    risk_proof = order_plan.get("risk_proof") if isinstance(order_plan.get("risk_proof"), dict) else {}
+    if not risk_proof:
+        return False, {"blocker": "ORDER_PLAN_RISK_PROOF_MISSING", "order_plan_path": str(order_plan_path)}
+    if risk_proof.get("defined_risk_proven") is not True:
+        return False, {"blocker": "ORDER_PLAN_DEFINED_RISK_NOT_TRUE", "order_plan_path": str(order_plan_path), "risk_proof": risk_proof}
+    try:
+        _positive_decimal(risk_proof.get("max_loss_usd"), "max_loss_usd")
+        _positive_decimal(risk_proof.get("width_points"), "width_points")
+        if "contracts" in risk_proof:
+            _positive_decimal(risk_proof.get("contracts"), "contracts")
+    except ValueError as exc:
+        return False, {"blocker": str(exc), "order_plan_path": str(order_plan_path), "risk_proof": risk_proof}
+    proof = dict(risk_proof)
+    proof["order_plan_path"] = str(order_plan_path)
+    proof["order_plan_sha256"] = actual_hash
+    proof["execution_identity_record_path"] = str(identity_path)
+    return True, proof
 
 
 def _phasec_defined_risk(ctx: bod.BodContext, active_intents: list[dict[str, Any]]) -> tuple[dict[str, Any], str]:
@@ -396,7 +458,7 @@ def _phasec_defined_risk(ctx: bod.BodContext, active_intents: list[dict[str, Any
                 },
                 "PHASEC_EXECUTION_IDENTITY_MISSING",
             )
-        proven, proof = _defined_risk_proven(payload)
+        proven, proof = _defined_risk_proven(path, payload)
         identities.append({"intent_id": intent.get("intent_id"), "path": str(path), "defined_risk_proven": proven})
         if not proven:
             return (
