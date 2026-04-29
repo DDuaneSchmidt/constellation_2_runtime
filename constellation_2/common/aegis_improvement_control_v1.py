@@ -941,3 +941,224 @@ def build_improvement_control_report_v1(
         "controls_broker_execution": False,
         "controls_phasec_materialization": False,
     }
+
+
+def build_improvement_control_review_v1(
+    *,
+    day_utc: str,
+    evidence: Iterable[Mapping[str, Any]] | None = None,
+    findings: Iterable[Mapping[str, Any]] | None = None,
+    proposals: Iterable[Mapping[str, Any]] | None = None,
+    approvals: Iterable[Mapping[str, Any]] | None = None,
+    policies: Iterable[Mapping[str, Any]] | None = None,
+    measurements: Iterable[Mapping[str, Any]] | None = None,
+    rollbacks: Iterable[Mapping[str, Any]] | None = None,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    evidence_rows = [_plain_jsonish(row) for row in evidence or []]
+    finding_rows = [_plain_jsonish(row) for row in findings or []]
+    proposal_rows = [_plain_jsonish(row) for row in proposals or []]
+    approval_rows = [_plain_jsonish(row) for row in approvals or []]
+    policy_rows = [_plain_jsonish(row) for row in policies or []]
+    measurement_rows = [_plain_jsonish(row) for row in measurements or []]
+    rollback_rows = [_plain_jsonish(row) for row in rollbacks or []]
+
+    proposals_by_status = {status: 0 for status in sorted(PROPOSAL_STATUSES)}
+    proposal_status_groups = {status: [] for status in sorted(PROPOSAL_STATUSES)}
+    for proposal in proposal_rows:
+        status = str(proposal.get("status") or "")
+        if status in proposals_by_status:
+            proposals_by_status[status] += 1
+            proposal_status_groups[status].append(_proposal_review_row_v1(proposal))
+
+    decisions_by_id = _proposal_decisions_by_id(approval_rows)
+    approval_test_queue = {"proposed": [], "test_first": [], "rejected": [], "approved": []}
+    for proposal in proposal_rows:
+        group = _proposal_queue_group(proposal, decisions_by_id)
+        approval_test_queue[group].append(_proposal_review_row_v1(proposal))
+
+    inactive_policy_rows = [_policy_review_row_v1(policy) for policy in policy_rows if str(policy.get("status") or "") == "inactive"]
+    active_policy_rows = [_policy_review_row_v1(policy) for policy in policy_rows if str(policy.get("status") or "") == "active"]
+    measurements_due = _measurements_due_for_review(policy_rows, measurement_rows)
+    rollback_candidates = _rollback_candidates_from_measurements(measurement_rows)
+
+    return {
+        "schema_id": REVIEW_SCHEMA_ID,
+        "schema_version": 1,
+        "day_utc": _require_non_empty(day_utc, "day_utc"),
+        "generated_at": generated_at or _now_utc(),
+        "module_version": MODULE_VERSION,
+        "summary": {
+            "open_findings_count": sum(1 for row in finding_rows if row.get("status") == "open"),
+            "proposals_by_status": proposals_by_status,
+            "test_first_items_count": len(approval_test_queue["test_first"]),
+            "inactive_policies_count": len(inactive_policy_rows),
+            "active_policies_count": len(active_policy_rows),
+            "measurements_due_count": len(measurements_due),
+            "rollback_candidates_count": len(rollback_candidates),
+            "advisory_only": True,
+            "controls_runtime_behavior": False,
+            "controls_broker_execution": False,
+            "controls_phasec_materialization": False,
+        },
+        "findings": [_finding_review_row_v1(row) for row in finding_rows],
+        "evidence": [_evidence_review_row_v1(row) for row in evidence_rows],
+        "proposals": [_proposal_review_row_v1(row) for row in proposal_rows],
+        "proposals_by_status": proposal_status_groups,
+        "approval_test_queue": approval_test_queue,
+        "approvals": [_approval_review_row_v1(row) for row in approval_rows],
+        "policies": [_policy_review_row_v1(row) for row in policy_rows],
+        "inactive_policies": inactive_policy_rows,
+        "active_policies": active_policy_rows,
+        "measurements": [_measurement_review_row_v1(row) for row in measurement_rows],
+        "measurements_due": measurements_due,
+        "rollback_candidates": rollback_candidates,
+        "rollback_records": rollback_rows,
+        "advisory_only": True,
+        "controls_runtime_behavior": False,
+        "controls_broker_execution": False,
+        "controls_phasec_materialization": False,
+    }
+
+
+def _finding_review_row_v1(row: Mapping[str, Any]) -> dict[str, Any]:
+    return _projection(
+        row,
+        (
+            "finding_id",
+            "category",
+            "severity",
+            "confidence",
+            "affected_scope",
+            "affected_ids",
+            "observation",
+            "evidence_ids",
+            "status",
+        ),
+    )
+
+
+def _evidence_review_row_v1(row: Mapping[str, Any]) -> dict[str, Any]:
+    return _projection(row, ("evidence_id", "evidence_type", "source_path", "source_sha256", "summary"))
+
+
+def _proposal_review_row_v1(row: Mapping[str, Any]) -> dict[str, Any]:
+    return _projection(
+        row,
+        (
+            "proposal_id",
+            "finding_id",
+            "proposal_type",
+            "rationale",
+            "current_value",
+            "proposed_value",
+            "expected_impact",
+            "risk_notes",
+            "success_criteria",
+            "rollback_criteria",
+            "status",
+        ),
+    )
+
+
+def _approval_review_row_v1(row: Mapping[str, Any]) -> dict[str, Any]:
+    return _projection(row, ("approval_id", "proposal_id", "decision", "approver", "timestamp", "notes", "resulting_policy_id"))
+
+
+def _policy_review_row_v1(row: Mapping[str, Any]) -> dict[str, Any]:
+    return _projection(
+        row,
+        (
+            "policy_id",
+            "policy_version",
+            "source_proposal_id",
+            "policy_type",
+            "status",
+            "effective_start",
+            "effective_end",
+        ),
+    )
+
+
+def _measurement_review_row_v1(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "policy_id": _plain_jsonish(row.get("policy_id")),
+        "measurement_id": _plain_jsonish(row.get("measurement_id")),
+        "measurement_window_start": _plain_jsonish(row.get("measurement_window_start")),
+        "measurement_window_end": _plain_jsonish(row.get("measurement_window_end")),
+        "success_criteria_met": _plain_jsonish(row.get("success_criteria_met")),
+        "rollback_criteria_met": _plain_jsonish(row.get("rollback_criteria_met")),
+        "conclusion": _plain_jsonish(row.get("conclusion")),
+        "summary": _plain_jsonish(row.get("summary")),
+    }
+
+
+def render_improvement_control_review_markdown_v1(review: Mapping[str, Any]) -> str:
+    summary = review.get("summary") if isinstance(review.get("summary"), Mapping) else {}
+    lines = [
+        "# Aegis Improvement Control Review V1",
+        "",
+        f"Day: {review.get('day_utc')}",
+        f"Generated: {review.get('generated_at')}",
+        "",
+        "## Summary",
+        f"- Open findings: {summary.get('open_findings_count')}",
+        f"- Test-first items: {summary.get('test_first_items_count')}",
+        f"- Inactive policies: {summary.get('inactive_policies_count')}",
+        f"- Active policies: {summary.get('active_policies_count')}",
+        f"- Measurements due: {summary.get('measurements_due_count')}",
+        f"- Rollback candidates: {summary.get('rollback_candidates_count')}",
+        f"- Advisory only: {str(summary.get('advisory_only')).lower()}",
+        f"- Controls runtime behavior: {str(summary.get('controls_runtime_behavior')).lower()}",
+        f"- Controls broker execution: {str(summary.get('controls_broker_execution')).lower()}",
+        f"- Controls Phase C materialization: {str(summary.get('controls_phasec_materialization')).lower()}",
+    ]
+    _append_markdown_table(lines, "Findings", review.get("findings") or [], ("finding_id", "category", "severity", "confidence", "affected_scope", "status"))
+    _append_markdown_table(lines, "Evidence", review.get("evidence") or [], ("evidence_id", "evidence_type", "source_path", "source_sha256"))
+    _append_markdown_table(lines, "Proposals", review.get("proposals") or [], ("proposal_id", "proposal_type", "finding_id", "status"))
+    _append_markdown_table(lines, "Policies", review.get("policies") or [], ("policy_id", "policy_version", "policy_type", "status"))
+    _append_markdown_table(lines, "Measurements", review.get("measurements") or [], ("measurement_id", "policy_id", "conclusion", "rollback_criteria_met"))
+    _append_markdown_table(lines, "Rollback Candidates", review.get("rollback_candidates") or [], ("policy_id", "measurement_id", "reason", "conclusion"))
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _append_markdown_table(lines: list[str], title: str, rows: Iterable[Mapping[str, Any]], fields: tuple[str, ...]) -> None:
+    row_list = [dict(row) for row in rows]
+    lines.extend(["", f"## {title}"])
+    if not row_list:
+        lines.append("_None._")
+        return
+    lines.append("| " + " | ".join(fields) + " |")
+    lines.append("| " + " | ".join("---" for _ in fields) + " |")
+    for row in row_list:
+        values = [_markdown_cell(row.get(field)) for field in fields]
+        lines.append("| " + " | ".join(values) + " |")
+
+
+def _markdown_cell(value: Any) -> str:
+    if isinstance(value, (dict, list)):
+        text = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    else:
+        text = "" if value is None else str(value)
+    return text.replace("|", "\\|").replace("\n", " ")[:240]
+
+
+def write_improvement_control_review_artifacts_v1(
+    *,
+    truth_root: str | Path,
+    review: Mapping[str, Any],
+    write_markdown: bool = True,
+) -> dict[str, str | None]:
+    day_utc = _require_non_empty(review.get("day_utc"), "day_utc")
+    output_dir = Path(truth_root) / "reports" / "aegis_improvement_control_review_v1" / day_utc
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_path = output_dir / "aegis_improvement_control_review.v1.json"
+    json_path.write_text(json.dumps(_plain_jsonish(review), sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    markdown_path: Path | None = None
+    if write_markdown:
+        markdown_path = output_dir / "aegis_improvement_control_review.v1.md"
+        markdown_path.write_text(render_improvement_control_review_markdown_v1(review), encoding="utf-8")
+    return {
+        "json_path": str(json_path),
+        "markdown_path": str(markdown_path) if markdown_path is not None else None,
+    }
