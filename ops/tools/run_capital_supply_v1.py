@@ -29,9 +29,6 @@ ALLOWED_BLOCKERS = {
     "CAPITAL_EVIDENCE_STALE",
     "OPERATOR_STATEMENT_REQUIRED",
     "BOOTSTRAP_CAPITAL_ONLY",
-    "EXPOSURE_BUDGET_MISSING",
-    "EXPOSURE_BUDGET_NAV_MISSING",
-    "CAPITAL_RISK_ENVELOPE_BLOCKED",
 }
 
 
@@ -366,9 +363,6 @@ def _operator_action(blocker: str, ctx: bod.BodContext) -> str:
         "NAV_TOTAL_MISSING_OR_INVALID": "Provide valid positive current-day NAV/accounting evidence before risk sizing.",
         "OPERATOR_STATEMENT_REQUIRED": "Provide current-day operator statement or broker NAV evidence before risk sizing.",
         "BOOTSTRAP_CAPITAL_ONLY": "Replace bootstrap-only capital with broker NAV evidence or explicit operator statement before live-like paper submit.",
-        "EXPOSURE_BUDGET_MISSING": "Generate current-day exposure budget allocation summary before risk sizing.",
-        "EXPOSURE_BUDGET_NAV_MISSING": "Regenerate exposure budget with valid positive NAV before risk sizing.",
-        "CAPITAL_RISK_ENVELOPE_BLOCKED": "Resolve capital risk envelope reason codes, then rerun run_capital_supply_v1.py.",
     }
     return mapping.get(blocker, f"Resolve {blocker}, then rerun python3 ops/tools/run_capital_supply_v1.py --day_utc {ctx.day_utc} --environment PAPER." if blocker else "")
 
@@ -380,22 +374,10 @@ def build_capital_supply(ctx: bod.BodContext) -> dict[str, Any]:
     if source_status == "DEGRADED":
         blocker = ""
     nav_result: dict[str, Any] = {}
-    budget_result: dict[str, Any] = {}
-    envelope_result: dict[str, Any] = {}
     if not blocker or source_status == "DEGRADED":
         nav_result, nav_blocker = _nav_evidence(ctx, selected)
         if nav_blocker:
             blocker = nav_blocker
-            source_status = "BLOCKED"
-    if not blocker:
-        budget_result, budget_blocker = _exposure_budget(ctx)
-        if budget_blocker:
-            blocker = budget_blocker
-            source_status = "BLOCKED"
-    if not blocker:
-        envelope_result, envelope_blocker = _run_capital_risk_envelope(ctx)
-        if envelope_blocker:
-            blocker = envelope_blocker
             source_status = "BLOCKED"
     status = "PASS" if source_status == "PASS" and not blocker else ("DEGRADED" if source_status == "DEGRADED" and not blocker else "BLOCKED")
     canonical_blocker = degraded_blocker if status == "DEGRADED" else blocker
@@ -410,8 +392,8 @@ def build_capital_supply(ctx: bod.BodContext) -> dict[str, Any]:
         "capital_sources": sources,
         "selected_source": selected,
         "nav_evidence": nav_result,
-        "exposure_budget": budget_result,
-        "capital_risk_envelope": envelope_result,
+        "exposure_budget": {},
+        "capital_risk_envelope": {},
         "operator_next_action": _operator_action(canonical_blocker, ctx),
     }
 

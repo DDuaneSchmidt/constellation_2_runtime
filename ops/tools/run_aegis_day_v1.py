@@ -245,6 +245,10 @@ def _capital_supply_path(ctx: PhaseContext) -> Path:
     return _artifact(ctx, "capital_supply_v1", "capital_supply.v1.json")
 
 
+def _risk_budget_supply_path(ctx: PhaseContext) -> Path:
+    return _artifact(ctx, "risk_budget_supply_v1", "risk_budget_supply.v1.json")
+
+
 def _broker_supply_path(ctx: PhaseContext) -> Path:
     return _artifact(ctx, "broker_supply_v1", "broker_supply.v1.json")
 
@@ -435,6 +439,7 @@ def _phase_strategy_and_risk(ctx: PhaseContext, env: dict[str, str]) -> dict[str
     ]
     steps, outputs, blockers = _run_steps("STRATEGY_AND_RISK", pre_capital_commands, env=env)
     capital_path = _capital_supply_path(ctx)
+    risk_budget_path = _risk_budget_supply_path(ctx)
     if not blockers:
         capital_steps, capital_outputs, capital_blockers = _run_steps(
             "STRATEGY_AND_RISK",
@@ -452,20 +457,46 @@ def _phase_strategy_and_risk(ctx: PhaseContext, env: dict[str, str]) -> dict[str
         elif capital_status == "DEGRADED":
             blockers = [capital_blocker or "BOOTSTRAP_CAPITAL_ONLY"]
         elif capital_status == "PASS":
-            risk_steps, risk_outputs, risk_blockers = _run_steps(
+            risk_budget_steps, risk_budget_outputs, risk_budget_blockers = _run_steps(
                 "STRATEGY_AND_RISK",
-                [("risk_sizing_authority", [py, "ops/tools/run_risk_sizing_authority_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.truth_root), "--execution_root", str(ctx.execution_root)], 1)],
+                [("risk_budget_supply", [py, "ops/tools/run_risk_budget_supply_v1.py", "--day_utc", ctx.day_utc, "--environment", ctx.environment], 1)],
                 env=env,
             )
-            steps.extend(risk_steps)
-            outputs.extend(risk_outputs)
-            blockers.extend(risk_blockers)
+            steps.extend(risk_budget_steps)
+            outputs.extend(risk_budget_outputs or [str(risk_budget_path)])
+            blockers.extend(risk_budget_blockers)
+            risk_budget_payload = _read_json(risk_budget_path)
+            risk_budget_status = str(risk_budget_payload.get("status") or "").strip().upper()
+            risk_budget_blocker = str(risk_budget_payload.get("canonical_blocker") or "").strip()
+            if risk_budget_status == "BLOCKED":
+                blockers = [risk_budget_blocker or "RISK_SIZING_EXPORT_MISSING"]
+            elif risk_budget_status == "DEGRADED":
+                blockers = [risk_budget_blocker or "RISK_SIZING_EXPORT_MISSING"]
+            elif risk_budget_status == "PASS":
+                risk_steps, risk_outputs, risk_blockers = _run_steps(
+                    "STRATEGY_AND_RISK",
+                    [("risk_sizing_authority", [py, "ops/tools/run_risk_sizing_authority_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.truth_root), "--execution_root", str(ctx.execution_root)], 1)],
+                    env=env,
+                )
+                steps.extend(risk_steps)
+                outputs.extend(risk_outputs)
+                blockers.extend(risk_blockers)
+            else:
+                blockers = ["RISK_SIZING_EXPORT_MISSING"]
         else:
             blockers = ["CAPITAL_SOURCE_MISSING"]
     completed = _now_iso()
     capital_payload = _read_json(capital_path)
+    risk_budget_payload = _read_json(risk_budget_path)
     blocker_detail = "strategy, portfolio, capital supply, or risk sizing failed" if blockers else ""
-    if blockers and capital_payload:
+    if blockers and risk_budget_payload and str(risk_budget_payload.get("status") or "").strip().upper() == "BLOCKED":
+        nav_basis = risk_budget_payload.get("nav_basis") if isinstance(risk_budget_payload.get("nav_basis"), dict) else {}
+        blocker_detail = (
+            f"risk_budget_supply_status={risk_budget_payload.get('status', 'MISSING')} "
+            f"nav_basis_source={nav_basis.get('source', '')} "
+            f"nav_total_cents={nav_basis.get('net_liquidation_cents', '')}"
+        )
+    elif blockers and capital_payload:
         selected = capital_payload.get("selected_source") if isinstance(capital_payload.get("selected_source"), dict) else {}
         blocker_detail = (
             f"capital_supply_status={capital_payload.get('status', 'MISSING')} "
@@ -478,7 +509,7 @@ def _phase_strategy_and_risk(ctx: PhaseContext, env: dict[str, str]) -> dict[str
         canonical_blocker=blockers[0] if blockers else "",
         blocker_detail=blocker_detail,
         outputs=outputs,
-        producer_command="run intent generation; strategy; portfolio; PhaseC prep; capital supply; risk sizing",
+        producer_command="run intent generation; strategy; portfolio; PhaseC prep; capital supply; risk budget supply; risk sizing",
         started_at_utc=started,
         completed_at_utc=completed,
         duration_ms=sum(int(s.get("duration_ms") or 0) for s in steps),

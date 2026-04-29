@@ -213,6 +213,21 @@ class CapitalSupplyStatus:
 
 
 @dataclass(frozen=True)
+class RiskBudgetSupplyStatus:
+    exists: bool
+    path: str
+    day_utc: str
+    status: str
+    canonical_blocker: str
+    nav_basis: dict[str, Any]
+    budget_policy: dict[str, Any]
+    intent_budgets: list[dict[str, Any]]
+    capital_risk_envelope: dict[str, Any]
+    risk_sizing_export: dict[str, Any]
+    operator_next_action: str
+
+
+@dataclass(frozen=True)
 class BrokerSupplyStatus:
     exists: bool
     path: str
@@ -444,6 +459,18 @@ def _capital_supply_path(roots: RootResolution, day_utc: str) -> Path | None:
     ).resolve()
 
 
+def _risk_budget_supply_path(roots: RootResolution, day_utc: str) -> Path | None:
+    if roots.canonical_truth_root is None or not DATE_RE.match(str(day_utc or "")):
+        return None
+    return (
+        roots.canonical_truth_root
+        / "reports"
+        / "risk_budget_supply_v1"
+        / day_utc
+        / "risk_budget_supply.v1.json"
+    ).resolve()
+
+
 def _broker_supply_path(roots: RootResolution, day_utc: str) -> Path | None:
     if roots.canonical_truth_root is None or not DATE_RE.match(str(day_utc or "")):
         return None
@@ -497,6 +524,29 @@ def _load_capital_supply_status(roots: RootResolution, day_utc: str) -> CapitalS
         selected,
         exposure,
         envelope,
+        str(payload.get("operator_next_action") or "").strip(),
+    )
+
+
+def _load_risk_budget_supply_status(roots: RootResolution, day_utc: str) -> RiskBudgetSupplyStatus:
+    path = _risk_budget_supply_path(roots, day_utc)
+    payload = _read_json(path)
+    if not isinstance(payload, dict):
+        return RiskBudgetSupplyStatus(False, str(path) if path else "NOT_FOUND", day_utc, "MISSING", "RISK_BUDGET_SUPPLY_MISSING", {}, {}, [], {}, {}, "")
+    if str(payload.get("day_utc") or "").strip() != day_utc:
+        return RiskBudgetSupplyStatus(True, str(path), day_utc, "WRONG_DAY", "WRONG_DAY_RISK_BUDGET_SUPPLY", {}, {}, [], {}, {}, f"Regenerate risk budget supply for {day_utc}.")
+    intent_budgets = payload.get("intent_budgets") if isinstance(payload.get("intent_budgets"), list) else []
+    return RiskBudgetSupplyStatus(
+        True,
+        str(path),
+        str(payload.get("day_utc") or day_utc),
+        str(payload.get("status") or "").strip().upper(),
+        str(payload.get("canonical_blocker") or "").strip(),
+        payload.get("nav_basis") if isinstance(payload.get("nav_basis"), dict) else {},
+        payload.get("budget_policy") if isinstance(payload.get("budget_policy"), dict) else {},
+        [row for row in intent_budgets if isinstance(row, dict)],
+        payload.get("capital_risk_envelope") if isinstance(payload.get("capital_risk_envelope"), dict) else {},
+        payload.get("risk_sizing_export") if isinstance(payload.get("risk_sizing_export"), dict) else {},
         str(payload.get("operator_next_action") or "").strip(),
     )
 
@@ -2031,6 +2081,7 @@ def _build_paper_status(
     market_data_supply = _load_market_data_supply_status(roots, current_day.day_utc)
     broker_supply = _load_broker_supply_status(roots, current_day.day_utc)
     capital_supply = _load_capital_supply_status(roots, current_day.day_utc)
+    risk_budget_supply = _load_risk_budget_supply_status(roots, current_day.day_utc)
 
     freshness_day = (
         current_day.day_utc
@@ -2256,6 +2307,22 @@ def _build_paper_status(
         f"- capital_risk_envelope_reason_codes: {json.dumps(capital_supply.capital_risk_envelope.get('reason_codes', []), sort_keys=True)}",
         f"- operator_next_action: {capital_supply.operator_next_action}",
         "",
+        "## Risk Budget Supply",
+        "",
+        f"- risk_budget_supply_path: {risk_budget_supply.path}",
+        f"- risk_budget_supply_exists: {'true' if risk_budget_supply.exists else 'false'}",
+        f"- risk_budget_supply_status: {risk_budget_supply.status}",
+        f"- risk_budget_supply_canonical_blocker: {risk_budget_supply.canonical_blocker}",
+        f"- nav_basis_source: {risk_budget_supply.nav_basis.get('source', '')}",
+        f"- nav_basis_net_liquidation_cents: {risk_budget_supply.nav_basis.get('net_liquidation_cents', '')}",
+        f"- nav_basis_cash_total_cents: {risk_budget_supply.nav_basis.get('cash_total_cents', '')}",
+        f"- budget_policy_id: {risk_budget_supply.budget_policy.get('policy_id', '')}",
+        f"- intent_budgets: {json.dumps(risk_budget_supply.intent_budgets, sort_keys=True)}",
+        f"- capital_risk_envelope_status: {risk_budget_supply.capital_risk_envelope.get('status', '')}",
+        f"- capital_risk_envelope_reason_codes: {json.dumps(risk_budget_supply.capital_risk_envelope.get('reason_codes', []), sort_keys=True)}",
+        f"- risk_sizing_export_usable: {risk_budget_supply.risk_sizing_export.get('usable_for_risk_sizing', '')}",
+        f"- operator_next_action: {risk_budget_supply.operator_next_action}",
+        "",
         "## Aegis Paper-Trading Status",
         "",
         f"- status: {final_decision.status}",
@@ -2293,6 +2360,18 @@ def _build_paper_status(
         f"- capital_supply_exposure_budget_status: {capital_supply.exposure_budget.get('status', '')}",
         f"- capital_supply_capital_risk_envelope_status: {capital_supply.capital_risk_envelope.get('status', '')}",
         f"- capital_supply_operator_next_action: {capital_supply.operator_next_action}",
+        f"- risk_budget_supply_path: {risk_budget_supply.path}",
+        f"- risk_budget_supply_status: {risk_budget_supply.status}",
+        f"- risk_budget_supply_canonical_blocker: {risk_budget_supply.canonical_blocker}",
+        f"- risk_budget_supply_nav_basis_source: {risk_budget_supply.nav_basis.get('source', '')}",
+        f"- risk_budget_supply_nav_basis_net_liquidation_cents: {risk_budget_supply.nav_basis.get('net_liquidation_cents', '')}",
+        f"- risk_budget_supply_cash_total_cents: {risk_budget_supply.nav_basis.get('cash_total_cents', '')}",
+        f"- risk_budget_supply_budget_policy_id: {risk_budget_supply.budget_policy.get('policy_id', '')}",
+        f"- risk_budget_supply_intent_budgets: {json.dumps(risk_budget_supply.intent_budgets, sort_keys=True)}",
+        f"- risk_budget_supply_capital_risk_envelope_status: {risk_budget_supply.capital_risk_envelope.get('status', '')}",
+        f"- risk_budget_supply_capital_risk_envelope_reason_codes: {json.dumps(risk_budget_supply.capital_risk_envelope.get('reason_codes', []), sort_keys=True)}",
+        f"- risk_budget_supply_risk_sizing_export_usable: {risk_budget_supply.risk_sizing_export.get('usable_for_risk_sizing', '')}",
+        f"- risk_budget_supply_operator_next_action: {risk_budget_supply.operator_next_action}",
         f"- requirement_graph_path: {requirement_graph.path}",
         f"- requirement_owner_phase: {requirement_graph.root_requirement.get('owner_phase', '')}",
         f"- requirement_id: {requirement_graph.root_requirement.get('requirement_id', '')}",

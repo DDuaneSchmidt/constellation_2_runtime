@@ -161,34 +161,39 @@ def test_wrong_day_nav_cannot_satisfy_current_day(tmp_path: Path) -> None:
     assert payload["canonical_blocker"] == "BROKER_NAV_EVIDENCE_MISSING"
 
 
-def test_missing_exposure_budget_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_capital_supply_no_longer_owns_missing_exposure_budget(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _broker(ctx)
     _nav(ctx)
     _pass_envelope(monkeypatch)
     payload = supply.build_capital_supply(ctx)
-    assert payload["canonical_blocker"] == "EXPOSURE_BUDGET_MISSING"
+    assert payload["status"] == "PASS"
+    assert payload["canonical_blocker"] == ""
+    assert payload["exposure_budget"] == {}
 
 
-def test_exposure_budget_missing_nav_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_capital_supply_no_longer_reports_exposure_budget_nav_missing_when_broker_nav_valid(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _broker(ctx)
     _nav(ctx)
     _budget(ctx, nav_total_cents=None)
     _pass_envelope(monkeypatch)
     payload = supply.build_capital_supply(ctx)
-    assert payload["canonical_blocker"] == "EXPOSURE_BUDGET_NAV_MISSING"
+    assert payload["status"] == "PASS"
+    assert payload["canonical_blocker"] != "EXPOSURE_BUDGET_NAV_MISSING"
+    assert payload["selected_source"]["net_liquidation_cents"] == 100_000_00
 
 
-def test_capital_risk_envelope_failure_preserves_reason_codes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_capital_supply_no_longer_owns_capital_risk_envelope_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _broker(ctx)
     _nav(ctx)
     _budget(ctx)
     monkeypatch.setattr(supply, "_run_capital_risk_envelope", lambda ctx: ({"status": "FAIL", "reason_codes": ["B2_NAV_TOTAL_MISSING_OR_INVALID"]}, "CAPITAL_RISK_ENVELOPE_BLOCKED"))
     payload = supply.build_capital_supply(ctx)
-    assert payload["canonical_blocker"] == "CAPITAL_RISK_ENVELOPE_BLOCKED"
-    assert payload["capital_risk_envelope"]["reason_codes"] == ["B2_NAV_TOTAL_MISSING_OR_INVALID"]
+    assert payload["status"] == "PASS"
+    assert payload["canonical_blocker"] == ""
+    assert payload["capital_risk_envelope"] == {}
 
 
 def test_day_ledger_skips_risk_sizing_when_capital_supply_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
