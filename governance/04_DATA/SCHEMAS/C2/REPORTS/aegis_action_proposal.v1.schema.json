@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/aegis_action_proposal.v1.schema.json",
+  "title": "aegis_action_proposal.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["proposal_id", "finding_id", "proposal_type", "title", "rationale", "affected_scope", "affected_ids", "current_value", "proposed_value", "bounds", "expected_impact", "risk_notes", "success_criteria", "rollback_criteria", "proposed_duration", "status", "created_at", "reviewed_at", "reviewer_notes"],
+  "properties": {
+    "proposal_id": { "type": "string", "pattern": "^proposal_[a-f0-9]{64}$" },
+    "finding_id": { "type": "string", "pattern": "^finding_[a-f0-9]{64}$" },
+    "proposal_type": { "type": "string", "enum": ["adjust_sleeve_allocation", "enable_sleeve_by_regime", "disable_sleeve_by_regime", "adjust_threshold_bounded", "add_temporary_filter", "flag_for_backtest", "rollback_policy", "no_action_monitor"] },
+    "title": { "type": "string", "minLength": 1 },
+    "rationale": { "type": "string", "minLength": 1 },
+    "affected_scope": { "type": "string", "enum": ["sleeve", "regime", "structure_layer", "risk_config", "allocation", "portfolio", "execution"] },
+    "affected_ids": { "type": "array", "items": { "type": "string" } },
+    "current_value": {},
+    "proposed_value": {},
+    "bounds": { "type": "object" },
+    "expected_impact": { "type": "string", "minLength": 1 },
+    "risk_notes": { "type": "string", "minLength": 1 },
+    "success_criteria": { "type": "array" },
+    "rollback_criteria": { "type": "array" },
+    "proposed_duration": { "type": ["string", "null"] },
+    "status": { "type": "string", "enum": ["proposed", "approved", "rejected", "test_first", "expired", "rolled_back"] },
+    "created_at": { "type": "string", "minLength": 1 },
+    "reviewed_at": { "type": ["string", "null"] },
+    "reviewer_notes": { "type": ["string", "null"] }
+  }
+}

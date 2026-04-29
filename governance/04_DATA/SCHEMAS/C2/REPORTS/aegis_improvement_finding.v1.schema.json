@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/aegis_improvement_finding.v1.schema.json",
+  "title": "aegis_improvement_finding.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["finding_id", "timestamp", "title", "category", "affected_scope", "affected_ids", "severity", "confidence", "observation", "evidence_ids", "suggested_action_summary", "status", "created_at"],
+  "properties": {
+    "finding_id": { "type": "string", "pattern": "^finding_[a-f0-9]{64}$" },
+    "timestamp": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1 },
+    "category": { "type": "string", "enum": ["failure_analysis", "trade_review", "backtest_interpretation", "scenario_test", "trace_interpretation", "strategy_diagnostic", "configuration_review"] },
+    "affected_scope": { "type": "string", "enum": ["sleeve", "regime", "structure_layer", "risk_config", "allocation", "portfolio", "execution"] },
+    "affected_ids": { "type": "array", "items": { "type": "string" } },
+    "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+    "confidence": { "type": "string", "enum": ["low", "medium", "high"] },
+    "observation": { "type": "string", "minLength": 1 },
+    "evidence_ids": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^evidence_[a-f0-9]{64}$" } },
+    "suggested_action_summary": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["open", "proposal_created", "dismissed", "resolved"] },
+    "created_at": { "type": "string", "minLength": 1 }
+  }
+}

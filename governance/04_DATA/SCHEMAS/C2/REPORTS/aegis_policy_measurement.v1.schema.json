@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/aegis_policy_measurement.v1.schema.json",
+  "title": "aegis_policy_measurement.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["measurement_id", "policy_id", "measurement_window_start", "measurement_window_end", "before_metrics", "after_metrics", "success_criteria_met", "rollback_criteria_met", "conclusion", "summary", "created_at"],
+  "properties": {
+    "measurement_id": { "type": "string", "pattern": "^measurement_[a-f0-9]{64}$" },
+    "policy_id": { "type": "string", "pattern": "^policy_[a-f0-9]{64}$" },
+    "measurement_window_start": { "type": "string", "minLength": 1 },
+    "measurement_window_end": { "type": "string", "minLength": 1 },
+    "before_metrics": { "type": "object" },
+    "after_metrics": { "type": "object" },
+    "success_criteria_met": { "type": "boolean" },
+    "rollback_criteria_met": { "type": "boolean" },
+    "conclusion": { "type": "string", "enum": ["improved", "degraded", "inconclusive"] },
+    "summary": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "minLength": 1 }
+  }
+}

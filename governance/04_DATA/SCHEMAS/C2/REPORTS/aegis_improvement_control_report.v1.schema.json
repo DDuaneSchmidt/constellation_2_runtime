@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/aegis_improvement_control_report.v1.schema.json",
+  "title": "aegis_improvement_control_report.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "generated_at", "module_version", "open_findings", "findings_by_category", "proposals_by_status", "approved_policies", "active_policies", "measurements_due", "rollback_candidates", "rollback_records", "unknown_policy_state_fail_closed", "fail_closed_policy_ids", "advisory_only", "controls_runtime_behavior", "controls_broker_execution", "controls_phasec_materialization"],
+  "properties": {
+    "schema_id": { "type": "string", "const": "C2_AEGIS_IMPROVEMENT_CONTROL_REPORT_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "generated_at": { "type": "string", "minLength": 1 },
+    "module_version": { "type": "string", "minLength": 1 },
+    "open_findings": { "type": "array", "items": { "type": "object" } },
+    "findings_by_category": { "type": "object" },
+    "proposals_by_status": { "type": "object" },
+    "approved_policies": { "type": "array", "items": { "type": "object" } },
+    "active_policies": { "type": "array", "items": { "type": "object" } },
+    "measurements_due": { "type": "array", "items": { "type": "object" } },
+    "rollback_candidates": { "type": "array", "items": { "type": "object" } },
+    "rollback_records": { "type": "array", "items": { "type": "object" } },
+    "unknown_policy_state_fail_closed": { "type": "boolean" },
+    "fail_closed_policy_ids": { "type": "array", "items": { "type": "string" } },
+    "advisory_only": { "type": "boolean", "const": true },
+    "controls_runtime_behavior": { "type": "boolean", "const": false },
+    "controls_broker_execution": { "type": "boolean", "const": false },
+    "controls_phasec_materialization": { "type": "boolean", "const": false }
+  }
+}

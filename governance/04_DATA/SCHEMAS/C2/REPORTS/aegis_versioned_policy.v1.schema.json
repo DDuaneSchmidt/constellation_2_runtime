@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/aegis_versioned_policy.v1.schema.json",
+  "title": "aegis_versioned_policy.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["policy_id", "policy_version", "source_proposal_id", "policy_type", "policy_payload", "status", "effective_start", "effective_end", "created_at", "activated_at", "superseded_by_policy_id", "advisory_only", "controls_runtime_behavior", "controls_broker_execution", "controls_phasec_materialization"],
+  "properties": {
+    "policy_id": { "type": "string", "pattern": "^policy_[a-f0-9]{64}$" },
+    "policy_version": { "type": ["integer", "string"] },
+    "source_proposal_id": { "type": "string", "pattern": "^proposal_[a-f0-9]{64}$" },
+    "policy_type": { "type": "string", "minLength": 1 },
+    "policy_payload": { "type": "object" },
+    "status": { "type": "string", "enum": ["draft", "active", "inactive", "superseded", "rolled_back"] },
+    "effective_start": { "type": ["string", "null"] },
+    "effective_end": { "type": ["string", "null"] },
+    "created_at": { "type": "string", "minLength": 1 },
+    "activated_at": { "type": ["string", "null"] },
+    "superseded_by_policy_id": { "type": ["string", "null"] },
+    "advisory_only": { "type": "boolean", "const": true },
+    "controls_runtime_behavior": { "type": "boolean", "const": false },
+    "controls_broker_execution": { "type": "boolean", "const": false },
+    "controls_phasec_materialization": { "type": "boolean", "const": false }
+  }
+}

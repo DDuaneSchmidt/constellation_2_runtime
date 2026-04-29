@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/aegis_policy_rollback.v1.schema.json",
+  "title": "aegis_policy_rollback.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["rollback_id", "policy_id", "trigger_reason", "triggered_by", "timestamp", "restored_policy_id", "notes"],
+  "properties": {
+    "rollback_id": { "type": "string", "pattern": "^rollback_[a-f0-9]{64}$" },
+    "policy_id": { "type": "string", "pattern": "^policy_[a-f0-9]{64}$" },
+    "trigger_reason": { "type": "string", "minLength": 1 },
+    "triggered_by": { "type": "string", "enum": ["operator", "rollback_criteria", "system_review"] },
+    "timestamp": { "type": "string", "minLength": 1 },
+    "restored_policy_id": { "type": ["string", "null"] },
+    "notes": { "type": "string" }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/aegis_improvement_evidence.v1.schema.json",
+  "title": "aegis_improvement_evidence.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["evidence_id", "timestamp", "evidence_type", "source_path", "source_sha256", "summary", "raw_payload", "created_at"],
+  "properties": {
+    "evidence_id": { "type": "string", "pattern": "^evidence_[a-f0-9]{64}$" },
+    "timestamp": { "type": "string", "minLength": 1 },
+    "evidence_type": { "type": "string", "enum": ["trade_outcome", "decision_trace", "eod_advisory", "backtest_result", "config_snapshot", "regime_observation", "sleeve_performance"] },
+    "source_path": { "type": "string", "minLength": 1 },
+    "source_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "summary": { "type": "string", "minLength": 1 },
+    "raw_payload": { "type": "object" },
+    "created_at": { "type": "string", "minLength": 1 }
+  }
+}
