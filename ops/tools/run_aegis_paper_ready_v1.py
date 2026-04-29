@@ -34,6 +34,10 @@ def _state(payload: dict[str, Any], *keys: str) -> str:
     return "UNKNOWN"
 
 
+def _status(payload: dict[str, Any]) -> str:
+    return str(payload.get("status") or "").strip().upper()
+
+
 def evaluate_paper_ready_v1(ctx: bod.BodContext) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
 
@@ -61,13 +65,19 @@ def evaluate_paper_ready_v1(ctx: bod.BodContext) -> dict[str, Any]:
     strategy_path = ctx.truth_root / "reports" / "strategy_decision_authority_v1" / ctx.day_utc / "strategy_decision_authority.v1.json"
     strategy = bod._read_json(strategy_path)
     strategy_state = _state(strategy, "strategy_decision_state", "status")
-    add_check("strategy_decision", strategy_path, strategy_state in {"READY", "VALID", "PASS", "NO_INTENTS", "NO_INTENT"}, "STRATEGY_BLOCKED", strategy_state)
+    strategy_ok = strategy_state in {"READY", "VALID", "PASS", "NO_INTENTS", "NO_INTENT"} or (
+        strategy_state == "INTENT_CREATED" and _status(strategy) == "PASS"
+    )
+    add_check("strategy_decision", strategy_path, strategy_ok, "STRATEGY_BLOCKED", strategy_state)
 
     risk_path = ctx.truth_root / "reports" / "risk_sizing_authority_v1" / ctx.day_utc / "risk_sizing_authority.v1.json"
     risk = bod._read_json(risk_path)
     risk_state = _state(risk, "risk_sizing_state", "status")
     risk_blocker = str(risk.get("canonical_blocker") or risk.get("first_blocker") or "").strip() or "RISK_EVIDENCE_MISSING"
-    add_check("risk_sizing", risk_path, risk_state in {"READY", "VALID", "PASS", "NO_RISK_REQUIRED"}, risk_blocker, risk_state)
+    risk_ok = risk_state in {"READY", "VALID", "PASS", "NO_RISK_REQUIRED"} or (
+        risk_state == "SIZED" and _status(risk) == "PASS"
+    )
+    add_check("risk_sizing", risk_path, risk_ok, risk_blocker, risk_state)
 
     submit_path = ctx.truth_root / "reports" / "submit_boundary_status_v1" / ctx.day_utc / "submit_boundary_status.v1.json"
     submit = bod._read_json(submit_path)
@@ -109,15 +119,18 @@ def main(argv: list[str] | None = None) -> int:
     payload = evaluate_paper_ready_v1(ctx)
     path = _manifest_path(ctx)
     payload["path"] = str(path)
-    lifecycle_path = write_lifecycle_transition_v1(
-        truth_root=ctx.truth_root,
-        day_utc=ctx.day_utc,
-        state="PAPER_READY" if payload["status"] == "PAPER_READY" else "PRE_OPEN_BLOCKED",
-        producer="ops/tools/run_aegis_paper_ready_v1.py",
-        blocker=str(payload.get("canonical_blocker") or ""),
-        reason="Paper readiness gate complete",
-        evidence_paths=[str(path)],
-    )
+    pre_open_check = next((row for row in payload["checks"] if row.get("name") == "pre_open_lifecycle"), {})
+    lifecycle_path = ctx.truth_root / "reports" / "aegis_day_lifecycle_v1" / ctx.day_utc / "aegis_day_lifecycle.v1.json"
+    if payload["status"] == "PAPER_READY" or pre_open_check.get("status") == "BLOCKED":
+        lifecycle_path = write_lifecycle_transition_v1(
+            truth_root=ctx.truth_root,
+            day_utc=ctx.day_utc,
+            state="PAPER_READY" if payload["status"] == "PAPER_READY" else "PRE_OPEN_BLOCKED",
+            producer="ops/tools/run_aegis_paper_ready_v1.py",
+            blocker=str(payload.get("canonical_blocker") or ""),
+            reason="Paper readiness gate complete",
+            evidence_paths=[str(path)],
+        )
     payload["lifecycle_path"] = str(lifecycle_path)
     bod._write_json(path, payload)
     print(json.dumps({"status": payload["status"], "canonical_blocker": payload["canonical_blocker"], "path": str(path)}, sort_keys=True))

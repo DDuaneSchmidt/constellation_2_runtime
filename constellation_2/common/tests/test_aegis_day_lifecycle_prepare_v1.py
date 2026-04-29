@@ -64,12 +64,30 @@ def _seed_pre_open_inputs(ctx: bod.BodContext, *, session: str = "GRANTED", pre_
         _write(ctx.operator_input_root / "operator_inputs/cash_ledger_operator_statements" / ctx.day_utc / "operator_statement.v1.json", {"cash_total": "0.00"})
 
 
-def _seed_paper_ready_inputs(ctx: bod.BodContext, *, risk_state: str = "PASS") -> None:
+def _seed_paper_ready_inputs(
+    ctx: bod.BodContext,
+    *,
+    strategy_state: str = "READY",
+    strategy_status: str = "PASS",
+    risk_state: str = "PASS",
+    risk_status: str = "PASS",
+) -> None:
     _write(ctx.truth_root / "reports/market_data_authority_v1" / ctx.day_utc / "market_data_authority.v1.json", {"market_data_state": "READY"})
-    _write(ctx.truth_root / "reports/strategy_decision_authority_v1" / ctx.day_utc / "strategy_decision_authority.v1.json", {"strategy_decision_state": "READY"})
+    _write(
+        ctx.truth_root / "reports/strategy_decision_authority_v1" / ctx.day_utc / "strategy_decision_authority.v1.json",
+        {
+            "status": strategy_status,
+            "strategy_decision_state": strategy_state,
+            "canonical_blocker": "STRATEGY_BLOCKED" if strategy_status != "PASS" else "",
+        },
+    )
     _write(
         ctx.truth_root / "reports/risk_sizing_authority_v1" / ctx.day_utc / "risk_sizing_authority.v1.json",
-        {"risk_sizing_state": risk_state, "canonical_blocker": "AUTHZ_MISSING_DEFINED_RISK_EVIDENCE" if risk_state != "PASS" else ""},
+        {
+            "status": risk_status,
+            "risk_sizing_state": risk_state,
+            "canonical_blocker": "AUTHZ_MISSING_DEFINED_RISK_EVIDENCE" if risk_status != "PASS" else "",
+        },
     )
     _write(
         ctx.truth_root / "reports/submit_boundary_status_v1" / ctx.day_utc / "submit_boundary_status.v1.json",
@@ -130,13 +148,99 @@ def test_missing_options_data_reports_market_data_unavailable(monkeypatch, tmp_p
 def test_missing_phasec_evidence_blocks_paper_ready(monkeypatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _seed_pre_open_inputs(ctx)
-    _seed_paper_ready_inputs(ctx, risk_state="BLOCKED")
+    _seed_paper_ready_inputs(ctx, risk_state="BLOCKED", risk_status="BLOCKED")
     write_lifecycle_transition_v1(truth_root=ctx.truth_root, day_utc=DAY, state="PRE_OPEN_READY", producer="test")
     monkeypatch.setattr(paper.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
 
     assert paper.main(["--day_utc", DAY]) == 2
     payload = json.loads((ctx.truth_root / "reports/aegis_paper_ready_v1" / DAY / "aegis_paper_ready.v1.json").read_text(encoding="utf-8"))
     assert payload["status"] == "NOT_READY"
+    assert payload["canonical_blocker"] == "AUTHZ_MISSING_DEFINED_RISK_EVIDENCE"
+
+
+def test_paper_ready_does_not_regress_pre_open_lifecycle_when_downstream_blocks(monkeypatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _seed_pre_open_inputs(ctx)
+    _seed_paper_ready_inputs(ctx, strategy_state="BLOCKED", strategy_status="BLOCKED")
+    write_lifecycle_transition_v1(truth_root=ctx.truth_root, day_utc=DAY, state="PRE_OPEN_READY", producer="test")
+    monkeypatch.setattr(paper.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+
+    assert paper.main(["--day_utc", DAY]) == 2
+
+    payload = json.loads((ctx.truth_root / "reports/aegis_paper_ready_v1" / DAY / "aegis_paper_ready.v1.json").read_text(encoding="utf-8"))
+    lifecycle = read_lifecycle_state_v1(truth_root=ctx.truth_root, day_utc=DAY)
+    assert payload["canonical_blocker"] == "STRATEGY_BLOCKED"
+    assert lifecycle["state"] == "PRE_OPEN_READY"
+
+
+def test_paper_ready_accepts_intent_created_when_strategy_status_pass(monkeypatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _seed_pre_open_inputs(ctx)
+    _seed_paper_ready_inputs(ctx, strategy_state="INTENT_CREATED", strategy_status="PASS")
+    write_lifecycle_transition_v1(truth_root=ctx.truth_root, day_utc=DAY, state="PRE_OPEN_READY", producer="test")
+    monkeypatch.setattr(paper.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+
+    assert paper.main(["--day_utc", DAY]) == 0
+
+    payload = json.loads((ctx.truth_root / "reports/aegis_paper_ready_v1" / DAY / "aegis_paper_ready.v1.json").read_text(encoding="utf-8"))
+    strategy_check = next(row for row in payload["checks"] if row["name"] == "strategy_decision")
+    assert strategy_check["observed_state"] == "INTENT_CREATED"
+    assert strategy_check["status"] == "PASS"
+
+
+def test_paper_ready_accepts_sized_when_risk_status_pass(monkeypatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _seed_pre_open_inputs(ctx)
+    _seed_paper_ready_inputs(ctx, risk_state="SIZED", risk_status="PASS")
+    write_lifecycle_transition_v1(truth_root=ctx.truth_root, day_utc=DAY, state="PRE_OPEN_READY", producer="test")
+    monkeypatch.setattr(paper.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+
+    assert paper.main(["--day_utc", DAY]) == 0
+
+    payload = json.loads((ctx.truth_root / "reports/aegis_paper_ready_v1" / DAY / "aegis_paper_ready.v1.json").read_text(encoding="utf-8"))
+    risk_check = next(row for row in payload["checks"] if row["name"] == "risk_sizing")
+    assert risk_check["observed_state"] == "SIZED"
+    assert risk_check["status"] == "PASS"
+
+
+def test_true_pre_open_failure_still_blocks_and_writes_pre_open_blocked(monkeypatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _seed_pre_open_inputs(ctx)
+    _seed_paper_ready_inputs(ctx)
+    write_lifecycle_transition_v1(truth_root=ctx.truth_root, day_utc=DAY, state="PRE_OPEN_BLOCKED", producer="test", blocker="PRE_OPEN_NOT_READY")
+    monkeypatch.setattr(paper.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+
+    assert paper.main(["--day_utc", DAY]) == 2
+
+    payload = json.loads((ctx.truth_root / "reports/aegis_paper_ready_v1" / DAY / "aegis_paper_ready.v1.json").read_text(encoding="utf-8"))
+    lifecycle = read_lifecycle_state_v1(truth_root=ctx.truth_root, day_utc=DAY)
+    assert payload["canonical_blocker"] == "PRE_OPEN_NOT_READY"
+    assert lifecycle["state"] == "PRE_OPEN_BLOCKED"
+
+
+def test_true_strategy_failure_still_blocks(monkeypatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _seed_pre_open_inputs(ctx)
+    _seed_paper_ready_inputs(ctx, strategy_state="INTENT_CREATED", strategy_status="FAIL")
+    write_lifecycle_transition_v1(truth_root=ctx.truth_root, day_utc=DAY, state="PRE_OPEN_READY", producer="test")
+    monkeypatch.setattr(paper.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+
+    assert paper.main(["--day_utc", DAY]) == 2
+
+    payload = json.loads((ctx.truth_root / "reports/aegis_paper_ready_v1" / DAY / "aegis_paper_ready.v1.json").read_text(encoding="utf-8"))
+    assert payload["canonical_blocker"] == "STRATEGY_BLOCKED"
+
+
+def test_true_risk_failure_still_blocks(monkeypatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _seed_pre_open_inputs(ctx)
+    _seed_paper_ready_inputs(ctx, risk_state="SIZED", risk_status="FAIL")
+    write_lifecycle_transition_v1(truth_root=ctx.truth_root, day_utc=DAY, state="PRE_OPEN_READY", producer="test")
+    monkeypatch.setattr(paper.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+
+    assert paper.main(["--day_utc", DAY]) == 2
+
+    payload = json.loads((ctx.truth_root / "reports/aegis_paper_ready_v1" / DAY / "aegis_paper_ready.v1.json").read_text(encoding="utf-8"))
     assert payload["canonical_blocker"] == "AUTHZ_MISSING_DEFINED_RISK_EVIDENCE"
 
 
