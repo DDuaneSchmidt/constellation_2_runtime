@@ -633,8 +633,11 @@ async function handleSubmit(event) {
     try {
       await executeReliabilityWorkflow(formData, state);
     } catch (error) {
+      const submitted = Object.fromEntries([...formData.entries()].map(([key, value]) => [key, String(value || "")]));
       state.reliabilityWorkflow = {
         ...(state.reliabilityWorkflow || {}),
+        lastAction: String(formData.get("reliability_action") || ""),
+        lastFormInput: submitted,
         lastError: error?.payload?.errors?.join(", ")
           || error?.payload?.reason_codes?.join(", ")
           || error?.message

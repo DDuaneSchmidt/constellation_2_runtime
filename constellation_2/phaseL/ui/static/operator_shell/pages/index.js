@@ -43,6 +43,7 @@ import {
   fetchReliabilityWorkOrders,
   fetchReliabilityFixAttempts,
   assessReliabilityReadiness,
+  createReliabilityIssue,
   createWorkOrderFromIssue,
   draftReliabilityIssue,
   linkReliabilityObservation,
@@ -2979,7 +2980,7 @@ async function renderReliabilityDashboardPage(state) {
   };
 }
 
-async function renderReliabilityIssuesPage() {
+async function renderReliabilityIssuesPage(state = {}) {
   const search = currentSearchParams();
   const filters = {
     status: search.get("status") || "",
@@ -2994,7 +2995,16 @@ async function renderReliabilityIssuesPage() {
   };
   const payload = await fetchReliabilityIssues(filters);
   const issues = safeList(payload.issues);
-  const issueRows = issues.map((row) => {
+  const workflow = state.reliabilityWorkflow || {};
+  const lastError = workflow.lastAction === "create_issue" ? workflow.lastError : null;
+  const createdIssue = workflow.lastAction === "create_issue" ? workflow.lastIssue : null;
+  const formInput = workflow.lastAction === "create_issue" && workflow.lastFormInput ? workflow.lastFormInput : {};
+  const selectValue = (key, fallback = "") => String(formInput[key] || fallback);
+  const selected = (key, value, fallback = "") => selectValue(key, fallback) === value ? "selected" : "";
+  const visibleIssues = createdIssue && !issues.some((issue) => String(issue.id || "") === String(createdIssue.id || ""))
+    ? [createdIssue, ...issues]
+    : issues;
+  const issueRows = visibleIssues.map((row) => {
     const route = `/reliability/issues/detail?issue_id=${encodeURIComponent(String(row.id || ""))}`;
     const shortId = shortIssueId(row.id);
     const action = issueRowNextAction(row);
@@ -3016,7 +3026,7 @@ async function renderReliabilityIssuesPage() {
       </tr>
     `;
   }).join("");
-  const issuesTable = issues.length
+  const issuesTable = visibleIssues.length
     ? `
       <div class="table-wrap">
         <table class="data-table">
@@ -3041,6 +3051,76 @@ async function renderReliabilityIssuesPage() {
     title: "Reliability Issues",
     meta: "Structured issue ledger with recurrence, blocker flags, severity, and codex workflow progress.",
     html: [
+      renderCardSection({
+        eyebrow: "Create",
+        title: "+ New Issue",
+        subtitle: "Create a structured reliability issue in the existing ledger.",
+        body: `
+          <details ${lastError ? "open" : ""}>
+            <summary><strong>+ New Issue</strong></summary>
+            <form class="reliability-action-form" autocomplete="off" style="margin-top:12px;">
+              <input type="hidden" name="reliability_action" value="create_issue" />
+              <input type="hidden" name="codex_status" value="not_needed" />
+              <div class="line-list"><label>Title <input type="text" name="title" value="${escapeHtml(formInput.title || "")}" required /></label></div>
+              <div class="line-list"><label>Type
+                <select name="type" required>
+                  <option value="bug" ${selected("type", "bug", "bug")}>bug</option>
+                  <option value="missing_functionality" ${selected("type", "missing_functionality", "bug")}>missing_functionality</option>
+                  <option value="regression" ${selected("type", "regression", "bug")}>regression</option>
+                  <option value="paper_trading_incident" ${selected("type", "paper_trading_incident", "bug")}>paper_trading_incident</option>
+                  <option value="readiness_blocker" ${selected("type", "readiness_blocker", "bug")}>readiness_blocker</option>
+                </select>
+              </label></div>
+              <div class="line-list"><label>Category
+                <select name="category" required>
+                  <option value="infrastructure" ${selected("category", "infrastructure", "infrastructure")}>infrastructure</option>
+                  <option value="execution" ${selected("category", "execution", "infrastructure")}>execution</option>
+                  <option value="data" ${selected("category", "data", "infrastructure")}>data</option>
+                  <option value="strategy" ${selected("category", "strategy", "infrastructure")}>strategy</option>
+                  <option value="ui_missing_functionality" ${selected("category", "ui_missing_functionality", "infrastructure")}>ui_missing_functionality</option>
+                </select>
+              </label></div>
+              <div class="line-list"><label>Severity
+                <select name="severity" required>
+                  <option value="medium" ${selected("severity", "medium", "medium")}>medium</option>
+                  <option value="low" ${selected("severity", "low", "medium")}>low</option>
+                  <option value="high" ${selected("severity", "high", "medium")}>high</option>
+                  <option value="critical" ${selected("severity", "critical", "medium")}>critical</option>
+                </select>
+              </label></div>
+              <div class="line-list"><label>Readiness blocker
+                <select name="readiness_blocker">
+                  <option value="" ${selected("readiness_blocker", "", "")}>default</option>
+                  <option value="true" ${selected("readiness_blocker", "true", "")}>true</option>
+                  <option value="false" ${selected("readiness_blocker", "false", "")}>false</option>
+                </select>
+              </label></div>
+              <div class="line-list"><label>Canonical key <input type="text" name="canonical_key" value="${escapeHtml(formInput.canonical_key || "")}" required /></label></div>
+              <div class="line-list"><label>Impact summary <input type="text" name="impact_summary" value="${escapeHtml(formInput.impact_summary || "")}" required /></label></div>
+              <div class="line-list"><label>Expected behavior <textarea name="expected_behavior" required>${escapeHtml(formInput.expected_behavior || "")}</textarea></label></div>
+              <div class="line-list"><label>Actual behavior <textarea name="actual_behavior" required>${escapeHtml(formInput.actual_behavior || "")}</textarea></label></div>
+              <div class="line-list"><label>Created by <input type="text" name="created_by" value="${escapeHtml(formInput.created_by || "operator")}" required /></label></div>
+              <button type="submit">Create Issue</button>
+            </form>
+          </details>
+        `,
+      }),
+      lastError
+        ? renderCardSection({
+            eyebrow: "Error",
+            title: "Last Reliability Issue Create Error",
+            subtitle: "The backend rejected the issue create request.",
+            body: `<div class="error-state">${escapeHtml(String(lastError))}</div>`,
+          })
+        : "",
+      createdIssue
+        ? renderCardSection({
+            eyebrow: "Created",
+            title: "Issue Created",
+            subtitle: "The issue list was refreshed from the reliability API.",
+            body: `<div class="line-list"><div>Issue id: ${escapeHtml(shortIssueId(createdIssue.id))}</div><div>${escapeHtml(createdIssue.title || "")}</div></div>`,
+          })
+        : "",
       renderCardSection({
         eyebrow: "Filters",
         title: "Issue Filters",
@@ -3073,8 +3153,8 @@ async function renderReliabilityIssuesPage() {
       subtitle: "Quick counts for triage and blocking review.",
       body: renderDefinitionRows([
         { label: "Total matching issues", value: String(payload.total_count || issues.length) },
-        { label: "Open issues", value: String(issues.filter((item) => openIssueStatus(item)).length) },
-        { label: "Open blockers", value: String(issues.filter((item) => openIssueStatus(item) && item.readiness_blocker).length) },
+        { label: "Open issues", value: String(visibleIssues.filter((item) => openIssueStatus(item)).length) },
+        { label: "Open blockers", value: String(visibleIssues.filter((item) => openIssueStatus(item) && item.readiness_blocker).length) },
       ]),
     }),
   };
@@ -4428,6 +4508,27 @@ export async function executeReliabilityWorkflow(formData, state) {
     };
     result = await draftReliabilityIssue(payload);
     lastDraft = result?.draft_issue || null;
+    lastIssue = result?.issue || null;
+  } else if (action === "create_issue") {
+    const payload = {
+      title: String(formData?.get("title") || "").trim(),
+      type: String(formData?.get("type") || "").trim(),
+      category: String(formData?.get("category") || "").trim(),
+      severity: String(formData?.get("severity") || "").trim(),
+      status: String(formData?.get("status") || "open").trim(),
+      canonical_key: String(formData?.get("canonical_key") || "").trim(),
+      impact_summary: String(formData?.get("impact_summary") || "").trim(),
+      expected_behavior: String(formData?.get("expected_behavior") || "").trim(),
+      actual_behavior: String(formData?.get("actual_behavior") || "").trim(),
+      created_by: String(formData?.get("created_by") || "operator").trim() || "operator",
+      codex_status: String(formData?.get("codex_status") || "not_needed").trim() || "not_needed",
+      observation_ids: _parseDelimitedList(formData?.get("observation_ids")),
+    };
+    const readinessBlockerValue = String(formData?.get("readiness_blocker") || "").trim();
+    if (readinessBlockerValue) {
+      payload.readiness_blocker = _parseBooleanText(readinessBlockerValue);
+    }
+    result = await createReliabilityIssue(payload);
     lastIssue = result?.issue || null;
   } else if (action === "update_issue") {
     const issueId = String(formData?.get("issue_id") || "").trim();
