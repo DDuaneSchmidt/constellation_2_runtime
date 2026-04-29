@@ -17,6 +17,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
+from constellation_2.common.stale_artifact_guard_v1 import (
+    MISSING_EVIDENCE,
+    STALE_ARTIFACT,
+    classify_artifact_freshness_v1,
+)
 from ops.tools import run_aegis_bod_prepare_v1 as bod
 
 SCHEMA_VERSION = "authorization_supply.v1"
@@ -38,6 +43,8 @@ ALLOWED_BLOCKERS = {
     "AUTHORIZATION_EVIDENCE_MISSING",
     "AUTHORIZATION_REJECTED",
     "AUTHORIZED_INTENTS_EMPTY",
+    MISSING_EVIDENCE,
+    STALE_ARTIFACT,
 }
 
 
@@ -493,7 +500,12 @@ def _run_authorization_artifacts(ctx: bod.BodContext) -> dict[str, Any]:
     return _run_command([sys.executable, "ops/tools/run_authorization_artifacts_day_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.execution_root)])
 
 
-def _authorization_evidence(ctx: bod.BodContext, active_intents: list[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any], str]:
+def _authorization_evidence(
+    ctx: bod.BodContext,
+    active_intents: list[dict[str, Any]],
+    *,
+    dependency_paths: list[Path],
+) -> tuple[dict[str, Any], dict[str, Any], str]:
     root = _authorization_root(ctx)
     if not root.exists() or not any(root.glob("*.authorization.v1.json")):
         _run_authorization_artifacts(ctx)
@@ -507,6 +519,24 @@ def _authorization_evidence(ctx: bod.BodContext, active_intents: list[dict[str, 
         intent_id = str(payload.get("intent_id") or "").strip()
         if not intent_id:
             continue
+        freshness = classify_artifact_freshness_v1(
+            artifact_path=path,
+            day_utc=ctx.day_utc,
+            dependency_paths=dependency_paths,
+            payload=payload,
+        )
+        if freshness["status"] == "STALE":
+            return (
+                {
+                    "status": "BLOCKED",
+                    "path": str(path),
+                    "rejected": [],
+                    "authorized_count": 0,
+                    "artifact_freshness": freshness,
+                },
+                {"usable_for_submit_readiness": False, "authorized_intents": []},
+                STALE_ARTIFACT,
+            )
         status = str(payload.get("status") or "").strip().upper()
         decision = str((payload.get("authorization") if isinstance(payload.get("authorization"), dict) else {}).get("decision") or "").strip().upper()
         by_intent[intent_id] = (path, payload)
@@ -542,7 +572,7 @@ def _authorization_evidence(ctx: bod.BodContext, active_intents: list[dict[str, 
         return (
             {"status": "BLOCKED", "path": str(root), "rejected": [], "authorized_count": 0},
             {"usable_for_submit_readiness": False, "authorized_intents": []},
-            "AUTHORIZATION_EVIDENCE_MISSING",
+            MISSING_EVIDENCE,
         )
     if not authorized:
         return (
@@ -654,7 +684,21 @@ def build_authorization_supply_v1(ctx: bod.BodContext) -> dict[str, Any]:
             phasec_defined_risk=phasec_defined_risk,
         )
 
-    authorization, export, auth_blocker = _authorization_evidence(ctx, active_intents)
+    auth_dependencies = [
+        _market_data_supply_path(ctx),
+        _risk_budget_supply_path(ctx),
+        _strategy_decision_path(ctx),
+        _structure_decision_supply_path(ctx),
+    ]
+    identity_path = str(phasec_defined_risk.get("execution_identity_record_path") or "").strip()
+    if identity_path:
+        auth_dependencies.append(Path(identity_path))
+    proof = phasec_defined_risk.get("risk_proof") if isinstance(phasec_defined_risk.get("risk_proof"), dict) else {}
+    identities = proof.get("identities") if isinstance(proof.get("identities"), list) else []
+    for row in identities:
+        if isinstance(row, dict) and str(row.get("path") or "").strip():
+            auth_dependencies.append(Path(str(row["path"])))
+    authorization, export, auth_blocker = _authorization_evidence(ctx, active_intents, dependency_paths=auth_dependencies)
     if auth_blocker:
         return _blocked_payload(
             ctx,

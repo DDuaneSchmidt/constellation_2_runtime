@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
 from pathlib import Path
 import sys
 
@@ -503,7 +504,7 @@ def test_missing_authorization_evidence_blocks(monkeypatch: pytest.MonkeyPatch, 
     _strategy(ctx)
     _identity(ctx)
     payload = auth.build_authorization_supply_v1(ctx)
-    assert payload["canonical_blocker"] == "AUTHORIZATION_EVIDENCE_MISSING"
+    assert payload["canonical_blocker"] == "MISSING_EVIDENCE"
 
 
 def test_authorization_rejected_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -517,6 +518,26 @@ def test_authorization_rejected_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path
     _authorization(ctx, status="REJECTED")
     payload = auth.build_authorization_supply_v1(ctx)
     assert payload["canonical_blocker"] == "AUTHORIZATION_REJECTED"
+
+
+def test_stale_authorization_artifact_blocks_as_stale_not_rejected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _no_external(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _intent(ctx)
+    _market_supply(ctx)
+    _risk_budget(ctx)
+    _strategy(ctx)
+    stale_auth = _authorization(ctx, status="REJECTED")
+    _identity(ctx)
+    identity_path = next((ctx.execution_root / "phaseC_preflight_v1" / ctx.day_utc).glob("attempt_*/*/execution_identity_record.v1.json"))
+    # Force the rejected authorization to be older than the PhaseC identity it depends on.
+    os.utime(stale_auth, (1000, 1000))
+    os.utime(identity_path, (2000, 2000))
+
+    payload = auth.build_authorization_supply_v1(ctx)
+
+    assert payload["canonical_blocker"] == "STALE_ARTIFACT"
+    assert payload["authorization"]["artifact_freshness"]["stale_dependency_path"]
 
 
 def test_valid_authorization_supply_passes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

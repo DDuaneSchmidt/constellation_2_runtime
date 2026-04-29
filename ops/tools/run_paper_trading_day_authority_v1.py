@@ -40,6 +40,11 @@ from constellation_2.common.paper_second_attempt_clearance_v1 import (
 from constellation_2.common.paper_submit_mode_status_v1 import classify_paper_submit_mode_status_v1
 from constellation_2.common.runtime_path_authority_v1 import require_authoritative_repo_runtime_v1
 from constellation_2.common.sleeve_execution_root_v1 import resolve_sleeve_execution_root_v1
+from constellation_2.common.stale_artifact_guard_v1 import (
+    MISSING_EVIDENCE,
+    STALE_ARTIFACT,
+    classify_artifact_freshness_v1,
+)
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
 
@@ -835,31 +840,62 @@ def main(argv: List[str] | None = None) -> int:
         payload: Dict[str, Any] | None,
         load_error: str,
         state_key: str,
+        dependency_paths: List[Path] | None = None,
     ) -> None:
         if payload is None:
+            if (
+                load_error == "MISSING"
+                and logical_name == "risk_sizing_authority_v1"
+                and any(dep.exists() for dep in (dependency_paths or []))
+            ):
+                input_status[logical_name] = {
+                    "path": str(path),
+                    "exists": False,
+                    "status": "MISSING",
+                    "reason_codes": [MISSING_EVIDENCE],
+                    "required_or_diagnostic": "required",
+                    "readiness_role": "authority_input",
+                    "owning_subsystem": logical_name,
+                    "producer_command": producer_commands.get(logical_name, ""),
+                    "causal_parent": "",
+                    "freshness_status": "MISSING",
+                    "schema_status": "UNKNOWN",
+                    state_key: "MISSING",
+                }
             return
+        freshness = classify_artifact_freshness_v1(
+            artifact_path=path,
+            day_utc=day_utc,
+            dependency_paths=dependency_paths or [],
+            payload=payload,
+        )
         observed_status = str(payload.get("status") or "").strip().upper()
         observed_state = str(payload.get(state_key) or "").strip().upper()
-        row_status = "PASS" if observed_status == "PASS" else ("WARN" if observed_status == "WARN" else "FAIL")
+        row_status = "STALE" if freshness["status"] == "STALE" else ("PASS" if observed_status == "PASS" else ("WARN" if observed_status == "WARN" else "FAIL"))
         diagnostic = bool(post_submit_dry_run or row_status == "WARN")
         input_status[logical_name] = {
             "path": str(path),
             "exists": True,
             "status": row_status,
-            "reason_codes": [] if row_status in {"PASS", "WARN"} else [str(payload.get("first_blocker") or f"{logical_name.upper()}_{observed_state}")],
+            "reason_codes": [] if row_status in {"PASS", "WARN"} else [STALE_ARTIFACT if row_status == "STALE" else str(payload.get("first_blocker") or f"{logical_name.upper()}_{observed_state}")],
             "required_or_diagnostic": "diagnostic" if diagnostic else "required",
             "readiness_role": "diagnostic" if diagnostic else "authority_input",
             "owning_subsystem": logical_name,
             "producer_command": producer_commands.get(logical_name, ""),
-            "causal_parent": "",
-            "freshness_status": "CURRENT",
+            "causal_parent": freshness.get("stale_dependency_path") or "",
+            "freshness_status": "STALE" if row_status == "STALE" else "CURRENT",
             "schema_status": "PASS" if not load_error else "INVALID",
             state_key: observed_state,
         }
 
     add_direct_authority_row(logical_name="strategy_decision_authority_v1", path=strategy_authority_path, payload=strategy_payload, load_error=strategy_error, state_key="strategy_decision_state")
     add_direct_authority_row(logical_name="portfolio_account_authority_v1", path=portfolio_authority_path, payload=portfolio_payload, load_error=portfolio_error, state_key="account_state")
-    add_direct_authority_row(logical_name="risk_sizing_authority_v1", path=risk_sizing_authority_path, payload=risk_sizing_payload, load_error=risk_sizing_error, state_key="risk_sizing_state")
+    risk_sizing_dependencies = [
+        (truth_root / "reports" / "risk_budget_supply_v1" / day_utc / "risk_budget_supply.v1.json").resolve(),
+        (truth_root / "reports" / "capital_supply_v1" / day_utc / "capital_supply.v1.json").resolve(),
+        (execution_truth_root / "reports" / "capital_risk_envelope_v2" / day_utc / "capital_risk_envelope.v2.json").resolve(),
+    ]
+    add_direct_authority_row(logical_name="risk_sizing_authority_v1", path=risk_sizing_authority_path, payload=risk_sizing_payload, load_error=risk_sizing_error, state_key="risk_sizing_state", dependency_paths=risk_sizing_dependencies)
 
     preflight_inputs = tuple(
         name

@@ -62,6 +62,7 @@ from constellation_2.common.session_authority_v1 import (
 )
 from constellation_2.common.sleeve_execution_root_v1 import resolve_sleeve_execution_root_v1
 from constellation_2.common.paper_submit_mode_status_v1 import classify_paper_submit_mode_status_v1
+from constellation_2.common.stale_artifact_guard_v1 import STALE_ARTIFACT
 
 PAPER_TRADING_DAY_AUTHORITY_SCHEMA_RELPATH_V1 = (
     "governance/04_DATA/SCHEMAS/C2/REPORTS/paper_trading_day_authority.v1.schema.json"
@@ -636,6 +637,8 @@ def _ensure_dependency_ref_v1(
 
 def _canonical_blocker_for_boundary_v1(blocking_codes: List[str]) -> str:
     normalized = _normalize_reason_codes(blocking_codes)
+    if STALE_ARTIFACT in normalized:
+        return STALE_ARTIFACT
     for preferred in ("NON_TRADING_DAY", "NO_ACTIVE_PAPER_SESSION", "SESSION_AUTHORITY_MISSING"):
         if preferred in normalized:
             return preferred

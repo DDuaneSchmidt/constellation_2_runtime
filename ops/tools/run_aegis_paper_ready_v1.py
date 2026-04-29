@@ -13,6 +13,11 @@ if str(REPO_ROOT) not in sys.path:
 
 from constellation_2.common.aegis_day_lifecycle_v1 import read_lifecycle_state_v1, write_lifecycle_transition_v1
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
+from constellation_2.common.stale_artifact_guard_v1 import (
+    MISSING_EVIDENCE,
+    STALE_ARTIFACT,
+    classify_artifact_freshness_v1,
+)
 from ops.tools import run_aegis_bod_prepare_v1 as bod
 
 
@@ -55,7 +60,22 @@ def evaluate_paper_ready_v1(ctx: bod.BodContext) -> dict[str, Any]:
     lifecycle = read_lifecycle_state_v1(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     lifecycle_state = str(lifecycle.get("state") or "").strip().upper()
     lifecycle_path = ctx.truth_root / "reports" / "aegis_day_lifecycle_v1" / ctx.day_utc / "aegis_day_lifecycle.v1.json"
-    add_check("pre_open_lifecycle", lifecycle_path, lifecycle_state in {"PRE_OPEN_READY", "PAPER_READY"}, "PRE_OPEN_NOT_READY", lifecycle_state)
+    pre_open_verify_path = ctx.truth_root / "reports" / "aegis_pre_open_verify_v1" / ctx.day_utc / "aegis_pre_open_verify.v1.json"
+    lifecycle_freshness = classify_artifact_freshness_v1(
+        artifact_path=lifecycle_path,
+        day_utc=ctx.day_utc,
+        dependency_paths=[pre_open_verify_path],
+        payload=lifecycle,
+    )
+    if lifecycle_freshness["status"] == "MISSING":
+        add_check("pre_open_lifecycle", lifecycle_path, False, MISSING_EVIDENCE, lifecycle_state)
+        checks[-1]["artifact_freshness"] = lifecycle_freshness
+    elif lifecycle_freshness["status"] == "STALE":
+        add_check("pre_open_lifecycle", lifecycle_path, False, STALE_ARTIFACT, lifecycle_state)
+        checks[-1]["artifact_freshness"] = lifecycle_freshness
+    else:
+        add_check("pre_open_lifecycle", lifecycle_path, lifecycle_state in {"PRE_OPEN_READY", "PAPER_READY"}, "PRE_OPEN_NOT_READY", lifecycle_state)
+        checks[-1]["artifact_freshness"] = lifecycle_freshness
 
     market_path = ctx.truth_root / "reports" / "market_data_authority_v1" / ctx.day_utc / "market_data_authority.v1.json"
     market = bod._read_json(market_path)

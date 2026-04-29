@@ -119,6 +119,8 @@ def _logical_name_from_path(path: Path) -> str:
         return "trading_day_control_plane_v1"
     if "/market_data_authority_v1/" in text:
         return "market_data_authority_v1"
+    if "/risk_sizing_authority_v1/" in text:
+        return "risk_sizing_authority_v1"
     return ""
 
 
@@ -348,6 +350,43 @@ def test_stale_market_data_before_submit_blocks_open_ready(monkeypatch, tmp_path
     assert payload["can_submit_paper_orders"] is False
     assert payload["canonical_blocker"] == "OPTIONS_CHAIN_SNAPSHOT_STALE"
     assert payload["input_status"]["market_data_authority_v1"]["operator_impact"] == "PRE_SUBMIT_BLOCKER"
+
+
+def test_stale_risk_sizing_reports_stale_artifact_not_envelope_failure(monkeypatch, tmp_path: Path) -> None:
+    truth_root, execution_root, captured = _configure_day_authority_runtime(monkeypatch, tmp_path)
+    payloads = _pass_payloads()
+    payloads["risk_sizing_authority_v1"] = {
+        "day_utc": "2026-04-27",
+        "status": "FAIL",
+        "risk_sizing_state": "BLOCKED",
+        "first_blocker": "CAPITAL_RISK_ENVELOPE_NOT_PASS",
+    }
+    risk_path = truth_root / "reports" / "risk_sizing_authority_v1" / "2026-04-27" / "risk_sizing_authority.v1.json"
+    risk_path.parent.mkdir(parents=True, exist_ok=True)
+    risk_path.write_text(json.dumps(payloads["risk_sizing_authority_v1"], sort_keys=True), encoding="utf-8")
+    dep = truth_root / "reports" / "risk_budget_supply_v1" / "2026-04-27" / "risk_budget_supply.v1.json"
+    dep.parent.mkdir(parents=True, exist_ok=True)
+    dep.write_text(json.dumps({"day_utc": "2026-04-27", "status": "PASS"}, sort_keys=True), encoding="utf-8")
+    os.utime(risk_path, (1000, 1000))
+    os.utime(dep, (2000, 2000))
+
+    def _fake_read_validated(path: Path, _schema_relpath: str):
+        logical_name = _logical_name_from_path(path)
+        payload = payloads.get(logical_name)
+        if payload is None:
+            return None, "MISSING"
+        return dict(payload), ""
+
+    monkeypatch.setattr(day_authority_module, "_read_validated", _fake_read_validated)
+
+    rc = day_authority_module.main(["--day_utc", "2026-04-27"])
+    payload = dict(captured["payload"])
+
+    assert rc == 2
+    assert payload["input_status"]["risk_sizing_authority_v1"]["status"] == "STALE"
+    assert payload["input_status"]["risk_sizing_authority_v1"]["reason_codes"] == ["STALE_ARTIFACT"]
+    assert payload["canonical_blocker"] == "STALE_ARTIFACT"
+    assert "CAPITAL_RISK_ENVELOPE_NOT_PASS" not in payload["reason_codes"]
 
 
 def test_successful_same_day_evidence_bundle_produces_open_ready(monkeypatch, tmp_path: Path) -> None:
@@ -723,6 +762,15 @@ def test_submit_boundary_refuses_authority_with_required_options_snapshot_failur
             }
         )
         is False
+    )
+
+
+def test_submit_boundary_prefers_stale_artifact_over_downstream_policy_failure() -> None:
+    assert (
+        submit_boundary_module._canonical_blocker_for_boundary_v1(
+            ["CAPITAL_RISK_ENVELOPE_NOT_PASS", "STALE_ARTIFACT"]
+        )
+        == "STALE_ARTIFACT"
     )
 
 
