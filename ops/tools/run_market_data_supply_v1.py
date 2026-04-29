@@ -1,0 +1,553 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
+from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+from ops.tools import run_aegis_bod_prepare_v1 as bod
+from ops.tools.run_aegis_requirement_graph_v1 import requirement_graph_path
+
+SCHEMA_VERSION = "market_data_supply.v1"
+OPTIONS_CHAIN_SCHEMA = "constellation_2/schemas/options_chain_snapshot.v1.schema.json"
+ALLOWED_BLOCKERS = {
+    "MARKET_DATA_REQUIREMENT_UNOWNED",
+    "IB_MARKET_DATA_CAPABILITY_UNKNOWN",
+    "OPTIONS_MARKET_DATA_PERMISSION_DENIED",
+    "OPTIONS_CONTRACT_QUALIFICATION_FAILED",
+    "OPTIONS_UNDERLYING_SPOT_MISSING",
+    "OPTIONS_QUOTES_MISSING",
+    "OPTIONS_SNAPSHOT_CAPTURE_FAILED",
+    "OPTIONS_SNAPSHOT_STALE",
+    "MARKET_DATA_AUTHORITY_BLOCKED",
+}
+MARKET_DATA_REQUIREMENT_ARTIFACTS = {
+    "underlying_spot": "UNDERLYING_SPOT",
+    "option_chain": "OPTION_CHAIN",
+    "bid_ask_quotes": "BID_ASK_QUOTES",
+    "freshness_certificate": "FRESHNESS_CERTIFICATE",
+    "options_snapshot_artifact": "OPTIONS_SNAPSHOT",
+}
+PERMISSION_ERROR_CODES = {10089, 10091, 10167}
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(UTC)
+    except Exception:
+        return None
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    if not path.exists() or not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n", encoding="utf-8")
+
+
+def market_data_supply_path(*, truth_root: Path, day_utc: str) -> Path:
+    return (truth_root / "reports" / "market_data_supply_v1" / day_utc / "market_data_supply.v1.json").resolve()
+
+
+def _latest_capture_diagnostic(*, execution_root: Path, day_utc: str, symbol: str) -> Path | None:
+    root = execution_root / "reports" / "options_chain_capture_ib_day_v1" / day_utc
+    if not root.exists() or not root.is_dir():
+        return None
+    candidates = [
+        path.resolve()
+        for path in root.glob(f"ib_capture_{symbol.upper()}_*/options_chain_capture_diagnostic.v1.json")
+        if path.is_file()
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda path: path.stat().st_mtime)
+    return candidates[-1]
+
+
+def _iter_dicts(value: Any) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    if isinstance(value, dict):
+        out.append(value)
+        for item in value.values():
+            out.extend(_iter_dicts(item))
+    elif isinstance(value, list):
+        for item in value:
+            out.extend(_iter_dicts(item))
+    return out
+
+
+def _ib_error_code(row: dict[str, Any]) -> int | None:
+    try:
+        return int(row.get("error_code", row.get("code")))
+    except Exception:
+        return None
+
+
+def _ib_permission_evidence(diagnostic: dict[str, Any]) -> list[dict[str, Any]]:
+    evidence: list[dict[str, Any]] = []
+    for row in _iter_dicts(diagnostic):
+        code = _ib_error_code(row)
+        if code not in PERMISSION_ERROR_CODES:
+            continue
+        evidence.append(
+            {
+                "ib_error_code": code,
+                "mapped_blocker": "OPTIONS_MARKET_DATA_PERMISSION_DENIED",
+                "detail": str(row.get("error_detail") or row.get("message") or "").strip(),
+                "req_id": row.get("req_id"),
+                "observed_at_utc": row.get("observed_at_utc"),
+            }
+        )
+    return evidence
+
+
+def _spot_seen(diagnostic: dict[str, Any]) -> bool:
+    for row in _iter_dicts(diagnostic):
+        spot = row.get("spot_snapshot")
+        if not isinstance(spot, dict):
+            continue
+        for key in ("bid", "ask", "last", "close", "delayed_bid", "delayed_ask", "delayed_last", "delayed_close"):
+            if spot.get(key) not in (None, ""):
+                return True
+    return False
+
+
+def _contracts_qualified(diagnostic: dict[str, Any]) -> bool:
+    for row in _iter_dicts(diagnostic):
+        try:
+            if int(row.get("contract_details_count") or 0) > 0:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _quotes_seen(diagnostic: dict[str, Any]) -> bool:
+    for row in _iter_dicts(diagnostic):
+        if row.get("valid_quote") is True:
+            return True
+        try:
+            if int(row.get("valid_quote_count") or 0) > 0:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _requirement_rows(requirement_graph: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    raw = requirement_graph.get("requirements")
+    if not isinstance(raw, list):
+        return [], None
+    requirements: list[dict[str, Any]] = []
+    unowned: dict[str, Any] | None = None
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("owner_phase") or "").strip().upper() != "MARKET_DATA":
+            continue
+        artifact = str(row.get("required_artifact") or "").strip()
+        if artifact not in MARKET_DATA_REQUIREMENT_ARTIFACTS:
+            continue
+        source_type = str(row.get("source_type") or "").strip().upper()
+        if source_type not in {"ACTIVE_INTENT", "STATIC_POLICY"}:
+            unowned = row
+            continue
+        if not str(row.get("source_id") or "").strip() or not str(row.get("instrument") or "").strip():
+            unowned = row
+            continue
+        requirements.append(
+            {
+                "requirement_id": str(row.get("requirement_id") or "").strip(),
+                "source_type": source_type,
+                "source_id": str(row.get("source_id") or "").strip(),
+                "instrument": str(row.get("instrument") or "").strip().upper(),
+                "data_type": MARKET_DATA_REQUIREMENT_ARTIFACTS[artifact],
+                "required": True,
+            }
+        )
+    return requirements, unowned
+
+
+def _provider_check(
+    *,
+    ctx: bod.BodContext,
+    instrument: str,
+    capability: str,
+    status: str,
+    evidence: list[dict[str, Any]],
+    blocker: str = "",
+    action: str = "",
+) -> dict[str, Any]:
+    return {
+        "provider": "IBKR",
+        "account": ctx.ib_account,
+        "instrument": instrument,
+        "capability": capability,
+        "status": status,
+        "evidence": evidence,
+        "blocker": blocker,
+        "operator_next_action": action,
+    }
+
+
+def _provider_checks_for_instrument(*, ctx: bod.BodContext, instrument: str) -> tuple[list[dict[str, Any]], str, str]:
+    diagnostic_path = _latest_capture_diagnostic(execution_root=ctx.execution_root, day_utc=ctx.day_utc, symbol=instrument)
+    diagnostic = _read_json(diagnostic_path) if diagnostic_path else {}
+    evidence: list[dict[str, Any]] = []
+    if diagnostic_path:
+        evidence.append({"artifact_type": "options_chain_capture_diagnostic", "path": str(diagnostic_path), "exists": True})
+    permission_evidence = _ib_permission_evidence(diagnostic)
+    evidence.extend(permission_evidence[:20])
+    action = "Enable IBKR API market-data permissions/subscriptions for the required SPY underlying and options feeds for the logged-in trading user/account."
+    if permission_evidence:
+        return (
+            [
+                _provider_check(ctx=ctx, instrument=instrument, capability="IB_MARKET_DATA_API_ACCESS", status="UNAVAILABLE", evidence=evidence, blocker="OPTIONS_MARKET_DATA_PERMISSION_DENIED", action=action),
+                _provider_check(ctx=ctx, instrument=instrument, capability="UNDERLYING_MARKET_DATA", status="UNAVAILABLE" if not _spot_seen(diagnostic) else "AVAILABLE", evidence=evidence, blocker="" if _spot_seen(diagnostic) else "OPTIONS_MARKET_DATA_PERMISSION_DENIED", action="" if _spot_seen(diagnostic) else action),
+                _provider_check(ctx=ctx, instrument=instrument, capability="OPTIONS_CHAIN_QUALIFICATION", status="AVAILABLE" if _contracts_qualified(diagnostic) else "UNKNOWN", evidence=evidence),
+                _provider_check(ctx=ctx, instrument=instrument, capability="OPTIONS_BID_ASK_QUOTES", status="UNAVAILABLE" if not _quotes_seen(diagnostic) else "AVAILABLE", evidence=evidence, blocker="" if _quotes_seen(diagnostic) else "OPTIONS_MARKET_DATA_PERMISSION_DENIED", action="" if _quotes_seen(diagnostic) else action),
+            ],
+            "OPTIONS_MARKET_DATA_PERMISSION_DENIED",
+            action,
+        )
+    if diagnostic_path:
+        checks = [
+            _provider_check(ctx=ctx, instrument=instrument, capability="IB_MARKET_DATA_API_ACCESS", status="AVAILABLE" if (_spot_seen(diagnostic) or _quotes_seen(diagnostic)) else "UNKNOWN", evidence=evidence),
+            _provider_check(ctx=ctx, instrument=instrument, capability="UNDERLYING_MARKET_DATA", status="AVAILABLE" if _spot_seen(diagnostic) else "UNKNOWN", evidence=evidence),
+            _provider_check(ctx=ctx, instrument=instrument, capability="OPTIONS_CHAIN_QUALIFICATION", status="AVAILABLE" if _contracts_qualified(diagnostic) else "UNKNOWN", evidence=evidence),
+            _provider_check(ctx=ctx, instrument=instrument, capability="OPTIONS_BID_ASK_QUOTES", status="AVAILABLE" if _quotes_seen(diagnostic) else "UNKNOWN", evidence=evidence),
+        ]
+        return checks, "", ""
+    return (
+        [_provider_check(ctx=ctx, instrument=instrument, capability="IB_MARKET_DATA_API_ACCESS", status="UNKNOWN", evidence=[])],
+        "",
+        "",
+    )
+
+
+def _run_capture(ctx: bod.BodContext, instrument: str) -> dict[str, Any]:
+    cmd = [
+        sys.executable,
+        "ops/tools/run_options_chain_snapshot_required_day_v1.py",
+        "--day_utc",
+        ctx.day_utc,
+        "--truth_root",
+        str(ctx.execution_root),
+        "--symbol",
+        instrument,
+        "--symbols_from_intents",
+        "NO",
+    ]
+    env = dict(os.environ)
+    env["C2_TRUTH_ROOT"] = str(ctx.execution_root)
+    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True, check=False, env=env, timeout=90)
+    snapshot_path = ""
+    cert_path = ""
+    blocker = ""
+    try:
+        payload = json.loads(str(proc.stdout or "").splitlines()[-1])
+    except Exception:
+        payload = {}
+    if isinstance(payload, dict):
+        results = payload.get("results")
+        if isinstance(results, list) and results:
+            first = results[0] if isinstance(results[0], dict) else {}
+            blocker = str(first.get("reason_code") or "").strip()
+            if str(first.get("status") or "").upper() == "PASS":
+                snapshot_path = str(first.get("path") or "")
+                cert_path = str(first.get("freshness_certificate_path") or "")
+        elif str(payload.get("status") or "").upper() == "OK":
+            blocker = ""
+    if proc.returncode != 0 and not blocker:
+        blocker = "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+    return {
+        "instrument": instrument,
+        "command": " ".join(cmd),
+        "status": "PASS" if proc.returncode == 0 else "BLOCKED",
+        "blocker": blocker if blocker in ALLOWED_BLOCKERS else "OPTIONS_SNAPSHOT_CAPTURE_FAILED",
+        "snapshot_path": snapshot_path,
+        "freshness_certificate_path": cert_path,
+        "exit_code": int(proc.returncode),
+        "stdout_summary": str(proc.stdout or "").strip()[-1200:],
+        "stderr_summary": str(proc.stderr or "").strip()[-1200:],
+    }
+
+
+def _latest_snapshot_for_symbol(*, execution_root: Path, day_utc: str, instrument: str) -> tuple[Path | None, Path | None, dict[str, Any], dict[str, Any]]:
+    root = execution_root / "options_chain_snapshot_v1" / day_utc
+    candidates: list[tuple[Path, Path, dict[str, Any], dict[str, Any]]] = []
+    if root.exists() and root.is_dir():
+        for path in root.rglob("options_chain_snapshot.v1.json"):
+            payload = _read_json(path)
+            underlying = payload.get("underlying") if isinstance(payload.get("underlying"), dict) else {}
+            observed = str(underlying.get("symbol") or payload.get("symbol") or "").strip().upper()
+            if observed != instrument.upper():
+                continue
+            cert_path = path.parent / "freshness_certificate.v1.json"
+            candidates.append((path.resolve(), cert_path.resolve(), payload, _read_json(cert_path)))
+    if not candidates:
+        return None, None, {}, {}
+    candidates.sort(key=lambda row: str(row[0]))
+    return candidates[-1]
+
+
+def _contract_has_quote(contract: dict[str, Any]) -> bool:
+    for key in ("bid", "ask", "last", "mark", "mid", "close", "delayed_bid", "delayed_ask", "delayed_last", "delayed_close"):
+        if contract.get(key) not in (None, ""):
+            return True
+    quote = contract.get("quote")
+    if isinstance(quote, dict):
+        return any(quote.get(key) not in (None, "") for key in ("bid", "ask", "last", "mark", "mid"))
+    return False
+
+
+def _validate_snapshot(*, ctx: bod.BodContext, instrument: str, eval_time_utc: str) -> tuple[str, dict[str, Any]]:
+    snapshot_path, cert_path, snapshot, cert = _latest_snapshot_for_symbol(execution_root=ctx.execution_root, day_utc=ctx.day_utc, instrument=instrument)
+    artifact = {
+        "instrument": instrument,
+        "snapshot_path": str(snapshot_path or ""),
+        "freshness_certificate_path": str(cert_path or ""),
+        "snapshot_valid": False,
+        "freshness_valid": False,
+        "blocker": "",
+    }
+    if snapshot_path is None:
+        artifact["blocker"] = "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+        return "OPTIONS_SNAPSHOT_CAPTURE_FAILED", artifact
+    if not str(snapshot_path).startswith(str((ctx.execution_root / "options_chain_snapshot_v1" / ctx.day_utc).resolve())):
+        artifact["blocker"] = "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+        return "OPTIONS_SNAPSHOT_CAPTURE_FAILED", artifact
+    try:
+        validate_against_repo_schema_v1(snapshot, REPO_ROOT, OPTIONS_CHAIN_SCHEMA)
+    except Exception:
+        artifact["blocker"] = "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+        return "OPTIONS_SNAPSHOT_CAPTURE_FAILED", artifact
+    underlying = snapshot.get("underlying") if isinstance(snapshot.get("underlying"), dict) else {}
+    if str(underlying.get("symbol") or snapshot.get("symbol") or "").strip().upper() != instrument.upper():
+        artifact["blocker"] = "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+        return "OPTIONS_SNAPSHOT_CAPTURE_FAILED", artifact
+    spot = underlying.get("spot_price") or underlying.get("spot") or snapshot.get("spot_price")
+    if spot in (None, ""):
+        artifact["blocker"] = "OPTIONS_UNDERLYING_SPOT_MISSING"
+        return "OPTIONS_UNDERLYING_SPOT_MISSING", artifact
+    contracts = snapshot.get("contracts")
+    if not isinstance(contracts, list) or not contracts:
+        artifact["blocker"] = "OPTIONS_CONTRACT_QUALIFICATION_FAILED"
+        return "OPTIONS_CONTRACT_QUALIFICATION_FAILED", artifact
+    if not any(isinstance(row, dict) and _contract_has_quote(row) for row in contracts):
+        artifact["blocker"] = "OPTIONS_QUOTES_MISSING"
+        return "OPTIONS_QUOTES_MISSING", artifact
+    if cert_path is None or not cert_path.exists() or not cert:
+        artifact["blocker"] = "OPTIONS_SNAPSHOT_STALE"
+        return "OPTIONS_SNAPSHOT_STALE", artifact
+    valid_until = _parse_iso(cert.get("valid_until_utc"))
+    eval_time = _parse_iso(eval_time_utc)
+    if valid_until is None or eval_time is None or valid_until < eval_time:
+        artifact["blocker"] = "OPTIONS_SNAPSHOT_STALE"
+        return "OPTIONS_SNAPSHOT_STALE", artifact
+    artifact["snapshot_valid"] = True
+    artifact["freshness_valid"] = True
+    return "", artifact
+
+
+def _run_market_data_authority(ctx: bod.BodContext) -> tuple[dict[str, Any], str]:
+    cmd = [
+        sys.executable,
+        "ops/tools/run_market_data_authority_v1.py",
+        "--day_utc",
+        ctx.day_utc,
+        "--truth_root",
+        str(ctx.truth_root),
+        "--execution_root",
+        str(ctx.execution_root),
+    ]
+    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True, check=False, timeout=60)
+    try:
+        summary = json.loads(str(proc.stdout or "").splitlines()[-1])
+    except Exception:
+        summary = {}
+    return {
+        "command": " ".join(cmd),
+        "exit_code": int(proc.returncode),
+        "summary": summary if isinstance(summary, dict) else {},
+        "stdout_summary": str(proc.stdout or "").strip()[-1200:],
+        "stderr_summary": str(proc.stderr or "").strip()[-1200:],
+    }, "" if proc.returncode == 0 else "MARKET_DATA_AUTHORITY_BLOCKED"
+
+
+def _operator_action(blocker: str, instrument: str, day_utc: str) -> str:
+    if blocker == "OPTIONS_MARKET_DATA_PERMISSION_DENIED":
+        return "Enable IBKR API market-data permissions/subscriptions for the required SPY underlying and options feeds for the logged-in trading user/account."
+    if blocker == "MARKET_DATA_REQUIREMENT_UNOWNED":
+        return "Fix Requirement Graph ownership so the MARKET_DATA requirement points to an ACTIVE_INTENT or STATIC_POLICY."
+    if blocker == "IB_MARKET_DATA_CAPABILITY_UNKNOWN":
+        return f"Run python3 ops/tools/run_options_chain_snapshot_required_day_v1.py --day_utc {day_utc} to probe IBKR market-data capability for {instrument}."
+    if blocker:
+        return f"Resolve {blocker} for {instrument}, then rerun python3 ops/tools/run_market_data_supply_v1.py --day_utc {day_utc} --environment PAPER."
+    return ""
+
+
+def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
+    eval_time_utc = _now_iso()
+    req_path = requirement_graph_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    requirement_graph = _read_json(req_path)
+    requirements, unowned = _requirement_rows(requirement_graph if str(requirement_graph.get("day_utc") or "") == ctx.day_utc else {})
+    provider_checks: list[dict[str, Any]] = []
+    capture_attempts: list[dict[str, Any]] = []
+    artifacts: list[dict[str, Any]] = []
+    authority_result: dict[str, Any] = {}
+    blocker = ""
+    if unowned is not None:
+        requirements.append(
+            {
+                "requirement_id": str(unowned.get("requirement_id") or "UNOWNED_MARKET_DATA_REQUIREMENT"),
+                "source_type": str(unowned.get("source_type") or "").strip().upper() or "UNKNOWN",
+                "source_id": str(unowned.get("source_id") or "").strip(),
+                "instrument": str(unowned.get("instrument") or "").strip().upper(),
+                "data_type": str(unowned.get("required_artifact") or "").strip(),
+                "required": True,
+            }
+        )
+        blocker = "MARKET_DATA_REQUIREMENT_UNOWNED"
+    if not requirements and not blocker:
+        return {
+            "schema_id": "market_data_supply",
+            "schema_version": SCHEMA_VERSION,
+            "day_utc": ctx.day_utc,
+            "environment": ctx.environment,
+            "generated_at_utc": eval_time_utc,
+            "status": "SKIPPED",
+            "canonical_blocker": "",
+            "requirements": [],
+            "provider_checks": [],
+            "capture_attempts": [],
+            "artifacts": [],
+            "authority_result": {},
+            "operator_next_action": "",
+        }
+    instruments = sorted({str(row.get("instrument") or "").strip().upper() for row in requirements if row.get("instrument")})
+    provider_blocker = ""
+    provider_action = ""
+    for instrument in instruments:
+        checks, check_blocker, check_action = _provider_checks_for_instrument(ctx=ctx, instrument=instrument)
+        provider_checks.extend(checks)
+        if check_blocker and not provider_blocker:
+            provider_blocker = check_blocker
+            provider_action = check_action
+    if blocker:
+        pass
+    elif provider_blocker:
+        blocker = provider_blocker
+    else:
+        for instrument in instruments:
+            unknown = any(
+                row.get("instrument") == instrument
+                and row.get("capability") == "IB_MARKET_DATA_API_ACCESS"
+                and row.get("status") == "UNKNOWN"
+                for row in provider_checks
+            )
+            if unknown:
+                capture = _run_capture(ctx, instrument)
+                capture_attempts.append(capture)
+                checks, check_blocker, check_action = _provider_checks_for_instrument(ctx=ctx, instrument=instrument)
+                provider_checks = [row for row in provider_checks if not (row.get("instrument") == instrument and row.get("provider") == "IBKR")]
+                provider_checks.extend(checks)
+                if check_blocker:
+                    blocker = check_blocker
+                    provider_action = check_action
+                    break
+                if capture["status"] != "PASS":
+                    blocker = str(capture.get("blocker") or "OPTIONS_SNAPSHOT_CAPTURE_FAILED")
+                    break
+        if not blocker:
+            for instrument in instruments:
+                validation_blocker, artifact = _validate_snapshot(ctx=ctx, instrument=instrument, eval_time_utc=eval_time_utc)
+                artifacts.append(artifact)
+                if validation_blocker:
+                    blocker = validation_blocker
+                    break
+        if not blocker:
+            authority_result, authority_blocker = _run_market_data_authority(ctx)
+            if authority_blocker:
+                blocker = authority_blocker
+    status = "PASS" if not blocker else "BLOCKED"
+    root_instrument = instruments[0] if instruments else ""
+    action = provider_action or _operator_action(blocker, root_instrument, ctx.day_utc)
+    return {
+        "schema_id": "market_data_supply",
+        "schema_version": SCHEMA_VERSION,
+        "day_utc": ctx.day_utc,
+        "environment": ctx.environment,
+        "generated_at_utc": eval_time_utc,
+        "status": status,
+        "canonical_blocker": blocker,
+        "requirements": requirements,
+        "provider_checks": provider_checks,
+        "capture_attempts": capture_attempts,
+        "artifacts": artifacts,
+        "authority_result": authority_result,
+        "operator_next_action": action,
+    }
+
+
+def run_market_data_supply_v1(day_utc: str, environment: str, truth_root: str = "") -> tuple[Path, dict[str, Any]]:
+    ctx = bod._resolve_context(day_utc, environment, truth_root)
+    payload = build_market_data_supply(ctx)
+    path = market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    previous = _read_json(path)
+    if previous and str(previous.get("day_utc") or "") != ctx.day_utc:
+        raise SystemExit(f"FAIL: WRONG_DAY_MARKET_DATA_SUPPLY_COLLISION: {path}")
+    _write_json(path, payload)
+    return path, payload
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="run_market_data_supply_v1")
+    parser.add_argument("--day_utc", required=True)
+    parser.add_argument("--environment", default="PAPER", choices=["PAPER"])
+    parser.add_argument("--truth_root", default="")
+    args = parser.parse_args(argv)
+    day_utc = parse_day_utc_v1(args.day_utc)
+    environment = str(args.environment or "PAPER").strip().upper()
+    path, payload = run_market_data_supply_v1(day_utc, environment, str(args.truth_root or ""))
+    print(
+        json.dumps(
+            {
+                "status": payload["status"],
+                "canonical_blocker": payload["canonical_blocker"],
+                "market_data_supply_path": str(path),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0 if payload.get("status") in {"PASS", "SKIPPED"} else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

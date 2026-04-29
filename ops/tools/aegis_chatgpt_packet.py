@@ -188,6 +188,18 @@ class RequirementGraphStatus:
 
 
 @dataclass(frozen=True)
+class MarketDataSupplyStatus:
+    exists: bool
+    path: str
+    day_utc: str
+    status: str
+    canonical_blocker: str
+    requirement: dict[str, Any]
+    provider_check: dict[str, Any]
+    operator_next_action: str
+
+
+@dataclass(frozen=True)
 class CapabilityRow:
     capability: str
     status: str
@@ -378,6 +390,45 @@ def _requirement_graph_path(roots: RootResolution, day_utc: str) -> Path | None:
         / day_utc
         / "requirement_graph.v1.json"
     ).resolve()
+
+
+def _market_data_supply_path(roots: RootResolution, day_utc: str) -> Path | None:
+    if roots.canonical_truth_root is None or not DATE_RE.match(str(day_utc or "")):
+        return None
+    return (
+        roots.canonical_truth_root
+        / "reports"
+        / "market_data_supply_v1"
+        / day_utc
+        / "market_data_supply.v1.json"
+    ).resolve()
+
+
+def _load_market_data_supply_status(roots: RootResolution, day_utc: str) -> MarketDataSupplyStatus:
+    path = _market_data_supply_path(roots, day_utc)
+    payload = _read_json(path)
+    if not isinstance(payload, dict):
+        return MarketDataSupplyStatus(False, str(path) if path else "NOT_FOUND", day_utc, "MISSING", "MARKET_DATA_SUPPLY_MISSING", {}, {}, "")
+    if str(payload.get("day_utc") or "").strip() != day_utc:
+        return MarketDataSupplyStatus(True, str(path), day_utc, "WRONG_DAY", "WRONG_DAY_MARKET_DATA_SUPPLY", {}, {}, f"Regenerate market data supply for {day_utc}.")
+    requirements = payload.get("requirements")
+    providers = payload.get("provider_checks")
+    first_requirement = next((row for row in requirements if isinstance(row, dict)), {}) if isinstance(requirements, list) else {}
+    first_provider = {}
+    if isinstance(providers, list):
+        first_provider = next((row for row in providers if isinstance(row, dict) and row.get("blocker")), {})
+        if not first_provider:
+            first_provider = next((row for row in providers if isinstance(row, dict)), {})
+    return MarketDataSupplyStatus(
+        True,
+        str(path),
+        str(payload.get("day_utc") or day_utc),
+        str(payload.get("status") or "").strip().upper(),
+        str(payload.get("canonical_blocker") or "").strip(),
+        first_requirement if isinstance(first_requirement, dict) else {},
+        first_provider if isinstance(first_provider, dict) else {},
+        str(payload.get("operator_next_action") or "").strip(),
+    )
 
 
 def _load_requirement_graph_status(roots: RootResolution, day_utc: str) -> RequirementGraphStatus:
@@ -1880,6 +1931,7 @@ def _build_paper_status(
     latest_trading_day = _build_latest_trading_day_evidence_status(roots)
     day_run = _load_day_run_ledger_status(roots, current_day.day_utc)
     requirement_graph = _load_requirement_graph_status(roots, current_day.day_utc)
+    market_data_supply = _load_market_data_supply_status(roots, current_day.day_utc)
 
     freshness_day = (
         current_day.day_utc
@@ -2058,6 +2110,21 @@ def _build_paper_status(
         f"- expected_path: {requirement_graph.root_requirement.get('expected_path', '')}",
         f"- operator_next_action: {requirement_graph.root_requirement.get('operator_next_action', '')}",
         "",
+        "## Market Data Supply",
+        "",
+        f"- market_data_supply_path: {market_data_supply.path}",
+        f"- market_data_supply_exists: {'true' if market_data_supply.exists else 'false'}",
+        f"- market_data_supply_status: {market_data_supply.status}",
+        f"- market_data_supply_canonical_blocker: {market_data_supply.canonical_blocker}",
+        f"- requirement_id: {market_data_supply.requirement.get('requirement_id', '')}",
+        f"- source_id: {market_data_supply.requirement.get('source_id', '')}",
+        f"- instrument: {market_data_supply.requirement.get('instrument', '')}",
+        f"- provider: {market_data_supply.provider_check.get('provider', '')}",
+        f"- provider_status: {market_data_supply.provider_check.get('status', '')}",
+        f"- provider_capability: {market_data_supply.provider_check.get('capability', '')}",
+        f"- IB evidence: {json.dumps(market_data_supply.provider_check.get('evidence', []), sort_keys=True)}",
+        f"- operator_next_action: {market_data_supply.operator_next_action}",
+        "",
         "## Aegis Paper-Trading Status",
         "",
         f"- status: {final_decision.status}",
@@ -2065,6 +2132,16 @@ def _build_paper_status(
         f"- latest_trading_day_blocker: {latest_trading_day.canonical_blocker}",
         f"- owning_subsystem: {final_decision.owning_subsystem}",
         f"- owning_gate: {final_decision.owning_gate}",
+        f"- market_data_supply_path: {market_data_supply.path}",
+        f"- market_data_supply_status: {market_data_supply.status}",
+        f"- market_data_supply_canonical_blocker: {market_data_supply.canonical_blocker}",
+        f"- market_data_supply_requirement_id: {market_data_supply.requirement.get('requirement_id', '')}",
+        f"- market_data_supply_source_id: {market_data_supply.requirement.get('source_id', '')}",
+        f"- market_data_supply_instrument: {market_data_supply.requirement.get('instrument', '')}",
+        f"- market_data_supply_provider: {market_data_supply.provider_check.get('provider', '')}",
+        f"- market_data_supply_provider_status: {market_data_supply.provider_check.get('status', '')}",
+        f"- market_data_supply_IB_evidence: {json.dumps(market_data_supply.provider_check.get('evidence', []), sort_keys=True)}",
+        f"- market_data_supply_operator_next_action: {market_data_supply.operator_next_action}",
         f"- requirement_graph_path: {requirement_graph.path}",
         f"- requirement_owner_phase: {requirement_graph.root_requirement.get('owner_phase', '')}",
         f"- requirement_id: {requirement_graph.root_requirement.get('requirement_id', '')}",

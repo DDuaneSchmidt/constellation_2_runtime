@@ -114,21 +114,20 @@ def test_market_data_specific_capture_blocker_wins_over_generic_authority(monkey
         return (
             [
                 {
-                    "step_name": "options_chain_snapshot",
+                    "step_name": "market_data_supply",
                     "status": "BLOCKED",
                     "blocker": "OPTIONS_MARKET_DATA_PERMISSION_DENIED",
-                    "stdout_summary": '{"results":[{"reason_code":"OPTIONS_MARKET_DATA_PERMISSION_DENIED"}]}',
                     "duration_ms": 1,
                 }
             ],
-            [],
+            [str(day_run._market_data_supply_path(ctx))],
             ["OPTIONS_MARKET_DATA_PERMISSION_DENIED"],
         )
 
-    market_path = ctx.truth_root / "reports" / "market_data_authority_v1" / ctx.day_utc / "market_data_authority.v1.json"
-    market_path.parent.mkdir(parents=True)
-    market_path.write_text(
-        '{"market_data_state":"MISSING_REQUIRED_DATA","first_blocker":"OPTIONS_CHAIN_SNAPSHOT_MISSING"}\n',
+    supply_path = day_run._market_data_supply_path(ctx)
+    supply_path.parent.mkdir(parents=True)
+    supply_path.write_text(
+        '{"status":"BLOCKED","canonical_blocker":"OPTIONS_MARKET_DATA_PERMISSION_DENIED","requirements":[{"requirement_id":"REQ1","instrument":"SPY"}],"provider_checks":[{"provider":"IBKR","capability":"OPTIONS_BID_ASK_QUOTES","status":"UNAVAILABLE","blocker":"OPTIONS_MARKET_DATA_PERMISSION_DENIED"}]}\n',
         encoding="utf-8",
     )
     monkeypatch.setattr(day_run, "_run_steps", _fake_run_steps)
@@ -143,16 +142,12 @@ def test_market_data_successful_snapshot_phase_passes(monkeypatch: pytest.Monkey
     ctx = _ctx(tmp_path)
 
     def _fake_run_steps(*_args, **_kwargs):  # noqa: ANN002, ANN003
-        return ([{"step_name": "options_chain_snapshot", "status": "PASS", "duration_ms": 1}], ["snapshot"], [])
+        return ([{"step_name": "market_data_supply", "status": "PASS", "duration_ms": 1}], [str(day_run._market_data_supply_path(ctx))], [])
 
-    market_path = ctx.truth_root / "reports" / "market_data_authority_v1" / ctx.day_utc / "market_data_authority.v1.json"
-    market_path.parent.mkdir(parents=True)
-    market_path.write_text('{"market_data_state":"READY","first_blocker":""}\n', encoding="utf-8")
-    graph_path = day_run._requirement_graph_path(ctx)
-    graph_path.parent.mkdir(parents=True)
-    graph_path.write_text('{"day_utc":"2026-04-29","root_requirement":{}}\n', encoding="utf-8")
+    supply_path = day_run._market_data_supply_path(ctx)
+    supply_path.parent.mkdir(parents=True)
+    supply_path.write_text('{"status":"PASS","canonical_blocker":"","requirements":[],"provider_checks":[]}\n', encoding="utf-8")
     monkeypatch.setattr(day_run, "_run_steps", _fake_run_steps)
-    monkeypatch.setattr(day_run.bod, "_run_child_with_retries", lambda *args, **kwargs: {"status": "PASS", "duration_ms": 1})
 
     row = day_run._phase_market_data(ctx, {})
 
