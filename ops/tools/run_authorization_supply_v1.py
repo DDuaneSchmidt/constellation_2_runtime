@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -364,6 +365,19 @@ def _defined_risk_proven(payload: dict[str, Any]) -> tuple[bool, dict[str, Any]]
 
 def _phasec_defined_risk(ctx: bod.BodContext, active_intents: list[dict[str, Any]]) -> tuple[dict[str, Any], str]:
     if not _identity_paths(ctx):
+        if str(os.environ.get("AEGIS_SKIP_PHASEC_MATERIALIZATION") or "").strip().upper() in {"1", "YES", "TRUE"}:
+            return (
+                {
+                    "status": "BLOCKED",
+                    "execution_identity_record_path": "",
+                    "defined_risk_proven": False,
+                    "risk_proof": {},
+                    "blocker": "PHASEC_EXECUTION_IDENTITY_MISSING",
+                    "producer_command": "python3 ops/tools/run_phasec_identity_materializer_day_v1.py",
+                    "materialization_skipped_by_policy": True,
+                },
+                "PHASEC_EXECUTION_IDENTITY_MISSING",
+            )
         _run_phasec_identity_materializer(ctx)
     identities: list[dict[str, Any]] = []
     for intent in active_intents:

@@ -295,6 +295,30 @@ def test_missing_execution_identity_blocks(monkeypatch: pytest.MonkeyPatch, tmp_
     assert payload["canonical_blocker"] == "PHASEC_EXECUTION_IDENTITY_MISSING"
 
 
+def test_skip_phasec_materialization_policy_does_not_run_materializer(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _intent(ctx)
+    _market_supply(ctx)
+    _risk_budget(ctx)
+    _strategy(ctx)
+    called = False
+
+    def _phasec(_ctx):  # noqa: ANN001
+        nonlocal called
+        called = True
+        return {"exit_code": 0}
+
+    monkeypatch.setenv("AEGIS_SKIP_PHASEC_MATERIALIZATION", "YES")
+    monkeypatch.setattr(auth, "_run_command", lambda *_args, **_kwargs: {"exit_code": 0})
+    monkeypatch.setattr(auth, "_run_phasec_identity_materializer", _phasec)
+
+    payload = auth.build_authorization_supply_v1(ctx)
+
+    assert payload["canonical_blocker"] == "PHASEC_EXECUTION_IDENTITY_MISSING"
+    assert payload["phasec_defined_risk"]["materialization_skipped_by_policy"] is True
+    assert called is False
+
+
 def test_defined_risk_false_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _no_external(monkeypatch)
     ctx = _ctx(tmp_path)
