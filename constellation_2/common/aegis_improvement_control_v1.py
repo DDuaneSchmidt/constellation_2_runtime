@@ -13,6 +13,7 @@ from constellation_2.phaseD.lib.canon_json_v1 import canonical_sha256_hex_v1
 
 MODULE_VERSION = "constellation_2.common.aegis_improvement_control_v1"
 REPORT_SCHEMA_ID = "C2_AEGIS_IMPROVEMENT_CONTROL_REPORT_V1"
+REVIEW_SCHEMA_ID = "C2_AEGIS_IMPROVEMENT_CONTROL_REVIEW_V1"
 
 EVIDENCE_TYPES = frozenset(
     {
@@ -242,6 +243,78 @@ def policy_state_is_runtime_eligible_v1(policy: Mapping[str, Any]) -> bool:
         return _known_policy_status(policy) == "active"
     except ValueError:
         return False
+
+
+def _projection(row: Mapping[str, Any], fields: Iterable[str]) -> dict[str, Any]:
+    return {field: _plain_jsonish(row.get(field)) for field in fields}
+
+
+def _proposal_decisions_by_id(approvals: Iterable[Mapping[str, Any]]) -> dict[str, str]:
+    decisions: dict[str, str] = {}
+    for approval in approvals:
+        proposal_id = str(approval.get("proposal_id") or "").strip()
+        decision = str(approval.get("decision") or "").strip()
+        if proposal_id and decision in APPROVAL_DECISIONS:
+            decisions[proposal_id] = decision
+    return decisions
+
+
+def _proposal_queue_group(proposal: Mapping[str, Any], decisions_by_id: Mapping[str, str]) -> str:
+    proposal_id = str(proposal.get("proposal_id") or "").strip()
+    decision = str(decisions_by_id.get(proposal_id) or "").strip()
+    if decision == "approve":
+        return "approved"
+    if decision == "reject":
+        return "rejected"
+    if decision == "test_first":
+        return "test_first"
+    status = str(proposal.get("status") or "proposed").strip()
+    if status in {"approved", "rejected", "test_first"}:
+        return status
+    return "proposed"
+
+
+def _measurements_due_for_review(policies: Iterable[Mapping[str, Any]], measurements: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    measured_policy_ids = {str(row.get("policy_id") or "") for row in measurements}
+    due: list[dict[str, Any]] = []
+    for policy in policies:
+        policy_id = str(policy.get("policy_id") or "").strip()
+        if not policy_id or policy_id in measured_policy_ids:
+            continue
+        status = str(policy.get("status") or "").strip()
+        if status == "active":
+            reason = "active_policy_has_no_measurement_record"
+        elif status == "inactive":
+            reason = "inactive_policy_waiting_for_measurement_plan"
+        else:
+            continue
+        due.append(
+            {
+                "policy_id": policy_id,
+                "policy_status": status,
+                "source_proposal_id": str(policy.get("source_proposal_id") or ""),
+                "reason": reason,
+            }
+        )
+    return due
+
+
+def _rollback_candidates_from_measurements(measurements: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for measurement in measurements:
+        rollback_met = measurement.get("rollback_criteria_met") is True
+        degraded = measurement.get("conclusion") == "degraded"
+        if rollback_met or degraded:
+            candidates.append(
+                {
+                    "policy_id": str(measurement.get("policy_id") or ""),
+                    "measurement_id": str(measurement.get("measurement_id") or ""),
+                    "conclusion": str(measurement.get("conclusion") or ""),
+                    "rollback_criteria_met": bool(measurement.get("rollback_criteria_met")),
+                    "reason": "rollback_criteria_met" if rollback_met else "degraded_measurement",
+                }
+            )
+    return candidates
 
 
 def make_evidence_record_v1(
