@@ -258,6 +258,17 @@ def test_all_pass_status_pass(tmp_path: Path) -> None:
     truth, execution = _seed_all_pass(tmp_path)
     payload = _run(truth, execution)
     assert payload["status"] == "PASS"
+    assert payload["overall_status"] == payload["status"]
+    assert payload["canonical_blocker"] == ""
+    assert payload["first_failed_group"] == ""
+    assert payload["first_failed_check"] == ""
+    assert payload["grouped_check_summary"]["MARKET_DATA"]["status"] == "PASS"
+    assert payload["grouped_check_summary"]["IB_PREVIEW"]["status"] == "PASS"
+    assert payload["trade_summary"]["symbol"] == "SPY"
+    assert payload["trade_summary"]["short_leg"]["action"] == "SELL"
+    assert payload["trade_summary"]["long_leg"]["action"] == "BUY"
+    assert payload["trade_summary"]["account"] == "DUO847203"
+    assert payload["plain_english_next_action"].startswith("All pre-submit checklist checks passed")
     assert all(row["status"] == "PASS" for row in payload["checks"])
 
 
@@ -266,7 +277,33 @@ def test_missing_preview_blocks(tmp_path: Path) -> None:
     (execution / "execution_evidence_v1" / "submissions" / DAY / SUBMISSION / "ib_combo_preview.v1.json").unlink()
     payload = _run(truth, execution)
     assert payload["status"] == "BLOCKED"
+    assert payload["overall_status"] == payload["status"]
     assert payload["canonical_blocker"] == "IB_PREVIEW_MISSING"
+    assert payload["first_failed_group"] == "IB_PREVIEW"
+    assert payload["first_failed_check"] == "19_IB_PREVIEW_PASS"
+    assert payload["grouped_check_summary"]["IB_PREVIEW"]["status"] == "NOT_CHECKED"
+    assert payload["trade_summary"]["preview_status"] == ""
+    assert payload["plain_english_next_action"] == "Run IB what-if preview for the exact payload and do not submit until preview passes."
+
+
+def test_operator_summary_does_not_change_readiness_decision(tmp_path: Path) -> None:
+    truth, execution = _seed_all_pass(tmp_path)
+
+    passing = _run(truth, execution)
+    assert passing["status"] == "PASS"
+    assert passing["overall_status"] == "PASS"
+
+    preview_path = execution / "execution_evidence_v1" / "submissions" / DAY / SUBMISSION / "ib_combo_preview.v1.json"
+    preview = json.loads(preview_path.read_text(encoding="utf-8"))
+    preview["status"] = "BLOCKED"
+    preview["whatif_ok"] = False
+    _write_json(preview_path, preview)
+
+    blocked = _run(truth, execution)
+    assert blocked["status"] == "BLOCKED"
+    assert blocked["overall_status"] == "BLOCKED"
+    assert blocked["canonical_blocker"] == "IB_PREVIEW_NOT_PASS"
+    assert blocked["grouped_check_summary"]["IB_PREVIEW"]["canonical_blocker"] == "IB_PREVIEW_NOT_PASS"
 
 
 def test_error_201_preview_blocks(tmp_path: Path) -> None:

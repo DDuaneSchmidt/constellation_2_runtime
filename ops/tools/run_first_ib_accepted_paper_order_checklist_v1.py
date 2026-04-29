@@ -311,6 +311,122 @@ def _freshness_window_ok(cert: dict[str, Any], now_utc: str) -> tuple[bool, dict
     return ok, {"valid_from_utc": valid_from, "valid_until_utc": valid_until, "validation_time_utc": now_utc}
 
 
+CHECK_GROUPS = {
+    "MARKET_DATA": {"01_MARKET_DATA_SNAPSHOT_FRESH", "02_UNDERLYING_SPOT_PRESENT", "03_OPTION_BID_ASK_PRESENT"},
+    "SNAPSHOT_LINEAGE": {"04_MARKET_OPEN_GATE_SNAPSHOT_MATCH", "05_STRUCTURE_SNAPSHOT_MATCH", "06_PHASEC_SNAPSHOT_MATCH", "07_ORDER_PLAN_SNAPSHOT_MATCH"},
+    "STRUCTURE": {"08_SELECTED_LEGS_EXIST_IN_SNAPSHOT", "09_STRUCTURE_NOT_NEAR_ITM", "10_WIDTH_VALID", "11_LIQUIDITY_PRESENT"},
+    "PRICING": {"12_LIMIT_CREDIT_IN_RANGE", "13_LIMIT_CREDIT_NOT_STALE", "14_IB_PRICE_REALISTIC"},
+    "IB_PAYLOAD": {"15_BAG_PARENT_ACTION", "16_BAG_LEG_ACTIONS", "17_BAG_LEG_RATIOS", "18_SMART_ROUTING_NONGUARANTEED"},
+    "IB_PREVIEW": {"19_IB_PREVIEW_PASS", "20_NO_IB_ERROR_201", "21_NO_RISKLESS_CLASSIFICATION"},
+    "GOVERNANCE": {"22_SECOND_ATTEMPT_CLEARANCE", "23_NEW_PLAN_HASH", "24_NEW_STRUCTURE_PRICING_SIGNATURE", "25_PAPER_ONLY_ACCOUNT"},
+    "SUBMIT_AUTHORITY": {"26_SUBMIT_BOUNDARY_AUTHORIZED"},
+}
+
+
+def _check_group(check_id: str) -> str:
+    for group, check_ids in CHECK_GROUPS.items():
+        if check_id in check_ids:
+            return group
+    return "UNKNOWN"
+
+
+def _grouped_check_summary(checks: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    by_id = {str(row.get("check_id") or ""): row for row in checks}
+    summary: dict[str, dict[str, Any]] = {}
+    for group, check_ids in CHECK_GROUPS.items():
+        rows = [by_id[check_id] for check_id in sorted(check_ids) if check_id in by_id]
+        failed = [row for row in rows if row.get("status") == FAIL]
+        not_checked = [row for row in rows if row.get("status") == NOT_CHECKED]
+        first_bad = next((row for row in rows if row.get("status") != PASS), {})
+        if failed:
+            status = "BLOCKED"
+        elif not_checked:
+            status = NOT_CHECKED
+        else:
+            status = PASS
+        summary[group] = {
+            "status": status,
+            "pass_count": sum(1 for row in rows if row.get("status") == PASS),
+            "fail_count": len(failed),
+            "not_checked_count": len(not_checked),
+            "first_failed_check": str(first_bad.get("check_id") or ""),
+            "canonical_blocker": str(first_bad.get("blocker") or ""),
+        }
+    return summary
+
+
+def _leg_summary(leg: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "action": str(leg.get("action") or ""),
+        "right": str(leg.get("right") or ""),
+        "strike": str(leg.get("strike") or ""),
+        "expiry": str(leg.get("expiry_utc") or ""),
+        "ratio": leg.get("ratio"),
+        "contract_key": str(leg.get("contract_key") or ""),
+        "ib_conId": leg.get("ib_conId") or leg.get("conId"),
+    }
+
+
+def _trade_summary(
+    *,
+    order_plan: dict[str, Any],
+    structure: dict[str, Any],
+    selected_legs: list[dict[str, Any]],
+    environment: str,
+    ib_account: str,
+    preview_status: str,
+) -> dict[str, Any]:
+    if not order_plan and not structure and not selected_legs:
+        return {}
+    underlying = order_plan.get("underlying") if isinstance(order_plan.get("underlying"), dict) else {}
+    decision = _first_structure_decision(structure)
+    option_structure = decision.get("option_structure") if isinstance(decision.get("option_structure"), dict) else {}
+    pricing = _pricing_inputs(structure)
+    terms = order_plan.get("order_terms") if isinstance(order_plan.get("order_terms"), dict) else {}
+    proof = order_plan.get("risk_proof") if isinstance(order_plan.get("risk_proof"), dict) else {}
+    short_leg = next((leg for leg in selected_legs if str(leg.get("action") or "").upper() == "SELL"), {})
+    long_leg = next((leg for leg in selected_legs if str(leg.get("action") or "").upper() == "BUY"), {})
+    expiry = str(short_leg.get("expiry_utc") or long_leg.get("expiry_utc") or "")
+    return {
+        "symbol": str(underlying.get("symbol") or decision.get("symbol") or ""),
+        "expiry": expiry,
+        "structure": str(order_plan.get("structure") or option_structure.get("selected_structure") or decision.get("selected_structure") or ""),
+        "short_leg": _leg_summary(short_leg) if short_leg else {},
+        "long_leg": _leg_summary(long_leg) if long_leg else {},
+        "width": str(proof.get("width_points") or option_structure.get("width_points") or ""),
+        "credit": str(terms.get("limit_price") or option_structure.get("net_credit") or ""),
+        "max_loss": str(proof.get("max_loss_usd") or option_structure.get("max_loss_cents") or ""),
+        "account": ib_account,
+        "environment": environment,
+        "data_mode": str(pricing.get("data_mode") or ""),
+        "preview_status": preview_status,
+    }
+
+
+def _plain_english_next_action(first_failed: dict[str, Any] | None) -> str:
+    if first_failed is None:
+        return "All pre-submit checklist checks passed. Operator may proceed only through the governed PAPER submit command."
+    group = _check_group(str(first_failed.get("check_id") or ""))
+    blocker = str(first_failed.get("blocker") or "UNKNOWN_BLOCKER")
+    if group == "MARKET_DATA":
+        return "Regenerate market-open data and rerun the checklist before submit."
+    if group == "SNAPSHOT_LINEAGE":
+        return "Regenerate structure decision, PhaseC, and order plan from the latest accepted market-open snapshot."
+    if group == "STRUCTURE":
+        return "Select a clearly OTM, liquid, governed-width structure from the latest accepted snapshot."
+    if group == "PRICING":
+        return "Regenerate pricing from the latest accepted bid/ask snapshot and keep credit inside the executable range."
+    if group == "IB_PAYLOAD":
+        return "Regenerate the IB BAG payload from the current order plan and verify routing fields."
+    if group == "IB_PREVIEW":
+        return "Run IB what-if preview for the exact payload and do not submit until preview passes."
+    if group == "GOVERNANCE":
+        return "Resolve second-attempt clearance, non-identical retry, or PAPER account governance before submit."
+    if group == "SUBMIT_AUTHORITY":
+        return "Refresh submit boundary and proceed only after it is AUTHORIZED."
+    return f"Resolve {blocker} before broker transmit."
+
+
 def build_first_ib_accepted_paper_order_checklist_v1(
     *,
     truth_root: Path,
@@ -735,13 +851,19 @@ def build_first_ib_accepted_paper_order_checklist_v1(
     ))
 
     first_failed = next((row for row in checks if row["status"] != PASS), None)
+    overall_status = PASS if first_failed is None else "BLOCKED"
+    grouped_summary = _grouped_check_summary(checks)
+    first_failed_check = "" if first_failed is None else str(first_failed.get("check_id") or "")
+    first_failed_group = "" if first_failed is None else _check_group(first_failed_check)
+    plain_next_action = _plain_english_next_action(first_failed)
     return {
         "schema_id": SCHEMA_ID,
         "schema_version": SCHEMA_VERSION,
         "day_utc": day_utc,
         "environment": environment,
         "ib_account": ib_account,
-        "status": PASS if first_failed is None else "BLOCKED",
+        "status": overall_status,
+        "overall_status": overall_status,
         "canonical_blocker": "" if first_failed is None else str(first_failed["blocker"]),
         "canonical_check_id": "" if first_failed is None else str(first_failed["check_id"]),
         "created_at_utc": now_utc,
@@ -753,8 +875,20 @@ def build_first_ib_accepted_paper_order_checklist_v1(
             "order_plan_path": _path_text(candidate.order_plan_path),
             "submission_dir": _path_text(submission_dir),
         },
+        "trade_summary": _trade_summary(
+            order_plan=candidate.order_plan,
+            structure=structure,
+            selected_legs=selected_legs,
+            environment=environment,
+            ib_account=ib_account,
+            preview_status=preview_status,
+        ),
+        "grouped_check_summary": grouped_summary,
+        "first_failed_group": first_failed_group,
+        "first_failed_check": first_failed_check,
+        "plain_english_next_action": plain_next_action,
         "checks": checks,
-        "operator_next_action": "" if first_failed is None else f"Resolve {first_failed['check_id']} before broker transmit.",
+        "operator_next_action": plain_next_action,
     }
 
 
