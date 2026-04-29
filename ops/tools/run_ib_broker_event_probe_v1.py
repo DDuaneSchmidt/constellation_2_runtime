@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 import sys
 import threading
 import time
@@ -16,11 +18,15 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.common.paper_execution_authority_v1 import resolve_governed_paper_execution_profile
+from constellation_2.common.paper_execution_authority_v1 import resolve_governed_paper_execution_roots
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
 from constellation_2.common.runtime_contract_v1 import resolve_runtime_data_root
 from ops.tools.c2_account_resolution_v1 import resolve_single_paper_ib_account_from_sleeve_registry
 
 
+EXECUTION_OBSERVER_CLIENT_ID = 179
+ORDER_SUBMISSION_CLIENT_ID = 7
+FALLBACK_PROBE_CLIENT_ID = 180
 REQUIRED_EVENT_TYPES = {"nextValidId", "currentTime", "managedAccounts", "accountSummary", "accountSummaryEnd", "positionEnd"}
 BLOCKERS = {
     "IB_SOCKET_CONNECT_FAILED",
@@ -34,6 +40,9 @@ BLOCKERS = {
     "IB_PERMISSION_DENIED",
     "IB_MARKET_DATA_UNAVAILABLE",
     "IB_UNKNOWN_HANDSHAKE_FAILURE",
+    "BROKER_EVENT_LOG_MISSING",
+    "BROKER_EVENT_LOG_STALE",
+    "BROKER_EVENT_CONTENT_INVALID",
 }
 
 
@@ -63,13 +72,99 @@ class ProbeConfig:
     expected_account: str
     host: str
     port: int
-    client_id: int
+    observer_client_id: int
+    probe_client_id: int
+    broker_event_log_path: Path
     timeout_seconds: float
+    freshness_seconds: float
     request_open_orders: bool
 
 
 def _event(event_type: str, **fields: Any) -> dict[str, Any]:
     return {"event_type": event_type, "received_utc": _now_iso(), **fields}
+
+
+def _arg_values(row: dict[str, Any]) -> list[str]:
+    args = ((row.get("ib_fields") or {}).get("args") or []) if isinstance(row.get("ib_fields"), dict) else []
+    return [str(item.get("value") or "") for item in args if isinstance(item, dict)]
+
+
+def _extract_prefixed(values: list[str], prefix: str) -> str:
+    for value in values:
+        for token in str(value or "").replace(",", " ").split():
+            if token.startswith(prefix):
+                return token.split("=", 1)[1].strip()
+        if str(value).startswith(prefix):
+            return str(value).split("=", 1)[1].strip()
+    return ""
+
+
+def _legacy_row_to_probe_event(row: dict[str, Any]) -> dict[str, Any]:
+    event_type = str(row.get("event_type") or "").strip()
+    values = _arg_values(row)
+    event = {"event_type": event_type, "received_utc": str(row.get("received_utc") or "")}
+    if event_type == "managedAccounts":
+        raw = _extract_prefixed(values, "accounts=")
+        event["accounts"] = [item.strip() for item in raw.split(",") if item.strip()]
+    elif event_type == "accountSummary":
+        event["account"] = _extract_prefixed(values, "account=")
+        event["tag"] = _extract_prefixed(values, "tag=")
+        event["value"] = _extract_prefixed(values, "value=")
+        event["currency"] = _extract_prefixed(values, "currency=")
+    elif event_type in {"position", "updateAccountValue", "updatePortfolio", "accountDownloadEnd"}:
+        event["account"] = _extract_prefixed(values, "account=")
+    elif event_type == "error":
+        code = _extract_prefixed(values, "errorCode=")
+        if code:
+            try:
+                event["error_code"] = int(code)
+            except ValueError:
+                event["error_code"] = code
+        event["error_string"] = _extract_prefixed(values, "errorString=")
+    return event
+
+
+def _read_broker_event_log(path: Path) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    if not path.exists() or not path.is_file():
+        return events
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(row, dict):
+            events.append(_legacy_row_to_probe_event(row))
+    return events
+
+
+def _observer_processes(config: ProbeConfig) -> list[str]:
+    proc = subprocess.run(["ps", "-eo", "pid,args"], capture_output=True, text=True, check=False)
+    rows: list[str] = []
+    needle = f"--client-id {int(config.observer_client_id)}"
+    for line in str(proc.stdout or "").splitlines():
+        if "ops/ib/c2_execution_observer_v1.py" in line and needle in line:
+            rows.append(" ".join(line.split()))
+    return rows
+
+
+def _active_processes_for_client_id(client_id: int) -> list[str]:
+    proc = subprocess.run(["ps", "-eo", "pid,args"], capture_output=True, text=True, check=False)
+    rows: list[str] = []
+    needles = {f"--client-id {int(client_id)}", f"--client_id {int(client_id)}", f"clientId={int(client_id)}"}
+    for line in str(proc.stdout or "").splitlines():
+        if any(needle in line for needle in needles):
+            rows.append(" ".join(line.split()))
+    return rows
+
+
+def _log_fresh(path: Path, freshness_seconds: float) -> bool:
+    if not path.exists() or not path.is_file():
+        return False
+    age = max(0.0, time.time() - path.stat().st_mtime)
+    return age <= float(freshness_seconds)
 
 
 class _IbProbeClient:  # pragma: no cover - exercised by live verification, pure evaluator is unit-tested
@@ -178,7 +273,7 @@ class _IbProbeClient:  # pragma: no cover - exercised by live verification, pure
         connected = False
         connect_error = ""
         try:
-            self.client.connect(self.config.host, int(self.config.port), int(self.config.client_id))
+            self.client.connect(self.config.host, int(self.config.port), int(self.config.probe_client_id))
             connected = bool(self.client.isConnected())
             self.thread = threading.Thread(target=self.client.run, daemon=True)
             self.thread.start()
@@ -288,7 +383,9 @@ def evaluate_probe_v1(config: ProbeConfig, raw: dict[str, Any]) -> dict[str, Any
         "expected_account": config.expected_account,
         "expected_host": config.host,
         "expected_port": int(config.port),
-        "expected_client_id": int(config.client_id),
+        "execution_observer_client_id": int(config.observer_client_id),
+        "order_submission_client_id": int(ORDER_SUBMISSION_CLIENT_ID),
+        "probe_client_id": int(config.probe_client_id),
         "timeout_seconds": float(config.timeout_seconds),
         "freshness_window": "CURRENT_DAY_ONLY",
         "required_event_types": sorted(REQUIRED_EVENT_TYPES),
@@ -314,15 +411,47 @@ def evaluate_probe_v1(config: ProbeConfig, raw: dict[str, Any]) -> dict[str, Any
             "account_summary_accounts": account_summary_accounts,
             "error_codes": errors,
         },
+        "broker_event_log_path": str(config.broker_event_log_path),
         "events": events,
         "started_at_utc": str(raw.get("started_at_utc") or ""),
         "completed_at_utc": str(raw.get("completed_at_utc") or ""),
     }
 
 
-def _resolve_config(day_utc: str, environment: str, timeout_seconds: float, request_open_orders: bool) -> tuple[ProbeConfig, Path]:
+def evaluate_event_log_v1(config: ProbeConfig, *, observer_processes: list[str]) -> dict[str, Any]:
+    path = config.broker_event_log_path
+    events = _read_broker_event_log(path)
+    raw = {
+        "connected": True,
+        "connect_error": "",
+        "server_version": 0,
+        "events": events,
+        "started_at_utc": _now_iso(),
+        "completed_at_utc": _now_iso(),
+    }
+    payload = evaluate_probe_v1(config, raw)
+    payload["evidence_source"] = "broker_event_log"
+    payload["observer_processes"] = list(observer_processes)
+    if not path.exists() or not path.is_file():
+        payload["status"] = "BLOCKED"
+        payload["canonical_blocker"] = "BROKER_EVENT_LOG_MISSING"
+    elif not _log_fresh(path, config.freshness_seconds):
+        payload["status"] = "BLOCKED"
+        payload["canonical_blocker"] = "BROKER_EVENT_LOG_STALE"
+    elif payload["status"] != "PASS":
+        payload["canonical_blocker"] = "BROKER_EVENT_CONTENT_INVALID"
+    return payload
+
+
+def _resolve_config(day_utc: str, environment: str, timeout_seconds: float, freshness_seconds: float, request_open_orders: bool) -> tuple[ProbeConfig, Path]:
     ib_account = resolve_single_paper_ib_account_from_sleeve_registry(REPO_ROOT)
     profile = resolve_governed_paper_execution_profile(
+        repo_root=REPO_ROOT,
+        environment=environment,
+        ib_account=ib_account,
+        sleeve_id="PRIMARY",
+    )
+    roots = resolve_governed_paper_execution_roots(
         repo_root=REPO_ROOT,
         environment=environment,
         ib_account=ib_account,
@@ -335,8 +464,17 @@ def _resolve_config(day_utc: str, environment: str, timeout_seconds: float, requ
         expected_account=str(profile.ib_account),
         host=str(profile.host),
         port=int(profile.port),
-        client_id=int(profile.client_id_observer),
+        observer_client_id=int(profile.client_id_observer),
+        probe_client_id=int(os.environ.get("C2_IB_PROBE_CLIENT_ID") or FALLBACK_PROBE_CLIENT_ID),
+        broker_event_log_path=(
+            Path(roots.execution_root_path).resolve()
+            / "execution_evidence_v1"
+            / "broker_events"
+            / day_utc
+            / "broker_event_log.v1.jsonl"
+        ),
         timeout_seconds=float(timeout_seconds),
+        freshness_seconds=float(freshness_seconds),
         request_open_orders=bool(request_open_orders),
     )
     return config, truth_root
@@ -347,6 +485,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--day_utc", required=True)
     parser.add_argument("--environment", default="PAPER", choices=["PAPER"])
     parser.add_argument("--timeout_seconds", type=float, default=12.0)
+    parser.add_argument("--freshness_seconds", type=float, default=300.0)
     parser.add_argument("--request_open_orders", default="NO", choices=["YES", "NO"])
     args = parser.parse_args(argv)
 
@@ -356,21 +495,31 @@ def main(argv: list[str] | None = None) -> int:
         day_utc,
         environment,
         float(args.timeout_seconds),
+        float(args.freshness_seconds),
         str(args.request_open_orders).strip().upper() == "YES",
     )
     path = probe_artifact_path_v1(truth_root=truth_root, day_utc=day_utc)
-    try:
-        raw = _IbProbeClient(config).run()
-    except Exception as exc:  # noqa: BLE001
-        raw = {
-            "connected": False,
-            "connect_error": repr(exc),
-            "server_version": 0,
-            "events": [],
-            "started_at_utc": _now_iso(),
-            "completed_at_utc": _now_iso(),
-        }
-    payload = evaluate_probe_v1(config, raw)
+    observer_processes = _observer_processes(config)
+    log_exists = config.broker_event_log_path.exists() and config.broker_event_log_path.is_file()
+    if observer_processes or log_exists:
+        payload = evaluate_event_log_v1(config, observer_processes=observer_processes)
+    else:
+        try:
+            raw = _IbProbeClient(config).run()
+        except Exception as exc:  # noqa: BLE001
+            raw = {
+                "connected": False,
+                "connect_error": repr(exc),
+                "server_version": 0,
+                "events": [],
+                "started_at_utc": _now_iso(),
+                "completed_at_utc": _now_iso(),
+            }
+        payload = evaluate_probe_v1(config, raw)
+        payload["evidence_source"] = "fallback_ib_probe_connection"
+    if payload.get("canonical_blocker") == "IB_CLIENT_ID_IN_USE":
+        payload["conflicting_client_id"] = int(config.probe_client_id)
+        payload["active_processes"] = _active_processes_for_client_id(config.probe_client_id)
     payload["path"] = str(path)
     _write_json(path, payload)
     print(json.dumps({"status": payload["status"], "canonical_blocker": payload["canonical_blocker"], "path": str(path)}, sort_keys=True))

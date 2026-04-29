@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import time
 from pathlib import Path
 
 SOURCE_ROOT = Path("/home/node/constellation")
@@ -16,15 +18,18 @@ import ops.tools.run_ib_broker_event_probe_v1 as probe
 DAY = "2026-04-30"
 
 
-def _config() -> probe.ProbeConfig:
+def _config(log_path: Path | None = None) -> probe.ProbeConfig:
     return probe.ProbeConfig(
         day_utc=DAY,
         environment="PAPER",
         expected_account="DUO847203",
         host="127.0.0.1",
         port=4002,
-        client_id=179,
+        observer_client_id=179,
+        probe_client_id=180,
+        broker_event_log_path=log_path or Path("/tmp/broker_event_log.v1.jsonl"),
         timeout_seconds=12.0,
+        freshness_seconds=300.0,
         request_open_orders=False,
     )
 
@@ -60,6 +65,32 @@ def _valid_events(account: str = "DUO847203") -> list[dict]:
         {"event_type": "accountSummaryEnd", "req_id": 9101},
         {"event_type": "positionEnd"},
     ]
+
+
+def _legacy_event(event_type: str, args: list[str] | None = None) -> dict:
+    return {
+        "schema_id": "BROKER_EVENT_RAW",
+        "schema_version": 1,
+        "event_type": event_type,
+        "received_utc": "2026-04-30T13:00:00Z",
+        "sequence_number": 1,
+        "broker": {"client_id": 179, "environment": "PAPER", "name": "INTERACTIVE_BROKERS"},
+        "ib_fields": {"args": [{"value": value} for value in (args or [])]},
+        "sha256": "test",
+    }
+
+
+def _write_legacy_log(path: Path, account: str = "DUO847203") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        _legacy_event("nextValidId", ["orderId=44"]),
+        _legacy_event("currentTime", ["time=1770000000"]),
+        _legacy_event("managedAccounts", [f"accounts={account}"]),
+        _legacy_event("accountSummary", [f"account={account}", "tag=NetLiquidation", "value=100000", "currency=USD"]),
+        _legacy_event("accountSummaryEnd", ["reqId=9003"]),
+        _legacy_event("positionEnd", ["positionEnd()"]),
+    ]
+    path.write_text("\n".join(json.dumps(row, sort_keys=True) for row in rows) + "\n", encoding="utf-8")
 
 
 def test_socket_connected_without_account_events_blocks_specific_reason() -> None:
@@ -134,3 +165,72 @@ def test_client_id_in_use_is_specific_blocker() -> None:
     )
 
     assert payload["canonical_blocker"] == "IB_CLIENT_ID_IN_USE"
+
+
+def test_observer_running_probe_uses_event_log_without_connecting(monkeypatch, tmp_path: Path) -> None:
+    log_path = tmp_path / "truth_sleeves/PRIMARY/PAPER/execution_evidence_v1/broker_events" / DAY / "broker_event_log.v1.jsonl"
+    truth_root = tmp_path / "truth"
+    _write_legacy_log(log_path)
+    cfg = _config(log_path)
+    calls: list[str] = []
+
+    class FailingProbe:
+        def __init__(self, _config):
+            calls.append("constructed")
+
+        def run(self):
+            raise AssertionError("fallback probe connection must not be used")
+
+    monkeypatch.setattr(probe, "_resolve_config", lambda *_args, **_kwargs: (cfg, truth_root))
+    monkeypatch.setattr(probe, "_observer_processes", lambda _cfg: ["123 python ops/ib/c2_execution_observer_v1.py --client-id 179"])
+    monkeypatch.setattr(probe, "_IbProbeClient", FailingProbe)
+
+    assert probe.main(["--day_utc", DAY, "--environment", "PAPER"]) == 0
+    payload = json.loads(probe.probe_artifact_path_v1(truth_root=truth_root, day_utc=DAY).read_text(encoding="utf-8"))
+
+    assert payload["status"] == "PASS"
+    assert payload["evidence_source"] == "broker_event_log"
+    assert calls == []
+
+
+def test_observer_not_running_probe_connects_with_fallback_client(monkeypatch, tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth"
+    cfg = _config(tmp_path / "missing" / "broker_event_log.v1.jsonl")
+    seen_client_ids: list[int] = []
+
+    class FakeProbe:
+        def __init__(self, config):
+            seen_client_ids.append(config.probe_client_id)
+
+        def run(self):
+            return {"connected": True, "server_version": 178, "events": _valid_events(), "started_at_utc": "", "completed_at_utc": ""}
+
+    monkeypatch.setattr(probe, "_resolve_config", lambda *_args, **_kwargs: (cfg, truth_root))
+    monkeypatch.setattr(probe, "_observer_processes", lambda _cfg: [])
+    monkeypatch.setattr(probe, "_IbProbeClient", FakeProbe)
+
+    assert probe.main(["--day_utc", DAY, "--environment", "PAPER"]) == 0
+    payload = json.loads(probe.probe_artifact_path_v1(truth_root=truth_root, day_utc=DAY).read_text(encoding="utf-8"))
+
+    assert seen_client_ids == [180]
+    assert payload["status"] == "PASS"
+    assert payload["evidence_source"] == "fallback_ib_probe_connection"
+
+
+def test_event_log_exists_but_stale_blocks(tmp_path: Path) -> None:
+    log_path = tmp_path / "broker_event_log.v1.jsonl"
+    _write_legacy_log(log_path)
+    stale = time.time() - 3600
+    os.utime(log_path, (stale, stale))
+
+    payload = probe.evaluate_event_log_v1(_config(log_path), observer_processes=["observer"])
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "BROKER_EVENT_LOG_STALE"
+
+
+def test_event_log_missing_blocks_when_observer_is_authoritative(tmp_path: Path) -> None:
+    payload = probe.evaluate_event_log_v1(_config(tmp_path / "missing.jsonl"), observer_processes=["observer"])
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "BROKER_EVENT_LOG_MISSING"

@@ -287,6 +287,16 @@ class Observer(EWrapper, EClient):
 
     def _request_bootstrap_snapshots(self) -> None:
         try:
+            self.reqCurrentTime()
+            self.writer.write_raw("reqCurrentTime", ["reqCurrentTime()"])
+        except Exception as e:
+            self.writer.write_raw("reqCurrentTime_error", [repr(e)])
+        try:
+            self.reqManagedAccts()
+            self.writer.write_raw("reqManagedAccounts", ["reqManagedAccts()"])
+        except Exception as e:
+            self.writer.write_raw("reqManagedAccounts_error", [repr(e)])
+        try:
             self.reqAllOpenOrders()
             self.writer.write_raw("reqAllOpenOrders", ["reqAllOpenOrders()"])
         except Exception as e:
@@ -337,6 +347,12 @@ class Observer(EWrapper, EClient):
 
     def connectionClosed(self) -> None:
         self.writer.write_raw("connectionClosed", ["connectionClosed()"])
+
+    def currentTime(self, time_: int) -> None:  # noqa: N802
+        self.writer.write_raw("currentTime", [f"time={time_}"])
+
+    def managedAccounts(self, accountsList: str) -> None:  # noqa: N802
+        self.writer.write_raw("managedAccounts", [f"accounts={accountsList}"])
 
     def error(self, reqId: int, errorCode: int, errorString: str, advancedOrderRejectJson: str = "") -> None:
         self.writer.write_raw(
