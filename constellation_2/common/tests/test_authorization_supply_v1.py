@@ -1,0 +1,287 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import sys
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+import ops.tools.run_aegis_bod_prepare_v1 as bod  # noqa: E402
+import ops.tools.run_aegis_day_v1 as day_run  # noqa: E402
+import ops.tools.run_authorization_supply_v1 as auth  # noqa: E402
+
+DAY = "2026-04-29"
+
+
+def _ctx(tmp_path: Path, day: str = DAY) -> bod.BodContext:
+    truth = tmp_path / "truth"
+    execution = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    runtime = tmp_path / "runtime"
+    operator = tmp_path / "operator"
+    for path in (truth, execution, runtime, operator):
+        path.mkdir(parents=True, exist_ok=True)
+    return bod.BodContext(
+        day_utc=day,
+        environment="PAPER",
+        truth_root=truth,
+        execution_root=execution,
+        runtime_root=runtime,
+        operator_input_root=operator,
+        ib_account="DUO847203",
+    )
+
+
+def _write(path: Path, payload: dict) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+def _intent(ctx: bod.BodContext, *, intent_id: str = "intent-1", structure: bool = True, day: str | None = None) -> Path:
+    payload = {
+        "day_utc": day or ctx.day_utc,
+        "intent_id": intent_id,
+        "intent_hash": "a" * 64,
+        "underlying": {"symbol": "SPY"},
+        "intent_type": "DEFINED_RISK_OPTIONS",
+        "requires_defined_risk": True,
+    }
+    if structure:
+        payload["option_structure"] = {"selected_structure": "VERTICAL_SPREAD", "legs": [{"right": "CALL"}, {"right": "CALL"}]}
+    return _write(ctx.execution_root / "intents_v1" / "snapshots" / (day or ctx.day_utc) / f"{'a' * 64}.exposure_intent.v1.json", payload)
+
+
+def _market_supply(ctx: bod.BodContext, status: str = "PASS", blocker: str = "") -> Path:
+    return _write(
+        ctx.truth_root / "reports" / "market_data_supply_v1" / ctx.day_utc / "market_data_supply.v1.json",
+        {"day_utc": ctx.day_utc, "status": status, "canonical_blocker": blocker, "operator_next_action": "fix market data"},
+    )
+
+
+def _risk_budget(ctx: bod.BodContext, status: str = "PASS", blocker: str = "") -> Path:
+    return _write(
+        ctx.truth_root / "reports" / "risk_budget_supply_v1" / ctx.day_utc / "risk_budget_supply.v1.json",
+        {"day_utc": ctx.day_utc, "status": status, "canonical_blocker": blocker, "operator_next_action": "fix risk budget"},
+    )
+
+
+def _strategy(ctx: bod.BodContext, state: str = "INTENT_CREATED") -> Path:
+    return _write(
+        ctx.truth_root / "reports" / "strategy_decision_authority_v1" / ctx.day_utc / "strategy_decision_authority.v1.json",
+        {"day_utc": ctx.day_utc, "status": "PASS", "strategy_decision_state": state, "intent_count": 1},
+    )
+
+
+def _identity(ctx: bod.BodContext, *, defined: bool = True, day: str | None = None) -> Path:
+    return _write(
+        ctx.execution_root / "phaseC_preflight_v1" / (day or ctx.day_utc) / "attempt_000001" / ("a" * 64) / "execution_identity_record.v1.json",
+        {
+            "schema_id": "execution_identity_record",
+            "day_utc": day or ctx.day_utc,
+            "intent_id": "intent-1",
+            "risk_proof": {"defined_risk_proven": defined},
+        },
+    )
+
+
+def _authorization(ctx: bod.BodContext, *, status: str = "AUTHORIZED", day: str | None = None) -> Path:
+    decision = "AUTHORIZED" if status == "AUTHORIZED" else "REJECTED"
+    return _write(
+        ctx.execution_root / "engine_activity_v1" / "authorization_v1" / (day or ctx.day_utc) / f"{'a' * 64}.authorization.v1.json",
+        {
+            "schema_id": "C2_AUTHORIZATION_V1",
+            "day_utc": day or ctx.day_utc,
+            "intent_id": "intent-1",
+            "status": status,
+            "authorization": {"decision": decision},
+            "reason_codes": [] if status == "AUTHORIZED" else ["REJECTED"],
+        },
+    )
+
+
+def _no_external(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(auth, "_run_command", lambda *_args, **_kwargs: {"exit_code": 0})
+    monkeypatch.setattr(auth, "_run_phasec_identity_materializer", lambda *_args, **_kwargs: {"exit_code": 0})
+    monkeypatch.setattr(auth, "_run_authorization_artifacts", lambda *_args, **_kwargs: {"exit_code": 0})
+
+
+def test_no_active_intent_blocks(tmp_path: Path) -> None:
+    payload = auth.build_authorization_supply_v1(_ctx(tmp_path))
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "ACTIVE_INTENT_MISSING"
+
+
+def test_market_data_supply_blocked_prevents_phasec(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _intent(ctx)
+    _market_supply(ctx, "BLOCKED", "OPTIONS_MARKET_DATA_PERMISSION_DENIED")
+    called = False
+
+    def _phasec(_ctx):  # noqa: ANN001
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(auth, "_run_phasec_identity_materializer", _phasec)
+    payload = auth.build_authorization_supply_v1(ctx)
+    assert payload["canonical_blocker"] == "MARKET_DATA_SUPPLY_BLOCKED"
+    assert payload["phasec_defined_risk"]["status"] == "SKIPPED"
+    assert called is False
+
+
+def test_risk_budget_supply_blocked_prevents_phasec(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _intent(ctx)
+    _market_supply(ctx)
+    _risk_budget(ctx, "BLOCKED", "NAV_BASIS_INVALID")
+    called = False
+
+    def _phasec(_ctx):  # noqa: ANN001
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(auth, "_run_phasec_identity_materializer", _phasec)
+    payload = auth.build_authorization_supply_v1(ctx)
+    assert payload["canonical_blocker"] == "RISK_BUDGET_SUPPLY_BLOCKED"
+    assert called is False
+
+
+def test_missing_strategy_decision_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _no_external(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _intent(ctx)
+    _market_supply(ctx)
+    _risk_budget(ctx)
+    payload = auth.build_authorization_supply_v1(ctx)
+    assert payload["canonical_blocker"] == "STRATEGY_DECISION_MISSING"
+
+
+def test_missing_structure_decision_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _no_external(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _intent(ctx, structure=False)
+    _market_supply(ctx)
+    _risk_budget(ctx)
+    _strategy(ctx)
+    payload = auth.build_authorization_supply_v1(ctx)
+    assert payload["canonical_blocker"] == "STRUCTURE_DECISION_MISSING"
+
+
+def test_missing_execution_identity_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _no_external(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _intent(ctx)
+    _market_supply(ctx)
+    _risk_budget(ctx)
+    _strategy(ctx)
+    payload = auth.build_authorization_supply_v1(ctx)
+    assert payload["canonical_blocker"] == "PHASEC_EXECUTION_IDENTITY_MISSING"
+
+
+def test_defined_risk_false_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _no_external(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _intent(ctx)
+    _market_supply(ctx)
+    _risk_budget(ctx)
+    _strategy(ctx)
+    _identity(ctx, defined=False)
+    payload = auth.build_authorization_supply_v1(ctx)
+    assert payload["canonical_blocker"] == "PHASEC_DEFINED_RISK_NOT_PROVEN"
+
+
+def test_missing_authorization_evidence_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _no_external(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _intent(ctx)
+    _market_supply(ctx)
+    _risk_budget(ctx)
+    _strategy(ctx)
+    _identity(ctx)
+    payload = auth.build_authorization_supply_v1(ctx)
+    assert payload["canonical_blocker"] == "AUTHORIZATION_EVIDENCE_MISSING"
+
+
+def test_authorization_rejected_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _no_external(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _intent(ctx)
+    _market_supply(ctx)
+    _risk_budget(ctx)
+    _strategy(ctx)
+    _identity(ctx)
+    _authorization(ctx, status="REJECTED")
+    payload = auth.build_authorization_supply_v1(ctx)
+    assert payload["canonical_blocker"] == "AUTHORIZATION_REJECTED"
+
+
+def test_valid_authorization_supply_passes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _no_external(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _intent(ctx)
+    _market_supply(ctx)
+    _risk_budget(ctx)
+    _strategy(ctx)
+    _identity(ctx)
+    _authorization(ctx)
+    payload = auth.build_authorization_supply_v1(ctx)
+    assert payload["status"] == "PASS"
+    assert payload["authorization_export"]["usable_for_submit_readiness"] is True
+
+
+def test_wrong_day_phasec_and_authorization_do_not_satisfy_current_day(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _no_external(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _intent(ctx)
+    _market_supply(ctx)
+    _risk_budget(ctx)
+    _strategy(ctx)
+    _identity(ctx, day="2026-04-28")
+    _authorization(ctx, day="2026-04-28")
+    payload = auth.build_authorization_supply_v1(ctx)
+    assert payload["canonical_blocker"] == "PHASEC_EXECUTION_IDENTITY_MISSING"
+
+
+def test_run_authorization_supply_writes_only_runtime_artifact(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _no_external(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _intent(ctx)
+    _market_supply(ctx, "BLOCKED", "OPTIONS_MARKET_DATA_PERMISSION_DENIED")
+    monkeypatch.setattr(auth.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+    path, payload = auth.run_authorization_supply_v1(ctx.day_utc, ctx.environment)
+    assert path == ctx.truth_root / "reports" / "authorization_supply_v1" / ctx.day_utc / "authorization_supply.v1.json"
+    assert payload["canonical_blocker"] == "MARKET_DATA_SUPPLY_BLOCKED"
+    assert REPO_ROOT not in path.parents
+
+
+def test_day_ledger_does_not_run_risk_sizing_before_authorization_pass(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    phase_ctx = day_run.PhaseContext(
+        day_utc=DAY,
+        environment="PAPER",
+        truth_root=tmp_path / "truth",
+        execution_root=tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER",
+        runtime_root=tmp_path / "runtime",
+        operator_input_root=tmp_path / "operator",
+        ib_account="DUO847203",
+    )
+    for path in (phase_ctx.truth_root, phase_ctx.execution_root, phase_ctx.runtime_root, phase_ctx.operator_input_root):
+        path.mkdir(parents=True, exist_ok=True)
+    _write(phase_ctx.truth_root / "reports" / "capital_supply_v1" / DAY / "capital_supply.v1.json", {"day_utc": DAY, "status": "PASS"})
+    _write(phase_ctx.truth_root / "reports" / "risk_budget_supply_v1" / DAY / "risk_budget_supply.v1.json", {"day_utc": DAY, "status": "PASS"})
+    _write(phase_ctx.truth_root / "reports" / "authorization_supply_v1" / DAY / "authorization_supply.v1.json", {"day_utc": DAY, "status": "BLOCKED", "canonical_blocker": "AUTHORIZATION_EVIDENCE_MISSING"})
+    called: list[str] = []
+
+    def _fake_run_steps(_phase, commands, **_kwargs):  # noqa: ANN001, ANN002
+        step = commands[0][0]
+        called.append(step)
+        blocker = "AUTHORIZATION_EVIDENCE_MISSING" if step == "authorization_supply" else ""
+        status = "BLOCKED" if blocker else "PASS"
+        return ([{"step_name": step, "status": status, "blocker": blocker, "duration_ms": 1}], [], [blocker] if blocker else [])
+
+    monkeypatch.setattr(day_run, "_run_steps", _fake_run_steps)
+    row = day_run._phase_strategy_and_risk(phase_ctx, {})
+    assert row["canonical_blocker"] == "AUTHORIZATION_EVIDENCE_MISSING"
+    assert "risk_sizing_authority" not in called

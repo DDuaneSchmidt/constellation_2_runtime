@@ -228,6 +228,24 @@ class RiskBudgetSupplyStatus:
 
 
 @dataclass(frozen=True)
+class AuthorizationSupplyStatus:
+    exists: bool
+    path: str
+    day_utc: str
+    status: str
+    canonical_blocker: str
+    active_intents: list[dict[str, Any]]
+    market_data_input: dict[str, Any]
+    risk_budget_input: dict[str, Any]
+    strategy_decision: dict[str, Any]
+    structure_decision: dict[str, Any]
+    phasec_defined_risk: dict[str, Any]
+    authorization: dict[str, Any]
+    authorization_export: dict[str, Any]
+    operator_next_action: str
+
+
+@dataclass(frozen=True)
 class BrokerSupplyStatus:
     exists: bool
     path: str
@@ -471,6 +489,18 @@ def _risk_budget_supply_path(roots: RootResolution, day_utc: str) -> Path | None
     ).resolve()
 
 
+def _authorization_supply_path(roots: RootResolution, day_utc: str) -> Path | None:
+    if roots.canonical_truth_root is None or not DATE_RE.match(str(day_utc or "")):
+        return None
+    return (
+        roots.canonical_truth_root
+        / "reports"
+        / "authorization_supply_v1"
+        / day_utc
+        / "authorization_supply.v1.json"
+    ).resolve()
+
+
 def _broker_supply_path(roots: RootResolution, day_utc: str) -> Path | None:
     if roots.canonical_truth_root is None or not DATE_RE.match(str(day_utc or "")):
         return None
@@ -547,6 +577,32 @@ def _load_risk_budget_supply_status(roots: RootResolution, day_utc: str) -> Risk
         [row for row in intent_budgets if isinstance(row, dict)],
         payload.get("capital_risk_envelope") if isinstance(payload.get("capital_risk_envelope"), dict) else {},
         payload.get("risk_sizing_export") if isinstance(payload.get("risk_sizing_export"), dict) else {},
+        str(payload.get("operator_next_action") or "").strip(),
+    )
+
+
+def _load_authorization_supply_status(roots: RootResolution, day_utc: str) -> AuthorizationSupplyStatus:
+    path = _authorization_supply_path(roots, day_utc)
+    payload = _read_json(path)
+    if not isinstance(payload, dict):
+        return AuthorizationSupplyStatus(False, str(path) if path else "NOT_FOUND", day_utc, "MISSING", "AUTHORIZATION_SUPPLY_MISSING", [], {}, {}, {}, {}, {}, {}, {}, "")
+    if str(payload.get("day_utc") or "").strip() != day_utc:
+        return AuthorizationSupplyStatus(True, str(path), day_utc, "WRONG_DAY", "WRONG_DAY_AUTHORIZATION_SUPPLY", [], {}, {}, {}, {}, {}, {}, {}, f"Regenerate authorization supply for {day_utc}.")
+    intents = payload.get("active_intents") if isinstance(payload.get("active_intents"), list) else []
+    return AuthorizationSupplyStatus(
+        True,
+        str(path),
+        str(payload.get("day_utc") or day_utc),
+        str(payload.get("status") or "").strip().upper(),
+        str(payload.get("canonical_blocker") or "").strip(),
+        [row for row in intents if isinstance(row, dict)],
+        payload.get("market_data_input") if isinstance(payload.get("market_data_input"), dict) else {},
+        payload.get("risk_budget_input") if isinstance(payload.get("risk_budget_input"), dict) else {},
+        payload.get("strategy_decision") if isinstance(payload.get("strategy_decision"), dict) else {},
+        payload.get("structure_decision") if isinstance(payload.get("structure_decision"), dict) else {},
+        payload.get("phasec_defined_risk") if isinstance(payload.get("phasec_defined_risk"), dict) else {},
+        payload.get("authorization") if isinstance(payload.get("authorization"), dict) else {},
+        payload.get("authorization_export") if isinstance(payload.get("authorization_export"), dict) else {},
         str(payload.get("operator_next_action") or "").strip(),
     )
 
@@ -2082,6 +2138,7 @@ def _build_paper_status(
     broker_supply = _load_broker_supply_status(roots, current_day.day_utc)
     capital_supply = _load_capital_supply_status(roots, current_day.day_utc)
     risk_budget_supply = _load_risk_budget_supply_status(roots, current_day.day_utc)
+    authorization_supply = _load_authorization_supply_status(roots, current_day.day_utc)
 
     freshness_day = (
         current_day.day_utc
@@ -2323,6 +2380,24 @@ def _build_paper_status(
         f"- risk_sizing_export_usable: {risk_budget_supply.risk_sizing_export.get('usable_for_risk_sizing', '')}",
         f"- operator_next_action: {risk_budget_supply.operator_next_action}",
         "",
+        "## Authorization Supply",
+        "",
+        f"- authorization_supply_path: {authorization_supply.path}",
+        f"- authorization_supply_exists: {'true' if authorization_supply.exists else 'false'}",
+        f"- authorization_supply_status: {authorization_supply.status}",
+        f"- authorization_supply_canonical_blocker: {authorization_supply.canonical_blocker}",
+        f"- active_intent_ids: {json.dumps([row.get('intent_id', '') for row in authorization_supply.active_intents], sort_keys=True)}",
+        f"- market_data_input_status: {authorization_supply.market_data_input.get('status', '')}",
+        f"- risk_budget_input_status: {authorization_supply.risk_budget_input.get('status', '')}",
+        f"- strategy_decision_status: {authorization_supply.strategy_decision.get('status', '')}",
+        f"- strategy_decision_state: {authorization_supply.strategy_decision.get('strategy_decision_state', '')}",
+        f"- structure_decision_status: {authorization_supply.structure_decision.get('status', '')}",
+        f"- phasec_defined_risk_status: {authorization_supply.phasec_defined_risk.get('status', '')}",
+        f"- execution_identity_record_path: {authorization_supply.phasec_defined_risk.get('execution_identity_record_path', '')}",
+        f"- authorization_evidence_status: {authorization_supply.authorization.get('status', '')}",
+        f"- authorized_intent_count: {len(authorization_supply.authorization_export.get('authorized_intents') or []) if isinstance(authorization_supply.authorization_export.get('authorized_intents'), list) else 0}",
+        f"- operator_next_action: {authorization_supply.operator_next_action}",
+        "",
         "## Aegis Paper-Trading Status",
         "",
         f"- status: {final_decision.status}",
@@ -2372,6 +2447,19 @@ def _build_paper_status(
         f"- risk_budget_supply_capital_risk_envelope_reason_codes: {json.dumps(risk_budget_supply.capital_risk_envelope.get('reason_codes', []), sort_keys=True)}",
         f"- risk_budget_supply_risk_sizing_export_usable: {risk_budget_supply.risk_sizing_export.get('usable_for_risk_sizing', '')}",
         f"- risk_budget_supply_operator_next_action: {risk_budget_supply.operator_next_action}",
+        f"- authorization_supply_path: {authorization_supply.path}",
+        f"- authorization_supply_status: {authorization_supply.status}",
+        f"- authorization_supply_canonical_blocker: {authorization_supply.canonical_blocker}",
+        f"- authorization_supply_active_intent_ids: {json.dumps([row.get('intent_id', '') for row in authorization_supply.active_intents], sort_keys=True)}",
+        f"- authorization_supply_market_data_input_status: {authorization_supply.market_data_input.get('status', '')}",
+        f"- authorization_supply_risk_budget_input_status: {authorization_supply.risk_budget_input.get('status', '')}",
+        f"- authorization_supply_strategy_decision_status: {authorization_supply.strategy_decision.get('status', '')}",
+        f"- authorization_supply_structure_decision_status: {authorization_supply.structure_decision.get('status', '')}",
+        f"- authorization_supply_phasec_defined_risk_status: {authorization_supply.phasec_defined_risk.get('status', '')}",
+        f"- authorization_supply_execution_identity_record_path: {authorization_supply.phasec_defined_risk.get('execution_identity_record_path', '')}",
+        f"- authorization_supply_authorization_evidence_status: {authorization_supply.authorization.get('status', '')}",
+        f"- authorization_supply_authorized_intent_count: {len(authorization_supply.authorization_export.get('authorized_intents') or []) if isinstance(authorization_supply.authorization_export.get('authorized_intents'), list) else 0}",
+        f"- authorization_supply_operator_next_action: {authorization_supply.operator_next_action}",
         f"- requirement_graph_path: {requirement_graph.path}",
         f"- requirement_owner_phase: {requirement_graph.root_requirement.get('owner_phase', '')}",
         f"- requirement_id: {requirement_graph.root_requirement.get('requirement_id', '')}",

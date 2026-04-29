@@ -249,6 +249,10 @@ def _risk_budget_supply_path(ctx: PhaseContext) -> Path:
     return _artifact(ctx, "risk_budget_supply_v1", "risk_budget_supply.v1.json")
 
 
+def _authorization_supply_path(ctx: PhaseContext) -> Path:
+    return _artifact(ctx, "authorization_supply_v1", "authorization_supply.v1.json")
+
+
 def _broker_supply_path(ctx: PhaseContext) -> Path:
     return _artifact(ctx, "broker_supply_v1", "broker_supply.v1.json")
 
@@ -440,6 +444,7 @@ def _phase_strategy_and_risk(ctx: PhaseContext, env: dict[str, str]) -> dict[str
     steps, outputs, blockers = _run_steps("STRATEGY_AND_RISK", pre_capital_commands, env=env)
     capital_path = _capital_supply_path(ctx)
     risk_budget_path = _risk_budget_supply_path(ctx)
+    authorization_path = _authorization_supply_path(ctx)
     if not blockers:
         capital_steps, capital_outputs, capital_blockers = _run_steps(
             "STRATEGY_AND_RISK",
@@ -473,6 +478,24 @@ def _phase_strategy_and_risk(ctx: PhaseContext, env: dict[str, str]) -> dict[str
             elif risk_budget_status == "DEGRADED":
                 blockers = [risk_budget_blocker or "RISK_SIZING_EXPORT_MISSING"]
             elif risk_budget_status == "PASS":
+                authorization_steps, authorization_outputs, authorization_blockers = _run_steps(
+                    "STRATEGY_AND_RISK",
+                    [("authorization_supply", [py, "ops/tools/run_authorization_supply_v1.py", "--day_utc", ctx.day_utc, "--environment", ctx.environment], 1)],
+                    env=env,
+                )
+                steps.extend(authorization_steps)
+                outputs.extend(authorization_outputs or [str(authorization_path)])
+                blockers.extend(authorization_blockers)
+                authorization_payload = _read_json(authorization_path)
+                authorization_status = str(authorization_payload.get("status") or "").strip().upper()
+                authorization_blocker = str(authorization_payload.get("canonical_blocker") or "").strip()
+                if authorization_status == "BLOCKED":
+                    blockers = [authorization_blocker or "AUTHORIZATION_EVIDENCE_MISSING"]
+                elif authorization_status == "SKIPPED":
+                    blockers = [authorization_blocker or "AUTHORIZATION_EVIDENCE_MISSING"]
+                elif authorization_status != "PASS":
+                    blockers = ["AUTHORIZATION_EVIDENCE_MISSING"]
+            if not blockers and risk_budget_status == "PASS":
                 risk_steps, risk_outputs, risk_blockers = _run_steps(
                     "STRATEGY_AND_RISK",
                     [("risk_sizing_authority", [py, "ops/tools/run_risk_sizing_authority_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.truth_root), "--execution_root", str(ctx.execution_root)], 1)],
@@ -481,15 +504,24 @@ def _phase_strategy_and_risk(ctx: PhaseContext, env: dict[str, str]) -> dict[str
                 steps.extend(risk_steps)
                 outputs.extend(risk_outputs)
                 blockers.extend(risk_blockers)
-            else:
+            elif not blockers:
                 blockers = ["RISK_SIZING_EXPORT_MISSING"]
         else:
             blockers = ["CAPITAL_SOURCE_MISSING"]
     completed = _now_iso()
     capital_payload = _read_json(capital_path)
     risk_budget_payload = _read_json(risk_budget_path)
+    authorization_payload = _read_json(authorization_path)
     blocker_detail = "strategy, portfolio, capital supply, or risk sizing failed" if blockers else ""
-    if blockers and risk_budget_payload and str(risk_budget_payload.get("status") or "").strip().upper() == "BLOCKED":
+    if blockers and authorization_payload and str(authorization_payload.get("status") or "").strip().upper() == "BLOCKED":
+        phasec = authorization_payload.get("phasec_defined_risk") if isinstance(authorization_payload.get("phasec_defined_risk"), dict) else {}
+        blocker_detail = (
+            f"authorization_supply_status={authorization_payload.get('status', 'MISSING')} "
+            f"market_data_input={(authorization_payload.get('market_data_input') or {}).get('status', '') if isinstance(authorization_payload.get('market_data_input'), dict) else ''} "
+            f"risk_budget_input={(authorization_payload.get('risk_budget_input') or {}).get('status', '') if isinstance(authorization_payload.get('risk_budget_input'), dict) else ''} "
+            f"phasec_status={phasec.get('status', '')}"
+        )
+    elif blockers and risk_budget_payload and str(risk_budget_payload.get("status") or "").strip().upper() == "BLOCKED":
         nav_basis = risk_budget_payload.get("nav_basis") if isinstance(risk_budget_payload.get("nav_basis"), dict) else {}
         blocker_detail = (
             f"risk_budget_supply_status={risk_budget_payload.get('status', 'MISSING')} "
@@ -509,7 +541,7 @@ def _phase_strategy_and_risk(ctx: PhaseContext, env: dict[str, str]) -> dict[str
         canonical_blocker=blockers[0] if blockers else "",
         blocker_detail=blocker_detail,
         outputs=outputs,
-        producer_command="run intent generation; strategy; portfolio; PhaseC prep; capital supply; risk budget supply; risk sizing",
+        producer_command="run intent generation; strategy; portfolio; PhaseC prep; capital supply; risk budget supply; authorization supply; risk sizing",
         started_at_utc=started,
         completed_at_utc=completed,
         duration_ms=sum(int(s.get("duration_ms") or 0) for s in steps),
@@ -519,34 +551,27 @@ def _phase_strategy_and_risk(ctx: PhaseContext, env: dict[str, str]) -> dict[str
 
 
 def _phase_authorization(ctx: PhaseContext, env: dict[str, str]) -> dict[str, Any]:
-    py = sys.executable
+    del env
     started = _now_iso()
-    commands = [
-        ("defined_risk_phasec_evidence", [py, "ops/tools/run_phasec_identity_materializer_day_v1.py", "--day_utc", ctx.day_utc, "--eval_time_utc", f"{ctx.day_utc}T00:00:00Z", "--truth_root", str(ctx.truth_root), "--execution_truth_root", str(ctx.execution_root)], 1),
-        ("authorization_artifacts", [py, "ops/tools/run_authorization_artifacts_day_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.execution_root)], 1),
-    ]
-    steps, outputs, blockers = _run_steps("AUTHORIZATION", commands, env=env)
-    auth_root = _execution_authorization_root(ctx)
-    rejected = []
-    if auth_root.exists():
-        for path in auth_root.glob("*.authorization.v1.json"):
-            payload = _read_json(path)
-            if str(payload.get("status") or "").strip().upper() in {"REJECTED", "FAIL", "BLOCKED"}:
-                rejected.append(path.name)
-    blocker = blockers[0] if blockers else ("AUTHZ_MISSING_DEFINED_RISK_EVIDENCE" if rejected else "")
+    path = _authorization_supply_path(ctx)
+    payload = _read_json(path)
+    status = str(payload.get("status") or "").strip().upper()
+    blocker = str(payload.get("canonical_blocker") or "").strip()
+    authorized = payload.get("authorization_export") if isinstance(payload.get("authorization_export"), dict) else {}
+    authorized_count = len(authorized.get("authorized_intents") or []) if isinstance(authorized.get("authorized_intents"), list) else 0
+    if status != "PASS" and not blocker:
+        blocker = "AUTHORIZATION_EVIDENCE_MISSING"
     completed = _now_iso()
     return _empty_phase(
         "AUTHORIZATION",
         status="BLOCKED" if blocker else "PASS",
         canonical_blocker=blocker,
-        blocker_detail=f"rejected_authorization_count={len(rejected)}",
-        outputs=outputs or [str(auth_root)],
-        producer_command="run PhaseC identity materializer; run authorization artifacts",
+        blocker_detail=f"authorization_supply_status={status or 'MISSING'} authorized_intent_count={authorized_count}",
+        outputs=[str(path)],
+        producer_command="verify authorization supply",
         started_at_utc=started,
         completed_at_utc=completed,
-        duration_ms=sum(int(s.get("duration_ms") or 0) for s in steps),
         exit_code=2 if blocker else 0,
-        child_steps=steps,
     )
 
 
