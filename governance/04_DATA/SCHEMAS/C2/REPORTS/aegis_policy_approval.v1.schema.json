@@ -4,7 +4,7 @@
   "title": "aegis_policy_approval.v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["approval_id", "proposal_id", "decision", "approver", "timestamp", "notes", "resulting_policy_id", "controls_runtime_behavior", "controls_broker_execution", "controls_phasec_materialization"],
+  "required": ["approval_id", "proposal_id", "decision", "approver", "timestamp", "notes", "resulting_policy_id"],
   "properties": {
     "approval_id": { "type": "string", "pattern": "^approval_[a-f0-9]{64}$" },
     "proposal_id": { "type": "string", "pattern": "^proposal_[a-f0-9]{64}$" },
@@ -12,9 +12,6 @@
     "approver": { "type": "string", "minLength": 1 },
     "timestamp": { "type": "string", "minLength": 1 },
     "notes": { "type": "string" },
-    "resulting_policy_id": { "type": ["string", "null"] },
-    "controls_runtime_behavior": { "type": "boolean", "const": false },
-    "controls_broker_execution": { "type": "boolean", "const": false },
-    "controls_phasec_materialization": { "type": "boolean", "const": false }
+    "resulting_policy_id": { "type": ["string", "null"] }
   }
 }

@@ -4,7 +4,7 @@
   "title": "aegis_versioned_policy.v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["policy_id", "policy_version", "source_proposal_id", "policy_type", "policy_payload", "status", "effective_start", "effective_end", "created_at", "activated_at", "superseded_by_policy_id", "advisory_only", "controls_runtime_behavior", "controls_broker_execution", "controls_phasec_materialization"],
+  "required": ["policy_id", "policy_version", "source_proposal_id", "policy_type", "policy_payload", "status", "effective_start", "effective_end", "created_at", "activated_at", "superseded_by_policy_id"],
   "properties": {
     "policy_id": { "type": "string", "pattern": "^policy_[a-f0-9]{64}$" },
     "policy_version": { "type": ["integer", "string"] },
@@ -16,10 +16,6 @@
     "effective_end": { "type": ["string", "null"] },
     "created_at": { "type": "string", "minLength": 1 },
     "activated_at": { "type": ["string", "null"] },
-    "superseded_by_policy_id": { "type": ["string", "null"] },
-    "advisory_only": { "type": "boolean", "const": true },
-    "controls_runtime_behavior": { "type": "boolean", "const": false },
-    "controls_broker_execution": { "type": "boolean", "const": false },
-    "controls_phasec_materialization": { "type": "boolean", "const": false }
+    "superseded_by_policy_id": { "type": ["string", "null"] }
   }
 }

@@ -212,9 +212,7 @@ def test_approval_creates_record_without_runtime_behavior() -> None:
     approval = approve_proposal_v1(proposal=proposal, approver="operator", timestamp=TS, notes="Approved.")
     assert approval["decision"] == "approve"
     assert proposal["status"] == "proposed"
-    assert approval["controls_runtime_behavior"] is False
-    assert approval["controls_broker_execution"] is False
-    assert approval["controls_phasec_materialization"] is False
+    assert approval["resulting_policy_id"] is None
     validate_against_repo_schema_v1(approval, REPO_ROOT, APPROVAL_SCHEMA)
 
 

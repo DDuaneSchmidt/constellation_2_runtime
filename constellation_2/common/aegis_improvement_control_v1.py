@@ -141,6 +141,16 @@ def _deep_freeze(value: Any) -> Any:
     return value
 
 
+def _plain_jsonish(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _plain_jsonish(child) for key, child in value.items()}
+    if isinstance(value, tuple):
+        return [_plain_jsonish(item) for item in value]
+    if isinstance(value, list):
+        return [_plain_jsonish(item) for item in value]
+    return copy.deepcopy(value)
+
+
 def _known_policy_status(policy: Mapping[str, Any]) -> str:
     status = str(policy.get("status") or "").strip()
     if status not in POLICY_STATUSES:
@@ -340,9 +350,6 @@ def approve_proposal_v1(
         "timestamp": approval_seed["timestamp"],
         "notes": approval_seed["notes"],
         "resulting_policy_id": resulting_policy_id,
-        "controls_runtime_behavior": False,
-        "controls_broker_execution": False,
-        "controls_phasec_materialization": False,
     }
 
 
@@ -369,9 +376,6 @@ def reject_proposal_v1(
         "timestamp": approval_seed["timestamp"],
         "notes": approval_seed["notes"],
         "resulting_policy_id": None,
-        "controls_runtime_behavior": False,
-        "controls_broker_execution": False,
-        "controls_phasec_materialization": False,
     }
 
 
@@ -418,10 +422,6 @@ def create_policy_from_approved_proposal_v1(
         "created_at": created_at or _now_utc(),
         "activated_at": activated_at,
         "superseded_by_policy_id": superseded_by_policy_id,
-        "advisory_only": True,
-        "controls_runtime_behavior": False,
-        "controls_broker_execution": False,
-        "controls_phasec_materialization": False,
     }
     if status_value == "active":
         return _deep_freeze(record)
@@ -490,12 +490,12 @@ def build_improvement_control_report_v1(
     rollbacks: Iterable[Mapping[str, Any]] | None = None,
     generated_at: str | None = None,
 ) -> dict[str, Any]:
-    finding_rows = [dict(row) for row in findings or []]
-    proposal_rows = [dict(row) for row in proposals or []]
-    approval_rows = [dict(row) for row in approvals or []]
-    policy_rows = [dict(row) for row in policies or []]
-    measurement_rows = [dict(row) for row in measurements or []]
-    rollback_rows = [dict(row) for row in rollbacks or []]
+    finding_rows = [_plain_jsonish(row) for row in findings or []]
+    proposal_rows = [_plain_jsonish(row) for row in proposals or []]
+    approval_rows = [_plain_jsonish(row) for row in approvals or []]
+    policy_rows = [_plain_jsonish(row) for row in policies or []]
+    measurement_rows = [_plain_jsonish(row) for row in measurements or []]
+    rollback_rows = [_plain_jsonish(row) for row in rollbacks or []]
 
     findings_by_category = {category: 0 for category in sorted(FINDING_CATEGORIES)}
     for row in finding_rows:
