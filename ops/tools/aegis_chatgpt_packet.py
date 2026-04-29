@@ -203,6 +203,9 @@ class MarketDataSupplyStatus:
     delayed_data_available: bool
     delayed_data_accepted_by_policy: bool
     delayed_data_policy: dict[str, Any]
+    delayed_data_used: bool
+    market_data_mode: str
+    policy_source_path: str
     ib_error_codes: list[int]
     operator_next_action: str
 
@@ -619,9 +622,9 @@ def _load_market_data_supply_status(roots: RootResolution, day_utc: str) -> Mark
     path = _market_data_supply_path(roots, day_utc)
     payload = _read_json(path)
     if not isinstance(payload, dict):
-        return MarketDataSupplyStatus(False, str(path) if path else "NOT_FOUND", day_utc, "MISSING", "MARKET_DATA_SUPPLY_MISSING", {}, {}, "", "MISSING", [], False, False, False, {}, [], "")
+        return MarketDataSupplyStatus(False, str(path) if path else "NOT_FOUND", day_utc, "MISSING", "MARKET_DATA_SUPPLY_MISSING", {}, {}, "", "MISSING", [], False, False, False, {}, False, "UNKNOWN", "", [], "")
     if str(payload.get("day_utc") or "").strip() != day_utc:
-        return MarketDataSupplyStatus(True, str(path), day_utc, "WRONG_DAY", "WRONG_DAY_MARKET_DATA_SUPPLY", {}, {}, "", "WRONG_DAY", [], False, False, False, {}, [], f"Regenerate market data supply for {day_utc}.")
+        return MarketDataSupplyStatus(True, str(path), day_utc, "WRONG_DAY", "WRONG_DAY_MARKET_DATA_SUPPLY", {}, {}, "", "WRONG_DAY", [], False, False, False, {}, False, "UNKNOWN", "", [], f"Regenerate market data supply for {day_utc}.")
     requirements = payload.get("requirements")
     providers = payload.get("provider_checks")
     first_requirement = next((row for row in requirements if isinstance(row, dict)), {}) if isinstance(requirements, list) else {}
@@ -652,6 +655,9 @@ def _load_market_data_supply_status(roots: RootResolution, day_utc: str) -> Mark
         bool(payload.get("delayed_data_available") is True),
         bool(payload.get("delayed_data_accepted_by_policy") is True),
         payload.get("delayed_data_policy") if isinstance(payload.get("delayed_data_policy"), dict) else {},
+        bool(payload.get("delayed_data_used") is True),
+        str(payload.get("market_data_mode") or "UNKNOWN").strip().upper(),
+        str(payload.get("policy_source_path") or "").strip(),
         codes,
         str(payload.get("operator_next_action") or "").strip(),
     )
@@ -2169,7 +2175,7 @@ def _build_paper_status(
         else latest_trading_day.evidence_day_utc
     )
     freshness_status = _freshness_status_for_day(freshness_day)
-    ledger_ready = day_run.final_status in {"PAPER_READY", "TRADING_ACTIVE", "EOD_COMPLETE"}
+    ledger_ready = day_run.final_status in {"PAPER_READY", "PAPER_READY_WITH_DELAYED_DATA", "TRADING_ACTIVE", "EOD_COMPLETE"}
     signals: list[ReadinessSignal] = []
     source_blocked = source_integrity_gate is not None and source_integrity_gate.effective_status == "BLOCKED"
     if source_blocked:
@@ -2358,6 +2364,9 @@ def _build_paper_status(
         f"- live_data_available: {str(market_data_supply.live_data_available).lower()}",
         f"- delayed_data_available: {str(market_data_supply.delayed_data_available).lower()}",
         f"- delayed_data_accepted_by_policy: {str(market_data_supply.delayed_data_accepted_by_policy).lower()}",
+        f"- delayed_data_used: {str(market_data_supply.delayed_data_used).lower()}",
+        f"- market_data_mode: {market_data_supply.market_data_mode}",
+        f"- policy_source_path: {market_data_supply.policy_source_path}",
         f"- delayed_data_policy: {json.dumps(market_data_supply.delayed_data_policy, sort_keys=True)}",
         f"- ib_error_codes: {json.dumps(market_data_supply.ib_error_codes, sort_keys=True)}",
         f"- IB evidence: {json.dumps(market_data_supply.provider_check.get('evidence', []), sort_keys=True)}",
@@ -2450,6 +2459,9 @@ def _build_paper_status(
         f"- market_data_supply_live_data_available: {str(market_data_supply.live_data_available).lower()}",
         f"- market_data_supply_delayed_data_available: {str(market_data_supply.delayed_data_available).lower()}",
         f"- market_data_supply_delayed_data_accepted_by_policy: {str(market_data_supply.delayed_data_accepted_by_policy).lower()}",
+        f"- market_data_supply_delayed_data_used: {str(market_data_supply.delayed_data_used).lower()}",
+        f"- market_data_supply_market_data_mode: {market_data_supply.market_data_mode}",
+        f"- market_data_supply_policy_source_path: {market_data_supply.policy_source_path}",
         f"- market_data_supply_delayed_data_policy: {json.dumps(market_data_supply.delayed_data_policy, sort_keys=True)}",
         f"- market_data_supply_ib_error_codes: {json.dumps(market_data_supply.ib_error_codes, sort_keys=True)}",
         f"- market_data_supply_IB_evidence: {json.dumps(market_data_supply.provider_check.get('evidence', []), sort_keys=True)}",

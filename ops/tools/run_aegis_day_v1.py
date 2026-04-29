@@ -257,6 +257,11 @@ def _broker_supply_path(ctx: PhaseContext) -> Path:
     return _artifact(ctx, "broker_supply_v1", "broker_supply.v1.json")
 
 
+def _market_data_delayed_used(ctx: PhaseContext) -> bool:
+    supply = _read_json(_market_data_supply_path(ctx))
+    return supply.get("delayed_data_used") is True and str(supply.get("market_data_mode") or "").strip().upper() == "DELAYED"
+
+
 def _load_requirement_graph_root(ctx: PhaseContext) -> dict[str, Any]:
     graph = _read_json(_requirement_graph_path(ctx))
     if str(graph.get("day_utc") or "").strip() != ctx.day_utc:
@@ -762,6 +767,8 @@ def build_day_run_payload(ctx: PhaseContext) -> dict[str, Any]:
             final_status = "EOD_COMPLETE"
         elif execution.get("status") == "PASS":
             final_status = "TRADING_ACTIVE"
+        elif _market_data_delayed_used(ctx):
+            final_status = "PAPER_READY_WITH_DELAYED_DATA"
         else:
             final_status = "PAPER_READY"
 
@@ -845,7 +852,7 @@ def main(argv: list[str] | None = None) -> int:
             sort_keys=True,
         )
     )
-    return 0 if payload.get("final_status") in {"PAPER_READY", "TRADING_ACTIVE", "EOD_COMPLETE"} else 2
+    return 0 if payload.get("final_status") in {"PAPER_READY", "PAPER_READY_WITH_DELAYED_DATA", "TRADING_ACTIVE", "EOD_COMPLETE"} else 2
 
 
 if __name__ == "__main__":

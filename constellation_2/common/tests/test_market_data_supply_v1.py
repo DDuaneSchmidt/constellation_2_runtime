@@ -112,24 +112,59 @@ def _entitlement(
     return path
 
 
-def _snapshot(ctx: bod.BodContext, *, day: str | None = None, fresh: bool = True, quotes: bool = True) -> tuple[Path, Path]:
+def _policy(ctx: bod.BodContext, *, allow: bool = True, mode: str = "PAPER") -> Path:
+    path = ctx.truth_root / "governance" / "paper_market_data_policy_v1.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "mode": mode,
+                "allow_delayed_data": allow,
+                "allowed_data_types": ["DELAYED", "DELAYED_FROZEN"],
+                "requirements": [
+                    "underlying spot present",
+                    "option chain present",
+                    "bid/ask or equivalent quote fields present",
+                    "quote timestamp available",
+                ],
+                "reason": "paper trading requires testable data path when IB live API entitlement is unavailable",
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _snapshot(
+    ctx: bod.BodContext,
+    *,
+    day: str | None = None,
+    fresh: bool = True,
+    quotes: bool = True,
+    timestamps: bool = True,
+    market_data_type: int = 1,
+) -> tuple[Path, Path]:
     day_utc = day or ctx.day_utc
     root = ctx.execution_root / "options_chain_snapshot_v1" / day_utc / "capture"
     root.mkdir(parents=True, exist_ok=True)
     snap = root / "options_chain_snapshot.v1.json"
     cert = root / "freshness_certificate.v1.json"
     contract = {"bid": "1.00", "ask": "1.10"} if quotes else {"strike": "500"}
+    underlying = {"symbol": "SPY", "spot_price": "500.00"}
+    if timestamps:
+        underlying["spot_as_of_utc"] = f"{day_utc}T14:30:00Z"
+    payload = {
+        "schema_id": "options_chain_snapshot",
+        "schema_version": 1,
+        "underlying": underlying,
+        "contracts": [contract],
+        "provenance": {"market_data_type": market_data_type},
+    }
+    if timestamps:
+        payload["as_of_utc"] = f"{day_utc}T14:30:00Z"
     snap.write_text(
-        json.dumps(
-            {
-                "schema_id": "options_chain_snapshot",
-                "schema_version": 1,
-                "as_of_utc": f"{day_utc}T14:30:00Z",
-                "underlying": {"symbol": "SPY", "spot_price": "500.00"},
-                "contracts": [contract],
-            },
-            sort_keys=True,
-        ),
+        json.dumps(payload, sort_keys=True),
         encoding="utf-8",
     )
     cert.write_text(
@@ -254,6 +289,77 @@ def test_live_market_data_available_lets_supply_attempt_capture(monkeypatch: pyt
     assert payload["status"] == "PASS"
 
 
+def test_live_unavailable_delayed_available_policy_enabled_passes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _requirement(ctx)
+    policy = _policy(ctx)
+    _entitlement(ctx, status="BLOCKED", codes=[10167], live=False, delayed=True)
+    _snapshot(ctx, market_data_type=3)
+    monkeypatch.setattr(supply, "validate_against_repo_schema_v1", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(supply, "_run_market_data_authority", lambda _ctx: ({"exit_code": 0}, ""))
+
+    payload = supply.build_market_data_supply(ctx)
+
+    assert payload["status"] == "PASS"
+    assert payload["canonical_blocker"] == ""
+    assert payload["delayed_data_used"] is True
+    assert payload["market_data_mode"] == "DELAYED"
+    assert payload["policy_source_path"] == str(policy)
+
+
+def test_delayed_policy_makes_supply_continue_to_capture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _requirement(ctx)
+    _policy(ctx)
+    _entitlement(ctx, status="BLOCKED", codes=[10167], live=False, delayed=True)
+    calls: list[str] = []
+
+    def _capture(_ctx, instrument):  # noqa: ANN001
+        calls.append(instrument)
+        _snapshot(ctx, market_data_type=3)
+        return {"instrument": instrument, "status": "PASS", "blocker": "", "snapshot_path": "x", "freshness_certificate_path": "y"}
+
+    monkeypatch.setattr(supply, "_run_capture", _capture)
+    monkeypatch.setattr(supply, "validate_against_repo_schema_v1", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(supply, "_run_market_data_authority", lambda _ctx: ({"exit_code": 0}, ""))
+
+    payload = supply.build_market_data_supply(ctx)
+
+    assert calls == ["SPY"]
+    assert payload["status"] == "PASS"
+    assert payload["capture_attempts"][0]["data_mode"] == "DELAYED"
+
+
+def test_delayed_data_requires_quotes_and_timestamps(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _requirement(ctx)
+    _policy(ctx)
+    _entitlement(ctx, status="BLOCKED", codes=[10167], live=False, delayed=True)
+    _snapshot(ctx, market_data_type=3, timestamps=False)
+    monkeypatch.setattr(supply, "validate_against_repo_schema_v1", lambda *_args, **_kwargs: None)
+
+    payload = supply.build_market_data_supply(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "OPTIONS_SNAPSHOT_STALE"
+
+
+def test_live_mode_blocks_when_only_delayed_data_exists(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    live_ctx = bod.BodContext(ctx.day_utc, "LIVE", ctx.truth_root, ctx.execution_root, ctx.runtime_root, ctx.operator_input_root, ctx.ib_account)
+    _requirement(live_ctx)
+    _policy(live_ctx)
+    _entitlement(live_ctx, status="BLOCKED", codes=[10167], live=False, delayed=True)
+    _snapshot(live_ctx, market_data_type=3)
+    monkeypatch.setattr(supply, "validate_against_repo_schema_v1", lambda *_args, **_kwargs: None)
+
+    payload = supply.build_market_data_supply(live_ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "OPTIONS_MARKET_DATA_PERMISSION_DENIED"
+    assert payload["delayed_data_accepted_by_policy"] is False
+
+
 def test_permission_denied_blocks_before_generic_snapshot_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _requirement(ctx)
@@ -360,6 +466,9 @@ def test_packet_displays_market_data_supply_root_details(monkeypatch: pytest.Mon
                 "live_data_available": False,
                 "delayed_data_available": True,
                 "delayed_data_accepted_by_policy": False,
+                "delayed_data_used": False,
+                "market_data_mode": "UNKNOWN",
+                "policy_source_path": "/tmp/paper_market_data_policy_v1.json",
                 "delayed_data_policy": {"policy_decision": "DELAYED_DATA_POLICY_MISSING"},
                 "ib_error_codes": [10091],
                 "operator_next_action": "Enable IBKR API market-data permissions",
@@ -378,6 +487,8 @@ def test_packet_displays_market_data_supply_root_details(monkeypatch: pytest.Mon
     assert "- market_data_supply_provider: IBKR" in section
     assert "- market_data_supply_entitlement_probe_path: /tmp/probe.json" in section
     assert "- market_data_supply_ib_error_codes: [10091]" in section
+    assert "- market_data_supply_market_data_mode: UNKNOWN" in section
+    assert "- market_data_supply_policy_source_path: /tmp/paper_market_data_policy_v1.json" in section
     assert "10091" in section
 
 

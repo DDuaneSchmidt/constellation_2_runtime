@@ -191,6 +191,21 @@ def test_all_pre_ready_phases_pass_produces_paper_ready(monkeypatch: pytest.Monk
     assert payload["phase_results"]["EOD_RECONCILIATION"]["status"] == "SKIPPED"
 
 
+def test_all_pre_ready_phases_pass_with_delayed_market_data_marks_delayed_ready(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_phase_runners(monkeypatch)
+    ctx = _ctx(tmp_path)
+    path = day_run._market_data_supply_path(ctx)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"day_utc":"2026-04-29","status":"PASS","delayed_data_used":true,"market_data_mode":"DELAYED"}\n', encoding="utf-8")
+
+    payload = day_run.build_day_run_payload(ctx)
+
+    assert payload["final_status"] == "PAPER_READY_WITH_DELAYED_DATA"
+    assert payload["canonical_phase"] == ""
+
+
 def test_packet_without_ledger_reports_day_run_missing_not_downstream(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     roots = packet.RootResolution(
         canonical_truth_root=tmp_path / "truth",

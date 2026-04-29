@@ -35,6 +35,7 @@ ALLOWED_BLOCKERS = {
     "DELAYED_DATA_POLICY_MISSING",
     "DELAYED_DATA_AVAILABLE_NOT_ACCEPTED",
 }
+PAPER_DELAYED_POLICY_RELATIVE_PATH = Path("governance/paper_market_data_policy_v1.json")
 MARKET_DATA_REQUIREMENT_ARTIFACTS = {
     "underlying_spot": "UNDERLYING_SPOT",
     "option_chain": "OPTION_CHAIN",
@@ -44,9 +45,9 @@ MARKET_DATA_REQUIREMENT_ARTIFACTS = {
 }
 PERMISSION_ERROR_CODES = {10089, 10091, 10167}
 DELAYED_POLICY_CANDIDATES = (
-    REPO_ROOT / "governance/02_REGISTRIES/C2_MARKET_DATA_POLICY_V1.json",
-    REPO_ROOT / "governance/02_REGISTRIES/C2_PAPER_MARKET_DATA_POLICY_V1.json",
-    REPO_ROOT / "governance/05_CONTRACTS/C2/paper_market_data_policy_v1.contract.json",
+    Path("governance/02_REGISTRIES/C2_MARKET_DATA_POLICY_V1.json"),
+    Path("governance/02_REGISTRIES/C2_PAPER_MARKET_DATA_POLICY_V1.json"),
+    Path("governance/05_CONTRACTS/C2/paper_market_data_policy_v1.contract.json"),
 )
 
 
@@ -165,28 +166,49 @@ def _ib_permission_evidence_from_entitlement(probe: dict[str, Any]) -> list[dict
     return evidence
 
 
-def _delayed_data_policy() -> dict[str, Any]:
-    for path in DELAYED_POLICY_CANDIDATES:
+def _delayed_data_policy(ctx: bod.BodContext) -> dict[str, Any]:
+    candidates = [ctx.truth_root / PAPER_DELAYED_POLICY_RELATIVE_PATH]
+    candidates.extend(REPO_ROOT / path for path in DELAYED_POLICY_CANDIDATES)
+    for path in candidates:
         payload = _read_json(path)
         if not payload:
             continue
-        raw = (
-            payload.get("paper_delayed_data_allowed")
-            if "paper_delayed_data_allowed" in payload
-            else payload.get("delayed_data_accepted_for_paper_readiness")
+        mode = str(payload.get("mode") or payload.get("environment") or "").strip().upper()
+        allowed_types = payload.get("allowed_data_types") if isinstance(payload.get("allowed_data_types"), list) else []
+        raw = payload.get("allow_delayed_data")
+        if raw is None:
+            raw = (
+                payload.get("paper_delayed_data_allowed")
+                if "paper_delayed_data_allowed" in payload
+                else payload.get("delayed_data_accepted_for_paper_readiness")
+            )
+        accepted = (
+            ctx.environment == "PAPER"
+            and mode == "PAPER"
+            and raw is True
+            and bool({"DELAYED", "DELAYED_FROZEN"}.intersection({str(item or "").strip().upper() for item in allowed_types}))
         )
-        accepted = bool(raw is True)
         return {
             "status": "PRESENT",
             "policy_path": str(path),
             "delayed_data_accepted_by_policy": accepted,
             "policy_decision": "DELAYED_DATA_ACCEPTED_BY_POLICY" if accepted else "DELAYED_DATA_NOT_ACCEPTED_BY_POLICY",
+            "mode": mode,
+            "allow_delayed_data": bool(raw is True),
+            "allowed_data_types": allowed_types,
+            "requirements": payload.get("requirements") if isinstance(payload.get("requirements"), list) else [],
+            "reason": str(payload.get("reason") or "").strip(),
         }
     return {
         "status": "MISSING",
-        "policy_path": "",
+        "policy_path": str((ctx.truth_root / PAPER_DELAYED_POLICY_RELATIVE_PATH).resolve()),
         "delayed_data_accepted_by_policy": False,
         "policy_decision": "DELAYED_DATA_POLICY_MISSING",
+        "mode": ctx.environment,
+        "allow_delayed_data": False,
+        "allowed_data_types": [],
+        "requirements": [],
+        "reason": "",
     }
 
 
@@ -343,8 +365,8 @@ def _provider_checks_from_entitlement(
     if delayed_available and delayed_accepted:
         return (
             [
-                _provider_check(ctx=ctx, instrument=instrument, capability="IB_MARKET_DATA_API_ACCESS", status="AVAILABLE", evidence=evidence),
-                _provider_check(ctx=ctx, instrument=instrument, capability="OPTIONS_BID_ASK_QUOTES", status="AVAILABLE", evidence=evidence + [{"policy_decision": "DELAYED_DATA_ACCEPTED_BY_POLICY", "policy_path": delayed_policy.get("policy_path", "")}]),
+                _provider_check(ctx=ctx, instrument=instrument, capability="IB_MARKET_DATA_API_ACCESS", status="AVAILABLE", evidence=evidence + [{"capability": "DELAYED_DATA_ACCEPTED_BY_POLICY", "policy_path": delayed_policy.get("policy_path", "")}]),
+                _provider_check(ctx=ctx, instrument=instrument, capability="OPTIONS_BID_ASK_QUOTES", status="AVAILABLE", evidence=evidence + [{"capability": "DELAYED_DATA_ACCEPTED_BY_POLICY", "policy_decision": "DELAYED_DATA_ACCEPTED_BY_POLICY", "policy_path": delayed_policy.get("policy_path", "")}]),
             ],
             "",
             "",
@@ -433,6 +455,19 @@ def _latest_snapshot_for_symbol(*, execution_root: Path, day_utc: str, instrumen
     return candidates[-1]
 
 
+def _snapshot_market_data_mode(snapshot: dict[str, Any]) -> str:
+    provenance = snapshot.get("provenance") if isinstance(snapshot.get("provenance"), dict) else {}
+    try:
+        market_data_type = int(provenance.get("market_data_type"))
+    except Exception:
+        market_data_type = 0
+    if market_data_type == 1:
+        return "LIVE"
+    if market_data_type in {3, 4}:
+        return "DELAYED"
+    return "UNKNOWN"
+
+
 def _contract_has_quote(contract: dict[str, Any]) -> bool:
     for key in ("bid", "ask", "last", "mark", "mid", "close", "delayed_bid", "delayed_ask", "delayed_last", "delayed_close"):
         if contract.get(key) not in (None, ""):
@@ -443,14 +478,17 @@ def _contract_has_quote(contract: dict[str, Any]) -> bool:
     return False
 
 
-def _validate_snapshot(*, ctx: bod.BodContext, instrument: str, eval_time_utc: str) -> tuple[str, dict[str, Any]]:
+def _validate_snapshot(*, ctx: bod.BodContext, instrument: str, eval_time_utc: str, data_mode: str = "UNKNOWN") -> tuple[str, dict[str, Any]]:
     snapshot_path, cert_path, snapshot, cert = _latest_snapshot_for_symbol(execution_root=ctx.execution_root, day_utc=ctx.day_utc, instrument=instrument)
+    observed_mode = _snapshot_market_data_mode(snapshot) if snapshot else data_mode
     artifact = {
         "instrument": instrument,
         "snapshot_path": str(snapshot_path or ""),
         "freshness_certificate_path": str(cert_path or ""),
         "snapshot_valid": False,
         "freshness_valid": False,
+        "data_mode": data_mode if data_mode != "UNKNOWN" else observed_mode,
+        "quote_timestamp_available": False,
         "blocker": "",
     }
     if snapshot_path is None:
@@ -472,6 +510,9 @@ def _validate_snapshot(*, ctx: bod.BodContext, instrument: str, eval_time_utc: s
     if spot in (None, ""):
         artifact["blocker"] = "OPTIONS_UNDERLYING_SPOT_MISSING"
         return "OPTIONS_UNDERLYING_SPOT_MISSING", artifact
+    if not str(snapshot.get("as_of_utc") or "").strip() or not str(underlying.get("spot_as_of_utc") or "").strip():
+        artifact["blocker"] = "OPTIONS_SNAPSHOT_STALE"
+        return "OPTIONS_SNAPSHOT_STALE", artifact
     contracts = snapshot.get("contracts")
     if not isinstance(contracts, list) or not contracts:
         artifact["blocker"] = "OPTIONS_CONTRACT_QUALIFICATION_FAILED"
@@ -489,6 +530,8 @@ def _validate_snapshot(*, ctx: bod.BodContext, instrument: str, eval_time_utc: s
         return "OPTIONS_SNAPSHOT_STALE", artifact
     artifact["snapshot_valid"] = True
     artifact["freshness_valid"] = True
+    artifact["quote_timestamp_available"] = True
+    artifact["data_mode"] = data_mode if data_mode != "UNKNOWN" else observed_mode
     return "", artifact
 
 
@@ -543,7 +586,7 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
     artifacts: list[dict[str, Any]] = []
     entitlement_probes: list[dict[str, Any]] = []
     authority_result: dict[str, Any] = {}
-    delayed_policy = _delayed_data_policy()
+    delayed_policy = _delayed_data_policy(ctx)
     blocker = ""
     if unowned is not None:
         requirements.append(
@@ -578,6 +621,9 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
             "delayed_data_available": False,
             "delayed_data_accepted_by_policy": False,
             "delayed_data_policy": delayed_policy,
+            "delayed_data_used": False,
+            "market_data_mode": "NOT_REQUIRED",
+            "policy_source_path": str(delayed_policy.get("policy_path") or ""),
             "ib_error_codes": [],
             "operator_next_action": "",
         }
@@ -597,6 +643,13 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
         if check_blocker and not provider_blocker:
             provider_blocker = check_blocker
             provider_action = check_action
+    root_probe = entitlement_probes[0] if entitlement_probes else {}
+    delayed_data_used = (
+        bool(root_probe.get("live_data_available") is False)
+        and bool(root_probe.get("delayed_data_available") is True)
+        and bool(delayed_policy.get("delayed_data_accepted_by_policy") is True)
+    )
+    market_data_mode = "DELAYED" if delayed_data_used else ("LIVE" if root_probe.get("live_data_available") is True else "UNKNOWN")
     if blocker:
         pass
     elif provider_blocker:
@@ -611,6 +664,7 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
             )
             if unknown:
                 capture = _run_capture(ctx, instrument)
+                capture["data_mode"] = market_data_mode
                 capture_attempts.append(capture)
                 probe_path = _entitlement_probe_path(ctx, instrument)
                 probe = _read_json(probe_path)
@@ -634,6 +688,7 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
                 snapshot_path, _cert_path, _snapshot_payload, _cert_payload = _latest_snapshot_for_symbol(execution_root=ctx.execution_root, day_utc=ctx.day_utc, instrument=instrument)
                 if snapshot_path is None and not any(row.get("instrument") == instrument for row in capture_attempts):
                     capture = _run_capture(ctx, instrument)
+                    capture["data_mode"] = market_data_mode
                     capture_attempts.append(capture)
                     if capture["status"] != "PASS":
                         blocker = str(capture.get("blocker") or "OPTIONS_SNAPSHOT_CAPTURE_FAILED")
@@ -642,7 +697,7 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
                 pass
         if not blocker:
             for instrument in instruments:
-                validation_blocker, artifact = _validate_snapshot(ctx=ctx, instrument=instrument, eval_time_utc=eval_time_utc)
+                validation_blocker, artifact = _validate_snapshot(ctx=ctx, instrument=instrument, eval_time_utc=eval_time_utc, data_mode=market_data_mode)
                 artifacts.append(artifact)
                 if validation_blocker:
                     blocker = validation_blocker
@@ -654,7 +709,6 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
     status = "PASS" if not blocker else "BLOCKED"
     root_instrument = instruments[0] if instruments else ""
     action = provider_action or _operator_action(blocker, root_instrument, ctx.day_utc)
-    root_probe = entitlement_probes[0] if entitlement_probes else {}
     ib_error_codes: list[int] = []
     for probe in entitlement_probes:
         for code in probe.get("ib_error_codes") or []:
@@ -684,6 +738,9 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
         "delayed_data_available": bool(root_probe.get("delayed_data_available") is True),
         "delayed_data_accepted_by_policy": bool(delayed_policy.get("delayed_data_accepted_by_policy") is True),
         "delayed_data_policy": delayed_policy,
+        "delayed_data_used": delayed_data_used,
+        "market_data_mode": market_data_mode,
+        "policy_source_path": str(delayed_policy.get("policy_path") or ""),
         "delayed_data_policy_result": (
             "DELAYED_DATA_ACCEPTED_BY_POLICY"
             if delayed_policy.get("delayed_data_accepted_by_policy") is True
