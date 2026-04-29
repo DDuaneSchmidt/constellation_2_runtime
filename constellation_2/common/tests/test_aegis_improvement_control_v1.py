@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from constellation_2.common.aegis_improvement_control_v1 import (
     approve_proposal_v1,
+    build_improvement_control_review_v1,
     build_improvement_control_report_v1,
     create_policy_from_approved_proposal_v1,
     create_rollback_record_v1,
@@ -23,8 +26,10 @@ from constellation_2.common.aegis_improvement_control_v1 import (
     make_measurement_placeholder_from_replay_or_backtest_v1,
     measure_policy_impact_v1,
     policy_state_is_runtime_eligible_v1,
+    render_improvement_control_review_markdown_v1,
     reject_proposal_v1,
     test_first_proposal_v1 as make_test_first_decision_v1,
+    write_improvement_control_review_artifacts_v1,
 )
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
@@ -40,6 +45,7 @@ POLICY_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/aegis_versioned_policy.v1
 MEASUREMENT_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/aegis_policy_measurement.v1.schema.json"
 ROLLBACK_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/aegis_policy_rollback.v1.schema.json"
 REPORT_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/aegis_improvement_control_report.v1.schema.json"
+REVIEW_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/aegis_improvement_control_review.v1.schema.json"
 PREFLIGHT_ARTIFACT = Path("constellation_2/runtime/truth/reports/preopen_preflight_v1/2026-04-08/preopen_preflight.v1.json")
 DIVERGENCE_ARTIFACT = Path("constellation_2/runtime/truth/reports/paper_session_divergence_v1/2026-04-08/paper_session_divergence.v1.json")
 
@@ -409,6 +415,120 @@ def test_measurement_placeholder_can_reference_available_replay_or_backtest_outp
     assert measurement["before_metrics"]["source_sha256"] == "7a718799303ba39a2023063238b6cf971c2180c322936f517685d6e3b9e00e38"
     assert measurement["before_metrics"]["selected_summary_fields"]["reason_code"] == "UNDECLARED_DEPENDENCY_ACCESS"
     validate_against_repo_schema_v1(measurement, REPO_ROOT, MEASUREMENT_SCHEMA)
+
+
+def _review_fixture() -> dict:
+    evidence = _evidence()
+    finding = _finding()
+    proposal = _proposal()
+    test_first = make_test_first_decision_v1(proposal=proposal, approver="operator", timestamp=TS, notes="Test before approval.")
+    approval = approve_proposal_v1(proposal=proposal, approver="operator", timestamp=TS, notes="Approved for inactive policy record.")
+    inactive_policy_due = create_policy_from_approved_proposal_v1(
+        proposal=proposal,
+        approval=approval,
+        policy_version=1,
+        policy_payload={"advisory_policy": {"threshold_bps": 25}},
+        status="inactive",
+        created_at=TS,
+    )
+    inactive_policy_degraded = create_policy_from_approved_proposal_v1(
+        proposal=proposal,
+        approval=approval,
+        policy_version=2,
+        policy_payload={"advisory_policy": {"threshold_bps": 26}},
+        status="inactive",
+        created_at=TS,
+    )
+    degraded_measurement = measure_policy_impact_v1(
+        policy_id=inactive_policy_degraded["policy_id"],
+        measurement_window_start="2026-04-01",
+        measurement_window_end="2026-04-28",
+        before_metrics={"blocked_days": 1},
+        after_metrics={"blocked_days": 2},
+        success_criteria_met=False,
+        rollback_criteria_met=True,
+        conclusion="degraded",
+        summary="Offline measurement indicates degradation.",
+        created_at=TS,
+    )
+    return {
+        "evidence": [evidence],
+        "findings": [finding],
+        "proposals": [proposal],
+        "approvals": [test_first, approval],
+        "policies": [inactive_policy_due, inactive_policy_degraded],
+        "measurements": [degraded_measurement],
+        "rollbacks": [],
+    }
+
+
+def test_review_report_includes_required_sections_and_flags() -> None:
+    fixture = _review_fixture()
+    review = build_improvement_control_review_v1(day_utc="2026-04-28", generated_at=TS, **fixture)
+    assert review["summary"]["advisory_only"] is True
+    assert review["summary"]["controls_runtime_behavior"] is False
+    assert review["summary"]["controls_broker_execution"] is False
+    assert review["summary"]["controls_phasec_materialization"] is False
+    assert review["advisory_only"] is True
+    assert review["controls_runtime_behavior"] is False
+    validate_against_repo_schema_v1(review, REPO_ROOT, REVIEW_SCHEMA)
+
+
+def test_review_report_includes_findings_with_linked_evidence() -> None:
+    fixture = _review_fixture()
+    review = build_improvement_control_review_v1(day_utc="2026-04-28", generated_at=TS, **fixture)
+    assert review["findings"][0]["finding_id"] == fixture["findings"][0]["finding_id"]
+    assert review["findings"][0]["evidence_ids"] == fixture["findings"][0]["evidence_ids"]
+    assert review["evidence"][0]["evidence_id"] == fixture["evidence"][0]["evidence_id"]
+    assert review["evidence"][0]["source_sha256"] == SHA
+
+
+def test_review_report_groups_proposals_and_surfaces_test_first() -> None:
+    fixture = _review_fixture()
+    review = build_improvement_control_review_v1(day_utc="2026-04-28", generated_at=TS, **fixture)
+    assert review["summary"]["proposals_by_status"]["proposed"] == 1
+    assert len(review["proposals_by_status"]["proposed"]) == 1
+    assert review["summary"]["test_first_items_count"] == 1
+    assert review["approval_test_queue"]["test_first"][0]["proposal_id"] == fixture["proposals"][0]["proposal_id"]
+
+
+def test_review_report_shows_inactive_policies_without_active_policy() -> None:
+    fixture = _review_fixture()
+    review = build_improvement_control_review_v1(day_utc="2026-04-28", generated_at=TS, **fixture)
+    assert review["summary"]["inactive_policies_count"] == 2
+    assert review["summary"]["active_policies_count"] == 0
+    assert {row["status"] for row in review["inactive_policies"]} == {"inactive"}
+    assert review["active_policies"] == []
+
+
+def test_review_report_surfaces_measurements_due_and_rollback_candidates() -> None:
+    fixture = _review_fixture()
+    review = build_improvement_control_review_v1(day_utc="2026-04-28", generated_at=TS, **fixture)
+    assert review["summary"]["measurements_due_count"] == 1
+    assert review["measurements_due"][0]["policy_status"] == "inactive"
+    assert review["summary"]["rollback_candidates_count"] == 1
+    assert review["rollback_candidates"][0]["reason"] == "rollback_criteria_met"
+    assert review["rollback_candidates"][0]["conclusion"] == "degraded"
+
+
+def test_review_report_generation_does_not_mutate_inputs() -> None:
+    fixture = _review_fixture()
+    before = copy.deepcopy(fixture)
+    build_improvement_control_review_v1(day_utc="2026-04-28", generated_at=TS, **fixture)
+    assert fixture == before
+
+
+def test_review_markdown_and_artifact_writer_are_read_only_outputs(tmp_path: Path) -> None:
+    fixture = _review_fixture()
+    review = build_improvement_control_review_v1(day_utc="2026-04-28", generated_at=TS, **fixture)
+    markdown = render_improvement_control_review_markdown_v1(review)
+    assert "Aegis Improvement Control Review V1" in markdown
+    paths = write_improvement_control_review_artifacts_v1(truth_root=tmp_path, review=review)
+    json_path = Path(str(paths["json_path"]))
+    markdown_path = Path(str(paths["markdown_path"]))
+    assert json_path.exists()
+    assert markdown_path.exists()
+    assert json.loads(json_path.read_text(encoding="utf-8"))["schema_id"] == "C2_AEGIS_IMPROVEMENT_CONTROL_REVIEW_V1"
 
 
 def test_no_broker_phasec_or_sleeve_logic_files_are_changed() -> None:

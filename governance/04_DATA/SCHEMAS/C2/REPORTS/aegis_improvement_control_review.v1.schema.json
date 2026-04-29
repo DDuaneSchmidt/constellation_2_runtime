@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/aegis_improvement_control_review.v1.schema.json",
+  "title": "aegis_improvement_control_review.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "generated_at",
+    "module_version",
+    "summary",
+    "findings",
+    "evidence",
+    "proposals",
+    "proposals_by_status",
+    "approval_test_queue",
+    "approvals",
+    "policies",
+    "inactive_policies",
+    "active_policies",
+    "measurements",
+    "measurements_due",
+    "rollback_candidates",
+    "rollback_records",
+    "advisory_only",
+    "controls_runtime_behavior",
+    "controls_broker_execution",
+    "controls_phasec_materialization"
+  ],
+  "properties": {
+    "schema_id": { "type": "string", "const": "C2_AEGIS_IMPROVEMENT_CONTROL_REVIEW_V1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "generated_at": { "type": "string", "minLength": 1 },
+    "module_version": { "type": "string", "minLength": 1 },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "open_findings_count",
+        "proposals_by_status",
+        "test_first_items_count",
+        "inactive_policies_count",
+        "active_policies_count",
+        "measurements_due_count",
+        "rollback_candidates_count",
+        "advisory_only",
+        "controls_runtime_behavior",
+        "controls_broker_execution",
+        "controls_phasec_materialization"
+      ],
+      "properties": {
+        "open_findings_count": { "type": "integer", "minimum": 0 },
+        "proposals_by_status": { "type": "object" },
+        "test_first_items_count": { "type": "integer", "minimum": 0 },
+        "inactive_policies_count": { "type": "integer", "minimum": 0 },
+        "active_policies_count": { "type": "integer", "minimum": 0 },
+        "measurements_due_count": { "type": "integer", "minimum": 0 },
+        "rollback_candidates_count": { "type": "integer", "minimum": 0 },
+        "advisory_only": { "type": "boolean", "const": true },
+        "controls_runtime_behavior": { "type": "boolean", "const": false },
+        "controls_broker_execution": { "type": "boolean", "const": false },
+        "controls_phasec_materialization": { "type": "boolean", "const": false }
+      }
+    },
+    "findings": { "type": "array", "items": { "$ref": "#/$defs/finding_row" } },
+    "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence_row" } },
+    "proposals": { "type": "array", "items": { "$ref": "#/$defs/proposal_row" } },
+    "proposals_by_status": { "type": "object" },
+    "approval_test_queue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["proposed", "test_first", "rejected", "approved"],
+      "properties": {
+        "proposed": { "type": "array", "items": { "$ref": "#/$defs/proposal_row" } },
+        "test_first": { "type": "array", "items": { "$ref": "#/$defs/proposal_row" } },
+        "rejected": { "type": "array", "items": { "$ref": "#/$defs/proposal_row" } },
+        "approved": { "type": "array", "items": { "$ref": "#/$defs/proposal_row" } }
+      }
+    },
+    "approvals": { "type": "array", "items": { "type": "object" } },
+    "policies": { "type": "array", "items": { "$ref": "#/$defs/policy_row" } },
+    "inactive_policies": { "type": "array", "items": { "$ref": "#/$defs/policy_row" } },
+    "active_policies": { "type": "array", "items": { "$ref": "#/$defs/policy_row" } },
+    "measurements": { "type": "array", "items": { "$ref": "#/$defs/measurement_row" } },
+    "measurements_due": { "type": "array", "items": { "type": "object" } },
+    "rollback_candidates": { "type": "array", "items": { "type": "object" } },
+    "rollback_records": { "type": "array", "items": { "type": "object" } },
+    "advisory_only": { "type": "boolean", "const": true },
+    "controls_runtime_behavior": { "type": "boolean", "const": false },
+    "controls_broker_execution": { "type": "boolean", "const": false },
+    "controls_phasec_materialization": { "type": "boolean", "const": false }
+  },
+  "$defs": {
+    "finding_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["finding_id", "category", "severity", "confidence", "affected_scope", "affected_ids", "observation", "evidence_ids", "status"],
+      "properties": {
+        "finding_id": { "type": "string" },
+        "category": { "type": "string" },
+        "severity": { "type": "string" },
+        "confidence": { "type": "string" },
+        "affected_scope": { "type": "string" },
+        "affected_ids": { "type": "array" },
+        "observation": { "type": "string" },
+        "evidence_ids": { "type": "array" },
+        "status": { "type": "string" }
+      }
+    },
+    "evidence_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_id", "evidence_type", "source_path", "source_sha256", "summary"],
+      "properties": {
+        "evidence_id": { "type": "string" },
+        "evidence_type": { "type": "string" },
+        "source_path": { "type": "string" },
+        "source_sha256": { "type": "string" },
+        "summary": { "type": "string" }
+      }
+    },
+    "proposal_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["proposal_id", "finding_id", "proposal_type", "rationale", "current_value", "proposed_value", "expected_impact", "risk_notes", "success_criteria", "rollback_criteria", "status"],
+      "properties": {
+        "proposal_id": { "type": "string" },
+        "finding_id": { "type": "string" },
+        "proposal_type": { "type": "string" },
+        "rationale": { "type": "string" },
+        "current_value": {},
+        "proposed_value": {},
+        "expected_impact": { "type": "string" },
+        "risk_notes": { "type": "string" },
+        "success_criteria": { "type": "array" },
+        "rollback_criteria": { "type": "array" },
+        "status": { "type": "string" }
+      }
+    },
+    "policy_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_id", "policy_version", "source_proposal_id", "policy_type", "status", "effective_start", "effective_end"],
+      "properties": {
+        "policy_id": { "type": "string" },
+        "policy_version": { "type": ["integer", "string"] },
+        "source_proposal_id": { "type": "string" },
+        "policy_type": { "type": "string" },
+        "status": { "type": "string" },
+        "effective_start": { "type": ["string", "null"] },
+        "effective_end": { "type": ["string", "null"] }
+      }
+    },
+    "measurement_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_id", "measurement_id", "measurement_window_start", "measurement_window_end", "success_criteria_met", "rollback_criteria_met", "conclusion", "summary"],
+      "properties": {
+        "policy_id": { "type": "string" },
+        "measurement_id": { "type": "string" },
+        "measurement_window_start": { "type": "string" },
+        "measurement_window_end": { "type": "string" },
+        "success_criteria_met": { "type": "boolean" },
+        "rollback_criteria_met": { "type": "boolean" },
+        "conclusion": { "type": "string" },
+        "summary": { "type": "string" }
+      }
+    }
+  }
+}

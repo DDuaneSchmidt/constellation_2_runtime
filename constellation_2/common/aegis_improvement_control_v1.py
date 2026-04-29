@@ -249,29 +249,35 @@ def _projection(row: Mapping[str, Any], fields: Iterable[str]) -> dict[str, Any]
     return {field: _plain_jsonish(row.get(field)) for field in fields}
 
 
-def _proposal_decisions_by_id(approvals: Iterable[Mapping[str, Any]]) -> dict[str, str]:
-    decisions: dict[str, str] = {}
+def _proposal_decisions_by_id(approvals: Iterable[Mapping[str, Any]]) -> dict[str, list[str]]:
+    decisions: dict[str, list[str]] = {}
     for approval in approvals:
         proposal_id = str(approval.get("proposal_id") or "").strip()
         decision = str(approval.get("decision") or "").strip()
         if proposal_id and decision in APPROVAL_DECISIONS:
-            decisions[proposal_id] = decision
+            decisions.setdefault(proposal_id, [])
+            if decision not in decisions[proposal_id]:
+                decisions[proposal_id].append(decision)
     return decisions
 
 
-def _proposal_queue_group(proposal: Mapping[str, Any], decisions_by_id: Mapping[str, str]) -> str:
+def _proposal_queue_groups(proposal: Mapping[str, Any], decisions_by_id: Mapping[str, list[str]]) -> list[str]:
     proposal_id = str(proposal.get("proposal_id") or "").strip()
-    decision = str(decisions_by_id.get(proposal_id) or "").strip()
-    if decision == "approve":
-        return "approved"
-    if decision == "reject":
-        return "rejected"
-    if decision == "test_first":
-        return "test_first"
+    decisions = list(decisions_by_id.get(proposal_id) or [])
+    groups: list[str] = []
+    for decision in decisions:
+        if decision == "approve":
+            groups.append("approved")
+        elif decision == "reject":
+            groups.append("rejected")
+        elif decision == "test_first":
+            groups.append("test_first")
+    if groups:
+        return groups
     status = str(proposal.get("status") or "proposed").strip()
     if status in {"approved", "rejected", "test_first"}:
-        return status
-    return "proposed"
+        return [status]
+    return ["proposed"]
 
 
 def _measurements_due_for_review(policies: Iterable[Mapping[str, Any]], measurements: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -974,8 +980,9 @@ def build_improvement_control_review_v1(
     decisions_by_id = _proposal_decisions_by_id(approval_rows)
     approval_test_queue = {"proposed": [], "test_first": [], "rejected": [], "approved": []}
     for proposal in proposal_rows:
-        group = _proposal_queue_group(proposal, decisions_by_id)
-        approval_test_queue[group].append(_proposal_review_row_v1(proposal))
+        proposal_row = _proposal_review_row_v1(proposal)
+        for group in _proposal_queue_groups(proposal, decisions_by_id):
+            approval_test_queue[group].append(proposal_row)
 
     inactive_policy_rows = [_policy_review_row_v1(policy) for policy in policy_rows if str(policy.get("status") or "") == "inactive"]
     active_policy_rows = [_policy_review_row_v1(policy) for policy in policy_rows if str(policy.get("status") or "") == "active"]
