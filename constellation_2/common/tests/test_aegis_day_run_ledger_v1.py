@@ -366,6 +366,37 @@ def test_market_data_bod_prep_demotes_stale_snapshot_to_market_open_gate(
     assert "OPTIONS_SNAPSHOT_STALE" in row["downstream_consequences"]
 
 
+def test_strategy_and_risk_bod_phase_does_not_run_quote_dependent_strategy_decision(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ctx = _ctx(tmp_path)
+    _write(day_run._capital_supply_path(ctx), {"day_utc": ctx.day_utc, "status": "PASS"})
+    _write(day_run._risk_budget_supply_path(ctx), {"day_utc": ctx.day_utc, "status": "PASS"})
+    called: list[str] = []
+
+    def _fake_run_steps(_phase, commands, **_kwargs):  # noqa: ANN001
+        called.extend(command[0] for command in commands)
+        outputs = []
+        for step_name, _cmd, _attempts in commands:
+            if step_name == "capital_supply":
+                outputs.append(str(day_run._capital_supply_path(ctx)))
+            if step_name == "risk_budget_supply":
+                outputs.append(str(day_run._risk_budget_supply_path(ctx)))
+        return (
+            [{"step_name": command[0], "status": "PASS", "blocker": ""} for command in commands],
+            outputs,
+            [],
+        )
+
+    monkeypatch.setattr(day_run, "_run_steps", _fake_run_steps)
+
+    row = day_run._phase_strategy_and_risk(ctx, {})
+
+    assert row["status"] == "PASS"
+    assert "strategy_decision_authority" not in called
+    assert "risk_budget_supply" in called
+
+
 def test_day_ledger_cannot_reach_paper_ready_before_market_gate_passes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

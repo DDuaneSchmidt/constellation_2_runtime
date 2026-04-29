@@ -504,7 +504,6 @@ def _phase_strategy_and_risk(ctx: PhaseContext, env: dict[str, str]) -> dict[str
     started = _now_iso()
     pre_capital_commands = [
         ("trading_day_intent_generation", [py, "ops/tools/run_trading_day_intent_generation_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.truth_root)], 1),
-        ("strategy_decision_authority", [py, "ops/tools/run_strategy_decision_authority_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.truth_root), "--execution_root", str(ctx.execution_root)], 1),
         ("portfolio_account_authority", [py, "ops/tools/run_portfolio_account_authority_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.truth_root), "--execution_root", str(ctx.execution_root)], 1),
         ("phasec_risk_inputs_prep", [py, "ops/tools/run_phasec_risk_inputs_prep_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.truth_root)], 1),
     ]
@@ -581,7 +580,7 @@ def _phase_strategy_and_risk(ctx: PhaseContext, env: dict[str, str]) -> dict[str
         canonical_blocker=blockers[0] if blockers else "",
         blocker_detail=blocker_detail,
         outputs=outputs,
-        producer_command="run intent generation; strategy; portfolio; PhaseC prep; capital supply; risk budget supply",
+        producer_command="run intent generation; portfolio; PhaseC prep; capital supply; risk budget supply",
         started_at_utc=started,
         completed_at_utc=completed,
         duration_ms=sum(int(s.get("duration_ms") or 0) for s in steps),
