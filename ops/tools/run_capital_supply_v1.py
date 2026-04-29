@@ -97,6 +97,10 @@ def capital_supply_path(*, truth_root: Path, day_utc: str) -> Path:
     return (truth_root / "reports" / "capital_supply_v1" / day_utc / "capital_supply.v1.json").resolve()
 
 
+def _broker_supply_path(ctx: bod.BodContext) -> Path:
+    return (ctx.truth_root / "reports" / "broker_supply_v1" / ctx.day_utc / "broker_supply.v1.json").resolve()
+
+
 def _source_row(
     *,
     source_type: str,
@@ -165,6 +169,35 @@ def _broker_snapshot_paths(ctx: bod.BodContext) -> list[Path]:
 
 
 def _load_broker_source(ctx: bod.BodContext) -> dict[str, Any]:
+    broker_supply_path = _broker_supply_path(ctx)
+    broker_supply = _read_json(broker_supply_path)
+    if broker_supply:
+        export = broker_supply.get("capital_supply_export") if isinstance(broker_supply.get("capital_supply_export"), dict) else {}
+        values = broker_supply.get("account_values") if isinstance(broker_supply.get("account_values"), dict) else {}
+        usable = bool(export.get("usable_for_capital_supply") is True)
+        blocker = str(broker_supply.get("canonical_blocker") or "").strip()
+        cash = export.get("cash_total_cents") if usable else values.get("total_cash_value_cents")
+        nav = export.get("net_liquidation_cents") if usable else values.get("net_liquidation_cents")
+        if usable and isinstance(cash, int) and isinstance(nav, int) and nav > 0:
+            status, row_blocker = "VALID", ""
+        elif blocker in {"BROKER_NAV_EVIDENCE_MISSING", "BROKER_CASH_EVIDENCE_MISSING", "BROKER_VALUES_INVALID"}:
+            status, row_blocker = "NULL_VALUES", blocker
+        elif blocker:
+            status, row_blocker = "MISSING", "BROKER_NAV_EVIDENCE_MISSING"
+        else:
+            status, row_blocker = "MISSING", "BROKER_NAV_EVIDENCE_MISSING"
+        return _source_row(
+            source_type="BROKER_ACCOUNT",
+            source_path=broker_supply_path,
+            status=status,
+            account=str(broker_supply.get("account") or ctx.ib_account),
+            cash_total_cents=cash if isinstance(cash, int) else None,
+            net_liquidation_cents=nav if isinstance(nav, int) else None,
+            currency=str(values.get("currency") or "USD"),
+            freshness_utc=str(broker_supply.get("generated_at_utc") or ""),
+            trust_level=str(export.get("trust_level") or "HIGH"),
+            blocker=row_blocker,
+        )
     for path in _broker_snapshot_paths(ctx):
         payload = _read_json(path)
         if not payload:
@@ -258,6 +291,24 @@ def _select_source(sources: list[dict[str, Any]]) -> tuple[dict[str, Any], str, 
 
 
 def _nav_evidence(ctx: bod.BodContext, selected: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    selected_nav = selected.get("net_liquidation_cents")
+    if (
+        selected.get("source_type") == "BROKER_ACCOUNT"
+        and "broker_supply_v1" in str(selected.get("source_path") or "")
+        and isinstance(selected_nav, int)
+        and selected_nav > 0
+    ):
+        return (
+            {
+                "path": str(selected.get("source_path") or ""),
+                "exists": True,
+                "status": "BROKER_SUPPLY_VALID",
+                "nav_total_cents": selected_nav,
+                "cash_total_cents": selected.get("cash_total_cents"),
+                "source_type": selected.get("source_type", ""),
+            },
+            "",
+        )
     path = (ctx.execution_root / "accounting_v2" / "nav" / ctx.day_utc / "nav.v2.json").resolve()
     payload = _read_json(path)
     nav = payload.get("nav") if isinstance(payload.get("nav"), dict) else {}

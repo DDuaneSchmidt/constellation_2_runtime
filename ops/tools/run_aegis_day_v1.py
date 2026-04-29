@@ -245,6 +245,10 @@ def _capital_supply_path(ctx: PhaseContext) -> Path:
     return _artifact(ctx, "capital_supply_v1", "capital_supply.v1.json")
 
 
+def _broker_supply_path(ctx: PhaseContext) -> Path:
+    return _artifact(ctx, "broker_supply_v1", "broker_supply.v1.json")
+
+
 def _load_requirement_graph_root(ctx: PhaseContext) -> dict[str, Any]:
     graph = _read_json(_requirement_graph_path(ctx))
     if str(graph.get("day_utc") or "").strip() != ctx.day_utc:
@@ -288,23 +292,23 @@ def _phase_broker_health(ctx: PhaseContext, env: dict[str, str]) -> dict[str, An
     started = _now_iso()
     steps, outputs, blockers = _run_steps(
         "BROKER_HEALTH",
-        [("ib_broker_event_probe", [py, "ops/tools/run_ib_broker_event_probe_v1.py", "--day_utc", ctx.day_utc, "--environment", ctx.environment], 1)],
+        [("broker_supply", [py, "ops/tools/run_broker_supply_v1.py", "--day_utc", ctx.day_utc, "--environment", ctx.environment], 1)],
         env=env,
     )
-    path = _artifact(ctx, "ib_broker_event_probe_v1", "ib_broker_event_probe.v1.json")
+    path = _broker_supply_path(ctx)
     payload = _read_json(path)
     status = str(payload.get("status") or "").strip().upper()
     blocker = str(payload.get("canonical_blocker") or "").strip() or (blockers[0] if blockers else "")
     if status != "PASS" and not blocker:
-        blocker = "BROKER_EVENT_LOG_MISSING"
+        blocker = "BROKER_ACCOUNT_SUMMARY_MISSING"
     completed = _now_iso()
     return _empty_phase(
         "BROKER_HEALTH",
         status="PASS" if status == "PASS" and not blockers else "BLOCKED",
         canonical_blocker="" if status == "PASS" and not blockers else blocker,
-        blocker_detail=f"broker probe status={status or 'MISSING'}",
+        blocker_detail=f"broker_supply_status={status or 'MISSING'}",
         outputs=outputs or [str(path)],
-        producer_command="python3 ops/tools/run_ib_broker_event_probe_v1.py",
+        producer_command="python3 ops/tools/run_broker_supply_v1.py",
         started_at_utc=started,
         completed_at_utc=completed,
         duration_ms=sum(int(s.get("duration_ms") or 0) for s in steps),

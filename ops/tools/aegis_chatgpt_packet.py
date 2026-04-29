@@ -213,6 +213,21 @@ class CapitalSupplyStatus:
 
 
 @dataclass(frozen=True)
+class BrokerSupplyStatus:
+    exists: bool
+    path: str
+    day_utc: str
+    status: str
+    canonical_blocker: str
+    account_identity: dict[str, Any]
+    account_values: dict[str, Any]
+    event_log: dict[str, Any]
+    capital_supply_export: dict[str, Any]
+    execution_readiness_export: dict[str, Any]
+    operator_next_action: str
+
+
+@dataclass(frozen=True)
 class CapabilityRow:
     capability: str
     status: str
@@ -427,6 +442,40 @@ def _capital_supply_path(roots: RootResolution, day_utc: str) -> Path | None:
         / day_utc
         / "capital_supply.v1.json"
     ).resolve()
+
+
+def _broker_supply_path(roots: RootResolution, day_utc: str) -> Path | None:
+    if roots.canonical_truth_root is None or not DATE_RE.match(str(day_utc or "")):
+        return None
+    return (
+        roots.canonical_truth_root
+        / "reports"
+        / "broker_supply_v1"
+        / day_utc
+        / "broker_supply.v1.json"
+    ).resolve()
+
+
+def _load_broker_supply_status(roots: RootResolution, day_utc: str) -> BrokerSupplyStatus:
+    path = _broker_supply_path(roots, day_utc)
+    payload = _read_json(path)
+    if not isinstance(payload, dict):
+        return BrokerSupplyStatus(False, str(path) if path else "NOT_FOUND", day_utc, "MISSING", "BROKER_SUPPLY_MISSING", {}, {}, {}, {}, {}, "")
+    if str(payload.get("day_utc") or "").strip() != day_utc:
+        return BrokerSupplyStatus(True, str(path), day_utc, "WRONG_DAY", "WRONG_DAY_BROKER_SUPPLY", {}, {}, {}, {}, {}, f"Regenerate broker supply for {day_utc}.")
+    return BrokerSupplyStatus(
+        True,
+        str(path),
+        str(payload.get("day_utc") or day_utc),
+        str(payload.get("status") or "").strip().upper(),
+        str(payload.get("canonical_blocker") or "").strip(),
+        payload.get("account_identity") if isinstance(payload.get("account_identity"), dict) else {},
+        payload.get("account_values") if isinstance(payload.get("account_values"), dict) else {},
+        payload.get("event_log") if isinstance(payload.get("event_log"), dict) else {},
+        payload.get("capital_supply_export") if isinstance(payload.get("capital_supply_export"), dict) else {},
+        payload.get("execution_readiness_export") if isinstance(payload.get("execution_readiness_export"), dict) else {},
+        str(payload.get("operator_next_action") or "").strip(),
+    )
 
 
 def _load_capital_supply_status(roots: RootResolution, day_utc: str) -> CapitalSupplyStatus:
@@ -1980,6 +2029,7 @@ def _build_paper_status(
     day_run = _load_day_run_ledger_status(roots, current_day.day_utc)
     requirement_graph = _load_requirement_graph_status(roots, current_day.day_utc)
     market_data_supply = _load_market_data_supply_status(roots, current_day.day_utc)
+    broker_supply = _load_broker_supply_status(roots, current_day.day_utc)
     capital_supply = _load_capital_supply_status(roots, current_day.day_utc)
 
     freshness_day = (
@@ -2174,6 +2224,22 @@ def _build_paper_status(
         f"- IB evidence: {json.dumps(market_data_supply.provider_check.get('evidence', []), sort_keys=True)}",
         f"- operator_next_action: {market_data_supply.operator_next_action}",
         "",
+        "## Broker Supply",
+        "",
+        f"- broker_supply_path: {broker_supply.path}",
+        f"- broker_supply_exists: {'true' if broker_supply.exists else 'false'}",
+        f"- broker_supply_status: {broker_supply.status}",
+        f"- broker_supply_canonical_blocker: {broker_supply.canonical_blocker}",
+        f"- broker_account_identity_match: {broker_supply.account_identity.get('match', '')}",
+        f"- broker_observed_accounts: {json.dumps(broker_supply.account_identity.get('observed_accounts', []), sort_keys=True)}",
+        f"- broker_net_liquidation_cents: {broker_supply.account_values.get('net_liquidation_cents', '')}",
+        f"- broker_total_cash_value_cents: {broker_supply.account_values.get('total_cash_value_cents', '')}",
+        f"- broker_event_log_status: {broker_supply.event_log.get('status', '')}",
+        f"- broker_event_latest_event_at_utc: {broker_supply.event_log.get('latest_event_at_utc', '')}",
+        f"- broker_capital_supply_export_usable: {broker_supply.capital_supply_export.get('usable_for_capital_supply', '')}",
+        f"- broker_execution_readiness_export_usable: {broker_supply.execution_readiness_export.get('usable_for_execution_readiness', '')}",
+        f"- operator_next_action: {broker_supply.operator_next_action}",
+        "",
         "## Capital Supply",
         "",
         f"- capital_supply_path: {capital_supply.path}",
@@ -2207,6 +2273,16 @@ def _build_paper_status(
         f"- market_data_supply_provider_status: {market_data_supply.provider_check.get('status', '')}",
         f"- market_data_supply_IB_evidence: {json.dumps(market_data_supply.provider_check.get('evidence', []), sort_keys=True)}",
         f"- market_data_supply_operator_next_action: {market_data_supply.operator_next_action}",
+        f"- broker_supply_path: {broker_supply.path}",
+        f"- broker_supply_status: {broker_supply.status}",
+        f"- broker_supply_canonical_blocker: {broker_supply.canonical_blocker}",
+        f"- broker_supply_account_identity_match: {broker_supply.account_identity.get('match', '')}",
+        f"- broker_supply_net_liquidation_cents: {broker_supply.account_values.get('net_liquidation_cents', '')}",
+        f"- broker_supply_total_cash_value_cents: {broker_supply.account_values.get('total_cash_value_cents', '')}",
+        f"- broker_supply_event_freshness: {broker_supply.event_log.get('status', '')}",
+        f"- broker_supply_capital_export_usable: {broker_supply.capital_supply_export.get('usable_for_capital_supply', '')}",
+        f"- broker_supply_execution_export_usable: {broker_supply.execution_readiness_export.get('usable_for_execution_readiness', '')}",
+        f"- broker_supply_operator_next_action: {broker_supply.operator_next_action}",
         f"- capital_supply_path: {capital_supply.path}",
         f"- capital_supply_status: {capital_supply.status}",
         f"- capital_supply_canonical_blocker: {capital_supply.canonical_blocker}",
