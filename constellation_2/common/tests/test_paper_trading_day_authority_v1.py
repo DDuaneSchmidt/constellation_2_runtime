@@ -11,6 +11,7 @@ if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
 import ops.tools.run_aegis_paper_preflight_v1 as preflight_module
+import ops.tools.run_options_chain_snapshot_required_day_v1 as options_required_module
 import ops.tools.run_paper_trading_day_authority_v1 as day_authority_module
 import ops.tools.run_submit_boundary_status_v1 as submit_boundary_module
 
@@ -465,6 +466,43 @@ def test_active_option_intent_missing_options_snapshot_blocks_day_authority(monk
     assert payload["missing_or_stale_inputs"][0]["logical_name"] == "options_chain_snapshot_v1"
 
 
+def test_session_denied_precedes_missing_options_snapshot(monkeypatch, tmp_path: Path) -> None:
+    _truth_root, execution_root, captured = _configure_day_authority_runtime(monkeypatch, tmp_path)
+    _write_option_intent(execution_root)
+    payloads = _pass_payloads()
+    payloads["paper_session_authority_v1"] = {
+        "authority_status": "DENIED",
+        "submission_authorized": False,
+        "blocking_reason_codes": ["PAPER_CAPITAL_SEED_MISSING"],
+    }
+
+    def _fake_read_validated(path: Path, _schema_relpath: str):
+        logical_name = _logical_name_from_path(path)
+        payload = payloads.get(logical_name)
+        if payload is None:
+            return None, "MISSING"
+        return dict(payload), ""
+
+    monkeypatch.setattr(day_authority_module, "_read_validated", _fake_read_validated)
+
+    rc = day_authority_module.main(["--day_utc", "2026-04-27"])
+    payload = dict(captured["payload"])
+
+    assert rc == 2
+    assert payload["state"] == "PREFLIGHT_BLOCKED"
+    assert payload["canonical_blocker"] == "SESSION_AUTHORITY_DENIED"
+    session_row = payload["input_status"]["paper_session_authority_v1"]
+    assert session_row["status"] == "FAIL"
+    assert session_row["reason_codes"] == ["SESSION_AUTHORITY_DENIED", "PAPER_CAPITAL_SEED_MISSING"]
+    options_row = payload["input_status"]["options_chain_snapshot_v1"]
+    assert options_row["status"] == "MISSING"
+    assert options_row["required_or_diagnostic"] == "diagnostic"
+    assert options_row["readiness_role"] == "diagnostic"
+    assert "options_chain_snapshot_v1" not in [
+        str(row.get("logical_name") or "") for row in payload["missing_or_stale_inputs"]
+    ]
+
+
 def test_active_option_intent_valid_options_snapshot_allows_open_ready(monkeypatch, tmp_path: Path) -> None:
     _truth_root, execution_root, captured = _configure_day_authority_runtime(monkeypatch, tmp_path)
     _write_option_intent(execution_root)
@@ -511,6 +549,62 @@ def test_no_active_option_intent_does_not_require_options_snapshot(monkeypatch, 
     assert rc == 0
     assert payload["state"] == "OPEN_READY"
     assert payload["input_status"]["options_chain_snapshot_v1"]["required_or_diagnostic"] == "diagnostic"
+
+
+def test_wrong_day_options_snapshot_does_not_satisfy_current_day(monkeypatch, tmp_path: Path) -> None:
+    _truth_root, execution_root, captured = _configure_day_authority_runtime(monkeypatch, tmp_path)
+    _write_option_intent(execution_root, day="2026-04-27")
+    _write_options_snapshot(execution_root, day="2026-04-26")
+    payloads = _pass_payloads()
+
+    def _fake_read_validated(path: Path, _schema_relpath: str):
+        logical_name = _logical_name_from_path(path)
+        payload = payloads.get(logical_name)
+        if payload is None:
+            return None, "MISSING"
+        return dict(payload), ""
+
+    monkeypatch.setattr(day_authority_module, "_read_validated", _fake_read_validated)
+
+    rc = day_authority_module.main(["--day_utc", "2026-04-27"])
+    payload = dict(captured["payload"])
+
+    assert rc == 2
+    assert payload["canonical_blocker"] == "OPTIONS_SNAPSHOT_ROOT_MISSING"
+    assert payload["input_status"]["options_chain_snapshot_v1"]["required_or_diagnostic"] == "required"
+    assert payload["input_status"]["options_chain_snapshot_v1"]["status"] == "MISSING"
+
+
+def test_options_snapshot_capture_failure_is_not_reported_as_missing_root(monkeypatch, tmp_path: Path, capsys) -> None:
+    truth_root = (tmp_path / "execution_truth").resolve()
+    truth_root.mkdir(parents=True)
+
+    monkeypatch.setattr(
+        options_required_module,
+        "_capture_symbol",
+        lambda **_kwargs: {
+            "cmd": ["capture"],
+            "return_code": 2,
+            "stdout": "",
+            "stderr": "IB_UNAVAILABLE",
+        },
+    )
+
+    rc = options_required_module.main(
+        [
+            "--day_utc",
+            "2026-04-27",
+            "--truth_root",
+            str(truth_root),
+            "--symbol",
+            "SPY",
+        ]
+    )
+    out = json.loads(capsys.readouterr().out)
+
+    assert rc == 2
+    assert out["status"] == "BLOCKED_VALID"
+    assert out["results"][0]["reason_code"] == "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
 
 
 def test_submit_boundary_refuses_authority_with_required_options_snapshot_failure() -> None:

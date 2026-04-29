@@ -680,6 +680,18 @@ def main(argv: List[str] | None = None) -> int:
             pass_statuses=("READY_NOW",),
         ),
     }
+    session_authority_status = (
+        str((session_payload or {}).get("authority_status") or "").strip().upper()
+        if isinstance(session_payload, dict)
+        else ""
+    )
+    session_authority_denied = bool(session_authority_status == "DENIED")
+    if session_authority_denied:
+        session_detail_codes = _paper_session_submission_blockers(session_payload)
+        input_status["paper_session_authority_v1"]["status"] = "FAIL"
+        input_status["paper_session_authority_v1"]["reason_codes"] = list(
+            dict.fromkeys(["SESSION_AUTHORITY_DENIED"] + session_detail_codes)
+        )
     if control_payload is not None and not control_error:
         control_decision = str(control_payload.get("final_start_decision") or "").strip().upper()
         if control_decision == "READY_NOW":
@@ -780,8 +792,9 @@ def main(argv: List[str] | None = None) -> int:
         options_row = input_status["options_chain_snapshot_v1"]
         options_item = artifact_map.get("options_chain_snapshot_v1") or {}
         options_row["condition"] = str(options_item.get("condition") or "")
-        options_row["required_or_diagnostic"] = "required" if required_option_symbols else "diagnostic"
-        options_row["readiness_role"] = "authority_input"
+        options_required = bool(required_option_symbols) and not session_authority_denied
+        options_row["required_or_diagnostic"] = "required" if options_required else "diagnostic"
+        options_row["readiness_role"] = "authority_input" if options_required else "diagnostic"
         options_row["required_symbols"] = required_option_symbols
         options_row["covered_symbols"] = list(options_row.get("covered_symbols") or [])
     if market_data_payload is not None and not market_data_error:
@@ -790,13 +803,14 @@ def main(argv: List[str] | None = None) -> int:
         operator_impact = str(market_data_payload.get("operator_impact") or "").strip().upper()
         market_blocker = str(market_data_payload.get("first_blocker") or "").strip()
         market_row_status = "PASS" if market_status == "PASS" else ("WARN" if market_status == "WARN" else "FAIL")
+        market_required = bool(operator_impact == "PRE_SUBMIT_BLOCKER" and not session_authority_denied)
         input_status["market_data_authority_v1"] = {
             "path": str(market_data_authority_path),
             "exists": True,
             "status": market_row_status,
             "reason_codes": [] if market_row_status in {"PASS", "WARN"} else [market_blocker or f"MARKET_DATA_{market_state}"],
-            "required_or_diagnostic": "required" if operator_impact == "PRE_SUBMIT_BLOCKER" else "diagnostic",
-            "readiness_role": "authority_input" if operator_impact == "PRE_SUBMIT_BLOCKER" else "diagnostic",
+            "required_or_diagnostic": "required" if market_required else "diagnostic",
+            "readiness_role": "authority_input" if market_required else "diagnostic",
             "owning_subsystem": "market_data_authority_v1",
             "producer_command": producer_commands.get("market_data_authority_v1", ""),
             "causal_parent": "",

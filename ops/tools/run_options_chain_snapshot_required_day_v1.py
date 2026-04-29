@@ -21,7 +21,9 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     read_json_object_v1,
     resolve_paper_intent_truth_root_v1,
 )
+from constellation_2.common.sleeve_execution_root_v1 import resolve_sleeve_execution_root_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+from ops.tools.c2_account_resolution_v1 import resolve_single_paper_ib_account_from_sleeve_registry
 
 
 OPTIONS_CHAIN_SCHEMA = "constellation_2/schemas/options_chain_snapshot.v1.schema.json"
@@ -29,6 +31,16 @@ OPTIONS_CHAIN_SCHEMA = "constellation_2/schemas/options_chain_snapshot.v1.schema
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _default_truth_root() -> Path:
+    paper_account = resolve_single_paper_ib_account_from_sleeve_registry(REPO_ROOT)
+    return resolve_sleeve_execution_root_v1(
+        repo_root=REPO_ROOT,
+        environment="PAPER",
+        ib_account=paper_account,
+        sleeve_id="PRIMARY",
+    ).execution_root_path.resolve()
 
 
 def _parse_iso(value: Any) -> datetime | None:
@@ -134,7 +146,25 @@ def _snapshot_valid_for_symbol(*, truth_root: Path, day_utc: str, symbol: str, e
 def _run_tool(cmd: List[str], *, truth_root: Path) -> Dict[str, Any]:
     env = dict(os.environ)
     env["C2_TRUTH_ROOT"] = str(truth_root)
-    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True, check=False, env=env)
+    timeout_s = int(str(os.environ.get("C2_OPTIONS_SNAPSHOT_STEP_TIMEOUT_SECONDS") or "60").strip())
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+            timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "cmd": cmd,
+            "return_code": 124,
+            "stdout": str(exc.stdout or "").strip(),
+            "stderr": f"OPTIONS_SNAPSHOT_CAPTURE_TIMEOUT:{timeout_s}s",
+            "timed_out": True,
+        }
     return {
         "cmd": cmd,
         "return_code": int(proc.returncode),
@@ -188,7 +218,7 @@ def _promote_symbol(*, truth_root: Path, day_utc: str, symbol: str, eval_time_ut
 def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="run_options_chain_snapshot_required_day_v1")
     ap.add_argument("--day_utc", required=True)
-    ap.add_argument("--truth_root", required=True)
+    ap.add_argument("--truth_root", default="")
     ap.add_argument("--symbol", action="append", default=[])
     ap.add_argument("--symbols_from_intents", choices=["YES", "NO"], default="NO")
     ap.add_argument("--capture_missing", choices=["YES", "NO"], default="YES")
@@ -197,7 +227,7 @@ def main(argv: List[str] | None = None) -> int:
 
     day_utc = parse_day_utc_v1(args.day_utc)
     eval_time_utc = str(args.eval_time_utc or "").strip() or _utc_now_iso()
-    truth_root = Path(args.truth_root).expanduser().resolve()
+    truth_root = Path(args.truth_root).expanduser().resolve() if str(args.truth_root or "").strip() else _default_truth_root()
     intent_truth_root = resolve_paper_intent_truth_root_v1(truth_root=truth_root, repo_root=REPO_ROOT)
     symbols = [str(symbol or "").strip().upper() for symbol in args.symbol if str(symbol or "").strip()]
     if args.symbols_from_intents == "YES":
@@ -215,16 +245,21 @@ def main(argv: List[str] | None = None) -> int:
         if before["ok"]:
             results.append({"symbol": symbol, "status": "PASS", "path": before["path"]})
             continue
+        capture_result: Dict[str, Any] | None = None
         if args.capture_missing == "YES":
-            steps.append({"symbol": symbol, "producer": "options_chain_capture_ib_day_v1", **_capture_symbol(truth_root=intent_truth_root, day_utc=day_utc, symbol=symbol, eval_time_utc=eval_time_utc)})
+            capture_result = _capture_symbol(truth_root=intent_truth_root, day_utc=day_utc, symbol=symbol, eval_time_utc=eval_time_utc)
+            steps.append({"symbol": symbol, "producer": "options_chain_capture_ib_day_v1", **capture_result})
         if _raw_exists_for_symbol(truth_root=intent_truth_root, day_utc=day_utc, symbol=symbol):
             steps.append({"symbol": symbol, "producer": "options_chain_truth_promotion_day_v1", **_promote_symbol(truth_root=intent_truth_root, day_utc=day_utc, symbol=symbol, eval_time_utc=eval_time_utc)})
         after = _snapshot_valid_for_symbol(truth_root=intent_truth_root, day_utc=day_utc, symbol=symbol, eval_time_utc=eval_time_utc)
+        reason_code = str(after.get("reason_code") or "")
+        if not after["ok"] and capture_result is not None and int(capture_result.get("return_code") or 0) != 0:
+            reason_code = "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
         results.append(
             {
                 "symbol": symbol,
                 "status": "PASS" if after["ok"] else "FAIL",
-                "reason_code": str(after.get("reason_code") or ""),
+                "reason_code": reason_code,
                 "path": str(after.get("path") or ""),
                 "failures": list(after.get("failures") or []),
             }
