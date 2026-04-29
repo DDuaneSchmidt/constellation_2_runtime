@@ -1825,7 +1825,20 @@ def _build_paper_status(
     freshness_status = _freshness_status_for_day(freshness_day)
     ledger_ready = day_run.final_status in {"PAPER_READY", "TRADING_ACTIVE", "EOD_COMPLETE"}
     signals: list[ReadinessSignal] = []
-    if not ledger_ready:
+    source_blocked = source_integrity_gate is not None and source_integrity_gate.effective_status == "BLOCKED"
+    if source_blocked:
+        signals.append(
+            _signal(
+                input_name="source_integrity_gate",
+                classification="HARD_SAFETY_INVARIANT",
+                status="FAIL",
+                code=source_integrity_gate.effective_blocker,
+                owner=source_integrity_gate.effective_owner,
+                gate=source_integrity_gate.effective_gate,
+                root_cause_id="source_integrity",
+            )
+        )
+    if (not ledger_ready) and (not source_blocked):
         signals.append(
             _signal(
                 input_name="aegis_day_run_ledger",
@@ -1881,19 +1894,30 @@ def _build_paper_status(
             root_cause_id="dirty_path_reporting",
         )
     )
-    final_decision = FinalReadinessDecision(
-        status=day_run.final_status if ledger_ready else "NOT_READY",
-        canonical_blocker="" if ledger_ready else (day_run.canonical_blocker or "DAY_RUN_LEDGER_MISSING"),
-        owning_subsystem="aegis_day_run_ledger",
-        owning_gate=day_run.canonical_phase or "DAY_RUN",
-        reason=(
-            f"day-run ledger final_status={day_run.final_status}"
-            if day_run.exists
-            else "current-day day-run ledger missing; run BOD/day ledger before audit"
-        ),
-        signals=signals,
-        grade_profile=_build_grade_profile(signals),
-    )
+    if source_blocked and source_integrity_gate is not None:
+        final_decision = FinalReadinessDecision(
+            status="BLOCKED",
+            canonical_blocker=source_integrity_gate.effective_blocker,
+            owning_subsystem=source_integrity_gate.effective_owner,
+            owning_gate=source_integrity_gate.effective_gate,
+            reason=f"hard safety invariant failed: {source_integrity_gate.effective_blocker}",
+            signals=signals,
+            grade_profile=_build_grade_profile(signals),
+        )
+    else:
+        final_decision = FinalReadinessDecision(
+            status=day_run.final_status if ledger_ready else "NOT_READY",
+            canonical_blocker="" if ledger_ready else (day_run.canonical_blocker or "DAY_RUN_LEDGER_MISSING"),
+            owning_subsystem="aegis_day_run_ledger",
+            owning_gate=day_run.canonical_phase or "DAY_RUN",
+            reason=(
+                f"day-run ledger final_status={day_run.final_status}"
+                if day_run.exists
+                else "current-day day-run ledger missing; run BOD/day ledger before audit"
+            ),
+            signals=signals,
+            grade_profile=_build_grade_profile(signals),
+        )
 
     section_lines = [
         "## Current Calendar Day Runtime Status",
