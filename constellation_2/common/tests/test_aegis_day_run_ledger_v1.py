@@ -411,6 +411,7 @@ def test_day_ledger_cannot_reach_paper_ready_before_market_gate_passes(
 def test_market_open_gate_before_0930_returns_market_not_open(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     monkeypatch.setattr(open_gate, "_market_session_state", lambda: "PRE_MARKET")
+    monkeypatch.setattr(open_gate, "_run_capture", lambda *_args, **_kwargs: pytest.fail("capture should not run before open"))
 
     payload = open_gate.build_market_open_data_gate(ctx)
 
@@ -425,13 +426,38 @@ def test_market_open_gate_during_market_hours_with_valid_quotes_passes(
     supply_path = day_run._market_data_supply_path(ctx)
     supply_path.parent.mkdir(parents=True, exist_ok=True)
     supply_path.write_text('{"status":"PASS","canonical_blocker":"","artifacts":[]}\n', encoding="utf-8")
+    snap_root = ctx.execution_root / "options_chain_snapshot_v1" / ctx.day_utc / "capture"
+    snap_root.mkdir(parents=True, exist_ok=True)
+    (snap_root / "options_chain_snapshot.v1.json").write_text(
+        json.dumps(
+            {
+                "as_of_utc": f"{ctx.day_utc}T14:30:00Z",
+                "underlying": {"symbol": "SPY", "spot_price": "500.00", "spot_as_of_utc": f"{ctx.day_utc}T14:30:00Z"},
+                "contracts": [{"bid": "1.00", "ask": "1.10"}],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (snap_root / "freshness_certificate.v1.json").write_text('{"valid_until_utc":"2099-01-01T00:00:00Z"}\n', encoding="utf-8")
     monkeypatch.setattr(open_gate, "_market_session_state", lambda: "REGULAR")
-    monkeypatch.setattr(open_gate, "_run_market_data_supply", lambda _ctx: ({"exit_code": 0}, ""))
+    monkeypatch.setattr(open_gate, "_run_market_data_supply", lambda _ctx: {"exit_code": 0})
 
     payload = open_gate.build_market_open_data_gate(ctx)
 
     assert payload["status"] == "PASS"
     assert payload["canonical_blocker"] == ""
+
+
+def test_day_ledger_advances_past_market_open_gate_when_gate_passes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_phase_runners(monkeypatch)
+    payload = day_run.build_day_run_payload(_ctx(tmp_path))
+
+    assert payload["phase_results"]["MARKET_OPEN_DATA_GATE"]["status"] == "PASS"
+    assert payload["phase_results"]["AUTHORIZATION_FINAL"]["status"] == "PASS"
+    assert payload["final_status"] == "PAPER_READY"
 
 
 def test_packet_without_ledger_reports_day_run_missing_not_downstream(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

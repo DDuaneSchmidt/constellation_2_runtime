@@ -566,11 +566,13 @@ def test_pre_market_entitlement_denied_still_blocks(tmp_path: Path) -> None:
 def test_market_open_gate_before_open_is_pending(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     monkeypatch.setattr(open_gate, "_market_session_state", lambda: "PRE_MARKET")
+    monkeypatch.setattr(open_gate, "_run_capture", lambda *_args, **_kwargs: pytest.fail("capture should not run before open"))
 
     payload = open_gate.build_market_open_data_gate(ctx)
 
     assert payload["status"] == "PENDING"
     assert payload["canonical_blocker"] == "MARKET_NOT_OPEN"
+    assert payload["capture_attempted_by_gate"] is False
 
 
 def test_market_open_gate_passes_during_market_with_valid_supply(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -578,13 +580,102 @@ def test_market_open_gate_passes_during_market_with_valid_supply(monkeypatch: py
     mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     mds_path.parent.mkdir(parents=True, exist_ok=True)
     mds_path.write_text('{"status":"PASS","canonical_blocker":"","artifacts":[]}\n', encoding="utf-8")
+    _snapshot(ctx)
     monkeypatch.setattr(open_gate, "_market_session_state", lambda: "REGULAR")
-    monkeypatch.setattr(open_gate, "_run_market_data_supply", lambda _ctx: ({"exit_code": 0}, ""))
+    monkeypatch.setattr(open_gate, "_run_market_data_supply", lambda _ctx: {"exit_code": 0})
 
     payload = open_gate.build_market_open_data_gate(ctx)
 
     assert payload["status"] == "PASS"
     assert payload["canonical_blocker"] == ""
+
+
+def test_market_open_gate_stale_snapshot_attempts_capture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _snapshot(ctx, fresh=False)
+    mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    calls = {"mds": 0, "capture": 0}
+
+    def _mds(_ctx):  # noqa: ANN001
+        calls["mds"] += 1
+        mds_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"status": "BLOCKED", "canonical_blocker": "OPTIONS_SNAPSHOT_STALE", "requirements": [{"instrument": "SPY"}]}
+        if calls["mds"] > 1:
+            payload = {"status": "PASS", "canonical_blocker": "", "requirements": [{"instrument": "SPY"}]}
+        mds_path.write_text(json.dumps(payload), encoding="utf-8")
+        return {"exit_code": 0 if calls["mds"] > 1 else 2}
+
+    def _capture(_ctx, instrument):  # noqa: ANN001
+        calls["capture"] += 1
+        _snapshot(ctx, fresh=True)
+        return {"instrument": instrument, "status": "PASS", "blocker": "", "snapshot_path": "x", "freshness_certificate_path": "y"}
+
+    monkeypatch.setattr(open_gate, "_market_session_state", lambda: "REGULAR")
+    monkeypatch.setattr(open_gate, "_run_market_data_supply", _mds)
+    monkeypatch.setattr(open_gate, "_run_capture", _capture)
+
+    payload = open_gate.build_market_open_data_gate(ctx)
+
+    assert calls["capture"] == 1
+    assert payload["capture_attempted_by_gate"] is True
+    assert payload["status"] == "PASS"
+
+
+def test_market_open_gate_failed_capture_reports_specific_blocker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _snapshot(ctx, fresh=False)
+    mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+
+    def _mds(_ctx):  # noqa: ANN001
+        mds_path.parent.mkdir(parents=True, exist_ok=True)
+        mds_path.write_text('{"status":"BLOCKED","canonical_blocker":"OPTIONS_SNAPSHOT_STALE","requirements":[{"instrument":"SPY"}]}\n', encoding="utf-8")
+        return {"exit_code": 2}
+
+    monkeypatch.setattr(open_gate, "_market_session_state", lambda: "REGULAR")
+    monkeypatch.setattr(open_gate, "_run_market_data_supply", _mds)
+    monkeypatch.setattr(
+        open_gate,
+        "_run_capture",
+        lambda _ctx, instrument: {"instrument": instrument, "status": "BLOCKED", "blocker": "OPTIONS_DELAYED_QUOTES_NOT_RETURNED_BY_IB", "snapshot_path": "", "freshness_certificate_path": ""},
+    )
+
+    payload = open_gate.build_market_open_data_gate(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "OPTIONS_DELAYED_QUOTES_NOT_RETURNED_BY_IB"
+
+
+def test_market_open_gate_missing_freshness_certificate_is_specific(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    calls = {"mds": 0}
+
+    def _snapshot_without_cert() -> None:
+        snap, cert = _snapshot(ctx, fresh=True)
+        cert.unlink()
+        assert snap.exists()
+
+    def _mds(_ctx):  # noqa: ANN001
+        calls["mds"] += 1
+        mds_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"status": "BLOCKED", "canonical_blocker": "OPTIONS_SNAPSHOT_STALE", "requirements": [{"instrument": "SPY"}]}
+        if calls["mds"] > 1:
+            payload = {"status": "PASS", "canonical_blocker": "", "requirements": [{"instrument": "SPY"}]}
+        mds_path.write_text(json.dumps(payload), encoding="utf-8")
+        return {"exit_code": 0}
+
+    def _capture(_ctx, instrument):  # noqa: ANN001
+        _snapshot_without_cert()
+        return {"instrument": instrument, "status": "PASS", "blocker": "", "snapshot_path": "x", "freshness_certificate_path": ""}
+
+    monkeypatch.setattr(open_gate, "_market_session_state", lambda: "REGULAR")
+    monkeypatch.setattr(open_gate, "_run_market_data_supply", _mds)
+    monkeypatch.setattr(open_gate, "_run_capture", _capture)
+
+    payload = open_gate.build_market_open_data_gate(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "OPTIONS_FRESHNESS_CERTIFICATE_MISSING"
 
 
 def test_day_ledger_market_data_phase_consumes_supply_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

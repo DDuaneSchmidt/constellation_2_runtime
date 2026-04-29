@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -16,9 +17,31 @@ if str(REPO_ROOT) not in sys.path:
 
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
 from ops.tools import run_aegis_bod_prepare_v1 as bod
-from ops.tools.run_market_data_supply_v1 import market_data_supply_path
+from ops.tools.run_market_data_supply_v1 import (
+    _latest_snapshot_for_symbol,
+    _parse_iso,
+    market_data_supply_path,
+)
 
 SCHEMA_VERSION = "market_open_data_gate.v1"
+REFRESHABLE_BLOCKERS = {
+    "OPTIONS_SNAPSHOT_STALE",
+    "OPTIONS_SNAPSHOT_CAPTURE_FAILED",
+    "OPTIONS_QUOTES_MISSING",
+    "OPTIONS_QUOTES_MISSING_BID_ASK",
+    "OPTIONS_DELAYED_QUOTES_NOT_RETURNED_BY_IB",
+    "OPTIONS_FRESHNESS_CERTIFICATE_MISSING",
+}
+ALLOWED_BLOCKERS = {
+    "MARKET_NOT_OPEN",
+    "MARKET_CLOSED",
+    "OPTIONS_SNAPSHOT_STALE",
+    "OPTIONS_SNAPSHOT_CAPTURE_FAILED",
+    "OPTIONS_QUOTES_MISSING_BID_ASK",
+    "OPTIONS_DELAYED_QUOTES_NOT_RETURNED_BY_IB",
+    "OPTIONS_MARKET_DATA_PERMISSION_DENIED",
+    "OPTIONS_FRESHNESS_CERTIFICATE_MISSING",
+}
 
 
 def _now_iso() -> str:
@@ -75,25 +98,191 @@ def _run_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
     }
 
 
+def _run_capture(ctx: bod.BodContext, instrument: str) -> dict[str, Any]:
+    cmd = [
+        sys.executable,
+        "ops/tools/run_options_chain_snapshot_required_day_v1.py",
+        "--day_utc",
+        ctx.day_utc,
+        "--truth_root",
+        str(ctx.execution_root),
+        "--symbol",
+        instrument,
+        "--symbols_from_intents",
+        "NO",
+    ]
+    env = dict(os.environ)
+    env["C2_TRUTH_ROOT"] = str(ctx.execution_root)
+    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True, check=False, env=env, timeout=120)
+    blocker = ""
+    snapshot_path = ""
+    cert_path = ""
+    try:
+        payload = json.loads(str(proc.stdout or "").splitlines()[-1])
+    except Exception:
+        payload = {}
+    if isinstance(payload, dict):
+        results = payload.get("results")
+        if isinstance(results, list) and results:
+            first = results[0] if isinstance(results[0], dict) else {}
+            blocker = str(first.get("reason_code") or "").strip()
+            snapshot_path = str(first.get("path") or "")
+            cert_path = str(first.get("freshness_certificate_path") or "")
+        else:
+            blocker = str(payload.get("canonical_blocker") or payload.get("reason_code") or "").strip()
+    if proc.returncode != 0 and not blocker:
+        blocker = "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+    if blocker == "OPTIONS_QUOTES_MISSING":
+        blocker = "OPTIONS_QUOTES_MISSING_BID_ASK"
+    if blocker not in ALLOWED_BLOCKERS and blocker:
+        blocker = "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+    return {
+        "instrument": instrument,
+        "command": " ".join(cmd),
+        "status": "PASS" if proc.returncode == 0 else "BLOCKED",
+        "blocker": blocker,
+        "snapshot_path": snapshot_path,
+        "freshness_certificate_path": cert_path,
+        "exit_code": int(proc.returncode),
+        "stdout_summary": str(proc.stdout or "").strip()[-1200:],
+        "stderr_summary": str(proc.stderr or "").strip()[-1200:],
+    }
+
+
+def _root_instrument(supply: dict[str, Any]) -> str:
+    for row in supply.get("requirements") or []:
+        if not isinstance(row, dict):
+            continue
+        instrument = str(row.get("instrument") or "").strip().upper()
+        if instrument:
+            return instrument
+    return "SPY"
+
+
+def _has_bid_ask(contract: dict[str, Any]) -> bool:
+    if contract.get("bid") not in (None, "") and contract.get("ask") not in (None, ""):
+        return True
+    if contract.get("delayed_bid") not in (None, "") and contract.get("delayed_ask") not in (None, ""):
+        return True
+    quote = contract.get("quote")
+    if isinstance(quote, dict):
+        return quote.get("bid") not in (None, "") and quote.get("ask") not in (None, "")
+    return False
+
+
+def _snapshot_age_seconds(snapshot: dict[str, Any], now_utc: datetime) -> int | None:
+    as_of = _parse_iso(snapshot.get("as_of_utc"))
+    if as_of is None:
+        underlying = snapshot.get("underlying") if isinstance(snapshot.get("underlying"), dict) else {}
+        as_of = _parse_iso(underlying.get("spot_as_of_utc"))
+    if as_of is None:
+        return None
+    return max(0, int((now_utc - as_of).total_seconds()))
+
+
+def _validate_current_snapshot(ctx: bod.BodContext, instrument: str, now_utc: datetime) -> dict[str, Any]:
+    snapshot_path, cert_path, snapshot, cert = _latest_snapshot_for_symbol(
+        execution_root=ctx.execution_root,
+        day_utc=ctx.day_utc,
+        instrument=instrument,
+    )
+    result: dict[str, Any] = {
+        "instrument": instrument,
+        "snapshot_path": str(snapshot_path or ""),
+        "freshness_certificate_path": str(cert_path or ""),
+        "snapshot_age_seconds": _snapshot_age_seconds(snapshot, now_utc) if snapshot else None,
+        "quote_count": 0,
+        "blocker": "",
+    }
+    if snapshot_path is None or not snapshot:
+        result["blocker"] = "OPTIONS_SNAPSHOT_STALE"
+        return result
+    expected_root = (ctx.execution_root / "options_chain_snapshot_v1" / ctx.day_utc).resolve()
+    if not str(snapshot_path).startswith(str(expected_root)):
+        result["blocker"] = "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+        return result
+    underlying = snapshot.get("underlying") if isinstance(snapshot.get("underlying"), dict) else {}
+    if str(underlying.get("symbol") or snapshot.get("symbol") or "").strip().upper() != instrument.upper():
+        result["blocker"] = "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+        return result
+    if underlying.get("spot_price") in (None, "") and underlying.get("spot") in (None, "") and snapshot.get("spot_price") in (None, ""):
+        result["blocker"] = "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+        return result
+    if not str(snapshot.get("as_of_utc") or "").strip() or not str(underlying.get("spot_as_of_utc") or "").strip():
+        result["blocker"] = "OPTIONS_SNAPSHOT_STALE"
+        return result
+    contracts = snapshot.get("contracts")
+    if not isinstance(contracts, list) or not contracts:
+        result["blocker"] = "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+        return result
+    quote_count = sum(1 for row in contracts if isinstance(row, dict) and _has_bid_ask(row))
+    result["quote_count"] = quote_count
+    if quote_count <= 0:
+        result["blocker"] = "OPTIONS_QUOTES_MISSING_BID_ASK"
+        return result
+    if cert_path is None or not cert_path.exists() or not cert:
+        result["blocker"] = "OPTIONS_FRESHNESS_CERTIFICATE_MISSING"
+        return result
+    valid_until = _parse_iso(cert.get("valid_until_utc"))
+    if valid_until is None or valid_until < now_utc:
+        result["blocker"] = "OPTIONS_SNAPSHOT_STALE"
+        return result
+    return result
+
+
+def _blocker_from_supply(supply: dict[str, Any]) -> str:
+    blocker = str(supply.get("canonical_blocker") or "").strip()
+    if blocker in {"OPTIONS_QUOTES_MISSING", "OPTIONS_QUOTES_UNAVAILABLE_OUTSIDE_MARKET_HOURS"}:
+        return "OPTIONS_QUOTES_MISSING_BID_ASK"
+    return blocker
+
+
 def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
     generated_at = _now_iso()
+    now_utc = datetime.now(UTC)
     session_state = _market_session_state()
     supply_path = market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     command_result: dict[str, Any] = {}
-    if session_state != "REGULAR":
+    capture_result: dict[str, Any] = {}
+    capture_attempted = False
+    instrument = "SPY"
+    snapshot_validation: dict[str, Any] = {}
+    if session_state in {"PRE_MARKET", "NON_TRADING_DAY"}:
         status = "PENDING"
         blocker = "MARKET_NOT_OPEN"
         action = "Rerun market-open data gate after 09:30 ET during regular US options market hours."
+    elif session_state == "AFTER_HOURS":
+        status = "BLOCKED"
+        blocker = "MARKET_CLOSED"
+        action = "Rerun market-open data gate during regular US options market hours; submit-time quote freshness is not evaluated after market close."
     else:
         command_result = _run_market_data_supply(ctx)
         supply = _read_json(supply_path)
+        instrument = _root_instrument(supply)
+        snapshot_validation = _validate_current_snapshot(ctx, instrument, now_utc)
         supply_status = str(supply.get("status") or "").strip().upper()
-        blocker = str(supply.get("canonical_blocker") or "").strip()
-        status = "PASS" if supply_status == "PASS" and not blocker else "BLOCKED"
-        if status == "BLOCKED" and blocker in {"OPTIONS_QUOTES_MISSING", "OPTIONS_QUOTES_UNAVAILABLE_OUTSIDE_MARKET_HOURS"}:
+        blocker = _blocker_from_supply(supply) or str(snapshot_validation.get("blocker") or "").strip()
+        if blocker in REFRESHABLE_BLOCKERS:
+            capture_attempted = True
+            capture_result = _run_capture(ctx, instrument)
+            command_result = {
+                "initial_market_data_supply": command_result,
+                "capture": capture_result,
+                "post_capture_market_data_supply": _run_market_data_supply(ctx),
+            }
+            supply = _read_json(supply_path)
+            supply_status = str(supply.get("status") or "").strip().upper()
+            snapshot_validation = _validate_current_snapshot(ctx, instrument, datetime.now(UTC))
+            blocker = _blocker_from_supply(supply) or str(snapshot_validation.get("blocker") or "").strip()
+            if capture_result.get("status") != "PASS" and blocker in {"", "OPTIONS_SNAPSHOT_STALE", "OPTIONS_SNAPSHOT_CAPTURE_FAILED"}:
+                blocker = str(capture_result.get("blocker") or "") or "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+        if blocker == "OPTIONS_QUOTES_MISSING":
             blocker = "OPTIONS_QUOTES_MISSING_BID_ASK"
-        if status == "BLOCKED" and not blocker:
-            blocker = "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+        if supply_status == "PASS" and not snapshot_validation.get("blocker") and not blocker:
+            status = "PASS"
+        else:
+            status = "BLOCKED"
+            blocker = blocker or str(snapshot_validation.get("blocker") or "") or "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
         action = "" if status == "PASS" else "Capture current SPY option bid/ask quotes and freshness certificate during regular market hours, then rerun this gate."
     return {
         "schema_id": "market_open_data_gate",
@@ -106,6 +295,11 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
         "canonical_blocker": blocker,
         "market_data_supply_path": str(supply_path),
         "command_result": command_result,
+        "snapshot_path": str(snapshot_validation.get("snapshot_path") or ""),
+        "freshness_certificate_path": str(snapshot_validation.get("freshness_certificate_path") or ""),
+        "snapshot_age_seconds": snapshot_validation.get("snapshot_age_seconds"),
+        "capture_attempted_by_gate": capture_attempted,
+        "capture_result": capture_result,
         "operator_next_action": action,
     }
 
