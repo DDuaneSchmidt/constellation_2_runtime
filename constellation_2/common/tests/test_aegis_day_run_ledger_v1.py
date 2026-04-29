@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
+import json
 
 import pytest
 
@@ -30,6 +31,11 @@ def _ctx(tmp_path: Path, day: str = "2026-04-29") -> day_run.PhaseContext:
         operator_input_root=operator,
         ib_account="DU123456",
     )
+
+
+def _write(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
 
 
 def _phase(status: str = "PASS", blocker: str = "", phase: str = "X") -> dict:
@@ -101,6 +107,73 @@ def test_market_data_block_after_session_passes_is_canonical(monkeypatch: pytest
     assert payload["phase_results"]["SESSION_AUTHORITY"]["status"] == "PASS"
     assert payload["canonical_phase"] == "MARKET_DATA_BOD_PREP"
     assert payload["canonical_blocker"] == "OPTIONS_SNAPSHOT_ROOT_MISSING"
+
+
+def test_session_authority_true_target_day_admission_failure_remains_canonical(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ctx = _ctx(tmp_path)
+    _write(
+        ctx.truth_root / "reports" / "paper_session_authority_v1" / ctx.day_utc / "paper_session_authority.v1.json",
+        {"authority_status": "DENIED", "submission_authorized": False},
+    )
+    _write(
+        ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json",
+        {"bootstrap_status": "BLOCKED", "bootstrap_semantic_status": "BLOCKED"},
+    )
+    _write(
+        ctx.truth_root / "risk_v1" / "kill_switch_v1" / ctx.day_utc / "global_kill_switch_state.v1.json",
+        {"state": "INACTIVE"},
+    )
+
+    monkeypatch.setattr(
+        day_run,
+        "_run_steps",
+        lambda *_args, **_kwargs: (
+            [{"step_name": "paper_trading_day_authority", "status": "BLOCKED", "blocker": "TARGET_DAY_ADMISSION_NOT_READY"}],
+            [],
+            ["TARGET_DAY_ADMISSION_NOT_READY"],
+        ),
+    )
+
+    row = day_run._phase_session_authority(ctx, {})
+
+    assert row["status"] == "BLOCKED"
+    assert row["canonical_blocker"] == "TARGET_DAY_ADMISSION_NOT_READY"
+
+
+def test_session_authority_does_not_fail_on_quote_dependent_legacy_day_authority_when_session_granted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ctx = _ctx(tmp_path)
+    _write(
+        ctx.truth_root / "reports" / "paper_session_authority_v1" / ctx.day_utc / "paper_session_authority.v1.json",
+        {"authority_status": "GRANTED", "submission_authorized": False},
+    )
+    _write(
+        ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json",
+        {"bootstrap_status": "READY", "bootstrap_semantic_status": "READY_PAPER_ONLY"},
+    )
+    _write(
+        ctx.truth_root / "risk_v1" / "kill_switch_v1" / ctx.day_utc / "global_kill_switch_state.v1.json",
+        {"state": "INACTIVE"},
+    )
+
+    monkeypatch.setattr(
+        day_run,
+        "_run_steps",
+        lambda *_args, **_kwargs: (
+            [{"step_name": "paper_trading_day_authority", "status": "BLOCKED", "blocker": "TARGET_DAY_ADMISSION_NOT_READY"}],
+            [],
+            ["TARGET_DAY_ADMISSION_NOT_READY"],
+        ),
+    )
+
+    row = day_run._phase_session_authority(ctx, {})
+
+    assert row["status"] == "PASS"
+    assert row["canonical_blocker"] == ""
+    assert "TARGET_DAY_ADMISSION_NOT_READY" in row["downstream_consequences"]
 
 
 def test_market_data_missing_snapshot_without_capture_diagnostic_stays_generic() -> None:
@@ -227,6 +300,38 @@ def test_day_ledger_reaches_pre_market_ready_before_market_open(
     assert payload["canonical_blocker"] == "MARKET_NOT_OPEN"
     assert payload["phase_results"]["AUTHORIZATION_FINAL"]["status"] == "SKIPPED"
     assert payload["phase_results"]["PAPER_READY"]["status"] == "SKIPPED"
+
+
+def test_market_data_bod_prep_runs_and_passes_when_supply_is_pre_market_pending(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ctx = _ctx(tmp_path)
+    supply_path = day_run._market_data_supply_path(ctx)
+    _write(
+        supply_path,
+        {
+            "day_utc": ctx.day_utc,
+            "status": "PRE_MARKET_PENDING",
+            "canonical_blocker": "MARKET_OPEN_DATA_PENDING",
+            "requirements": [{"requirement_id": "REQ1", "instrument": "SPY"}],
+            "provider_checks": [],
+        },
+    )
+    monkeypatch.setattr(
+        day_run,
+        "_run_steps",
+        lambda *_args, **_kwargs: (
+            [{"step_name": "market_data_supply", "status": "PASS", "blocker": ""}],
+            [str(supply_path)],
+            [],
+        ),
+    )
+
+    row = day_run._phase_market_data_bod_prep(ctx, {})
+
+    assert row["status"] == "PASS"
+    assert row["canonical_blocker"] == ""
+    assert row["outputs"] == [str(supply_path)]
 
 
 def test_day_ledger_cannot_reach_paper_ready_before_market_gate_passes(

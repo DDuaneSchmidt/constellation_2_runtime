@@ -69,6 +69,20 @@ SPECIFIC_OPTIONS_CAPTURE_BLOCKERS = MARKET_DATA_BLOCKERS - GENERIC_MARKET_DATA_B
     "UNDERLYING_SPOT_MISSING",
 }
 
+SESSION_SUPPORTING_READINESS_BLOCKERS = {
+    "TARGET_DAY_ADMISSION_NOT_READY",
+    "TARGET_DAY_BUILD_NOT_READY",
+    "SESSION_PROMOTION_DECISION_NOT_READY",
+    "OPTIONS_CHAIN_SNAPSHOT_MISSING",
+    "OPTIONS_SNAPSHOT_CAPTURE_FAILED",
+    "OPTIONS_SNAPSHOT_ROOT_MISSING",
+    "MARKET_DATA_AUTHORITY_BLOCKED",
+    "AUTHZ_MISSING_DEFINED_RISK_EVIDENCE",
+    "CAPITAL_RISK_ENVELOPE_NOT_PASS",
+    "SUBMIT_BOUNDARY_NOT_AUTHORIZED",
+    "SUBMIT_BOUNDARY_READINESS_POLICY_NOT_PASS",
+}
+
 
 def _now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -377,15 +391,26 @@ def _phase_session_authority(ctx: PhaseContext, env: dict[str, str]) -> dict[str
     ]
     steps, outputs, blockers = _run_steps("SESSION_AUTHORITY", commands, env=env)
     session_path = _artifact(ctx, "paper_session_authority_v1", "paper_session_authority.v1.json")
+    bootstrap_path = _artifact(ctx, "paper_session_bootstrap_v1", "paper_session_bootstrap.v1.json")
     session = _read_json(session_path)
+    bootstrap = _read_json(bootstrap_path)
     kill_path = ctx.truth_root / "risk_v1" / "kill_switch_v1" / ctx.day_utc / "global_kill_switch_state.v1.json"
     kill = _read_json(kill_path)
     authority_status = str(session.get("authority_status") or "").strip().upper()
+    bootstrap_semantic_status = str(bootstrap.get("bootstrap_semantic_status") or "").strip().upper()
+    bootstrap_status = str(bootstrap.get("bootstrap_status") or "").strip().upper()
     kill_state = str(kill.get("state") or kill.get("kill_switch_state") or "").strip().upper()
     blocker = ""
     downstream: list[str] = []
     for item in blockers:
         if item in MARKET_DATA_BLOCKERS:
+            downstream.append(item)
+        elif (
+            item in SESSION_SUPPORTING_READINESS_BLOCKERS
+            and authority_status in {"GRANTED", "AUTHORIZED"}
+            and kill_state in {"", "INACTIVE"}
+            and (bootstrap_semantic_status in {"READY_PAPER_ONLY", "READY"} or bootstrap_status == "READY")
+        ):
             downstream.append(item)
         else:
             blocker = item
@@ -399,7 +424,11 @@ def _phase_session_authority(ctx: PhaseContext, env: dict[str, str]) -> dict[str
         "SESSION_AUTHORITY",
         status="BLOCKED" if blocker else "PASS",
         canonical_blocker=blocker,
-        blocker_detail=f"paper_session_authority={authority_status or 'MISSING'} kill_switch={kill_state or 'MISSING'}",
+        blocker_detail=(
+            f"paper_session_authority={authority_status or 'MISSING'} "
+            f"kill_switch={kill_state or 'MISSING'} "
+            f"bootstrap_semantic_status={bootstrap_semantic_status or 'MISSING'}"
+        ),
         inputs=[str(session_path), str(kill_path)],
         outputs=outputs or [str(session_path)],
         downstream_consequences=downstream,
