@@ -9,6 +9,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -34,6 +35,12 @@ ALLOWED_BLOCKERS = {
     "MARKET_DATA_AUTHORITY_BLOCKED",
     "DELAYED_DATA_POLICY_MISSING",
     "DELAYED_DATA_AVAILABLE_NOT_ACCEPTED",
+    "OPTIONS_QUOTES_MISSING_BID_ASK",
+    "OPTIONS_QUOTES_UNAVAILABLE_OUTSIDE_MARKET_HOURS",
+    "OPTIONS_DELAYED_QUOTES_NOT_RETURNED_BY_IB",
+    "OPTIONS_QUOTE_VALIDATION_TOO_STRICT",
+    "OPTIONS_QUOTE_FIELDS_UNSUPPORTED",
+    "OPTIONS_MARKET_DATA_POLICY_REJECTED_QUOTE_TYPE",
 }
 PAPER_DELAYED_POLICY_RELATIVE_PATH = Path("governance/paper_market_data_policy_v1.json")
 MARKET_DATA_REQUIREMENT_ARTIFACTS = {
@@ -197,6 +204,8 @@ def _delayed_data_policy(ctx: bod.BodContext) -> dict[str, Any]:
             "allow_delayed_data": bool(raw is True),
             "allowed_data_types": allowed_types,
             "requirements": payload.get("requirements") if isinstance(payload.get("requirements"), list) else [],
+            "accepted_quote_fields": payload.get("accepted_quote_fields") if isinstance(payload.get("accepted_quote_fields"), list) else [],
+            "minimum_acceptable_mode": str(payload.get("minimum_acceptable_mode") or "").strip(),
             "reason": str(payload.get("reason") or "").strip(),
         }
     return {
@@ -208,6 +217,8 @@ def _delayed_data_policy(ctx: bod.BodContext) -> dict[str, Any]:
         "allow_delayed_data": False,
         "allowed_data_types": [],
         "requirements": [],
+        "accepted_quote_fields": [],
+        "minimum_acceptable_mode": "",
         "reason": "",
     }
 
@@ -437,13 +448,84 @@ def _run_capture(ctx: bod.BodContext, instrument: str) -> dict[str, Any]:
     }
 
 
-def _refine_delayed_capture_blocker(capture: dict[str, Any], *, delayed_data_used: bool) -> str:
+def _inside_regular_us_options_hours(now_utc: datetime | None = None) -> bool:
+    now = now_utc or datetime.now(UTC)
+    local = now.astimezone(ZoneInfo("America/New_York"))
+    if local.weekday() >= 5:
+        return False
+    minutes = local.hour * 60 + local.minute
+    return (9 * 60 + 30) <= minutes < (16 * 60)
+
+
+def _quote_field_names(row: dict[str, Any]) -> set[str]:
+    fields: set[str] = set()
+    for key in ("bid", "ask", "last", "close", "mark", "midpoint", "delayed_bid", "delayed_ask", "delayed_last", "delayed_close"):
+        if row.get(key) not in (None, ""):
+            fields.add(key)
+    option_computation = row.get("option_computation")
+    if isinstance(option_computation, dict):
+        for comp in option_computation.values():
+            if isinstance(comp, dict) and comp.get("opt_price") not in (None, ""):
+                fields.add("mark")
+    return fields
+
+
+def _classify_delayed_quote_diagnostic(diagnostic: dict[str, Any], delayed_policy: dict[str, Any]) -> str:
+    attempts = diagnostic.get("attempts") if isinstance(diagnostic.get("attempts"), list) else []
+    delayed_attempt = next((row for row in attempts if isinstance(row, dict) and int(row.get("market_data_type_requested") or 0) == 3), {})
+    if not delayed_attempt:
+        return "OPTIONS_DELAYED_QUOTES_NOT_RETURNED_BY_IB"
+    samples = delayed_attempt.get("quote_samples") if isinstance(delayed_attempt.get("quote_samples"), list) else []
+    callbacks = [
+        row for row in samples
+        if isinstance(row, dict)
+        and (
+            list(row.get("observed_tick_types") or [])
+            or row.get("market_data_type_callback") not in (None, "")
+            or bool(row.get("option_computation"))
+            or bool(_quote_field_names(row))
+        )
+    ]
+    if not callbacks:
+        return "OPTIONS_DELAYED_QUOTES_NOT_RETURNED_BY_IB"
+    observed_fields: set[str] = set()
+    for row in callbacks:
+        observed_fields.update(_quote_field_names(row))
+    has_bid_ask = {"bid", "ask"}.issubset(observed_fields) or {"delayed_bid", "delayed_ask"}.issubset(observed_fields)
+    if has_bid_ask:
+        return "OPTIONS_QUOTES_MISSING_BID_ASK"
+    if observed_fields:
+        accepted = {str(item or "").strip().lower() for item in delayed_policy.get("accepted_quote_fields") or []}
+        normalized_observed = {field.removeprefix("delayed_") for field in observed_fields}
+        minimum_mode = str(delayed_policy.get("minimum_acceptable_mode") or "").strip().upper()
+        if minimum_mode == "BID_ASK_REQUIRED" and normalized_observed.intersection(accepted):
+            return "OPTIONS_MARKET_DATA_POLICY_REJECTED_QUOTE_TYPE"
+        return "OPTIONS_QUOTE_VALIDATION_TOO_STRICT"
+    return "OPTIONS_QUOTE_FIELDS_UNSUPPORTED"
+
+
+def _refine_delayed_capture_blocker(
+    ctx: bod.BodContext,
+    instrument: str,
+    capture: dict[str, Any],
+    *,
+    delayed_data_used: bool,
+    delayed_policy: dict[str, Any],
+) -> str:
     blocker = str(capture.get("blocker") or "").strip()
     if not delayed_data_used:
         return blocker
+    if not _inside_regular_us_options_hours():
+        return "OPTIONS_QUOTES_UNAVAILABLE_OUTSIDE_MARKET_HOURS"
+    diagnostic_path = _latest_capture_diagnostic(execution_root=ctx.execution_root, day_utc=ctx.day_utc, symbol=instrument)
+    diagnostic = _read_json(diagnostic_path) if diagnostic_path else {}
+    if diagnostic:
+        classified = _classify_delayed_quote_diagnostic(diagnostic, delayed_policy)
+        if classified:
+            return classified
     text = "\n".join([str(capture.get("stdout_summary") or ""), str(capture.get("stderr_summary") or "")]).upper()
     if "MARKET_DATA_TYPE=3:NO_VALID_OPTION_QUOTES_CAPTURED" in text or "NO_VALID_OPTION_QUOTES_CAPTURED" in text:
-        return "OPTIONS_QUOTES_MISSING"
+        return "OPTIONS_QUOTES_MISSING_BID_ASK"
     if "MARKET_DATA_TYPE=3:UNDERLYING_SPOT_MISSING" in text:
         return "OPTIONS_UNDERLYING_SPOT_MISSING"
     if "CONTRACT" in text and "MISSING" in text:
@@ -577,6 +659,16 @@ def _run_market_data_authority(ctx: bod.BodContext) -> tuple[dict[str, Any], str
 def _operator_action(blocker: str, instrument: str, day_utc: str) -> str:
     if blocker == "OPTIONS_MARKET_DATA_PERMISSION_DENIED":
         return "Enable IBKR Client Portal market-data subscriptions and API market-data access for SPY underlying and options for the logged-in trading user/account."
+    if blocker == "OPTIONS_QUOTES_UNAVAILABLE_OUTSIDE_MARKET_HOURS":
+        return f"Rerun SPY options delayed quote capture during regular US options market hours for {day_utc}, or enable live IBKR API option quote entitlement."
+    if blocker == "OPTIONS_DELAYED_QUOTES_NOT_RETURNED_BY_IB":
+        return "IB did not return delayed option quote callbacks; confirm delayed option quotes are enabled in TWS/API and retry during regular US options market hours."
+    if blocker == "OPTIONS_QUOTES_MISSING_BID_ASK":
+        return "SPY option bid/ask quotes are required for snapshot construction; enable OPRA/API option bid/ask quotes or retry during regular options market hours."
+    if blocker == "OPTIONS_MARKET_DATA_POLICY_REJECTED_QUOTE_TYPE":
+        return "IB returned only non-bid/ask option quote fields; current PAPER policy requires bid/ask for readiness, so enable option bid/ask quotes or change governed policy only if the strategy/order builder supports it."
+    if blocker == "OPTIONS_QUOTE_VALIDATION_TOO_STRICT":
+        return "IB returned non-bid/ask option fields; review whether the governed strategy/order path supports those fields before changing quote validation."
     if blocker == "DELAYED_DATA_POLICY_MISSING":
         return "Add or activate a governed paper delayed-data policy before delayed/frozen market data can satisfy readiness, or enable live IBKR API market data."
     if blocker == "DELAYED_DATA_AVAILABLE_NOT_ACCEPTED":
@@ -679,7 +771,7 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
             if unknown:
                 capture = _run_capture(ctx, instrument)
                 capture["data_mode"] = market_data_mode
-                capture["blocker"] = _refine_delayed_capture_blocker(capture, delayed_data_used=delayed_data_used)
+                capture["blocker"] = _refine_delayed_capture_blocker(ctx, instrument, capture, delayed_data_used=delayed_data_used, delayed_policy=delayed_policy)
                 capture_attempts.append(capture)
                 probe_path = _entitlement_probe_path(ctx, instrument)
                 probe = _read_json(probe_path)
@@ -704,7 +796,7 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
                 if snapshot_path is None and not any(row.get("instrument") == instrument for row in capture_attempts):
                     capture = _run_capture(ctx, instrument)
                     capture["data_mode"] = market_data_mode
-                    capture["blocker"] = _refine_delayed_capture_blocker(capture, delayed_data_used=delayed_data_used)
+                    capture["blocker"] = _refine_delayed_capture_blocker(ctx, instrument, capture, delayed_data_used=delayed_data_used, delayed_policy=delayed_policy)
                     capture_attempts.append(capture)
                     if capture["status"] != "PASS":
                         blocker = str(capture.get("blocker") or "OPTIONS_SNAPSHOT_CAPTURE_FAILED")
