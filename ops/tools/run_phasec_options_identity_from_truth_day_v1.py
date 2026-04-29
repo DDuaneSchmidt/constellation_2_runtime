@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Tuple
@@ -182,6 +183,244 @@ def _find_latest_snapshot_and_cert(truth_root: Path, day_utc: str, symbol: str) 
     return candidates[-1]
 
 
+def _global_truth_root_for(truth_root: Path) -> Path:
+    parts = truth_root.resolve().parts
+    if "truth_sleeves" in parts:
+        idx = parts.index("truth_sleeves")
+        return Path(*parts[:idx]) / "truth"
+    return truth_root.resolve()
+
+
+def _structure_decision_supply_path(truth_root: Path, day_utc: str) -> Path:
+    rel = Path("reports") / "structure_decision_supply_v1" / day_utc / "structure_decision_supply.v1.json"
+    candidates = [
+        (truth_root / rel).resolve(),
+        (_global_truth_root_for(truth_root) / rel).resolve(),
+    ]
+    try:
+        truth_root.resolve().relative_to(RUNTIME_DATA_ROOT)
+        candidates.append((RUNTIME_DATA_ROOT / "truth" / rel).resolve())
+    except ValueError:
+        pass
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return candidates[1]
+
+
+def _parse_utc_z(ts: str) -> datetime:
+    raw = str(ts or "").strip()
+    if not raw.endswith("Z"):
+        raise OptionsIdentityError(f"UTC_Z_TIMESTAMP_REQUIRED:{raw!r}")
+    return datetime.fromisoformat(raw[:-1] + "+00:00")
+
+
+def _dte_days_calendar(as_of_utc: str, expiry_utc: str) -> int:
+    return (_parse_utc_z(expiry_utc).date() - _parse_utc_z(as_of_utc).date()).days
+
+
+def _decimal_string(value: Decimal) -> str:
+    return format(value.normalize(), "f")
+
+
+def _leg_key(leg: Dict[str, Any]) -> Tuple[str, str, str]:
+    return (
+        str(leg.get("expiry_utc") or "").strip(),
+        str(leg.get("right") or "").strip().upper(),
+        f"{_parse_decimal_str(str(leg.get('strike') or ''), label='leg.strike'):.2f}",
+    )
+
+
+def _snapshot_contract_index(snap_obj: Dict[str, Any]) -> Dict[Tuple[str, str, str], Dict[str, Any]]:
+    contracts = snap_obj.get("contracts")
+    if not isinstance(contracts, list):
+        raise OptionsIdentityError("SNAPSHOT_CONTRACTS_NOT_LIST")
+    index: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+    for contract in contracts:
+        if not isinstance(contract, dict):
+            continue
+        index[_leg_key(contract)] = contract
+    return index
+
+
+def _load_structure_decision_for_intent(
+    *,
+    truth_root: Path,
+    day_utc: str,
+    intent_obj: Dict[str, Any],
+    intent_hash: str,
+    snap_path: Path,
+    cert_path: Path,
+    snap_obj: Dict[str, Any],
+) -> Tuple[Path, Dict[str, Any]]:
+    supply_path = _structure_decision_supply_path(truth_root, day_utc)
+    if not supply_path.exists() or not supply_path.is_file():
+        raise OptionsIdentityError(f"STRUCTURE_DECISION_SUPPLY_MISSING:path={supply_path}")
+
+    supply = _read_json_obj(supply_path)
+    if str(supply.get("day_utc") or "").strip() != day_utc:
+        raise OptionsIdentityError(
+            f"STRUCTURE_DECISION_SUPPLY_WRONG_DAY:expected={day_utc}:actual={supply.get('day_utc')}:path={supply_path}"
+        )
+    if str(supply.get("status") or "").strip().upper() != "PASS":
+        raise OptionsIdentityError(
+            f"STRUCTURE_DECISION_SUPPLY_NOT_PASS:status={supply.get('status')}:blocker={supply.get('canonical_blocker')}:path={supply_path}"
+        )
+
+    market_open_data = supply.get("market_open_data") if isinstance(supply.get("market_open_data"), dict) else {}
+    source_snapshot_path = Path(str(market_open_data.get("snapshot_path") or "")).expanduser().resolve()
+    source_cert_path = Path(str(market_open_data.get("freshness_certificate_path") or "")).expanduser().resolve()
+    if source_snapshot_path != snap_path.resolve():
+        raise OptionsIdentityError(
+            "STRUCTURE_DECISION_SNAPSHOT_MISMATCH:"
+            f"structure={source_snapshot_path}:accepted={snap_path.resolve()}:path={supply_path}"
+        )
+    if source_cert_path != cert_path.resolve():
+        raise OptionsIdentityError(
+            "STRUCTURE_DECISION_FRESHNESS_CERT_MISMATCH:"
+            f"structure={source_cert_path}:accepted={cert_path.resolve()}:path={supply_path}"
+        )
+
+    intent_id = str(intent_obj.get("intent_id") or "").strip()
+    decisions = supply.get("structure_decisions")
+    if not isinstance(decisions, list) or not decisions:
+        raise OptionsIdentityError(f"STRUCTURE_DECISION_SUPPLY_EMPTY:path={supply_path}")
+
+    selected: Optional[Dict[str, Any]] = None
+    for item in decisions:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("intent_hash") or "").strip().lower() == intent_hash.lower():
+            selected = item
+            break
+        if intent_id and str(item.get("intent_id") or "").strip() == intent_id:
+            selected = item
+            break
+    if selected is None:
+        raise OptionsIdentityError(f"STRUCTURE_DECISION_FOR_INTENT_MISSING:intent_id={intent_id}:intent_hash={intent_hash}:path={supply_path}")
+
+    if selected.get("risk_defined") is not True or selected.get("max_loss_known") is not True:
+        raise OptionsIdentityError(f"STRUCTURE_DECISION_DEFINED_RISK_NOT_PROVEN:path={supply_path}")
+
+    option_structure = selected.get("option_structure")
+    if not isinstance(option_structure, dict):
+        raise OptionsIdentityError(f"STRUCTURE_DECISION_OPTION_STRUCTURE_MISSING:path={supply_path}")
+    if str(option_structure.get("selected_structure") or selected.get("selected_structure") or "").strip().upper() != "VERTICAL_SPREAD":
+        raise OptionsIdentityError(f"STRUCTURE_DECISION_NOT_VERTICAL_SPREAD:path={supply_path}")
+    legs = option_structure.get("legs")
+    if not isinstance(legs, list) or len(legs) != 2:
+        raise OptionsIdentityError(f"STRUCTURE_DECISION_VERTICAL_REQUIRES_TWO_LEGS:path={supply_path}")
+
+    snapshot_index = _snapshot_contract_index(snap_obj)
+    actions = set()
+    rights = set()
+    expiries = set()
+    strikes = []
+    for idx, leg in enumerate(legs):
+        if not isinstance(leg, dict):
+            raise OptionsIdentityError(f"STRUCTURE_DECISION_LEG_INVALID:index={idx}:path={supply_path}")
+        for field in ("action", "right", "expiry_utc", "strike", "ratio", "ib_conId", "bid", "ask"):
+            if leg.get(field) in (None, ""):
+                raise OptionsIdentityError(f"STRUCTURE_DECISION_LEG_FIELD_MISSING:index={idx}:field={field}:path={supply_path}")
+        action = str(leg.get("action") or "").strip().upper()
+        if action not in {"BUY", "SELL"}:
+            raise OptionsIdentityError(f"STRUCTURE_DECISION_LEG_ACTION_INVALID:index={idx}:action={action}:path={supply_path}")
+        ratio = int(leg.get("ratio"))
+        if ratio <= 0:
+            raise OptionsIdentityError(f"STRUCTURE_DECISION_LEG_RATIO_INVALID:index={idx}:ratio={ratio}:path={supply_path}")
+        key = _leg_key(leg)
+        contract = snapshot_index.get(key)
+        if contract is None:
+            raise OptionsIdentityError(f"STRUCTURE_DECISION_LEG_NOT_IN_ACCEPTED_SNAPSHOT:index={idx}:key={key}:path={supply_path}")
+        ib = contract.get("ib") if isinstance(contract.get("ib"), dict) else {}
+        if int(leg.get("ib_conId")) != int(ib.get("conId") or -1):
+            raise OptionsIdentityError(
+                f"STRUCTURE_DECISION_LEG_CONID_MISMATCH:index={idx}:structure={leg.get('ib_conId')}:snapshot={ib.get('conId')}:path={supply_path}"
+            )
+        for price_field in ("bid", "ask"):
+            if _parse_decimal_str(str(leg.get(price_field)), label=f"structure_leg[{idx}].{price_field}") != _parse_decimal_str(
+                str(contract.get(price_field)), label=f"snapshot_contract[{idx}].{price_field}"
+            ):
+                raise OptionsIdentityError(f"STRUCTURE_DECISION_LEG_PRICE_MISMATCH:index={idx}:field={price_field}:path={supply_path}")
+        actions.add(action)
+        rights.add(key[1])
+        expiries.add(key[0])
+        strikes.append(_parse_decimal_str(str(leg.get("strike")), label=f"structure_leg[{idx}].strike"))
+
+    if actions != {"BUY", "SELL"}:
+        raise OptionsIdentityError(f"STRUCTURE_DECISION_VERTICAL_ACTIONS_INVALID:actions={sorted(actions)}:path={supply_path}")
+    if len(rights) != 1 or len(expiries) != 1:
+        raise OptionsIdentityError(f"STRUCTURE_DECISION_VERTICAL_LEG_MISMATCH:path={supply_path}")
+    width = abs(strikes[0] - strikes[1])
+    if width <= Decimal("0"):
+        raise OptionsIdentityError(f"STRUCTURE_DECISION_WIDTH_INVALID:path={supply_path}")
+    option_structure["phasec_width_points"] = _decimal_string(width)
+    option_structure["phasec_right"] = next(iter(rights))
+    option_structure["phasec_expiry_utc"] = next(iter(expiries))
+    option_structure["phasec_dte"] = _dte_days_calendar(str(snap_obj.get("as_of_utc") or ""), option_structure["phasec_expiry_utc"])
+    return supply_path, selected
+
+
+def _apply_structure_decision_to_options_intent(
+    *,
+    options_intent_path: Path,
+    structure_decision: Dict[str, Any],
+) -> None:
+    options_intent = _read_json_obj(options_intent_path)
+    option_structure = structure_decision.get("option_structure") if isinstance(structure_decision.get("option_structure"), dict) else {}
+    width = str(option_structure.get("phasec_width_points") or "").strip()
+    right = str(option_structure.get("phasec_right") or option_structure.get("right") or "").strip().upper()
+    direction = str(option_structure.get("strategy_direction") or "").strip().upper()
+    dte = int(option_structure.get("phasec_dte"))
+    if direction not in {"CREDIT", "DEBIT"}:
+        raise OptionsIdentityError(f"STRUCTURE_DECISION_DIRECTION_INVALID:{direction}")
+    if right not in {"PUT", "CALL"}:
+        raise OptionsIdentityError(f"STRUCTURE_DECISION_RIGHT_INVALID:{right}")
+    if dte < 0:
+        raise OptionsIdentityError(f"STRUCTURE_DECISION_DTE_INVALID:{dte}")
+    options_intent["strategy"]["direction"] = direction
+    options_intent["strategy"]["right"] = right
+    options_intent["selection_policy"]["width_policy"]["width_points"] = width
+    options_intent["selection_policy"]["expiry_policy"]["target_dte_min"] = dte
+    options_intent["selection_policy"]["expiry_policy"]["target_dte_max"] = dte
+    options_intent["canonical_json_hash"] = None
+    options_intent_path.write_bytes(canonical_json_bytes_v1(options_intent) + b"\n")
+
+
+def _validate_mapped_plan_matches_structure_decision(*, order_plan_path: Path, structure_decision: Dict[str, Any]) -> None:
+    order_plan = _read_json_obj(order_plan_path)
+    mapped_legs = order_plan.get("legs")
+    option_structure = structure_decision.get("option_structure") if isinstance(structure_decision.get("option_structure"), dict) else {}
+    governed_legs = option_structure.get("legs")
+    if not isinstance(mapped_legs, list) or not isinstance(governed_legs, list) or len(mapped_legs) != len(governed_legs):
+        raise OptionsIdentityError(f"OPTIONS_MAPPED_LEG_COUNT_MISMATCH:path={order_plan_path}")
+
+    def normalized(legs: list[Any]) -> list[Tuple[str, str, str, str, int]]:
+        rows = []
+        for leg in legs:
+            if not isinstance(leg, dict):
+                raise OptionsIdentityError(f"OPTIONS_MAPPED_LEG_INVALID:path={order_plan_path}")
+            rows.append(
+                (
+                    str(leg.get("action") or "").strip().upper(),
+                    str(leg.get("expiry_utc") or "").strip(),
+                    str(leg.get("right") or "").strip().upper(),
+                    f"{_parse_decimal_str(str(leg.get('strike') or ''), label='mapped_leg.strike'):.2f}",
+                    int(leg.get("ib_conId")),
+                )
+            )
+        return sorted(rows)
+
+    if normalized(mapped_legs) != normalized(governed_legs):
+        raise OptionsIdentityError(
+            "OPTIONS_MAPPED_LEGS_DO_NOT_MATCH_STRUCTURE_DECISION:"
+            f"mapped={normalized(mapped_legs)}:governed={normalized(governed_legs)}:path={order_plan_path}"
+        )
+    risk_proof = order_plan.get("risk_proof") if isinstance(order_plan.get("risk_proof"), dict) else {}
+    if risk_proof.get("defined_risk_proven") is not True:
+        raise OptionsIdentityError(f"OPTIONS_DEFINED_RISK_NOT_PROVEN:path={order_plan_path}")
+
+
 def _run(cmd: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
     repo_path = str(REPO_ROOT)
@@ -337,6 +576,7 @@ def _write_execution_identity_record(
     decision_path: Path,
     options_intent_path: Path,
     adapter_record_path: Path,
+    structure_decision_supply_path: Optional[Path] = None,
 ) -> Path:
     if not order_plan_path.exists() or not order_plan_path.is_file():
         raise OptionsIdentityError(f"ORDER_PLAN_MISSING:path={order_plan_path}")
@@ -445,6 +685,8 @@ def _write_execution_identity_record(
         _source_ref(ref_type="submit_preflight_decision_ref", path=decision_path),
         _source_ref(ref_type="exposure_to_options_adapter_record_ref", path=adapter_record_path),
     ]
+    if structure_decision_supply_path is not None:
+        source_refs.append(_source_ref(ref_type="structure_decision_supply_ref", path=structure_decision_supply_path))
     if prior_identity_path is not None:
         source_refs.append(_source_ref(ref_type="prior_execution_identity_ref", path=prior_identity_path))
 
@@ -517,6 +759,27 @@ def _materialize(
     if not cert_hash:
         raise OptionsIdentityError(f"FRESHNESS_CANONICAL_HASH_MISSING: {cert_path}")
 
+    try:
+        structure_supply_path, structure_decision = _load_structure_decision_for_intent(
+            truth_root=truth_root,
+            day_utc=day_utc,
+            intent_obj=intent_obj,
+            intent_hash=intent_hash,
+            snap_path=snap_path,
+            cert_path=cert_path,
+            snap_obj=snap_obj,
+        )
+    except Exception as e:
+        veto_path = _write_failclosed_veto(
+            out_day_dir=out_day_dir,
+            day_utc=day_utc,
+            eval_time_utc=eval_time_utc,
+            intent_hash=intent_hash,
+            intent_path=intent_path,
+            reason_detail=str(e),
+        )
+        return ("BLOCKED", str(veto_path))
+
     tick_size = _derive_tick_size_from_snapshot(snap_obj)
 
     with tempfile.TemporaryDirectory(prefix=f"phasec_options_{day_utc}_{intent_hash[:12]}_") as td:
@@ -573,6 +836,22 @@ def _materialize(
             )
             return ("BLOCKED", str(veto_path))
 
+        try:
+            _apply_structure_decision_to_options_intent(
+                options_intent_path=options_intent_path,
+                structure_decision=structure_decision,
+            )
+        except Exception as e:
+            veto_path = _write_failclosed_veto(
+                out_day_dir=out_day_dir,
+                day_utc=day_utc,
+                eval_time_utc=eval_time_utc,
+                intent_hash=intent_hash,
+                intent_path=intent_path,
+                reason_detail=f"STRUCTURE_DECISION_TO_OPTIONS_INTENT_FAILED:{e}",
+            )
+            return ("BLOCKED", str(veto_path))
+
         map_cmd = [
             "python3",
             "-m",
@@ -618,6 +897,21 @@ def _materialize(
                 intent_hash=intent_hash,
                 intent_path=intent_path,
                 reason_detail="OPTIONS_MAP_OUTPUT_MISSING",
+            )
+            return ("BLOCKED", str(veto_path))
+        try:
+            _validate_mapped_plan_matches_structure_decision(
+                order_plan_path=order_plan,
+                structure_decision=structure_decision,
+            )
+        except Exception as e:
+            veto_path = _write_failclosed_veto(
+                out_day_dir=out_day_dir,
+                day_utc=day_utc,
+                eval_time_utc=eval_time_utc,
+                intent_hash=intent_hash,
+                intent_path=intent_path,
+                reason_detail=f"OPTIONS_MAPPED_PLAN_STRUCTURE_DECISION_VALIDATION_FAILED:{e}",
             )
             return ("BLOCKED", str(veto_path))
 
@@ -683,6 +977,7 @@ def _materialize(
         _immutable_copy(allow, final_identity_dir / "submit_preflight_decision.v1.json")
         _immutable_copy(options_intent_path, final_identity_dir / "options_intent.v2.json")
         _immutable_copy(adapter_record_path, final_identity_dir / "exposure_to_options_adapter_record.v1.json")
+        _immutable_copy(structure_supply_path, final_identity_dir / "structure_decision_supply.v1.json")
         try:
             _write_execution_identity_record(
                 day_utc=day_utc,
@@ -698,6 +993,7 @@ def _materialize(
                 decision_path=(final_identity_dir / "submit_preflight_decision.v1.json").resolve(),
                 options_intent_path=(final_identity_dir / "options_intent.v2.json").resolve(),
                 adapter_record_path=(final_identity_dir / "exposure_to_options_adapter_record.v1.json").resolve(),
+                structure_decision_supply_path=(final_identity_dir / "structure_decision_supply.v1.json").resolve(),
             )
         except Exception as e:
             veto_path = _write_failclosed_veto(
