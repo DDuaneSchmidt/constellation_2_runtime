@@ -457,6 +457,19 @@ def _inside_regular_us_options_hours(now_utc: datetime | None = None) -> bool:
     return (9 * 60 + 30) <= minutes < (16 * 60)
 
 
+def _market_session_state(now_utc: datetime | None = None) -> str:
+    now = now_utc or datetime.now(UTC)
+    local = now.astimezone(ZoneInfo("America/New_York"))
+    if local.weekday() >= 5:
+        return "NON_TRADING_DAY"
+    minutes = local.hour * 60 + local.minute
+    if minutes < (9 * 60 + 30):
+        return "PRE_MARKET"
+    if minutes < (16 * 60):
+        return "REGULAR"
+    return "AFTER_HOURS"
+
+
 def _quote_field_names(row: dict[str, Any]) -> set[str]:
     fields: set[str] = set()
     for key in ("bid", "ask", "last", "close", "mark", "midpoint", "delayed_bid", "delayed_ask", "delayed_last", "delayed_close"):
@@ -614,8 +627,8 @@ def _validate_snapshot(*, ctx: bod.BodContext, instrument: str, eval_time_utc: s
         artifact["blocker"] = "OPTIONS_CONTRACT_QUALIFICATION_FAILED"
         return "OPTIONS_CONTRACT_QUALIFICATION_FAILED", artifact
     if not any(isinstance(row, dict) and _contract_has_quote(row) for row in contracts):
-        artifact["blocker"] = "OPTIONS_QUOTES_MISSING"
-        return "OPTIONS_QUOTES_MISSING", artifact
+        artifact["blocker"] = "OPTIONS_QUOTES_MISSING_BID_ASK"
+        return "OPTIONS_QUOTES_MISSING_BID_ASK", artifact
     if cert_path is None or not cert_path.exists() or not cert:
         artifact["blocker"] = "OPTIONS_SNAPSHOT_STALE"
         return "OPTIONS_SNAPSHOT_STALE", artifact
@@ -659,6 +672,8 @@ def _run_market_data_authority(ctx: bod.BodContext) -> tuple[dict[str, Any], str
 def _operator_action(blocker: str, instrument: str, day_utc: str) -> str:
     if blocker == "OPTIONS_MARKET_DATA_PERMISSION_DENIED":
         return "Enable IBKR Client Portal market-data subscriptions and API market-data access for SPY underlying and options for the logged-in trading user/account."
+    if blocker == "MARKET_OPEN_DATA_PENDING":
+        return f"BOD market-data prerequisites are complete enough for pre-market; rerun python3 ops/tools/run_market_open_data_gate_v1.py --day_utc {day_utc} --environment PAPER after 09:30 ET."
     if blocker == "OPTIONS_QUOTES_UNAVAILABLE_OUTSIDE_MARKET_HOURS":
         return f"Rerun SPY options delayed quote capture during regular US options market hours for {day_utc}, or enable live IBKR API option quote entitlement."
     if blocker == "OPTIONS_DELAYED_QUOTES_NOT_RETURNED_BY_IB":
@@ -684,6 +699,7 @@ def _operator_action(blocker: str, instrument: str, day_utc: str) -> str:
 
 def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
     eval_time_utc = _now_iso()
+    market_session_state = _market_session_state()
     req_path = requirement_graph_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     requirement_graph = _read_json(req_path)
     requirements, unowned = _requirement_rows(requirement_graph if str(requirement_graph.get("day_utc") or "") == ctx.day_utc else {})
@@ -713,6 +729,7 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
             "day_utc": ctx.day_utc,
             "environment": ctx.environment,
             "generated_at_utc": eval_time_utc,
+            "market_session_state": market_session_state,
             "status": "SKIPPED",
             "canonical_blocker": "",
             "requirements": [],
@@ -760,6 +777,8 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
         pass
     elif provider_blocker:
         blocker = provider_blocker
+    elif market_session_state == "PRE_MARKET":
+        blocker = "MARKET_OPEN_DATA_PENDING"
     else:
         for instrument in instruments:
             unknown = any(
@@ -814,7 +833,7 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
             authority_result, authority_blocker = _run_market_data_authority(ctx)
             if authority_blocker:
                 blocker = authority_blocker
-    status = "PASS" if not blocker else "BLOCKED"
+    status = "PRE_MARKET_PENDING" if blocker == "MARKET_OPEN_DATA_PENDING" else ("PASS" if not blocker else "BLOCKED")
     root_instrument = instruments[0] if instruments else ""
     action = provider_action or _operator_action(blocker, root_instrument, ctx.day_utc)
     ib_error_codes: list[int] = []
@@ -832,6 +851,7 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
         "day_utc": ctx.day_utc,
         "environment": ctx.environment,
         "generated_at_utc": eval_time_utc,
+        "market_session_state": market_session_state,
         "status": status,
         "canonical_blocker": blocker,
         "requirements": requirements,
@@ -890,7 +910,7 @@ def main(argv: list[str] | None = None) -> int:
             sort_keys=True,
         )
     )
-    return 0 if payload.get("status") in {"PASS", "SKIPPED"} else 2
+    return 0 if payload.get("status") in {"PASS", "SKIPPED", "PRE_MARKET_PENDING"} else 2
 
 
 if __name__ == "__main__":

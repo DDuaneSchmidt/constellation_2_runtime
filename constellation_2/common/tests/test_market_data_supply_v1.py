@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 import ops.tools.aegis_chatgpt_packet as packet  # noqa: E402
 import ops.tools.run_aegis_day_v1 as day_run  # noqa: E402
 import ops.tools.run_ib_market_data_entitlement_probe_v1 as entitlement  # noqa: E402
+import ops.tools.run_market_open_data_gate_v1 as open_gate  # noqa: E402
 import ops.tools.run_market_data_supply_v1 as supply  # noqa: E402
 from ops.tools import run_aegis_bod_prepare_v1 as bod  # noqa: E402
 
@@ -282,6 +283,7 @@ def test_live_market_data_available_lets_supply_attempt_capture(monkeypatch: pyt
         return {"instrument": instrument, "status": "PASS", "blocker": "", "snapshot_path": "x", "freshness_certificate_path": "y"}
 
     monkeypatch.setattr(supply, "_run_capture", _capture)
+    monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
     monkeypatch.setattr(supply, "validate_against_repo_schema_v1", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(supply, "_run_market_data_authority", lambda _ctx: ({"exit_code": 0}, ""))
 
@@ -297,6 +299,7 @@ def test_live_unavailable_delayed_available_policy_enabled_passes(monkeypatch: p
     policy = _policy(ctx)
     _entitlement(ctx, status="BLOCKED", codes=[10167], live=False, delayed=True)
     _snapshot(ctx, market_data_type=3)
+    monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
     monkeypatch.setattr(supply, "validate_against_repo_schema_v1", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(supply, "_run_market_data_authority", lambda _ctx: ({"exit_code": 0}, ""))
 
@@ -322,6 +325,7 @@ def test_delayed_policy_makes_supply_continue_to_capture(monkeypatch: pytest.Mon
         return {"instrument": instrument, "status": "PASS", "blocker": "", "snapshot_path": "x", "freshness_certificate_path": "y"}
 
     monkeypatch.setattr(supply, "_run_capture", _capture)
+    monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
     monkeypatch.setattr(supply, "validate_against_repo_schema_v1", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(supply, "_run_market_data_authority", lambda _ctx: ({"exit_code": 0}, ""))
 
@@ -356,6 +360,7 @@ def test_delayed_underlying_chain_zero_option_callbacks_reports_not_returned(mon
         }
 
     monkeypatch.setattr(supply, "_run_capture", _capture)
+    monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
     monkeypatch.setattr(supply, "_inside_regular_us_options_hours", lambda: True)
 
     payload = supply.build_market_data_supply(ctx)
@@ -389,6 +394,7 @@ def test_delayed_callbacks_with_close_only_rejected_by_bid_ask_policy(monkeypatc
             "stderr_summary": "",
         },
     )
+    monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
     monkeypatch.setattr(supply, "_inside_regular_us_options_hours", lambda: True)
 
     result = supply.build_market_data_supply(ctx)
@@ -415,6 +421,7 @@ def test_outside_us_options_hours_reports_specific_blocker(monkeypatch: pytest.M
             "stderr_summary": "",
         },
     )
+    monkeypatch.setattr(supply, "_market_session_state", lambda: "AFTER_HOURS")
     monkeypatch.setattr(supply, "_inside_regular_us_options_hours", lambda: False)
 
     result = supply.build_market_data_supply(ctx)
@@ -428,6 +435,7 @@ def test_delayed_data_requires_quotes_and_timestamps(monkeypatch: pytest.MonkeyP
     _policy(ctx)
     _entitlement(ctx, status="BLOCKED", codes=[10167], live=False, delayed=True)
     _snapshot(ctx, market_data_type=3, timestamps=False)
+    monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
     monkeypatch.setattr(supply, "validate_against_repo_schema_v1", lambda *_args, **_kwargs: None)
 
     payload = supply.build_market_data_supply(ctx)
@@ -443,6 +451,7 @@ def test_live_mode_blocks_when_only_delayed_data_exists(monkeypatch: pytest.Monk
     _policy(live_ctx)
     _entitlement(live_ctx, status="BLOCKED", codes=[10167], live=False, delayed=True)
     _snapshot(live_ctx, market_data_type=3)
+    monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
     monkeypatch.setattr(supply, "validate_against_repo_schema_v1", lambda *_args, **_kwargs: None)
 
     payload = supply.build_market_data_supply(live_ctx)
@@ -469,6 +478,7 @@ def test_valid_current_day_snapshot_and_freshness_pass(monkeypatch: pytest.Monke
     _requirement(ctx)
     _diag(ctx, [], valid_quotes=1, spot=True, contracts=1)
     _snapshot(ctx)
+    monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
     monkeypatch.setattr(supply, "validate_against_repo_schema_v1", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(supply, "_run_market_data_authority", lambda _ctx: ({"exit_code": 0}, ""))
 
@@ -483,6 +493,7 @@ def test_wrong_day_snapshot_is_rejected(monkeypatch: pytest.MonkeyPatch, tmp_pat
     _requirement(ctx)
     _diag(ctx, [], valid_quotes=1, spot=True, contracts=1)
     _snapshot(ctx, day="2026-04-28")
+    monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
     monkeypatch.setattr(supply, "_run_capture", lambda *_args, **_kwargs: {"instrument": "SPY", "status": "PASS", "blocker": "", "snapshot_path": "", "freshness_certificate_path": ""})
 
     payload = supply.build_market_data_supply(ctx)
@@ -496,6 +507,7 @@ def test_stale_snapshot_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     _requirement(ctx)
     _diag(ctx, [], valid_quotes=1, spot=True, contracts=1)
     _snapshot(ctx, fresh=False)
+    monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
     monkeypatch.setattr(supply, "validate_against_repo_schema_v1", lambda *_args, **_kwargs: None)
 
     payload = supply.build_market_data_supply(ctx)
@@ -508,11 +520,71 @@ def test_missing_quote_fields_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     _requirement(ctx)
     _diag(ctx, [], valid_quotes=1, spot=True, contracts=1)
     _snapshot(ctx, quotes=False)
+    monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
     monkeypatch.setattr(supply, "validate_against_repo_schema_v1", lambda *_args, **_kwargs: None)
 
     payload = supply.build_market_data_supply(ctx)
 
-    assert payload["canonical_blocker"] == "OPTIONS_QUOTES_MISSING"
+    assert payload["canonical_blocker"] == "OPTIONS_QUOTES_MISSING_BID_ASK"
+
+
+def test_pre_market_missing_bid_ask_returns_pending(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _requirement(ctx)
+    _policy(ctx)
+    _entitlement(ctx, status="BLOCKED", codes=[10167], live=False, delayed=True)
+    monkeypatch.setattr(supply, "_market_session_state", lambda: "PRE_MARKET")
+    monkeypatch.setattr(
+        supply,
+        "_run_capture",
+        lambda _ctx, instrument: {
+            "instrument": instrument,
+            "status": "BLOCKED",
+            "blocker": "OPTIONS_MARKET_DATA_PERMISSION_DENIED",
+            "snapshot_path": "",
+            "freshness_certificate_path": "",
+        },
+    )
+
+    payload = supply.build_market_data_supply(ctx)
+
+    assert payload["status"] == "PRE_MARKET_PENDING"
+    assert payload["canonical_blocker"] == "MARKET_OPEN_DATA_PENDING"
+
+
+def test_pre_market_entitlement_denied_still_blocks(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _requirement(ctx)
+    _entitlement(ctx, status="BLOCKED", codes=[10089], live=False, delayed=False)
+
+    payload = supply.build_market_data_supply(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "OPTIONS_MARKET_DATA_PERMISSION_DENIED"
+
+
+def test_market_open_gate_before_open_is_pending(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    monkeypatch.setattr(open_gate, "_market_session_state", lambda: "PRE_MARKET")
+
+    payload = open_gate.build_market_open_data_gate(ctx)
+
+    assert payload["status"] == "PENDING"
+    assert payload["canonical_blocker"] == "MARKET_NOT_OPEN"
+
+
+def test_market_open_gate_passes_during_market_with_valid_supply(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    mds_path.parent.mkdir(parents=True, exist_ok=True)
+    mds_path.write_text('{"status":"PASS","canonical_blocker":"","artifacts":[]}\n', encoding="utf-8")
+    monkeypatch.setattr(open_gate, "_market_session_state", lambda: "REGULAR")
+    monkeypatch.setattr(open_gate, "_run_market_data_supply", lambda _ctx: ({"exit_code": 0}, ""))
+
+    payload = open_gate.build_market_open_data_gate(ctx)
+
+    assert payload["status"] == "PASS"
+    assert payload["canonical_blocker"] == ""
 
 
 def test_day_ledger_market_data_phase_consumes_supply_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -476,6 +476,18 @@ def _market_data_supply_path(roots: RootResolution, day_utc: str) -> Path | None
     ).resolve()
 
 
+def _market_open_data_gate_path(roots: RootResolution, day_utc: str) -> Path | None:
+    if roots.canonical_truth_root is None or not DATE_RE.match(str(day_utc or "")):
+        return None
+    return (
+        roots.canonical_truth_root
+        / "reports"
+        / "market_open_data_gate_v1"
+        / day_utc
+        / "market_open_data_gate.v1.json"
+    ).resolve()
+
+
 def _capital_supply_path(roots: RootResolution, day_utc: str) -> Path | None:
     if roots.canonical_truth_root is None or not DATE_RE.match(str(day_utc or "")):
         return None
@@ -2162,6 +2174,12 @@ def _build_paper_status(
     current_day = _build_current_calendar_day_runtime_status(roots)
     latest_trading_day = _build_latest_trading_day_evidence_status(roots)
     day_run = _load_day_run_ledger_status(roots, current_day.day_utc)
+    day_run_payload = _read_json(Path(day_run.path)) if day_run.exists else {}
+    phase_results = day_run_payload.get("phase_results") if isinstance(day_run_payload.get("phase_results"), dict) else {}
+    market_data_bod_prep = phase_results.get("MARKET_DATA_BOD_PREP") if isinstance(phase_results.get("MARKET_DATA_BOD_PREP"), dict) else {}
+    market_open_gate_phase = phase_results.get("MARKET_OPEN_DATA_GATE") if isinstance(phase_results.get("MARKET_OPEN_DATA_GATE"), dict) else {}
+    gate_path = _market_open_data_gate_path(roots, current_day.day_utc)
+    market_open_gate_payload = _read_json(gate_path) or {}
     requirement_graph = _load_requirement_graph_status(roots, current_day.day_utc)
     market_data_supply = _load_market_data_supply_status(roots, current_day.day_utc)
     broker_supply = _load_broker_supply_status(roots, current_day.day_utc)
@@ -2175,7 +2193,7 @@ def _build_paper_status(
         else latest_trading_day.evidence_day_utc
     )
     freshness_status = _freshness_status_for_day(freshness_day)
-    ledger_ready = day_run.final_status in {"PAPER_READY", "PAPER_READY_WITH_DELAYED_DATA", "TRADING_ACTIVE", "EOD_COMPLETE"}
+    ledger_ready = day_run.final_status in {"PRE_MARKET_READY", "PAPER_READY", "PAPER_READY_WITH_DELAYED_DATA", "TRADING_ACTIVE", "EOD_COMPLETE"}
     signals: list[ReadinessSignal] = []
     source_blocked = source_integrity_gate is not None and source_integrity_gate.effective_status == "BLOCKED"
     if source_blocked:
@@ -2259,7 +2277,7 @@ def _build_paper_status(
     else:
         final_decision = FinalReadinessDecision(
             status=day_run.final_status if ledger_ready else "NOT_READY",
-            canonical_blocker="" if ledger_ready else (day_run.canonical_blocker or "DAY_RUN_LEDGER_MISSING"),
+            canonical_blocker=day_run.canonical_blocker if day_run.final_status == "PRE_MARKET_READY" else ("" if ledger_ready else (day_run.canonical_blocker or "DAY_RUN_LEDGER_MISSING")),
             owning_subsystem="aegis_day_run_ledger",
             owning_gate=day_run.canonical_phase or "DAY_RUN",
             reason=(
@@ -2323,9 +2341,15 @@ def _build_paper_status(
         f"- day_run_ledger_exists: {'true' if day_run.exists else 'false'}",
         f"- day_utc: {day_run.day_utc}",
         f"- environment: {day_run.environment}",
+        f"- day_run_final_status: {day_run.final_status}",
         f"- final_status: {day_run.final_status}",
         f"- canonical_phase: {day_run.canonical_phase}",
         f"- canonical_blocker: {day_run.canonical_blocker}",
+        f"- market_data_bod_prep_status: {market_data_bod_prep.get('status', '')}",
+        f"- market_data_bod_prep_blocker: {market_data_bod_prep.get('canonical_blocker', '')}",
+        f"- market_open_data_gate_path: {str(gate_path) if gate_path else 'NOT_FOUND'}",
+        f"- market_open_data_gate_status: {market_open_gate_payload.get('status') or market_open_gate_phase.get('status', '')}",
+        f"- market_open_data_gate_blocker: {market_open_gate_payload.get('canonical_blocker') or market_open_gate_phase.get('canonical_blocker', '')}",
         f"- root_cause_chain: {json.dumps(day_run.root_cause_chain, sort_keys=True)}",
         f"- downstream_consequences: {json.dumps(day_run.downstream_consequences, sort_keys=True)}",
         f"- operator_next_action: {day_run.operator_next_action}",

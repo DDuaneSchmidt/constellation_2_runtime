@@ -282,6 +282,6 @@ def test_day_ledger_does_not_run_risk_sizing_before_authorization_pass(monkeypat
         return ([{"step_name": step, "status": status, "blocker": blocker, "duration_ms": 1}], [], [blocker] if blocker else [])
 
     monkeypatch.setattr(day_run, "_run_steps", _fake_run_steps)
-    row = day_run._phase_strategy_and_risk(phase_ctx, {})
+    row = day_run._phase_authorization_final(phase_ctx, {})
     assert row["canonical_blocker"] == "AUTHORIZATION_EVIDENCE_MISSING"
     assert "risk_sizing_authority" not in called

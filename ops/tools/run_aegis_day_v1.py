@@ -26,15 +26,17 @@ PHASE_ORDER = [
     "BROKER_HEALTH",
     "BOD_INPUTS",
     "SESSION_AUTHORITY",
-    "MARKET_DATA",
+    "MARKET_DATA_BOD_PREP",
     "STRATEGY_AND_RISK",
-    "AUTHORIZATION",
+    "AUTHORIZATION_PREP",
+    "MARKET_OPEN_DATA_GATE",
+    "AUTHORIZATION_FINAL",
     "SUBMIT_BOUNDARY",
     "PAPER_READY",
     "EXECUTION",
     "EOD_RECONCILIATION",
 ]
-PRE_READY_PHASES = set(PHASE_ORDER[:9])
+PRE_READY_PHASES = set(PHASE_ORDER[:11])
 
 MARKET_DATA_BLOCKERS = {
     "MARKET_DATA_AUTHORITY_BLOCKED",
@@ -45,6 +47,10 @@ MARKET_DATA_BLOCKERS = {
     "UNDERLYING_SPOT_MISSING",
     "OPTIONS_UNDERLYING_SPOT_MISSING",
     "OPTIONS_QUOTES_MISSING",
+    "OPTIONS_QUOTES_MISSING_BID_ASK",
+    "OPTIONS_DELAYED_QUOTES_NOT_RETURNED_BY_IB",
+    "OPTIONS_QUOTES_UNAVAILABLE_OUTSIDE_MARKET_HOURS",
+    "OPTIONS_SNAPSHOT_STALE",
     "OPTIONS_MARKET_DATA_PERMISSION_DENIED",
     "OPTIONS_MARKET_CLOSED_OR_UNAVAILABLE",
     "OPTIONS_CONTRACT_QUALIFICATION_FAILED",
@@ -257,6 +263,10 @@ def _broker_supply_path(ctx: PhaseContext) -> Path:
     return _artifact(ctx, "broker_supply_v1", "broker_supply.v1.json")
 
 
+def _market_open_data_gate_path(ctx: PhaseContext) -> Path:
+    return _artifact(ctx, "market_open_data_gate_v1", "market_open_data_gate.v1.json")
+
+
 def _market_data_delayed_used(ctx: PhaseContext) -> bool:
     supply = _read_json(_market_data_supply_path(ctx))
     return supply.get("delayed_data_used") is True and str(supply.get("market_data_mode") or "").strip().upper() == "DELAYED"
@@ -402,11 +412,11 @@ def _phase_session_authority(ctx: PhaseContext, env: dict[str, str]) -> dict[str
     )
 
 
-def _phase_market_data(ctx: PhaseContext, env: dict[str, str]) -> dict[str, Any]:
+def _phase_market_data_bod_prep(ctx: PhaseContext, env: dict[str, str]) -> dict[str, Any]:
     py = sys.executable
     started = _now_iso()
     commands = [("market_data_supply", [py, "ops/tools/run_market_data_supply_v1.py", "--day_utc", ctx.day_utc, "--environment", ctx.environment], 1)]
-    steps, outputs, blockers = _run_steps("MARKET_DATA", commands, env=env)
+    steps, outputs, blockers = _run_steps("MARKET_DATA_BOD_PREP", commands, env=env)
     supply_path = _market_data_supply_path(ctx)
     supply = _read_json(supply_path)
     supply_status = str(supply.get("status") or "").strip().upper()
@@ -420,9 +430,9 @@ def _phase_market_data(ctx: PhaseContext, env: dict[str, str]) -> dict[str, Any]
         detail_parts.append(f"provider_capability={first_provider.get('capability')}")
     blocker_detail = " ".join(detail_parts)
     completed = _now_iso()
-    phase_status = "PASS" if supply_status in {"PASS", "SKIPPED"} and not blockers else "BLOCKED"
+    phase_status = "PASS" if supply_status in {"PASS", "SKIPPED", "PRE_MARKET_PENDING"} and blocker in {"", "MARKET_OPEN_DATA_PENDING"} else "BLOCKED"
     return _empty_phase(
-        "MARKET_DATA",
+        "MARKET_DATA_BOD_PREP",
         status=phase_status,
         canonical_blocker="" if phase_status == "PASS" else (blocker or "MARKET_DATA_AUTHORITY_BLOCKED"),
         blocker_detail=blocker_detail,
@@ -435,6 +445,10 @@ def _phase_market_data(ctx: PhaseContext, env: dict[str, str]) -> dict[str, Any]
         exit_code=0 if phase_status == "PASS" else 2,
         child_steps=steps,
     )
+
+
+def _phase_market_data(ctx: PhaseContext, env: dict[str, str]) -> dict[str, Any]:
+    return _phase_market_data_bod_prep(ctx, env)
 
 
 def _phase_strategy_and_risk(ctx: PhaseContext, env: dict[str, str]) -> dict[str, Any]:
@@ -482,34 +496,7 @@ def _phase_strategy_and_risk(ctx: PhaseContext, env: dict[str, str]) -> dict[str
                 blockers = [risk_budget_blocker or "RISK_SIZING_EXPORT_MISSING"]
             elif risk_budget_status == "DEGRADED":
                 blockers = [risk_budget_blocker or "RISK_SIZING_EXPORT_MISSING"]
-            elif risk_budget_status == "PASS":
-                authorization_steps, authorization_outputs, authorization_blockers = _run_steps(
-                    "STRATEGY_AND_RISK",
-                    [("authorization_supply", [py, "ops/tools/run_authorization_supply_v1.py", "--day_utc", ctx.day_utc, "--environment", ctx.environment], 1)],
-                    env=env,
-                )
-                steps.extend(authorization_steps)
-                outputs.extend(authorization_outputs or [str(authorization_path)])
-                blockers.extend(authorization_blockers)
-                authorization_payload = _read_json(authorization_path)
-                authorization_status = str(authorization_payload.get("status") or "").strip().upper()
-                authorization_blocker = str(authorization_payload.get("canonical_blocker") or "").strip()
-                if authorization_status == "BLOCKED":
-                    blockers = [authorization_blocker or "AUTHORIZATION_EVIDENCE_MISSING"]
-                elif authorization_status == "SKIPPED":
-                    blockers = [authorization_blocker or "AUTHORIZATION_EVIDENCE_MISSING"]
-                elif authorization_status != "PASS":
-                    blockers = ["AUTHORIZATION_EVIDENCE_MISSING"]
-            if not blockers and risk_budget_status == "PASS":
-                risk_steps, risk_outputs, risk_blockers = _run_steps(
-                    "STRATEGY_AND_RISK",
-                    [("risk_sizing_authority", [py, "ops/tools/run_risk_sizing_authority_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.truth_root), "--execution_root", str(ctx.execution_root)], 1)],
-                    env=env,
-                )
-                steps.extend(risk_steps)
-                outputs.extend(risk_outputs)
-                blockers.extend(risk_blockers)
-            elif not blockers:
+            elif risk_budget_status != "PASS":
                 blockers = ["RISK_SIZING_EXPORT_MISSING"]
         else:
             blockers = ["CAPITAL_SOURCE_MISSING"]
@@ -546,11 +533,90 @@ def _phase_strategy_and_risk(ctx: PhaseContext, env: dict[str, str]) -> dict[str
         canonical_blocker=blockers[0] if blockers else "",
         blocker_detail=blocker_detail,
         outputs=outputs,
-        producer_command="run intent generation; strategy; portfolio; PhaseC prep; capital supply; risk budget supply; authorization supply; risk sizing",
+        producer_command="run intent generation; strategy; portfolio; PhaseC prep; capital supply; risk budget supply",
         started_at_utc=started,
         completed_at_utc=completed,
         duration_ms=sum(int(s.get("duration_ms") or 0) for s in steps),
         exit_code=2 if blockers else 0,
+        child_steps=steps,
+    )
+
+
+def _phase_authorization_prep(ctx: PhaseContext, env: dict[str, str]) -> dict[str, Any]:
+    del env
+    return _empty_phase(
+        "AUTHORIZATION_PREP",
+        status="PASS",
+        blocker_detail="PhaseC and final authorization are deferred until MARKET_OPEN_DATA_GATE passes",
+        producer_command="authorization prep defers quote-dependent PhaseC",
+    )
+
+
+def _phase_market_open_data_gate(ctx: PhaseContext, env: dict[str, str]) -> dict[str, Any]:
+    py = sys.executable
+    started = _now_iso()
+    steps, outputs, blockers = _run_steps(
+        "MARKET_OPEN_DATA_GATE",
+        [("market_open_data_gate", [py, "ops/tools/run_market_open_data_gate_v1.py", "--day_utc", ctx.day_utc, "--environment", ctx.environment], 1)],
+        env=env,
+    )
+    path = _market_open_data_gate_path(ctx)
+    payload = _read_json(path)
+    status = str(payload.get("status") or "").strip().upper()
+    blocker = str(payload.get("canonical_blocker") or "").strip() or (blockers[0] if blockers else "")
+    completed = _now_iso()
+    phase_status = "PASS" if status == "PASS" and not blockers else ("PENDING" if status == "PENDING" and blocker == "MARKET_NOT_OPEN" else "BLOCKED")
+    return _empty_phase(
+        "MARKET_OPEN_DATA_GATE",
+        status=phase_status,
+        canonical_blocker="" if phase_status == "PASS" else blocker,
+        blocker_detail=f"market_open_data_gate_status={status or 'MISSING'} market_session_state={payload.get('market_session_state', '')}",
+        outputs=outputs or [str(path)],
+        producer_command="run market-open data gate",
+        started_at_utc=started,
+        completed_at_utc=completed,
+        duration_ms=sum(int(s.get("duration_ms") or 0) for s in steps),
+        exit_code=0 if phase_status in {"PASS", "PENDING"} else 2,
+        child_steps=steps,
+    )
+
+
+def _phase_authorization_final(ctx: PhaseContext, env: dict[str, str]) -> dict[str, Any]:
+    py = sys.executable
+    started = _now_iso()
+    authorization_path = _authorization_supply_path(ctx)
+    steps, outputs, blockers = _run_steps(
+        "AUTHORIZATION_FINAL",
+        [("authorization_supply", [py, "ops/tools/run_authorization_supply_v1.py", "--day_utc", ctx.day_utc, "--environment", ctx.environment], 1)],
+        env=env,
+    )
+    payload = _read_json(authorization_path)
+    status = str(payload.get("status") or "").strip().upper()
+    blocker = str(payload.get("canonical_blocker") or "").strip() or (blockers[0] if blockers else "")
+    if status == "PASS" and not blockers:
+        risk_steps, risk_outputs, risk_blockers = _run_steps(
+            "AUTHORIZATION_FINAL",
+            [("risk_sizing_authority", [py, "ops/tools/run_risk_sizing_authority_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.truth_root), "--execution_root", str(ctx.execution_root)], 1)],
+            env=env,
+        )
+        steps.extend(risk_steps)
+        outputs.extend(risk_outputs)
+        blockers.extend(risk_blockers)
+        blocker = blockers[0] if blockers else ""
+    elif not blocker:
+        blocker = "AUTHORIZATION_EVIDENCE_MISSING"
+    completed = _now_iso()
+    return _empty_phase(
+        "AUTHORIZATION_FINAL",
+        status="PASS" if status == "PASS" and not blockers else "BLOCKED",
+        canonical_blocker="" if status == "PASS" and not blockers else blocker,
+        blocker_detail=f"authorization_supply_status={status or 'MISSING'}",
+        outputs=outputs or [str(authorization_path)],
+        producer_command="run authorization supply; run risk sizing",
+        started_at_utc=started,
+        completed_at_utc=completed,
+        duration_ms=sum(int(s.get("duration_ms") or 0) for s in steps),
+        exit_code=0 if status == "PASS" and not blockers else 2,
         child_steps=steps,
     )
 
@@ -681,9 +747,11 @@ PHASE_RUNNERS: dict[str, Callable[[PhaseContext, dict[str, str]], dict[str, Any]
     "BROKER_HEALTH": _phase_broker_health,
     "BOD_INPUTS": _phase_bod_inputs,
     "SESSION_AUTHORITY": _phase_session_authority,
-    "MARKET_DATA": _phase_market_data,
+    "MARKET_DATA_BOD_PREP": _phase_market_data_bod_prep,
     "STRATEGY_AND_RISK": _phase_strategy_and_risk,
-    "AUTHORIZATION": _phase_authorization,
+    "AUTHORIZATION_PREP": _phase_authorization_prep,
+    "MARKET_OPEN_DATA_GATE": _phase_market_open_data_gate,
+    "AUTHORIZATION_FINAL": _phase_authorization_final,
     "SUBMIT_BOUNDARY": _phase_submit_boundary,
     "PAPER_READY": _phase_paper_ready,
     "EXECUTION": _phase_execution,
@@ -707,9 +775,10 @@ def _operator_next_action(canonical_phase: str, canonical_blocker: str) -> str:
         "BROKER_HEALTH": "Restore authoritative IB observer/probe broker event evidence, then rerun run_aegis_day_v1.py.",
         "BOD_INPUTS": "Provide or regenerate paper capital seed, operator statement, and pre-open bundle, then rerun run_aegis_day_v1.py.",
         "SESSION_AUTHORITY": "Resolve paper session authority, kill switch, or session admission blocker, then rerun run_aegis_day_v1.py.",
-        "MARKET_DATA": "Generate valid current-day options snapshot and market-data authority evidence, then rerun run_aegis_day_v1.py.",
+        "MARKET_DATA_BOD_PREP": "Resolve BOD market-data ownership, entitlement, or policy blocker, then rerun run_aegis_day_v1.py.",
         "STRATEGY_AND_RISK": "Resolve strategy, NAV, capital envelope, and risk-sizing inputs, then rerun run_aegis_day_v1.py.",
-        "AUTHORIZATION": "Generate valid PhaseC defined-risk and engine authorization evidence, then rerun run_aegis_day_v1.py.",
+        "MARKET_OPEN_DATA_GATE": "Rerun market-open data gate after 09:30 ET and capture quote-complete options evidence.",
+        "AUTHORIZATION_FINAL": "Generate valid PhaseC defined-risk and engine authorization evidence, then rerun run_aegis_day_v1.py.",
         "SUBMIT_BOUNDARY": "Resolve submit readiness, submit boundary, and decision trace blockers, then rerun run_aegis_day_v1.py.",
         "PAPER_READY": "Resolve final paper-ready aggregation blocker, then rerun run_aegis_day_v1.py.",
     }
@@ -745,21 +814,27 @@ def build_day_run_payload(ctx: PhaseContext) -> dict[str, Any]:
         phase_results[phase] = row
         for consequence in row.get("downstream_consequences") or []:
             downstream_consequences.append({"phase": phase, "reason": str(consequence)})
-        if row.get("status") == "BLOCKED" and not blocked_phase and phase in PRE_READY_PHASES:
+        if row.get("status") in {"BLOCKED", "PENDING"} and not blocked_phase and phase in PRE_READY_PHASES:
             blocked_phase = phase
-            root_cause_chain.append(
-                {
-                    "phase": phase,
-                    "canonical_blocker": str(row.get("canonical_blocker") or ""),
-                    "blocker_detail": str(row.get("blocker_detail") or ""),
-                }
-            )
+            if row.get("status") == "BLOCKED":
+                root_cause_chain.append(
+                    {
+                        "phase": phase,
+                        "canonical_blocker": str(row.get("canonical_blocker") or ""),
+                        "blocker_detail": str(row.get("blocker_detail") or ""),
+                    }
+                )
 
     blocked = _first_blocked_phase({p: phase_results[p] for p in PRE_READY_PHASES if p in phase_results})
+    pending_gate = phase_results.get("MARKET_OPEN_DATA_GATE", {}) if not blocked else {}
     canonical_phase = str(blocked.get("phase") or "") if blocked else ""
     canonical_blocker = str(blocked.get("canonical_blocker") or "") if blocked else ""
     if blocked:
         final_status = "NOT_READY"
+    elif pending_gate.get("status") == "PENDING":
+        final_status = "PRE_MARKET_READY"
+        canonical_phase = "MARKET_OPEN_DATA_GATE"
+        canonical_blocker = str(pending_gate.get("canonical_blocker") or "MARKET_NOT_OPEN")
     else:
         execution = phase_results.get("EXECUTION", {})
         eod = phase_results.get("EOD_RECONCILIATION", {})
@@ -852,7 +927,7 @@ def main(argv: list[str] | None = None) -> int:
             sort_keys=True,
         )
     )
-    return 0 if payload.get("final_status") in {"PAPER_READY", "PAPER_READY_WITH_DELAYED_DATA", "TRADING_ACTIVE", "EOD_COMPLETE"} else 2
+    return 0 if payload.get("final_status") in {"PRE_MARKET_READY", "PAPER_READY", "PAPER_READY_WITH_DELAYED_DATA", "TRADING_ACTIVE", "EOD_COMPLETE"} else 2
 
 
 if __name__ == "__main__":

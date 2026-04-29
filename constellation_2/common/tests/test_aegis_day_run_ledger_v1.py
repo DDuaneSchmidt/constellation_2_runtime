@@ -11,6 +11,7 @@ if str(REPO_ROOT) not in sys.path:
 
 import ops.tools.aegis_chatgpt_packet as packet  # noqa: E402
 import ops.tools.run_aegis_day_v1 as day_run  # noqa: E402
+import ops.tools.run_market_open_data_gate_v1 as open_gate  # noqa: E402
 
 
 def _ctx(tmp_path: Path, day: str = "2026-04-29") -> day_run.PhaseContext:
@@ -38,16 +39,24 @@ def _phase(status: str = "PASS", blocker: str = "", phase: str = "X") -> dict:
         canonical_blocker=blocker,
         blocker_detail=blocker,
         producer_command=f"test:{phase}",
-        exit_code=0 if status in {"PASS", "SKIPPED"} else 2,
+        exit_code=0 if status in {"PASS", "SKIPPED", "PENDING"} else 2,
     )
 
 
-def _install_phase_runners(monkeypatch: pytest.MonkeyPatch, blocked_phase: str | None = None, blocker: str = "BLOCKED") -> None:
+def _install_phase_runners(
+    monkeypatch: pytest.MonkeyPatch,
+    blocked_phase: str | None = None,
+    blocker: str = "BLOCKED",
+    pending_phase: str | None = None,
+    pending_blocker: str = "MARKET_NOT_OPEN",
+) -> None:
     runners = {}
     for phase in day_run.PHASE_ORDER:
         def _runner(ctx, env, phase=phase):  # noqa: ANN001
             if phase == blocked_phase:
                 return _phase("BLOCKED", blocker, phase)
+            if phase == pending_phase:
+                return _phase("PENDING", pending_blocker, phase)
             if phase == "EXECUTION":
                 return _phase("SKIPPED", "", phase)
             if phase == "EOD_RECONCILIATION":
@@ -81,16 +90,16 @@ def test_broker_block_makes_later_failures_downstream_only(monkeypatch: pytest.M
     payload = day_run.build_day_run_payload(_ctx(tmp_path))
     assert payload["canonical_phase"] == "BROKER_HEALTH"
     assert payload["canonical_blocker"] == "IB_EVENT_TIMEOUT"
-    assert payload["phase_results"]["MARKET_DATA"]["status"] == "SKIPPED"
+    assert payload["phase_results"]["MARKET_DATA_BOD_PREP"]["status"] == "SKIPPED"
     assert payload["phase_results"]["SUBMIT_BOUNDARY"]["status"] == "SKIPPED"
-    assert all(item["phase"] != "MARKET_DATA" or "Skipped because BROKER_HEALTH" in item["reason"] for item in payload["downstream_consequences"])
+    assert all(item["phase"] != "MARKET_DATA_BOD_PREP" or "Skipped because BROKER_HEALTH" in item["reason"] for item in payload["downstream_consequences"])
 
 
 def test_market_data_block_after_session_passes_is_canonical(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    _install_phase_runners(monkeypatch, blocked_phase="MARKET_DATA", blocker="OPTIONS_SNAPSHOT_ROOT_MISSING")
+    _install_phase_runners(monkeypatch, blocked_phase="MARKET_DATA_BOD_PREP", blocker="OPTIONS_SNAPSHOT_ROOT_MISSING")
     payload = day_run.build_day_run_payload(_ctx(tmp_path))
     assert payload["phase_results"]["SESSION_AUTHORITY"]["status"] == "PASS"
-    assert payload["canonical_phase"] == "MARKET_DATA"
+    assert payload["canonical_phase"] == "MARKET_DATA_BOD_PREP"
     assert payload["canonical_blocker"] == "OPTIONS_SNAPSHOT_ROOT_MISSING"
 
 
@@ -156,7 +165,7 @@ def test_market_data_successful_snapshot_phase_passes(monkeypatch: pytest.Monkey
 
 
 def test_market_data_wrong_day_snapshot_does_not_satisfy_current_day(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    _install_phase_runners(monkeypatch, blocked_phase="MARKET_DATA", blocker="OPTIONS_CHAIN_SNAPSHOT_MISSING")
+    _install_phase_runners(monkeypatch, blocked_phase="MARKET_DATA_BOD_PREP", blocker="OPTIONS_CHAIN_SNAPSHOT_MISSING")
     ctx = _ctx(tmp_path, "2026-04-29")
     wrong_day = ctx.execution_root / "options_chain_snapshot_v1" / "2026-04-28" / "capture" / "options_chain_snapshot.v1.json"
     wrong_day.parent.mkdir(parents=True)
@@ -164,7 +173,7 @@ def test_market_data_wrong_day_snapshot_does_not_satisfy_current_day(monkeypatch
 
     payload = day_run.build_day_run_payload(ctx)
 
-    assert payload["canonical_phase"] == "MARKET_DATA"
+    assert payload["canonical_phase"] == "MARKET_DATA_BOD_PREP"
     assert payload["canonical_blocker"] == "OPTIONS_CHAIN_SNAPSHOT_MISSING"
     assert payload["phase_results"]["STRATEGY_AND_RISK"]["status"] == "SKIPPED"
 
@@ -172,14 +181,14 @@ def test_market_data_wrong_day_snapshot_does_not_satisfy_current_day(monkeypatch
 def test_specific_market_data_blocker_is_ledger_canonical_and_skips_downstream(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    _install_phase_runners(monkeypatch, blocked_phase="MARKET_DATA", blocker="OPTIONS_QUOTES_MISSING")
+    _install_phase_runners(monkeypatch, blocked_phase="MARKET_DATA_BOD_PREP", blocker="OPTIONS_QUOTES_MISSING_BID_ASK")
 
     payload = day_run.build_day_run_payload(_ctx(tmp_path))
 
-    assert payload["canonical_phase"] == "MARKET_DATA"
-    assert payload["canonical_blocker"] == "OPTIONS_QUOTES_MISSING"
+    assert payload["canonical_phase"] == "MARKET_DATA_BOD_PREP"
+    assert payload["canonical_blocker"] == "OPTIONS_QUOTES_MISSING_BID_ASK"
     assert payload["phase_results"]["STRATEGY_AND_RISK"]["status"] == "SKIPPED"
-    assert payload["phase_results"]["AUTHORIZATION"]["status"] == "SKIPPED"
+    assert payload["phase_results"]["AUTHORIZATION_PREP"]["status"] == "SKIPPED"
 
 
 def test_all_pre_ready_phases_pass_produces_paper_ready(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -204,6 +213,57 @@ def test_all_pre_ready_phases_pass_with_delayed_market_data_marks_delayed_ready(
 
     assert payload["final_status"] == "PAPER_READY_WITH_DELAYED_DATA"
     assert payload["canonical_phase"] == ""
+
+
+def test_day_ledger_reaches_pre_market_ready_before_market_open(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_phase_runners(monkeypatch, pending_phase="MARKET_OPEN_DATA_GATE", pending_blocker="MARKET_NOT_OPEN")
+
+    payload = day_run.build_day_run_payload(_ctx(tmp_path))
+
+    assert payload["final_status"] == "PRE_MARKET_READY"
+    assert payload["canonical_phase"] == "MARKET_OPEN_DATA_GATE"
+    assert payload["canonical_blocker"] == "MARKET_NOT_OPEN"
+    assert payload["phase_results"]["AUTHORIZATION_FINAL"]["status"] == "SKIPPED"
+    assert payload["phase_results"]["PAPER_READY"]["status"] == "SKIPPED"
+
+
+def test_day_ledger_cannot_reach_paper_ready_before_market_gate_passes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_phase_runners(monkeypatch, pending_phase="MARKET_OPEN_DATA_GATE", pending_blocker="MARKET_NOT_OPEN")
+
+    payload = day_run.build_day_run_payload(_ctx(tmp_path))
+
+    assert payload["final_status"] != "PAPER_READY"
+    assert payload["phase_results"]["MARKET_OPEN_DATA_GATE"]["status"] == "PENDING"
+
+
+def test_market_open_gate_before_0930_returns_market_not_open(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    monkeypatch.setattr(open_gate, "_market_session_state", lambda: "PRE_MARKET")
+
+    payload = open_gate.build_market_open_data_gate(ctx)
+
+    assert payload["status"] == "PENDING"
+    assert payload["canonical_blocker"] == "MARKET_NOT_OPEN"
+
+
+def test_market_open_gate_during_market_hours_with_valid_quotes_passes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ctx = _ctx(tmp_path)
+    supply_path = day_run._market_data_supply_path(ctx)
+    supply_path.parent.mkdir(parents=True, exist_ok=True)
+    supply_path.write_text('{"status":"PASS","canonical_blocker":"","artifacts":[]}\n', encoding="utf-8")
+    monkeypatch.setattr(open_gate, "_market_session_state", lambda: "REGULAR")
+    monkeypatch.setattr(open_gate, "_run_market_data_supply", lambda _ctx: ({"exit_code": 0}, ""))
+
+    payload = open_gate.build_market_open_data_gate(ctx)
+
+    assert payload["status"] == "PASS"
+    assert payload["canonical_blocker"] == ""
 
 
 def test_packet_without_ledger_reports_day_run_missing_not_downstream(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -278,7 +338,7 @@ def test_packet_without_ledger_reports_day_run_missing_not_downstream(monkeypatc
 
 
 def test_ledger_write_is_idempotent_and_preserves_prior_day(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    _install_phase_runners(monkeypatch, blocked_phase="MARKET_DATA", blocker="OPTIONS_SNAPSHOT_ROOT_MISSING")
+    _install_phase_runners(monkeypatch, blocked_phase="MARKET_DATA_BOD_PREP", blocker="OPTIONS_SNAPSHOT_ROOT_MISSING")
     ctx = _ctx(tmp_path, "2026-04-29")
     payload1 = day_run.build_day_run_payload(ctx)
     path = day_run._ledger_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
@@ -313,8 +373,8 @@ def test_downstream_blockers_do_not_replace_canonical(monkeypatch: pytest.Monkey
     _install_phase_runners(monkeypatch, blocked_phase="BOD_INPUTS", blocker="OPERATOR_STATEMENT_MISSING")
     payload = day_run.build_day_run_payload(_ctx(tmp_path))
     assert payload["canonical_blocker"] == "OPERATOR_STATEMENT_MISSING"
-    assert payload["phase_results"]["MARKET_DATA"]["status"] == "SKIPPED"
-    assert payload["phase_results"]["AUTHORIZATION"]["status"] == "SKIPPED"
+    assert payload["phase_results"]["MARKET_DATA_BOD_PREP"]["status"] == "SKIPPED"
+    assert payload["phase_results"]["AUTHORIZATION_PREP"]["status"] == "SKIPPED"
 
 
 def test_submit_decision_trace_only_in_mutating_submit_phase() -> None:
