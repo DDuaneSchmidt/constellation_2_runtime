@@ -178,6 +178,10 @@ def test_phasec_consumes_structure_decision_selected_width_when_present(tmp_path
     assert adapted["selection_policy"]["width_policy"]["width_points"] == "1"
     assert adapted["selection_policy"]["expiry_policy"]["target_dte_min"] == 1
     assert adapted["selection_policy"]["expiry_policy"]["target_dte_max"] == 1
+    assert adapted["selection_policy"]["governed_legs"] == [
+        {"action": "SELL", "expiry_utc": "2026-04-30T00:00:00Z", "right": "PUT", "strike": "693.00", "ib_conId": 826250332},
+        {"action": "BUY", "expiry_utc": "2026-04-30T00:00:00Z", "right": "PUT", "strike": "692.00", "ib_conId": 826250298},
+    ]
 
 
 def test_phasec_does_not_accept_mapper_output_that_remaps_away_from_governed_legs(tmp_path: Path) -> None:

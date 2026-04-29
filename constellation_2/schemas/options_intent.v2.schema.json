@@ -185,6 +185,23 @@
             "limit_offset": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
             "tick_rounding": { "type": "string", "enum": ["ROUND_DOWN", "ROUND_UP", "ROUND_NEAREST"] }
           }
+        },
+        "governed_legs": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["action", "expiry_utc", "right", "strike", "ib_conId"],
+            "properties": {
+              "action": { "type": "string", "enum": ["BUY", "SELL"] },
+              "expiry_utc": { "type": "string", "format": "date-time" },
+              "right": { "type": "string", "enum": ["CALL", "PUT"] },
+              "strike": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+              "ib_conId": { "type": "integer", "minimum": 1 }
+            }
+          }
         }
       }
     },

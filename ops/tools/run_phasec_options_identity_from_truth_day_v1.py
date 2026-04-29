@@ -383,6 +383,17 @@ def _apply_structure_decision_to_options_intent(
     options_intent["selection_policy"]["width_policy"]["width_points"] = width
     options_intent["selection_policy"]["expiry_policy"]["target_dte_min"] = dte
     options_intent["selection_policy"]["expiry_policy"]["target_dte_max"] = dte
+    options_intent["selection_policy"]["governed_legs"] = [
+        {
+            "action": str(leg.get("action") or "").strip().upper(),
+            "expiry_utc": str(leg.get("expiry_utc") or "").strip(),
+            "right": str(leg.get("right") or "").strip().upper(),
+            "strike": f"{_parse_decimal_str(str(leg.get('strike') or ''), label='governed_leg.strike'):.2f}",
+            "ib_conId": int(leg.get("ib_conId")),
+        }
+        for leg in option_structure.get("legs", [])
+        if isinstance(leg, dict)
+    ]
     options_intent["canonical_json_hash"] = None
     options_intent_path.write_bytes(canonical_json_bytes_v1(options_intent) + b"\n")
 

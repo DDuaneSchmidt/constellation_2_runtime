@@ -285,6 +285,7 @@ def _select_strikes(intent: Dict[str, Any], chain: Dict[str, Any], expiry: str) 
     spot = _dec(chain["underlying"]["spot_price"])
     liq_pol = intent["selection_policy"]["liquidity_policy"]
     engine_mode = str(intent["engine"]["mode"] or "").strip().upper()
+    governed_legs = intent["selection_policy"].get("governed_legs")
 
     # Gather liquid contracts at expiry/right
     candidates: List[Dict[str, Any]] = []
@@ -304,6 +305,43 @@ def _select_strikes(intent: Dict[str, Any], chain: Dict[str, Any], expiry: str) 
     strikes_sorted = sorted(strikes, key=lambda t: (t[0], t[1]["contract_key"]))
 
     tie_breakers: List[str] = []
+    idx = _index_contracts(chain)
+
+    if governed_legs is not None:
+        if not isinstance(governed_legs, list) or len(governed_legs) != 2:
+            raise MappingError("governed_legs must contain exactly two legs.")
+        resolved: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+        for leg in governed_legs:
+            if not isinstance(leg, dict):
+                raise MappingError("governed_legs entries must be objects.")
+            action = str(leg.get("action") or "").strip().upper()
+            leg_right = str(leg.get("right") or "").strip().upper()
+            leg_expiry = str(leg.get("expiry_utc") or "").strip()
+            leg_strike = f"{_dec(str(leg.get('strike') or '')):.2f}"
+            leg_con_id = int(leg.get("ib_conId") or 0)
+            if action not in {"BUY", "SELL"}:
+                raise MappingError("governed_legs action must be BUY or SELL.")
+            if leg_expiry != expiry or leg_right != right:
+                raise MappingError("governed_legs expiry/right mismatch selected policy.")
+            contract = idx.get((leg_expiry, leg_right, leg_strike))
+            if contract is None:
+                raise MappingError("governed_legs contract missing from chain snapshot.")
+            ib = contract.get("ib") if isinstance(contract.get("ib"), dict) else {}
+            if int(ib.get("conId") or 0) != leg_con_id:
+                raise MappingError("governed_legs ib_conId mismatch chain snapshot.")
+            if not _liquid_contract(contract, liq_pol, engine_mode=engine_mode):
+                raise MappingError("governed_legs contract fails liquidity policy.")
+            resolved.append((leg, contract))
+        sell_contracts = [contract for leg, contract in resolved if str(leg.get("action") or "").strip().upper() == "SELL"]
+        buy_contracts = [contract for leg, contract in resolved if str(leg.get("action") or "").strip().upper() == "BUY"]
+        if len(sell_contracts) != 1 or len(buy_contracts) != 1:
+            raise MappingError("governed_legs must contain one BUY and one SELL leg.")
+        short_c = sell_contracts[0]
+        long_c = buy_contracts[0]
+        if abs(_dec(short_c["strike"]) - _dec(long_c["strike"])) != width:
+            raise MappingError("governed_legs width mismatch width_policy.")
+        tie_breakers.append("GOVERNED_STRUCTURE_DECISION_LEGS")
+        return short_c, long_c, tie_breakers
 
     def pick_short_near_money_put_credit_with_pair(
         idx: Dict[Tuple[str, str, str], Dict[str, Any]],
@@ -365,8 +403,6 @@ def _select_strikes(intent: Dict[str, Any], chain: Dict[str, Any], expiry: str) 
             tie_breakers.append("DEBIT_NEAR=closest_abs(strike-spot)_with_width_pair;tie=strike_then_contract_key")
             return near_cand, far_cand
         raise MappingError("No debit spread pair satisfies width_points + liquidity.")
-
-    idx = _index_contracts(chain)
 
     if direction == "CREDIT":
         if right == "PUT":
