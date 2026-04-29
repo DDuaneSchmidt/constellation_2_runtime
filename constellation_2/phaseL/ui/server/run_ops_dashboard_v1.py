@@ -152,6 +152,8 @@ THIS_FILE = Path(__file__).resolve()
 REPO_ROOT = THIS_FILE.parents[4]
 TRUTH_ROOT = SLEEVE_TRUTH_ROOT
 RUNTIME_ROOT = Path(os.environ.get("C2_RUNTIME_STATE_ROOT", "/home/node/constellation_runtime_data/runtime")).resolve()
+PERFORMANCE_SHOWCASE_FAMILY = "aegis_performance_showcase_v1"
+PERFORMANCE_SHOWCASE_HTML = "aegis_performance_showcase.v1.html"
 
 
 def _known_truth_roots() -> List[Path]:
@@ -1850,6 +1852,7 @@ class OpsHandler(SimpleHTTPRequestHandler):
         "/capital/cashflow",
         "/capital/validation",
         "/portfolio",
+        "/performance",
         "/sleeves",
         "/advisory",
         "/tax",
@@ -1910,6 +1913,32 @@ class OpsHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(b)))
         self.end_headers()
         self.wfile.write(b)
+
+    def _send_performance_cockpit_html(self, requested_day: Optional[str]) -> bool:
+        day = requested_day if isinstance(requested_day, str) and _is_day_str(requested_day) else date.today().isoformat()
+        path = (
+            GLOBAL_TRUTH_ROOT
+            / "reports"
+            / PERFORMANCE_SHOWCASE_FAMILY
+            / day
+            / PERFORMANCE_SHOWCASE_HTML
+        ).resolve()
+        allowed_root = GLOBAL_TRUTH_ROOT.resolve()
+        if not (str(path).startswith(str(allowed_root) + "/") or str(path) == str(allowed_root)):
+            self._send_json(HTTPStatus.FORBIDDEN, {"ok": False, "errors": ["PATH_OUTSIDE_TRUTH_ROOT"], "path": str(path)})
+            return True
+        if not path.exists() or not path.is_file():
+            self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "errors": ["PERFORMANCE_COCKPIT_NOT_FOUND"], "path": str(path)})
+            return True
+        b = path.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+        return True
 
     @staticmethod
     def _single_query_values(qs: Dict[str, List[str]]) -> Dict[str, str]:
@@ -2797,10 +2826,18 @@ class OpsHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         started = time.perf_counter()
-        path = urlparse(self.path).path
-        if urlparse(self.path).path == "/health":
+        parsed = urlparse(self.path)
+        path = parsed.path
+        if path == "/health":
             self._send_json(HTTPStatus.OK, self._health_payload())
             sys.stderr.write(f"TIMING: api endpoint=/health duration_ms={(time.perf_counter() - started) * 1000:.1f}\n")
+            return
+        if path == "/performance/cockpit.html":
+            qs = parse_qs(parsed.query)
+            raw_day = (qs.get("day") or [None])[0]
+            requested_day = raw_day if isinstance(raw_day, str) and raw_day and _is_day_str(raw_day) else None
+            self._send_performance_cockpit_html(requested_day)
+            sys.stderr.write(f"TIMING: performance cockpit duration_ms={(time.perf_counter() - started) * 1000:.1f}\n")
             return
         if self._route_api():
             sys.stderr.write(f"TIMING: api endpoint={path} duration_ms={(time.perf_counter() - started) * 1000:.1f}\n")

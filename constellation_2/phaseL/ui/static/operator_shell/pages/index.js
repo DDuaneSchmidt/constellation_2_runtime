@@ -142,6 +142,13 @@ export const ROUTES = [
     subtitle: "Positions and portfolio-operating facts from canonical runtime projections.",
   },
   {
+    path: "/performance",
+    id: "performance_cockpit",
+    label: "Performance",
+    eyebrow: "Performance Cockpit",
+    subtitle: "Standalone Aegis performance cockpit rendered from generated read-only report HTML.",
+  },
+  {
     path: "/sleeves",
     id: "sleeves",
     label: "Sleeves",
@@ -2096,6 +2103,41 @@ async function renderOutcomesPage() {
     contextHtml: [
       renderSourceRefCard(safeList(valueState.source_refs), "Value Evidence", "Governed value refs backing the current proof surface."),
     ].join(""),
+  };
+}
+
+async function renderPerformanceCockpitPage() {
+  const cockpitUrl = "/performance/cockpit.html";
+  return {
+    title: "Performance",
+    meta: "Read-only generated Aegis Performance Cockpit. Loaded only when this route is opened.",
+    html: renderCardSection({
+      eyebrow: "Generated Report",
+      title: "AEGIS Performance Cockpit",
+      subtitle: "The cockpit remains a standalone generated HTML artifact and is embedded here without merging it into shell logic.",
+      body: `
+        <div class="line-list">
+          <div>Source: <code>${escapeHtml(cockpitUrl)}</code></div>
+          <div><a href="${escapeHtml(cockpitUrl)}" target="_blank" rel="noopener noreferrer">Open Performance Cockpit</a></div>
+        </div>
+        <iframe
+          title="AEGIS Performance Cockpit"
+          src="${escapeHtml(cockpitUrl)}"
+          loading="lazy"
+          style="width:100%;height:78vh;border:1px solid var(--border-subtle);border-radius:8px;background:#090b10;"
+        ></iframe>
+      `,
+    }),
+    contextHtml: renderCardSection({
+      eyebrow: "Boundary",
+      title: "Read-only Artifact View",
+      subtitle: "This route does not produce trading evidence, mutate artifacts, or alter readiness logic.",
+      body: renderDefinitionRows([
+        { label: "Route", value: "/performance" },
+        { label: "Cockpit HTML", value: cockpitUrl },
+        { label: "Load behavior", value: "lazy iframe on route open" },
+      ]),
+    }),
   };
 }
 
@@ -4254,6 +4296,8 @@ export async function loadRouteView(routeId, state) {
       return renderCapitalValidationPage(state);
     case "portfolio":
       return renderPortfolioPage(state);
+    case "performance_cockpit":
+      return renderPerformanceCockpitPage(state);
     case "sleeves":
       return renderSleevesPage(state);
     case "opportunities":

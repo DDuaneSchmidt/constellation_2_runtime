@@ -46,7 +46,7 @@ export const NAVIGATION_SCHEMA = [
         children: [
           { id: "portfolio_overview", label: "Overview", icon: "◫", route: "/portfolio", truthOwner: "financial_state_authority" },
           { id: "portfolio_positions", label: "Positions", icon: "▦", route: "/portfolio", truthOwner: "positions_view" },
-          { id: "portfolio_performance", label: "Performance", icon: "⌁", route: "/outcomes", truthOwner: "value_state_view" },
+          { id: "portfolio_performance", label: "Performance", icon: "⌁", route: "/performance", truthOwner: "aegis_performance_showcase_v1" },
           { id: "portfolio_exposure", label: "Exposure", icon: "◎", route: "/portfolio", truthOwner: "exposure_authority" },
           { id: "portfolio_reconciliation", label: "Reconciliation", icon: "↔", route: "/reports", truthOwner: "reconciliation_view" },
         ],
