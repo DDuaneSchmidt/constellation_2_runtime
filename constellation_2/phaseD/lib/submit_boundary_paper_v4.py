@@ -522,6 +522,12 @@ def _preview_payload_from_whatif(whatif: Any) -> Dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _ib_payload_hash(payload: Dict[str, Any]) -> str:
+    if not isinstance(payload, dict) or not payload:
+        return ""
+    return canonical_hash_for_c2_artifact_v1(payload)
+
+
 def _combo_preview_blocker(whatif: Any) -> str:
     raw = getattr(whatif, "raw", None)
     raw_text = str(raw or "").upper()
@@ -559,6 +565,7 @@ def _write_ib_order_payload_artifact(
     final_lineage_gate: Dict[str, Any],
 ) -> Path:
     path = (submission_dir / "ib_order_payload.v1.json").resolve()
+    payload_sha256 = _ib_payload_hash(payload)
     _write_json_artifact(
         path,
         {
@@ -569,6 +576,8 @@ def _write_ib_order_payload_artifact(
             "ib_account": ib_account,
             "connection": {"host": ib_host, "port": ib_port, "client_id": ib_client_id},
             "payload": payload,
+            "payload_sha256": payload_sha256,
+            "submit_payload_sha256": payload_sha256,
             "final_snapshot_lineage_gate": final_lineage_gate,
         },
     )
@@ -582,9 +591,13 @@ def _write_ib_combo_preview_artifact(
     ib_account: str,
     whatif: Any,
     blocker: str,
+    submit_payload_sha256: str = "",
 ) -> Path:
     path = (submission_dir / "ib_combo_preview.v1.json").resolve()
     raw = getattr(whatif, "raw", None)
+    preview_payload = _preview_payload_from_whatif(whatif)
+    preview_payload_sha256 = _ib_payload_hash(preview_payload)
+    hashes_match = bool(preview_payload_sha256 and submit_payload_sha256 and preview_payload_sha256 == submit_payload_sha256)
     _write_json_artifact(
         path,
         {
@@ -599,6 +612,9 @@ def _write_ib_combo_preview_artifact(
             "detail": str(getattr(whatif, "detail", "") or ""),
             "margin_change_usd": str(getattr(whatif, "margin_change_usd", "") or ""),
             "notional_usd": str(getattr(whatif, "notional_usd", "") or ""),
+            "preview_payload_sha256": preview_payload_sha256,
+            "submit_payload_sha256": submit_payload_sha256,
+            "preview_payload_hash_matches_submit_payload_hash": hashes_match,
             "raw": raw if isinstance(raw, dict) else {},
         },
     )
@@ -2297,12 +2313,16 @@ def run_submit_boundary_paper_v4(
                     raw={"exception": message},
                 ),
                 blocker=blocker,
+                submit_payload_sha256="",
             )
             pointers.append(str(preview_path))
             raise SubmitBoundaryV4Error(f"{RC_BROKER_COMBO_PREVIEW_NOT_PASS}:{blocker}") from exc
 
         payload_path = None
+        preview_submit_payload_sha256 = ""
         if mode == "OPTIONS":
+            preview_payload = _preview_payload_from_whatif(whatif)
+            preview_submit_payload_sha256 = _ib_payload_hash(preview_payload)
             payload_path = _write_ib_order_payload_artifact(
                 submission_dir=submission_dir,
                 day_utc=day,
@@ -2310,7 +2330,7 @@ def run_submit_boundary_paper_v4(
                 ib_host=ib_host,
                 ib_port=ib_port,
                 ib_client_id=ib_client_id,
-                payload=_preview_payload_from_whatif(whatif),
+                payload=preview_payload,
                 final_lineage_gate=final_lineage_gate,
             )
             pointers.append(str(payload_path))
@@ -2321,6 +2341,7 @@ def run_submit_boundary_paper_v4(
                 ib_account=execution_identity.account_id,
                 whatif=whatif,
                 blocker=preview_blocker,
+                submit_payload_sha256=preview_submit_payload_sha256,
             )
             pointers.append(str(preview_path))
             if preview_blocker:
@@ -2364,6 +2385,15 @@ def run_submit_boundary_paper_v4(
         submit_res = adapter.submit_order(order_plan=plan_obj)
         assert_no_synth_status_in_paper("PAPER", submit_res.status)
         raw_submit = submit_res.raw if isinstance(submit_res.raw, dict) else {}
+        if mode == "OPTIONS":
+            actual_submit_payload = raw_submit.get("payload") if isinstance(raw_submit.get("payload"), dict) else {}
+            actual_submit_payload_sha256 = _ib_payload_hash(actual_submit_payload)
+            if not preview_submit_payload_sha256 or actual_submit_payload_sha256 != preview_submit_payload_sha256:
+                raise SubmitBoundaryV4Error(
+                    "C2_BROKER_COMBO_PREVIEW_SUBMIT_PAYLOAD_HASH_MISMATCH"
+                    f": preview_payload_hash={preview_submit_payload_sha256 or 'MISSING'}"
+                    f" submit_payload_hash={actual_submit_payload_sha256 or 'MISSING'}"
+                )
         raw_broker_ids = raw_submit.get("broker_ids") if isinstance(raw_submit.get("broker_ids"), dict) else {}
         parent_order_id = raw_broker_ids.get("parent_order_id")
         parent_perm_id = raw_broker_ids.get("parent_perm_id")

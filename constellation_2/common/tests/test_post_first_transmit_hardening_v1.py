@@ -20,7 +20,9 @@ from constellation_2.phaseD.lib.submit_boundary_paper_v4 import (  # noqa: E402
     _combo_preview_blocker,
     _enforce_final_snapshot_lineage_gate,
     _enforce_second_attempt_clearance_gate,
+    _ib_payload_hash,
     _sha256_file,
+    _write_ib_combo_preview_artifact,
     _write_ib_order_payload_artifact,
 )
 from constellation_2.common.paper_second_attempt_clearance_v1 import (  # noqa: E402
@@ -195,7 +197,38 @@ def test_exact_ib_payload_is_persisted_before_transmit(tmp_path: Path) -> None:
     payload = json.loads(payload_path.read_text(encoding="utf-8"))
     assert payload["payload"]["bag"]["secType"] == "BAG"
     assert payload["payload"]["order"]["action"] == "BUY"
+    assert payload["payload_sha256"] == _ib_payload_hash(payload["payload"])
+    assert payload["submit_payload_sha256"] == payload["payload_sha256"]
     assert payload["canonical_json_hash"]
+
+
+def test_ib_combo_preview_artifact_hash_matches_exact_submit_payload(tmp_path: Path) -> None:
+    payload = {
+        "bag": {"secType": "BAG"},
+        "order": {"action": "BUY"},
+        "routing": {"smart_combo_routing_params": [{"tag": "NonGuaranteed", "value": "1"}]},
+    }
+    payload_hash = _ib_payload_hash(payload)
+    preview_path = _write_ib_combo_preview_artifact(
+        submission_dir=tmp_path / "submission",
+        day_utc=DAY,
+        ib_account="DUO847203",
+        whatif=SimpleNamespace(
+            ok=True,
+            detail="WHATIF_OK",
+            margin_change_usd="100",
+            notional_usd="100",
+            raw={"payload": payload},
+        ),
+        blocker="",
+        submit_payload_sha256=payload_hash,
+    )
+
+    preview = json.loads(preview_path.read_text(encoding="utf-8"))
+    assert preview["status"] == "PASS"
+    assert preview["preview_payload_sha256"] == payload_hash
+    assert preview["submit_payload_sha256"] == payload_hash
+    assert preview["preview_payload_hash_matches_submit_payload_hash"] is True
 
 
 def test_second_attempt_missing_clearance_blocks_submit(tmp_path: Path) -> None:

@@ -576,6 +576,7 @@ def build_first_ib_accepted_paper_order_checklist_v1(
     ))
 
     raw_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
+    payload_sha256 = str(payload.get("submit_payload_sha256") or payload.get("payload_sha256") or "").strip()
     order = raw_payload.get("order") if isinstance(raw_payload.get("order"), dict) else {}
     bag = raw_payload.get("bag") if isinstance(raw_payload.get("bag"), dict) else {}
     bag_legs = bag.get("legs") if isinstance(bag.get("legs"), list) else []
@@ -622,13 +623,35 @@ def build_first_ib_accepted_paper_order_checklist_v1(
         "SMART_ROUTING_PARAM_MISSING" if payload else "IB_PAYLOAD_MISSING",
     ))
 
+    if raw_payload and not payload_sha256:
+        try:
+            from constellation_2.phaseD.lib.submit_boundary_paper_v4 import _ib_payload_hash  # noqa: PLC0415
+
+            payload_sha256 = _ib_payload_hash(raw_payload)
+        except Exception:
+            payload_sha256 = ""
     preview_status = str(preview.get("status") or "").upper()
-    preview_ok = preview_status == "PASS" and preview.get("whatif_ok") is True
+    preview_payload_sha256 = str(preview.get("preview_payload_sha256") or "").strip()
+    preview_submit_payload_sha256 = str(preview.get("submit_payload_sha256") or "").strip()
+    preview_hashes_match = (
+        preview.get("preview_payload_hash_matches_submit_payload_hash") is True
+        and bool(payload_sha256)
+        and preview_payload_sha256 == payload_sha256
+        and preview_submit_payload_sha256 == payload_sha256
+    )
+    preview_ok = preview_status == "PASS" and preview.get("whatif_ok") is True and preview_hashes_match
     checks.append(_check(
         "19_IB_PREVIEW_PASS",
         PASS if preview_ok else (FAIL if preview else NOT_CHECKED),
-        "ib_combo_preview status == PASS and whatif_ok == true",
-        {"status": preview.get("status"), "whatif_ok": preview.get("whatif_ok")},
+        "ib_combo_preview status == PASS, whatif_ok == true, and preview_payload_hash == submit_payload_hash",
+        {
+            "status": preview.get("status"),
+            "whatif_ok": preview.get("whatif_ok"),
+            "preview_payload_sha256": preview_payload_sha256,
+            "submit_payload_sha256": preview_submit_payload_sha256,
+            "ib_order_payload_sha256": payload_sha256,
+            "preview_payload_hash_matches_submit_payload_hash": preview.get("preview_payload_hash_matches_submit_payload_hash"),
+        },
         _path_text(preview_path),
         "IB_PREVIEW_NOT_PASS" if preview else "IB_PREVIEW_MISSING",
     ))

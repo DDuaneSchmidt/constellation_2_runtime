@@ -13,6 +13,7 @@ from constellation_2.common.paper_second_attempt_clearance_v1 import (  # noqa: 
     plan_hash_v1,
     sha256_file_v1,
 )
+from constellation_2.phaseD.lib.submit_boundary_paper_v4 import _ib_payload_hash  # noqa: E402
 from ops.tools.run_first_ib_accepted_paper_order_checklist_v1 import (  # noqa: E402
     build_first_ib_accepted_paper_order_checklist_v1,
 )
@@ -189,6 +190,15 @@ def _seed_all_pass(tmp_path: Path) -> tuple[Path, Path]:
     )
 
     submission = execution / "execution_evidence_v1" / "submissions" / DAY / SUBMISSION
+    ib_payload = {
+        "bag": {
+            "secType": "BAG",
+            "legs": [{"conId": 1001, "ratio": 1, "action": "SELL"}, {"conId": 1002, "ratio": 1, "action": "BUY"}],
+        },
+        "order": {"action": "BUY"},
+        "routing": {"smart_combo_routing_params": [{"tag": "NonGuaranteed", "value": "1"}]},
+    }
+    ib_payload_hash = _ib_payload_hash(ib_payload)
     _write_json(
         submission / "ib_order_payload.v1.json",
         {
@@ -196,14 +206,9 @@ def _seed_all_pass(tmp_path: Path) -> tuple[Path, Path]:
             "day_utc": DAY,
             "environment": "PAPER",
             "ib_account": "DUO847203",
-            "payload": {
-                "bag": {
-                    "secType": "BAG",
-                    "legs": [{"conId": 1001, "ratio": 1, "action": "SELL"}, {"conId": 1002, "ratio": 1, "action": "BUY"}],
-                },
-                "order": {"action": "BUY"},
-                "routing": {"smart_combo_routing_params": [{"tag": "NonGuaranteed", "value": "1"}]},
-            },
+            "payload": ib_payload,
+            "payload_sha256": ib_payload_hash,
+            "submit_payload_sha256": ib_payload_hash,
         },
     )
     _write_json(
@@ -217,7 +222,10 @@ def _seed_all_pass(tmp_path: Path) -> tuple[Path, Path]:
             "canonical_blocker": "",
             "whatif_ok": True,
             "detail": "WHATIF_OK",
-            "raw": {"payload": {"routing": {"smart_combo_routing_params": [{"tag": "NonGuaranteed", "value": "1"}]}}},
+            "preview_payload_sha256": ib_payload_hash,
+            "submit_payload_sha256": ib_payload_hash,
+            "preview_payload_hash_matches_submit_payload_hash": True,
+            "raw": {"payload": ib_payload},
         },
     )
     _write_json(
