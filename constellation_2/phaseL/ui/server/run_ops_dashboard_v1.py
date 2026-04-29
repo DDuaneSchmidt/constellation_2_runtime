@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from datetime import date, datetime, timezone
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -50,6 +51,7 @@ from constellation_2.phaseL.ui_api import (
     build_configuration_current_v1,
     build_financial_state_view,
     build_kernel_status_rail_view,
+    build_kernel_status_rail_summary_view,
     build_integrity_view,
     build_operations_view,
     build_opportunity_state_view,
@@ -2234,7 +2236,11 @@ class OpsHandler(SimpleHTTPRequestHandler):
             return True
 
         if path == "/api/shell/status-rail":
-            self._send_json(HTTPStatus.OK, build_kernel_status_rail_view())
+            summary_only = (qs.get("summary") or [""])[0] in {"1", "true", "TRUE", "yes", "YES"}
+            self._send_json(
+                HTTPStatus.OK,
+                build_kernel_status_rail_summary_view() if summary_only else build_kernel_status_rail_view(),
+            )
             return True
 
         if path == "/api/work-queue":
@@ -2287,7 +2293,8 @@ class OpsHandler(SimpleHTTPRequestHandler):
             return True
 
         if path == "/api/advisory":
-            self._send_json(HTTPStatus.OK, build_advisory_view(requested_day))
+            summary_only = (qs.get("summary") or [""])[0] in {"1", "true", "TRUE", "yes", "YES"}
+            self._send_json(HTTPStatus.OK, build_advisory_view(requested_day, include_evidence=not summary_only))
             return True
 
         if path == "/api/policy-evolution":
@@ -2789,10 +2796,14 @@ class OpsHandler(SimpleHTTPRequestHandler):
         return True
 
     def do_GET(self) -> None:
+        started = time.perf_counter()
+        path = urlparse(self.path).path
         if urlparse(self.path).path == "/health":
             self._send_json(HTTPStatus.OK, self._health_payload())
+            sys.stderr.write(f"TIMING: api endpoint=/health duration_ms={(time.perf_counter() - started) * 1000:.1f}\n")
             return
         if self._route_api():
+            sys.stderr.write(f"TIMING: api endpoint={path} duration_ms={(time.perf_counter() - started) * 1000:.1f}\n")
             return
         return super().do_GET()
 

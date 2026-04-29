@@ -77,9 +77,23 @@ const state = {
   },
   activeView: null,
   paletteOpen: false,
-  sidebarCollapsed: false,
+  sidebarMode: localStorage.getItem("aegis.sidebar.mode") || "expanded",
   sidebarOpenGroups: new Set(NAVIGATION_SCHEMA.flatMap((section) => section.domains.map((domain) => domain.id))),
 };
+
+function logTiming(phase, startedAt, extra = {}) {
+  const durationMs = Math.round((performance.now() - startedAt) * 10) / 10;
+  console.info("[aegis-ui-timing]", { phase, duration_ms: durationMs, ...extra });
+}
+
+async function timedAsync(phase, action, extra = {}) {
+  const startedAt = performance.now();
+  try {
+    return await action();
+  } finally {
+    logTiming(phase, startedAt, extra);
+  }
+}
 
 function formatDisplayLabel(value) {
   const text = String(value || "Unknown").trim();
@@ -111,9 +125,19 @@ function renderBrand() {
 }
 
 function renderNav() {
+  const startedAt = performance.now();
   const active = activeNavigationForPath(window.location.pathname, NAVIGATION_SCHEMA);
   const query = String(document.getElementById("sidebarSearch")?.value || "").trim().toLowerCase();
-  document.body.classList.toggle("sidebar-collapsed", state.sidebarCollapsed);
+  state.sidebarMode = ["expanded", "collapsed", "hidden"].includes(state.sidebarMode) ? state.sidebarMode : "expanded";
+  document.body.classList.toggle("sidebar-collapsed", state.sidebarMode === "collapsed");
+  document.body.classList.toggle("sidebar-hidden", state.sidebarMode === "hidden");
+  const collapseButton = document.querySelector("[data-sidebar-collapse]");
+  if (collapseButton) {
+    const nextLabel = state.sidebarMode === "expanded" ? "Collapse" : state.sidebarMode === "collapsed" ? "Hide" : "Show";
+    collapseButton.setAttribute("aria-label", `${nextLabel} navigation`);
+    collapseButton.querySelector("span").textContent = nextLabel;
+    collapseButton.querySelector("strong").textContent = state.sidebarMode === "hidden" ? "›" : "‹";
+  }
   document.getElementById("workspaceNav").innerHTML = NAVIGATION_SCHEMA.map((section) => {
     const domains = section.domains
       .map((domain) => {
@@ -174,6 +198,7 @@ function renderNav() {
       </section>
     `;
   }).join("");
+  logTiming("workspace/navigation load", startedAt, { mode: state.sidebarMode });
 }
 
 function renderKernelRail() {
@@ -266,15 +291,15 @@ function togglePalette(forceOpen) {
   }
 }
 
-async function loadSharedShellState() {
-  const [semanticsPayload, railPayload, systemSummary, operatorWorkflow, alerts, financialState] = await Promise.all([
+async function loadSharedShellState({ summaryOnly = false } = {}) {
+  const [semanticsPayload, railPayload, systemSummary, operatorWorkflow, alerts, financialState] = await timedAsync("readiness cards load", () => Promise.all([
     fetchStatusSemantics(),
-    fetchStatusRail(),
+    fetchStatusRail(summaryOnly ? { summary: 1 } : {}),
     fetchSystemSummary(),
     fetchOperatorWorkflow(),
     fetchAlerts(),
     fetchFinancialState(),
-  ]);
+  ]), { summary_only: summaryOnly });
   state.semantics = semanticsPayload.status_semantics || {};
   state.shell.statusRail = railPayload.kernels || [];
   state.shell.systemSummary = systemSummary || {};
@@ -287,6 +312,7 @@ async function loadSharedShellState() {
 }
 
 async function renderRoute() {
+  const startedAt = performance.now();
   const route = currentRoute();
   renderNav();
   const mainHost = document.getElementById("workspaceContent");
@@ -294,7 +320,7 @@ async function renderRoute() {
   mainHost.innerHTML = `<div class="page-loading">Loading ${escapeHtml(route.label)}…</div>`;
   contextHost.innerHTML = "";
   try {
-    const view = await loadRouteView(route.id, state);
+    const view = await timedAsync("workspace route load", () => loadRouteView(route.id, state), { route_id: route.id });
     state.activeView = view;
     setPageChrome(route, view);
     mainHost.innerHTML = view.html;
@@ -308,6 +334,8 @@ async function renderRoute() {
       mainHost.innerHTML = renderError(error.message || "Route render failed.");
     }
     contextHost.innerHTML = "";
+  } finally {
+    logTiming("workspace render complete", startedAt, { route_id: route.id });
   }
 }
 
@@ -334,11 +362,16 @@ async function navigateTo(path) {
 }
 
 async function openArtifact(path, title) {
+  const startedAt = performance.now();
+  document.getElementById("drawerTitle").textContent = title || "Loading evidence";
+  document.getElementById("drawerMeta").textContent = path || "";
+  document.getElementById("drawerContent").textContent = "Loading evidence artifact...";
   const response = await fetch(`/api/artifact?path=${encodeURIComponent(path)}`, { cache: "no-store" });
   const payload = await response.json();
   document.getElementById("drawerTitle").textContent = title || payload.path || "Artifact";
   document.getElementById("drawerMeta").textContent = payload.path || "";
   document.getElementById("drawerContent").textContent = payload.content || "";
+  logTiming("evidence drawer load", startedAt, { ok: Boolean(payload.ok), path: payload.path || path || "" });
 }
 
 function resetDrawer() {
@@ -503,8 +536,41 @@ async function handleClick(event) {
   const sidebarCollapse = event.target.closest("[data-sidebar-collapse]");
   if (sidebarCollapse) {
     event.preventDefault();
-    state.sidebarCollapsed = !state.sidebarCollapsed;
+    state.sidebarMode = state.sidebarMode === "expanded" ? "collapsed" : state.sidebarMode === "collapsed" ? "hidden" : "expanded";
+    localStorage.setItem("aegis.sidebar.mode", state.sidebarMode);
     renderNav();
+    return;
+  }
+
+  const advisoryEvidenceButton = event.target.closest("[data-load-advisory-evidence]");
+  if (advisoryEvidenceButton) {
+    event.preventDefault();
+    const startedAt = performance.now();
+    const host = document.getElementById("advisoryEvidenceRefs");
+    if (host) {
+      host.textContent = "Loading evidence refs...";
+    }
+    try {
+      const response = await fetch("/api/advisory", { cache: "no-store" });
+      const advisory = await response.json();
+      const refs = Array.isArray(advisory.source_refs) ? advisory.source_refs : [];
+      if (host) {
+        host.classList.remove("empty-state");
+        host.innerHTML = refs.length
+          ? `<div class="evidence-list">${refs.map((ref) => `
+              <button class="evidence-button" type="button" data-artifact-path="${escapeHtml(ref.artifact_path || ref.path || "")}" data-artifact-title="${escapeHtml(ref.label || ref.artifact_type || "Advisory evidence")}">
+                ${escapeHtml(ref.label || ref.artifact_type || "Evidence")}
+              </button>
+            `).join("")}</div>`
+          : `<div class="empty-state">No advisory evidence refs were returned.</div>`;
+      }
+      logTiming("evidence refs load", startedAt, { count: refs.length });
+    } catch (error) {
+      if (host) {
+        host.innerHTML = renderError(error?.message || "Evidence refs failed to load.");
+      }
+      logTiming("evidence refs load", startedAt, { error: true });
+    }
     return;
   }
 
@@ -622,12 +688,25 @@ async function handleSubmit(event) {
 }
 
 export async function bootOperatorShell() {
+  const startedAt = performance.now();
   renderBrand();
-  await loadSharedShellState();
+  renderNav();
+  renderTopBar();
+  document.getElementById("workspaceContent").innerHTML = `<div class="page-loading">Loading workspace…</div>`;
+  document.getElementById("contextRailContent").innerHTML = `<div class="empty-state">Evidence loads after the workspace summary is available.</div>`;
+  logTiming("initial shell render", startedAt);
+  loadSharedShellState({ summaryOnly: true }).then(() => {
+    renderRoute();
+    return loadSharedShellState({ summaryOnly: false });
+  }).then(() => {
+    renderRoute();
+  }).catch((error) => {
+    console.error("[aegis-ui] shared shell load failed", error);
+  });
   await renderRoute();
 
   document.getElementById("refreshButton").addEventListener("click", async () => {
-    await loadSharedShellState();
+    await loadSharedShellState({ summaryOnly: false });
     await renderRoute();
   });
   document.getElementById("commandPaletteButton").addEventListener("click", () => {

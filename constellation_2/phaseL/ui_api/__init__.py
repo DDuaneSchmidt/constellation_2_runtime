@@ -42,6 +42,7 @@ from .configuration_workflow_v1 import (
 from .value_state_read_model import build_value_state_view
 from .workflow_layer import build_operator_workflow_summary
 from .kernel_operator_shell_v1 import (
+    build_kernel_status_rail_summary_view,
     build_kernel_status_rail_view,
     build_operator_work_queue_view,
     build_workspace_view,
@@ -98,6 +99,7 @@ __all__ = [
     "build_outcome_state_view",
     "build_operator_workflow_summary",
     "build_kernel_status_rail_view",
+    "build_kernel_status_rail_summary_view",
     "build_operator_work_queue_view",
     "build_positions_view",
     "build_product_summary_view",

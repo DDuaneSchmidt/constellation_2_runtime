@@ -20,7 +20,7 @@ def _latest_advisory_day() -> Optional[str]:
     return days[-1] if days else None
 
 
-def build_advisory_view(day: Optional[str] = None) -> Dict[str, Any]:
+def build_advisory_view(day: Optional[str] = None, *, include_evidence: bool = True) -> Dict[str, Any]:
     advisory_day = resolve_ui_day(day) or _latest_advisory_day()
     decisions: List[Dict[str, Any]] = []
     source_rows = []
@@ -45,7 +45,7 @@ def build_advisory_view(day: Optional[str] = None) -> Dict[str, Any]:
                 "summary_message": ((payload.get("primary_explanation") or {}).get("short_message")),
                 "authority_label": payload.get("authority_label"),
                 "provenance_markers": markers("advisory", "governed_certified_decision"),
-                "evidence_refs": evidence_refs(
+                "evidence_refs": [] if not include_evidence else evidence_refs(
                     *[
                         evidence_ref(
                             Path(row.get("artifact_path") or ""),
@@ -65,7 +65,7 @@ def build_advisory_view(day: Optional[str] = None) -> Dict[str, Any]:
         as_of_utc=(source_rows[-1].payload.get("generated_at_utc") if source_rows else None),
         freshness_state=(latest_decision or {}).get("freshness_state") or "unknown",
         provenance_markers=provenance_markers("advisory", "governed_certified_decision"),
-        source_refs=evidence_refs(
+        source_refs=[] if not include_evidence else evidence_refs(
             *[
                 evidence_ref(ref.path, label=ref.payload.get("advisory_item_id"), artifact_type="advisory_decision_state_v1")
                 for ref in source_rows

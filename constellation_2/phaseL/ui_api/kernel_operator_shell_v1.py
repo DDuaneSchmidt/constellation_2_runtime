@@ -1169,6 +1169,31 @@ def build_kernel_status_rail_view() -> dict[str, Any]:
     }
 
 
+def build_kernel_status_rail_summary_view() -> dict[str, Any]:
+    labels = {
+        "control": "Control",
+        "state": "State",
+        "advisory": "Advisory",
+        "submission": "Submission",
+        "lifecycle": "Lifecycle",
+    }
+    return {
+        "ok": True,
+        "query_contract_version": QUERY_CONTRACT_VERSION,
+        "summary_only": True,
+        "generated_utc": _now_utc(),
+        "kernels": [
+            {
+                "kernel_id": workspace_id,
+                "label": label,
+                "status": _status("unknown", label="Loading", semantic="unknown", reason_codes=["SUMMARY_ONLY"]),
+                "href": f"/{workspace_id}",
+            }
+            for workspace_id, label in labels.items()
+        ],
+    }
+
+
 def build_operator_work_queue_view() -> dict[str, Any]:
     rail = build_kernel_status_rail_view()
     items = []

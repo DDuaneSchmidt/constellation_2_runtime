@@ -108,6 +108,7 @@ function buildOperatorFetchError({
 
 async function requestJson(path, options = {}) {
   const requestUrl = buildRequestUrl(path);
+  const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   let response;
   try {
     response = await fetch(requestUrl, options);
@@ -139,6 +140,13 @@ async function requestJson(path, options = {}) {
       parseError,
     });
   }
+  const durationMs = Math.round(((typeof performance !== "undefined" ? performance.now() : Date.now()) - startedAt) * 10) / 10;
+  console.info("[aegis-api-timing]", {
+    endpoint: path,
+    request_url: requestUrl,
+    status: response.status,
+    duration_ms: durationMs,
+  });
   return payload;
 }
 

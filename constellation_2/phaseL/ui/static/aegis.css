@@ -328,6 +328,37 @@
   justify-content: center;
 }
 
+.sidebar-hidden .shell-frame {
+  grid-template-columns: 0 minmax(0, 1fr) 320px;
+}
+
+.sidebar-hidden .shell-leftnav {
+  width: 0;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  overflow: visible;
+}
+
+.sidebar-hidden .shell-leftnav > *:not(.sidebar-collapse-button) {
+  display: none;
+}
+
+.sidebar-hidden .sidebar-collapse-button {
+  position: fixed;
+  left: 12px;
+  top: 92px;
+  z-index: 20;
+  width: 38px;
+  height: 38px;
+  justify-content: center;
+  padding: 0;
+}
+
+.sidebar-hidden .sidebar-collapse-button span {
+  display: none;
+}
+
 .page-toolbar {
   display: none;
 }

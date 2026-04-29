@@ -2238,7 +2238,7 @@ async function renderPolicyPage() {
 }
 
 async function renderAdvisoryPage() {
-  const advisory = await fetchAdvisory();
+  const advisory = await fetchAdvisory({ summary: 1 });
   const decisions = safeList(advisory.decisions);
   return {
     title: "Advisory",
@@ -2273,7 +2273,15 @@ async function renderAdvisoryPage() {
       }),
     ].join(""),
     contextHtml: [
-      renderSourceRefCard(safeList(advisory.source_refs), "Advisory Evidence", "Governed advisory decision-state refs."),
+      renderCardSection({
+        eyebrow: "Evidence",
+        title: "Advisory Evidence",
+        subtitle: "Evidence refs are loaded on demand so the advisory shell is not blocked by artifact hydration.",
+        body: `
+          <button class="evidence-button" type="button" data-load-advisory-evidence>Load evidence refs</button>
+          <div id="advisoryEvidenceRefs" class="evidence-lazy-slot empty-state">Evidence refs not loaded.</div>
+        `,
+      }),
       renderCardSection({
         eyebrow: "Warnings",
         title: "Advisory Warnings",

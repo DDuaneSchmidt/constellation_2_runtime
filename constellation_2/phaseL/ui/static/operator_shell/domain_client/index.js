@@ -16,8 +16,8 @@ export function fetchStatusSemantics() {
   return query("/api/shared/status-semantics");
 }
 
-export function fetchStatusRail() {
-  return query("/api/shell/status-rail");
+export function fetchStatusRail(params = {}) {
+  return query("/api/shell/status-rail", params);
 }
 
 export function fetchSystemSummary() {
@@ -64,8 +64,8 @@ export function fetchIntegrity() {
   return query("/api/integrity");
 }
 
-export function fetchAdvisory() {
-  return query("/api/advisory");
+export function fetchAdvisory(params = {}) {
+  return query("/api/advisory", params);
 }
 
 export function fetchOpportunities() {
