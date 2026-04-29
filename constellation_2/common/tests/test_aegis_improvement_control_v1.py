@@ -465,6 +465,7 @@ def _review_fixture() -> dict:
 def test_review_report_includes_required_sections_and_flags() -> None:
     fixture = _review_fixture()
     review = build_improvement_control_review_v1(day_utc="2026-04-28", generated_at=TS, **fixture)
+    assert review["summary"]["operator_action_required_count"] == 4
     assert review["summary"]["advisory_only"] is True
     assert review["summary"]["controls_runtime_behavior"] is False
     assert review["summary"]["controls_broker_execution"] is False
@@ -490,6 +491,8 @@ def test_review_report_groups_proposals_and_surfaces_test_first() -> None:
     assert len(review["proposals_by_status"]["proposed"]) == 1
     assert review["summary"]["test_first_items_count"] == 1
     assert review["approval_test_queue"]["test_first"][0]["proposal_id"] == fixture["proposals"][0]["proposal_id"]
+    assert review["operator_action_required"][0]["action_type"] == "TEST"
+    assert review["operator_action_required"][0]["action"] == "Run replay validation"
 
 
 def test_review_report_shows_inactive_policies_without_active_policy() -> None:
@@ -509,6 +512,8 @@ def test_review_report_surfaces_measurements_due_and_rollback_candidates() -> No
     assert review["summary"]["rollback_candidates_count"] == 1
     assert review["rollback_candidates"][0]["reason"] == "rollback_criteria_met"
     assert review["rollback_candidates"][0]["conclusion"] == "degraded"
+    action_types = [row["action_type"] for row in review["operator_action_required"]]
+    assert action_types == ["TEST", "MEASURE", "REVIEW", "SAFE_STATE"]
 
 
 def test_review_report_generation_does_not_mutate_inputs() -> None:
@@ -523,6 +528,9 @@ def test_review_markdown_and_artifact_writer_are_read_only_outputs(tmp_path: Pat
     review = build_improvement_control_review_v1(day_utc="2026-04-28", generated_at=TS, **fixture)
     markdown = render_improvement_control_review_markdown_v1(review)
     assert "Aegis Improvement Control Review V1" in markdown
+    assert "## Operator Action Required" in markdown
+    assert "4. [SAFE_STATE]" in markdown
+    assert "No runtime changes currently active" in markdown
     paths = write_improvement_control_review_artifacts_v1(truth_root=tmp_path, review=review)
     json_path = Path(str(paths["json_path"]))
     markdown_path = Path(str(paths["markdown_path"]))

@@ -17,6 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from constellation_2.common.aegis_day_lifecycle_v1 import write_lifecycle_transition_v1
 from constellation_2.common.decision_authority_bridge_v1 import resolve_decision_truth_root_bridge_v1
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1, resolve_market_calendar_record_v1
 from constellation_2.common.paper_session_path_alignment_v1 import (
@@ -199,9 +200,60 @@ def _run_child(step_name: str, cmd: list[str], *, env: dict[str, str] | None = N
     }
 
 
+def _classify_failure(step_name: str, blocker: str) -> str:
+    text = f"{step_name} {blocker}".upper()
+    if any(token in text for token in ("IB", "HANDSHAKE", "MARKET_DATA", "OPTIONS", "TIMEOUT", "SOCKET")):
+        return "TRANSIENT_EXTERNAL_FAILURE"
+    if any(token in text for token in ("OPERATOR", "CAPITAL_SEED", "STATEMENT", "PRE_OPEN_BUNDLE_INCOMPLETE")):
+        return "OPERATOR_INPUT_REQUIRED"
+    if blocker:
+        return "SYSTEM_FAILURE"
+    return ""
+
+
+def _annotate_step(row: dict[str, Any]) -> dict[str, Any]:
+    row["failure_classification"] = (
+        _classify_failure(str(row.get("step_name") or ""), str(row.get("blocker") or ""))
+        if row.get("status") in {"BLOCKED", "TIMEOUT"}
+        else ""
+    )
+    return row
+
+
+def _run_child_with_retries(
+    step_name: str,
+    cmd: list[str],
+    *,
+    env: dict[str, str] | None = None,
+    max_attempts: int = 1,
+    backoff_seconds: float = 1.0,
+) -> dict[str, Any]:
+    attempts: list[dict[str, Any]] = []
+    final: dict[str, Any] | None = None
+    for attempt in range(1, max(1, max_attempts) + 1):
+        row = _annotate_step(_run_child(step_name, cmd, env=env))
+        row["attempt_number"] = attempt
+        attempts.append(
+            {
+                key: row[key]
+                for key in ("status", "blocker", "exit_code", "duration_ms", "failure_classification", "attempt_number")
+            }
+        )
+        final = row
+        if row["status"] == "PASS":
+            break
+        if row.get("failure_classification") != "TRANSIENT_EXTERNAL_FAILURE" or attempt >= max_attempts:
+            break
+        time.sleep(backoff_seconds)
+    assert final is not None
+    final["attempts"] = len(attempts)
+    final["attempt_results"] = attempts
+    return final
+
+
 def _internal_step(step_name: str, *, status: str, artifact_path: str = "", blocker: str = "", command: list[str] | None = None) -> dict[str, Any]:
     now = _now_iso()
-    return {
+    return _annotate_step({
         "step_name": step_name,
         "command": command or ["internal", step_name],
         "status": status,
@@ -214,7 +266,7 @@ def _internal_step(step_name: str, *, status: str, artifact_path: str = "", bloc
         "stderr_summary": "",
         "stdout_summary": "",
         "timeout_seconds": 0,
-    }
+    })
 
 
 @dataclass(frozen=True)
@@ -395,7 +447,7 @@ def _run_sequence(ctx: BodContext) -> list[dict[str, Any]]:
     seed_path = resolve_paper_capital_seed_path(operator_input_root=ctx.operator_input_root, day_utc=ctx.day_utc)
     statement_path = resolve_operator_statement_path(operator_input_root=ctx.operator_input_root, day_utc=ctx.day_utc)
     steps.append(
-        _run_child(
+        _run_child_with_retries(
             "paper_capital_seed",
             [
                 py,
@@ -417,7 +469,7 @@ def _run_sequence(ctx: BodContext) -> list[dict[str, Any]]:
     steps[-1]["artifact_path"] = steps[-1]["artifact_path"] or str(seed_path)
 
     steps.append(
-        _run_child(
+        _run_child_with_retries(
             "operator_statement",
             [
                 py,
@@ -446,7 +498,8 @@ def _run_sequence(ctx: BodContext) -> list[dict[str, Any]]:
         ("portfolio_account_authority", [py, "ops/tools/run_portfolio_account_authority_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.truth_root), "--execution_root", str(ctx.execution_root)]),
     ]
     for name, cmd in commands:
-        steps.append(_run_child(name, cmd, env=env))
+        attempts = 2 if name in {"pre_open_bundle", "paper_session_bootstrap"} else 1
+        steps.append(_run_child_with_retries(name, cmd, env=env, max_attempts=attempts))
 
     if _session_denied(ctx):
         steps.append(
@@ -460,7 +513,7 @@ def _run_sequence(ctx: BodContext) -> list[dict[str, Any]]:
         )
     else:
         steps.append(
-            _run_child(
+            _run_child_with_retries(
                 "options_chain_snapshot",
                 [
                     py,
@@ -473,6 +526,7 @@ def _run_sequence(ctx: BodContext) -> list[dict[str, Any]]:
                     "YES",
                 ],
                 env=env,
+                max_attempts=2,
             )
         )
 
@@ -491,7 +545,8 @@ def _run_sequence(ctx: BodContext) -> list[dict[str, Any]]:
         ("aegis_daily_operator_summary", [py, "ops/tools/run_aegis_paper_daily_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.truth_root), "--mode", "DRY_RUN", "--run_style", "MANUAL"]),
         ("aegis_chatgpt_packet", [py, "ops/tools/aegis_chatgpt_packet.py"]),
     ]:
-        steps.append(_run_child(name, cmd, env=env))
+        attempts = 2 if name in {"market_data_authority"} else 1
+        steps.append(_run_child_with_retries(name, cmd, env=env, max_attempts=attempts))
     return steps
 
 
@@ -565,6 +620,15 @@ def main(argv: list[str] | None = None) -> int:
         runtime_root = resolve_runtime_data_root().resolve()
         fallback_truth = runtime_root / "truth"
         path = fallback_truth / "reports" / "aegis_bod_prepare_v1" / day_utc / "aegis_bod_prepare.v1.json"
+        lifecycle_path = write_lifecycle_transition_v1(
+            truth_root=fallback_truth,
+            day_utc=day_utc,
+            state="PRE_OPEN_BLOCKED",
+            producer="ops/tools/run_aegis_bod_prepare_v1.py",
+            blocker=str(source_step["blocker"]),
+            reason="BOD source integrity gate blocked",
+            evidence_paths=[str(path)],
+        )
         payload = {
             "schema_id": "aegis_bod_prepare",
             "schema_version": "v1",
@@ -574,6 +638,8 @@ def main(argv: list[str] | None = None) -> int:
             "canonical_blocker": source_step["blocker"],
             "started_at_utc": started,
             "completed_at_utc": _now_iso(),
+            "lifecycle_state": "PRE_OPEN_BLOCKED",
+            "lifecycle_path": str(lifecycle_path),
             "steps": steps,
         }
         _write_json(path, payload)
@@ -587,6 +653,15 @@ def main(argv: list[str] | None = None) -> int:
         runtime_root = resolve_runtime_data_root().resolve()
         path = runtime_root / "truth" / "reports" / "aegis_bod_prepare_v1" / day_utc / "aegis_bod_prepare.v1.json"
         steps.append(_internal_step("runtime_contract_resolution", status="BLOCKED", blocker=f"{type(exc).__name__}:{exc}"))
+        lifecycle_path = write_lifecycle_transition_v1(
+            truth_root=runtime_root / "truth",
+            day_utc=day_utc,
+            state="PRE_OPEN_BLOCKED",
+            producer="ops/tools/run_aegis_bod_prepare_v1.py",
+            blocker="TRUTH_ROOT_RUNTIME_CONTRACT_BLOCKED",
+            reason="BOD runtime contract resolution blocked",
+            evidence_paths=[str(path)],
+        )
         payload = {
             "schema_id": "aegis_bod_prepare",
             "schema_version": "v1",
@@ -596,6 +671,8 @@ def main(argv: list[str] | None = None) -> int:
             "canonical_blocker": "TRUTH_ROOT_RUNTIME_CONTRACT_BLOCKED",
             "started_at_utc": started,
             "completed_at_utc": _now_iso(),
+            "lifecycle_state": "PRE_OPEN_BLOCKED",
+            "lifecycle_path": str(lifecycle_path),
             "steps": steps,
         }
         _write_json(path, payload)
@@ -615,6 +692,17 @@ def main(argv: list[str] | None = None) -> int:
 
     blocker = _canonical_blocker(steps, ctx)
     status = "OK" if not blocker else "BLOCKED"
+    path = _manifest_path(ctx)
+    lifecycle_state = "BOD_PREPARED" if status == "OK" else "PRE_OPEN_BLOCKED"
+    lifecycle_path = write_lifecycle_transition_v1(
+        truth_root=ctx.truth_root,
+        day_utc=ctx.day_utc,
+        state=lifecycle_state,
+        producer="ops/tools/run_aegis_bod_prepare_v1.py",
+        blocker=blocker,
+        reason="BOD prepared current-day artifacts" if status == "OK" else "BOD blocked before pre-open readiness",
+        evidence_paths=[str(path)],
+    )
     manifest = {
         "schema_id": "aegis_bod_prepare",
         "schema_version": "v1",
@@ -624,6 +712,8 @@ def main(argv: list[str] | None = None) -> int:
         "canonical_blocker": blocker,
         "started_at_utc": started,
         "completed_at_utc": _now_iso(),
+        "lifecycle_state": lifecycle_state,
+        "lifecycle_path": str(lifecycle_path),
         "truth_root": str(ctx.truth_root),
         "execution_root": str(ctx.execution_root),
         "operator_input_root": str(ctx.operator_input_root),
@@ -633,7 +723,6 @@ def main(argv: list[str] | None = None) -> int:
         "operator_actions": _operator_actions(ctx, steps),
         "defined_risk_expected_evidence": _defined_risk_expected(ctx),
     }
-    path = _manifest_path(ctx)
     _write_json(path, manifest)
     print(json.dumps({"status": status, "canonical_blocker": blocker, "manifest_path": str(path)}, sort_keys=True))
     return 0 if status == "OK" else 2

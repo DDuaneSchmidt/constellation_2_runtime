@@ -10,6 +10,7 @@
     "day_utc",
     "generated_at",
     "module_version",
+    "operator_action_required",
     "summary",
     "findings",
     "evidence",
@@ -46,6 +47,7 @@
         "active_policies_count",
         "measurements_due_count",
         "rollback_candidates_count",
+        "operator_action_required_count",
         "advisory_only",
         "controls_runtime_behavior",
         "controls_broker_execution",
@@ -59,12 +61,14 @@
         "active_policies_count": { "type": "integer", "minimum": 0 },
         "measurements_due_count": { "type": "integer", "minimum": 0 },
         "rollback_candidates_count": { "type": "integer", "minimum": 0 },
+        "operator_action_required_count": { "type": "integer", "minimum": 0 },
         "advisory_only": { "type": "boolean", "const": true },
         "controls_runtime_behavior": { "type": "boolean", "const": false },
         "controls_broker_execution": { "type": "boolean", "const": false },
         "controls_phasec_materialization": { "type": "boolean", "const": false }
       }
     },
+    "operator_action_required": { "type": "array", "items": { "$ref": "#/$defs/operator_action_row" } },
     "findings": { "type": "array", "items": { "$ref": "#/$defs/finding_row" } },
     "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence_row" } },
     "proposals": { "type": "array", "items": { "$ref": "#/$defs/proposal_row" } },
@@ -125,11 +129,12 @@
     "proposal_row": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["proposal_id", "finding_id", "proposal_type", "rationale", "current_value", "proposed_value", "expected_impact", "risk_notes", "success_criteria", "rollback_criteria", "status"],
+      "required": ["proposal_id", "finding_id", "proposal_type", "title", "rationale", "current_value", "proposed_value", "expected_impact", "risk_notes", "success_criteria", "rollback_criteria", "status"],
       "properties": {
         "proposal_id": { "type": "string" },
         "finding_id": { "type": "string" },
         "proposal_type": { "type": "string" },
+        "title": { "type": "string" },
         "rationale": { "type": "string" },
         "current_value": {},
         "proposed_value": {},
@@ -167,6 +172,19 @@
         "rollback_criteria_met": { "type": "boolean" },
         "conclusion": { "type": "string" },
         "summary": { "type": "string" }
+      }
+    },
+    "operator_action_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_type", "title", "confidence", "impact", "action", "related_ids"],
+      "properties": {
+        "action_type": { "type": "string", "enum": ["TEST", "MEASURE", "REVIEW", "SAFE_STATE"] },
+        "title": { "type": "string", "minLength": 1 },
+        "confidence": { "type": "string", "minLength": 1 },
+        "impact": { "type": "string", "minLength": 1 },
+        "action": { "type": "string", "minLength": 1 },
+        "related_ids": { "type": "object" }
       }
     }
   }

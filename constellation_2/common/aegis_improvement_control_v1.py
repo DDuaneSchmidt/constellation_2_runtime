@@ -323,6 +323,87 @@ def _rollback_candidates_from_measurements(measurements: Iterable[Mapping[str, A
     return candidates
 
 
+def _operator_action_required_v1(
+    *,
+    approval_test_queue: Mapping[str, list[dict[str, Any]]],
+    finding_rows: Iterable[Mapping[str, Any]],
+    inactive_policy_rows: Iterable[Mapping[str, Any]],
+    active_policy_rows: Iterable[Mapping[str, Any]],
+    measurements_due: Iterable[Mapping[str, Any]],
+    rollback_candidates: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    finding_by_id = {str(row.get("finding_id") or ""): row for row in finding_rows}
+    actions: list[dict[str, Any]] = []
+    for proposal in approval_test_queue.get("test_first", []):
+        finding = finding_by_id.get(str(proposal.get("finding_id") or ""), {})
+        actions.append(
+            {
+                "action_type": "TEST",
+                "title": _short_action_title("Replay proposal", proposal.get("title") or proposal.get("proposal_type")),
+                "confidence": str(finding.get("confidence") or "unknown").upper(),
+                "impact": "execution readiness",
+                "action": "Run replay validation",
+                "related_ids": {
+                    "proposal_id": proposal.get("proposal_id"),
+                    "finding_id": proposal.get("finding_id"),
+                },
+            }
+        )
+    inactive_by_id = {str(row.get("policy_id") or ""): row for row in inactive_policy_rows}
+    for due in measurements_due:
+        policy = inactive_by_id.get(str(due.get("policy_id") or ""), {})
+        actions.append(
+            {
+                "action_type": "MEASURE",
+                "title": "Policy awaiting measurement",
+                "confidence": "UNKNOWN",
+                "impact": str(policy.get("policy_type") or "policy measurement"),
+                "action": "Review results",
+                "related_ids": {
+                    "policy_id": due.get("policy_id"),
+                    "source_proposal_id": due.get("source_proposal_id"),
+                },
+            }
+        )
+    for candidate in rollback_candidates:
+        policy = inactive_by_id.get(str(candidate.get("policy_id") or ""), {})
+        actions.append(
+            {
+                "action_type": "REVIEW",
+                "title": "Rollback candidate",
+                "confidence": "UNKNOWN",
+                "impact": "policy degrading performance",
+                "action": "Evaluate rollback",
+                "related_ids": {
+                    "policy_id": candidate.get("policy_id"),
+                    "measurement_id": candidate.get("measurement_id"),
+                    "policy_type": policy.get("policy_type"),
+                },
+            }
+        )
+    if not list(active_policy_rows):
+        actions.append(
+            {
+                "action_type": "SAFE_STATE",
+                "title": "No runtime changes currently active",
+                "confidence": "HIGH",
+                "impact": "runtime behavior unchanged",
+                "action": "No runtime action required",
+                "related_ids": {},
+            }
+        )
+    return actions
+
+
+def _short_action_title(prefix: str, value: Any) -> str:
+    text = " ".join(str(value or "").replace("_", " ").split())
+    if not text:
+        return prefix
+    if text.lower().startswith(prefix.lower()):
+        return text[:96]
+    return f"{prefix}: {text}"[:96]
+
+
 def make_evidence_record_v1(
     *,
     timestamp: str,
@@ -988,6 +1069,14 @@ def build_improvement_control_review_v1(
     active_policy_rows = [_policy_review_row_v1(policy) for policy in policy_rows if str(policy.get("status") or "") == "active"]
     measurements_due = _measurements_due_for_review(policy_rows, measurement_rows)
     rollback_candidates = _rollback_candidates_from_measurements(measurement_rows)
+    operator_action_required = _operator_action_required_v1(
+        approval_test_queue=approval_test_queue,
+        finding_rows=finding_rows,
+        inactive_policy_rows=inactive_policy_rows,
+        active_policy_rows=active_policy_rows,
+        measurements_due=measurements_due,
+        rollback_candidates=rollback_candidates,
+    )
 
     return {
         "schema_id": REVIEW_SCHEMA_ID,
@@ -995,6 +1084,7 @@ def build_improvement_control_review_v1(
         "day_utc": _require_non_empty(day_utc, "day_utc"),
         "generated_at": generated_at or _now_utc(),
         "module_version": MODULE_VERSION,
+        "operator_action_required": operator_action_required,
         "summary": {
             "open_findings_count": sum(1 for row in finding_rows if row.get("status") == "open"),
             "proposals_by_status": proposals_by_status,
@@ -1003,6 +1093,7 @@ def build_improvement_control_review_v1(
             "active_policies_count": len(active_policy_rows),
             "measurements_due_count": len(measurements_due),
             "rollback_candidates_count": len(rollback_candidates),
+            "operator_action_required_count": len(operator_action_required),
             "advisory_only": True,
             "controls_runtime_behavior": False,
             "controls_broker_execution": False,
@@ -1056,6 +1147,7 @@ def _proposal_review_row_v1(row: Mapping[str, Any]) -> dict[str, Any]:
             "proposal_id",
             "finding_id",
             "proposal_type",
+            "title",
             "rationale",
             "current_value",
             "proposed_value",
@@ -1115,11 +1207,13 @@ def render_improvement_control_review_markdown_v1(review: Mapping[str, Any]) -> 
         f"- Active policies: {summary.get('active_policies_count')}",
         f"- Measurements due: {summary.get('measurements_due_count')}",
         f"- Rollback candidates: {summary.get('rollback_candidates_count')}",
+        f"- Operator actions required: {summary.get('operator_action_required_count')}",
         f"- Advisory only: {str(summary.get('advisory_only')).lower()}",
         f"- Controls runtime behavior: {str(summary.get('controls_runtime_behavior')).lower()}",
         f"- Controls broker execution: {str(summary.get('controls_broker_execution')).lower()}",
         f"- Controls Phase C materialization: {str(summary.get('controls_phasec_materialization')).lower()}",
     ]
+    _append_operator_action_required_markdown(lines, review.get("operator_action_required") or [])
     _append_markdown_table(lines, "Findings", review.get("findings") or [], ("finding_id", "category", "severity", "confidence", "affected_scope", "status"))
     _append_markdown_table(lines, "Evidence", review.get("evidence") or [], ("evidence_id", "evidence_type", "source_path", "source_sha256"))
     _append_markdown_table(lines, "Proposals", review.get("proposals") or [], ("proposal_id", "proposal_type", "finding_id", "status"))
@@ -1127,6 +1221,25 @@ def render_improvement_control_review_markdown_v1(review: Mapping[str, Any]) -> 
     _append_markdown_table(lines, "Measurements", review.get("measurements") or [], ("measurement_id", "policy_id", "conclusion", "rollback_criteria_met"))
     _append_markdown_table(lines, "Rollback Candidates", review.get("rollback_candidates") or [], ("policy_id", "measurement_id", "reason", "conclusion"))
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _append_operator_action_required_markdown(lines: list[str], actions: Iterable[Mapping[str, Any]]) -> None:
+    action_rows = [dict(row) for row in actions]
+    lines.extend(["", "## Operator Action Required"])
+    if not action_rows:
+        lines.append("_None._")
+        return
+    for idx, action in enumerate(action_rows, start=1):
+        action_type = str(action.get("action_type") or "REVIEW")
+        title = str(action.get("title") or "Review item")
+        if action_type == "SAFE_STATE":
+            lines.append(f"{idx}. [{action_type}]")
+            lines.append("   No runtime changes currently active")
+            continue
+        lines.append(f"{idx}. [{action_type}] {title}")
+        lines.append(f"   - Confidence: {str(action.get('confidence') or 'UNKNOWN').upper()}")
+        lines.append(f"   - Impact: {action.get('impact') or 'operator review'}")
+        lines.append(f"   -> Action: {action.get('action') or 'Review'}")
 
 
 def _append_markdown_table(lines: list[str], title: str, rows: Iterable[Mapping[str, Any]], fields: tuple[str, ...]) -> None:
