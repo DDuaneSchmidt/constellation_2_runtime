@@ -220,7 +220,7 @@ def main(argv: List[str] | None = None) -> int:
     ap.add_argument("--day_utc", required=True)
     ap.add_argument("--truth_root", default="")
     ap.add_argument("--symbol", action="append", default=[])
-    ap.add_argument("--symbols_from_intents", choices=["YES", "NO"], default="NO")
+    ap.add_argument("--symbols_from_intents", choices=["YES", "NO"], default="YES")
     ap.add_argument("--capture_missing", choices=["YES", "NO"], default="YES")
     ap.add_argument("--eval_time_utc", default="")
     args = ap.parse_args(argv)

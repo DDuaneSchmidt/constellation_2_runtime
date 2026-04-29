@@ -607,6 +607,36 @@ def test_options_snapshot_capture_failure_is_not_reported_as_missing_root(monkey
     assert out["results"][0]["reason_code"] == "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
 
 
+def test_options_snapshot_required_defaults_to_current_day_intents(monkeypatch, tmp_path: Path, capsys) -> None:
+    truth_root = (tmp_path / "execution_truth").resolve()
+    _write_option_intent(truth_root)
+
+    monkeypatch.setattr(
+        options_required_module,
+        "_capture_symbol",
+        lambda **_kwargs: {
+            "cmd": ["capture"],
+            "return_code": 2,
+            "stdout": "",
+            "stderr": "IB_UNAVAILABLE",
+        },
+    )
+
+    rc = options_required_module.main(
+        [
+            "--day_utc",
+            "2026-04-27",
+            "--truth_root",
+            str(truth_root),
+        ]
+    )
+    out = json.loads(capsys.readouterr().out)
+
+    assert rc == 2
+    assert out["required_symbols"] == ["SPY"]
+    assert out["results"][0]["reason_code"] == "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+
+
 def test_submit_boundary_refuses_authority_with_required_options_snapshot_failure() -> None:
     assert (
         submit_boundary_module._day_authority_has_manifest_required_inputs_v1(
