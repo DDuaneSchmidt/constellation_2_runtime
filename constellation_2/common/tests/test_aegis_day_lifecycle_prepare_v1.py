@@ -142,15 +142,24 @@ def test_missing_phasec_evidence_blocks_paper_ready(monkeypatch, tmp_path: Path)
 
 def test_rerunning_full_pipeline_is_idempotent_for_master_manifest(monkeypatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
+    seen_timeout_env: list[str] = []
 
     monkeypatch.setattr(master.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
-    monkeypatch.setattr(master.bod, "_run_child", lambda name, cmd, **_kwargs: bod._internal_step(name, status="PASS", command=cmd))
+
+    def fake_run_child(name: str, cmd: list[str], **kwargs):
+        env = kwargs.get("env") or {}
+        if name == "bod_prepare":
+            seen_timeout_env.append(str(env.get("AEGIS_BOD_STEP_TIMEOUT_SECONDS") or ""))
+        return bod._internal_step(name, status="PASS", command=cmd)
+
+    monkeypatch.setattr(master.bod, "_run_child", fake_run_child)
 
     assert master.main(["--day_utc", DAY]) == 0
     assert master.main(["--day_utc", DAY]) == 0
 
     manifests = list((ctx.truth_root / "reports/aegis_day_prepare_v1" / DAY).glob("*.json"))
     assert manifests == [ctx.truth_root / "reports/aegis_day_prepare_v1" / DAY / "aegis_day_prepare.v1.json"]
+    assert seen_timeout_env == ["120", "120"]
 
 
 def test_pipeline_outputs_do_not_target_source_repo(tmp_path: Path) -> None:

@@ -63,6 +63,9 @@ def run_prepare_for_trading_day_v1(ctx: bod.BodContext) -> dict[str, Any]:
     py = sys.executable
     env = dict(os.environ)
     env.setdefault("C2_GOVERNED_SUBMIT_DRY_RUN", "YES")
+    env.setdefault("AEGIS_BOD_STEP_TIMEOUT_SECONDS", "120")
+    env.setdefault("AEGIS_BOD_STEP_TIMEOUT_OPTIONS_CHAIN_SNAPSHOT_SECONDS", "75")
+    os.environ.setdefault("AEGIS_BOD_STEP_TIMEOUT_BOD_PREPARE_SECONDS", "900")
     write_lifecycle_transition_v1(
         truth_root=ctx.truth_root,
         day_utc=ctx.day_utc,
