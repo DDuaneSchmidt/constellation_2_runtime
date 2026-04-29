@@ -154,7 +154,7 @@ def test_missing_phasec_evidence_links_to_lifecycle_requirement(tmp_path: Path) 
     assert phasec["producer_command"].startswith("python3 ops/tools/run_phasec_identity_materializer_day_v1.py")
 
 
-def test_day_ledger_uses_requirement_graph_market_data_blocker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_day_ledger_uses_market_data_supply_blocker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     phase_ctx = day_run.PhaseContext(
         day_utc="2026-04-29",
         environment="PAPER",
@@ -181,16 +181,45 @@ def test_day_ledger_uses_requirement_graph_market_data_blocker(monkeypatch: pyte
         ),
         encoding="utf-8",
     )
-    market_path = phase_ctx.truth_root / "reports" / "market_data_authority_v1" / phase_ctx.day_utc / "market_data_authority.v1.json"
-    market_path.parent.mkdir(parents=True)
-    market_path.write_text('{"market_data_state":"MISSING_REQUIRED_DATA","first_blocker":"OPTIONS_CHAIN_SNAPSHOT_MISSING"}', encoding="utf-8")
+    supply_path = phase_ctx.truth_root / "reports" / "market_data_supply_v1" / phase_ctx.day_utc / "market_data_supply.v1.json"
+    supply_path.parent.mkdir(parents=True)
+    supply_path.write_text(
+        json.dumps(
+            {
+                "status": "BLOCKED",
+                "canonical_blocker": "OPTIONS_MARKET_DATA_PERMISSION_DENIED",
+                "requirements": [
+                    {
+                        "requirement_id": "MARKET_DATA:intent_spy_2026-04-29:SPY:OPTIONS_SNAPSHOT",
+                        "source_type": "ACTIVE_INTENT",
+                        "source_id": "intent_spy_2026-04-29",
+                        "instrument": "SPY",
+                        "data_type": "OPTIONS_SNAPSHOT",
+                        "required": True,
+                    }
+                ],
+                "provider_checks": [
+                    {
+                        "provider": "IBKR",
+                        "instrument": "SPY",
+                        "capability": "OPTIONS_BID_ASK_QUOTES",
+                        "status": "UNAVAILABLE",
+                        "blocker": "OPTIONS_MARKET_DATA_PERMISSION_DENIED",
+                    }
+                ],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
     monkeypatch.setattr(day_run.bod, "_run_child_with_retries", lambda *args, **kwargs: {"status": "BLOCKED", "blocker": "OPTIONS_MARKET_DATA_PERMISSION_DENIED", "duration_ms": 1})
-    monkeypatch.setattr(day_run, "_run_steps", lambda *args, **kwargs: ([{"status": "BLOCKED", "blocker": "OPTIONS_CHAIN_SNAPSHOT_MISSING"}], [], ["OPTIONS_CHAIN_SNAPSHOT_MISSING"]))
+    monkeypatch.setattr(day_run, "_run_steps", lambda *args, **kwargs: ([{"status": "BLOCKED", "blocker": "OPTIONS_MARKET_DATA_PERMISSION_DENIED"}], [str(supply_path)], ["OPTIONS_MARKET_DATA_PERMISSION_DENIED"]))
 
     row = day_run._phase_market_data(phase_ctx, {})
 
     assert row["canonical_blocker"] == "OPTIONS_MARKET_DATA_PERMISSION_DENIED"
     assert "requirement_id=MARKET_DATA:intent_spy_2026-04-29:SPY:OPTIONS_SNAPSHOT" in row["blocker_detail"]
+    assert "provider_capability=OPTIONS_BID_ASK_QUOTES" in row["blocker_detail"]
 
 
 def test_packet_displays_requirement_graph_root_details(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
