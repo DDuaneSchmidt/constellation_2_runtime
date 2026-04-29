@@ -416,6 +416,16 @@ def _session_denied(ctx: BodContext) -> bool:
     return str(payload.get("authority_status") or "").strip().upper() == "DENIED"
 
 
+def _broker_probe_passed(ctx: BodContext) -> bool:
+    path = ctx.truth_root / "reports" / "ib_broker_event_probe_v1" / ctx.day_utc / "ib_broker_event_probe.v1.json"
+    payload = _read_json(path)
+    return str(payload.get("status") or "").strip().upper() == "PASS"
+
+
+def _is_generic_broker_blocker(blocker: str) -> bool:
+    return str(blocker or "").strip().upper() in {"BROKER_EVENTS_MISSING", "IB_API_HANDSHAKE_NOT_OK"}
+
+
 def _defined_risk_expected(ctx: BodContext) -> list[dict[str, str]]:
     day_root = ctx.execution_root / "intents_v1" / "snapshots" / ctx.day_utc
     rows: list[dict[str, str]] = []
@@ -491,6 +501,7 @@ def _run_sequence(ctx: BodContext) -> list[dict[str, Any]]:
     steps[-1]["artifact_path"] = steps[-1]["artifact_path"] or str(statement_path)
 
     commands: list[tuple[str, list[str]]] = [
+        ("ib_broker_event_probe", [py, "ops/tools/run_ib_broker_event_probe_v1.py", "--day_utc", ctx.day_utc, "--environment", ctx.environment]),
         ("pre_open_bundle", [py, "ops/tools/run_pre_open_materializer_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.truth_root), "--environment", ctx.environment, "--ib_account", ctx.ib_account]),
         ("paper_session_bootstrap", [py, "ops/tools/run_paper_session_bootstrap_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.truth_root), "--operator_input_root", str(ctx.operator_input_root), "--environment", ctx.environment, "--ib_account", ctx.ib_account, "--seed_usd", "0.00", "--materialize", "YES", "--emit_report", "YES"]),
         ("paper_trading_day_authority", [py, "ops/tools/run_paper_trading_day_authority_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.truth_root)]),
@@ -564,10 +575,13 @@ def _canonical_blocker(steps: list[dict[str, Any]], ctx: BodContext) -> str:
     day_blocker = str(day_authority.get("canonical_blocker") or "").strip()
     if day_blocker in {"SESSION_AUTHORITY_DENIED", "SESSION_NOT_ALLOWED", "MARKET_CLOSED"}:
         return day_blocker
-    for step_name in ("paper_capital_seed", "operator_statement", "pre_open_bundle", "paper_session_bootstrap"):
+    for step_name in ("paper_capital_seed", "operator_statement", "ib_broker_event_probe", "pre_open_bundle", "paper_session_bootstrap"):
         row = next((s for s in steps if s["step_name"] == step_name), {})
         if row.get("status") in {"BLOCKED", "TIMEOUT"}:
-            return str(row.get("blocker") or f"{step_name.upper()}_BLOCKED")
+            blocker = str(row.get("blocker") or f"{step_name.upper()}_BLOCKED")
+            if _broker_probe_passed(ctx) and _is_generic_broker_blocker(blocker):
+                continue
+            return blocker
     if day_blocker:
         return day_blocker
     for step_name in ("options_chain_snapshot", "market_data_authority", "defined_risk_phasec_evidence", "risk_sizing_authority", "execution_mode_authority", "runtime_service_authority", "submit_boundary_status"):
@@ -575,7 +589,10 @@ def _canonical_blocker(steps: list[dict[str, Any]], ctx: BodContext) -> str:
         if row.get("status") in {"BLOCKED", "TIMEOUT"}:
             if step_name == "options_chain_snapshot" and _session_denied(ctx):
                 continue
-            return str(row.get("blocker") or f"{step_name.upper()}_BLOCKED")
+            blocker = str(row.get("blocker") or f"{step_name.upper()}_BLOCKED")
+            if _broker_probe_passed(ctx) and _is_generic_broker_blocker(blocker):
+                continue
+            return blocker
     return ""
 
 

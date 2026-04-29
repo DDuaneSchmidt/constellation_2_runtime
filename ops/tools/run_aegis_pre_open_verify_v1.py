@@ -49,6 +49,22 @@ def _blocker_from_codes(payload: dict[str, Any], fallback: str) -> str:
     return fallback
 
 
+def _broker_probe_path(ctx: bod.BodContext) -> Path:
+    return ctx.truth_root / "reports" / "ib_broker_event_probe_v1" / ctx.day_utc / "ib_broker_event_probe.v1.json"
+
+
+def _broker_probe_status(ctx: bod.BodContext) -> tuple[bool, str, Path, dict[str, Any]]:
+    path = _broker_probe_path(ctx)
+    payload = _read_json(path)
+    status = str(payload.get("status") or "").strip().upper()
+    blocker = str(payload.get("canonical_blocker") or "").strip()
+    return status == "PASS", blocker or "IB_EVENT_TIMEOUT", path, payload
+
+
+def _is_generic_broker_blocker(blocker: str) -> bool:
+    return str(blocker or "").strip().upper() in {"BROKER_EVENTS_MISSING", "IB_API_HANDSHAKE_NOT_OK"}
+
+
 def evaluate_pre_open_verify_v1(ctx: bod.BodContext) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
 
@@ -62,20 +78,31 @@ def evaluate_pre_open_verify_v1(ctx: bod.BodContext) -> dict[str, Any]:
             }
         )
 
+    probe_ok, probe_blocker, probe_path, probe_payload = _broker_probe_status(ctx)
+
     session_path = ctx.truth_root / "reports" / "paper_session_authority_v1" / ctx.day_utc / "paper_session_authority.v1.json"
     session = _read_json(session_path)
     session_status = str(session.get("authority_status") or session.get("status") or "").strip().upper()
     session_ok = session_status == "GRANTED" and session.get("submission_authorized") is True
-    add_check("session_authority", session_path, session_ok, _blocker_from_codes(session, "SESSION_AUTHORITY_DENIED" if session else "SESSION_AUTHORITY_MISSING"))
+    session_blocker = _blocker_from_codes(session, "SESSION_AUTHORITY_DENIED" if session else "SESSION_AUTHORITY_MISSING")
+    if probe_ok and _is_generic_broker_blocker(session_blocker):
+        session_blocker = "SESSION_AUTHORITY_REQUIRES_REGEN_AFTER_VALID_BROKER_PROBE"
+    add_check("session_authority", session_path, session_ok, session_blocker)
 
     pre_open_path = ctx.truth_root / "reports" / "pre_open_bundle_v1" / ctx.day_utc / "pre_open_bundle.v1.json"
     pre_open = _read_json(pre_open_path)
     pre_open_state = str(pre_open.get("materialization_state") or pre_open.get("bundle_state") or pre_open.get("status") or "").strip().upper()
     pre_open_ok = pre_open_state in {"COMPLETE", "READY", "PASS"}
     pre_open_blocker = _blocker_from_codes(pre_open, "PRE_OPEN_BUNDLE_INCOMPLETE" if pre_open else "PRE_OPEN_BUNDLE_MISSING")
+    if probe_ok and _is_generic_broker_blocker(pre_open_blocker):
+        pre_open_blocker = "PRE_OPEN_BUNDLE_REQUIRES_REGEN_AFTER_VALID_BROKER_PROBE"
     add_check("pre_open_bundle", pre_open_path, pre_open_ok, pre_open_blocker)
-    ib_ok = pre_open_ok and "IB_API_HANDSHAKE_NOT_OK" not in json.dumps(pre_open, sort_keys=True)
-    add_check("ib_connection", pre_open_path, ib_ok, "IB_API_HANDSHAKE_NOT_OK")
+    legacy_ib_ok = pre_open_ok and "IB_API_HANDSHAKE_NOT_OK" not in json.dumps(pre_open, sort_keys=True)
+    ib_ok = probe_ok or legacy_ib_ok
+    ib_blocker = "" if ib_ok else (probe_blocker if probe_payload else "IB_API_HANDSHAKE_NOT_OK")
+    probe_check_ok = probe_ok or (not probe_payload and legacy_ib_ok)
+    add_check("ib_broker_event_probe", probe_path, probe_check_ok, probe_blocker if not probe_check_ok else "")
+    add_check("ib_connection", probe_path if probe_payload else pre_open_path, ib_ok, ib_blocker)
 
     seed_path = resolve_paper_capital_seed_path(operator_input_root=ctx.operator_input_root, day_utc=ctx.day_utc)
     add_check("paper_capital_seed", seed_path, seed_path.exists(), "PAPER_CAPITAL_SEED_MISSING")
