@@ -10,16 +10,41 @@ if str(SOURCE_ROOT) not in sys.path:
 from ops.tools.run_structure_decision_supply_v1 import (  # noqa: E402
     _near_itm_same_week_disallowed,
     _selected_legs_exist_in_snapshot,
+    _selected_structure_guard_blocker,
 )
 
 
 def _snapshot() -> dict:
     return {
         "as_of_utc": "2026-04-29T14:30:00Z",
-        "underlying": {"spot_price": "710.60"},
+        "underlying": {"spot_price": "110.00"},
         "contracts": [
-            {"contract_key": "SPY-20260430-P-712", "strike": "712.00", "right": "PUT", "ib": {"conId": 849302191}},
-            {"contract_key": "SPY-20260430-P-710", "strike": "710.00", "right": "PUT", "ib": {"conId": 826251088}},
+            {"contract_key": "SPY-20260430-P-108", "strike": "108.00", "right": "PUT", "bid": "2.00", "ask": "2.05", "ib": {"conId": 849302108}},
+            {"contract_key": "SPY-20260430-P-105", "strike": "105.00", "right": "PUT", "bid": "1.00", "ask": "1.05", "ib": {"conId": 849302105}},
+            {"contract_key": "SPY-20260430-P-103", "strike": "103.00", "right": "PUT", "bid": "0.50", "ask": "0.55", "ib": {"conId": 826251103}},
+            {"contract_key": "SPY-20260430-P-100", "strike": "100.00", "right": "PUT", "bid": "0.40", "ask": "0.45", "ib": {"conId": 826251100}},
+        ],
+    }
+
+
+def _policy() -> dict:
+    return {
+        "options_template": {
+            "selection_policy": {
+                "width_policy": {"width_points": "5.00"},
+                "liquidity_policy": {"max_bid_ask_spread": "0.10"},
+            }
+        }
+    }
+
+
+def _selected(sell: str = "105", buy: str = "100") -> dict:
+    return {
+        "expiry_utc": "2026-04-30T00:00:00Z",
+        "width_points": str(abs(int(sell) - int(buy))),
+        "legs": [
+            {"action": "SELL", "right": "PUT", "strike": f"{sell}.00", "contract_key": f"SPY-20260430-P-{sell}", "ib_conId": int(f"849302{sell}") if sell in {"105", "108"} else int(f"826251{sell}")},
+            {"action": "BUY", "right": "PUT", "strike": f"{buy}.00", "contract_key": f"SPY-20260430-P-{buy}", "ib_conId": int(f"826251{buy}")},
         ],
     }
 
@@ -27,8 +52,8 @@ def _snapshot() -> dict:
 def test_selected_legs_must_exist_in_latest_snapshot() -> None:
     selected = {
         "legs": [
-            {"contract_key": "SPY-20260430-P-712", "ib_conId": 849302191},
-            {"contract_key": "SPY-20260430-P-710", "ib_conId": 826251088},
+            {"contract_key": "SPY-20260430-P-105", "ib_conId": 849302105},
+            {"contract_key": "SPY-20260430-P-100", "ib_conId": 826251100},
         ]
     }
 
@@ -44,7 +69,7 @@ def test_selection_rejects_absent_legs() -> None:
 def test_near_itm_same_week_spread_requires_explicit_policy_approval() -> None:
     selected = {
         "expiry_utc": "2026-04-30T00:00:00Z",
-        "legs": [{"action": "SELL", "right": "PUT", "strike": "712.00"}],
+        "legs": [{"action": "SELL", "right": "PUT", "strike": "110.00"}],
     }
 
     assert _near_itm_same_week_disallowed(selected, {"options_template": {"selection_policy": {}}}, _snapshot()) is True
@@ -53,8 +78,35 @@ def test_near_itm_same_week_spread_requires_explicit_policy_approval() -> None:
 def test_policy_can_explicitly_allow_near_itm_same_week_spread() -> None:
     selected = {
         "expiry_utc": "2026-04-30T00:00:00Z",
-        "legs": [{"action": "SELL", "right": "PUT", "strike": "712.00"}],
+        "legs": [{"action": "SELL", "right": "PUT", "strike": "110.00"}],
     }
     policy = {"options_template": {"selection_policy": {"allow_near_itm_same_week": True}}}
 
     assert _near_itm_same_week_disallowed(selected, policy, _snapshot()) is False
+
+
+def test_valid_otm_moderate_width_structure_passes_candidate_guard() -> None:
+    blocker, _action = _selected_structure_guard_blocker(_selected(), _policy(), _snapshot())
+
+    assert blocker == ""
+
+
+def test_near_itm_structure_fails_candidate_guard() -> None:
+    blocker, _action = _selected_structure_guard_blocker(_selected("108", "103"), _policy(), _snapshot())
+
+    assert blocker == "NO_ELIGIBLE_OPTION_STRUCTURE"
+
+
+def test_minimal_width_structure_fails_candidate_guard() -> None:
+    blocker, _action = _selected_structure_guard_blocker(_selected("103", "100"), _policy(), _snapshot())
+
+    assert blocker == "NO_ELIGIBLE_OPTION_STRUCTURE"
+
+
+def test_illiquid_structure_fails_candidate_guard() -> None:
+    snapshot = _snapshot()
+    snapshot["contracts"][1]["ask"] = "1.30"
+
+    blocker, _action = _selected_structure_guard_blocker(_selected(), _policy(), snapshot)
+
+    assert blocker == "NO_ELIGIBLE_OPTION_STRUCTURE"

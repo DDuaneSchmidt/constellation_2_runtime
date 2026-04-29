@@ -195,8 +195,8 @@ def _market_gate_with_snapshot(ctx: bod.BodContext, *, quotes: bool = True) -> P
     snap_root = ctx.execution_root / "options_chain_snapshot_v1" / ctx.day_utc / "capture"
     snap_root.mkdir(parents=True, exist_ok=True)
     contracts = [
-        {"right": "PUT", "strike": "100.00", "bid": "1.05" if quotes else "", "ask": "1.10" if quotes else "", "expiry_utc": f"{ctx.day_utc}T00:00:00Z"},
-        {"right": "PUT", "strike": "99.00", "bid": "0.55" if quotes else "", "ask": "0.60" if quotes else "", "expiry_utc": f"{ctx.day_utc}T00:00:00Z"},
+        {"right": "PUT", "strike": "105.00", "bid": "3.10" if quotes else "", "ask": "3.15" if quotes else "", "expiry_utc": f"{ctx.day_utc}T00:00:00Z"},
+        {"right": "PUT", "strike": "100.00", "bid": "0.55" if quotes else "", "ask": "0.60" if quotes else "", "expiry_utc": f"{ctx.day_utc}T00:00:00Z"},
     ]
     snap = _write(
         snap_root / "options_chain_snapshot.v1.json",
@@ -204,7 +204,7 @@ def _market_gate_with_snapshot(ctx: bod.BodContext, *, quotes: bool = True) -> P
             "schema_id": "options_chain_snapshot",
             "schema_version": 1,
             "as_of_utc": f"{ctx.day_utc}T14:30:00Z",
-            "underlying": {"symbol": "SPY", "spot_price": "101.00", "spot_as_of_utc": f"{ctx.day_utc}T14:30:00Z"},
+            "underlying": {"symbol": "SPY", "spot_price": "110.00", "spot_as_of_utc": f"{ctx.day_utc}T14:30:00Z"},
             "contracts": contracts,
             "provenance": {"source": "TEST"},
         },

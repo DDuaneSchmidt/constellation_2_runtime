@@ -246,6 +246,14 @@ def _run(truth: Path, execution: Path, *, account: str = "DUO847203") -> dict:
     )
 
 
+def _refresh_snapshot_hash_refs(execution: Path, snapshot_path: Path) -> None:
+    phasec = execution / "phaseC_preflight_v1" / DAY / "attempt_A0001" / INTENT
+    mapping_path = phasec / "mapping_ledger_record.v1.json"
+    mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+    mapping["chain_snapshot_hash"] = sha256_file_v1(snapshot_path)
+    _write_json(mapping_path, mapping)
+
+
 def test_all_pass_status_pass(tmp_path: Path) -> None:
     truth, execution = _seed_all_pass(tmp_path)
     payload = _run(truth, execution)
@@ -283,6 +291,34 @@ def test_stale_snapshot_lineage_blocks(tmp_path: Path) -> None:
     assert payload["canonical_blocker"] == "SNAPSHOT_LINEAGE_MISMATCH"
 
 
+def test_near_itm_structure_blocks(tmp_path: Path) -> None:
+    truth, execution = _seed_all_pass(tmp_path)
+    snapshot_path = execution / "options_chain_snapshot_v1" / DAY / "capture" / "options_chain_snapshot.v1.json"
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    snapshot["underlying"]["spot_price"] = "101.00"
+    _write_json(snapshot_path, snapshot)
+    _refresh_snapshot_hash_refs(execution, snapshot_path)
+
+    payload = _run(truth, execution)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "NEAR_ITM_NOT_APPROVED"
+
+
+def test_illiquid_structure_blocks(tmp_path: Path) -> None:
+    truth, execution = _seed_all_pass(tmp_path)
+    snapshot_path = execution / "options_chain_snapshot_v1" / DAY / "capture" / "options_chain_snapshot.v1.json"
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    snapshot["contracts"][0]["ask"] = "1.30"
+    _write_json(snapshot_path, snapshot)
+    _refresh_snapshot_hash_refs(execution, snapshot_path)
+
+    payload = _run(truth, execution)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "LIQUIDITY_INVALID"
+
+
 def test_identical_plan_hash_blocks(tmp_path: Path) -> None:
     truth, execution = _seed_all_pass(tmp_path)
     current = execution / "phaseC_preflight_v1" / DAY / "attempt_A0001" / INTENT / "order_plan.v1.json"
@@ -296,6 +332,24 @@ def test_identical_plan_hash_blocks(tmp_path: Path) -> None:
     payload = _run(truth, execution)
     assert payload["status"] == "BLOCKED"
     assert payload["canonical_blocker"] == "IDENTICAL_PLAN_HASH"
+
+
+def test_identical_structure_pricing_blocks(tmp_path: Path) -> None:
+    truth, execution = _seed_all_pass(tmp_path)
+    prior = execution / "execution_evidence_v1" / "submissions" / DAY / PRIOR / "order_plan.v1.json"
+    current = json.loads((execution / "phaseC_preflight_v1" / DAY / "attempt_A0001" / INTENT / "order_plan.v1.json").read_text(encoding="utf-8"))
+    prior_plan = dict(current)
+    prior_plan["prior_only_metadata"] = "changes-plan-hash-without-changing-structure-pricing-signature"
+    _write_json(prior, prior_plan)
+    clearance = truth / "reports" / "paper_second_attempt_clearance_v1" / DAY / PRIOR / "paper_second_attempt_clearance.v1.json"
+    obj = json.loads(clearance.read_text(encoding="utf-8"))
+    obj["prior_submission"]["order_plan_sha256"] = sha256_file_v1(prior)
+    _write_json(clearance, obj)
+
+    payload = _run(truth, execution)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "IDENTICAL_STRUCTURE_PRICING"
 
 
 def test_wrong_account_blocks(tmp_path: Path) -> None:

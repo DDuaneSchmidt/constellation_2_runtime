@@ -469,38 +469,41 @@ def build_first_ib_accepted_paper_order_checklist_v1(
     policy = _policy_for_engine(_policy_engine_id(structure))
     selection = ((policy.get("options_template") or {}).get("selection_policy") or {}) if isinstance(policy.get("options_template"), dict) else {}
     allow_near_itm = selection.get("allow_near_itm_same_week") is True
-    near_itm = False
+    clearly_otm = False
+    width_policy = selection.get("width_policy") if isinstance(selection.get("width_policy"), dict) else {}
+    governed_width = _dec(width_policy.get("width_points"))
+    strikes = [_dec(leg.get("strike")) for leg in selected_legs]
+    width = abs(strikes[0] - strikes[1]) if len(strikes) == 2 and strikes[0] is not None and strikes[1] is not None else None
     if spot is not None:
         for leg in selected_legs:
             if str(leg.get("action") or "").upper() != "SELL":
                 continue
             strike = _dec(leg.get("strike"))
             right = str(leg.get("right") or "").upper()
-            if strike is None:
-                near_itm = True
-            elif right == "PUT" and strike >= spot:
-                near_itm = True
-            elif right == "CALL" and strike <= spot:
-                near_itm = True
+            if strike is not None and width is not None and width > 0 and right == "PUT":
+                clearly_otm = strike <= spot - width
+            elif strike is not None and width is not None and width > 0 and right == "CALL":
+                clearly_otm = strike >= spot + width
+            else:
+                clearly_otm = False
+            break
     checks.append(_check(
         "09_STRUCTURE_NOT_NEAR_ITM",
-        PASS if selected_legs and (not near_itm or allow_near_itm) else FAIL,
-        "short leg is not near/ITM unless explicit policy approval exists",
-        {"spot": None if spot is None else str(spot), "allow_near_itm_same_week": allow_near_itm, "selected_legs": selected_legs},
+        PASS if selected_legs and (clearly_otm or allow_near_itm) else FAIL,
+        "short leg is clearly OTM by at least one spread width unless explicit policy approval exists",
+        {"spot": None if spot is None else str(spot), "computed_width_points": None if width is None else str(width), "allow_near_itm_same_week": allow_near_itm, "selected_legs": selected_legs},
         str(POLICY_PATH),
         "NEAR_ITM_NOT_APPROVED",
     ))
 
-    strikes = [_dec(leg.get("strike")) for leg in selected_legs]
-    width = abs(strikes[0] - strikes[1]) if len(strikes) == 2 and strikes[0] is not None and strikes[1] is not None else None
     proof = candidate.order_plan.get("risk_proof") if isinstance(candidate.order_plan.get("risk_proof"), dict) else {}
     proof_width = _dec(proof.get("width_points"))
-    width_ok = bool(width is not None and width > 0 and (proof_width is None or proof_width == width))
+    width_ok = bool(width is not None and width > 0 and governed_width is not None and width == governed_width and (proof_width is None or proof_width == width))
     checks.append(_check(
         "10_WIDTH_VALID",
         PASS if width_ok else FAIL,
-        "spread width is positive and matches risk proof when present",
-        {"computed_width_points": None if width is None else str(width), "risk_proof_width_points": proof.get("width_points")},
+        "spread width is positive, matches governed moderate width policy, and matches risk proof when present",
+        {"computed_width_points": None if width is None else str(width), "governed_width_points": None if governed_width is None else str(governed_width), "risk_proof_width_points": proof.get("width_points")},
         _path_text(candidate.order_plan_path),
         "WIDTH_INVALID",
     ))

@@ -232,6 +232,100 @@ def _near_itm_same_week_disallowed(selected: dict[str, Any], policy: dict[str, A
     return False
 
 
+def _selection_policy(policy: dict[str, Any]) -> dict[str, Any]:
+    template = policy.get("options_template") if isinstance(policy.get("options_template"), dict) else {}
+    selection = template.get("selection_policy") if isinstance(template.get("selection_policy"), dict) else {}
+    return selection if isinstance(selection, dict) else {}
+
+
+def _target_width_points(policy: dict[str, Any]) -> Decimal | None:
+    selection = _selection_policy(policy)
+    width_policy = selection.get("width_policy") if isinstance(selection.get("width_policy"), dict) else {}
+    return _dec(width_policy.get("width_points"))
+
+
+def _selected_width_points(selected: dict[str, Any]) -> Decimal | None:
+    width = _dec(selected.get("width_points"))
+    if width is not None:
+        return width
+    strikes: list[Decimal] = []
+    for leg in selected.get("legs") or []:
+        if not isinstance(leg, dict):
+            continue
+        strike = _dec(leg.get("strike"))
+        if strike is not None:
+            strikes.append(strike)
+    if len(strikes) != 2:
+        return None
+    return abs(strikes[0] - strikes[1])
+
+
+def _selected_width_matches_policy(selected: dict[str, Any], policy: dict[str, Any]) -> bool:
+    target = _target_width_points(policy)
+    actual = _selected_width_points(selected)
+    return bool(target is not None and actual is not None and actual == target and actual > 0)
+
+
+def _clearly_otm_structure(selected: dict[str, Any], snapshot: dict[str, Any]) -> bool:
+    underlying = snapshot.get("underlying") if isinstance(snapshot.get("underlying"), dict) else {}
+    spot = _dec(underlying.get("spot_price"))
+    width = _selected_width_points(selected)
+    if spot is None or spot <= 0 or width is None or width <= 0:
+        return False
+    for leg in selected.get("legs") or []:
+        if not isinstance(leg, dict) or str(leg.get("action") or "").strip().upper() != "SELL":
+            continue
+        strike = _dec(leg.get("strike"))
+        right = str(leg.get("right") or "").strip().upper()
+        if strike is None:
+            return False
+        if right == "PUT":
+            return strike <= spot - width
+        if right == "CALL":
+            return strike >= spot + width
+        return False
+    return False
+
+
+def _selected_legs_liquid(selected: dict[str, Any], snapshot: dict[str, Any], policy: dict[str, Any]) -> bool:
+    selection = _selection_policy(policy)
+    liquidity = selection.get("liquidity_policy") if isinstance(selection.get("liquidity_policy"), dict) else {}
+    max_spread = _dec(liquidity.get("max_bid_ask_spread")) or Decimal("0.10")
+    by_identity: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in snapshot.get("contracts") or []:
+        if isinstance(row, dict):
+            by_identity[_contract_identity(row)] = row
+    for leg in selected.get("legs") or []:
+        if not isinstance(leg, dict):
+            return False
+        key = str(leg.get("contract_key") or "").strip()
+        conid = str(leg.get("ib_conId") or "").strip()
+        row = by_identity.get((key, conid))
+        if row is None:
+            return False
+        bid = _contract_price(row, "bid")
+        ask = _contract_price(row, "ask")
+        if bid is None or ask is None or bid <= 0 or ask <= 0 or ask < bid:
+            return False
+        if ask - bid > max_spread:
+            return False
+    return True
+
+
+def _selected_structure_guard_blocker(selected: dict[str, Any], policy: dict[str, Any], snapshot: dict[str, Any]) -> tuple[str, str]:
+    if not _selected_legs_exist_in_snapshot(selected, snapshot):
+        return "STRUCTURE_DECISION_VALIDATION_FAILED", "Selected option legs are absent from the latest accepted market-open snapshot; rerun market-open gate and structure selection."
+    if not _selected_width_matches_policy(selected, policy):
+        return "NO_ELIGIBLE_OPTION_STRUCTURE", "Selected spread width does not match the governed moderate width policy."
+    if not _clearly_otm_structure(selected, snapshot):
+        return "NO_ELIGIBLE_OPTION_STRUCTURE", "Selected structure is not clearly OTM by at least one governed spread width."
+    if not _selected_legs_liquid(selected, snapshot, policy):
+        return "NO_ELIGIBLE_OPTION_STRUCTURE", "Selected option legs do not satisfy governed bid/ask liquidity limits."
+    if _near_itm_same_week_disallowed(selected, policy, snapshot):
+        return "NO_ELIGIBLE_OPTION_STRUCTURE", "Near/ITM same-week structures are disallowed unless explicitly policy-approved and broker preview-valid."
+    return "", ""
+
+
 def _intent_budget(risk_budget: dict[str, Any], intent_id: str) -> dict[str, Any]:
     for row in risk_budget.get("intent_budgets") or []:
         if isinstance(row, dict) and str(row.get("intent_id") or "").strip() == intent_id:
@@ -250,8 +344,9 @@ def _select_vertical_put_credit_spread(
     template = policy.get("options_template") if isinstance(policy.get("options_template"), dict) else {}
     strategy = template.get("strategy") if isinstance(template.get("strategy"), dict) else {}
     risk = template.get("risk") if isinstance(template.get("risk"), dict) else {}
-    selection = template.get("selection_policy") if isinstance(template.get("selection_policy"), dict) else {}
+    selection = _selection_policy(policy)
     liquidity = selection.get("liquidity_policy") if isinstance(selection.get("liquidity_policy"), dict) else {}
+    target_width = _target_width_points(policy)
     option = intent.get("option") if isinstance(intent.get("option"), dict) else {}
     right = str(strategy.get("right") or option.get("structure") or "").strip().upper()
     direction = str(strategy.get("direction") or "").strip().upper()
@@ -288,6 +383,8 @@ def _select_vertical_put_credit_spread(
                 if buy_strike is None or buy_ask is None or buy_strike >= sell_strike:
                     continue
                 width = sell_strike - buy_strike
+                if target_width is None or width != target_width:
+                    continue
                 credit = sell_bid - buy_ask
                 if credit <= 0:
                     continue
@@ -399,10 +496,9 @@ def build_structure_decision_supply_v1(ctx: bod.BodContext) -> dict[str, Any]:
         selected, select_blocker = _select_vertical_put_credit_spread(intent=intent, policy=policy, snapshot=snapshot, risk_budget=risk_budget, intent_id=intent_id)
         if select_blocker:
             return _blocked(ctx, select_blocker, "No current-day option legs satisfy policy, quote, and risk constraints; rerun after richer option chain capture or adjust governed policy.", active_intents=active_rows, risk_budget_input=risk_input, market_open_data=market_open_data, structure_policy={"path": str(POLICY_PATH), "engine_id": _engine_id(intent)})
-        if not _selected_legs_exist_in_snapshot(selected, snapshot):
-            return _blocked(ctx, "STRUCTURE_DECISION_VALIDATION_FAILED", "Selected option legs are absent from the latest accepted market-open snapshot; rerun market-open gate and structure selection.", active_intents=active_rows, risk_budget_input=risk_input, market_open_data=market_open_data, structure_policy={"path": str(POLICY_PATH), "engine_id": _engine_id(intent)})
-        if _near_itm_same_week_disallowed(selected, policy, snapshot):
-            return _blocked(ctx, "NO_ELIGIBLE_OPTION_STRUCTURE", "Near/ITM same-week structures are disallowed unless explicitly policy-approved and broker preview-valid.", active_intents=active_rows, risk_budget_input=risk_input, market_open_data=market_open_data, structure_policy={"path": str(POLICY_PATH), "engine_id": _engine_id(intent)})
+        guard_blocker, guard_action = _selected_structure_guard_blocker(selected, policy, snapshot)
+        if guard_blocker:
+            return _blocked(ctx, guard_blocker, guard_action, active_intents=active_rows, risk_budget_input=risk_input, market_open_data=market_open_data, structure_policy={"path": str(POLICY_PATH), "engine_id": _engine_id(intent)})
         structure_input = _candidate_from_intent(intent_path, intent, snapshot)
         base_decision = select_structure_for_candidate_v1(structure_input)
         if base_decision.get("structure_status") != STRUCTURE_STATUS_SELECTED:
