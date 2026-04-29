@@ -15,12 +15,16 @@ from constellation_2.common.aegis_improvement_control_v1 import (
     build_improvement_control_report_v1,
     create_policy_from_approved_proposal_v1,
     create_rollback_record_v1,
+    ingest_paper_session_divergence_evidence_v1,
+    ingest_preflight_output_evidence_v1,
     make_action_proposal_v1,
     make_evidence_record_v1,
     make_finding_record_v1,
+    make_measurement_placeholder_from_replay_or_backtest_v1,
     measure_policy_impact_v1,
     policy_state_is_runtime_eligible_v1,
     reject_proposal_v1,
+    test_first_proposal_v1 as make_test_first_decision_v1,
 )
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
@@ -36,6 +40,8 @@ POLICY_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/aegis_versioned_policy.v1
 MEASUREMENT_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/aegis_policy_measurement.v1.schema.json"
 ROLLBACK_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/aegis_policy_rollback.v1.schema.json"
 REPORT_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/aegis_improvement_control_report.v1.schema.json"
+PREFLIGHT_ARTIFACT = Path("constellation_2/runtime/truth/reports/preopen_preflight_v1/2026-04-08/preopen_preflight.v1.json")
+DIVERGENCE_ARTIFACT = Path("constellation_2/runtime/truth/reports/paper_session_divergence_v1/2026-04-08/paper_session_divergence.v1.json")
 
 
 def _evidence() -> dict:
@@ -339,6 +345,70 @@ def test_control_report_includes_advisory_only_flags_and_valid_schema() -> None:
     assert report["controls_broker_execution"] is False
     assert report["controls_phasec_materialization"] is False
     validate_against_repo_schema_v1(report, REPO_ROOT, REPORT_SCHEMA)
+
+
+def test_real_preflight_and_divergence_artifacts_ingest_as_evidence() -> None:
+    if not (REPO_ROOT / PREFLIGHT_ARTIFACT).exists() or not (REPO_ROOT / DIVERGENCE_ARTIFACT).exists():
+        pytest.skip("local Aegis validation artifacts are not present")
+    preflight = ingest_preflight_output_evidence_v1(
+        artifact_path=PREFLIGHT_ARTIFACT,
+        repo_root=REPO_ROOT,
+        created_at=TS,
+    )
+    divergence = ingest_paper_session_divergence_evidence_v1(
+        artifact_path=DIVERGENCE_ARTIFACT,
+        repo_root=REPO_ROOT,
+        created_at=TS,
+    )
+    assert preflight["evidence_type"] == "preflight_output"
+    assert divergence["evidence_type"] == "paper_session_divergence"
+    assert preflight["source_path"] == PREFLIGHT_ARTIFACT.as_posix()
+    assert divergence["source_path"] == DIVERGENCE_ARTIFACT.as_posix()
+    assert preflight["source_sha256"] == "1797d697462753582595f0b2da8c1c2d86c61c03fcecf169e896a9059b66afb0"
+    assert divergence["source_sha256"] == "7a718799303ba39a2023063238b6cf971c2180c322936f517685d6e3b9e00e38"
+    assert preflight["raw_payload"]["first_true_blocker_code"] == "INTENTS_DAY_COMPLETENESS_MISSING_DAY_DIR"
+    assert divergence["raw_payload"]["reason_code"] == "UNDECLARED_DEPENDENCY_ACCESS"
+    assert ingest_preflight_output_evidence_v1(artifact_path=PREFLIGHT_ARTIFACT, repo_root=REPO_ROOT, created_at="different")["evidence_id"] == preflight["evidence_id"]
+    validate_against_repo_schema_v1(preflight, REPO_ROOT, EVIDENCE_SCHEMA)
+    validate_against_repo_schema_v1(divergence, REPO_ROOT, EVIDENCE_SCHEMA)
+
+
+def test_test_first_decision_does_not_create_policy() -> None:
+    proposal = _proposal()
+    decision = make_test_first_decision_v1(proposal=proposal, approver="operator", timestamp=TS, notes="Run replay before approval.")
+    assert decision["decision"] == "test_first"
+    assert decision["resulting_policy_id"] is None
+    with pytest.raises(ValueError, match="approved proposal"):
+        create_policy_from_approved_proposal_v1(
+            proposal=proposal,
+            approval=decision,
+            policy_version=1,
+            policy_payload={"advisory_policy": {"threshold_bps": 25}},
+            status="inactive",
+            created_at=TS,
+        )
+    validate_against_repo_schema_v1(decision, REPO_ROOT, APPROVAL_SCHEMA)
+
+
+def test_measurement_placeholder_can_reference_available_replay_or_backtest_output() -> None:
+    if not (REPO_ROOT / DIVERGENCE_ARTIFACT).exists():
+        pytest.skip("local replay-like validation artifact is not present")
+    policy = _approved_policy(status="inactive")
+    measurement = make_measurement_placeholder_from_replay_or_backtest_v1(
+        policy_id=policy["policy_id"],
+        measurement_window_start="2026-04-08",
+        measurement_window_end="2026-04-08",
+        artifact_path=DIVERGENCE_ARTIFACT,
+        repo_root=REPO_ROOT,
+        selected_summary_fields=("schema_id", "day_utc", "status", "reason_code"),
+        created_at=TS,
+    )
+    assert measurement["conclusion"] == "inconclusive"
+    assert measurement["before_metrics"]["artifact_available"] is True
+    assert measurement["before_metrics"]["source_path"] == DIVERGENCE_ARTIFACT.as_posix()
+    assert measurement["before_metrics"]["source_sha256"] == "7a718799303ba39a2023063238b6cf971c2180c322936f517685d6e3b9e00e38"
+    assert measurement["before_metrics"]["selected_summary_fields"]["reason_code"] == "UNDECLARED_DEPENDENCY_ACCESS"
+    validate_against_repo_schema_v1(measurement, REPO_ROOT, MEASUREMENT_SCHEMA)
 
 
 def test_no_broker_phasec_or_sleeve_logic_files_are_changed() -> None:

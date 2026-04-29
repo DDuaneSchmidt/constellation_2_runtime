@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping
 
@@ -14,6 +17,8 @@ REPORT_SCHEMA_ID = "C2_AEGIS_IMPROVEMENT_CONTROL_REPORT_V1"
 EVIDENCE_TYPES = frozenset(
     {
         "trade_outcome",
+        "preflight_output",
+        "paper_session_divergence",
         "decision_trace",
         "eod_advisory",
         "backtest_result",
@@ -83,6 +88,17 @@ _DIRECT_RUNTIME_CHANGE_KEYS = frozenset(
     }
 )
 
+_DEFAULT_SUMMARY_FIELDS_BY_EVIDENCE_TYPE = {
+    "preflight_output": ("schema_id", "day_utc", "status", "final_start_decision", "first_true_blocker_code"),
+    "paper_session_divergence": ("schema_id", "day_utc", "status", "reason_code", "dependency_key"),
+    "decision_trace": ("schema_id", "day_utc", "status", "decision", "reason_code"),
+    "eod_advisory": ("schema_id", "day_utc", "status", "advisory_status", "summary"),
+    "config_snapshot": ("schema_id", "day_utc", "config_version", "status"),
+    "backtest_result": ("schema_id", "day_utc", "status", "conclusion", "run_id"),
+}
+
+_TIMESTAMP_FIELDS = ("timestamp", "generated_at_utc", "produced_utc", "detected_at", "recorded_at", "created_at", "day_utc")
+
 
 def _now_utc() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -116,6 +132,68 @@ def _stable_id(prefix: str, seed: Mapping[str, Any]) -> str:
 
 def _copy_jsonish(value: Any) -> Any:
     return copy.deepcopy(value)
+
+
+def _read_json_artifact(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        raise FileNotFoundError(f"artifact path does not exist: {path}")
+    if not path.is_file():
+        raise ValueError(f"artifact path is not a file: {path}")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"artifact is not valid JSON: {path}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"artifact JSON root must be an object: {path}")
+    return payload
+
+
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _display_path(path: Path, repo_root: Path | None) -> str:
+    resolved = path.resolve()
+    if repo_root is not None:
+        try:
+            return resolved.relative_to(repo_root.resolve()).as_posix()
+        except ValueError:
+            pass
+    return str(path)
+
+
+def _get_path_value(payload: Mapping[str, Any], field_path: str) -> Any:
+    current: Any = payload
+    for part in field_path.split("."):
+        if isinstance(current, Mapping) and part in current:
+            current = current[part]
+        else:
+            return None
+    return current
+
+
+def _selected_summary_fields(payload: Mapping[str, Any], field_paths: Iterable[str]) -> dict[str, Any]:
+    selected: dict[str, Any] = {}
+    for field_path in field_paths:
+        value = _get_path_value(payload, str(field_path))
+        if value is not None:
+            selected[str(field_path)] = _plain_jsonish(value)
+    return selected
+
+
+def _summary_from_fields(evidence_type: str, selected_fields: Mapping[str, Any]) -> str:
+    if not selected_fields:
+        return f"{evidence_type} artifact ingested with no configured summary fields present."
+    fragments = [f"{key}={json.dumps(value, sort_keys=True, separators=(',', ':'))}" for key, value in sorted(selected_fields.items())]
+    return f"{evidence_type} artifact: " + "; ".join(fragments)
+
+
+def _timestamp_from_payload(payload: Mapping[str, Any], fallback: str | None = None) -> str:
+    for field in _TIMESTAMP_FIELDS:
+        value = payload.get(field)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return fallback or "unknown"
 
 
 def _contains_direct_runtime_change(value: Any) -> bool:
@@ -201,6 +279,155 @@ def make_evidence_record_v1(
         "raw_payload": raw_payload_value,
         "created_at": created_at or _now_utc(),
     }
+
+
+def ingest_local_artifact_evidence_v1(
+    *,
+    artifact_path: str | Path,
+    evidence_type: str,
+    repo_root: str | Path | None = None,
+    selected_summary_fields: Iterable[str] | None = None,
+    summary: str | None = None,
+    timestamp: str | None = None,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    evidence_type_value = _require_enum(evidence_type, "evidence_type", EVIDENCE_TYPES)
+    repo_root_path = None if repo_root is None else Path(repo_root)
+    read_path = Path(artifact_path)
+    if not read_path.is_absolute() and repo_root_path is not None:
+        read_path = repo_root_path / read_path
+    payload = _read_json_artifact(read_path)
+    fields = tuple(selected_summary_fields or _DEFAULT_SUMMARY_FIELDS_BY_EVIDENCE_TYPE.get(evidence_type_value, ("schema_id", "day_utc", "status")))
+    selected_fields = _selected_summary_fields(payload, fields)
+    return make_evidence_record_v1(
+        timestamp=timestamp or _timestamp_from_payload(payload, created_at),
+        evidence_type=evidence_type_value,
+        source_path=_display_path(read_path, repo_root_path),
+        source_sha256=_sha256_file(read_path),
+        summary=summary or _summary_from_fields(evidence_type_value, selected_fields),
+        raw_payload=payload,
+        created_at=created_at,
+    )
+
+
+def ingest_preflight_output_evidence_v1(
+    *,
+    artifact_path: str | Path,
+    repo_root: str | Path | None = None,
+    selected_summary_fields: Iterable[str] | None = None,
+    summary: str | None = None,
+    timestamp: str | None = None,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    return ingest_local_artifact_evidence_v1(
+        artifact_path=artifact_path,
+        evidence_type="preflight_output",
+        repo_root=repo_root,
+        selected_summary_fields=selected_summary_fields,
+        summary=summary,
+        timestamp=timestamp,
+        created_at=created_at,
+    )
+
+
+def ingest_paper_session_divergence_evidence_v1(
+    *,
+    artifact_path: str | Path,
+    repo_root: str | Path | None = None,
+    selected_summary_fields: Iterable[str] | None = None,
+    summary: str | None = None,
+    timestamp: str | None = None,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    return ingest_local_artifact_evidence_v1(
+        artifact_path=artifact_path,
+        evidence_type="paper_session_divergence",
+        repo_root=repo_root,
+        selected_summary_fields=selected_summary_fields,
+        summary=summary,
+        timestamp=timestamp,
+        created_at=created_at,
+    )
+
+
+def ingest_decision_trace_evidence_v1(
+    *,
+    artifact_path: str | Path,
+    repo_root: str | Path | None = None,
+    selected_summary_fields: Iterable[str] | None = None,
+    summary: str | None = None,
+    timestamp: str | None = None,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    return ingest_local_artifact_evidence_v1(
+        artifact_path=artifact_path,
+        evidence_type="decision_trace",
+        repo_root=repo_root,
+        selected_summary_fields=selected_summary_fields,
+        summary=summary,
+        timestamp=timestamp,
+        created_at=created_at,
+    )
+
+
+def ingest_eod_advisory_evidence_v1(
+    *,
+    artifact_path: str | Path,
+    repo_root: str | Path | None = None,
+    selected_summary_fields: Iterable[str] | None = None,
+    summary: str | None = None,
+    timestamp: str | None = None,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    return ingest_local_artifact_evidence_v1(
+        artifact_path=artifact_path,
+        evidence_type="eod_advisory",
+        repo_root=repo_root,
+        selected_summary_fields=selected_summary_fields,
+        summary=summary,
+        timestamp=timestamp,
+        created_at=created_at,
+    )
+
+
+def ingest_config_snapshot_evidence_v1(
+    *,
+    artifact_path: str | Path,
+    repo_root: str | Path | None = None,
+    selected_summary_fields: Iterable[str] | None = None,
+    summary: str | None = None,
+    timestamp: str | None = None,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    return ingest_local_artifact_evidence_v1(
+        artifact_path=artifact_path,
+        evidence_type="config_snapshot",
+        repo_root=repo_root,
+        selected_summary_fields=selected_summary_fields,
+        summary=summary,
+        timestamp=timestamp,
+        created_at=created_at,
+    )
+
+
+def ingest_backtest_result_evidence_v1(
+    *,
+    artifact_path: str | Path,
+    repo_root: str | Path | None = None,
+    selected_summary_fields: Iterable[str] | None = None,
+    summary: str | None = None,
+    timestamp: str | None = None,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    return ingest_local_artifact_evidence_v1(
+        artifact_path=artifact_path,
+        evidence_type="backtest_result",
+        repo_root=repo_root,
+        selected_summary_fields=selected_summary_fields,
+        summary=summary,
+        timestamp=timestamp,
+        created_at=created_at,
+    )
 
 
 def make_finding_record_v1(
@@ -379,6 +606,32 @@ def reject_proposal_v1(
     }
 
 
+def test_first_proposal_v1(
+    *,
+    proposal: Mapping[str, Any],
+    approver: str,
+    timestamp: str,
+    notes: str,
+) -> dict[str, Any]:
+    validate_action_proposal_v1(proposal)
+    approval_seed = {
+        "proposal_id": proposal["proposal_id"],
+        "decision": "test_first",
+        "approver": _require_non_empty(approver, "approver"),
+        "timestamp": _require_non_empty(timestamp, "timestamp"),
+        "notes": str(notes or ""),
+    }
+    return {
+        "approval_id": _stable_id("approval", approval_seed),
+        "proposal_id": proposal["proposal_id"],
+        "decision": "test_first",
+        "approver": approval_seed["approver"],
+        "timestamp": approval_seed["timestamp"],
+        "notes": approval_seed["notes"],
+        "resulting_policy_id": None,
+    }
+
+
 def create_policy_from_approved_proposal_v1(
     *,
     proposal: Mapping[str, Any],
@@ -458,6 +711,61 @@ def measure_policy_impact_v1(
         **seed,
         "created_at": created_at or _now_utc(),
     }
+
+
+def make_measurement_placeholder_from_replay_or_backtest_v1(
+    *,
+    policy_id: str,
+    measurement_window_start: str,
+    measurement_window_end: str,
+    artifact_path: str | Path | None = None,
+    repo_root: str | Path | None = None,
+    selected_summary_fields: Iterable[str] | None = None,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    repo_root_path = None if repo_root is None else Path(repo_root)
+    artifact_ref: dict[str, Any] = {
+        "artifact_available": False,
+        "source_path": None,
+        "source_sha256": None,
+        "selected_summary_fields": {},
+    }
+    if artifact_path is not None:
+        read_path = Path(artifact_path)
+        if not read_path.is_absolute() and repo_root_path is not None:
+            read_path = repo_root_path / read_path
+        if read_path.exists():
+            payload = _read_json_artifact(read_path)
+            fields = tuple(selected_summary_fields or _DEFAULT_SUMMARY_FIELDS_BY_EVIDENCE_TYPE["backtest_result"])
+            artifact_ref = {
+                "artifact_available": True,
+                "source_path": _display_path(read_path, repo_root_path),
+                "source_sha256": _sha256_file(read_path),
+                "selected_summary_fields": _selected_summary_fields(payload, fields),
+            }
+    summary = (
+        "Measurement placeholder created from available replay/backtest output; impact remains inconclusive until reviewed."
+        if artifact_ref["artifact_available"]
+        else "Measurement placeholder created without replay/backtest output; impact remains inconclusive."
+    )
+    return measure_policy_impact_v1(
+        policy_id=policy_id,
+        measurement_window_start=measurement_window_start,
+        measurement_window_end=measurement_window_end,
+        before_metrics={
+            "measurement_source": "replay_or_backtest_placeholder",
+            **artifact_ref,
+        },
+        after_metrics={
+            "measurement_status": "pending_operator_or_replay_review",
+            "artifact_available": artifact_ref["artifact_available"],
+        },
+        success_criteria_met=False,
+        rollback_criteria_met=False,
+        conclusion="inconclusive",
+        summary=summary,
+        created_at=created_at,
+    )
 
 
 def create_rollback_record_v1(

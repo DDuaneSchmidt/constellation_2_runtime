@@ -8,7 +8,7 @@
   "properties": {
     "evidence_id": { "type": "string", "pattern": "^evidence_[a-f0-9]{64}$" },
     "timestamp": { "type": "string", "minLength": 1 },
-    "evidence_type": { "type": "string", "enum": ["trade_outcome", "decision_trace", "eod_advisory", "backtest_result", "config_snapshot", "regime_observation", "sleeve_performance"] },
+    "evidence_type": { "type": "string", "enum": ["trade_outcome", "preflight_output", "paper_session_divergence", "decision_trace", "eod_advisory", "backtest_result", "config_snapshot", "regime_observation", "sleeve_performance"] },
     "source_path": { "type": "string", "minLength": 1 },
     "source_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "summary": { "type": "string", "minLength": 1 },
