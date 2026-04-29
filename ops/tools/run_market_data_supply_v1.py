@@ -437,6 +437,20 @@ def _run_capture(ctx: bod.BodContext, instrument: str) -> dict[str, Any]:
     }
 
 
+def _refine_delayed_capture_blocker(capture: dict[str, Any], *, delayed_data_used: bool) -> str:
+    blocker = str(capture.get("blocker") or "").strip()
+    if not delayed_data_used:
+        return blocker
+    text = "\n".join([str(capture.get("stdout_summary") or ""), str(capture.get("stderr_summary") or "")]).upper()
+    if "MARKET_DATA_TYPE=3:NO_VALID_OPTION_QUOTES_CAPTURED" in text or "NO_VALID_OPTION_QUOTES_CAPTURED" in text:
+        return "OPTIONS_QUOTES_MISSING"
+    if "MARKET_DATA_TYPE=3:UNDERLYING_SPOT_MISSING" in text:
+        return "OPTIONS_UNDERLYING_SPOT_MISSING"
+    if "CONTRACT" in text and "MISSING" in text:
+        return "OPTIONS_CONTRACT_QUALIFICATION_FAILED"
+    return blocker
+
+
 def _latest_snapshot_for_symbol(*, execution_root: Path, day_utc: str, instrument: str) -> tuple[Path | None, Path | None, dict[str, Any], dict[str, Any]]:
     root = execution_root / "options_chain_snapshot_v1" / day_utc
     candidates: list[tuple[Path, Path, dict[str, Any], dict[str, Any]]] = []
@@ -665,6 +679,7 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
             if unknown:
                 capture = _run_capture(ctx, instrument)
                 capture["data_mode"] = market_data_mode
+                capture["blocker"] = _refine_delayed_capture_blocker(capture, delayed_data_used=delayed_data_used)
                 capture_attempts.append(capture)
                 probe_path = _entitlement_probe_path(ctx, instrument)
                 probe = _read_json(probe_path)
@@ -689,6 +704,7 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
                 if snapshot_path is None and not any(row.get("instrument") == instrument for row in capture_attempts):
                     capture = _run_capture(ctx, instrument)
                     capture["data_mode"] = market_data_mode
+                    capture["blocker"] = _refine_delayed_capture_blocker(capture, delayed_data_used=delayed_data_used)
                     capture_attempts.append(capture)
                     if capture["status"] != "PASS":
                         blocker = str(capture.get("blocker") or "OPTIONS_SNAPSHOT_CAPTURE_FAILED")

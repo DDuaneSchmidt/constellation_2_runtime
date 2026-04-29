@@ -330,6 +330,32 @@ def test_delayed_policy_makes_supply_continue_to_capture(monkeypatch: pytest.Mon
     assert payload["capture_attempts"][0]["data_mode"] == "DELAYED"
 
 
+def test_delayed_capture_missing_bid_ask_reports_quotes_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _requirement(ctx)
+    _policy(ctx)
+    _entitlement(ctx, status="BLOCKED", codes=[10167], live=False, delayed=True)
+
+    def _capture(_ctx, instrument):  # noqa: ANN001
+        return {
+            "instrument": instrument,
+            "status": "BLOCKED",
+            "blocker": "OPTIONS_MARKET_DATA_PERMISSION_DENIED",
+            "snapshot_path": "",
+            "freshness_certificate_path": "",
+            "stdout_summary": "market_data_type=3:NO_VALID_OPTION_QUOTES_CAPTURED",
+            "stderr_summary": "",
+        }
+
+    monkeypatch.setattr(supply, "_run_capture", _capture)
+
+    payload = supply.build_market_data_supply(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "OPTIONS_QUOTES_MISSING"
+    assert payload["capture_attempts"][0]["blocker"] == "OPTIONS_QUOTES_MISSING"
+
+
 def test_delayed_data_requires_quotes_and_timestamps(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _requirement(ctx)
