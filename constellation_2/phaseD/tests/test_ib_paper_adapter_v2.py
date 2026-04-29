@@ -42,6 +42,7 @@ class _FakeComboLeg:
 
 class _FakeOrder:
     def __init__(self) -> None:
+        self.orderId = None
         self.action = None
         self.orderType = None
         self.lmtPrice = None
@@ -67,6 +68,7 @@ class _FakeIB:
 class _FakeSubmitIB:
     def __init__(self) -> None:
         self.placed: list[_FakeOrder] = []
+        self.cancelled: list[int] = []
         self._next_order_id = 100
 
     def placeOrder(self, _contract, order):
@@ -83,6 +85,10 @@ class _FakeSubmitIB:
 
     def sleep(self, _seconds: float) -> None:
         return None
+
+    def cancelOrder(self, order):
+        self.cancelled.append(order.orderId)
+        return SimpleNamespace(orderStatus=SimpleNamespace(status="PENDINGCANCEL"))
 
 
 def _install_fake_ib_insync(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -221,6 +227,20 @@ def test_options_whatif_uses_defined_risk_fallback_when_ib_margin_missing(monkey
     assert result.notional_usd == "388.00"
     assert isinstance(result.raw, dict)
     assert result.raw["margin_source"] == "RISK_PROOF_MAX_LOSS_FALLBACK"
+
+
+def test_cancel_order_calls_ib_cancel_order_for_given_order_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_ib_insync(monkeypatch)
+    fake_ib = _FakeSubmitIB()
+    adapter = IBPaperAdapterV2(conn=BrokerConnectionSpec(host="127.0.0.1", port=4002, client_id=7), env="PAPER")
+    adapter._ib = fake_ib
+
+    result = adapter.cancel_order(order_id=123)
+
+    assert result.ok is True
+    assert result.status == "PENDINGCANCEL"
+    assert result.order_id == 123
+    assert fake_ib.cancelled == [123]
 
 
 def test_options_whatif_fails_when_ib_margin_missing_and_defined_risk_missing(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -706,4 +706,43 @@ class IBPaperAdapterV2(BrokerAdapterV1):
         )
 
     def cancel_order(self, *, order_id: int) -> BrokerSubmitResult:
-        raise IBAdapterError("CANCEL_NOT_SUPPORTED_IN_ADAPTER_V2")
+        if not isinstance(order_id, int) or order_id <= 0:
+            raise IBAdapterError(f"CANCEL_ORDER_ID_INVALID: {order_id!r}")
+        if self._ib is None:
+            raise IBAdapterError("BROKER_NOT_CONNECTED")
+        try:
+            from ib_insync import Order
+        except Exception as e:  # noqa: BLE001
+            raise IBAdapterError(f"IB_INSYNC_IMPORT_FAILED: {e}") from e
+
+        order = Order()
+        order.orderId = int(order_id)
+        try:
+            trade = self._ib.cancelOrder(order)
+            if hasattr(self._ib, "sleep"):
+                self._ib.sleep(0.5)
+        except Exception as e:  # noqa: BLE001
+            raise IBAdapterError(f"CANCEL_CALL_FAILED: {e}") from e
+
+        status = "CANCELLED"
+        try:
+            raw_status = getattr(getattr(trade, "orderStatus", None), "status", None)
+            if isinstance(raw_status, str) and raw_status.strip():
+                status = raw_status.strip().upper()
+        except Exception:
+            status = "CANCELLED"
+
+        ok = status in {"CANCELLED", "PENDINGCANCEL", "APICANCELLED", "API_CANCELLED"}
+        return BrokerSubmitResult(
+            ok=ok,
+            status=status,
+            order_id=int(order_id),
+            perm_id=None,
+            error_code=None if ok else "CANCEL_NOT_ACKNOWLEDGED",
+            error_message=None if ok else f"cancel status={status}",
+            raw={
+                "cancel_order_id": int(order_id),
+                "trade": str(trade),
+                "status": status,
+            },
+        )
