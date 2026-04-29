@@ -132,8 +132,10 @@ def _artifact_ref_from_details(
 def _broker_identity(broker_payload: Mapping[str, Any]) -> tuple[str, str, str]:
     submission_id = str(broker_payload.get("submission_id") or "").strip()
     broker_ids = broker_payload.get("broker_ids") if isinstance(broker_payload.get("broker_ids"), dict) else {}
-    order_id = str(broker_ids.get("order_id") or "").strip()
-    perm_id = str(broker_ids.get("perm_id") or "").strip()
+    order_id_raw = broker_ids.get("order_id")
+    perm_id_raw = broker_ids.get("perm_id")
+    order_id = "" if order_id_raw is None else str(order_id_raw).strip()
+    perm_id = "" if perm_id_raw is None else str(perm_id_raw).strip()
     return submission_id, order_id, perm_id
 
 

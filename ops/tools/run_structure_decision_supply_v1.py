@@ -171,6 +171,67 @@ def _leg_from_contract(row: dict[str, Any], *, action: str, price_field: str) ->
     }
 
 
+def _contract_identity(row: dict[str, Any]) -> tuple[str, str]:
+    ib = row.get("ib") if isinstance(row.get("ib"), dict) else {}
+    return str(row.get("contract_key") or "").strip(), str(ib.get("conId") or row.get("ib_conId") or "").strip()
+
+
+def _snapshot_contract_index(snapshot: dict[str, Any]) -> set[tuple[str, str]]:
+    out: set[tuple[str, str]] = set()
+    for row in snapshot.get("contracts") or []:
+        if isinstance(row, dict):
+            out.add(_contract_identity(row))
+    return out
+
+
+def _selected_legs_exist_in_snapshot(selected: dict[str, Any], snapshot: dict[str, Any]) -> bool:
+    index = _snapshot_contract_index(snapshot)
+    for leg in selected.get("legs") or []:
+        if not isinstance(leg, dict):
+            return False
+        key = str(leg.get("contract_key") or "").strip()
+        conid = str(leg.get("ib_conId") or "").strip()
+        if (key, conid) not in index:
+            return False
+    return True
+
+
+def _expiry_days_from_snapshot(expiry_utc: str, snapshot: dict[str, Any]) -> int | None:
+    as_of_text = str(snapshot.get("as_of_utc") or "").strip()
+    if not expiry_utc or not as_of_text:
+        return None
+    try:
+        as_of_dt = datetime.fromisoformat(as_of_text.replace("Z", "+00:00"))
+        expiry_dt = datetime.fromisoformat(expiry_utc.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return (expiry_dt.date() - as_of_dt.date()).days
+
+
+def _near_itm_same_week_disallowed(selected: dict[str, Any], policy: dict[str, Any], snapshot: dict[str, Any]) -> bool:
+    template = policy.get("options_template") if isinstance(policy.get("options_template"), dict) else {}
+    selection = template.get("selection_policy") if isinstance(template.get("selection_policy"), dict) else {}
+    if selection.get("allow_near_itm_same_week") is True:
+        return False
+    underlying = snapshot.get("underlying") if isinstance(snapshot.get("underlying"), dict) else {}
+    spot = _dec(underlying.get("spot_price"))
+    if spot is None or spot <= 0:
+        return False
+    expiry_days = _expiry_days_from_snapshot(str(selected.get("expiry_utc") or ""), snapshot)
+    if expiry_days is None or expiry_days < 0 or expiry_days > 7:
+        return False
+    for leg in selected.get("legs") or []:
+        if not isinstance(leg, dict) or str(leg.get("action") or "").strip().upper() != "SELL":
+            continue
+        strike = _dec(leg.get("strike"))
+        right = str(leg.get("right") or "").strip().upper()
+        if right == "PUT" and strike is not None and strike >= spot:
+            return True
+        if right == "CALL" and strike is not None and strike <= spot:
+            return True
+    return False
+
+
 def _intent_budget(risk_budget: dict[str, Any], intent_id: str) -> dict[str, Any]:
     for row in risk_budget.get("intent_budgets") or []:
         if isinstance(row, dict) and str(row.get("intent_id") or "").strip() == intent_id:
@@ -338,6 +399,10 @@ def build_structure_decision_supply_v1(ctx: bod.BodContext) -> dict[str, Any]:
         selected, select_blocker = _select_vertical_put_credit_spread(intent=intent, policy=policy, snapshot=snapshot, risk_budget=risk_budget, intent_id=intent_id)
         if select_blocker:
             return _blocked(ctx, select_blocker, "No current-day option legs satisfy policy, quote, and risk constraints; rerun after richer option chain capture or adjust governed policy.", active_intents=active_rows, risk_budget_input=risk_input, market_open_data=market_open_data, structure_policy={"path": str(POLICY_PATH), "engine_id": _engine_id(intent)})
+        if not _selected_legs_exist_in_snapshot(selected, snapshot):
+            return _blocked(ctx, "STRUCTURE_DECISION_VALIDATION_FAILED", "Selected option legs are absent from the latest accepted market-open snapshot; rerun market-open gate and structure selection.", active_intents=active_rows, risk_budget_input=risk_input, market_open_data=market_open_data, structure_policy={"path": str(POLICY_PATH), "engine_id": _engine_id(intent)})
+        if _near_itm_same_week_disallowed(selected, policy, snapshot):
+            return _blocked(ctx, "NO_ELIGIBLE_OPTION_STRUCTURE", "Near/ITM same-week structures are disallowed unless explicitly policy-approved and broker preview-valid.", active_intents=active_rows, risk_budget_input=risk_input, market_open_data=market_open_data, structure_policy={"path": str(POLICY_PATH), "engine_id": _engine_id(intent)})
         structure_input = _candidate_from_intent(intent_path, intent, snapshot)
         base_decision = select_structure_for_candidate_v1(structure_input)
         if base_decision.get("structure_status") != STRUCTURE_STATUS_SELECTED:

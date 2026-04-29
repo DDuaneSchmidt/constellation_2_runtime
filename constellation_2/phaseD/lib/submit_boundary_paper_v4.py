@@ -185,6 +185,8 @@ RC_ADVISORY_EXECUTION_PROVENANCE_MISMATCH = "C2_SUBMIT_ADVISORY_EXECUTION_PROVEN
 RC_EXECUTION_SUBMISSION_RECORD_REQUIRED = "C2_SUBMIT_EXECUTION_SUBMISSION_RECORD_REQUIRED"
 RC_EXECUTION_SUBMISSION_RECORD_MISMATCH = "C2_SUBMIT_EXECUTION_SUBMISSION_RECORD_MISMATCH"
 RC_RAW_CANDIDATE_SUBMIT_DISABLED = "C2_SUBMIT_RAW_CANDIDATE_DISABLED"
+RC_FINAL_SNAPSHOT_LINEAGE_MISMATCH = "C2_FINAL_SNAPSHOT_LINEAGE_MISMATCH"
+RC_BROKER_COMBO_PREVIEW_NOT_PASS = "C2_BROKER_COMBO_PREVIEW_NOT_PASS"
 BROKER_TRANSMIT_ENABLEMENT_MSG = (
     "explicit micro-live path requires C2_ENABLE_BROKER_TRANSMIT=YES with dry_run=False"
 )
@@ -192,6 +194,8 @@ SUBMISSION_PREWRITE_FILENAMES = (
     "broker_submit_attempt_v1.json",
     "broker_acknowledgement_v1.json",
     "broker_order_outcome_v1.json",
+    "ib_order_payload.v1.json",
+    "ib_combo_preview.v1.json",
 )
 
 
@@ -295,6 +299,231 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _write_json_artifact(path: Path, payload: Dict[str, Any]) -> None:
+    import json
+
+    out = dict(payload)
+    out["canonical_json_hash"] = None
+    out["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(out)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(out, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+
+
+def _path_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return str(Path(text).expanduser().resolve())
+
+
+def _lineage_ref(name: str, path: str, expected_path: str) -> Dict[str, Any]:
+    return {
+        "name": name,
+        "path": path,
+        "expected_path": expected_path,
+        "match": bool(path and expected_path and path == expected_path),
+    }
+
+
+def _extract_structure_decision_refs(payload: Dict[str, Any]) -> tuple[str, str]:
+    decisions = payload.get("structure_decisions")
+    if isinstance(decisions, list) and decisions and isinstance(decisions[0], dict):
+        pricing = decisions[0].get("pricing_inputs") if isinstance(decisions[0].get("pricing_inputs"), dict) else {}
+        return _path_text(pricing.get("snapshot_path")), _path_text(pricing.get("freshness_certificate_path"))
+    return "", ""
+
+
+def _enforce_final_snapshot_lineage_gate(
+    *,
+    canonical_truth_root: Path,
+    execution_truth_root: Path,
+    day_utc: str,
+    phasec_out_dir: Path,
+    mapping_obj: Dict[str, Any],
+    binding_obj: Dict[str, Any],
+    pointers: List[str],
+) -> Dict[str, Any]:
+    gate_path = (
+        canonical_truth_root
+        / "reports"
+        / "market_open_data_gate_v1"
+        / day_utc
+        / "market_open_data_gate.v1.json"
+    ).resolve()
+    structure_path = (
+        canonical_truth_root
+        / "reports"
+        / "structure_decision_supply_v1"
+        / day_utc
+        / "structure_decision_supply.v1.json"
+    ).resolve()
+    phasec_structure_path = (phasec_out_dir / "structure_decision_supply.v1.json").resolve()
+    gate = _read_json_file(gate_path)
+    if str(gate.get("status") or "").strip().upper() != "PASS":
+        raise SubmitBoundaryV4Error(f"{RC_FINAL_SNAPSHOT_LINEAGE_MISMATCH}:market_open_data_gate_not_pass:path={gate_path}")
+    gate_snapshot_path = _path_text(gate.get("snapshot_path"))
+    gate_cert_path = _path_text(gate.get("freshness_certificate_path"))
+    if not gate_snapshot_path or not gate_cert_path:
+        raise SubmitBoundaryV4Error(f"{RC_FINAL_SNAPSHOT_LINEAGE_MISMATCH}:market_open_gate_snapshot_or_cert_missing:path={gate_path}")
+    expected_snapshot_root = (execution_truth_root / "options_chain_snapshot_v1" / day_utc).resolve()
+    if not gate_snapshot_path.startswith(str(expected_snapshot_root)):
+        raise SubmitBoundaryV4Error(
+            f"{RC_FINAL_SNAPSHOT_LINEAGE_MISMATCH}:snapshot_not_current_execution_root:path={gate_snapshot_path}"
+        )
+    gate_snapshot = Path(gate_snapshot_path)
+    gate_cert = Path(gate_cert_path)
+    if not gate_snapshot.exists() or not gate_snapshot.is_file() or not gate_cert.exists() or not gate_cert.is_file():
+        raise SubmitBoundaryV4Error(f"{RC_FINAL_SNAPSHOT_LINEAGE_MISMATCH}:snapshot_or_cert_missing")
+    gate_snapshot_sha = _sha256_file(gate_snapshot)
+    gate_cert_sha = _sha256_file(gate_cert)
+
+    structure = _read_json_file(structure_path)
+    if str(structure.get("status") or "").strip().upper() != "PASS":
+        raise SubmitBoundaryV4Error(f"{RC_FINAL_SNAPSHOT_LINEAGE_MISMATCH}:structure_decision_supply_not_pass:path={structure_path}")
+    structure_market = structure.get("market_open_data") if isinstance(structure.get("market_open_data"), dict) else {}
+    structure_snapshot_path = _path_text(structure_market.get("snapshot_path"))
+    structure_cert_path = _path_text(structure_market.get("freshness_certificate_path"))
+    decision_snapshot_path, decision_cert_path = _extract_structure_decision_refs(structure)
+
+    phasec_structure = _read_json_file(phasec_structure_path)
+    phasec_market = phasec_structure.get("market_open_data") if isinstance(phasec_structure.get("market_open_data"), dict) else {}
+    phasec_snapshot_path = _path_text(phasec_market.get("snapshot_path"))
+    phasec_cert_path = _path_text(phasec_market.get("freshness_certificate_path"))
+    phasec_decision_snapshot_path, phasec_decision_cert_path = _extract_structure_decision_refs(phasec_structure)
+
+    refs = [
+        _lineage_ref("market_open_data_gate.snapshot_path", gate_snapshot_path, gate_snapshot_path),
+        _lineage_ref("structure_decision_supply.market_open_data.snapshot_path", structure_snapshot_path, gate_snapshot_path),
+        _lineage_ref("structure_decision_supply.decision.pricing_inputs.snapshot_path", decision_snapshot_path, gate_snapshot_path),
+        _lineage_ref("phasec.structure_decision_supply.market_open_data.snapshot_path", phasec_snapshot_path, gate_snapshot_path),
+        _lineage_ref("phasec.structure_decision_supply.decision.pricing_inputs.snapshot_path", phasec_decision_snapshot_path, gate_snapshot_path),
+        _lineage_ref("market_open_data_gate.freshness_certificate_path", gate_cert_path, gate_cert_path),
+        _lineage_ref("structure_decision_supply.market_open_data.freshness_certificate_path", structure_cert_path, gate_cert_path),
+        _lineage_ref("structure_decision_supply.decision.pricing_inputs.freshness_certificate_path", decision_cert_path, gate_cert_path),
+        _lineage_ref("phasec.structure_decision_supply.market_open_data.freshness_certificate_path", phasec_cert_path, gate_cert_path),
+        _lineage_ref("phasec.structure_decision_supply.decision.pricing_inputs.freshness_certificate_path", phasec_decision_cert_path, gate_cert_path),
+    ]
+    mapping_snapshot_hash = str(mapping_obj.get("chain_snapshot_hash") or "").strip()
+    mapping_cert_hash = str(mapping_obj.get("freshness_cert_hash") or "").strip()
+    binding_cert_hash = str(binding_obj.get("freshness_cert_hash") or "").strip()
+    hash_refs = [
+        {"name": "mapping_ledger_record.chain_snapshot_hash", "sha256": mapping_snapshot_hash, "expected_sha256": gate_snapshot_sha, "match": mapping_snapshot_hash == gate_snapshot_sha},
+        {"name": "mapping_ledger_record.freshness_cert_hash", "sha256": mapping_cert_hash, "expected_sha256": gate_cert_sha, "match": mapping_cert_hash == gate_cert_sha},
+        {"name": "binding_record.freshness_cert_hash", "sha256": binding_cert_hash, "expected_sha256": gate_cert_sha, "match": binding_cert_hash == gate_cert_sha},
+    ]
+    mismatches = [row for row in refs if not row["match"]] + [row for row in hash_refs if not row["match"]]
+    payload = {
+        "schema_id": "final_snapshot_lineage_gate",
+        "schema_version": "v1",
+        "day_utc": day_utc,
+        "status": "PASS" if not mismatches else "BLOCKED",
+        "canonical_blocker": "" if not mismatches else RC_FINAL_SNAPSHOT_LINEAGE_MISMATCH,
+        "market_open_data_gate_path": str(gate_path),
+        "latest_accepted_snapshot_path": gate_snapshot_path,
+        "latest_accepted_freshness_certificate_path": gate_cert_path,
+        "latest_accepted_snapshot_sha256": gate_snapshot_sha,
+        "latest_accepted_freshness_certificate_sha256": gate_cert_sha,
+        "path_refs": refs,
+        "hash_refs": hash_refs,
+        "mismatches": mismatches,
+    }
+    pointers.extend([str(gate_path), str(structure_path), str(phasec_structure_path), gate_snapshot_path, gate_cert_path])
+    if mismatches:
+        raise SubmitBoundaryV4Error(f"{RC_FINAL_SNAPSHOT_LINEAGE_MISMATCH}:{mismatches[0]['name']}")
+    return payload
+
+
+def _preview_payload_from_whatif(whatif: Any) -> Dict[str, Any]:
+    raw = getattr(whatif, "raw", None)
+    if not isinstance(raw, dict):
+        return {}
+    payload = raw.get("payload")
+    return payload if isinstance(payload, dict) else {}
+
+
+def _combo_preview_blocker(whatif: Any) -> str:
+    raw = getattr(whatif, "raw", None)
+    raw_text = str(raw or "").upper()
+    detail = str(getattr(whatif, "detail", "") or "").upper()
+    payload = _preview_payload_from_whatif(whatif)
+    routing = payload.get("routing") if isinstance(payload.get("routing"), dict) else {}
+    params = routing.get("smart_combo_routing_params")
+    if not isinstance(params, list) or not any(
+        isinstance(row, dict)
+        and str(row.get("tag") or "").strip() == "NonGuaranteed"
+        and str(row.get("value") or "").strip() in {"0", "1"}
+        for row in params
+    ):
+        return "SMART_COMBO_ROUTING_PARAMS_MISSING"
+    if "ERROR 201" in raw_text or "IB_ERROR_201" in raw_text or "RISKLESS COMBINATION" in raw_text or "COMBOPAYOUT" in raw_text:
+        return "IB_ERROR_201_RISKLESS_COMBINATION"
+    if "INVALID COMBO" in raw_text or "INVALID COMBINATION" in raw_text:
+        return "IB_INVALID_COMBO"
+    if str(getattr(whatif, "ok", False)) != "True":
+        return "WHATIF_NOT_OK"
+    if not detail or "WHATIF_OK" not in detail:
+        return "WHATIF_AMBIGUOUS"
+    return ""
+
+
+def _write_ib_order_payload_artifact(
+    *,
+    submission_dir: Path,
+    day_utc: str,
+    ib_account: str,
+    ib_host: str,
+    ib_port: int,
+    ib_client_id: int,
+    payload: Dict[str, Any],
+    final_lineage_gate: Dict[str, Any],
+) -> Path:
+    path = (submission_dir / "ib_order_payload.v1.json").resolve()
+    _write_json_artifact(
+        path,
+        {
+            "schema_id": "ib_order_payload",
+            "schema_version": "v1",
+            "day_utc": day_utc,
+            "environment": "PAPER",
+            "ib_account": ib_account,
+            "connection": {"host": ib_host, "port": ib_port, "client_id": ib_client_id},
+            "payload": payload,
+            "final_snapshot_lineage_gate": final_lineage_gate,
+        },
+    )
+    return path
+
+
+def _write_ib_combo_preview_artifact(
+    *,
+    submission_dir: Path,
+    day_utc: str,
+    ib_account: str,
+    whatif: Any,
+    blocker: str,
+) -> Path:
+    path = (submission_dir / "ib_combo_preview.v1.json").resolve()
+    raw = getattr(whatif, "raw", None)
+    _write_json_artifact(
+        path,
+        {
+            "schema_id": "ib_combo_preview",
+            "schema_version": "v1",
+            "day_utc": day_utc,
+            "environment": "PAPER",
+            "ib_account": ib_account,
+            "status": "PASS" if not blocker else "BLOCKED",
+            "canonical_blocker": blocker,
+            "whatif_ok": bool(getattr(whatif, "ok", False)),
+            "detail": str(getattr(whatif, "detail", "") or ""),
+            "margin_change_usd": str(getattr(whatif, "margin_change_usd", "") or ""),
+            "notional_usd": str(getattr(whatif, "notional_usd", "") or ""),
+            "raw": raw if isinstance(raw, dict) else {},
+        },
+    )
+    return path
 
 
 def _dependency_refs_by_id(package_obj: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -735,6 +964,8 @@ def _extract_reason_code_and_detail(error: Exception, *, default_code: str) -> T
             RC_INTENT_PROTECTIVE_STOP_MISSING,
             RC_PROTECTIVE_STOP_REQUIRED_BUT_MISSING,
             RC_BRACKET_SUBMISSION_FAILED,
+            RC_FINAL_SNAPSHOT_LINEAGE_MISMATCH,
+            RC_BROKER_COMBO_PREVIEW_NOT_PASS,
         }:
             return possible_code, remainder.strip() or message
     return default_code, message
@@ -1549,6 +1780,18 @@ def run_submit_boundary_paper_v4(
         if package_build_path is not None:
             pointers.append(str(package_build_path.resolve()))
 
+    final_lineage_gate = {}
+    if mode == "OPTIONS":
+        final_lineage_gate = _enforce_final_snapshot_lineage_gate(
+            canonical_truth_root=canonical_control_truth_root,
+            execution_truth_root=execution_root.execution_root_path.resolve(),
+            day_utc=day,
+            phasec_out_dir=phasec_out_dir.resolve(),
+            mapping_obj=mapping_obj,
+            binding_obj=binding_obj,
+            pointers=pointers,
+        )
+
     intent_hash = str(plan_obj.get("intent_hash") or "").strip()
     if not intent_hash:
         raise SubmitBoundaryV4Error("PHASEC_IDENTITY_SET_MISSING_INTENT_HASH")
@@ -1934,7 +2177,55 @@ def run_submit_boundary_paper_v4(
 
         risk_budget = _read_json_file(risk_budget_path.resolve())
 
-        whatif = adapter.whatif_order(order_plan=plan_obj)
+        try:
+            whatif = adapter.whatif_order(order_plan=plan_obj)
+        except Exception as exc:  # noqa: BLE001
+            message = str(exc)
+            blocker = (
+                "IB_ERROR_201_RISKLESS_COMBINATION"
+                if "IB_ERROR_201" in message or "RISKLESS COMBINATION" in message.upper()
+                else "WHATIF_EXCEPTION"
+            )
+            preview_path = _write_ib_combo_preview_artifact(
+                submission_dir=submission_dir,
+                day_utc=day,
+                ib_account=execution_identity.account_id,
+                whatif=SimpleNamespace(
+                    ok=False,
+                    detail=message,
+                    margin_change_usd="",
+                    notional_usd="",
+                    raw={"exception": message},
+                ),
+                blocker=blocker,
+            )
+            pointers.append(str(preview_path))
+            raise SubmitBoundaryV4Error(f"{RC_BROKER_COMBO_PREVIEW_NOT_PASS}:{blocker}") from exc
+
+        payload_path = None
+        if mode == "OPTIONS":
+            payload_path = _write_ib_order_payload_artifact(
+                submission_dir=submission_dir,
+                day_utc=day,
+                ib_account=execution_identity.account_id,
+                ib_host=ib_host,
+                ib_port=ib_port,
+                ib_client_id=ib_client_id,
+                payload=_preview_payload_from_whatif(whatif),
+                final_lineage_gate=final_lineage_gate,
+            )
+            pointers.append(str(payload_path))
+            preview_blocker = _combo_preview_blocker(whatif)
+            preview_path = _write_ib_combo_preview_artifact(
+                submission_dir=submission_dir,
+                day_utc=day,
+                ib_account=execution_identity.account_id,
+                whatif=whatif,
+                blocker=preview_blocker,
+            )
+            pointers.append(str(preview_path))
+            if preview_blocker:
+                raise SubmitBoundaryV4Error(f"{RC_BROKER_COMBO_PREVIEW_NOT_PASS}:{preview_blocker}")
 
         dec = enforce_risk_budget_against_whatif_v1(
             repo_root=repo_root,

@@ -6,8 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from constellation_2.common.constitutional_runtime_v1 import validate_governed_artifact_payload_v1
-
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
@@ -17,6 +15,7 @@ REPO_ROOT = _repo_root()
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from constellation_2.common.constitutional_runtime_v1 import validate_governed_artifact_payload_v1  # noqa: E402
 import ops.tools.run_fill_ledger_day_v1 as fill_ledger  # noqa: E402
 import ops.tools.run_submission_lifecycle_refresh_v1 as lifecycle_refresh  # noqa: E402
 
@@ -408,6 +407,32 @@ def test_submission_lifecycle_refresh_maps_ib_error_201_to_broker_rejected(tmp_p
     outcome = json.loads((subdir / "broker_order_outcome_v1.json").read_text(encoding="utf-8"))
     assert ack["identity_strength"] == "WEAK"
     assert outcome["outcome_state"] == "BROKER_REJECTED"
+    assert "IB_ERROR_201_RISKLESS_COMBINATION" in outcome["reason_codes"]
+    assert outcome["error"]["code"] == "IB_ERROR_201"
+
+
+def test_submission_lifecycle_refresh_maps_submission_record_ib_error_201_to_specific_rejection(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth"
+    subdir = _seed_submission(
+        truth_root,
+        submission_id=TARGET_SUBMISSION_ID,
+        binding_hash=TARGET_BINDING_HASH,
+        broker_hash=TARGET_BROKER_HASH,
+        intent_sha=TARGET_INTENT_SHA,
+        order_id=90,
+        perm_id=0,
+    )
+    broker_record_path = subdir / "broker_submission_record.v2.json"
+    broker_record = json.loads(broker_record_path.read_text(encoding="utf-8"))
+    broker_record["status"] = "CANCELLED"
+    broker_record["error"] = {"code": "IB_ERROR_201", "message": "Riskless combination orders are not allowed."}
+    _write_json(broker_record_path, broker_record)
+
+    assert lifecycle_refresh.main(["--day_utc", DAY, "--truth_root", str(truth_root), "--submission_id", TARGET_SUBMISSION_ID]) == 0
+
+    outcome = json.loads((subdir / "broker_order_outcome_v1.json").read_text(encoding="utf-8"))
+    assert outcome["outcome_state"] == "BROKER_REJECTED"
+    assert "IB_ERROR_201_RISKLESS_COMBINATION" in outcome["reason_codes"]
     assert outcome["error"]["code"] == "IB_ERROR_201"
 
 

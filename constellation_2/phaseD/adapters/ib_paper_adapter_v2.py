@@ -191,7 +191,7 @@ def _options_plan_require_vertical_v1(plan: Dict[str, Any]) -> Tuple[Dict[str, A
 
 def _build_ib_bag_and_order_from_options_plan_v1(order_plan: Dict[str, Any]) -> Tuple[Any, Any, Dict[str, Any]]:
     try:
-        from ib_insync import ComboLeg, Contract, Order  # type: ignore
+        from ib_insync import ComboLeg, Contract, Order, TagValue  # type: ignore
     except Exception as e:  # noqa: BLE001
         raise IBAdapterError("C2_BROKER_ADAPTER_NOT_AVAILABLE: ib_insync import failed") from e
 
@@ -229,7 +229,7 @@ def _build_ib_bag_and_order_from_options_plan_v1(order_plan: Dict[str, Any]) -> 
         raise IBAdapterError("LIMIT_PRICE_PARSE_FAILED") from e
 
     is_credit = bool(terms.get("is_credit") is True)
-    order_action = "SELL" if is_credit else "BUY"
+    order_action = "BUY"
 
     contracts = 1
     rp = op.get("risk_proof")
@@ -249,10 +249,15 @@ def _build_ib_bag_and_order_from_options_plan_v1(order_plan: Dict[str, Any]) -> 
     order.totalQuantity = contracts
     order.lmtPrice = limit_price_f
     order.tif = str(tif)
+    order.smartComboRoutingParams = [TagValue("NonGuaranteed", "1")]
 
     raw = {
         "format": "IB_BAG_ORDER_V2",
-        "routing": {"exchange": exchange},
+        "routing": {
+            "exchange": exchange,
+            "smart_combo_routing_params": [{"tag": "NonGuaranteed", "value": "1"}],
+            "smart_combo_routing_policy": "NON_GUARANTEED_SMART_COMBO",
+        },
         "bag": {
             "symbol": str(underlying["symbol"]),
             "currency": str(underlying["currency"]),
@@ -265,13 +270,61 @@ def _build_ib_bag_and_order_from_options_plan_v1(order_plan: Dict[str, Any]) -> 
         },
         "order": {
             "action": order_action,
+            "combo_action_convention": "BUY_PARENT_LEG_ACTIONS_ENCODE_SPREAD",
             "orderType": "LMT",
             "tif": str(tif),
             "totalQuantity": contracts,
             "limitPrice": str(Decimal(limit_price_s)),
+            "isCredit": is_credit,
         },
     }
     return bag, order, raw
+
+
+def _json_safe_text(value: Any) -> str:
+    try:
+        return str(value)
+    except Exception:
+        return repr(value)
+
+
+def _trade_log_entries(trade: Any) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    raw_log = getattr(trade, "log", None)
+    if not isinstance(raw_log, list):
+        return entries
+    for item in raw_log:
+        entries.append(
+            {
+                "status": _json_safe_text(getattr(item, "status", "")),
+                "message": _json_safe_text(getattr(item, "message", "")),
+                "errorCode": _json_safe_text(getattr(item, "errorCode", "")),
+            }
+        )
+    return entries
+
+
+def _order_state_summary(trade: Any) -> dict[str, str]:
+    state = getattr(trade, "orderState", None)
+    if state is None:
+        return {}
+    out: dict[str, str] = {}
+    for name in ("status", "warningText", "completedStatus", "completedTime", "rejectReason"):
+        value = getattr(state, name, None)
+        if value not in (None, ""):
+            out[name] = _json_safe_text(value)
+    return out
+
+
+def _detect_ib_error_201(*values: Any) -> bool:
+    text = " ".join(_json_safe_text(value) for value in values if value is not None).upper()
+    return (
+        "ERROR 201" in text
+        or "ERRORCODE=201" in text
+        or "IB_ERROR_201" in text
+        or "RISKLESS COMBINATION ORDERS ARE NOT ALLOWED" in text
+        or "COMBOPAYOUT" in text
+    )
 
 
 def _build_ib_stock_and_order_from_equity_order_plan_v1_or_v2(plan: Dict[str, Any]) -> Tuple[Any, Any, Dict[str, Any]]:
@@ -490,6 +543,8 @@ class IBPaperAdapterV2(BrokerAdapterV1):
             try:
                 res = self._ib.whatIfOrder(contract, order)
             except Exception as e:  # noqa: BLE001
+                if _detect_ib_error_201(e):
+                    raise IBAdapterError("IB_ERROR_201_RISKLESS_COMBINATION: Riskless combination orders are not allowed.") from e
                 raise IBAdapterError(f"WHATIF_FAILED: {e!r}") from e
 
             margin_change, raw_margin_fields = _select_margin_change(res)
@@ -599,9 +654,14 @@ class IBPaperAdapterV2(BrokerAdapterV1):
             order_id = getattr(getattr(trade, "order", None), "orderId", None)
             perm_id = getattr(getattr(trade, "order", None), "permId", None)
             st = str(status) if status is not None else "UNKNOWN"
+            advanced_error = _json_safe_text(getattr(trade, "advancedError", ""))
+            order_state = _order_state_summary(trade)
+            trade_log = _trade_log_entries(trade)
+            error_201 = _detect_ib_error_201(advanced_error, order_state, trade_log)
             ok = (
                 isinstance(order_id, int)
                 and isinstance(perm_id, int)
+                and not error_201
                 and st.upper() in (
                     "PENDINGSUBMIT",
                     "PRESUBMITTED",
@@ -616,11 +676,17 @@ class IBPaperAdapterV2(BrokerAdapterV1):
                 status=st.upper(),
                 order_id=int(order_id) if isinstance(order_id, int) else None,
                 perm_id=int(perm_id) if isinstance(perm_id, int) else None,
-                error_code=None if ok else "BAG_SUBMISSION_FAILED",
-                error_message=None if ok else f"status={st}",
+                error_code=None if ok else ("IB_ERROR_201" if error_201 else "BAG_SUBMISSION_FAILED"),
+                error_message=None if ok else (
+                    "Riskless combination orders are not allowed." if error_201 else f"status={st}"
+                ),
                 raw={
                     "trade": str(trade),
                     "payload": raw_payload,
+                    "advanced_error": advanced_error,
+                    "order_state": order_state,
+                    "trade_log": trade_log,
+                    "ib_error_201_detected": bool(error_201),
                     "broker_ids": {
                         "parent_order_id": int(order_id) if isinstance(order_id, int) else None,
                         "parent_perm_id": int(perm_id) if isinstance(perm_id, int) else None,

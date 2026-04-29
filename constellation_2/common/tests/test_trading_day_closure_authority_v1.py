@@ -34,6 +34,38 @@ def _write_submission(root: Path, *, dry_run: bool = True, lifecycle_state: str 
     )
 
 
+def _write_terminal_zero_fill_submission(root: Path) -> None:
+    subdir = root / "execution_evidence_v1" / "submissions" / DAY / SID
+    _write_json(subdir / "broker_submit_attempt_v1.json", {"submission_id": SID, "dry_run": False})
+    _write_json(
+        subdir / "broker_submission_record.v2.json",
+        {
+            "submission_id": SID,
+            "status": "CANCELLED",
+            "broker_ids": {"order_id": 101, "perm_id": 0},
+            "error": {"code": "IB_ERROR_201", "message": "Riskless combination orders are not allowed."},
+        },
+    )
+    _write_json(
+        subdir / "execution_event_record.v1.json",
+        {
+            "submission_id": SID,
+            "broker_order_id": "101",
+            "perm_id": "0",
+            "status": "CANCELLED",
+            "filled_qty": 0,
+        },
+    )
+    _write_json(
+        root / "reports" / "execution_lifecycle_authority_v1" / DAY / "execution_lifecycle_authority.v1.json",
+        {"submissions": [{"submission_id": SID, "current_lifecycle_state": "CANCELED"}]},
+    )
+    _write_json(
+        root / "reports" / "trade_lineage_graph_v1" / DAY / "trade_lineage_graph.v1.json",
+        {"lineages": [{"submission_id": SID, "dry_run": False, "broker_transmit_enabled": True, "lifecycle_state": "CANCELED", "identity_state": "CANCELED"}]},
+    )
+
+
 def test_no_submissions_closes_no_trades(tmp_path: Path) -> None:
     payload = evaluate_trading_day_closure_authority_v1(day_utc=DAY, truth_root=tmp_path, execution_root=tmp_path)
 
@@ -68,6 +100,17 @@ def test_transmitted_open_order_blocks_closure(tmp_path: Path) -> None:
 
     assert payload["closure_state"] == "OPEN_EXECUTIONS"
     assert payload["unresolved_submissions"][0]["submission_id"] == SID
+
+
+def test_rejected_zero_fill_perm_zero_submission_closes_terminally(tmp_path: Path) -> None:
+    _write_terminal_zero_fill_submission(tmp_path)
+
+    payload = evaluate_trading_day_closure_authority_v1(day_utc=DAY, truth_root=tmp_path, execution_root=tmp_path)
+
+    assert payload["status"] == "PASS"
+    assert payload["closure_state"] == "NO_TRADES_CLOSED"
+    assert payload["terminal_zero_fill_submission_count"] == 1
+    assert payload["submissions"][0]["terminal_zero_fill"] is True
 
 
 def test_fills_without_reconciliation_require_reconciliation(tmp_path: Path) -> None:

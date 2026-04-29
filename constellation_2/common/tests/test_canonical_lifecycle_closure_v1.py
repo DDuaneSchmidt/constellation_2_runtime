@@ -331,6 +331,7 @@ def test_canonical_lifecycle_closure_materializes_canonical_visibility_and_recon
         json.loads(line)
         for line in resolve_runtime_ledger_path(truth_root=canonical_truth, day_utc=DAY).read_text(encoding="utf-8").splitlines()
     ]
+
     assert [row["event_type"] for row in ledger_rows] == [
         "SUBMISSION_RECORDED",
         "BROKER_STATUS_NOT_YET_OBSERVED",
@@ -373,6 +374,73 @@ def test_canonical_lifecycle_closure_materializes_canonical_visibility_and_recon
     assert recon["semantic_status"] == "FULLY_OBSERVED_AND_CONFIRMED"
     assert "NO_SUBMISSIONS_FOUND" not in recon["reason_codes"]
     assert recon["runtime_ledger_projection"]["derived_from_runtime_ledger"] is True
+
+
+def test_canonical_lifecycle_closure_preserves_zero_perm_id_for_cancelled_submission(tmp_path: Path) -> None:
+    canonical_truth = tmp_path / "truth"
+    sleeve_truth = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    canonical_truth.mkdir(parents=True, exist_ok=True)
+    _seed_sleeve_submission(sleeve_truth, advanced_status=True)
+    subdir = sleeve_truth / "execution_evidence_v1" / "submissions" / DAY / SUBMISSION_ID
+    _write_json(
+        subdir / "broker_submission_record.v2.json",
+        {
+            "schema_id": "broker_submission_record",
+            "schema_version": "v2",
+            "submission_id": SUBMISSION_ID,
+            "submitted_at_utc": f"{DAY}T14:35:00Z",
+            "binding_hash": "a" * 64,
+            "broker": {"name": "INTERACTIVE_BROKERS", "environment": "PAPER"},
+            "status": "CANCELLED",
+            "broker_ids": {"order_id": 85, "perm_id": 0},
+            "error": {"code": "IB_ERROR_201", "message": "Riskless combination orders are not allowed."},
+            "canonical_json_hash": "b" * 64,
+        },
+    )
+    _write_json(
+        subdir / "execution_event_record.v1.json",
+        {
+            "schema_id": "execution_event_record",
+            "schema_version": "v1",
+            "created_at_utc": f"{DAY}T14:35:00Z",
+            "event_time_utc": f"{DAY}T14:36:00Z",
+            "binding_hash": "a" * 64,
+            "broker_submission_hash": "b" * 64,
+            "broker_order_id": "85",
+            "perm_id": "0",
+            "status": "CANCELLED",
+            "filled_qty": 0,
+            "avg_price": "0",
+            "raw_broker_status": "Cancelled",
+            "raw_payload_digest": None,
+            "sequence_num": None,
+            "canonical_json_hash": "c" * 64,
+            "upstream_hash": None,
+        },
+    )
+
+    rc = closure_tool.main(
+        [
+            "--day_utc",
+            DAY,
+            "--truth_root",
+            str(canonical_truth),
+            "--source_truth_root",
+            str(sleeve_truth),
+        ]
+    )
+    assert rc == 0
+
+    closure = json.loads(
+        resolve_canonical_lifecycle_closure_path(
+            truth_root=canonical_truth,
+            day_utc=DAY,
+            submission_id=SUBMISSION_ID,
+        ).read_text(encoding="utf-8")
+    )
+    assert closure["order_id"] == "85"
+    assert closure["perm_id"] == "0"
+    assert closure["canonical_lifecycle_status"] == "CANONICALIZED"
 
 
 def test_execution_reconciliation_marks_missing_upstream_inputs_as_not_yet_materialized(tmp_path: Path) -> None:

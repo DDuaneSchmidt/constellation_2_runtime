@@ -40,6 +40,12 @@ class _FakeComboLeg:
         self.exchange = exchange
 
 
+class _FakeTagValue:
+    def __init__(self, tag: str, value: str) -> None:
+        self.tag = tag
+        self.value = value
+
+
 class _FakeOrder:
     def __init__(self) -> None:
         self.orderId = None
@@ -53,6 +59,7 @@ class _FakeOrder:
         self.parentId = None
         self.ocaGroup = None
         self.ocaType = None
+        self.smartComboRoutingParams = None
 
 
 class _FakeIB:
@@ -62,7 +69,10 @@ class _FakeIB:
 
     def whatIfOrder(self, _contract, order):
         self.calls.append(str(order.orderType))
-        return self._responses[str(order.orderType)]
+        response = self._responses[str(order.orderType)]
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 class _FakeSubmitIB:
@@ -80,6 +90,9 @@ class _FakeSubmitIB:
         trade = SimpleNamespace(
             order=SimpleNamespace(orderId=order_id, permId=order_id + 1000),
             orderStatus=SimpleNamespace(status="SUBMITTED"),
+            advancedError="",
+            orderState=SimpleNamespace(status="Submitted"),
+            log=[],
         )
         return trade
 
@@ -96,6 +109,7 @@ def _install_fake_ib_insync(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_module.Stock = _FakeStock
     fake_module.Contract = _FakeContract
     fake_module.ComboLeg = _FakeComboLeg
+    fake_module.TagValue = _FakeTagValue
     fake_module.Order = _FakeOrder
     monkeypatch.setitem(sys.modules, "ib_insync", fake_module)
 
@@ -206,6 +220,10 @@ def test_options_whatif_supported_for_vertical_spread(monkeypatch: pytest.Monkey
     assert isinstance(result.raw, dict)
     assert isinstance(result.raw.get("payload"), dict)
     assert result.raw["payload"]["bag"]["secType"] == "BAG"
+    assert result.raw["payload"]["order"]["action"] == "BUY"
+    assert result.raw["payload"]["routing"]["smart_combo_routing_params"] == [
+        {"tag": "NonGuaranteed", "value": "1"}
+    ]
 
 
 def test_options_whatif_uses_defined_risk_fallback_when_ib_margin_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -227,6 +245,15 @@ def test_options_whatif_uses_defined_risk_fallback_when_ib_margin_missing(monkey
     assert result.notional_usd == "388.00"
     assert isinstance(result.raw, dict)
     assert result.raw["margin_source"] == "RISK_PROOF_MAX_LOSS_FALLBACK"
+
+
+def test_options_whatif_error_201_blocks_as_riskless_combination(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_ib_insync(monkeypatch)
+    adapter = IBPaperAdapterV2(conn=BrokerConnectionSpec(host="127.0.0.1", port=4002, client_id=7), env="PAPER")
+    adapter._ib = _FakeIB({"LMT": RuntimeError("Error 201: Riskless combination orders are not allowed.")})
+
+    with pytest.raises(IBAdapterError, match="IB_ERROR_201_RISKLESS_COMBINATION"):
+        adapter.whatif_order(order_plan=_sample_options_plan())
 
 
 def test_cancel_order_calls_ib_cancel_order_for_given_order_id(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -357,13 +384,41 @@ def test_submit_order_supports_options_vertical_spread(monkeypatch: pytest.Monke
     assert result.status == "SUBMITTED"
     assert len(fake_ib.placed) == 1
     placed = fake_ib.placed[0]
-    assert placed.action == "SELL"
+    assert placed.action == "BUY"
     assert placed.orderType == "LMT"
     assert placed.totalQuantity == 1
+    assert [(row.tag, row.value) for row in placed.smartComboRoutingParams] == [("NonGuaranteed", "1")]
     assert isinstance(result.raw, dict)
     assert isinstance(result.raw.get("broker_ids"), dict)
+    assert result.raw["payload"]["order"]["combo_action_convention"] == "BUY_PARENT_LEG_ACTIONS_ENCODE_SPREAD"
     assert result.raw["broker_ids"]["parent_order_id"] == 100
     assert result.raw["broker_ids"]["stop_order_id"] is None
+
+
+def test_submit_order_error_201_is_broker_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_ib_insync(monkeypatch)
+
+    class RejectingIB(_FakeSubmitIB):
+        def placeOrder(self, _contract, order):
+            self.placed.append(order)
+            return SimpleNamespace(
+                order=SimpleNamespace(orderId=94, permId=0),
+                orderStatus=SimpleNamespace(status="Cancelled"),
+                advancedError="Error 201: Riskless combination orders are not allowed.",
+                orderState=SimpleNamespace(status="Cancelled", rejectReason="Riskless combination"),
+                log=[],
+            )
+
+    adapter = IBPaperAdapterV2(conn=BrokerConnectionSpec(host="127.0.0.1", port=4002, client_id=7), env="PAPER")
+    adapter._ib = RejectingIB()
+
+    result = adapter.submit_order(order_plan=_sample_options_plan())
+
+    assert result.ok is False
+    assert result.order_id == 94
+    assert result.perm_id == 0
+    assert result.error_code == "IB_ERROR_201"
+    assert result.raw["ib_error_201_detected"] is True
 
 
 def test_submit_order_requires_protective_stop(monkeypatch: pytest.MonkeyPatch) -> None:

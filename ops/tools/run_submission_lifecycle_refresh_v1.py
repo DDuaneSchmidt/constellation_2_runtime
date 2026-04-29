@@ -258,6 +258,16 @@ def _classify_outcome_state(
                 },
             )
         if error_code and error_code != "DRY_RUN_NO_BROKER_ID":
+            if error_code == "IB_ERROR_201":
+                return (
+                    "BROKER_REJECTED",
+                    _normalize_broker_status(stream_status or broker_event_status or broker_submission_status) or "REJECTED",
+                    ["IB_ERROR_201_RISKLESS_COMBINATION", "BROKER_REJECTED"],
+                    {
+                        "code": "IB_ERROR_201",
+                        "message": str(error_obj.get("message") or "Riskless combination orders are not allowed.").strip(),
+                    },
+                )
             return (
                 "BROKER_REJECTED",
                 _normalize_broker_status(stream_status or broker_event_status or broker_submission_status) or "REJECTED",

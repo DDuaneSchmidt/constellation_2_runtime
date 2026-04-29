@@ -116,6 +116,7 @@ def evaluate_trading_day_closure_authority_v1(
     fill_count = 0
     dry_run_count = 0
     transmitted_count = 0
+    terminal_zero_fill_count = 0
     for subdir in _submission_dirs(execution_root, truth_root, day_utc):
         submission_id = subdir.name
         broker_path = subdir / "broker_submission_record.v2.json"
@@ -131,12 +132,28 @@ def evaluate_trading_day_closure_authority_v1(
         identity_state = str(lineage_row.get("identity_state") or "").strip().upper()
         dry_run = bool(attempt.get("dry_run") is True or lineage_row.get("dry_run") is True)
         broker_transmit_enabled = bool(lineage_row.get("broker_transmit_enabled") is True)
+        broker_status = str(broker.get("status") or "").strip().upper()
+        event_path = subdir / "execution_event_record.v1.json"
+        event_payload = _read_json(event_path) or {}
+        event_status = str(event_payload.get("status") or "").strip().upper()
+        filled_qty = int(event_payload.get("filled_qty") or 0)
+        terminal_zero_fill = (
+            broker_transmit_enabled
+            and filled_qty == 0
+            and (
+                lifecycle_state in {"CANCELED", "CANCELLED", "REJECTED", "BROKER_REJECTED"}
+                or broker_status in {"CANCELLED", "CANCELED", "REJECTED"}
+                or event_status in {"CANCELLED", "CANCELED", "REJECTED"}
+            )
+        )
         if dry_run:
             dry_run_count += 1
         if broker_transmit_enabled:
             transmitted_count += 1
         if fill_path.exists():
             fill_count += 1
+        if terminal_zero_fill:
+            terminal_zero_fill_count += 1
         if not broker_path.exists():
             closure_gaps.append({"submission_id": submission_id, "blocker_code": "BROKER_SUBMISSION_RECORD_MISSING", "path": str(broker_path)})
         if lifecycle_state in {"SUBMITTED_PENDING_ACK", "ACKNOWLEDGED_OPEN", "PARTIALLY_FILLED"}:
@@ -152,16 +169,22 @@ def evaluate_trading_day_closure_authority_v1(
                 "fill_ledger_present": fill_path.exists(),
                 "broker_submission_record_path": str(broker_path),
                 "broker_submission_record_present": broker_path.exists(),
+                "terminal_zero_fill": terminal_zero_fill,
+                "execution_event_record_path": str(event_path),
+                "execution_event_record_present": event_path.exists(),
             }
         )
 
     reconciliation_complete = _reconciled(recon)
+    all_terminal_zero_fill = bool(submissions) and terminal_zero_fill_count == len(submissions)
     if closure_gaps:
         state = "CLOSURE_GAP"
     elif not submissions:
         state = "NO_TRADES_CLOSED"
     elif unresolved:
         state = "OPEN_EXECUTIONS"
+    elif all_terminal_zero_fill:
+        state = "NO_TRADES_CLOSED"
     elif transmitted_count and fill_count and not reconciliation_complete:
         state = "RECONCILIATION_REQUIRED"
     elif reconciliation_complete:
@@ -182,10 +205,11 @@ def evaluate_trading_day_closure_authority_v1(
         "status": "PASS" if state in {"NO_TRADES_CLOSED", "DRY_RUN_CLOSED", "RECONCILED"} else "FAIL",
         "closure_state": state,
         "reconciliation_complete": reconciliation_complete,
-        "reconciliation_required": bool(transmitted_count and fill_count),
+        "reconciliation_required": bool(transmitted_count and fill_count and not all_terminal_zero_fill),
         "submission_count": len(submissions),
         "dry_run_submission_count": dry_run_count,
         "transmitted_submission_count": transmitted_count,
+        "terminal_zero_fill_submission_count": terminal_zero_fill_count,
         "unresolved_submissions": unresolved,
         "closure_gaps": closure_gaps,
         "submissions": submissions,
