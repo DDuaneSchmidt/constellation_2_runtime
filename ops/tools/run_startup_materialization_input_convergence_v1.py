@@ -16,6 +16,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from ops.tools.c2_account_resolution_v1 import resolve_single_paper_ib_account_from_sleeve_registry  # noqa: E402
+from constellation_2.common.paper_session_path_alignment_v1 import resolve_operator_statement_path  # noqa: E402
 from constellation_2.common.runtime_path_authority_v1 import resolve_decision_truth_root_v1  # noqa: E402
 from constellation_2.common.startup_materialization_input_convergence_v1 import (  # noqa: E402
     derive_startup_materialization_input_convergence_payload_v1,
@@ -122,35 +123,36 @@ def _artifact_result(
     }
 
 
-def _operator_input_root() -> Path:
-    return (REPO_ROOT / "constellation_2" / "operator_inputs").resolve()
+def _runtime_operator_input_root(*, truth_root: Path, operator_input_root: str = "") -> Path:
+    if str(operator_input_root or "").strip():
+        return Path(str(operator_input_root).strip()).expanduser().resolve()
+    root = Path(truth_root).resolve()
+    if root.name == "truth":
+        return root.parent.resolve()
+    return root.resolve()
 
 
-def _operator_statement_truth_root() -> Path:
-    return (REPO_ROOT / "constellation_2").resolve()
-
-
-def _operator_statement_path(*, day_utc: str) -> Path:
-    return (
-        _operator_input_root()
-        / "cash_ledger_operator_statements"
-        / day_utc
-        / "operator_statement.v1.json"
-    ).resolve()
+def _operator_statement_path(*, operator_input_root: Path, day_utc: str) -> Path:
+    return resolve_operator_statement_path(operator_input_root=operator_input_root, day_utc=day_utc).resolve()
 
 
 def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="run_startup_materialization_input_convergence_v1")
     ap.add_argument("--day_utc", required=True)
     ap.add_argument("--truth_root", default="")
+    ap.add_argument("--operator_input_root", default="")
     ap.add_argument("--ib_account", default="")
     args = ap.parse_args(argv)
 
     day_utc = str(args.day_utc).strip()
     truth_root = resolve_decision_truth_root_v1(args.truth_root, repo_root=REPO_ROOT)
+    operator_input_root = _runtime_operator_input_root(
+        truth_root=truth_root,
+        operator_input_root=str(args.operator_input_root or ""),
+    )
     git_sha = _git_sha()
     ib_account = str(args.ib_account).strip() or resolve_single_paper_ib_account_from_sleeve_registry(REPO_ROOT)
-    operator_statement_path = _operator_statement_path(day_utc=day_utc)
+    operator_statement_path = _operator_statement_path(operator_input_root=operator_input_root, day_utc=day_utc)
     runtime_python = _critical_path_python()
 
     source_refs: List[Dict[str, Any]] = []
@@ -162,13 +164,13 @@ def main(argv: List[str] | None = None) -> int:
                 "--day_utc",
                 day_utc,
                 "--truth_root",
-                str(_operator_statement_truth_root()),
+                str(operator_input_root),
                 "--ib_account",
                 ib_account,
                 "--mode",
-                "SEED_100K",
+                "GOVERNED_SEED",
                 "--allow_create",
-                "YES",
+                "NO",
             ],
             logical_name="ops/tools/ensure_cash_ledger_operator_statement_v1.py",
         )
