@@ -178,6 +178,16 @@ class DayRunLedgerStatus:
 
 
 @dataclass(frozen=True)
+class RequirementGraphStatus:
+    exists: bool
+    path: str
+    day_utc: str
+    status: str
+    canonical_blocker: str
+    root_requirement: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class CapabilityRow:
     capability: str
     status: str
@@ -356,6 +366,59 @@ def _day_run_ledger_path(roots: RootResolution, day_utc: str) -> Path | None:
         / day_utc
         / "day_run.v1.json"
     ).resolve()
+
+
+def _requirement_graph_path(roots: RootResolution, day_utc: str) -> Path | None:
+    if roots.canonical_truth_root is None or not DATE_RE.match(str(day_utc or "")):
+        return None
+    return (
+        roots.canonical_truth_root
+        / "reports"
+        / "aegis_requirement_graph_v1"
+        / day_utc
+        / "requirement_graph.v1.json"
+    ).resolve()
+
+
+def _load_requirement_graph_status(roots: RootResolution, day_utc: str) -> RequirementGraphStatus:
+    path = _requirement_graph_path(roots, day_utc)
+    payload = _read_json(path)
+    if not isinstance(payload, dict):
+        return RequirementGraphStatus(
+            exists=False,
+            path=str(path) if path else "NOT_FOUND",
+            day_utc=day_utc,
+            status="MISSING",
+            canonical_blocker="REQUIREMENT_GRAPH_MISSING",
+            root_requirement={},
+        )
+    payload_day = str(payload.get("day_utc") or "").strip()
+    if payload_day != day_utc:
+        return RequirementGraphStatus(
+            exists=True,
+            path=str(path),
+            day_utc=day_utc,
+            status="WRONG_DAY",
+            canonical_blocker="WRONG_DAY_REQUIREMENT_GRAPH",
+            root_requirement={
+                "requirement_id": "REQUIREMENT_GRAPH:WRONG_DAY",
+                "owner_phase": "DAY_RUN",
+                "source_type": "LIFECYCLE_PHASE",
+                "source_id": payload_day or "UNKNOWN",
+                "producer_command": f"python3 ops/tools/run_aegis_requirement_graph_v1.py --day_utc {day_utc} --environment PAPER",
+                "expected_path": str(path),
+                "operator_next_action": f"Regenerate current-day requirement graph for {day_utc}.",
+            },
+        )
+    root = payload.get("root_requirement")
+    return RequirementGraphStatus(
+        exists=True,
+        path=str(path),
+        day_utc=payload_day,
+        status=str(payload.get("status") or "").strip().upper(),
+        canonical_blocker=str(payload.get("canonical_blocker") or "").strip(),
+        root_requirement=root if isinstance(root, dict) else {},
+    )
 
 
 def _load_day_run_ledger_status(roots: RootResolution, day_utc: str) -> DayRunLedgerStatus:
@@ -1816,6 +1879,7 @@ def _build_paper_status(
     current_day = _build_current_calendar_day_runtime_status(roots)
     latest_trading_day = _build_latest_trading_day_evidence_status(roots)
     day_run = _load_day_run_ledger_status(roots, current_day.day_utc)
+    requirement_graph = _load_requirement_graph_status(roots, current_day.day_utc)
 
     freshness_day = (
         current_day.day_utc
@@ -1979,6 +2043,21 @@ def _build_paper_status(
         f"- operator_next_action: {day_run.operator_next_action}",
         f"- updated_at_utc: {day_run.updated_at_utc}",
         "",
+        "## Aegis Requirement Graph",
+        "",
+        f"- requirement_graph_path: {requirement_graph.path}",
+        f"- requirement_graph_exists: {'true' if requirement_graph.exists else 'false'}",
+        f"- day_utc: {requirement_graph.day_utc}",
+        f"- status: {requirement_graph.status}",
+        f"- canonical_blocker: {requirement_graph.canonical_blocker}",
+        f"- owner_phase: {requirement_graph.root_requirement.get('owner_phase', '')}",
+        f"- requirement_id: {requirement_graph.root_requirement.get('requirement_id', '')}",
+        f"- source_type: {requirement_graph.root_requirement.get('source_type', '')}",
+        f"- source_id: {requirement_graph.root_requirement.get('source_id', '')}",
+        f"- producer_command: {requirement_graph.root_requirement.get('producer_command', '')}",
+        f"- expected_path: {requirement_graph.root_requirement.get('expected_path', '')}",
+        f"- operator_next_action: {requirement_graph.root_requirement.get('operator_next_action', '')}",
+        "",
         "## Aegis Paper-Trading Status",
         "",
         f"- status: {final_decision.status}",
@@ -1986,6 +2065,14 @@ def _build_paper_status(
         f"- latest_trading_day_blocker: {latest_trading_day.canonical_blocker}",
         f"- owning_subsystem: {final_decision.owning_subsystem}",
         f"- owning_gate: {final_decision.owning_gate}",
+        f"- requirement_graph_path: {requirement_graph.path}",
+        f"- requirement_owner_phase: {requirement_graph.root_requirement.get('owner_phase', '')}",
+        f"- requirement_id: {requirement_graph.root_requirement.get('requirement_id', '')}",
+        f"- requirement_source_type: {requirement_graph.root_requirement.get('source_type', '')}",
+        f"- requirement_source_id: {requirement_graph.root_requirement.get('source_id', '')}",
+        f"- requirement_producer_command: {requirement_graph.root_requirement.get('producer_command', '')}",
+        f"- requirement_expected_path: {requirement_graph.root_requirement.get('expected_path', '')}",
+        f"- requirement_operator_next_action: {requirement_graph.root_requirement.get('operator_next_action', '')}",
         (
             f"- effective_source_integrity_gate_status: "
             f"{source_integrity_gate.effective_status if source_integrity_gate else 'UNKNOWN'}"

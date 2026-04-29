@@ -233,6 +233,18 @@ def _artifact(ctx: PhaseContext, family: str, filename: str) -> Path:
     return ctx.truth_root / "reports" / family / ctx.day_utc / filename
 
 
+def _requirement_graph_path(ctx: PhaseContext) -> Path:
+    return _artifact(ctx, "aegis_requirement_graph_v1", "requirement_graph.v1.json")
+
+
+def _load_requirement_graph_root(ctx: PhaseContext) -> dict[str, Any]:
+    graph = _read_json(_requirement_graph_path(ctx))
+    if str(graph.get("day_utc") or "").strip() != ctx.day_utc:
+        return {}
+    root = graph.get("root_requirement")
+    return root if isinstance(root, dict) else {}
+
+
 def _execution_authorization_root(ctx: PhaseContext) -> Path:
     return ctx.execution_root / "engine_activity_v1" / "authorization_v1" / ctx.day_utc
 
@@ -368,29 +380,45 @@ def _phase_session_authority(ctx: PhaseContext, env: dict[str, str]) -> dict[str
 def _phase_market_data(ctx: PhaseContext, env: dict[str, str]) -> dict[str, Any]:
     py = sys.executable
     started = _now_iso()
+    requirement_cmd = [py, "ops/tools/run_aegis_requirement_graph_v1.py", "--day_utc", ctx.day_utc, "--environment", ctx.environment]
+    requirement_before = bod._run_child_with_retries("requirement_graph_before_market_data", requirement_cmd, env=env, max_attempts=1)
     commands = [
         ("options_chain_snapshot", [py, "ops/tools/run_options_chain_snapshot_required_day_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.execution_root), "--symbols_from_intents", "YES"], 2),
         ("market_data_authority", [py, "ops/tools/run_market_data_authority_v1.py", "--day_utc", ctx.day_utc, "--truth_root", str(ctx.truth_root), "--execution_root", str(ctx.execution_root)], 2),
     ]
     steps, outputs, blockers = _run_steps("MARKET_DATA", commands, env=env)
+    requirement_after = bod._run_child_with_retries("requirement_graph_after_market_data", requirement_cmd, env=env, max_attempts=1)
+    steps = [requirement_before, *steps, requirement_after]
     market_path = _artifact(ctx, "market_data_authority_v1", "market_data_authority.v1.json")
+    graph_path = _requirement_graph_path(ctx)
     market = _read_json(market_path)
     state = str(market.get("market_data_state") or "").strip().upper()
     first = str(market.get("first_blocker") or "").strip()
     step_specific = _specific_market_data_blocker_from_steps(steps)
+    requirement_root = _load_requirement_graph_root(ctx)
+    requirement_blocker = ""
+    if str(requirement_root.get("owner_phase") or "").strip().upper() == "MARKET_DATA":
+        requirement_blocker = str(requirement_root.get("blocker") or "").strip()
     child_blocker = blockers[0] if blockers else ""
     blocker = first or child_blocker
     if step_specific and (not blocker or blocker in GENERIC_MARKET_DATA_BLOCKERS):
         blocker = step_specific
+    if requirement_blocker and (not blocker or blocker in GENERIC_MARKET_DATA_BLOCKERS or blocker == step_specific):
+        blocker = requirement_blocker
     if state not in {"OK", "PASS", "READY"} and not blocker:
         blocker = "MARKET_DATA_AUTHORITY_BLOCKED"
+    requirement_id = str(requirement_root.get("requirement_id") or "").strip()
+    blocker_detail = f"market_data_state={state or 'MISSING'}"
+    if requirement_id:
+        blocker_detail = f"{blocker_detail} requirement_id={requirement_id}"
     completed = _now_iso()
     return _empty_phase(
         "MARKET_DATA",
         status="BLOCKED" if blocker else "PASS",
         canonical_blocker=blocker,
-        blocker_detail=f"market_data_state={state or 'MISSING'}",
-        outputs=outputs or [str(market_path)],
+        blocker_detail=blocker_detail,
+        inputs=[str(graph_path)],
+        outputs=outputs or [str(market_path), str(graph_path)],
         producer_command="run options snapshot; run market data authority",
         started_at_utc=started,
         completed_at_utc=completed,

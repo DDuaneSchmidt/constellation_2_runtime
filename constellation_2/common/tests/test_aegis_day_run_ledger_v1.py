@@ -148,7 +148,11 @@ def test_market_data_successful_snapshot_phase_passes(monkeypatch: pytest.Monkey
     market_path = ctx.truth_root / "reports" / "market_data_authority_v1" / ctx.day_utc / "market_data_authority.v1.json"
     market_path.parent.mkdir(parents=True)
     market_path.write_text('{"market_data_state":"READY","first_blocker":""}\n', encoding="utf-8")
+    graph_path = day_run._requirement_graph_path(ctx)
+    graph_path.parent.mkdir(parents=True)
+    graph_path.write_text('{"day_utc":"2026-04-29","root_requirement":{}}\n', encoding="utf-8")
     monkeypatch.setattr(day_run, "_run_steps", _fake_run_steps)
+    monkeypatch.setattr(day_run.bod, "_run_child_with_retries", lambda *args, **kwargs: {"status": "PASS", "duration_ms": 1})
 
     row = day_run._phase_market_data(ctx, {})
 
