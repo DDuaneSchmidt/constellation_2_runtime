@@ -531,6 +531,10 @@ def test_review_markdown_and_artifact_writer_are_read_only_outputs(tmp_path: Pat
     assert "## Operator Action Required" in markdown
     assert "4. [SAFE_STATE]" in markdown
     assert "No runtime changes currently active" in markdown
+    assert "Evidence Basis:" in markdown
+    assert "Inactive policies do not affect runtime behavior." in markdown
+    assert "| evidence | type | summary | source | sha256 |" in markdown
+    assert "| proposal | title | type | status | expected impact | risk |" in markdown
     paths = write_improvement_control_review_artifacts_v1(truth_root=tmp_path, review=review)
     json_path = Path(str(paths["json_path"]))
     markdown_path = Path(str(paths["markdown_path"]))

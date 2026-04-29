@@ -1214,10 +1214,15 @@ def render_improvement_control_review_markdown_v1(review: Mapping[str, Any]) -> 
         f"- Controls Phase C materialization: {str(summary.get('controls_phasec_materialization')).lower()}",
     ]
     _append_operator_action_required_markdown(lines, review.get("operator_action_required") or [])
-    _append_markdown_table(lines, "Findings", review.get("findings") or [], ("finding_id", "category", "severity", "confidence", "affected_scope", "status"))
-    _append_markdown_table(lines, "Evidence", review.get("evidence") or [], ("evidence_id", "evidence_type", "source_path", "source_sha256"))
-    _append_markdown_table(lines, "Proposals", review.get("proposals") or [], ("proposal_id", "proposal_type", "finding_id", "status"))
-    _append_markdown_table(lines, "Policies", review.get("policies") or [], ("policy_id", "policy_version", "policy_type", "status"))
+    evidence_by_id = {
+        str(row.get("evidence_id") or ""): dict(row)
+        for row in (review.get("evidence") or [])
+        if isinstance(row, Mapping)
+    }
+    _append_findings_markdown(lines, review.get("findings") or [], evidence_by_id)
+    _append_evidence_markdown(lines, review.get("evidence") or [])
+    _append_proposals_markdown(lines, review.get("proposals") or [], evidence_by_id, review.get("findings") or [])
+    _append_policies_markdown(lines, review.get("policies") or [])
     _append_markdown_table(lines, "Measurements", review.get("measurements") or [], ("measurement_id", "policy_id", "conclusion", "rollback_criteria_met"))
     _append_markdown_table(lines, "Rollback Candidates", review.get("rollback_candidates") or [], ("policy_id", "measurement_id", "reason", "conclusion"))
     return "\n".join(lines).rstrip() + "\n"
@@ -1253,6 +1258,174 @@ def _append_markdown_table(lines: list[str], title: str, rows: Iterable[Mapping[
     for row in row_list:
         values = [_markdown_cell(row.get(field)) for field in fields]
         lines.append("| " + " | ".join(values) + " |")
+
+
+def _append_findings_markdown(lines: list[str], rows: Iterable[Mapping[str, Any]], evidence_by_id: Mapping[str, Mapping[str, Any]]) -> None:
+    row_list = [dict(row) for row in rows]
+    lines.extend(["", "## Findings"])
+    if not row_list:
+        lines.append("_None._")
+        return
+    lines.append("| finding | category | severity | confidence | affected | status | summary |")
+    lines.append("| --- | --- | --- | --- | --- | --- | --- |")
+    for row in row_list:
+        evidence_basis = _evidence_basis_text(row.get("evidence_ids") or [], evidence_by_id)
+        summary = _first_text(row.get("observation"), row.get("finding_id"))
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _markdown_cell(_short_token(row.get("finding_id"))),
+                    _markdown_cell(row.get("category")),
+                    _markdown_cell(row.get("severity")),
+                    _markdown_cell(row.get("confidence")),
+                    _markdown_cell(_affected_text(row)),
+                    _markdown_cell(row.get("status")),
+                    _markdown_cell(summary),
+                ]
+            )
+            + " |"
+        )
+        if evidence_basis:
+            lines.append(f"  - Evidence Basis: {evidence_basis}")
+
+
+def _append_evidence_markdown(lines: list[str], rows: Iterable[Mapping[str, Any]]) -> None:
+    row_list = [dict(row) for row in rows]
+    lines.extend(["", "## Evidence"])
+    if not row_list:
+        lines.append("_None._")
+        return
+    lines.append("| evidence | type | summary | source | sha256 |")
+    lines.append("| --- | --- | --- | --- | --- |")
+    for row in row_list:
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _markdown_cell(_short_token(row.get("evidence_id"))),
+                    _markdown_cell(row.get("evidence_type")),
+                    _markdown_cell(row.get("summary")),
+                    _markdown_cell(_basename(row.get("source_path"))),
+                    _markdown_cell(_short_token(row.get("source_sha256"), width=12)),
+                ]
+            )
+            + " |"
+        )
+
+
+def _append_proposals_markdown(
+    lines: list[str],
+    rows: Iterable[Mapping[str, Any]],
+    evidence_by_id: Mapping[str, Mapping[str, Any]],
+    findings: Iterable[Mapping[str, Any]],
+) -> None:
+    row_list = [dict(row) for row in rows]
+    finding_by_id = {str(row.get("finding_id") or ""): dict(row) for row in findings if isinstance(row, Mapping)}
+    lines.extend(["", "## Proposals"])
+    if not row_list:
+        lines.append("_None._")
+        return
+    lines.append("| proposal | title | type | status | expected impact | risk |")
+    lines.append("| --- | --- | --- | --- | --- | --- |")
+    for row in row_list:
+        finding = finding_by_id.get(str(row.get("finding_id") or ""), {})
+        evidence_basis = _evidence_basis_text(finding.get("evidence_ids") or [], evidence_by_id)
+        title = _first_text(row.get("title"), row.get("proposal_type"))
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _markdown_cell(_short_token(row.get("proposal_id"))),
+                    _markdown_cell(title),
+                    _markdown_cell(row.get("proposal_type")),
+                    _markdown_cell(row.get("status")),
+                    _markdown_cell(row.get("expected_impact")),
+                    _markdown_cell(row.get("risk_notes")),
+                ]
+            )
+            + " |"
+        )
+        if evidence_basis:
+            lines.append(f"  - Evidence Basis: {evidence_basis}")
+        lines.append(f"  - Rationale: {_markdown_cell(row.get('rationale'))}")
+        lines.append(f"  - Success: {_markdown_cell(row.get('success_criteria'))}")
+        lines.append(f"  - Rollback: {_markdown_cell(row.get('rollback_criteria'))}")
+
+
+def _append_policies_markdown(lines: list[str], rows: Iterable[Mapping[str, Any]]) -> None:
+    row_list = [dict(row) for row in rows]
+    lines.extend(
+        [
+            "",
+            "## Policies",
+            "Inactive policies do not affect runtime behavior. This report is advisory-only unless a policy is separately activated by an approved enforcement path.",
+        ]
+    )
+    if not row_list:
+        lines.append("_None._")
+        return
+    lines.append("| policy | title | version | source proposal | status | effective window |")
+    lines.append("| --- | --- | --- | --- | --- | --- |")
+    for row in row_list:
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _markdown_cell(_short_token(row.get("policy_id"))),
+                    _markdown_cell(row.get("policy_type")),
+                    _markdown_cell(row.get("policy_version")),
+                    _markdown_cell(_short_token(row.get("source_proposal_id"))),
+                    _markdown_cell(row.get("status")),
+                    _markdown_cell(f"{row.get('effective_start') or 'not set'} to {row.get('effective_end') or 'not set'}"),
+                ]
+            )
+            + " |"
+        )
+
+
+def _evidence_basis_text(evidence_ids: Iterable[Any], evidence_by_id: Mapping[str, Mapping[str, Any]]) -> str:
+    parts: list[str] = []
+    for evidence_id in evidence_ids:
+        key = str(evidence_id or "")
+        evidence = evidence_by_id.get(key, {})
+        summary = str(evidence.get("summary") or "").strip()
+        if summary:
+            parts.append(f"{_short_token(key)}: {summary}")
+        elif key:
+            parts.append(_short_token(key))
+    return "; ".join(parts)
+
+
+def _affected_text(row: Mapping[str, Any]) -> str:
+    scope = str(row.get("affected_scope") or "")
+    ids = row.get("affected_ids") or []
+    if isinstance(ids, list) and ids:
+        return f"{scope}: {', '.join(str(item) for item in ids[:3])}"
+    return scope
+
+
+def _basename(value: Any) -> str:
+    text = str(value or "")
+    return text.rsplit("/", 1)[-1] if "/" in text else text
+
+
+def _first_text(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _short_token(value: Any, *, width: int = 12) -> str:
+    text = str(value or "")
+    if len(text) <= width:
+        return text
+    if "_" in text:
+        prefix, suffix = text.split("_", 1)
+        return f"{prefix}_{suffix[:width]}"
+    return text[:width]
 
 
 def _markdown_cell(value: Any) -> str:
