@@ -12,6 +12,7 @@ if str(REPO_ROOT) not in sys.path:
 
 import ops.tools.aegis_chatgpt_packet as packet  # noqa: E402
 import ops.tools.run_aegis_day_v1 as day_run  # noqa: E402
+import ops.tools.run_ib_market_data_entitlement_probe_v1 as entitlement  # noqa: E402
 import ops.tools.run_market_data_supply_v1 as supply  # noqa: E402
 from ops.tools import run_aegis_bod_prepare_v1 as bod  # noqa: E402
 
@@ -76,6 +77,41 @@ def _diag(ctx: bod.BodContext, errors: list[int], *, valid_quotes: int = 0, spot
     return path
 
 
+def _entitlement(
+    ctx: bod.BodContext,
+    *,
+    status: str = "BLOCKED",
+    codes: list[int] | None = None,
+    live: bool = False,
+    delayed: bool = False,
+) -> Path:
+    path = supply._entitlement_probe_path(ctx, "SPY")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "day_utc": ctx.day_utc,
+        "environment": ctx.environment,
+        "symbol": "SPY",
+        "status": status,
+        "canonical_blocker": "" if status == "PASS" else "OPTIONS_MARKET_DATA_PERMISSION_DENIED",
+        "path": str(path),
+        "tested_data_types": [
+            {"market_data_type": 1, "name": "LIVE", "readiness_eligible": True},
+            {"market_data_type": 2, "name": "FROZEN", "readiness_eligible": False},
+            {"market_data_type": 3, "name": "DELAYED", "readiness_eligible": False},
+            {"market_data_type": 4, "name": "DELAYED_FROZEN", "readiness_eligible": False},
+        ],
+        "live_data_available": live,
+        "delayed_data_available": delayed,
+        "ib_error_codes": codes or [],
+        "ib_errors": [
+            {"error_code": code, "error_message": f"IB error {code}", "req_id": code}
+            for code in (codes or [])
+        ],
+    }
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    return path
+
+
 def _snapshot(ctx: bod.BodContext, *, day: str | None = None, fresh: bool = True, quotes: bool = True) -> tuple[Path, Path]:
     day_utc = day or ctx.day_utc
     root = ctx.execution_root / "options_chain_snapshot_v1" / day_utc / "capture"
@@ -132,6 +168,90 @@ def test_ib_permission_errors_block_with_permission_denied(tmp_path: Path, code:
 
     assert payload["canonical_blocker"] == "OPTIONS_MARKET_DATA_PERMISSION_DENIED"
     assert any(row["blocker"] == "OPTIONS_MARKET_DATA_PERMISSION_DENIED" for row in payload["provider_checks"])
+
+
+@pytest.mark.parametrize(
+    ("code", "meaning"),
+    [
+        (10089, "API_MARKET_DATA_SUBSCRIPTION_MISSING"),
+        (10091, "PARTIAL_MARKET_DATA_SUBSCRIPTION_MISSING"),
+        (10167, "MARKET_DATA_NOT_SUBSCRIBED_DELAYED_AVAILABLE"),
+    ],
+)
+def test_entitlement_probe_maps_ib_market_data_errors(code: int, meaning: str) -> None:
+    config = entitlement.EntitlementProbeConfig(
+        day_utc="2026-04-29",
+        environment="PAPER",
+        symbol="SPY",
+        host="127.0.0.1",
+        port=4002,
+        client_id=181,
+        account="DU123456",
+        timeout_seconds=1.0,
+    )
+    payload = entitlement.evaluate_entitlement_probe_v1(
+        config,
+        {
+            "connected": True,
+            "requests": [
+                {
+                    "requested_market_data_type": 1,
+                    "has_any_price": False,
+                    "errors": [{"error_code": code, "error_message": "err", "req_id": 1}],
+                }
+            ],
+        },
+    )
+
+    assert payload["canonical_blocker"] == "OPTIONS_MARKET_DATA_PERMISSION_DENIED"
+    assert {"ib_error_code": code, "meaning": meaning} in payload["error_mapping"]
+
+
+def test_ib_10167_records_delayed_available_but_not_accepted_without_policy(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _requirement(ctx)
+    _entitlement(ctx, codes=[10167], live=False, delayed=True)
+
+    payload = supply.build_market_data_supply(ctx)
+
+    assert payload["canonical_blocker"] == "OPTIONS_MARKET_DATA_PERMISSION_DENIED"
+    assert payload["delayed_data_available"] is True
+    assert payload["delayed_data_accepted_by_policy"] is False
+    assert payload["delayed_data_policy_result"] == "DELAYED_DATA_AVAILABLE_NOT_ACCEPTED"
+
+
+def test_delayed_data_cannot_satisfy_without_explicit_governed_policy(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _requirement(ctx)
+    _entitlement(ctx, status="BLOCKED", codes=[10167], live=False, delayed=True)
+    _snapshot(ctx)
+
+    payload = supply.build_market_data_supply(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "OPTIONS_MARKET_DATA_PERMISSION_DENIED"
+    assert payload["delayed_data_policy"]["policy_decision"] == "DELAYED_DATA_POLICY_MISSING"
+
+
+def test_live_market_data_available_lets_supply_attempt_capture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _requirement(ctx)
+    _entitlement(ctx, status="PASS", codes=[], live=True, delayed=False)
+    calls: list[str] = []
+
+    def _capture(_ctx, instrument):  # noqa: ANN001
+        calls.append(instrument)
+        _snapshot(ctx)
+        return {"instrument": instrument, "status": "PASS", "blocker": "", "snapshot_path": "x", "freshness_certificate_path": "y"}
+
+    monkeypatch.setattr(supply, "_run_capture", _capture)
+    monkeypatch.setattr(supply, "validate_against_repo_schema_v1", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(supply, "_run_market_data_authority", lambda _ctx: ({"exit_code": 0}, ""))
+
+    payload = supply.build_market_data_supply(ctx)
+
+    assert calls == ["SPY"]
+    assert payload["status"] == "PASS"
 
 
 def test_permission_denied_blocks_before_generic_snapshot_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -234,6 +354,14 @@ def test_packet_displays_market_data_supply_root_details(monkeypatch: pytest.Mon
                 "canonical_blocker": "OPTIONS_MARKET_DATA_PERMISSION_DENIED",
                 "requirements": [{"requirement_id": "REQ1", "source_id": "intent_spy", "instrument": "SPY"}],
                 "provider_checks": [{"provider": "IBKR", "status": "UNAVAILABLE", "capability": "OPTIONS_BID_ASK_QUOTES", "evidence": [{"ib_error_code": 10091}], "blocker": "OPTIONS_MARKET_DATA_PERMISSION_DENIED"}],
+                "entitlement_probe_path": "/tmp/probe.json",
+                "entitlement_status": "BLOCKED",
+                "tested_data_types": [{"market_data_type": 1, "name": "LIVE"}],
+                "live_data_available": False,
+                "delayed_data_available": True,
+                "delayed_data_accepted_by_policy": False,
+                "delayed_data_policy": {"policy_decision": "DELAYED_DATA_POLICY_MISSING"},
+                "ib_error_codes": [10091],
                 "operator_next_action": "Enable IBKR API market-data permissions",
             }
         ),
@@ -248,7 +376,21 @@ def test_packet_displays_market_data_supply_root_details(monkeypatch: pytest.Mon
     assert "- market_data_supply_path: " in section
     assert "- market_data_supply_requirement_id: REQ1" in section
     assert "- market_data_supply_provider: IBKR" in section
+    assert "- market_data_supply_entitlement_probe_path: /tmp/probe.json" in section
+    assert "- market_data_supply_ib_error_codes: [10091]" in section
     assert "10091" in section
+
+
+def test_market_data_supply_includes_entitlement_probe_path_and_tested_data_types(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _requirement(ctx)
+    path = _entitlement(ctx, codes=[10089], delayed=True)
+
+    payload = supply.build_market_data_supply(ctx)
+
+    assert payload["entitlement_probe_path"] == str(path)
+    assert payload["entitlement_status"] == "BLOCKED"
+    assert {row["market_data_type"] for row in payload["tested_data_types"]} == {1, 2, 3, 4}
 
 
 def test_market_data_supply_writes_only_runtime_artifact(tmp_path: Path) -> None:

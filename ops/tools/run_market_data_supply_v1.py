@@ -18,6 +18,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from ops.tools import run_aegis_bod_prepare_v1 as bod
 from ops.tools.run_aegis_requirement_graph_v1 import requirement_graph_path
+from ops.tools.run_ib_market_data_entitlement_probe_v1 import entitlement_probe_path_v1
 
 SCHEMA_VERSION = "market_data_supply.v1"
 OPTIONS_CHAIN_SCHEMA = "constellation_2/schemas/options_chain_snapshot.v1.schema.json"
@@ -31,6 +32,8 @@ ALLOWED_BLOCKERS = {
     "OPTIONS_SNAPSHOT_CAPTURE_FAILED",
     "OPTIONS_SNAPSHOT_STALE",
     "MARKET_DATA_AUTHORITY_BLOCKED",
+    "DELAYED_DATA_POLICY_MISSING",
+    "DELAYED_DATA_AVAILABLE_NOT_ACCEPTED",
 }
 MARKET_DATA_REQUIREMENT_ARTIFACTS = {
     "underlying_spot": "UNDERLYING_SPOT",
@@ -40,6 +43,11 @@ MARKET_DATA_REQUIREMENT_ARTIFACTS = {
     "options_snapshot_artifact": "OPTIONS_SNAPSHOT",
 }
 PERMISSION_ERROR_CODES = {10089, 10091, 10167}
+DELAYED_POLICY_CANDIDATES = (
+    REPO_ROOT / "governance/02_REGISTRIES/C2_MARKET_DATA_POLICY_V1.json",
+    REPO_ROOT / "governance/02_REGISTRIES/C2_PAPER_MARKET_DATA_POLICY_V1.json",
+    REPO_ROOT / "governance/05_CONTRACTS/C2/paper_market_data_policy_v1.contract.json",
+)
 
 
 def _now_iso() -> str:
@@ -73,6 +81,10 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def market_data_supply_path(*, truth_root: Path, day_utc: str) -> Path:
     return (truth_root / "reports" / "market_data_supply_v1" / day_utc / "market_data_supply.v1.json").resolve()
+
+
+def _entitlement_probe_path(ctx: bod.BodContext, instrument: str) -> Path:
+    return entitlement_probe_path_v1(truth_root=ctx.truth_root, day_utc=ctx.day_utc, symbol=instrument)
 
 
 def _latest_capture_diagnostic(*, execution_root: Path, day_utc: str, symbol: str) -> Path | None:
@@ -125,6 +137,57 @@ def _ib_permission_evidence(diagnostic: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
     return evidence
+
+
+def _ib_permission_evidence_from_entitlement(probe: dict[str, Any]) -> list[dict[str, Any]]:
+    evidence: list[dict[str, Any]] = []
+    path = str(probe.get("path") or "").strip()
+    if path:
+        evidence.append({"artifact_type": "ib_market_data_entitlement_probe", "path": path, "exists": True})
+    for row in probe.get("ib_errors") or []:
+        if not isinstance(row, dict):
+            continue
+        try:
+            code = int(row.get("error_code"))
+        except Exception:
+            continue
+        if code not in PERMISSION_ERROR_CODES:
+            continue
+        evidence.append(
+            {
+                "ib_error_code": code,
+                "mapped_blocker": "OPTIONS_MARKET_DATA_PERMISSION_DENIED",
+                "detail": str(row.get("error_message") or row.get("error_detail") or "").strip(),
+                "req_id": row.get("req_id"),
+                "observed_at_utc": row.get("observed_at_utc"),
+            }
+        )
+    return evidence
+
+
+def _delayed_data_policy() -> dict[str, Any]:
+    for path in DELAYED_POLICY_CANDIDATES:
+        payload = _read_json(path)
+        if not payload:
+            continue
+        raw = (
+            payload.get("paper_delayed_data_allowed")
+            if "paper_delayed_data_allowed" in payload
+            else payload.get("delayed_data_accepted_for_paper_readiness")
+        )
+        accepted = bool(raw is True)
+        return {
+            "status": "PRESENT",
+            "policy_path": str(path),
+            "delayed_data_accepted_by_policy": accepted,
+            "policy_decision": "DELAYED_DATA_ACCEPTED_BY_POLICY" if accepted else "DELAYED_DATA_NOT_ACCEPTED_BY_POLICY",
+        }
+    return {
+        "status": "MISSING",
+        "policy_path": "",
+        "delayed_data_accepted_by_policy": False,
+        "policy_decision": "DELAYED_DATA_POLICY_MISSING",
+    }
 
 
 def _spot_seen(diagnostic: dict[str, Any]) -> bool:
@@ -246,6 +309,59 @@ def _provider_checks_for_instrument(*, ctx: bod.BodContext, instrument: str) -> 
         return checks, "", ""
     return (
         [_provider_check(ctx=ctx, instrument=instrument, capability="IB_MARKET_DATA_API_ACCESS", status="UNKNOWN", evidence=[])],
+        "",
+        "",
+    )
+
+
+def _provider_checks_from_entitlement(
+    *,
+    ctx: bod.BodContext,
+    instrument: str,
+    entitlement_probe: dict[str, Any],
+    delayed_policy: dict[str, Any],
+) -> tuple[list[dict[str, Any]], str, str]:
+    if not entitlement_probe:
+        return [], "", ""
+    status = str(entitlement_probe.get("status") or "").strip().upper()
+    live_available = entitlement_probe.get("live_data_available") is True
+    delayed_available = entitlement_probe.get("delayed_data_available") is True
+    delayed_accepted = bool(delayed_policy.get("delayed_data_accepted_by_policy") is True)
+    permission_evidence = _ib_permission_evidence_from_entitlement(entitlement_probe)
+    evidence = permission_evidence or [{"artifact_type": "ib_market_data_entitlement_probe", "path": str(entitlement_probe.get("path") or _entitlement_probe_path(ctx, instrument)), "exists": True}]
+    action = "Enable IBKR Client Portal market-data subscriptions and API market-data access for SPY underlying and options for the logged-in trading user/account."
+    if live_available:
+        return (
+            [
+                _provider_check(ctx=ctx, instrument=instrument, capability="IB_MARKET_DATA_API_ACCESS", status="AVAILABLE", evidence=evidence),
+                _provider_check(ctx=ctx, instrument=instrument, capability="UNDERLYING_MARKET_DATA", status="AVAILABLE", evidence=evidence),
+                _provider_check(ctx=ctx, instrument=instrument, capability="OPTIONS_BID_ASK_QUOTES", status="AVAILABLE", evidence=evidence),
+            ],
+            "",
+            "",
+        )
+    if delayed_available and delayed_accepted:
+        return (
+            [
+                _provider_check(ctx=ctx, instrument=instrument, capability="IB_MARKET_DATA_API_ACCESS", status="AVAILABLE", evidence=evidence),
+                _provider_check(ctx=ctx, instrument=instrument, capability="OPTIONS_BID_ASK_QUOTES", status="AVAILABLE", evidence=evidence + [{"policy_decision": "DELAYED_DATA_ACCEPTED_BY_POLICY", "policy_path": delayed_policy.get("policy_path", "")}]),
+            ],
+            "",
+            "",
+        )
+    if status == "BLOCKED" or permission_evidence:
+        if delayed_available and not delayed_accepted:
+            action = "Live IBKR API market data is unavailable. Delayed/frozen data was observed but cannot satisfy readiness without an explicit governed paper delayed-data policy; enable live API market-data permissions or add/approve that policy."
+        return (
+            [
+                _provider_check(ctx=ctx, instrument=instrument, capability="IB_MARKET_DATA_API_ACCESS", status="UNAVAILABLE", evidence=evidence, blocker="OPTIONS_MARKET_DATA_PERMISSION_DENIED", action=action),
+                _provider_check(ctx=ctx, instrument=instrument, capability="OPTIONS_BID_ASK_QUOTES", status="UNAVAILABLE", evidence=evidence, blocker="OPTIONS_MARKET_DATA_PERMISSION_DENIED", action=action),
+            ],
+            "OPTIONS_MARKET_DATA_PERMISSION_DENIED",
+            action,
+        )
+    return (
+        [_provider_check(ctx=ctx, instrument=instrument, capability="IB_MARKET_DATA_API_ACCESS", status="UNKNOWN", evidence=evidence)],
         "",
         "",
     )
@@ -403,7 +519,11 @@ def _run_market_data_authority(ctx: bod.BodContext) -> tuple[dict[str, Any], str
 
 def _operator_action(blocker: str, instrument: str, day_utc: str) -> str:
     if blocker == "OPTIONS_MARKET_DATA_PERMISSION_DENIED":
-        return "Enable IBKR API market-data permissions/subscriptions for the required SPY underlying and options feeds for the logged-in trading user/account."
+        return "Enable IBKR Client Portal market-data subscriptions and API market-data access for SPY underlying and options for the logged-in trading user/account."
+    if blocker == "DELAYED_DATA_POLICY_MISSING":
+        return "Add or activate a governed paper delayed-data policy before delayed/frozen market data can satisfy readiness, or enable live IBKR API market data."
+    if blocker == "DELAYED_DATA_AVAILABLE_NOT_ACCEPTED":
+        return "Enable live IBKR API market data or explicitly approve governed paper delayed-data use before using delayed/frozen quotes for readiness."
     if blocker == "MARKET_DATA_REQUIREMENT_UNOWNED":
         return "Fix Requirement Graph ownership so the MARKET_DATA requirement points to an ACTIVE_INTENT or STATIC_POLICY."
     if blocker == "IB_MARKET_DATA_CAPABILITY_UNKNOWN":
@@ -421,7 +541,9 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
     provider_checks: list[dict[str, Any]] = []
     capture_attempts: list[dict[str, Any]] = []
     artifacts: list[dict[str, Any]] = []
+    entitlement_probes: list[dict[str, Any]] = []
     authority_result: dict[str, Any] = {}
+    delayed_policy = _delayed_data_policy()
     blocker = ""
     if unowned is not None:
         requirements.append(
@@ -449,13 +571,28 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
             "capture_attempts": [],
             "artifacts": [],
             "authority_result": {},
+            "entitlement_probe_path": "",
+            "entitlement_status": "NOT_REQUIRED",
+            "tested_data_types": [],
+            "live_data_available": False,
+            "delayed_data_available": False,
+            "delayed_data_accepted_by_policy": False,
+            "delayed_data_policy": delayed_policy,
+            "ib_error_codes": [],
             "operator_next_action": "",
         }
     instruments = sorted({str(row.get("instrument") or "").strip().upper() for row in requirements if row.get("instrument")})
     provider_blocker = ""
     provider_action = ""
     for instrument in instruments:
-        checks, check_blocker, check_action = _provider_checks_for_instrument(ctx=ctx, instrument=instrument)
+        probe_path = _entitlement_probe_path(ctx, instrument)
+        probe = _read_json(probe_path)
+        if probe:
+            probe = {**probe, "path": str(probe_path)}
+            entitlement_probes.append(probe)
+            checks, check_blocker, check_action = _provider_checks_from_entitlement(ctx=ctx, instrument=instrument, entitlement_probe=probe, delayed_policy=delayed_policy)
+        else:
+            checks, check_blocker, check_action = _provider_checks_for_instrument(ctx=ctx, instrument=instrument)
         provider_checks.extend(checks)
         if check_blocker and not provider_blocker:
             provider_blocker = check_blocker
@@ -475,7 +612,14 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
             if unknown:
                 capture = _run_capture(ctx, instrument)
                 capture_attempts.append(capture)
-                checks, check_blocker, check_action = _provider_checks_for_instrument(ctx=ctx, instrument=instrument)
+                probe_path = _entitlement_probe_path(ctx, instrument)
+                probe = _read_json(probe_path)
+                if probe:
+                    probe = {**probe, "path": str(probe_path)}
+                    entitlement_probes.append(probe)
+                    checks, check_blocker, check_action = _provider_checks_from_entitlement(ctx=ctx, instrument=instrument, entitlement_probe=probe, delayed_policy=delayed_policy)
+                else:
+                    checks, check_blocker, check_action = _provider_checks_for_instrument(ctx=ctx, instrument=instrument)
                 provider_checks = [row for row in provider_checks if not (row.get("instrument") == instrument and row.get("provider") == "IBKR")]
                 provider_checks.extend(checks)
                 if check_blocker:
@@ -485,6 +629,17 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
                 if capture["status"] != "PASS":
                     blocker = str(capture.get("blocker") or "OPTIONS_SNAPSHOT_CAPTURE_FAILED")
                     break
+        if not blocker:
+            for instrument in instruments:
+                snapshot_path, _cert_path, _snapshot_payload, _cert_payload = _latest_snapshot_for_symbol(execution_root=ctx.execution_root, day_utc=ctx.day_utc, instrument=instrument)
+                if snapshot_path is None and not any(row.get("instrument") == instrument for row in capture_attempts):
+                    capture = _run_capture(ctx, instrument)
+                    capture_attempts.append(capture)
+                    if capture["status"] != "PASS":
+                        blocker = str(capture.get("blocker") or "OPTIONS_SNAPSHOT_CAPTURE_FAILED")
+                        break
+            if blocker:
+                pass
         if not blocker:
             for instrument in instruments:
                 validation_blocker, artifact = _validate_snapshot(ctx=ctx, instrument=instrument, eval_time_utc=eval_time_utc)
@@ -499,6 +654,16 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
     status = "PASS" if not blocker else "BLOCKED"
     root_instrument = instruments[0] if instruments else ""
     action = provider_action or _operator_action(blocker, root_instrument, ctx.day_utc)
+    root_probe = entitlement_probes[0] if entitlement_probes else {}
+    ib_error_codes: list[int] = []
+    for probe in entitlement_probes:
+        for code in probe.get("ib_error_codes") or []:
+            try:
+                value = int(code)
+            except Exception:
+                continue
+            if value not in ib_error_codes:
+                ib_error_codes.append(value)
     return {
         "schema_id": "market_data_supply",
         "schema_version": SCHEMA_VERSION,
@@ -512,6 +677,20 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
         "capture_attempts": capture_attempts,
         "artifacts": artifacts,
         "authority_result": authority_result,
+        "entitlement_probe_path": str(_entitlement_probe_path(ctx, root_instrument)) if root_instrument else "",
+        "entitlement_status": str(root_probe.get("status") or ("MISSING" if root_instrument else "NOT_REQUIRED")).strip().upper(),
+        "tested_data_types": root_probe.get("tested_data_types") if isinstance(root_probe.get("tested_data_types"), list) else [],
+        "live_data_available": bool(root_probe.get("live_data_available") is True),
+        "delayed_data_available": bool(root_probe.get("delayed_data_available") is True),
+        "delayed_data_accepted_by_policy": bool(delayed_policy.get("delayed_data_accepted_by_policy") is True),
+        "delayed_data_policy": delayed_policy,
+        "delayed_data_policy_result": (
+            "DELAYED_DATA_ACCEPTED_BY_POLICY"
+            if delayed_policy.get("delayed_data_accepted_by_policy") is True
+            else ("DELAYED_DATA_AVAILABLE_NOT_ACCEPTED" if root_probe.get("delayed_data_available") is True else delayed_policy.get("policy_decision", "DELAYED_DATA_POLICY_MISSING"))
+        ),
+        "ib_error_codes": sorted(ib_error_codes),
+        "entitlement_probes": entitlement_probes,
         "operator_next_action": action,
     }
 

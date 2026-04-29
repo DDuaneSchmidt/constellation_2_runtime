@@ -196,6 +196,14 @@ class MarketDataSupplyStatus:
     canonical_blocker: str
     requirement: dict[str, Any]
     provider_check: dict[str, Any]
+    entitlement_probe_path: str
+    entitlement_status: str
+    tested_data_types: list[dict[str, Any]]
+    live_data_available: bool
+    delayed_data_available: bool
+    delayed_data_accepted_by_policy: bool
+    delayed_data_policy: dict[str, Any]
+    ib_error_codes: list[int]
     operator_next_action: str
 
 
@@ -611,9 +619,9 @@ def _load_market_data_supply_status(roots: RootResolution, day_utc: str) -> Mark
     path = _market_data_supply_path(roots, day_utc)
     payload = _read_json(path)
     if not isinstance(payload, dict):
-        return MarketDataSupplyStatus(False, str(path) if path else "NOT_FOUND", day_utc, "MISSING", "MARKET_DATA_SUPPLY_MISSING", {}, {}, "")
+        return MarketDataSupplyStatus(False, str(path) if path else "NOT_FOUND", day_utc, "MISSING", "MARKET_DATA_SUPPLY_MISSING", {}, {}, "", "MISSING", [], False, False, False, {}, [], "")
     if str(payload.get("day_utc") or "").strip() != day_utc:
-        return MarketDataSupplyStatus(True, str(path), day_utc, "WRONG_DAY", "WRONG_DAY_MARKET_DATA_SUPPLY", {}, {}, f"Regenerate market data supply for {day_utc}.")
+        return MarketDataSupplyStatus(True, str(path), day_utc, "WRONG_DAY", "WRONG_DAY_MARKET_DATA_SUPPLY", {}, {}, "", "WRONG_DAY", [], False, False, False, {}, [], f"Regenerate market data supply for {day_utc}.")
     requirements = payload.get("requirements")
     providers = payload.get("provider_checks")
     first_requirement = next((row for row in requirements if isinstance(row, dict)), {}) if isinstance(requirements, list) else {}
@@ -622,6 +630,13 @@ def _load_market_data_supply_status(roots: RootResolution, day_utc: str) -> Mark
         first_provider = next((row for row in providers if isinstance(row, dict) and row.get("blocker")), {})
         if not first_provider:
             first_provider = next((row for row in providers if isinstance(row, dict)), {})
+    tested = payload.get("tested_data_types") if isinstance(payload.get("tested_data_types"), list) else []
+    codes: list[int] = []
+    for code in payload.get("ib_error_codes") or []:
+        try:
+            codes.append(int(code))
+        except Exception:
+            continue
     return MarketDataSupplyStatus(
         True,
         str(path),
@@ -630,6 +645,14 @@ def _load_market_data_supply_status(roots: RootResolution, day_utc: str) -> Mark
         str(payload.get("canonical_blocker") or "").strip(),
         first_requirement if isinstance(first_requirement, dict) else {},
         first_provider if isinstance(first_provider, dict) else {},
+        str(payload.get("entitlement_probe_path") or "").strip(),
+        str(payload.get("entitlement_status") or "").strip().upper(),
+        [row for row in tested if isinstance(row, dict)],
+        bool(payload.get("live_data_available") is True),
+        bool(payload.get("delayed_data_available") is True),
+        bool(payload.get("delayed_data_accepted_by_policy") is True),
+        payload.get("delayed_data_policy") if isinstance(payload.get("delayed_data_policy"), dict) else {},
+        codes,
         str(payload.get("operator_next_action") or "").strip(),
     )
 
@@ -2329,6 +2352,14 @@ def _build_paper_status(
         f"- provider: {market_data_supply.provider_check.get('provider', '')}",
         f"- provider_status: {market_data_supply.provider_check.get('status', '')}",
         f"- provider_capability: {market_data_supply.provider_check.get('capability', '')}",
+        f"- entitlement_probe_path: {market_data_supply.entitlement_probe_path}",
+        f"- entitlement_status: {market_data_supply.entitlement_status}",
+        f"- tested_data_types: {json.dumps(market_data_supply.tested_data_types, sort_keys=True)}",
+        f"- live_data_available: {str(market_data_supply.live_data_available).lower()}",
+        f"- delayed_data_available: {str(market_data_supply.delayed_data_available).lower()}",
+        f"- delayed_data_accepted_by_policy: {str(market_data_supply.delayed_data_accepted_by_policy).lower()}",
+        f"- delayed_data_policy: {json.dumps(market_data_supply.delayed_data_policy, sort_keys=True)}",
+        f"- ib_error_codes: {json.dumps(market_data_supply.ib_error_codes, sort_keys=True)}",
         f"- IB evidence: {json.dumps(market_data_supply.provider_check.get('evidence', []), sort_keys=True)}",
         f"- operator_next_action: {market_data_supply.operator_next_action}",
         "",
@@ -2413,6 +2444,14 @@ def _build_paper_status(
         f"- market_data_supply_instrument: {market_data_supply.requirement.get('instrument', '')}",
         f"- market_data_supply_provider: {market_data_supply.provider_check.get('provider', '')}",
         f"- market_data_supply_provider_status: {market_data_supply.provider_check.get('status', '')}",
+        f"- market_data_supply_entitlement_probe_path: {market_data_supply.entitlement_probe_path}",
+        f"- market_data_supply_entitlement_status: {market_data_supply.entitlement_status}",
+        f"- market_data_supply_tested_data_types: {json.dumps(market_data_supply.tested_data_types, sort_keys=True)}",
+        f"- market_data_supply_live_data_available: {str(market_data_supply.live_data_available).lower()}",
+        f"- market_data_supply_delayed_data_available: {str(market_data_supply.delayed_data_available).lower()}",
+        f"- market_data_supply_delayed_data_accepted_by_policy: {str(market_data_supply.delayed_data_accepted_by_policy).lower()}",
+        f"- market_data_supply_delayed_data_policy: {json.dumps(market_data_supply.delayed_data_policy, sort_keys=True)}",
+        f"- market_data_supply_ib_error_codes: {json.dumps(market_data_supply.ib_error_codes, sort_keys=True)}",
         f"- market_data_supply_IB_evidence: {json.dumps(market_data_supply.provider_check.get('evidence', []), sort_keys=True)}",
         f"- market_data_supply_operator_next_action: {market_data_supply.operator_next_action}",
         f"- broker_supply_path: {broker_supply.path}",
