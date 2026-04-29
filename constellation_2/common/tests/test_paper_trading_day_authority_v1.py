@@ -637,6 +637,25 @@ def test_options_snapshot_required_defaults_to_current_day_intents(monkeypatch, 
     assert out["results"][0]["reason_code"] == "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
 
 
+def test_options_snapshot_required_default_root_is_runtime_data(monkeypatch) -> None:
+    runtime_root = Path("/home/node/constellation_runtime_data/truth_sleeves/PRIMARY/PAPER").resolve()
+    monkeypatch.setattr(
+        options_required_module,
+        "resolve_single_paper_ib_account_from_sleeve_registry",
+        lambda _repo: "DUO847203",
+    )
+    monkeypatch.setattr(
+        options_required_module,
+        "resolve_sleeve_execution_root_v1",
+        lambda **_kwargs: SimpleNamespace(execution_root_path=runtime_root),
+    )
+
+    resolved_root = options_required_module._default_truth_root()
+
+    assert resolved_root == runtime_root
+    assert not resolved_root.is_relative_to(SOURCE_ROOT)
+
+
 def test_submit_boundary_refuses_authority_with_required_options_snapshot_failure() -> None:
     assert (
         submit_boundary_module._day_authority_has_manifest_required_inputs_v1(
