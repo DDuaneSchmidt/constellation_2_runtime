@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 import ops.tools.run_aegis_bod_prepare_v1 as bod  # noqa: E402
 import ops.tools.run_aegis_day_v1 as day_run  # noqa: E402
 import ops.tools.run_authorization_supply_v1 as auth  # noqa: E402
+import ops.tools.run_structure_decision_supply_v1 as structure_supply  # noqa: E402
 
 DAY = "2026-04-29"
 
@@ -49,6 +50,10 @@ def _intent(ctx: bod.BodContext, *, intent_id: str = "intent-1", structure: bool
         "underlying": {"symbol": "SPY"},
         "intent_type": "DEFINED_RISK_OPTIONS",
         "requires_defined_risk": True,
+        "engine": {"engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1", "suite": "C2_HYBRID_V1", "mode": "PAPER"},
+        "exposure_type": "SHORT_VOL_DEFINED",
+        "option": {"direction": "SELL", "structure": "PUT"},
+        "expected_holding_days": 7,
     }
     if structure:
         payload["option_structure"] = {"selected_structure": "VERTICAL_SPREAD", "legs": [{"right": "CALL"}, {"right": "CALL"}]}
@@ -65,7 +70,13 @@ def _market_supply(ctx: bod.BodContext, status: str = "PASS", blocker: str = "")
 def _risk_budget(ctx: bod.BodContext, status: str = "PASS", blocker: str = "") -> Path:
     return _write(
         ctx.truth_root / "reports" / "risk_budget_supply_v1" / ctx.day_utc / "risk_budget_supply.v1.json",
-        {"day_utc": ctx.day_utc, "status": status, "canonical_blocker": blocker, "operator_next_action": "fix risk budget"},
+        {
+            "day_utc": ctx.day_utc,
+            "status": status,
+            "canonical_blocker": blocker,
+            "operator_next_action": "fix risk budget",
+            "intent_budgets": [{"intent_id": "intent-1", "instrument": "SPY", "allowed_risk_cents": 25000}],
+        },
     )
 
 
@@ -100,6 +111,48 @@ def _authorization(ctx: bod.BodContext, *, status: str = "AUTHORIZED", day: str 
             "authorization": {"decision": decision},
             "reason_codes": [] if status == "AUTHORIZED" else ["REJECTED"],
         },
+    )
+
+
+def _structure_supply(ctx: bod.BodContext, *, day: str | None = None, intent_id: str = "intent-1") -> Path:
+    day_utc = day or ctx.day_utc
+    return _write(
+        ctx.truth_root / "reports" / "structure_decision_supply_v1" / day_utc / "structure_decision_supply.v1.json",
+        {
+            "day_utc": day_utc,
+            "status": "PASS",
+            "canonical_blocker": "",
+            "structure_export": {
+                "usable_for_authorization_supply": True,
+                "decision_count": 1,
+                "decisions": [{"intent_id": intent_id, "selected_structure": "VERTICAL_SPREAD", "legs": [{"right": "PUT"}, {"right": "PUT"}]}],
+            },
+        },
+    )
+
+
+def _market_gate_with_snapshot(ctx: bod.BodContext, *, quotes: bool = True) -> Path:
+    snap_root = ctx.execution_root / "options_chain_snapshot_v1" / ctx.day_utc / "capture"
+    snap_root.mkdir(parents=True, exist_ok=True)
+    contracts = [
+        {"right": "PUT", "strike": "100.00", "bid": "1.05" if quotes else "", "ask": "1.10" if quotes else "", "expiry_utc": f"{ctx.day_utc}T00:00:00Z"},
+        {"right": "PUT", "strike": "99.00", "bid": "0.55" if quotes else "", "ask": "0.60" if quotes else "", "expiry_utc": f"{ctx.day_utc}T00:00:00Z"},
+    ]
+    snap = _write(
+        snap_root / "options_chain_snapshot.v1.json",
+        {
+            "schema_id": "options_chain_snapshot",
+            "schema_version": 1,
+            "as_of_utc": f"{ctx.day_utc}T14:30:00Z",
+            "underlying": {"symbol": "SPY", "spot_price": "101.00", "spot_as_of_utc": f"{ctx.day_utc}T14:30:00Z"},
+            "contracts": contracts,
+            "provenance": {"source": "TEST"},
+        },
+    )
+    cert = _write(snap_root / "freshness_certificate.v1.json", {"valid_until_utc": "2099-01-01T00:00:00Z"})
+    return _write(
+        ctx.truth_root / "reports" / "market_open_data_gate_v1" / ctx.day_utc / "market_open_data_gate.v1.json",
+        {"day_utc": ctx.day_utc, "status": "PASS", "snapshot_path": str(snap), "freshness_certificate_path": str(cert)},
     )
 
 
@@ -168,6 +221,67 @@ def test_missing_structure_decision_blocks(monkeypatch: pytest.MonkeyPatch, tmp_
     _strategy(ctx)
     payload = auth.build_authorization_supply_v1(ctx)
     assert payload["canonical_blocker"] == "STRUCTURE_DECISION_MISSING"
+    assert payload["structure_decision"]["producer_command"].startswith("python3 ops/tools/run_structure_decision_supply_v1.py")
+
+
+def test_valid_current_day_structure_decision_allows_phasec(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _no_external(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _intent(ctx, structure=False)
+    _market_supply(ctx)
+    _risk_budget(ctx)
+    _strategy(ctx)
+    _structure_supply(ctx)
+    _identity(ctx)
+    _authorization(ctx)
+
+    payload = auth.build_authorization_supply_v1(ctx)
+
+    assert payload["status"] == "PASS"
+    assert payload["structure_decision"]["status"] == "PASS"
+    assert payload["phasec_defined_risk"]["status"] == "PASS"
+
+
+def test_wrong_day_structure_decision_is_rejected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _no_external(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _intent(ctx, structure=False)
+    _market_supply(ctx)
+    _risk_budget(ctx)
+    _strategy(ctx)
+    _structure_supply(ctx, day="2026-04-28")
+
+    payload = auth.build_authorization_supply_v1(ctx)
+
+    assert payload["canonical_blocker"] == "STRUCTURE_DECISION_MISSING"
+
+
+def test_structure_selection_uses_current_day_options_snapshot(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _intent(ctx, structure=False)
+    _risk_budget(ctx)
+    gate = _market_gate_with_snapshot(ctx)
+
+    payload = structure_supply.build_structure_decision_supply_v1(ctx)
+
+    assert payload["status"] == "PASS"
+    assert payload["market_open_data"]["market_open_data_gate_path"] == str(gate)
+    decision = payload["structure_decisions"][0]
+    assert decision["pricing_inputs"]["snapshot_path"].endswith("options_chain_snapshot.v1.json")
+    assert decision["option_structure"]["legs"][0]["action"] == "SELL"
+    assert decision["option_structure"]["legs"][1]["action"] == "BUY"
+
+
+def test_structure_selection_no_eligible_option_structure_blocks(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _intent(ctx, structure=False)
+    _risk_budget(ctx)
+    _market_gate_with_snapshot(ctx, quotes=False)
+
+    payload = structure_supply.build_structure_decision_supply_v1(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "NO_ELIGIBLE_OPTION_STRUCTURE"
 
 
 def test_missing_execution_identity_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

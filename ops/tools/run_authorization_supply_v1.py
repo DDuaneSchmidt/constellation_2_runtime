@@ -23,6 +23,11 @@ ALLOWED_BLOCKERS = {
     "RISK_BUDGET_SUPPLY_BLOCKED",
     "STRATEGY_DECISION_MISSING",
     "STRUCTURE_DECISION_MISSING",
+    "MARKET_OPEN_DATA_MISSING",
+    "OPTIONS_SNAPSHOT_MISSING",
+    "NO_ELIGIBLE_OPTION_STRUCTURE",
+    "STRUCTURE_POLICY_MISSING",
+    "STRUCTURE_DECISION_VALIDATION_FAILED",
     "PHASEC_INPUT_MARKET_DATA_MISSING",
     "PHASEC_INPUT_RISK_BUDGET_MISSING",
     "PHASEC_EXECUTION_IDENTITY_MISSING",
@@ -66,6 +71,10 @@ def _risk_budget_supply_path(ctx: bod.BodContext) -> Path:
 
 def _strategy_decision_path(ctx: bod.BodContext) -> Path:
     return (ctx.truth_root / "reports" / "strategy_decision_authority_v1" / ctx.day_utc / "strategy_decision_authority.v1.json").resolve()
+
+
+def _structure_decision_supply_path(ctx: bod.BodContext) -> Path:
+    return (ctx.truth_root / "reports" / "structure_decision_supply_v1" / ctx.day_utc / "structure_decision_supply.v1.json").resolve()
 
 
 def _json_files(root: Path) -> list[Path]:
@@ -226,13 +235,78 @@ def _ensure_strategy_decision(ctx: bod.BodContext) -> tuple[dict[str, Any], str]
     )
 
 
-def _structure_decision(active_intents: list[dict[str, Any]]) -> tuple[dict[str, Any], str]:
-    missing = [row["intent_id"] for row in active_intents if row.get("requires_defined_risk") is True and row.get("structure_present") is not True]
+def _run_structure_decision_supply(ctx: bod.BodContext) -> dict[str, Any]:
+    return _run_command(
+        [
+            sys.executable,
+            "ops/tools/run_structure_decision_supply_v1.py",
+            "--day_utc",
+            ctx.day_utc,
+            "--environment",
+            ctx.environment,
+        ]
+    )
+
+
+def _structure_decision(ctx: bod.BodContext, active_intents: list[dict[str, Any]]) -> tuple[dict[str, Any], str]:
+    required_ids = [row["intent_id"] for row in active_intents if row.get("requires_defined_risk") is True]
+    supply_path = _structure_decision_supply_path(ctx)
+    supply = _read_json(supply_path)
+    if str(supply.get("day_utc") or "").strip() != ctx.day_utc:
+        supply = {}
+    export = supply.get("structure_export") if isinstance(supply.get("structure_export"), dict) else {}
+    supplied = {
+        str(row.get("intent_id") or "").strip()
+        for row in export.get("decisions") or []
+        if isinstance(row, dict)
+    } if export.get("usable_for_authorization_supply") is True else set()
+    missing = [
+        row["intent_id"]
+        for row in active_intents
+        if row.get("requires_defined_risk") is True
+        and row.get("structure_present") is not True
+        and row["intent_id"] not in supplied
+    ]
+    if missing and not supply:
+        _run_structure_decision_supply(ctx)
+        supply = _read_json(supply_path)
+        export = supply.get("structure_export") if isinstance(supply.get("structure_export"), dict) else {}
+        supplied = {
+            str(row.get("intent_id") or "").strip()
+            for row in export.get("decisions") or []
+            if isinstance(row, dict)
+        } if export.get("usable_for_authorization_supply") is True else set()
+        missing = [
+            row["intent_id"]
+            for row in active_intents
+            if row.get("requires_defined_risk") is True
+            and row.get("structure_present") is not True
+            and row["intent_id"] not in supplied
+        ]
+    status = str(supply.get("status") or "").strip().upper()
+    supply_blocker = str(supply.get("canonical_blocker") or "").strip()
+    if status == "BLOCKED" and supply_blocker:
+        return (
+            {
+                "status": "BLOCKED",
+                "required": bool(required_ids),
+                "missing_intent_ids": missing or required_ids,
+                "structure_decision_supply_path": str(supply_path),
+                "structure_decision_supply_status": status,
+                "structure_decision_supply_blocker": supply_blocker,
+                "producer_command": f"python3 ops/tools/run_structure_decision_supply_v1.py --day_utc {ctx.day_utc} --environment {ctx.environment}",
+            },
+            supply_blocker,
+        )
     return (
         {
             "status": "BLOCKED" if missing else "PASS",
-            "required": bool(any(row.get("requires_defined_risk") is True for row in active_intents)),
+            "required": bool(required_ids),
             "missing_intent_ids": missing,
+            "structure_decision_supply_path": str(supply_path),
+            "structure_decision_supply_status": status or ("MISSING" if required_ids else "NOT_REQUIRED"),
+            "structure_decision_count": int(export.get("decision_count") or 0) if isinstance(export, dict) else 0,
+            "producer_command": f"python3 ops/tools/run_structure_decision_supply_v1.py --day_utc {ctx.day_utc} --environment {ctx.environment}",
         },
         "STRUCTURE_DECISION_MISSING" if missing else "",
     )
@@ -473,13 +547,17 @@ def build_authorization_supply_v1(ctx: bod.BodContext) -> dict[str, Any]:
             strategy_decision=strategy_decision,
         )
 
-    structure_decision, structure_blocker = _structure_decision(active_intents)
+    structure_decision, structure_blocker = _structure_decision(ctx, active_intents)
     if structure_blocker:
         return _blocked_payload(
             ctx,
             active_intents=active_intents,
             blocker=structure_blocker,
-            action="Materialize structure decision/legs for each active defined-risk intent before PhaseC.",
+            action=(
+                "Materialize structure decision/legs for each active defined-risk intent before PhaseC."
+                if structure_blocker == "STRUCTURE_DECISION_MISSING"
+                else f"Resolve {structure_blocker} from Structure Decision Supply before PhaseC."
+            ),
             market_data_input=market_data_input,
             risk_budget_input=risk_budget_input,
             strategy_decision=strategy_decision,
