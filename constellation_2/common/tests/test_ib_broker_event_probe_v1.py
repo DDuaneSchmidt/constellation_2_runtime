@@ -118,6 +118,7 @@ def test_pre_open_verify_consumes_probe_specific_blocker(monkeypatch, tmp_path: 
     assert preopen.main(["--day_utc", DAY]) == 2
     payload = json.loads((ctx.truth_root / "reports/aegis_pre_open_verify_v1" / DAY / "aegis_pre_open_verify.v1.json").read_text(encoding="utf-8"))
 
+    assert payload["canonical_blocker"] == "IB_ACCOUNT_UPDATES_MISSING"
     blockers = [row["blocker"] for row in payload["checks"] if row["name"] in {"ib_broker_event_probe", "ib_connection"}]
     assert blockers == ["IB_ACCOUNT_UPDATES_MISSING", "IB_ACCOUNT_UPDATES_MISSING"]
 

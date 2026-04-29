@@ -85,8 +85,11 @@ def evaluate_pre_open_verify_v1(ctx: bod.BodContext) -> dict[str, Any]:
     session_status = str(session.get("authority_status") or session.get("status") or "").strip().upper()
     session_ok = session_status == "GRANTED" and session.get("submission_authorized") is True
     session_blocker = _blocker_from_codes(session, "SESSION_AUTHORITY_DENIED" if session else "SESSION_AUTHORITY_MISSING")
-    if probe_ok and _is_generic_broker_blocker(session_blocker):
-        session_blocker = "SESSION_AUTHORITY_REQUIRES_REGEN_AFTER_VALID_BROKER_PROBE"
+    if _is_generic_broker_blocker(session_blocker):
+        if probe_ok:
+            session_blocker = "SESSION_AUTHORITY_REQUIRES_REGEN_AFTER_VALID_BROKER_PROBE"
+        elif probe_payload:
+            session_blocker = probe_blocker
     add_check("session_authority", session_path, session_ok, session_blocker)
 
     pre_open_path = ctx.truth_root / "reports" / "pre_open_bundle_v1" / ctx.day_utc / "pre_open_bundle.v1.json"
@@ -94,8 +97,11 @@ def evaluate_pre_open_verify_v1(ctx: bod.BodContext) -> dict[str, Any]:
     pre_open_state = str(pre_open.get("materialization_state") or pre_open.get("bundle_state") or pre_open.get("status") or "").strip().upper()
     pre_open_ok = pre_open_state in {"COMPLETE", "READY", "PASS"}
     pre_open_blocker = _blocker_from_codes(pre_open, "PRE_OPEN_BUNDLE_INCOMPLETE" if pre_open else "PRE_OPEN_BUNDLE_MISSING")
-    if probe_ok and _is_generic_broker_blocker(pre_open_blocker):
-        pre_open_blocker = "PRE_OPEN_BUNDLE_REQUIRES_REGEN_AFTER_VALID_BROKER_PROBE"
+    if _is_generic_broker_blocker(pre_open_blocker):
+        if probe_ok:
+            pre_open_blocker = "PRE_OPEN_BUNDLE_REQUIRES_REGEN_AFTER_VALID_BROKER_PROBE"
+        elif probe_payload:
+            pre_open_blocker = probe_blocker
     add_check("pre_open_bundle", pre_open_path, pre_open_ok, pre_open_blocker)
     legacy_ib_ok = pre_open_ok and "IB_API_HANDSHAKE_NOT_OK" not in json.dumps(pre_open, sort_keys=True)
     ib_ok = probe_ok or legacy_ib_ok
