@@ -37,6 +37,7 @@ ACTIVE_RUNTIME_CONTRACT_PATH = (
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 MAX_FRESHNESS_DAYS = 2
 MAX_PROVEN_DAYS = 14
+DAY_RUN_SCHEMA_VERSION = "aegis_day_run.v1"
 
 SECRET_PATTERNS = [
     re.compile(r"(?i)\bapi[_-]?key\s*[:=]\s*\S+"),
@@ -159,6 +160,21 @@ class LatestTradingDayEvidenceStatus:
     current_head_path: str
     submission_index_path: str
     evidence: str
+
+
+@dataclass(frozen=True)
+class DayRunLedgerStatus:
+    exists: bool
+    path: str
+    day_utc: str
+    environment: str
+    final_status: str
+    canonical_phase: str
+    canonical_blocker: str
+    root_cause_chain: list[dict[str, Any]]
+    downstream_consequences: list[dict[str, Any]]
+    operator_next_action: str
+    updated_at_utc: str
 
 
 @dataclass(frozen=True)
@@ -328,6 +344,83 @@ def _latest_day_with_file(
 
 def _today_utc_day() -> str:
     return _utc_now().date().isoformat()
+
+
+def _day_run_ledger_path(roots: RootResolution, day_utc: str) -> Path | None:
+    if roots.canonical_truth_root is None or not DATE_RE.match(str(day_utc or "")):
+        return None
+    return (
+        roots.canonical_truth_root
+        / "reports"
+        / "aegis_day_run_v1"
+        / day_utc
+        / "day_run.v1.json"
+    ).resolve()
+
+
+def _load_day_run_ledger_status(roots: RootResolution, day_utc: str) -> DayRunLedgerStatus:
+    path = _day_run_ledger_path(roots, day_utc)
+    payload = _read_json(path)
+    if not isinstance(payload, dict):
+        return DayRunLedgerStatus(
+            exists=False,
+            path=str(path) if path else "NOT_FOUND",
+            day_utc=day_utc,
+            environment="PAPER",
+            final_status="NOT_READY",
+            canonical_phase="DAY_RUN",
+            canonical_blocker="DAY_RUN_LEDGER_MISSING",
+            root_cause_chain=[
+                {
+                    "phase": "DAY_RUN",
+                    "canonical_blocker": "DAY_RUN_LEDGER_MISSING",
+                    "blocker_detail": "current-day Aegis day-run ledger does not exist",
+                }
+            ],
+            downstream_consequences=[],
+            operator_next_action=(
+                f"Run python3 ops/tools/run_aegis_day_v1.py --day_utc {day_utc} --environment PAPER"
+            ),
+            updated_at_utc="UNKNOWN",
+        )
+    payload_day = str(payload.get("day_utc") or "").strip()
+    if payload_day != day_utc:
+        return DayRunLedgerStatus(
+            exists=True,
+            path=str(path),
+            day_utc=day_utc,
+            environment=str(payload.get("environment") or "PAPER").strip().upper(),
+            final_status="NOT_READY",
+            canonical_phase="DAY_RUN",
+            canonical_blocker="WRONG_DAY_RUN_LEDGER",
+            root_cause_chain=[
+                {
+                    "phase": "DAY_RUN",
+                    "canonical_blocker": "WRONG_DAY_RUN_LEDGER",
+                    "blocker_detail": f"ledger day_utc={payload_day or 'UNKNOWN'} does not match current day {day_utc}",
+                }
+            ],
+            downstream_consequences=[],
+            operator_next_action=(
+                f"Regenerate current-day ledger via python3 ops/tools/run_aegis_day_v1.py --day_utc {day_utc} --environment PAPER"
+            ),
+            updated_at_utc=str(payload.get("updated_at_utc") or "UNKNOWN"),
+        )
+    root_chain = payload.get("root_cause_chain")
+    downstream = payload.get("downstream_consequences")
+    return DayRunLedgerStatus(
+        exists=True,
+        path=str(path),
+        day_utc=payload_day,
+        environment=str(payload.get("environment") or "PAPER").strip().upper(),
+        final_status=str(payload.get("final_status") or "NOT_READY").strip().upper(),
+        canonical_phase=str(payload.get("canonical_phase") or "").strip().upper(),
+        canonical_blocker=str(payload.get("canonical_blocker") or "").strip(),
+        root_cause_chain=root_chain if isinstance(root_chain, list) else [],
+        downstream_consequences=downstream if isinstance(downstream, list) else [],
+        operator_next_action=str(payload.get("operator_next_action") or "").strip(),
+        updated_at_utc=str(payload.get("updated_at_utc") or "UNKNOWN"),
+    )
 
 
 def _reason_codes(payload: dict[str, Any] | None, key: str = "blocking_reason_codes") -> list[str]:
@@ -1722,6 +1815,7 @@ def _build_paper_status(
 ) -> PaperStatus:
     current_day = _build_current_calendar_day_runtime_status(roots)
     latest_trading_day = _build_latest_trading_day_evidence_status(roots)
+    day_run = _load_day_run_ledger_status(roots, current_day.day_utc)
 
     freshness_day = (
         current_day.day_utc
@@ -1729,18 +1823,76 @@ def _build_paper_status(
         else latest_trading_day.evidence_day_utc
     )
     freshness_status = _freshness_status_for_day(freshness_day)
-    signals = _collect_readiness_signals(
-        roots=roots,
-        current_day=current_day,
-        latest_trading_day=latest_trading_day,
-        source_integrity_gate=source_integrity_gate,
-        freshness_status=freshness_status,
-        status_lines=status_lines or [],
+    ledger_ready = day_run.final_status in {"PAPER_READY", "TRADING_ACTIVE", "EOD_COMPLETE"}
+    signals: list[ReadinessSignal] = []
+    if not ledger_ready:
+        signals.append(
+            _signal(
+                input_name="aegis_day_run_ledger",
+                classification="OPERATIONAL_BLOCKER",
+                status="FAIL",
+                code=day_run.canonical_blocker or "DAY_RUN_LEDGER_MISSING",
+                owner="aegis_day_run_ledger",
+                gate=day_run.canonical_phase or "DAY_RUN",
+                root_cause_id=f"day_run:{day_run.canonical_phase or 'DAY_RUN'}:{day_run.canonical_blocker or 'DAY_RUN_LEDGER_MISSING'}",
+            )
+        )
+    signals.append(
+        _signal(
+            input_name="legacy_current_day_readiness_surfaces",
+            classification="DIAGNOSTIC_ONLY",
+            status="INFO" if current_day.status in {"READY", "DRY_RUN_COMPLETE"} else "WARN",
+            code=current_day.canonical_blocker or current_day.status,
+            owner="current_calendar_day_runtime_status",
+            gate="legacy_current_day_readiness_surfaces",
+            root_cause_id="legacy_current_day_supporting_evidence",
+        )
     )
-    final_decision = _decide_final_readiness(
-        current_day=current_day,
-        latest_trading_day=latest_trading_day,
+    signals.append(
+        _signal(
+            input_name="legacy_latest_trading_day_evidence_status",
+            classification="DIAGNOSTIC_ONLY",
+            status="INFO" if latest_trading_day.status in {"READY", "DRY_RUN_COMPLETE"} else "WARN",
+            code=latest_trading_day.canonical_blocker or latest_trading_day.status,
+            owner="latest_trading_day_evidence_status",
+            gate="legacy_latest_trading_day_evidence_gate",
+            root_cause_id="legacy_latest_trading_day_supporting_evidence",
+        )
+    )
+    signals.append(
+        _signal(
+            input_name="latest_paper_trade_attempt",
+            classification="DIAGNOSTIC_ONLY",
+            status="INFO",
+            code="BROKER_PATH_OBSERVATION_ONLY",
+            owner="broker_observation_authority",
+            gate="broker_attempt_diagnostic",
+            root_cause_id="broker_observation",
+        )
+    )
+    signals.append(
+        _signal(
+            input_name="files_changed_since_last_commit",
+            classification="REPORTING_ONLY",
+            status="INFO",
+            code="DIRTY_PATH_LIST_REPORTING_ONLY",
+            owner="packet_reporting",
+            gate="files_changed_section",
+            root_cause_id="dirty_path_reporting",
+        )
+    )
+    final_decision = FinalReadinessDecision(
+        status=day_run.final_status if ledger_ready else "NOT_READY",
+        canonical_blocker="" if ledger_ready else (day_run.canonical_blocker or "DAY_RUN_LEDGER_MISSING"),
+        owning_subsystem="aegis_day_run_ledger",
+        owning_gate=day_run.canonical_phase or "DAY_RUN",
+        reason=(
+            f"day-run ledger final_status={day_run.final_status}"
+            if day_run.exists
+            else "current-day day-run ledger missing; run BOD/day ledger before audit"
+        ),
         signals=signals,
+        grade_profile=_build_grade_profile(signals),
     )
 
     section_lines = [
@@ -1789,6 +1941,20 @@ def _build_paper_status(
         f"- status: {latest_trading_day.status}",
         f"- canonical_blocker: {latest_trading_day.canonical_blocker}",
         "",
+        "## Aegis Day Run Ledger",
+        "",
+        f"- day_run_ledger_path: {day_run.path}",
+        f"- day_run_ledger_exists: {'true' if day_run.exists else 'false'}",
+        f"- day_utc: {day_run.day_utc}",
+        f"- environment: {day_run.environment}",
+        f"- final_status: {day_run.final_status}",
+        f"- canonical_phase: {day_run.canonical_phase}",
+        f"- canonical_blocker: {day_run.canonical_blocker}",
+        f"- root_cause_chain: {json.dumps(day_run.root_cause_chain, sort_keys=True)}",
+        f"- downstream_consequences: {json.dumps(day_run.downstream_consequences, sort_keys=True)}",
+        f"- operator_next_action: {day_run.operator_next_action}",
+        f"- updated_at_utc: {day_run.updated_at_utc}",
+        "",
         "## Aegis Paper-Trading Status",
         "",
         f"- status: {final_decision.status}",
@@ -1809,14 +1975,14 @@ def _build_paper_status(
             f"{source_integrity_gate.effective_owner if source_integrity_gate else 'UNKNOWN'}"
         ),
         (
-            f"- evidence: {current_day.evidence} ; latest_trading_day={latest_trading_day.evidence_day_utc}:{latest_trading_day.evidence}"
+            f"- evidence: day_run={day_run.path} ; {current_day.evidence} ; latest_trading_day={latest_trading_day.evidence_day_utc}:{latest_trading_day.evidence}"
         ),
         f"- reason: {final_decision.reason}",
         "",
         "## Aegis Brittleness Map",
         "",
-        "- final_readiness_authority: packet_final_readiness_authority_v1",
-        "- decision_model: HARD_SAFETY_INVARIANT => BLOCKED; OPERATIONAL_BLOCKER => NOT_READY; DEGRADATION_SIGNAL => DEGRADED_READY; DIAGNOSTIC_ONLY/REPORTING_ONLY => non-decisional",
+        "- final_readiness_authority: aegis_day_run_ledger_v1",
+        "- decision_model: day_run ledger owns final readiness; legacy authority artifacts are supporting evidence only; downstream blockers do not override the first blocked ledger phase",
         "- inputs:",
     ]
     for signal in signals:
