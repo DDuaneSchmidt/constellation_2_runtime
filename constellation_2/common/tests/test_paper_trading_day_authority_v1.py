@@ -604,7 +604,7 @@ def test_options_snapshot_capture_failure_is_not_reported_as_missing_root(monkey
 
     assert rc == 2
     assert out["status"] == "BLOCKED_VALID"
-    assert out["results"][0]["reason_code"] == "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+    assert out["results"][0]["reason_code"] == "OPTIONS_MARKET_CLOSED_OR_UNAVAILABLE"
 
 
 def test_options_snapshot_required_defaults_to_current_day_intents(monkeypatch, tmp_path: Path, capsys) -> None:
@@ -634,7 +634,55 @@ def test_options_snapshot_required_defaults_to_current_day_intents(monkeypatch, 
 
     assert rc == 2
     assert out["required_symbols"] == ["SPY"]
-    assert out["results"][0]["reason_code"] == "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+    assert out["results"][0]["reason_code"] == "OPTIONS_MARKET_CLOSED_OR_UNAVAILABLE"
+
+
+def test_options_capture_diagnostic_underlying_spot_missing_is_specific(tmp_path: Path) -> None:
+    diag = tmp_path / "options_chain_capture_diagnostic.v1.json"
+    diag.write_text(json.dumps({"status": "FAIL", "error": "UNDERLYING_SPOT_MISSING"}), encoding="utf-8")
+
+    out = options_required_module._classify_options_capture_failure(
+        {"return_code": 2, "stdout": "", "stderr": f"FAIL: UNDERLYING_SPOT_MISSING:DIAG_PATH={diag}"}
+    )
+
+    assert out["reason_code"] == "OPTIONS_UNDERLYING_SPOT_MISSING"
+    assert out["capture_diagnostic_path"] == str(diag.resolve())
+
+
+def test_options_capture_diagnostic_missing_quotes_is_specific(tmp_path: Path) -> None:
+    diag = tmp_path / "options_chain_capture_diagnostic.v1.json"
+    diag.write_text(json.dumps({"status": "FAIL", "error": "NO_VALID_OPTION_QUOTES_CAPTURED"}), encoding="utf-8")
+
+    out = options_required_module._classify_options_capture_failure(
+        {"return_code": 2, "stdout": "", "stderr": f"FAIL: NO_VALID_OPTION_QUOTES_CAPTURED:DIAG_PATH={diag}"}
+    )
+
+    assert out["reason_code"] == "OPTIONS_QUOTES_MISSING"
+
+
+def test_options_capture_diagnostic_permission_denied_takes_precedence(tmp_path: Path) -> None:
+    diag = tmp_path / "options_chain_capture_diagnostic.v1.json"
+    diag.write_text(
+        json.dumps(
+            {
+                "status": "FAIL",
+                "error": "OPTIONS_CAPTURE_FAILED_ALL_MARKET_DATA_TYPES:market_data_type=1:UNDERLYING_SPOT_MISSING",
+                "ib_errors": [
+                    {
+                        "code": 10089,
+                        "message": "Requested market data requires additional subscription for API. Delayed market data is available.",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    out = options_required_module._classify_options_capture_failure(
+        {"return_code": 2, "stdout": "", "stderr": f"FAIL: UNDERLYING_SPOT_MISSING:DIAG_PATH={diag}"}
+    )
+
+    assert out["reason_code"] == "OPTIONS_MARKET_DATA_PERMISSION_DENIED"
 
 
 def test_options_snapshot_required_default_root_is_runtime_data(monkeypatch) -> None:

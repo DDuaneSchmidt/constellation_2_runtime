@@ -43,6 +43,24 @@ MARKET_DATA_BLOCKERS = {
     "OPTIONS_SNAPSHOT_CAPTURE_FAILED",
     "OPTIONS_SNAPSHOT_ROOT_MISSING",
     "UNDERLYING_SPOT_MISSING",
+    "OPTIONS_UNDERLYING_SPOT_MISSING",
+    "OPTIONS_QUOTES_MISSING",
+    "OPTIONS_MARKET_DATA_PERMISSION_DENIED",
+    "OPTIONS_MARKET_CLOSED_OR_UNAVAILABLE",
+    "OPTIONS_CONTRACT_QUALIFICATION_FAILED",
+    "OPTIONS_CAPTURE_TIMEOUT",
+    "OPTIONS_CAPTURE_IMPLEMENTATION_ERROR",
+}
+GENERIC_MARKET_DATA_BLOCKERS = {
+    "OPTIONS_CHAIN_SNAPSHOT_MISSING",
+    "OPTIONS_SNAPSHOT_CAPTURE_FAILED",
+    "OPTIONS_SNAPSHOT_ROOT_MISSING",
+    "OPTIONS_SNAPSHOT_SYMBOL_MISSING",
+}
+SPECIFIC_OPTIONS_CAPTURE_BLOCKERS = MARKET_DATA_BLOCKERS - GENERIC_MARKET_DATA_BLOCKERS - {
+    "MARKET_DATA_AUTHORITY_BLOCKED",
+    "MARKET_DATA_CAPTURE_UNAVAILABLE",
+    "UNDERLYING_SPOT_MISSING",
 }
 
 
@@ -162,6 +180,31 @@ def _empty_phase(
 def _blocker_from_step(row: dict[str, Any], fallback: str) -> str:
     blocker = str(row.get("blocker") or "").strip()
     return blocker or fallback
+
+
+def _specific_market_data_blocker_from_steps(steps: list[dict[str, Any]]) -> str:
+    for row in steps:
+        blocker = str(row.get("blocker") or "").strip()
+        if blocker in SPECIFIC_OPTIONS_CAPTURE_BLOCKERS:
+            return blocker
+        for key in ("stdout_summary", "stderr_summary"):
+            text = str(row.get(key) or "").strip()
+            if not text:
+                continue
+            try:
+                payload = json.loads(text.splitlines()[-1])
+            except Exception:
+                payload = {}
+            results = payload.get("results") if isinstance(payload, dict) else None
+            if not isinstance(results, list):
+                continue
+            for item in results:
+                if not isinstance(item, dict):
+                    continue
+                reason = str(item.get("reason_code") or "").strip()
+                if reason in SPECIFIC_OPTIONS_CAPTURE_BLOCKERS:
+                    return reason
+    return ""
 
 
 def _run_steps(
@@ -334,7 +377,11 @@ def _phase_market_data(ctx: PhaseContext, env: dict[str, str]) -> dict[str, Any]
     market = _read_json(market_path)
     state = str(market.get("market_data_state") or "").strip().upper()
     first = str(market.get("first_blocker") or "").strip()
-    blocker = first or (blockers[0] if blockers else "")
+    step_specific = _specific_market_data_blocker_from_steps(steps)
+    child_blocker = blockers[0] if blockers else ""
+    blocker = first or child_blocker
+    if step_specific and (not blocker or blocker in GENERIC_MARKET_DATA_BLOCKERS):
+        blocker = step_specific
     if state not in {"OK", "PASS", "READY"} and not blocker:
         blocker = "MARKET_DATA_AUTHORITY_BLOCKED"
     completed = _now_iso()

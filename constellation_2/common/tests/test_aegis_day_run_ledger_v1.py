@@ -94,6 +94,95 @@ def test_market_data_block_after_session_passes_is_canonical(monkeypatch: pytest
     assert payload["canonical_blocker"] == "OPTIONS_SNAPSHOT_ROOT_MISSING"
 
 
+def test_market_data_missing_snapshot_without_capture_diagnostic_stays_generic() -> None:
+    steps = [
+        {
+            "step_name": "options_chain_snapshot",
+            "status": "BLOCKED",
+            "blocker": "OPTIONS_CHAIN_SNAPSHOT_MISSING",
+            "stdout_summary": '{"results":[{"reason_code":"OPTIONS_CHAIN_SNAPSHOT_MISSING"}]}',
+        }
+    ]
+
+    assert day_run._specific_market_data_blocker_from_steps(steps) == ""
+
+
+def test_market_data_specific_capture_blocker_wins_over_generic_authority(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+
+    def _fake_run_steps(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        return (
+            [
+                {
+                    "step_name": "options_chain_snapshot",
+                    "status": "BLOCKED",
+                    "blocker": "OPTIONS_MARKET_DATA_PERMISSION_DENIED",
+                    "stdout_summary": '{"results":[{"reason_code":"OPTIONS_MARKET_DATA_PERMISSION_DENIED"}]}',
+                    "duration_ms": 1,
+                }
+            ],
+            [],
+            ["OPTIONS_MARKET_DATA_PERMISSION_DENIED"],
+        )
+
+    market_path = ctx.truth_root / "reports" / "market_data_authority_v1" / ctx.day_utc / "market_data_authority.v1.json"
+    market_path.parent.mkdir(parents=True)
+    market_path.write_text(
+        '{"market_data_state":"MISSING_REQUIRED_DATA","first_blocker":"OPTIONS_CHAIN_SNAPSHOT_MISSING"}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(day_run, "_run_steps", _fake_run_steps)
+
+    row = day_run._phase_market_data(ctx, {})
+
+    assert row["status"] == "BLOCKED"
+    assert row["canonical_blocker"] == "OPTIONS_MARKET_DATA_PERMISSION_DENIED"
+
+
+def test_market_data_successful_snapshot_phase_passes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+
+    def _fake_run_steps(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        return ([{"step_name": "options_chain_snapshot", "status": "PASS", "duration_ms": 1}], ["snapshot"], [])
+
+    market_path = ctx.truth_root / "reports" / "market_data_authority_v1" / ctx.day_utc / "market_data_authority.v1.json"
+    market_path.parent.mkdir(parents=True)
+    market_path.write_text('{"market_data_state":"READY","first_blocker":""}\n', encoding="utf-8")
+    monkeypatch.setattr(day_run, "_run_steps", _fake_run_steps)
+
+    row = day_run._phase_market_data(ctx, {})
+
+    assert row["status"] == "PASS"
+    assert row["canonical_blocker"] == ""
+
+
+def test_market_data_wrong_day_snapshot_does_not_satisfy_current_day(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _install_phase_runners(monkeypatch, blocked_phase="MARKET_DATA", blocker="OPTIONS_CHAIN_SNAPSHOT_MISSING")
+    ctx = _ctx(tmp_path, "2026-04-29")
+    wrong_day = ctx.execution_root / "options_chain_snapshot_v1" / "2026-04-28" / "capture" / "options_chain_snapshot.v1.json"
+    wrong_day.parent.mkdir(parents=True)
+    wrong_day.write_text('{"day_utc":"2026-04-28"}\n', encoding="utf-8")
+
+    payload = day_run.build_day_run_payload(ctx)
+
+    assert payload["canonical_phase"] == "MARKET_DATA"
+    assert payload["canonical_blocker"] == "OPTIONS_CHAIN_SNAPSHOT_MISSING"
+    assert payload["phase_results"]["STRATEGY_AND_RISK"]["status"] == "SKIPPED"
+
+
+def test_specific_market_data_blocker_is_ledger_canonical_and_skips_downstream(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_phase_runners(monkeypatch, blocked_phase="MARKET_DATA", blocker="OPTIONS_QUOTES_MISSING")
+
+    payload = day_run.build_day_run_payload(_ctx(tmp_path))
+
+    assert payload["canonical_phase"] == "MARKET_DATA"
+    assert payload["canonical_blocker"] == "OPTIONS_QUOTES_MISSING"
+    assert payload["phase_results"]["STRATEGY_AND_RISK"]["status"] == "SKIPPED"
+    assert payload["phase_results"]["AUTHORIZATION"]["status"] == "SKIPPED"
+
+
 def test_all_pre_ready_phases_pass_produces_paper_ready(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _install_phase_runners(monkeypatch)
     payload = day_run.build_day_run_payload(_ctx(tmp_path))

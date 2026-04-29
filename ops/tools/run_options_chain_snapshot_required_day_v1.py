@@ -27,6 +27,15 @@ from ops.tools.c2_account_resolution_v1 import resolve_single_paper_ib_account_f
 
 
 OPTIONS_CHAIN_SCHEMA = "constellation_2/schemas/options_chain_snapshot.v1.schema.json"
+OPTIONS_CAPTURE_SPECIFIC_BLOCKERS = {
+    "OPTIONS_UNDERLYING_SPOT_MISSING",
+    "OPTIONS_QUOTES_MISSING",
+    "OPTIONS_MARKET_DATA_PERMISSION_DENIED",
+    "OPTIONS_MARKET_CLOSED_OR_UNAVAILABLE",
+    "OPTIONS_CONTRACT_QUALIFICATION_FAILED",
+    "OPTIONS_CAPTURE_TIMEOUT",
+    "OPTIONS_CAPTURE_IMPLEMENTATION_ERROR",
+}
 
 
 def _utc_now_iso() -> str:
@@ -173,6 +182,82 @@ def _run_tool(cmd: List[str], *, truth_root: Path) -> Dict[str, Any]:
     }
 
 
+def _walk_json_strings(value: Any) -> List[str]:
+    out: List[str] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if isinstance(key, str):
+                out.append(key)
+            out.extend(_walk_json_strings(item))
+    elif isinstance(value, list):
+        for item in value:
+            out.extend(_walk_json_strings(item))
+    elif value is not None:
+        out.append(str(value))
+    return out
+
+
+def _diagnostic_path_from_capture_result(capture_result: Dict[str, Any]) -> Path | None:
+    for key in ("diagnostic_path", "capture_diagnostic_path"):
+        text = str(capture_result.get(key) or "").strip()
+        if text:
+            return Path(text).expanduser().resolve()
+    for text in (str(capture_result.get("stdout") or ""), str(capture_result.get("stderr") or "")):
+        marker = "DIAG_PATH="
+        if marker not in text:
+            continue
+        tail = text.rsplit(marker, 1)[-1].strip()
+        candidate = tail.split()[0].strip().strip(",")
+        if candidate:
+            return Path(candidate).expanduser().resolve()
+    return None
+
+
+def _read_capture_diagnostic(path: Path | None) -> Dict[str, Any]:
+    if path is None or not path.exists() or not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _classify_options_capture_failure(capture_result: Dict[str, Any]) -> Dict[str, Any]:
+    if bool(capture_result.get("timed_out")) or "OPTIONS_SNAPSHOT_CAPTURE_TIMEOUT" in str(capture_result.get("stderr") or ""):
+        return {"reason_code": "OPTIONS_CAPTURE_TIMEOUT", "capture_diagnostic_path": ""}
+
+    diagnostic_path = _diagnostic_path_from_capture_result(capture_result)
+    diagnostic = _read_capture_diagnostic(diagnostic_path)
+    text = "\n".join(
+        [
+            str(capture_result.get("stdout") or ""),
+            str(capture_result.get("stderr") or ""),
+            "\n".join(_walk_json_strings(diagnostic)),
+        ]
+    )
+    upper = text.upper()
+
+    if any(token in upper for token in ("REQUIRES ADDITIONAL SUBSCRIPTION", "NOT SUBSCRIBED", "PERMISSION", "10089", "10091")):
+        reason = "OPTIONS_MARKET_DATA_PERMISSION_DENIED"
+    elif any(token in upper for token in ("CONTRACT_QUALIFICATION", "CONTRACT_DETAILS_COUNT 0", "CONTRACT_DETAILS_TIMEOUT", "NO CONTRACT")):
+        reason = "OPTIONS_CONTRACT_QUALIFICATION_FAILED"
+    elif any(token in upper for token in ("MARKET CLOSED", "MARKET_CLOSED", "NO DELAYED", "UNAVAILABLE")):
+        reason = "OPTIONS_MARKET_CLOSED_OR_UNAVAILABLE"
+    elif "UNDERLYING_SPOT_MISSING" in upper:
+        reason = "OPTIONS_UNDERLYING_SPOT_MISSING"
+    elif "NO_VALID_OPTION_QUOTES_CAPTURED" in upper or "OPTION_QUOTES_MISSING" in upper:
+        reason = "OPTIONS_QUOTES_MISSING"
+    else:
+        reason = "OPTIONS_CAPTURE_IMPLEMENTATION_ERROR"
+
+    return {
+        "reason_code": reason,
+        "capture_diagnostic_path": str(diagnostic_path or ""),
+        "capture_error": str(diagnostic.get("error") or capture_result.get("stderr") or capture_result.get("stdout") or "")[-500:],
+    }
+
+
 def _capture_symbol(*, truth_root: Path, day_utc: str, symbol: str, eval_time_utc: str) -> Dict[str, Any]:
     return _run_tool(
         [
@@ -253,8 +338,10 @@ def main(argv: List[str] | None = None) -> int:
             steps.append({"symbol": symbol, "producer": "options_chain_truth_promotion_day_v1", **_promote_symbol(truth_root=intent_truth_root, day_utc=day_utc, symbol=symbol, eval_time_utc=eval_time_utc)})
         after = _snapshot_valid_for_symbol(truth_root=intent_truth_root, day_utc=day_utc, symbol=symbol, eval_time_utc=eval_time_utc)
         reason_code = str(after.get("reason_code") or "")
+        capture_failure: Dict[str, Any] = {}
         if not after["ok"] and capture_result is not None and int(capture_result.get("return_code") or 0) != 0:
-            reason_code = "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+            capture_failure = _classify_options_capture_failure(capture_result)
+            reason_code = str(capture_failure.get("reason_code") or "OPTIONS_CAPTURE_IMPLEMENTATION_ERROR")
         results.append(
             {
                 "symbol": symbol,
@@ -262,6 +349,8 @@ def main(argv: List[str] | None = None) -> int:
                 "reason_code": reason_code,
                 "path": str(after.get("path") or ""),
                 "failures": list(after.get("failures") or []),
+                "capture_diagnostic_path": str(capture_failure.get("capture_diagnostic_path") or ""),
+                "capture_error": str(capture_failure.get("capture_error") or ""),
             }
         )
 
