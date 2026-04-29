@@ -334,6 +334,38 @@ def test_market_data_bod_prep_runs_and_passes_when_supply_is_pre_market_pending(
     assert row["outputs"] == [str(supply_path)]
 
 
+def test_market_data_bod_prep_demotes_stale_snapshot_to_market_open_gate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ctx = _ctx(tmp_path)
+    supply_path = day_run._market_data_supply_path(ctx)
+    _write(
+        supply_path,
+        {
+            "day_utc": ctx.day_utc,
+            "status": "BLOCKED",
+            "canonical_blocker": "OPTIONS_SNAPSHOT_STALE",
+            "requirements": [{"requirement_id": "REQ1", "instrument": "SPY"}],
+            "provider_checks": [],
+        },
+    )
+    monkeypatch.setattr(
+        day_run,
+        "_run_steps",
+        lambda *_args, **_kwargs: (
+            [{"step_name": "market_data_supply", "status": "BLOCKED", "blocker": "OPTIONS_SNAPSHOT_STALE"}],
+            [str(supply_path)],
+            ["OPTIONS_SNAPSHOT_STALE"],
+        ),
+    )
+
+    row = day_run._phase_market_data_bod_prep(ctx, {})
+
+    assert row["status"] == "PASS"
+    assert row["canonical_blocker"] == ""
+    assert "OPTIONS_SNAPSHOT_STALE" in row["downstream_consequences"]
+
+
 def test_day_ledger_cannot_reach_paper_ready_before_market_gate_passes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

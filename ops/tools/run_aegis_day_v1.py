@@ -83,6 +83,16 @@ SESSION_SUPPORTING_READINESS_BLOCKERS = {
     "SUBMIT_BOUNDARY_READINESS_POLICY_NOT_PASS",
 }
 
+MARKET_OPEN_DATA_GATE_BLOCKERS = {
+    "MARKET_OPEN_DATA_PENDING",
+    "OPTIONS_QUOTES_MISSING",
+    "OPTIONS_QUOTES_MISSING_BID_ASK",
+    "OPTIONS_DELAYED_QUOTES_NOT_RETURNED_BY_IB",
+    "OPTIONS_QUOTES_UNAVAILABLE_OUTSIDE_MARKET_HOURS",
+    "OPTIONS_SNAPSHOT_STALE",
+    "OPTIONS_SNAPSHOT_CAPTURE_FAILED",
+}
+
 
 def _now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -459,7 +469,15 @@ def _phase_market_data_bod_prep(ctx: PhaseContext, env: dict[str, str]) -> dict[
         detail_parts.append(f"provider_capability={first_provider.get('capability')}")
     blocker_detail = " ".join(detail_parts)
     completed = _now_iso()
-    phase_status = "PASS" if supply_status in {"PASS", "SKIPPED", "PRE_MARKET_PENDING"} and blocker in {"", "MARKET_OPEN_DATA_PENDING"} else "BLOCKED"
+    phase_status = (
+        "PASS"
+        if (
+            supply_status in {"PASS", "SKIPPED", "PRE_MARKET_PENDING"}
+            and blocker in {"", "MARKET_OPEN_DATA_PENDING"}
+        )
+        or blocker in MARKET_OPEN_DATA_GATE_BLOCKERS
+        else "BLOCKED"
+    )
     return _empty_phase(
         "MARKET_DATA_BOD_PREP",
         status=phase_status,
@@ -467,6 +485,7 @@ def _phase_market_data_bod_prep(ctx: PhaseContext, env: dict[str, str]) -> dict[
         blocker_detail=blocker_detail,
         inputs=[str(_requirement_graph_path(ctx))],
         outputs=outputs or [str(supply_path)],
+        downstream_consequences=[blocker] if phase_status == "PASS" and blocker in MARKET_OPEN_DATA_GATE_BLOCKERS else [],
         producer_command="run market data supply",
         started_at_utc=started,
         completed_at_utc=completed,
