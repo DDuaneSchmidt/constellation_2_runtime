@@ -195,6 +195,10 @@ SESSION_AUTHORITY_STATUS_DERIVED_FROM_PAPER = (
     "target_day_build_v1",
     "market_calendar_coverage_status_v1",
     "operator_summary_dossier_v1",
+    "submit_boundary_status_v1",
+    "aegis_day_run_v1",
+    "paper_day_control_plane_v1",
+    "execution_mode_authority_v1",
 )
 SESSION_AUTHORITY_STATUS_DERIVED_FROM_LIVE = (
     "submit_boundary_status_v1",
@@ -795,6 +799,85 @@ def _canonical_surface_detail(surface: CanonicalReadinessSurfaceV1) -> Dict[str,
     }
 
 
+def _read_json_surface_payload(path: Path) -> Dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _append_json_canonical_surface_v1(
+    surfaces: List[CanonicalReadinessSurfaceV1],
+    *,
+    surface_name: str,
+    path: Path,
+    produced_fields: tuple[str, ...],
+    status_fields: tuple[str, ...],
+    authorized_fields: tuple[str, ...] = (),
+    reason_fields: tuple[str, ...] = (),
+) -> None:
+    payload = _read_json_surface_payload(path)
+    if payload is None:
+        return
+
+    produced_utc = ""
+    for field_name in produced_fields:
+        candidate = str(payload.get(field_name) or "").strip()
+        if candidate:
+            produced_utc = candidate
+            break
+
+    status_value = "UNKNOWN"
+    for field_name in status_fields:
+        candidate = str(payload.get(field_name) or "").strip().upper()
+        if candidate:
+            status_value = candidate
+            break
+
+    submission_authorized = any(payload.get(field_name) is True for field_name in authorized_fields)
+
+    reason_codes: List[str] = []
+    for field_name in reason_fields:
+        values = payload.get(field_name)
+        if isinstance(values, list):
+            for row in values:
+                if isinstance(row, dict):
+                    for key in ("canonical_blocker", "code", "reason_code", "blocker"):
+                        value = str(row.get(key) or "").strip()
+                        if value:
+                            reason_codes.append(value)
+                            break
+                    continue
+                value = str(row).strip()
+                if value:
+                    reason_codes.append(value)
+            continue
+        if isinstance(values, dict):
+            for key in ("canonical_blocker", "code", "reason_code", "blocker"):
+                value = str(values.get(key) or "").strip()
+                if value:
+                    reason_codes.append(value)
+                    break
+            continue
+        value = str(values or "").strip()
+        if value:
+            reason_codes.append(value)
+
+    surfaces.append(
+        CanonicalReadinessSurfaceV1(
+            surface_name=surface_name,
+            path=path,
+            sha256=sha256_file_v1(path),
+            produced_utc=produced_utc,
+            produced_dt=_parse_utc(produced_utc),
+            submission_authorized=submission_authorized,
+            status_value=status_value,
+            reason_codes=tuple(reason_codes),
+        )
+    )
+
+
 def _read_canonical_readiness_surfaces_v1(
     *,
     truth_root: Path,
@@ -832,6 +915,53 @@ def _read_canonical_readiness_surfaces_v1(
             )
         except Exception:
             pass
+
+        _append_json_canonical_surface_v1(
+            surfaces,
+            surface_name="submit_boundary_status_v1",
+            path=truth_root
+            / "reports"
+            / "submit_boundary_status_v1"
+            / day_utc
+            / "submit_boundary_status.v1.json",
+            produced_fields=("produced_at_utc", "generated_at_utc", "produced_utc"),
+            status_fields=("boundary_status", "status"),
+            authorized_fields=("submission_authorized", "submit_allowed", "readiness_submit_allowed"),
+            reason_fields=("blocking_codes", "reason_codes", "canonical_blocker", "first_blocker_code"),
+        )
+        _append_json_canonical_surface_v1(
+            surfaces,
+            surface_name="aegis_day_run_v1",
+            path=truth_root / "reports" / "aegis_day_run_v1" / day_utc / "day_run.v1.json",
+            produced_fields=("updated_at_utc", "created_at_utc"),
+            status_fields=("final_status",),
+            reason_fields=("canonical_blocker", "root_cause_chain"),
+        )
+        _append_json_canonical_surface_v1(
+            surfaces,
+            surface_name="paper_day_control_plane_v1",
+            path=truth_root
+            / "reports"
+            / "paper_day_control_plane_v1"
+            / day_utc
+            / "paper_day_control_plane.v1.json",
+            produced_fields=("evaluated_at_utc", "produced_at_utc", "generated_at_utc", "produced_utc"),
+            status_fields=("final_start_decision", "status"),
+            reason_fields=("blocking_codes",),
+        )
+        _append_json_canonical_surface_v1(
+            surfaces,
+            surface_name="execution_mode_authority_v1",
+            path=truth_root
+            / "reports"
+            / "execution_mode_authority_v1"
+            / day_utc
+            / "execution_mode_authority.v1.json",
+            produced_fields=("produced_utc", "produced_at_utc", "generated_at_utc"),
+            status_fields=("mode_state", "mode", "status"),
+            authorized_fields=("broker_transmit_enabled",),
+            reason_fields=("first_blocker", "canonical_blocker", "blocking_codes", "reason_codes"),
+        )
         return surfaces
 
     try:
@@ -1007,6 +1137,31 @@ def _enforce_session_authority_truth_v1(
             )
         return dict(payload)
 
+    if environment == ENVIRONMENT_PAPER and not any(
+        surface.surface_name == "paper_session_authority_v1" for surface in surfaces
+    ):
+        authority_path = resolve_paper_session_authority_path(
+            truth_root=truth_root,
+            day_utc=comparison_day,
+        )
+        missing_reason_code = (
+            BLOCKING_CODE_SESSION_AUTHORITY_ARTIFACT_INVALID
+            if authority_path.exists()
+            else BLOCKING_CODE_SESSION_AUTHORITY_ARTIFACT_MISSING
+        )
+        return _invalidate_session_authority_status_payload_v1(
+            payload=payload,
+            reason_code=missing_reason_code,
+            summary=(
+                "Canonical paper_session_authority_v1 artifact is missing or invalid "
+                f"for day={comparison_day}."
+            ),
+            comparison_day=comparison_day,
+            surfaces=[],
+            now=now,
+            artifact_path_hint=str(authority_path),
+        )
+
     latest_surface = max(
         surfaces,
         key=lambda surface: surface.produced_dt or datetime.min.replace(tzinfo=UTC),
@@ -1027,7 +1182,13 @@ def _enforce_session_authority_truth_v1(
             now=now,
         )
 
-    authorized_values = {surface.submission_authorized for surface in surfaces}
+    authorization_surface_names = (
+        {"paper_session_authority_v1"}
+        if environment == ENVIRONMENT_PAPER
+        else {"submit_boundary_status_v1", "paper_session_ledger_v1", "paper_day_control_plane_v1"}
+    )
+    authorization_surfaces = [surface for surface in surfaces if surface.surface_name in authorization_surface_names]
+    authorized_values = {surface.submission_authorized for surface in authorization_surfaces}
     if len(authorized_values) > 1:
         return _invalidate_session_authority_status_payload_v1(
             payload=payload,
@@ -1043,7 +1204,7 @@ def _enforce_session_authority_truth_v1(
 
     mismatched_surfaces = [
         surface
-        for surface in surfaces
+        for surface in authorization_surfaces
         if not _status_current_matches_surface(status_payload=payload, surface=surface)
     ]
     if mismatched_surfaces:

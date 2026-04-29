@@ -57,6 +57,7 @@ from constellation_2.common.session_authority_v1 import (
     write_target_day_admission_v1,
     write_target_day_build_v1,
 )
+from constellation_2.phaseL.ui_api.operations_read_model import _build_readiness_ladder
 from constellation_2.common.tests.test_paper_day_control_plane_v1 import (
     _producer as _canonical_producer,
     _write_boundary as _write_submit_boundary,
@@ -665,6 +666,72 @@ def _write_canonical_readiness_stack(
     )
 
 
+def _write_day_run_ledger(
+    truth_root: Path,
+    *,
+    day_utc: str,
+    final_status: str = "NOT_READY",
+    canonical_phase: str = "MARKET_OPEN_DATA_GATE",
+    canonical_blocker: str = "MARKET_CLOSED",
+    updated_at_utc: str = "2026-04-11T22:12:00Z",
+) -> None:
+    _write_json(
+        truth_root / "reports" / "aegis_day_run_v1" / day_utc / "day_run.v1.json",
+        {
+            "schema_id": "aegis_day_run.v1",
+            "schema_version": "aegis_day_run.v1",
+            "day_utc": day_utc,
+            "environment": "PAPER",
+            "final_status": final_status,
+            "canonical_phase": canonical_phase,
+            "canonical_blocker": canonical_blocker,
+            "root_cause_chain": [canonical_blocker] if canonical_blocker else [],
+            "downstream_consequences": [],
+            "phase_order": [],
+            "phase_results": {},
+            "created_at_utc": updated_at_utc,
+            "updated_at_utc": updated_at_utc,
+            "source_repo_status": {},
+            "operator_next_action": "",
+        },
+    )
+
+
+def _write_execution_mode_authority(
+    truth_root: Path,
+    *,
+    day_utc: str,
+    mode_state: str = "PAPER_TRANSMIT_ENABLED",
+    produced_utc: str = "2026-04-11T22:12:01Z",
+) -> None:
+    _write_json(
+        truth_root / "reports" / "execution_mode_authority_v1" / day_utc / "execution_mode_authority.v1.json",
+        {
+            "schema_id": "C2_EXECUTION_MODE_AUTHORITY_V1",
+            "schema_version": 1,
+            "day_utc": day_utc,
+            "environment": "PAPER",
+            "status": "PASS",
+            "mode_state": mode_state,
+            "mode": mode_state,
+            "broker_transmit_enabled": mode_state == "PAPER_TRANSMIT_ENABLED",
+            "produced_utc": produced_utc,
+            "first_blocker": "",
+        },
+    )
+
+
+def _canonical_surface_map(payload: dict) -> dict[str, dict]:
+    checks = [
+        row
+        for row in payload.get("monitoring_checks", [])
+        if isinstance(row, dict) and row.get("check_name") == "canonical_readiness_authority"
+    ]
+    assert checks
+    surfaces = checks[-1]["details"]["canonical_surfaces"]
+    return {str(surface["surface_name"]): surface for surface in surfaces}
+
+
 def _build_and_write_status(
     tmp_path: Path,
     *,
@@ -711,6 +778,108 @@ def test_status_reports_healthy_admit_state(tmp_path: Path) -> None:
     assert payload["status_severity"] == STATUS_SEVERITY_INFO
     assert payload["target_day_admission_status"] == "ADMIT"
     assert payload["traceability_status"] == "VALID"
+
+
+def test_paper_session_status_includes_runtime_ladder_canonical_surfaces(tmp_path: Path) -> None:
+    _write_state(
+        tmp_path,
+        artifact_rows=[
+            _artifact_row(tmp_path, "market_calendar_day", role_class="REQUIRED_BINDING_INPUT"),
+            _artifact_row(tmp_path, "paper_policy_verdict_v1"),
+            _artifact_row(tmp_path, "trade_submit_readiness_c2_v1"),
+            _artifact_row(tmp_path, "trading_day_state_machine_v1", role_class="REQUIRED_EXECUTION_BOUNDARY"),
+        ],
+    )
+    _write_canonical_readiness_stack(
+        tmp_path,
+        day_utc=DAY,
+        submit_authorized=True,
+        ledger_granted=True,
+        control_plane_ready=True,
+        submit_ts="2026-04-11T22:11:51Z",
+        ledger_ts="2026-04-11T22:11:54Z",
+        control_ts="2026-04-11T22:11:50Z",
+    )
+    _write_day_run_ledger(
+        tmp_path,
+        day_utc=DAY,
+        final_status="NOT_READY",
+        canonical_blocker="MARKET_CLOSED",
+        updated_at_utc="2026-04-11T22:11:55Z",
+    )
+    _write_execution_mode_authority(
+        tmp_path,
+        day_utc=DAY,
+        mode_state="PAPER_TRANSMIT_ENABLED",
+        produced_utc="2026-04-11T22:11:56Z",
+    )
+
+    payload = build_session_authority_status_payload_v1(truth_root=tmp_path, environment="PAPER")
+    surfaces = _canonical_surface_map(payload)
+
+    assert surfaces["submit_boundary_status_v1"]["status_value"] == "AUTHORIZED"
+    assert surfaces["aegis_day_run_v1"]["status_value"] == "NOT_READY"
+    assert surfaces["paper_day_control_plane_v1"]["status_value"] == "READY_NOW"
+    assert surfaces["execution_mode_authority_v1"]["status_value"] == "PAPER_TRANSMIT_ENABLED"
+
+
+def test_runtime_readiness_ladder_uses_boundary_day_run_and_execution_mode_surfaces(tmp_path: Path) -> None:
+    _write_state(
+        tmp_path,
+        artifact_rows=[
+            _artifact_row(tmp_path, "market_calendar_day", role_class="REQUIRED_BINDING_INPUT"),
+            _artifact_row(tmp_path, "paper_policy_verdict_v1"),
+            _artifact_row(tmp_path, "trade_submit_readiness_c2_v1"),
+            _artifact_row(tmp_path, "trading_day_state_machine_v1", role_class="REQUIRED_EXECUTION_BOUNDARY"),
+        ],
+    )
+    _write_canonical_readiness_stack(
+        tmp_path,
+        day_utc=DAY,
+        submit_authorized=True,
+        ledger_granted=True,
+        control_plane_ready=True,
+        submit_ts="2026-04-11T22:11:51Z",
+        ledger_ts="2026-04-11T22:11:54Z",
+        control_ts="2026-04-11T22:11:50Z",
+    )
+    _write_day_run_ledger(tmp_path, day_utc=DAY, final_status="NOT_READY", updated_at_utc="2026-04-11T22:11:55Z")
+    _write_execution_mode_authority(tmp_path, day_utc=DAY, mode_state="PAPER_TRANSMIT_ENABLED")
+
+    payload = build_session_authority_status_payload_v1(truth_root=tmp_path, environment="PAPER")
+    rows = {row["key"]: row for row in _build_readiness_ladder(payload, {})}
+
+    assert rows["boundary"]["status"] == "AUTHORIZED"
+    assert rows["ledger"]["status"] == "NOT_READY"
+    assert rows["ledger"]["artifact_ref"]["surface_name"] == "aegis_day_run_v1"
+    assert rows["control"]["status"] == "PAPER_TRANSMIT_ENABLED"
+    assert rows["control"]["artifact_ref"]["surface_name"] == "execution_mode_authority_v1"
+
+
+def test_runtime_readiness_ladder_unknown_only_when_runtime_surface_missing(tmp_path: Path) -> None:
+    _write_state(
+        tmp_path,
+        artifact_rows=[
+            _artifact_row(tmp_path, "market_calendar_day", role_class="REQUIRED_BINDING_INPUT"),
+            _artifact_row(tmp_path, "paper_policy_verdict_v1"),
+            _artifact_row(tmp_path, "trade_submit_readiness_c2_v1"),
+            _artifact_row(tmp_path, "trading_day_state_machine_v1", role_class="REQUIRED_EXECUTION_BOUNDARY"),
+        ],
+    )
+    submit_path = tmp_path / "reports" / "submit_boundary_status_v1" / DAY / "submit_boundary_status.v1.json"
+    if submit_path.exists():
+        submit_path.unlink()
+
+    payload = build_session_authority_status_payload_v1(truth_root=tmp_path, environment="PAPER")
+    surfaces = _canonical_surface_map(payload)
+    rows = {row["key"]: row for row in _build_readiness_ladder(payload, {})}
+
+    assert "submit_boundary_status_v1" not in surfaces
+    assert "aegis_day_run_v1" not in surfaces
+    assert "execution_mode_authority_v1" not in surfaces
+    assert rows["boundary"]["status"] == "UNKNOWN"
+    assert rows["ledger"]["status"] == "UNKNOWN"
+    assert rows["control"]["status"] == "UNKNOWN"
 
 
 def test_status_reports_withheld_rollover_state(tmp_path: Path) -> None:

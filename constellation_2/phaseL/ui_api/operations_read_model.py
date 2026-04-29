@@ -96,8 +96,16 @@ def _build_readiness_ladder(session_status: Dict[str, Any], replay_doc: Optional
     build_ref = session_status.get("target_day_build_ref") if isinstance(session_status.get("target_day_build_ref"), dict) else {}
     admission_ref = session_status.get("target_day_admission_ref") if isinstance(session_status.get("target_day_admission_ref"), dict) else {}
     boundary_surface = _canonical_readiness_row(session_status, "submit_boundary_status_v1") or {}
-    ledger_surface = _canonical_readiness_row(session_status, "paper_session_ledger_v1") or {}
-    control_surface = _canonical_readiness_row(session_status, "paper_day_control_plane_v1") or {}
+    ledger_surface = (
+        _canonical_readiness_row(session_status, "aegis_day_run_v1")
+        or _canonical_readiness_row(session_status, "paper_session_ledger_v1")
+        or {}
+    )
+    control_surface = (
+        _canonical_readiness_row(session_status, "execution_mode_authority_v1")
+        or _canonical_readiness_row(session_status, "paper_day_control_plane_v1")
+        or {}
+    )
     consistency_check = None
     for check in session_status.get("monitoring_checks", []):
         if isinstance(check, dict) and str(check.get("check_name") or "") == "canonical_readiness_authority":
