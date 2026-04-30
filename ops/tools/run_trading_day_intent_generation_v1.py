@@ -29,6 +29,8 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
 )
 from constellation_2.common.paper_session_path_alignment_v1 import resolve_trading_day_intent_generation_path
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+from ops.tools.run_intent_arbitration_v1 import build_intent_arbitration
+from ops.tools.run_sleeve_evaluation_kernel_v1 import build_sleeve_evaluation_kernel
 
 
 OUTPUT_SCHEMA_RELPATH_V1 = (
@@ -239,6 +241,124 @@ def main(argv: List[str] | None = None) -> int:
     output_path = resolve_trading_day_intent_generation_path(truth_root=decision_truth_root, day_utc=day_utc)
     registry_payload, registry_path, registry_sha = _load_registry()
     producer_specs, skipped_active_engines = _load_required_producer_specs()
+
+    sleeve_rollup = build_sleeve_evaluation_kernel(day_utc=day_utc, truth_root=decision_truth_root, environment=PAPER_MODE)
+    arbitration = build_intent_arbitration(day_utc=day_utc, truth_root=decision_truth_root, environment=PAPER_MODE)
+    selected = arbitration.get("selected_intent") if isinstance(arbitration.get("selected_intent"), dict) else {}
+    candidate_intents = arbitration.get("candidate_intents") if isinstance(arbitration.get("candidate_intents"), list) else []
+    blocking_codes = sorted(
+        {
+            str(row.get("canonical_blocker") or "").strip()
+            for row in sleeve_rollup.get("outcomes", [])
+            if isinstance(row, dict) and str(row.get("canonical_blocker") or "").strip()
+        }
+    )
+    if arbitration.get("status") == "SELECTED":
+        final_status = "INTENTS_PRESENT"
+        first_blocker_code = ""
+        first_blocker_artifact_path = ""
+        return_code = 0
+    elif arbitration.get("status") == "NO_EXECUTABLE_INTENT":
+        final_status = "VALID_ZERO"
+        first_blocker_code = "NO_EXECUTABLE_INTENT"
+        first_blocker_artifact_path = str(arbitration.get("artifact_path") or "")
+        return_code = 0
+    else:
+        final_status = "BLOCKED_BY_DEFECT"
+        first_blocker_code = str(arbitration.get("canonical_blocker") or (blocking_codes[0] if blocking_codes else "INTENT_ARBITRATION_BLOCKED"))
+        first_blocker_artifact_path = str(arbitration.get("artifact_path") or "")
+        return_code = 3
+    day_dir = _intents_dir(truth_root=resolve_paper_intent_truth_root_v1(truth_root=decision_truth_root, repo_root=REPO_ROOT), day_utc=day_utc)
+    producer_results = []
+    registry_by_engine = {
+        str(row.get("engine_id") or ""): row
+        for row in registry_payload.get("engines", [])
+        if isinstance(row, dict)
+    }
+    for row in sleeve_rollup.get("outcomes", []) if isinstance(sleeve_rollup.get("outcomes"), list) else []:
+        if not isinstance(row, dict):
+            continue
+        registry_row = registry_by_engine.get(str(row.get("engine_id") or "")) or {}
+        runner_path = (REPO_ROOT / str(registry_row.get("engine_runner_path") or "")).resolve()
+        script_sha = _sha256_file(runner_path) if runner_path.exists() and runner_path.is_file() else "0" * 64
+        status_map = {
+            "INTENT_CREATED": "INTENT_WRITTEN",
+            "NO_INTENT": "NO_INTENT",
+            "BLOCKED": "BLOCKED_BY_DEFECT",
+            "FILTERED_OUT": "SKIPPED",
+            "DISABLED": "SKIPPED",
+        }
+        producer_results.append(
+            _producer_result(
+                logical_name=str(row.get("sleeve_id") or row.get("engine_id") or ""),
+                engine_id=str(row.get("engine_id") or ""),
+                script_path=runner_path if str(registry_row.get("engine_runner_path") or "") else output_path,
+                script_sha256=script_sha,
+                registry_runner_sha256=str(registry_row.get("engine_runner_sha256") or script_sha),
+                status=status_map.get(str(row.get("status") or ""), "BLOCKED_BY_DEFECT"),
+                return_code=int(row.get("exit_code") or 0),
+                reason_codes=[str(code) for code in row.get("reason_codes", [])] if isinstance(row.get("reason_codes"), list) else [],
+                stdout=str(row.get("stdout_summary") or ""),
+                stderr=str(row.get("stderr_summary") or ""),
+                output_paths=[str(item.get("intent_path") or "") for item in row.get("output_intents", []) if isinstance(item, dict) and str(item.get("intent_path") or "")],
+            )
+        )
+    payload = {
+        "schema_id": "trading_day_intent_generation",
+        "schema_version": "v1",
+        "authority_scope": "NON_AUTHORITY_PREREQUISITE_FACT",
+        "day_utc": day_utc,
+        "generation_run_id": f"trading_day_intent_generation:{day_utc}:{produced_at_utc}",
+        "produced_at_utc": produced_at_utc,
+        "producer": producer_block_v1(module="ops/tools/run_trading_day_intent_generation_v1.py"),
+        "truth_root": str(decision_truth_root),
+        "active_engine_registry_path": str(registry_path),
+        "active_engine_registry_sha256": registry_sha,
+        "producer_topology": [
+            {
+                "engine_id": spec.engine_id,
+                "script_path": str(spec.script_path),
+                "script_sha256": _sha256_file(spec.script_path),
+                "registry_runner_sha256": spec.registry_runner_sha256,
+                "required": True,
+            }
+            for spec in producer_specs
+        ],
+        "skipped_active_engines": skipped_active_engines,
+        "producer_results": producer_results,
+        "final_status": final_status,
+        "first_blocker_code": first_blocker_code,
+        "first_blocker_artifact_path": first_blocker_artifact_path,
+        "canonical_outputs": {
+            "intents_dir": str(day_dir),
+            "intent_output_paths": [str(row.get("intent_path") or "") for row in candidate_intents if isinstance(row, dict)],
+            "no_intents_marker_path": "",
+            "output_count": len(candidate_intents),
+        },
+        "blocking_codes": blocking_codes,
+        "human_readable_summary": f"Intent generation reached {final_status} for {day_utc}.",
+    }
+    atomic_write_validated_json_v1(
+        path=output_path,
+        payload=payload,
+        schema_relpath=OUTPUT_SCHEMA_RELPATH_V1,
+    )
+    print(
+        json.dumps(
+            {
+                "final_status": final_status,
+                "first_blocker_code": first_blocker_code,
+                "generation_run_id": payload["generation_run_id"],
+                "intent_output_count": len(candidate_intents),
+                "selected_intent_pointer_path": str(arbitration.get("selected_intent_pointer_path") or ""),
+                "no_intents_marker_path": "",
+                "path": str(output_path),
+                "sha256": _sha256_file(output_path),
+            },
+            sort_keys=True,
+        )
+    )
+    return return_code
 
     day_dir = _intents_dir(truth_root=intent_truth_root, day_utc=day_utc)
     marker_path = _marker_path(truth_root=intent_truth_root, day_utc=day_utc)

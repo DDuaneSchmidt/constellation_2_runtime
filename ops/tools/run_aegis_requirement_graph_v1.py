@@ -20,6 +20,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
 )
 from ops.tools import run_aegis_bod_prepare_v1 as bod
 from ops.tools import run_options_chain_snapshot_required_day_v1 as options_required
+from ops.tools.run_intent_arbitration_v1 import intent_arbitration_path, selected_intent_pointer_path
 
 SCHEMA_VERSION = "aegis_requirement_graph.v1"
 SOURCE_ACTIVE_INTENT = "ACTIVE_INTENT"
@@ -72,6 +73,28 @@ def _intent_symbol(payload: dict[str, Any]) -> str:
 
 
 def _discover_active_intents(*, truth_root: Path, execution_root: Path, day_utc: str) -> list[dict[str, Any]]:
+    pointer_path = selected_intent_pointer_path(truth_root=truth_root, day_utc=day_utc)
+    if pointer_path.exists() and pointer_path.is_file():
+        pointer = _read_json(pointer_path)
+        if str(pointer.get("status") or "").strip().upper() != "SELECTED":
+            return []
+        selected = pointer.get("selected_intent") if isinstance(pointer.get("selected_intent"), dict) else {}
+        intent_path_text = str(selected.get("intent_path") or "").strip()
+        path = Path(intent_path_text).expanduser().resolve() if intent_path_text else None
+        if path is not None and path.exists() and path.is_file():
+            payload = read_json_object_v1(path)
+            intent_id = str(payload.get("intent_id") or selected.get("intent_id") or path.stem).strip()
+            symbol = _intent_symbol(payload)
+            return [
+                {
+                    "intent_id": intent_id,
+                    "intent_path": str(path),
+                    "instrument": symbol,
+                    "requires_options": _is_option_intent(payload) and bool(symbol),
+                    "risk_class": str(payload.get("risk_class") or "").strip(),
+                    "exposure_type": str(payload.get("exposure_type") or "").strip(),
+                }
+            ]
     intent_truth_root = resolve_paper_intent_truth_root_v1(truth_root=execution_root, repo_root=REPO_ROOT)
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -377,9 +400,52 @@ def _root_requirement(nodes: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def build_requirement_graph(ctx: bod.BodContext) -> dict[str, Any]:
-    intents = _discover_active_intents(truth_root=ctx.truth_root, execution_root=ctx.execution_root, day_utc=ctx.day_utc)
     nodes: list[dict[str, Any]] = []
     nodes.extend(_lifecycle_nodes(ctx))
+    arbitration_path = intent_arbitration_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    pointer_path = selected_intent_pointer_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    if not arbitration_path.exists() and not pointer_path.exists():
+        nodes.append(
+            _node(
+                requirement_id="STRATEGY_AND_RISK:intent_arbitration",
+                owner_phase="STRATEGY_AND_RISK",
+                source_type=SOURCE_LIFECYCLE_PHASE,
+                source_id="INTENT_ARBITRATION",
+                instrument="",
+                required_artifact="selected_intent_pointer",
+                expected_path=pointer_path,
+                producer_command=f"python3 ops/tools/run_intent_arbitration_v1.py --day_utc {ctx.day_utc} --environment {ctx.environment}",
+                consumer="aegis_requirement_graph_v1",
+                status="BLOCKED",
+                blocker="INTENT_ARBITRATION_MISSING",
+                blocker_detail=f"missing arbitration={arbitration_path} selected_pointer={pointer_path}",
+                operator_next_action="Run sleeve evaluation and intent arbitration for the current day.",
+            )
+        )
+        intents: list[dict[str, Any]] = []
+    elif pointer_path.exists() and pointer_path.is_file() and str(_read_json(pointer_path).get("status") or "").strip().upper() != "SELECTED":
+        pointer = _read_json(pointer_path)
+        blocker = str(pointer.get("canonical_blocker") or pointer.get("status") or "NO_EXECUTABLE_INTENT").strip()
+        nodes.append(
+            _node(
+                requirement_id="STRATEGY_AND_RISK:selected_intent",
+                owner_phase="STRATEGY_AND_RISK",
+                source_type=SOURCE_LIFECYCLE_PHASE,
+                source_id="INTENT_ARBITRATION",
+                instrument="",
+                required_artifact="selected_intent_pointer",
+                expected_path=pointer_path,
+                producer_command=f"python3 ops/tools/run_market_session_intent_engine_v1.py --day_utc {ctx.day_utc} --environment {ctx.environment} --once",
+                consumer="aegis_requirement_graph_v1",
+                status="BLOCKED",
+                blocker=blocker,
+                blocker_detail=f"selected intent pointer status={pointer.get('status')} blocker={blocker}",
+                operator_next_action="Review sleeve scan outcomes and resolve arbitration blocker or accept no-trade day.",
+            )
+        )
+        intents = []
+    else:
+        intents = _discover_active_intents(truth_root=ctx.truth_root, execution_root=ctx.execution_root, day_utc=ctx.day_utc)
     for intent in intents:
         if intent.get("requires_options"):
             nodes.extend(_option_requirement_nodes(day_utc=ctx.day_utc, execution_root=ctx.execution_root, intent=intent))

@@ -21,6 +21,7 @@ from constellation_2.common.aegis_structure_selection_v1 import (
 )
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
 from ops.tools import run_aegis_bod_prepare_v1 as bod
+from ops.tools.run_intent_arbitration_v1 import intent_arbitration_path, selected_intent_pointer_path
 
 SCHEMA_VERSION = "structure_decision_supply.v1"
 POLICY_PATH = REPO_ROOT / "governance" / "02_REGISTRIES" / "C2_EXPOSURE_TO_OPTIONS_INTENT_POLICY_V1.json"
@@ -32,6 +33,9 @@ ALLOWED_BLOCKERS = {
     "NO_ELIGIBLE_OPTION_STRUCTURE",
     "STRUCTURE_POLICY_MISSING",
     "STRUCTURE_DECISION_VALIDATION_FAILED",
+    "INTENT_ARBITRATION_MISSING",
+    "NO_EXECUTABLE_INTENT",
+    "ALLOWED_SYMBOL_MISMATCH",
 }
 
 
@@ -59,6 +63,16 @@ def structure_decision_supply_path(*, truth_root: Path, day_utc: str) -> Path:
 
 
 def _intent_files(ctx: bod.BodContext) -> list[Path]:
+    pointer_path = selected_intent_pointer_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    if pointer_path.exists() and pointer_path.is_file():
+        pointer = _read_json(pointer_path)
+        if str(pointer.get("status") or "").strip().upper() != "SELECTED":
+            return []
+        selected = pointer.get("selected_intent") if isinstance(pointer.get("selected_intent"), dict) else {}
+        intent_path = str(selected.get("intent_path") or "").strip()
+        if intent_path:
+            path = Path(intent_path).expanduser().resolve()
+            return [path] if path.exists() and path.is_file() else []
     root = ctx.execution_root / "intents_v1" / "snapshots" / ctx.day_utc
     if not root.exists() or not root.is_dir():
         return []
@@ -458,6 +472,24 @@ def _blocked(ctx: bod.BodContext, blocker: str, action: str, **sections: Any) ->
 
 
 def build_structure_decision_supply_v1(ctx: bod.BodContext) -> dict[str, Any]:
+    arbitration_path = intent_arbitration_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    pointer_path = selected_intent_pointer_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    if not arbitration_path.exists() and not pointer_path.exists():
+        return _blocked(
+            ctx,
+            "INTENT_ARBITRATION_MISSING",
+            "Run sleeve evaluation and intent arbitration before structure selection.",
+            active_intents=[],
+        )
+    if pointer_path.exists() and pointer_path.is_file():
+        pointer = _read_json(pointer_path)
+        if str(pointer.get("status") or "").strip().upper() != "SELECTED":
+            return _blocked(
+                ctx,
+                str(pointer.get("canonical_blocker") or pointer.get("status") or "NO_EXECUTABLE_INTENT"),
+                "Resolve intent arbitration before structure selection.",
+                active_intents=[],
+            )
     intents = _active_intents(ctx)
     active_rows = [
         {
