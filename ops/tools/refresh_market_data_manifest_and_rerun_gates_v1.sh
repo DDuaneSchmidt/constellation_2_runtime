@@ -33,11 +33,11 @@ ss -ltn | grep ':4002'
 
 echo
 echo "=== STEP: refresh manifest using only already-existing year files ==="
+echo "INFO: symbol universe resolves from active ENGINE_MODEL_REGISTRY_V1; pass --symbols to downloader only for an operator override"
 echo "INFO: this intentionally avoids missing years 2018-2025"
 "$PY" constellation_2/phaseJ/tools/ib_historical_market_data_snapshot_downloader_v1.py \
   --run_utc "$RUN_UTC" \
   --dataset_version v1 \
-  --symbols SPY,QQQ,IWM,TLT,GLD,HYG \
   --start_year 2017 \
   --end_year 2017 \
   --host 127.0.0.1 \

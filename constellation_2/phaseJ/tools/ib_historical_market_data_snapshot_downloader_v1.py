@@ -30,6 +30,14 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 ISO_Z = "%Y-%m-%dT%H:%M:%SZ"
+ENGINE_MODEL_REGISTRY_RELPATH = Path("governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json")
+SIMULATOR_ENGINE_ID = "C2_INTENT_SIMULATOR_V1"
+REGISTRY_SYMBOL_SOURCE = "ENGINE_MODEL_REGISTRY_V1.active_allowed_symbols"
+OPERATOR_SYMBOL_SOURCE = "OPERATOR_CLI_OVERRIDE"
+LEGACY_DEPRECATED_SYMBOL_SETS = {
+    ("GLD", "IWM", "QQQ", "TLT"),
+    ("GLD", "HYG", "IWM", "QQQ", "SPY", "TLT"),
+}
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -73,6 +81,80 @@ def _select_truth_root(repo_root: Path) -> Path:
     if env:
         return _require_abs_existing_dir(env, "C2_TRUTH_ROOT")
     return (repo_root / "constellation_2" / "runtime" / "truth").resolve()
+
+
+def _normalize_symbols(values: List[str]) -> List[str]:
+    symbols: List[str] = []
+    for value in values:
+        for part in str(value or "").split(","):
+            symbol = part.strip().upper()
+            if symbol:
+                symbols.append(symbol)
+    return sorted(set(symbols))
+
+
+def _authoritative_symbols_from_engine_registry(repo_root: Path) -> List[str]:
+    registry_path = (repo_root / ENGINE_MODEL_REGISTRY_RELPATH).resolve()
+    if not registry_path.exists():
+        return []
+
+    with registry_path.open("r", encoding="utf-8") as f:
+        registry = json.load(f)
+
+    symbols: List[str] = []
+    for engine in list(registry.get("engines", [])):
+        if str(engine.get("activation_status", "")).upper() != "ACTIVE":
+            continue
+        if str(engine.get("engine_id", "")) == SIMULATOR_ENGINE_ID:
+            continue
+        symbols.extend([str(s) for s in list(engine.get("allowed_symbols", []))])
+    return _normalize_symbols(symbols)
+
+
+def _symbol_resolution_diagnostics(
+    *,
+    symbol_source: str,
+    symbols_requested: List[str],
+    symbols_authoritative: List[str],
+) -> dict:
+    requested = _normalize_symbols(symbols_requested)
+    authoritative = _normalize_symbols(symbols_authoritative)
+    return {
+        "symbol_source": symbol_source,
+        "symbols_requested": requested,
+        "symbols_authoritative": authoritative,
+        "deprecated_symbol_source_detected": tuple(requested) in LEGACY_DEPRECATED_SYMBOL_SETS,
+        "affected_components": [
+            "historical_market_data_backfill",
+            "market_data_snapshot_v1",
+        ],
+    }
+
+
+def _resolve_requested_symbols(repo_root: Path, cli_symbol: List[str], cli_symbols: str) -> Tuple[List[str], dict]:
+    symbols_authoritative = _authoritative_symbols_from_engine_registry(repo_root)
+    symbols_from_cli = _normalize_symbols(list(cli_symbol or []) + [cli_symbols or ""])
+
+    if symbols_from_cli:
+        diagnostics = _symbol_resolution_diagnostics(
+            symbol_source=OPERATOR_SYMBOL_SOURCE,
+            symbols_requested=symbols_from_cli,
+            symbols_authoritative=symbols_authoritative,
+        )
+        return symbols_from_cli, diagnostics
+
+    if not symbols_authoritative:
+        raise SystemExit(
+            "FAIL: no symbols provided and no authoritative active registry symbols found "
+            f"at {ENGINE_MODEL_REGISTRY_RELPATH}"
+        )
+
+    diagnostics = _symbol_resolution_diagnostics(
+        symbol_source=REGISTRY_SYMBOL_SOURCE,
+        symbols_requested=symbols_authoritative,
+        symbols_authoritative=symbols_authoritative,
+    )
+    return symbols_authoritative, diagnostics
 
 
 def _ensure_dir(path: Path) -> None:
@@ -299,8 +381,17 @@ def main() -> int:
     )
     ap.add_argument("--run_utc", required=True, help="Determinism anchor timestamp (UTC Z): YYYY-MM-DDTHH:MM:SSZ")
     ap.add_argument("--dataset_version", default="v1", help="Dataset version string (default v1). Must match manifest.dataset_version if manifest exists.")
-    ap.add_argument("--symbol", action="append", default=[], help="Symbol to download (repeatable). Example: --symbol SPY --symbol QQQ")
-    ap.add_argument("--symbols", default="", help="Comma-separated symbols (alternative to repeated --symbol). Example: SPY,QQQ,IWM")
+    ap.add_argument(
+        "--symbol",
+        action="append",
+        default=[],
+        help="Operator override symbol to download (repeatable). If omitted, active registry symbols are used.",
+    )
+    ap.add_argument(
+        "--symbols",
+        default="",
+        help="Operator override comma-separated symbols. If omitted, active registry symbols are used.",
+    )
     ap.add_argument("--start_year", type=int, required=True, help="First year to download (inclusive).")
     ap.add_argument("--end_year", type=int, required=True, help="Last year to download (inclusive).")
     ap.add_argument("--host", default="127.0.0.1", help="IB host (default 127.0.0.1).")
@@ -320,17 +411,7 @@ def main() -> int:
     if not dataset_version:
         raise SystemExit("FAIL: --dataset_version must be non-empty")
 
-    symbols: List[str] = []
-    if args.symbol:
-        symbols.extend([s.strip().upper() for s in args.symbol if s.strip()])
-    if args.symbols.strip():
-        symbols.extend([s.strip().upper() for s in args.symbols.split(",") if s.strip()])
-
-    if not symbols:
-        raise SystemExit("FAIL: no symbols provided (use --symbol repeatable or --symbols comma-separated)")
-
-    # Deduplicate symbol list deterministically.
-    symbols = sorted(set(symbols))
+    symbols, symbol_diagnostics = _resolve_requested_symbols(repo_root, args.symbol, args.symbols)
 
     if args.start_year > args.end_year:
         raise SystemExit("FAIL: --start_year must be <= --end_year")
@@ -338,6 +419,7 @@ def main() -> int:
     print(f"OK: repo_root={repo_root}")
     print(f"OK: truth_root={truth_root}")
     print(f"OK: spine_root={spine_root}")
+    print(f"OK: symbol_resolution={json.dumps(symbol_diagnostics, sort_keys=True, separators=(',', ':'))}")
     print(f"OK: symbols={symbols}")
     print(f"OK: years={args.start_year}..{args.end_year}")
     print(f"OK: run_utc={run_utc}")
@@ -543,6 +625,11 @@ def main() -> int:
     manifest_out = {
         "dataset_version": manifest["dataset_version"],
         "symbols": symbols_sorted,
+        "symbol_source": symbol_diagnostics["symbol_source"],
+        "symbols_requested": symbol_diagnostics["symbols_requested"],
+        "symbols_authoritative": symbol_diagnostics["symbols_authoritative"],
+        "deprecated_symbol_source_detected": symbol_diagnostics["deprecated_symbol_source_detected"],
+        "affected_components": symbol_diagnostics["affected_components"],
         "date_range": {"start": start_day, "end": end_day},
         "files": merged_files_sorted,
         "global_hash": _stable_global_hash(merged_files_sorted),
