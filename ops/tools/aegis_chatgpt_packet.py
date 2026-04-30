@@ -38,6 +38,13 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 MAX_FRESHNESS_DAYS = 2
 MAX_PROVEN_DAYS = 14
 DAY_RUN_SCHEMA_VERSION = "aegis_day_run.v1"
+DAY_RUN_READY_FINAL_STATUSES = {
+    "PRE_MARKET_READY",
+    "PAPER_READY",
+    "PAPER_READY_WITH_DELAYED_DATA",
+    "TRADING_ACTIVE",
+    "EOD_COMPLETE",
+}
 
 SECRET_PATTERNS = [
     re.compile(r"(?i)\bapi[_-]?key\s*[:=]\s*\S+"),
@@ -1512,12 +1519,6 @@ def _build_current_calendar_day_runtime_status(roots: RootResolution) -> Current
         global_monitoring_status = "DEGRADED"
         global_monitoring_blocker = operator_gate_blocker
 
-    service_status_summary = (
-        f"paper_orchestrator={paper_orchestrator_status}/{paper_orchestrator_blocker or '<none>'}; "
-        f"global_monitoring={global_monitoring_status}/{global_monitoring_blocker or '<none>'}; "
-        f"operator_gate={operator_gate_status}/{operator_gate_blocker or '<none>'}"
-    )
-
     evidence_parts = [
         str(path)
         for path in (
@@ -1531,6 +1532,31 @@ def _build_current_calendar_day_runtime_status(roots: RootResolution) -> Current
         if path is not None
     ]
     evidence = " ; ".join(evidence_parts) if evidence_parts else "NOT_FOUND"
+
+    day_run = _load_day_run_ledger_status(roots, day_utc)
+    if day_run.exists:
+        if day_run.final_status in DAY_RUN_READY_FINAL_STATUSES:
+            status = "READY"
+            canonical_blocker = ""
+        else:
+            status = "NOT_READY"
+            canonical_blocker = day_run.canonical_blocker or "DAY_RUN_NOT_READY"
+        service_status_summary = (
+            f"day_run={day_run.final_status}/{canonical_blocker or '<none>'}; "
+            f"day_run_phase={day_run.canonical_phase or '<none>'}; "
+            "legacy_session_surfaces=DIAGNOSTIC_ONLY"
+        )
+        evidence = (
+            f"day_run={day_run.path} ; legacy_session_evidence={evidence}"
+            if evidence and evidence != "NOT_FOUND"
+            else f"day_run={day_run.path}"
+        )
+    else:
+        service_status_summary = (
+            f"paper_orchestrator={paper_orchestrator_status}/{paper_orchestrator_blocker or '<none>'}; "
+            f"global_monitoring={global_monitoring_status}/{global_monitoring_blocker or '<none>'}; "
+            f"operator_gate={operator_gate_status}/{operator_gate_blocker or '<none>'}"
+        )
 
     if is_trading_session is True:
         is_trading_session_text = "true"
@@ -2193,7 +2219,7 @@ def _build_paper_status(
         else latest_trading_day.evidence_day_utc
     )
     freshness_status = _freshness_status_for_day(freshness_day)
-    ledger_ready = day_run.final_status in {"PRE_MARKET_READY", "PAPER_READY", "PAPER_READY_WITH_DELAYED_DATA", "TRADING_ACTIVE", "EOD_COMPLETE"}
+    ledger_ready = day_run.final_status in DAY_RUN_READY_FINAL_STATUSES
     signals: list[ReadinessSignal] = []
     source_blocked = source_integrity_gate is not None and source_integrity_gate.effective_status == "BLOCKED"
     if source_blocked:

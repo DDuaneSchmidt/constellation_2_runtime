@@ -143,6 +143,7 @@ def _snapshot(
     ctx: bod.BodContext,
     *,
     day: str | None = None,
+    symbol: str = "SPY",
     fresh: bool = True,
     quotes: bool = True,
     timestamps: bool = True,
@@ -154,7 +155,7 @@ def _snapshot(
     snap = root / "options_chain_snapshot.v1.json"
     cert = root / "freshness_certificate.v1.json"
     contract = {"bid": "1.00", "ask": "1.10"} if quotes else {"strike": "500"}
-    underlying = {"symbol": "SPY", "spot_price": "500.00"}
+    underlying = {"symbol": symbol, "spot_price": "500.00"}
     if timestamps:
         underlying["spot_as_of_utc"] = f"{day_utc}T14:30:00Z"
     payload = {
@@ -175,6 +176,43 @@ def _snapshot(
         encoding="utf-8",
     )
     return snap, cert
+
+
+def _selected_pointer(ctx: bod.BodContext, *, symbol: str = "SPY") -> Path:
+    intent_path = ctx.execution_root / "intents_v1" / "snapshots" / ctx.day_utc / f"{symbol.lower()}.exposure_intent.v1.json"
+    intent_path.parent.mkdir(parents=True, exist_ok=True)
+    intent_path.write_text(
+        json.dumps(
+            {
+                "schema_id": "exposure_intent",
+                "schema_version": "v1",
+                "intent_id": f"intent_{symbol.lower()}",
+                "underlying": {"symbol": symbol},
+                "option": {"structure": "PUT"},
+                "exposure_type": "SHORT_VOL_DEFINED",
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    pointer = open_gate.selected_intent_pointer_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    pointer.parent.mkdir(parents=True, exist_ok=True)
+    pointer.write_text(
+        json.dumps(
+            {
+                "schema_id": "selected_intent_pointer",
+                "schema_version": "v1",
+                "day_utc": ctx.day_utc,
+                "environment": "PAPER",
+                "status": "SELECTED",
+                "canonical_blocker": "",
+                "selected_intent": {"intent_id": f"intent_{symbol.lower()}", "intent_path": str(intent_path), "symbol": symbol},
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    return pointer
 
 
 def test_owned_spy_active_intent_creates_market_data_requirements(tmp_path: Path) -> None:
@@ -565,6 +603,7 @@ def test_pre_market_entitlement_denied_still_blocks(tmp_path: Path) -> None:
 
 def test_market_open_gate_before_open_is_pending(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
+    _selected_pointer(ctx)
     monkeypatch.setattr(open_gate, "_market_session_state", lambda: "PRE_MARKET")
     monkeypatch.setattr(open_gate, "_run_capture", lambda *_args, **_kwargs: pytest.fail("capture should not run before open"))
 
@@ -638,6 +677,7 @@ def test_market_open_gate_prioritizes_no_intent_over_after_hours(monkeypatch: py
 
 def test_market_open_gate_passes_during_market_with_valid_supply(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
+    _selected_pointer(ctx)
     mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     mds_path.parent.mkdir(parents=True, exist_ok=True)
     mds_path.write_text('{"status":"PASS","canonical_blocker":"","artifacts":[]}\n', encoding="utf-8")
@@ -651,8 +691,26 @@ def test_market_open_gate_passes_during_market_with_valid_supply(monkeypatch: py
     assert payload["canonical_blocker"] == ""
 
 
+def test_market_open_gate_uses_selected_intent_symbol(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _selected_pointer(ctx, symbol="IWM")
+    mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    mds_path.parent.mkdir(parents=True, exist_ok=True)
+    mds_path.write_text('{"status":"PASS","canonical_blocker":"","requirements":[{"instrument":"IWM"}],"artifacts":[]}\n', encoding="utf-8")
+    _snapshot(ctx, symbol="IWM")
+    monkeypatch.setattr(open_gate, "_market_session_state", lambda: "REGULAR")
+    monkeypatch.setattr(open_gate, "_run_market_data_supply", lambda _ctx: {"exit_code": 0})
+
+    payload = open_gate.build_market_open_data_gate(ctx)
+
+    assert payload["status"] == "PASS"
+    assert payload["canonical_blocker"] == ""
+    assert "/options_chain_snapshot_v1/" in payload["snapshot_path"]
+
+
 def test_market_open_gate_stale_snapshot_attempts_capture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
+    _selected_pointer(ctx)
     _snapshot(ctx, fresh=False)
     mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     calls = {"mds": 0, "capture": 0}
@@ -684,6 +742,7 @@ def test_market_open_gate_stale_snapshot_attempts_capture(monkeypatch: pytest.Mo
 
 def test_market_open_gate_failed_capture_reports_specific_blocker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
+    _selected_pointer(ctx)
     _snapshot(ctx, fresh=False)
     mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
 
@@ -708,6 +767,7 @@ def test_market_open_gate_failed_capture_reports_specific_blocker(monkeypatch: p
 
 def test_market_open_gate_missing_freshness_certificate_is_specific(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
+    _selected_pointer(ctx)
     mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     calls = {"mds": 0}
 

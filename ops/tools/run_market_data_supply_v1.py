@@ -362,7 +362,7 @@ def _provider_checks_from_entitlement(
     delayed_accepted = bool(delayed_policy.get("delayed_data_accepted_by_policy") is True)
     permission_evidence = _ib_permission_evidence_from_entitlement(entitlement_probe)
     evidence = permission_evidence or [{"artifact_type": "ib_market_data_entitlement_probe", "path": str(entitlement_probe.get("path") or _entitlement_probe_path(ctx, instrument)), "exists": True}]
-    action = "Enable IBKR Client Portal market-data subscriptions and API market-data access for SPY underlying and options for the logged-in trading user/account."
+    action = f"Enable IBKR Client Portal market-data subscriptions and API market-data access for {instrument} underlying and options for the logged-in trading user/account."
     if live_available:
         return (
             [
@@ -671,15 +671,15 @@ def _run_market_data_authority(ctx: bod.BodContext) -> tuple[dict[str, Any], str
 
 def _operator_action(blocker: str, instrument: str, day_utc: str) -> str:
     if blocker == "OPTIONS_MARKET_DATA_PERMISSION_DENIED":
-        return "Enable IBKR Client Portal market-data subscriptions and API market-data access for SPY underlying and options for the logged-in trading user/account."
+        return f"Enable IBKR Client Portal market-data subscriptions and API market-data access for {instrument} underlying and options for the logged-in trading user/account."
     if blocker == "MARKET_OPEN_DATA_PENDING":
         return f"BOD market-data prerequisites are complete enough for pre-market; rerun python3 ops/tools/run_market_open_data_gate_v1.py --day_utc {day_utc} --environment PAPER after 09:30 ET."
     if blocker == "OPTIONS_QUOTES_UNAVAILABLE_OUTSIDE_MARKET_HOURS":
-        return f"Rerun SPY options delayed quote capture during regular US options market hours for {day_utc}, or enable live IBKR API option quote entitlement."
+        return f"Rerun {instrument} options delayed quote capture during regular US options market hours for {day_utc}, or enable live IBKR API option quote entitlement."
     if blocker == "OPTIONS_DELAYED_QUOTES_NOT_RETURNED_BY_IB":
         return "IB did not return delayed option quote callbacks; confirm delayed option quotes are enabled in TWS/API and retry during regular US options market hours."
     if blocker == "OPTIONS_QUOTES_MISSING_BID_ASK":
-        return "SPY option bid/ask quotes are required for snapshot construction; enable OPRA/API option bid/ask quotes or retry during regular options market hours."
+        return f"{instrument} option bid/ask quotes are required for snapshot construction; enable OPRA/API option bid/ask quotes or retry during regular options market hours."
     if blocker == "OPTIONS_MARKET_DATA_POLICY_REJECTED_QUOTE_TYPE":
         return "IB returned only non-bid/ask option quote fields; current PAPER policy requires bid/ask for readiness, so enable option bid/ask quotes or change governed policy only if the strategy/order builder supports it."
     if blocker == "OPTIONS_QUOTE_VALIDATION_TOO_STRICT":

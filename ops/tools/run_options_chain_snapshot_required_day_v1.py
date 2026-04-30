@@ -21,9 +21,11 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     read_json_object_v1,
     resolve_paper_intent_truth_root_v1,
 )
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
 from constellation_2.common.sleeve_execution_root_v1 import resolve_sleeve_execution_root_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from ops.tools.c2_account_resolution_v1 import resolve_single_paper_ib_account_from_sleeve_registry
+from ops.tools.run_intent_arbitration_v1 import selected_intent_pointer_path
 
 
 OPTIONS_CHAIN_SCHEMA = "constellation_2/schemas/options_chain_snapshot.v1.schema.json"
@@ -62,6 +64,64 @@ def _parse_iso(value: Any) -> datetime | None:
         return None
 
 
+def _canonical_truth_root() -> Path:
+    try:
+        return resolve_canonical_truth_root().resolve()
+    except Exception:
+        return Path("")
+
+
+def _intent_option_symbol(payload: Dict[str, Any]) -> str:
+    option = payload.get("option")
+    exposure_type = str(payload.get("exposure_type") or "").strip().upper()
+    has_option_structure = isinstance(option, dict) or exposure_type in {"SHORT_VOL_DEFINED", "VOL_INCOME_DEFINED"}
+    if not has_option_structure:
+        return ""
+    underlying = payload.get("underlying")
+    if isinstance(underlying, dict):
+        return str(underlying.get("symbol") or "").strip().upper()
+    if isinstance(underlying, str):
+        return underlying.strip().upper()
+    return str(payload.get("symbol") or "").strip().upper()
+
+
+def _selected_pointer_option_symbols(*, candidate_roots: List[Path], day_utc: str) -> tuple[bool, List[str]]:
+    seen: set[str] = set()
+    for root in candidate_roots:
+        if not str(root):
+            continue
+        resolved = Path(root).expanduser().resolve()
+        key = str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        pointer_path = selected_intent_pointer_path(truth_root=resolved, day_utc=day_utc)
+        if not pointer_path.exists() or not pointer_path.is_file():
+            continue
+        try:
+            pointer = read_json_object_v1(pointer_path)
+        except ValueError:
+            return True, []
+        if str(pointer.get("day_utc") or day_utc).strip() != day_utc:
+            continue
+        if str(pointer.get("status") or "").strip().upper() != "SELECTED":
+            return True, []
+        selected = pointer.get("selected_intent") if isinstance(pointer.get("selected_intent"), dict) else {}
+        intent_path = str(selected.get("intent_path") or "").strip()
+        payload: Dict[str, Any] = {}
+        if intent_path:
+            try:
+                payload = read_json_object_v1(Path(intent_path).expanduser().resolve())
+            except ValueError:
+                payload = {}
+        source = payload or selected
+        symbol = _intent_option_symbol(source)
+        if not symbol:
+            symbol = str(selected.get("symbol") or "").strip().upper()
+        return True, [symbol] if symbol and _intent_option_symbol(source) else []
+    return False, []
+
+
 def _option_symbols_from_intents(*, truth_root: Path, day_utc: str) -> List[str]:
     symbols: List[str] = []
     for path in collect_intent_files_v1(truth_root=truth_root, day_utc=day_utc):
@@ -69,17 +129,7 @@ def _option_symbols_from_intents(*, truth_root: Path, day_utc: str) -> List[str]
             payload = read_json_object_v1(path)
         except ValueError:
             continue
-        option = payload.get("option")
-        exposure_type = str(payload.get("exposure_type") or "").strip().upper()
-        has_option_structure = isinstance(option, dict) or exposure_type in {"SHORT_VOL_DEFINED", "VOL_INCOME_DEFINED"}
-        if not has_option_structure:
-            continue
-        underlying = payload.get("underlying")
-        symbol = ""
-        if isinstance(underlying, dict):
-            symbol = str(underlying.get("symbol") or "").strip().upper()
-        elif isinstance(underlying, str):
-            symbol = underlying.strip().upper()
+        symbol = _intent_option_symbol(payload)
         if symbol:
             symbols.append(symbol)
     return sorted(set(symbols))
@@ -316,7 +366,14 @@ def main(argv: List[str] | None = None) -> int:
     intent_truth_root = resolve_paper_intent_truth_root_v1(truth_root=truth_root, repo_root=REPO_ROOT)
     symbols = [str(symbol or "").strip().upper() for symbol in args.symbol if str(symbol or "").strip()]
     if args.symbols_from_intents == "YES":
-        symbols.extend(_option_symbols_from_intents(truth_root=intent_truth_root, day_utc=day_utc))
+        pointer_present, pointer_symbols = _selected_pointer_option_symbols(
+            candidate_roots=[_canonical_truth_root(), truth_root],
+            day_utc=day_utc,
+        )
+        if pointer_present:
+            symbols.extend(pointer_symbols)
+        else:
+            symbols.extend(_option_symbols_from_intents(truth_root=intent_truth_root, day_utc=day_utc))
     required_symbols = sorted(set(symbols))
 
     steps: List[Dict[str, Any]] = []

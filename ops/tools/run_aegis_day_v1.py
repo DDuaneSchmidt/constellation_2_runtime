@@ -45,6 +45,7 @@ MARKET_DATA_BLOCKERS = {
     "OPTIONS_CHAIN_SNAPSHOT_MISSING",
     "OPTIONS_SNAPSHOT_CAPTURE_FAILED",
     "OPTIONS_SNAPSHOT_ROOT_MISSING",
+    "OPTIONS_SNAPSHOT_SYMBOL_MISSING",
     "UNDERLYING_SPOT_MISSING",
     "OPTIONS_UNDERLYING_SPOT_MISSING",
     "OPTIONS_QUOTES_MISSING",
@@ -77,11 +78,16 @@ SESSION_SUPPORTING_READINESS_BLOCKERS = {
     "OPTIONS_CHAIN_SNAPSHOT_MISSING",
     "OPTIONS_SNAPSHOT_CAPTURE_FAILED",
     "OPTIONS_SNAPSHOT_ROOT_MISSING",
+    "OPTIONS_SNAPSHOT_SYMBOL_MISSING",
     "MARKET_DATA_AUTHORITY_BLOCKED",
     "AUTHZ_MISSING_DEFINED_RISK_EVIDENCE",
     "CAPITAL_RISK_ENVELOPE_NOT_PASS",
     "SUBMIT_BOUNDARY_NOT_AUTHORIZED",
     "SUBMIT_BOUNDARY_READINESS_POLICY_NOT_PASS",
+}
+
+SESSION_DIAGNOSTIC_ONLY_BLOCKERS = {
+    "OPTIONS_SNAPSHOT_SYMBOL_MISSING",
 }
 
 MARKET_OPEN_DATA_GATE_BLOCKERS = {
@@ -413,14 +419,19 @@ def _phase_session_authority(ctx: PhaseContext, env: dict[str, str]) -> dict[str
     kill_state = str(kill.get("state") or kill.get("kill_switch_state") or "").strip().upper()
     blocker = ""
     downstream: list[str] = []
+    session_allows_submit_flow = (
+        authority_status in {"GRANTED", "AUTHORIZED"}
+        and kill_state in {"", "INACTIVE"}
+        and (bootstrap_semantic_status in {"READY_PAPER_ONLY", "READY"} or bootstrap_status == "READY")
+    )
     for item in blockers:
+        if item in SESSION_DIAGNOSTIC_ONLY_BLOCKERS and session_allows_submit_flow:
+            continue
         if item in MARKET_DATA_BLOCKERS:
             downstream.append(item)
         elif (
             item in SESSION_SUPPORTING_READINESS_BLOCKERS
-            and authority_status in {"GRANTED", "AUTHORIZED"}
-            and kill_state in {"", "INACTIVE"}
-            and (bootstrap_semantic_status in {"READY_PAPER_ONLY", "READY"} or bootstrap_status == "READY")
+            and session_allows_submit_flow
         ):
             downstream.append(item)
         else:

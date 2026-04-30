@@ -239,6 +239,87 @@ def test_blocked_selected_pointer_prevents_stale_option_symbol_requirement(monke
     assert symbols == []
 
 
+def test_options_required_uses_selected_option_symbol_over_stale_option_intents(monkeypatch, tmp_path: Path, capsys) -> None:
+    truth_root = (tmp_path / "truth").resolve()
+    execution_root = (tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER").resolve()
+    truth_root.mkdir(parents=True)
+    execution_root.mkdir(parents=True)
+    _write_option_intent(execution_root, symbol="SPY")
+    selected_path = execution_root / "intents_v1" / "snapshots" / "2026-04-27" / "iwm_selected.exposure_intent.v1.json"
+    selected_path.parent.mkdir(parents=True, exist_ok=True)
+    selected_path.write_text(
+        json.dumps(
+            {
+                "schema_id": "exposure_intent",
+                "schema_version": "v1",
+                "intent_id": "c2_vol_income_iwm_2026-04-27_v1",
+                "underlying": {"symbol": "IWM"},
+                "option": {"direction": "SELL", "structure": "PUT"},
+                "exposure_type": "SHORT_VOL_DEFINED",
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    _write_selected_intent_pointer(
+        truth_root,
+        status="SELECTED",
+        blocker="",
+        selected_intent={
+            "intent_id": "c2_vol_income_iwm_2026-04-27_v1",
+            "intent_path": str(selected_path),
+            "symbol": "IWM",
+        },
+    )
+    monkeypatch.setattr(options_required_module, "_canonical_truth_root", lambda: truth_root)
+
+    rc = options_required_module.main(
+        [
+            "--day_utc",
+            "2026-04-27",
+            "--truth_root",
+            str(execution_root),
+            "--symbols_from_intents",
+            "YES",
+            "--capture_missing",
+            "NO",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)
+
+    assert rc == 2
+    assert output["required_symbols"] == ["IWM"]
+    assert output["results"][0]["reason_code"] == "OPTIONS_SNAPSHOT_ROOT_MISSING"
+
+
+def test_options_required_skips_when_selected_pointer_has_no_executable_intent(monkeypatch, tmp_path: Path, capsys) -> None:
+    truth_root = (tmp_path / "truth").resolve()
+    execution_root = (tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER").resolve()
+    truth_root.mkdir(parents=True)
+    execution_root.mkdir(parents=True)
+    _write_option_intent(execution_root, symbol="SPY")
+    _write_selected_intent_pointer(truth_root, status="NO_EXECUTABLE_INTENT", blocker="NO_EXECUTABLE_INTENT")
+    monkeypatch.setattr(options_required_module, "_canonical_truth_root", lambda: truth_root)
+
+    rc = options_required_module.main(
+        [
+            "--day_utc",
+            "2026-04-27",
+            "--truth_root",
+            str(execution_root),
+            "--symbols_from_intents",
+            "YES",
+            "--capture_missing",
+            "NO",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)
+
+    assert rc == 0
+    assert output["required_symbols"] == []
+    assert output["reason"] == "NO_ACTIVE_OPTION_INTENTS"
+
+
 def _write_options_snapshot(execution_truth_root: Path, *, day: str = "2026-04-27", symbol: str = "SPY") -> None:
     capture_dir = execution_truth_root / "options_chain_snapshot_v1" / day / "capture_test"
     capture_dir.mkdir(parents=True, exist_ok=True)

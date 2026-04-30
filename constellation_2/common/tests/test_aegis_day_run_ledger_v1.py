@@ -38,6 +38,33 @@ def _write(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
 
 
+def _selected_pointer(ctx: day_run.PhaseContext, *, symbol: str = "SPY") -> None:
+    intent_path = ctx.execution_root / "intents_v1" / "snapshots" / ctx.day_utc / f"{symbol.lower()}.exposure_intent.v1.json"
+    _write(
+        intent_path,
+        {
+            "schema_id": "exposure_intent",
+            "schema_version": "v1",
+            "intent_id": f"intent_{symbol.lower()}",
+            "underlying": {"symbol": symbol},
+            "option": {"structure": "PUT"},
+            "exposure_type": "SHORT_VOL_DEFINED",
+        },
+    )
+    _write(
+        open_gate.selected_intent_pointer_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc),
+        {
+            "schema_id": "selected_intent_pointer",
+            "schema_version": "v1",
+            "day_utc": ctx.day_utc,
+            "environment": "PAPER",
+            "status": "SELECTED",
+            "canonical_blocker": "",
+            "selected_intent": {"intent_id": f"intent_{symbol.lower()}", "intent_path": str(intent_path), "symbol": symbol},
+        },
+    )
+
+
 def _phase(status: str = "PASS", blocker: str = "", phase: str = "X") -> dict:
     return day_run._empty_phase(
         phase,
@@ -174,6 +201,40 @@ def test_session_authority_does_not_fail_on_quote_dependent_legacy_day_authority
     assert row["status"] == "PASS"
     assert row["canonical_blocker"] == ""
     assert "TARGET_DAY_ADMISSION_NOT_READY" in row["downstream_consequences"]
+
+
+def test_session_options_symbol_missing_is_diagnostic_only_when_session_ready(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ctx = _ctx(tmp_path)
+    _write(
+        ctx.truth_root / "reports" / "paper_session_authority_v1" / ctx.day_utc / "paper_session_authority.v1.json",
+        {"authority_status": "GRANTED", "submission_authorized": False},
+    )
+    _write(
+        ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json",
+        {"bootstrap_status": "READY", "bootstrap_semantic_status": "READY_PAPER_ONLY"},
+    )
+    _write(
+        ctx.truth_root / "risk_v1" / "kill_switch_v1" / ctx.day_utc / "global_kill_switch_state.v1.json",
+        {"state": "INACTIVE"},
+    )
+
+    monkeypatch.setattr(
+        day_run,
+        "_run_steps",
+        lambda *_args, **_kwargs: (
+            [{"step_name": "paper_trading_day_authority", "status": "BLOCKED", "blocker": "OPTIONS_SNAPSHOT_SYMBOL_MISSING"}],
+            [],
+            ["OPTIONS_SNAPSHOT_SYMBOL_MISSING"],
+        ),
+    )
+
+    row = day_run._phase_session_authority(ctx, {})
+
+    assert row["status"] == "PASS"
+    assert row["canonical_blocker"] == ""
+    assert row["downstream_consequences"] == []
 
 
 def test_market_data_missing_snapshot_without_capture_diagnostic_stays_generic() -> None:
@@ -410,6 +471,7 @@ def test_day_ledger_cannot_reach_paper_ready_before_market_gate_passes(
 
 def test_market_open_gate_before_0930_returns_market_not_open(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
+    _selected_pointer(ctx)
     monkeypatch.setattr(open_gate, "_market_session_state", lambda: "PRE_MARKET")
     monkeypatch.setattr(open_gate, "_run_capture", lambda *_args, **_kwargs: pytest.fail("capture should not run before open"))
 
@@ -423,6 +485,7 @@ def test_market_open_gate_during_market_hours_with_valid_quotes_passes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     ctx = _ctx(tmp_path)
+    _selected_pointer(ctx)
     supply_path = day_run._market_data_supply_path(ctx)
     supply_path.parent.mkdir(parents=True, exist_ok=True)
     supply_path.write_text('{"status":"PASS","canonical_blocker":"","artifacts":[]}\n', encoding="utf-8")

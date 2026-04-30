@@ -157,12 +157,20 @@ def _root_instrument(supply: dict[str, Any]) -> str:
         instrument = str(row.get("instrument") or "").strip().upper()
         if instrument:
             return instrument
-    return "SPY"
+    return ""
 
 
-def _selected_intent_status(ctx: bod.BodContext) -> str:
+def _selected_intent_state(ctx: bod.BodContext) -> tuple[str, str]:
     pointer = _read_json(selected_intent_pointer_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc))
-    return str(pointer.get("status") or "").strip().upper()
+    status = str(pointer.get("status") or "").strip().upper()
+    selected = pointer.get("selected_intent") if isinstance(pointer.get("selected_intent"), dict) else {}
+    symbol = str(selected.get("symbol") or "").strip().upper()
+    intent_path = str(selected.get("intent_path") or "").strip()
+    if intent_path:
+        payload = _read_json(Path(intent_path).expanduser().resolve())
+        underlying = payload.get("underlying") if isinstance(payload.get("underlying"), dict) else {}
+        symbol = str(underlying.get("symbol") or payload.get("symbol") or symbol).strip().upper()
+    return status, symbol
 
 
 def _has_bid_ask(contract: dict[str, Any]) -> bool:
@@ -247,14 +255,14 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
     generated_at = _now_iso()
     now_utc = datetime.now(UTC)
     session_state = _market_session_state()
-    selected_intent_status = _selected_intent_status(ctx)
+    selected_intent_status, selected_instrument = _selected_intent_state(ctx)
     supply_path = market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     command_result: dict[str, Any] = {}
     capture_result: dict[str, Any] = {}
     capture_attempted = False
-    instrument = "SPY"
+    instrument = selected_instrument
     snapshot_validation: dict[str, Any] = {}
-    if selected_intent_status not in {"", "SELECTED"}:
+    if selected_intent_status != "SELECTED":
         status = "PASS"
         blocker = ""
         action = ""
@@ -275,7 +283,35 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
     else:
         command_result = _run_market_data_supply(ctx)
         supply = _read_json(supply_path)
-        instrument = _root_instrument(supply)
+        instrument = _root_instrument(supply) or selected_instrument
+        if not instrument:
+            status = "BLOCKED"
+            blocker = "SELECTED_INTENT_SYMBOL_MISSING"
+            action = "Resolve selected intent symbol before evaluating market-open option data."
+            snapshot_validation = {
+                "blocker": blocker,
+                "snapshot_path": "",
+                "freshness_certificate_path": "",
+                "snapshot_age_seconds": None,
+            }
+            return {
+                "schema_id": "market_open_data_gate",
+                "schema_version": SCHEMA_VERSION,
+                "day_utc": ctx.day_utc,
+                "environment": ctx.environment,
+                "generated_at_utc": generated_at,
+                "market_session_state": session_state,
+                "status": status,
+                "canonical_blocker": blocker,
+                "market_data_supply_path": str(supply_path),
+                "command_result": command_result,
+                "snapshot_path": "",
+                "freshness_certificate_path": "",
+                "snapshot_age_seconds": None,
+                "capture_attempted_by_gate": False,
+                "capture_result": {},
+                "operator_next_action": action,
+            }
         snapshot_validation = _validate_current_snapshot(ctx, instrument, now_utc)
         supply_status = str(supply.get("status") or "").strip().upper()
         blocker = _blocker_from_supply(supply) or str(snapshot_validation.get("blocker") or "").strip()
@@ -300,7 +336,7 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
         else:
             status = "BLOCKED"
             blocker = blocker or str(snapshot_validation.get("blocker") or "") or "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
-        action = "" if status == "PASS" else "Capture current SPY option bid/ask quotes and freshness certificate during regular market hours, then rerun this gate."
+        action = "" if status == "PASS" else f"Capture current {instrument} option bid/ask quotes and freshness certificate during regular market hours, then rerun this gate."
     return {
         "schema_id": "market_open_data_gate",
         "schema_version": SCHEMA_VERSION,
