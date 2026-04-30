@@ -54,6 +54,11 @@ from constellation_2.common.kill_switch_authority_v1 import (
     STATUS_PASS as KILL_SWITCH_STATUS_PASS,
     resolve_kill_switch_authority_v1,
 )
+from constellation_2.common.safety_state_authority_v1 import (
+    evaluate_safety_state_authority_v1,
+    safety_state_authority_output_path,
+    write_safety_state_authority_v1,
+)
 from constellation_2.common.session_authority_v1 import (
     read_target_day_admission_ref_v1,
     read_target_day_build_ref_v1,
@@ -639,6 +644,20 @@ def _canonical_blocker_for_boundary_v1(blocking_codes: List[str]) -> str:
     normalized = _normalize_reason_codes(blocking_codes)
     if STALE_ARTIFACT in normalized:
         return STALE_ARTIFACT
+    for preferred in (
+        "NAV_INVALID",
+        "DRAWDOWN_LIMIT_EXCEEDED",
+        "KILL_SWITCH_ACTIVE",
+        "GLOBAL_KILL_SWITCH_STATE_MISSING",
+        "CAPITAL_RISK_ENVELOPE_NOT_PASS",
+        "CAPITAL_RISK_ENVELOPE_MISSING",
+        "TRADE_SUBMIT_READINESS_BLOCKED",
+        "TRADE_SUBMIT_READINESS_MISSING",
+        "SAFETY_INPUTS_DEGRADED",
+        "SAFETY_STATE_AUTHORITY_NOT_PASS",
+    ):
+        if preferred in normalized:
+            return preferred
     for preferred in ("NON_TRADING_DAY", "NO_ACTIVE_PAPER_SESSION", "SESSION_AUTHORITY_MISSING"):
         if preferred in normalized:
             return preferred
@@ -723,6 +742,9 @@ def main(argv: List[str] | None = None) -> int:
     build_sha256 = ""
     readiness_path = (execution_truth_root / "trade_submit_readiness_c2_v1" / "_history" / "PAPER" / paper_account / day_utc / "status.json").resolve()
     readiness_sha256 = ""
+    safety_state_path = safety_state_authority_output_path(truth_root=truth_root, day_utc=day_utc).resolve()
+    safety_state_sha256 = ""
+    safety_state_ok = False
     readiness_status = ""
     readiness_decision = ""
     readiness_submit_allowed: bool | None = None
@@ -737,6 +759,7 @@ def main(argv: List[str] | None = None) -> int:
         "target_day_build_v1": str(build_path),
         "target_day_admission_v1": str(admission_path),
         "trade_submit_readiness_c2_v1": str(readiness_path),
+        "safety_state_authority_v1": str(safety_state_path),
         "paper_trading_day_authority_v1": str(day_authority_path),
     }
     readiness_policy_view = _load_trade_readiness_policy_view_v1(truth_root=truth_root, day_utc=day_utc)
@@ -1024,6 +1047,63 @@ def main(argv: List[str] | None = None) -> int:
             linkage_verdict = "UNLINKED"
             blocking_codes.extend(row["reason_codes"])
 
+    try:
+        safety_payload = evaluate_safety_state_authority_v1(
+            day_utc=day_utc,
+            truth_root=truth_root,
+            execution_root=execution_truth_root,
+            account=paper_account,
+            environment="PAPER",
+            produced_utc=produced_at_utc,
+        )
+        safety_state_path = write_safety_state_authority_v1(
+            truth_root=truth_root,
+            day_utc=day_utc,
+            payload=safety_payload,
+        ).resolve()
+        safety_state_sha256 = _sha256_file(safety_state_path)
+        source_paths["safety_state_authority_v1"] = str(safety_state_path)
+        safety_state_ok = str(safety_payload.get("status") or "").strip().upper() == "PASS"
+        safety_blocker = str(safety_payload.get("canonical_blocker") or "").strip().upper()
+        safety_reason_codes = [code for code in [safety_blocker or "SAFETY_STATE_AUTHORITY_NOT_PASS"] if code]
+        row = _check_row(
+            logical_name="safety_state_authority_v1",
+            path=safety_state_path,
+            status="PASS" if safety_state_ok else "FAIL",
+            day_utc=day_utc,
+            reason_codes=[] if safety_state_ok else safety_reason_codes,
+        )
+        required_checks.append(row)
+        if not safety_state_ok:
+            submission_authorized = False
+            boundary_status = "BLOCKED"
+            failed_checks.append(row)
+            blocking_codes.extend(safety_reason_codes)
+            extra_failed_conditions.append(
+                {
+                    "logical_name": "safety_state_authority_v1",
+                    "path": str(safety_state_path),
+                    "condition": "SAFETY_STATE_AUTHORITY_NOT_PASS",
+                    "code": safety_blocker or "SAFETY_STATE_AUTHORITY_NOT_PASS",
+                    "detail": str(safety_payload.get("root_cause") or ""),
+                }
+            )
+    except Exception as exc:
+        row = _check_row(
+            logical_name="safety_state_authority_v1",
+            path=safety_state_path,
+            status="MISSING",
+            day_utc=day_utc,
+            reason_codes=[f"SUBMIT_BOUNDARY_SAFETY_STATE_AUTHORITY_UNAVAILABLE:{type(exc).__name__}"],
+        )
+        required_checks.append(row)
+        failed_checks.append(row)
+        submission_authorized = False
+        boundary_status = "BLOCKED"
+        freshness_verdict = "UNKNOWN"
+        linkage_verdict = "UNLINKED"
+        blocking_codes.extend(row["reason_codes"])
+
     policy_logical_name = str(readiness_policy_view.get("selected_logical_name") or "").strip()
     policy_path = Path(str(readiness_policy_view.get("selected_path") or "").strip() or str(admission_path)).resolve()
     if policy_logical_name:
@@ -1171,111 +1251,6 @@ def main(argv: List[str] | None = None) -> int:
         linkage_verdict = "UNLINKED"
         blocking_codes.extend(row["reason_codes"])
 
-    try:
-        truth_sleeves_root = execution_truth_root.parent.parent.resolve()
-        kill_switch = resolve_kill_switch_authority_v1(
-            canonical_truth_root=truth_root,
-            truth_sleeves_root=truth_sleeves_root,
-            day_utc=day_utc,
-        )
-        kill_reason_codes = list(kill_switch.reason_codes)
-        kill_switch_ok = (
-            kill_switch.status == KILL_SWITCH_STATUS_PASS
-            and str(kill_switch.state or "").strip().upper() == "INACTIVE"
-            and bool(kill_switch.allow_entries is True)
-        )
-        if not kill_reason_codes and not kill_switch_ok:
-            kill_reason_codes = ["SUBMIT_BOUNDARY_KILL_SWITCH_BLOCKED"]
-        required_checks.append(
-            _check_row(
-                logical_name="global_kill_switch_state_v1",
-                path=kill_switch.canonical_path,
-                status="PASS" if kill_switch_ok else "FAIL",
-                day_utc=day_utc,
-                reason_codes=kill_reason_codes,
-            )
-        )
-        if not kill_switch_ok:
-            submission_authorized = False
-            boundary_status = "BLOCKED"
-            failed_checks.append(required_checks[-1])
-            blocking_codes.extend(kill_reason_codes)
-    except Exception as exc:
-        missing_path = (truth_root / "risk_v1" / "kill_switch_v1" / day_utc / "global_kill_switch_state.v1.json").resolve()
-        row = _check_row(
-            logical_name="global_kill_switch_state_v1",
-            path=missing_path,
-            status="MISSING",
-            day_utc=day_utc,
-            reason_codes=[f"SUBMIT_BOUNDARY_KILL_SWITCH_UNAVAILABLE:{type(exc).__name__}"],
-        )
-        required_checks.append(row)
-        failed_checks.append(row)
-        submission_authorized = False
-        boundary_status = "BLOCKED"
-        freshness_verdict = "UNKNOWN"
-        linkage_verdict = "UNLINKED"
-        blocking_codes.extend(row["reason_codes"])
-
-    try:
-        control_run_id = canonical_hash_for_c2_artifact_v1(
-            {
-                "tool": "run_submit_boundary_status_v1",
-                "day_utc": day_utc,
-                "ib_account": paper_account,
-                "produced_at_utc": produced_at_utc,
-            }
-        )
-        control_result = run_runtime_control_kernel_v1(
-            canonical_truth_root=truth_root,
-            execution_truth_root=execution_truth_root,
-            day_utc=day_utc,
-            produced_utc=produced_at_utc,
-            run_id=f"submit-boundary-status:{control_run_id}",
-            environment="PAPER",
-            ib_account=paper_account,
-            sleeve_id="PRIMARY",
-        )
-        control_decision = control_result["runtime_control_decision"]
-        control_record = control_result["runtime_control_record"]
-        control_record_path = control_result["runtime_control_record_path"]
-        control_reason_codes = list(control_decision.reason_codes)
-        control_ok = control_record is not None and control_record.control_state == "ALLOW"
-        control_path = Path(str(control_record_path or control_result["runtime_control_decision_path"])).resolve()
-        required_checks.append(
-            _check_row(
-                logical_name="runtime_control_record_v1",
-                path=control_path,
-                status="PASS" if control_ok else "FAIL",
-                day_utc=day_utc,
-                reason_codes=control_reason_codes,
-            )
-        )
-        if not control_ok:
-            submission_authorized = False
-            failed_checks.append(required_checks[-1])
-            boundary_status = "BLOCKED"
-            if control_record is None:
-                freshness_verdict = "UNKNOWN"
-                linkage_verdict = "UNLINKED"
-            blocking_codes.extend(control_reason_codes or ["SUBMIT_BOUNDARY_RUNTIME_CONTROL_BLOCKED"])
-    except Exception as exc:
-        missing_path = (truth_root / "runtime_control_kernel_v1" / "records" / day_utc / "PAPER" / paper_account).resolve()
-        row = _check_row(
-            logical_name="runtime_control_record_v1",
-            path=missing_path,
-            status="MISSING",
-            day_utc=day_utc,
-            reason_codes=[f"SUBMIT_BOUNDARY_RUNTIME_CONTROL_UNAVAILABLE:{type(exc).__name__}"],
-        )
-        required_checks.append(row)
-        failed_checks.append(row)
-        submission_authorized = False
-        boundary_status = "BLOCKED"
-        freshness_verdict = "UNKNOWN"
-        linkage_verdict = "UNLINKED"
-        blocking_codes.extend(row["reason_codes"])
-
     intent_auth_summary = _summarize_execution_intent_authorization_v1(
         execution_truth_root=execution_truth_root,
         day_utc=day_utc,
@@ -1329,8 +1304,14 @@ def main(argv: List[str] | None = None) -> int:
             sha256=readiness_sha256,
             day_utc=day_utc,
         ),
+        _ensure_dependency_ref_v1(
+            artifact_id="safety_state_authority_v1",
+            path=safety_state_path,
+            sha256=safety_state_sha256,
+            day_utc=day_utc,
+        ),
     ]
-    if day_authority_ok:
+    if day_authority_ok and safety_state_ok:
         # Submit boundary is a projection of paper_trading_day_authority_v1. Legacy
         # submit-local checks remain visible in required_boundary_checks, but they
         # no longer carry veto power unless promoted to required authority inputs

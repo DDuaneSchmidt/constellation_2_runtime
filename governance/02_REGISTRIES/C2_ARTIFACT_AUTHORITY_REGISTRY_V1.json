@@ -755,7 +755,8 @@
       "authoritative_path_pattern": "{execution_truth_root}/reports/capital_risk_envelope_v2/{day_utc}/capital_risk_envelope.v2.json",
       "legal_consumers": [
         "operator_daily_gate_v3",
-        "gate_stack_verdict_v1"
+        "gate_stack_verdict_v1",
+        "safety_state_authority_v1"
       ],
       "required_upstream_dependencies": [],
       "initial_finality_state": "provisional",
@@ -809,6 +810,7 @@
       "root_policy": "execution_only",
       "authoritative_path_pattern": "{execution_truth_root}/trade_submit_readiness_c2_v1/PAPER/{ib_account}/status.json",
       "legal_consumers": [
+        "safety_state_authority_v1",
         "submit_boundary_status_v1",
         "session_authority_v1",
         "submit_boundary_paper_v4"
@@ -860,6 +862,39 @@
       }
     },
     {
+      "artifact_id": "safety_state_authority_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "ops/tools/run_safety_state_authority_v1.py",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/safety_state_authority.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/safety_state_authority_v1/{day_utc}/safety_state_authority.v1.json",
+      "legal_consumers": [
+        "submit_boundary_status_v1",
+        "session_authority_v1",
+        "day_authority_decision_v1"
+      ],
+      "required_upstream_dependencies": [
+        "capital_risk_envelope_v2",
+        "trade_submit_readiness_c2_v1"
+      ],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "may_materialize_if_missing",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_safety_state_authority_v1.py",
+          "ops/tools/run_submit_boundary_status_v1.py"
+        ]
+      }
+    },
+    {
       "artifact_id": "target_day_build_v1",
       "artifact_class": "admission_result",
       "authoritative_writer": "ops/tools/run_session_authority_v1.py",
@@ -905,7 +940,8 @@
       ],
       "required_upstream_dependencies": [
         "target_day_build_v1",
-        "trade_submit_readiness_c2_v1"
+        "trade_submit_readiness_c2_v1",
+        "safety_state_authority_v1"
       ],
       "initial_finality_state": "provisional",
       "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
