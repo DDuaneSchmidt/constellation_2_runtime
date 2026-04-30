@@ -173,6 +173,34 @@ def _write_option_intent(execution_truth_root: Path, *, day: str = "2026-04-27",
     )
 
 
+def _write_selected_intent_pointer(
+    truth_root: Path,
+    *,
+    day: str = "2026-04-27",
+    status: str = "NO_EXECUTABLE_INTENT",
+    blocker: str = "NO_EXECUTABLE_INTENT",
+    selected_intent: dict | None = None,
+) -> Path:
+    path = day_authority_module.selected_intent_pointer_path(truth_root=truth_root, day_utc=day)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schema_id": "selected_intent_pointer",
+                "schema_version": "v1",
+                "day_utc": day,
+                "environment": "PAPER",
+                "status": status,
+                "canonical_blocker": blocker,
+                "selected_intent": selected_intent or {},
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def _write_equity_intent(execution_truth_root: Path, *, day: str = "2026-04-27", symbol: str = "SPY") -> None:
     path = (
         execution_truth_root
@@ -195,6 +223,20 @@ def _write_equity_intent(execution_truth_root: Path, *, day: str = "2026-04-27",
         ),
         encoding="utf-8",
     )
+
+
+def test_blocked_selected_pointer_prevents_stale_option_symbol_requirement(monkeypatch, tmp_path: Path) -> None:
+    truth_root, execution_root, _captured = _configure_day_authority_runtime(monkeypatch, tmp_path)
+    _write_option_intent(execution_root, symbol="SPY")
+    _write_selected_intent_pointer(truth_root, status="NO_EXECUTABLE_INTENT", blocker="NO_EXECUTABLE_INTENT")
+
+    symbols = day_authority_module._active_option_symbols(
+        truth_root=truth_root,
+        intent_truth_root=execution_root,
+        day_utc="2026-04-27",
+    )
+
+    assert symbols == []
 
 
 def _write_options_snapshot(execution_truth_root: Path, *, day: str = "2026-04-27", symbol: str = "SPY") -> None:

@@ -46,6 +46,7 @@ from constellation_2.common.stale_artifact_guard_v1 import (
     classify_artifact_freshness_v1,
 )
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+from ops.tools.run_intent_arbitration_v1 import selected_intent_pointer_path
 
 
 OUTPUT_SCHEMA = (
@@ -380,8 +381,44 @@ def _same_day_payload(payload: Dict[str, Any] | None, day_utc: str) -> bool:
     return not observed or observed == day_utc
 
 
-def _active_option_symbols(*, truth_root: Path, day_utc: str) -> List[str]:
-    intent_truth_root = resolve_paper_intent_truth_root_v1(truth_root=truth_root, repo_root=REPO_ROOT)
+def _selected_pointer_option_symbols(*, truth_root: Path, day_utc: str) -> Tuple[bool, List[str]]:
+    pointer_path = selected_intent_pointer_path(truth_root=truth_root, day_utc=day_utc)
+    if not pointer_path.exists() or not pointer_path.is_file():
+        return False, []
+    try:
+        pointer = read_json_object_v1(pointer_path)
+    except ValueError:
+        return True, []
+    if str(pointer.get("status") or "").strip().upper() != "SELECTED":
+        return True, []
+    selected = pointer.get("selected_intent") if isinstance(pointer.get("selected_intent"), dict) else {}
+    intent_path = str(selected.get("intent_path") or "").strip()
+    payload: Dict[str, Any] = {}
+    if intent_path:
+        try:
+            payload = read_json_object_v1(Path(intent_path).expanduser().resolve())
+        except ValueError:
+            payload = {}
+    option = payload.get("option") if payload else selected.get("option")
+    exposure_type = str((payload or selected).get("exposure_type") or "").strip().upper()
+    has_option_structure = isinstance(option, dict) or exposure_type in {"SHORT_VOL_DEFINED", "VOL_INCOME_DEFINED"}
+    if not has_option_structure:
+        return True, []
+    underlying = (payload or selected).get("underlying")
+    symbol = ""
+    if isinstance(underlying, dict):
+        symbol = str(underlying.get("symbol") or "").strip().upper()
+    elif isinstance(underlying, str):
+        symbol = underlying.strip().upper()
+    if not symbol:
+        symbol = str(selected.get("symbol") or "").strip().upper()
+    return True, [symbol] if symbol else []
+
+
+def _active_option_symbols(*, truth_root: Path, intent_truth_root: Path, day_utc: str) -> List[str]:
+    pointer_present, pointer_symbols = _selected_pointer_option_symbols(truth_root=truth_root, day_utc=day_utc)
+    if pointer_present:
+        return pointer_symbols
     symbols: List[str] = []
     for path in collect_intent_files_v1(truth_root=intent_truth_root, day_utc=day_utc):
         try:
@@ -582,7 +619,11 @@ def main(argv: List[str] | None = None) -> int:
         if str(item.get("artifact_name") or "").strip()
     }
     evidence_paths = {key: str(path) for key, path in input_paths.items()}
-    required_option_symbols = _active_option_symbols(truth_root=execution_truth_root, day_utc=day_utc)
+    required_option_symbols = _active_option_symbols(
+        truth_root=truth_root,
+        intent_truth_root=execution_truth_root,
+        day_utc=day_utc,
+    )
 
     corr_payload, corr_error = _read_validated(input_paths["correlation_envelope_gate_v1"], CORRELATION_SCHEMA)
     replay_payload, replay_error = _read_validated(input_paths["replay_certification_gate_v1"], REPLAY_SCHEMA)

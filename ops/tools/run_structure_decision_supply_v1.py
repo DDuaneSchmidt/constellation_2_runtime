@@ -25,6 +25,7 @@ from ops.tools.run_intent_arbitration_v1 import intent_arbitration_path, selecte
 
 SCHEMA_VERSION = "structure_decision_supply.v1"
 POLICY_PATH = REPO_ROOT / "governance" / "02_REGISTRIES" / "C2_EXPOSURE_TO_OPTIONS_INTENT_POLICY_V1.json"
+ENGINE_REGISTRY_PATH = REPO_ROOT / "governance" / "02_REGISTRIES" / "ENGINE_MODEL_REGISTRY_V1.json"
 ALLOWED_BLOCKERS = {
     "ACTIVE_INTENT_MISSING",
     "MARKET_OPEN_DATA_MISSING",
@@ -95,6 +96,74 @@ def _symbol(payload: dict[str, Any]) -> str:
 def _engine_id(payload: dict[str, Any]) -> str:
     engine = payload.get("engine") if isinstance(payload.get("engine"), dict) else {}
     return str(engine.get("engine_id") or payload.get("engine_id") or "").strip()
+
+
+def _allowed_symbols_for_engine(engine_id: str) -> list[str]:
+    registry = _read_json(ENGINE_REGISTRY_PATH)
+    for row in registry.get("engines") if isinstance(registry.get("engines"), list) else []:
+        if not isinstance(row, dict) or str(row.get("engine_id") or "").strip() != engine_id:
+            continue
+        raw = row.get("allowed_symbols") if isinstance(row.get("allowed_symbols"), list) else []
+        return [str(symbol).strip().upper() for symbol in raw if str(symbol).strip()]
+    return []
+
+
+def _bump_rejection(diagnostics: dict[str, Any], reason: str, count: int = 1) -> None:
+    rejected = diagnostics.setdefault("rejected_by_reason", {})
+    rejected[reason] = int(rejected.get(reason) or 0) + count
+
+
+def _empty_structure_diagnostics(
+    *,
+    intent_id: str = "",
+    selected_symbol: str = "",
+    allowed_symbols: list[str] | None = None,
+    option_chain_snapshot_path: str = "",
+) -> dict[str, Any]:
+    return {
+        "intent_id": intent_id,
+        "selected_symbol": selected_symbol,
+        "allowed_symbols": sorted({str(symbol).strip().upper() for symbol in (allowed_symbols or []) if str(symbol).strip()}),
+        "option_chain_snapshot_path": option_chain_snapshot_path,
+        "candidates_seen": 0,
+        "candidates_eligible": 0,
+        "rejected_by_reason": {},
+    }
+
+
+def _pointer_diagnostics(pointer: dict[str, Any]) -> dict[str, Any]:
+    selected = pointer.get("selected_intent") if isinstance(pointer.get("selected_intent"), dict) else {}
+    intent_id = str(selected.get("intent_id") or "").strip()
+    selected_symbol = str(selected.get("symbol") or "").strip().upper()
+    fallback_allowed_symbols: list[str] = []
+    matched_allowed_symbols: list[str] = []
+    for ref_key in ("source_rollup_path", "source_arbitration_path"):
+        ref_path = Path(str(pointer.get(ref_key) or "")).expanduser()
+        payload = _read_json(ref_path)
+        outcomes = payload.get("sleeve_outcomes") if isinstance(payload.get("sleeve_outcomes"), list) else payload.get("outcomes")
+        for outcome in outcomes if isinstance(outcomes, list) else []:
+            if not isinstance(outcome, dict):
+                continue
+            raw_allowed = outcome.get("allowed_symbols") if isinstance(outcome.get("allowed_symbols"), list) else outcome.get("registry_allowed_symbols")
+            if isinstance(raw_allowed, list):
+                fallback_allowed_symbols.extend(str(symbol).strip().upper() for symbol in raw_allowed if str(symbol).strip())
+            rejected = outcome.get("rejected_intents") if isinstance(outcome.get("rejected_intents"), list) else []
+            if rejected and isinstance(rejected[0], dict):
+                if not selected_symbol:
+                    selected_symbol = str(rejected[0].get("symbol") or "").strip().upper()
+                if not intent_id:
+                    intent_id = str(rejected[0].get("intent_id") or "").strip()
+                if isinstance(raw_allowed, list):
+                    matched_allowed_symbols.extend(str(symbol).strip().upper() for symbol in raw_allowed if str(symbol).strip())
+    diagnostics = _empty_structure_diagnostics(
+        intent_id=intent_id,
+        selected_symbol=selected_symbol,
+        allowed_symbols=matched_allowed_symbols or fallback_allowed_symbols,
+    )
+    blocker = str(pointer.get("canonical_blocker") or pointer.get("status") or "").strip()
+    if blocker:
+        _bump_rejection(diagnostics, blocker)
+    return diagnostics
 
 
 def _active_intents(ctx: bod.BodContext) -> list[tuple[Path, dict[str, Any]]]:
@@ -354,7 +423,13 @@ def _select_vertical_put_credit_spread(
     snapshot: dict[str, Any],
     risk_budget: dict[str, Any],
     intent_id: str,
-) -> tuple[dict[str, Any], str]:
+) -> tuple[dict[str, Any], str, dict[str, Any]]:
+    engine_id = _engine_id(intent)
+    diagnostics = _empty_structure_diagnostics(
+        intent_id=intent_id,
+        selected_symbol=_symbol(intent),
+        allowed_symbols=_allowed_symbols_for_engine(engine_id),
+    )
     template = policy.get("options_template") if isinstance(policy.get("options_template"), dict) else {}
     strategy = template.get("strategy") if isinstance(template.get("strategy"), dict) else {}
     risk = template.get("risk") if isinstance(template.get("risk"), dict) else {}
@@ -365,7 +440,8 @@ def _select_vertical_put_credit_spread(
     right = str(strategy.get("right") or option.get("structure") or "").strip().upper()
     direction = str(strategy.get("direction") or "").strip().upper()
     if right != "PUT" or direction != "CREDIT":
-        return {}, "STRUCTURE_POLICY_MISSING"
+        _bump_rejection(diagnostics, "STRUCTURE_POLICY_MISSING")
+        return {}, "STRUCTURE_POLICY_MISSING", diagnostics
     max_spread = _dec(liquidity.get("max_bid_ask_spread")) or Decimal("0.10")
     max_contracts = int(risk.get("max_contracts") or 1)
     multiplier = int(risk.get("multiplier") or 100)
@@ -374,12 +450,16 @@ def _select_vertical_put_credit_spread(
     allowed_risk_cents = int(budget.get("allowed_risk_cents") or 0)
     positive_caps = [value for value in (policy_max_risk_cents, allowed_risk_cents) if value > 0]
     if not positive_caps:
-        return {}, "RISK_BUDGET_SUPPLY_BLOCKED"
+        _bump_rejection(diagnostics, "RISK_BUDGET_UNAVAILABLE")
+        return {}, "RISK_BUDGET_SUPPLY_BLOCKED", diagnostics
     max_risk_cents = min(positive_caps)
     contracts = [
         row for row in snapshot.get("contracts") or []
         if isinstance(row, dict) and _contract_ok(row, right=right, max_spread=max_spread)
     ]
+    right_contract_count = len([row for row in snapshot.get("contracts") or [] if isinstance(row, dict) and str(row.get("right") or "").strip().upper() == right])
+    if not contracts and right_contract_count:
+        _bump_rejection(diagnostics, "NO_LIQUID_CONTRACTS", right_contract_count)
     by_expiry: dict[str, list[dict[str, Any]]] = {}
     for row in contracts:
         by_expiry.setdefault(str(row.get("expiry_utc") or ""), []).append(row)
@@ -389,21 +469,29 @@ def _select_vertical_put_credit_spread(
         for sell in ordered:
             sell_strike = _dec(sell.get("strike"))
             sell_bid = _contract_price(sell, "bid")
-            if sell_strike is None or sell_bid is None:
-                continue
             for buy in ordered:
                 buy_strike = _dec(buy.get("strike"))
                 buy_ask = _contract_price(buy, "ask")
-                if buy_strike is None or buy_ask is None or buy_strike >= sell_strike:
+                if sell_strike is None or sell_bid is None or buy_strike is None or buy_ask is None:
+                    _bump_rejection(diagnostics, "MISSING_STRIKE_OR_PRICE")
                     continue
+                if buy_strike >= sell_strike:
+                    continue
+                diagnostics["candidates_seen"] = int(diagnostics["candidates_seen"]) + 1
                 width = sell_strike - buy_strike
                 if target_width is None or width != target_width:
+                    _bump_rejection(diagnostics, "WIDTH_POLICY_MISMATCH")
                     continue
                 credit = sell_bid - buy_ask
                 if credit <= 0:
+                    _bump_rejection(diagnostics, "NON_POSITIVE_CREDIT")
                     continue
                 max_loss_cents = int(((width - credit) * multiplier * 100).to_integral_value())
-                if max_loss_cents <= 0 or max_loss_cents > max_risk_cents:
+                if max_loss_cents <= 0:
+                    _bump_rejection(diagnostics, "INVALID_MAX_LOSS")
+                    continue
+                if max_loss_cents > max_risk_cents:
+                    _bump_rejection(diagnostics, "MAX_LOSS_EXCEEDS_RISK")
                     continue
                 candidates.append(
                     {
@@ -417,8 +505,9 @@ def _select_vertical_put_credit_spread(
                         ],
                     }
                 )
+    diagnostics["candidates_eligible"] = len(candidates)
     if not candidates:
-        return {}, "NO_ELIGIBLE_OPTION_STRUCTURE"
+        return {}, "NO_ELIGIBLE_OPTION_STRUCTURE", diagnostics
     candidates.sort(key=lambda item: (int(item["max_loss_cents"]), Decimal(str(item["width_points"])), Decimal(str(item["net_credit"]))))
     selected = candidates[0]
     selected["quantity_basis"] = {
@@ -427,7 +516,7 @@ def _select_vertical_put_credit_spread(
         "policy_max_risk_cents": policy_max_risk_cents,
         "selected_contracts": min(max_contracts, max(1, max_risk_cents // int(selected["max_loss_cents"]))),
     }
-    return selected, ""
+    return selected, "", diagnostics
 
 
 def _candidate_from_intent(intent_path: Path, intent: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -465,6 +554,7 @@ def _blocked(ctx: bod.BodContext, blocker: str, action: str, **sections: Any) ->
         "market_open_data": sections.get("market_open_data", {}),
         "risk_budget_input": sections.get("risk_budget_input", {}),
         "structure_policy": sections.get("structure_policy", {}),
+        "structure_diagnostics": sections.get("structure_diagnostics", []),
         "structure_decisions": sections.get("structure_decisions", []),
         "structure_export": {"usable_for_authorization_supply": False, "decision_count": 0, "decisions": []},
         "operator_next_action": action,
@@ -489,6 +579,7 @@ def build_structure_decision_supply_v1(ctx: bod.BodContext) -> dict[str, Any]:
                 str(pointer.get("canonical_blocker") or pointer.get("status") or "NO_EXECUTABLE_INTENT"),
                 "Resolve intent arbitration before structure selection.",
                 active_intents=[],
+                structure_diagnostics=[_pointer_diagnostics(pointer)],
             )
     intents = _active_intents(ctx)
     active_rows = [
@@ -525,16 +616,19 @@ def build_structure_decision_supply_v1(ctx: bod.BodContext) -> dict[str, Any]:
         policy = _policy_for_intent(intent)
         if not policy:
             return _blocked(ctx, "STRUCTURE_POLICY_MISSING", "Add governed exposure-to-options policy for the active intent engine.", active_intents=active_rows, risk_budget_input=risk_input, market_open_data=market_open_data)
-        selected, select_blocker = _select_vertical_put_credit_spread(intent=intent, policy=policy, snapshot=snapshot, risk_budget=risk_budget, intent_id=intent_id)
+        selected, select_blocker, diagnostics = _select_vertical_put_credit_spread(intent=intent, policy=policy, snapshot=snapshot, risk_budget=risk_budget, intent_id=intent_id)
+        diagnostics["option_chain_snapshot_path"] = str(snapshot_path)
         if select_blocker:
-            return _blocked(ctx, select_blocker, "No current-day option legs satisfy policy, quote, and risk constraints; rerun after richer option chain capture or adjust governed policy.", active_intents=active_rows, risk_budget_input=risk_input, market_open_data=market_open_data, structure_policy={"path": str(POLICY_PATH), "engine_id": _engine_id(intent)})
+            return _blocked(ctx, select_blocker, "No current-day option legs satisfy policy, quote, and risk constraints; rerun after richer option chain capture or adjust governed policy.", active_intents=active_rows, risk_budget_input=risk_input, market_open_data=market_open_data, structure_policy={"path": str(POLICY_PATH), "engine_id": _engine_id(intent)}, structure_diagnostics=[diagnostics])
         guard_blocker, guard_action = _selected_structure_guard_blocker(selected, policy, snapshot)
         if guard_blocker:
-            return _blocked(ctx, guard_blocker, guard_action, active_intents=active_rows, risk_budget_input=risk_input, market_open_data=market_open_data, structure_policy={"path": str(POLICY_PATH), "engine_id": _engine_id(intent)})
+            _bump_rejection(diagnostics, guard_blocker)
+            return _blocked(ctx, guard_blocker, guard_action, active_intents=active_rows, risk_budget_input=risk_input, market_open_data=market_open_data, structure_policy={"path": str(POLICY_PATH), "engine_id": _engine_id(intent)}, structure_diagnostics=[diagnostics])
         structure_input = _candidate_from_intent(intent_path, intent, snapshot)
         base_decision = select_structure_for_candidate_v1(structure_input)
         if base_decision.get("structure_status") != STRUCTURE_STATUS_SELECTED:
-            return _blocked(ctx, "NO_ELIGIBLE_OPTION_STRUCTURE", str(base_decision.get("structure_reason") or "Structure selection rejected active intent."), active_intents=active_rows, risk_budget_input=risk_input, market_open_data=market_open_data, structure_decisions=[base_decision])
+            _bump_rejection(diagnostics, "BASE_STRUCTURE_SELECTOR_REJECTED")
+            return _blocked(ctx, "NO_ELIGIBLE_OPTION_STRUCTURE", str(base_decision.get("structure_reason") or "Structure selection rejected active intent."), active_intents=active_rows, risk_budget_input=risk_input, market_open_data=market_open_data, structure_decisions=[base_decision], structure_diagnostics=[diagnostics])
         decision = {
             **base_decision,
             "day_utc": ctx.day_utc,
@@ -563,6 +657,7 @@ def build_structure_decision_supply_v1(ctx: bod.BodContext) -> dict[str, Any]:
                 "policy_max_risk_cents": selected["quantity_basis"]["policy_max_risk_cents"],
                 "max_loss_cents": selected["max_loss_cents"],
             },
+            "structure_diagnostics": diagnostics,
         }
         decision["structure_decision_hash"] = hashlib.sha256(
             canonical_structure_decision_json_v1(decision).encode("utf-8")
@@ -580,6 +675,7 @@ def build_structure_decision_supply_v1(ctx: bod.BodContext) -> dict[str, Any]:
         "market_open_data": market_open_data,
         "risk_budget_input": risk_input,
         "structure_policy": {"path": str(POLICY_PATH), "status": "PRESENT"},
+        "structure_diagnostics": [row["structure_diagnostics"] for row in decisions if isinstance(row.get("structure_diagnostics"), dict)],
         "structure_decisions": decisions,
         "structure_export": {
             "usable_for_authorization_supply": True,

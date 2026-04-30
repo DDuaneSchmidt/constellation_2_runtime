@@ -22,6 +22,7 @@ from ops.tools.run_market_data_supply_v1 import (
     _parse_iso,
     market_data_supply_path,
 )
+from ops.tools.run_intent_arbitration_v1 import selected_intent_pointer_path
 
 SCHEMA_VERSION = "market_open_data_gate.v1"
 REFRESHABLE_BLOCKERS = {
@@ -159,6 +160,11 @@ def _root_instrument(supply: dict[str, Any]) -> str:
     return "SPY"
 
 
+def _selected_intent_status(ctx: bod.BodContext) -> str:
+    pointer = _read_json(selected_intent_pointer_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc))
+    return str(pointer.get("status") or "").strip().upper()
+
+
 def _has_bid_ask(contract: dict[str, Any]) -> bool:
     if contract.get("bid") not in (None, "") and contract.get("ask") not in (None, ""):
         return True
@@ -255,6 +261,16 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
         status = "BLOCKED"
         blocker = "MARKET_CLOSED"
         action = "Rerun market-open data gate during regular US options market hours; submit-time quote freshness is not evaluated after market close."
+    elif _selected_intent_status(ctx) not in {"", "SELECTED"}:
+        status = "PASS"
+        blocker = ""
+        action = ""
+        snapshot_validation = {
+            "blocker": "",
+            "snapshot_path": "",
+            "freshness_certificate_path": "",
+            "snapshot_age_seconds": None,
+        }
     else:
         command_result = _run_market_data_supply(ctx)
         supply = _read_json(supply_path)

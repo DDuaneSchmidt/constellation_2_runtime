@@ -23,6 +23,7 @@ from constellation_2.common.stale_artifact_guard_v1 import (
     classify_artifact_freshness_v1,
 )
 from ops.tools import run_aegis_bod_prepare_v1 as bod
+from ops.tools.run_intent_arbitration_v1 import selected_intent_pointer_path
 
 SCHEMA_VERSION = "authorization_supply.v1"
 ALLOWED_BLOCKERS = {
@@ -36,6 +37,9 @@ ALLOWED_BLOCKERS = {
     "NO_ELIGIBLE_OPTION_STRUCTURE",
     "STRUCTURE_POLICY_MISSING",
     "STRUCTURE_DECISION_VALIDATION_FAILED",
+    "INTENT_ARBITRATION_MISSING",
+    "NO_EXECUTABLE_INTENT",
+    "ALLOWED_SYMBOL_MISMATCH",
     "PHASEC_INPUT_MARKET_DATA_MISSING",
     "PHASEC_INPUT_RISK_BUDGET_MISSING",
     "PHASEC_EXECUTION_IDENTITY_MISSING",
@@ -146,6 +150,20 @@ def _has_structure_decision(payload: dict[str, Any]) -> bool:
 
 
 def _active_intents(ctx: bod.BodContext) -> list[tuple[Path, dict[str, Any]]]:
+    pointer_path = selected_intent_pointer_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    if pointer_path.exists() and pointer_path.is_file():
+        pointer = _read_json(pointer_path)
+        if str(pointer.get("status") or "").strip().upper() != "SELECTED":
+            return []
+        selected = pointer.get("selected_intent") if isinstance(pointer.get("selected_intent"), dict) else {}
+        intent_path = str(selected.get("intent_path") or "").strip()
+        if not intent_path:
+            return []
+        path = Path(intent_path).expanduser().resolve()
+        payload = _read_json(path)
+        if payload and str(payload.get("day_utc") or ctx.day_utc).strip() == ctx.day_utc:
+            return [(path, payload)]
+        return []
     roots = [ctx.execution_root, ctx.truth_root] if ctx.execution_root != ctx.truth_root else [ctx.truth_root]
     seen: set[str] = set()
     rows: list[tuple[Path, dict[str, Any]]] = []
@@ -160,6 +178,25 @@ def _active_intents(ctx: bod.BodContext) -> list[tuple[Path, dict[str, Any]]]:
             seen.add(key)
             rows.append((path, payload))
     return rows
+
+
+def _selected_pointer_blocker(ctx: bod.BodContext) -> tuple[str, dict[str, Any]]:
+    pointer_path = selected_intent_pointer_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    if not pointer_path.exists() or not pointer_path.is_file():
+        return "", {}
+    pointer = _read_json(pointer_path)
+    status = str(pointer.get("status") or "").strip().upper()
+    if status == "SELECTED":
+        return "", {"path": str(pointer_path), "status": status}
+    blocker = str(pointer.get("canonical_blocker") or status or "NO_EXECUTABLE_INTENT").strip()
+    return blocker, {
+        "path": str(pointer_path),
+        "status": status,
+        "canonical_blocker": blocker,
+        "cycle_id": str(pointer.get("cycle_id") or ""),
+        "source_arbitration_path": str(pointer.get("source_arbitration_path") or ""),
+        "source_rollup_path": str(pointer.get("source_rollup_path") or ""),
+    }
 
 
 def _active_intent_rows(ctx: bod.BodContext) -> list[dict[str, Any]]:
@@ -318,6 +355,7 @@ def _structure_decision(ctx: bod.BodContext, active_intents: list[dict[str, Any]
                 "structure_decision_supply_path": str(supply_path),
                 "structure_decision_supply_status": status,
                 "structure_decision_supply_blocker": supply_blocker,
+                "structure_diagnostics": supply.get("structure_diagnostics", []),
                 "producer_command": f"python3 ops/tools/run_structure_decision_supply_v1.py --day_utc {ctx.day_utc} --environment {ctx.environment}",
             },
             supply_blocker,
@@ -613,6 +651,15 @@ def _blocked_payload(ctx: bod.BodContext, *, active_intents: list[dict[str, Any]
 def build_authorization_supply_v1(ctx: bod.BodContext) -> dict[str, Any]:
     active_intents = _active_intent_rows(ctx)
     if not active_intents:
+        pointer_blocker, pointer_input = _selected_pointer_blocker(ctx)
+        if pointer_blocker:
+            return _blocked_payload(
+                ctx,
+                active_intents=[],
+                blocker=pointer_blocker,
+                action="Resolve selected-intent arbitration before final authorization.",
+                strategy_decision={"status": "BLOCKED", "selected_intent_pointer": pointer_input},
+            )
         return _blocked_payload(
             ctx,
             active_intents=[],

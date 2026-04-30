@@ -15,6 +15,7 @@ if str(REPO_ROOT) not in sys.path:
 import ops.tools.run_aegis_bod_prepare_v1 as bod  # noqa: E402
 import ops.tools.run_aegis_day_v1 as day_run  # noqa: E402
 import ops.tools.run_authorization_supply_v1 as auth  # noqa: E402
+import ops.tools.run_intent_arbitration_v1 as arbitration  # noqa: E402
 import ops.tools.run_structure_decision_supply_v1 as structure_supply  # noqa: E402
 
 DAY = "2026-04-29"
@@ -191,6 +192,27 @@ def _structure_supply(ctx: bod.BodContext, *, day: str | None = None, intent_id:
     )
 
 
+def _selected_pointer(ctx: bod.BodContext, intent_path: Path) -> Path:
+    return _write(
+        arbitration.selected_intent_pointer_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc),
+        {
+            "schema_id": "selected_intent_pointer",
+            "schema_version": "v1",
+            "day_utc": ctx.day_utc,
+            "environment": "PAPER",
+            "status": "SELECTED",
+            "canonical_blocker": "",
+            "selected_intent": {
+                "intent_id": "intent-1",
+                "intent_hash": "a" * 64,
+                "intent_path": str(intent_path),
+                "engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1",
+                "symbol": "SPY",
+            },
+        },
+    )
+
+
 def _market_gate_with_snapshot(ctx: bod.BodContext, *, quotes: bool = True) -> Path:
     snap_root = ctx.execution_root / "options_chain_snapshot_v1" / ctx.day_utc / "capture"
     snap_root.mkdir(parents=True, exist_ok=True)
@@ -318,7 +340,8 @@ def test_wrong_day_structure_decision_is_rejected(monkeypatch: pytest.MonkeyPatc
 
 def test_structure_selection_uses_current_day_options_snapshot(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    _intent(ctx, structure=False)
+    intent_path = _intent(ctx, structure=False)
+    _selected_pointer(ctx, intent_path)
     _risk_budget(ctx)
     gate = _market_gate_with_snapshot(ctx)
 
@@ -334,7 +357,8 @@ def test_structure_selection_uses_current_day_options_snapshot(tmp_path: Path) -
 
 def test_structure_selection_no_eligible_option_structure_blocks(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    _intent(ctx, structure=False)
+    intent_path = _intent(ctx, structure=False)
+    _selected_pointer(ctx, intent_path)
     _risk_budget(ctx)
     _market_gate_with_snapshot(ctx, quotes=False)
 
@@ -342,6 +366,40 @@ def test_structure_selection_no_eligible_option_structure_blocks(tmp_path: Path)
 
     assert payload["status"] == "BLOCKED"
     assert payload["canonical_blocker"] == "NO_ELIGIBLE_OPTION_STRUCTURE"
+    diagnostics = payload["structure_diagnostics"][0]
+    assert diagnostics["intent_id"] == "intent-1"
+    assert diagnostics["selected_symbol"] == "SPY"
+    assert diagnostics["option_chain_snapshot_path"].endswith("options_chain_snapshot.v1.json")
+    assert diagnostics["candidates_seen"] == 0
+    assert diagnostics["candidates_eligible"] == 0
+    assert diagnostics["rejected_by_reason"]["NO_LIQUID_CONTRACTS"] == 2
+
+
+def test_blocked_selected_intent_pointer_supersedes_stale_raw_intent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _no_external(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _intent(ctx, structure=False)
+    pointer_path = arbitration.selected_intent_pointer_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    _write(
+        pointer_path,
+        {
+            "schema_id": "selected_intent_pointer",
+            "schema_version": "v1",
+            "day_utc": ctx.day_utc,
+            "environment": "PAPER",
+            "status": "BLOCKED",
+            "canonical_blocker": "ALLOWED_SYMBOL_MISMATCH",
+            "selected_intent": {},
+            "cycle_id": "scan_test",
+        },
+    )
+
+    payload = auth.build_authorization_supply_v1(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "ALLOWED_SYMBOL_MISMATCH"
+    assert payload["active_intents"] == []
+    assert payload["strategy_decision"]["selected_intent_pointer"]["path"] == str(pointer_path)
 
 
 def test_missing_execution_identity_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
