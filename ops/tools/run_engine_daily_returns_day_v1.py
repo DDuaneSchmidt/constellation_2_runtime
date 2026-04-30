@@ -18,6 +18,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
+from constellation_2.common.paper_session_fact_plane_v1 import resolve_paper_intent_truth_root_v1
 from constellation_2.common.runtime_contract_v1 import resolve_release_provenance_release_current_first_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
@@ -66,9 +67,11 @@ def _parse_day(day_utc: str) -> date:
     return date.fromisoformat(str(day_utc).strip())
 
 
-def _resolve_truth_root(raw: str) -> Path:
+def _resolve_truth_root(raw: str, *, environment: str = "") -> Path:
     text = str(raw or "").strip()
     truth_root = Path(text).expanduser().resolve() if text else DEFAULT_TRUTH_ROOT
+    if not text and str(environment or "").strip().upper() == "PAPER":
+        truth_root = resolve_paper_intent_truth_root_v1(truth_root=DEFAULT_TRUTH_ROOT, repo_root=REPO_ROOT).resolve()
     if not truth_root.is_absolute():
         raise SystemExit(f"FAIL: truth_root must be absolute: {truth_root}")
     if not truth_root.exists() or not truth_root.is_dir():
@@ -146,13 +149,14 @@ def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="run_engine_daily_returns_day_v1")
     ap.add_argument("--day_utc", required=True)
     ap.add_argument("--prev_day_utc", default="", help="Optional previous day; if empty, returns NOT_AVAILABLE")
+    ap.add_argument("--environment", default="")
     ap.add_argument("--truth_root", default="")
     args = ap.parse_args(argv)
 
     day = str(args.day_utc).strip()
     prev = str(args.prev_day_utc).strip() or (_parse_day(day) - timedelta(days=1)).isoformat()
     global _TRUTH_ROOT
-    _TRUTH_ROOT = _resolve_truth_root(str(args.truth_root))
+    _TRUTH_ROOT = _resolve_truth_root(str(args.truth_root), environment=str(args.environment))
 
     today_path = _TRUTH_ROOT / "accounting_v2" / "attribution" / day / "engine_attribution.v2.json"
     prev_path = _TRUTH_ROOT / "accounting_v2" / "attribution" / prev / "engine_attribution.v2.json" if prev else None

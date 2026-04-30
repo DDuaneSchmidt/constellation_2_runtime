@@ -221,6 +221,10 @@ def _correlation_state(path: Path, *, environment: str) -> tuple[str, str, dict[
         state = "NORMAL"
     else:
         state = "LOW"
+    if corr_status == DEGRADED_INSUFFICIENT_HISTORY:
+        if bootstrap_status == BOOTSTRAP_ACCEPTED_FOR_PAPER and environment == PAPER_MODE:
+            return state, str(max_corr), payload, [], ["engine_correlation_matrix:BOOTSTRAP_ACCEPTED_FOR_PAPER"], BOOTSTRAP_ACCEPTED_FOR_PAPER
+        return state, str(max_corr), payload, ["engine_correlation_matrix:DEGRADED_INSUFFICIENT_HISTORY"], [], DEGRADED_INSUFFICIENT_HISTORY
     return state, str(max_corr), payload, [], [], str(bootstrap_status or corr_status)
 
 

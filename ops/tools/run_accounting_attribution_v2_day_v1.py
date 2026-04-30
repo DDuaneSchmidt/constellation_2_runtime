@@ -12,10 +12,13 @@ _REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
 if str(_REPO_ROOT_FROM_FILE) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT_FROM_FILE))
 
+from constellation_2.common.paper_session_fact_plane_v1 import resolve_paper_intent_truth_root_v1
 from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
 TRUTH_ROOT = resolve_canonical_truth_root().resolve()
+REGISTRY_PATH = REPO_ROOT / "governance" / "02_REGISTRIES" / "ENGINE_MODEL_REGISTRY_V1.json"
+SIMULATOR_ENGINE_ID = "C2_INTENT_SIMULATOR_V1"
 
 DAY0_RC_ALLOWED = "DAY0_BOOTSTRAP_ATTRIB_DEGRADED_OK"
 
@@ -71,6 +74,47 @@ def _load_json(p: Path) -> Dict[str, Any]:
     with p.open("r", encoding="utf-8") as f:
         return json.load(f)
 
+
+def _resolve_truth_root(*, environment: str, truth_root_arg: str) -> Path:
+    raw = str(truth_root_arg or "").strip()
+    if raw:
+        root = Path(raw).expanduser().resolve()
+    else:
+        root = resolve_canonical_truth_root().resolve()
+        if str(environment or "").strip().upper() == "PAPER":
+            root = resolve_paper_intent_truth_root_v1(truth_root=root, repo_root=REPO_ROOT).resolve()
+    if not root.is_absolute():
+        raise SystemExit(f"FAIL: truth_root must be absolute: {root}")
+    if not root.exists() or not root.is_dir():
+        raise SystemExit(f"FAIL: truth_root missing or not directory: {root}")
+    return root
+
+
+def _active_trading_engine_ids() -> List[str]:
+    registry = _load_json(REGISTRY_PATH)
+    models = registry.get("engines") if isinstance(registry.get("engines"), list) else []
+    out: List[str] = []
+    for row in models:
+        if not isinstance(row, dict):
+            continue
+        sleeve_id = str(row.get("engine_id") or row.get("sleeve_id") or "").strip()
+        status = str(row.get("activation_status") or row.get("activation") or row.get("status") or "").strip().upper()
+        if not sleeve_id or sleeve_id == SIMULATOR_ENGINE_ID or status != "ACTIVE":
+            continue
+        out.append(sleeve_id)
+    return sorted(set(out))
+
+
+def _position_items(pos: Dict[str, Any]) -> List[Dict[str, Any]]:
+    top_items = pos.get("items")
+    if isinstance(top_items, list):
+        return [item for item in top_items if isinstance(item, dict)]
+    positions = pos.get("positions") if isinstance(pos.get("positions"), dict) else {}
+    nested = positions.get("items")
+    if isinstance(nested, list):
+        return [item for item in nested if isinstance(item, dict)]
+    return []
+
 def _return_if_existing_report(out_path: Path, expected_day_utc: str) -> int | None:
     """
     Immutable truth rule (audit-grade):
@@ -110,9 +154,13 @@ def main() -> int:
     ap.add_argument("--day_utc", required=True)
     ap.add_argument("--producer_git_sha", required=True)
     ap.add_argument("--producer_repo", required=True)
+    ap.add_argument("--environment", default="")
+    ap.add_argument("--truth_root", default="")
     args = ap.parse_args()
 
     day = str(args.day_utc).strip()
+    global TRUTH_ROOT
+    TRUTH_ROOT = _resolve_truth_root(environment=str(args.environment), truth_root_arg=str(args.truth_root))
 
     out_dir = TRUTH_ROOT / "accounting_v2" / "attribution" / day
     out_path = out_dir / "engine_attribution.v2.json"
@@ -121,14 +169,15 @@ def main() -> int:
     if existing_rc is not None:
         return int(existing_rc)
 
-    pos_path = TRUTH_ROOT / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json"
+    pos_v5_path = TRUTH_ROOT / "positions_v1" / "snapshots" / day / "positions_snapshot.v5.json"
+    pos_v2_path = TRUTH_ROOT / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json"
+    pos_path = pos_v5_path if pos_v5_path.exists() else pos_v2_path
     marks_path = TRUTH_ROOT / "market_data_snapshot_v1" / "broker_marks_v1" / day / "broker_marks.v1.json"
     link_path = TRUTH_ROOT / "engine_linkage_v1" / "snapshots" / day / "engine_linkage.v1.json"
 
     missing = []
-    for p in [pos_path, marks_path, link_path]:
-        if not p.exists():
-            missing.append(str(p.relative_to(TRUTH_ROOT)))
+    if not pos_path.exists():
+        missing.append(str(pos_path.relative_to(TRUTH_ROOT)))
 
     status = "ACTIVE"
     reason_codes: List[str] = []
@@ -144,12 +193,29 @@ def main() -> int:
 
     if status == "ACTIVE":
         pos = _load_json(pos_path)
-        items = (((pos.get("positions") or {}).get("items")) or [])
+        items = _position_items(pos)
+        if items:
+            for p in [marks_path, link_path]:
+                if not p.exists():
+                    missing.append(str(p.relative_to(TRUTH_ROOT)))
+            if missing:
+                status = "DEGRADED_MISSING_INPUTS"
+                reason_codes.append("MISSING_INPUTS")
+                notes.extend([f"MISSING: {m}" for m in missing])
         if not items:
-            status = "ACTIVE"
-            reason_codes.append("NO_POSITIONS")
-            notes.append("SAFE_IDLE: positions snapshot empty; attribution empty.")
-        else:
+            reason_codes.append("SAFE_IDLE_EMPTY_POSITIONS")
+            notes.append("SAFE_IDLE: positions snapshot empty; zero PnL attributed to all active trading sleeves.")
+            by_engine = [
+                {
+                    "engine_id": engine_id,
+                    "realized_pnl_to_date": "0",
+                    "unrealized_pnl": "0",
+                    "pnl_to_date": "0",
+                    "basis": "SAFE_IDLE_EMPTY_POSITIONS",
+                }
+                for engine_id in _active_trading_engine_ids()
+            ]
+        elif status == "ACTIVE":
             status = "DEGRADED_NOT_IMPLEMENTED"
             reason_codes.append("JOIN_KEYS_NOT_PROVEN")
             notes.append("Positions present but join keys for linkage+marks not yet proven in this environment.")
@@ -166,6 +232,7 @@ def main() -> int:
             {"type": "positions_truth", "path": str(pos_path), "sha256": _sha256_file(pos_path) if pos_path.exists() else "0" * 64, "day_utc": day, "producer": "positions_v1"},
             {"type": "broker_marks", "path": str(marks_path), "sha256": _sha256_file(marks_path) if marks_path.exists() else "0" * 64, "day_utc": day, "producer": "broker_marks_v1"},
             {"type": "engine_linkage", "path": str(link_path), "sha256": _sha256_file(link_path) if link_path.exists() else "0" * 64, "day_utc": day, "producer": "engine_linkage_v1"},
+            {"type": "engine_model_registry", "path": str(REGISTRY_PATH), "sha256": _sha256_file(REGISTRY_PATH), "day_utc": day, "producer": "governance_registry"},
         ],
         "attribution": {
             "currency": currency,

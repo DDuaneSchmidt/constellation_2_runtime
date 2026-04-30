@@ -136,7 +136,11 @@
         },
         "return_source": {
           "type": "string",
-          "enum": ["REALIZED_ACCOUNTING_ATTRIBUTION", "UNAVAILABLE_NO_ATTRIBUTION_HISTORY"]
+          "enum": [
+            "REALIZED_ACCOUNTING_ATTRIBUTION",
+            "REALIZED_ACCOUNTING_ATTRIBUTION_INSUFFICIENT_HISTORY",
+            "UNAVAILABLE_NO_ATTRIBUTION_HISTORY"
+          ]
         },
         "required_history_days": { "type": "integer", "minimum": 1, "maximum": 4000 },
         "observed_return_days": { "type": "integer", "minimum": 0, "maximum": 4000 },

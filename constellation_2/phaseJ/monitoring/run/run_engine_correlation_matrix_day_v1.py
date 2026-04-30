@@ -212,10 +212,18 @@ def _bootstrap_policy(
     observed_return_days: int,
     observed_engine_count: int,
 ) -> Dict[str, Any]:
-    if observed_engine_count > 0:
+    if observed_engine_count > 0 and observed_return_days >= window_days:
         status = "NOT_APPLICABLE"
         source = "REALIZED_ACCOUNTING_ATTRIBUTION"
         next_action = ""
+    elif observed_engine_count > 0 and _paper_truth_root_true(truth_root):
+        status = "BOOTSTRAP_ACCEPTED_FOR_PAPER"
+        source = "REALIZED_ACCOUNTING_ATTRIBUTION_INSUFFICIENT_HISTORY"
+        next_action = "Accumulate enough paper engine attribution returns to satisfy the correlation history window."
+    elif observed_engine_count > 0:
+        status = "BLOCKED_FOR_LIVE"
+        source = "REALIZED_ACCOUNTING_ATTRIBUTION_INSUFFICIENT_HISTORY"
+        next_action = "Accumulate enough real engine attribution returns before relying on live pairwise correlation."
     elif _bootstrap_window_true(day_utc, truth_root) and _paper_truth_root_true(truth_root):
         status = "BOOTSTRAP_ACCEPTED_FOR_PAPER"
         source = "UNAVAILABLE_NO_ATTRIBUTION_HISTORY"
@@ -390,6 +398,9 @@ def main() -> int:
         if max_len < 2:
             status = "DEGRADED_INSUFFICIENT_HISTORY"
             reason_codes.append("INSUFFICIENT_HISTORY_LT_2")
+        elif max_len < window_days:
+            status = "DEGRADED_INSUFFICIENT_HISTORY"
+            reason_codes.append("INSUFFICIENT_HISTORY_LT_WINDOW")
         n = len(engine_ids)
 
         corr: List[List[str]] = []
