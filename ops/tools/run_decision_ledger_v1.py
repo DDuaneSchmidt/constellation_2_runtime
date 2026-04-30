@@ -19,6 +19,7 @@ from ops.tools.run_intent_arbitration_v1 import selected_intent_pointer_path
 from ops.tools.run_portfolio_activation_gate_v1 import portfolio_activation_gate_path
 from ops.tools.run_portfolio_scoring_v1 import portfolio_scoring_path
 from ops.tools.run_portfolio_state_v1 import portfolio_state_path
+from ops.tools.run_position_lifecycle_state_v1 import position_lifecycle_state_path
 
 PAPER_MODE = "PAPER"
 
@@ -128,6 +129,49 @@ def _lifecycle_summary(truth_root: Path, day_utc: str) -> dict[str, Any]:
     }
 
 
+def _position_lifecycle_summary(truth_root: Path, day_utc: str, selected_intent_id: str) -> dict[str, Any]:
+    path = position_lifecycle_state_path(truth_root=truth_root, day_utc=day_utc)
+    payload = _read_json(path)
+    rows = payload.get("rows") if isinstance(payload.get("rows"), list) else []
+    counts = payload.get("counts") if isinstance(payload.get("counts"), dict) else {}
+    selected_row: dict[str, Any] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if selected_intent_id and str(row.get("intent_id") or "") == selected_intent_id:
+            selected_row = row
+            break
+    if not selected_row and rows:
+        first = rows[0]
+        selected_row = first if isinstance(first, dict) else {}
+    reason_sets = [
+        {str(reason).strip().upper() for reason in row.get("reason_codes", [])}
+        for row in rows
+        if isinstance(row, dict) and isinstance(row.get("reason_codes"), list)
+    ]
+    uncertain = (
+        int(counts.get("uncertain_position_count"))
+        if counts.get("uncertain_position_count") is not None
+        else len([reasons for reasons in reason_sets if "POSITION_MATCH_UNCERTAIN" in reasons])
+    )
+    chain = {
+        "intent_id": str(selected_row.get("intent_id") or selected_intent_id or ""),
+        "submission_id": str(selected_row.get("submission_id") or ""),
+        "fill_id": str(selected_row.get("fill_id") or ""),
+        "position_id": str(selected_row.get("position_id") or ""),
+    }
+    return {
+        "position_lifecycle_state_path": str(path),
+        "selected_position_id": chain["position_id"],
+        "lifecycle_chain": chain,
+        "open_position_count": int(counts.get("open_position_count") or len([row for row in rows if isinstance(row, dict) and row.get("lifecycle_state") == "POSITION_OPEN"])),
+        "pending_order_count": int(counts.get("pending_order_count") or len([row for row in rows if isinstance(row, dict) and row.get("lifecycle_state") == "ORDER_PENDING"])),
+        "closed_position_count": int(counts.get("closed_position_count") or len([row for row in rows if isinstance(row, dict) and row.get("lifecycle_state") == "POSITION_CLOSED"])),
+        "uncertain_position_count": uncertain,
+        "final_exposure_state": str(selected_row.get("lifecycle_state") or "UNKNOWN"),
+    }
+
+
 def build_decision_ledger_v1(
     *,
     day_utc: str,
@@ -157,6 +201,8 @@ def build_decision_ledger_v1(
     scoring_summary = _scoring_summary(truth_root, day_utc)
     arbitration_summary = _arbitration_summary(scan_paths["arbitration_result_path"])
     lifecycle_summary = _lifecycle_summary(truth_root, day_utc)
+    selected_intent_id = str(selected.get("intent_id") or "")
+    position_lifecycle_summary = _position_lifecycle_summary(truth_root, day_utc, selected_intent_id)
     payload = {
         "schema_id": "decision_ledger",
         "schema_version": "v1",
@@ -170,13 +216,20 @@ def build_decision_ledger_v1(
         "portfolio_state_path": str(portfolio_state_path(truth_root=truth_root, day_utc=day_utc)),
         "raw_sleeve_scan_path": scan_paths["raw_sleeve_scan_path"],
         "intent_lifecycle_state_path": lifecycle_summary["intent_lifecycle_state_path"],
+        "position_lifecycle_state_path": position_lifecycle_summary["position_lifecycle_state_path"],
         "portfolio_activation_gate_path": str(portfolio_activation_gate_path(truth_root=truth_root, day_utc=day_utc)),
         "portfolio_scoring_path": scoring_summary["portfolio_scoring_path"],
         "arbitration_result_path": scan_paths["arbitration_result_path"],
         "authorization_result_path": (authorization.get("outputs") or [""])[0] if isinstance(authorization.get("outputs"), list) and authorization.get("outputs") else "",
         "execution_result_path": (execution.get("outputs") or [""])[0] if isinstance(execution.get("outputs"), list) and execution.get("outputs") else "",
         "selected_intent_pointer_path": str(selected_pointer_path),
-        "selected_intent_id": str(selected.get("intent_id") or ""),
+        "selected_intent_id": selected_intent_id,
+        "selected_position_id": position_lifecycle_summary["selected_position_id"],
+        "lifecycle_chain": position_lifecycle_summary["lifecycle_chain"],
+        "open_position_count": position_lifecycle_summary["open_position_count"],
+        "pending_order_count": position_lifecycle_summary["pending_order_count"],
+        "closed_position_count": position_lifecycle_summary["closed_position_count"],
+        "final_exposure_state": position_lifecycle_summary["final_exposure_state"],
         "selected_intent_score": arbitration_summary["selected_intent_score"],
         "selected_intent_rank": arbitration_summary["selected_intent_rank"],
         "scored_intents_count": scoring_summary["scored_intents_count"],
@@ -184,7 +237,7 @@ def build_decision_ledger_v1(
         "reentry_intent_count": lifecycle_summary["reentry_intent_count"],
         "suppressed_position_count": lifecycle_summary["suppressed_position_count"],
         "suppressed_order_count": lifecycle_summary["suppressed_order_count"],
-        "uncertain_position_count": lifecycle_summary["uncertain_position_count"],
+        "uncertain_position_count": max(lifecycle_summary["uncertain_position_count"], position_lifecycle_summary["uncertain_position_count"]),
         "selected_intent_lifecycle_reason_codes": lifecycle_summary["selected_intent_lifecycle_reason_codes"],
         "top_rejected_or_suppressed_reasons": scoring_summary["top_rejected_or_suppressed_reasons"],
         "final_status": str(day_run.get("final_status") or "UNKNOWN"),

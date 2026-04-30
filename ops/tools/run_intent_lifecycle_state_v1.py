@@ -19,6 +19,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     resolve_paper_intent_truth_root_v1,
 )
 from ops.tools import run_sleeve_evaluation_kernel_v1 as sleeve_kernel
+from ops.tools.run_position_lifecycle_state_v1 import position_lifecycle_state_path
 
 PAPER_MODE = "PAPER"
 PRODUCER = "ops/tools/run_intent_lifecycle_state_v1.py"
@@ -368,6 +369,103 @@ def _order_match_state(
     return "ORDER_MATCH_UNCERTAIN" if uncertain else "NO_ORDER"
 
 
+def _load_position_lifecycle_rows(*, truth_root: Path, day_utc: str) -> tuple[str, list[dict[str, Any]], str]:
+    path = position_lifecycle_state_path(truth_root=truth_root, day_utc=day_utc)
+    if not path.is_file():
+        return "", [], str(path)
+    payload = _read_json(path)
+    rows = payload.get("rows") if isinstance(payload.get("rows"), list) else []
+    return str(payload.get("position_truth_status") or payload.get("status") or ""), [row for row in rows if isinstance(row, dict)], str(path)
+
+
+def _position_lifecycle_match(
+    *,
+    rows: list[dict[str, Any]],
+    sleeve_id: str,
+    engine_id: str,
+    symbol: str,
+    underlying: str,
+    exposure_type: str,
+    environment: str,
+    account_id: str,
+) -> dict[str, Any]:
+    best: dict[str, Any] = {}
+    uncertain = False
+    stale = False
+    for row in rows:
+        if not _same_symbol(row, symbol=symbol, underlying=underlying):
+            continue
+        reasons = row.get("reason_codes") if isinstance(row.get("reason_codes"), list) else []
+        reason_set = {str(reason).strip().upper() for reason in reasons}
+        if "POSITION_STATE_STALE" in reason_set:
+            stale = True
+        if "POSITION_MATCH_UNCERTAIN" in reason_set:
+            uncertain = True
+        identity_match, attribution_unknown = _same_identity(row, sleeve_id=sleeve_id, engine_id=engine_id, environment=environment, account_id=account_id)
+        if attribution_unknown:
+            uncertain = True
+            continue
+        if identity_match and _compatible_exposure(exposure_type, row):
+            best = row
+            break
+    state = _norm(best.get("lifecycle_state")) if best else ""
+    if stale and not best:
+        return {
+            "position_state": "POSITION_STATE_STALE",
+            "order_state": "NO_ORDER",
+            "matching_position_id": "",
+            "matching_lifecycle_state": "UNKNOWN",
+            "position_truth_status": "POSITION_STATE_STALE",
+            "reentry_allowed_by_position_lifecycle": False,
+        }
+    if uncertain and not best:
+        return {
+            "position_state": "POSITION_MATCH_UNCERTAIN",
+            "order_state": "NO_ORDER",
+            "matching_position_id": "",
+            "matching_lifecycle_state": "UNKNOWN",
+            "position_truth_status": "POSITION_MATCH_UNCERTAIN",
+            "reentry_allowed_by_position_lifecycle": False,
+        }
+    if not best:
+        return {}
+    if state in {"POSITION_OPEN", "PARTIALLY_FILLED", "EXIT_PENDING"}:
+        position_state = "POSITION_OPEN"
+        order_state = "NO_ORDER"
+        reentry_allowed = False
+    elif state == "ORDER_PENDING":
+        position_state = "NO_POSITION"
+        order_state = "ORDER_PENDING"
+        reentry_allowed = False
+    elif state in {"POSITION_CLOSED", "CANCELED", "FAILED", "NO_POSITION"}:
+        position_state = "NO_POSITION"
+        order_state = "NO_ORDER"
+        reentry_allowed = True
+    elif state == "UNKNOWN":
+        reasons = best.get("reason_codes") if isinstance(best.get("reason_codes"), list) else []
+        reason_set = {str(reason).strip().upper() for reason in reasons}
+        if "POSITION_STATE_STALE" in reason_set:
+            position_state = "POSITION_STATE_STALE"
+        elif "POSITION_MATCH_UNCERTAIN" in reason_set:
+            position_state = "POSITION_MATCH_UNCERTAIN"
+        else:
+            position_state = "POSITION_MATCH_UNCERTAIN"
+        order_state = "NO_ORDER"
+        reentry_allowed = False
+    else:
+        position_state = "NO_POSITION"
+        order_state = "NO_ORDER"
+        reentry_allowed = True
+    return {
+        "position_state": position_state,
+        "order_state": order_state,
+        "matching_position_id": str(best.get("position_id") or "") if best else "",
+        "matching_lifecycle_state": state or "",
+        "position_truth_status": str(best.get("position_truth_status") or position_state or ""),
+        "reentry_allowed_by_position_lifecycle": reentry_allowed,
+    }
+
+
 def _lifecycle_decision(*, signal_state: str, unchanged_signal: bool, position_state: str, order_state: str) -> tuple[str, list[str], bool]:
     if signal_state == "INACTIVE":
         return "NO_INTENT", ["SIGNAL_INACTIVE"], False
@@ -409,6 +507,7 @@ def build_intent_lifecycle_state_v1(
     previous_by_engine = previous_by_engine if isinstance(previous_by_engine, dict) else {}
     positions_status, positions, positions_path, position_evidence = _load_positions(truth_root=truth_root, intent_truth_root=intent_root, day_utc=day_utc)
     order_rows, order_evidence = _load_order_rows(truth_root=truth_root, intent_truth_root=intent_root, day_utc=day_utc)
+    position_lifecycle_status, position_lifecycle_rows, position_lifecycle_path = _load_position_lifecycle_rows(truth_root=truth_root, day_utc=day_utc)
     rows: list[dict[str, Any]] = []
     produced_at = _now_iso()
     for outcome in input_outcomes:
@@ -419,7 +518,20 @@ def build_intent_lifecycle_state_v1(
         signal_signature = _signal_signature(outcome)
         unchanged_signal = is_unchanged_signal(outcome, previous)
         signal_state = _signal_state(outcome)
-        if positions_status == "POSITION_STATE_STALE":
+        lifecycle_match = _position_lifecycle_match(
+            rows=position_lifecycle_rows,
+            sleeve_id=sleeve_id,
+            engine_id=engine_id,
+            symbol=fields["symbol"],
+            underlying=fields["underlying"],
+            exposure_type=fields["exposure_type"],
+            environment=environment,
+            account_id=account_id,
+        ) if position_lifecycle_rows else {}
+        if lifecycle_match:
+            position_state = str(lifecycle_match["position_state"])
+            order_state = str(lifecycle_match["order_state"])
+        elif positions_status == "POSITION_STATE_STALE":
             position_state = "POSITION_STATE_STALE" if signal_state == "ACTIVE" else "NO_POSITION"
         else:
             position_state = _position_match_state(
@@ -432,16 +544,17 @@ def build_intent_lifecycle_state_v1(
                 environment=environment,
                 account_id=account_id,
             )
-        order_state = _order_match_state(
-            rows=order_rows,
-            sleeve_id=sleeve_id,
-            engine_id=engine_id,
-            symbol=fields["symbol"],
-            underlying=fields["underlying"],
-            exposure_type=fields["exposure_type"],
-            environment=environment,
-            account_id=account_id,
-        )
+        if not lifecycle_match:
+            order_state = _order_match_state(
+                rows=order_rows,
+                sleeve_id=sleeve_id,
+                engine_id=engine_id,
+                symbol=fields["symbol"],
+                underlying=fields["underlying"],
+                exposure_type=fields["exposure_type"],
+                environment=environment,
+                account_id=account_id,
+            )
         decision, reasons, reentry_eligible = _lifecycle_decision(
             signal_state=signal_state,
             unchanged_signal=unchanged_signal,
@@ -462,10 +575,15 @@ def build_intent_lifecycle_state_v1(
                 "unchanged_signal": unchanged_signal,
                 "matching_position_state": position_state,
                 "matching_order_state": order_state,
+                "position_lifecycle_state_path": position_lifecycle_path if lifecycle_match else "",
+                "matching_position_id": str(lifecycle_match.get("matching_position_id") or ""),
+                "matching_lifecycle_state": str(lifecycle_match.get("matching_lifecycle_state") or ""),
+                "position_truth_status": str(lifecycle_match.get("position_truth_status") or positions_status),
+                "reentry_allowed_by_position_lifecycle": bool(lifecycle_match.get("reentry_allowed_by_position_lifecycle")) if lifecycle_match else reentry_eligible,
                 "reentry_eligible": reentry_eligible,
                 "lifecycle_decision": decision,
                 "lifecycle_reason_codes": sorted(set(reasons)),
-                "evidence_paths": sorted(set([path for path in [positions_path, str(outcome.get("artifact_path") or "")] + position_evidence + order_evidence if path])),
+                "evidence_paths": sorted(set([path for path in [positions_path, position_lifecycle_path if lifecycle_match else "", str(outcome.get("artifact_path") or "")] + position_evidence + order_evidence if path])),
                 "produced_at_utc": produced_at,
                 "producer": PRODUCER,
             }
@@ -491,6 +609,8 @@ def build_intent_lifecycle_state_v1(
         "canonical_blocker": "INTENT_LIFECYCLE_BLOCKED" if counts["BLOCKED"] else "",
         "positions_snapshot_path": positions_path,
         "position_snapshot_status": positions_status,
+        "position_lifecycle_state_path": position_lifecycle_path if position_lifecycle_rows else "",
+        "position_lifecycle_status": position_lifecycle_status,
         "intent_truth_root": str(intent_root),
         "rows": rows,
         "counts": counts,
