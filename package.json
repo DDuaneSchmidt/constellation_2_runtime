@@ -2,6 +2,10 @@
   "name": "constellation",
   "private": true,
   "scripts": {
+    "aegis:ui:start": "python3 ops/runtime/supervisor.py start",
+    "aegis:ui:stop": "python3 ops/runtime/supervisor.py stop",
+    "aegis:ui:restart": "python3 ops/runtime/supervisor.py restart",
+    "aegis:ui:status": "python3 ops/runtime/supervisor.py status",
     "aegis:ui:refresh": "python3 ops/tools/run_c2_global_monitoring_refresh_v1.py --include-ui-data --ui-only",
     "aegis:paper:preflight": "python3 ops/tools/run_aegis_paper_preflight_v1.py",
     "aegis:paper:submit": "python3 ops/tools/run_aegis_paper_submit_v1.py",

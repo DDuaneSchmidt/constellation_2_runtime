@@ -33,6 +33,10 @@ from constellation_2.common.operator_control_plane_v1 import (
     build_operator_query_bundle,
 )
 from constellation_2.common.control_plane_read_gateway_v1 import read_control_plane_surface_v1
+from constellation_2.common.runtime_contract_v1 import (
+    resolve_canonical_truth_root,
+    resolve_truth_sleeves_root,
+)
 from constellation_2.phaseL.ui_api import (
     STATUS_SEMANTICS,
     build_action_inventory,
@@ -154,6 +158,7 @@ THIS_FILE = Path(__file__).resolve()
 REPO_ROOT = THIS_FILE.parents[4]
 TRUTH_ROOT = SLEEVE_TRUTH_ROOT
 RUNTIME_ROOT = Path(os.environ.get("C2_RUNTIME_STATE_ROOT", "/home/node/constellation_runtime_data/runtime")).resolve()
+PROJECTION_CONTRACT_VERSION = "aegis_ui_projection.v1"
 PERFORMANCE_SHOWCASE_FAMILY = "aegis_performance_showcase_v1"
 PERFORMANCE_SHOWCASE_HTML = "aegis_performance_showcase.v1.html"
 
@@ -223,6 +228,9 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+SERVICE_STARTED_AT_UTC = _utc_now_iso()
+
+
 def _service_version() -> Optional[str]:
     import os
 
@@ -264,6 +272,192 @@ def _is_day_str(s: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def _canonical_truth_root() -> Path:
+    try:
+        return resolve_canonical_truth_root().resolve()
+    except Exception:
+        return GLOBAL_TRUTH_ROOT.resolve()
+
+
+def _runtime_truth_root() -> Path:
+    try:
+        return (resolve_truth_sleeves_root().resolve() / "PRIMARY" / "PAPER").resolve()
+    except Exception:
+        return SLEEVE_TRUTH_ROOT.resolve()
+
+
+def _latest_packet_path() -> Path:
+    return (
+        Path("/home/node/constellation_runtime_data")
+        / "exports"
+        / "aegis_state"
+        / "latest"
+        / "chatgpt_aegis_packet.md"
+    ).resolve()
+
+
+def _projection_day(raw_day: Optional[str] = None) -> str:
+    if isinstance(raw_day, str) and _is_day_str(raw_day):
+        return raw_day
+    day_run_root = (_canonical_truth_root() / "reports" / "aegis_day_run_v1").resolve()
+    days = [day for day in _list_day_dirs(day_run_root) if day <= date.today().isoformat()]
+    if days:
+        return days[-1]
+    return date.today().isoformat()
+
+
+def _canonical_report_path(family: str, day_utc: str, filename: str) -> Path:
+    return (_canonical_truth_root() / "reports" / family / day_utc / filename).resolve()
+
+
+def _read_json_dict_or_empty(path: Path) -> Dict[str, Any]:
+    payload, _err = _safe_read_json(path)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _artifact_projection_payload(
+    *,
+    day_utc: str,
+    family: str,
+    filename: str,
+    label: str,
+) -> Dict[str, Any]:
+    path = _canonical_report_path(family, day_utc, filename)
+    payload, err = _safe_read_json(path)
+    if not isinstance(payload, dict):
+        return {
+            "ok": False,
+            "status": "FAIL" if err == "FILE_NOT_FOUND" else "DEGRADED",
+            "reason_codes": [f"{label.upper()}_MISSING" if err == "FILE_NOT_FOUND" else f"{label.upper()}_UNREADABLE"],
+            "day_utc": day_utc,
+            "truth_root": str(_canonical_truth_root()),
+            "artifact_path": str(path),
+            "data": {},
+        }
+    return {
+        "ok": True,
+        "status": str(payload.get("status") or payload.get("final_status") or "PASS").strip().upper() or "PASS",
+        "reason_codes": [],
+        "day_utc": str(payload.get("day_utc") or day_utc),
+        "truth_root": str(_canonical_truth_root()),
+        "artifact_path": str(path),
+        "data": payload,
+    }
+
+
+def _selected_intent_projection() -> Tuple[str, str, str]:
+    pointer_path = (_canonical_truth_root() / "pointers" / "selected_intent_pointer.v1.json").resolve()
+    pointer = _read_json_dict_or_empty(pointer_path)
+    selected = pointer.get("selected_intent") if isinstance(pointer.get("selected_intent"), dict) else {}
+    return (
+        str(pointer.get("selected_intent_id") or selected.get("intent_id") or "").strip(),
+        str(pointer.get("status") or "").strip().upper(),
+        str(pointer_path),
+    )
+
+
+def _runtime_status_projection(day_utc: Optional[str] = None) -> Dict[str, Any]:
+    day = _projection_day(day_utc)
+    truth_root = _canonical_truth_root()
+    runtime_truth = _runtime_truth_root()
+    day_run_path = _canonical_report_path("aegis_day_run_v1", day, "day_run.v1.json")
+    day_run = _read_json_dict_or_empty(day_run_path)
+    selected_intent_id, selected_intent_status, selected_pointer_path = _selected_intent_projection()
+    portfolio_state = _artifact_projection_payload(
+        day_utc=day,
+        family="portfolio_state_v1",
+        filename="portfolio_state.v1.json",
+        label="portfolio_state",
+    )
+    portfolio_scoring = _artifact_projection_payload(
+        day_utc=day,
+        family="portfolio_scoring_v1",
+        filename="portfolio_scoring.v1.json",
+        label="portfolio_scoring",
+    )
+    decision_ledger = _artifact_projection_payload(
+        day_utc=day,
+        family="decision_ledger_v1",
+        filename="decision_ledger.v1.json",
+        label="decision_ledger",
+    )
+    source_status = ""
+    if isinstance(day_run.get("source_repo_status"), dict):
+        source_status = str(day_run["source_repo_status"].get("source_reproducibility_status") or "").strip()
+
+    final_status = str(day_run.get("final_status") or "").strip().upper()
+    canonical_phase = str(day_run.get("canonical_phase") or "").strip().upper()
+    canonical_blocker = str(day_run.get("canonical_blocker") or "").strip()
+    missing = []
+    if not day_run:
+        missing.append("AEGIS_DAY_RUN_MISSING")
+    if not portfolio_state.get("ok"):
+        missing.extend(portfolio_state.get("reason_codes") or [])
+    if not portfolio_scoring.get("ok"):
+        missing.extend(portfolio_scoring.get("reason_codes") or [])
+    packet_path = _latest_packet_path()
+
+    status = "PASS"
+    if not day_run:
+        status = "FAIL"
+    elif missing:
+        status = "DEGRADED"
+
+    return {
+        "ok": bool(day_run),
+        "status": status,
+        "reason_codes": missing,
+        "projection_contract_version": PROJECTION_CONTRACT_VERSION,
+        "generated_at_utc": _utc_now_iso(),
+        "day_utc": day,
+        "truth_root": str(truth_root),
+        "runtime_truth_root": str(runtime_truth),
+        "final_status": final_status or "UNKNOWN",
+        "canonical_phase": canonical_phase,
+        "canonical_blocker": canonical_blocker,
+        "source_integrity_status": source_status or "UNKNOWN",
+        "selected_intent_id": selected_intent_id,
+        "selected_intent_status": selected_intent_status,
+        "portfolio_state_status": str(portfolio_state.get("status") or "UNKNOWN"),
+        "portfolio_scoring_status": str(portfolio_scoring.get("status") or "UNKNOWN"),
+        "decision_ledger_status": str(decision_ledger.get("status") or "UNKNOWN"),
+        "operator_next_action": str(day_run.get("operator_next_action") or "").strip(),
+        "artifact_paths": {
+            "day_run": str(day_run_path),
+            "selected_intent_pointer": selected_pointer_path,
+            "portfolio_state": str(portfolio_state.get("artifact_path") or ""),
+            "portfolio_scoring": str(portfolio_scoring.get("artifact_path") or ""),
+            "decision_ledger": str(decision_ledger.get("artifact_path") or ""),
+            "latest_packet": str(packet_path),
+        },
+    }
+
+
+def _latest_packet_projection() -> Dict[str, Any]:
+    path = _latest_packet_path()
+    if not path.exists() or not path.is_file():
+        return {
+            "ok": False,
+            "status": "FAIL",
+            "reason_codes": ["LATEST_PACKET_MISSING"],
+            "artifact_path": str(path),
+            "content": "",
+        }
+    content = path.read_text(encoding="utf-8", errors="replace")
+    return {
+        "ok": True,
+        "status": "PASS",
+        "reason_codes": [],
+        "artifact_path": str(path),
+        "updated_at_utc": datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "content": content,
+    }
+
+
+def _ui_service_authority_path(day_utc: str) -> Path:
+    return _canonical_report_path("ui_service_authority_v1", day_utc, "ui_service_authority.v1.json")
 
 
 def _list_day_dirs(root: Path) -> List[str]:
@@ -2223,8 +2417,11 @@ class OpsHandler(SimpleHTTPRequestHandler):
             "service": "ops_dashboard",
             "status": status,
             "timestamp_utc": _utc_now_iso(),
+            "process_alive": True,
+            "pid": os.getpid(),
             "host": host,
             "port": port,
+            "started_at_utc": SERVICE_STARTED_AT_UTC,
             "checks": checks,
             "runtime_root": str(RUNTIME_ROOT),
         }
@@ -2232,6 +2429,52 @@ class OpsHandler(SimpleHTTPRequestHandler):
         if isinstance(version, str) and version:
             payload["version"] = version
         return payload
+
+    def _route_status_payload(self) -> Dict[str, Any]:
+        routes = {
+            "/aegis-runtime": "/aegis-runtime" in self.SHELL_ROUTES,
+            "/api/runtime-status": True,
+            "/api/decision-ledger": True,
+            "/api/portfolio-state": True,
+            "/api/portfolio-scoring": True,
+            "/api/latest-packet": True,
+            "/api/ui-service-authority": True,
+            "/healthz": True,
+            "/readyz": True,
+            "/runtime-status": True,
+        }
+        return {
+            "status": "PASS" if all(routes.values()) else "FAIL",
+            "routes": routes,
+        }
+
+    def _readyz_payload(self) -> Dict[str, Any]:
+        truth_root = _canonical_truth_root()
+        runtime_truth = _runtime_truth_root()
+        latest_packet = _latest_packet_path()
+        route_status = self._route_status_payload()
+        checks = {
+            "truth_root_resolved": truth_root.exists() and truth_root.is_dir(),
+            "latest_packet_available": latest_packet.exists() and latest_packet.is_file(),
+            "runtime_truth_available": runtime_truth.exists() and runtime_truth.is_dir(),
+            "projection_contracts_loaded": (REPO_ROOT / "constellation_2" / "phaseL" / "ui_api" / "projection_contracts.py").exists(),
+            "routes_registered": route_status["status"] == "PASS",
+        }
+        if checks["truth_root_resolved"] and checks["runtime_truth_available"] and checks["projection_contracts_loaded"] and checks["routes_registered"]:
+            status = "PASS" if checks["latest_packet_available"] else "DEGRADED"
+        else:
+            status = "FAIL"
+        return {
+            "ok": status == "PASS",
+            "status": status,
+            "generated_at_utc": _utc_now_iso(),
+            "truth_root": str(truth_root),
+            "runtime_truth_root": str(runtime_truth),
+            "latest_packet_path": str(latest_packet),
+            "projection_contract_version": PROJECTION_CONTRACT_VERSION,
+            "checks": checks,
+            "route_status": route_status,
+        }
 
     def translate_path(self, path: str) -> str:
         u = urlparse(path)
@@ -2265,6 +2508,63 @@ class OpsHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/shared/status-semantics":
             self._send_json(HTTPStatus.OK, {"ok": True, "status_semantics": STATUS_SEMANTICS})
+            return True
+
+        if path == "/api/runtime-status":
+            self._send_json(HTTPStatus.OK, _runtime_status_projection(requested_day))
+            return True
+
+        if path == "/api/decision-ledger":
+            self._send_json(
+                HTTPStatus.OK,
+                _artifact_projection_payload(
+                    day_utc=_projection_day(requested_day),
+                    family="decision_ledger_v1",
+                    filename="decision_ledger.v1.json",
+                    label="decision_ledger",
+                ),
+            )
+            return True
+
+        if path == "/api/portfolio-state":
+            self._send_json(
+                HTTPStatus.OK,
+                _artifact_projection_payload(
+                    day_utc=_projection_day(requested_day),
+                    family="portfolio_state_v1",
+                    filename="portfolio_state.v1.json",
+                    label="portfolio_state",
+                ),
+            )
+            return True
+
+        if path == "/api/portfolio-scoring":
+            self._send_json(
+                HTTPStatus.OK,
+                _artifact_projection_payload(
+                    day_utc=_projection_day(requested_day),
+                    family="portfolio_scoring_v1",
+                    filename="portfolio_scoring.v1.json",
+                    label="portfolio_scoring",
+                ),
+            )
+            return True
+
+        if path == "/api/latest-packet":
+            self._send_json(HTTPStatus.OK, _latest_packet_projection())
+            return True
+
+        if path == "/api/ui-service-authority":
+            day = _projection_day(requested_day)
+            self._send_json(
+                HTTPStatus.OK,
+                _artifact_projection_payload(
+                    day_utc=day,
+                    family="ui_service_authority_v1",
+                    filename="ui_service_authority.v1.json",
+                    label="ui_service_authority",
+                ),
+            )
             return True
 
         if path == "/api/shell/status-rail":
@@ -2839,9 +3139,22 @@ class OpsHandler(SimpleHTTPRequestHandler):
         started = time.perf_counter()
         parsed = urlparse(self.path)
         path = parsed.path
-        if path == "/health":
+        if path in {"/health", "/healthz"}:
             self._send_json(HTTPStatus.OK, self._health_payload())
-            sys.stderr.write(f"TIMING: api endpoint=/health duration_ms={(time.perf_counter() - started) * 1000:.1f}\n")
+            sys.stderr.write(f"TIMING: api endpoint={path} duration_ms={(time.perf_counter() - started) * 1000:.1f}\n")
+            return
+        if path == "/readyz":
+            payload = self._readyz_payload()
+            status_code = HTTPStatus.OK if payload["status"] in {"PASS", "DEGRADED"} else HTTPStatus.SERVICE_UNAVAILABLE
+            self._send_json(status_code, payload)
+            sys.stderr.write(f"TIMING: api endpoint=/readyz duration_ms={(time.perf_counter() - started) * 1000:.1f}\n")
+            return
+        if path == "/runtime-status":
+            qs = parse_qs(parsed.query)
+            raw_day = (qs.get("day") or [None])[0]
+            requested_day = raw_day if isinstance(raw_day, str) and raw_day and _is_day_str(raw_day) else None
+            self._send_json(HTTPStatus.OK, _runtime_status_projection(requested_day))
+            sys.stderr.write(f"TIMING: api endpoint=/runtime-status duration_ms={(time.perf_counter() - started) * 1000:.1f}\n")
             return
         if path == "/performance/cockpit.html":
             qs = parse_qs(parsed.query)

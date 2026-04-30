@@ -75,6 +75,11 @@ const state = {
     lastDraft: null,
     lastError: null,
   },
+  connection: {
+    state: "RECONNECTING",
+    last_checked_at: null,
+    recovery_command: "npm run aegis:ui:restart",
+  },
   activeView: null,
   paletteOpen: false,
   sidebarMode: localStorage.getItem("aegis.sidebar.mode") || "expanded",
@@ -248,8 +253,11 @@ function renderTopBar() {
   document.getElementById("bottomReadiness").textContent = readinessStatus;
   document.getElementById("bottomEnvironment").textContent = formatDisplayLabel(summary.environment || "UNKNOWN");
   document.getElementById("bottomSession").textContent = summary.current_day || "UNKNOWN";
+  const connectionState = state.connection?.state || "RECONNECTING";
   document.getElementById("bottomAlert").textContent =
-    topAlert?.target_label || topAlert?.label || topAlert?.summary_message || "No elevated summary item";
+    connectionState === "CONNECTED"
+      ? (topAlert?.target_label || topAlert?.label || topAlert?.summary_message || "No elevated summary item")
+      : `${connectionState}: ${state.connection?.recovery_command || "npm run aegis:ui:restart"}`;
 }
 
 function setPageChrome(route, view) {
@@ -727,6 +735,18 @@ export async function bootOperatorShell() {
   window.addEventListener("popstate", () => {
     renderRoute();
   });
+  window.addEventListener("aegis:connection-state", (event) => {
+    state.connection = {
+      ...state.connection,
+      ...(event.detail || window.__AEGIS_CONNECTION_STATE || {}),
+    };
+    renderTopBar();
+  });
+  window.setInterval(() => {
+    if (currentRoute().id === "aegis_runtime" && state.connection?.state && state.connection.state !== "CONNECTED") {
+      renderRoute();
+    }
+  }, 5000);
   window.addEventListener("keydown", (event) => {
     handleKeydown(event);
   });

@@ -79,6 +79,23 @@ function nextActionForFailure(failureClass, endpointAttempted) {
   return "Inspect browser network + backend logs to isolate transport vs endpoint contract failure.";
 }
 
+function emitConnectionState(state, detail = {}) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const payload = {
+    state,
+    last_checked_at: new Date().toISOString(),
+    ...detail,
+  };
+  window.__AEGIS_CONNECTION_STATE = payload;
+  try {
+    window.dispatchEvent(new CustomEvent("aegis:connection-state", { detail: payload }));
+  } catch {
+    window.dispatchEvent(new Event("aegis:connection-state"));
+  }
+}
+
 function buildOperatorFetchError({
   requestPath,
   requestUrl,
@@ -113,6 +130,10 @@ async function requestJson(path, options = {}) {
   try {
     response = await fetch(requestUrl, options);
   } catch (networkError) {
+    emitConnectionState("BACKEND_UNAVAILABLE", {
+      endpoint: requestUrl,
+      recovery_command: "npm run aegis:ui:restart",
+    });
     throw buildOperatorFetchError({
       requestPath: path,
       requestUrl,
@@ -132,6 +153,10 @@ async function requestJson(path, options = {}) {
   }
 
   if (!response.ok || parseError || payload === null || typeof payload !== "object") {
+    emitConnectionState(response && response.status >= 500 ? "DISCONNECTED" : "RECONNECTING", {
+      endpoint: requestUrl,
+      recovery_command: "npm run aegis:ui:restart",
+    });
     throw buildOperatorFetchError({
       requestPath: path,
       requestUrl,
@@ -147,6 +172,7 @@ async function requestJson(path, options = {}) {
     status: response.status,
     duration_ms: durationMs,
   });
+  emitConnectionState("CONNECTED", { endpoint: requestUrl });
   return payload;
 }
 

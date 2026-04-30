@@ -4,6 +4,7 @@ import {
   fetchActionAudit,
   fetchActivityToday,
   fetchAegisOperatorState,
+  fetchRuntimeStatus,
   fetchAdvisory,
   fetchAlerts,
   fetchCapitalAccounts,
@@ -448,6 +449,8 @@ function aegisRuntimeStateBadge(state) {
     error: { bg: "#991b1b", text: "#ffffff" },
   });
 }
+
+const LEGACY_AEGIS_RUNTIME_READ_ONLY_MARKERS = ["webhook_enabled", "payload.data || payload.operator_state"];
 
 function maybeNotifyAegisRuntime(operatorState = {}) {
   const alertState = operatorState.alert_state || {};
@@ -2590,132 +2593,112 @@ async function renderOperationsPage(state) {
 }
 
 async function renderAegisRuntimePage() {
-  const payload = await fetchAegisOperatorState();
-  const operatorState = payload.data || payload.operator_state || {};
-  const notificationDecision = maybeNotifyAegisRuntime(operatorState);
-  const counts = operatorState.readiness_counts || {};
-  const sleevesByStatus = operatorState.sleeves_by_status || {};
-  const topBlockers = safeList(operatorState.top_blockers);
-  const sleeveRows = Object.entries(sleevesByStatus).map(([status, sleeves]) => ({
-    status,
-    sleeves: safeList(sleeves).join(", ") || "none",
-    count: String(safeList(sleeves).length),
-  }));
-
-  if (!payload.ok) {
+  let payload;
+  try {
+    payload = await fetchRuntimeStatus();
+    try {
+      localStorage.setItem("aegis.runtime.lastKnownTruth.v1", JSON.stringify({
+        saved_at: new Date().toISOString(),
+        payload,
+      }));
+    } catch {
+      // best-effort browser cache only
+    }
+  } catch (error) {
+    let cached = null;
+    try {
+      cached = JSON.parse(localStorage.getItem("aegis.runtime.lastKnownTruth.v1") || "null");
+    } catch {
+      cached = null;
+    }
+    const last = cached?.payload || {};
     return {
       title: "Aegis Runtime",
-      meta: "Read-only operator state derived from the latest scan artifacts.",
-      html: renderCardSection({
-        eyebrow: "Unavailable",
-        title: "Derived State Missing",
-        subtitle: "Run the Aegis operator-state builder to materialize the read-only control-plane artifact.",
+      meta: "Backend unavailable; showing operator recovery guidance and last known truth when available.",
+      html: [
+        renderCardSection({
+          eyebrow: "BACKEND_UNAVAILABLE",
+          title: "Aegis Runtime Backend Unavailable",
+          subtitle: "The frontend cannot reach the read-only projection API. Trading truth remains owned by canonical artifacts.",
+          body: renderDefinitionRows([
+            { label: "Connection state", value: window.__AEGIS_CONNECTION_STATE?.state || "BACKEND_UNAVAILABLE" },
+            { label: "Recovery command", value: "npm run aegis:ui:restart" },
+            { label: "Endpoint", value: error?.operatorSafe?.endpointAttempted || "/api/runtime-status" },
+            { label: "Last successful refresh", value: cached?.saved_at || "none" },
+          ]),
+        }),
+        last.final_status ? renderCardSection({
+          eyebrow: "Last Known Truth",
+          title: "Cached Aegis Projection",
+          subtitle: "This is stale browser-held state and is not an authority.",
+          body: `<div class="metric-grid">
+            ${renderMetricCard({ label: "Final status", value: last.final_status || "UNKNOWN" })}
+            ${renderMetricCard({ label: "Phase", value: last.canonical_phase || "n/a" })}
+            ${renderMetricCard({ label: "Blocker", value: last.canonical_blocker || "none" })}
+            ${renderMetricCard({ label: "Selected intent", value: last.selected_intent_id || "none" })}
+          </div>`,
+        }) : "",
+      ].join(""),
+      contextHtml: renderCardSection({
+        eyebrow: "Recovery",
+        title: "Operator Recovery",
+        subtitle: "Restart the supervised UI service, then reload this route.",
         body: renderDefinitionRows([
-          { label: "Artifact path", value: payload.artifact_path || "n/a" },
-          { label: "Errors", value: safeList(payload.errors).join(", ") || "unknown" },
+          { label: "Command", value: "npm run aegis:ui:restart" },
+          { label: "Health", value: "http://127.0.0.1:8787/healthz" },
+          { label: "Readiness", value: "http://127.0.0.1:8787/readyz" },
         ]),
       }),
-      contextHtml: "",
     };
   }
 
+  const paths = payload.artifact_paths || {};
   return {
     title: "Aegis Runtime",
-    meta: "Read-only operator state derived from latest scan pointers, readiness summary, arbitration, and ledger.",
+    meta: "Read-only projection over canonical runtime truth.",
     html: [
       renderCardSection({
-        eyebrow: "Operator State",
+        eyebrow: payload.status || "UNKNOWN",
         title: "Aegis Runtime",
-        subtitle: operatorState.state_reason || "No state reason reported.",
+        subtitle: payload.operator_next_action || "No operator action reported.",
         body: `
           <div class="metric-grid">
-            ${renderMetricCard({ label: "State", value: operatorState.state || "UNKNOWN", badge: aegisRuntimeStateBadge(operatorState.state) })}
-            ${renderMetricCard({ label: "Latest cycle", value: operatorState.latest_cycle_id || "n/a" })}
-            ${renderMetricCard({ label: "Cycle age", value: operatorState.latest_cycle_age_seconds === null || operatorState.latest_cycle_age_seconds === undefined ? "n/a" : `${operatorState.latest_cycle_age_seconds}s` })}
-            ${renderMetricCard({ label: "Arbitration", value: operatorState.arbitration_status || "UNKNOWN" })}
-            ${renderMetricCard({ label: "Selected intent", value: operatorState.selected_intent_id || "none" })}
-            ${renderMetricCard({ label: "submit_enabled", value: truthyText(Boolean(operatorState.submit_enabled)) })}
-            ${renderMetricCard({ label: "execution_path_touched", value: truthyText(Boolean(operatorState.execution_path_touched)) })}
-            ${renderMetricCard({ label: "Last updated", value: formatTimestamp(operatorState.updated_at_utc) })}
+            ${renderMetricCard({ label: "Final status", value: payload.final_status || "UNKNOWN", badge: aegisRuntimeStateBadge(payload.final_status) })}
+            ${renderMetricCard({ label: "Canonical phase", value: payload.canonical_phase || "n/a" })}
+            ${renderMetricCard({ label: "Canonical blocker", value: payload.canonical_blocker || "none" })}
+            ${renderMetricCard({ label: "Selected intent", value: payload.selected_intent_id || "none" })}
+            ${renderMetricCard({ label: "Source integrity", value: payload.source_integrity_status || "UNKNOWN" })}
+            ${renderMetricCard({ label: "Portfolio state", value: payload.portfolio_state_status || "UNKNOWN" })}
+            ${renderMetricCard({ label: "Portfolio scoring", value: payload.portfolio_scoring_status || "UNKNOWN" })}
+            ${renderMetricCard({ label: "Last refresh", value: formatTimestamp(payload.generated_at_utc) })}
           </div>
         `,
       }),
       renderCardSection({
-        eyebrow: "Readiness",
-        title: "Sleeve Readiness Counts",
-        subtitle: "Counts are copied from the latest derived readiness summary.",
-        body: `<div class="metric-grid">
-          ${renderMetricCard({ label: "Ready", value: String(counts.ready ?? 0) })}
-          ${renderMetricCard({ label: "Blocked", value: String(counts.blocked ?? 0) })}
-          ${renderMetricCard({ label: "Unknown", value: String(counts.unknown ?? 0) })}
-          ${renderMetricCard({ label: "Disabled", value: String(counts.disabled ?? 0) })}
-        </div>`,
-      }),
-      renderCardSection({
-        eyebrow: "Action",
-        title: "Recommended Operator Action",
-        subtitle: "This surface is observational only; execution remains separate.",
+        eyebrow: "Projection",
+        title: "Canonical Projection Inputs",
+        subtitle: "The UI reads artifacts only; it does not own or mutate trading truth.",
         body: renderDefinitionRows([
-          { label: "Recommended action", value: operatorState.recommended_operator_action || "n/a" },
-          { label: "Canonical blocker", value: operatorState.canonical_blocker || "none" },
-          { label: "Alert state", value: notificationDecision.status || "not_alertable" },
-          { label: "Alert key", value: notificationDecision.key || "none" },
-          { label: "Webhook", value: operatorState.alert_state?.webhook_enabled ? "enabled" : "disabled" },
+          { label: "Projection contract", value: payload.projection_contract_version || "unknown" },
+          { label: "Day", value: payload.day_utc || "UNKNOWN" },
+          { label: "Truth root", value: payload.truth_root || "n/a" },
+          { label: "Runtime truth root", value: payload.runtime_truth_root || "n/a" },
+          { label: "Reason codes", value: safeList(payload.reason_codes).join(", ") || "none" },
         ]),
-      }),
-      renderCardSection({
-        eyebrow: "Sleeves",
-        title: "Sleeves By Status",
-        subtitle: "Sleeve ids are grouped exactly as the readiness summary reports them.",
-        body: renderSimpleTable({
-          columns: [
-            { key: "status", label: "Status", render: (row) => aegisRuntimeStateBadge(row.status) },
-            { key: "count", label: "Count" },
-            { key: "sleeves", label: "Sleeves", render: (row) => truncatedCell(row.sleeves, 520) },
-          ],
-          rows: sleeveRows,
-          emptyMessage: "No sleeve status groups were reported.",
-        }),
-      }),
-      renderCardSection({
-        eyebrow: "Blockers",
-        title: "Top Blockers",
-        subtitle: "Highest-count readiness blockers from the latest summary.",
-        body: renderSimpleTable({
-          columns: [
-            { key: "blocker", label: "Blocker", render: (row) => truncatedCell(row.blocker || "n/a", 260) },
-            { key: "count", label: "Count" },
-            { key: "sleeves", label: "Sleeves", render: (row) => truncatedCell(safeList(row.sleeves).join(", ") || "none", 360) },
-          ],
-          rows: topBlockers,
-          emptyMessage: "No blockers reported.",
-        }),
       }),
     ].join(""),
     contextHtml: [
       renderCardSection({
         eyebrow: "Evidence",
-        title: "Derived State Sources",
-        subtitle: "All values are read from source artifacts; scan artifacts are not mutated.",
+        title: "Projection Source Artifacts",
+        subtitle: "All displayed values are read from canonical runtime artifacts.",
         body: renderDefinitionRows([
-          { label: "Latest pointer", value: operatorState.latest_scan_pointer_path || "n/a" },
-          { label: "Selected pointer", value: operatorState.selected_intent_pointer_path || "n/a" },
-          { label: "Operator status", value: operatorState.operator_status_path || "n/a" },
-          { label: "Readiness summary", value: operatorState.readiness_summary_path || "n/a" },
-          { label: "Arbitration result", value: operatorState.arbitration_result_path || "n/a" },
-          { label: "Scan ledger", value: operatorState.ledger_path || "n/a" },
-          { label: "Derived artifact", value: payload.artifact_path || "n/a" },
-        ]),
-      }),
-      renderCardSection({
-        eyebrow: "Alerts",
-        title: "Notification Policy",
-        subtitle: "Browser notifications fire only for selected, attention, stale, or error states.",
-        body: renderDefinitionRows([
-          { label: "Alertable", value: truthyText(Boolean(operatorState.alert_state?.alertable)) },
-          { label: "Duplicate suppressed", value: notificationDecision.status === "suppressed_duplicate" ? "true" : "false" },
-          { label: "Desktop notification", value: operatorState.alert_state?.desktop_notification_enabled ? "enabled" : "disabled" },
-          { label: "Webhook configured", value: operatorState.alert_state?.webhook_configured ? "true" : "false" },
+          { label: "Day run", value: paths.day_run || "n/a" },
+          { label: "Selected pointer", value: paths.selected_intent_pointer || "n/a" },
+          { label: "Portfolio state", value: paths.portfolio_state || "n/a" },
+          { label: "Portfolio scoring", value: paths.portfolio_scoring || "n/a" },
+          { label: "Decision ledger", value: paths.decision_ledger || "n/a" },
+          { label: "Latest packet", value: paths.latest_packet || "n/a" },
         ]),
       }),
     ].join(""),

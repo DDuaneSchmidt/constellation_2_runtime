@@ -64,6 +64,18 @@ export function fetchAegisOperatorState() {
   return fetchJson(new URL(path, window.location.origin).toString());
 }
 
+export function fetchRuntimeStatus() {
+  return query("/api/runtime-status");
+}
+
+export function fetchUiServiceAuthority() {
+  return query("/api/ui-service-authority");
+}
+
+export function fetchLatestPacket() {
+  return query("/api/latest-packet");
+}
+
 export function fetchReadinessKernel(params = {}) {
   return query("/api/readiness-kernel", params);
 }

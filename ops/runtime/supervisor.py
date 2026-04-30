@@ -307,6 +307,31 @@ def _health_probe(service: ServiceSpec, timeout_seconds: float = 1.5) -> Dict[st
     return result
 
 
+def _route_probe(service: ServiceSpec, timeout_seconds: float = 1.5) -> Dict[str, Any]:
+    route_paths = ["/healthz", "/readyz", "/runtime-status", "/api/runtime-status", "/aegis-runtime"]
+    routes: Dict[str, Any] = {}
+    for route_path in route_paths:
+        url = f"http://{service.host}:{service.port}{route_path}"
+        row: Dict[str, Any] = {"url": url, "ok": False, "http_status": None, "error": None}
+        req = Request(url, method="GET")
+        try:
+            with urlopen(req, timeout=timeout_seconds) as response:
+                row["http_status"] = int(response.status)
+                row["ok"] = 200 <= int(response.status) < 400
+        except HTTPError as exc:
+            row["http_status"] = int(exc.code)
+            row["error"] = f"HTTP_{exc.code}"
+        except URLError as exc:
+            row["error"] = f"URL_ERROR:{exc.reason}"
+        except Exception as exc:
+            row["error"] = f"ROUTE_ERROR:{exc}"
+        routes[route_path] = row
+    return {
+        "status": "PASS" if all(bool(row.get("ok")) for row in routes.values()) else "DEGRADED",
+        "routes": routes,
+    }
+
+
 def probe_service(service: ServiceSpec) -> Dict[str, Any]:
     pid = _read_pid_file(service.pid_path)
     pid_running = _process_exists(pid) if isinstance(pid, int) else False
@@ -323,6 +348,7 @@ def probe_service(service: ServiceSpec) -> Dict[str, Any]:
 
     port_open = _is_port_listening(service.host, service.port)
     health = _health_probe(service) if port_open else {"url": service.health_url, "ok": False, "http_status": None, "error": "PORT_NOT_OPEN", "status_value": None}
+    route_status = _route_probe(service) if port_open else {"status": "FAIL", "routes": {}}
 
     if owned_by_supervisor and pid_running and port_open and health.get("ok"):
         state = STATE_READY
@@ -347,6 +373,7 @@ def probe_service(service: ServiceSpec) -> Dict[str, Any]:
         "log_file": str(service.log_path),
         "port_open": port_open,
         "health": health,
+        "route_status": route_status,
     }
 
 
