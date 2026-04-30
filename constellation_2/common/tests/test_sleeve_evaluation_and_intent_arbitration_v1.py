@@ -183,6 +183,10 @@ def test_disallowed_symbol_existing_intent_blocks_that_sleeve(tmp_path: Path) ->
     assert outcome["producer_requested_symbol"] == "IWM"
     assert outcome["intent_symbol"] == "SPY"
     assert outcome["rejected_intents"][0]["symbol"] == "SPY"
+    assert outcome["stale_artifact_detected"] is True
+    assert outcome["artifact_source"] == "PREEXISTING_INTENT_SNAPSHOT"
+    assert outcome["artifact_symbol"] == "SPY"
+    assert outcome["active_symbol_universe"] == ["IWM"]
 
 
 def test_producer_receives_single_registry_allowed_symbol(tmp_path: Path) -> None:
@@ -223,6 +227,10 @@ def test_stale_spy_intent_does_not_become_arbitration_candidate_for_iwm_sleeve(t
     assert outcome["status"] == "BLOCKED"
     assert outcome["canonical_blocker"] == "ALLOWED_SYMBOL_MISMATCH"
     assert outcome["rejected_intents"][0]["symbol"] == "SPY"
+    assert outcome["stale_artifact_detected"] is True
+    assert outcome["artifact_source"] == "PREEXISTING_INTENT_SNAPSHOT"
+    assert outcome["artifact_symbol"] == "SPY"
+    assert outcome["active_symbol_universe"] == ["IWM"]
     assert payload["arbitration"]["candidate_intents"] == []
     assert payload["arbitration"]["selected_intent"] == {}
 
@@ -241,6 +249,10 @@ def test_iwm_manifest_and_iwm_intent_can_be_selected_for_iwm_sleeve(tmp_path: Pa
     assert outcome["status"] == "INTENT_CREATED"
     assert outcome["output_intents"][0]["symbol"] == "IWM"
     assert [row["symbol"] for row in outcome["rejected_intents"]] == ["SPY"]
+    assert outcome["stale_artifact_detected"] is True
+    assert outcome["artifact_source"] == "PREEXISTING_INTENT_SNAPSHOT"
+    assert outcome["artifact_symbol"] == "SPY"
+    assert outcome["active_symbol_universe"] == ["IWM"]
     assert payload["arbitration"]["selected_intent"]["symbol"] == "IWM"
 
 

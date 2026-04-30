@@ -203,7 +203,7 @@ def _existing_intents_by_engine(*, intent_truth_root: Path, day_utc: str) -> dic
     return out
 
 
-def _intent_rows(paths_payloads: list[tuple[Path, dict[str, Any]]]) -> list[dict[str, Any]]:
+def _intent_rows(paths_payloads: list[tuple[Path, dict[str, Any]]], *, artifact_source: str = "") -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for path, payload in sorted(paths_payloads, key=lambda item: str(item[0])):
         rows.append(
@@ -216,6 +216,7 @@ def _intent_rows(paths_payloads: list[tuple[Path, dict[str, Any]]]) -> list[dict
                 "schema_id": str(payload.get("schema_id") or "").strip(),
                 "schema_version": str(payload.get("schema_version") or "").strip(),
                 "intent_artifact_mtime": _mtime_iso(path),
+                "artifact_source": artifact_source,
             }
         )
     return rows
@@ -224,6 +225,25 @@ def _intent_rows(paths_payloads: list[tuple[Path, dict[str, Any]]]) -> list[dict
 def _allowed_symbols(row: dict[str, Any]) -> list[str]:
     raw = row.get("allowed_symbols") if isinstance(row.get("allowed_symbols"), list) else []
     return [str(symbol).strip().upper() for symbol in raw if str(symbol).strip()]
+
+
+def _stale_artifact_guard(*, rejected_intents: list[dict[str, Any]], active_symbol_universe: list[str]) -> dict[str, Any]:
+    active = sorted({str(symbol).strip().upper() for symbol in active_symbol_universe if str(symbol).strip()})
+    active_set = set(active)
+    stale = [
+        row
+        for row in rejected_intents
+        if str(row.get("symbol") or "").strip().upper() and active_set and str(row.get("symbol") or "").strip().upper() not in active_set
+    ]
+    stale_symbols = sorted({str(row.get("symbol") or "").strip().upper() for row in stale if str(row.get("symbol") or "").strip()})
+    stale_sources = sorted({str(row.get("artifact_source") or "UNKNOWN") for row in stale})
+    return {
+        "stale_artifact_detected": bool(stale),
+        "artifact_source": ",".join(stale_sources),
+        "artifact_symbol": ",".join(stale_symbols),
+        "active_symbol_universe": active,
+        "stale_artifacts": stale,
+    }
 
 
 def _producer_requested_symbol(row: dict[str, Any]) -> str:
@@ -533,6 +553,11 @@ def _outcome_for_inactive(*, row: dict[str, Any], day_utc: str, environment: str
         "market_data_manifest_check": {},
         "output_intents": [],
         "rejected_intents": [],
+        "stale_artifact_detected": False,
+        "artifact_source": "",
+        "artifact_symbol": "",
+        "active_symbol_universe": _allowed_symbols(row),
+        "stale_artifacts": [],
         "output_intent_path": "",
         "output_intent_id": "",
         "output_intent_hash": "",
@@ -596,12 +621,12 @@ def _evaluate_active_engine(
         reason_codes = [blocker]
         preexisting = existing_by_engine.get(engine_id, [])
         _matching_preexisting, mismatched_preexisting = _partition_intents_by_allowed(paths_payloads=preexisting, allowed_symbols=allowed_symbols)
-        rejected_intents = _intent_rows(mismatched_preexisting)
+        rejected_intents = _intent_rows(mismatched_preexisting, artifact_source="PREEXISTING_INTENT_SNAPSHOT")
         actual_intents = []
     else:
         preexisting = existing_by_engine.get(engine_id, [])
         matching_preexisting, mismatched_preexisting = _partition_intents_by_allowed(paths_payloads=preexisting, allowed_symbols=allowed_symbols)
-        rejected_intents = _intent_rows(mismatched_preexisting)
+        rejected_intents = _intent_rows(mismatched_preexisting, artifact_source="PREEXISTING_INTENT_SNAPSHOT")
         before = {str(path) for path in collect_intent_files_v1(truth_root=intent_truth_root, day_utc=day_utc)}
         if matching_preexisting:
             actual_intents = _intent_rows(matching_preexisting)
@@ -617,7 +642,7 @@ def _evaluate_active_engine(
             new_paths = [path for path in after_paths if str(path) not in before]
             new_payloads = [(path, _read_json(path)) for path in new_paths]
             matching_new, mismatched_new = _partition_intents_by_allowed(paths_payloads=new_payloads, allowed_symbols=allowed_symbols)
-            rejected_intents.extend(_intent_rows(mismatched_new))
+            rejected_intents.extend(_intent_rows(mismatched_new, artifact_source="PRODUCER_OUTPUT"))
             if exit_code != 0:
                 producer_blocker = _classify_nonzero(stdout, stderr)
                 blocker = "ALLOWED_SYMBOL_MISMATCH" if rejected_intents else producer_blocker
@@ -653,7 +678,7 @@ def _evaluate_active_engine(
             status = "BLOCKED"
             blocker = "ALLOWED_SYMBOL_MISMATCH"
             reason_codes = sorted(set(reason_codes + [blocker]))
-            rejected_intents.extend(actual_intents)
+            rejected_intents.extend([dict(row, artifact_source=str(row.get("artifact_source") or "OUTPUT_INTENT_MISMATCH")) for row in actual_intents])
             actual_intents = []
 
     runner_hash_match = bool(actual_sha and (not expected_sha or actual_sha.lower() == expected_sha))
@@ -663,6 +688,7 @@ def _evaluate_active_engine(
     )
     completed = _now_iso()
     rejected_intents = rejected_intents if "rejected_intents" in locals() else []
+    stale_artifact_guard = _stale_artifact_guard(rejected_intents=rejected_intents, active_symbol_universe=allowed_symbols)
     primary = actual_intents[0] if actual_intents else {}
     evidence_intent = primary or (rejected_intents[0] if rejected_intents else {})
     return {
@@ -688,6 +714,7 @@ def _evaluate_active_engine(
         "market_data_manifest_check": market_data_manifest_check,
         "output_intents": actual_intents if "actual_intents" in locals() else [],
         "rejected_intents": rejected_intents,
+        **stale_artifact_guard,
         "output_intent_path": str(primary.get("intent_path") or ""),
         "output_intent_id": str(primary.get("intent_id") or ""),
         "output_intent_hash": str(primary.get("intent_hash") or ""),
