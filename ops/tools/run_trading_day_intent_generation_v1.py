@@ -29,6 +29,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
 )
 from constellation_2.common.paper_session_path_alignment_v1 import resolve_trading_day_intent_generation_path
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+from constellation_2.common.trading_day_readiness_authority_v1 import read_or_evaluate_trading_day_readiness_authority_v1
 from ops.tools.run_intent_arbitration_v1 import build_intent_arbitration
 from ops.tools.run_sleeve_evaluation_kernel_v1 import build_sleeve_evaluation_kernel
 
@@ -241,6 +242,14 @@ def main(argv: List[str] | None = None) -> int:
     output_path = resolve_trading_day_intent_generation_path(truth_root=decision_truth_root, day_utc=day_utc)
     registry_payload, registry_path, registry_sha = _load_registry()
     producer_specs, skipped_active_engines = _load_required_producer_specs()
+    readiness_path, readiness = read_or_evaluate_trading_day_readiness_authority_v1(
+        target_day=day_utc,
+        truth_root=decision_truth_root,
+        execution_root=intent_truth_root,
+        environment=PAPER_MODE,
+    )
+    readiness_mode = str(readiness.get("readiness_mode") or "").strip().upper()
+    preopen_build_mode = readiness_mode in {"PREOPEN_BUILD", "PREOPEN_ADMISSION"}
 
     sleeve_rollup = build_sleeve_evaluation_kernel(day_utc=day_utc, truth_root=decision_truth_root, environment=PAPER_MODE)
     arbitration = build_intent_arbitration(day_utc=day_utc, truth_root=decision_truth_root, environment=PAPER_MODE)
@@ -262,6 +271,12 @@ def main(argv: List[str] | None = None) -> int:
         final_status = "VALID_ZERO"
         first_blocker_code = "NO_EXECUTABLE_INTENT"
         first_blocker_artifact_path = str(arbitration.get("artifact_path") or "")
+        return_code = 0
+    elif preopen_build_mode and str(arbitration.get("canonical_blocker") or "").strip() == "MISSING_REQUIRED_INPUTS":
+        final_status = "VALID_ZERO"
+        first_blocker_code = "PREOPEN_BUILD_INTENT_INPUTS_NOT_REQUIRED"
+        first_blocker_artifact_path = str(readiness_path)
+        blocking_codes = []
         return_code = 0
     else:
         final_status = "BLOCKED_BY_DEFECT"
@@ -288,6 +303,11 @@ def main(argv: List[str] | None = None) -> int:
             "FILTERED_OUT": "SKIPPED",
             "DISABLED": "SKIPPED",
         }
+        row_status = status_map.get(str(row.get("status") or ""), "BLOCKED_BY_DEFECT")
+        reason_codes = [str(code) for code in row.get("reason_codes", [])] if isinstance(row.get("reason_codes"), list) else []
+        if preopen_build_mode and row_status == "BLOCKED_BY_DEFECT" and str(row.get("canonical_blocker") or "").strip() == "MISSING_REQUIRED_INPUTS":
+            row_status = "SKIPPED"
+            reason_codes = ["PREOPEN_BUILD_INTENT_INPUTS_NOT_REQUIRED"]
         producer_results.append(
             _producer_result(
                 logical_name=str(row.get("sleeve_id") or row.get("engine_id") or ""),
@@ -295,9 +315,9 @@ def main(argv: List[str] | None = None) -> int:
                 script_path=runner_path if str(registry_row.get("engine_runner_path") or "") else output_path,
                 script_sha256=script_sha,
                 registry_runner_sha256=str(registry_row.get("engine_runner_sha256") or script_sha),
-                status=status_map.get(str(row.get("status") or ""), "BLOCKED_BY_DEFECT"),
+                status=row_status,
                 return_code=int(row.get("exit_code") or 0),
-                reason_codes=[str(code) for code in row.get("reason_codes", [])] if isinstance(row.get("reason_codes"), list) else [],
+                reason_codes=reason_codes,
                 stdout=str(row.get("stdout_summary") or ""),
                 stderr=str(row.get("stderr_summary") or ""),
                 output_paths=[str(item.get("intent_path") or "") for item in row.get("output_intents", []) if isinstance(item, dict) and str(item.get("intent_path") or "")],
@@ -336,6 +356,10 @@ def main(argv: List[str] | None = None) -> int:
             "output_count": len(candidate_intents),
         },
         "blocking_codes": blocking_codes,
+        "readiness_authority_path": str(readiness_path),
+        "readiness_mode": str(readiness.get("readiness_mode") or "").strip(),
+        "evidence_policy_used": readiness.get("evidence_policy") if isinstance(readiness.get("evidence_policy"), dict) else {},
+        "mode_specific_blocker": bool(preopen_build_mode),
         "human_readable_summary": f"Intent generation reached {final_status} for {day_utc}.",
     }
     atomic_write_validated_json_v1(

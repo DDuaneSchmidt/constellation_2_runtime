@@ -138,6 +138,13 @@
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
     },
+    "readiness_authority_path": { "type": "string" },
+    "readiness_mode": { "type": "string" },
+    "evidence_policy_used": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "mode_specific_blocker": { "type": "boolean" },
     "human_readable_summary": { "type": "string", "minLength": 1 }
   }
 }

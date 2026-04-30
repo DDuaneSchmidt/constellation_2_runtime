@@ -406,6 +406,60 @@ def test_generator_nonzero_rc_uses_structured_failure_code_when_present(tmp_path
     assert payload["producer_results"][0]["reason_codes"] == ["MISSING_REQUIRED_INPUTS"]
 
 
+def test_preopen_build_missing_strategy_inputs_is_valid_zero(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    monkeypatch.setenv("C2_TRADING_DAY_READINESS_NOW_UTC", "2026-04-30T22:00:00Z")
+    truth_root = tmp_path / "truth"
+    day_utc = "2026-05-01"
+    registry_path = SOURCE_ROOT / "governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json"
+
+    with patch.object(generation_module, "_load_registry", return_value=(_registry_payload(), registry_path, "a" * 64)):
+        with patch.object(generation_module, "_load_required_producer_specs", return_value=([], [])):
+            with patch.object(
+                generation_module,
+                "build_sleeve_evaluation_kernel",
+                return_value={
+                    "outcomes": [
+                        {
+                            "engine_id": "C2_TREND_EQ_PRIMARY_V1",
+                            "status": "BLOCKED",
+                            "canonical_blocker": "MISSING_REQUIRED_INPUTS",
+                            "reason_codes": ["MISSING_REQUIRED_INPUTS"],
+                            "exit_code": 3,
+                            "output_intents": [],
+                        }
+                    ]
+                },
+            ):
+                with patch.object(
+                    generation_module,
+                    "build_intent_arbitration",
+                    return_value={
+                        "status": "BLOCKED",
+                        "canonical_blocker": "MISSING_REQUIRED_INPUTS",
+                        "candidate_intents": [],
+                        "selected_intent": {},
+                        "artifact_path": str(truth_root / "reports/intent_arbitration_v1" / day_utc / "intent_arbitration.v1.json"),
+                    },
+                ):
+                    rc = generation_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+
+    assert rc == 0
+    payload = json.loads(
+        (
+            truth_root
+            / "reports"
+            / "trading_day_intent_generation_v1"
+            / day_utc
+            / "trading_day_intent_generation.v1.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert payload["final_status"] == "VALID_ZERO"
+    assert payload["first_blocker_code"] == "PREOPEN_BUILD_INTENT_INPUTS_NOT_REQUIRED"
+    assert payload["blocking_codes"] == []
+    assert payload["readiness_mode"] == "PREOPEN_BUILD"
+    assert payload["producer_results"][0]["status"] == "SKIPPED"
+
+
 def test_generator_nonzero_rc_maps_missing_market_data_manifest_phrase(tmp_path: Path) -> None:
     truth_root = tmp_path / "truth"
     day_utc = "2026-04-08"
