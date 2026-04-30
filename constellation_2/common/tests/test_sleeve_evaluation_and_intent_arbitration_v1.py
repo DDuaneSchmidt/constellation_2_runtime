@@ -13,6 +13,9 @@ if str(SOURCE_ROOT) not in sys.path:
 import ops.tools.run_aegis_requirement_graph_v1 as requirement_graph
 import ops.tools.run_intent_arbitration_v1 as arbitration
 import ops.tools.run_market_session_intent_engine_v1 as market_session
+import ops.tools.run_portfolio_activation_gate_v1 as portfolio_gate
+import ops.tools.run_portfolio_scoring_v1 as portfolio_scoring
+import ops.tools.run_portfolio_state_v1 as portfolio_state
 import ops.tools.run_sleeve_evaluation_kernel_v1 as sleeve_kernel
 import ops.tools.run_structure_decision_supply_v1 as structure_supply
 from ops.tools import run_aegis_bod_prepare_v1 as bod
@@ -469,10 +472,26 @@ def test_multiple_valid_intents_are_deterministically_arbitrated(tmp_path: Path)
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps(rollup), encoding="utf-8")
 
-    payload = arbitration.build_intent_arbitration(day_utc=day, truth_root=truth, environment="PAPER")
+    state_path = portfolio_state.portfolio_state_path(truth_root=truth, day_utc=day)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps({"schema_id": "portfolio_state", "day_utc": day, "status": "PASS", "regime": "TREND", "trend_strength": "HIGH", "volatility_regime": "NORMAL", "artifact_path": str(state_path)}),
+        encoding="utf-8",
+    )
+    gate = portfolio_gate.build_portfolio_activation_gate_v1(day_utc=day, truth_root=truth, environment="PAPER", source_rollup_path=path)
+    scoring = portfolio_scoring.build_portfolio_scoring_v1(day_utc=day, truth_root=truth, environment="PAPER", source_rollup_path=path, portfolio_gate_path_arg=Path(gate["artifact_path"]))
+
+    payload = arbitration.build_intent_arbitration(
+        day_utc=day,
+        truth_root=truth,
+        environment="PAPER",
+        portfolio_gate_path=Path(gate["artifact_path"]),
+        portfolio_scoring_path_arg=Path(scoring["artifact_path"]),
+    )
 
     assert payload["status"] == "SELECTED"
-    assert payload["selected_intent"]["intent_id"] == "vol"
+    assert payload["selected_intent"]["intent_id"] == "trend"
+    assert payload["selected_intent_rank"] == 1
     assert Path(payload["selected_intent_pointer_path"]).is_file()
 
 
@@ -1058,7 +1077,8 @@ def test_market_session_selected_pointer_includes_cycle_id(tmp_path: Path) -> No
     pointer = json.loads(Path(payload["selected_intent_pointer_path"]).read_text())
     assert pointer["cycle_id"] == "cycle_a"
     assert pointer["selected_intent"]["cycle_id"] == "cycle_a"
-    assert pointer["selected_intent"]["arbitration_reason"] == "FIRST_BY_INTENT_ARBITRATION_PRIORITY_V1"
+    assert pointer["selected_intent"]["arbitration_reason"] == "HIGHEST_PORTFOLIO_SCORE_V1"
+    assert pointer["portfolio_scoring_path"]
 
 
 def test_market_session_arbitration_is_deterministic_with_multiple_candidates(tmp_path: Path) -> None:
@@ -1071,8 +1091,10 @@ def test_market_session_arbitration_is_deterministic_with_multiple_candidates(tm
     with patch.object(sleeve_kernel, "_load_engine_registry", return_value=_registry_with_simulator(active=[{"engine_id": "C2_TREND_EQ_PRIMARY_V1"}, {"engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1"}])):
         payload = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a")
 
-    assert payload["arbitration"]["selected_intent"]["engine_id"] == "C2_VOL_INCOME_DEFINED_RISK_V1"
-    assert payload["arbitration"]["rejected_or_filtered_intents"][0]["engine_id"] == "C2_TREND_EQ_PRIMARY_V1"
+    assert payload["arbitration"]["selected_intent"]["engine_id"] == "C2_TREND_EQ_PRIMARY_V1"
+    assert payload["arbitration"]["selected_intent"]["portfolio_score_rank"] == 1
+    assert payload["arbitration"]["rejected_or_filtered_intents"][0]["engine_id"] == "C2_VOL_INCOME_DEFINED_RISK_V1"
+    assert payload["arbitration"]["rejected_or_filtered_intents"][0]["rejection_reason"] == "NOT_SELECTED_BY_PORTFOLIO_SCORE_V1"
 
 
 def test_market_session_identical_consecutive_scan_does_not_duplicate_executable_intent(tmp_path: Path) -> None:

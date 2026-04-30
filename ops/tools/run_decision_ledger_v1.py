@@ -16,6 +16,7 @@ if str(REPO_ROOT) not in sys.path:
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1, read_json_object_v1, resolve_fact_plane_truth_root_v1
 from ops.tools.run_intent_arbitration_v1 import selected_intent_pointer_path
 from ops.tools.run_portfolio_activation_gate_v1 import portfolio_activation_gate_path
+from ops.tools.run_portfolio_scoring_v1 import portfolio_scoring_path
 from ops.tools.run_portfolio_state_v1 import portfolio_state_path
 
 PAPER_MODE = "PAPER"
@@ -66,6 +67,35 @@ def _latest_scan_paths(truth_root: Path, day_utc: str) -> dict[str, str]:
     }
 
 
+def _scoring_summary(truth_root: Path, day_utc: str) -> dict[str, Any]:
+    path = portfolio_scoring_path(truth_root=truth_root, day_utc=day_utc)
+    scoring = _read_json(path)
+    rankings = scoring.get("rankings") if isinstance(scoring.get("rankings"), list) else scoring.get("ranked_intents")
+    rows = rankings if isinstance(rankings, list) else []
+    return {
+        "portfolio_scoring_path": str(path),
+        "scored_intents_count": int(scoring.get("intents_scored_count") or len([row for row in rows if isinstance(row, dict) and row.get("executable_eligible")])),
+        "top_rejected_or_suppressed_reasons": sorted(
+            {
+                str(reason)
+                for row in rows
+                if isinstance(row, dict) and not row.get("executable_eligible")
+                for reason in (row.get("reason_codes") if isinstance(row.get("reason_codes"), list) else [])
+                if str(reason)
+            }
+        )[:10],
+    }
+
+
+def _arbitration_summary(path: str) -> dict[str, Any]:
+    arbitration = _read_json(Path(path)) if str(path or "").strip() else {}
+    selected = arbitration.get("selected_intent") if isinstance(arbitration.get("selected_intent"), dict) else {}
+    return {
+        "selected_intent_score": float(arbitration.get("selected_intent_score") or selected.get("portfolio_score_total") or 0.0),
+        "selected_intent_rank": int(arbitration.get("selected_intent_rank") or selected.get("portfolio_score_rank") or 0),
+    }
+
+
 def build_decision_ledger_v1(
     *,
     day_utc: str,
@@ -92,6 +122,8 @@ def build_decision_ledger_v1(
     out_path = decision_ledger_path(truth_root=truth_root, day_utc=day_utc)
     registry = REPO_ROOT / "governance" / "02_REGISTRIES" / "ENGINE_MODEL_REGISTRY_V1.json"
     market_manifest = truth_root / "market_data_snapshot_v1" / "dataset_manifest.json"
+    scoring_summary = _scoring_summary(truth_root, day_utc)
+    arbitration_summary = _arbitration_summary(scan_paths["arbitration_result_path"])
     payload = {
         "schema_id": "decision_ledger",
         "schema_version": "v1",
@@ -105,11 +137,16 @@ def build_decision_ledger_v1(
         "portfolio_state_path": str(portfolio_state_path(truth_root=truth_root, day_utc=day_utc)),
         "raw_sleeve_scan_path": scan_paths["raw_sleeve_scan_path"],
         "portfolio_activation_gate_path": str(portfolio_activation_gate_path(truth_root=truth_root, day_utc=day_utc)),
+        "portfolio_scoring_path": scoring_summary["portfolio_scoring_path"],
         "arbitration_result_path": scan_paths["arbitration_result_path"],
         "authorization_result_path": (authorization.get("outputs") or [""])[0] if isinstance(authorization.get("outputs"), list) and authorization.get("outputs") else "",
         "execution_result_path": (execution.get("outputs") or [""])[0] if isinstance(execution.get("outputs"), list) and execution.get("outputs") else "",
         "selected_intent_pointer_path": str(selected_pointer_path),
         "selected_intent_id": str(selected.get("intent_id") or ""),
+        "selected_intent_score": arbitration_summary["selected_intent_score"],
+        "selected_intent_rank": arbitration_summary["selected_intent_rank"],
+        "scored_intents_count": scoring_summary["scored_intents_count"],
+        "top_rejected_or_suppressed_reasons": scoring_summary["top_rejected_or_suppressed_reasons"],
         "final_status": str(day_run.get("final_status") or "UNKNOWN"),
         "canonical_phase": str(day_run.get("canonical_phase") or ""),
         "canonical_blocker": str(day_run.get("canonical_blocker") or ""),

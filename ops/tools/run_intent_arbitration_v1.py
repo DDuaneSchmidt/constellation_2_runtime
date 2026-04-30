@@ -14,17 +14,18 @@ if str(REPO_ROOT) not in sys.path:
 
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1, read_json_object_v1, resolve_fact_plane_truth_root_v1
 from ops.tools.run_portfolio_activation_gate_v1 import portfolio_activation_gate_path
+from ops.tools.run_portfolio_scoring_v1 import build_portfolio_scoring_v1, portfolio_scoring_path
 from ops.tools.run_sleeve_evaluation_kernel_v1 import sleeve_evaluation_rollup_path
 
 PAPER_MODE = "PAPER"
 DEFAULT_PRIORITY = [
-    "C2_VOL_INCOME_DEFINED_RISK_V1",
-    "C2_TREND_EQ_PRIMARY_V1",
-    "C2_MEAN_REVERSION_EQ_V1",
-    "C2_EVENT_DISLOCATION_V1",
     "C2_DEFENSIVE_TAIL_V1",
-    "C2_CROSS_ASSET_TREND_V1",
+    "C2_EVENT_DISLOCATION_V1",
     "C2_MARKET_NEUTRAL_SPREAD_V1",
+    "C2_MEAN_REVERSION_EQ_V1",
+    "C2_CROSS_ASSET_TREND_V1",
+    "C2_TREND_EQ_PRIMARY_V1",
+    "C2_VOL_INCOME_DEFINED_RISK_V1",
 ]
 
 
@@ -99,6 +100,37 @@ def _load_portfolio_gate(*, truth_root: Path, day_utc: str, path: Path | None) -
     return payload
 
 
+def _load_portfolio_scoring(
+    *,
+    truth_root: Path,
+    day_utc: str,
+    environment: str,
+    source_rollup_path: Path,
+    gate: dict[str, Any],
+    path: Path | None,
+) -> dict[str, Any]:
+    scoring_path = Path(path).resolve() if path is not None else portfolio_scoring_path(truth_root=truth_root, day_utc=day_utc)
+    if scoring_path.is_file():
+        try:
+            payload = read_json_object_v1(scoring_path)
+        except Exception:
+            payload = {}
+        if str(payload.get("day_utc") or "") == day_utc:
+            payload["_artifact_path_resolved"] = str(scoring_path)
+            return payload
+    if gate:
+        payload = build_portfolio_scoring_v1(
+            day_utc=day_utc,
+            truth_root=truth_root,
+            environment=environment,
+            source_rollup_path=source_rollup_path,
+            portfolio_gate_path_arg=Path(str(gate.get("_artifact_path_resolved") or gate.get("artifact_path") or "")),
+        )
+        payload["_artifact_path_resolved"] = str(payload.get("artifact_path") or "")
+        return payload
+    return {}
+
+
 def _apply_portfolio_gate(candidates: list[dict[str, Any]], gate: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     if not gate:
         return candidates, []
@@ -135,6 +167,60 @@ def _apply_portfolio_gate(candidates: list[dict[str, Any]], gate: dict[str, Any]
     return approved, rejected
 
 
+def _scoring_rankings(scoring: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = scoring.get("rankings") if isinstance(scoring.get("rankings"), list) else scoring.get("ranked_intents")
+    return rows if isinstance(rows, list) else []
+
+
+def _apply_portfolio_scoring(candidates: list[dict[str, Any]], scoring: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    rows = _scoring_rankings(scoring)
+    by_id = {
+        str(row.get("intent_id") or "").strip(): row
+        for row in rows
+        if isinstance(row, dict) and str(row.get("intent_id") or "").strip()
+    }
+    enriched: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    for candidate in candidates:
+        row = by_id.get(str(candidate.get("intent_id") or "").strip())
+        if not row:
+            rejected.append(
+                {
+                    **candidate,
+                    "portfolio_score_total": 0.0,
+                    "portfolio_score_components": {},
+                    "portfolio_score_rank": 999999,
+                    "portfolio_scoring_path": str(scoring.get("_artifact_path_resolved") or scoring.get("artifact_path") or ""),
+                    "portfolio_scoring_status": "MISSING_INTENT_SCORE",
+                    "rejection_reason": "PORTFOLIO_SCORING_MISSING_INTENT_SCORE",
+                }
+            )
+            continue
+        scored = {
+            **candidate,
+            "portfolio_score_total": float(row.get("score_total") or 0.0),
+            "portfolio_score_components": row.get("score_components") if isinstance(row.get("score_components"), dict) else {},
+            "portfolio_score_rank": int(row.get("rank") or 999999),
+            "portfolio_scoring_path": str(scoring.get("_artifact_path_resolved") or scoring.get("artifact_path") or ""),
+            "portfolio_scoring_status": "SCORED",
+            "scoring_reason_codes": row.get("reason_codes") if isinstance(row.get("reason_codes"), list) else [],
+            "executable_eligible": bool(row.get("executable_eligible")),
+        }
+        if scored["executable_eligible"] and int(scored["portfolio_score_rank"]) > 0:
+            enriched.append(scored)
+        else:
+            rejected.append({**scored, "rejection_reason": "PORTFOLIO_SCORING_NOT_EXECUTABLE"})
+    enriched.sort(
+        key=lambda row: (
+            int(row.get("portfolio_score_rank") or 999999),
+            -float(row.get("portfolio_score_total") or 0.0),
+            _priority_index(str(row.get("engine_id") or "")),
+            str(row.get("intent_hash") or ""),
+        )
+    )
+    return enriched, rejected
+
+
 def build_intent_arbitration(
     *,
     day_utc: str,
@@ -143,6 +229,7 @@ def build_intent_arbitration(
     cycle_id: str = "",
     source_rollup_path: Path | None = None,
     portfolio_gate_path: Path | None = None,
+    portfolio_scoring_path_arg: Path | None = None,
 ) -> dict[str, Any]:
     cycle_id = str(cycle_id or "").strip()
     rollup_path = Path(source_rollup_path).resolve() if source_rollup_path is not None else sleeve_evaluation_rollup_path(truth_root=truth_root, day_utc=day_utc)
@@ -173,12 +260,20 @@ def build_intent_arbitration(
     raw_candidates = _candidate_rows(rollup)
     gate = _load_portfolio_gate(truth_root=truth_root, day_utc=day_utc, path=portfolio_gate_path)
     candidates, portfolio_rejections = _apply_portfolio_gate(raw_candidates, gate)
-    candidates.sort(key=lambda row: (_priority_index(str(row.get("engine_id") or "")), str(row.get("intent_hash") or "")))
+    scoring = _load_portfolio_scoring(
+        truth_root=truth_root,
+        day_utc=day_utc,
+        environment=environment,
+        source_rollup_path=rollup_path,
+        gate=gate,
+        path=portfolio_scoring_path_arg,
+    )
+    candidates, scoring_rejections = _apply_portfolio_scoring(candidates, scoring)
     selected = dict(candidates[0]) if candidates else {}
     if selected:
         selected["cycle_id"] = cycle_id
-        selected["selection_reason"] = "FIRST_BY_INTENT_ARBITRATION_PRIORITY_V1"
-        selected["arbitration_reason"] = "FIRST_BY_INTENT_ARBITRATION_PRIORITY_V1"
+        selected["selection_reason"] = "HIGHEST_PORTFOLIO_SCORE_V1"
+        selected["arbitration_reason"] = "HIGHEST_PORTFOLIO_SCORE_V1"
         status = "SELECTED"
         blocker = ""
         next_action = ""
@@ -189,7 +284,7 @@ def build_intent_arbitration(
         blocker = str(blocked[0].get("canonical_blocker") or "NO_EXECUTABLE_INTENT") if blocked else "NO_EXECUTABLE_INTENT"
         next_action = "Review sleeve evaluation outcomes and resolve blockers or accept no-trade day."
 
-    rejected = portfolio_rejections + [{**row, "rejection_reason": "NOT_SELECTED_BY_INTENT_ARBITRATION_PRIORITY_V1"} for row in candidates[1:]]
+    rejected = portfolio_rejections + scoring_rejections + [{**row, "rejection_reason": "NOT_SELECTED_BY_PORTFOLIO_SCORE_V1"} for row in candidates[1:]]
     non_selected = []
     outcomes = rollup.get("outcomes") if isinstance(rollup.get("outcomes"), list) else rollup.get("sleeve_outcomes")
     for outcome in outcomes if isinstance(outcomes, list) else []:
@@ -217,8 +312,13 @@ def build_intent_arbitration(
         "environment": environment,
         "status": status,
         "canonical_blocker": blocker,
-        "selection_policy": {"policy_id": "intent_arbitration_priority_v1", "policy_path": "embedded:v1", "priority_order": DEFAULT_PRIORITY, "tie_breakers": ["priority_order", "engine_id", "intent_hash"]},
+        "selection_policy": {"policy_id": "portfolio_score_arbitration_v1", "policy_path": "embedded:v1", "tie_breakers": ["portfolio_score_rank", "portfolio_score_total_desc", "priority_order", "engine_id", "intent_hash"]},
         "portfolio_activation_gate_path": str(gate.get("_artifact_path_resolved") or gate.get("artifact_path") or ""),
+        "portfolio_scoring_path": str(scoring.get("_artifact_path_resolved") or scoring.get("artifact_path") or ""),
+        "portfolio_ranking": _scoring_rankings(scoring),
+        "selected_intent_score": float(selected.get("portfolio_score_total") or 0.0) if selected else 0.0,
+        "selected_intent_rank": int(selected.get("portfolio_score_rank") or 0) if selected else 0,
+        "scoring_reason_codes": selected.get("scoring_reason_codes") if selected and isinstance(selected.get("scoring_reason_codes"), list) else [],
         "raw_candidate_intents": raw_candidates,
         "candidate_intents": candidates,
         "rejected_or_filtered_intents": rejected,
@@ -243,6 +343,7 @@ def build_intent_arbitration(
         "source_arbitration_path": str(arbitration_path),
         "source_rollup_path": str(rollup_path),
         "portfolio_activation_gate_path": str(gate.get("_artifact_path_resolved") or gate.get("artifact_path") or ""),
+        "portfolio_scoring_path": str(scoring.get("_artifact_path_resolved") or scoring.get("artifact_path") or ""),
         "created_at_utc": _now_iso(),
     }
     _write_json(pointer_path, pointer)
