@@ -17,6 +17,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1, read_json_object_v1, resolve_fact_plane_truth_root_v1, resolve_paper_intent_truth_root_v1
 from ops.tools.run_intent_arbitration_v1 import build_intent_arbitration, selected_intent_pointer_path
+from ops.tools.run_portfolio_activation_gate_v1 import build_portfolio_activation_gate_v1
+from ops.tools.run_portfolio_state_v1 import build_portfolio_state_v1
 from ops.tools import run_sleeve_evaluation_kernel_v1 as sleeve_kernel
 
 PAPER_MODE = "PAPER"
@@ -607,12 +609,21 @@ def run_scan_cycle_v1(
     }
     _write_json(rollup_path, rollup)
 
+    portfolio_state = build_portfolio_state_v1(day_utc=day_utc, truth_root=truth_root, environment=environment)
+    portfolio_gate = build_portfolio_activation_gate_v1(
+        day_utc=day_utc,
+        truth_root=truth_root,
+        environment=environment,
+        source_rollup_path=rollup_path,
+    )
+
     arbitration_raw = build_intent_arbitration(
         day_utc=day_utc,
         truth_root=truth_root,
         environment=environment,
         cycle_id=cycle_id,
         source_rollup_path=rollup_path,
+        portfolio_gate_path=Path(str(portfolio_gate.get("artifact_path") or "")),
     )
     arbitration_path = arbitration_result_path(truth_root=truth_root, day_utc=day_utc, cycle_id=cycle_id)
     arbitration = dict(arbitration_raw)
@@ -722,11 +733,15 @@ def run_scan_cycle_v1(
         "operator_status_path": str(operator_path),
         "preflight_readiness_matrix_path": result.preflight_readiness_matrix_path,
         "operator_readiness_summary_path": result.operator_readiness_summary_path,
+        "portfolio_state_path": str(portfolio_state.get("artifact_path") or ""),
+        "portfolio_activation_gate_path": str(portfolio_gate.get("artifact_path") or ""),
         "latest_scan_cycle_pointer_path": str(latest_pointer_path),
         "ledger_path": str(ledger_path),
         "selected_intent_pointer_path": str(selected_intent_pointer_path(truth_root=truth_root, day_utc=day_utc)),
         "sleeve_outcomes": outcomes,
         "arbitration": arbitration,
+        "portfolio_state": portfolio_state,
+        "portfolio_activation_gate": portfolio_gate,
         "preflight_readiness_matrix": readiness_matrix,
         "operator_readiness_summary": readiness_summary,
         "operator_status": operator_status,

@@ -161,22 +161,52 @@ def _dec_str(x: Any, field: str) -> Decimal:
         raise DefensiveTailError(f"DECIMAL_PARSE_FAILED: field={field} value={x!r}") from e
 
 
-def _max_pairwise_corr(corr_obj: Dict[str, Any]) -> Decimal:
+def _correlation_diagnostics(corr_obj: Dict[str, Any]) -> Dict[str, Any]:
+    matrix = corr_obj.get("matrix") if isinstance(corr_obj.get("matrix"), dict) else {}
+    if isinstance(matrix.get("corr"), list):
+        engine_ids = matrix.get("engine_ids") if isinstance(matrix.get("engine_ids"), list) else []
+        rows = matrix.get("corr")
+        if not all(isinstance(row, list) for row in rows):
+            raise DefensiveTailError("MATRIX_CORR_ROWS_NOT_LIST")
+        max_corr: Optional[Decimal] = None
+        for i, row in enumerate(rows):
+            for j, value in enumerate(row):
+                if i == j:
+                    continue
+                d = _dec_str(value, "matrix.corr.*")
+                if max_corr is None or d > max_corr:
+                    max_corr = d
+        return {
+            "correlation_schema_version": "matrix.corr",
+            "correlation_input_status": "PASS",
+            "max_pairwise_corr": str(max_corr if max_corr is not None else Decimal("0")),
+            "correlation_branch_evaluated": True,
+            "correlation_branch_blocker": "" if max_corr is not None else "NO_PAIRWISE_CORRELATIONS_AVAILABLE",
+            "correlation_engine_ids": [str(item) for item in engine_ids],
+        }
+
     cm = corr_obj.get("correlation_matrix", {})
     if not isinstance(cm, dict):
         raise DefensiveTailError("CORRELATION_MATRIX_NOT_OBJECT")
 
-    m: Optional[Decimal] = None
-    for _, row in cm.items():
+    max_corr: Optional[Decimal] = None
+    for row_key, row in cm.items():
         if not isinstance(row, dict):
             continue
-        for _, v in row.items():
-            d = _dec_str(v, "correlation_matrix.*")
-            if m is None or d > m:
-                m = d
-    if m is None:
-        return Decimal("0")
-    return m
+        for col_key, value in row.items():
+            if str(row_key) == str(col_key):
+                continue
+            d = _dec_str(value, "correlation_matrix.*")
+            if max_corr is None or d > max_corr:
+                max_corr = d
+    return {
+        "correlation_schema_version": "correlation_matrix",
+        "correlation_input_status": "PASS",
+        "max_pairwise_corr": str(max_corr if max_corr is not None else Decimal("0")),
+        "correlation_branch_evaluated": True,
+        "correlation_branch_blocker": "" if max_corr is not None else "NO_PAIRWISE_CORRELATIONS_AVAILABLE",
+        "correlation_engine_ids": sorted([str(key) for key in cm.keys()]),
+    }
 
 
 @dataclass(frozen=True)
@@ -283,7 +313,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         dd = _dec_str(nav.get("history", {}).get("drawdown_pct"), "history.drawdown_pct")
 
         cor = _read_json_obj(inputs.cor_path)
-        mx = _max_pairwise_corr(cor)
+        corr_diag = _correlation_diagnostics(cor)
+        mx = Decimal(str(corr_diag["max_pairwise_corr"]))
 
         reg = _read_json_obj(inputs.reg_path)
         regime = str(reg.get("regime") or reg.get("regime_label") or "").strip()
@@ -296,10 +327,21 @@ def main(argv: Optional[List[str]] = None) -> int:
             reason_codes.append(RC_DRAWDOWN_BREACH)
 
     if not reason_codes:
+        corr_diag = locals().get(
+            "corr_diag",
+            {
+                "correlation_schema_version": "NOT_EVALUATED",
+                "correlation_input_status": "NOT_EVALUATED",
+                "max_pairwise_corr": "0",
+                "correlation_branch_evaluated": False,
+                "correlation_branch_blocker": "FORCE_ENTER_TEST_ONLY",
+                "correlation_engine_ids": [],
+            },
+        )
         print(
             "OK: DEF_TAIL_NO_INTENT "
             + json.dumps(
-                {"day_utc": day_utc, "engine_id": ENGINE_ID, "status": RC_NO_INTENT},
+                {"day_utc": day_utc, "engine_id": ENGINE_ID, "status": RC_NO_INTENT, **corr_diag},
                 sort_keys=True,
                 separators=(",", ":"),
             )
@@ -336,6 +378,17 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "intent_hash": intent_hash,
                 "out_path": str(out_path),
                 "reason_codes": reason_codes,
+                **locals().get(
+                    "corr_diag",
+                    {
+                        "correlation_schema_version": "NOT_EVALUATED",
+                        "correlation_input_status": "NOT_EVALUATED",
+                        "max_pairwise_corr": "0",
+                        "correlation_branch_evaluated": False,
+                        "correlation_branch_blocker": "FORCE_ENTER_TEST_ONLY",
+                        "correlation_engine_ids": [],
+                    },
+                ),
                 "engine_id": ENGINE_ID,
                 "suite": ENGINE_SUITE,
                 "mode": mode,

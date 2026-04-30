@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1, read_json_object_v1, resolve_fact_plane_truth_root_v1
+from ops.tools.run_portfolio_activation_gate_v1 import portfolio_activation_gate_path
 from ops.tools.run_sleeve_evaluation_kernel_v1 import sleeve_evaluation_rollup_path
 
 PAPER_MODE = "PAPER"
@@ -84,6 +85,56 @@ def _priority_index(engine_id: str) -> tuple[int, str]:
         return (len(DEFAULT_PRIORITY), engine_id)
 
 
+def _load_portfolio_gate(*, truth_root: Path, day_utc: str, path: Path | None) -> dict[str, Any]:
+    gate_path = Path(path).resolve() if path is not None else portfolio_activation_gate_path(truth_root=truth_root, day_utc=day_utc)
+    if not gate_path.is_file():
+        return {}
+    try:
+        payload = read_json_object_v1(gate_path)
+    except Exception:
+        return {}
+    if str(payload.get("day_utc") or "") != day_utc:
+        return {}
+    payload["_artifact_path_resolved"] = str(gate_path)
+    return payload
+
+
+def _apply_portfolio_gate(candidates: list[dict[str, Any]], gate: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not gate:
+        return candidates, []
+    decisions = gate.get("decisions") if isinstance(gate.get("decisions"), list) else []
+    by_id = {
+        str(row.get("raw_intent_id") or "").strip(): row
+        for row in decisions
+        if isinstance(row, dict) and str(row.get("raw_intent_id") or "").strip()
+    }
+    by_hash = {
+        str(row.get("raw_intent_hash") or "").strip(): row
+        for row in decisions
+        if isinstance(row, dict) and str(row.get("raw_intent_hash") or "").strip()
+    }
+    approved: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    for candidate in candidates:
+        decision = by_id.get(str(candidate.get("intent_id") or "").strip()) or by_hash.get(str(candidate.get("intent_hash") or "").strip())
+        if not decision:
+            rejected.append({**candidate, "rejection_reason": "PORTFOLIO_GATE_DECISION_MISSING"})
+            continue
+        gate_decision = str(decision.get("portfolio_gate_decision") or "").strip().upper()
+        enriched = {
+            **candidate,
+            "portfolio_gate_decision": gate_decision,
+            "portfolio_gate_reason_codes": decision.get("reason_codes") if isinstance(decision.get("reason_codes"), list) else [],
+            "portfolio_gate_path": str(gate.get("_artifact_path_resolved") or gate.get("artifact_path") or ""),
+        }
+        if gate_decision == "ALLOW" and decision.get("allowed_by_portfolio_gate") is True:
+            approved.append(enriched)
+        else:
+            reason = "PORTFOLIO_GATE_SIGNAL_ONLY" if gate_decision == "SIGNAL_ONLY" else "PORTFOLIO_GATE_SUPPRESSED"
+            rejected.append({**enriched, "rejection_reason": reason})
+    return approved, rejected
+
+
 def build_intent_arbitration(
     *,
     day_utc: str,
@@ -91,6 +142,7 @@ def build_intent_arbitration(
     environment: str = PAPER_MODE,
     cycle_id: str = "",
     source_rollup_path: Path | None = None,
+    portfolio_gate_path: Path | None = None,
 ) -> dict[str, Any]:
     cycle_id = str(cycle_id or "").strip()
     rollup_path = Path(source_rollup_path).resolve() if source_rollup_path is not None else sleeve_evaluation_rollup_path(truth_root=truth_root, day_utc=day_utc)
@@ -118,7 +170,9 @@ def build_intent_arbitration(
         return payload
 
     rollup = read_json_object_v1(rollup_path)
-    candidates = _candidate_rows(rollup)
+    raw_candidates = _candidate_rows(rollup)
+    gate = _load_portfolio_gate(truth_root=truth_root, day_utc=day_utc, path=portfolio_gate_path)
+    candidates, portfolio_rejections = _apply_portfolio_gate(raw_candidates, gate)
     candidates.sort(key=lambda row: (_priority_index(str(row.get("engine_id") or "")), str(row.get("intent_hash") or "")))
     selected = dict(candidates[0]) if candidates else {}
     if selected:
@@ -135,7 +189,7 @@ def build_intent_arbitration(
         blocker = str(blocked[0].get("canonical_blocker") or "NO_EXECUTABLE_INTENT") if blocked else "NO_EXECUTABLE_INTENT"
         next_action = "Review sleeve evaluation outcomes and resolve blockers or accept no-trade day."
 
-    rejected = [{**row, "rejection_reason": "NOT_SELECTED_BY_INTENT_ARBITRATION_PRIORITY_V1"} for row in candidates[1:]]
+    rejected = portfolio_rejections + [{**row, "rejection_reason": "NOT_SELECTED_BY_INTENT_ARBITRATION_PRIORITY_V1"} for row in candidates[1:]]
     non_selected = []
     outcomes = rollup.get("outcomes") if isinstance(rollup.get("outcomes"), list) else rollup.get("sleeve_outcomes")
     for outcome in outcomes if isinstance(outcomes, list) else []:
@@ -164,6 +218,8 @@ def build_intent_arbitration(
         "status": status,
         "canonical_blocker": blocker,
         "selection_policy": {"policy_id": "intent_arbitration_priority_v1", "policy_path": "embedded:v1", "priority_order": DEFAULT_PRIORITY, "tie_breakers": ["priority_order", "engine_id", "intent_hash"]},
+        "portfolio_activation_gate_path": str(gate.get("_artifact_path_resolved") or gate.get("artifact_path") or ""),
+        "raw_candidate_intents": raw_candidates,
         "candidate_intents": candidates,
         "rejected_or_filtered_intents": rejected,
         "selected_intent": selected,
@@ -186,6 +242,7 @@ def build_intent_arbitration(
         "selected_intent": selected,
         "source_arbitration_path": str(arbitration_path),
         "source_rollup_path": str(rollup_path),
+        "portfolio_activation_gate_path": str(gate.get("_artifact_path_resolved") or gate.get("artifact_path") or ""),
         "created_at_utc": _now_iso(),
     }
     _write_json(pointer_path, pointer)

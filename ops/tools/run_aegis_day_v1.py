@@ -19,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
 from constellation_2.common.runtime_contract_v1 import resolve_runtime_data_root
 from ops.tools import run_aegis_bod_prepare_v1 as bod
+from ops.tools.run_decision_ledger_v1 import build_decision_ledger_v1
 
 SCHEMA_VERSION = "aegis_day_run.v1"
 PHASE_ORDER = [
@@ -927,6 +928,14 @@ def run_aegis_day_v1(day_utc: str, environment: str, truth_root: str = "") -> tu
     previous = _read_json(path)
     if previous and str(previous.get("day_utc") or "") != ctx.day_utc:
         raise SystemExit(f"FAIL: WRONG_DAY_LEDGER_COLLISION: {path}")
+    _write_json(path, payload)
+    decision_ledger = build_decision_ledger_v1(
+        day_utc=ctx.day_utc,
+        truth_root=ctx.truth_root,
+        environment=ctx.environment,
+        aegis_day_payload=payload,
+    )
+    payload["decision_ledger_path"] = str(decision_ledger.get("artifact_path") or "")
     _write_json(path, payload)
     return path, payload
 
