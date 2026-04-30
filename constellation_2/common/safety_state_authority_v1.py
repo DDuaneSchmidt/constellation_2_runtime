@@ -7,6 +7,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
+from constellation_2.common.trading_day_readiness_authority_v1 import read_or_evaluate_trading_day_readiness_authority_v1
+
 
 SCHEMA_ID = "C2_SAFETY_STATE_AUTHORITY_V1"
 SCHEMA_VERSION = 1
@@ -287,6 +289,12 @@ def evaluate_safety_state_authority_v1(
     capital_envelope_path = (execution_root / "reports" / "capital_risk_envelope_v2" / day_utc / "capital_risk_envelope.v2.json").resolve()
     readiness_path = (execution_root / "trade_submit_readiness_c2_v1" / "_history" / environment / account / day_utc / "status.json").resolve()
     submit_boundary_path = (truth_root / "reports" / "submit_boundary_status_v1" / day_utc / "submit_boundary_status.v1.json").resolve()
+    day_readiness_path, day_readiness = read_or_evaluate_trading_day_readiness_authority_v1(
+        target_day=day_utc,
+        truth_root=truth_root,
+        execution_root=execution_root,
+        environment=environment,
+    )
 
     current_nav = _read_json(current_nav_path)
     prior_nav = _read_json(prior_nav_path)
@@ -478,9 +486,15 @@ def evaluate_safety_state_authority_v1(
             "capital_risk_envelope_v2": str(capital_envelope_path),
             "trade_submit_readiness_c2_v1": str(readiness_path),
             "submit_boundary_status_v1": str(submit_boundary_path),
+            "trading_day_readiness_authority_v1": str(day_readiness_path),
         },
         "stale_or_conflicting_inputs": stale_or_conflicting_inputs,
         "operator_next_action": _operator_action(canonical_blocker),
+        "readiness_authority_path": str(day_readiness_path),
+        "readiness_mode": str(day_readiness.get("readiness_mode") or "").strip().upper(),
+        "evidence_policy_used": day_readiness.get("evidence_policy") if isinstance(day_readiness.get("evidence_policy"), dict) else {},
+        "carry_forward_source_used": "",
+        "mode_specific_blocker": bool(canonical_blocker and str(day_readiness.get("readiness_mode") or "").strip().upper() in {"PREOPEN_BUILD", "PREOPEN_ADMISSION", "AFTER_HOURS_CLOSURE", "HISTORICAL_REPLAY"}),
         "hard_blockers": sorted(set(hard_blockers)),
         "trade_submit_readiness_status": readiness_status,
         "trade_submit_readiness_reason_codes": readiness_codes,

@@ -4,6 +4,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 SOURCE_ROOT = Path("/home/node/constellation")
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
@@ -191,6 +193,25 @@ def test_failed_envelope_negative_drawdown_does_not_override_canonical_nav_drawd
     assert payload["drawdown_pct"] == "0.000000"
     assert payload["drawdown_status"] == "PASS"
     assert payload["canonical_blocker"] == "CAPITAL_RISK_ENVELOPE_NOT_PASS"
+
+
+def test_safety_state_records_trading_day_readiness_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("C2_TRADING_DAY_READINESS_NOW_UTC", "2026-04-30T22:00:00Z")
+    _base_safety_inputs(tmp_path)
+
+    payload = evaluate_safety_state_authority_v1(
+        day_utc="2026-05-01",
+        truth_root=tmp_path,
+        execution_root=tmp_path,
+        account=ACCOUNT,
+        environment="PAPER",
+    )
+
+    assert payload["readiness_mode"] == "PREOPEN_BUILD"
+    assert payload["readiness_authority_path"].endswith(
+        "/reports/trading_day_readiness_authority_v1/2026-05-01/trading_day_readiness_authority.v1.json"
+    )
+    assert payload["evidence_policy_used"]["policy_id"] == "PREOPEN_CARRY_FORWARD_V1"
 
 
 def test_safety_state_payload_matches_schema(tmp_path: Path) -> None:

@@ -862,6 +862,43 @@
       }
     },
     {
+      "artifact_id": "trading_day_readiness_authority_v1",
+      "artifact_class": "admission_result",
+      "authoritative_writer": "ops/tools/run_trading_day_readiness_authority_v1.py",
+      "authoritative_domain": "authority",
+      "authoritative_root_type": "canonical_truth_root",
+      "schema_relpath": "governance/04_DATA/SCHEMAS/C2/REPORTS/trading_day_readiness_authority.v1.schema.json",
+      "root_policy": "canonical_only",
+      "authoritative_path_pattern": "{canonical_truth_root}/reports/trading_day_readiness_authority_v1/{day_utc}/trading_day_readiness_authority.v1.json",
+      "legal_consumers": [
+        "broker_supply_v1",
+        "capital_supply_v1",
+        "safety_state_authority_v1",
+        "market_open_data_gate_v1",
+        "submit_boundary_status_v1",
+        "session_authority_v1"
+      ],
+      "required_upstream_dependencies": [],
+      "initial_finality_state": "provisional",
+      "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],
+      "append_only_audit": true,
+      "immutable_policy_snapshot_required": false,
+      "frozen_input_bundle_required": false,
+      "dependency_law": "declared_downward_only",
+      "materialization_policy": {
+        "writer_policy": "may_materialize_if_missing",
+        "default_consumer_policy": "must_block_if_missing",
+        "allowed_materializers": [
+          "ops/tools/run_trading_day_readiness_authority_v1.py",
+          "ops/tools/run_broker_supply_v1.py",
+          "ops/tools/run_capital_supply_v1.py",
+          "ops/tools/run_safety_state_authority_v1.py",
+          "ops/tools/run_market_open_data_gate_v1.py",
+          "ops/tools/run_submit_boundary_status_v1.py"
+        ]
+      }
+    },
+    {
       "artifact_id": "safety_state_authority_v1",
       "artifact_class": "admission_result",
       "authoritative_writer": "ops/tools/run_safety_state_authority_v1.py",
@@ -876,6 +913,7 @@
         "day_authority_decision_v1"
       ],
       "required_upstream_dependencies": [
+        "trading_day_readiness_authority_v1",
         "capital_risk_envelope_v2",
         "trade_submit_readiness_c2_v1"
       ],
@@ -941,7 +979,8 @@
       "required_upstream_dependencies": [
         "target_day_build_v1",
         "trade_submit_readiness_c2_v1",
-        "safety_state_authority_v1"
+        "safety_state_authority_v1",
+        "trading_day_readiness_authority_v1"
       ],
       "initial_finality_state": "provisional",
       "allowed_finality_states": ["provisional", "finalized", "corrected", "superseded", "archived"],

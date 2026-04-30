@@ -59,6 +59,7 @@ from constellation_2.common.safety_state_authority_v1 import (
     safety_state_authority_output_path,
     write_safety_state_authority_v1,
 )
+from constellation_2.common.trading_day_readiness_authority_v1 import read_or_evaluate_trading_day_readiness_authority_v1
 from constellation_2.common.session_authority_v1 import (
     read_target_day_admission_ref_v1,
     read_target_day_build_ref_v1,
@@ -642,6 +643,8 @@ def _ensure_dependency_ref_v1(
 
 def _canonical_blocker_for_boundary_v1(blocking_codes: List[str]) -> str:
     normalized = _normalize_reason_codes(blocking_codes)
+    if "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE" in normalized:
+        return "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE"
     if STALE_ARTIFACT in normalized:
         return STALE_ARTIFACT
     for preferred in (
@@ -725,6 +728,14 @@ def main(argv: List[str] | None = None) -> int:
     )
     submit_mode_status = str(submit_mode.get("submit_mode_status") or "NO_SUBMIT_ATTEMPT").strip().upper()
     dry_run_complete = submit_mode_status == "DRY_RUN_COMPLETE"
+    day_readiness_path, day_readiness = read_or_evaluate_trading_day_readiness_authority_v1(
+        target_day=day_utc,
+        truth_root=truth_root,
+        execution_root=execution_truth_root,
+        environment="PAPER",
+    )
+    day_readiness_mode = str(day_readiness.get("readiness_mode") or "").strip().upper()
+    day_readiness_submit_allowed = bool(day_readiness.get("submit_allowed_by_mode") is True)
 
     required_checks: List[Dict[str, Any]] = []
     failed_checks: List[Dict[str, Any]] = []
@@ -760,8 +771,23 @@ def main(argv: List[str] | None = None) -> int:
         "target_day_admission_v1": str(admission_path),
         "trade_submit_readiness_c2_v1": str(readiness_path),
         "safety_state_authority_v1": str(safety_state_path),
+        "trading_day_readiness_authority_v1": str(day_readiness_path),
         "paper_trading_day_authority_v1": str(day_authority_path),
     }
+    day_readiness_codes = [] if day_readiness_submit_allowed else [str(day_readiness.get("canonical_blocker") or "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE")]
+    day_readiness_row = _check_row(
+        logical_name="trading_day_readiness_authority_v1",
+        path=day_readiness_path,
+        status="PASS" if day_readiness_submit_allowed else "FAIL",
+        day_utc=day_utc,
+        reason_codes=day_readiness_codes,
+    )
+    required_checks.append(day_readiness_row)
+    if not day_readiness_submit_allowed:
+        submission_authorized = False
+        boundary_status = "BLOCKED"
+        failed_checks.append(day_readiness_row)
+        blocking_codes.extend(day_readiness_codes)
     readiness_policy_view = _load_trade_readiness_policy_view_v1(truth_root=truth_root, day_utc=day_utc)
     source_paths.update(dict(readiness_policy_view.get("source_paths") or {}))
     extra_failed_conditions: List[Dict[str, Any]] = list(readiness_policy_view.get("failed_conditions") or [])
@@ -1310,8 +1336,14 @@ def main(argv: List[str] | None = None) -> int:
             sha256=safety_state_sha256,
             day_utc=day_utc,
         ),
+        _ensure_dependency_ref_v1(
+            artifact_id="trading_day_readiness_authority_v1",
+            path=day_readiness_path,
+            sha256=_sha256_file(day_readiness_path) if day_readiness_path.exists() else "",
+            day_utc=day_utc,
+        ),
     ]
-    if day_authority_ok and safety_state_ok:
+    if day_authority_ok and safety_state_ok and day_readiness_submit_allowed:
         # Submit boundary is a projection of paper_trading_day_authority_v1. Legacy
         # submit-local checks remain visible in required_boundary_checks, but they
         # no longer carry veto power unless promoted to required authority inputs
@@ -1427,6 +1459,11 @@ def main(argv: List[str] | None = None) -> int:
         "reason_codes": blocking_codes_sorted,
         "source_surface_path": source_surface_path,
         "source_paths": source_paths,
+        "readiness_authority_path": str(day_readiness_path),
+        "readiness_mode": day_readiness_mode,
+        "evidence_policy_used": day_readiness.get("evidence_policy") if isinstance(day_readiness.get("evidence_policy"), dict) else {},
+        "carry_forward_source_used": "",
+        "mode_specific_blocker": bool(canonical_blocker == "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE"),
         "readiness_status": effective_readiness_status,
         "readiness_decision": effective_readiness_decision,
         "readiness_submit_allowed": effective_readiness_submit_allowed,

@@ -33,6 +33,11 @@ def _ctx(tmp_path: Path) -> bod.BodContext:
     return bod.BodContext(DAY, "PAPER", truth, execution, runtime, operator, "DUO847203")
 
 
+def _ctx_for_day(tmp_path: Path, day: str) -> bod.BodContext:
+    base = _ctx(tmp_path)
+    return bod.BodContext(day, base.environment, base.truth_root, base.execution_root, base.runtime_root, base.operator_input_root, base.ib_account)
+
+
 def _config(ctx: bod.BodContext) -> probe.ProbeConfig:
     return probe.ProbeConfig(
         day_utc=ctx.day_utc,
@@ -252,3 +257,36 @@ def test_broker_supply_writes_only_runtime_artifact(monkeypatch: pytest.MonkeyPa
     assert path == ctx.truth_root / "reports" / "broker_supply_v1" / ctx.day_utc / "broker_supply.v1.json"
     assert payload["status"] == "PASS"
     assert str(path).startswith(str(ctx.truth_root))
+
+
+def test_future_target_day_uses_t_minus_1_broker_event_carry_forward(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    target = _ctx_for_day(tmp_path, "2026-05-01")
+    prior = _ctx_for_day(tmp_path, "2026-04-30")
+    monkeypatch.setenv("C2_TRADING_DAY_READINESS_NOW_UTC", "2026-04-30T22:00:00Z")
+    _patch_config(monkeypatch, target)
+    _write_probe(target)
+    _write_log(prior)
+
+    payload = broker_supply.build_broker_supply(target)
+
+    assert payload["status"] == "PASS"
+    assert payload["readiness_mode"] == "PREOPEN_BUILD"
+    assert payload["broker_event_source"] == "CARRY_FORWARD"
+    assert payload["broker_event_day_used"] == "2026-04-30"
+    assert payload["carry_forward_allowed"] is True
+
+
+def test_intraday_target_day_requires_same_day_broker_event_log(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    target = _ctx_for_day(tmp_path, "2026-05-01")
+    prior = _ctx_for_day(tmp_path, "2026-04-30")
+    monkeypatch.setenv("C2_TRADING_DAY_READINESS_NOW_UTC", "2026-05-01T15:00:00Z")
+    _patch_config(monkeypatch, target)
+    _write_probe(target)
+    _write_log(prior)
+
+    payload = broker_supply.build_broker_supply(target)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["readiness_mode"] == "INTRADAY_SUBMIT_READY"
+    assert payload["broker_event_source"] == "MISSING"
+    assert payload["canonical_blocker"] == "BROKER_EVENT_LOG_MISSING"

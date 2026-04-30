@@ -28,6 +28,7 @@ from constellation_2.common.session_authority_v1 import resolve_session_authorit
 from constellation_2.common.paper_session_fact_plane_v1 import read_json_object_v1
 from constellation_2.common.trade_submit_readiness_authority_v1 import resolve_governed_sleeve_truth_bindings
 from constellation_2.common.truth_root_v1 import resolve_truth_root
+from constellation_2.common.trading_day_readiness_authority_v1 import read_or_evaluate_trading_day_readiness_authority_v1
 
 
 RUN_IB_API_HANDSHAKE_TOOL = (REPO_ROOT / "ops/tools/run_ib_api_handshake_spine_v1.py").resolve()
@@ -231,6 +232,20 @@ def main(argv: List[str] | None = None) -> int:
     environment = str(args.environment or "PAPER").strip().upper()
     ib_account = _resolve_ib_account(args.ib_account)
     primary_sleeve_truth_root = _resolve_primary_sleeve_truth_root(environment=environment, ib_account=ib_account)
+    execution_truth_root = _resolve_primary_execution_truth_root(
+        environment=environment,
+        ib_account=ib_account,
+    )
+    readiness_authority_path, readiness_payload = read_or_evaluate_trading_day_readiness_authority_v1(
+        target_day=target_day,
+        truth_root=truth_root,
+        execution_root=execution_truth_root,
+        environment=environment,
+    )
+    readiness_mode = str(readiness_payload.get("readiness_mode") or "").strip().upper()
+    requires_same_day_broker_event_log = readiness_payload.get("requires_same_day_broker_event_log") is True
+    requires_live_account_truth = readiness_payload.get("requires_live_account_truth") is True
+    live_broker_evidence_required = readiness_mode not in {"PREOPEN_BUILD", "PREOPEN_ADMISSION"} or requires_same_day_broker_event_log or requires_live_account_truth
 
     producer_results: List[Dict[str, Any]] = []
     stale_rollover_condition = _stale_authority_head_detected(truth_root=truth_root, target_day=target_day)
@@ -254,16 +269,12 @@ def main(argv: List[str] | None = None) -> int:
         truth_root=primary_sleeve_truth_root,
         day_utc=target_day,
     )
-    if not rollover_attempt_had_failures and environment == "PAPER" and not broker_events_path.exists():
+    if not rollover_attempt_had_failures and environment == "PAPER" and live_broker_evidence_required and not broker_events_path.exists():
         execution_profile = resolve_governed_paper_execution_profile(
             repo_root=REPO_ROOT,
             environment=environment,
             ib_account=ib_account,
             sleeve_id=PRIMARY_SLEEVE_ID,
-        )
-        execution_truth_root = _resolve_primary_execution_truth_root(
-            environment=environment,
-            ib_account=ib_account,
         )
         producer_results.append(
             _run_tool(
@@ -309,22 +320,26 @@ def main(argv: List[str] | None = None) -> int:
         )
 
     if not rollover_attempt_had_failures:
-        producer_results.extend([
-            _run_tool(
-                [
-                    sys.executable,
-                    str(RUN_IB_API_HANDSHAKE_TOOL),
-                    "--day_utc",
-                    target_day,
-                    "--truth_root",
-                    str(primary_sleeve_truth_root),
-                    "--environment",
-                    environment,
-                    "--ib_account",
-                    ib_account,
-                ],
-                script="ops/tools/run_ib_api_handshake_spine_v1.py",
-            ),
+        followup_results: List[Dict[str, Any]] = []
+        if live_broker_evidence_required:
+            followup_results.append(
+                _run_tool(
+                    [
+                        sys.executable,
+                        str(RUN_IB_API_HANDSHAKE_TOOL),
+                        "--day_utc",
+                        target_day,
+                        "--truth_root",
+                        str(primary_sleeve_truth_root),
+                        "--environment",
+                        environment,
+                        "--ib_account",
+                        ib_account,
+                    ],
+                    script="ops/tools/run_ib_api_handshake_spine_v1.py",
+                )
+            )
+        followup_results.extend([
             _run_tool(
                 [
                     sys.executable,
@@ -352,6 +367,7 @@ def main(argv: List[str] | None = None) -> int:
                 },
             ),
         ])
+        producer_results.extend(followup_results)
 
     payload = derive_pre_open_bundle_payload_v1(
         truth_root=truth_root,
@@ -361,6 +377,8 @@ def main(argv: List[str] | None = None) -> int:
         producer_results=producer_results,
         owner_tool=OWNER_TOOL,
         repo_root=REPO_ROOT,
+        readiness_payload=readiness_payload,
+        readiness_authority_path=str(readiness_authority_path),
     )
     if stale_rollover_condition:
         authority_head_aligned = _primary_scoped_head_matches_target_day(payload=payload, target_day=target_day)

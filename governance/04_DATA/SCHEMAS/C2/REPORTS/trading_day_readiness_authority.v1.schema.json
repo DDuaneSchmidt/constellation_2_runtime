@@ -1,0 +1,62 @@
+{
+  "$id": "https://constellation.local/schemas/c2/reports/trading_day_readiness_authority.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Trading Day Readiness Authority v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "target_day",
+    "current_day",
+    "current_time_utc",
+    "timezone",
+    "exchange",
+    "session_state",
+    "readiness_mode",
+    "evidence_policy",
+    "allowed_carry_forward_sources",
+    "forbidden_future_sources",
+    "requires_same_day_broker_event_log",
+    "requires_same_day_options_snapshot",
+    "requires_live_account_truth",
+    "submit_allowed_by_mode",
+    "canonical_blocker",
+    "blocking_phase",
+    "operator_next_action",
+    "produced_at_utc",
+    "artifact_paths",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "C2_TRADING_DAY_READINESS_AUTHORITY_V1" },
+    "schema_version": { "const": 1 },
+    "target_day": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "current_day": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "current_time_utc": { "type": "string" },
+    "timezone": { "const": "America/New_York" },
+    "exchange": { "type": "string" },
+    "session_state": {
+      "type": "string",
+      "enum": ["PRE_MARKET", "REGULAR_OPEN", "AFTER_HOURS", "CLOSED", "FUTURE_TARGET_DAY", "PAST_TARGET_DAY"]
+    },
+    "readiness_mode": {
+      "type": "string",
+      "enum": ["PREOPEN_BUILD", "PREOPEN_ADMISSION", "MARKET_OPEN_READY", "INTRADAY_SUBMIT_READY", "AFTER_HOURS_CLOSURE", "HISTORICAL_REPLAY"]
+    },
+    "evidence_policy": { "type": "object", "additionalProperties": true },
+    "allowed_carry_forward_sources": { "type": "array", "items": { "type": "string" } },
+    "forbidden_future_sources": { "type": "array", "items": { "type": "string" } },
+    "requires_same_day_broker_event_log": { "type": "boolean" },
+    "requires_same_day_options_snapshot": { "type": "boolean" },
+    "requires_live_account_truth": { "type": "boolean" },
+    "submit_allowed_by_mode": { "type": "boolean" },
+    "canonical_blocker": { "type": "string" },
+    "blocking_phase": { "type": "string" },
+    "operator_next_action": { "type": "string" },
+    "produced_at_utc": { "type": "string" },
+    "artifact_paths": { "type": "object", "additionalProperties": { "type": "string" } },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

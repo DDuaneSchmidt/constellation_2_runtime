@@ -1029,6 +1029,49 @@ def collect_pre_open_prerequisite_checks_v1(
     return rows
 
 
+def apply_trading_day_readiness_policy_to_pre_open_checks_v1(
+    *,
+    checks: List[Dict[str, Any]],
+    readiness_payload: Mapping[str, Any] | None,
+) -> List[Dict[str, Any]]:
+    readiness = readiness_payload if isinstance(readiness_payload, Mapping) else {}
+    readiness_mode = str(readiness.get("readiness_mode") or "").strip().upper()
+    requires_same_day_broker_event_log = readiness.get("requires_same_day_broker_event_log")
+    requires_live_account_truth = readiness.get("requires_live_account_truth")
+    if readiness_mode not in {"PREOPEN_BUILD", "PREOPEN_ADMISSION"}:
+        return checks
+    if requires_same_day_broker_event_log is not False and requires_live_account_truth is not False:
+        return checks
+
+    adjusted: List[Dict[str, Any]] = []
+    for row in checks:
+        item = dict(row)
+        artifact_id = str(item.get("artifact_id") or "").strip()
+        if artifact_id in {"ib_api_handshake_latest_pointer_v1", "ib_api_handshake_v1"}:
+            item.update(
+                {
+                    "required": False,
+                    "observed_status": f"NOT_REQUIRED_BY_{readiness_mode}",
+                    "result_status": "PASS",
+                    "blocker_codes": [],
+                    "blocking_reason_code": "",
+                    "freshness_rule": "TRADING_DAY_READINESS_POLICY",
+                    "freshness_status": "NOT_REQUIRED",
+                    "date_binding_status": "NOT_REQUIRED",
+                    "provenance_required": False,
+                    "provenance_summary": {"required": False, "present": False, "fields_present": [], "source": "trading_day_readiness_authority_v1"},
+                    "closure_status": "CLOSED",
+                }
+            )
+            refs = list(item.get("source_refs") or [])
+            readiness_path = str(readiness.get("path") or readiness.get("artifact_path") or "").strip()
+            if readiness_path:
+                refs.append({"artifact_path": readiness_path, "artifact_sha256": ""})
+            item["source_refs"] = refs
+        adjusted.append(item)
+    return adjusted
+
+
 def derive_pre_open_bundle_payload_v1(
     *,
     truth_root: Path,
@@ -1038,6 +1081,8 @@ def derive_pre_open_bundle_payload_v1(
     producer_results: Iterable[Mapping[str, Any]],
     owner_tool: str,
     repo_root: Path | None = None,
+    readiness_payload: Mapping[str, Any] | None = None,
+    readiness_authority_path: str = "",
 ) -> Dict[str, Any]:
     normalized_truth_root = Path(truth_root).resolve()
     normalized_target_day = str(target_day).strip()
@@ -1047,6 +1092,10 @@ def derive_pre_open_bundle_payload_v1(
         environment=environment,
         ib_account=ib_account,
         repo_root=repo_root,
+    )
+    checks = apply_trading_day_readiness_policy_to_pre_open_checks_v1(
+        checks=checks,
+        readiness_payload=readiness_payload,
     )
     active_day_observed = _current_active_day_observed(truth_root=normalized_truth_root)
     checks = _apply_paper_active_session_alignment_override(
@@ -1094,7 +1143,8 @@ def derive_pre_open_bundle_payload_v1(
         }
         | set(producer_failure_codes)
     )
-    return {
+    readiness = readiness_payload if isinstance(readiness_payload, Mapping) else {}
+    payload = {
         "schema_id": "pre_open_bundle",
         "schema_version": "v1",
         "target_day": normalized_target_day,
@@ -1114,6 +1164,17 @@ def derive_pre_open_bundle_payload_v1(
             "git_sha": repo_git_sha_v1(),
         },
     }
+    if readiness:
+        payload.update(
+            {
+                "readiness_authority_path": str(readiness_authority_path or readiness.get("path") or readiness.get("artifact_path") or "").strip(),
+                "readiness_mode": str(readiness.get("readiness_mode") or "").strip(),
+                "evidence_policy_used": readiness.get("evidence_policy") if isinstance(readiness.get("evidence_policy"), Mapping) else {},
+                "carry_forward_source_used": "T_MINUS_1" if str(readiness.get("readiness_mode") or "").strip().upper() in {"PREOPEN_BUILD", "PREOPEN_ADMISSION"} else "",
+                "mode_specific_blocker": str(readiness.get("canonical_blocker") or "").strip() == "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE",
+            }
+        )
+    return payload
 
 
 def write_pre_open_bundle_v1(*, truth_root: Path, payload: Dict[str, Any]) -> PreOpenBundleRefV1:

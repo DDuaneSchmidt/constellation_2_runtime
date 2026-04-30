@@ -23,6 +23,7 @@ from ops.tools.run_market_data_supply_v1 import (
     market_data_supply_path,
 )
 from ops.tools.run_intent_arbitration_v1 import selected_intent_pointer_path
+from constellation_2.common.trading_day_readiness_authority_v1 import read_or_evaluate_trading_day_readiness_authority_v1
 
 SCHEMA_VERSION = "market_open_data_gate.v1"
 REFRESHABLE_BLOCKERS = {
@@ -254,6 +255,39 @@ def _blocker_from_supply(supply: dict[str, Any]) -> str:
 def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
     generated_at = _now_iso()
     now_utc = datetime.now(UTC)
+    readiness_path, readiness = read_or_evaluate_trading_day_readiness_authority_v1(
+        target_day=ctx.day_utc,
+        truth_root=ctx.truth_root,
+        execution_root=ctx.execution_root,
+        environment=ctx.environment,
+    )
+    readiness_mode = str(readiness.get("readiness_mode") or "").strip().upper()
+    if not bool(readiness.get("requires_same_day_options_snapshot") is True):
+        status = "PASS" if readiness_mode in {"AFTER_HOURS_CLOSURE", "HISTORICAL_REPLAY"} else "PENDING"
+        blocker = "" if status == "PASS" else "MARKET_NOT_OPEN"
+        return {
+            "schema_id": "market_open_data_gate",
+            "schema_version": SCHEMA_VERSION,
+            "day_utc": ctx.day_utc,
+            "environment": ctx.environment,
+            "generated_at_utc": generated_at,
+            "market_session_state": str(readiness.get("session_state") or ""),
+            "status": status,
+            "canonical_blocker": blocker,
+            "readiness_authority_path": str(readiness_path),
+            "readiness_mode": readiness_mode,
+            "evidence_policy_used": readiness.get("evidence_policy") if isinstance(readiness.get("evidence_policy"), dict) else {},
+            "carry_forward_source_used": "",
+            "mode_specific_blocker": bool(blocker),
+            "market_data_supply_path": str(market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)),
+            "command_result": {},
+            "snapshot_path": "",
+            "freshness_certificate_path": "",
+            "snapshot_age_seconds": None,
+            "capture_attempted_by_gate": False,
+            "capture_result": {},
+            "operator_next_action": str(readiness.get("operator_next_action") or ""),
+        }
     session_state = _market_session_state()
     selected_intent_status, selected_instrument = _selected_intent_state(ctx)
     supply_path = market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
@@ -346,6 +380,11 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
         "market_session_state": session_state,
         "status": status,
         "canonical_blocker": blocker,
+        "readiness_authority_path": str(readiness_path),
+        "readiness_mode": readiness_mode,
+        "evidence_policy_used": readiness.get("evidence_policy") if isinstance(readiness.get("evidence_policy"), dict) else {},
+        "carry_forward_source_used": "",
+        "mode_specific_blocker": bool(blocker and readiness_mode in {"PREOPEN_BUILD", "PREOPEN_ADMISSION", "AFTER_HOURS_CLOSURE", "HISTORICAL_REPLAY"}),
         "market_data_supply_path": str(supply_path),
         "command_result": command_result,
         "snapshot_path": str(snapshot_validation.get("snapshot_path") or ""),

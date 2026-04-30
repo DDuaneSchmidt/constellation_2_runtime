@@ -110,7 +110,15 @@
     "produced_at_utc": { "type": "string", "minLength": 20 },
     "freshness_verdict": { "type": "string", "enum": ["CURRENT", "STALE", "UNKNOWN"] },
     "linkage_verdict": { "type": "string", "enum": ["LINKED", "UNLINKED"] },
-    "paper_account": { "type": "string", "minLength": 1 }
+    "paper_account": { "type": "string", "minLength": 1 },
+    "readiness_authority_path": { "type": "string", "minLength": 1 },
+    "readiness_mode": { "type": "string", "minLength": 1 },
+    "evidence_policy_used": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "carry_forward_source_used": { "type": ["string", "null"] },
+    "mode_specific_blocker": { "type": "boolean" }
   },
   "$defs": {
     "producer": {

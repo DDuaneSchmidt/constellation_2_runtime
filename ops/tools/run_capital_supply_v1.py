@@ -19,6 +19,7 @@ from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_operator_statement_path,
     resolve_paper_capital_seed_path,
 )
+from constellation_2.common.trading_day_readiness_authority_v1 import read_or_evaluate_trading_day_readiness_authority_v1
 from ops.tools import run_aegis_bod_prepare_v1 as bod
 
 SCHEMA_VERSION = "capital_supply.v1"
@@ -368,6 +369,12 @@ def _operator_action(blocker: str, ctx: bod.BodContext) -> str:
 
 
 def build_capital_supply(ctx: bod.BodContext) -> dict[str, Any]:
+    readiness_path, readiness = read_or_evaluate_trading_day_readiness_authority_v1(
+        target_day=ctx.day_utc,
+        truth_root=ctx.truth_root,
+        execution_root=ctx.execution_root,
+        environment=ctx.environment,
+    )
     sources = [_load_broker_source(ctx), _load_operator_source(ctx), _load_seed_source(ctx)]
     selected, source_status, blocker = _select_source(sources)
     degraded_blocker = blocker if source_status == "DEGRADED" else ""
@@ -381,6 +388,8 @@ def build_capital_supply(ctx: bod.BodContext) -> dict[str, Any]:
             source_status = "BLOCKED"
     status = "PASS" if source_status == "PASS" and not blocker else ("DEGRADED" if source_status == "DEGRADED" and not blocker else "BLOCKED")
     canonical_blocker = degraded_blocker if status == "DEGRADED" else blocker
+    broker_supply = _read_json(_broker_supply_path(ctx))
+    broker_event_source = str(broker_supply.get("broker_event_source") or "").strip().upper()
     return {
         "schema_id": "capital_supply",
         "schema_version": SCHEMA_VERSION,
@@ -389,6 +398,11 @@ def build_capital_supply(ctx: bod.BodContext) -> dict[str, Any]:
         "generated_at_utc": _now_iso(),
         "status": status,
         "canonical_blocker": canonical_blocker,
+        "readiness_authority_path": str(readiness_path),
+        "readiness_mode": str(readiness.get("readiness_mode") or "").strip().upper(),
+        "evidence_policy_used": readiness.get("evidence_policy") if isinstance(readiness.get("evidence_policy"), dict) else {},
+        "carry_forward_source_used": str(broker_supply.get("carry_forward_source_used") or "") if broker_event_source == "CARRY_FORWARD" else "",
+        "mode_specific_blocker": bool(canonical_blocker and str(readiness.get("readiness_mode") or "").strip().upper() in {"PREOPEN_BUILD", "PREOPEN_ADMISSION", "AFTER_HOURS_CLOSURE", "HISTORICAL_REPLAY"}),
         "capital_sources": sources,
         "selected_source": selected,
         "nav_evidence": nav_result,

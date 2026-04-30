@@ -17,6 +17,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
+from constellation_2.common.trading_day_readiness_authority_v1 import read_or_evaluate_trading_day_readiness_authority_v1
 from ops.tools import run_aegis_bod_prepare_v1 as bod
 from ops.tools import run_ib_broker_event_probe_v1 as probe
 
@@ -72,6 +73,12 @@ def _event_log_path(ctx: bod.BodContext) -> Path:
         / ctx.day_utc
         / "broker_event_log.v1.jsonl"
     ).resolve()
+
+
+def _prior_day(day_utc: str) -> str:
+    from datetime import date, timedelta
+
+    return (date.fromisoformat(day_utc) - timedelta(days=1)).isoformat()
 
 
 def _arg_values(row: dict[str, Any]) -> list[str]:
@@ -209,11 +216,40 @@ def _connection_from_probe(probe_payload: dict[str, Any], config: probe.ProbeCon
 
 
 def build_broker_supply(ctx: bod.BodContext, *, freshness_seconds: float = 300.0) -> dict[str, Any]:
+    readiness_path, readiness = read_or_evaluate_trading_day_readiness_authority_v1(
+        target_day=ctx.day_utc,
+        truth_root=ctx.truth_root,
+        execution_root=ctx.execution_root,
+        environment=ctx.environment,
+    )
+    readiness_mode = str(readiness.get("readiness_mode") or "").strip().upper()
+    evidence_policy = readiness.get("evidence_policy") if isinstance(readiness.get("evidence_policy"), dict) else {}
+    carry_forward_allowed = (
+        "broker_event_log" in {str(item).strip() for item in readiness.get("allowed_carry_forward_sources") or []}
+        and not bool(readiness.get("requires_same_day_broker_event_log") is True)
+    )
     config, truth_root = probe._resolve_config(ctx.day_utc, ctx.environment, 12.0, freshness_seconds, False)
     probe_path = _probe_path(truth_root=truth_root, day_utc=ctx.day_utc)
     probe_payload = _read_json(probe_path)
     log_path = _event_log_path(ctx)
-    events = _read_event_log(log_path)
+    carry_forward_day = _prior_day(ctx.day_utc)
+    carry_forward_path = (
+        ctx.execution_root
+        / "execution_evidence_v1"
+        / "broker_events"
+        / carry_forward_day
+        / "broker_event_log.v1.jsonl"
+    ).resolve()
+    same_day_log_exists = log_path.exists() and log_path.is_file()
+    carry_forward_log_exists = carry_forward_path.exists() and carry_forward_path.is_file()
+    target_is_future = str(readiness.get("session_state") or "").strip().upper() == "FUTURE_TARGET_DAY"
+    if target_is_future and carry_forward_allowed and carry_forward_log_exists:
+        broker_event_source = "CARRY_FORWARD"
+    else:
+        broker_event_source = "SAME_DAY" if same_day_log_exists else ("CARRY_FORWARD" if carry_forward_allowed and carry_forward_log_exists else "MISSING")
+    event_log_day_used = ctx.day_utc if broker_event_source == "SAME_DAY" else (carry_forward_day if broker_event_source == "CARRY_FORWARD" else "")
+    event_log_path_used = log_path if broker_event_source in {"SAME_DAY", "MISSING"} else carry_forward_path
+    events = _read_event_log(event_log_path_used) if broker_event_source != "MISSING" else []
     event_types = _event_types(events)
     latest_event_at = _latest_event_at(events)
     managed = _managed_accounts(events)
@@ -221,10 +257,17 @@ def build_broker_supply(ctx: bod.BodContext, *, freshness_seconds: float = 300.0
     positions = _position_rows(events, ctx.ib_account)
     required_seen = sorted(REQUIRED_EVENTS & event_types)
     log_status = "MISSING"
-    if log_path.exists() and log_path.is_file():
+    broker_event_freshness_status = "MISSING"
+    if broker_event_source == "CARRY_FORWARD":
+        log_status = "PRESENT"
+        broker_event_freshness_status = "CARRY_FORWARD_T_MINUS_1"
+    elif log_path.exists() and log_path.is_file():
         log_status = "PRESENT"
         if max(0.0, time.time() - log_path.stat().st_mtime) > float(freshness_seconds):
             log_status = "STALE"
+            broker_event_freshness_status = "STALE"
+        else:
+            broker_event_freshness_status = "FRESH"
     account_values = {
         "net_liquidation_cents": _money_to_cents(raw_fields.get("NetLiquidation")),
         "total_cash_value_cents": _money_to_cents(raw_fields.get("TotalCashValue")),
@@ -234,13 +277,14 @@ def build_broker_supply(ctx: bod.BodContext, *, freshness_seconds: float = 300.0
         "raw_fields": raw_fields,
     }
     blocker = ""
-    if (probe_payload.get("status") == "BLOCKED" and str(probe_payload.get("canonical_blocker") or "").startswith("IB_")) or (
-        probe_payload and (probe_payload.get("connection") or {}).get("connected") is False
+    if bool(readiness.get("requires_live_account_truth") is True) and (
+        (probe_payload.get("status") == "BLOCKED" and str(probe_payload.get("canonical_blocker") or "").startswith("IB_"))
+        or (probe_payload and (probe_payload.get("connection") or {}).get("connected") is False)
     ):
         blocker = "IB_CONNECTION_FAILED"
     elif log_status == "MISSING":
         blocker = "BROKER_EVENT_LOG_MISSING"
-    elif log_status == "STALE":
+    elif log_status == "STALE" and broker_event_source != "CARRY_FORWARD":
         blocker = "BROKER_EVENT_LOG_STALE"
     elif ctx.ib_account not in managed:
         blocker = "BROKER_ACCOUNT_MISMATCH" if managed else "BROKER_ACCOUNT_SUMMARY_MISSING"
@@ -274,11 +318,23 @@ def build_broker_supply(ctx: bod.BodContext, *, freshness_seconds: float = 300.0
         "account": ctx.ib_account,
         "connection": _connection_from_probe(probe_payload, config, probe_path),
         "event_log": {
-            "path": str(log_path),
+            "path": str(event_log_path_used),
             "status": log_status,
+            "source": broker_event_source,
+            "day_used": event_log_day_used,
             "latest_event_at_utc": latest_event_at,
             "required_events_seen": required_seen,
         },
+        "readiness_authority_path": str(readiness_path),
+        "readiness_mode": readiness_mode,
+        "evidence_policy_used": evidence_policy,
+        "carry_forward_source_used": str(carry_forward_path) if broker_event_source == "CARRY_FORWARD" else "",
+        "mode_specific_blocker": bool(blocker and readiness_mode in {"PREOPEN_BUILD", "PREOPEN_ADMISSION", "AFTER_HOURS_CLOSURE", "HISTORICAL_REPLAY"}),
+        "broker_event_source": broker_event_source,
+        "broker_event_day_used": event_log_day_used,
+        "broker_event_freshness_status": broker_event_freshness_status,
+        "carry_forward_allowed": carry_forward_allowed,
+        "carry_forward_reason": "PREOPEN_T_MINUS_1_BROKER_EVENT_LOG_ALLOWED" if broker_event_source == "CARRY_FORWARD" else "",
         "account_identity": {
             "expected_account": ctx.ib_account,
             "observed_accounts": managed,
