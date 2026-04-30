@@ -247,21 +247,14 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
     generated_at = _now_iso()
     now_utc = datetime.now(UTC)
     session_state = _market_session_state()
+    selected_intent_status = _selected_intent_status(ctx)
     supply_path = market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     command_result: dict[str, Any] = {}
     capture_result: dict[str, Any] = {}
     capture_attempted = False
     instrument = "SPY"
     snapshot_validation: dict[str, Any] = {}
-    if session_state in {"PRE_MARKET", "NON_TRADING_DAY"}:
-        status = "PENDING"
-        blocker = "MARKET_NOT_OPEN"
-        action = "Rerun market-open data gate after 09:30 ET during regular US options market hours."
-    elif session_state == "AFTER_HOURS":
-        status = "BLOCKED"
-        blocker = "MARKET_CLOSED"
-        action = "Rerun market-open data gate during regular US options market hours; submit-time quote freshness is not evaluated after market close."
-    elif _selected_intent_status(ctx) not in {"", "SELECTED"}:
+    if selected_intent_status not in {"", "SELECTED"}:
         status = "PASS"
         blocker = ""
         action = ""
@@ -271,6 +264,14 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
             "freshness_certificate_path": "",
             "snapshot_age_seconds": None,
         }
+    elif session_state in {"PRE_MARKET", "NON_TRADING_DAY"}:
+        status = "PENDING"
+        blocker = "MARKET_NOT_OPEN"
+        action = "Rerun market-open data gate after 09:30 ET during regular US options market hours."
+    elif session_state == "AFTER_HOURS":
+        status = "BLOCKED"
+        blocker = "MARKET_CLOSED"
+        action = "Rerun market-open data gate during regular US options market hours; submit-time quote freshness is not evaluated after market close."
     else:
         command_result = _run_market_data_supply(ctx)
         supply = _read_json(supply_path)

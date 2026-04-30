@@ -605,6 +605,37 @@ def test_market_open_gate_skips_capture_without_selected_intent(monkeypatch: pyt
     assert payload["capture_attempted_by_gate"] is False
 
 
+def test_market_open_gate_prioritizes_no_intent_over_after_hours(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    pointer = open_gate.selected_intent_pointer_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    pointer.parent.mkdir(parents=True, exist_ok=True)
+    pointer.write_text(
+        json.dumps(
+            {
+                "schema_id": "selected_intent_pointer",
+                "schema_version": "v1",
+                "day_utc": ctx.day_utc,
+                "environment": "PAPER",
+                "status": "NO_EXECUTABLE_INTENT",
+                "canonical_blocker": "NO_EXECUTABLE_INTENT",
+                "selected_intent": {},
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(open_gate, "_market_session_state", lambda: "AFTER_HOURS")
+    monkeypatch.setattr(open_gate, "_run_market_data_supply", lambda _ctx: pytest.fail("market data supply should not run without selected intent"))
+    monkeypatch.setattr(open_gate, "_run_capture", lambda *_args, **_kwargs: pytest.fail("capture should not run without selected intent"))
+
+    payload = open_gate.build_market_open_data_gate(ctx)
+
+    assert payload["status"] == "PASS"
+    assert payload["canonical_blocker"] == ""
+    assert payload["market_session_state"] == "AFTER_HOURS"
+    assert payload["capture_attempted_by_gate"] is False
+
+
 def test_market_open_gate_passes_during_market_with_valid_supply(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
