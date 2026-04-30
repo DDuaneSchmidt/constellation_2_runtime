@@ -168,7 +168,47 @@ def _intent_hash(path: Path, payload: dict[str, Any]) -> str:
     return str(payload.get("intent_hash") or payload.get("canonical_json_hash") or path.name.split(".", 1)[0]).strip()
 
 
+def _selected_intent_pointer(ctx: bod.BodContext) -> dict[str, Any]:
+    pointer_path = (ctx.truth_root / "pointers" / "selected_intent_pointer.v1.json").resolve()
+    payload = _read_json(pointer_path)
+    if not payload or str(payload.get("day_utc") or "").strip() != ctx.day_utc:
+        return {}
+    return payload
+
+
+def _selected_intent_identity(pointer: dict[str, Any]) -> dict[str, str]:
+    selected = pointer.get("selected_intent") if isinstance(pointer.get("selected_intent"), dict) else {}
+    return {
+        "intent_id": str(selected.get("intent_id") or pointer.get("selected_intent_id") or "").strip(),
+        "intent_hash": str(selected.get("intent_hash") or pointer.get("selected_intent_hash") or "").strip(),
+        "intent_path": str(selected.get("intent_path") or pointer.get("selected_intent_path") or "").strip(),
+    }
+
+
+def _matches_selected_intent(path: Path, payload: dict[str, Any], identity: dict[str, str]) -> bool:
+    selected_path = str(identity.get("intent_path") or "").strip()
+    if selected_path:
+        try:
+            if Path(selected_path).resolve() == path.resolve():
+                return True
+        except Exception:
+            pass
+    selected_hash = str(identity.get("intent_hash") or "").strip()
+    if selected_hash and selected_hash == _intent_hash(path, payload):
+        return True
+    selected_id = str(identity.get("intent_id") or "").strip()
+    return bool(selected_id and selected_id == str(payload.get("intent_id") or "").strip())
+
+
 def _active_intents(ctx: bod.BodContext) -> list[tuple[Path, dict[str, Any]]]:
+    pointer = _selected_intent_pointer(ctx)
+    pointer_status = str(pointer.get("status") or "").strip().upper()
+    pointer_blocker = str(pointer.get("canonical_blocker") or "").strip().upper()
+    if pointer_status == "NO_EXECUTABLE_INTENT" or pointer_blocker == "NO_EXECUTABLE_INTENT":
+        return []
+    selected_identity = _selected_intent_identity(pointer)
+    selected_present = any(str(value or "").strip() for value in selected_identity.values())
+
     roots = [ctx.execution_root, ctx.truth_root] if ctx.execution_root != ctx.truth_root else [ctx.truth_root]
     seen: set[str] = set()
     rows: list[tuple[Path, dict[str, Any]]] = []
@@ -179,6 +219,8 @@ def _active_intents(ctx: bod.BodContext) -> list[tuple[Path, dict[str, Any]]]:
                 continue
             key = _intent_hash(path, payload)
             if key in seen:
+                continue
+            if selected_present and not _matches_selected_intent(path, payload, selected_identity):
                 continue
             seen.add(key)
             rows.append((path, payload))

@@ -71,6 +71,23 @@ def _intent(ctx: bod.BodContext, *, target: str = "0.01") -> Path:
     )
 
 
+def _selected_pointer(ctx: bod.BodContext, *, status: str = "SELECTED", blocker: str = "", intent_id: str = "intent_1", intent_path: Path | None = None) -> Path:
+    selected = {}
+    if status == "SELECTED":
+        selected = {"intent_id": intent_id}
+        if intent_path is not None:
+            selected["intent_path"] = str(intent_path)
+    return _write_json(
+        ctx.truth_root / "pointers" / "selected_intent_pointer.v1.json",
+        {
+            "day_utc": ctx.day_utc,
+            "status": status,
+            "canonical_blocker": blocker,
+            "selected_intent": selected,
+        },
+    )
+
+
 def _positions_v2(ctx: bod.BodContext) -> Path:
     return _write_json(
         ctx.execution_root / "positions_v1" / "snapshots" / ctx.day_utc / "positions_snapshot.v2.json",
@@ -200,17 +217,54 @@ def test_missing_budget_policy_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path:
 def test_active_current_day_intent_receives_computed_budget(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _capital_supply(ctx, nav=200_000_00)
-    _intent(ctx, target="0.01")
+    intent_path = _intent(ctx, target="0.01")
+    _selected_pointer(ctx, intent_path=intent_path)
     _pass_envelope(monkeypatch)
     payload = supply.build_risk_budget_supply(ctx)
     assert payload["intent_budgets"][0]["allowed_risk_cents"] == 200_000
     assert payload["intent_budgets"][0]["instrument"] == "SPY"
 
 
-def test_intent_budget_compute_failure_blocks(tmp_path: Path) -> None:
+def test_no_executable_intent_pointer_ignores_stale_day_snapshots(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _capital_supply(ctx)
     _intent(ctx, target="0.05")
+    _selected_pointer(ctx, status="NO_EXECUTABLE_INTENT", blocker="NO_EXECUTABLE_INTENT")
+    _pass_envelope(monkeypatch)
+
+    payload = supply.build_risk_budget_supply(ctx)
+
+    assert payload["status"] == "PASS"
+    assert payload["intent_budgets"] == []
+    assert payload["risk_sizing_export"]["usable_for_risk_sizing"] is True
+
+
+def test_selected_intent_pointer_limits_budgeting_to_selected_snapshot(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _capital_supply(ctx)
+    selected_path = _intent(ctx, target="0.01")
+    _write_json(
+        ctx.execution_root / "intents_v1" / "snapshots" / ctx.day_utc / "stale.exposure_intent.v1.json",
+        {
+            "intent_id": "stale_intent",
+            "target_notional_pct": "0.05",
+            "underlying": {"symbol": "DBC"},
+        },
+    )
+    _selected_pointer(ctx, intent_path=selected_path)
+    _pass_envelope(monkeypatch)
+
+    payload = supply.build_risk_budget_supply(ctx)
+
+    assert payload["status"] == "PASS"
+    assert [row["intent_id"] for row in payload["intent_budgets"]] == ["intent_1"]
+
+
+def test_intent_budget_compute_failure_blocks(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _capital_supply(ctx)
+    intent_path = _intent(ctx, target="0.05")
+    _selected_pointer(ctx, intent_path=intent_path)
     payload = supply.build_risk_budget_supply(ctx)
     assert payload["canonical_blocker"] == "INTENT_BUDGET_COMPUTE_FAILED"
 
