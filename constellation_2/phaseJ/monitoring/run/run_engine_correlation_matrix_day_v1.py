@@ -377,6 +377,7 @@ def main() -> int:
             series_by_engine.setdefault(eid, []).append(val)
 
     engine_ids = sorted(series_by_engine.keys())
+    observed_return_days_for_policy = 0
     if len(engine_ids) == 0:
         # Bootstrap: no returns => 1x1 with placeholder engine id, degraded status
         status = "DEGRADED_INSUFFICIENT_HISTORY"
@@ -390,6 +391,7 @@ def main() -> int:
         flags = {"crowding_threshold": "0.75", "sustained_days": 1, "pairs": []}
     else:
         max_len = max([len(series_by_engine[eid]) for eid in engine_ids])
+        observed_return_days_for_policy = max_len
         for eid in engine_ids:
             s = series_by_engine[eid]
             if len(s) < max_len:
@@ -458,7 +460,7 @@ def main() -> int:
             day_utc=day_utc,
             truth_root=truth_root,
             window_days=window_days,
-            observed_return_days=len(win),
+            observed_return_days=observed_return_days_for_policy,
             observed_engine_count=len(series_by_engine),
         ),
     }
