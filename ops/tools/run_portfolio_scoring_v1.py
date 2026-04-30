@@ -17,6 +17,7 @@ from ops.tools.run_portfolio_activation_gate_v1 import build_portfolio_activatio
 from ops.tools.run_portfolio_state_v1 import portfolio_state_path
 
 PAPER_MODE = "PAPER"
+BOOTSTRAP_ACCEPTED_FOR_PAPER = "BOOTSTRAP_ACCEPTED_FOR_PAPER"
 SCORING_POLICY_ID = "portfolio_scoring_v1"
 SCORING_POLICY_VERSION = "2026-04-30.2"
 MACRO_DIVERSIFIERS = {"DBC", "GLD", "HYG", "IEF", "LQD", "TLT", "UUP"}
@@ -320,7 +321,14 @@ def build_portfolio_scoring_v1(
     rows.sort(key=lambda row: (row["rank"] if row["rank"] else 999999, str(row.get("sleeve_id") or ""), str(row.get("intent_id") or "")))
     out_path = portfolio_scoring_path(truth_root=truth_root, day_utc=day_utc)
     selected_candidate_intent_id = str(rankable[0].get("intent_id") or "") if rankable else ""
-    status = "BLOCKED" if not gate else ("DEGRADED" if str(state.get("status") or "").upper() == "DEGRADED" or str(gate.get("status") or "").upper() == "DEGRADED" else "PASS")
+    if not gate:
+        status = "BLOCKED"
+    elif str(state.get("status") or "").upper() == BOOTSTRAP_ACCEPTED_FOR_PAPER or str(gate.get("status") or "").upper() == BOOTSTRAP_ACCEPTED_FOR_PAPER:
+        status = BOOTSTRAP_ACCEPTED_FOR_PAPER
+    elif str(state.get("status") or "").upper() == "DEGRADED" or str(gate.get("status") or "").upper() == "DEGRADED":
+        status = "DEGRADED"
+    else:
+        status = "PASS"
     payload = {
         "schema_id": "portfolio_scoring",
         "schema_version": "v1",
@@ -380,7 +388,7 @@ def main(argv: list[str] | None = None) -> int:
         portfolio_gate_path_arg=gate_path,
     )
     print(json.dumps({"status": payload["status"], "path": payload["artifact_path"], "ranked_count": len(payload["rankings"])}, sort_keys=True))
-    return 0 if payload["status"] in {"PASS", "DEGRADED"} else 2
+    return 0 if payload["status"] in {"PASS", "DEGRADED", BOOTSTRAP_ACCEPTED_FOR_PAPER} else 2
 
 
 if __name__ == "__main__":

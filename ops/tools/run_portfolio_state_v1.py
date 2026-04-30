@@ -22,6 +22,9 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
 
 PAPER_MODE = "PAPER"
 REGIMES = {"TREND", "CHOPPY", "CRISIS", "DISPERSION", "VOL_SHOCK", "UNKNOWN"}
+BOOTSTRAP_ACCEPTED_FOR_PAPER = "BOOTSTRAP_ACCEPTED_FOR_PAPER"
+DEGRADED_INSUFFICIENT_HISTORY = "DEGRADED_INSUFFICIENT_HISTORY"
+BLOCKED_FOR_LIVE = "BLOCKED_FOR_LIVE"
 
 
 def _now_iso() -> str:
@@ -175,10 +178,13 @@ def _market_metrics(*, market_root: Path, day_utc: str, symbols: list[str]) -> t
     )
 
 
-def _correlation_state(path: Path) -> tuple[str, str, dict[str, Any], list[str]]:
+def _correlation_state(path: Path, *, environment: str) -> tuple[str, str, dict[str, Any], list[str], list[str], str]:
     payload = _read_json(path)
     if not payload:
-        return "UNKNOWN", "0", {}, ["engine_correlation_matrix"]
+        return "UNKNOWN", "0", {}, ["engine_correlation_matrix"], [], ""
+    bootstrap = payload.get("bootstrap_policy") if isinstance(payload.get("bootstrap_policy"), dict) else {}
+    bootstrap_status = str(bootstrap.get("status") or "").strip().upper()
+    corr_status = str(payload.get("status") or "").strip().upper()
     matrix = payload.get("matrix") if isinstance(payload.get("matrix"), dict) else {}
     max_corr: Decimal | None = None
     if isinstance(matrix.get("corr"), list):
@@ -204,14 +210,18 @@ def _correlation_state(path: Path) -> tuple[str, str, dict[str, Any], list[str]]
                 if max_corr is None or corr > max_corr:
                     max_corr = corr
     if max_corr is None:
-        return "UNKNOWN", "0", payload, ["engine_correlation_matrix:NO_PAIRWISE_CORRELATIONS"]
+        if bootstrap_status == BOOTSTRAP_ACCEPTED_FOR_PAPER and environment == PAPER_MODE:
+            return "UNKNOWN", "0", payload, [], ["engine_correlation_matrix:BOOTSTRAP_ACCEPTED_FOR_PAPER"], BOOTSTRAP_ACCEPTED_FOR_PAPER
+        if corr_status == DEGRADED_INSUFFICIENT_HISTORY:
+            return "UNKNOWN", "0", payload, ["engine_correlation_matrix:DEGRADED_INSUFFICIENT_HISTORY"], [], DEGRADED_INSUFFICIENT_HISTORY
+        return "UNKNOWN", "0", payload, ["engine_correlation_matrix:NO_PAIRWISE_CORRELATIONS"], [], corr_status
     if max_corr >= Decimal("0.70"):
         state = "HIGH"
     elif max_corr >= Decimal("0.30"):
         state = "NORMAL"
     else:
         state = "LOW"
-    return state, str(max_corr), payload, []
+    return state, str(max_corr), payload, [], [], str(bootstrap_status or corr_status)
 
 
 def _derive_regime(*, regime_payload: dict[str, Any], market: dict[str, Any], correlation_regime: str) -> str:
@@ -240,20 +250,36 @@ def build_portfolio_state_v1(*, day_utc: str, truth_root: Path, environment: str
     regime_path = sleeve_truth_root / "monitoring_v1" / "regime_snapshot_v2" / day_utc / "regime_snapshot.v2.json"
     corr_path = sleeve_truth_root / "monitoring_v1" / "engine_correlation_matrix" / day_utc / "engine_correlation_matrix.v1.json"
     regime_payload = _read_json(regime_path)
-    correlation_regime, max_corr, corr_payload, corr_missing = _correlation_state(corr_path)
+    correlation_regime, max_corr, corr_payload, corr_missing, corr_bootstrap_inputs, corr_input_status = _correlation_state(
+        corr_path,
+        environment=environment,
+    )
     regime = _derive_regime(regime_payload=regime_payload, market=market, correlation_regime=correlation_regime)
 
     missing_inputs: list[str] = []
     degraded_inputs: list[str] = []
+    bootstrap_inputs: list[str] = []
     if not regime_payload:
         missing_inputs.append("regime_snapshot_v2")
     if not corr_payload:
         missing_inputs.append("engine_correlation_matrix")
     degraded_inputs.extend(corr_missing)
+    bootstrap_inputs.extend(corr_bootstrap_inputs)
     missing_inputs.extend(market_missing)
     if regime not in REGIMES:
         regime = "UNKNOWN"
-    status = "BLOCKED" if not market_inputs else ("DEGRADED" if missing_inputs or degraded_inputs or regime == "UNKNOWN" else "PASS")
+    if not market_inputs:
+        status = "BLOCKED"
+    elif missing_inputs or degraded_inputs:
+        status = "DEGRADED"
+    elif bootstrap_inputs and environment == PAPER_MODE:
+        status = BOOTSTRAP_ACCEPTED_FOR_PAPER
+    elif bootstrap_inputs:
+        status = BLOCKED_FOR_LIVE
+    elif regime == "UNKNOWN":
+        status = "DEGRADED"
+    else:
+        status = "PASS"
     out_path = portfolio_state_path(truth_root=truth_root, day_utc=day_utc)
     payload = {
         "schema_id": "portfolio_state",
@@ -265,6 +291,8 @@ def build_portfolio_state_v1(*, day_utc: str, truth_root: Path, environment: str
         "trend_strength": market["trend_strength"],
         "volatility_regime": market["volatility_regime"],
         "correlation_regime": correlation_regime,
+        "correlation_input_status": corr_input_status,
+        "correlation_bootstrap_policy_status": (corr_payload.get("bootstrap_policy") if isinstance(corr_payload.get("bootstrap_policy"), dict) else {}).get("status", ""),
         "dispersion_regime": market["dispersion_regime"],
         "equity_beta_state": market["equity_beta_state"],
         "max_pairwise_corr": max_corr,
@@ -275,10 +303,11 @@ def build_portfolio_state_v1(*, day_utc: str, truth_root: Path, environment: str
         ],
         "missing_inputs": sorted(set(missing_inputs)),
         "degraded_inputs": sorted(set(degraded_inputs)),
+        "bootstrap_inputs": sorted(set(bootstrap_inputs)),
         "derived_metrics": {k: v for k, v in market.items() if k not in {"trend_strength", "volatility_regime", "dispersion_regime", "equity_beta_state"}},
         "produced_at_utc": _now_iso(),
         "producer": "ops/tools/run_portfolio_state_v1.py",
-        "operator_next_action": "Review missing/degraded portfolio-state inputs before relying on portfolio activation." if status != "PASS" else "",
+        "operator_next_action": "Accumulate paper engine attribution history; bootstrap correlation is accepted only for PAPER." if status == BOOTSTRAP_ACCEPTED_FOR_PAPER else ("Review missing/degraded portfolio-state inputs before relying on portfolio activation." if status != "PASS" else ""),
         "artifact_path": str(out_path),
     }
     _write_json(out_path, payload)
@@ -295,7 +324,7 @@ def main(argv: list[str] | None = None) -> int:
     truth_root = resolve_fact_plane_truth_root_v1(args.truth_root)
     payload = build_portfolio_state_v1(day_utc=day_utc, truth_root=truth_root, environment=str(args.environment).strip().upper())
     print(json.dumps({"status": payload["status"], "regime": payload["regime"], "path": payload["artifact_path"]}, sort_keys=True))
-    return 0 if payload["status"] in {"PASS", "DEGRADED"} else 2
+    return 0 if payload["status"] in {"PASS", "DEGRADED", BOOTSTRAP_ACCEPTED_FOR_PAPER} else 2
 
 
 if __name__ == "__main__":

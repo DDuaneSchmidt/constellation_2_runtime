@@ -15,7 +15,8 @@
     "input_manifest",
     "produced_utc",
     "producer",
-    "reason_codes"
+    "reason_codes",
+    "bootstrap_policy"
   ],
   "properties": {
     "schema_id": { "const": "C2_ENGINE_CORRELATION_MATRIX_V1" },
@@ -115,6 +116,33 @@
     "reason_codes": {
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
+    },
+
+    "bootstrap_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "return_source",
+        "required_history_days",
+        "observed_return_days",
+        "observed_engine_count",
+        "operator_next_action"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["NOT_APPLICABLE", "BOOTSTRAP_ACCEPTED_FOR_PAPER", "BLOCKED_FOR_LIVE"]
+        },
+        "return_source": {
+          "type": "string",
+          "enum": ["REALIZED_ACCOUNTING_ATTRIBUTION", "UNAVAILABLE_NO_ATTRIBUTION_HISTORY"]
+        },
+        "required_history_days": { "type": "integer", "minimum": 1, "maximum": 4000 },
+        "observed_return_days": { "type": "integer", "minimum": 0, "maximum": 4000 },
+        "observed_engine_count": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "operator_next_action": { "type": "string" }
+      }
     }
   }
 }

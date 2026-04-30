@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 from pathlib import Path
-
-import ops.tools.run_engine_daily_returns_day_v1 as returns_module
 
 
 DAY = "2026-04-23"
 PREV_DAY = "2026-04-22"
+_RETURNS_MODULE_PATH = Path("/home/node/constellation/ops/tools/run_engine_daily_returns_day_v1.py")
+_SPEC = importlib.util.spec_from_file_location("ops_run_engine_daily_returns_day_v1_under_test", _RETURNS_MODULE_PATH)
+assert _SPEC and _SPEC.loader
+returns_module = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(returns_module)
 
 
 def _write_json(path: Path, payload: dict) -> None:

@@ -199,6 +199,41 @@ def _bootstrap_window_true(day_utc: str, truth_root: Path) -> bool:
     return True
 
 
+def _paper_truth_root_true(truth_root: Path) -> bool:
+    parts = tuple(Path(truth_root).resolve().parts)
+    return len(parts) >= 2 and parts[-2:] == ("PRIMARY", "PAPER")
+
+
+def _bootstrap_policy(
+    *,
+    day_utc: str,
+    truth_root: Path,
+    window_days: int,
+    observed_return_days: int,
+    observed_engine_count: int,
+) -> Dict[str, Any]:
+    if observed_engine_count > 0:
+        status = "NOT_APPLICABLE"
+        source = "REALIZED_ACCOUNTING_ATTRIBUTION"
+        next_action = ""
+    elif _bootstrap_window_true(day_utc, truth_root) and _paper_truth_root_true(truth_root):
+        status = "BOOTSTRAP_ACCEPTED_FOR_PAPER"
+        source = "UNAVAILABLE_NO_ATTRIBUTION_HISTORY"
+        next_action = "Accumulate paper engine attribution history; replace bootstrap correlation once pairwise engine returns exist."
+    else:
+        status = "BLOCKED_FOR_LIVE"
+        source = "UNAVAILABLE_NO_ATTRIBUTION_HISTORY"
+        next_action = "Produce real engine attribution and daily returns before relying on live pairwise correlation."
+    return {
+        "status": status,
+        "return_source": source,
+        "required_history_days": int(window_days),
+        "observed_return_days": int(observed_return_days),
+        "observed_engine_count": int(observed_engine_count),
+        "operator_next_action": next_action,
+    }
+
+
 def _list_days(root: Path) -> List[date]:
     if not root.exists() or not root.is_dir():
         raise CliError(f"MISSING_ROOT_DIR: {root}")
@@ -338,6 +373,10 @@ def main() -> int:
         # Bootstrap: no returns => 1x1 with placeholder engine id, degraded status
         status = "DEGRADED_INSUFFICIENT_HISTORY"
         reason_codes.append("NO_ENGINE_RETURNS_AVAILABLE")
+        if _bootstrap_window_true(day_utc, truth_root) and _paper_truth_root_true(truth_root):
+            reason_codes.append("BOOTSTRAP_ACCEPTED_FOR_PAPER")
+        else:
+            reason_codes.append("BLOCKED_FOR_LIVE")
         engine_ids = ["BOOTSTRAP"]
         corr = [["1.000000"]]
         flags = {"crowding_threshold": "0.75", "sustained_days": 1, "pairs": []}
@@ -404,6 +443,13 @@ def main() -> int:
         "produced_utc": produced_utc,
         "producer": {"repo": "constellation_2_runtime", "git_sha": _git_sha(), "module": "constellation_2/phaseJ/monitoring/run/run_engine_correlation_matrix_day_v1.py"},
         "reason_codes": sorted(list(dict.fromkeys(reason_codes))),
+        "bootstrap_policy": _bootstrap_policy(
+            day_utc=day_utc,
+            truth_root=truth_root,
+            window_days=window_days,
+            observed_return_days=len(win),
+            observed_engine_count=len(series_by_engine),
+        ),
     }
 
     validate_against_repo_schema_v1(payload, REPO_ROOT, SCHEMA_RELPATH)

@@ -17,6 +17,7 @@ from ops.tools.run_portfolio_state_v1 import build_portfolio_state_v1, portfolio
 from ops.tools.run_sleeve_evaluation_kernel_v1 import sleeve_evaluation_rollup_path
 
 PAPER_MODE = "PAPER"
+BOOTSTRAP_ACCEPTED_FOR_PAPER = "BOOTSTRAP_ACCEPTED_FOR_PAPER"
 PRIORITY = [
     "C2_DEFENSIVE_TAIL_V1",
     "C2_TREND_EQ_PRIMARY_V1",
@@ -128,7 +129,11 @@ def _initial_decision(*, engine_id: str, raw_status: str, symbol: str, state: di
     if engine_id == "C2_MARKET_NEUTRAL_SPREAD_V1":
         return "SIGNAL_ONLY", ["PAIRED_EXECUTION_NOT_SUPPORTED"]
 
-    if str(state.get("status") or "").strip().upper() in {"DEGRADED", "BLOCKED"} or regime == "UNKNOWN":
+    state_status = str(state.get("status") or "").strip().upper()
+    if state_status == BOOTSTRAP_ACCEPTED_FOR_PAPER:
+        return "ALLOW", ["PORTFOLIO_STATE_BOOTSTRAP_ACCEPTED_FOR_PAPER_NO_SUPPRESSION_APPLIED"]
+
+    if state_status in {"DEGRADED", "BLOCKED"} or regime == "UNKNOWN":
         return "ALLOW", ["PORTFOLIO_STATE_DEGRADED_NO_SUPPRESSION_APPLIED"]
 
     if regime == "CRISIS":
@@ -258,7 +263,7 @@ def build_portfolio_activation_gate_v1(
         "schema_version": "v1",
         "day_utc": day_utc,
         "environment": environment,
-        "status": "DEGRADED" if degraded or str(state.get("status") or "") == "DEGRADED" else "PASS",
+        "status": BOOTSTRAP_ACCEPTED_FOR_PAPER if str(state.get("status") or "").strip().upper() == BOOTSTRAP_ACCEPTED_FOR_PAPER else ("DEGRADED" if degraded or str(state.get("status") or "") == "DEGRADED" else "PASS"),
         "canonical_blocker": "",
         "portfolio_state_snapshot_path": str(state.get("artifact_path") or state_path),
         "source_rollup_path": str(rollup_path),
@@ -299,7 +304,7 @@ def main(argv: list[str] | None = None) -> int:
     rollup = Path(args.source_rollup_path).resolve() if str(args.source_rollup_path or "").strip() else None
     payload = build_portfolio_activation_gate_v1(day_utc=day_utc, truth_root=truth_root, environment=str(args.environment).strip().upper(), source_rollup_path=rollup)
     print(json.dumps({"status": payload["status"], "path": payload["artifact_path"], "decision_count": len(payload["decisions"])}, sort_keys=True))
-    return 0 if payload["status"] in {"PASS", "DEGRADED"} else 2
+    return 0 if payload["status"] in {"PASS", "DEGRADED", BOOTSTRAP_ACCEPTED_FOR_PAPER} else 2
 
 
 if __name__ == "__main__":

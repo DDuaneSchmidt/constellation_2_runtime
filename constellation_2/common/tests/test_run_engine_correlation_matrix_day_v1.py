@@ -39,3 +39,4 @@ def test_engine_correlation_matrix_script_bootstraps_with_truth_root_override(tm
     payload = json.loads(out_path.read_text(encoding="utf-8"))
     assert payload["status"] == "DEGRADED_INSUFFICIENT_HISTORY"
     assert payload["matrix"]["engine_ids"] == ["BOOTSTRAP"]
+    assert payload["bootstrap_policy"]["status"] == "BLOCKED_FOR_LIVE"
