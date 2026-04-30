@@ -56,6 +56,14 @@ export function fetchOperations() {
   return query("/api/operations");
 }
 
+export function fetchAegisOperatorState() {
+  const path = "/api/aegis/operator-state";
+  if (typeof window === "undefined") {
+    return query(path);
+  }
+  return fetchJson(new URL(path, window.location.origin).toString());
+}
+
 export function fetchReadinessKernel(params = {}) {
   return query("/api/readiness-kernel", params);
 }

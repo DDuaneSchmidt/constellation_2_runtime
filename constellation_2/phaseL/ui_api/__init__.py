@@ -1,5 +1,6 @@
 from .actions import ACTION_SPECS, build_action_inventory, list_action_audit_entries, run_action
 from .advisory_read_model import build_advisory_view
+from .aegis_operator_state_read_model import build_aegis_operator_state_view, get_operator_state
 from .alerts_read_model import build_alerts_view
 from .financial_state_read_model import build_financial_state_view
 from .integrity_read_model import build_integrity_view
@@ -90,6 +91,8 @@ __all__ = [
     "STATUS_SEMANTICS",
     "build_action_inventory",
     "build_advisory_view",
+    "build_aegis_operator_state_view",
+    "get_operator_state",
     "build_alerts_view",
     "build_financial_state_view",
     "build_integrity_view",

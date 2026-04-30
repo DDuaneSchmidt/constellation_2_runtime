@@ -83,6 +83,7 @@ from constellation_2.phaseL.ui_api import (
     draft_reliability_issue_v1,
     get_reliability_fix_attempt_v1,
     get_latest_reliability_readiness_v1,
+    get_operator_state,
     get_configuration_draft_v1,
     get_reliability_issue_v1,
     get_reliability_readiness_v1,
@@ -1858,6 +1859,7 @@ class OpsHandler(SimpleHTTPRequestHandler):
         "/advisory",
         "/tax",
         "/operations",
+        "/aegis-runtime",
         "/configuration",
         "/reliability",
         "/reliability/readiness",
@@ -2306,6 +2308,10 @@ class OpsHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/operations":
             self._send_json(HTTPStatus.OK, build_operations_view(requested_day))
+            return True
+
+        if path == "/api/aegis/operator-state":
+            self._send_json(HTTPStatus.OK, get_operator_state(GLOBAL_TRUTH_ROOT))
             return True
 
         if path == "/api/command/overview":

@@ -49,6 +49,13 @@ def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _mtime_iso(path: Path) -> str:
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime, UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    except OSError:
+        return ""
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     try:
         return read_json_object_v1(path)
@@ -115,8 +122,28 @@ def _classify_no_intent(stdout: str) -> bool:
     return isinstance(obj, dict) and str(obj.get("status") or "").strip().upper() == "NO_INTENT"
 
 
-def _run_engine(row: dict[str, Any], *, day_utc: str, intent_truth_root: Path) -> dict[str, Any]:
-    cmd = [
+def _runner_supports_symbols_arg(row: dict[str, Any]) -> bool:
+    path = _engine_runner_path(row)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception:
+        return False
+    return "--symbols" in text
+
+
+def _producer_symbol_invocations(row: dict[str, Any]) -> list[dict[str, Any]]:
+    allowed = _allowed_symbols(row)
+    if not allowed:
+        return [{"arg_name": "", "arg_value": "", "symbols": []}]
+    if len(allowed) == 1:
+        return [{"arg_name": "--symbol", "arg_value": allowed[0], "symbols": allowed}]
+    if _runner_supports_symbols_arg(row):
+        return [{"arg_name": "--symbols", "arg_value": ",".join(allowed), "symbols": allowed}]
+    return [{"arg_name": "--symbol", "arg_value": symbol, "symbols": [symbol]} for symbol in allowed]
+
+
+def _base_engine_cmd(row: dict[str, Any], *, day_utc: str, intent_truth_root: Path) -> list[str]:
+    return [
         sys.executable,
         str(_engine_runner_path(row)),
         "--day_utc",
@@ -126,6 +153,14 @@ def _run_engine(row: dict[str, Any], *, day_utc: str, intent_truth_root: Path) -
         "--truth_root",
         str(intent_truth_root),
     ]
+
+
+def _run_one_engine_invocation(row: dict[str, Any], *, day_utc: str, intent_truth_root: Path, invocation: dict[str, Any]) -> dict[str, Any]:
+    cmd = _base_engine_cmd(row, day_utc=day_utc, intent_truth_root=intent_truth_root)
+    arg_name = str(invocation.get("arg_name") or "").strip()
+    arg_value = str(invocation.get("arg_value") or "").strip()
+    if arg_name and arg_value:
+        cmd.extend([arg_name, arg_value])
     env = os.environ.copy()
     env["C2_TRUTH_ROOT"] = str(intent_truth_root)
     started = _now_iso()
@@ -138,6 +173,24 @@ def _run_engine(row: dict[str, Any], *, day_utc: str, intent_truth_root: Path) -
         "stderr": proc.stderr.strip(),
         "started_at_utc": started,
         "completed_at_utc": completed,
+    }
+
+
+def _run_engine(row: dict[str, Any], *, day_utc: str, intent_truth_root: Path) -> dict[str, Any]:
+    results: list[dict[str, Any]] = []
+    for invocation in _producer_symbol_invocations(row):
+        results.append(_run_one_engine_invocation(row, day_utc=day_utc, intent_truth_root=intent_truth_root, invocation=invocation))
+        if int(results[-1]["return_code"]) != 0:
+            break
+    first = results[0] if results else {"started_at_utc": _now_iso(), "completed_at_utc": _now_iso()}
+    return {
+        "command": results[-1]["command"] if results else _base_engine_cmd(row, day_utc=day_utc, intent_truth_root=intent_truth_root),
+        "commands": [result["command"] for result in results],
+        "return_code": next((int(result["return_code"]) for result in results if int(result["return_code"]) != 0), 0),
+        "stdout": "\n".join(str(result["stdout"]) for result in results if str(result["stdout"])),
+        "stderr": "\n".join(str(result["stderr"]) for result in results if str(result["stderr"])),
+        "started_at_utc": str(first.get("started_at_utc") or ""),
+        "completed_at_utc": str((results[-1] if results else first).get("completed_at_utc") or ""),
     }
 
 
@@ -162,9 +215,189 @@ def _intent_rows(paths_payloads: list[tuple[Path, dict[str, Any]]]) -> list[dict
                 "engine_id": _intent_engine_id(payload),
                 "schema_id": str(payload.get("schema_id") or "").strip(),
                 "schema_version": str(payload.get("schema_version") or "").strip(),
+                "intent_artifact_mtime": _mtime_iso(path),
             }
         )
     return rows
+
+
+def _allowed_symbols(row: dict[str, Any]) -> list[str]:
+    raw = row.get("allowed_symbols") if isinstance(row.get("allowed_symbols"), list) else []
+    return [str(symbol).strip().upper() for symbol in raw if str(symbol).strip()]
+
+
+def _producer_requested_symbol(row: dict[str, Any]) -> str:
+    allowed = _allowed_symbols(row)
+    return allowed[0] if len(allowed) == 1 else ""
+
+
+def _producer_requested_symbols(row: dict[str, Any]) -> list[str]:
+    return _allowed_symbols(row)
+
+
+def _symbol_source(row: dict[str, Any]) -> str:
+    return "ENGINE_MODEL_REGISTRY_V1.allowed_symbols" if _allowed_symbols(row) else "NO_REGISTRY_SYMBOL_RESTRICTION"
+
+
+def _manifest_symbols(root: Path) -> tuple[Path, set[str]]:
+    manifest_path = Path(root).resolve() / "market_data_snapshot_v1" / "dataset_manifest.json"
+    payload = _read_json(manifest_path)
+    symbols: set[str] = set()
+    for symbol in payload.get("symbols") if isinstance(payload.get("symbols"), list) else []:
+        text = str(symbol).strip().upper()
+        if text:
+            symbols.add(text)
+    for entry in payload.get("files") if isinstance(payload.get("files"), list) else []:
+        if not isinstance(entry, dict):
+            continue
+        text = str(entry.get("symbol") or "").strip().upper()
+        if text:
+            symbols.add(text)
+    return manifest_path, symbols
+
+
+def _manifest_file_entries_by_symbol(root: Path) -> tuple[Path, dict[str, Any], dict[str, list[dict[str, Any]]]]:
+    manifest_path = Path(root).resolve() / "market_data_snapshot_v1" / "dataset_manifest.json"
+    payload = _read_json(manifest_path)
+    by_symbol: dict[str, list[dict[str, Any]]] = {}
+    for entry in payload.get("files") if isinstance(payload.get("files"), list) else []:
+        if not isinstance(entry, dict):
+            continue
+        symbol = str(entry.get("symbol") or "").strip().upper()
+        rel_file = str(entry.get("file") or "").strip()
+        if symbol and rel_file:
+            by_symbol.setdefault(symbol, []).append(dict(entry))
+    return manifest_path, payload, by_symbol
+
+
+def _canonical_truth_root() -> Path:
+    try:
+        from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
+
+        return Path(resolve_canonical_truth_root()).resolve()
+    except Exception:
+        return Path("")
+
+
+def _requested_registry_symbols(rows: list[dict[str, Any]]) -> list[str]:
+    requested: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict) or _status_from_registry(row) != "ACTIVE":
+            continue
+        requested.update(_allowed_symbols(row))
+    return sorted(requested)
+
+
+def align_registry_market_data_symbols_v1(*, intent_truth_root: Path, requested_symbols: list[str]) -> dict[str, Any]:
+    requested = sorted({str(symbol).strip().upper() for symbol in requested_symbols if str(symbol).strip()})
+    local_root = Path(intent_truth_root).resolve()
+    canonical_root = _canonical_truth_root()
+    local_manifest, local_payload, local_entries = _manifest_file_entries_by_symbol(local_root)
+    canonical_manifest, _canonical_payload, canonical_entries = (
+        _manifest_file_entries_by_symbol(canonical_root) if str(canonical_root) else (Path(""), {}, {})
+    )
+    copied: list[dict[str, Any]] = []
+    missing_in_canonical: list[str] = []
+    invalid_canonical: list[dict[str, str]] = []
+    if not requested:
+        return {
+            "status": "PASS",
+            "canonical_blocker": "",
+            "requested_symbols": [],
+            "copied_symbols": [],
+            "missing_in_canonical_truth_root": [],
+            "invalid_canonical_files": [],
+            "local_manifest_path": str(local_manifest),
+            "canonical_manifest_path": str(canonical_manifest) if str(canonical_manifest) else "",
+        }
+
+    for symbol in requested:
+        entries = canonical_entries.get(symbol, [])
+        if not entries:
+            missing_in_canonical.append(symbol)
+            continue
+        copied_entries_for_symbol: list[dict[str, Any]] = []
+        for entry in entries:
+            rel_file = str(entry.get("file") or "").strip()
+            expected_sha = str(entry.get("sha256") or "").strip().lower()
+            source = canonical_root / "market_data_snapshot_v1" / rel_file
+            target = local_root / "market_data_snapshot_v1" / rel_file
+            if not source.is_file():
+                invalid_canonical.append({"symbol": symbol, "file": rel_file, "reason": "CANONICAL_FILE_MISSING"})
+                continue
+            actual_sha = _sha256_file(source)
+            if expected_sha and actual_sha.lower() != expected_sha:
+                invalid_canonical.append({"symbol": symbol, "file": rel_file, "reason": "CANONICAL_FILE_HASH_MISMATCH"})
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(source.read_bytes())
+            copied.append({"symbol": symbol, "file": rel_file, "sha256": expected_sha or actual_sha})
+            copied_entries_for_symbol.append(dict(entry))
+        if copied_entries_for_symbol and len(copied_entries_for_symbol) == len(entries):
+            local_entries[symbol] = copied_entries_for_symbol
+
+    blocker = ""
+    if invalid_canonical:
+        blocker = "CANONICAL_MARKET_DATA_MANIFEST_INVALID"
+    elif missing_in_canonical:
+        blocker = "MARKET_DATA_MANIFEST_SYMBOL_MISSING"
+
+    if copied:
+        merged_entries: list[dict[str, Any]] = []
+        for symbol, entries in local_entries.items():
+            for entry in entries:
+                merged_entries.append(dict(entry))
+        merged_entries.sort(key=lambda entry: (str(entry.get("symbol") or ""), str(entry.get("file") or "")))
+        merged_payload = dict(local_payload) if isinstance(local_payload, dict) else {}
+        if not merged_payload.get("dataset_version"):
+            merged_payload["dataset_version"] = "v1"
+        merged_payload["symbols"] = sorted({str(entry.get("symbol") or "").strip().upper() for entry in merged_entries if str(entry.get("symbol") or "").strip()})
+        merged_payload["files"] = merged_entries
+        _write_json(local_manifest, merged_payload)
+
+    return {
+        "status": "BLOCKED" if blocker else "PASS",
+        "canonical_blocker": blocker,
+        "requested_symbols": requested,
+        "copied_symbols": sorted({row["symbol"] for row in copied}),
+        "copied_files": copied,
+        "missing_in_canonical_truth_root": missing_in_canonical,
+        "invalid_canonical_files": invalid_canonical,
+        "local_manifest_path": str(local_manifest),
+        "canonical_manifest_path": str(canonical_manifest) if str(canonical_manifest) else "",
+    }
+
+
+def _market_data_symbol_preflight(*, intent_truth_root: Path, requested_symbols: list[str]) -> dict[str, Any]:
+    local_manifest, local_symbols = _manifest_symbols(intent_truth_root)
+    canonical_root = _canonical_truth_root()
+    canonical_manifest, canonical_symbols = _manifest_symbols(canonical_root) if str(canonical_root) else (Path(""), set())
+    requested = sorted({str(symbol).strip().upper() for symbol in requested_symbols if str(symbol).strip()})
+    missing_local = sorted(symbol for symbol in requested if symbol not in local_symbols)
+    present_canonical = sorted(symbol for symbol in missing_local if symbol in canonical_symbols)
+    missing_everywhere = sorted(symbol for symbol in missing_local if symbol not in canonical_symbols)
+    status = "PASS"
+    blocker = ""
+    if present_canonical:
+        status = "BLOCKED"
+        blocker = "TRUTH_ROOT_MARKET_DATA_ALIGNMENT_MISSING"
+    elif missing_everywhere:
+        status = "BLOCKED"
+        blocker = "MARKET_DATA_MANIFEST_SYMBOL_MISSING"
+    return {
+        "status": status,
+        "canonical_blocker": blocker,
+        "requested_symbols": requested,
+        "local_truth_root": str(Path(intent_truth_root).resolve()),
+        "local_manifest_path": str(local_manifest),
+        "local_manifest_symbols": sorted(local_symbols),
+        "canonical_truth_root": str(canonical_root) if str(canonical_root) else "",
+        "canonical_manifest_path": str(canonical_manifest) if str(canonical_manifest) else "",
+        "canonical_manifest_symbols": sorted(canonical_symbols),
+        "missing_in_local_truth_root": missing_local,
+        "present_in_canonical_truth_root": present_canonical,
+        "missing_in_both_truth_roots": missing_everywhere,
+    }
 
 
 def _allowed_symbol_mismatches(*, intents: list[dict[str, Any]], allowed_symbols: list[str]) -> list[str]:
@@ -172,6 +405,25 @@ def _allowed_symbol_mismatches(*, intents: list[dict[str, Any]], allowed_symbols
     if not allowed:
         return []
     return [row["symbol"] for row in intents if row.get("symbol") and str(row.get("symbol")).upper() not in allowed]
+
+
+def _partition_intents_by_allowed(
+    *,
+    paths_payloads: list[tuple[Path, dict[str, Any]]],
+    allowed_symbols: list[str],
+) -> tuple[list[tuple[Path, dict[str, Any]]], list[tuple[Path, dict[str, Any]]]]:
+    allowed = {str(symbol).strip().upper() for symbol in allowed_symbols if str(symbol).strip()}
+    if not allowed:
+        return paths_payloads, []
+    matching: list[tuple[Path, dict[str, Any]]] = []
+    mismatched: list[tuple[Path, dict[str, Any]]] = []
+    for path, payload in paths_payloads:
+        symbol = _intent_symbol(payload)
+        if symbol and symbol in allowed:
+            matching.append((path, payload))
+        else:
+            mismatched.append((path, payload))
+    return matching, mismatched
 
 
 def _intent_signature(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -266,12 +518,21 @@ def _outcome_for_inactive(*, row: dict[str, Any], day_utc: str, environment: str
         "activation_status": _status_from_registry(row),
         "expected_intent_type": "ExposureIntent",
         "allowed_symbols": row.get("allowed_symbols") if isinstance(row.get("allowed_symbols"), list) else [],
+        "registry_allowed_symbols": row.get("allowed_symbols") if isinstance(row.get("allowed_symbols"), list) else [],
+        "producer_requested_symbol": _producer_requested_symbol(row),
+        "producer_requested_symbols": _producer_requested_symbols(row),
+        "intent_symbol": "",
+        "intent_artifact_path": "",
+        "intent_artifact_mtime": "",
+        "symbol_source": _symbol_source(row),
         "governing_policy_paths": [str(_engine_registry_path())],
         "status": "DISABLED",
         "canonical_blocker": "",
         "reason_codes": ["ENGINE_INACTIVE"],
         "input_artifacts": [],
+        "market_data_manifest_check": {},
         "output_intents": [],
+        "rejected_intents": [],
         "output_intent_path": "",
         "output_intent_id": "",
         "output_intent_hash": "",
@@ -306,6 +567,9 @@ def _evaluate_active_engine(
     expected_sha = str(row.get("engine_runner_sha256") or "").strip().lower()
     actual_sha = _sha256_file(runner) if runner.exists() and runner.is_file() else ""
     allowed_symbols = row.get("allowed_symbols") if isinstance(row.get("allowed_symbols"), list) else []
+    producer_requested_symbol = _producer_requested_symbol(row)
+    producer_requested_symbols = _producer_requested_symbols(row)
+    market_data_manifest_check = _market_data_symbol_preflight(intent_truth_root=intent_truth_root, requested_symbols=producer_requested_symbols)
     started = _now_iso()
     command = ""
     exit_code = 0
@@ -327,11 +591,20 @@ def _evaluate_active_engine(
         blocker = "ENGINE_RUNNER_SHA256_MISMATCH"
         reason_codes = [blocker]
         actual_intents = []
+    elif market_data_manifest_check.get("status") == "BLOCKED":
+        blocker = str(market_data_manifest_check.get("canonical_blocker") or "MARKET_DATA_MANIFEST_SYMBOL_MISSING")
+        reason_codes = [blocker]
+        preexisting = existing_by_engine.get(engine_id, [])
+        _matching_preexisting, mismatched_preexisting = _partition_intents_by_allowed(paths_payloads=preexisting, allowed_symbols=allowed_symbols)
+        rejected_intents = _intent_rows(mismatched_preexisting)
+        actual_intents = []
     else:
         preexisting = existing_by_engine.get(engine_id, [])
+        matching_preexisting, mismatched_preexisting = _partition_intents_by_allowed(paths_payloads=preexisting, allowed_symbols=allowed_symbols)
+        rejected_intents = _intent_rows(mismatched_preexisting)
         before = {str(path) for path in collect_intent_files_v1(truth_root=intent_truth_root, day_utc=day_utc)}
-        if preexisting:
-            actual_intents = _intent_rows(preexisting)
+        if matching_preexisting:
+            actual_intents = _intent_rows(matching_preexisting)
             status = "INTENT_CREATED"
             reason_codes = ["EXISTING_ENGINE_INTENT_EVALUATED"]
         else:
@@ -343,20 +616,28 @@ def _evaluate_active_engine(
             after_paths = collect_intent_files_v1(truth_root=intent_truth_root, day_utc=day_utc)
             new_paths = [path for path in after_paths if str(path) not in before]
             new_payloads = [(path, _read_json(path)) for path in new_paths]
+            matching_new, mismatched_new = _partition_intents_by_allowed(paths_payloads=new_payloads, allowed_symbols=allowed_symbols)
+            rejected_intents.extend(_intent_rows(mismatched_new))
             if exit_code != 0:
-                blocker = _classify_nonzero(stdout, stderr)
-                reason_codes = [blocker]
+                producer_blocker = _classify_nonzero(stdout, stderr)
+                blocker = "ALLOWED_SYMBOL_MISMATCH" if rejected_intents else producer_blocker
+                reason_codes = sorted(set([blocker, producer_blocker] + (["STALE_MISMATCHED_INTENT_REJECTED"] if rejected_intents else [])))
                 status = "BLOCKED"
-                actual_intents = _intent_rows(new_payloads)
+                actual_intents = _intent_rows(matching_new)
             elif len(new_paths) > 1:
                 blocker = "PRODUCER_MULTIPLE_OUTPUTS_UNEXPECTED"
                 reason_codes = [blocker]
                 status = "BLOCKED"
-                actual_intents = _intent_rows(new_payloads)
-            elif new_paths:
+                actual_intents = _intent_rows(matching_new)
+            elif matching_new:
                 status = "INTENT_CREATED"
                 reason_codes = ["INTENT_OUTPUT_CREATED"]
-                actual_intents = _intent_rows(new_payloads)
+                actual_intents = _intent_rows(matching_new)
+            elif mismatched_new or rejected_intents:
+                blocker = "ALLOWED_SYMBOL_MISMATCH"
+                reason_codes = ["ALLOWED_SYMBOL_MISMATCH", "MISMATCHED_INTENT_REJECTED"]
+                status = "BLOCKED"
+                actual_intents = []
             elif _classify_no_intent(stdout):
                 status = "NO_INTENT"
                 reason_codes = ["NO_INTENT_DECLARED"]
@@ -367,11 +648,13 @@ def _evaluate_active_engine(
                 status = "BLOCKED"
                 actual_intents = []
 
-        mismatches = _allowed_symbol_mismatches(intents=actual_intents, allowed_symbols=allowed_symbols)
+        mismatches = _allowed_symbol_mismatches(intents=actual_intents if "actual_intents" in locals() else [], allowed_symbols=allowed_symbols)
         if mismatches:
             status = "BLOCKED"
             blocker = "ALLOWED_SYMBOL_MISMATCH"
             reason_codes = sorted(set(reason_codes + [blocker]))
+            rejected_intents.extend(actual_intents)
+            actual_intents = []
 
     runner_hash_match = bool(actual_sha and (not expected_sha or actual_sha.lower() == expected_sha))
     allowed_symbol_match = not _allowed_symbol_mismatches(
@@ -379,7 +662,9 @@ def _evaluate_active_engine(
         allowed_symbols=allowed_symbols,
     )
     completed = _now_iso()
+    rejected_intents = rejected_intents if "rejected_intents" in locals() else []
     primary = actual_intents[0] if actual_intents else {}
+    evidence_intent = primary or (rejected_intents[0] if rejected_intents else {})
     return {
         "schema_id": "sleeve_evaluation_kernel",
         "schema_version": "v1",
@@ -391,15 +676,24 @@ def _evaluate_active_engine(
         "activation_status": _status_from_registry(row),
         "expected_intent_type": "ExposureIntent",
         "allowed_symbols": allowed_symbols,
+        "registry_allowed_symbols": allowed_symbols,
+        "producer_requested_symbol": producer_requested_symbol,
+        "producer_requested_symbols": producer_requested_symbols,
+        "symbol_source": _symbol_source(row),
         "governing_policy_paths": [str(_engine_registry_path())],
         "status": status,
         "canonical_blocker": blocker,
         "reason_codes": reason_codes,
         "input_artifacts": [{"artifact_type": "engine_registry", "path": str(_engine_registry_path()), "sha256": _sha256_file(_engine_registry_path())}],
+        "market_data_manifest_check": market_data_manifest_check,
         "output_intents": actual_intents if "actual_intents" in locals() else [],
+        "rejected_intents": rejected_intents,
         "output_intent_path": str(primary.get("intent_path") or ""),
         "output_intent_id": str(primary.get("intent_id") or ""),
         "output_intent_hash": str(primary.get("intent_hash") or ""),
+        "intent_symbol": str(evidence_intent.get("symbol") or ""),
+        "intent_artifact_path": str(evidence_intent.get("intent_path") or ""),
+        "intent_artifact_mtime": str(evidence_intent.get("intent_artifact_mtime") or ""),
         "registry_constraints_checked": {
             "runner_hash_match": runner_hash_match,
             "allowed_symbol_match": allowed_symbol_match,
@@ -420,6 +714,7 @@ def _evaluate_active_engine(
 def build_sleeve_evaluation_kernel(*, day_utc: str, truth_root: Path, environment: str = PAPER_MODE) -> dict[str, Any]:
     registry = _load_engine_registry()
     intent_truth_root = resolve_paper_intent_truth_root_v1(truth_root=truth_root, repo_root=REPO_ROOT)
+    align_registry_market_data_symbols_v1(intent_truth_root=intent_truth_root, requested_symbols=_requested_registry_symbols(registry.get("engines") if isinstance(registry.get("engines"), list) else []))
     existing_by_engine = _existing_intents_by_engine(intent_truth_root=intent_truth_root, day_utc=day_utc)
     outcomes: list[dict[str, Any]] = []
     for row in registry.get("engines") if isinstance(registry.get("engines"), list) else []:

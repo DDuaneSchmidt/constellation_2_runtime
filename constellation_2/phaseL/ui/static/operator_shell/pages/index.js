@@ -3,6 +3,7 @@ import {
   createConfigurationDraft,
   fetchActionAudit,
   fetchActivityToday,
+  fetchAegisOperatorState,
   fetchAdvisory,
   fetchAlerts,
   fetchCapitalAccounts,
@@ -205,6 +206,13 @@ export const ROUTES = [
     label: "Operations",
     eyebrow: "Readiness & Runtime",
     subtitle: "Readiness ladders, runtime blocks, alerts, and governed operator actions.",
+  },
+  {
+    path: "/aegis-runtime",
+    id: "aegis_runtime",
+    label: "Aegis Runtime",
+    eyebrow: "Aegis Runtime",
+    subtitle: "Read-only operator state derived from the latest immutable scan artifacts.",
   },
   {
     path: "/configuration",
@@ -429,6 +437,57 @@ function readinessBlockerBadge(value) {
   return value
     ? `<span style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700;background:#dc2626;color:#ffffff;">BLOCKER</span>`
     : `<span style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700;background:#e5e7eb;color:#374151;">non-blocker</span>`;
+}
+
+function aegisRuntimeStateBadge(state) {
+  return reliabilityStatusBadge(state, {
+    waiting_for_intent: { bg: "#16a34a", text: "#ffffff" },
+    selected_intent_review_required: { bg: "#f59e0b", text: "#111827" },
+    attention_required: { bg: "#dc2626", text: "#ffffff" },
+    stale: { bg: "#6b7280", text: "#ffffff" },
+    error: { bg: "#991b1b", text: "#ffffff" },
+  });
+}
+
+function maybeNotifyAegisRuntime(operatorState = {}) {
+  const alertState = operatorState.alert_state || {};
+  const key = String(alertState.alert_key || "");
+  if (!alertState.alertable || !key || typeof window === "undefined") {
+    return { status: "not_alertable", key };
+  }
+  const storageKey = "aegis_runtime_last_alert_key_v1";
+  let lastKey = "";
+  try {
+    lastKey = window.localStorage?.getItem(storageKey) || "";
+  } catch (_err) {
+    lastKey = "";
+  }
+  if (lastKey === key) {
+    return { status: "suppressed_duplicate", key };
+  }
+  try {
+    window.localStorage?.setItem(storageKey, key);
+  } catch (_err) {
+    // Storage is best-effort; notification support still controls delivery.
+  }
+  if (!("Notification" in window)) {
+    return { status: "unsupported", key };
+  }
+  const title = `Aegis Runtime: ${operatorState.state || "UNKNOWN"}`;
+  const body = operatorState.recommended_operator_action || operatorState.state_reason || "Review Aegis Runtime.";
+  if (window.Notification.permission === "granted") {
+    new window.Notification(title, { body, tag: key });
+    return { status: "sent", key };
+  }
+  if (window.Notification.permission === "default") {
+    window.Notification.requestPermission().then((permission) => {
+      if (permission === "granted") {
+        new window.Notification(title, { body, tag: key });
+      }
+    });
+    return { status: "permission_requested", key };
+  }
+  return { status: "permission_denied", key };
 }
 
 function nextActionForWorkOrder(status) {
@@ -2530,6 +2589,139 @@ async function renderOperationsPage(state) {
   };
 }
 
+async function renderAegisRuntimePage() {
+  const payload = await fetchAegisOperatorState();
+  const operatorState = payload.data || payload.operator_state || {};
+  const notificationDecision = maybeNotifyAegisRuntime(operatorState);
+  const counts = operatorState.readiness_counts || {};
+  const sleevesByStatus = operatorState.sleeves_by_status || {};
+  const topBlockers = safeList(operatorState.top_blockers);
+  const sleeveRows = Object.entries(sleevesByStatus).map(([status, sleeves]) => ({
+    status,
+    sleeves: safeList(sleeves).join(", ") || "none",
+    count: String(safeList(sleeves).length),
+  }));
+
+  if (!payload.ok) {
+    return {
+      title: "Aegis Runtime",
+      meta: "Read-only operator state derived from the latest scan artifacts.",
+      html: renderCardSection({
+        eyebrow: "Unavailable",
+        title: "Derived State Missing",
+        subtitle: "Run the Aegis operator-state builder to materialize the read-only control-plane artifact.",
+        body: renderDefinitionRows([
+          { label: "Artifact path", value: payload.artifact_path || "n/a" },
+          { label: "Errors", value: safeList(payload.errors).join(", ") || "unknown" },
+        ]),
+      }),
+      contextHtml: "",
+    };
+  }
+
+  return {
+    title: "Aegis Runtime",
+    meta: "Read-only operator state derived from latest scan pointers, readiness summary, arbitration, and ledger.",
+    html: [
+      renderCardSection({
+        eyebrow: "Operator State",
+        title: "Aegis Runtime",
+        subtitle: operatorState.state_reason || "No state reason reported.",
+        body: `
+          <div class="metric-grid">
+            ${renderMetricCard({ label: "State", value: operatorState.state || "UNKNOWN", badge: aegisRuntimeStateBadge(operatorState.state) })}
+            ${renderMetricCard({ label: "Latest cycle", value: operatorState.latest_cycle_id || "n/a" })}
+            ${renderMetricCard({ label: "Cycle age", value: operatorState.latest_cycle_age_seconds === null || operatorState.latest_cycle_age_seconds === undefined ? "n/a" : `${operatorState.latest_cycle_age_seconds}s` })}
+            ${renderMetricCard({ label: "Arbitration", value: operatorState.arbitration_status || "UNKNOWN" })}
+            ${renderMetricCard({ label: "Selected intent", value: operatorState.selected_intent_id || "none" })}
+            ${renderMetricCard({ label: "submit_enabled", value: truthyText(Boolean(operatorState.submit_enabled)) })}
+            ${renderMetricCard({ label: "execution_path_touched", value: truthyText(Boolean(operatorState.execution_path_touched)) })}
+            ${renderMetricCard({ label: "Last updated", value: formatTimestamp(operatorState.updated_at_utc) })}
+          </div>
+        `,
+      }),
+      renderCardSection({
+        eyebrow: "Readiness",
+        title: "Sleeve Readiness Counts",
+        subtitle: "Counts are copied from the latest derived readiness summary.",
+        body: `<div class="metric-grid">
+          ${renderMetricCard({ label: "Ready", value: String(counts.ready ?? 0) })}
+          ${renderMetricCard({ label: "Blocked", value: String(counts.blocked ?? 0) })}
+          ${renderMetricCard({ label: "Unknown", value: String(counts.unknown ?? 0) })}
+          ${renderMetricCard({ label: "Disabled", value: String(counts.disabled ?? 0) })}
+        </div>`,
+      }),
+      renderCardSection({
+        eyebrow: "Action",
+        title: "Recommended Operator Action",
+        subtitle: "This surface is observational only; execution remains separate.",
+        body: renderDefinitionRows([
+          { label: "Recommended action", value: operatorState.recommended_operator_action || "n/a" },
+          { label: "Canonical blocker", value: operatorState.canonical_blocker || "none" },
+          { label: "Alert state", value: notificationDecision.status || "not_alertable" },
+          { label: "Alert key", value: notificationDecision.key || "none" },
+          { label: "Webhook", value: operatorState.alert_state?.webhook_enabled ? "enabled" : "disabled" },
+        ]),
+      }),
+      renderCardSection({
+        eyebrow: "Sleeves",
+        title: "Sleeves By Status",
+        subtitle: "Sleeve ids are grouped exactly as the readiness summary reports them.",
+        body: renderSimpleTable({
+          columns: [
+            { key: "status", label: "Status", render: (row) => aegisRuntimeStateBadge(row.status) },
+            { key: "count", label: "Count" },
+            { key: "sleeves", label: "Sleeves", render: (row) => truncatedCell(row.sleeves, 520) },
+          ],
+          rows: sleeveRows,
+          emptyMessage: "No sleeve status groups were reported.",
+        }),
+      }),
+      renderCardSection({
+        eyebrow: "Blockers",
+        title: "Top Blockers",
+        subtitle: "Highest-count readiness blockers from the latest summary.",
+        body: renderSimpleTable({
+          columns: [
+            { key: "blocker", label: "Blocker", render: (row) => truncatedCell(row.blocker || "n/a", 260) },
+            { key: "count", label: "Count" },
+            { key: "sleeves", label: "Sleeves", render: (row) => truncatedCell(safeList(row.sleeves).join(", ") || "none", 360) },
+          ],
+          rows: topBlockers,
+          emptyMessage: "No blockers reported.",
+        }),
+      }),
+    ].join(""),
+    contextHtml: [
+      renderCardSection({
+        eyebrow: "Evidence",
+        title: "Derived State Sources",
+        subtitle: "All values are read from source artifacts; scan artifacts are not mutated.",
+        body: renderDefinitionRows([
+          { label: "Latest pointer", value: operatorState.latest_scan_pointer_path || "n/a" },
+          { label: "Selected pointer", value: operatorState.selected_intent_pointer_path || "n/a" },
+          { label: "Operator status", value: operatorState.operator_status_path || "n/a" },
+          { label: "Readiness summary", value: operatorState.readiness_summary_path || "n/a" },
+          { label: "Arbitration result", value: operatorState.arbitration_result_path || "n/a" },
+          { label: "Scan ledger", value: operatorState.ledger_path || "n/a" },
+          { label: "Derived artifact", value: payload.artifact_path || "n/a" },
+        ]),
+      }),
+      renderCardSection({
+        eyebrow: "Alerts",
+        title: "Notification Policy",
+        subtitle: "Browser notifications fire only for selected, attention, stale, or error states.",
+        body: renderDefinitionRows([
+          { label: "Alertable", value: truthyText(Boolean(operatorState.alert_state?.alertable)) },
+          { label: "Duplicate suppressed", value: notificationDecision.status === "suppressed_duplicate" ? "true" : "false" },
+          { label: "Desktop notification", value: operatorState.alert_state?.desktop_notification_enabled ? "enabled" : "disabled" },
+          { label: "Webhook configured", value: operatorState.alert_state?.webhook_configured ? "true" : "false" },
+        ]),
+      }),
+    ].join(""),
+  };
+}
+
 async function renderAuditPage() {
   const [audit, activity, homeBundle] = await Promise.all([
     fetchActionAudit(),
@@ -4428,6 +4620,8 @@ export async function loadRouteView(routeId, state) {
       return renderAdvisoryPage(state);
     case "operations":
       return renderOperationsPage(state);
+    case "aegis_runtime":
+      return renderAegisRuntimePage(state);
     case "outcomes":
       return renderOutcomesPage(state);
     case "refinement":

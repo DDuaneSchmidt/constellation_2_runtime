@@ -110,8 +110,9 @@ export const NAVIGATION_SCHEMA = [
         truthOwner: "reliability_ledger_v1",
         description: "Reliability, issue tracking, and integration health.",
         children: [
+          { id: "system_reliability", label: "Reliability", icon: "◉", route: "/reliability", truthOwner: "reliability_readiness" },
+          { id: "system_aegis_runtime", label: "Aegis Runtime", icon: "◇", route: "/aegis-runtime", truthOwner: "aegis_operator_state_v1" },
           { id: "system_bug_log", label: "Bug Log", icon: "!", route: "/reliability/issues", badgeCount: 5, truthOwner: "reliability_issue_ledger" },
-          { id: "system_health_monitor", label: "Health Monitor", icon: "◉", route: "/reliability", truthOwner: "reliability_readiness" },
           { id: "system_integrations", label: "Integrations", icon: "↔", route: "/operations", truthOwner: "runtime_service_authority_v1" },
         ],
       },

@@ -31,7 +31,7 @@ import json
 import os
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 ISO_DAY = "%Y-%m-%d"
@@ -112,6 +112,24 @@ def _read_json_obj(path: Path) -> Dict[str, Any]:
         raise SystemExit(f"FAIL: cannot parse json: {path}: {e!r}") from e
 
 
+def _read_jsonl_objects(path: Path) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    try:
+        for idx, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            text = line.strip()
+            if not text:
+                continue
+            obj = json.loads(text)
+            if not isinstance(obj, dict):
+                raise SystemExit(f"FAIL: jsonl row not object: {path}:{idx}")
+            rows.append(obj)
+    except Exception as e:
+        if isinstance(e, SystemExit):
+            raise
+        raise SystemExit(f"FAIL: cannot parse jsonl: {path}: {e!r}") from e
+    return rows
+
+
 def _dec_str(v: Any, field: str) -> str:
     try:
         d = Decimal(str(v).strip())
@@ -123,7 +141,7 @@ def _dec_str(v: Any, field: str) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(prog="build_defensive_tail_required_inputs_day_v1")
     ap.add_argument("--day_utc", required=True, help="UTC day key YYYY-MM-DD")
-    ap.add_argument("--symbol", default="SPY", help="Underlying symbol (default SPY)")
+    ap.add_argument("--symbol", required=True, help="Underlying symbol from ENGINE_MODEL_REGISTRY_V1.allowed_symbols")
     args = ap.parse_args()
 
     repo_root = Path(__file__).resolve().parents[3]
@@ -137,11 +155,14 @@ def main() -> int:
     # Sources
     src_pos = (truth_root / "positions_v1" / "snapshots" / day / "positions_snapshot.v2.json").resolve()
     src_reg = (truth_root / "monitoring_v1" / "regime_snapshot_v2" / day / "regime_snapshot.v2.json").resolve()
+    src_md = (truth_root / "market_data_snapshot_v1" / sym / f"{day[:4]}.jsonl").resolve()
 
     if not src_pos.exists():
         raise SystemExit(f"FAIL: missing required source positions snapshot: {src_pos}")
     if not src_reg.exists():
         raise SystemExit(f"FAIL: missing required source regime snapshot: {src_reg}")
+    if not src_md.exists():
+        raise SystemExit(f"FAIL: missing required source market data jsonl: {src_md}")
 
     # Targets
     out_md = (truth_root / "market_data_snapshot_v1" / "snapshots" / day / f"{sym}.market_data_snapshot.v1.json").resolve()
@@ -184,10 +205,25 @@ def main() -> int:
         f"source_regime={src_reg} source_regime_sha256={_sha256_file(src_reg)}"
     )
 
-    # --- market_data_snapshot_v1 daily snapshot wrapper: minimal bars surface ---
+    # --- market_data_snapshot_v1 daily snapshot wrapper from governed yearly JSONL ---
+    md_rows = _read_jsonl_objects(src_md)
+    day_rows = [
+        row
+        for row in md_rows
+        if str(row.get("symbol") or "").strip().upper() == sym
+        and str(row.get("timestamp_utc") or "").startswith(day)
+    ]
     md_obj = {
-        "bars": [],
+        "bars": day_rows,
         "day_utc": day,
+        "source_provenance": {
+            "market_data_yearly_jsonl": {
+                "path": str(src_md),
+                "sha256": _sha256_file(src_md),
+                "row_count": len(md_rows),
+                "matching_day_row_count": len(day_rows),
+            }
+        },
         "schema_id": "C2_MARKET_DATA_SNAPSHOT_V1",
         "schema_version": "v1",
         "symbol": sym,
@@ -195,7 +231,10 @@ def main() -> int:
     md_bytes = _stable_json_bytes(md_obj)
     act_md = _atomic_write_idempotent(out_md, md_bytes)
     md_sha = _sha256_file(out_md) if out_md.exists() else _sha256_bytes(md_bytes)
-    print(f"OK: market_data_snapshot_v1_snapshot action={act_md} path={out_md} sha256={md_sha}")
+    print(
+        f"OK: market_data_snapshot_v1_snapshot action={act_md} path={out_md} sha256={md_sha} "
+        f"source_market_data={src_md} source_market_data_sha256={_sha256_file(src_md)} matching_day_rows={len(day_rows)}"
+    )
 
     print("OK: done=1")
     return 0

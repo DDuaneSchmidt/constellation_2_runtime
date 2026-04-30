@@ -27,7 +27,7 @@ If none -> deterministic NO_INTENT (exit code 0)
 
 Exposure:
 - exposure_type: LONG_EQUITY
-- underlying: SPY (symbol+currency)
+- underlying: requested registry symbol (symbol+currency)
 - target_notional_pct: 0.05 (hard cap)
 
 Hashing:
@@ -71,7 +71,6 @@ ENGINE_ID = "C2_DEFENSIVE_TAIL_V1"
 ENGINE_SUITE = "C2_HYBRID_V1"
 RISK_CLASS = "DEFENSIVE_OVERLAY"
 
-UNDERLYING_SYMBOL = "SPY"
 UNDERLYING_CCY = "USD"
 
 THRESH_CORR = Decimal("0.70")
@@ -208,11 +207,12 @@ def _build_intent_v2(
     day_utc: str,
     produced_utc: str,
     mode: str,
+    symbol: str,
     reason_codes: List[str],
     inputs: _Inputs,
 ) -> Dict[str, Any]:
     # Deterministic intent_id derived from deterministic content spine: engine+day+target+reasons
-    intent_id_seed = f"{ENGINE_ID}|{day_utc}|{TARGET_NOTIONAL_PCT}|" + ",".join(reason_codes)
+    intent_id_seed = f"{ENGINE_ID}|{day_utc}|{symbol}|{TARGET_NOTIONAL_PCT}|" + ",".join(reason_codes)
     intent_id = _sha256_bytes(intent_id_seed.encode("utf-8"))
 
     inp = {
@@ -239,7 +239,7 @@ def _build_intent_v2(
         "produced_utc": produced_utc,
         "producer": "run_defensive_tail_intents_day_v1",
         "engine": {"engine_id": ENGINE_ID, "suite": ENGINE_SUITE, "mode": mode},
-        "underlying": {"symbol": UNDERLYING_SYMBOL, "currency": UNDERLYING_CCY},
+        "underlying": {"symbol": symbol, "currency": UNDERLYING_CCY},
         "exposure_type": "LONG_EQUITY",
         "target_notional_pct": TARGET_NOTIONAL_PCT,
         "expected_holding_days": 1,
@@ -262,7 +262,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--day_utc", required=True, help="UTC day key YYYY-MM-DD")
     ap.add_argument("--mode", required=True, choices=["PAPER", "LIVE"], help="Engine mode")
     ap.add_argument("--truth_root", default="", help="Canonical truth root override")
-    ap.add_argument("--symbol", default=UNDERLYING_SYMBOL, help="Underlying symbol (default SPY)")
+    ap.add_argument("--symbol", required=True, help="Underlying symbol from ENGINE_MODEL_REGISTRY_V1.allowed_symbols")
     ap.add_argument("--force_enter_test_only", action="store_true", help="TEST ONLY: force emitting entry intent")
     args = ap.parse_args(argv)
     _bind_truth_root(str(args.truth_root))
@@ -306,7 +306,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         return 0
 
-    intent_obj = _build_intent_v2(day_utc=day_utc, produced_utc=produced_utc, mode=mode, reason_codes=reason_codes, inputs=inputs)
+    intent_obj = _build_intent_v2(day_utc=day_utc, produced_utc=produced_utc, mode=mode, symbol=symbol, reason_codes=reason_codes, inputs=inputs)
 
     # Governed schema validation (v2 schema)
     validate_against_repo_schema_v1(intent_obj, REPO_ROOT, EXPOSURE_INTENT_SCHEMA_RELPATH)

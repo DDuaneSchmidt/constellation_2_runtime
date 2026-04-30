@@ -48,7 +48,7 @@ def intent_arbitration_path(*, truth_root: Path, day_utc: str, cycle_id: str = "
 
 
 def selected_intent_pointer_path(*, truth_root: Path, day_utc: str) -> Path:
-    return Path(truth_root).resolve() / "reports" / "intent_arbitration_v1" / day_utc / "selected_intent_pointer.v1.json"
+    return Path(truth_root).resolve() / "pointers" / "selected_intent_pointer.v1.json"
 
 
 def _candidate_rows(rollup: dict[str, Any]) -> list[dict[str, Any]]:

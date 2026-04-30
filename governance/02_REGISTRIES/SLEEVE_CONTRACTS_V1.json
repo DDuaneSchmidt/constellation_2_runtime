@@ -1,0 +1,180 @@
+{
+  "schema_id": "sleeve_contracts",
+  "schema_version": "v1",
+  "produced_utc": "2026-04-30T00:00:00Z",
+  "symbol_policy_source": "ENGINE_MODEL_REGISTRY_V1.allowed_symbols",
+  "contracts": [
+    {
+      "engine_id": "C2_MEAN_REVERSION_EQ_V1",
+      "activation_status_source": "ENGINE_MODEL_REGISTRY_V1.activation_status",
+      "symbol_policy_source": "ENGINE_MODEL_REGISTRY_V1.allowed_symbols",
+      "producer_entrypoint": "constellation_2/phaseI/mean_reversion/run/run_mean_reversion_intents_day_v1.py",
+      "can_generate_intents": true,
+      "can_submit_orders": false,
+      "required_inputs": [
+        {
+          "name": "market_data_manifest",
+          "truth_owner": "sleeve_truth_root",
+          "required_scope": "global",
+          "expected_artifact_type": "manifest",
+          "path_template": "market_data_snapshot_v1/dataset_manifest.json",
+          "required": true
+        },
+        {
+          "name": "market_data_symbol_yearly_jsonl",
+          "truth_owner": "sleeve_truth_root",
+          "required_scope": "allowed_symbols",
+          "expected_artifact_type": "jsonl",
+          "path_template": "market_data_snapshot_v1/{symbol}/{year}.jsonl",
+          "required": true
+        }
+      ]
+    },
+    {
+      "engine_id": "C2_TREND_EQ_PRIMARY_V1",
+      "activation_status_source": "ENGINE_MODEL_REGISTRY_V1.activation_status",
+      "symbol_policy_source": "ENGINE_MODEL_REGISTRY_V1.allowed_symbols",
+      "producer_entrypoint": "constellation_2/phaseI/trend_eq_primary/run/run_trend_eq_primary_intents_day_v1.py",
+      "can_generate_intents": true,
+      "can_submit_orders": false,
+      "required_inputs": [
+        {
+          "name": "market_data_manifest",
+          "truth_owner": "sleeve_truth_root",
+          "required_scope": "global",
+          "expected_artifact_type": "manifest",
+          "path_template": "market_data_snapshot_v1/dataset_manifest.json",
+          "required": true
+        },
+        {
+          "name": "market_data_symbol_yearly_jsonl",
+          "truth_owner": "sleeve_truth_root",
+          "required_scope": "allowed_symbols",
+          "expected_artifact_type": "jsonl",
+          "path_template": "market_data_snapshot_v1/{symbol}/{year}.jsonl",
+          "required": true
+        }
+      ]
+    },
+    {
+      "engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1",
+      "activation_status_source": "ENGINE_MODEL_REGISTRY_V1.activation_status",
+      "symbol_policy_source": "ENGINE_MODEL_REGISTRY_V1.allowed_symbols",
+      "producer_entrypoint": "constellation_2/phaseI/vol_income_defined_risk/run/run_vol_income_defined_risk_intents_day_v1.py",
+      "can_generate_intents": true,
+      "can_submit_orders": false,
+      "required_inputs": [
+        {
+          "name": "market_data_manifest",
+          "truth_owner": "sleeve_truth_root",
+          "required_scope": "global",
+          "expected_artifact_type": "manifest",
+          "path_template": "market_data_snapshot_v1/dataset_manifest.json",
+          "required": true
+        },
+        {
+          "name": "market_data_symbol_yearly_jsonl",
+          "truth_owner": "sleeve_truth_root",
+          "required_scope": "allowed_symbols",
+          "expected_artifact_type": "jsonl",
+          "path_template": "market_data_snapshot_v1/{symbol}/{year}.jsonl",
+          "required": true
+        }
+      ]
+    },
+    {
+      "engine_id": "C2_EVENT_DISLOCATION_V1",
+      "activation_status_source": "ENGINE_MODEL_REGISTRY_V1.activation_status",
+      "symbol_policy_source": "ENGINE_MODEL_REGISTRY_V1.allowed_symbols",
+      "producer_entrypoint": "constellation_2/phaseI/event_dislocation/run/run_event_dislocation_intents_day_v1.py",
+      "can_generate_intents": true,
+      "can_submit_orders": false,
+      "required_inputs": [
+        {
+          "name": "market_data_manifest",
+          "truth_owner": "sleeve_truth_root",
+          "required_scope": "global",
+          "expected_artifact_type": "manifest",
+          "path_template": "market_data_snapshot_v1/dataset_manifest.json",
+          "required": true
+        },
+        {
+          "name": "market_data_symbol_yearly_jsonl",
+          "truth_owner": "sleeve_truth_root",
+          "required_scope": "allowed_symbols",
+          "expected_artifact_type": "jsonl",
+          "path_template": "market_data_snapshot_v1/{symbol}/{year}.jsonl",
+          "required": true
+        }
+      ]
+    },
+    {
+      "engine_id": "C2_DEFENSIVE_TAIL_V1",
+      "activation_status_source": "ENGINE_MODEL_REGISTRY_V1.activation_status",
+      "symbol_policy_source": "ENGINE_MODEL_REGISTRY_V1.allowed_symbols",
+      "producer_entrypoint": "constellation_2/phaseI/defensive_tail/run/run_defensive_tail_intents_day_v1.py",
+      "can_generate_intents": true,
+      "can_submit_orders": false,
+      "required_inputs": [
+        {
+          "name": "market_data_daily_snapshot",
+          "truth_owner": "sleeve_truth_root",
+          "required_scope": "allowed_symbols",
+          "expected_artifact_type": "json",
+          "path_template": "market_data_snapshot_v1/snapshots/{day}/{symbol}.market_data_snapshot.v1.json",
+          "required": true
+        },
+        {
+          "name": "nav_snapshot",
+          "truth_owner": "sleeve_truth_root",
+          "required_scope": "day",
+          "expected_artifact_type": "json",
+          "path_template": "accounting_v1/nav/{day}/nav_snapshot.v1.json",
+          "required": true
+        },
+        {
+          "name": "positions_snapshot_v2",
+          "truth_owner": "sleeve_truth_root",
+          "required_scope": "day",
+          "expected_artifact_type": "json",
+          "path_template": "positions_snapshot_v2/snapshots/{day}/positions_snapshot.v2.json",
+          "required": true
+        },
+        {
+          "name": "engine_correlation_matrix",
+          "truth_owner": "sleeve_truth_root",
+          "required_scope": "day",
+          "expected_artifact_type": "json",
+          "path_template": "monitoring_v1/engine_correlation_matrix/{day}/engine_correlation_matrix.v1.json",
+          "required": true
+        },
+        {
+          "name": "regime_snapshot_v2",
+          "truth_owner": "sleeve_truth_root",
+          "required_scope": "day",
+          "expected_artifact_type": "json",
+          "path_template": "monitoring_v1/regime_snapshot_v2/{day}/regime_snapshot.v2.json",
+          "required": true
+        }
+      ]
+    },
+    {
+      "engine_id": "C2_CROSS_ASSET_TREND_V1",
+      "activation_status_source": "ENGINE_MODEL_REGISTRY_V1.activation_status",
+      "symbol_policy_source": "ENGINE_MODEL_REGISTRY_V1.allowed_symbols",
+      "producer_entrypoint": "constellation_2/phaseI/cross_asset_trend/run/run_cross_asset_trend_intents_day_v1.py",
+      "can_generate_intents": true,
+      "can_submit_orders": false,
+      "required_inputs": []
+    },
+    {
+      "engine_id": "C2_MARKET_NEUTRAL_SPREAD_V1",
+      "activation_status_source": "ENGINE_MODEL_REGISTRY_V1.activation_status",
+      "symbol_policy_source": "ENGINE_MODEL_REGISTRY_V1.allowed_symbols",
+      "producer_entrypoint": "constellation_2/phaseI/market_neutral_spread/run/run_market_neutral_spread_intents_day_v1.py",
+      "can_generate_intents": true,
+      "can_submit_orders": false,
+      "required_inputs": []
+    }
+  ]
+}
