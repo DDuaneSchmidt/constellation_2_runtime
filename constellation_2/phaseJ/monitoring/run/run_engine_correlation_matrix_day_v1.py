@@ -248,6 +248,8 @@ def _list_days(root: Path) -> List[date]:
     out: List[date] = []
     for child in sorted(root.iterdir()):
         if child.is_dir():
+            if not (child / "engine_daily_returns.v1.json").is_file():
+                continue
             try:
                 out.append(_parse_day(child.name))
             except CliError:

@@ -50,6 +50,8 @@ def test_engine_correlation_matrix_script_bootstraps_with_truth_root_override(tm
 def test_engine_correlation_matrix_requires_full_window_for_pass(tmp_path: Path) -> None:
     truth_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
     end_day = "2026-04-10"
+    stale_dir = truth_root / "monitoring_v1" / "engine_daily_returns_v1" / "2026-04-07"
+    _write_json(stale_dir / "engine_daily_returns.v1.json.archived", {"status": "ACTIVE"})
     for day in ["2026-04-08", "2026-04-09", "2026-04-10"]:
         _write_json(
             truth_root / "monitoring_v1" / "engine_daily_returns_v1" / day / "engine_daily_returns.v1.json",
@@ -84,3 +86,4 @@ def test_engine_correlation_matrix_requires_full_window_for_pass(tmp_path: Path)
     assert "INSUFFICIENT_HISTORY_LT_WINDOW" in payload["reason_codes"]
     assert payload["bootstrap_policy"]["status"] == "BOOTSTRAP_ACCEPTED_FOR_PAPER"
     assert payload["bootstrap_policy"]["return_source"] == "REALIZED_ACCOUNTING_ATTRIBUTION_INSUFFICIENT_HISTORY"
+    assert [item["day_utc"] for item in payload["input_manifest"]] == ["2026-04-08", "2026-04-09", "2026-04-10"]
