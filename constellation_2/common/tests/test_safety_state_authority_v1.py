@@ -112,6 +112,87 @@ def test_submit_boundary_prefers_safety_authority_root_cause_over_legacy_safety_
     )
 
 
+def test_accounting_nav_v2_nested_nav_total_is_canonical_nav_source(tmp_path: Path) -> None:
+    _base_safety_inputs(tmp_path)
+    _write_json(
+        tmp_path / "accounting_v2" / "nav" / DAY / "nav.v2.json",
+        {
+            "schema_id": "C2_ACCOUNTING_NAV_V2",
+            "schema_version": 2,
+            "day_utc": DAY,
+            "status": "ACTIVE",
+            "nav": {"nav_total": 5000000, "cash_total": 5000000, "currency": "USD"},
+            "history": {"peak_nav": 5000000, "drawdown_abs": 0, "drawdown_pct": "0.000000"},
+        },
+    )
+    _write_json(
+        tmp_path / "accounting_v2" / "nav" / PRIOR_DAY / "nav.v2.json",
+        {
+            "schema_id": "C2_ACCOUNTING_NAV_V2",
+            "schema_version": 2,
+            "day_utc": PRIOR_DAY,
+            "status": "ACTIVE",
+            "nav": {"nav_total": 0, "cash_total": 0, "currency": "USD"},
+            "history": {"peak_nav": 0, "drawdown_abs": 0, "drawdown_pct": "0.000000"},
+        },
+    )
+
+    payload = evaluate_safety_state_authority_v1(
+        day_utc=DAY,
+        truth_root=tmp_path,
+        execution_root=tmp_path,
+        account=ACCOUNT,
+        environment="PAPER",
+    )
+
+    assert payload["status"] == "PASS"
+    assert payload["nav_source"].startswith("accounting_nav_v2:")
+    assert payload["nav_current_cents"] == 500000000
+    assert payload["nav_prior_cents"] == 500000000
+    assert payload["drawdown_pct"] == "0.000000"
+
+
+def test_failed_envelope_negative_drawdown_does_not_override_canonical_nav_drawdown(tmp_path: Path) -> None:
+    _base_safety_inputs(tmp_path)
+    _write_json(
+        tmp_path / "accounting_v2" / "nav" / DAY / "nav.v2.json",
+        {
+            "schema_id": "C2_ACCOUNTING_NAV_V2",
+            "schema_version": 2,
+            "day_utc": DAY,
+            "status": "ACTIVE",
+            "nav": {"nav_total": 5000000, "cash_total": 5000000, "currency": "USD"},
+            "history": {"peak_nav": 5000000, "drawdown_abs": 0, "drawdown_pct": "0.000000"},
+        },
+    )
+    _write_json(
+        tmp_path / "reports" / "capital_risk_envelope_v2" / DAY / "capital_risk_envelope.v2.json",
+        {
+            "day_utc": DAY,
+            "status": "FAIL",
+            "reason_codes": ["B2_NAV_TOTAL_MISSING_OR_INVALID"],
+            "envelope": {
+                "nav_total_cents": 0,
+                "peak_nav": 1013002,
+                "drawdown_pct": "-1.000000",
+                "drawdown_limit_pct": "-0.100000",
+            },
+        },
+    )
+
+    payload = evaluate_safety_state_authority_v1(
+        day_utc=DAY,
+        truth_root=tmp_path,
+        execution_root=tmp_path,
+        account=ACCOUNT,
+        environment="PAPER",
+    )
+
+    assert payload["drawdown_pct"] == "0.000000"
+    assert payload["drawdown_status"] == "PASS"
+    assert payload["canonical_blocker"] == "CAPITAL_RISK_ENVELOPE_NOT_PASS"
+
+
 def test_safety_state_payload_matches_schema(tmp_path: Path) -> None:
     _base_safety_inputs(tmp_path)
 

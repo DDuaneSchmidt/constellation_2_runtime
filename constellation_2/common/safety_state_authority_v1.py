@@ -154,6 +154,32 @@ def _extract_cents(payload: dict[str, Any] | None, *, preferred_keys: tuple[str,
     return None
 
 
+def _extract_accounting_nav_cents(payload: dict[str, Any] | None, *, field: str = "nav_total") -> int | None:
+    if not isinstance(payload, dict):
+        return None
+    nav = payload.get("nav") if isinstance(payload.get("nav"), dict) else {}
+    cents = _int(nav.get(f"{field}_cents"))
+    if cents is not None:
+        return cents
+    dollars = _int(nav.get(field))
+    if dollars is not None:
+        return dollars * 100
+    return None
+
+
+def _extract_accounting_peak_cents(payload: dict[str, Any] | None) -> int | None:
+    if not isinstance(payload, dict):
+        return None
+    history = payload.get("history") if isinstance(payload.get("history"), dict) else {}
+    cents = _int(history.get("peak_nav_cents") or history.get("rolling_peak_nav_cents"))
+    if cents is not None:
+        return cents
+    dollars = _int(history.get("peak_nav") or history.get("rolling_peak_nav"))
+    if dollars is not None:
+        return dollars * 100
+    return None
+
+
 def _extract_only_cents(payload: dict[str, Any] | None, keys: tuple[str, ...]) -> int | None:
     if not isinstance(payload, dict):
         return None
@@ -300,6 +326,7 @@ def evaluate_safety_state_authority_v1(
         )
 
     current_candidates: list[tuple[str, Path, dict[str, Any] | None, int | None]] = [
+        ("accounting_nav_v2", current_nav_path, current_nav, _extract_accounting_nav_cents(current_nav)),
         ("nav_v2", current_nav_path, current_nav, _extract_cents(current_nav)),
         ("portfolio_account_authority_v1", portfolio_path, portfolio, _extract_cents(portfolio)),
         ("capital_risk_envelope_v2", capital_envelope_path, capital_envelope, _extract_cents(capital_envelope)),
@@ -317,6 +344,10 @@ def evaluate_safety_state_authority_v1(
         current_nav,
         ("nav_prior_cents", "prior_nav_cents", "previous_nav_cents", "rolling_peak_nav_cents"),
     )
+    if nav_prior_cents is None:
+        nav_prior_cents = _extract_accounting_peak_cents(current_nav)
+    if nav_prior_cents is None:
+        nav_prior_cents = _extract_accounting_nav_cents(prior_nav)
     if nav_prior_cents is None:
         nav_prior_cents = _extract_cents(prior_nav)
     if nav_prior_cents is None:
@@ -345,9 +376,7 @@ def evaluate_safety_state_authority_v1(
         drawdown_pct: Decimal | None = None
         drawdown_status = "NAV_INVALID"
     else:
-        drawdown_pct = _extract_decimal(capital_envelope, "drawdown_pct")
-        if drawdown_pct is None:
-            drawdown_pct = (Decimal(nav_current_cents) / Decimal(nav_prior_cents)) - Decimal("1")
+        drawdown_pct = (Decimal(nav_current_cents) / Decimal(nav_prior_cents)) - Decimal("1")
         drawdown_status = "BLOCKED" if drawdown_pct <= drawdown_limit else "PASS"
 
     kill_switch_state = _normalize_status((kill_switch or {}).get("state") or "MISSING")
