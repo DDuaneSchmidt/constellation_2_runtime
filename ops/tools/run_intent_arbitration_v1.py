@@ -59,6 +59,9 @@ def _candidate_rows(rollup: dict[str, Any]) -> list[dict[str, Any]]:
     for outcome in outcomes if isinstance(outcomes, list) else []:
         if not isinstance(outcome, dict) or outcome.get("status") != "INTENT_CREATED":
             continue
+        lifecycle_decision = str(outcome.get("lifecycle_decision") or "").strip().upper()
+        if lifecycle_decision and lifecycle_decision != "INTENT_CREATED":
+            continue
         if outcome.get("canonical_blocker"):
             continue
         for intent in outcome.get("output_intents") if isinstance(outcome.get("output_intents"), list) else []:
@@ -73,6 +76,13 @@ def _candidate_rows(rollup: dict[str, Any]) -> list[dict[str, Any]]:
                     "intent_hash": str(intent.get("intent_hash") or "").strip(),
                     "symbol": str(intent.get("symbol") or "").strip().upper(),
                     "risk_class": "",
+                    "lifecycle_state_path": str(outcome.get("lifecycle_state_path") or ""),
+                    "lifecycle_decision": str(outcome.get("lifecycle_decision") or ""),
+                    "lifecycle_reason_codes": outcome.get("lifecycle_reason_codes") if isinstance(outcome.get("lifecycle_reason_codes"), list) else [],
+                    "position_match_status": str(outcome.get("position_match_status") or ""),
+                    "order_match_status": str(outcome.get("order_match_status") or ""),
+                    "reentry_eligible": bool(outcome.get("reentry_eligible")),
+                    "unchanged_signal": bool(outcome.get("unchanged_signal")),
                     "selection_reason": "",
                 }
             )
@@ -158,6 +168,13 @@ def _apply_portfolio_gate(candidates: list[dict[str, Any]], gate: dict[str, Any]
             "portfolio_gate_decision": gate_decision,
             "portfolio_gate_reason_codes": decision.get("reason_codes") if isinstance(decision.get("reason_codes"), list) else [],
             "portfolio_gate_path": str(gate.get("_artifact_path_resolved") or gate.get("artifact_path") or ""),
+            "lifecycle_state_path": str(decision.get("lifecycle_state_path") or candidate.get("lifecycle_state_path") or ""),
+            "lifecycle_decision": str(decision.get("lifecycle_decision") or candidate.get("lifecycle_decision") or ""),
+            "lifecycle_reason_codes": decision.get("lifecycle_reason_codes") if isinstance(decision.get("lifecycle_reason_codes"), list) else candidate.get("lifecycle_reason_codes", []),
+            "position_match_status": str(decision.get("position_match_status") or candidate.get("position_match_status") or ""),
+            "order_match_status": str(decision.get("order_match_status") or candidate.get("order_match_status") or ""),
+            "reentry_eligible": bool(decision.get("reentry_eligible") or candidate.get("reentry_eligible")),
+            "unchanged_signal": bool(decision.get("unchanged_signal") or candidate.get("unchanged_signal")),
         }
         if gate_decision == "ALLOW" and decision.get("allowed_by_portfolio_gate") is True:
             approved.append(enriched)
@@ -205,6 +222,9 @@ def _apply_portfolio_scoring(candidates: list[dict[str, Any]], scoring: dict[str
             "portfolio_scoring_status": "SCORED",
             "scoring_reason_codes": row.get("reason_codes") if isinstance(row.get("reason_codes"), list) else [],
             "executable_eligible": bool(row.get("executable_eligible")),
+            "lifecycle_state_path": str(row.get("lifecycle_state_path") or candidate.get("lifecycle_state_path") or ""),
+            "lifecycle_decision": str(row.get("lifecycle_decision") or candidate.get("lifecycle_decision") or ""),
+            "lifecycle_reason_codes": row.get("lifecycle_reason_codes") if isinstance(row.get("lifecycle_reason_codes"), list) else candidate.get("lifecycle_reason_codes", []),
         }
         if scored["executable_eligible"] and int(scored["portfolio_score_rank"]) > 0:
             enriched.append(scored)
@@ -299,6 +319,8 @@ def build_intent_arbitration(
                 "status": outcome.get("status", ""),
                 "canonical_blocker": outcome.get("canonical_blocker", ""),
                 "reason_codes": outcome.get("reason_codes", []),
+                "lifecycle_decision": outcome.get("lifecycle_decision", ""),
+                "lifecycle_reason_codes": outcome.get("lifecycle_reason_codes", []),
             }
         )
 

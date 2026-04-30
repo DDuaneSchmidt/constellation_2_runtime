@@ -290,6 +290,7 @@ def build_portfolio_scoring_v1(
             total = 0.0
         evidence_paths = [
             str(row.get("raw_intent_path") or ""),
+            str(row.get("lifecycle_state_path") or ""),
             str(row.get("portfolio_state_snapshot_path") or state.get("artifact_path") or state_path),
             str(gate.get("_artifact_path_resolved") or gate.get("artifact_path") or ""),
         ]
@@ -306,6 +307,13 @@ def build_portfolio_scoring_v1(
                 "portfolio_gate_decision": decision,
                 "allowed_by_portfolio_gate": bool(row.get("allowed_by_portfolio_gate")),
                 "executable_eligible": executable_eligible,
+                "lifecycle_state_path": str(row.get("lifecycle_state_path") or ""),
+                "lifecycle_decision": str(row.get("lifecycle_decision") or ""),
+                "lifecycle_reason_codes": row.get("lifecycle_reason_codes") if isinstance(row.get("lifecycle_reason_codes"), list) else [],
+                "position_match_status": str(row.get("position_match_status") or ""),
+                "order_match_status": str(row.get("order_match_status") or ""),
+                "reentry_eligible": bool(row.get("reentry_eligible")),
+                "unchanged_signal": bool(row.get("unchanged_signal")),
                 "score_total": total,
                 "score_components": components,
                 "reason_codes": sorted(set([*reasons, scoring_reason])),

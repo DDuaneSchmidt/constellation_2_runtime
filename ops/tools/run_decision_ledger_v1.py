@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1, read_json_object_v1, resolve_fact_plane_truth_root_v1
+from ops.tools.run_intent_lifecycle_state_v1 import intent_lifecycle_state_path
 from ops.tools.run_intent_arbitration_v1 import selected_intent_pointer_path
 from ops.tools.run_portfolio_activation_gate_v1 import portfolio_activation_gate_path
 from ops.tools.run_portfolio_scoring_v1 import portfolio_scoring_path
@@ -96,6 +97,37 @@ def _arbitration_summary(path: str) -> dict[str, Any]:
     }
 
 
+def _lifecycle_summary(truth_root: Path, day_utc: str) -> dict[str, Any]:
+    path = intent_lifecycle_state_path(truth_root=truth_root, day_utc=day_utc)
+    payload = _read_json(path)
+    rows = payload.get("rows") if isinstance(payload.get("rows"), list) else []
+    counts = payload.get("counts") if isinstance(payload.get("counts"), dict) else {}
+    decision_counts: dict[str, int] = {}
+    selected_codes = sorted(
+        {
+            str(code)
+            for row in rows
+            if isinstance(row, dict)
+            for code in (row.get("lifecycle_reason_codes") if isinstance(row.get("lifecycle_reason_codes"), list) else [])
+            if str(code)
+        }
+    )
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        decision = str(row.get("lifecycle_decision") or "UNKNOWN")
+        decision_counts[decision] = decision_counts.get(decision, 0) + 1
+    return {
+        "intent_lifecycle_state_path": str(path),
+        "lifecycle_decision_counts": decision_counts,
+        "reentry_intent_count": int(counts.get("reentry_intent_count") or 0),
+        "suppressed_position_count": int(counts.get("suppressed_position_count") or 0),
+        "suppressed_order_count": int(counts.get("suppressed_order_count") or 0),
+        "uncertain_position_count": int(counts.get("uncertain_position_count") or 0),
+        "selected_intent_lifecycle_reason_codes": selected_codes[:20],
+    }
+
+
 def build_decision_ledger_v1(
     *,
     day_utc: str,
@@ -124,6 +156,7 @@ def build_decision_ledger_v1(
     market_manifest = truth_root / "market_data_snapshot_v1" / "dataset_manifest.json"
     scoring_summary = _scoring_summary(truth_root, day_utc)
     arbitration_summary = _arbitration_summary(scan_paths["arbitration_result_path"])
+    lifecycle_summary = _lifecycle_summary(truth_root, day_utc)
     payload = {
         "schema_id": "decision_ledger",
         "schema_version": "v1",
@@ -136,6 +169,7 @@ def build_decision_ledger_v1(
         "market_data_artifact_paths": [str(market_manifest)],
         "portfolio_state_path": str(portfolio_state_path(truth_root=truth_root, day_utc=day_utc)),
         "raw_sleeve_scan_path": scan_paths["raw_sleeve_scan_path"],
+        "intent_lifecycle_state_path": lifecycle_summary["intent_lifecycle_state_path"],
         "portfolio_activation_gate_path": str(portfolio_activation_gate_path(truth_root=truth_root, day_utc=day_utc)),
         "portfolio_scoring_path": scoring_summary["portfolio_scoring_path"],
         "arbitration_result_path": scan_paths["arbitration_result_path"],
@@ -146,6 +180,12 @@ def build_decision_ledger_v1(
         "selected_intent_score": arbitration_summary["selected_intent_score"],
         "selected_intent_rank": arbitration_summary["selected_intent_rank"],
         "scored_intents_count": scoring_summary["scored_intents_count"],
+        "lifecycle_decision_counts": lifecycle_summary["lifecycle_decision_counts"],
+        "reentry_intent_count": lifecycle_summary["reentry_intent_count"],
+        "suppressed_position_count": lifecycle_summary["suppressed_position_count"],
+        "suppressed_order_count": lifecycle_summary["suppressed_order_count"],
+        "uncertain_position_count": lifecycle_summary["uncertain_position_count"],
+        "selected_intent_lifecycle_reason_codes": lifecycle_summary["selected_intent_lifecycle_reason_codes"],
         "top_rejected_or_suppressed_reasons": scoring_summary["top_rejected_or_suppressed_reasons"],
         "final_status": str(day_run.get("final_status") or "UNKNOWN"),
         "canonical_phase": str(day_run.get("canonical_phase") or ""),

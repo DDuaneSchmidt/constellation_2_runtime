@@ -101,6 +101,16 @@ def _write_manifest(root: Path, symbols: list[str]) -> Path:
     return manifest
 
 
+def _write_positions(root: Path, day: str, items: list[dict]) -> Path:
+    path = root / "positions_v1" / "snapshots" / day / "positions_snapshot.v5.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"schema_id": "positions_snapshot", "schema_version": "v5", "day_utc": day, "status": "OK", "items": items}, sort_keys=True),
+        encoding="utf-8",
+    )
+    return path
+
+
 def _ctx(tmp_path: Path, day: str = "2026-04-30") -> bod.BodContext:
     truth = tmp_path / "truth"
     execution = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
@@ -564,6 +574,7 @@ def test_identical_consecutive_cycles_do_not_duplicate_intents(tmp_path: Path) -
     truth = tmp_path / "truth"
     _write_manifest(truth, ["SPY"])
     _write_intent(truth, day, engine_id="ENGINE_A", symbol="SPY")
+    _write_positions(truth, day, [{"engine_id": "ENGINE_A", "symbol": "SPY", "quantity": 10, "exposure_type": "LONG_EQUITY"}])
 
     with patch.object(sleeve_kernel, "_load_engine_registry", return_value=_registry(active=[{"engine_id": "ENGINE_A"}])):
         first = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER")
@@ -572,6 +583,8 @@ def test_identical_consecutive_cycles_do_not_duplicate_intents(tmp_path: Path) -
     assert first["outcomes"][0]["status"] == "INTENT_CREATED"
     assert first["outcomes"][0]["signal_state"] == {"state": "ACTIVE", "duration_cycles": 1}
     assert second["outcomes"][0]["status"] == "NO_INTENT"
+    assert second["outcomes"][0]["position_match_status"] == "POSITION_OPEN"
+    assert "POSITION_ALREADY_OPEN" in second["outcomes"][0]["lifecycle_reason_codes"]
     assert "UNCHANGED_SIGNAL" in second["outcomes"][0]["reason_codes"]
     assert second["outcomes"][0]["output_intents"] == []
     assert second["outcomes"][0]["signal_state"] == {"state": "ACTIVE", "duration_cycles": 2}
@@ -604,6 +617,7 @@ def test_state_memory_uses_deterministic_intent_signature(tmp_path: Path) -> Non
     truth = tmp_path / "truth"
     _write_manifest(truth, ["SPY"])
     _write_intent(truth, day, engine_id="ENGINE_A", symbol="SPY")
+    _write_positions(truth, day, [{"engine_id": "ENGINE_A", "symbol": "SPY", "quantity": 10, "exposure_type": "LONG_EQUITY"}])
 
     with patch.object(sleeve_kernel, "_load_engine_registry", return_value=_registry(active=[{"engine_id": "ENGINE_A"}])):
         first = sleeve_kernel.build_sleeve_evaluation_kernel(day_utc=day, truth_root=truth, environment="PAPER")
@@ -1102,6 +1116,7 @@ def test_market_session_identical_consecutive_scan_does_not_duplicate_executable
     truth = tmp_path / "truth"
     _write_manifest(truth, ["SPY"])
     _write_intent(truth, day, engine_id="ENGINE_A", symbol="SPY")
+    _write_positions(truth, day, [{"engine_id": "ENGINE_A", "symbol": "SPY", "quantity": 10, "exposure_type": "LONG_EQUITY"}])
 
     with patch.object(sleeve_kernel, "_load_engine_registry", return_value=_registry_with_simulator(active=[{"engine_id": "ENGINE_A"}])):
         first = market_session.build_market_session_intent_engine(day_utc=day, truth_root=truth, environment="PAPER", cycle_id="cycle_a")
@@ -1109,6 +1124,8 @@ def test_market_session_identical_consecutive_scan_does_not_duplicate_executable
 
     assert first["sleeve_outcomes"][0]["status"] == "INTENT_CREATED"
     assert second["sleeve_outcomes"][0]["status"] == "NO_INTENT"
+    assert second["sleeve_outcomes"][0]["position_match_status"] == "POSITION_OPEN"
+    assert "POSITION_ALREADY_OPEN" in second["sleeve_outcomes"][0]["lifecycle_reason_codes"]
     assert "UNCHANGED_SIGNAL" in second["sleeve_outcomes"][0]["reason_codes"]
     assert second["arbitration"]["status"] == "NO_EXECUTABLE_INTENT"
 

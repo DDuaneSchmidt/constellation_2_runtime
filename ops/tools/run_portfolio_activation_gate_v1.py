@@ -67,6 +67,9 @@ def _latest_scan_rollup_path(truth_root: Path, day_utc: str) -> Path:
 
 
 def _intent_from_outcome(outcome: dict[str, Any]) -> dict[str, str]:
+    lifecycle_decision = str(outcome.get("lifecycle_decision") or "").strip().upper()
+    if lifecycle_decision and lifecycle_decision != "INTENT_CREATED":
+        return {"raw_intent_id": "", "raw_intent_path": "", "raw_intent_hash": "", "raw_intent_symbol": str(outcome.get("intent_symbol") or outcome.get("producer_requested_symbol") or "").upper()}
     output_intents = outcome.get("output_intents") if isinstance(outcome.get("output_intents"), list) else []
     if output_intents and isinstance(output_intents[0], dict):
         row = output_intents[0]
@@ -90,6 +93,9 @@ def _intent_from_outcome(outcome: dict[str, Any]) -> dict[str, str]:
 
 def _raw_status(outcome: dict[str, Any], intent: dict[str, str]) -> str:
     status = str(outcome.get("status") or "").strip().upper()
+    lifecycle_decision = str(outcome.get("lifecycle_decision") or "").strip().upper()
+    if lifecycle_decision in {"NO_INTENT", "BLOCKED", "DEGRADED"}:
+        return lifecycle_decision
     signal = outcome.get("signal_state") if isinstance(outcome.get("signal_state"), dict) else {}
     if intent.get("raw_intent_id") or signal.get("state") == "ACTIVE":
         return "ACTIVE"
@@ -238,6 +244,13 @@ def build_portfolio_activation_gate_v1(
             "allowed_by_portfolio_gate": decision == "ALLOW",
             "portfolio_gate_decision": decision,
             "reason_codes": reasons,
+            "lifecycle_state_path": str(outcome.get("lifecycle_state_path") or ""),
+            "lifecycle_decision": str(outcome.get("lifecycle_decision") or ""),
+            "lifecycle_reason_codes": outcome.get("lifecycle_reason_codes") if isinstance(outcome.get("lifecycle_reason_codes"), list) else [],
+            "position_match_status": str(outcome.get("position_match_status") or ""),
+            "order_match_status": str(outcome.get("order_match_status") or ""),
+            "reentry_eligible": bool(outcome.get("reentry_eligible")),
+            "unchanged_signal": bool(outcome.get("unchanged_signal")),
             "overlap_group": overlap_group,
             "regime_bucket": regime_bucket,
             "portfolio_state_snapshot_path": str(state.get("artifact_path") or state_path),
@@ -248,6 +261,13 @@ def build_portfolio_activation_gate_v1(
                 "sleeve_id": sleeve_id,
                 "raw_signal_status": raw_status,
                 **intent,
+                "lifecycle_state_path": str(outcome.get("lifecycle_state_path") or ""),
+                "lifecycle_decision": str(outcome.get("lifecycle_decision") or ""),
+                "lifecycle_reason_codes": outcome.get("lifecycle_reason_codes") if isinstance(outcome.get("lifecycle_reason_codes"), list) else [],
+                "position_match_status": str(outcome.get("position_match_status") or ""),
+                "order_match_status": str(outcome.get("order_match_status") or ""),
+                "reentry_eligible": bool(outcome.get("reentry_eligible")),
+                "unchanged_signal": bool(outcome.get("unchanged_signal")),
                 "source_sleeve_outcome_path": str(outcome.get("artifact_path") or ""),
             }
         )

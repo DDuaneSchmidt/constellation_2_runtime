@@ -17,6 +17,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1, read_json_object_v1, resolve_fact_plane_truth_root_v1, resolve_paper_intent_truth_root_v1
 from ops.tools.run_intent_arbitration_v1 import build_intent_arbitration, selected_intent_pointer_path
+from ops.tools.run_intent_lifecycle_state_v1 import build_intent_lifecycle_state_v1, rows_by_engine
 from ops.tools.run_portfolio_activation_gate_v1 import build_portfolio_activation_gate_v1
 from ops.tools.run_portfolio_scoring_v1 import build_portfolio_scoring_v1
 from ops.tools.run_portfolio_state_v1 import build_portfolio_state_v1
@@ -536,11 +537,13 @@ def run_scan_cycle_v1(
         ),
     )
     existing_by_engine = sleeve_kernel._existing_intents_by_engine(intent_truth_root=intent_truth_root, day_utc=day_utc)
-    outcomes: list[dict[str, Any]] = []
+    raw_outcomes: list[dict[str, Any]] = []
+    previous_by_engine: dict[str, dict[str, Any]] = {}
 
     for row in rows:
         sleeve_id = str(row.get("engine_id") or "").strip()
         previous = _previous_cycle_outcome(truth_root=truth_root, day_utc=day_utc, cycle_id=cycle_id, sleeve_id=sleeve_id)
+        previous_by_engine[sleeve_id] = previous
         if sleeve_kernel._status_from_registry(row) != "ACTIVE":
             outcome = sleeve_kernel._outcome_for_inactive(row=row, day_utc=day_utc, environment=environment, truth_root=truth_root)
         else:
@@ -553,7 +556,28 @@ def run_scan_cycle_v1(
                 existing_by_engine=existing_by_engine,
             )
         outcome = _adapt_outcome_for_scan(outcome, truth_root=truth_root, day_utc=day_utc, cycle_id=cycle_id)
-        outcome = sleeve_kernel._apply_state_memory(outcome, previous)
+        raw_outcomes.append(outcome)
+
+    lifecycle = build_intent_lifecycle_state_v1(
+        day_utc=day_utc,
+        truth_root=truth_root,
+        environment=environment,
+        intent_truth_root=intent_truth_root,
+        outcomes=raw_outcomes,
+        previous_by_engine=previous_by_engine,
+    )
+    lifecycle_by_engine = rows_by_engine(lifecycle)
+    lifecycle_path = str(lifecycle.get("artifact_path") or "")
+    outcomes: list[dict[str, Any]] = []
+    for outcome in raw_outcomes:
+        sleeve_id = str(outcome.get("sleeve_id") or outcome.get("engine_id") or "").strip()
+        previous = previous_by_engine.get(sleeve_id, {})
+        outcome = sleeve_kernel._apply_state_memory(
+            outcome,
+            previous,
+            lifecycle_row=lifecycle_by_engine.get(sleeve_id, {}),
+            lifecycle_state_path=lifecycle_path,
+        )
         if outcome["status"] not in sleeve_kernel.OUTCOMES:
             outcome["status"] = "BLOCKED"
             outcome["current_status"] = "BLOCKED"
@@ -745,6 +769,7 @@ def run_scan_cycle_v1(
         "portfolio_state_path": str(portfolio_state.get("artifact_path") or ""),
         "portfolio_activation_gate_path": str(portfolio_gate.get("artifact_path") or ""),
         "portfolio_scoring_path": str(portfolio_scoring.get("artifact_path") or ""),
+        "intent_lifecycle_state_path": lifecycle_path,
         "latest_scan_cycle_pointer_path": str(latest_pointer_path),
         "ledger_path": str(ledger_path),
         "selected_intent_pointer_path": str(selected_intent_pointer_path(truth_root=truth_root, day_utc=day_utc)),
@@ -753,6 +778,7 @@ def run_scan_cycle_v1(
         "portfolio_state": portfolio_state,
         "portfolio_activation_gate": portfolio_gate,
         "portfolio_scoring": portfolio_scoring,
+        "intent_lifecycle_state": lifecycle,
         "preflight_readiness_matrix": readiness_matrix,
         "operator_readiness_summary": readiness_summary,
         "operator_status": operator_status,

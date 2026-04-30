@@ -28,7 +28,7 @@ ENGINE_REGISTRY_RELPATH = "governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.jso
 SIMULATOR_ENGINE_ID = "C2_INTENT_SIMULATOR_V1"
 PAPER_MODE = "PAPER"
 
-OUTCOMES = {"INTENT_CREATED", "NO_INTENT", "BLOCKED", "FILTERED_OUT", "DISABLED"}
+OUTCOMES = {"INTENT_CREATED", "NO_INTENT", "BLOCKED", "DEGRADED", "FILTERED_OUT", "DISABLED"}
 _REASON_RE = re.compile(r"(?<![A-Z0-9_])([A-Z][A-Z0-9_]{2,})(?=:\s|$)")
 
 
@@ -484,7 +484,32 @@ def _previous_outcome(*, truth_root: Path, day_utc: str, sleeve_id: str) -> dict
     return _read_json(sleeve_evaluation_output_path(truth_root=truth_root, day_utc=day_utc, sleeve_id=sleeve_id))
 
 
-def _apply_state_memory(outcome: dict[str, Any], previous: dict[str, Any]) -> dict[str, Any]:
+def _apply_lifecycle_diagnostics(outcome: dict[str, Any], lifecycle_row: dict[str, Any], lifecycle_state_path: str) -> None:
+    if not lifecycle_row:
+        outcome.setdefault("unchanged_signal", False)
+        outcome.setdefault("lifecycle_state_path", "")
+        outcome.setdefault("lifecycle_decision", "")
+        outcome.setdefault("lifecycle_reason_codes", [])
+        outcome.setdefault("position_match_status", "")
+        outcome.setdefault("order_match_status", "")
+        outcome.setdefault("reentry_eligible", False)
+        return
+    outcome["unchanged_signal"] = bool(lifecycle_row.get("unchanged_signal"))
+    outcome["lifecycle_state_path"] = str(lifecycle_state_path or "")
+    outcome["lifecycle_decision"] = str(lifecycle_row.get("lifecycle_decision") or "").strip().upper()
+    outcome["lifecycle_reason_codes"] = lifecycle_row.get("lifecycle_reason_codes") if isinstance(lifecycle_row.get("lifecycle_reason_codes"), list) else []
+    outcome["position_match_status"] = str(lifecycle_row.get("matching_position_state") or "")
+    outcome["order_match_status"] = str(lifecycle_row.get("matching_order_state") or "")
+    outcome["reentry_eligible"] = bool(lifecycle_row.get("reentry_eligible"))
+
+
+def _apply_state_memory(
+    outcome: dict[str, Any],
+    previous: dict[str, Any],
+    *,
+    lifecycle_row: dict[str, Any] | None = None,
+    lifecycle_state_path: str = "",
+) -> dict[str, Any]:
     previous_status = str(previous.get("current_status") or previous.get("status") or "").strip()
     raw_current_status = str(outcome.get("status") or "").strip()
     previous_signature = previous.get("intent_signature") if isinstance(previous.get("intent_signature"), list) else []
@@ -500,7 +525,31 @@ def _apply_state_memory(outcome: dict[str, Any], previous: dict[str, Any]) -> di
         and bool(current_signature)
         and current_signature == previous_signature
     )
-    if unchanged_signal:
+    _apply_lifecycle_diagnostics(outcome, lifecycle_row or {}, lifecycle_state_path)
+    lifecycle_decision = str(lifecycle_row.get("lifecycle_decision") or "").strip().upper() if lifecycle_row else ""
+    lifecycle_can_rewrite = bool(lifecycle_row) and raw_current_status == "INTENT_CREATED"
+    if lifecycle_can_rewrite and lifecycle_decision in {"NO_INTENT", "BLOCKED", "DEGRADED"}:
+        decision = str(lifecycle_row.get("lifecycle_decision") or "").strip().upper()
+        reason_codes = outcome.get("reason_codes") if isinstance(outcome.get("reason_codes"), list) else []
+        lifecycle_reasons = lifecycle_row.get("lifecycle_reason_codes") if isinstance(lifecycle_row.get("lifecycle_reason_codes"), list) else []
+        outcome["status"] = decision
+        outcome["current_status"] = decision
+        outcome["canonical_blocker"] = str(lifecycle_reasons[0] if decision in {"BLOCKED", "DEGRADED"} and lifecycle_reasons else "")
+        outcome["reason_codes"] = sorted(set([str(code) for code in reason_codes + lifecycle_reasons if str(code)]))
+        outcome["output_intents"] = []
+        outcome["output_intent_path"] = ""
+        outcome["output_intent_id"] = ""
+        outcome["output_intent_hash"] = ""
+        signal_state = "ACTIVE" if str(lifecycle_row.get("signal_state") or "").strip().upper() == "ACTIVE" else raw_signal_state
+    elif lifecycle_can_rewrite and lifecycle_decision == "INTENT_CREATED":
+        outcome["status"] = "INTENT_CREATED"
+        outcome["current_status"] = "INTENT_CREATED"
+        outcome["canonical_blocker"] = ""
+        reason_codes = outcome.get("reason_codes") if isinstance(outcome.get("reason_codes"), list) else []
+        lifecycle_reasons = lifecycle_row.get("lifecycle_reason_codes") if isinstance(lifecycle_row.get("lifecycle_reason_codes"), list) else []
+        outcome["reason_codes"] = sorted(set([str(code) for code in reason_codes + lifecycle_reasons if str(code)]))
+        signal_state = "ACTIVE"
+    elif unchanged_signal:
         outcome["status"] = "NO_INTENT"
         outcome["current_status"] = "NO_INTENT"
         outcome["canonical_blocker"] = ""
@@ -743,12 +792,14 @@ def build_sleeve_evaluation_kernel(*, day_utc: str, truth_root: Path, environmen
     intent_truth_root = resolve_paper_intent_truth_root_v1(truth_root=truth_root, repo_root=REPO_ROOT)
     align_registry_market_data_symbols_v1(intent_truth_root=intent_truth_root, requested_symbols=_requested_registry_symbols(registry.get("engines") if isinstance(registry.get("engines"), list) else []))
     existing_by_engine = _existing_intents_by_engine(intent_truth_root=intent_truth_root, day_utc=day_utc)
-    outcomes: list[dict[str, Any]] = []
+    raw_outcomes: list[dict[str, Any]] = []
+    previous_by_engine: dict[str, dict[str, Any]] = {}
     for row in registry.get("engines") if isinstance(registry.get("engines"), list) else []:
         if not isinstance(row, dict):
             continue
         sleeve_id = str(row.get("engine_id") or "").strip()
         previous = _previous_outcome(truth_root=truth_root, day_utc=day_utc, sleeve_id=sleeve_id)
+        previous_by_engine[sleeve_id] = previous
         if _status_from_registry(row) != "ACTIVE":
             outcome = _outcome_for_inactive(row=row, day_utc=day_utc, environment=environment, truth_root=truth_root)
         else:
@@ -760,7 +811,30 @@ def build_sleeve_evaluation_kernel(*, day_utc: str, truth_root: Path, environmen
                 intent_truth_root=intent_truth_root,
                 existing_by_engine=existing_by_engine,
             )
-        outcome = _apply_state_memory(outcome, previous)
+        raw_outcomes.append(outcome)
+
+    from ops.tools.run_intent_lifecycle_state_v1 import build_intent_lifecycle_state_v1, rows_by_engine
+
+    lifecycle = build_intent_lifecycle_state_v1(
+        day_utc=day_utc,
+        truth_root=truth_root,
+        environment=environment,
+        intent_truth_root=intent_truth_root,
+        outcomes=raw_outcomes,
+        previous_by_engine=previous_by_engine,
+    )
+    lifecycle_by_engine = rows_by_engine(lifecycle)
+    lifecycle_path = str(lifecycle.get("artifact_path") or "")
+    outcomes: list[dict[str, Any]] = []
+    for outcome in raw_outcomes:
+        sleeve_id = str(outcome.get("sleeve_id") or outcome.get("engine_id") or "").strip()
+        previous = previous_by_engine.get(sleeve_id, {})
+        outcome = _apply_state_memory(
+            outcome,
+            previous,
+            lifecycle_row=lifecycle_by_engine.get(sleeve_id, {}),
+            lifecycle_state_path=lifecycle_path,
+        )
         if outcome["status"] not in OUTCOMES:
             outcome["status"] = "BLOCKED"
             outcome["canonical_blocker"] = "INVALID_SLEEVE_EVALUATION_STATUS"
