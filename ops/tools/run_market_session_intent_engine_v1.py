@@ -256,6 +256,23 @@ def _load_sleeve_contracts() -> dict[str, dict[str, Any]]:
     return contracts
 
 
+def _load_sleeve_dataset_readiness(*, truth_root: Path, day_utc: str) -> dict[str, dict[str, Any]]:
+    path = (
+        Path(truth_root).resolve()
+        / "reports"
+        / "sleeve_dataset_readiness_v1"
+        / day_utc
+        / "sleeve_dataset_readiness.v1.json"
+    )
+    payload = _read_json(path)
+    rows = payload.get("rows") if isinstance(payload.get("rows"), list) else []
+    return {
+        str(row.get("sleeve_id") or "").strip(): {**row, "validation_artifact_path": str(path)}
+        for row in rows
+        if isinstance(row, dict) and str(row.get("sleeve_id") or "").strip()
+    }
+
+
 def _contract_paths(
     *,
     input_contract: dict[str, Any],
@@ -305,6 +322,7 @@ def build_preflight_readiness_matrix_v1(
     outcomes: list[dict[str, Any]],
 ) -> dict[str, Any]:
     contracts = _load_sleeve_contracts()
+    dataset_readiness = _load_sleeve_dataset_readiness(truth_root=truth_root, day_utc=day_utc)
     canonical_truth_root = sleeve_kernel._canonical_truth_root()
     outcomes_by_engine = {str(row.get("engine_id") or "").strip(): row for row in outcomes if isinstance(row, dict)}
     matrix_rows: list[dict[str, Any]] = []
@@ -313,6 +331,7 @@ def build_preflight_readiness_matrix_v1(
         activation_status = sleeve_kernel._status_from_registry(row)
         allowed_symbols = sleeve_kernel._allowed_symbols(row)
         contract = contracts.get(engine_id)
+        dataset_row = dataset_readiness.get(engine_id, {})
         outcome = outcomes_by_engine.get(engine_id, {})
         candidate_intents = outcome.get("output_intents") if isinstance(outcome.get("output_intents"), list) else []
         required_inputs = contract.get("required_inputs") if isinstance(contract, dict) and isinstance(contract.get("required_inputs"), list) else []
@@ -386,6 +405,12 @@ def build_preflight_readiness_matrix_v1(
                 "canonical_truth_available": canonical_available,
                 "latest_sleeve_blocker": str(outcome.get("canonical_blocker") or ""),
                 "candidate_intent_present": bool(candidate_intents),
+                "dataset_ready": bool(dataset_row.get("dataset_ready")) if dataset_row else False,
+                "missing_symbols": dataset_row.get("missing_symbols") if isinstance(dataset_row.get("missing_symbols"), list) else [],
+                "stale_symbols": dataset_row.get("stale_symbols") if isinstance(dataset_row.get("stale_symbols"), list) else [],
+                "insufficient_history_symbols": dataset_row.get("insufficient_history_symbols") if isinstance(dataset_row.get("insufficient_history_symbols"), list) else [],
+                "validation_artifact_path": str(dataset_row.get("validation_artifact_path") or ""),
+                "activation_blocker": str(dataset_row.get("activation_blocker") or ("SLEEVE_DATASET_READINESS_MISSING" if engine_id in {"C2_CROSS_ASSET_TREND_V1", "C2_MARKET_NEUTRAL_SPREAD_V1"} and not dataset_row else "")),
                 "readiness_status": readiness_status,
                 "readiness_reason": readiness_reason,
                 "diagnostic_only": True,

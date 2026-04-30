@@ -61,7 +61,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from constellation_2.phaseD.lib.canon_json_v1 import CanonicalizationError, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+REPO_ROOT = Path(__file__).resolve().parents[4]
 TRUTH_ROOT = (REPO_ROOT / "constellation_2" / "runtime" / "truth").resolve()
 
 INTENTS_ROOT = (TRUTH_ROOT / "intents_v1" / "snapshots").resolve()
@@ -69,13 +69,14 @@ INTENTS_ROOT = (TRUTH_ROOT / "intents_v1" / "snapshots").resolve()
 MD_ROOT = (TRUTH_ROOT / "market_data_snapshot_v1").resolve()
 MD_MANIFEST = (MD_ROOT / "dataset_manifest.json").resolve()
 
-EXPOSURE_INTENT_SCHEMA = (REPO_ROOT / "constellation_2" / "schemas" / "exposure_intent.v1.schema.json").resolve()
+EXPOSURE_INTENT_SCHEMA_RELPATH = "constellation_2/schemas/exposure_intent.v1.schema.json"
 
 ENGINE_ID = "C2_MARKET_NEUTRAL_SPREAD_V1"
 ENGINE_SUITE = "C2_HYBRID_V1"
 RISK_CLASS = "MARKET_NEUTRAL_SPREAD"
 
 PAIRS_REQUIRED: List[Tuple[str, str]] = [("SPY", "QQQ"), ("IWM", "SPY"), ("HYG", "LQD")]
+REQUIRED_UNIVERSE = sorted({symbol for pair in PAIRS_REQUIRED for symbol in pair})
 
 getcontext().prec = 28
 
@@ -263,6 +264,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(prog="run_market_neutral_spread_intents_day_v1")
     ap.add_argument("--day_utc", required=True, help="YYYY-MM-DD")
     ap.add_argument("--mode", required=True, choices=["PAPER", "LIVE"])
+    ap.add_argument("--truth_root", default=os.environ.get("C2_TRUTH_ROOT", ""), help="Runtime truth root override.")
+    ap.add_argument("--symbols", default=",".join(REQUIRED_UNIVERSE), help="Comma-separated ETF universe; must include required pair symbols.")
 
     ap.add_argument("--lookback", default="60", help="Lookback sessions (default 60).")
     ap.add_argument("--z_enter", default="2.0", help="Enter when |z| > z_enter (default 2.0).")
@@ -274,6 +277,21 @@ def main() -> int:
 
     day_utc = _parse_day_utc(args.day_utc)
     mode = str(args.mode).strip().upper()
+    if str(args.truth_root or "").strip():
+        global TRUTH_ROOT, INTENTS_ROOT, MD_ROOT, MD_MANIFEST
+        TRUTH_ROOT = Path(str(args.truth_root).strip()).expanduser().resolve()
+        INTENTS_ROOT = (TRUTH_ROOT / "intents_v1" / "snapshots").resolve()
+        MD_ROOT = (TRUTH_ROOT / "market_data_snapshot_v1").resolve()
+        MD_MANIFEST = (MD_ROOT / "dataset_manifest.json").resolve()
+
+    requested_symbols = {
+        part.strip().upper()
+        for part in str(args.symbols or "").split(",")
+        if part.strip()
+    }
+    missing_required = sorted([symbol for symbol in REQUIRED_UNIVERSE if symbol not in requested_symbols])
+    if missing_required:
+        raise MarketNeutralSpreadError(f"REQUIRED_UNIVERSE_MISSING_SYMBOLS: {','.join(missing_required)}")
 
     try:
         lookback = int(str(args.lookback).strip())
@@ -380,7 +398,7 @@ def main() -> int:
     )
 
     try:
-        validate_against_repo_schema_v1(intent_obj, EXPOSURE_INTENT_SCHEMA)
+        validate_against_repo_schema_v1(intent_obj, REPO_ROOT, EXPOSURE_INTENT_SCHEMA_RELPATH)
     except Exception as e:  # noqa: BLE001
         raise MarketNeutralSpreadError(f"SCHEMA_VALIDATION_FAILED: {e}") from e
 

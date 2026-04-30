@@ -122,39 +122,41 @@
     },
     {
       "engine_id": "C2_CROSS_ASSET_TREND_V1",
-      "activation_status": "INACTIVE",
-      "allowed_symbols": ["SPY"],
+      "activation_status": "ACTIVE",
+      "allowed_symbols": ["DBC", "GLD", "HYG", "IEF", "IWM", "LQD", "QQQ", "SPY", "TLT", "UUP"],
       "runner_path": "constellation_2.phaseI.cross_asset_trend.run.run_cross_asset_trend_intents_day_v1",
       "budget_notional_pct": "0.10",
       "approved_git_sha": "2778fc92b3d1e95d6d92c06e1cc888526a302a79",
       "engine_runner_path": "constellation_2/phaseI/cross_asset_trend/run/run_cross_asset_trend_intents_day_v1.py",
-      "engine_runner_sha256": "267e2742d1fe862522a38dbdaf7712405c41c599a0eeb7cac7c5d2f63d00b40e",
+      "engine_runner_sha256": "568d87e06c27fa01cb02d30880f6cf208b5548c6ac664b764da8372cadefff30",
       "approved_utc": "2026-02-26T00:00:00Z",
       "approved_by": "OPERATOR",
       "parameter_lock": null,
       "notes": [
         "Code-lock enforced via engine_runner_sha256.",
-        "INACTIVE by default: orchestrator must not select; not scheduled; emits no truth unless explicitly invoked.",
+        "Activated after sleeve_dataset_readiness_v1 PASS on 2026-04-30 with contract-required ETF universe present in market_data_snapshot_v1.",
+        "Previously INACTIVE by default: orchestrator must not select until dataset readiness and registry gate pass.",
         "Universe requires ETFs: SPY, QQQ, IWM, TLT, GLD, HYG, IEF, LQD, UUP, DBC.",
-        "Current market_data_snapshot_v1 in-repo does not include IEF/LQD/UUP/DBC; engine will FAIL-CLOSED if invoked until dataset expanded."
+        "market_data_snapshot_v1 now includes IEF/LQD/UUP/DBC in canonical runtime truth for activation validation."
       ]
     },
     {
       "engine_id": "C2_MARKET_NEUTRAL_SPREAD_V1",
-      "activation_status": "INACTIVE",
-      "allowed_symbols": ["SPY"],
+      "activation_status": "ACTIVE",
+      "allowed_symbols": ["HYG", "IWM", "LQD", "QQQ", "SPY"],
       "runner_path": "constellation_2.phaseI.market_neutral_spread.run.run_market_neutral_spread_intents_day_v1",
       "budget_notional_pct": "0.05",
       "approved_git_sha": "2778fc92b3d1e95d6d92c06e1cc888526a302a79",
       "engine_runner_path": "constellation_2/phaseI/market_neutral_spread/run/run_market_neutral_spread_intents_day_v1.py",
-      "engine_runner_sha256": "a10faa04384452b5b08baa6c398f8bb73c527b93b71f16248804eff8f50cbfd8",
+      "engine_runner_sha256": "061975257b36efbe08d765dca443be0c2352cef44868b6120821a8fff6b73425",
       "approved_utc": "2026-02-26T00:00:00Z",
       "approved_by": "OPERATOR",
       "parameter_lock": null,
       "notes": [
         "Code-lock enforced via engine_runner_sha256.",
-        "INACTIVE by default: orchestrator must not select; not scheduled; emits no truth unless explicitly invoked.",
-        "Pairs: SPY:QQQ, IWM:SPY, HYG:LQD. Requires LQD market data; engine will FAIL-CLOSED if invoked until dataset expanded."
+        "Activated after sleeve_dataset_readiness_v1 PASS on 2026-04-30 with LQD and all required pair symbols present in market_data_snapshot_v1.",
+        "Previously INACTIVE by default: orchestrator must not select until dataset readiness and registry gate pass.",
+        "Pairs: SPY:QQQ, IWM:SPY, HYG:LQD. LQD market data is present in canonical runtime truth for activation validation."
       ]
     }
   ]

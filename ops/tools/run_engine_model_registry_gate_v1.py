@@ -56,7 +56,7 @@ from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from constellation_2.phaseF.accounting.lib.immut_write_v1 import ImmutableWriteError, write_file_immutable_v1
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
 TRUTH = resolve_canonical_truth_root_bridge_v1(caller="ops/tools/run_engine_model_registry_gate_v1.py").resolve()
 
 REG_PATH = (REPO_ROOT / "governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json").resolve()
