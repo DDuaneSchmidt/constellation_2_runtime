@@ -40,6 +40,8 @@ def _capital_supply(
     nav: int | None = 100_000_00,
     cash: int | None = 90_000_00,
     day: str | None = None,
+    freshness_utc: str | None = None,
+    carry_forward_source_used: str = "",
 ) -> Path:
     day_utc = day or ctx.day_utc
     return _write_json(
@@ -54,8 +56,9 @@ def _capital_supply(
                 "cash_total_cents": cash,
                 "net_liquidation_cents": nav,
                 "trust_level": "HIGH",
-                "freshness_utc": f"{day_utc}T14:30:00Z",
+                "freshness_utc": freshness_utc or f"{day_utc}T14:30:00Z",
             },
+            "carry_forward_source_used": carry_forward_source_used,
         },
     )
 
@@ -239,6 +242,20 @@ def test_no_executable_intent_pointer_ignores_stale_day_snapshots(monkeypatch: p
     assert payload["risk_sizing_export"]["usable_for_risk_sizing"] is True
 
 
+def test_blocked_empty_selected_intent_pointer_does_not_budget_all_snapshots(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _capital_supply(ctx)
+    _intent(ctx, target="0.10")
+    _selected_pointer(ctx, status="BLOCKED", blocker="MISSING_REQUIRED_INPUTS", intent_id="")
+    _pass_envelope(monkeypatch)
+
+    payload = supply.build_risk_budget_supply(ctx)
+
+    assert payload["status"] == "PASS"
+    assert payload["intent_budgets"] == []
+    assert payload["risk_sizing_export"]["usable_for_risk_sizing"] is True
+
+
 def test_selected_intent_pointer_limits_budgeting_to_selected_snapshot(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _capital_supply(ctx)
@@ -292,6 +309,46 @@ def test_capital_risk_envelope_no_longer_reports_missing_nav_with_valid_risk_bud
     assert "B2_NAV_TOTAL_MISSING_OR_INVALID" not in payload["capital_risk_envelope"]["reason_codes"]
     assert "AUTHZ_MISSING_EXPOSURE_BUDGET_NAV_TOTAL_CENTS" not in payload["capital_risk_envelope"]["reason_codes"]
     assert payload["risk_sizing_export"]["usable_for_risk_sizing"] is True
+
+
+def test_preopen_build_allows_t_minus_1_capital_supply_freshness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("C2_TRADING_DAY_READINESS_NOW_UTC", "2026-04-30T22:00:00Z")
+    ctx = _ctx(tmp_path, day="2026-05-01")
+    _capital_supply(
+        ctx,
+        nav=101_300_246,
+        cash=100_766_465,
+        freshness_utc="2026-04-30T22:50:29Z",
+        carry_forward_source_used="T_MINUS_1",
+    )
+    _intent(ctx)
+    _pass_envelope(monkeypatch)
+
+    payload = supply.build_risk_budget_supply(ctx)
+
+    assert payload["status"] == "PASS"
+    assert payload["readiness_mode"] == "PREOPEN_BUILD"
+    assert payload["nav_basis"]["freshness_status"] == "CARRY_FORWARD_T_MINUS_1"
+    assert payload["nav_basis"]["carry_forward_allowed"] is True
+
+
+def test_intraday_submit_does_not_allow_t_minus_1_capital_supply_freshness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("C2_TRADING_DAY_READINESS_NOW_UTC", "2026-05-01T15:00:00Z")
+    ctx = _ctx(tmp_path, day="2026-05-01")
+    _capital_supply(
+        ctx,
+        nav=101_300_246,
+        cash=100_766_465,
+        freshness_utc="2026-04-30T22:50:29Z",
+        carry_forward_source_used="T_MINUS_1",
+    )
+
+    payload = supply.build_risk_budget_supply(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "NAV_BASIS_INVALID"
+    assert payload["readiness_mode"] == "INTRADAY_SUBMIT_READY"
+    assert payload["nav_basis"]["carry_forward_allowed"] is False
 
 
 def test_risk_sizing_export_only_when_budget_and_envelope_pass(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

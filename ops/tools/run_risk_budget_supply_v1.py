@@ -16,6 +16,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
+from constellation_2.common.trading_day_readiness_authority_v1 import read_or_evaluate_trading_day_readiness_authority_v1
 from ops.tools import run_aegis_bod_prepare_v1 as bod
 
 SCHEMA_VERSION = "risk_budget_supply.v1"
@@ -117,7 +118,7 @@ def _load_capital_supply(ctx: bod.BodContext) -> tuple[dict[str, Any], str]:
     return payload, ""
 
 
-def _nav_basis(ctx: bod.BodContext, capital_supply: dict[str, Any]) -> tuple[dict[str, Any], str]:
+def _nav_basis(ctx: bod.BodContext, capital_supply: dict[str, Any], readiness: dict[str, Any]) -> tuple[dict[str, Any], str]:
     selected = capital_supply.get("selected_source") if isinstance(capital_supply.get("selected_source"), dict) else {}
     if not selected:
         return {"valid": False}, "NAV_BASIS_MISSING"
@@ -126,19 +127,33 @@ def _nav_basis(ctx: bod.BodContext, capital_supply: dict[str, Any]) -> tuple[dic
     cash = _int(selected.get("cash_total_cents"))
     freshness = str(selected.get("freshness_utc") or capital_supply.get("generated_at_utc") or "").strip()
     trust = str(selected.get("trust_level") or "").strip()
+    readiness_mode = str(readiness.get("readiness_mode") or "").strip().upper()
+    policy = readiness.get("evidence_policy") if isinstance(readiness.get("evidence_policy"), dict) else {}
+    carry_forward_source = str(capital_supply.get("carry_forward_source_used") or "").strip()
+    t_minus_1_allowed = (
+        readiness_mode in {"PREOPEN_BUILD", "PREOPEN_ADMISSION"}
+        and str(policy.get("broker_account_truth") or "").strip().upper() == "T_MINUS_1_ALLOWED"
+        and bool(carry_forward_source)
+        and carry_forward_source.upper() not in {"NONE", "MISSING", "SAME_DAY", "LIVE"}
+    )
+    freshness_day = freshness[:10] if len(freshness) >= 10 else ""
     basis = {
         "source": _source_to_nav_basis_source(source_type),
         "net_liquidation_cents": nav,
         "cash_total_cents": cash,
         "trust_level": trust,
         "freshness_utc": freshness,
+        "freshness_day": freshness_day,
+        "freshness_status": "CURRENT" if freshness_day == ctx.day_utc else ("CARRY_FORWARD_T_MINUS_1" if t_minus_1_allowed else "STALE"),
+        "carry_forward_allowed": bool(t_minus_1_allowed),
+        "carry_forward_reason": "PREOPEN_T_MINUS_1_ACCOUNT_TRUTH_ALLOWED" if t_minus_1_allowed else "",
         "valid": False,
     }
     if basis["source"] == "":
         return basis, "NAV_BASIS_MISSING"
     if not isinstance(nav, int) or nav <= 0 or not isinstance(cash, int) or cash < 0 or not trust:
         return basis, "NAV_BASIS_INVALID"
-    if freshness and not freshness.startswith(ctx.day_utc):
+    if freshness and freshness_day != ctx.day_utc and not t_minus_1_allowed:
         return basis, "NAV_BASIS_INVALID"
     basis["valid"] = True
     return basis, ""
@@ -208,6 +223,8 @@ def _active_intents(ctx: bod.BodContext) -> list[tuple[Path, dict[str, Any]]]:
         return []
     selected_identity = _selected_intent_identity(pointer)
     selected_present = any(str(value or "").strip() for value in selected_identity.values())
+    if pointer and not selected_present:
+        return []
 
     roots = [ctx.execution_root, ctx.truth_root] if ctx.execution_root != ctx.truth_root else [ctx.truth_root]
     seen: set[str] = set()
@@ -500,6 +517,12 @@ def _operator_action(blocker: str, ctx: bod.BodContext, capital_supply: dict[str
 
 
 def build_risk_budget_supply(ctx: bod.BodContext) -> dict[str, Any]:
+    readiness_path, readiness = read_or_evaluate_trading_day_readiness_authority_v1(
+        target_day=ctx.day_utc,
+        truth_root=ctx.truth_root,
+        execution_root=ctx.execution_root,
+        environment=ctx.environment,
+    )
     capital_supply, blocker = _load_capital_supply(ctx)
     capital_path = _capital_supply_path(ctx)
     nav_basis: dict[str, Any] = {}
@@ -516,7 +539,7 @@ def build_risk_budget_supply(ctx: bod.BodContext) -> dict[str, Any]:
     status = "BLOCKED" if blocker else "PASS"
 
     if not blocker:
-        nav_basis, blocker = _nav_basis(ctx, capital_supply)
+        nav_basis, blocker = _nav_basis(ctx, capital_supply, readiness)
         if blocker:
             status = "BLOCKED"
     if not blocker:
@@ -565,6 +588,11 @@ def build_risk_budget_supply(ctx: bod.BodContext) -> dict[str, Any]:
             "status": str(capital_supply.get("status") or ("MISSING" if not capital_supply else "")).strip().upper(),
             "canonical_blocker": str(capital_supply.get("canonical_blocker") or "").strip(),
         },
+        "readiness_authority_path": str(readiness_path),
+        "readiness_mode": str(readiness.get("readiness_mode") or "").strip(),
+        "evidence_policy_used": readiness.get("evidence_policy") if isinstance(readiness.get("evidence_policy"), dict) else {},
+        "carry_forward_source_used": str(capital_supply.get("carry_forward_source_used") or "").strip(),
+        "mode_specific_blocker": str(readiness.get("canonical_blocker") or "").strip() == "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE",
         "nav_basis": nav_basis,
         "budget_policy": policy,
         "intent_budgets": budgets,
