@@ -291,6 +291,7 @@ def evaluate_safety_state_authority_v1(
     capital_envelope_path = (execution_root / "reports" / "capital_risk_envelope_v2" / day_utc / "capital_risk_envelope.v2.json").resolve()
     readiness_path = (execution_root / "trade_submit_readiness_c2_v1" / "_history" / environment / account / day_utc / "status.json").resolve()
     submit_boundary_path = (truth_root / "reports" / "submit_boundary_status_v1" / day_utc / "submit_boundary_status.v1.json").resolve()
+    runtime_resilience_path = (truth_root / "reports" / "runtime_resilience_authority_v1" / day_utc / "runtime_resilience_authority.v1.json").resolve()
     day_readiness_path, day_readiness = read_or_evaluate_trading_day_readiness_authority_v1(
         target_day=day_utc,
         truth_root=truth_root,
@@ -307,6 +308,7 @@ def evaluate_safety_state_authority_v1(
     capital_envelope = _read_json(capital_envelope_path)
     readiness = _read_json(readiness_path)
     submit_boundary = _read_json(submit_boundary_path)
+    runtime_resilience = _read_json(runtime_resilience_path)
 
     stale_or_conflicting_inputs: list[dict[str, Any]] = []
     for name, path, payload in (
@@ -318,6 +320,7 @@ def evaluate_safety_state_authority_v1(
         ("global_kill_switch_state_v1", kill_switch_path, kill_switch),
         ("capital_risk_envelope_v2", capital_envelope_path, capital_envelope),
         ("trade_submit_readiness_c2_v1", readiness_path, readiness),
+        ("runtime_resilience_authority_v1", runtime_resilience_path, runtime_resilience),
     ):
         _record_input(
             name=name,
@@ -495,6 +498,7 @@ def evaluate_safety_state_authority_v1(
             "trade_submit_readiness_c2_v1": str(readiness_path),
             "submit_boundary_status_v1": str(submit_boundary_path),
             "trading_day_readiness_authority_v1": str(day_readiness_path),
+            "runtime_resilience_authority_v1": str(runtime_resilience_path),
         },
         "stale_or_conflicting_inputs": stale_or_conflicting_inputs,
         "operator_next_action": _operator_action(canonical_blocker),
@@ -506,6 +510,8 @@ def evaluate_safety_state_authority_v1(
         "hard_blockers": sorted(set(hard_blockers)),
         "trade_submit_readiness_status": readiness_status,
         "trade_submit_readiness_reason_codes": readiness_codes,
+        "runtime_resilience_status": _normalize_status((runtime_resilience or {}).get("status") or "MISSING"),
+        "runtime_resilience_blocker": _normalize_status((runtime_resilience or {}).get("canonical_blocker") or ""),
         "canonical_json_hash": "",
     }
     payload["canonical_json_hash"] = _sha256_payload(payload)

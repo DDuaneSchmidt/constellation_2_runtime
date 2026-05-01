@@ -64,6 +64,10 @@ def _read_json(path: Path) -> dict[str, Any]:
         return {}
 
 
+def _runtime_resilience_path(*, truth_root: Path, day_utc: str) -> Path:
+    return Path(truth_root).resolve() / "reports" / "runtime_resilience_authority_v1" / day_utc / "runtime_resilience_authority.v1.json"
+
+
 def intent_lifecycle_state_path(*, truth_root: Path, day_utc: str) -> Path:
     return Path(truth_root).resolve() / "reports" / "intent_lifecycle_state_v1" / day_utc / "intent_lifecycle_state.v1.json"
 
@@ -484,6 +488,10 @@ def _lifecycle_decision(
         if str(readiness_mode or "").strip().upper() in PREOPEN_MODES:
             return "NO_INTENT", ["PREOPEN_INPUTS_NOT_REQUIRED"], False
         return "BLOCKED", ["SIGNAL_STATE_UNKNOWN"], False
+    if position_state == "POSITION_OPEN":
+        return "NO_INTENT", ["POSITION_ALREADY_OPEN"], False
+    if order_state == "ORDER_PENDING":
+        return "NO_INTENT", ["ORDER_ALREADY_PENDING"], False
     if not unchanged_signal:
         return "INTENT_CREATED", ["SIGNAL_CHANGED"], True
     reasons = ["UNCHANGED_SIGNAL"]
@@ -525,6 +533,8 @@ def build_intent_lifecycle_state_v1(
         environment=environment,
     )
     readiness_mode = str(readiness.get("readiness_mode") or "").strip().upper()
+    runtime_path = _runtime_resilience_path(truth_root=truth_root, day_utc=day_utc)
+    runtime_resilience = _read_json(runtime_path)
     positions_status, positions, positions_path, position_evidence = _load_positions(truth_root=truth_root, intent_truth_root=intent_root, day_utc=day_utc)
     order_rows, order_evidence = _load_order_rows(truth_root=truth_root, intent_truth_root=intent_root, day_utc=day_utc)
     position_lifecycle_status, position_lifecycle_rows, position_lifecycle_path = _load_position_lifecycle_rows(truth_root=truth_root, day_utc=day_utc)
@@ -605,6 +615,9 @@ def build_intent_lifecycle_state_v1(
                 "lifecycle_decision": decision,
                 "lifecycle_reason_codes": sorted(set(reasons)),
                 "evidence_paths": sorted(set([path for path in [positions_path, position_lifecycle_path if lifecycle_match else "", str(outcome.get("artifact_path") or "")] + position_evidence + order_evidence if path])),
+                "runtime_resilience_authority_path": str(runtime_path),
+                "runtime_resilience_status": str(runtime_resilience.get("status") or "UNKNOWN").strip().upper(),
+                "runtime_resilience_blocker": str(runtime_resilience.get("canonical_blocker") or "").strip().upper(),
                 "produced_at_utc": produced_at,
                 "producer": PRODUCER,
             }
@@ -635,6 +648,9 @@ def build_intent_lifecycle_state_v1(
         "readiness_authority_path": str(readiness_path),
         "readiness_mode": readiness_mode,
         "evidence_policy_used": readiness.get("evidence_policy") if isinstance(readiness.get("evidence_policy"), dict) else {},
+        "runtime_resilience_authority_path": str(runtime_path),
+        "runtime_resilience_status": str(runtime_resilience.get("status") or "UNKNOWN").strip().upper(),
+        "runtime_resilience_blocker": str(runtime_resilience.get("canonical_blocker") or "").strip().upper(),
         "intent_truth_root": str(intent_root),
         "rows": rows,
         "counts": counts,

@@ -40,6 +40,10 @@ def _read_json(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _runtime_resilience_path(*, truth_root: Path, day_utc: str) -> Path:
+    return (truth_root / "reports" / "runtime_resilience_authority_v1" / day_utc / "runtime_resilience_authority.v1.json").resolve()
+
+
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n", encoding="utf-8")
@@ -306,6 +310,8 @@ def build_broker_supply(ctx: bod.BodContext, *, freshness_seconds: float = 300.0
     status = "PASS" if not blocker else "BLOCKED"
     capital_usable = status == "PASS"
     execution_usable = status == "PASS"
+    runtime_path = _runtime_resilience_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    runtime_resilience = _read_json(runtime_path)
     return {
         "schema_id": "broker_supply",
         "schema_version": SCHEMA_VERSION,
@@ -360,6 +366,9 @@ def build_broker_supply(ctx: bod.BodContext, *, freshness_seconds: float = 300.0
             "broker_events_fresh": log_status == "PRESENT",
         },
         "operator_next_action": _operator_action(blocker),
+        "runtime_resilience_authority_path": str(runtime_path),
+        "runtime_resilience_status": str(runtime_resilience.get("status") or "UNKNOWN").strip().upper(),
+        "runtime_resilience_blocker": str(runtime_resilience.get("canonical_blocker") or "").strip().upper(),
     }
 
 

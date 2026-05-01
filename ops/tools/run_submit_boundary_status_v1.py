@@ -60,6 +60,10 @@ from constellation_2.common.safety_state_authority_v1 import (
     write_safety_state_authority_v1,
 )
 from constellation_2.common.trading_day_readiness_authority_v1 import read_or_evaluate_trading_day_readiness_authority_v1
+from ops.tools.run_runtime_resilience_authority_v1 import (
+    build_runtime_resilience_authority_v1,
+    runtime_resilience_authority_path,
+)
 from constellation_2.common.session_authority_v1 import (
     read_target_day_admission_ref_v1,
     read_target_day_build_ref_v1,
@@ -645,6 +649,20 @@ def _canonical_blocker_for_boundary_v1(blocking_codes: List[str]) -> str:
     normalized = _normalize_reason_codes(blocking_codes)
     if "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE" in normalized:
         return "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE"
+    for preferred in (
+        "IB_RECONNECTING",
+        "IB_DISCONNECTED",
+        "ACCOUNT_SUMMARY_MISSING",
+        "BROKER_EVENT_LOG_MISSING",
+        "BROKER_EVENT_LOG_STALE",
+        "POSITION_OR_ORDER_TRUTH_UNKNOWN",
+        "PENDING_ORDERS_NOT_RECONCILED",
+        "OPEN_POSITIONS_NOT_RECONCILED",
+        "RESTART_RECOVERY_REQUIRED",
+        "RUNTIME_RESILIENCE_AUTHORITY_NOT_PASS",
+    ):
+        if preferred in normalized:
+            return preferred
     if STALE_ARTIFACT in normalized:
         return STALE_ARTIFACT
     for preferred in (
@@ -697,6 +715,36 @@ def _source_surface_path_for_blocker_v1(*, blocker_code: str, rows: List[Dict[st
         if path:
             return path
     return ""
+
+
+def _runtime_resilience_boundary_check_v1(*, payload: Dict[str, Any]) -> Tuple[bool, List[str], str]:
+    status = str(payload.get("status") or "").strip().upper()
+    blocker = str(payload.get("canonical_blocker") or "").strip().upper()
+    recovery = str(payload.get("recovery_status") or "").strip().upper()
+    ib_state = str(payload.get("ib_connection_state") or "").strip().upper()
+    pending_reconciled = bool(payload.get("pending_orders_reconciled") is True)
+    open_reconciled = bool(payload.get("open_positions_reconciled") is True)
+    submit_blocked_during_recovery = bool(payload.get("submit_blocked_during_recovery") is True)
+    codes = _normalize_reason_codes(list(payload.get("reason_codes") or []))
+    if blocker:
+        codes.append(blocker)
+    if recovery in {"IN_PROGRESS", "BLOCKED", "DEGRADED"}:
+        codes.append(blocker or "RESTART_RECOVERY_REQUIRED")
+    if ib_state in {"DISCONNECTED", "STALE", "RECONNECTING", "UNKNOWN"}:
+        codes.append(
+            "IB_RECONNECTING"
+            if ib_state == "RECONNECTING"
+            else ("ACCOUNT_SUMMARY_MISSING" if ib_state == "STALE" else "IB_DISCONNECTED")
+        )
+    if not pending_reconciled:
+        codes.append("PENDING_ORDERS_NOT_RECONCILED")
+    if not open_reconciled:
+        codes.append("OPEN_POSITIONS_NOT_RECONCILED")
+    if submit_blocked_during_recovery and not codes:
+        codes.append("RUNTIME_RESILIENCE_AUTHORITY_NOT_PASS")
+    normalized = _normalize_reason_codes(codes)
+    ok = status == "PASS" and not normalized
+    return ok, normalized, blocker or (normalized[0] if normalized else "")
 
 
 def main(argv: List[str] | None = None) -> int:
@@ -774,6 +822,11 @@ def main(argv: List[str] | None = None) -> int:
         "trading_day_readiness_authority_v1": str(day_readiness_path),
         "paper_trading_day_authority_v1": str(day_authority_path),
     }
+    runtime_resilience_path = runtime_resilience_authority_path(truth_root=truth_root, day_utc=day_utc).resolve()
+    runtime_resilience_status = "UNKNOWN"
+    runtime_resilience_blocker = ""
+    submit_blocked_during_recovery = False
+    extra_failed_conditions: List[Dict[str, Any]] = []
     day_readiness_codes = [] if day_readiness_submit_allowed else [str(day_readiness.get("canonical_blocker") or "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE")]
     day_readiness_row = _check_row(
         logical_name="trading_day_readiness_authority_v1",
@@ -788,9 +841,62 @@ def main(argv: List[str] | None = None) -> int:
         boundary_status = "BLOCKED"
         failed_checks.append(day_readiness_row)
         blocking_codes.extend(day_readiness_codes)
+    try:
+        runtime_resilience_payload = build_runtime_resilience_authority_v1(
+            day_utc=day_utc,
+            truth_root=truth_root,
+            execution_root=execution_truth_root,
+            runtime_root=truth_root.parent,
+            environment="PAPER",
+            broker_account=paper_account,
+        )
+        runtime_resilience_path = Path(str(runtime_resilience_payload.get("artifact_path") or runtime_resilience_path)).resolve()
+        source_paths["runtime_resilience_authority_v1"] = str(runtime_resilience_path)
+        runtime_resilience_status = str(runtime_resilience_payload.get("status") or "").strip().upper()
+        runtime_resilience_blocker = str(runtime_resilience_payload.get("canonical_blocker") or "").strip().upper()
+        submit_blocked_during_recovery = bool(runtime_resilience_payload.get("submit_blocked_during_recovery") is True)
+        runtime_ok, runtime_codes, runtime_blocker = _runtime_resilience_boundary_check_v1(payload=runtime_resilience_payload)
+        runtime_row = _check_row(
+            logical_name="runtime_resilience_authority_v1",
+            path=runtime_resilience_path,
+            status="PASS" if runtime_ok else "FAIL",
+            day_utc=day_utc,
+            reason_codes=runtime_codes,
+        )
+        required_checks.append(runtime_row)
+        if not runtime_ok:
+            submission_authorized = False
+            boundary_status = "BLOCKED"
+            failed_checks.append(runtime_row)
+            blocking_codes.extend(runtime_codes or [runtime_blocker or "RUNTIME_RESILIENCE_AUTHORITY_NOT_PASS"])
+            extra_failed_conditions.append(
+                {
+                    "logical_name": "runtime_resilience_authority_v1",
+                    "path": str(runtime_resilience_path),
+                    "condition": "RUNTIME_RESILIENCE_AUTHORITY_NOT_PASS",
+                    "code": runtime_blocker or "RUNTIME_RESILIENCE_AUTHORITY_NOT_PASS",
+                    "detail": str(runtime_resilience_payload.get("operator_next_action") or ""),
+                }
+            )
+    except Exception as exc:
+        source_paths["runtime_resilience_authority_v1"] = str(runtime_resilience_path)
+        runtime_row = _check_row(
+            logical_name="runtime_resilience_authority_v1",
+            path=runtime_resilience_path,
+            status="MISSING",
+            day_utc=day_utc,
+            reason_codes=[f"SUBMIT_BOUNDARY_RUNTIME_RESILIENCE_UNAVAILABLE:{type(exc).__name__}"],
+        )
+        required_checks.append(runtime_row)
+        failed_checks.append(runtime_row)
+        submission_authorized = False
+        boundary_status = "BLOCKED"
+        freshness_verdict = "UNKNOWN"
+        linkage_verdict = "UNLINKED"
+        blocking_codes.extend(runtime_row["reason_codes"])
     readiness_policy_view = _load_trade_readiness_policy_view_v1(truth_root=truth_root, day_utc=day_utc)
     source_paths.update(dict(readiness_policy_view.get("source_paths") or {}))
-    extra_failed_conditions: List[Dict[str, Any]] = list(readiness_policy_view.get("failed_conditions") or [])
+    extra_failed_conditions.extend(list(readiness_policy_view.get("failed_conditions") or []))
     ledger_surface_eval = _evaluate_paper_session_ledger_surface_v1(truth_root=truth_root, day_utc=day_utc)
     source_paths["paper_session_ledger_v1"] = str(ledger_surface_eval.get("path") or "")
     extra_failed_conditions.extend(list(ledger_surface_eval.get("failed_conditions") or []))
@@ -1342,8 +1448,15 @@ def main(argv: List[str] | None = None) -> int:
             sha256=_sha256_file(day_readiness_path) if day_readiness_path.exists() else "",
             day_utc=day_utc,
         ),
+        _ensure_dependency_ref_v1(
+            artifact_id="runtime_resilience_authority_v1",
+            path=runtime_resilience_path,
+            sha256=_sha256_file(runtime_resilience_path) if runtime_resilience_path.exists() else "",
+            day_utc=day_utc,
+        ),
     ]
-    if day_authority_ok and safety_state_ok and day_readiness_submit_allowed:
+    runtime_resilience_ok = runtime_resilience_status == "PASS" and not runtime_resilience_blocker and not submit_blocked_during_recovery
+    if day_authority_ok and safety_state_ok and day_readiness_submit_allowed and runtime_resilience_ok:
         # Submit boundary is a projection of paper_trading_day_authority_v1. Legacy
         # submit-local checks remain visible in required_boundary_checks, but they
         # no longer carry veto power unless promoted to required authority inputs
@@ -1464,6 +1577,10 @@ def main(argv: List[str] | None = None) -> int:
         "evidence_policy_used": day_readiness.get("evidence_policy") if isinstance(day_readiness.get("evidence_policy"), dict) else {},
         "carry_forward_source_used": "",
         "mode_specific_blocker": bool(canonical_blocker == "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE"),
+        "runtime_resilience_authority_path": str(runtime_resilience_path),
+        "runtime_resilience_status": runtime_resilience_status,
+        "runtime_resilience_blocker": runtime_resilience_blocker,
+        "submit_blocked_during_recovery": submit_blocked_during_recovery,
         "readiness_status": effective_readiness_status,
         "readiness_decision": effective_readiness_decision,
         "readiness_submit_allowed": effective_readiness_submit_allowed,

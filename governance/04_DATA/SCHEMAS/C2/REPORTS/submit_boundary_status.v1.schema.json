@@ -118,7 +118,11 @@
       "additionalProperties": true
     },
     "carry_forward_source_used": { "type": ["string", "null"] },
-    "mode_specific_blocker": { "type": "boolean" }
+    "mode_specific_blocker": { "type": "boolean" },
+    "runtime_resilience_authority_path": { "type": "string", "minLength": 1 },
+    "runtime_resilience_status": { "type": "string" },
+    "runtime_resilience_blocker": { "type": "string" },
+    "submit_blocked_during_recovery": { "type": "boolean" }
   },
   "$defs": {
     "producer": {

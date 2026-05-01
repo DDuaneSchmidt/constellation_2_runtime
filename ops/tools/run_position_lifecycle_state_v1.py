@@ -61,6 +61,10 @@ def _read_json(path: Path) -> dict[str, Any]:
         return {}
 
 
+def _runtime_resilience_path(*, truth_root: Path, day_utc: str) -> Path:
+    return Path(truth_root).resolve() / "reports" / "runtime_resilience_authority_v1" / day_utc / "runtime_resilience_authority.v1.json"
+
+
 def position_lifecycle_state_path(*, truth_root: Path, day_utc: str) -> Path:
     return Path(truth_root).resolve() / "reports" / "position_lifecycle_state_v1" / day_utc / "position_lifecycle_state.v1.json"
 
@@ -492,6 +496,8 @@ def build_position_lifecycle_state_v1(
         evidence_paths.extend(evidence)
     positions_status, positions, positions_path, position_evidence = _load_positions(truth_root, execution, day_utc)
     evidence_paths.extend(position_evidence)
+    runtime_path = _runtime_resilience_path(truth_root=truth_root, day_utc=day_utc)
+    runtime_resilience = _read_json(runtime_path)
     row = _position_row(
         day_utc=day_utc,
         selected=selected,
@@ -526,6 +532,9 @@ def build_position_lifecycle_state_v1(
         "execution_root": str(execution),
         "positions_snapshot_path": positions_path,
         "position_truth_status": positions_status,
+        "runtime_resilience_authority_path": str(runtime_path),
+        "runtime_resilience_status": str(runtime_resilience.get("status") or "UNKNOWN").strip().upper(),
+        "runtime_resilience_blocker": str(runtime_resilience.get("canonical_blocker") or "").strip().upper(),
         "rows": rows,
         "counts": counts,
         "produced_at_utc": _now_iso(),
