@@ -15,6 +15,7 @@ if str(REPO_ROOT) not in sys.path:
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1, read_json_object_v1, resolve_fact_plane_truth_root_v1
 from ops.tools.run_portfolio_activation_gate_v1 import build_portfolio_activation_gate_v1, portfolio_activation_gate_path
 from ops.tools.run_portfolio_state_v1 import portfolio_state_path
+from ops.tools.run_regime_confidence_v1 import regime_confidence_path
 
 PAPER_MODE = "PAPER"
 BOOTSTRAP_ACCEPTED_FOR_PAPER = "BOOTSTRAP_ACCEPTED_FOR_PAPER"
@@ -41,6 +42,7 @@ COMPONENTS = [
     "data_quality_penalty",
     "execution_readiness_penalty",
 ]
+REGIME_CONFIDENCE_DAMPING_FLOOR = 0.35
 
 
 def _now_iso() -> str:
@@ -157,6 +159,14 @@ def _regime_alignment(row: dict[str, Any], state: dict[str, Any]) -> float:
     return 0.0
 
 
+def _regime_confidence_multiplier(payload: dict[str, Any]) -> float:
+    try:
+        score = float(payload.get("confidence_score"))
+    except Exception:
+        return 1.0
+    return round(max(REGIME_CONFIDENCE_DAMPING_FLOOR, min(1.0, score)), 6)
+
+
 def _diversification_bonus(row: dict[str, Any], allowed_rows: list[dict[str, Any]]) -> float:
     symbol = str(row.get("raw_intent_symbol") or "").upper()
     overlap = str(row.get("overlap_group") or "")
@@ -262,6 +272,9 @@ def build_portfolio_scoring_v1(
     truth_root = Path(truth_root).resolve()
     state_path = portfolio_state_path(truth_root=truth_root, day_utc=day_utc)
     state = _read_json(state_path)
+    regime_path = regime_confidence_path(truth_root=truth_root, day_utc=day_utc)
+    regime_confidence = _read_json(regime_path)
+    regime_multiplier = _regime_confidence_multiplier(regime_confidence) if regime_confidence else 1.0
     gate = _load_gate(day_utc=day_utc, truth_root=truth_root, environment=environment, source_rollup_path=source_rollup_path, path=portfolio_gate_path_arg)
     decisions = gate.get("decisions") if isinstance(gate.get("decisions"), list) else []
     outcome_by_intent = _outcomes_by_intent(gate)
@@ -275,9 +288,10 @@ def build_portfolio_scoring_v1(
         decision = str(row.get("portfolio_gate_decision") or "").upper()
         executable_eligible = decision == "ALLOW" and row.get("allowed_by_portfolio_gate") is True
         if executable_eligible:
+            raw_regime_alignment = _regime_alignment(row, state)
             components = {
                 "signal_strength": _signal_strength(row, outcome, intent),
-                "regime_alignment": _regime_alignment(row, state),
+                "regime_alignment": round(raw_regime_alignment * regime_multiplier, 4),
                 "diversification_bonus": _diversification_bonus(row, allowed_rows),
                 "overlap_penalty": _overlap_penalty(row, allowed_rows),
                 "risk_penalty": _risk_penalty(intent) if intent else -5.0,
@@ -287,6 +301,7 @@ def build_portfolio_scoring_v1(
             total = _score_total(components)
         else:
             components = {name: 0.0 for name in COMPONENTS}
+            raw_regime_alignment = 0.0
             total = 0.0
         evidence_paths = [
             str(row.get("raw_intent_path") or ""),
@@ -316,6 +331,10 @@ def build_portfolio_scoring_v1(
                 "unchanged_signal": bool(row.get("unchanged_signal")),
                 "score_total": total,
                 "score_components": components,
+                "regime_confidence_path": str(regime_path),
+                "regime_confidence_level": str(regime_confidence.get("confidence_level") or "UNKNOWN") if regime_confidence else "UNKNOWN",
+                "regime_confidence_multiplier": regime_multiplier,
+                "raw_regime_alignment_component": raw_regime_alignment,
                 "reason_codes": sorted(set([*reasons, scoring_reason])),
                 "evidence_paths": evidence_paths,
                 "portfolio_activation_gate_path": str(gate.get("_artifact_path_resolved") or gate.get("artifact_path") or ""),
@@ -346,6 +365,9 @@ def build_portfolio_scoring_v1(
         "canonical_blocker": "" if gate else "PORTFOLIO_ACTIVATION_GATE_MISSING",
         "portfolio_activation_gate_path": str(gate.get("_artifact_path_resolved") or gate.get("artifact_path") or ""),
         "portfolio_state_path": str(state.get("artifact_path") or state_path),
+        "regime_confidence_path": str(regime_path),
+        "regime_confidence_level": str(regime_confidence.get("confidence_level") or "UNKNOWN") if regime_confidence else "UNKNOWN",
+        "regime_confidence_multiplier": regime_multiplier,
         "scoring_policy_id": SCORING_POLICY_ID,
         "scoring_policy_version": SCORING_POLICY_VERSION,
         "intents_scored_count": len(rankable),

@@ -48,6 +48,10 @@ def decision_ledger_path(*, truth_root: Path, day_utc: str) -> Path:
     return Path(truth_root).resolve() / "reports" / "decision_ledger_v1" / day_utc / "decision_ledger.v1.json"
 
 
+def _report_path(*, truth_root: Path, artifact_id: str, day_utc: str, filename: str) -> Path:
+    return Path(truth_root).resolve() / "reports" / artifact_id / day_utc / filename
+
+
 def _git_commit() -> str:
     proc = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT), capture_output=True, text=True, check=False)
     return str(proc.stdout or "").strip() if proc.returncode == 0 else "UNKNOWN"
@@ -203,6 +207,13 @@ def build_decision_ledger_v1(
     lifecycle_summary = _lifecycle_summary(truth_root, day_utc)
     selected_intent_id = str(selected.get("intent_id") or "")
     position_lifecycle_summary = _position_lifecycle_summary(truth_root, day_utc, selected_intent_id)
+    performance_paths = {
+        "selection_quality_path": str(_report_path(truth_root=truth_root, artifact_id="selection_quality_v1", day_utc=day_utc, filename="selection_quality.v1.json")),
+        "edge_attribution_path": str(_report_path(truth_root=truth_root, artifact_id="edge_attribution_v1", day_utc=day_utc, filename="edge_attribution.v1.json")),
+        "regime_confidence_path": str(_report_path(truth_root=truth_root, artifact_id="regime_confidence_v1", day_utc=day_utc, filename="regime_confidence.v1.json")),
+        "ai_advisory_review_path": str(_report_path(truth_root=truth_root, artifact_id="ai_advisory_review_v1", day_utc=day_utc, filename="ai_advisory_review.v1.json")),
+        "strategy_change_governance_path": str(_report_path(truth_root=truth_root, artifact_id="strategy_change_governance_v1", day_utc=day_utc, filename="strategy_change_governance.v1.json")),
+    }
     payload = {
         "schema_id": "decision_ledger",
         "schema_version": "v1",
@@ -219,6 +230,8 @@ def build_decision_ledger_v1(
         "position_lifecycle_state_path": position_lifecycle_summary["position_lifecycle_state_path"],
         "portfolio_activation_gate_path": str(portfolio_activation_gate_path(truth_root=truth_root, day_utc=day_utc)),
         "portfolio_scoring_path": scoring_summary["portfolio_scoring_path"],
+        **performance_paths,
+        "performance_intelligence_paths": performance_paths,
         "arbitration_result_path": scan_paths["arbitration_result_path"],
         "authorization_result_path": (authorization.get("outputs") or [""])[0] if isinstance(authorization.get("outputs"), list) and authorization.get("outputs") else "",
         "execution_result_path": (execution.get("outputs") or [""])[0] if isinstance(execution.get("outputs"), list) and execution.get("outputs") else "",

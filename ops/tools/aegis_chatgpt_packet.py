@@ -347,6 +347,56 @@ def _read_json(path: Path | None) -> dict[str, Any] | None:
     return obj if isinstance(obj, dict) else None
 
 
+def _performance_intelligence_section_lines(roots: RootResolution, day_utc: str) -> list[str]:
+    truth_root = roots.canonical_truth_root
+    lines = ["## Performance Intelligence Advisory", ""]
+    if truth_root is None:
+        return lines + ["- status: UNKNOWN", "- evidence: TRUTH_ROOT_UNAVAILABLE", ""]
+    base = truth_root / "reports"
+    selection_path = base / "selection_quality_v1" / day_utc / "selection_quality.v1.json"
+    edge_path = base / "edge_attribution_v1" / day_utc / "edge_attribution.v1.json"
+    regime_path = base / "regime_confidence_v1" / day_utc / "regime_confidence.v1.json"
+    advisory_path = base / "ai_advisory_review_v1" / day_utc / "ai_advisory_review.v1.json"
+    governance_path = base / "strategy_change_governance_v1" / day_utc / "strategy_change_governance.v1.json"
+    selection = _read_json(selection_path) or {}
+    edge = _read_json(edge_path) or {}
+    regime = _read_json(regime_path) or {}
+    advisory = _read_json(advisory_path) or {}
+    governance = _read_json(governance_path) or {}
+    edge_health = [
+        f"{row.get('sleeve_id')}={row.get('edge_health')}"
+        for row in edge.get("sleeves", [])
+        if isinstance(row, dict)
+    ]
+    recommendations = advisory.get("recommendations") if isinstance(advisory.get("recommendations"), list) else []
+    lines.extend(
+        [
+            f"- selection_quality_path: {selection_path}",
+            f"- selection_confidence: {selection.get('confidence_level', 'UNKNOWN')}",
+            f"- selection_score_gap: {selection.get('score_gap', '')}",
+            f"- defer_recommended: {selection.get('defer_recommended', '')}",
+            f"- edge_attribution_path: {edge_path}",
+            f"- edge_status: {edge.get('status', 'UNKNOWN')}",
+            f"- edge_health: {json.dumps(edge_health, sort_keys=True)}",
+            f"- regime_confidence_path: {regime_path}",
+            f"- regime: {regime.get('regime', 'UNKNOWN')}",
+            f"- regime_confidence: {regime.get('confidence_level', 'UNKNOWN')}",
+            f"- transition_risk: {regime.get('transition_risk', 'UNKNOWN')}",
+            f"- ai_advisory_review_path: {advisory_path}",
+            f"- advisory_status: {advisory.get('status', 'UNKNOWN')}",
+            f"- advisory_recommendation_count: {len(recommendations)}",
+            f"- advisory_requires_human_review: {advisory.get('requires_human_review', '')}",
+            f"- prohibited_actions_attempted: {advisory.get('prohibited_actions_attempted', '')}",
+            f"- strategy_change_governance_path: {governance_path}",
+            f"- governance_status: {governance.get('status', 'UNKNOWN')}",
+            f"- human_approval_required: {governance.get('human_approval_required', '')}",
+            f"- automatic_deployment_allowed: {governance.get('automatic_deployment_allowed', '')}",
+            "",
+        ]
+    )
+    return lines
+
+
 def _mtime_utc(path: Path | None) -> str:
     if path is None or (not path.exists()):
         return "UNKNOWN"
@@ -2626,6 +2676,7 @@ def _build_paper_status(
             "",
         ]
     )
+    section_lines.extend(_performance_intelligence_section_lines(roots, current_day.day_utc))
     return PaperStatus(
         section="\n".join(section_lines),
         status=final_decision.status,
