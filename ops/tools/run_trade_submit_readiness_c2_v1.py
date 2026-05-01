@@ -48,6 +48,11 @@ from constellation_2.common.trade_submit_readiness_authority_v1 import (
 )
 from constellation_2.common.economic_state_authority_v1 import run_economic_state_authority_v1
 from constellation_2.common.runtime_authority_bridge_v1 import resolve_canonical_truth_root_bridge_v1
+from constellation_2.common.safety_state_authority_v1 import safety_state_authority_output_path
+from constellation_2.common.trading_day_readiness_authority_v1 import (
+    PREOPEN_MODES,
+    read_or_evaluate_trading_day_readiness_authority_v1,
+)
 from constellation_2.phaseD.lib.validate_against_schema_v1 import (
     validate_against_repo_schema_v1,
 )
@@ -84,6 +89,16 @@ def _read_json(p: Path) -> Any:
     if not p.exists() or not p.is_file():
         raise SystemExit(f"FAIL: missing_required_file: {p}")
     return json.loads(p.read_text(encoding="utf-8"))
+
+
+def _try_read_json(p: Path) -> Dict[str, Any] | None:
+    if not p.exists() or not p.is_file():
+        return None
+    try:
+        payload = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def _atomic_write(path: Path, payload: bytes) -> None:
@@ -739,6 +754,43 @@ def _load_previous_day_economic_package_state(
     }
 
 
+def _economic_state_from_safety_state(*, truth_root: Path, day_utc: str) -> tuple[Dict[str, Any] | None, Path]:
+    path = safety_state_authority_output_path(truth_root=truth_root, day_utc=day_utc).resolve()
+    payload = _try_read_json(path)
+    if not isinstance(payload, dict) or str(payload.get("day_utc") or payload.get("target_day") or "").strip() != day_utc:
+        return None, path
+    drawdown_status = str(payload.get("drawdown_status") or "").strip().upper()
+    drawdown_pct = payload.get("drawdown_pct")
+    status = str(payload.get("status") or "").strip().upper()
+    if drawdown_status not in {"PASS", "BLOCKED", "NAV_INVALID"}:
+        return None, path
+    reason_codes: List[str] = []
+    if drawdown_status == "NAV_INVALID" or payload.get("nav_valid") is False:
+        reason_codes.append("SAFETY_STATE_NAV_INVALID")
+    if drawdown_status == "BLOCKED":
+        reason_codes.append("SAFETY_STATE_DRAWDOWN_BLOCKED")
+    canonical_blocker = str(payload.get("canonical_blocker") or "").strip().upper()
+    if canonical_blocker in {"NAV_INVALID", "DRAWDOWN_LIMIT_EXCEEDED", "KILL_SWITCH_ACTIVE", "CAPITAL_RISK_ENVELOPE_NOT_PASS"} and not reason_codes:
+        reason_codes.append(f"SAFETY_STATE_{canonical_blocker}")
+    if status == "DEGRADED" and not reason_codes:
+        blocker = str(payload.get("canonical_blocker") or status).strip().upper()
+        if blocker:
+            reason_codes.append(f"SAFETY_STATE_{blocker}")
+    return {
+        "status": "OK" if not reason_codes else "UNKNOWN",
+        "source_day_utc": day_utc,
+        "package_path": str(path),
+        "package_sha256": _sha256_file(path),
+        "build_path": str(path),
+        "build_sha256": _sha256_file(path),
+        "drawdown_pct": str(drawdown_pct) if drawdown_pct is not None else None,
+        "drawdown_guard_status": "BLOCKED" if drawdown_status in {"BLOCKED", "NAV_INVALID"} else "PASS",
+        "policy_baseline_comparison_vs_portfolio_return": None,
+        "external_benchmark_underperformer_count": 0,
+        "reason_codes": reason_codes,
+    }, path
+
+
 def main() -> int:
     global OUT_ROOT, OUT_DIR
     ap = argparse.ArgumentParser(prog="run_trade_submit_readiness_c2_v1")
@@ -765,6 +817,12 @@ def main() -> int:
     ok_handshake = False
     ok_gate = False
     ok_economic = True
+    ok_mode = True
+    readiness_payload: Dict[str, Any] = {}
+    readiness_path = Path("")
+    readiness_mode = ""
+    safety_state_payload: Dict[str, Any] | None = None
+    safety_state_path = Path("")
     authorization_state: Dict[str, Any] | None = None
     cycle_snapshot_family = "authorization_gate_verdict_v1"
     cycle_snapshot_artifact_path = "UNAVAILABLE"
@@ -822,92 +880,140 @@ def main() -> int:
     except ValueError as exc:
         raise SystemExit(f"FAIL: {exc}")
 
-    try:
-        handshake = resolve_pointer_bound_handshake_state(
-            truth_root=execution_truth_root,
-            day_utc=day,
-            environment=env,
-            ib_account=ib_account,
-        )
-        ok_handshake = True
-        reasons.append("IB_API_HANDSHAKE_POINTER_OK")
-        input_manifest.append(
-            {
-                "type": "ib_api_handshake_latest_pointer_v1",
-                "path": str(handshake.pointer_path),
-                "sha256": handshake.pointer_sha256,
-            }
-        )
-        input_manifest.append(
-            {
-                "type": "ib_api_handshake_v1",
-                "path": str(handshake.handshake_path),
-                "sha256": handshake.handshake_sha256,
-            }
-        )
-    except ValueError as exc:
-        exc_text = str(exc)
-        if exc_text.startswith("IB_API_HANDSHAKE_POINTER_MISSING:") or exc_text.startswith("IB_API_HANDSHAKE_STALE_POINTER:"):
-            _refresh_handshake_spine_for_day(day_utc=day, execution_truth_root=execution_truth_root)
-            try:
-                handshake = resolve_pointer_bound_handshake_state(
-                    truth_root=execution_truth_root,
-                    day_utc=day,
-                    environment=env,
-                    ib_account=ib_account,
-                )
-                ok_handshake = True
-                reasons.append("IB_API_HANDSHAKE_POINTER_OK")
-                input_manifest.append(
-                    {
-                        "type": "ib_api_handshake_latest_pointer_v1",
-                        "path": str(handshake.pointer_path),
-                        "sha256": handshake.pointer_sha256,
-                    }
-                )
-                input_manifest.append(
-                    {
-                        "type": "ib_api_handshake_v1",
-                        "path": str(handshake.handshake_path),
-                        "sha256": handshake.handshake_sha256,
-                    }
-                )
-            except ValueError as refreshed_exc:
-                _append_fail_reason(reasons, str(refreshed_exc))
-        else:
-            _append_fail_reason(reasons, exc_text)
-
-    try:
-        convergence_rc = _refresh_authorization_convergence_for_day(
-            day_utc=day,
-            ib_account=ib_account,
-            environment=env,
-            execution_truth_root=execution_truth_root,
-        )
-        if convergence_rc not in (0, 2):
-            raise ValueError(f"AUTHORIZATION_CONVERGENCE_REFRESH_FAILED:returncode={convergence_rc}")
-        authorization_state = _load_primary_scoped_authorization_snapshot(
-            repo_root=REPO_ROOT,
-            environment=env,
-            ib_account=ib_account,
-            day_utc=day,
-        )
-        input_manifest.extend(authorization_state["input_manifest"])
-        cycle_snapshot_artifact_path = str(authorization_state["authorization_path"])
-        cycle_snapshot_artifact_sha256 = str(authorization_state["authorization_sha256"])
-        cycle_coherence_status = "COHERENT"
-        cycle_upstream_refs.extend(authorization_state["input_manifest"])
-    except ValueError as exc:
-        _append_fail_reason(reasons, str(exc))
-
-    economic_state = _load_previous_day_economic_package_state(
-        execution_truth_root=execution_truth_root,
-        day_utc=day,
-        repo_root=REPO_ROOT,
-        sleeve_id=str(authorization_state["binding"].sleeve_id) if authorization_state is not None else "",
+    readiness_path, readiness_payload = read_or_evaluate_trading_day_readiness_authority_v1(
+        target_day=day,
+        truth_root=TRUTH_ROOT,
+        execution_root=execution_truth_root,
         environment=env,
-        ib_account=ib_account,
     )
+    readiness_mode = str(readiness_payload.get("readiness_mode") or "").strip().upper()
+    ok_mode = bool(readiness_payload.get("submit_allowed_by_mode") is True)
+    input_manifest.append(
+        {
+            "type": "trading_day_readiness_authority_v1",
+            "path": str(readiness_path),
+            "sha256": _sha256_file(readiness_path) if readiness_path.exists() else "",
+        }
+    )
+    if not ok_mode:
+        _append_fail_reason(
+            reasons,
+            f"SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE:readiness_mode={readiness_mode or 'UNKNOWN'}",
+        )
+
+    if readiness_mode in PREOPEN_MODES or bool(readiness_payload.get("requires_live_account_truth") is not True):
+        ok_handshake = True
+        reasons.append(f"INFO:IB_API_HANDSHAKE_NOT_REQUIRED_BY_READINESS_MODE:{readiness_mode or 'UNKNOWN'}")
+    else:
+        try:
+            handshake = resolve_pointer_bound_handshake_state(
+                truth_root=execution_truth_root,
+                day_utc=day,
+                environment=env,
+                ib_account=ib_account,
+            )
+            ok_handshake = True
+            reasons.append("IB_API_HANDSHAKE_POINTER_OK")
+            input_manifest.append(
+                {
+                    "type": "ib_api_handshake_latest_pointer_v1",
+                    "path": str(handshake.pointer_path),
+                    "sha256": handshake.pointer_sha256,
+                }
+            )
+            input_manifest.append(
+                {
+                    "type": "ib_api_handshake_v1",
+                    "path": str(handshake.handshake_path),
+                    "sha256": handshake.handshake_sha256,
+                }
+            )
+        except ValueError as exc:
+            exc_text = str(exc)
+            if exc_text.startswith("IB_API_HANDSHAKE_POINTER_MISSING:") or exc_text.startswith("IB_API_HANDSHAKE_STALE_POINTER:"):
+                _refresh_handshake_spine_for_day(day_utc=day, execution_truth_root=execution_truth_root)
+                try:
+                    handshake = resolve_pointer_bound_handshake_state(
+                        truth_root=execution_truth_root,
+                        day_utc=day,
+                        environment=env,
+                        ib_account=ib_account,
+                    )
+                    ok_handshake = True
+                    reasons.append("IB_API_HANDSHAKE_POINTER_OK")
+                    input_manifest.append(
+                        {
+                            "type": "ib_api_handshake_latest_pointer_v1",
+                            "path": str(handshake.pointer_path),
+                            "sha256": handshake.pointer_sha256,
+                        }
+                    )
+                    input_manifest.append(
+                        {
+                            "type": "ib_api_handshake_v1",
+                            "path": str(handshake.handshake_path),
+                            "sha256": handshake.handshake_sha256,
+                        }
+                    )
+                except ValueError as refreshed_exc:
+                    _append_fail_reason(reasons, str(refreshed_exc))
+            else:
+                _append_fail_reason(reasons, exc_text)
+
+    if not ok_mode:
+        ok_gate = True
+        reasons.append(f"INFO:AUTHORIZATION_CONVERGENCE_NOT_REQUIRED_BY_READINESS_MODE:{readiness_mode or 'UNKNOWN'}")
+    else:
+        try:
+            convergence_rc = _refresh_authorization_convergence_for_day(
+                day_utc=day,
+                ib_account=ib_account,
+                environment=env,
+                execution_truth_root=execution_truth_root,
+            )
+            if convergence_rc not in (0, 2):
+                raise ValueError(f"AUTHORIZATION_CONVERGENCE_REFRESH_FAILED:returncode={convergence_rc}")
+            authorization_state = _load_primary_scoped_authorization_snapshot(
+                repo_root=REPO_ROOT,
+                environment=env,
+                ib_account=ib_account,
+                day_utc=day,
+            )
+            input_manifest.extend(authorization_state["input_manifest"])
+            cycle_snapshot_artifact_path = str(authorization_state["authorization_path"])
+            cycle_snapshot_artifact_sha256 = str(authorization_state["authorization_sha256"])
+            cycle_coherence_status = "COHERENT"
+            cycle_upstream_refs.extend(authorization_state["input_manifest"])
+        except ValueError as exc:
+            _append_fail_reason(reasons, str(exc))
+
+    economic_state, safety_state_path = _economic_state_from_safety_state(truth_root=TRUTH_ROOT, day_utc=day)
+    safety_state_payload = _try_read_json(safety_state_path)
+    if economic_state is not None:
+        input_manifest.append(
+            {
+                "type": "safety_state_authority_v1",
+                "path": str(safety_state_path),
+                "sha256": _sha256_file(safety_state_path),
+            }
+        )
+        cycle_upstream_refs.append(
+            {
+                "type": "safety_state_authority_v1",
+                "path": str(safety_state_path),
+                "sha256": _sha256_file(safety_state_path),
+            }
+        )
+        reasons.append("INFO:ECONOMIC_STATE_DERIVED_FROM_SAFETY_STATE_AUTHORITY")
+    else:
+        economic_state = _load_previous_day_economic_package_state(
+            execution_truth_root=execution_truth_root,
+            day_utc=day,
+            repo_root=REPO_ROOT,
+            sleeve_id=str(authorization_state["binding"].sleeve_id) if authorization_state is not None else "",
+            environment=env,
+            ib_account=ib_account,
+        )
     if str(economic_state.get("package_path") or "").strip():
         input_manifest.append(
             {
@@ -1061,7 +1167,7 @@ def main() -> int:
                 f"INFO:DAY_AUTHORITY_VALIDATION_BLOCKED:blocking_class={str(day_authority_payload.get('blocking_class') or 'UNKNOWN').strip()}"
             )
 
-    ok = bool(ok_registry and ok_handshake and ok_gate and ok_economic)
+    ok = bool(ok_registry and ok_handshake and ok_gate and ok_economic and ok_mode)
     state = "OK" if ok else "FAIL"
 
     as_of_utc, expires_utc = _runtime_freshness_ts(
@@ -1165,6 +1271,24 @@ def main() -> int:
                 economic_state.get("external_benchmark_underperformer_count") or 0
             ),
             "reason_codes": list(economic_state.get("reason_codes") or []),
+        },
+        "trading_day_readiness": {
+            "path": str(readiness_path),
+            "readiness_mode": readiness_mode,
+            "submit_allowed_by_mode": bool(readiness_payload.get("submit_allowed_by_mode") is True),
+            "requires_live_account_truth": bool(readiness_payload.get("requires_live_account_truth") is True),
+            "requires_same_day_broker_event_log": bool(readiness_payload.get("requires_same_day_broker_event_log") is True),
+            "requires_same_day_options_snapshot": bool(readiness_payload.get("requires_same_day_options_snapshot") is True),
+            "canonical_blocker": str(readiness_payload.get("canonical_blocker") or ""),
+            "evidence_policy_used": readiness_payload.get("evidence_policy") if isinstance(readiness_payload.get("evidence_policy"), dict) else {},
+        },
+        "safety_state_authority": {
+            "path": str(safety_state_path),
+            "status": str(safety_state_payload.get("status") or "") if isinstance(safety_state_payload, dict) else "",
+            "canonical_blocker": str(safety_state_payload.get("canonical_blocker") or "") if isinstance(safety_state_payload, dict) else "",
+            "drawdown_pct": safety_state_payload.get("drawdown_pct") if isinstance(safety_state_payload, dict) else None,
+            "drawdown_status": str(safety_state_payload.get("drawdown_status") or "") if isinstance(safety_state_payload, dict) else "",
+            "nav_valid": bool(safety_state_payload.get("nav_valid") is True) if isinstance(safety_state_payload, dict) else False,
         },
         "session_authority_attestation": session_authority_attestation,
         "run_state_authority_attestation": run_state_authority_attestation,

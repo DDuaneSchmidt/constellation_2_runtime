@@ -18,6 +18,10 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     resolve_fact_plane_truth_root_v1,
     resolve_paper_intent_truth_root_v1,
 )
+from constellation_2.common.trading_day_readiness_authority_v1 import (
+    PREOPEN_MODES,
+    read_or_evaluate_trading_day_readiness_authority_v1,
+)
 from ops.tools import run_sleeve_evaluation_kernel_v1 as sleeve_kernel
 from ops.tools.run_position_lifecycle_state_v1 import position_lifecycle_state_path
 
@@ -466,10 +470,19 @@ def _position_lifecycle_match(
     }
 
 
-def _lifecycle_decision(*, signal_state: str, unchanged_signal: bool, position_state: str, order_state: str) -> tuple[str, list[str], bool]:
+def _lifecycle_decision(
+    *,
+    signal_state: str,
+    unchanged_signal: bool,
+    position_state: str,
+    order_state: str,
+    readiness_mode: str = "",
+) -> tuple[str, list[str], bool]:
     if signal_state == "INACTIVE":
         return "NO_INTENT", ["SIGNAL_INACTIVE"], False
     if signal_state == "UNKNOWN":
+        if str(readiness_mode or "").strip().upper() in PREOPEN_MODES:
+            return "NO_INTENT", ["PREOPEN_INPUTS_NOT_REQUIRED"], False
         return "BLOCKED", ["SIGNAL_STATE_UNKNOWN"], False
     if not unchanged_signal:
         return "INTENT_CREATED", ["SIGNAL_CHANGED"], True
@@ -505,6 +518,13 @@ def build_intent_lifecycle_state_v1(
     intent_root = Path(intent_truth_root).resolve() if intent_truth_root is not None else resolve_paper_intent_truth_root_v1(truth_root=truth_root, repo_root=REPO_ROOT)
     input_outcomes = [row for row in outcomes if isinstance(row, dict)] if isinstance(outcomes, list) else _load_outcomes(truth_root=truth_root, day_utc=day_utc)
     previous_by_engine = previous_by_engine if isinstance(previous_by_engine, dict) else {}
+    readiness_path, readiness = read_or_evaluate_trading_day_readiness_authority_v1(
+        target_day=day_utc,
+        truth_root=truth_root,
+        execution_root=intent_root,
+        environment=environment,
+    )
+    readiness_mode = str(readiness.get("readiness_mode") or "").strip().upper()
     positions_status, positions, positions_path, position_evidence = _load_positions(truth_root=truth_root, intent_truth_root=intent_root, day_utc=day_utc)
     order_rows, order_evidence = _load_order_rows(truth_root=truth_root, intent_truth_root=intent_root, day_utc=day_utc)
     position_lifecycle_status, position_lifecycle_rows, position_lifecycle_path = _load_position_lifecycle_rows(truth_root=truth_root, day_utc=day_utc)
@@ -560,6 +580,7 @@ def build_intent_lifecycle_state_v1(
             unchanged_signal=unchanged_signal,
             position_state=position_state,
             order_state=order_state,
+            readiness_mode=readiness_mode,
         )
         rows.append(
             {
@@ -611,6 +632,9 @@ def build_intent_lifecycle_state_v1(
         "position_snapshot_status": positions_status,
         "position_lifecycle_state_path": position_lifecycle_path if position_lifecycle_rows else "",
         "position_lifecycle_status": position_lifecycle_status,
+        "readiness_authority_path": str(readiness_path),
+        "readiness_mode": readiness_mode,
+        "evidence_policy_used": readiness.get("evidence_policy") if isinstance(readiness.get("evidence_policy"), dict) else {},
         "intent_truth_root": str(intent_root),
         "rows": rows,
         "counts": counts,

@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1, read_json_object_v1, resolve_fact_plane_truth_root_v1
+from ops.tools.run_intent_lifecycle_state_v1 import intent_lifecycle_state_path
 from ops.tools.run_portfolio_state_v1 import build_portfolio_state_v1, portfolio_state_path
 from ops.tools.run_sleeve_evaluation_kernel_v1 import sleeve_evaluation_rollup_path
 
@@ -89,6 +90,43 @@ def _intent_from_outcome(outcome: dict[str, Any]) -> dict[str, str]:
             "raw_intent_symbol": str(row.get("symbol") or outcome.get("intent_symbol") or "").upper(),
         }
     return {"raw_intent_id": "", "raw_intent_path": "", "raw_intent_hash": "", "raw_intent_symbol": ""}
+
+
+def _load_lifecycle_rows(truth_root: Path, day_utc: str) -> tuple[dict[str, dict[str, Any]], str]:
+    path = intent_lifecycle_state_path(truth_root=truth_root, day_utc=day_utc)
+    payload = _read_json(path)
+    rows = payload.get("rows") if isinstance(payload.get("rows"), list) else []
+    by_engine: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for key in (str(row.get("engine_id") or "").strip(), str(row.get("sleeve_id") or "").strip()):
+            if key:
+                by_engine[key] = row
+    return by_engine, str(path)
+
+
+def _merge_lifecycle(outcome: dict[str, Any], lifecycle_by_engine: dict[str, dict[str, Any]], lifecycle_path: str) -> dict[str, Any]:
+    sleeve_id = str(outcome.get("sleeve_id") or outcome.get("engine_id") or "").strip()
+    engine_id = str(outcome.get("engine_id") or sleeve_id).strip()
+    lifecycle = lifecycle_by_engine.get(engine_id) or lifecycle_by_engine.get(sleeve_id)
+    if not lifecycle:
+        return outcome
+    merged = dict(outcome)
+    for source_key, target_key in (
+        ("lifecycle_decision", "lifecycle_decision"),
+        ("lifecycle_reason_codes", "lifecycle_reason_codes"),
+        ("reentry_eligible", "reentry_eligible"),
+        ("unchanged_signal", "unchanged_signal"),
+        ("matching_position_state", "position_match_status"),
+        ("matching_order_state", "order_match_status"),
+        ("symbol", "intent_symbol"),
+        ("exposure_type", "exposure_type"),
+    ):
+        if source_key in lifecycle:
+            merged[target_key] = lifecycle.get(source_key)
+    merged["lifecycle_state_path"] = lifecycle_path
+    return merged
 
 
 def _raw_status(outcome: dict[str, Any], intent: dict[str, str]) -> str:
@@ -219,11 +257,13 @@ def build_portfolio_activation_gate_v1(
     rollup_path = Path(source_rollup_path).resolve() if source_rollup_path is not None else _latest_scan_rollup_path(truth_root, day_utc)
     rollup = _read_json(rollup_path)
     outcomes = rollup.get("outcomes") if isinstance(rollup.get("outcomes"), list) else rollup.get("sleeve_outcomes", [])
+    lifecycle_by_engine, lifecycle_path = _load_lifecycle_rows(truth_root, day_utc)
     decisions: list[dict[str, Any]] = []
     raw_signals: list[dict[str, Any]] = []
     for outcome in outcomes if isinstance(outcomes, list) else []:
         if not isinstance(outcome, dict):
             continue
+        outcome = _merge_lifecycle(outcome, lifecycle_by_engine, lifecycle_path)
         sleeve_id = str(outcome.get("sleeve_id") or outcome.get("engine_id") or "")
         intent = _intent_from_outcome(outcome)
         raw_status = _raw_status(outcome, intent)
@@ -287,6 +327,7 @@ def build_portfolio_activation_gate_v1(
         "canonical_blocker": "",
         "portfolio_state_snapshot_path": str(state.get("artifact_path") or state_path),
         "source_rollup_path": str(rollup_path),
+        "intent_lifecycle_state_path": lifecycle_path,
         "raw_sleeve_signals": raw_signals,
         "decisions": decisions,
         "approved_executable_intents": [row for row in allowed if str(row.get("raw_intent_id") or "")],

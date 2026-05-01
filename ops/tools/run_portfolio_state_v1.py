@@ -19,6 +19,10 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     resolve_fact_plane_truth_root_v1,
     resolve_paper_intent_truth_root_v1,
 )
+from constellation_2.common.trading_day_readiness_authority_v1 import (
+    PREOPEN_MODES,
+    read_or_evaluate_trading_day_readiness_authority_v1,
+)
 
 PAPER_MODE = "PAPER"
 REGIMES = {"TREND", "CHOPPY", "CRISIS", "DISPERSION", "VOL_SHOCK", "UNKNOWN"}
@@ -248,6 +252,14 @@ def build_portfolio_state_v1(*, day_utc: str, truth_root: Path, environment: str
     truth_root = Path(truth_root).resolve()
     environment = str(environment or PAPER_MODE).strip().upper()
     sleeve_truth_root = resolve_paper_intent_truth_root_v1(truth_root=truth_root, repo_root=REPO_ROOT) if environment == PAPER_MODE else truth_root
+    readiness_path, readiness = read_or_evaluate_trading_day_readiness_authority_v1(
+        target_day=day_utc,
+        truth_root=truth_root,
+        execution_root=sleeve_truth_root,
+        environment=environment,
+    )
+    readiness_mode = str(readiness.get("readiness_mode") or "").strip().upper()
+    preopen_mode = readiness_mode in PREOPEN_MODES
     symbols = ["DBC", "GLD", "HYG", "IEF", "IWM", "LQD", "QQQ", "SPY", "TLT", "UUP"]
     market, market_inputs, market_missing = _market_metrics(market_root=truth_root, day_utc=day_utc, symbols=symbols)
 
@@ -263,7 +275,10 @@ def build_portfolio_state_v1(*, day_utc: str, truth_root: Path, environment: str
     missing_inputs: list[str] = []
     degraded_inputs: list[str] = []
     bootstrap_inputs: list[str] = []
-    if not regime_payload:
+    mode_not_required_inputs: list[str] = []
+    if not regime_payload and preopen_mode:
+        mode_not_required_inputs.append("regime_snapshot_v2:PREOPEN_INPUTS_NOT_REQUIRED")
+    elif not regime_payload:
         missing_inputs.append("regime_snapshot_v2")
     if not corr_payload:
         missing_inputs.append("engine_correlation_matrix")
@@ -297,6 +312,9 @@ def build_portfolio_state_v1(*, day_utc: str, truth_root: Path, environment: str
         "correlation_regime": correlation_regime,
         "correlation_input_status": corr_input_status,
         "correlation_bootstrap_policy_status": (corr_payload.get("bootstrap_policy") if isinstance(corr_payload.get("bootstrap_policy"), dict) else {}).get("status", ""),
+        "readiness_authority_path": str(readiness_path),
+        "readiness_mode": readiness_mode,
+        "evidence_policy_used": readiness.get("evidence_policy") if isinstance(readiness.get("evidence_policy"), dict) else {},
         "dispersion_regime": market["dispersion_regime"],
         "equity_beta_state": market["equity_beta_state"],
         "max_pairwise_corr": max_corr,
@@ -308,6 +326,7 @@ def build_portfolio_state_v1(*, day_utc: str, truth_root: Path, environment: str
         "missing_inputs": sorted(set(missing_inputs)),
         "degraded_inputs": sorted(set(degraded_inputs)),
         "bootstrap_inputs": sorted(set(bootstrap_inputs)),
+        "mode_not_required_inputs": sorted(set(mode_not_required_inputs)),
         "derived_metrics": {k: v for k, v in market.items() if k not in {"trend_strength", "volatility_regime", "dispersion_regime", "equity_beta_state"}},
         "produced_at_utc": _now_iso(),
         "producer": "ops/tools/run_portfolio_state_v1.py",

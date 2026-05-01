@@ -18,7 +18,11 @@
     "required_inputs",
     "artifact_results",
     "blocker_chain",
-    "source_refs"
+    "source_refs",
+    "readiness_authority_path",
+    "readiness_mode",
+    "evidence_policy_used",
+    "symbol_diagnostics"
   ],
   "properties": {
     "schema_id": { "const": "paper_startup_intent_input_convergence_v1" },
@@ -87,6 +91,27 @@
     "source_refs": {
       "type": "array",
       "items": { "type": "object" }
+    },
+    "readiness_authority_path": { "type": "string" },
+    "readiness_mode": { "type": "string" },
+    "evidence_policy_used": { "type": "object" },
+    "symbol_diagnostics": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "selected_intent_symbol",
+        "required_options_symbol",
+        "options_snapshot_symbol",
+        "symbol_source",
+        "stale_default_symbol_detected"
+      ],
+      "properties": {
+        "selected_intent_symbol": { "type": "string" },
+        "required_options_symbol": { "type": "string" },
+        "options_snapshot_symbol": { "type": "string" },
+        "symbol_source": { "type": "string" },
+        "stale_default_symbol_detected": { "type": "boolean" }
+      }
     }
   }
 }

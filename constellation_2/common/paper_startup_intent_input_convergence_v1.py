@@ -59,6 +59,10 @@ def derive_paper_startup_intent_input_convergence_payload_v1(
     artifact_results: List[Dict[str, Any]],
     source_refs: List[Dict[str, Any]],
     blocker_chain: List[Dict[str, str]] | None = None,
+    readiness_authority_path: str = "",
+    readiness_mode: str = "",
+    evidence_policy_used: Dict[str, Any] | None = None,
+    symbol_diagnostics: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     blocker_rows = blocker_chain or _normalize_blocker_chain(artifact_results)
     convergence_status = "SUCCESS" if not blocker_rows else "BLOCKED"
@@ -77,6 +81,10 @@ def derive_paper_startup_intent_input_convergence_payload_v1(
         "artifact_results": artifact_results,
         "blocker_chain": blocker_rows,
         "source_refs": source_refs,
+        "readiness_authority_path": str(readiness_authority_path or ""),
+        "readiness_mode": str(readiness_mode or "").strip().upper(),
+        "evidence_policy_used": evidence_policy_used if isinstance(evidence_policy_used, dict) else {},
+        "symbol_diagnostics": symbol_diagnostics if isinstance(symbol_diagnostics, dict) else {},
     }
 
 

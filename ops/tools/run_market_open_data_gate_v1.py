@@ -43,6 +43,7 @@ ALLOWED_BLOCKERS = {
     "OPTIONS_DELAYED_QUOTES_NOT_RETURNED_BY_IB",
     "OPTIONS_MARKET_DATA_PERMISSION_DENIED",
     "OPTIONS_FRESHNESS_CERTIFICATE_MISSING",
+    "OPTIONS_SNAPSHOT_SYMBOL_MISMATCH",
 }
 
 
@@ -208,6 +209,7 @@ def _validate_current_snapshot(ctx: bod.BodContext, instrument: str, now_utc: da
         "snapshot_age_seconds": _snapshot_age_seconds(snapshot, now_utc) if snapshot else None,
         "quote_count": 0,
         "blocker": "",
+        "options_snapshot_symbol": "",
     }
     if snapshot_path is None or not snapshot:
         result["blocker"] = "OPTIONS_SNAPSHOT_STALE"
@@ -217,7 +219,9 @@ def _validate_current_snapshot(ctx: bod.BodContext, instrument: str, now_utc: da
         result["blocker"] = "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
         return result
     underlying = snapshot.get("underlying") if isinstance(snapshot.get("underlying"), dict) else {}
-    if str(underlying.get("symbol") or snapshot.get("symbol") or "").strip().upper() != instrument.upper():
+    observed_symbol = str(underlying.get("symbol") or snapshot.get("symbol") or "").strip().upper()
+    result["options_snapshot_symbol"] = observed_symbol
+    if observed_symbol != instrument.upper():
         result["blocker"] = "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
         return result
     if underlying.get("spot_price") in (None, "") and underlying.get("spot") in (None, "") and snapshot.get("spot_price") in (None, ""):
@@ -262,6 +266,15 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
         environment=ctx.environment,
     )
     readiness_mode = str(readiness.get("readiness_mode") or "").strip().upper()
+    selected_intent_status, selected_instrument = _selected_intent_state(ctx)
+    symbol_diagnostics: dict[str, Any] = {
+        "selected_intent_status": selected_intent_status,
+        "selected_intent_symbol": selected_instrument,
+        "required_options_symbol": selected_instrument if bool(readiness.get("requires_same_day_options_snapshot") is True) else "",
+        "options_snapshot_symbol": "",
+        "symbol_source": "SELECTED_INTENT" if selected_instrument else "NONE",
+        "stale_default_symbol_detected": False,
+    }
     if not bool(readiness.get("requires_same_day_options_snapshot") is True):
         status = "PASS" if readiness_mode in {"AFTER_HOURS_CLOSURE", "HISTORICAL_REPLAY"} else "PENDING"
         blocker = "" if status == "PASS" else "MARKET_NOT_OPEN"
@@ -286,10 +299,10 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
             "snapshot_age_seconds": None,
             "capture_attempted_by_gate": False,
             "capture_result": {},
+            **symbol_diagnostics,
             "operator_next_action": str(readiness.get("operator_next_action") or ""),
         }
     session_state = _market_session_state()
-    selected_intent_status, selected_instrument = _selected_intent_state(ctx)
     supply_path = market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     command_result: dict[str, Any] = {}
     capture_result: dict[str, Any] = {}
@@ -317,7 +330,15 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
     else:
         command_result = _run_market_data_supply(ctx)
         supply = _read_json(supply_path)
-        instrument = _root_instrument(supply) or selected_instrument
+        supply_instrument = _root_instrument(supply)
+        if selected_instrument:
+            instrument = selected_instrument
+            if supply_instrument and supply_instrument != selected_instrument:
+                symbol_diagnostics["stale_default_symbol_detected"] = True
+        else:
+            instrument = supply_instrument
+            symbol_diagnostics["symbol_source"] = "MARKET_DATA_SUPPLY" if supply_instrument else "NONE"
+        symbol_diagnostics["required_options_symbol"] = instrument
         if not instrument:
             status = "BLOCKED"
             blocker = "SELECTED_INTENT_SYMBOL_MISSING"
@@ -344,11 +365,15 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
                 "snapshot_age_seconds": None,
                 "capture_attempted_by_gate": False,
                 "capture_result": {},
+                **symbol_diagnostics,
                 "operator_next_action": action,
             }
         snapshot_validation = _validate_current_snapshot(ctx, instrument, now_utc)
+        symbol_diagnostics["options_snapshot_symbol"] = str(snapshot_validation.get("options_snapshot_symbol") or "")
         supply_status = str(supply.get("status") or "").strip().upper()
         blocker = _blocker_from_supply(supply) or str(snapshot_validation.get("blocker") or "").strip()
+        if symbol_diagnostics["stale_default_symbol_detected"] and blocker in {"", "OPTIONS_SNAPSHOT_STALE"}:
+            blocker = "OPTIONS_SNAPSHOT_SYMBOL_MISMATCH"
         if blocker in REFRESHABLE_BLOCKERS:
             capture_attempted = True
             capture_result = _run_capture(ctx, instrument)
@@ -360,7 +385,10 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
             supply = _read_json(supply_path)
             supply_status = str(supply.get("status") or "").strip().upper()
             snapshot_validation = _validate_current_snapshot(ctx, instrument, datetime.now(UTC))
+            symbol_diagnostics["options_snapshot_symbol"] = str(snapshot_validation.get("options_snapshot_symbol") or "")
             blocker = _blocker_from_supply(supply) or str(snapshot_validation.get("blocker") or "").strip()
+            if symbol_diagnostics["stale_default_symbol_detected"] and blocker in {"", "OPTIONS_SNAPSHOT_STALE"}:
+                blocker = "OPTIONS_SNAPSHOT_SYMBOL_MISMATCH"
             if capture_result.get("status") != "PASS" and blocker in {"", "OPTIONS_SNAPSHOT_STALE", "OPTIONS_SNAPSHOT_CAPTURE_FAILED"}:
                 blocker = str(capture_result.get("blocker") or "") or "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
         if blocker == "OPTIONS_QUOTES_MISSING":
@@ -392,6 +420,7 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
         "snapshot_age_seconds": snapshot_validation.get("snapshot_age_seconds"),
         "capture_attempted_by_gate": capture_attempted,
         "capture_result": capture_result,
+        **symbol_diagnostics,
         "operator_next_action": action,
     }
 

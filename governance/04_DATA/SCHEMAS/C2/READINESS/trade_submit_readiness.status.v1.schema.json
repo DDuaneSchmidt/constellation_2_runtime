@@ -20,6 +20,8 @@
     "constitutional_dependency_declaration",
     "constitutional_lineage",
     "economic_state",
+    "trading_day_readiness",
+    "safety_state_authority",
     "session_authority_attestation",
     "run_state_authority_attestation"
   ],
@@ -110,6 +112,50 @@
           "type": "array",
           "items": { "type": "string" }
         }
+      }
+    },
+    "trading_day_readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "readiness_mode",
+        "submit_allowed_by_mode",
+        "requires_live_account_truth",
+        "requires_same_day_broker_event_log",
+        "requires_same_day_options_snapshot",
+        "canonical_blocker",
+        "evidence_policy_used"
+      ],
+      "properties": {
+        "path": { "type": "string" },
+        "readiness_mode": { "type": "string" },
+        "submit_allowed_by_mode": { "type": "boolean" },
+        "requires_live_account_truth": { "type": "boolean" },
+        "requires_same_day_broker_event_log": { "type": "boolean" },
+        "requires_same_day_options_snapshot": { "type": "boolean" },
+        "canonical_blocker": { "type": "string" },
+        "evidence_policy_used": { "type": "object" }
+      }
+    },
+    "safety_state_authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "status",
+        "canonical_blocker",
+        "drawdown_pct",
+        "drawdown_status",
+        "nav_valid"
+      ],
+      "properties": {
+        "path": { "type": "string" },
+        "status": { "type": "string" },
+        "canonical_blocker": { "type": "string" },
+        "drawdown_pct": { "type": ["string", "number", "null"] },
+        "drawdown_status": { "type": "string" },
+        "nav_valid": { "type": "boolean" }
       }
     },
     "session_authority_attestation": {

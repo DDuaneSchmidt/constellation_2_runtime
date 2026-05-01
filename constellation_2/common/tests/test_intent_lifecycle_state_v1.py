@@ -162,6 +162,24 @@ def test_stale_position_snapshot_blocks_reentry(tmp_path: Path) -> None:
     assert "POSITION_STATE_STALE" in row["lifecycle_reason_codes"]
 
 
+def test_preopen_unknown_signal_is_data_dependent_not_blocked(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("C2_TRADING_DAY_READINESS_NOW_UTC", "2026-04-30T12:00:00Z")
+    truth = tmp_path / "truth"
+    outcome = _outcome("C2_DEFENSIVE_TAIL_V1", "TLT", status="BLOCKED", exposure_type="TAIL_HEDGE")
+    row = build_intent_lifecycle_state_v1(
+        day_utc="2026-05-01",
+        truth_root=truth,
+        environment="PAPER",
+        intent_truth_root=truth,
+        outcomes=[outcome],
+        previous_by_engine={},
+    )["rows"][0]
+
+    assert row["signal_state"] == "UNKNOWN"
+    assert row["lifecycle_decision"] == "NO_INTENT"
+    assert row["lifecycle_reason_codes"] == ["PREOPEN_INPUTS_NOT_REQUIRED"]
+
+
 def test_unknown_sleeve_attribution_is_uncertain_not_suppressed(tmp_path: Path) -> None:
     truth = tmp_path / "truth"
     _positions(truth, "2026-04-30", [{"symbol": "SPY", "quantity": 10, "exposure_type": "LONG_EQUITY"}])
@@ -239,6 +257,51 @@ def test_only_lifecycle_created_reentry_flows_to_gate_scoring_and_arbitration(tm
     assert [row["sleeve_id"] for row in scoring["rankings"] if row["executable_eligible"]] == ["C2_TREND_EQ_PRIMARY_V1"]
     assert arbitration["selected_intent"]["sleeve_id"] == "C2_TREND_EQ_PRIMARY_V1"
     assert {row["sleeve_id"] for row in arbitration["raw_candidate_intents"]} == {"C2_TREND_EQ_PRIMARY_V1"}
+
+
+def test_portfolio_gate_consumes_canonical_lifecycle_overlay(tmp_path: Path) -> None:
+    day = "2026-04-30"
+    truth = tmp_path / "truth"
+    _state(truth, day)
+    stale_blocked = _outcome("C2_DEFENSIVE_TAIL_V1", "TLT", status="BLOCKED", exposure_type="TAIL_HEDGE")
+    stale_blocked.update(
+        {
+            "lifecycle_decision": "BLOCKED",
+            "lifecycle_reason_codes": ["SIGNAL_STATE_UNKNOWN"],
+            "lifecycle_state_path": "",
+        }
+    )
+    lifecycle_path = intent_lifecycle_state_path(truth_root=truth, day_utc=day)
+    _write_json(
+        lifecycle_path,
+        {
+            "schema_id": "intent_lifecycle_state",
+            "day_utc": day,
+            "rows": [
+                {
+                    "sleeve_id": "C2_DEFENSIVE_TAIL_V1",
+                    "engine_id": "C2_DEFENSIVE_TAIL_V1",
+                    "symbol": "TLT",
+                    "exposure_type": "TAIL_HEDGE",
+                    "lifecycle_decision": "NO_INTENT",
+                    "lifecycle_reason_codes": ["PREOPEN_INPUTS_NOT_REQUIRED"],
+                    "matching_position_state": "NO_POSITION",
+                    "matching_order_state": "NO_ORDER",
+                    "reentry_eligible": False,
+                    "unchanged_signal": False,
+                }
+            ],
+        },
+    )
+    rollup = tmp_path / "rollup.json"
+    _write_json(rollup, {"schema_id": "sleeve_scan_session", "day_utc": day, "status": "PASS", "outcomes": [stale_blocked]})
+
+    gate = build_portfolio_activation_gate_v1(day_utc=day, truth_root=truth, source_rollup_path=rollup)
+    defensive = gate["decisions"][0]
+
+    assert defensive["portfolio_gate_decision"] == "SUPPRESS"
+    assert defensive["lifecycle_reason_codes"] == ["PREOPEN_INPUTS_NOT_REQUIRED"]
+    assert defensive["lifecycle_state_path"] == str(lifecycle_path)
 
 
 def test_decision_ledger_records_lifecycle_path_and_counts(tmp_path: Path) -> None:

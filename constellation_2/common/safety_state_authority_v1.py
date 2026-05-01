@@ -231,6 +231,8 @@ def _operator_action(canonical_blocker: str) -> str:
         return "Regenerate or repair capital_risk_envelope_v2 from governed capital/NAV inputs, then rerun safety and submit boundary."
     if canonical_blocker == "TRADE_SUBMIT_READINESS_BLOCKED":
         return "Resolve trade_submit_readiness_c2_v1 blockers, then rerun safety_state_authority_v1 and submit_boundary_status_v1."
+    if canonical_blocker == "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE":
+        return "Submit is not allowed in the current trading-day readiness mode; rerun during an admissible intraday submit window."
     if canonical_blocker == "SAFETY_INPUTS_DEGRADED":
         return "Regenerate stale or missing governed safety inputs, then rerun safety_state_authority_v1 and submit_boundary_status_v1."
     if canonical_blocker.endswith("_MISSING"):
@@ -401,6 +403,8 @@ def evaluate_safety_state_authority_v1(
     if (readiness or {}).get("submit_allowed") is False:
         readiness_ok = False
     readiness_codes = _normalize_codes((readiness or {}).get("reason_codes") or (readiness or {}).get("reasons"))
+    day_readiness_mode_blocks_submit = bool(day_readiness.get("submit_allowed_by_mode") is not True)
+    readiness_blocked_by_mode = any("SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE" in code for code in readiness_codes)
 
     hard_blockers: list[str] = []
     if not nav_valid:
@@ -418,7 +422,10 @@ def evaluate_safety_state_authority_v1(
     if readiness is None:
         hard_blockers.append("TRADE_SUBMIT_READINESS_MISSING")
     elif not readiness_ok:
-        hard_blockers.append("TRADE_SUBMIT_READINESS_BLOCKED")
+        if day_readiness_mode_blocks_submit and readiness_blocked_by_mode:
+            hard_blockers.append("SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE")
+        else:
+            hard_blockers.append("TRADE_SUBMIT_READINESS_BLOCKED")
 
     priority = [
         "NAV_INVALID",
@@ -427,6 +434,7 @@ def evaluate_safety_state_authority_v1(
         "GLOBAL_KILL_SWITCH_STATE_MISSING",
         "CAPITAL_RISK_ENVELOPE_NOT_PASS",
         "CAPITAL_RISK_ENVELOPE_MISSING",
+        "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE",
         "TRADE_SUBMIT_READINESS_BLOCKED",
         "TRADE_SUBMIT_READINESS_MISSING",
     ]

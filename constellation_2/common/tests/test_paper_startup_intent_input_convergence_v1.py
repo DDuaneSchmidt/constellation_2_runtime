@@ -76,3 +76,39 @@ def test_intent_input_convergence_succeeds_when_required_inputs_present(tmp_path
     )
     assert payload["convergence_status"] == "SUCCESS"
     assert payload["blocker_chain"] == []
+
+
+def test_intent_input_convergence_records_readiness_mode_and_symbol_diagnostics(tmp_path: Path) -> None:
+    payload = derive_paper_startup_intent_input_convergence_payload_v1(
+        truth_root=tmp_path,
+        target_day=DAY,
+        sleeve_id="PRIMARY",
+        environment="PAPER",
+        ib_account="DU1234567",
+        sleeve_truth_root=tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER",
+        required_inputs=["positions_snapshot_v1"],
+        artifact_results=[
+            _row("positions_snapshot_v1", ready=True, observed_status="OK"),
+            {
+                **_row("market_data_snapshot_v1", ready=True, observed_status="PREOPEN_FUTURE_MARKET_DATA_FORBIDDEN"),
+                "required": False,
+                "reason_codes": ["PREOPEN_FUTURE_MARKET_DATA_FORBIDDEN"],
+            },
+        ],
+        source_refs=[],
+        readiness_authority_path="/tmp/trading_day_readiness_authority.v1.json",
+        readiness_mode="PREOPEN_BUILD",
+        evidence_policy_used={"options_snapshot": "FORBIDDEN_FUTURE_DATA"},
+        symbol_diagnostics={
+            "selected_intent_symbol": "",
+            "required_options_symbol": "",
+            "options_snapshot_symbol": "",
+            "symbol_source": "PREOPEN_NOT_REQUIRED",
+            "stale_default_symbol_detected": False,
+        },
+    )
+
+    assert payload["convergence_status"] == "SUCCESS"
+    assert payload["readiness_mode"] == "PREOPEN_BUILD"
+    assert payload["symbol_diagnostics"]["symbol_source"] == "PREOPEN_NOT_REQUIRED"
+    assert payload["symbol_diagnostics"]["stale_default_symbol_detected"] is False
