@@ -19,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
 from constellation_2.common.runtime_contract_v1 import resolve_runtime_data_root
 from ops.tools import run_aegis_bod_prepare_v1 as bod
+from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
 from ops.tools.run_decision_ledger_v1 import build_decision_ledger_v1
 
 SCHEMA_VERSION = "aegis_day_run.v1"
@@ -466,8 +467,24 @@ def _phase_session_authority(ctx: PhaseContext, env: dict[str, str]) -> dict[str
 def _phase_market_data_bod_prep(ctx: PhaseContext, env: dict[str, str]) -> dict[str, Any]:
     py = sys.executable
     started = _now_iso()
+    graph_cmd = [py, "ops/tools/run_aegis_requirement_graph_v1.py", "--day_utc", ctx.day_utc, "--environment", ctx.environment]
+    graph_started = time.perf_counter()
+    graph_proc = subprocess.run(graph_cmd, cwd=str(REPO_ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env, check=False)
+    graph_step = {
+        "step_name": "requirement_graph",
+        "status": "PASS" if graph_proc.returncode == 0 else "DIAGNOSTIC_ONLY",
+        "blocker": "",
+        "artifact_path": str(_requirement_graph_path(ctx)),
+        "duration_ms": int((time.perf_counter() - graph_started) * 1000),
+        "stdout_summary": str(graph_proc.stdout or "").strip()[-1200:],
+        "stderr_summary": str(graph_proc.stderr or "").strip()[-1200:],
+        "exit_code": int(graph_proc.returncode),
+        "blocking_class": "DIAGNOSTIC_ONLY",
+    }
     commands = [("market_data_supply", [py, "ops/tools/run_market_data_supply_v1.py", "--day_utc", ctx.day_utc, "--environment", ctx.environment], 1)]
     steps, outputs, blockers = _run_steps("MARKET_DATA_BOD_PREP", commands, env=env)
+    steps.insert(0, graph_step)
+    outputs.insert(0, str(_requirement_graph_path(ctx)))
     supply_path = _market_data_supply_path(ctx)
     supply = _read_json(supply_path)
     supply_status = str(supply.get("status") or "").strip().upper()
@@ -496,7 +513,7 @@ def _phase_market_data_bod_prep(ctx: PhaseContext, env: dict[str, str]) -> dict[
         canonical_blocker="" if phase_status == "PASS" else (blocker or "MARKET_DATA_AUTHORITY_BLOCKED"),
         blocker_detail=blocker_detail,
         inputs=[str(_requirement_graph_path(ctx))],
-        outputs=outputs or [str(supply_path)],
+        outputs=outputs or [str(_requirement_graph_path(ctx)), str(supply_path)],
         downstream_consequences=[blocker] if phase_status == "PASS" and blocker in MARKET_OPEN_DATA_GATE_BLOCKERS else [],
         producer_command="run market data supply",
         started_at_utc=started,
@@ -947,6 +964,19 @@ def run_aegis_day_v1(day_utc: str, environment: str, truth_root: str = "") -> tu
         aegis_day_payload=payload,
     )
     payload["decision_ledger_path"] = str(decision_ledger.get("artifact_path") or "")
+    phase_outputs: list[str] = []
+    for row in payload.get("phase_results", {}).values():
+        if isinstance(row, dict):
+            phase_outputs.extend(str(item) for item in row.get("outputs", []) if str(item or "").strip())
+            phase_outputs.extend(str(item) for item in row.get("inputs", []) if str(item or "").strip())
+    attach_producer_contract_v1(
+        payload,
+        producer_name="ops/tools/run_aegis_day_v1.py",
+        producer_command=f"python3 ops/tools/run_aegis_day_v1.py --day_utc {ctx.day_utc} --environment {ctx.environment}",
+        input_artifacts=phase_outputs,
+        output_artifacts=[path],
+        schema_versions={"aegis_day_run": SCHEMA_VERSION},
+    )
     _write_json(path, payload)
     return path, payload
 

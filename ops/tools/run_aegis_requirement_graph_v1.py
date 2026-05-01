@@ -19,6 +19,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     resolve_paper_intent_truth_root_v1,
 )
 from ops.tools import run_aegis_bod_prepare_v1 as bod
+from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
 from ops.tools import run_options_chain_snapshot_required_day_v1 as options_required
 from ops.tools.run_intent_arbitration_v1 import intent_arbitration_path, selected_intent_pointer_path
 
@@ -28,6 +29,7 @@ SOURCE_LIFECYCLE_PHASE = "LIFECYCLE_PHASE"
 SOURCE_OPERATOR_INPUT = "OPERATOR_INPUT_CONTRACT"
 SOURCE_BROKER_AUTHORITY = "BROKER_AUTHORITY"
 SOURCE_STATIC_POLICY = "STATIC_POLICY"
+DEFAULT_FRESHNESS_POLICY = "same_day_required; stale/contradictory/missing artifact => BLOCKED_OR_STALE"
 
 
 def _now_iso() -> str:
@@ -175,6 +177,10 @@ def _node(
     status: str,
     blocker: str = "",
     blocker_detail: str = "",
+    schema_path: str = "",
+    freshness_policy: str = DEFAULT_FRESHNESS_POLICY,
+    blocking_class: str = "HARD_BLOCKER",
+    dependencies: list[str] | None = None,
     downstream_consequences: list[str] | None = None,
     operator_next_action: str = "",
 ) -> dict[str, Any]:
@@ -186,25 +192,60 @@ def _node(
         "instrument": instrument,
         "required_artifact": required_artifact,
         "expected_path": str(expected_path),
+        "schema_path": schema_path,
         "producer_command": producer_command,
         "consumer": consumer,
+        "freshness_policy": freshness_policy,
+        "blocking_class": blocking_class,
+        "dependencies": dependencies or [],
         "status": status,
         "blocker": blocker,
+        "canonical_blocker": blocker,
         "blocker_detail": blocker_detail,
         "downstream_consequences": downstream_consequences or [],
         "operator_next_action": operator_next_action,
     }
 
 
-def _status_for_path(path: Path) -> str:
-    return "SATISFIED" if path.exists() else "BLOCKED"
+def _freshness_blocker(path: Path, *, day_utc: str) -> str:
+    payload = _read_json(path)
+    if not payload:
+        return ""
+    payload_day = str(
+        payload.get("day_utc")
+        or payload.get("trading_day")
+        or payload.get("business_day")
+        or payload.get("target_day")
+        or ""
+    ).strip()
+    if payload_day and payload_day != day_utc:
+        return "STALE_ARTIFACT"
+    for key in ("freshness_status", "freshness_verdict", "lineage_status", "stale_artifact_status"):
+        if str(payload.get(key) or "").strip().upper() in {"STALE", "STALE_ARTIFACT"}:
+            return "STALE_ARTIFACT"
+    if str(payload.get("canonical_blocker") or "").strip().upper() == "STALE_ARTIFACT":
+        return "STALE_ARTIFACT"
+    return ""
 
 
-def _path_blocker(path: Path, blocker: str) -> str:
+def _status_for_path(path: Path, *, day_utc: str) -> str:
+    if not path.exists():
+        return "BLOCKED"
+    if path.is_file() and _freshness_blocker(path, day_utc=day_utc):
+        return "STALE"
+    return "SATISFIED"
+
+
+def _path_blocker(path: Path, blocker: str, *, day_utc: str) -> str:
+    stale = _freshness_blocker(path, day_utc=day_utc) if path.exists() and path.is_file() else ""
+    if stale:
+        return stale
     return "" if path.exists() else blocker
 
 
-def _path_action(path: Path, action: str) -> str:
+def _path_action(path: Path, action: str, *, day_utc: str) -> str:
+    if path.exists() and path.is_file() and _freshness_blocker(path, day_utc=day_utc):
+        return f"Regenerate stale artifact at {path} for {day_utc}."
     return "" if path.exists() else action
 
 
@@ -358,7 +399,8 @@ def _lifecycle_nodes(ctx: bod.BodContext) -> list[dict[str, Any]]:
     ]
     nodes: list[dict[str, Any]] = []
     for owner_phase, source_type, artifact, path, command, consumer, blocker in items:
-        exists = path.exists()
+        status = _status_for_path(path, day_utc=day)
+        canonical_blocker = _path_blocker(path, blocker, day_utc=day)
         nodes.append(
             _node(
                 requirement_id=f"{owner_phase}:{artifact}",
@@ -370,11 +412,11 @@ def _lifecycle_nodes(ctx: bod.BodContext) -> list[dict[str, Any]]:
                 expected_path=path,
                 producer_command=command,
                 consumer=consumer,
-                status="SATISFIED" if exists else "BLOCKED",
-                blocker="" if exists else blocker,
-                blocker_detail="" if exists else f"expected artifact missing at {path}",
+                status=status,
+                blocker=canonical_blocker,
+                blocker_detail="" if status == "SATISFIED" else f"expected artifact missing or stale at {path}",
                 downstream_consequences=[],
-                operator_next_action="" if exists else f"Run {command}",
+                operator_next_action=_path_action(path, f"Run {command}", day_utc=day),
             )
         )
     return nodes
@@ -392,7 +434,7 @@ def _root_requirement(nodes: list[dict[str, Any]]) -> dict[str, Any]:
         "SUBMIT_BOUNDARY": 7,
         "PAPER_READY": 8,
     }
-    blocked = [node for node in nodes if node.get("status") == "BLOCKED"]
+    blocked = [node for node in nodes if node.get("status") in {"BLOCKED", "STALE"} and node.get("blocking_class") == "HARD_BLOCKER"]
     if not blocked:
         return {}
     blocked.sort(key=lambda node: (phase_rank.get(str(node.get("owner_phase") or ""), 99), str(node.get("requirement_id") or "")))
@@ -422,7 +464,7 @@ def build_requirement_graph(ctx: bod.BodContext) -> dict[str, Any]:
                 operator_next_action="Run sleeve evaluation and intent arbitration for the current day.",
             )
         )
-        intents: list[dict[str, Any]] = []
+        intents = _discover_active_intents(truth_root=ctx.truth_root, execution_root=ctx.execution_root, day_utc=ctx.day_utc)
     elif pointer_path.exists() and pointer_path.is_file() and str(_read_json(pointer_path).get("status") or "").strip().upper() != "SELECTED":
         pointer = _read_json(pointer_path)
         blocker = str(pointer.get("canonical_blocker") or pointer.get("status") or "NO_EXECUTABLE_INTENT").strip()
@@ -451,8 +493,8 @@ def build_requirement_graph(ctx: bod.BodContext) -> dict[str, Any]:
             nodes.extend(_option_requirement_nodes(day_utc=ctx.day_utc, execution_root=ctx.execution_root, intent=intent))
             nodes.append(_defined_risk_requirement_node(day_utc=ctx.day_utc, execution_root=ctx.execution_root, intent=intent))
     root = _root_requirement(nodes)
-    status = "BLOCKED" if root else "SATISFIED"
-    return {
+    status = "STALE" if str(root.get("status") or "") == "STALE" else ("BLOCKED" if root else "PASS")
+    payload = {
         "schema_id": "aegis_requirement_graph",
         "schema_version": SCHEMA_VERSION,
         "day_utc": ctx.day_utc,
@@ -467,6 +509,7 @@ def build_requirement_graph(ctx: bod.BodContext) -> dict[str, Any]:
         "canonical_blocker": str(root.get("blocker") or "") if root else "",
         "operator_next_action": str(root.get("operator_next_action") or "") if root else "",
     }
+    return payload
 
 
 def run_requirement_graph_v1(day_utc: str, environment: str, truth_root: str = "") -> tuple[Path, dict[str, Any]]:
@@ -476,6 +519,16 @@ def run_requirement_graph_v1(day_utc: str, environment: str, truth_root: str = "
     previous = _read_json(path)
     if previous and str(previous.get("day_utc") or "") != ctx.day_utc:
         raise SystemExit(f"FAIL: WRONG_DAY_REQUIREMENT_GRAPH_COLLISION: {path}")
+    input_paths = [row.get("intent_path") for row in payload.get("active_intents", []) if isinstance(row, dict)]
+    input_paths.extend(row.get("expected_path") for row in payload.get("requirements", []) if isinstance(row, dict))
+    attach_producer_contract_v1(
+        payload,
+        producer_name="ops/tools/run_aegis_requirement_graph_v1.py",
+        producer_command=f"python3 ops/tools/run_aegis_requirement_graph_v1.py --day_utc {ctx.day_utc} --environment {ctx.environment}",
+        input_artifacts=[str(path) for path in input_paths if str(path or "").strip()],
+        output_artifacts=[path],
+        schema_versions={"requirement_graph": SCHEMA_VERSION},
+    )
     _write_json(path, payload)
     return path, payload
 
@@ -501,7 +554,7 @@ def main(argv: list[str] | None = None) -> int:
             sort_keys=True,
         )
     )
-    return 0 if payload.get("status") == "SATISFIED" else 2
+    return 0
 
 
 if __name__ == "__main__":

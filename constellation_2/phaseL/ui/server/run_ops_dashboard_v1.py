@@ -435,6 +435,22 @@ def _runtime_status_projection(day_utc: Optional[str] = None) -> Dict[str, Any]:
     }
 
 
+def _operator_projection_payload(day_utc: Optional[str] = None) -> Dict[str, Any]:
+    day = _projection_day(day_utc)
+    path = _canonical_report_path("aegis_operator_projection_v1", day, "operator_projection.v1.json")
+    payload = _read_json_dict_or_empty(path)
+    if not payload:
+        return {
+            "ok": False,
+            "status": "MISSING",
+            "day_utc": day,
+            "artifact_path": str(path),
+            "operator_next_action": "Run ops/tools/run_aegis_operator_projection_v1.py for the current day.",
+            "authority_note": "Missing projection does not alter final readiness; aegis_day_run_ledger_v1 remains authoritative.",
+        }
+    return {"ok": True, "artifact_path": str(path), **payload}
+
+
 def _latest_packet_projection() -> Dict[str, Any]:
     path = _latest_packet_path()
     if not path.exists() or not path.is_file():
@@ -2596,6 +2612,10 @@ class OpsHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/readiness-kernel":
             self._send_json(HTTPStatus.OK, build_readiness_kernel_v1(requested_day))
+            return True
+
+        if path == "/api/aegis/operator-projection":
+            self._send_json(HTTPStatus.OK, _operator_projection_payload(requested_day))
             return True
 
         if path == "/api/system/actions":

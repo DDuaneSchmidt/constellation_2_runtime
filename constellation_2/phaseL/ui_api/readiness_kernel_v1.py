@@ -382,28 +382,23 @@ def _aggregation_warnings(truth_root: Path, layers: Sequence[Dict[str, Any]]) ->
 
 def _overall(layers: Sequence[Dict[str, Any]]) -> Tuple[str, str, str]:
     ledger = next((layer for layer in layers if layer.get("layer_id") == "LEDGER"), None)
-    if ledger and ledger.get("canonical_blocker") in OUT_OF_SESSION_BLOCKERS:
+    if not ledger:
+        return ("UNKNOWN", "DAY_RUN_LEDGER_MISSING", "Regenerate aegis_day_run_v1 before evaluating final readiness.")
+    ledger_status = str(ledger.get("status") or "").upper()
+    ledger_blocker = str(ledger.get("canonical_blocker") or "")
+    if ledger.get("classification") in {"MISSING_EVIDENCE", "UNKNOWN"} and not ledger.get("source_sha256"):
+        return ("UNKNOWN", ledger_blocker or "DAY_RUN_LEDGER_MISSING", str(ledger.get("next_action") or "Regenerate aegis_day_run_v1."))
+    if ledger_blocker in OUT_OF_SESSION_BLOCKERS:
         return (
             "OUT_OF_SESSION",
-            str(ledger.get("canonical_blocker") or ""),
+            ledger_blocker,
             str(ledger.get("next_action") or "Rerun readiness during the next eligible market session."),
         )
-
-    for layer in layers:
-        classification = str(layer.get("classification") or "")
-        if classification in {"POLICY_FAIL", "EXTERNAL_FAIL", "STALE_ARTIFACT"}:
-            blocker = str(layer.get("canonical_blocker") or classification)
-            return ("BLOCKED", blocker, str(layer.get("next_action") or "Resolve the canonical blocker."))
-
-    for layer in layers:
-        classification = str(layer.get("classification") or "")
-        if classification in {"MISSING_EVIDENCE", "UNKNOWN"}:
-            blocker = str(layer.get("canonical_blocker") or classification)
-            return ("UNKNOWN", blocker, str(layer.get("next_action") or "Regenerate or inspect missing source evidence."))
-
-    if ledger and str(ledger.get("status") or "").upper() in {"PAPER_READY", "READY"}:
+    if ledger_blocker or ledger_status in BLOCK_LIKE:
+        return ("BLOCKED", ledger_blocker or ledger_status or "DAY_RUN_LEDGER_NOT_READY", str(ledger.get("next_action") or "Resolve the day-run ledger blocker."))
+    if ledger_status in {"PRE_MARKET_READY", "PAPER_READY", "PAPER_READY_WITH_DELAYED_DATA", "TRADING_ACTIVE", "EOD_COMPLETE", "READY"}:
         return ("READY", "", "No operator action required.")
-    return ("NOT_READY", "", "Review direct readiness layers for the next required action.")
+    return ("NOT_READY", ledger_blocker, str(ledger.get("next_action") or "Review the day-run ledger for the next required action."))
 
 
 def build_readiness_kernel_v1(
@@ -432,6 +427,12 @@ def build_readiness_kernel_v1(
         "overall_status": overall_status,
         "canonical_blocker": canonical_blocker,
         "operator_next_action": operator_next_action,
+        "final_readiness_authority": "aegis_day_run_ledger_v1",
+        "supporting_evidence_only_layers": [
+            layer.get("layer_id")
+            for layer in layers
+            if layer.get("layer_id") != "LEDGER"
+        ],
         "layers": layers,
         "warnings": _aggregation_warnings(root, layers),
     }

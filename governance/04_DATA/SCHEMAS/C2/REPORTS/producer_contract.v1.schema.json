@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://constellation/governance/04_DATA/SCHEMAS/C2/REPORTS/producer_contract.v1.schema.json",
+  "title": "producer_contract.v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "producer_name",
+    "producer_command",
+    "code_version_git_commit",
+    "source_dirty_status",
+    "runtime_contract_path",
+    "input_artifacts",
+    "output_artifacts",
+    "schema_versions",
+    "generated_at_utc",
+    "deterministic_fingerprint"
+  ],
+  "properties": {
+    "schema_version": { "const": "producer_contract.v1" },
+    "producer_name": { "type": "string", "minLength": 1 },
+    "producer_command": { "type": "string", "minLength": 1 },
+    "code_version_git_commit": { "type": "string" },
+    "source_dirty_status": { "type": "string", "enum": ["CLEAN", "DIRTY"] },
+    "runtime_contract_path": { "type": "string", "minLength": 1 },
+    "input_artifacts": { "type": "array" },
+    "output_artifacts": { "type": "array" },
+    "schema_versions": { "type": "object" },
+    "generated_at_utc": { "type": "string", "minLength": 1 },
+    "deterministic_fingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

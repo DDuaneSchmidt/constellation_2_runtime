@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 import ops.tools.aegis_chatgpt_packet as packet  # noqa: E402
 import ops.tools.run_aegis_day_v1 as day_run  # noqa: E402
 import ops.tools.run_aegis_requirement_graph_v1 as graph  # noqa: E402
+from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1  # noqa: E402
 from ops.tools import run_aegis_bod_prepare_v1 as bod  # noqa: E402
 
 
@@ -121,6 +122,11 @@ def test_missing_options_snapshot_points_to_active_intent_source(tmp_path: Path)
     assert snapshot["status"] == "BLOCKED"
     assert snapshot["source_id"] == "intent_spy_2026-04-29"
     assert snapshot["blocker"] == "OPTIONS_CHAIN_SNAPSHOT_MISSING"
+    assert snapshot["canonical_blocker"] == "OPTIONS_CHAIN_SNAPSHOT_MISSING"
+    assert snapshot["schema_path"] == ""
+    assert snapshot["freshness_policy"]
+    assert snapshot["blocking_class"] == "HARD_BLOCKER"
+    assert snapshot["dependencies"] == []
 
 
 def test_ib_permission_failure_maps_to_operator_action(tmp_path: Path) -> None:
@@ -309,3 +315,44 @@ def test_requirement_graph_generation_writes_only_runtime_artifact(tmp_path: Pat
     assert path.exists()
     assert str(path).startswith(str(ctx.truth_root))
     assert not str(path).startswith(str(REPO_ROOT))
+
+
+def test_present_lifecycle_requirement_passes(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    target = ctx.truth_root / "reports" / "market_data_authority_v1" / ctx.day_utc / "market_data_authority.v1.json"
+    target.parent.mkdir(parents=True)
+    target.write_text(json.dumps({"day_utc": ctx.day_utc, "status": "PASS"}), encoding="utf-8")
+
+    payload = graph.build_requirement_graph(ctx)
+    node = next(row for row in payload["requirements"] if row["source_id"] == "MARKET_DATA")
+
+    assert node["status"] == "SATISFIED"
+    assert node["canonical_blocker"] == ""
+
+
+def test_stale_lifecycle_requirement_is_explicit(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    target = ctx.truth_root / "reports" / "market_data_authority_v1" / ctx.day_utc / "market_data_authority.v1.json"
+    target.parent.mkdir(parents=True)
+    target.write_text(json.dumps({"day_utc": "2026-04-28", "status": "PASS"}), encoding="utf-8")
+
+    payload = graph.build_requirement_graph(ctx)
+    node = next(row for row in payload["requirements"] if row["source_id"] == "MARKET_DATA")
+
+    assert node["status"] == "STALE"
+    assert node["canonical_blocker"] == "STALE_ARTIFACT"
+    assert "Regenerate stale artifact" in node["operator_next_action"]
+
+
+def test_requirement_graph_report_validates_schema(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    monkeypatch.setattr(graph.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+    path, payload = graph.run_requirement_graph_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
+
+    assert path.exists()
+    assert payload["producer_contract_v1"]["deterministic_fingerprint"]
+    validate_against_repo_schema_v1(
+        payload,
+        REPO_ROOT,
+        "governance/04_DATA/SCHEMAS/C2/REPORTS/aegis_requirement_graph.v1.schema.json",
+    )

@@ -23,6 +23,7 @@ from constellation_2.common.stale_artifact_guard_v1 import (
     classify_artifact_freshness_v1,
 )
 from ops.tools import run_aegis_bod_prepare_v1 as bod
+from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
 from ops.tools.run_intent_arbitration_v1 import selected_intent_pointer_path
 
 SCHEMA_VERSION = "authorization_supply.v1"
@@ -785,6 +786,25 @@ def run_authorization_supply_v1(day_utc: str, environment: str, truth_root: str 
     ctx = bod._resolve_context(day_utc, environment, truth_root)
     payload = build_authorization_supply_v1(ctx)
     path = authorization_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    input_paths: list[Any] = [
+        _market_data_supply_path(ctx),
+        _risk_budget_supply_path(ctx),
+        _strategy_decision_path(ctx),
+        _structure_decision_supply_path(ctx),
+    ]
+    for row in payload.get("active_intents", []) if isinstance(payload.get("active_intents"), list) else []:
+        if isinstance(row, dict):
+            input_paths.append(str(row.get("source_path") or row.get("intent_path") or ""))
+    phasec = payload.get("phasec_defined_risk") if isinstance(payload.get("phasec_defined_risk"), dict) else {}
+    input_paths.append(str(phasec.get("execution_identity_record_path") or ""))
+    attach_producer_contract_v1(
+        payload,
+        producer_name="ops/tools/run_authorization_supply_v1.py",
+        producer_command=f"python3 ops/tools/run_authorization_supply_v1.py --day_utc {ctx.day_utc} --environment {ctx.environment}",
+        input_artifacts=input_paths,
+        output_artifacts=[path],
+        schema_versions={"authorization_supply": SCHEMA_VERSION},
+    )
     _write_json(path, payload)
     return path, payload
 

@@ -21,6 +21,7 @@ from constellation_2.common.paper_session_path_alignment_v1 import (
 )
 from constellation_2.common.trading_day_readiness_authority_v1 import read_or_evaluate_trading_day_readiness_authority_v1
 from ops.tools import run_aegis_bod_prepare_v1 as bod
+from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
 
 SCHEMA_VERSION = "capital_supply.v1"
 ALLOWED_BLOCKERS = {
@@ -428,6 +429,21 @@ def run_capital_supply_v1(day_utc: str, environment: str, truth_root: str = "") 
     previous = _read_json(path)
     if previous and str(previous.get("day_utc") or "") != ctx.day_utc:
         raise SystemExit(f"FAIL: WRONG_DAY_CAPITAL_SUPPLY_COLLISION: {path}")
+    input_paths = [
+        payload.get("readiness_authority_path", ""),
+        _broker_supply_path(ctx),
+        resolve_operator_statement_path(operator_input_root=ctx.operator_input_root, day_utc=ctx.day_utc),
+        resolve_paper_capital_seed_path(operator_input_root=ctx.operator_input_root, day_utc=ctx.day_utc),
+        payload.get("runtime_resilience_authority_path", ""),
+    ]
+    attach_producer_contract_v1(
+        payload,
+        producer_name="ops/tools/run_capital_supply_v1.py",
+        producer_command=f"python3 ops/tools/run_capital_supply_v1.py --day_utc {ctx.day_utc} --environment {ctx.environment}",
+        input_artifacts=input_paths,
+        output_artifacts=[path],
+        schema_versions={"capital_supply": SCHEMA_VERSION},
+    )
     _write_json(path, payload)
     return path, payload
 

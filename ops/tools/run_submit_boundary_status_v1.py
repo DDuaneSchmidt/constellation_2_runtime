@@ -64,6 +64,7 @@ from ops.tools.run_runtime_resilience_authority_v1 import (
     build_runtime_resilience_authority_v1,
     runtime_resilience_authority_path,
 )
+from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
 from constellation_2.common.session_authority_v1 import (
     read_target_day_admission_ref_v1,
     read_target_day_build_ref_v1,
@@ -1612,6 +1613,14 @@ def main(argv: List[str] | None = None) -> int:
         "linkage_verdict": linkage_verdict,
         "paper_account": paper_account,
     }
+    attach_producer_contract_v1(
+        payload,
+        producer_name="ops/tools/run_submit_boundary_status_v1.py",
+        producer_command=f"python3 ops/tools/run_submit_boundary_status_v1.py --day_utc {day_utc}",
+        input_artifacts=list(source_paths.values()) + [str(day_readiness_path), str(runtime_resilience_path)],
+        output_artifacts=[resolve_submit_boundary_status_path(truth_root=truth_root, day_utc=day_utc)],
+        schema_versions={"submit_boundary_status": "v1"},
+    )
     ref = atomic_write_idempotent_validated_json_v1(
         path=resolve_submit_boundary_status_path(truth_root=truth_root, day_utc=day_utc),
         payload=payload,

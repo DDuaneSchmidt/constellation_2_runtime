@@ -18,6 +18,7 @@ if str(REPO_ROOT) not in sys.path:
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 from ops.tools import run_aegis_bod_prepare_v1 as bod
+from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
 from ops.tools.run_aegis_requirement_graph_v1 import requirement_graph_path
 from ops.tools.run_ib_market_data_entitlement_probe_v1 import entitlement_probe_path_v1
 
@@ -887,6 +888,19 @@ def run_market_data_supply_v1(day_utc: str, environment: str, truth_root: str = 
     previous = _read_json(path)
     if previous and str(previous.get("day_utc") or "") != ctx.day_utc:
         raise SystemExit(f"FAIL: WRONG_DAY_MARKET_DATA_SUPPLY_COLLISION: {path}")
+    input_paths: list[Any] = [requirement_graph_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)]
+    input_paths.extend(row.get("path") for row in payload.get("entitlement_probes", []) if isinstance(row, dict))
+    input_paths.extend(row.get("path") for row in payload.get("artifacts", []) if isinstance(row, dict))
+    if str(payload.get("policy_source_path") or "").strip():
+        input_paths.append(str(payload.get("policy_source_path")))
+    attach_producer_contract_v1(
+        payload,
+        producer_name="ops/tools/run_market_data_supply_v1.py",
+        producer_command=f"python3 ops/tools/run_market_data_supply_v1.py --day_utc {ctx.day_utc} --environment {ctx.environment}",
+        input_artifacts=input_paths,
+        output_artifacts=[path],
+        schema_versions={"market_data_supply": SCHEMA_VERSION},
+    )
     _write_json(path, payload)
     return path, payload
 

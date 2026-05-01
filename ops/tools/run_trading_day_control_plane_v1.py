@@ -38,6 +38,7 @@ from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_trading_day_control_plane_path,
 )
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
+from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
 
 
 OUTPUT_SCHEMA_RELPATH_V1 = "governance/04_DATA/SCHEMAS/C2/REPORTS/trading_day_control_plane.v1.schema.json"
@@ -519,6 +520,19 @@ def main(argv: list[str] | None = None) -> int:
                 ),
             },
         }
+    attach_producer_contract_v1(
+        payload,
+        producer_name="ops/tools/run_trading_day_control_plane_v1.py",
+        producer_command=f"python3 ops/tools/run_trading_day_control_plane_v1.py --day_utc {day}",
+        input_artifacts=[
+            upstream_completeness.get("intents_day_completeness_ref", ""),
+            upstream_completeness.get("paper_day_control_plane_ref", ""),
+            supporting_session_authority.get("ledger_path", ""),
+            startup_proof_result.get("path", ""),
+        ],
+        output_artifacts=[output_path],
+        schema_versions={"trading_day_control_plane": "v1"},
+    )
     ref = atomic_write_validated_json_v1(
         path=output_path,
         payload=payload,

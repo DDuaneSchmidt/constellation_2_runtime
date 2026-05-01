@@ -13,6 +13,7 @@
     "control_plane_id",
     "evaluated_at_utc",
     "producer",
+    "producer_contract_v1",
     "supersession",
     "upstream_completeness",
     "supporting_daily_control",
@@ -45,6 +46,7 @@
         "git_sha": { "type": "string", "minLength": 1 }
       }
     },
+    "producer_contract_v1": { "type": "object" },
     "supersession": {
       "type": "object",
       "additionalProperties": false,
