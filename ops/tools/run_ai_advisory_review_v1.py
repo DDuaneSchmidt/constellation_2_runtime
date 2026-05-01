@@ -16,13 +16,16 @@ from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1,
 from constellation_2.common.safety_state_authority_v1 import safety_state_authority_output_path
 from constellation_2.common.trading_day_readiness_authority_v1 import trading_day_readiness_authority_output_path
 from ops.tools.run_decision_ledger_v1 import decision_ledger_path
+from ops.tools.run_decision_consistency_v1 import decision_consistency_path
 from ops.tools.run_edge_attribution_v1 import edge_attribution_path
 from ops.tools.run_intent_lifecycle_state_v1 import intent_lifecycle_state_path
+from ops.tools.run_missed_opportunity_v1 import missed_opportunity_path
 from ops.tools.run_portfolio_activation_gate_v1 import portfolio_activation_gate_path
 from ops.tools.run_portfolio_scoring_v1 import portfolio_scoring_path
 from ops.tools.run_position_lifecycle_state_v1 import position_lifecycle_state_path
 from ops.tools.run_regime_confidence_v1 import regime_confidence_path
 from ops.tools.run_selection_quality_v1 import selection_quality_path
+from ops.tools.run_trade_outcome_v1 import trade_outcome_path
 
 PAPER_MODE = "PAPER"
 
@@ -47,6 +50,13 @@ def _read_json(path: Path) -> dict[str, Any]:
         return {}
 
 
+def _float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(str(value).strip())
+    except Exception:
+        return default
+
+
 def ai_advisory_review_path(*, truth_root: Path, day_utc: str) -> Path:
     return Path(truth_root).resolve() / "reports" / "ai_advisory_review_v1" / day_utc / "ai_advisory_review.v1.json"
 
@@ -57,6 +67,9 @@ def _artifact_map(truth_root: Path, day_utc: str) -> dict[str, Path]:
         "selection_quality_v1": selection_quality_path(truth_root=truth_root, day_utc=day_utc),
         "edge_attribution_v1": edge_attribution_path(truth_root=truth_root, day_utc=day_utc),
         "regime_confidence_v1": regime_confidence_path(truth_root=truth_root, day_utc=day_utc),
+        "trade_outcome_v1": trade_outcome_path(truth_root=truth_root, day_utc=day_utc),
+        "decision_consistency_v1": decision_consistency_path(truth_root=truth_root, day_utc=day_utc),
+        "missed_opportunity_v1": missed_opportunity_path(truth_root=truth_root, day_utc=day_utc),
         "portfolio_scoring_v1": portfolio_scoring_path(truth_root=truth_root, day_utc=day_utc),
         "portfolio_activation_gate_v1": portfolio_activation_gate_path(truth_root=truth_root, day_utc=day_utc),
         "intent_lifecycle_state_v1": intent_lifecycle_state_path(truth_root=truth_root, day_utc=day_utc),
@@ -74,6 +87,9 @@ def build_ai_advisory_review_v1(*, day_utc: str, truth_root: Path, environment: 
     selection = payloads["selection_quality_v1"]
     edge = payloads["edge_attribution_v1"]
     regime = payloads["regime_confidence_v1"]
+    trade_outcome = payloads["trade_outcome_v1"]
+    decision_consistency = payloads["decision_consistency_v1"]
+    missed_opportunity = payloads["missed_opportunity_v1"]
     scoring = payloads["portfolio_scoring_v1"]
     lifecycle = payloads["intent_lifecycle_state_v1"]
     recommendations: list[dict[str, Any]] = []
@@ -102,6 +118,24 @@ def build_ai_advisory_review_v1(*, day_utc: str, truth_root: Path, environment: 
                 "recommendation_id": f"{day_utc}:REGIME_CONFIDENCE_LOW",
                 "affected_component": "portfolio_scoring_v1",
                 "recommendation": "Keep regime-alignment impact explicitly damped until regime confidence improves.",
+                "requires_governance": True,
+            }
+        )
+    if str(trade_outcome.get("outcome_status") or "").upper() == "CLOSED" and _float(trade_outcome.get("return_pct")) < 0.0:
+        recommendations.append(
+            {
+                "recommendation_id": f"{day_utc}:NEGATIVE_TRADE_OUTCOME_REVIEW",
+                "affected_component": "strategy_selection",
+                "recommendation": "Review realized losing outcome after governed evidence windows are met; do not change thresholds automatically.",
+                "requires_governance": True,
+            }
+        )
+    if decision_consistency.get("decision_flip_detected") is True:
+        recommendations.append(
+            {
+                "recommendation_id": f"{day_utc}:DECISION_FLIP_REVIEW",
+                "affected_component": "portfolio_scoring_v1",
+                "recommendation": "Investigate rank flip and input stability before proposing any scoring change.",
                 "requires_governance": True,
             }
         )
@@ -138,6 +172,25 @@ def build_ai_advisory_review_v1(*, day_utc: str, truth_root: Path, environment: 
             "confidence_score": regime.get("confidence_score"),
             "confidence_level": str(regime.get("confidence_level") or "UNKNOWN"),
             "transition_risk": str(regime.get("transition_risk") or "UNKNOWN"),
+        },
+        "trade_outcome_summary": {
+            "status": str(trade_outcome.get("status") or "MISSING"),
+            "outcome_status": str(trade_outcome.get("outcome_status") or "UNKNOWN"),
+            "intent_id": str(trade_outcome.get("intent_id") or ""),
+            "return_pct": trade_outcome.get("return_pct"),
+            "realized_pnl": trade_outcome.get("realized_pnl"),
+            "unrealized_pnl": trade_outcome.get("unrealized_pnl"),
+        },
+        "decision_consistency_summary": {
+            "status": str(decision_consistency.get("status") or "MISSING"),
+            "ranking_stability": str(decision_consistency.get("ranking_stability") or "UNKNOWN"),
+            "decision_flip_detected": bool(decision_consistency.get("decision_flip_detected") is True),
+            "nondeterminism_suspected": bool(decision_consistency.get("nondeterminism_suspected") is True),
+        },
+        "missed_opportunity_summary": {
+            "status": str(missed_opportunity.get("status") or "MISSING"),
+            "alternative_count": len(missed_opportunity.get("alternatives") if isinstance(missed_opportunity.get("alternatives"), list) else []),
+            "no_fabricated_trades": bool(missed_opportunity.get("no_fabricated_trades") is True),
         },
         "scoring_observations": {
             "status": str(scoring.get("status") or "MISSING"),

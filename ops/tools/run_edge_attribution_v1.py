@@ -20,6 +20,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
     resolve_paper_intent_truth_root_v1,
 )
 from ops.tools.run_position_lifecycle_state_v1 import position_lifecycle_state_path
+from ops.tools.run_trade_outcome_v1 import trade_outcome_path
 
 PAPER_MODE = "PAPER"
 MIN_TRADES_FOR_EDGE_HEALTH = 20
@@ -77,6 +78,7 @@ def _candidate_files(root: Path, day_utc: str) -> list[Path]:
         root / "accounting_v2" / "attribution",
         root / "reports" / "sleeve_intent_trade_attribution_v1",
         root / "reports" / "execution_reconciliation_v1",
+        root / "reports" / "trade_outcome_v1",
     ):
         if base.exists():
             candidates.extend(path for path in base.rglob("*.json") if path.is_file() and str(day_utc) >= path.as_posix())
@@ -98,6 +100,8 @@ def _trade_return(row: dict[str, Any]) -> float | None:
 def _is_real_trade(row: dict[str, Any]) -> bool:
     if bool(row.get("proxy") is True) or str(row.get("pnl_source") or "").strip().upper() == "SIGNAL_PROXY":
         return False
+    if str(row.get("schema_id") or "").strip() == "trade_outcome":
+        return str(row.get("outcome_status") or "").strip().upper() == "CLOSED" and _trade_return(row) is not None
     if any(str(row.get(key) or "").strip() for key in ("fill_id", "execution_id", "submission_id", "broker_order_id", "position_id", "trade_id")):
         return True
     return _trade_return(row) is not None and str(row.get("sleeve_id") or row.get("engine_id") or "").strip()
@@ -200,6 +204,9 @@ def build_edge_attribution_v1(*, day_utc: str, truth_root: Path, environment: st
     position_path = position_lifecycle_state_path(truth_root=truth_root, day_utc=day_utc)
     if position_path.exists():
         evidence_paths.append(str(position_path))
+    outcome_path = trade_outcome_path(truth_root=truth_root, day_utc=day_utc)
+    if outcome_path.exists():
+        evidence_paths.append(str(outcome_path))
     sleeves = sorted(by_sleeve) or ["ALL"]
     sleeve_rows = [_summary_for_sleeve(sleeve, by_sleeve.get(sleeve, []), sorted(set(evidence_paths))) for sleeve in sleeves]
     out_path = edge_attribution_path(truth_root=truth_root, day_utc=day_utc)
@@ -210,6 +217,7 @@ def build_edge_attribution_v1(*, day_utc: str, truth_root: Path, environment: st
         "environment": environment,
         "status": "PASS" if by_sleeve else "UNPROVEN",
         "history_source": "REAL_FILLS_AND_ATTRIBUTION_ONLY",
+        "trade_outcome_path": str(outcome_path),
         "proxy_pnl_included": False,
         "minimum_trades_for_edge_health": MIN_TRADES_FOR_EDGE_HEALTH,
         "sleeves": sleeve_rows,

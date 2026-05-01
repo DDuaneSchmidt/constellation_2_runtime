@@ -214,6 +214,11 @@ def build_decision_ledger_v1(
         "ai_advisory_review_path": str(_report_path(truth_root=truth_root, artifact_id="ai_advisory_review_v1", day_utc=day_utc, filename="ai_advisory_review.v1.json")),
         "strategy_change_governance_path": str(_report_path(truth_root=truth_root, artifact_id="strategy_change_governance_v1", day_utc=day_utc, filename="strategy_change_governance.v1.json")),
     }
+    outcome_paths = {
+        "trade_outcome_path": str(_report_path(truth_root=truth_root, artifact_id="trade_outcome_v1", day_utc=day_utc, filename="trade_outcome.v1.json")),
+        "decision_consistency_path": str(_report_path(truth_root=truth_root, artifact_id="decision_consistency_v1", day_utc=day_utc, filename="decision_consistency.v1.json")),
+        "missed_opportunity_path": str(_report_path(truth_root=truth_root, artifact_id="missed_opportunity_v1", day_utc=day_utc, filename="missed_opportunity.v1.json")),
+    }
     payload = {
         "schema_id": "decision_ledger",
         "schema_version": "v1",
@@ -231,7 +236,9 @@ def build_decision_ledger_v1(
         "portfolio_activation_gate_path": str(portfolio_activation_gate_path(truth_root=truth_root, day_utc=day_utc)),
         "portfolio_scoring_path": scoring_summary["portfolio_scoring_path"],
         **performance_paths,
+        **outcome_paths,
         "performance_intelligence_paths": performance_paths,
+        "outcome_intelligence_paths": outcome_paths,
         "arbitration_result_path": scan_paths["arbitration_result_path"],
         "authorization_result_path": (authorization.get("outputs") or [""])[0] if isinstance(authorization.get("outputs"), list) and authorization.get("outputs") else "",
         "execution_result_path": (execution.get("outputs") or [""])[0] if isinstance(execution.get("outputs"), list) and execution.get("outputs") else "",

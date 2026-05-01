@@ -356,11 +356,17 @@ def _performance_intelligence_section_lines(roots: RootResolution, day_utc: str)
     selection_path = base / "selection_quality_v1" / day_utc / "selection_quality.v1.json"
     edge_path = base / "edge_attribution_v1" / day_utc / "edge_attribution.v1.json"
     regime_path = base / "regime_confidence_v1" / day_utc / "regime_confidence.v1.json"
+    trade_outcome_path = base / "trade_outcome_v1" / day_utc / "trade_outcome.v1.json"
+    decision_consistency_path = base / "decision_consistency_v1" / day_utc / "decision_consistency.v1.json"
+    missed_opportunity_path = base / "missed_opportunity_v1" / day_utc / "missed_opportunity.v1.json"
     advisory_path = base / "ai_advisory_review_v1" / day_utc / "ai_advisory_review.v1.json"
     governance_path = base / "strategy_change_governance_v1" / day_utc / "strategy_change_governance.v1.json"
     selection = _read_json(selection_path) or {}
     edge = _read_json(edge_path) or {}
     regime = _read_json(regime_path) or {}
+    trade_outcome = _read_json(trade_outcome_path) or {}
+    decision_consistency = _read_json(decision_consistency_path) or {}
+    missed_opportunity = _read_json(missed_opportunity_path) or {}
     advisory = _read_json(advisory_path) or {}
     governance = _read_json(governance_path) or {}
     edge_health = [
@@ -382,6 +388,14 @@ def _performance_intelligence_section_lines(roots: RootResolution, day_utc: str)
             f"- regime: {regime.get('regime', 'UNKNOWN')}",
             f"- regime_confidence: {regime.get('confidence_level', 'UNKNOWN')}",
             f"- transition_risk: {regime.get('transition_risk', 'UNKNOWN')}",
+            f"- trade_outcome_path: {trade_outcome_path}",
+            f"- trade_outcome_status: {trade_outcome.get('outcome_status', 'UNKNOWN')}",
+            f"- trade_outcome_return_pct: {trade_outcome.get('return_pct', '')}",
+            f"- decision_consistency_path: {decision_consistency_path}",
+            f"- ranking_stability: {decision_consistency.get('ranking_stability', 'UNKNOWN')}",
+            f"- decision_flip_detected: {decision_consistency.get('decision_flip_detected', '')}",
+            f"- missed_opportunity_path: {missed_opportunity_path}",
+            f"- missed_opportunity_alternatives: {len(missed_opportunity.get('alternatives') if isinstance(missed_opportunity.get('alternatives'), list) else [])}",
             f"- ai_advisory_review_path: {advisory_path}",
             f"- advisory_status: {advisory.get('status', 'UNKNOWN')}",
             f"- advisory_recommendation_count: {len(recommendations)}",
