@@ -18,6 +18,7 @@ from constellation_2.common.trading_day_readiness_authority_v1 import trading_da
 from ops.tools.run_decision_ledger_v1 import decision_ledger_path
 from ops.tools.run_decision_consistency_v1 import decision_consistency_path
 from ops.tools.run_edge_attribution_v1 import edge_attribution_path
+from ops.tools.run_insight_engine_v1 import insight_engine_path
 from ops.tools.run_intent_lifecycle_state_v1 import intent_lifecycle_state_path
 from ops.tools.run_missed_opportunity_v1 import missed_opportunity_path
 from ops.tools.run_portfolio_activation_gate_v1 import portfolio_activation_gate_path
@@ -92,9 +93,17 @@ def build_ai_advisory_review_v1(*, day_utc: str, truth_root: Path, environment: 
     missed_opportunity = payloads["missed_opportunity_v1"]
     scoring = payloads["portfolio_scoring_v1"]
     lifecycle = payloads["intent_lifecycle_state_v1"]
+    insight_path = insight_engine_path(truth_root=truth_root, day_utc=day_utc)
+    insight = _read_json(insight_path)
     recommendations: list[dict[str, Any]] = []
     anomaly_flags: list[str] = []
-    if selection.get("confidence_level") == "LOW":
+    if insight:
+        recommendations.extend(
+            row
+            for row in insight.get("advisory_recommendations", [])
+            if isinstance(row, dict)
+        )
+    if not insight and selection.get("confidence_level") == "LOW":
         recommendations.append(
             {
                 "recommendation_id": f"{day_utc}:SELECTION_CONFIDENCE_LOW",
@@ -103,7 +112,7 @@ def build_ai_advisory_review_v1(*, day_utc: str, truth_root: Path, environment: 
                 "requires_governance": True,
             }
         )
-    if any(row.get("edge_health") in {"NEGATIVE", "WEAKENING"} for row in edge.get("sleeves", []) if isinstance(row, dict)):
+    if not insight and any(row.get("edge_health") in {"NEGATIVE", "WEAKENING"} for row in edge.get("sleeves", []) if isinstance(row, dict)):
         recommendations.append(
             {
                 "recommendation_id": f"{day_utc}:EDGE_HEALTH_REVIEW",
@@ -112,7 +121,7 @@ def build_ai_advisory_review_v1(*, day_utc: str, truth_root: Path, environment: 
                 "requires_governance": True,
             }
         )
-    if str(regime.get("confidence_level") or "").upper() in {"LOW", "UNKNOWN"}:
+    if not insight and str(regime.get("confidence_level") or "").upper() in {"LOW", "UNKNOWN"}:
         recommendations.append(
             {
                 "recommendation_id": f"{day_utc}:REGIME_CONFIDENCE_LOW",
@@ -121,7 +130,7 @@ def build_ai_advisory_review_v1(*, day_utc: str, truth_root: Path, environment: 
                 "requires_governance": True,
             }
         )
-    if str(trade_outcome.get("outcome_status") or "").upper() == "CLOSED" and _float(trade_outcome.get("return_pct")) < 0.0:
+    if not insight and str(trade_outcome.get("outcome_status") or "").upper() == "CLOSED" and _float(trade_outcome.get("return_pct")) < 0.0:
         recommendations.append(
             {
                 "recommendation_id": f"{day_utc}:NEGATIVE_TRADE_OUTCOME_REVIEW",
@@ -130,7 +139,7 @@ def build_ai_advisory_review_v1(*, day_utc: str, truth_root: Path, environment: 
                 "requires_governance": True,
             }
         )
-    if decision_consistency.get("decision_flip_detected") is True:
+    if not insight and decision_consistency.get("decision_flip_detected") is True:
         recommendations.append(
             {
                 "recommendation_id": f"{day_utc}:DECISION_FLIP_REVIEW",
@@ -141,6 +150,8 @@ def build_ai_advisory_review_v1(*, day_utc: str, truth_root: Path, environment: 
         )
     if missing:
         anomaly_flags.extend([f"MISSING_INPUT:{name}" for name in missing])
+    if insight and str(insight.get("status") or "").upper() == "DEGRADED":
+        anomaly_flags.append("INSIGHT_ENGINE_DEGRADED")
     counts = lifecycle.get("counts") if isinstance(lifecycle.get("counts"), dict) else {}
     decisions_reviewed = int(counts.get("INTENT_CREATED") or 0) + int(counts.get("NO_INTENT") or 0) + int(counts.get("BLOCKED") or 0)
     out_path = ai_advisory_review_path(truth_root=truth_root, day_utc=day_utc)
@@ -187,6 +198,15 @@ def build_ai_advisory_review_v1(*, day_utc: str, truth_root: Path, environment: 
             "decision_flip_detected": bool(decision_consistency.get("decision_flip_detected") is True),
             "nondeterminism_suspected": bool(decision_consistency.get("nondeterminism_suspected") is True),
         },
+        "insight_engine_summary": {
+            "status": str(insight.get("status") or "MISSING"),
+            "operator_summary": insight.get("operator_summary") if isinstance(insight.get("operator_summary"), dict) else {},
+            "confidence_level": str(insight.get("confidence_level") or "UNKNOWN"),
+            "near_miss_count": len(insight.get("near_misses") if isinstance(insight.get("near_misses"), list) else []),
+            "drift_alert_count": len(insight.get("drift_alerts") if isinstance(insight.get("drift_alerts"), list) else []),
+            "governance_required": bool(insight.get("governance_required") is True),
+            "insight_engine_path": str(insight_path),
+        },
         "missed_opportunity_summary": {
             "status": str(missed_opportunity.get("status") or "MISSING"),
             "alternative_count": len(missed_opportunity.get("alternatives") if isinstance(missed_opportunity.get("alternatives"), list) else []),
@@ -203,7 +223,7 @@ def build_ai_advisory_review_v1(*, day_utc: str, truth_root: Path, environment: 
         "confidence": "LOW" if missing else "MEDIUM",
         "requires_human_review": True,
         "prohibited_actions_attempted": False,
-        "evidence_paths": sorted(set(evidence_paths)),
+        "evidence_paths": sorted(set([*evidence_paths, *([str(insight_path)] if insight_path.exists() else [])])),
         "produced_at_utc": _now_iso(),
         "producer": "ops/tools/run_ai_advisory_review_v1.py",
         "artifact_path": str(out_path),

@@ -359,6 +359,7 @@ def _performance_intelligence_section_lines(roots: RootResolution, day_utc: str)
     trade_outcome_path = base / "trade_outcome_v1" / day_utc / "trade_outcome.v1.json"
     decision_consistency_path = base / "decision_consistency_v1" / day_utc / "decision_consistency.v1.json"
     missed_opportunity_path = base / "missed_opportunity_v1" / day_utc / "missed_opportunity.v1.json"
+    insight_path = base / "insight_engine_v1" / day_utc / "insight_engine.v1.json"
     advisory_path = base / "ai_advisory_review_v1" / day_utc / "ai_advisory_review.v1.json"
     governance_path = base / "strategy_change_governance_v1" / day_utc / "strategy_change_governance.v1.json"
     selection = _read_json(selection_path) or {}
@@ -367,6 +368,7 @@ def _performance_intelligence_section_lines(roots: RootResolution, day_utc: str)
     trade_outcome = _read_json(trade_outcome_path) or {}
     decision_consistency = _read_json(decision_consistency_path) or {}
     missed_opportunity = _read_json(missed_opportunity_path) or {}
+    insight = _read_json(insight_path) or {}
     advisory = _read_json(advisory_path) or {}
     governance = _read_json(governance_path) or {}
     edge_health = [
@@ -375,6 +377,10 @@ def _performance_intelligence_section_lines(roots: RootResolution, day_utc: str)
         if isinstance(row, dict)
     ]
     recommendations = advisory.get("recommendations") if isinstance(advisory.get("recommendations"), list) else []
+    insight_operator_summary = insight.get("operator_summary") if isinstance(insight.get("operator_summary"), dict) else {}
+    insight_near_misses = insight.get("near_misses") if isinstance(insight.get("near_misses"), list) else []
+    insight_drift_alerts = insight.get("drift_alerts") if isinstance(insight.get("drift_alerts"), list) else []
+    top_near_miss = insight_near_misses[0] if insight_near_misses and isinstance(insight_near_misses[0], dict) else {}
     lines.extend(
         [
             f"- selection_quality_path: {selection_path}",
@@ -396,6 +402,13 @@ def _performance_intelligence_section_lines(roots: RootResolution, day_utc: str)
             f"- decision_flip_detected: {decision_consistency.get('decision_flip_detected', '')}",
             f"- missed_opportunity_path: {missed_opportunity_path}",
             f"- missed_opportunity_alternatives: {len(missed_opportunity.get('alternatives') if isinstance(missed_opportunity.get('alternatives'), list) else [])}",
+            f"- insight_engine_path: {insight_path}",
+            f"- insight_status: {insight.get('status', 'UNKNOWN')}",
+            f"- operator_summary: {json.dumps(insight_operator_summary, sort_keys=True)}",
+            f"- confidence_level: {insight.get('confidence_level', 'UNKNOWN')}",
+            f"- top_near_miss: {json.dumps(top_near_miss, sort_keys=True)}",
+            f"- drift_alert_count: {len(insight_drift_alerts)}",
+            f"- governance_required: {insight.get('governance_required', '')}",
             f"- ai_advisory_review_path: {advisory_path}",
             f"- advisory_status: {advisory.get('status', 'UNKNOWN')}",
             f"- advisory_recommendation_count: {len(recommendations)}",

@@ -211,6 +211,7 @@ def build_decision_ledger_v1(
         "selection_quality_path": str(_report_path(truth_root=truth_root, artifact_id="selection_quality_v1", day_utc=day_utc, filename="selection_quality.v1.json")),
         "edge_attribution_path": str(_report_path(truth_root=truth_root, artifact_id="edge_attribution_v1", day_utc=day_utc, filename="edge_attribution.v1.json")),
         "regime_confidence_path": str(_report_path(truth_root=truth_root, artifact_id="regime_confidence_v1", day_utc=day_utc, filename="regime_confidence.v1.json")),
+        "insight_engine_path": str(_report_path(truth_root=truth_root, artifact_id="insight_engine_v1", day_utc=day_utc, filename="insight_engine.v1.json")),
         "ai_advisory_review_path": str(_report_path(truth_root=truth_root, artifact_id="ai_advisory_review_v1", day_utc=day_utc, filename="ai_advisory_review.v1.json")),
         "strategy_change_governance_path": str(_report_path(truth_root=truth_root, artifact_id="strategy_change_governance_v1", day_utc=day_utc, filename="strategy_change_governance.v1.json")),
     }
