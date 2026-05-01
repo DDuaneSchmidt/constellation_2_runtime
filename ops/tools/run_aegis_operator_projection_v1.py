@@ -75,7 +75,38 @@ def _artifact_paths(ctx: bod.BodContext, blocker: str, graph: dict[str, Any]) ->
     return list(dict.fromkeys(path for path in paths if path))
 
 
-def _projection_for(ctx: bod.BodContext, ledger: dict[str, Any], graph: dict[str, Any]) -> dict[str, Any]:
+def _allowed_actions(action_validity: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = action_validity.get("action_rules") if isinstance(action_validity.get("action_rules"), list) else []
+    return [row for row in rows if isinstance(row, dict) and row.get("status") == "ALLOWED"]
+
+
+def _prioritized_allowed_action_labels(blocker: str, allowed: list[dict[str, Any]]) -> list[str]:
+    if not allowed:
+        return []
+    if blocker == "SOURCE_REPRODUCIBILITY_BLOCKED":
+        preferred = ["clean_and_protect_repo", "rerun_day", "rerun_requirement_graph", "rerun_operator_projection"]
+    elif blocker.startswith("MARKET") or blocker.startswith("OPTIONS") or blocker in {"MARKET_DATA_BLOCKED", "MARKET_DATA_AUTHORITY_BLOCKED"}:
+        preferred = ["inspect_market_data_artifacts", "rerun_day", "rerun_requirement_graph", "rerun_operator_projection"]
+    elif blocker == "NO_ELIGIBLE_OPTION_STRUCTURE":
+        preferred = ["inspect_authorization_diagnostics", "rerun_day", "rerun_operator_projection"]
+    else:
+        preferred = ["rerun_day", "rerun_requirement_graph", "rerun_operator_projection", "rerun_live_intelligence"]
+    by_id = {str(row.get("action_id") or ""): row for row in allowed}
+    ordered = [by_id[action_id] for action_id in preferred if action_id in by_id]
+    ordered.extend(row for row in allowed if row not in ordered)
+    labels = [str(row.get("label") or row.get("action_id") or "").strip() for row in ordered]
+    return [label for label in labels if label][:3]
+
+
+def _projection_for(
+    ctx: bod.BodContext,
+    ledger: dict[str, Any],
+    graph: dict[str, Any],
+    lineage: dict[str, Any] | None = None,
+    consistency: dict[str, Any] | None = None,
+    freshness: dict[str, Any] | None = None,
+    action_validity: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     final_status = str(ledger.get("final_status") or "UNKNOWN").strip().upper()
     phase = str(ledger.get("canonical_phase") or "").strip()
     blocker = str(ledger.get("canonical_blocker") or "").strip()
@@ -100,6 +131,14 @@ def _projection_for(ctx: bod.BodContext, ledger: dict[str, Any], graph: dict[str
         next_actions = [str(ledger.get("operator_next_action") or "Resolve the canonical ledger blocker and rerun the day.")]
     else:
         next_actions = ["No blocker reported by the day-run ledger."]
+    allowed = _allowed_actions(action_validity or {})
+    if allowed:
+        next_actions = _prioritized_allowed_action_labels(blocker, allowed)
+    invalid = [
+        str(row.get("label") or row.get("action_id") or "")
+        for row in ((action_validity or {}).get("action_rules") if isinstance((action_validity or {}).get("action_rules"), list) else [])
+        if isinstance(row, dict) and row.get("status") in {"FORBIDDEN", "BLOCKED"}
+    ]
     return {
         "schema_id": "aegis_operator_projection",
         "schema_version": SCHEMA_VERSION,
@@ -117,8 +156,18 @@ def _projection_for(ctx: bod.BodContext, ledger: dict[str, Any], graph: dict[str
         "downstream_consequences": ledger.get("downstream_consequences") if isinstance(ledger.get("downstream_consequences"), list) else [],
         "artifact_paths": _artifact_paths(ctx, blocker, graph),
         "next_valid_actions": next_actions,
-        "unsafe_actions": unsafe_actions,
-        "confidence_in_diagnosis": "HIGH" if blocker else "MEDIUM",
+        "unsafe_actions": unsafe_actions + invalid,
+        "lineage_status": str((lineage or {}).get("status") or "UNKNOWN"),
+        "consistency_status": str((consistency or {}).get("status") or "UNKNOWN"),
+        "freshness_status": str((freshness or {}).get("status") or "UNKNOWN"),
+        "action_validity_status": str((action_validity or {}).get("status") or "UNKNOWN"),
+        "integrity_context": {
+            "evidence_lineage_index_path": str(_report_path(ctx, "evidence_lineage_index_v1", "evidence_lineage_index.v1.json")),
+            "state_consistency_path": str(_report_path(ctx, "state_consistency_v1", "state_consistency.v1.json")),
+            "truth_freshness_path": str(_report_path(ctx, "truth_freshness_v1", "truth_freshness.v1.json")),
+            "action_validity_path": str(_report_path(ctx, "action_validity_v1", "action_validity.v1.json")),
+        },
+        "confidence_in_diagnosis": "CAPPED_BY_CONSISTENCY_FAILURE" if str((consistency or {}).get("status") or "") == "FAIL" else ("HIGH" if blocker else "MEDIUM"),
         "last_updated_at_utc": _now_iso(),
         "authority_note": "Operator projection is explanatory only; aegis_day_run_ledger_v1 remains final readiness authority.",
     }
@@ -128,13 +177,25 @@ def run_operator_projection_v1(day_utc: str, environment: str, truth_root: str =
     ctx = bod._resolve_context(day_utc, environment, truth_root)
     ledger_path = _report_path(ctx, "aegis_day_run_v1", "day_run.v1.json")
     graph_path = _report_path(ctx, "aegis_requirement_graph_v1", "requirement_graph.v1.json")
-    payload = _projection_for(ctx, _read_json(ledger_path), _read_json(graph_path))
+    lineage_path = _report_path(ctx, "evidence_lineage_index_v1", "evidence_lineage_index.v1.json")
+    consistency_path = _report_path(ctx, "state_consistency_v1", "state_consistency.v1.json")
+    freshness_path = _report_path(ctx, "truth_freshness_v1", "truth_freshness.v1.json")
+    action_path = _report_path(ctx, "action_validity_v1", "action_validity.v1.json")
+    payload = _projection_for(
+        ctx,
+        _read_json(ledger_path),
+        _read_json(graph_path),
+        _read_json(lineage_path),
+        _read_json(consistency_path),
+        _read_json(freshness_path),
+        _read_json(action_path),
+    )
     path = operator_projection_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     attach_producer_contract_v1(
         payload,
         producer_name="ops/tools/run_aegis_operator_projection_v1.py",
         producer_command=f"python3 ops/tools/run_aegis_operator_projection_v1.py --day_utc {ctx.day_utc} --environment {ctx.environment}",
-        input_artifacts=[ledger_path, graph_path],
+        input_artifacts=[ledger_path, graph_path, lineage_path, consistency_path, freshness_path, action_path],
         output_artifacts=[path],
         schema_versions={"aegis_operator_projection": SCHEMA_VERSION},
     )

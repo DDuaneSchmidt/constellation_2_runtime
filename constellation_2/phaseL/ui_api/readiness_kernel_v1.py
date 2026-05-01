@@ -187,10 +187,29 @@ def _artifact_is_stale(doc: Dict[str, Any], day: str) -> bool:
     return False
 
 
-def _classification(status: str, blocker: str, doc: Dict[str, Any], day: str) -> str:
+def _truth_freshness_by_artifact_path(root: Path, day: str) -> Dict[str, Dict[str, Any]]:
+    path = (root / "reports" / "truth_freshness_v1" / day / "truth_freshness.v1.json").resolve()
+    doc, error = read_json_dict(path)
+    if error:
+        return {}
+    records = doc.get("freshness_records") if isinstance(doc.get("freshness_records"), list) else []
+    result: Dict[str, Dict[str, Any]] = {}
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        artifact_path = _as_text(record.get("artifact_path"))
+        if artifact_path:
+            result[artifact_path] = record
+    return result
+
+
+def _classification(status: str, blocker: str, doc: Dict[str, Any], day: str, freshness_record: Optional[Dict[str, Any]] = None) -> str:
     status_u = status.upper()
     blocker_u = blocker.upper()
-    if _artifact_is_stale(doc, day):
+    freshness_status = _as_text((freshness_record or {}).get("freshness_status")).upper()
+    if freshness_status in {"STALE", "EXPIRED"}:
+        return "STALE_ARTIFACT"
+    if not freshness_record and _artifact_is_stale(doc, day):
         return "STALE_ARTIFACT"
     if blocker_u in OUT_OF_SESSION_BLOCKERS or status_u in {"OUT_OF_SESSION", "MARKET_CLOSED"}:
         return "OUT_OF_SESSION"
@@ -252,7 +271,7 @@ def _summarize(doc: Dict[str, Any], status: str, blocker: str) -> Dict[str, Any]
     return summary
 
 
-def _build_layer_from_file(*, spec: LayerSpec, path: Path, day: str) -> Dict[str, Any]:
+def _build_layer_from_file(*, spec: LayerSpec, path: Path, day: str, freshness_records: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
     doc, error = read_json_dict(path)
     if error:
         classification = "MISSING_EVIDENCE" if error == "FILE_NOT_FOUND" else "UNKNOWN"
@@ -275,8 +294,17 @@ def _build_layer_from_file(*, spec: LayerSpec, path: Path, day: str) -> Dict[str
 
     status = _first_value(doc, spec.status_keys) or "UNKNOWN"
     blocker = _first_value(doc, spec.blocker_keys)
-    classification = _classification(status, blocker, doc, day)
+    freshness_record = (freshness_records or {}).get(str(path))
+    classification = _classification(status, blocker, doc, day, freshness_record)
     timestamp = _first_value(doc, spec.timestamp_keys) or iso_from_mtime(path) or ""
+    evidence_summary = _summarize(doc, status, blocker)
+    if freshness_record:
+        evidence_summary["truth_freshness"] = {
+            "freshness_status": freshness_record.get("freshness_status"),
+            "freshness_policy_id": freshness_record.get("freshness_policy_id"),
+            "age_seconds": freshness_record.get("age_seconds"),
+            "canonical_blocker": freshness_record.get("canonical_blocker"),
+        }
     return {
         "layer_id": spec.layer_id,
         "label": spec.label,
@@ -289,11 +317,11 @@ def _build_layer_from_file(*, spec: LayerSpec, path: Path, day: str) -> Dict[str
         "produced_at_utc": timestamp,
         "updated_at_utc": _as_text(doc.get("updated_at_utc") or doc.get("updated_utc")),
         "next_action": _as_text(doc.get("operator_next_action")) or _next_action(spec.layer_id, status, blocker, classification),
-        "evidence_summary": _summarize(doc, status, blocker),
+        "evidence_summary": evidence_summary,
     }
 
 
-def _build_phasec_layer(*, day: str, sleeve_truth_root: Path) -> Dict[str, Any]:
+def _build_phasec_layer(*, day: str, sleeve_truth_root: Path, freshness_records: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
     spec = LayerSpec(
         layer_id="PHASEC",
         label="PhaseC",
@@ -305,7 +333,7 @@ def _build_phasec_layer(*, day: str, sleeve_truth_root: Path) -> Dict[str, Any]:
     path = _latest_phasec_identity(sleeve_truth_root, day)
     if path is None:
         path = (sleeve_truth_root / spec.paths[0]).resolve()
-    layer = _build_layer_from_file(spec=spec, path=path, day=day)
+    layer = _build_layer_from_file(spec=spec, path=path, day=day, freshness_records=freshness_records)
     if layer["classification"] == "UNKNOWN" and not layer["canonical_blocker"] and layer["source_sha256"]:
         layer["status"] = "CURRENT"
         layer["classification"] = "CURRENT"
@@ -413,10 +441,11 @@ def build_readiness_kernel_v1(
     sleeve_root = (sleeve_truth_root or SLEEVE_TRUTH_ROOT).resolve()
 
     layers: List[Dict[str, Any]] = []
+    freshness_records = _truth_freshness_by_artifact_path(root, resolved_day)
     for spec in _layer_specs(resolved_day):
-        layers.append(_build_layer_from_file(spec=spec, path=_find_path(root, spec), day=resolved_day))
+        layers.append(_build_layer_from_file(spec=spec, path=_find_path(root, spec), day=resolved_day, freshness_records=freshness_records))
         if spec.layer_id == "STRUCTURE":
-            layers.append(_build_phasec_layer(day=resolved_day, sleeve_truth_root=sleeve_root))
+            layers.append(_build_phasec_layer(day=resolved_day, sleeve_truth_root=sleeve_root, freshness_records=freshness_records))
 
     overall_status, canonical_blocker, operator_next_action = _overall(layers)
     return {

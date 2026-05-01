@@ -16,6 +16,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
+from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
 from ops.tools import run_aegis_bod_prepare_v1 as bod
 from ops.tools.run_market_data_supply_v1 import (
     _latest_snapshot_for_symbol,
@@ -432,6 +433,23 @@ def run_market_open_data_gate_v1(day_utc: str, environment: str, truth_root: str
     previous = _read_json(path)
     if previous and str(previous.get("day_utc") or "") != ctx.day_utc:
         raise SystemExit(f"FAIL: WRONG_DAY_MARKET_OPEN_DATA_GATE_COLLISION: {path}")
+    input_artifacts: list[str] = [
+        str(payload.get("readiness_authority_path") or ""),
+        str(payload.get("market_data_supply_path") or ""),
+        str(selected_intent_pointer_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)),
+    ]
+    for key in ("snapshot_path", "freshness_certificate_path"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            input_artifacts.append(value)
+    attach_producer_contract_v1(
+        payload,
+        producer_name="ops/tools/run_market_open_data_gate_v1.py",
+        producer_command=f"python3 ops/tools/run_market_open_data_gate_v1.py --day_utc {ctx.day_utc} --environment {ctx.environment}",
+        input_artifacts=input_artifacts,
+        output_artifacts=[path],
+        schema_versions={"market_open_data_gate": SCHEMA_VERSION},
+    )
     _write_json(path, payload)
     return path, payload
 

@@ -383,6 +383,12 @@ def _lifecycle_nodes(ctx: bod.BodContext) -> list[dict[str, Any]]:
     truth = ctx.truth_root
     execution = ctx.execution_root
     operator = ctx.operator_input_root
+    freshness = _read_json(truth / "reports" / "truth_freshness_v1" / day / "truth_freshness.v1.json")
+    freshness_by_path = {
+        str(row.get("artifact_path") or ""): row
+        for row in (freshness.get("freshness_records") if isinstance(freshness.get("freshness_records"), list) else [])
+        if isinstance(row, dict)
+    }
     items = [
         ("BROKER_HEALTH", SOURCE_BROKER_AUTHORITY, "broker_event_log", execution / "execution_evidence_v1" / "broker_events" / day, "ops/ib/c2_execution_observer_v1.py", "run_aegis_pre_open_verify_v1.py", "BROKER_EVENT_LOG_MISSING"),
         ("BOD_INPUTS", SOURCE_OPERATOR_INPUT, "paper_capital_seed", bod.resolve_paper_capital_seed_path(operator_input_root=operator, day_utc=day), f"python3 ops/tools/ensure_paper_capital_seed_v1.py --day_utc {day}", "paper_session_bootstrap_v1", "PAPER_CAPITAL_SEED_MISSING"),
@@ -401,6 +407,11 @@ def _lifecycle_nodes(ctx: bod.BodContext) -> list[dict[str, Any]]:
     for owner_phase, source_type, artifact, path, command, consumer, blocker in items:
         status = _status_for_path(path, day_utc=day)
         canonical_blocker = _path_blocker(path, blocker, day_utc=day)
+        fresh_row = freshness_by_path.get(str(path.resolve()))
+        if fresh_row and str(fresh_row.get("freshness_status") or "") in {"STALE", "EXPIRED", "UNKNOWN"}:
+            if str(fresh_row.get("blocking_class") or "") == "HARD_BLOCKER":
+                status = "STALE" if fresh_row.get("freshness_status") != "UNKNOWN" else "BLOCKED"
+                canonical_blocker = str(fresh_row.get("canonical_blocker") or "TRUTH_FRESHNESS_UNKNOWN")
         nodes.append(
             _node(
                 requirement_id=f"{owner_phase}:{artifact}",
@@ -416,7 +427,7 @@ def _lifecycle_nodes(ctx: bod.BodContext) -> list[dict[str, Any]]:
                 blocker=canonical_blocker,
                 blocker_detail="" if status == "SATISFIED" else f"expected artifact missing or stale at {path}",
                 downstream_consequences=[],
-                operator_next_action=_path_action(path, f"Run {command}", day_utc=day),
+                operator_next_action=str((fresh_row or {}).get("operator_next_action") or "") or _path_action(path, f"Run {command}", day_utc=day),
             )
         )
     return nodes

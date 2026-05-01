@@ -1,0 +1,16 @@
+{
+  "schema_id": "aegis_action_registry",
+  "schema_version": "aegis_action_registry.v1",
+  "actions": [
+    {"action_id": "rerun_day", "label": "Rerun day", "description": "Rerun Aegis day ledger.", "risk_level": "LOW", "authority_owner": "aegis_day_run_ledger_v1", "operator_confirmation_required": false},
+    {"action_id": "rerun_market_open_data_gate", "label": "Rerun market-open data gate", "description": "Rerun market-open quote gate.", "risk_level": "LOW", "authority_owner": "market_data_authority", "operator_confirmation_required": false},
+    {"action_id": "rerun_requirement_graph", "label": "Rerun requirement graph", "description": "Regenerate required-artifact graph.", "risk_level": "LOW", "authority_owner": "requirement_graph_v1", "operator_confirmation_required": false},
+    {"action_id": "rerun_operator_projection", "label": "Rerun operator projection", "description": "Regenerate operator explanation.", "risk_level": "LOW", "authority_owner": "operator_projection_v1", "operator_confirmation_required": false},
+    {"action_id": "rerun_live_intelligence", "label": "Rerun live intelligence", "description": "Regenerate advisory live intelligence.", "risk_level": "LOW", "authority_owner": "live_intelligence_v1", "operator_confirmation_required": false},
+    {"action_id": "clean_and_protect_repo", "label": "Clean and protect repo", "description": "Restore reproducible protected source state.", "risk_level": "MEDIUM", "authority_owner": "source_reproducibility_authority", "operator_confirmation_required": true},
+    {"action_id": "inspect_market_data_artifacts", "label": "Inspect market data artifacts", "description": "Inspect market data supply, authority, and gate artifacts.", "risk_level": "LOW", "authority_owner": "market_data_authority", "operator_confirmation_required": false},
+    {"action_id": "inspect_authorization_diagnostics", "label": "Inspect authorization diagnostics", "description": "Inspect authorization and option-structure diagnostics.", "risk_level": "LOW", "authority_owner": "authorization_supply", "operator_confirmation_required": false},
+    {"action_id": "submit_paper_order", "label": "Submit paper order", "description": "Submit a governed paper order.", "risk_level": "HIGH", "authority_owner": "submit_boundary_status_v1", "operator_confirmation_required": true},
+    {"action_id": "enable_broker_transmit", "label": "Enable broker transmit", "description": "Allow broker transmit path.", "risk_level": "HIGH", "authority_owner": "execution_mode_authority_v1", "operator_confirmation_required": true}
+  ]
+}

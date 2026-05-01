@@ -34,6 +34,7 @@ def test_producer_contract_fingerprint_ignores_generated_time(tmp_path: Path) ->
 def test_authoritative_producers_attach_contracts() -> None:
     producers = [
         "ops/tools/run_aegis_day_v1.py",
+        "ops/tools/run_market_open_data_gate_v1.py",
         "ops/tools/run_market_data_supply_v1.py",
         "ops/tools/run_broker_supply_v1.py",
         "ops/tools/run_capital_supply_v1.py",

@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://constellation/governance/04_DATA/SCHEMAS/C2/REPORTS/outcome_attribution.v1.schema.json",
+  "title": "outcome_attribution.v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_id", "schema_version", "day_utc", "generated_at_utc", "status", "canonical_blocker", "operator_next_action", "advisory_only", "attribution_records", "producer_contract_v1"],
+  "properties": {
+    "schema_id": { "const": "outcome_attribution" },
+    "schema_version": { "const": "outcome_attribution.v1" },
+    "advisory_only": { "const": true },
+    "attribution_records": { "type": "array" },
+    "producer_contract_v1": { "type": "object" }
+  }
+}

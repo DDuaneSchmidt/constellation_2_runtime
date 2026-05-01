@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://constellation/governance/04_DATA/SCHEMAS/C2/REPORTS/truth_freshness.v1.schema.json",
+  "title": "truth_freshness.v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_id", "schema_version", "day_utc", "generated_at_utc", "status", "canonical_blocker", "operator_next_action", "freshness_records", "producer_contract_v1"],
+  "properties": {
+    "schema_id": { "const": "truth_freshness" },
+    "schema_version": { "const": "truth_freshness.v1" },
+    "freshness_records": { "type": "array" },
+    "producer_contract_v1": { "type": "object" }
+  }
+}

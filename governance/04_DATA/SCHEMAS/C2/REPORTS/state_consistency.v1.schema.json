@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://constellation/governance/04_DATA/SCHEMAS/C2/REPORTS/state_consistency.v1.schema.json",
+  "title": "state_consistency.v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_id", "schema_version", "day_utc", "generated_at_utc", "status", "canonical_blocker", "operator_next_action", "invariant_results", "producer_contract_v1"],
+  "properties": {
+    "schema_id": { "const": "state_consistency" },
+    "schema_version": { "const": "state_consistency.v1" },
+    "invariant_results": { "type": "array" },
+    "producer_contract_v1": { "type": "object" }
+  }
+}

@@ -1617,7 +1617,11 @@ def main(argv: List[str] | None = None) -> int:
         payload,
         producer_name="ops/tools/run_submit_boundary_status_v1.py",
         producer_command=f"python3 ops/tools/run_submit_boundary_status_v1.py --day_utc {day_utc}",
-        input_artifacts=list(source_paths.values()) + [str(day_readiness_path), str(runtime_resilience_path)],
+        input_artifacts=[
+            path
+            for path in list(source_paths.values()) + [str(day_readiness_path), str(runtime_resilience_path)]
+            if str(path or "").strip() and Path(str(path)).expanduser().exists()
+        ],
         output_artifacts=[resolve_submit_boundary_status_path(truth_root=truth_root, day_utc=day_utc)],
         schema_versions={"submit_boundary_status": "v1"},
     )
