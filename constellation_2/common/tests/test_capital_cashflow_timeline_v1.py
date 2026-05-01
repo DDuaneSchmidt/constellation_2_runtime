@@ -32,6 +32,11 @@ def test_cashflow_projection_florida_and_chile_monthly_net(tmp_path: Path) -> No
     assert florida["monthly_projection"][0]["income"] == 18000.0
     assert florida["monthly_projection"][0]["expenses"] == 12000.0
     assert florida["monthly_projection"][0]["net"] == 6000.0
+    assert florida["operator_console"]["safety"]["answer"] == "SAFE_WITHIN_HORIZON"
+    assert florida["operator_console"]["weakest_month"]["month"] == "2026-05"
+    assert florida["operator_console"]["weakest_month"]["net"] == 6000.0
+    assert florida["operator_console"]["failure"]["status"] == "NO_FAILURE_WITHIN_HORIZON"
+    assert florida["operator_console"]["trust"]["calculation_authority"] == "CapitalDomainServiceV1.cashflow_projection"
 
     assert chile["status"] == "HEALTHY"
     assert chile["monthly_projection"][0]["income"] == 18000.0
@@ -99,6 +104,12 @@ def test_cashflow_projection_negative_streak_sets_at_risk(tmp_path: Path) -> Non
     assert projection["status"] == "AT_RISK"
     assert projection["operator_status"] == "AT_RISK"
     assert "CAPITAL_CASHFLOW_NEGATIVE_STREAK_AT_RISK" in finding_codes
+    assert projection["operator_console"]["safety"]["answer"] == "NOT_SAFE"
+    assert projection["operator_console"]["weakest_month"]["net"] == -2000.0
+    assert projection["operator_console"]["failure"]["status"] == "FAILS_WITHIN_HORIZON"
+    assert projection["operator_console"]["failure"]["month"] == "2026-07"
+    driver_names = [row["event_name"] for row in projection["operator_console"]["drivers"]["contributors"]]
+    assert driver_names == ["expense_only", "income_only"]
 
 
 def test_cashflow_projection_missing_expense_scenario_is_degraded(tmp_path: Path) -> None:
@@ -137,6 +148,7 @@ def test_cashflow_projection_missing_expense_scenario_is_degraded(tmp_path: Path
     assert projection["status"] == "DEGRADED"
     assert projection["operator_status"] == "TIGHT"
     assert "CAPITAL_CASHFLOW_SCENARIO_EXPENSE_MISSING" in finding_codes
+    assert projection["operator_console"]["safety"]["answer"] == "SAFE_BUT_DEGRADED"
 
 
 def test_cashflow_projection_is_deterministic_for_same_inputs(tmp_path: Path) -> None:

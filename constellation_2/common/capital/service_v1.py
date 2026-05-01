@@ -2025,6 +2025,135 @@ ORDER BY period ASC
         elif status == "DEGRADED":
             operator_status = "TIGHT"
 
+        weakest_month = None
+        if projection_rows:
+            weakest_source = min(
+                projection_rows,
+                key=lambda row: (
+                    float(row.get("net") or 0.0),
+                    str(row.get("month") or ""),
+                ),
+            )
+            weakest_month = {
+                "month": str(weakest_source["month"]),
+                "income": round(float(weakest_source["income"]), 2),
+                "expenses": round(float(weakest_source["expenses"]), 2),
+                "net": round(float(weakest_source["net"]), 2),
+                "cumulative": round(float(weakest_source["cumulative"]), 2),
+            }
+
+        failure_month = None
+        running_negative_streak = 0
+        for row in projection_rows:
+            if float(row["net"]) < 0:
+                running_negative_streak += 1
+                if running_negative_streak >= 3:
+                    failure_month = str(row["month"])
+                    break
+            else:
+                running_negative_streak = 0
+
+        critical_codes = {
+            str(finding.get("code") or "")
+            for finding in findings
+            if str(finding.get("severity") or "") == "CRITICAL"
+        }
+        month_specific_failure = "CAPITAL_CASHFLOW_NEGATIVE_STREAK_AT_RISK" in critical_codes
+        non_month_specific_critical = bool(critical_codes - {"CAPITAL_CASHFLOW_NEGATIVE_STREAK_AT_RISK"})
+        if non_month_specific_critical:
+            failure = {
+                "status": "FAIL_CLOSED",
+                "month": None,
+                "condition": "critical_projection_validation",
+                "message": "Critical projection validation prevents a trusted month-specific failure answer.",
+            }
+        elif month_specific_failure and failure_month is not None:
+            failure = {
+                "status": "FAILS_WITHIN_HORIZON",
+                "month": failure_month,
+                "condition": "three_consecutive_negative_net_months",
+                "message": "Kernel threshold is breached when projected net cashflow is negative for three consecutive months.",
+            }
+        else:
+            failure = {
+                "status": "NO_FAILURE_WITHIN_HORIZON",
+                "month": None,
+                "condition": "three_consecutive_negative_net_months",
+                "message": "Kernel failure threshold is not breached within the projection horizon.",
+            }
+
+        driver_contributors: list[dict[str, Any]] = []
+        if weakest_month is not None:
+            weakest_row = next(
+                (row for row in projection_rows if str(row.get("month") or "") == weakest_month["month"]),
+                None,
+            )
+            if weakest_row is not None:
+                driver_contributors = sorted(
+                    [
+                        {
+                            "event_id": int(item["event_id"]),
+                            "event_name": str(item["event_name"]),
+                            "event_type": str(item["event_type"]),
+                            "scenario": str(item["scenario"]),
+                            "amount": round(float(item["amount"]), 2),
+                            "frequency": str(item["frequency"]),
+                            "is_deterministic": bool(item["is_deterministic"]),
+                        }
+                        for item in weakest_row.get("contributors", [])
+                    ],
+                    key=lambda item: (
+                        0 if item["event_type"] == "expense" else 1,
+                        -abs(float(item["amount"])),
+                        str(item["event_name"]),
+                    ),
+                )
+
+        operator_console = {
+            "safety": {
+                "answer": (
+                    "SAFE_WITHIN_HORIZON"
+                    if status == "HEALTHY"
+                    else "SAFE_BUT_DEGRADED"
+                    if status == "DEGRADED"
+                    else "NOT_SAFE"
+                ),
+                "status": status,
+                "operator_status": operator_status,
+                "reason_codes": [
+                    str(finding.get("code") or "")
+                    for finding in findings
+                    if str(finding.get("severity") or "") in {"CRITICAL", "WARNING"}
+                ],
+            },
+            "weakest_month": weakest_month,
+            "failure": failure,
+            "drivers": {
+                "basis_month": weakest_month["month"] if weakest_month is not None else None,
+                "contributors": driver_contributors,
+                "expense_contributors": [
+                    item for item in driver_contributors if item["event_type"] == "expense"
+                ],
+                "income_contributors": [
+                    item for item in driver_contributors if item["event_type"] != "expense"
+                ],
+            },
+            "trust": {
+                "calculation_authority": "CapitalDomainServiceV1.cashflow_projection",
+                "projection_view": "v_capital_cashflow_projection_v1",
+                "source_table": "capital_cashflow_events_v1",
+                "deterministic_only": not include_nondeterministic,
+                "inheritance_excluded": not include_nondeterministic,
+                "scenario_scope": sorted(scenario_scope),
+                "horizon_months": safe_horizon,
+                "start_month": _month_key(_month_floor(projection_start)),
+                "event_count": len(projection_events),
+                "validation_status": status,
+                "severity_counts": severity_counts,
+                "ui_calculation_policy": "UI renders projection-kernel fields and does not calculate financial truth.",
+            },
+        }
+
         return {
             "projection_view": "v_capital_cashflow_projection_v1",
             "scenario": normalized_scenario,
@@ -2033,6 +2162,7 @@ ORDER BY period ASC
             "monthly_projection": projection_rows,
             "min_net": min_net,
             "max_negative_streak": max_negative_streak,
+            "operator_console": operator_console,
             "validation": {
                 "status": status,
                 "severity_counts": severity_counts,

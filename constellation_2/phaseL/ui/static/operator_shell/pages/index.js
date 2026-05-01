@@ -1592,7 +1592,7 @@ async function renderCapitalFlowsPage() {
   };
 }
 
-async function renderCapitalCashflowPage() {
+async function renderCapitalCashflowPage(state = {}) {
   const query = new URLSearchParams(window.location.search || "");
   const scenarioRaw = String(query.get("scenario") || "florida").toLowerCase();
   const scenario = ["base", "florida", "chile"].includes(scenarioRaw) ? scenarioRaw : "florida";
@@ -1605,13 +1605,27 @@ async function renderCapitalCashflowPage() {
   const validation = payload.validation || {};
   const findings = safeList(validation.findings);
   const basis = payload.basis || {};
-  const firstNet = rows.length ? Number(rows[0].net) : null;
-  const minNet = typeof payload.min_net === "number" ? payload.min_net : null;
-  const statusLabel = payload.operator_status || (payload.status === "DEGRADED" ? "TIGHT" : payload.status || "UNKNOWN");
-  const maxAbsNet = Math.max(
-    1,
-    ...rows.map((row) => Math.abs(Number(row.net || 0))),
-  );
+  const operatorConsole = payload.operator_console || {};
+  const safety = operatorConsole.safety || {};
+  const weakestMonth = operatorConsole.weakest_month || {};
+  const failure = operatorConsole.failure || {};
+  const drivers = operatorConsole.drivers || {};
+  const trust = operatorConsole.trust || {};
+  const semantics = state.semantics || {};
+  const safetyAnswer = safety.answer || "UNKNOWN";
+  const safetyLabel = {
+    SAFE_WITHIN_HORIZON: "Safe",
+    SAFE_BUT_DEGRADED: "Tight",
+    NOT_SAFE: "Not Safe",
+  }[safetyAnswer] || safetyAnswer;
+  const safetySemantic = safetyAnswer === "SAFE_WITHIN_HORIZON" ? "healthy" : safetyAnswer === "SAFE_BUT_DEGRADED" ? "warning" : "blocked";
+  const failureStatus = failure.status || "UNKNOWN";
+  const failureSemantic = failureStatus === "NO_FAILURE_WITHIN_HORIZON" ? "healthy" : "blocked";
+  const failureLabel = failure.month ? failure.month : failureStatus === "NO_FAILURE_WITHIN_HORIZON" ? "No failure" : "Fail closed";
+  const weakestNet = typeof weakestMonth.net === "number" ? weakestMonth.net : null;
+  const driverRows = safeList(drivers.contributors);
+  const kernelUsd = (value) => (typeof value === "number" ? formatUsd(value) : "n/a");
+  const kernelSignedUsd = (value) => (typeof value === "number" ? formatSignedUsd(value) : "n/a");
   const scenarioHref = (nextScenario) => {
     const search = new URLSearchParams();
     search.set("scenario", nextScenario);
@@ -1630,13 +1644,13 @@ async function renderCapitalCashflowPage() {
     return `/capital/cashflow${suffix ? `?${suffix}` : ""}`;
   };
   return {
-    title: "Capital Cashflow Timeline",
-    meta: "Month-by-month deterministic cashflow survival projection with scenario controls and explainable basis.",
+    title: "Capital Cashflow Console",
+    meta: "Deterministic projection-kernel console for safety, weakest month, failure point, drivers, and calculation trust.",
     html: [
       renderCardSection({
         eyebrow: "Scenario",
-        title: "Cashflow Timeline Controls",
-        subtitle: "Scenario toggles are explicit. Inheritance stays excluded by default.",
+        title: "Projection Inputs",
+        subtitle: "Scenario controls only select the kernel inputs. The UI does not calculate the projection.",
         body: `
           <div class="chip-list">
             <a class="support-chip chip-button" href="${escapeHtml(scenarioHref("florida"))}" data-route="${escapeHtml(scenarioHref("florida"))}">Florida</a>
@@ -1649,48 +1663,56 @@ async function renderCapitalCashflowPage() {
         `,
       }),
       renderCardSection({
-        eyebrow: "Projection",
-        title: "Monthly Cashflow Snapshot",
-        subtitle: "Deterministic-first projection answers whether monthly net turns negative.",
+        eyebrow: "Console",
+        title: "Operator Answers",
+        subtitle: "These answers are rendered from the projection kernel payload.",
         body: `<div class="metric-grid">
           ${renderMetricCard({ label: "Scenario", value: scenario.toUpperCase() })}
-          ${renderMetricCard({ label: "Monthly net (first month)", value: firstNet === null ? "n/a" : formatSignedUsd(firstNet) })}
-          ${renderMetricCard({ label: "Lowest projected net", value: minNet === null ? "n/a" : formatSignedUsd(minNet) })}
-          ${renderMetricCard({ label: "Status", value: statusLabel })}
+          ${renderMetricCard({ label: "Am I safe?", value: safetyLabel, semantic: safetySemantic, semantics })}
+          ${renderMetricCard({
+            label: "Weakest month",
+            value: weakestMonth.month || "n/a",
+            detail: weakestNet === null ? "Net n/a" : `Net ${formatSignedUsd(weakestNet)}`,
+          })}
+          ${renderMetricCard({
+            label: "Failure point",
+            value: failureLabel,
+            detail: failure.condition || "n/a",
+            semantic: failureSemantic,
+            semantics,
+          })}
         </div>`,
       }),
       renderCardSection({
-        eyebrow: "Chart",
-        title: "Monthly Net Cashflow",
-        subtitle: "Bars are backend-derived net values by month (income minus expenses).",
-        body: rows.length
-          ? `<div class="stack-list">${rows.map((row) => {
-              const net = Number(row.net || 0);
-              const width = Math.max(2, Math.round((Math.abs(net) / maxAbsNet) * 100));
-              const barColor = net < 0 ? "#b00020" : "#1f6f43";
-              return `
-                <article class="stack-card">
-                  <div class="stack-card-header">
-                    <div class="stack-card-title">${escapeHtml(String(row.month || "n/a"))}</div>
-                    <div class="stack-card-subtitle">${escapeHtml(formatSignedUsd(net))}</div>
-                  </div>
-                  <div style="height:10px;border-radius:4px;background:${barColor};width:${width}%"></div>
-                </article>
-              `;
-            }).join("")}</div>`
-          : `<div class="empty-state">No projection rows were returned.</div>`,
+        eyebrow: "Drivers",
+        title: "Weakest-Month Drivers",
+        subtitle: "Contributor rows come from the same projection row that produced the weakest month.",
+        body: driverRows.length
+          ? renderSimpleTable({
+              columns: [
+                { key: "event_name", label: "Event" },
+                { key: "event_type", label: "Type" },
+                { key: "scenario", label: "Scenario" },
+                { key: "amount", label: "Amount", render: (row) => escapeHtml(kernelUsd(row.amount)) },
+                { key: "frequency", label: "Frequency" },
+                { key: "is_deterministic", label: "Deterministic", render: (row) => escapeHtml(truthyText(row.is_deterministic)) },
+              ],
+              rows: driverRows,
+              emptyMessage: "No driver rows were returned by the projection kernel.",
+            })
+          : `<div class="empty-state">No driver rows were returned by the projection kernel.</div>`,
       }),
       renderCardSection({
         eyebrow: "Projection",
-        title: "Monthly Projection Table",
-        subtitle: "Every month shows income, expenses, net, and cumulative path.",
+        title: "Kernel Monthly Rows",
+        subtitle: "Every displayed amount is a field returned by the projection kernel.",
         body: renderSimpleTable({
           columns: [
             { key: "month", label: "Month" },
-            { key: "income", label: "Income", render: (row) => escapeHtml(formatUsd(Number(row.income || 0))) },
-            { key: "expenses", label: "Expenses", render: (row) => escapeHtml(formatUsd(Number(row.expenses || 0))) },
-            { key: "net", label: "Net", render: (row) => escapeHtml(formatSignedUsd(Number(row.net || 0))) },
-            { key: "cumulative", label: "Cumulative", render: (row) => escapeHtml(formatSignedUsd(Number(row.cumulative || 0))) },
+            { key: "income", label: "Income", render: (row) => escapeHtml(kernelUsd(row.income)) },
+            { key: "expenses", label: "Expenses", render: (row) => escapeHtml(kernelUsd(row.expenses)) },
+            { key: "net", label: "Net", render: (row) => escapeHtml(kernelSignedUsd(row.net)) },
+            { key: "cumulative", label: "Cumulative", render: (row) => escapeHtml(kernelSignedUsd(row.cumulative)) },
           ],
           rows,
           emptyMessage: "No monthly projection rows were returned.",
@@ -1700,17 +1722,21 @@ async function renderCapitalCashflowPage() {
     contextHtml: [
       renderCardSection({
         eyebrow: "Basis",
-        title: "Projection Basis",
-        subtitle: "Deterministic basis and inheritance exclusion are explicit.",
+        title: "Calculation Trust",
+        subtitle: "Authority, basis, validation status, and UI calculation policy are explicit.",
         body: renderDefinitionRows([
-          { label: "Projection view", value: basis.report_basis || "v_capital_cashflow_projection_v1" },
+          { label: "Calculation authority", value: trust.calculation_authority || "CapitalDomainServiceV1.cashflow_projection" },
+          { label: "Projection view", value: trust.projection_view || basis.report_basis || "v_capital_cashflow_projection_v1" },
+          { label: "Source table", value: trust.source_table || "capital_cashflow_events_v1" },
           { label: "Basis description", value: basis.basis_description || "n/a" },
-          { label: "Deterministic only", value: basis.deterministic_only ? "true" : "false" },
-          { label: "Inheritance excluded", value: basis.inheritance_excluded ? "true" : "false" },
-          { label: "Scenario scope", value: safeList(basis.scenario_scope).join(", ") || "n/a" },
-          { label: "Start month", value: basis.start_month || "n/a" },
-          { label: "Horizon (months)", value: String(basis.horizon_months ?? "n/a") },
-          { label: "Event count", value: String(basis.event_count ?? "0") },
+          { label: "Deterministic only", value: truthyText(trust.deterministic_only ?? basis.deterministic_only) },
+          { label: "Inheritance excluded", value: truthyText(trust.inheritance_excluded ?? basis.inheritance_excluded) },
+          { label: "Scenario scope", value: safeList(trust.scenario_scope || basis.scenario_scope).join(", ") || "n/a" },
+          { label: "Start month", value: trust.start_month || basis.start_month || "n/a" },
+          { label: "Horizon (months)", value: String(trust.horizon_months ?? basis.horizon_months ?? "n/a") },
+          { label: "Event count", value: String(trust.event_count ?? basis.event_count ?? "0") },
+          { label: "Validation status", value: trust.validation_status || validation.status || "n/a" },
+          { label: "UI policy", value: trust.ui_calculation_policy || "UI renders projection-kernel fields and does not calculate financial truth." },
         ]),
       }),
       renderCardSection({

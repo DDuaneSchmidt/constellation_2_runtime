@@ -78,6 +78,8 @@ def test_capital_overview_and_allocation_views_match_expected_seed_totals(monkey
     assert cashflow["scenario"] == "florida"
     assert cashflow["monthly_projection"][0]["net"] == 6000.0
     assert cashflow["basis"]["deterministic_only"] is True
+    assert cashflow["operator_console"]["safety"]["answer"] == "SAFE_WITHIN_HORIZON"
+    assert cashflow["operator_console"]["trust"]["calculation_authority"] == "CapitalDomainServiceV1.cashflow_projection"
     assert validation["validation"]["status"] == "HEALTHY"
 
 
@@ -142,6 +144,8 @@ def test_capital_routes_and_clients_are_shell_wired() -> None:
         "freshness_status",
         "contributors",
         "Confidence Band",
+        "operator_console",
+        "UI renders projection-kernel fields and does not calculate financial truth.",
     ]:
         assert basis_keyword in pages
 

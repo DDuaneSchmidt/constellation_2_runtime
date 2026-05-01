@@ -318,6 +318,33 @@ def build_capital_cashflow_view(
             "monthly_projection": [],
             "min_net": None,
             "max_negative_streak": 0,
+            "operator_console": {
+                "safety": {
+                    "answer": "NOT_SAFE",
+                    "status": "AT_RISK",
+                    "operator_status": "AT_RISK",
+                    "reason_codes": ["CAPITAL_CASHFLOW_PROJECTION_UNAVAILABLE"],
+                },
+                "weakest_month": None,
+                "failure": {
+                    "status": "FAIL_CLOSED",
+                    "month": None,
+                    "condition": "projection_unavailable",
+                    "message": "Projection kernel did not return a trusted cashflow result.",
+                },
+                "drivers": {
+                    "basis_month": None,
+                    "contributors": [],
+                    "expense_contributors": [],
+                    "income_contributors": [],
+                },
+                "trust": {
+                    "calculation_authority": "CapitalDomainServiceV1.cashflow_projection",
+                    "projection_view": "v_capital_cashflow_projection_v1",
+                    "validation_status": "AT_RISK",
+                    "ui_calculation_policy": "UI renders projection-kernel fields and does not calculate financial truth.",
+                },
+            },
             "validation": {
                 "status": "AT_RISK",
                 "severity_counts": {"CRITICAL": 1},
@@ -353,6 +380,7 @@ def build_capital_cashflow_view(
         "monthly_projection": projection.get("monthly_projection", []),
         "min_net": projection.get("min_net"),
         "max_negative_streak": projection.get("max_negative_streak"),
+        "operator_console": projection.get("operator_console", {}),
         "validation": projection.get("validation", {}),
         "basis": {
             "deterministic_only": not include_inheritance,
