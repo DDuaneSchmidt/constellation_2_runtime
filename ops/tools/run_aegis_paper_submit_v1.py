@@ -405,11 +405,25 @@ def run_aegis_paper_submit_v1(ctx: SubmitContext, *, runner: CommandRunner = _de
         "broker_order_transmitted": bool(submit_mode.get("broker_order_transmitted") is True),
         "missing_broker_ids_blocker": bool(submit_mode.get("missing_broker_ids_blocker") is True),
         "missing_broker_ids_diagnostic": bool(submit_mode.get("missing_broker_ids_diagnostic") is True),
+        "historical_dry_run_completed": bool(submit_mode_status == "DRY_RUN_COMPLETE"),
+        "current_submit_guard_status": "PASS" if guards["ok"] else "BLOCKED",
+        "current_guard_failure_reasons": [str(row.get("code") or "UNKNOWN") for row in guards["blockers"]],
         "guards": guards,
         "steps": [],
         "governed_submit": {},
         "evidence": {},
     }
+    if not guards["ok"]:
+        report["status"] = "BLOCKED"
+        report["reason_codes"] = [str(row.get("code") or "UNKNOWN") for row in guards["blockers"]]
+        if submit_mode_status == "DRY_RUN_COMPLETE":
+            report["evidence"] = collect_submit_evidence_v1(ctx, candidate_paths)
+            report["governed_submit"] = {
+                "producer": "ops/tools/run_c2_paper_day_orchestrator_v2.py::_run_governed_submit_stage",
+                "return_code": 0,
+                "reason_codes": ["DRY_RUN_ALREADY_COMPLETE", "CURRENT_SUBMIT_GUARDS_BLOCKED"],
+            }
+        return report
     if submit_mode_status == "DRY_RUN_COMPLETE":
         report["status"] = "DRY_RUN_COMPLETE"
         report["broker_transmit_enabled"] = False
@@ -420,10 +434,6 @@ def run_aegis_paper_submit_v1(ctx: SubmitContext, *, runner: CommandRunner = _de
             "return_code": 0,
             "reason_codes": ["DRY_RUN_ALREADY_COMPLETE"],
         }
-        return report
-    if not guards["ok"]:
-        report["status"] = "BLOCKED"
-        report["reason_codes"] = [str(row.get("code") or "UNKNOWN") for row in guards["blockers"]]
         return report
 
     auth_step = runner(_authorization_cmd(ctx), ctx.env)

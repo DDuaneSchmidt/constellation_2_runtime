@@ -200,7 +200,7 @@ def test_dry_run_policy_does_not_create_false_broker_submission_claims(tmp_path:
     assert report["evidence"]["execution_evidence_submissions"]["broker_submission_record_count"] == 0
 
 
-def test_existing_dry_run_submit_reports_complete_not_blocked_live_failure(tmp_path: Path) -> None:
+def test_existing_dry_run_submit_reports_current_guard_block(tmp_path: Path) -> None:
     ctx, _candidate = _seed_ready_roots(tmp_path)
     submission_dir = ctx.execution_root / "execution_evidence_v1" / "submissions" / DAY / SUBMISSION_ID
     _write_json(
@@ -231,11 +231,50 @@ def test_existing_dry_run_submit_reports_complete_not_blocked_live_failure(tmp_p
             runner=lambda cmd, env: {"cmd": cmd, "return_code": 0, "stdout": "", "stderr": ""},
         )
 
-    assert report["status"] == "DRY_RUN_COMPLETE"
+    assert report["status"] == "BLOCKED"
     assert report["submit_mode_status"] == "DRY_RUN_COMPLETE"
+    assert report["historical_dry_run_completed"] is True
+    assert report["current_submit_guard_status"] == "BLOCKED"
+    assert "PAPER_DAY_AUTHORITY_NOT_OPEN_READY" in report["current_guard_failure_reasons"]
     assert report["broker_transmit_enabled"] is False
     assert report["missing_broker_ids_blocker"] is False
     assert report["missing_broker_ids_diagnostic"] is True
+    run_submit.assert_not_called()
+
+
+def test_existing_dry_run_submit_does_not_mask_control_plane_not_ready(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ctx, _candidate = _seed_ready_roots(tmp_path)
+    submission_dir = ctx.execution_root / "execution_evidence_v1" / "submissions" / DAY / SUBMISSION_ID
+    _write_json(
+        submission_dir / "broker_submission_record.v2.json",
+        {
+            "submission_id": SUBMISSION_ID,
+            "status": "PENDINGSUBMIT",
+            "broker_ids": {"order_id": None, "perm_id": None},
+            "error": {"code": "DRY_RUN_NO_BROKER_ID"},
+        },
+    )
+    _write_json(submission_dir / "broker_submit_attempt_v1.json", {"submission_id": SUBMISSION_ID, "dry_run": True})
+    monkeypatch.setattr(
+        submit_tool,
+        "evaluate_submit_enforcement_v1",
+        lambda **_kwargs: {
+            "ok": False,
+            "status": "BLOCKED",
+            "canonical_blocker": "CONTROL_PLANE_NOT_READY",
+            "blockers": [{"code": "CONTROL_PLANE_NOT_READY"}],
+        },
+    )
+
+    with patch.object(submit_tool.orchestrator_v2, "_run_governed_submit_stage") as run_submit:
+        report = submit_tool.run_aegis_paper_submit_v1(ctx, runner=lambda *_: {"return_code": 0})
+
+    assert report["status"] == "BLOCKED"
+    assert report["submit_mode_status"] == "DRY_RUN_COMPLETE"
+    assert report["historical_dry_run_completed"] is True
+    assert report["current_submit_guard_status"] == "BLOCKED"
+    assert "CONTROL_PLANE_NOT_READY" in report["current_guard_failure_reasons"]
+    assert "CONTROL_PLANE_NOT_READY" in report["reason_codes"]
     run_submit.assert_not_called()
 
 

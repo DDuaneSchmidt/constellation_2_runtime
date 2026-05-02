@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 import ops.tools.aegis_submit_enforcement_v1 as enforcement
+import ops.tools.run_aegis_control_plane_v1 as cp
 
 
 DAY = "2026-04-29"
@@ -43,6 +44,7 @@ def _packet(runtime_root: Path, commit: str = COMMIT, runtime_mode: str = "PRODU
 def _stable_git(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(enforcement, "_git_commit", lambda: COMMIT)
     monkeypatch.setattr(enforcement, "_git_dirty_status", lambda: "CLEAN")
+    monkeypatch.setattr(cp, "_current_git_commit_v1", lambda: COMMIT)
 
 
 def _seed_ready(tmp_path: Path, runtime_mode: str = "PRODUCTION") -> tuple[Path, Path, Path]:
@@ -63,17 +65,25 @@ def _seed_ready(tmp_path: Path, runtime_mode: str = "PRODUCTION") -> tuple[Path,
                 "status": "ACTIVE",
             },
         )
+    control_path = _report(truth, "aegis_control_plane_v1", "control_plane.v1.json")
     _write(
-        _report(truth, "aegis_control_plane_v1", "control_plane.v1.json"),
+        control_path,
         {
             "day_utc": DAY,
+            "truth_root": str(truth.resolve()),
+            "runtime_root": str(runtime.resolve()),
+            "runtime_mode": runtime_mode,
+            "artifact_path": str(control_path.resolve()),
+            "actual_artifact_path": str(control_path.resolve()),
+            "producer_contract_output_artifact_path": str(control_path.resolve()),
             "final_status": "READY",
             "submit_allowed": True,
             "canonical_blocker": "",
             "producer_contract_v1": {
                 "code_version_git_commit": COMMIT,
                 "source_dirty_status": "CLEAN",
-                "output_artifacts": [{"path": str(_report(truth, "aegis_control_plane_v1", "control_plane.v1.json"))}],
+                "generated_at_utc": "2026-04-29T14:00:00Z",
+                "output_artifacts": [{"path": str(control_path.resolve())}],
             },
         },
     )
@@ -228,6 +238,42 @@ def test_candidate_runtime_and_unpromoted_commit_hard_block_submit(tmp_path: Pat
     assert any(row["code"] == "PROMOTION_VALIDATION_RUNTIME_ROOT_MISMATCH" for row in result["blockers"])
 
 
+def test_submit_enforcement_rejects_copied_candidate_control_plane_in_production_path(tmp_path: Path) -> None:
+    truth, execution, runtime = _seed_ready(tmp_path)
+    candidate_truth = tmp_path / "candidate_truth"
+    control_path = _report(truth, "aegis_control_plane_v1", "control_plane.v1.json")
+    candidate_control_path = _report(candidate_truth, "aegis_control_plane_v1", "control_plane.v1.json")
+    _write(
+        control_path,
+        {
+            "day_utc": DAY,
+            "truth_root": str(candidate_truth.resolve()),
+            "runtime_root": str(runtime.resolve()),
+            "runtime_mode": "CANDIDATE",
+            "artifact_path": str(candidate_control_path.resolve()),
+            "actual_artifact_path": str(candidate_control_path.resolve()),
+            "producer_contract_output_artifact_path": str(candidate_control_path.resolve()),
+            "final_status": "READY",
+            "submit_allowed": True,
+            "canonical_blocker": "",
+            "evidence_paths": [str(candidate_truth / "target_day_build_v1" / f"{DAY}.json")],
+            "producer_contract_v1": {
+                "code_version_git_commit": COMMIT,
+                "source_dirty_status": "CLEAN",
+                "generated_at_utc": "2026-04-29T14:00:00Z",
+                "output_artifacts": [{"path": str(candidate_control_path.resolve())}],
+            },
+        },
+    )
+
+    result = _evaluate(truth, execution, runtime)
+    codes = {row["code"] for row in result["blockers"]}
+
+    assert "CONTROL_PLANE_OUTPUT_PATH_MISMATCH" in codes
+    assert "CONTROL_PLANE_TRUTH_ROOT_MISMATCH" in codes
+    assert "CONTROL_PLANE_RUNTIME_MODE_MISMATCH" in codes
+
+
 def test_blocked_ledger_kill_switch_forbidden_action_packet_and_freshness_all_hard_block(tmp_path: Path) -> None:
     truth, execution, runtime = _seed_ready(tmp_path)
     _write(_report(truth, "aegis_day_run_v1", "day_run.v1.json"), {"final_status": "NOT_READY", "canonical_blocker": "C2_KILL_SWITCH_ACTIVE"})
@@ -263,16 +309,25 @@ def test_blocked_ledger_kill_switch_forbidden_action_packet_and_freshness_all_ha
     assert any(row["code"] == "REQUIRED_AUTHORITY_NOT_FRESH" for row in _evaluate(truth, execution, runtime)["blockers"])
 
     truth, execution, runtime = _seed_ready(tmp_path / "control_commit")
+    control_path = _report(truth, "aegis_control_plane_v1", "control_plane.v1.json")
     _write(
-        _report(truth, "aegis_control_plane_v1", "control_plane.v1.json"),
+        control_path,
         {
+            "day_utc": DAY,
+            "truth_root": str(truth.resolve()),
+            "runtime_root": str(runtime.resolve()),
+            "runtime_mode": "PRODUCTION",
+            "artifact_path": str(control_path.resolve()),
+            "actual_artifact_path": str(control_path.resolve()),
+            "producer_contract_output_artifact_path": str(control_path.resolve()),
             "final_status": "READY",
             "submit_allowed": True,
             "canonical_blocker": "",
             "producer_contract_v1": {
                 "code_version_git_commit": "b" * 40,
                 "source_dirty_status": "CLEAN",
-                "output_artifacts": [{"path": str(_report(truth, "aegis_control_plane_v1", "control_plane.v1.json"))}],
+                "generated_at_utc": "2026-04-29T14:00:00Z",
+                "output_artifacts": [{"path": str(control_path.resolve())}],
             },
         },
     )
@@ -281,12 +336,26 @@ def test_blocked_ledger_kill_switch_forbidden_action_packet_and_freshness_all_ha
 
 def test_control_plane_not_ready_blocks_even_when_legacy_gates_are_ready(tmp_path: Path) -> None:
     truth, execution, runtime = _seed_ready(tmp_path)
+    control_path = _report(truth, "aegis_control_plane_v1", "control_plane.v1.json")
     _write(
-        _report(truth, "aegis_control_plane_v1", "control_plane.v1.json"),
+        control_path,
         {
+            "day_utc": DAY,
+            "truth_root": str(truth.resolve()),
+            "runtime_root": str(runtime.resolve()),
+            "runtime_mode": "PRODUCTION",
+            "artifact_path": str(control_path.resolve()),
+            "actual_artifact_path": str(control_path.resolve()),
+            "producer_contract_output_artifact_path": str(control_path.resolve()),
             "final_status": "NOT_READY",
             "submit_allowed": False,
             "canonical_blocker": "SESSION_IDENTITY_PRECHECK_FAILED",
+            "producer_contract_v1": {
+                "code_version_git_commit": COMMIT,
+                "source_dirty_status": "CLEAN",
+                "generated_at_utc": "2026-04-29T14:00:00Z",
+                "output_artifacts": [{"path": str(control_path.resolve())}],
+            },
         },
     )
 

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ops.tools.aegis_runtime_mode_v1 import production_version_path_v1, read_production_version_v1, runtime_mode_from_truth_root_v1
+from ops.tools.run_aegis_control_plane_v1 import control_plane_self_binding_issues_v1
 from ops.tools.run_aegis_promotion_validation_ledger_v1 import promotion_validation_ledger_path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -255,6 +256,8 @@ def evaluate_submit_enforcement_v1(
     freshness = _read_json(paths["truth_freshness"])
     kill_switch = _read_json(paths["kill_switch"])
     blockers: list[dict[str, str]] = []
+    for issue in control_plane_self_binding_issues_v1(control_plane, actual_path=paths["control_plane"]):
+        blockers.append({key: str(value) for key, value in issue.items()})
 
     if mode != "PRODUCTION":
         blockers.append(

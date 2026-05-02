@@ -31,9 +31,9 @@ REPORT_CONTRACT_SCHEMAS = [
 def _ctx(tmp_path: Path) -> bod.BodContext:
     truth = tmp_path / "truth"
     execution = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
-    runtime = tmp_path / "runtime"
+    runtime = tmp_path
     operator = tmp_path / "operator"
-    for path in (truth, execution, runtime, operator):
+    for path in (truth, execution, operator):
         path.mkdir(parents=True, exist_ok=True)
     return bod.BodContext(
         day_utc=DAY,
@@ -48,9 +48,9 @@ def _ctx(tmp_path: Path) -> bod.BodContext:
 
 def _ctx_with_truth(tmp_path: Path, truth: Path) -> bod.BodContext:
     execution = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
-    runtime = tmp_path / "runtime"
+    runtime = tmp_path
     operator = tmp_path / "operator"
-    for path in (truth, execution, runtime, operator):
+    for path in (truth, execution, operator):
         path.mkdir(parents=True, exist_ok=True)
     return bod.BodContext(
         day_utc=DAY,
@@ -77,6 +77,41 @@ def _producer_contract() -> dict:
             "producer_name": "test",
             "producer_command": "test",
         }
+    }
+
+
+def _self_bound_control_payload(
+    *,
+    actual_path: Path,
+    truth_root: Path,
+    runtime_root: Path,
+    runtime_mode: str,
+    output_path: Path | None = None,
+) -> dict:
+    output = (output_path or actual_path).resolve()
+    return {
+        "schema_id": "aegis_control_plane",
+        "schema_version": cp.SCHEMA_VERSION,
+        "day_utc": DAY,
+        "truth_root": str(truth_root.resolve()),
+        "runtime_root": str(runtime_root.resolve()),
+        "runtime_mode": runtime_mode,
+        "artifact_path": str(actual_path.resolve()),
+        "actual_artifact_path": str(actual_path.resolve()),
+        "producer_contract_output_artifact_path": str(output),
+        "environment": "PAPER",
+        "final_status": "READY",
+        "current_phase": "",
+        "current_domain": "",
+        "canonical_blocker": "",
+        "submit_allowed": True,
+        "evidence_paths": [],
+        "producer_contract_v1": {
+            "code_version_git_commit": cp._current_git_commit_v1(),
+            "source_dirty_status": "CLEAN",
+            "generated_at_utc": f"{DAY}T13:00:00Z",
+            "output_artifacts": [{"path": str(output)}],
+        },
     }
 
 
@@ -765,6 +800,103 @@ def test_readiness_contract_schemas_accept_governed_artifact_shapes() -> None:
     )
 
 
+def test_control_plane_schema_requires_self_binding_fields(tmp_path: Path) -> None:
+    schema_path = "governance/04_DATA/SCHEMAS/C2/REPORTS/aegis_control_plane.v1.schema.json"
+    with pytest.raises(SchemaValidationError):
+        validate_against_repo_schema_v1(
+            {
+                "schema_id": "aegis_control_plane",
+                "schema_version": cp.SCHEMA_VERSION,
+                "day_utc": DAY,
+                "final_status": "READY",
+                "current_domain": "",
+                "current_phase": "",
+                "canonical_blocker": "",
+                "submit_allowed": True,
+                "producer_contract_v1": {
+                    "code_version_git_commit": cp._current_git_commit_v1(),
+                    "source_dirty_status": "CLEAN",
+                    "generated_at_utc": f"{DAY}T13:00:00Z",
+                },
+            },
+            REPO_ROOT,
+            schema_path,
+        )
+
+    truth_root = tmp_path / "candidate_truth"
+    path = cp.control_plane_path(truth_root=truth_root, day_utc=DAY)
+    payload = _self_bound_control_payload(
+        actual_path=path,
+        truth_root=truth_root,
+        runtime_root=tmp_path,
+        runtime_mode="CANDIDATE",
+    )
+    validate_against_repo_schema_v1(payload, REPO_ROOT, schema_path)
+
+
+def test_control_plane_self_binding_accepts_only_actual_output_path(tmp_path: Path) -> None:
+    truth_root = tmp_path / "candidate_truth"
+    path = cp.control_plane_path(truth_root=truth_root, day_utc=DAY)
+    payload = _self_bound_control_payload(
+        actual_path=path,
+        truth_root=truth_root,
+        runtime_root=tmp_path,
+        runtime_mode="CANDIDATE",
+    )
+    assert cp.control_plane_self_binding_issues_v1(payload, actual_path=path) == []
+
+    copied_path = cp.control_plane_path(truth_root=tmp_path / "production_truth", day_utc=DAY)
+    codes = {row["code"] for row in cp.control_plane_self_binding_issues_v1(payload, actual_path=copied_path)}
+    assert "CONTROL_PLANE_OUTPUT_PATH_MISMATCH" in codes
+    assert "CONTROL_PLANE_TRUTH_ROOT_MISMATCH" in codes
+
+
+def test_production_control_plane_rejects_candidate_runtime_mode_and_paths(tmp_path: Path) -> None:
+    production_truth = tmp_path / "production_truth"
+    candidate_truth = tmp_path / "candidate_truth"
+    path = cp.control_plane_path(truth_root=production_truth, day_utc=DAY)
+    payload = _self_bound_control_payload(
+        actual_path=path,
+        truth_root=production_truth,
+        runtime_root=tmp_path,
+        runtime_mode="CANDIDATE",
+        output_path=cp.control_plane_path(truth_root=candidate_truth, day_utc=DAY),
+    )
+    payload["evidence_paths"] = [str(candidate_truth / "target_day_build_v1" / f"{DAY}.json")]
+    payload["readiness_dependency_inventory"] = [
+        {"dependency_id": "stale_downstream", "upstream_artifacts": [str(candidate_truth / "reports" / "stale.json")]}
+    ]
+
+    codes = {row["code"] for row in cp.control_plane_self_binding_issues_v1(payload, actual_path=path)}
+
+    assert "CONTROL_PLANE_RUNTIME_MODE_MISMATCH" in codes
+    assert "CONTROL_PLANE_OUTPUT_PATH_MISMATCH" in codes
+    assert "CONTROL_PLANE_TRUTH_ROOT_MISMATCH" in codes
+
+
+def test_control_plane_self_binding_rejects_wrong_truth_root_runtime_root_mode_and_metadata(tmp_path: Path) -> None:
+    truth_root = tmp_path / "candidate_truth"
+    path = cp.control_plane_path(truth_root=truth_root, day_utc=DAY)
+    payload = _self_bound_control_payload(
+        actual_path=path,
+        truth_root=tmp_path / "other_truth",
+        runtime_root=tmp_path / "other_runtime",
+        runtime_mode="PRODUCTION",
+    )
+    payload["producer_contract_v1"]["code_version_git_commit"] = "0" * 40
+
+    codes = {row["code"] for row in cp.control_plane_self_binding_issues_v1(payload, actual_path=path)}
+
+    assert "CONTROL_PLANE_TRUTH_ROOT_MISMATCH" in codes
+    assert "CONTROL_PLANE_RUNTIME_ROOT_MISMATCH" in codes
+    assert "CONTROL_PLANE_RUNTIME_MODE_MISMATCH" in codes
+    assert "CONTROL_PLANE_PRODUCER_METADATA_STALE" in codes
+
+    payload.pop("producer_contract_v1")
+    codes = {row["code"] for row in cp.control_plane_self_binding_issues_v1(payload, actual_path=path)}
+    assert "CONTROL_PLANE_PRODUCER_METADATA_MISSING" in codes
+
+
 def test_control_plane_validates_required_dependency_schema_instances(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
     _source_pass(monkeypatch)
     ctx = _ctx(tmp_path)
@@ -1238,6 +1370,57 @@ def test_projection_blocks_when_control_plane_wrong_day_without_kernel_fallback(
     assert payload["final_status"] == "UNKNOWN"
     assert payload["submit_allowed"] is False
     assert "kernel fallback should not be used" not in payload["operator_next_action"]
+
+
+def test_projection_rejects_control_plane_output_path_mismatch(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    ctx = _ctx_with_truth(tmp_path, tmp_path / "candidate_truth")
+    cp_path = cp.control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    payload = _self_bound_control_payload(
+        actual_path=cp_path,
+        truth_root=ctx.truth_root,
+        runtime_root=ctx.runtime_root,
+        runtime_mode="CANDIDATE",
+        output_path=ctx.runtime_root / "candidate_truth" / "wrong" / "control_plane.v1.json",
+    )
+    _write(cp_path, payload)
+    monkeypatch.setattr(projection.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+
+    _out_path, observed = projection.run_operator_projection_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
+
+    assert observed["status"] == "BLOCKED"
+    assert observed["canonical_blocker"] == "CONTROL_PLANE_OUTPUT_PATH_MISMATCH"
+    assert observed["submit_allowed"] is False
+    assert observed["control_plane_integrity_issues"]
+
+
+def test_projection_rejects_copied_candidate_control_plane_under_production_truth(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    production_truth = tmp_path / "production_truth"
+    candidate_truth = tmp_path / "candidate_truth"
+    ctx = _ctx_with_truth(tmp_path, production_truth)
+    actual_path = cp.control_plane_path(truth_root=production_truth, day_utc=ctx.day_utc)
+    source_path = cp.control_plane_path(truth_root=candidate_truth, day_utc=ctx.day_utc)
+    payload = _self_bound_control_payload(
+        actual_path=source_path,
+        truth_root=candidate_truth,
+        runtime_root=tmp_path,
+        runtime_mode="CANDIDATE",
+    )
+    payload["evidence_paths"] = [str(candidate_truth / "target_day_build_v1" / f"{ctx.day_utc}.json")]
+    _write(actual_path, payload)
+    monkeypatch.setattr(projection.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+
+    _out_path, observed = projection.run_operator_projection_v1(ctx.day_utc, ctx.environment, str(production_truth))
+
+    assert observed["status"] == "BLOCKED"
+    assert observed["canonical_blocker"] in {
+        "CONTROL_PLANE_OUTPUT_PATH_MISMATCH",
+        "CONTROL_PLANE_TRUTH_ROOT_MISMATCH",
+        "CONTROL_PLANE_RUNTIME_MODE_MISMATCH",
+    }
+    assert {row["code"] for row in observed["control_plane_integrity_issues"]} >= {
+        "CONTROL_PLANE_OUTPUT_PATH_MISMATCH",
+        "CONTROL_PLANE_TRUTH_ROOT_MISMATCH",
+    }
 
 
 def test_projection_has_no_kernel_readiness_fallback_path() -> None:

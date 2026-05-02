@@ -16,7 +16,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
 from ops.tools import run_aegis_bod_prepare_v1 as bod
 from ops.tools.aegis_runtime_mode_v1 import git_commit_v1, read_production_version_v1, runtime_mode_from_truth_root_v1
 from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
-from ops.tools.run_aegis_control_plane_v1 import control_plane_path
+from ops.tools.run_aegis_control_plane_v1 import control_plane_path, control_plane_self_binding_issues_v1
 from ops.tools.run_aegis_promotion_validation_ledger_v1 import promotion_validation_ledger_path
 
 SCHEMA_VERSION = "aegis_operator_projection.v1"
@@ -215,6 +215,7 @@ def _projection_from_control_plane(ctx: bod.BodContext, control: dict[str, Any])
         "session_dependency_inventory": session_inventory,
         "session_precheck_failures": session_failures,
         "failed_current_domain_dependencies": failed_current_domain,
+        "control_plane_integrity_issues": [],
         "readiness_dependency_inventory": list(control.get("readiness_dependency_inventory") if isinstance(control.get("readiness_dependency_inventory"), list) else []),
         "downstream_consequences": [{"phase": item, "reason": f"Deferred by {phase}"} for item in deferred],
         "deferred_downstream_phases": deferred,
@@ -262,7 +263,14 @@ def _projection_from_control_plane(ctx: bod.BodContext, control: dict[str, Any])
     }
 
 
-def _projection_control_plane_unavailable(ctx: bod.BodContext, *, control_path: Path, reason: str) -> dict[str, Any]:
+def _projection_control_plane_unavailable(
+    ctx: bod.BodContext,
+    *,
+    control_path: Path,
+    reason: str,
+    blocker_code: str = "CONTROL_PLANE_UNAVAILABLE",
+    integrity_issues: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
     promotion_visibility = _promotion_visibility_v1(ctx)
     return {
         "schema_id": "aegis_operator_projection",
@@ -272,11 +280,11 @@ def _projection_control_plane_unavailable(ctx: bod.BodContext, *, control_path: 
         "runtime_mode": runtime_mode_from_truth_root_v1(ctx.truth_root),
         "generated_at_utc": _now_iso(),
         "status": "BLOCKED",
-        "canonical_blocker": "CONTROL_PLANE_UNAVAILABLE",
+        "canonical_blocker": blocker_code,
         "operator_next_action": f"Regenerate aegis_control_plane_v1 for {ctx.day_utc}; projection will not recompute readiness.",
-        "why_not_ready_summary": "SYSTEM NOT READY BECAUSE: CONTROL_PLANE -> CONTROL_PLANE_UNAVAILABLE",
+        "why_not_ready_summary": f"SYSTEM NOT READY BECAUSE: CONTROL_PLANE -> {blocker_code}",
         "final_status": "UNKNOWN",
-        "first_blocker": "CONTROL_PLANE_UNAVAILABLE",
+        "first_blocker": blocker_code,
         "owner": "aegis_control_plane_v1",
         "phase": "",
         "current_phase": "",
@@ -288,6 +296,7 @@ def _projection_control_plane_unavailable(ctx: bod.BodContext, *, control_path: 
         "session_precheck_failures": [],
         "failed_current_domain_dependencies": [],
         "readiness_dependency_inventory": [],
+        "control_plane_integrity_issues": list(integrity_issues or []),
         "downstream_consequences": [],
         "deferred_downstream_phases": [],
         "deferred_phases": [],
@@ -325,6 +334,7 @@ def _projection_control_plane_unavailable(ctx: bod.BodContext, *, control_path: 
             "aegis_control_plane_path": str(control_path),
             "final_status_source": "aegis_control_plane_v1",
             "control_plane_role": "sole readiness authority for projection",
+            "control_plane_integrity_issues": list(integrity_issues or []),
         },
         "confidence_in_diagnosis": "LOW",
         "last_updated_at_utc": _now_iso(),
@@ -337,11 +347,27 @@ def run_operator_projection_v1(day_utc: str, environment: str, truth_root: str =
     ctx = bod._resolve_context(day_utc, environment, truth_root)
     cp_path = control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     control = _read_json(cp_path)
-    payload = _projection_from_control_plane(ctx, control) if str(control.get("day_utc") or "") == ctx.day_utc else _projection_control_plane_unavailable(
-        ctx,
-        control_path=cp_path,
-        reason=f"control_plane_day={str(control.get('day_utc') or 'MISSING')} target_day={ctx.day_utc}",
-    )
+    integrity_issues = control_plane_self_binding_issues_v1(control, actual_path=cp_path) if control else [
+        {"code": "CONTROL_PLANE_UNAVAILABLE", "path": str(cp_path), "detail": "control plane artifact missing or unreadable"}
+    ]
+    if str(control.get("day_utc") or "") != ctx.day_utc:
+        payload = _projection_control_plane_unavailable(
+            ctx,
+            control_path=cp_path,
+            reason=f"control_plane_day={str(control.get('day_utc') or 'MISSING')} target_day={ctx.day_utc}",
+            blocker_code="CONTROL_PLANE_UNAVAILABLE",
+            integrity_issues=integrity_issues,
+        )
+    elif integrity_issues:
+        payload = _projection_control_plane_unavailable(
+            ctx,
+            control_path=cp_path,
+            reason=json.dumps(integrity_issues, sort_keys=True),
+            blocker_code=str(integrity_issues[0].get("code") or "CONTROL_PLANE_SELF_BINDING_INVALID"),
+            integrity_issues=integrity_issues,
+        )
+    else:
+        payload = _projection_from_control_plane(ctx, control)
     path = operator_projection_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     attach_producer_contract_v1(
         payload,

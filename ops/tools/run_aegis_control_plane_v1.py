@@ -101,6 +101,182 @@ def control_plane_path(*, truth_root: Path, day_utc: str) -> Path:
     return (truth_root / "reports" / "aegis_control_plane_v1" / day_utc / "control_plane.v1.json").resolve()
 
 
+def _path_is_under_v1(path: Path, root: Path) -> bool:
+    resolved = Path(path).expanduser().resolve()
+    root_resolved = Path(root).expanduser().resolve()
+    return resolved == root_resolved or root_resolved in resolved.parents
+
+
+def _declared_output_artifact_path_v1(payload: dict[str, Any]) -> str:
+    explicit = str(payload.get("producer_contract_output_artifact_path") or "").strip()
+    if explicit:
+        return explicit
+    contract = payload.get("producer_contract_v1") if isinstance(payload.get("producer_contract_v1"), dict) else {}
+    outputs = contract.get("output_artifacts") if isinstance(contract.get("output_artifacts"), list) else []
+    paths = [
+        str(row.get("path") or "").strip()
+        for row in outputs
+        if isinstance(row, dict) and str(row.get("path") or "").strip()
+    ]
+    return paths[0] if paths else ""
+
+
+def _expected_runtime_mode_for_bound_root_v1(truth_root: Path) -> str:
+    resolved = Path(truth_root).expanduser().resolve()
+    parts = set(resolved.parts)
+    if resolved.name == "production_truth" or "production_truth" in parts:
+        return "PRODUCTION"
+    if resolved.name == "candidate_truth" or "candidate_truth" in parts:
+        return "CANDIDATE"
+    return runtime_mode_from_truth_root_v1(resolved)
+
+
+def _expected_runtime_mode_for_actual_path_v1(actual_path: Path) -> str | None:
+    parts = set(Path(actual_path).expanduser().resolve().parts)
+    if "production_truth" in parts:
+        return "PRODUCTION"
+    if "candidate_truth" in parts:
+        return "CANDIDATE"
+    return None
+
+
+def _candidate_truth_refs_v1(value: Any, *, trail: str = "") -> list[dict[str, str]]:
+    refs: list[dict[str, str]] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            next_trail = f"{trail}.{key}" if trail else str(key)
+            refs.extend(_candidate_truth_refs_v1(item, trail=next_trail))
+    elif isinstance(value, list):
+        for idx, item in enumerate(value):
+            refs.extend(_candidate_truth_refs_v1(item, trail=f"{trail}[{idx}]"))
+    elif isinstance(value, str) and "candidate_truth" in set(Path(value).parts):
+        refs.append({"field": trail, "path": value})
+    return refs
+
+
+def control_plane_self_binding_issues_v1(
+    payload: dict[str, Any],
+    *,
+    actual_path: Path,
+    include_producer_freshness: bool = True,
+) -> list[dict[str, str]]:
+    actual = Path(actual_path).expanduser().resolve()
+    issues: list[dict[str, str]] = []
+    contract = payload.get("producer_contract_v1") if isinstance(payload.get("producer_contract_v1"), dict) else {}
+    if include_producer_freshness and not contract:
+        issues.append({"code": "CONTROL_PLANE_PRODUCER_METADATA_MISSING", "path": str(actual)})
+    elif include_producer_freshness:
+        contract_commit = str(contract.get("code_version_git_commit") or "").strip()
+        current_commit = _current_git_commit_v1()
+        if not contract_commit:
+            issues.append({"code": "CONTROL_PLANE_PRODUCER_METADATA_MISSING", "path": str(actual), "field": "code_version_git_commit"})
+        elif current_commit and contract_commit != current_commit:
+            issues.append(
+                {
+                    "code": "CONTROL_PLANE_PRODUCER_METADATA_STALE",
+                    "path": str(actual),
+                    "control_plane_commit": contract_commit,
+                    "current_git_commit": current_commit,
+                }
+            )
+        dirty_status = str(contract.get("source_dirty_status") or "").strip().upper()
+        if not dirty_status:
+            issues.append({"code": "CONTROL_PLANE_PRODUCER_METADATA_MISSING", "path": str(actual), "field": "source_dirty_status"})
+        if not str(contract.get("generated_at_utc") or "").strip():
+            issues.append({"code": "CONTROL_PLANE_PRODUCER_METADATA_MISSING", "path": str(actual), "field": "generated_at_utc"})
+
+    declared_artifact_path = str(payload.get("actual_artifact_path") or payload.get("artifact_path") or "").strip()
+    if not declared_artifact_path or Path(declared_artifact_path).expanduser().resolve() != actual:
+        issues.append(
+            {
+                "code": "CONTROL_PLANE_OUTPUT_PATH_MISMATCH",
+                "path": str(actual),
+                "declared_artifact_path": declared_artifact_path or "MISSING",
+            }
+        )
+
+    output_path_text = _declared_output_artifact_path_v1(payload)
+    if not output_path_text or Path(output_path_text).expanduser().resolve() != actual:
+        issues.append(
+            {
+                "code": "CONTROL_PLANE_OUTPUT_PATH_MISMATCH",
+                "path": str(actual),
+                "producer_contract_output_artifact_path": output_path_text or "MISSING",
+            }
+        )
+
+    truth_root_text = str(payload.get("truth_root") or "").strip()
+    runtime_root_text = str(payload.get("runtime_root") or "").strip()
+    runtime_mode = str(payload.get("runtime_mode") or "").strip().upper()
+    if not truth_root_text:
+        issues.append({"code": "CONTROL_PLANE_TRUTH_ROOT_MISMATCH", "path": str(actual), "truth_root": "MISSING"})
+        truth_root = actual.parents[3] if len(actual.parents) > 3 else actual.parent
+    else:
+        truth_root = Path(truth_root_text).expanduser().resolve()
+        if not _path_is_under_v1(actual, truth_root):
+            issues.append(
+                {
+                    "code": "CONTROL_PLANE_TRUTH_ROOT_MISMATCH",
+                    "path": str(actual),
+                    "truth_root": str(truth_root),
+                }
+            )
+
+    if not runtime_root_text:
+        issues.append({"code": "CONTROL_PLANE_RUNTIME_ROOT_MISMATCH", "path": str(actual), "runtime_root": "MISSING"})
+    else:
+        runtime_root = Path(runtime_root_text).expanduser().resolve()
+        if not _path_is_under_v1(actual, runtime_root) or not _path_is_under_v1(truth_root, runtime_root):
+            issues.append(
+                {
+                    "code": "CONTROL_PLANE_RUNTIME_ROOT_MISMATCH",
+                    "path": str(actual),
+                    "runtime_root": str(runtime_root),
+                    "truth_root": str(truth_root),
+                }
+            )
+
+    expected_mode = _expected_runtime_mode_for_actual_path_v1(actual) or _expected_runtime_mode_for_bound_root_v1(truth_root)
+    if runtime_mode not in {"PRODUCTION", "CANDIDATE"} or runtime_mode != expected_mode:
+        issues.append(
+            {
+                "code": "CONTROL_PLANE_RUNTIME_MODE_MISMATCH",
+                "path": str(actual),
+                "runtime_mode": runtime_mode or "MISSING",
+                "expected_runtime_mode": expected_mode,
+            }
+        )
+
+    if truth_root.name == "production_truth":
+        candidate_markers = _candidate_truth_refs_v1(payload)
+    else:
+        candidate_markers = []
+    if truth_root.name == "production_truth" and candidate_markers:
+        issues.append(
+            {
+                "code": "CONTROL_PLANE_TRUTH_ROOT_MISMATCH",
+                "path": str(actual),
+                "candidate_truth_dependency_paths": ",".join(row["path"] for row in candidate_markers[:6]),
+                "candidate_truth_dependency_count": str(len(candidate_markers)),
+            }
+        )
+    if truth_root.name == "production_truth" and output_path_text and "candidate_truth" in set(Path(output_path_text).parts):
+        issues.append(
+            {
+                "code": "CONTROL_PLANE_OUTPUT_PATH_MISMATCH",
+                "path": str(actual),
+                "producer_contract_output_artifact_path": output_path_text,
+            }
+        )
+    return issues
+
+
+def require_control_plane_self_binding_v1(payload: dict[str, Any], *, actual_path: Path) -> None:
+    issues = control_plane_self_binding_issues_v1(payload, actual_path=actual_path, include_producer_freshness=False)
+    if issues:
+        raise RuntimeError("CONTROL_PLANE_SELF_BINDING_INVALID:" + json.dumps(issues, sort_keys=True))
+
+
 def load_phase_registry_v1() -> list[dict[str, Any]]:
     payload = _read_json(REGISTRY_PATH)
     phases = payload.get("phases") if isinstance(payload.get("phases"), list) else []
@@ -426,6 +602,10 @@ def _artifact_metadata_issue_v1(
         allowed = [Path(root).expanduser().resolve() for root in (allowed_truth_roots or [Path(ctx.truth_root)])]
         if observed not in allowed:
             return "TRUTH_ROOT_MISMATCH", f"artifact_truth_root={observed} evaluated_truth_roots={','.join(str(root) for root in allowed)}"
+    if Path(ctx.truth_root).expanduser().resolve().name == "production_truth":
+        candidate_refs = _candidate_truth_refs_v1(payload)
+        if candidate_refs:
+            return "MIXED_TRUTH_ROOT_DEPENDENCY_PATH", f"{dependency_id} references candidate_truth upstream data count={len(candidate_refs)}"
     runtime_root = str(payload.get("runtime_root") or "").strip() or _nested_get(payload, ("truth_roots", "runtime_root"))
     if runtime_root:
         observed_runtime = Path(runtime_root).expanduser().resolve()
@@ -557,6 +737,13 @@ def _dependency_result(
         if isinstance(row, dict) and str(row.get("path") or "").strip()
     ]
     upstream_artifacts = list(dict.fromkeys(upstream_artifacts))
+    blocked_upstream_artifact_count = 0
+    upstream_artifact_integrity_blocker = ""
+    if Path(ctx.truth_root).expanduser().resolve().name == "production_truth":
+        blocked_upstream_artifact_count = sum(1 for item in upstream_artifacts if "candidate_truth" in set(Path(item).parts))
+        if blocked_upstream_artifact_count:
+            upstream_artifact_integrity_blocker = "MIXED_TRUTH_ROOT_DEPENDENCY_PATH"
+            upstream_artifacts = [item for item in upstream_artifacts if "candidate_truth" not in set(Path(item).parts)]
     upstream_producers = [
         str(item).strip()
         for item in (producer_contract.get("producer_name"), producer_contract.get("producer_command"), lineage_payload.get("producer_name"), lineage_payload.get("producer_command"))
@@ -575,6 +762,12 @@ def _dependency_result(
         if str(item or "").strip()
     ]
     upstream_truth_roots = list(dict.fromkeys(upstream_truth_roots))
+    blocked_upstream_truth_root_count = 0
+    if Path(ctx.truth_root).expanduser().resolve().name == "production_truth":
+        blocked_upstream_truth_root_count = sum(1 for item in upstream_truth_roots if "candidate_truth" in set(Path(item).parts))
+        if blocked_upstream_truth_root_count:
+            upstream_artifact_integrity_blocker = upstream_artifact_integrity_blocker or "MIXED_TRUTH_ROOT_DEPENDENCY_PATH"
+            upstream_truth_roots = [item for item in upstream_truth_roots if "candidate_truth" not in set(Path(item).parts)]
     return {
         "dependency_id": dependency_id,
         "domain_owner": str(dep.get("domain_owner") or "").strip(),
@@ -598,6 +791,9 @@ def _dependency_result(
         "evidence_path": str(expected),
         "detail": detail,
         "upstream_artifacts": upstream_artifacts,
+        "blocked_upstream_artifact_count": blocked_upstream_artifact_count,
+        "blocked_upstream_truth_root_count": blocked_upstream_truth_root_count,
+        "upstream_artifact_integrity_blocker": upstream_artifact_integrity_blocker,
         "upstream_producers": upstream_producers,
         "upstream_truth_roots": upstream_truth_roots,
     }
@@ -1676,6 +1872,8 @@ def build_control_plane_v1(ctx: Any, phase_results: dict[str, dict[str, Any]] | 
         "schema_id": "aegis_control_plane",
         "schema_version": SCHEMA_VERSION,
         "day_utc": ctx.day_utc,
+        "truth_root": str(Path(ctx.truth_root).expanduser().resolve()),
+        "runtime_root": str(Path(ctx.runtime_root).expanduser().resolve()),
         "environment": ctx.environment,
         "runtime_mode": runtime_mode_from_truth_root_v1(ctx.truth_root),
         "final_status": "NOT_READY" if current else "READY",
@@ -1728,6 +1926,11 @@ def run_control_plane_v1(day_utc: str, environment: str, truth_root: str = "", r
     payload["runtime_mode"] = mode
     path = control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     assert_candidate_cannot_write_production_v1(runtime_mode=mode, output_path=path)
+    payload["truth_root"] = str(ctx.truth_root.resolve())
+    payload["runtime_root"] = str(ctx.runtime_root.resolve())
+    payload["artifact_path"] = str(path)
+    payload["actual_artifact_path"] = str(path)
+    payload["producer_contract_output_artifact_path"] = str(path)
     input_paths: list[str] = [str(REGISTRY_PATH)]
     for row in payload["phase_results"]:
         input_paths.extend(str(item) for item in row.get("evidence_paths", []) if str(item or "").strip())
@@ -1738,6 +1941,12 @@ def run_control_plane_v1(day_utc: str, environment: str, truth_root: str = "", r
         input_artifacts=input_paths,
         output_artifacts=[path],
         schema_versions={"aegis_control_plane": SCHEMA_VERSION},
+    )
+    require_control_plane_self_binding_v1(payload, actual_path=path)
+    validate_against_repo_schema_v1(
+        payload,
+        REPO_ROOT,
+        "governance/04_DATA/SCHEMAS/C2/REPORTS/aegis_control_plane.v1.schema.json",
     )
     _write_json(path, payload)
     return path, payload
