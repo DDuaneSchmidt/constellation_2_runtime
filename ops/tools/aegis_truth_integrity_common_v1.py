@@ -21,6 +21,7 @@ AUTHORITATIVE_ARTIFACTS: tuple[dict[str, Any], ...] = (
     {"artifact_type": "risk_budget_supply_v1", "family": "risk_budget_supply_v1", "filename": "risk_budget_supply.v1.json", "blocking_class": "HARD_BLOCKER", "authoritative": True},
     {"artifact_type": "authorization_supply_v1", "family": "authorization_supply_v1", "filename": "authorization_supply.v1.json", "blocking_class": "HARD_BLOCKER", "authoritative": True},
     {"artifact_type": "submit_boundary_status_v1", "family": "submit_boundary_status_v1", "filename": "submit_boundary_status.v1.json", "blocking_class": "HARD_BLOCKER", "authoritative": True},
+    {"artifact_type": "action_validity_v1", "family": "action_validity_v1", "filename": "action_validity.v1.json", "blocking_class": "HARD_BLOCKER", "authoritative": True},
     {"artifact_type": "trading_day_control_plane_v1", "family": "trading_day_control_plane_v1", "filename": "trading_day_control_plane.v1.json", "blocking_class": "DIAGNOSTIC_ONLY", "authoritative": False},
     {"artifact_type": "aegis_operator_projection_v1", "family": "aegis_operator_projection_v1", "filename": "operator_projection.v1.json", "blocking_class": "DIAGNOSTIC_ONLY", "authoritative": False},
     {"artifact_type": "aegis_live_intelligence_v1", "family": "aegis_live_intelligence_v1", "filename": "live_intelligence.v1.json", "blocking_class": "DIAGNOSTIC_ONLY", "authoritative": False},

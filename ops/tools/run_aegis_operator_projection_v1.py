@@ -197,6 +197,26 @@ def _kernel_artifact_paths(kernel: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(paths))
 
 
+def _blocker_context(ctx: bod.BodContext, blocker: str) -> dict[str, Any]:
+    if blocker == "C2_KILL_SWITCH_ACTIVE":
+        path = ctx.execution_root / "risk_v1" / "kill_switch_v1" / ctx.day_utc / "global_kill_switch_state.v1.json"
+        return {
+            "evidence_paths": [str(path.resolve())],
+            "operator_next_action": "Set the global kill switch to INACTIVE through the governed kill-switch authority, then rerun the day-run ledger.",
+            "next_valid_actions": ["Resolve governed kill switch state", "Rerun day"],
+            "root_cause": "Global C2 kill switch is active; submission and readiness must remain blocked.",
+        }
+    if blocker == "SESSION_AUTHORITY_MISSING":
+        path = ctx.truth_root / "reports" / "paper_session_authority_v1" / ctx.day_utc / "paper_session_authority.v1.json"
+        return {
+            "evidence_paths": [str(path.resolve())],
+            "operator_next_action": f"Run python3 ops/tools/run_paper_session_bootstrap_v1.py --day_utc {ctx.day_utc}, then rerun the day-run ledger.",
+            "next_valid_actions": ["Run paper session bootstrap", "Rerun day"],
+            "root_cause": "Paper session authority artifact is missing for the current day.",
+        }
+    return {}
+
+
 def _projection_from_kernel(ctx: bod.BodContext, kernel: dict[str, Any]) -> dict[str, Any]:
     final_status = str(kernel.get("final_status") or "UNKNOWN").strip().upper()
     blocker = str(kernel.get("first_blocker") or kernel.get("canonical_blocker") or "").strip()
@@ -207,6 +227,10 @@ def _projection_from_kernel(ctx: bod.BodContext, kernel: dict[str, Any]) -> dict
     root_cause = blocker or "No blocker reported by unified truth kernel."
     if kernel.get("unknown_or_untrusted_artifacts"):
         root_cause = f"{root_cause}; truth_confidence={kernel.get('truth_confidence')}"
+    blocker_context = _blocker_context(ctx, blocker)
+    evidence_paths = blocker_context.get("evidence_paths") or _kernel_artifact_paths(kernel)
+    operator_next_action = str(blocker_context.get("operator_next_action") or kernel.get("operator_next_action") or "")
+    next_valid_actions = list(blocker_context.get("next_valid_actions") or _labels(allowed))
     return {
         "schema_id": "aegis_operator_projection",
         "schema_version": SCHEMA_VERSION,
@@ -215,15 +239,16 @@ def _projection_from_kernel(ctx: bod.BodContext, kernel: dict[str, Any]) -> dict
         "generated_at_utc": _now_iso(),
         "status": "PASS" if final_status not in {"UNKNOWN", "NOT_READY", "BLOCKED"} else "BLOCKED",
         "canonical_blocker": blocker,
-        "operator_next_action": str(kernel.get("operator_next_action") or ""),
+        "operator_next_action": operator_next_action,
         "final_status": final_status,
         "first_blocker": blocker,
         "owner": str(kernel.get("first_blocker_owner") or ""),
         "phase": str(kernel.get("first_blocker_phase") or ""),
-        "root_cause": root_cause,
+        "root_cause": str(blocker_context.get("root_cause") or root_cause),
         "downstream_consequences": kernel.get("downstream_consequences") if isinstance(kernel.get("downstream_consequences"), list) else [],
-        "artifact_paths": _kernel_artifact_paths(kernel),
-        "next_valid_actions": _labels(allowed),
+        "artifact_paths": evidence_paths,
+        "evidence_paths": evidence_paths,
+        "next_valid_actions": next_valid_actions,
         "forbidden_actions": _labels(forbidden),
         "unsafe_actions": list(kernel.get("unsafe_actions") if isinstance(kernel.get("unsafe_actions"), list) else []),
         "lineage_status": str(kernel.get("lineage_status") or "UNKNOWN"),

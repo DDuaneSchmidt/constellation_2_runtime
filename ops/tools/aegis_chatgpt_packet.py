@@ -3029,6 +3029,8 @@ def _build_packet() -> tuple[str, str]:
         "- git_branch: " + branch,
         "- git_commit: " + commit,
         "- git_dirty_status: " + dirty,
+        "- packet_currentness_status: CURRENT",
+        "- packet_currentness_rule: INVALID if latest packet git_commit differs from current repo HEAD or repo is dirty",
         "- dirty_path_count: " + str(dirty_path_count),
         "- source_reproducibility_status: " + source_reproducibility_status,
         "- canonical_repo_protection_status: " + canonical_repo_protection_status,

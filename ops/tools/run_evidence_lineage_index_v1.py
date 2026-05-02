@@ -25,6 +25,29 @@ from ops.tools.aegis_truth_integrity_common_v1 import (
 )
 
 SCHEMA_VERSION = "evidence_lineage_index.v1"
+PHASE_RANK = {
+    "SOURCE_INTEGRITY": 0,
+    "BROKER_HEALTH": 1,
+    "BOD_INPUTS": 2,
+    "SESSION_AUTHORITY": 3,
+    "MARKET_DATA_BOD_PREP": 4,
+    "MARKET_OPEN_DATA_GATE": 5,
+    "STRATEGY_AND_RISK": 6,
+    "AUTHORIZATION": 7,
+    "SUBMIT_BOUNDARY": 8,
+}
+ARTIFACT_PHASE = {
+    "aegis_day_run_v1": "SOURCE_INTEGRITY",
+    "broker_supply_v1": "BROKER_HEALTH",
+    "capital_supply_v1": "BOD_INPUTS",
+    "aegis_requirement_graph_v1": "MARKET_DATA_BOD_PREP",
+    "market_data_supply_v1": "MARKET_DATA_BOD_PREP",
+    "market_open_data_gate_v1": "MARKET_OPEN_DATA_GATE",
+    "risk_budget_supply_v1": "STRATEGY_AND_RISK",
+    "authorization_supply_v1": "AUTHORIZATION",
+    "submit_boundary_status_v1": "SUBMIT_BOUNDARY",
+    "action_validity_v1": "SUBMIT_BOUNDARY",
+}
 
 
 def evidence_lineage_index_path(*, truth_root: Path, day_utc: str) -> Path:
@@ -36,6 +59,20 @@ def _input_refs(contract: dict[str, Any]) -> list[dict[str, Any]]:
     return [row for row in rows if isinstance(row, dict)]
 
 
+def _required_now(ctx: bod.BodContext, spec: dict[str, Any]) -> bool:
+    if not spec.get("authoritative"):
+        return False
+    artifact_type = str(spec.get("artifact_type") or "")
+    if artifact_type == "aegis_day_run_v1":
+        return True
+    ledger = read_json_v1(report_path_v1(ctx, "aegis_day_run_v1", "day_run.v1.json"))
+    blocked_phase = str(ledger.get("canonical_phase") or "").strip()
+    if not blocked_phase:
+        return True
+    artifact_phase = ARTIFACT_PHASE.get(artifact_type, "SUBMIT_BOUNDARY")
+    return PHASE_RANK.get(artifact_phase, 99) <= PHASE_RANK.get(blocked_phase, 99)
+
+
 def _node(ctx: bod.BodContext, spec: dict[str, Any]) -> dict[str, Any]:
     path = report_path_v1(ctx, str(spec["family"]), str(spec["filename"]))
     payload = read_json_v1(path)
@@ -44,7 +81,12 @@ def _node(ctx: bod.BodContext, spec: dict[str, Any]) -> dict[str, Any]:
     missing_inputs = [row for row in inputs if row.get("exists") is False]
     authoritative = bool(spec.get("authoritative"))
     blocking_class = str(spec.get("blocking_class") or "HARD_BLOCKER")
-    if not path.exists():
+    required_now = _required_now(ctx, spec)
+    if authoritative and not required_now:
+        status = "WARN"
+        blocker = ""
+        action = "Artifact is downstream of the current day-run blocker and is not required for this blocked state."
+    elif not path.exists():
         status = "FAIL" if authoritative else "WARN"
         blocker = f"{spec['artifact_type'].upper()}_MISSING"
         action = f"Run the producer for {spec['artifact_type']}."
@@ -85,6 +127,7 @@ def _node(ctx: bod.BodContext, spec: dict[str, Any]) -> dict[str, Any]:
         "deterministic_fingerprint": str(contract.get("deterministic_fingerprint") or ""),
         "blocking_class": blocking_class,
         "authoritative": authoritative,
+        "required_for_current_day": required_now,
         "lineage_status": status,
         "canonical_blocker": blocker or blocker_of_v1(payload),
         "operator_next_action": action,

@@ -21,6 +21,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
 from constellation_2.common.paper_submit_mode_status_v1 import classify_paper_submit_mode_status_v1
 from constellation_2.common.runtime_path_authority_v1 import require_authoritative_repo_runtime_v1
 from constellation_2.common.sleeve_execution_root_v1 import resolve_sleeve_execution_root_v1
+from ops.tools.aegis_submit_enforcement_v1 import evaluate_submit_enforcement_v1
 from ops.tools.c2_account_resolution_v1 import resolve_single_paper_ib_account_from_sleeve_registry
 import ops.tools.run_c2_paper_day_orchestrator_v2 as orchestrator_v2
 
@@ -141,6 +142,17 @@ def _released_phasec_candidates(*, truth_root: Path, day_utc: str, ib_account: s
 
 def evaluate_submit_guards_v1(ctx: SubmitContext) -> dict[str, Any]:
     blockers: list[dict[str, str]] = []
+    runtime_root_text = str(ctx.env.get("C2_RUNTIME_ROOT") or "").strip()
+    aegis_gate = evaluate_submit_enforcement_v1(
+        truth_root=ctx.truth_root,
+        execution_root=ctx.execution_root,
+        day_utc=ctx.day_utc,
+        action_id="submit_paper_order",
+        runtime_root=(Path(runtime_root_text).resolve() if runtime_root_text else None),
+    )
+    if not aegis_gate["ok"]:
+        for row in aegis_gate["blockers"]:
+            blockers.append({key: str(value) for key, value in row.items()})
 
     authority_path = _authority_path(ctx.truth_root, ctx.day_utc)
     authority = _load_json_if_exists(authority_path)
@@ -196,6 +208,7 @@ def evaluate_submit_guards_v1(ctx: SubmitContext) -> dict[str, Any]:
     return {
         "ok": not blockers,
         "blockers": blockers,
+        "aegis_submit_enforcement": aegis_gate,
         "released_candidate_paths": [str(path) for path in released],
         "authority_path": str(authority_path),
         "submit_boundary_path": str(boundary_path),

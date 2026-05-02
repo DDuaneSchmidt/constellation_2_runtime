@@ -407,6 +407,11 @@ def _lifecycle_nodes(ctx: bod.BodContext) -> list[dict[str, Any]]:
     for owner_phase, source_type, artifact, path, command, consumer, blocker in items:
         status = _status_for_path(path, day_utc=day)
         canonical_blocker = _path_blocker(path, blocker, day_utc=day)
+        if status == "SATISFIED" and path.is_file() and path.suffix == ".json":
+            payload = _read_json(path)
+            if not isinstance(payload.get("producer_contract_v1"), dict):
+                status = "BLOCKED"
+                canonical_blocker = "REQUIRED_PRODUCER_CONTRACT_MISSING"
         fresh_row = freshness_by_path.get(str(path.resolve()))
         if fresh_row and str(fresh_row.get("freshness_status") or "") in {"STALE", "EXPIRED", "UNKNOWN"}:
             if str(fresh_row.get("blocking_class") or "") == "HARD_BLOCKER":
@@ -565,7 +570,7 @@ def main(argv: list[str] | None = None) -> int:
             sort_keys=True,
         )
     )
-    return 0
+    return 0 if payload["status"] == "PASS" else 2
 
 
 if __name__ == "__main__":

@@ -469,7 +469,7 @@ def build_readiness_kernel_v1(
     kernel, kernel_path, kernel_error = _unified_truth_kernel(root, resolved_day)
     if kernel:
         overall_status, canonical_blocker, operator_next_action = _overall_from_kernel(kernel)
-        final_readiness_authority = "unified_truth_kernel_v1 -> aegis_day_run_ledger_v1"
+        final_readiness_authority = "aegis_day_run_ledger_v1"
         truth_resolution_source_path = str(kernel_path)
     else:
         overall_status, canonical_blocker, operator_next_action = _overall(layers)

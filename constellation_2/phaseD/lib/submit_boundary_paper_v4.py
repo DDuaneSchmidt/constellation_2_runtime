@@ -156,6 +156,7 @@ from constellation_2.common.c2_risk_policy_loader_v1 import (
     get_allow_entry_only_paper_test_or_fail,
 )
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+from ops.tools.aegis_submit_enforcement_v1 import require_submit_enforcement_v1
 
 
 class SubmitBoundaryV4Error(Exception):
@@ -1839,6 +1840,12 @@ def run_submit_boundary_paper_v4(
     canonical_control_truth_root = resolve_canonical_truth_root().resolve()
 
     _require_phasec_out_dir_under_truth_root(execution_root.execution_root_path, phasec_out_dir)
+    require_submit_enforcement_v1(
+        truth_root=canonical_control_truth_root,
+        execution_root=execution_root.execution_root_path.resolve(),
+        day_utc=day,
+        action_id="submit_paper_order",
+    )
 
     mode, plan_obj, mapping_obj, binding_obj, execution_identity_obj, pointers = _load_identity_set(phasec_out_dir)
     actual_plan_path = Path(pointers[0]).resolve()

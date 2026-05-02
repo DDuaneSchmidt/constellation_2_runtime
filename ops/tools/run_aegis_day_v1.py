@@ -467,20 +467,48 @@ def _phase_session_authority(ctx: PhaseContext, env: dict[str, str]) -> dict[str
 def _phase_market_data_bod_prep(ctx: PhaseContext, env: dict[str, str]) -> dict[str, Any]:
     py = sys.executable
     started = _now_iso()
-    graph_cmd = [py, "ops/tools/run_aegis_requirement_graph_v1.py", "--day_utc", ctx.day_utc, "--environment", ctx.environment]
+    graph_cmd = [
+        py,
+        "ops/tools/run_aegis_requirement_graph_v1.py",
+        "--day_utc",
+        ctx.day_utc,
+        "--environment",
+        ctx.environment,
+        "--truth_root",
+        str(ctx.truth_root),
+    ]
     graph_started = time.perf_counter()
     graph_proc = subprocess.run(graph_cmd, cwd=str(REPO_ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env, check=False)
     graph_step = {
         "step_name": "requirement_graph",
-        "status": "PASS" if graph_proc.returncode == 0 else "DIAGNOSTIC_ONLY",
+        "status": "PASS" if graph_proc.returncode == 0 else "BLOCKED",
         "blocker": "",
         "artifact_path": str(_requirement_graph_path(ctx)),
         "duration_ms": int((time.perf_counter() - graph_started) * 1000),
         "stdout_summary": str(graph_proc.stdout or "").strip()[-1200:],
         "stderr_summary": str(graph_proc.stderr or "").strip()[-1200:],
         "exit_code": int(graph_proc.returncode),
-        "blocking_class": "DIAGNOSTIC_ONLY",
+        "blocking_class": "HARD_BLOCKER",
     }
+    if graph_proc.returncode != 0:
+        graph_payload = _read_json(_requirement_graph_path(ctx))
+        graph_blocker = str(graph_payload.get("canonical_blocker") or "REQUIREMENT_GRAPH_BLOCKED").strip()
+        completed = _now_iso()
+        return _empty_phase(
+            "MARKET_DATA_BOD_PREP",
+            status="BLOCKED",
+            canonical_blocker=graph_blocker,
+            blocker_detail=f"requirement_graph_status={graph_payload.get('status') or 'BLOCKED'}",
+            inputs=[str(_requirement_graph_path(ctx))],
+            outputs=[str(_requirement_graph_path(ctx))],
+            downstream_consequences=["market_data_supply", "market_open_data_gate", "strategy_decision", "submit_boundary"],
+            producer_command="run requirement graph",
+            started_at_utc=started,
+            completed_at_utc=completed,
+            duration_ms=int(graph_step["duration_ms"]),
+            exit_code=2,
+            child_steps=[graph_step],
+        )
     commands = [("market_data_supply", [py, "ops/tools/run_market_data_supply_v1.py", "--day_utc", ctx.day_utc, "--environment", ctx.environment], 1)]
     steps, outputs, blockers = _run_steps("MARKET_DATA_BOD_PREP", commands, env=env)
     steps.insert(0, graph_step)

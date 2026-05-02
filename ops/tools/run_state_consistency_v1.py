@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
 from ops.tools import run_aegis_bod_prepare_v1 as bod
 from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
+from ops.tools.aegis_submit_enforcement_v1 import packet_currentness_v1
 from ops.tools.aegis_truth_integrity_common_v1 import READY_FINAL_STATUSES, blocker_of_v1, now_iso_v1, read_json_v1, report_path_v1, status_of_v1, write_json_v1
 
 SCHEMA_VERSION = "state_consistency.v1"
@@ -58,6 +59,9 @@ def build_state_consistency_v1(ctx: bod.BodContext) -> dict[str, Any]:
         "shadow": report_path_v1(ctx, "shadow_evaluation_v1", "shadow_evaluation.v1.json"),
         "promotion": report_path_v1(ctx, "strategy_promotion_gate_v1", "strategy_promotion_gate.v1.json"),
         "monitor": report_path_v1(ctx, "post_promotion_monitor_v1", "post_promotion_monitor.v1.json"),
+        "lineage": report_path_v1(ctx, "evidence_lineage_index_v1", "evidence_lineage_index.v1.json"),
+        "freshness": report_path_v1(ctx, "truth_freshness_v1", "truth_freshness.v1.json"),
+        "action_validity": report_path_v1(ctx, "action_validity_v1", "action_validity.v1.json"),
     }
     ledger = read_json_v1(paths["ledger"])
     graph = read_json_v1(paths["requirement_graph"])
@@ -72,6 +76,9 @@ def build_state_consistency_v1(ctx: bod.BodContext) -> dict[str, Any]:
     shadow = read_json_v1(paths["shadow"])
     promotion = read_json_v1(paths["promotion"])
     monitor = read_json_v1(paths["monitor"])
+    lineage = read_json_v1(paths["lineage"])
+    freshness = read_json_v1(paths["freshness"])
+    action_validity = read_json_v1(paths["action_validity"])
     final_status = str(ledger.get("final_status") or "UNKNOWN").upper()
     ledger_blocker = blocker_of_v1(ledger)
     source = ledger.get("source_repo_status") if isinstance(ledger.get("source_repo_status"), dict) else {}
@@ -103,6 +110,28 @@ def build_state_consistency_v1(ctx: bod.BodContext) -> dict[str, Any]:
         for payload in (queue, proposal, shadow, promotion, monitor)
     )
     results.append(_result("GOVERNED_LEARNING_LOOP_IS_ADVISORY_ONLY", "HARD_BLOCKER", "PASS" if not learning_mutates else "FAIL", "strategy_change_governance", [paths["recommendation_queue"], paths["proposal"], paths["shadow"], paths["promotion"], paths["monitor"]], "learning-loop artifacts cannot mutate readiness, submit, or active strategy state", f"learning_mutates={learning_mutates}", "LEARNING_LOOP_AUTHORITY_BYPASS", "Regenerate governed learning-loop artifacts as advisory-only."))
+    lineage_required_failures = [
+        row for row in (lineage.get("lineage_nodes") if isinstance(lineage.get("lineage_nodes"), list) else [])
+        if isinstance(row, dict)
+        and row.get("required_for_current_day") is True
+        and row.get("blocking_class") == "HARD_BLOCKER"
+        and row.get("lineage_status") in {"FAIL", "UNKNOWN"}
+    ]
+    results.append(_result("REQUIRED_AUTHORITY_LINEAGE_MUST_PASS", "HARD_BLOCKER", "PASS" if not lineage_required_failures else "FAIL", "evidence_lineage_index_v1", [paths["lineage"]], "required authoritative lineage cannot FAIL or UNKNOWN", f"failures={[row.get('artifact_type') for row in lineage_required_failures]}", "REQUIRED_AUTHORITY_LINEAGE_FAILED", "Regenerate required authoritative artifacts with producer contracts and valid inputs."))
+    freshness_required_failures = [
+        row for row in (freshness.get("freshness_records") if isinstance(freshness.get("freshness_records"), list) else [])
+        if isinstance(row, dict)
+        and row.get("required_for_current_day") is True
+        and row.get("blocking_class") == "HARD_BLOCKER"
+        and row.get("freshness_status") not in {"FRESH", "NOT_REQUIRED"}
+    ]
+    results.append(_result("REQUIRED_AUTHORITY_FRESHNESS_MUST_PASS", "HARD_BLOCKER", "PASS" if not freshness_required_failures else "FAIL", "truth_freshness_v1", [paths["freshness"]], "required authoritative freshness must be FRESH", f"failures={[row.get('artifact_type') + ':' + str(row.get('freshness_status')) for row in freshness_required_failures]}", "REQUIRED_AUTHORITY_FRESHNESS_FAILED", "Regenerate stale or missing required authoritative artifacts."))
+    packet = packet_currentness_v1()
+    results.append(_result("CURRENT_PACKET_MUST_MATCH_REPO_COMMIT", "HARD_BLOCKER", "PASS" if packet["status"] == "CURRENT" else "FAIL", "aegis_chatgpt_packet", [Path(str(packet["path"]))], "latest packet git_commit equals current repo HEAD and source is clean", f"packet={packet.get('packet_git_commit')} current={packet.get('current_git_commit')} dirty={packet.get('current_git_dirty_status')}", "AEGIS_PACKET_STALE", "Regenerate the Aegis ChatGPT packet from the current clean commit."))
+    action_rows = action_validity.get("action_rules") if isinstance(action_validity.get("action_rules"), list) else []
+    submit_rule = next((row for row in action_rows if isinstance(row, dict) and row.get("action_id") == "submit_paper_order"), {})
+    action_forbidden_but_submit_allowed = str(submit_rule.get("status") or "").upper() in {"FORBIDDEN", "BLOCKED"} and submit_allowed
+    results.append(_result("FORBIDDEN_SUBMIT_ACTION_CANNOT_BE_AUTHORIZED", "HARD_BLOCKER", "PASS" if not action_forbidden_but_submit_allowed else "FAIL", "action_validity_v1", [paths["action_validity"], paths["submit_boundary"]], "if action_validity forbids submit, submit boundary must not authorize submission", f"action={submit_rule.get('status')} submit_allowed={submit_allowed}", "ACTION_VALIDITY_SUBMIT_CONTRADICTION", "Regenerate submit boundary and action validity from day-run ledger."))
     hard_failures = [row for row in results if row["status"] == "FAIL" and row["severity"] == "HARD_BLOCKER"]
     return {
         "schema_id": "state_consistency",

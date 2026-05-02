@@ -148,6 +148,20 @@ def test_shadow_evaluation_is_observe_only_and_preserves_baseline(tmp_path: Path
     assert payload["decision_delta"] == "NO_ACTIVE_BEHAVIOR_CHANGE"
 
 
+def test_shadow_evaluation_without_baseline_is_not_applicable_not_pass(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _base(ctx)
+    _materialize_queue(ctx)
+    _materialize_proposal(ctx)
+    _report(ctx, "strategy_decision_authority_v1", "strategy_decision_authority.v1.json").unlink()
+    payload = _materialize_shadow(ctx)
+
+    assert payload["status"] == "NOT_APPLICABLE"
+    assert payload["shadow_status"] == "NOT_APPLICABLE"
+    assert payload["shadow_evaluations"] == []
+    assert payload["submit_allowed"] is False
+
+
 def test_promotion_gate_blocks_without_human_approval_shadow_or_clean_kernel(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _base(ctx, ready=True)

@@ -34,6 +34,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1,
 from constellation_2.common.paper_submit_mode_status_v1 import classify_paper_submit_mode_status_v1
 from constellation_2.common.runtime_path_authority_v1 import require_authoritative_repo_runtime_v1
 from constellation_2.common.sleeve_execution_root_v1 import resolve_sleeve_execution_root_v1
+from ops.tools.aegis_submit_enforcement_v1 import evaluate_submit_enforcement_v1
 from ops.tools.c2_account_resolution_v1 import resolve_single_paper_ib_account_from_sleeve_registry
 
 
@@ -331,8 +332,18 @@ def evaluate_auto_submit_guard_v1(
     day_utc: str,
     market_session: dict[str, Any],
     dry_run_only: bool,
+    runtime_root: Path | None = None,
 ) -> dict[str, Any]:
     blockers: list[dict[str, Any]] = []
+    aegis_gate = evaluate_submit_enforcement_v1(
+        truth_root=truth_root,
+        execution_root=execution_root,
+        day_utc=day_utc,
+        action_id="submit_paper_order",
+        runtime_root=runtime_root,
+    )
+    if not aegis_gate["ok"]:
+        blockers.extend(dict(row) for row in aegis_gate["blockers"])
     if market_session.get("state") != "MARKET_OPEN":
         blockers.append({"code": "MARKET_SESSION_NOT_OPEN", "state": str(market_session.get("state") or "")})
 
@@ -388,6 +399,7 @@ def evaluate_auto_submit_guard_v1(
     return {
         "ok": not blockers,
         "blockers": blockers,
+        "aegis_submit_enforcement": aegis_gate,
         "candidate_paths": [str(path) for path in candidates],
         "submission_ids": submission_ids,
         "duplicate_guard": duplicate,
@@ -579,6 +591,7 @@ def _cycle(
         day_utc=day_utc,
         market_session=market,
         dry_run_only=dry_run_only,
+        runtime_root=runtime_root,
     )
     submit_attempted = False
     skip_reason = ""

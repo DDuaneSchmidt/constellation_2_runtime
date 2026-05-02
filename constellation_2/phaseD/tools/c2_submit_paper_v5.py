@@ -39,6 +39,7 @@ from constellation_2.common.execution_kernel.execution_submission_record_v1 impo
 from constellation_2.common.runtime_guardrails_v1 import classify_failure, format_failure_line  # noqa: E402
 from constellation_2.common.truth_root_v1 import resolve_truth_root  # noqa: E402
 from constellation_2.phaseD.lib.submit_boundary_paper_v4 import run_submit_boundary_paper_v4  # noqa: E402
+from ops.tools.aegis_submit_enforcement_v1 import require_submit_enforcement_v1  # noqa: E402
 
 BROKER_TRANSMIT_ENABLEMENT_MSG = (
     'broker transmit disabled by default; explicit micro-live path requires '
@@ -387,6 +388,20 @@ def main() -> int:
         raise SystemExit('FAIL_CLOSED: both --submission_record_path and --execution_package_path are required')
     package_path = Path(package_text).resolve()
     submission_record_path = Path(submission_record_text).resolve()
+    package_obj = _read_json_object(package_path)
+    day_utc, _submission_id, execution_truth_root = _require_package_context_fields(
+        package_obj=package_obj,
+        package_path=package_path,
+    )
+    candidate_ref = package_obj.get('candidate_ref') if isinstance(package_obj.get('candidate_ref'), dict) else {}
+    canonical_truth_root_text = str(candidate_ref.get('canonical_truth_root') or '').strip()
+    canonical_truth_root = Path(canonical_truth_root_text).resolve() if canonical_truth_root_text else resolve_truth_root(repo_root=_REPO_ROOT_FROM_FILE.resolve()).resolve()
+    require_submit_enforcement_v1(
+        truth_root=canonical_truth_root,
+        execution_root=execution_truth_root,
+        day_utc=day_utc,
+        action_id='submit_paper_order',
+    )
     package_path, submission_record_path = _refresh_submit_paths_if_constitutional_dependency_stale(
         repo_root=_REPO_ROOT_FROM_FILE,
         eval_time_utc=str(args.eval_time_utc).strip(),

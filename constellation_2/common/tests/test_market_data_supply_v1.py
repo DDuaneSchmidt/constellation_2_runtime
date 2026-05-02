@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -47,6 +48,19 @@ def _requirement(ctx: bod.BodContext, *, source_type: str = "ACTIVE_INTENT", day
     }
     path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
     return path
+
+
+def _same_day_options_readiness(monkeypatch: pytest.MonkeyPatch, ctx: bod.BodContext, *, session_state: str = "REGULAR") -> None:
+    path = ctx.truth_root / "reports" / "trading_day_readiness_authority_v1" / ctx.day_utc / "trading_day_readiness_authority.v1.json"
+    payload = {
+        "status": "PASS",
+        "readiness_mode": "MARKET_OPEN",
+        "requires_same_day_options_snapshot": True,
+        "session_state": session_state,
+        "operator_next_action": "",
+        "evidence_policy": {},
+    }
+    monkeypatch.setattr(open_gate, "read_or_evaluate_trading_day_readiness_authority_v1", lambda **_kwargs: (path, payload))
 
 
 def _diag(ctx: bod.BodContext, errors: list[int], *, valid_quotes: int = 0, spot: bool = False, contracts: int = 0) -> Path:
@@ -603,6 +617,7 @@ def test_pre_market_entitlement_denied_still_blocks(tmp_path: Path) -> None:
 
 def test_market_open_gate_before_open_is_pending(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
+    _same_day_options_readiness(monkeypatch, ctx, session_state="PRE_MARKET")
     _selected_pointer(ctx)
     monkeypatch.setattr(open_gate, "_market_session_state", lambda: "PRE_MARKET")
     monkeypatch.setattr(open_gate, "_run_capture", lambda *_args, **_kwargs: pytest.fail("capture should not run before open"))
@@ -616,6 +631,7 @@ def test_market_open_gate_before_open_is_pending(monkeypatch: pytest.MonkeyPatch
 
 def test_market_open_gate_skips_capture_without_selected_intent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
+    _same_day_options_readiness(monkeypatch, ctx)
     pointer = open_gate.selected_intent_pointer_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     pointer.parent.mkdir(parents=True, exist_ok=True)
     pointer.write_text(
@@ -646,6 +662,7 @@ def test_market_open_gate_skips_capture_without_selected_intent(monkeypatch: pyt
 
 def test_market_open_gate_prioritizes_no_intent_over_after_hours(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
+    _same_day_options_readiness(monkeypatch, ctx, session_state="AFTER_HOURS")
     pointer = open_gate.selected_intent_pointer_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     pointer.parent.mkdir(parents=True, exist_ok=True)
     pointer.write_text(
@@ -677,6 +694,7 @@ def test_market_open_gate_prioritizes_no_intent_over_after_hours(monkeypatch: py
 
 def test_market_open_gate_passes_during_market_with_valid_supply(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
+    _same_day_options_readiness(monkeypatch, ctx)
     _selected_pointer(ctx)
     mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     mds_path.parent.mkdir(parents=True, exist_ok=True)
@@ -693,6 +711,7 @@ def test_market_open_gate_passes_during_market_with_valid_supply(monkeypatch: py
 
 def test_market_open_gate_uses_selected_intent_symbol(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
+    _same_day_options_readiness(monkeypatch, ctx)
     _selected_pointer(ctx, symbol="IWM")
     mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     mds_path.parent.mkdir(parents=True, exist_ok=True)
@@ -710,6 +729,7 @@ def test_market_open_gate_uses_selected_intent_symbol(monkeypatch: pytest.Monkey
 
 def test_market_open_gate_stale_snapshot_attempts_capture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
+    _same_day_options_readiness(monkeypatch, ctx)
     _selected_pointer(ctx)
     _snapshot(ctx, fresh=False)
     mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
@@ -742,6 +762,7 @@ def test_market_open_gate_stale_snapshot_attempts_capture(monkeypatch: pytest.Mo
 
 def test_market_open_gate_failed_capture_reports_specific_blocker(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
+    _same_day_options_readiness(monkeypatch, ctx)
     _selected_pointer(ctx)
     _snapshot(ctx, fresh=False)
     mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
@@ -767,6 +788,7 @@ def test_market_open_gate_failed_capture_reports_specific_blocker(monkeypatch: p
 
 def test_market_open_gate_missing_freshness_certificate_is_specific(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
+    _same_day_options_readiness(monkeypatch, ctx)
     _selected_pointer(ctx)
     mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     calls = {"mds": 0}
@@ -801,6 +823,7 @@ def test_market_open_gate_missing_freshness_certificate_is_specific(monkeypatch:
 
 def test_day_ledger_market_data_phase_consumes_supply_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = day_run.PhaseContext("2026-04-29", "PAPER", tmp_path / "truth", tmp_path / "execution", tmp_path / "runtime", tmp_path / "operator", "DU123456")
+    monkeypatch.setattr(day_run.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="", stderr=""))
     supply_path = day_run._market_data_supply_path(ctx)
     supply_path.parent.mkdir(parents=True, exist_ok=True)
     supply_path.write_text('{"status":"BLOCKED","canonical_blocker":"OPTIONS_MARKET_DATA_PERMISSION_DENIED","requirements":[{"requirement_id":"REQ1","instrument":"SPY"}],"provider_checks":[{"provider":"IBKR","capability":"OPTIONS_BID_ASK_QUOTES","status":"UNAVAILABLE","blocker":"OPTIONS_MARKET_DATA_PERMISSION_DENIED"}]}\n', encoding="utf-8")

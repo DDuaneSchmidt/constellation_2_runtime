@@ -5,6 +5,8 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -17,6 +19,15 @@ INTENT_HASH = "6" * 64
 SUBMISSION_ID = "7" * 64
 OPEN_NOW_UTC = datetime(2026, 4, 27, 14, 0, 0, tzinfo=UTC)
 AFTER_CLOSE_UTC = datetime(2026, 4, 28, 14, 0, 0, tzinfo=UTC)
+
+
+@pytest.fixture(autouse=True)
+def _default_aegis_submit_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        auto,
+        "evaluate_submit_enforcement_v1",
+        lambda **_kwargs: {"ok": True, "status": "PASS", "canonical_blocker": "", "blockers": []},
+    )
 
 
 def _write_json(path: Path, payload: object) -> None:

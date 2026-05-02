@@ -63,16 +63,17 @@ def build_shadow_evaluation_v1(ctx: bod.BodContext) -> dict[str, Any]:
     proposals = proposal_payload.get("proposals") if isinstance(proposal_payload.get("proposals"), list) else []
     baseline_path = _baseline_path(ctx)
     baseline = read_json_v1(baseline_path)
-    evaluations = [_evaluation(ctx, row, baseline, baseline_path) for row in proposals if isinstance(row, dict)]
+    evaluations = [_evaluation(ctx, row, baseline, baseline_path) for row in proposals if isinstance(row, dict)] if baseline else []
+    meaningful_status = "PASS" if evaluations else "NOT_APPLICABLE"
     return {
         "schema_id": "shadow_evaluation",
         "schema_version": SCHEMA_VERSION,
         "day_utc": ctx.day_utc,
         "environment": ctx.environment,
         "generated_at_utc": now_iso_v1(),
-        "status": "PASS" if evaluations else "UNKNOWN",
+        "status": meaningful_status,
         "canonical_blocker": "",
-        "operator_next_action": "Review shadow evaluation before promotion." if evaluations else "Create a proposal before shadow evaluation.",
+        "operator_next_action": "Review shadow evaluation before promotion." if evaluations else "No baseline strategy decision exists; shadow evaluation is not applicable.",
         "shadow_evaluations": evaluations,
         "proposal_id": str((evaluations[0] if evaluations else {}).get("proposal_id") or ""),
         "baseline_decision": (evaluations[0] if evaluations else {}).get("baseline_decision", {}),
@@ -81,7 +82,7 @@ def build_shadow_evaluation_v1(ctx: bod.BodContext) -> dict[str, Any]:
         "expected_trade_delta": str((evaluations[0] if evaluations else {}).get("expected_trade_delta") or ""),
         "risk_delta": str((evaluations[0] if evaluations else {}).get("risk_delta") or "UNKNOWN"),
         "missed_opportunity_delta": str((evaluations[0] if evaluations else {}).get("missed_opportunity_delta") or "UNKNOWN"),
-        "shadow_status": str((evaluations[0] if evaluations else {}).get("shadow_status") or "UNKNOWN"),
+        "shadow_status": str((evaluations[0] if evaluations else {}).get("shadow_status") or "NOT_APPLICABLE"),
         "evidence_paths": [str(proposal_path), str(baseline_path)],
         "submit_allowed": False,
         "readiness_effect": "NONE",

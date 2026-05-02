@@ -284,6 +284,33 @@ def test_projection_and_live_consume_unified_truth_kernel(tmp_path: Path) -> Non
     assert live_payload["kernel_final_status_source"] == "aegis_day_run_ledger_v1"
 
 
+def test_projection_uses_concrete_blocker_evidence_for_known_hard_blockers(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    base_kernel = {
+        "final_status": "NOT_READY",
+        "final_status_source": "aegis_day_run_ledger_v1",
+        "first_blocker_phase": "BOD_INPUTS",
+        "first_blocker_owner": "risk_control",
+        "allowed_operator_actions": [{"label": "Rerun day"}],
+        "forbidden_operator_actions": [{"label": "Submit paper order"}],
+        "unsafe_actions": ["Submit paper order"],
+        "downstream_consequences": ["Submit remains blocked."],
+        "truth_confidence": "HIGH",
+        "trade_health": {},
+        "human_review_required": False,
+    }
+
+    kill = projection._projection_from_kernel(ctx, {**base_kernel, "first_blocker": "C2_KILL_SWITCH_ACTIVE", "canonical_blocker": "C2_KILL_SWITCH_ACTIVE"})
+    assert kill["evidence_paths"]
+    assert "global_kill_switch_state.v1.json" in kill["evidence_paths"][0]
+    assert "kill switch" in kill["operator_next_action"].lower()
+
+    session = projection._projection_from_kernel(ctx, {**base_kernel, "first_blocker": "SESSION_AUTHORITY_MISSING", "canonical_blocker": "SESSION_AUTHORITY_MISSING"})
+    assert session["evidence_paths"]
+    assert "paper_session_authority.v1.json" in session["evidence_paths"][0]
+    assert "run_paper_session_bootstrap_v1.py" in session["operator_next_action"]
+
+
 def test_ui_readiness_kernel_uses_unified_truth_kernel_when_present(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _base_artifacts(ctx)

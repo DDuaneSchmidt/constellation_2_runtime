@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -16,6 +18,15 @@ import ops.tools.run_trade_submit_readiness_c2_v1 as trade_readiness_tool
 DAY = "2026-04-27"
 INTENT_HASH = "6" * 64
 SUBMISSION_ID = "7" * 64
+
+
+@pytest.fixture(autouse=True)
+def _default_aegis_submit_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        submit_tool,
+        "evaluate_submit_enforcement_v1",
+        lambda **_kwargs: {"ok": True, "status": "PASS", "canonical_blocker": "", "blockers": []},
+    )
 
 
 def _write_json(path: Path, payload: object) -> None:
@@ -121,6 +132,27 @@ def test_submit_creator_refuses_when_submit_boundary_not_ready_authorized(tmp_pa
 
     assert report["status"] == "BLOCKED"
     assert "SUBMIT_BOUNDARY_NOT_READY_AUTHORIZED" in report["reason_codes"]
+
+
+def test_submit_creator_refuses_when_shared_aegis_submit_gate_blocks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ctx, _candidate = _seed_ready_roots(tmp_path)
+    monkeypatch.setattr(
+        submit_tool,
+        "evaluate_submit_enforcement_v1",
+        lambda **_kwargs: {
+            "ok": False,
+            "status": "BLOCKED",
+            "canonical_blocker": "ACTION_VALIDITY_FORBIDS_SUBMIT",
+            "blockers": [{"code": "ACTION_VALIDITY_FORBIDS_SUBMIT"}],
+        },
+    )
+
+    with patch.object(submit_tool.orchestrator_v2, "_run_governed_submit_stage") as run_submit:
+        report = submit_tool.run_aegis_paper_submit_v1(ctx, runner=lambda *_: {"return_code": 0})
+
+    assert report["status"] == "BLOCKED"
+    assert "ACTION_VALIDITY_FORBIDS_SUBMIT" in report["reason_codes"]
+    run_submit.assert_not_called()
 
 
 def test_released_candidate_produces_authorization_build_and_package_evidence(tmp_path: Path) -> None:

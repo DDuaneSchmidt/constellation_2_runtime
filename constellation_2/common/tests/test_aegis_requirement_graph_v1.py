@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -219,6 +220,7 @@ def test_day_ledger_uses_market_data_supply_blocker(monkeypatch: pytest.MonkeyPa
         encoding="utf-8",
     )
     monkeypatch.setattr(day_run.bod, "_run_child_with_retries", lambda *args, **kwargs: {"status": "BLOCKED", "blocker": "OPTIONS_MARKET_DATA_PERMISSION_DENIED", "duration_ms": 1})
+    monkeypatch.setattr(day_run.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="", stderr=""))
     monkeypatch.setattr(day_run, "_run_steps", lambda *args, **kwargs: ([{"status": "BLOCKED", "blocker": "OPTIONS_MARKET_DATA_PERMISSION_DENIED"}], [str(supply_path)], ["OPTIONS_MARKET_DATA_PERMISSION_DENIED"]))
 
     row = day_run._phase_market_data(phase_ctx, {})
@@ -321,7 +323,7 @@ def test_present_lifecycle_requirement_passes(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     target = ctx.truth_root / "reports" / "market_data_authority_v1" / ctx.day_utc / "market_data_authority.v1.json"
     target.parent.mkdir(parents=True)
-    target.write_text(json.dumps({"day_utc": ctx.day_utc, "status": "PASS"}), encoding="utf-8")
+    target.write_text(json.dumps({"day_utc": ctx.day_utc, "status": "PASS", "producer_contract_v1": {"deterministic_fingerprint": "test"}}), encoding="utf-8")
 
     payload = graph.build_requirement_graph(ctx)
     node = next(row for row in payload["requirements"] if row["source_id"] == "MARKET_DATA")

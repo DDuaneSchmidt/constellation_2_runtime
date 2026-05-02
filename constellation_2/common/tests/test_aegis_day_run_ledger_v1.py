@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -36,6 +37,10 @@ def _ctx(tmp_path: Path, day: str = "2026-04-29") -> day_run.PhaseContext:
 def _write(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+
+def _allow_requirement_graph(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(day_run.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="", stderr=""))
 
 
 def _selected_pointer(ctx: day_run.PhaseContext, *, symbol: str = "SPY") -> None:
@@ -252,6 +257,7 @@ def test_market_data_missing_snapshot_without_capture_diagnostic_stays_generic()
 
 def test_market_data_specific_capture_blocker_wins_over_generic_authority(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
+    _allow_requirement_graph(monkeypatch)
 
     def _fake_run_steps(*_args, **_kwargs):  # noqa: ANN002, ANN003
         return (
@@ -283,6 +289,7 @@ def test_market_data_specific_capture_blocker_wins_over_generic_authority(monkey
 
 def test_market_data_successful_snapshot_phase_passes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
+    _allow_requirement_graph(monkeypatch)
 
     def _fake_run_steps(*_args, **_kwargs):  # noqa: ANN002, ANN003
         return ([{"step_name": "market_data_supply", "status": "PASS", "duration_ms": 1}], [str(day_run._market_data_supply_path(ctx))], [])
@@ -339,6 +346,7 @@ def test_all_pre_ready_phases_pass_with_delayed_market_data_marks_delayed_ready(
 ) -> None:
     _install_phase_runners(monkeypatch)
     ctx = _ctx(tmp_path)
+    _allow_requirement_graph(monkeypatch)
     path = day_run._market_data_supply_path(ctx)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('{"day_utc":"2026-04-29","status":"PASS","delayed_data_used":true,"market_data_mode":"DELAYED"}\n', encoding="utf-8")
@@ -367,6 +375,7 @@ def test_market_data_bod_prep_runs_and_passes_when_supply_is_pre_market_pending(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     ctx = _ctx(tmp_path)
+    _allow_requirement_graph(monkeypatch)
     supply_path = day_run._market_data_supply_path(ctx)
     _write(
         supply_path,
@@ -392,13 +401,14 @@ def test_market_data_bod_prep_runs_and_passes_when_supply_is_pre_market_pending(
 
     assert row["status"] == "PASS"
     assert row["canonical_blocker"] == ""
-    assert row["outputs"] == [str(supply_path)]
+    assert str(supply_path) in row["outputs"]
 
 
 def test_market_data_bod_prep_demotes_stale_snapshot_to_market_open_gate(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     ctx = _ctx(tmp_path)
+    _allow_requirement_graph(monkeypatch)
     supply_path = day_run._market_data_supply_path(ctx)
     _write(
         supply_path,
@@ -472,6 +482,21 @@ def test_day_ledger_cannot_reach_paper_ready_before_market_gate_passes(
 def test_market_open_gate_before_0930_returns_market_not_open(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _selected_pointer(ctx)
+    readiness_path = ctx.truth_root / "reports" / "trading_day_readiness_authority_v1" / ctx.day_utc / "trading_day_readiness_authority.v1.json"
+    monkeypatch.setattr(
+        open_gate,
+        "read_or_evaluate_trading_day_readiness_authority_v1",
+        lambda **_kwargs: (
+            readiness_path,
+            {
+                "status": "PASS",
+                "readiness_mode": "MARKET_OPEN",
+                "requires_same_day_options_snapshot": True,
+                "session_state": "PRE_MARKET",
+                "evidence_policy": {},
+            },
+        ),
+    )
     monkeypatch.setattr(open_gate, "_market_session_state", lambda: "PRE_MARKET")
     monkeypatch.setattr(open_gate, "_run_capture", lambda *_args, **_kwargs: pytest.fail("capture should not run before open"))
 

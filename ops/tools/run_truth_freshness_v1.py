@@ -22,21 +22,63 @@ POLICIES = {
     "HARD_BLOCKER": {"freshness_policy_id": "current_day_authoritative_max_24h", "max_age_seconds": 86400, "session_scope": "TRADING_DAY"},
     "DIAGNOSTIC_ONLY": {"freshness_policy_id": "diagnostic_max_48h", "max_age_seconds": 172800, "session_scope": "REPORTING"},
 }
+PHASE_RANK = {
+    "SOURCE_INTEGRITY": 0,
+    "BROKER_HEALTH": 1,
+    "BOD_INPUTS": 2,
+    "SESSION_AUTHORITY": 3,
+    "MARKET_DATA_BOD_PREP": 4,
+    "MARKET_OPEN_DATA_GATE": 5,
+    "STRATEGY_AND_RISK": 6,
+    "AUTHORIZATION": 7,
+    "SUBMIT_BOUNDARY": 8,
+}
+ARTIFACT_PHASE = {
+    "aegis_day_run_v1": "SOURCE_INTEGRITY",
+    "broker_supply_v1": "BROKER_HEALTH",
+    "capital_supply_v1": "BOD_INPUTS",
+    "aegis_requirement_graph_v1": "MARKET_DATA_BOD_PREP",
+    "market_data_supply_v1": "MARKET_DATA_BOD_PREP",
+    "market_open_data_gate_v1": "MARKET_OPEN_DATA_GATE",
+    "risk_budget_supply_v1": "STRATEGY_AND_RISK",
+    "authorization_supply_v1": "AUTHORIZATION",
+    "submit_boundary_status_v1": "SUBMIT_BOUNDARY",
+    "action_validity_v1": "SUBMIT_BOUNDARY",
+}
 
 
 def truth_freshness_path(*, truth_root: Path, day_utc: str) -> Path:
     return (truth_root / "reports" / "truth_freshness_v1" / day_utc / "truth_freshness.v1.json").resolve()
 
 
+def _required_now(ctx: bod.BodContext, spec: dict[str, Any]) -> bool:
+    if not spec.get("authoritative"):
+        return False
+    artifact_type = str(spec.get("artifact_type") or "")
+    if artifact_type == "aegis_day_run_v1":
+        return True
+    ledger = read_json_v1(report_path_v1(ctx, "aegis_day_run_v1", "day_run.v1.json"))
+    blocked_phase = str(ledger.get("canonical_phase") or "").strip()
+    if not blocked_phase:
+        return True
+    artifact_phase = ARTIFACT_PHASE.get(artifact_type, "SUBMIT_BOUNDARY")
+    return PHASE_RANK.get(artifact_phase, 99) <= PHASE_RANK.get(blocked_phase, 99)
+
+
 def _record(ctx: bod.BodContext, spec: dict[str, Any], observed: datetime) -> dict[str, Any]:
     path = report_path_v1(ctx, str(spec["family"]), str(spec["filename"]))
     payload = read_json_v1(path)
     blocking_class = str(spec.get("blocking_class") or "HARD_BLOCKER")
+    required_now = _required_now(ctx, spec)
     policy = POLICIES.get(blocking_class)
     generated = generated_at_v1(payload)
     generated_dt = parse_iso_v1(generated)
     age = int((observed - generated_dt).total_seconds()) if generated_dt else None
-    if not path.exists():
+    if not required_now and blocking_class == "HARD_BLOCKER":
+        status = "NOT_REQUIRED"
+        blocker = ""
+        action = ""
+    elif not path.exists():
         status = "UNKNOWN"
         blocker = f"{spec['artifact_type'].upper()}_MISSING" if blocking_class == "HARD_BLOCKER" else ""
         action = f"Generate {spec['artifact_type']} before evaluating freshness."
@@ -68,6 +110,7 @@ def _record(ctx: bod.BodContext, spec: dict[str, Any], observed: datetime) -> di
         "freshness_status": status,
         "age_seconds": age,
         "blocking_class": blocking_class,
+        "required_for_current_day": required_now,
         "canonical_blocker": blocker,
         "operator_next_action": action,
     }
@@ -77,7 +120,7 @@ def build_truth_freshness_v1(ctx: bod.BodContext, *, observed_at_utc: str = "") 
     observed = parse_iso_v1(observed_at_utc) or datetime.now(UTC)
     records = [_record(ctx, spec, observed) for spec in artifact_specs_v1()]
     hard = [row for row in records if row["canonical_blocker"] and row["blocking_class"] == "HARD_BLOCKER"]
-    unknown = [row for row in records if row["freshness_status"] == "UNKNOWN"]
+    unknown = [row for row in records if row["freshness_status"] == "UNKNOWN" and row.get("required_for_current_day") is True]
     return {
         "schema_id": "truth_freshness",
         "schema_version": SCHEMA_VERSION,

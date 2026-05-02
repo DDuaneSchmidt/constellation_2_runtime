@@ -41,6 +41,11 @@ ENGINE_ID = 'C2_TREND_EQ_PRIMARY_V1'
 GIT_SHA = '7d64db4a5e4d68af1d89a56edf64fb9024bb218a'
 
 
+@pytest.fixture(autouse=True)
+def _default_aegis_submit_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(boundary_module, 'require_submit_enforcement_v1', lambda **_kwargs: {})
+
+
 def _write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=False) + '\n', encoding='utf-8')
@@ -425,6 +430,42 @@ def test_submit_boundary_rejects_raw_candidate_without_package(tmp_path: Path) -
         assert 'C2_SUBMIT_RAW_CANDIDATE_DISABLED' in str(exc)
     else:
         raise AssertionError('expected failure')
+
+
+def test_submit_boundary_v4_hard_blocks_when_shared_aegis_gate_blocks(tmp_path: Path, monkeypatch) -> None:
+    candidate, package_path = _seed_candidate_and_package(tmp_path, monkeypatch)
+    package_obj = json.loads(package_path.read_text(encoding='utf-8'))
+    submission_record_path = _write_submission_record(
+        tmp_path / 'kernel_truth' / 'execution_kernel_v1' / 'submission_records' / DAY / str(package_obj['submission_id']) / 'submission_record.v1.json',
+        package_path=package_path,
+        candidate=candidate,
+        submission_id=str(package_obj['submission_id']),
+    )
+    canonical_truth = tmp_path / 'truth'
+    sleeve_root = tmp_path / 'truth_sleeves'
+    monkeypatch.setattr(boundary_module, 'resolve_truth_sleeves_root', lambda: sleeve_root.resolve())
+    monkeypatch.setattr(boundary_module, 'resolve_canonical_truth_root', lambda: canonical_truth.resolve())
+    monkeypatch.setattr(boundary_module, 'enforce_submit_execution_identity_v1', lambda **kwargs: SimpleNamespace(account_id=ACCOUNT, sleeve_id=SLEEVE, sleeve_registry_path=SOURCE_ROOT / 'governance/02_REGISTRIES/C2_SLEEVE_REGISTRY_V1.json', account_registry_path=SOURCE_ROOT / 'governance/02_REGISTRIES/C2_IB_ACCOUNT_REGISTRY_V1.json'))
+    monkeypatch.setattr(boundary_module, '_resolve_execution_roots_for_phasec_out_dir', lambda **kwargs: SimpleNamespace(execution_root_path=(sleeve_root / SLEEVE / ENV).resolve(), sleeve_id=SLEEVE))
+    monkeypatch.setattr(boundary_module, 'require_submit_enforcement_v1', lambda **_kwargs: (_ for _ in ()).throw(SystemExit('FAIL_CLOSED: AEGIS_SUBMIT_ENFORCEMENT_BLOCKED')))
+    monkeypatch.setattr(boundary_module, 'IBPaperAdapterV2', lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('broker_adapter_bypass')))
+
+    with pytest.raises(SystemExit, match='AEGIS_SUBMIT_ENFORCEMENT_BLOCKED'):
+        boundary_module.run_submit_boundary_paper_v4(
+            repo_root=SOURCE_ROOT,
+            eval_time_utc=f'{DAY}T00:00:00Z',
+            phasec_out_dir=None,
+            execution_package_path=package_path,
+            allow_legacy_raw_candidate=False,
+            risk_budget_path=SOURCE_ROOT / 'constellation_2/phaseD/inputs/sample_risk_budget.v1.json',
+            ib_host='127.0.0.1',
+            ib_port=4002,
+            ib_client_id=7,
+            ib_account=ACCOUNT,
+            dry_run=True,
+            submission_record_path=submission_record_path,
+            submissions_root_override=tmp_path / 'submissions',
+        )
 
 
 def test_submit_boundary_accepts_sealed_package_in_dry_run(tmp_path: Path, monkeypatch) -> None:
