@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -87,6 +88,29 @@ class SleeveUpstreamV1:
 
 def _now_utc() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _repo_dirty_status_v1() -> str:
+    proc = subprocess.run(["git", "-C", str(REPO_ROOT), "status", "--short"], capture_output=True, text=True, check=False)
+    return "DIRTY" if str(proc.stdout or "").strip() else "CLEAN"
+
+
+def _scorecard_producer_contract_v1(*, day_utc: str, output_path: Path, source_refs: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+    stable = {
+        "schema_version": "producer_contract.v1",
+        "producer_name": WRITER_ID,
+        "producer_command": f"materialize_governed_evaluation_day_v1(day_utc={_parse_day(day_utc)})",
+        "code_version_git_commit": repo_git_sha_v1(),
+        "source_dirty_status": _repo_dirty_status_v1(),
+        "input_artifacts": [dict(row) for row in source_refs],
+        "output_artifacts": [{"path": str(output_path.resolve())}],
+        "schema_versions": {"weekly_scorecard_view_v1": "v1"},
+    }
+    return {
+        **stable,
+        "generated_at_utc": _now_utc(),
+        "deterministic_fingerprint": hashlib.sha256(json.dumps(stable, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")).hexdigest(),
+    }
 
 
 def _parse_day(day_utc: str) -> str:
@@ -1684,23 +1708,38 @@ def _write_scorecard(
     portfolio_summary: Mapping[str, Any],
     source_refs: Sequence[Mapping[str, Any]],
 ) -> SurfaceRefV1:
+    generated_at = _now_utc()
+    output_path = _portfolio_paths(truth_root=truth_root, day_utc=day_utc)["scorecard"]
     payload = {
         "schema_id": "C2_WEEKLY_SCORECARD_VIEW_V1",
         "schema_version": "v1",
+        "artifact_id": "weekly_scorecard_view_v1",
         "surface_kind": "projection",
         "day_utc": _parse_day(day_utc),
-        "generated_at_utc": _now_utc(),
+        "generated_at": generated_at,
+        "generated_at_utc": generated_at,
+        "git_commit": repo_git_sha_v1(),
+        "git_dirty_status": _repo_dirty_status_v1(),
+        "truth_root": str(truth_root.resolve()),
+        "runtime_root": str(truth_root.resolve()),
+        "producer": WRITER_ID,
+        "authority": "ADVISORY_ONLY",
+        "readiness_authority": "aegis_control_plane_v1",
+        "advisory_status": "ANALYSIS_ONLY",
         "window_label": f"WEEK_ENDING_{_parse_day(day_utc)}",
         "portfolio_summary": dict(portfolio_summary),
         "sleeve_rows": [dict(row) for row in sleeve_rows],
         "source_refs": [dict(row) for row in source_refs],
+        "warnings": [],
+        "requires_human_review": True,
     }
+    payload["producer_contract_v1"] = _scorecard_producer_contract_v1(day_utc=day_utc, output_path=output_path, source_refs=source_refs)
     validation = validate_read_model_payload_v1(payload)
     if not bool(validation.get("ok")):
         raise ValueError(f"INVALID_WEEKLY_SCORECARD_READ_MODEL:{validation.get('errors')}")
     validate_against_repo_schema_v1(payload, REPO_ROOT, WEEKLY_SCORECARD_SCHEMA)
     return atomic_write_idempotent_validated_json_v1(
-        path=_portfolio_paths(truth_root=truth_root, day_utc=day_utc)["scorecard"],
+        path=output_path,
         payload=payload,
         schema_relpath=WEEKLY_SCORECARD_SCHEMA,
         volatile_field_names=("generated_at_utc",),
