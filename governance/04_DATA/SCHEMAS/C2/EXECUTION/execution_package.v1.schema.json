@@ -31,6 +31,7 @@
     "global_context_package_ref": {"type": ["object", "null"]},
     "intent_id": {"type": ["string", "null"]},
     "operation_type": {"type": "string"},
+    "risk_contract_ref": {"type": ["object", "null"]},
     "schema_id": {"const": "execution_package"},
     "schema_version": {"const": "v1"},
     "seal_basis": {"type": "string"},

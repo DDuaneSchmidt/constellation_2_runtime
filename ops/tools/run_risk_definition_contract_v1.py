@@ -1,0 +1,354 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from datetime import UTC, datetime
+from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
+from pathlib import Path
+from typing import Any
+
+from jsonschema import Draft202012Validator
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1
+
+PRODUCER = "ops/tools/run_risk_definition_contract_v1.py"
+SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/risk_definition_contract.v1.schema.json"
+
+
+def _git_sha() -> str:
+    try:
+        out = subprocess.check_output(["/usr/bin/git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"])
+        return out.decode("utf-8").strip()
+    except Exception:
+        return "0" * 40
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as handle:
+        obj = json.load(handle)
+    if not isinstance(obj, dict):
+        raise ValueError(f"TOP_LEVEL_NOT_OBJECT:{path}")
+    return obj
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload_bytes = canonical_json_bytes_v1(payload) + b"\n"
+    path.write_bytes(payload_bytes)
+    return canonical_hash_for_c2_artifact_v1(payload)
+
+
+def risk_contract_path_v1(*, truth_root: Path, day_utc: str, intent_hash: str) -> Path:
+    return (
+        Path(truth_root).resolve()
+        / "risk_definition_contract_v1"
+        / day_utc
+        / intent_hash.lower()
+        / "risk_definition_contract.v1.json"
+    )
+
+
+def _intent_path(*, truth_root: Path, day_utc: str, intent_hash: str) -> Path:
+    return (
+        Path(truth_root).resolve()
+        / "intents_v1"
+        / "snapshots"
+        / day_utc
+        / f"{intent_hash.lower()}.exposure_intent.v1.json"
+    )
+
+
+def _find_intent_by_id(*, truth_root: Path, day_utc: str, intent_id: str) -> tuple[str, Path, dict[str, Any]]:
+    day_root = Path(truth_root).resolve() / "intents_v1" / "snapshots" / day_utc
+    if not day_root.exists():
+        raise FileNotFoundError(f"INTENTS_DAY_DIR_MISSING:{day_root}")
+    for path in sorted(day_root.glob("*.json")):
+        obj = _read_json(path)
+        if str(obj.get("intent_id") or "").strip() == intent_id:
+            name = path.name
+            suffix = ".exposure_intent.v1.json"
+            intent_hash = name[: -len(suffix)] if name.endswith(suffix) else canonical_hash_for_c2_artifact_v1(obj)
+            return intent_hash.lower(), path.resolve(), obj
+    raise FileNotFoundError(f"EXPOSURE_INTENT_NOT_FOUND:intent_id={intent_id}")
+
+
+def _market_reference_price(*, truth_root: Path, day_utc: str, symbol: str) -> tuple[Decimal | None, str]:
+    sym = str(symbol or "").strip().upper()
+    snapshot_path = (
+        Path(truth_root).resolve()
+        / "market_data_snapshot_v1"
+        / "snapshots"
+        / day_utc
+        / f"{sym}.market_data_snapshot.v1.json"
+    )
+    if snapshot_path.exists() and snapshot_path.is_file():
+        payload = _read_json(snapshot_path)
+        if str(payload.get("day_utc") or "").strip() == day_utc and str(payload.get("symbol") or "").strip().upper() == sym:
+            value = payload.get("close")
+            if value is not None:
+                dec = Decimal(str(value).strip())
+                if dec > 0:
+                    return dec, str(snapshot_path.resolve())
+    jsonl_path = Path(truth_root).resolve() / "market_data_snapshot_v1" / sym / f"{day_utc[:4]}.jsonl"
+    if not jsonl_path.exists() or not jsonl_path.is_file():
+        return None, ""
+    latest: Decimal | None = None
+    cutoff = f"{day_utc}T23:59:59Z"
+    for line in jsonl_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("symbol") or "").strip().upper() != sym:
+            continue
+        ts = str(row.get("timestamp_utc") or "").strip()
+        if not ts or ts > cutoff or row.get("close") is None:
+            continue
+        dec = Decimal(str(row.get("close")).strip())
+        if dec > 0:
+            latest = dec
+    return (latest, str(jsonl_path.resolve())) if latest is not None else (None, "")
+
+
+def _price_text(value: Decimal) -> str:
+    return str(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def _risk_cents(*, reference_price: Decimal, stop_loss_bps: int) -> int:
+    cents = reference_price * Decimal("100") * Decimal(stop_loss_bps) / Decimal("10000")
+    return int(cents.to_integral_value(rounding=ROUND_CEILING))
+
+
+def _stop_price(*, reference_price: Decimal, side: str, stop_loss_bps: int) -> str:
+    distance = Decimal(stop_loss_bps) / Decimal("10000")
+    normalized_side = str(side or "BUY").strip().upper()
+    if normalized_side == "SELL":
+        return _price_text(reference_price * (Decimal("1") + distance))
+    return _price_text(reference_price * (Decimal("1") - distance))
+
+
+def _latest_phasec_order_plan(*, truth_root: Path, day_utc: str, intent_hash: str) -> Path | None:
+    roots = [Path(truth_root).resolve()]
+    sleeve_root = (Path(truth_root).resolve().parent / "truth_sleeves" / "PRIMARY" / "PAPER").resolve()
+    if sleeve_root.exists():
+        roots.append(sleeve_root)
+    candidates: list[Path] = []
+    for root in roots:
+        candidates.extend((root / "phaseC_preflight_v1" / day_utc).glob(f"attempt_*/{intent_hash.lower()}/order_plan.v1.json"))
+    return sorted(candidates, key=lambda item: (item.stat().st_mtime_ns, str(item)))[-1].resolve() if candidates else None
+
+
+def _options_chain_ref(order_plan: dict[str, Any]) -> str:
+    for ref in order_plan.get("source_refs") or order_plan.get("evidence_refs") or []:
+        if not isinstance(ref, dict):
+            continue
+        raw = str(ref.get("path") or ref.get("artifact_path") or "").strip()
+        if raw and "options_chain" in raw:
+            return raw
+    raw = str(order_plan.get("options_chain_ref") or "").strip()
+    return raw
+
+
+def build_risk_definition_contract_v1(*, day_utc: str, truth_root: Path, intent_hash: str = "", intent_id: str = "") -> dict[str, Any]:
+    truth_root = Path(truth_root).resolve()
+    if intent_hash:
+        source_path = _intent_path(truth_root=truth_root, day_utc=day_utc, intent_hash=intent_hash)
+        intent_obj = _read_json(source_path)
+        resolved_hash = intent_hash.lower()
+    else:
+        resolved_hash, source_path, intent_obj = _find_intent_by_id(truth_root=truth_root, day_utc=day_utc, intent_id=intent_id)
+    resolved_intent_id = str(intent_obj.get("intent_id") or intent_id).strip()
+    exposure_type = str(intent_obj.get("exposure_type") or "").strip().upper()
+    engine = intent_obj.get("engine") if isinstance(intent_obj.get("engine"), dict) else {}
+    underlying = intent_obj.get("underlying") if isinstance(intent_obj.get("underlying"), dict) else {}
+    symbol = str(underlying.get("symbol") or "").strip().upper()
+    currency = str(underlying.get("currency") or "USD").strip().upper() or "USD"
+    sleeve_id = str(engine.get("engine_id") or "").strip() or str(intent_obj.get("sleeve_id") or "UNKNOWN").strip()
+    blockers: list[str] = []
+    risk_type = "DEFINED_RISK" if exposure_type == "SHORT_VOL_DEFINED" else "STOP_BASED"
+    payload: dict[str, Any] = {
+        "schema_id": "risk_definition_contract_v1",
+        "schema_version": "v1",
+        "contract_id": "",
+        "day_utc": day_utc,
+        "sleeve_id": sleeve_id,
+        "intent_id": resolved_intent_id,
+        "intent_hash": resolved_hash,
+        "instrument": {"kind": "OPTION_STRATEGY" if risk_type == "DEFINED_RISK" else "EQUITY", "symbol": symbol, "currency": currency},
+        "risk_type": risk_type,
+        "source_intent_path": str(source_path.resolve()),
+        "generated_at": _now_iso(),
+        "git_commit": _git_sha(),
+        "truth_root": str(truth_root),
+        "producer": {"repo": "constellation", "module": PRODUCER, "git_sha": _git_sha()},
+        "validation_status": "FAIL",
+        "blockers": blockers,
+        "stop_loss_bps": None,
+        "stop_loss_price": None,
+        "reference_price_source": None,
+        "reference_price": None,
+        "risk_per_unit": None,
+        "quantity_basis": None,
+        "structure_type": None,
+        "strikes": None,
+        "expiry": None,
+        "max_loss": None,
+        "max_gain": None,
+        "breakeven": None,
+        "options_chain_ref": None,
+        "canonical_json_hash": None
+    }
+    if not resolved_intent_id:
+        blockers.append("RISK_CONTRACT_INTENT_ID_MISSING")
+    if not symbol:
+        blockers.append("RISK_CONTRACT_INSTRUMENT_SYMBOL_MISSING")
+
+    if risk_type == "STOP_BASED":
+        constraints = intent_obj.get("constraints") if isinstance(intent_obj.get("constraints"), dict) else {}
+        try:
+            stop_bps = int(constraints.get("stop_loss_bps"))
+        except (TypeError, ValueError):
+            stop_bps = 0
+        if stop_bps <= 0:
+            blockers.append("RISK_CONTRACT_STOP_LOSS_BPS_MISSING")
+        price, price_source = _market_reference_price(truth_root=truth_root, day_utc=day_utc, symbol=symbol)
+        if price is None:
+            blockers.append("RISK_CONTRACT_REFERENCE_PRICE_MISSING")
+        if stop_bps > 0 and price is not None:
+            payload.update(
+                {
+                    "stop_loss_bps": stop_bps,
+                    "stop_loss_price": _stop_price(reference_price=price, side="BUY", stop_loss_bps=stop_bps),
+                    "reference_price_source": price_source,
+                    "reference_price": _price_text(price),
+                    "risk_per_unit": _risk_cents(reference_price=price, stop_loss_bps=stop_bps),
+                    "quantity_basis": {"basis": "ONE_UNIT_STOP_RISK_BOOTSTRAP", "quantity": 1},
+                }
+            )
+    elif risk_type == "DEFINED_RISK":
+        order_plan_path = _latest_phasec_order_plan(truth_root=truth_root, day_utc=day_utc, intent_hash=resolved_hash)
+        order_plan = _read_json(order_plan_path) if order_plan_path is not None else {}
+        risk_proof = order_plan.get("risk_proof") if isinstance(order_plan.get("risk_proof"), dict) else {}
+        legs = order_plan.get("legs") if isinstance(order_plan.get("legs"), list) else []
+        chain_ref = _options_chain_ref(order_plan)
+        if not order_plan:
+            blockers.append("RISK_CONTRACT_DEFINED_RISK_ORDER_PLAN_MISSING")
+        if risk_proof.get("defined_risk_proven") is not True:
+            blockers.append("RISK_CONTRACT_DEFINED_RISK_NOT_PROVEN")
+        if not legs:
+            blockers.append("RISK_CONTRACT_DEFINED_RISK_LEGS_MISSING")
+        if not chain_ref:
+            blockers.append("RISK_CONTRACT_OPTIONS_CHAIN_REF_MISSING")
+        contracts = risk_proof.get("contracts")
+        max_loss_usd = risk_proof.get("max_loss_usd")
+        try:
+            quantity = int(contracts)
+        except (TypeError, ValueError):
+            quantity = 0
+        try:
+            max_loss = int((Decimal(str(max_loss_usd)) * Decimal("100")).to_integral_value(rounding=ROUND_CEILING))
+        except Exception:
+            max_loss = 0
+        if quantity <= 0:
+            blockers.append("RISK_CONTRACT_DEFINED_RISK_QUANTITY_MISSING")
+        if max_loss <= 0:
+            blockers.append("RISK_CONTRACT_DEFINED_RISK_MAX_LOSS_MISSING")
+        if legs and quantity > 0 and max_loss > 0 and chain_ref:
+            payload.update(
+                {
+                    "structure_type": str(order_plan.get("structure") or "DEFINED_RISK_OPTIONS"),
+                    "strikes": [
+                        {
+                            "action": str(leg.get("action") or ""),
+                            "right": str(leg.get("right") or ""),
+                            "strike": str(leg.get("strike") or ""),
+                            "expiry": str(leg.get("expiry_utc") or leg.get("expiration") or ""),
+                        }
+                        for leg in legs
+                        if isinstance(leg, dict)
+                    ],
+                    "expiry": str((legs[0] if isinstance(legs[0], dict) else {}).get("expiry_utc") or (legs[0] if isinstance(legs[0], dict) else {}).get("expiration") or ""),
+                    "max_loss": max_loss,
+                    "max_gain": None,
+                    "breakeven": None,
+                    "options_chain_ref": chain_ref,
+                    "quantity_basis": {"basis": "DEFINED_RISK_CONTRACTS", "quantity": quantity},
+                    "risk_per_unit": (max_loss + quantity - 1) // quantity,
+                }
+            )
+    if not blockers:
+        payload["validation_status"] = "PASS"
+    payload["blockers"] = blockers
+    payload["contract_id"] = canonical_hash_for_c2_artifact_v1({**payload, "contract_id": "", "canonical_json_hash": None})
+    payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1({**payload, "canonical_json_hash": None})
+    return payload
+
+
+def validate_risk_definition_contract_v1(payload: dict[str, Any]) -> None:
+    schema = json.loads((REPO_ROOT / SCHEMA_RELPATH).read_text(encoding="utf-8"))
+    errors = sorted(Draft202012Validator(schema).iter_errors(payload), key=lambda err: list(err.path))
+    if errors:
+        raise ValueError("RISK_DEFINITION_CONTRACT_SCHEMA_INVALID:" + ";".join(error.message for error in errors[:3]))
+
+
+def load_valid_risk_definition_contract_v1(*, truth_root: Path, day_utc: str, intent_hash: str, intent_id: str = "") -> tuple[Path, dict[str, Any], str]:
+    path = risk_contract_path_v1(truth_root=truth_root, day_utc=day_utc, intent_hash=intent_hash)
+    if not path.exists() or not path.is_file():
+        return path, {}, "RISK_DEFINITION_CONTRACT_MISSING"
+    try:
+        payload = _read_json(path)
+        validate_risk_definition_contract_v1(payload)
+    except Exception as exc:
+        return path, {}, f"RISK_DEFINITION_CONTRACT_INVALID:{type(exc).__name__}"
+    if str(payload.get("day_utc") or "") != day_utc:
+        return path, payload, "RISK_DEFINITION_CONTRACT_DAY_MISMATCH"
+    if str(payload.get("intent_hash") or "").lower() != intent_hash.lower():
+        return path, payload, "RISK_DEFINITION_CONTRACT_INTENT_HASH_MISMATCH"
+    if intent_id and str(payload.get("intent_id") or "") != intent_id:
+        return path, payload, "RISK_DEFINITION_CONTRACT_INTENT_ID_MISMATCH"
+    if str(payload.get("truth_root") or "") != str(Path(truth_root).resolve()):
+        return path, payload, "RISK_DEFINITION_CONTRACT_TRUTH_ROOT_MISMATCH"
+    if str(payload.get("validation_status") or "").upper() != "PASS":
+        blockers = ",".join(str(item) for item in payload.get("blockers") or [])
+        return path, payload, f"RISK_DEFINITION_CONTRACT_FAILED:{blockers or 'UNKNOWN'}"
+    return path, payload, ""
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="run_risk_definition_contract_v1")
+    parser.add_argument("--day_utc", required=True)
+    parser.add_argument("--truth_root", required=True)
+    parser.add_argument("--intent_hash", default="")
+    parser.add_argument("--intent_id", default="")
+    args = parser.parse_args(argv)
+    payload = build_risk_definition_contract_v1(
+        day_utc=str(args.day_utc).strip(),
+        truth_root=Path(args.truth_root).expanduser().resolve(),
+        intent_hash=str(args.intent_hash or "").strip(),
+        intent_id=str(args.intent_id or "").strip(),
+    )
+    validate_risk_definition_contract_v1(payload)
+    out = risk_contract_path_v1(
+        truth_root=Path(args.truth_root).expanduser().resolve(),
+        day_utc=str(args.day_utc).strip(),
+        intent_hash=str(payload["intent_hash"]),
+    )
+    sha = _write_json(out, payload)
+    print(json.dumps({"status": payload["validation_status"], "path": str(out), "sha256": sha, "blockers": payload["blockers"]}, sort_keys=True))
+    return 0 if payload["validation_status"] == "PASS" else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

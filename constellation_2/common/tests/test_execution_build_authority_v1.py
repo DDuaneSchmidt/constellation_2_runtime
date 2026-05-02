@@ -41,6 +41,12 @@ def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=False) + '\n', encoding='utf-8')
 
 
+def _sha(path: Path) -> str:
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def _plan() -> dict[str, object]:
     return {
         'schema_id': 'equity_order_plan',
@@ -58,6 +64,30 @@ def _plan() -> dict[str, object]:
         'source_intent_id': INTENT_ID,
         'intent_sha256': INTENT_HASH,
     }
+
+
+def _plan_with_protective_stop() -> dict[str, object]:
+    plan = _plan()
+    plan['order_terms'] = {'order_type': 'LIMIT', 'limit_price': '500.00', 'time_in_force': 'DAY'}
+    plan['protective_stop'] = {
+        'order_type': 'STOP',
+        'stop_price': '450.00',
+        'time_in_force': 'DAY',
+        'basis': 'ENTRY_REFERENCE_PRICE',
+        'stop_loss_bps': 1000,
+    }
+    plan['take_profit'] = None
+    plan['bracket'] = {'enabled': True, 'oca_group': None, 'transmit_sequence': 'PARENT_FALSE_FINAL_CHILD_TRUE'}
+    return plan
+
+
+def _plan_market_without_stop() -> dict[str, object]:
+    plan = _plan()
+    plan['order_terms'] = {'order_type': 'MARKET', 'limit_price': None, 'time_in_force': 'DAY'}
+    plan['protective_stop'] = None
+    plan['take_profit'] = None
+    plan['bracket'] = None
+    return plan
 
 
 def _options_plan() -> dict[str, object]:
@@ -150,14 +180,69 @@ def _patch_roots(monkeypatch, canonical_truth: Path, sleeve_root: Path) -> None:
         monkeypatch.setattr(module, 'resolve_sleeve_execution_root_v1', lambda **kwargs: SimpleNamespace(execution_root_path=(sleeve_root / SLEEVE / ENV).resolve()))
 
 
+def _seed_risk_contract(root: Path, *, risk_type: str, stop_loss_bps: int = 1000) -> tuple[Path, dict[str, object]]:
+    path = root / SLEEVE / ENV / 'risk_definition_contract_v1' / DAY / INTENT_HASH / 'risk_definition_contract.v1.json'
+    payload: dict[str, object] = {
+        'schema_id': 'risk_definition_contract_v1',
+        'schema_version': 'v1',
+        'contract_id': 'risk-contract-' + INTENT_HASH[:16],
+        'day_utc': DAY,
+        'sleeve_id': ENGINE_ID,
+        'intent_id': INTENT_ID,
+        'intent_hash': INTENT_HASH,
+        'instrument': {'kind': 'EQUITY' if risk_type == 'STOP_BASED' else 'OPTION_STRATEGY', 'symbol': 'SPY', 'currency': 'USD'},
+        'risk_type': risk_type,
+        'source_intent_path': str((root / SLEEVE / ENV / 'intents_v1' / 'snapshots' / DAY / f'{INTENT_HASH}.exposure_intent.v1.json').resolve()),
+        'generated_at': f'{DAY}T00:00:00Z',
+        'git_commit': GIT_SHA,
+        'truth_root': str((root / SLEEVE / ENV).resolve()),
+        'producer': {'repo': 'constellation', 'module': 'ops/tools/run_risk_definition_contract_v1.py', 'git_sha': GIT_SHA},
+        'validation_status': 'PASS',
+        'blockers': [],
+        'stop_loss_bps': stop_loss_bps if risk_type == 'STOP_BASED' else None,
+        'stop_loss_price': '450.00' if risk_type == 'STOP_BASED' else None,
+        'reference_price_source': '/tmp/SPY.market_data_snapshot.v1.json' if risk_type == 'STOP_BASED' else None,
+        'reference_price': '500.00' if risk_type == 'STOP_BASED' else None,
+        'risk_per_unit': 5000 if risk_type == 'STOP_BASED' else 38800,
+        'quantity_basis': {'basis': 'ONE_UNIT_STOP_RISK_BOOTSTRAP' if risk_type == 'STOP_BASED' else 'DEFINED_RISK_CONTRACTS', 'quantity': 1},
+        'structure_type': None if risk_type == 'STOP_BASED' else 'VERTICAL_SPREAD',
+        'strikes': None if risk_type == 'STOP_BASED' else [{'action': 'SELL', 'right': 'PUT', 'strike': '712.00', 'expiry': '2026-04-27T00:00:00Z'}],
+        'expiry': None if risk_type == 'STOP_BASED' else '2026-04-27T00:00:00Z',
+        'max_loss': None if risk_type == 'STOP_BASED' else 38800,
+        'max_gain': None,
+        'breakeven': None,
+        'options_chain_ref': None if risk_type == 'STOP_BASED' else '/tmp/options_chain_snapshot.v1.json',
+        'canonical_json_hash': None,
+    }
+    payload['canonical_json_hash'] = canonical_hash_for_c2_artifact_v1(payload)
+    _write_json(path, payload)
+    return path, payload
+
+
+def _attach_risk_contract(plan: dict[str, object], sleeve_root: Path) -> dict[str, object]:
+    risk_type = 'DEFINED_RISK' if str(plan.get('schema_id') or '') == 'order_plan' else 'STOP_BASED'
+    contract_path, contract = _seed_risk_contract(sleeve_root, risk_type=risk_type)
+    updated = copy.deepcopy(plan)
+    updated['risk_contract_ref'] = {
+        'path': str(contract_path.resolve()),
+        'contract_id': str(contract['contract_id']),
+        'risk_type': risk_type,
+        'sha256': _sha(contract_path),
+    }
+    return updated
+
+
 def _seed_candidate(
     candidate: Path,
     *,
     attempt_id: str,
     plan_payload: dict[str, object] | None = None,
     plan_filename: str = 'equity_order_plan.v2.json',
+    attach_risk_contract: bool = True,
 ) -> dict[str, str]:
-    plan = copy.deepcopy(plan_payload) if plan_payload is not None else _plan()
+    plan = copy.deepcopy(plan_payload) if plan_payload is not None else _plan_with_protective_stop()
+    if attach_risk_contract:
+        plan = _attach_risk_contract(plan, candidate.parents[5])
     plan_hash = canonical_hash_for_c2_artifact_v1(plan)
     trade_instance = derive_trade_instance_id_v1(day_utc=DAY, attempt_id=attempt_id, sleeve_id=SLEEVE, environment=ENV, intent_id=INTENT_ID, intent_hash=INTENT_HASH)
     submission_id = derive_submission_id_v1(intent_id=INTENT_ID, plan_hash=plan_hash, trade_instance_id=trade_instance)
@@ -249,6 +334,7 @@ def _seed_complete_economic(canonical_truth: Path, sleeve_root: Path) -> None:
             },
         },
     )
+
     _write_json(
         canonical_truth / 'positions_v1' / 'snapshots' / DAY / 'positions_snapshot.v5.json',
         {
@@ -266,6 +352,7 @@ def _seed_complete_economic(canonical_truth: Path, sleeve_root: Path) -> None:
             'canonical_json_hash': '1' * 64,
         },
     )
+
     _write_json(
         canonical_truth / 'position_lifecycle_v2' / DAY / 'position_lifecycle_snapshot.v2.json',
         {
@@ -336,6 +423,26 @@ def _seed_complete_economic(canonical_truth: Path, sleeve_root: Path) -> None:
     )
 
 
+def _seed_source_exposure_with_stop(root: Path, *, stop_loss_bps: int = 1000) -> None:
+    _write_json(
+        root / 'intents_v1' / 'snapshots' / DAY / f'{INTENT_HASH}.exposure_intent.v1.json',
+        {
+            'schema_id': 'exposure_intent',
+            'schema_version': 'v1',
+            'intent_id': INTENT_ID,
+            'created_at_utc': f'{DAY}T00:00:00Z',
+            'engine': {'engine_id': ENGINE_ID, 'suite': 'C2_HYBRID_V1', 'mode': ENV},
+            'underlying': {'symbol': 'SPY', 'currency': 'USD'},
+            'exposure_type': 'LONG_EQUITY',
+            'target_notional_pct': '0.01',
+            'expected_holding_days': 20,
+            'risk_class': 'TREND',
+            'constraints': {'max_risk_pct': '0.01', 'stop_loss_bps': stop_loss_bps},
+            'canonical_json_hash': None,
+        },
+    )
+
+
 def _seal_global_context() -> None:
     da_module.run_day_activation_authority_v1(repo_root=SOURCE_ROOT, operation_type='fresh_paper_entry_v1', day_utc=DAY, sleeve_id=SLEEVE, environment=ENV, ib_account=ACCOUNT, materialize=False, emit_package=True)
     gc_module.run_global_context_authority_v1(repo_root=SOURCE_ROOT, operation_type='fresh_paper_entry_v1', day_utc=DAY, sleeve_id=SLEEVE, environment=ENV, ib_account=ACCOUNT, materialize=False, emit_package=True)
@@ -378,6 +485,65 @@ def test_build_primary_path_uses_only_sealed_upstream_packages(tmp_path: Path, m
     assert result['package_obj']['economic_state_package_ref']['dependency_id'] == 'economic_state_package_v1'
     ref_ids = {row['dependency_id'] for row in result['package_obj']['dependency_refs']}
     assert 'capital_authority_allocation_v1' in ref_ids
+
+
+def test_stop_loss_bps_implied_only_blocks_package(tmp_path: Path, monkeypatch) -> None:
+    canonical_truth, sleeve_root, candidate = _candidate_roots(tmp_path)
+    _patch_roots(monkeypatch, canonical_truth, sleeve_root)
+    _seed_candidate(candidate, attempt_id='A1001', plan_payload=_plan())
+    _seed_source_exposure_with_stop(sleeve_root / SLEEVE / ENV)
+    _seed_raw_global_context(canonical_truth, sleeve_root)
+    _seed_execution_non_economic(canonical_truth, sleeve_root, INTENT_HASH)
+    _seed_complete_economic(canonical_truth, sleeve_root)
+
+    _seal_global_context()
+    econ_module.run_economic_state_authority_v1(repo_root=SOURCE_ROOT, operation_type='fresh_paper_entry_v1', day_utc=DAY, sleeve_id=SLEEVE, environment=ENV, ib_account=ACCOUNT, materialize=False, emit_package=True)
+    result = build_module.run_execution_build_authority_v1(repo_root=SOURCE_ROOT, operation_type='fresh_paper_entry_v1', candidate_path=candidate, materialize=False, emit_package=True)
+    by_id = {row['dependency_id']: row for row in result['build_obj']['dependency_results']}
+    assert by_id['equity_order_plan_v2']['status'] == 'FAILED'
+    assert 'EXECUTION_BUILD_EQUITY_PROTECTIVE_STOP_MISSING' in by_id['equity_order_plan_v2']['detail']
+    assert result['build_obj']['closure_status'] == 'BLOCKED'
+    assert result['package_obj'] is None
+    assert result['package_path'] is None
+
+
+def test_explicit_protective_stop_allows_package(tmp_path: Path, monkeypatch) -> None:
+    canonical_truth, sleeve_root, candidate = _candidate_roots(tmp_path)
+    _patch_roots(monkeypatch, canonical_truth, sleeve_root)
+    ids = _seed_candidate(candidate, attempt_id='A1001', plan_payload=_plan_with_protective_stop())
+    _seed_source_exposure_with_stop(sleeve_root / SLEEVE / ENV)
+    _seed_raw_global_context(canonical_truth, sleeve_root)
+    _seed_execution_non_economic(canonical_truth, sleeve_root, INTENT_HASH)
+    _seed_complete_economic(canonical_truth, sleeve_root)
+
+    _seal_global_context()
+    econ_module.run_economic_state_authority_v1(repo_root=SOURCE_ROOT, operation_type='fresh_paper_entry_v1', day_utc=DAY, sleeve_id=SLEEVE, environment=ENV, ib_account=ACCOUNT, materialize=False, emit_package=True)
+    result = build_module.run_execution_build_authority_v1(repo_root=SOURCE_ROOT, operation_type='fresh_paper_entry_v1', candidate_path=candidate, materialize=False, emit_package=True)
+    by_id = {row['dependency_id']: row for row in result['build_obj']['dependency_results']}
+    assert by_id['equity_order_plan_v2']['status'] == 'PRESENT'
+    assert result['build_obj']['closure_status'] == 'COMPLETE'
+    assert result['package_obj'] is not None
+    assert result['package_obj']['submission_id'] == ids['submission_id']
+    assert result['package_obj']['protective_stop'] == {
+        'basis': 'ENTRY_REFERENCE_PRICE',
+        'order_type': 'STOP',
+        'stop_loss_bps': 1000,
+        'stop_price': '450.00',
+        'time_in_force': 'DAY',
+    }
+    assert result['package_obj']['risk_contract_ref']['risk_type'] == 'STOP_BASED'
+    assert result['package_obj']['risk_contract_ref']['path'].endswith('/risk_definition_contract.v1.json')
+
+
+def test_market_order_without_stop_is_rejected_for_stop_bearing_source_intent(tmp_path: Path, monkeypatch) -> None:
+    canonical_truth, sleeve_root, candidate = _candidate_roots(tmp_path)
+    _patch_roots(monkeypatch, canonical_truth, sleeve_root)
+    _seed_candidate(candidate, attempt_id='A1001', plan_payload=_plan_market_without_stop())
+    _seed_source_exposure_with_stop(sleeve_root / SLEEVE / ENV)
+    result = build_module.run_execution_build_authority_v1(repo_root=SOURCE_ROOT, operation_type='fresh_paper_entry_v1', candidate_path=candidate, materialize=False, emit_package=False)
+    by_id = {row['dependency_id']: row for row in result['build_obj']['dependency_results']}
+    assert by_id['equity_order_plan_v2']['status'] == 'FAILED'
+    assert 'EXECUTION_BUILD_EQUITY_PROTECTIVE_STOP_MISSING' in by_id['equity_order_plan_v2']['detail']
 
 
 def test_build_accepts_options_order_plan_and_emits_option_risk_fields(tmp_path: Path, monkeypatch) -> None:
@@ -655,6 +821,16 @@ def test_options_plan_without_defined_risk_fails_closed(tmp_path: Path, monkeypa
     bad_plan['risk_proof'] = {'defined_risk_proven': False, 'contracts': 1, 'max_loss_usd': '388.00'}
     _seed_candidate(candidate, attempt_id='A1001', plan_payload=bad_plan, plan_filename='order_plan.v1.json')
     with pytest.raises(ValueError, match='EXECUTION_BUILD_OPTIONS_DEFINED_RISK_NOT_PROVEN'):
+        build_module.run_execution_build_authority_v1(repo_root=SOURCE_ROOT, operation_type='fresh_paper_entry_v1', candidate_path=candidate, materialize=False, emit_package=False)
+
+
+def test_options_plan_without_max_loss_fails_closed(tmp_path: Path, monkeypatch) -> None:
+    canonical_truth, sleeve_root, candidate = _candidate_roots(tmp_path)
+    _patch_roots(monkeypatch, canonical_truth, sleeve_root)
+    bad_plan = _options_plan()
+    bad_plan['risk_proof'] = {'defined_risk_proven': True, 'contracts': 1}
+    _seed_candidate(candidate, attempt_id='A1001', plan_payload=bad_plan, plan_filename='order_plan.v1.json')
+    with pytest.raises(ValueError, match='EXECUTION_BUILD_PLAN_MAX_LOSS_USD_MISSING'):
         build_module.run_execution_build_authority_v1(repo_root=SOURCE_ROOT, operation_type='fresh_paper_entry_v1', candidate_path=candidate, materialize=False, emit_package=False)
 
 

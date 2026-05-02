@@ -76,6 +76,20 @@
           "upstream_dependency_ids": ["submit_preflight_decision_v1"]
         },
         {
+          "dependency_id": "risk_definition_contract_v1",
+          "stage_id": "CANDIDATE_IDENTITY",
+          "role_class": "TRUTH_OWNER",
+          "owner_ref": "run_risk_definition_contract_v1.py",
+          "producer_ref": null,
+          "path_pattern": "{execution_truth_root}/risk_definition_contract_v1/{day_utc}/{intent_hash}/risk_definition_contract.v1.json",
+          "required": true,
+          "advisory_only": false,
+          "post_submit_only": false,
+          "reusable": true,
+          "fresh_materialization_required": false,
+          "upstream_dependency_ids": ["submit_preflight_decision_v1"]
+        },
+        {
           "dependency_id": "global_context_package_v1",
           "stage_id": "GLOBAL_CONTEXT",
           "role_class": "SEALED_CONTEXT_PACKAGE",
@@ -196,6 +210,7 @@
         "binding_record_v2",
         "execution_identity_record_v1",
         "equity_order_plan_v2",
+        "risk_definition_contract_v1",
         "global_context_package_v1",
         "economic_state_package_v1",
         "capital_authority_allocation_v1",

@@ -246,6 +246,10 @@ def _build_plan_summary(*, plan_obj: Dict[str, Any], plan_path: Path) -> Dict[st
             'quantity': quantity,
             'order_type': order_type,
             'broker_order': copy.deepcopy(order_terms_obj),
+            'protective_stop': copy.deepcopy(plan_obj.get('protective_stop')),
+            'take_profit': copy.deepcopy(plan_obj.get('take_profit')),
+            'bracket': copy.deepcopy(plan_obj.get('bracket')),
+            'risk_contract_ref': copy.deepcopy(plan_obj.get('risk_contract_ref')),
             'legs': None,
             'defined_risk_proven': None,
             'max_defined_loss_cents': None,
@@ -287,6 +291,7 @@ def _build_plan_summary(*, plan_obj: Dict[str, Any], plan_path: Path) -> Dict[st
         'order_type': order_type,
         'broker_order': copy.deepcopy(order_terms_obj),
         'legs': legs,
+        'risk_contract_ref': copy.deepcopy(plan_obj.get('risk_contract_ref')),
         'defined_risk_proven': True,
         'max_defined_loss_cents': max_loss_cents,
         'risk_per_unit_cents': risk_per_unit_cents,
@@ -606,6 +611,115 @@ def _resolve_package_authorization_row(
     return row
 
 
+def _source_exposure_intent_obj(ctx: CandidateContext) -> Dict[str, Any] | None:
+    candidates = [
+        ctx.execution_truth_root / 'intents_v1' / 'snapshots' / ctx.day_utc / f'{ctx.intent_hash}.exposure_intent.v1.json',
+        ctx.canonical_truth_root / 'intents_v1' / 'snapshots' / ctx.day_utc / f'{ctx.intent_hash}.exposure_intent.v1.json',
+    ]
+    for path in candidates:
+        if path.exists() and path.is_file():
+            obj = _read_json(path)
+            if str(obj.get('intent_id') or '').strip() in {ctx.intent_id, str(ctx.plan_obj.get('source_intent_id') or '').strip()}:
+                return obj
+    return None
+
+
+def _int_positive_or_none(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _price_decimal(value: Any) -> Decimal | None:
+    text = str(value or '').strip()
+    if not text:
+        return None
+    try:
+        parsed = Decimal(text)
+    except InvalidOperation:
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _price_text(value: Decimal) -> str:
+    return str(value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+
+
+def _expected_stop_price_text(*, entry_price: Decimal, action: str, stop_loss_bps: int) -> str | None:
+    side = str(action or '').strip().upper()
+    distance = Decimal(stop_loss_bps) / Decimal('10000')
+    if side == 'BUY':
+        return _price_text(entry_price * (Decimal('1') - distance))
+    if side == 'SELL':
+        return _price_text(entry_price * (Decimal('1') + distance))
+    return None
+
+
+def _candidate_equity_stop(ctx: CandidateContext) -> Dict[str, Any]:
+    path = (ctx.candidate_path / 'equity_intent.v1.json').resolve()
+    if not path.exists() or not path.is_file():
+        return {}
+    obj = _read_json(path)
+    exit_policy = obj.get('exit_policy') if isinstance(obj.get('exit_policy'), dict) else {}
+    stop = exit_policy.get('protective_stop') if isinstance(exit_policy.get('protective_stop'), dict) else {}
+    return copy.deepcopy(stop)
+
+
+def _validate_equity_protective_stop(ctx: CandidateContext) -> tuple[bool, str]:
+    contract_ref = ctx.plan_summary.get('risk_contract_ref') if isinstance(ctx.plan_summary.get('risk_contract_ref'), dict) else {}
+    contract_path = Path(str(contract_ref.get('path') or '')).resolve() if str(contract_ref.get('path') or '').strip() else Path()
+    if not str(contract_ref.get('path') or '').strip() or not contract_path.exists():
+        return False, 'EXECUTION_BUILD_RISK_DEFINITION_CONTRACT_MISSING'
+    contract = _read_json(contract_path)
+    if str(contract.get('validation_status') or '').strip().upper() != 'PASS':
+        return False, 'EXECUTION_BUILD_RISK_DEFINITION_CONTRACT_NOT_PASS'
+    if str(contract.get('risk_type') or '').strip().upper() != 'STOP_BASED':
+        return False, 'EXECUTION_BUILD_RISK_DEFINITION_CONTRACT_TYPE_MISMATCH'
+    if str(contract.get('intent_id') or '').strip() != ctx.intent_id:
+        return False, 'EXECUTION_BUILD_RISK_DEFINITION_CONTRACT_INTENT_MISMATCH'
+    if str(contract.get('day_utc') or '').strip() != ctx.day_utc:
+        return False, 'EXECUTION_BUILD_RISK_DEFINITION_CONTRACT_DAY_MISMATCH'
+    source_bps = _int_positive_or_none(contract.get('stop_loss_bps'))
+    if source_bps is None:
+        return False, 'EXECUTION_BUILD_RISK_DEFINITION_CONTRACT_STOP_BPS_MISSING'
+
+    plan_stop = ctx.plan_obj.get('protective_stop') if isinstance(ctx.plan_obj.get('protective_stop'), dict) else {}
+    if not plan_stop:
+        return False, f'EXECUTION_BUILD_EQUITY_PROTECTIVE_STOP_MISSING:source_stop_loss_bps={source_bps}'
+    plan_bps = _int_positive_or_none(plan_stop.get('stop_loss_bps'))
+    if plan_bps != source_bps:
+        return False, f'EXECUTION_BUILD_EQUITY_STOP_LOSS_BPS_CONFLICT:source={source_bps}:plan={plan_bps or "MISSING"}'
+    if str(plan_stop.get('order_type') or '').strip().upper() != 'STOP':
+        return False, 'EXECUTION_BUILD_EQUITY_PROTECTIVE_STOP_ORDER_TYPE_INVALID'
+    if str(plan_stop.get('basis') or '').strip() != 'ENTRY_REFERENCE_PRICE':
+        return False, 'EXECUTION_BUILD_EQUITY_PROTECTIVE_STOP_BASIS_INVALID'
+    stop_price = _price_decimal(plan_stop.get('stop_price'))
+    if stop_price is None:
+        return False, 'EXECUTION_BUILD_EQUITY_PROTECTIVE_STOP_PRICE_MISSING'
+
+    order_terms = ctx.plan_obj.get('order_terms') if isinstance(ctx.plan_obj.get('order_terms'), dict) else {}
+    entry_price = _price_decimal(order_terms.get('limit_price')) if str(order_terms.get('order_type') or '').strip().upper() == 'LIMIT' else None
+    if entry_price is None:
+        return False, 'EXECUTION_BUILD_EQUITY_STOP_REFERENCE_PRICE_MISSING'
+    expected_stop = _expected_stop_price_text(entry_price=entry_price, action=str(ctx.plan_obj.get('action') or ''), stop_loss_bps=source_bps)
+    if expected_stop is None:
+        return False, 'EXECUTION_BUILD_EQUITY_STOP_ACTION_UNSUPPORTED'
+    if _price_text(stop_price) != expected_stop:
+        return False, f'EXECUTION_BUILD_EQUITY_STOP_PRICE_CONFLICT:expected={expected_stop}:plan={_price_text(stop_price)}'
+
+    candidate_stop = _candidate_equity_stop(ctx)
+    if candidate_stop:
+        candidate_bps = _int_positive_or_none(candidate_stop.get('stop_loss_bps'))
+        if candidate_bps != source_bps:
+            return False, f'EXECUTION_BUILD_EQUITY_PHASEC_STOP_LOSS_BPS_CONFLICT:source={source_bps}:phasec={candidate_bps or "MISSING"}'
+        candidate_price = _price_decimal(candidate_stop.get('stop_price'))
+        if candidate_price is not None and _price_text(candidate_price) != _price_text(stop_price):
+            return False, f'EXECUTION_BUILD_EQUITY_PHASEC_STOP_PRICE_CONFLICT:phasec={_price_text(candidate_price)}:plan={_price_text(stop_price)}'
+    return True, 'EQUITY_PROTECTIVE_STOP_MATCHES_SOURCE'
+
+
 def _evaluate_semantics(*, dependency_id: str, obj: Dict[str, Any], path: Path, ctx: CandidateContext) -> tuple[str, str]:
     day_value = _day_value(obj)
     if day_value and day_value != ctx.day_utc:
@@ -647,7 +761,14 @@ def _evaluate_semantics(*, dependency_id: str, obj: Dict[str, Any], path: Path, 
             return STATUS_FAILED, f'PLAN_KIND_MISSING:path={path}'
         if Path(path).resolve() != ctx.plan_path:
             return STATUS_STALE, f'PLAN_PATH_MISMATCH:expected={ctx.plan_path}:actual={path}'
+        if plan_kind == 'EQUITY':
+            stop_ok, stop_detail = _validate_equity_protective_stop(ctx)
+            if not stop_ok:
+                return STATUS_FAILED, f'{stop_detail}:path={path}'
         if plan_kind == 'OPTIONS':
+            contract_ref = ctx.plan_summary.get('risk_contract_ref') if isinstance(ctx.plan_summary.get('risk_contract_ref'), dict) else {}
+            if not str(contract_ref.get('path') or '').strip():
+                return STATUS_FAILED, f'OPTIONS_RISK_DEFINITION_CONTRACT_REF_MISSING:path={path}'
             if ctx.plan_summary.get('defined_risk_proven') is not True:
                 return STATUS_FAILED, f'OPTIONS_DEFINED_RISK_NOT_PROVEN:path={path}'
             legs = ctx.plan_summary.get('legs')
@@ -658,6 +779,26 @@ def _evaluate_semantics(*, dependency_id: str, obj: Dict[str, Any], path: Path, 
             if int(ctx.plan_summary.get('risk_per_unit_cents') or 0) <= 0:
                 return STATUS_FAILED, f'OPTIONS_RISK_PER_UNIT_MISSING:path={path}'
         return STATUS_PRESENT, f'PLAN_PRESENT:{plan_kind}'
+
+    if dependency_id == 'risk_definition_contract_v1':
+        if str(obj.get('schema_id') or '').strip() != 'risk_definition_contract_v1':
+            return STATUS_FAILED, f'RISK_CONTRACT_SCHEMA_ID_INVALID:path={path}'
+        if str(obj.get('validation_status') or '').strip().upper() != 'PASS':
+            return STATUS_FAILED, f'RISK_CONTRACT_NOT_PASS:blockers={obj.get("blockers")}:path={path}'
+        if str(obj.get('intent_id') or '').strip() != ctx.intent_id:
+            return STATUS_FAILED, f'RISK_CONTRACT_INTENT_MISMATCH:path={path}'
+        if str(obj.get('day_utc') or '').strip() != ctx.day_utc:
+            return STATUS_STALE, f'RISK_CONTRACT_DAY_MISMATCH:path={path}'
+        plan_kind = str(ctx.plan_summary.get('plan_kind') or '').strip().upper()
+        risk_type = str(obj.get('risk_type') or '').strip().upper()
+        if plan_kind == 'EQUITY' and risk_type != 'STOP_BASED':
+            return STATUS_FAILED, f'RISK_CONTRACT_TYPE_MISMATCH:expected=STOP_BASED:actual={risk_type or "MISSING"}:path={path}'
+        if plan_kind == 'OPTIONS' and risk_type != 'DEFINED_RISK':
+            return STATUS_FAILED, f'RISK_CONTRACT_TYPE_MISMATCH:expected=DEFINED_RISK:actual={risk_type or "MISSING"}:path={path}'
+        contract_ref = ctx.plan_summary.get('risk_contract_ref') if isinstance(ctx.plan_summary.get('risk_contract_ref'), dict) else {}
+        if str(contract_ref.get('path') or '').strip() and Path(str(contract_ref.get('path'))).resolve() != Path(path).resolve():
+            return STATUS_STALE, f'RISK_CONTRACT_PLAN_REF_MISMATCH:path={path}:plan_ref={contract_ref.get("path")}'
+        return STATUS_PRESENT, 'RISK_DEFINITION_CONTRACT_PASS'
 
     if dependency_id == 'global_context_package_v1':
         sealed = bool(obj.get('sealed') is True)
@@ -1170,6 +1311,10 @@ def run_execution_build_authority_v1(*, repo_root: Path, operation_type: str, ca
             'authorized_quantity': authorized_quantity,
             'order_type': ctx.plan_summary.get('order_type'),
             'legs': package_legs,
+            'protective_stop': copy.deepcopy(ctx.plan_summary.get('protective_stop')),
+            'take_profit': copy.deepcopy(ctx.plan_summary.get('take_profit')),
+            'bracket': copy.deepcopy(ctx.plan_summary.get('bracket')),
+            'risk_contract_ref': copy.deepcopy(ctx.plan_summary.get('risk_contract_ref')),
             'broker_order': copy.deepcopy(ctx.plan_summary.get('broker_order')),
             'defined_risk_proven': package_defined_risk,
             'max_defined_loss_cents': package_max_defined_loss_cents if package_max_defined_loss_cents > 0 else None,

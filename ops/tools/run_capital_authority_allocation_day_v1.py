@@ -51,6 +51,7 @@ from constellation_2.common.governed_evaluation_control_v1 import (
 )
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+from ops.tools.run_risk_definition_contract_v1 import load_valid_risk_definition_contract_v1
 
 POLICY_PATH = (REPO_ROOT / "governance" / "02_REGISTRIES" / "C2_CAPITAL_AUTHORITY_POLICY_V1.json").resolve()
 SLEEVE_EDGE_POLICY_PATH = (REPO_ROOT / "governance" / "02_REGISTRIES" / "C2_SLEEVE_EDGE_QUALIFICATION_POLICY_V1.json").resolve()
@@ -1114,76 +1115,42 @@ def _outcome_priority(outcome: str) -> int:
     }.get(str(outcome or "").strip().upper(), -1)
 
 
-def _latest_market_close_cents(*, truth_root: Optional[Path], day_utc: str, symbol: str) -> Optional[int]:
-    if truth_root is None:
-        return None
-    day = str(day_utc or "").strip()
-    sym = str(symbol or "").strip().upper()
-    if not day or not sym:
-        return None
-    snapshot_path = (
-        Path(truth_root)
-        / "market_data_snapshot_v1"
-        / "snapshots"
-        / day
-        / f"{sym}.market_data_snapshot.v1.json"
-    ).resolve()
-    if snapshot_path.exists() and snapshot_path.is_file():
-        payload = _read_json_obj(snapshot_path)
-        if str(payload.get("day_utc") or "").strip() != day:
-            return None
-        if str(payload.get("symbol") or "").strip().upper() != sym:
-            return None
-        close = payload.get("close")
-        if close is not None:
-            cents = (Decimal(str(close).strip()) * Decimal("100")).to_integral_value(rounding=ROUND_CEILING)
-            return int(cents) if cents > 0 else None
-    jsonl_path = (Path(truth_root) / "market_data_snapshot_v1" / sym / f"{day[:4]}.jsonl").resolve()
-    if not jsonl_path.exists() or not jsonl_path.is_file():
-        return None
-    cutoff = f"{day}T23:59:59Z"
-    latest_close: Optional[Decimal] = None
-    try:
-        for line in jsonl_path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            if not isinstance(row, dict):
-                continue
-            ts = str(row.get("timestamp_utc") or "").strip()
-            if not ts or ts > cutoff:
-                continue
-            close = row.get("close")
-            if close is None:
-                continue
-            latest_close = Decimal(str(close).strip())
-    except Exception:
-        return None
-    if latest_close is None or latest_close <= 0:
-        return None
-    return int((latest_close * Decimal("100")).to_integral_value(rounding=ROUND_CEILING))
-
-
-def _long_equity_stop_risk_per_unit_cents(
-    intent_obj: Dict[str, Any],
+def _risk_contract_status(
     *,
-    day_utc: str,
     truth_root: Optional[Path],
-    stop_loss_bps: Any,
-) -> Optional[int]:
+    day_utc: str,
+    intent_hash: str,
+    intent_id: str = "",
+) -> Tuple[Path, Dict[str, Any], str]:
+    if truth_root is None or not str(intent_hash or "").strip():
+        return Path(), {}, "RISK_DEFINITION_CONTRACT_MISSING"
+    return load_valid_risk_definition_contract_v1(
+        truth_root=truth_root,
+        day_utc=day_utc,
+        intent_hash=intent_hash,
+        intent_id=intent_id,
+    )
+
+
+def _risk_contract_quantity_and_risk(
+    *,
+    contract: Dict[str, Any],
+    expected_risk_type: str,
+) -> Optional[Tuple[int, int]]:
+    risk_type = str(contract.get("risk_type") or "").strip().upper()
+    if risk_type != expected_risk_type:
+        return None
+    quantity_basis = contract.get("quantity_basis")
+    if not isinstance(quantity_basis, dict):
+        return None
     try:
-        stop_bps = int(stop_loss_bps)
+        quantity = int(quantity_basis.get("quantity") or 0)
+        risk_per_unit = int(contract.get("risk_per_unit") or 0)
     except (TypeError, ValueError):
         return None
-    if stop_bps <= 0:
+    if quantity <= 0 or risk_per_unit <= 0:
         return None
-    underlying = intent_obj.get("underlying") if isinstance(intent_obj.get("underlying"), dict) else {}
-    symbol = str(underlying.get("symbol") or "").strip().upper()
-    close_cents = _latest_market_close_cents(truth_root=truth_root, day_utc=day_utc, symbol=symbol)
-    if close_cents is None or close_cents <= 0:
-        return None
-    risk_per_unit = (Decimal(close_cents) * Decimal(stop_bps) / Decimal("10000")).to_integral_value(rounding=ROUND_CEILING)
-    return int(risk_per_unit) if risk_per_unit > 0 else None
+    return quantity, risk_per_unit
 
 
 def _extract_quantity_and_risk_per_unit_cents(
@@ -1198,17 +1165,14 @@ def _extract_quantity_and_risk_per_unit_cents(
     schema_id = str(intent_obj.get("schema_id") or "").strip()
     schema_version = str(intent_obj.get("schema_version") or "").strip()
     if schema_id == "options_intent" and schema_version == "v2":
-        risk = intent_obj.get("risk")
-        if not isinstance(risk, dict):
+        _path, contract, blocker = _risk_contract_status(
+            truth_root=truth_root,
+            day_utc=day_utc,
+            intent_hash=intent_hash,
+        )
+        if blocker:
             return None
-        max_contracts = risk.get("max_contracts")
-        if not isinstance(max_contracts, int) or max_contracts <= 0:
-            return None
-        max_risk_cents = _decimal_usd_to_cents(risk.get("max_risk_usd"), field_name="MAX_RISK_USD")
-        risk_per_unit_cents = (max_risk_cents + max_contracts - 1) // max_contracts
-        if risk_per_unit_cents <= 0:
-            return None
-        return int(max_contracts), int(risk_per_unit_cents)
+        return _risk_contract_quantity_and_risk(contract=contract, expected_risk_type="DEFINED_RISK")
     if schema_id == "equity_intent" and schema_version == "v1":
         sizing = intent_obj.get("sizing")
         if not isinstance(sizing, dict):
@@ -1227,12 +1191,15 @@ def _extract_quantity_and_risk_per_unit_cents(
     if schema_id == "exposure_intent" and schema_version == "v1":
         exposure_type = str(intent_obj.get("exposure_type") or "").strip().upper()
         if exposure_type == "SHORT_VOL_DEFINED":
-            return _extract_short_vol_defined_risk_from_phasec(
+            _path, contract, blocker = _risk_contract_status(
                 truth_root=truth_root,
                 day_utc=day_utc,
                 intent_hash=intent_hash,
-                environment=environment,
+                intent_id=str(intent_obj.get("intent_id") or ""),
             )
+            if blocker:
+                return None
+            return _risk_contract_quantity_and_risk(contract=contract, expected_risk_type="DEFINED_RISK")
         if exposure_type != "LONG_EQUITY":
             return None
         constraints = intent_obj.get("constraints")
@@ -1244,17 +1211,16 @@ def _extract_quantity_and_risk_per_unit_cents(
             return None
         if nav_total_cents <= 0:
             return None
-        stop_loss_bps = constraints.get("stop_loss_bps")
-        if stop_loss_bps is not None:
-            risk_per_unit_cents = _long_equity_stop_risk_per_unit_cents(
-                intent_obj,
-                day_utc=day_utc,
+        if constraints.get("stop_loss_bps") is not None:
+            _path, contract, blocker = _risk_contract_status(
                 truth_root=truth_root,
-                stop_loss_bps=stop_loss_bps,
+                day_utc=day_utc,
+                intent_hash=intent_hash,
+                intent_id=str(intent_obj.get("intent_id") or ""),
             )
-            if risk_per_unit_cents is None:
+            if blocker:
                 return None
-            return 1, int(risk_per_unit_cents)
+            return _risk_contract_quantity_and_risk(contract=contract, expected_risk_type="STOP_BASED")
         risk_per_unit_cents = int((Decimal(nav_total_cents) * max_risk_pct).to_integral_value(rounding=ROUND_CEILING))
         if risk_per_unit_cents <= 0:
             return None
@@ -1277,19 +1243,15 @@ def _specific_unproven_requested_quantity_reason_codes(
     codes: List[str] = []
 
     if schema_id == "options_intent" and schema_version == "v2":
-        risk = intent_obj.get("risk")
-        if not isinstance(risk, dict):
-            return ["AUTHZ_MISSING_SIZING_INPUT"]
-        max_contracts = risk.get("max_contracts")
-        if not isinstance(max_contracts, int) or max_contracts <= 0:
-            return ["AUTHZ_INTENT_MISSING_EXECUTABLE_CONTRACT"]
-        try:
-            max_risk_cents = _decimal_usd_to_cents(risk.get("max_risk_usd"), field_name="MAX_RISK_USD")
-        except SystemExit:
-            return ["AUTHZ_MISSING_RISK_PER_UNIT"]
-        risk_per_unit_cents = (max_risk_cents + max_contracts - 1) // max_contracts
-        if risk_per_unit_cents <= 0:
-            return ["AUTHZ_MISSING_RISK_PER_UNIT"]
+        _path, contract, blocker = _risk_contract_status(
+            truth_root=truth_root,
+            day_utc=day_utc,
+            intent_hash=intent_hash,
+        )
+        if blocker:
+            return [blocker.split(":", 1)[0]]
+        if _risk_contract_quantity_and_risk(contract=contract, expected_risk_type="DEFINED_RISK") is None:
+            return ["AUTHZ_RISK_DEFINITION_CONTRACT_INVALID"]
         return []
 
     if schema_id == "equity_intent" and schema_version == "v1":
@@ -1314,15 +1276,17 @@ def _specific_unproven_requested_quantity_reason_codes(
     if schema_id == "exposure_intent" and schema_version == "v1":
         exposure_type = str(intent_obj.get("exposure_type") or "").strip().upper()
         if exposure_type == "SHORT_VOL_DEFINED":
-            sizing = _extract_short_vol_defined_risk_from_phasec(
+            _path, contract, blocker = _risk_contract_status(
                 truth_root=truth_root,
                 day_utc=day_utc,
                 intent_hash=intent_hash,
-                environment=environment,
+                intent_id=str(intent_obj.get("intent_id") or ""),
             )
-            if sizing is not None:
-                return []
-            return ["AUTHZ_MISSING_DEFINED_RISK_EVIDENCE"]
+            if blocker:
+                return [blocker.split(":", 1)[0], "AUTHZ_MISSING_DEFINED_RISK_EVIDENCE"]
+            if _risk_contract_quantity_and_risk(contract=contract, expected_risk_type="DEFINED_RISK") is None:
+                return ["AUTHZ_RISK_DEFINITION_CONTRACT_INVALID", "AUTHZ_MISSING_DEFINED_RISK_EVIDENCE"]
+            return []
         if exposure_type != "LONG_EQUITY":
             return ["AUTHZ_INTENT_NOT_EXECUTABLE"]
         constraints = intent_obj.get("constraints")
@@ -1340,13 +1304,17 @@ def _specific_unproven_requested_quantity_reason_codes(
         if nav_total_cents <= 0:
             codes.append("AUTHZ_MISSING_EXPOSURE_BUDGET_NAV_TOTAL_CENTS")
         if constraints.get("stop_loss_bps") is not None:
-            stop_risk = _long_equity_stop_risk_per_unit_cents(
-                intent_obj,
-                day_utc=day_utc,
+            _path, contract, blocker = _risk_contract_status(
                 truth_root=truth_root,
-                stop_loss_bps=constraints.get("stop_loss_bps"),
+                day_utc=day_utc,
+                intent_hash=intent_hash,
+                intent_id=str(intent_obj.get("intent_id") or ""),
             )
-            if stop_risk is None:
+            if blocker:
+                codes.append(blocker.split(":", 1)[0])
+                codes.append("AUTHZ_MISSING_EQUITY_STOP_RISK_EVIDENCE")
+            elif _risk_contract_quantity_and_risk(contract=contract, expected_risk_type="STOP_BASED") is None:
+                codes.append("AUTHZ_RISK_DEFINITION_CONTRACT_INVALID")
                 codes.append("AUTHZ_MISSING_EQUITY_STOP_RISK_EVIDENCE")
         if (not codes) and int((Decimal(nav_total_cents) * max_risk_pct).to_integral_value(rounding=ROUND_CEILING)) <= 0:
             codes.append("AUTHZ_MISSING_RISK_PER_UNIT")
@@ -1729,6 +1697,19 @@ def _decision_chain_for_intent(
     requested_quantity = 0
     requested_quantity_basis = ""
     risk_per_unit_cents = 0
+    risk_contract_path, risk_contract_obj, risk_contract_blocker = _risk_contract_status(
+        truth_root=truth_root,
+        day_utc=day_utc,
+        intent_hash=intent_sha,
+        intent_id=intent_id,
+    )
+    risk_contract_ref = {
+        "path": str(risk_contract_path) if str(risk_contract_path) != "." else "",
+        "contract_id": str(risk_contract_obj.get("contract_id") or ""),
+        "risk_type": str(risk_contract_obj.get("risk_type") or ""),
+        "validation_status": str(risk_contract_obj.get("validation_status") or ""),
+        "blocker": risk_contract_blocker,
+    }
     trade_reason_codes = list(candidate_reason_codes)
     if resolved_action in {ACTION_OPEN, ACTION_ADD}:
         sizing = _extract_quantity_and_risk_per_unit_cents(
@@ -1787,6 +1768,7 @@ def _decision_chain_for_intent(
         "lifecycle_intent": lifecycle_intent,
         "requested_quantity": int(requested_quantity),
         "requested_quantity_basis": requested_quantity_basis,
+        "risk_contract_ref": risk_contract_ref,
         "target_notional_pct": None if target_pct is None else _fraction_text(target_pct),
         "actual_notional_pct": _fraction_text(actual_pct),
         "drift_notional_pct": None if drift_pct is None else _fraction_text(drift_pct),
@@ -1868,6 +1850,7 @@ def _decision_chain_for_intent(
         "requested_quantity_basis": requested_quantity_basis,
         "authorized_quantity": int(authorized_quantity),
         "authorization_outcome": authorization_outcome,
+        "risk_contract_ref": risk_contract_ref,
         "risk_per_unit_cents": int(headroom_metrics["risk_per_unit_cents"]),
         "required_risk_cents": int(headroom_metrics["required_risk_cents"]),
         "available_sleeve_headroom_cents": int(headroom_metrics["available_sleeve_headroom_cents"]),

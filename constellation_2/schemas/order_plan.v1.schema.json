@@ -184,6 +184,17 @@
         }
       }
     },
+    "risk_contract_ref": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["path", "contract_id", "risk_type", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "contract_id": { "type": "string", "minLength": 16 },
+        "risk_type": { "type": "string", "enum": ["STOP_BASED", "DEFINED_RISK"] },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
     "canonical_json_hash": {
       "type": [
         "string",

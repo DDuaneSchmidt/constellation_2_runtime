@@ -11,6 +11,7 @@ if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
 import ops.tools.run_capital_authority_allocation_day_v1 as allocation_module
+from ops.tools.run_risk_definition_contract_v1 import build_risk_definition_contract_v1, risk_contract_path_v1
 
 
 def _write(path: Path, payload: dict) -> None:
@@ -96,7 +97,7 @@ def test_options_intent_without_executable_contract_has_specific_reason() -> Non
         intent,
         nav_total_cents=10_000_000,
     )
-    assert reason_codes == ["AUTHZ_INTENT_MISSING_EXECUTABLE_CONTRACT"]
+    assert reason_codes == ["RISK_DEFINITION_CONTRACT_MISSING"]
 
 
 def test_valid_exposure_intent_returns_no_unproven_reason() -> None:
@@ -129,11 +130,16 @@ def test_long_equity_stop_risk_uses_same_day_market_price(tmp_path: Path) -> Non
     intent = {
         "schema_id": "exposure_intent",
         "schema_version": "v1",
+        "intent_id": "trend-intent",
+        "engine": {"engine_id": "C2_TREND_EQ_PRIMARY_V1", "mode": "PAPER"},
         "exposure_type": "LONG_EQUITY",
         "underlying": {"symbol": "SPY"},
         "target_notional_pct": "0.01",
         "constraints": {"max_risk_pct": "0.01", "stop_loss_bps": 1000},
     }
+    _write(tmp_path / "intents_v1" / "snapshots" / day / f"{'a' * 64}.exposure_intent.v1.json", intent)
+    contract = build_risk_definition_contract_v1(day_utc=day, truth_root=tmp_path, intent_hash="a" * 64)
+    _write(risk_contract_path_v1(truth_root=tmp_path, day_utc=day, intent_hash="a" * 64), contract)
 
     sizing = allocation_module._extract_quantity_and_risk_per_unit_cents(
         intent,
@@ -165,7 +171,61 @@ def test_long_equity_stop_risk_fails_closed_without_price(tmp_path: Path) -> Non
         environment="PAPER",
     )
 
+    assert "RISK_DEFINITION_CONTRACT_MISSING" in reason_codes
     assert "AUTHZ_MISSING_EQUITY_STOP_RISK_EVIDENCE" in reason_codes
+
+
+def test_short_vol_defined_missing_max_loss_blocks_authorization_sizing(tmp_path: Path) -> None:
+    day = "2026-05-01"
+    intent_hash = "b" * 64
+    candidate = tmp_path / "phaseC_preflight_v1" / day / "attempt_A0001" / intent_hash
+    order_plan_path = candidate / "order_plan.v1.json"
+    _write(
+        order_plan_path,
+        {
+            "schema_id": "order_plan",
+            "schema_version": "v1",
+            "risk_proof": {"defined_risk_proven": True, "contracts": 1},
+        },
+    )
+    _write(
+        candidate / "execution_identity_record.v1.json",
+        {
+            "day_utc": day,
+            "environment": "PAPER",
+            "intent_hash": intent_hash,
+            "source_refs": [{"ref_type": "order_plan_ref", "path": str(order_plan_path)}],
+        },
+    )
+    intent = {
+        "schema_id": "exposure_intent",
+        "schema_version": "v1",
+        "exposure_type": "SHORT_VOL_DEFINED",
+        "underlying": {"symbol": "IWM"},
+        "target_notional_pct": "0.01",
+        "constraints": {"max_risk_pct": "0.01"},
+    }
+
+    sizing = allocation_module._extract_quantity_and_risk_per_unit_cents(
+        intent,
+        nav_total_cents=10_000_000,
+        day_utc=day,
+        intent_hash=intent_hash,
+        truth_root=tmp_path,
+        environment="PAPER",
+    )
+    reason_codes = allocation_module._specific_unproven_requested_quantity_reason_codes(
+        intent,
+        nav_total_cents=10_000_000,
+        day_utc=day,
+        intent_hash=intent_hash,
+        truth_root=tmp_path,
+        environment="PAPER",
+    )
+
+    assert sizing is None
+    assert "RISK_DEFINITION_CONTRACT_MISSING" in reason_codes
+    assert "AUTHZ_MISSING_DEFINED_RISK_EVIDENCE" in reason_codes
 
 
 def test_headroom_metrics_rejects_when_required_risk_exceeds_available_headroom() -> None:

@@ -20,6 +20,7 @@ from constellation_2.common.advisory.execution_package_builder_from_execution_in
 from constellation_2.common.execution_build_authority_v1 import run_execution_build_authority_v1
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+from ops.tools.run_risk_definition_contract_v1 import load_valid_risk_definition_contract_v1
 
 
 def _git_sha() -> str:
@@ -224,7 +225,15 @@ def _execution_build_chain_map(
     ]
 
 
-def _build_execution_intent(*, day_utc: str, truth_root: Path, row: dict[str, Any], intent_obj: dict[str, Any], intent_path: Path) -> ExecutionIntentV1:
+def _build_execution_intent(
+    *,
+    day_utc: str,
+    truth_root: Path,
+    row: dict[str, Any],
+    intent_obj: dict[str, Any],
+    intent_path: Path,
+    risk_contract_path: Path,
+) -> ExecutionIntentV1:
     intent_hash = str(row.get("intent_hash") or "").strip()
     symbol = str(((intent_obj.get("underlying") or {}) if isinstance(intent_obj.get("underlying"), dict) else {}).get("symbol") or row.get("symbol") or "").strip().upper()
     currency = str(((intent_obj.get("underlying") or {}) if isinstance(intent_obj.get("underlying"), dict) else {}).get("currency") or "USD").strip().upper()
@@ -253,7 +262,7 @@ def _build_execution_intent(*, day_utc: str, truth_root: Path, row: dict[str, An
         "quantity_shares": quantity,
         "order_terms": {"order_type": "MARKET", "limit_price": None, "time_in_force": "DAY"},
         "parent_lineage_refs": [f"capital_authority_allocation_path:{_capital_authority_path(truth_root, day_utc)}"],
-        "source_artifact_refs": [f"exposure_intent_path:{intent_path}", f"intent_hash:{intent_hash}"],
+        "source_artifact_refs": [f"exposure_intent_path:{intent_path}", f"risk_contract_path:{risk_contract_path}", f"intent_hash:{intent_hash}"],
         "canonical_json_hash": None,
     }
     payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1({**payload, "canonical_json_hash": None})
@@ -295,8 +304,30 @@ def build_execution_package_from_authorized_intent_v1(*, day_utc: str, truth_roo
     if not path.exists():
         return _fail_payload(day_utc=day_utc, intent_id=intent_id, truth_root=truth_root, blocker="EXPOSURE_INTENT_MISSING", details={"expected_path": str(path)})
     intent_obj = _read_json(path)
+    risk_contract_path, risk_contract, risk_blocker = load_valid_risk_definition_contract_v1(
+        truth_root=truth_root,
+        day_utc=day_utc,
+        intent_hash=intent_hash,
+        intent_id=intent_id,
+    )
+    if risk_blocker:
+        return _fail_payload(
+            day_utc=day_utc,
+            intent_id=intent_id,
+            truth_root=truth_root,
+            blocker=risk_blocker.split(":", 1)[0],
+            details={"risk_contract_path": str(risk_contract_path), "risk_contract_blocker": risk_blocker},
+        )
     exposure_type = str(intent_obj.get("exposure_type") or "").strip().upper()
     if exposure_type != "LONG_EQUITY":
+        if str(risk_contract.get("risk_type") or "").strip().upper() != "DEFINED_RISK":
+            return _fail_payload(
+                day_utc=day_utc,
+                intent_id=intent_id,
+                truth_root=truth_root,
+                blocker="DEFINED_RISK_CONTRACT_REQUIRED",
+                details={"risk_contract_path": str(risk_contract_path), **_defined_risk_diagnostic(day_utc=day_utc, exposure_type=exposure_type)},
+            )
         return _fail_payload(
             day_utc=day_utc,
             intent_id=intent_id,
@@ -304,7 +335,15 @@ def build_execution_package_from_authorized_intent_v1(*, day_utc: str, truth_roo
             blocker="DEFINED_RISK_EXECUTION_PACKAGE_REQUIRES_GOVERNED_OPTIONS_EVIDENCE",
             details=_defined_risk_diagnostic(day_utc=day_utc, exposure_type=exposure_type),
         )
-    execution_intent = _build_execution_intent(day_utc=day_utc, truth_root=truth_root, row=row, intent_obj=intent_obj, intent_path=path)
+    if str(risk_contract.get("risk_type") or "").strip().upper() != "STOP_BASED":
+        return _fail_payload(
+            day_utc=day_utc,
+            intent_id=intent_id,
+            truth_root=truth_root,
+            blocker="STOP_BASED_RISK_CONTRACT_REQUIRED",
+            details={"risk_contract_path": str(risk_contract_path), "risk_type": str(risk_contract.get("risk_type") or "")},
+        )
+    execution_intent = _build_execution_intent(day_utc=day_utc, truth_root=truth_root, row=row, intent_obj=intent_obj, intent_path=path, risk_contract_path=risk_contract_path)
     staged = stage_candidate_from_execution_intent_v1(repo_root=REPO_ROOT, execution_intent=execution_intent)
     result = run_execution_build_authority_v1(
         repo_root=REPO_ROOT,
@@ -351,6 +390,8 @@ def build_execution_package_from_authorized_intent_v1(*, day_utc: str, truth_roo
             "authorization_outcome": outcome,
             "authorized_quantity": qty,
             "intent_hash": intent_hash,
+            "risk_contract_path": str(risk_contract_path),
+            "risk_contract_id": str(risk_contract.get("contract_id") or ""),
         },
         "package_path": str(result["package_path"]),
         "build_path": str(result["build_path"]),

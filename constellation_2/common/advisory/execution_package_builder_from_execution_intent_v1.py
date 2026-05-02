@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,7 @@ from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artif
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
 from constellation_2.common.advisory.execution_intent_v1 import ExecutionIntentV1
+from ops.tools.run_risk_definition_contract_v1 import validate_risk_definition_contract_v1
 
 
 def _canonical_write(path: Path, obj: dict[str, Any]) -> str:
@@ -38,6 +41,134 @@ def _read_json_obj(path: Path) -> dict[str, Any]:
     if not isinstance(obj, dict):
         raise ValueError(f'TOP_LEVEL_NOT_OBJECT:{path}')
     return obj
+
+
+def _source_ref_path(execution_intent: ExecutionIntentV1, prefix: str) -> Path | None:
+    for ref in execution_intent.source_artifact_refs:
+        text = str(ref or '').strip()
+        if text.startswith(prefix):
+            raw = text[len(prefix) :].strip()
+            if raw:
+                return Path(raw).expanduser().resolve()
+    return None
+
+
+def _truth_root_from_exposure_path(path: Path) -> Path | None:
+    parts = path.resolve().parts
+    try:
+        idx = parts.index('intents_v1')
+    except ValueError:
+        return None
+    if idx <= 0:
+        return None
+    return Path(*parts[:idx]).resolve()
+
+
+def _decimal_price_text(value: Decimal) -> str:
+    return str(value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+
+
+def _dec_price(value: Any, *, field_name: str) -> Decimal:
+    text = str(value or '').strip()
+    if not text:
+        raise ValueError(f'EXECUTION_INTENT_{field_name}_MISSING')
+    try:
+        dec = Decimal(text)
+    except InvalidOperation as exc:
+        raise ValueError(f'EXECUTION_INTENT_{field_name}_INVALID:{text}') from exc
+    if dec <= 0:
+        raise ValueError(f'EXECUTION_INTENT_{field_name}_NOT_POSITIVE:{text}')
+    return dec
+
+
+def _latest_market_close_price(*, truth_root: Path, day_utc: str, symbol: str) -> Decimal | None:
+    day = str(day_utc or '').strip()
+    sym = str(symbol or '').strip().upper()
+    if not day or not sym:
+        return None
+    snapshot_path = truth_root / 'market_data_snapshot_v1' / 'snapshots' / day / f'{sym}.market_data_snapshot.v1.json'
+    if snapshot_path.exists() and snapshot_path.is_file():
+        obj = _read_json_obj(snapshot_path)
+        if str(obj.get('day_utc') or '').strip() == day and str(obj.get('symbol') or '').strip().upper() == sym and obj.get('close') is not None:
+            return _dec_price(obj.get('close'), field_name='REFERENCE_PRICE')
+    jsonl_path = truth_root / 'market_data_snapshot_v1' / sym / f'{day[:4]}.jsonl'
+    if not jsonl_path.exists() or not jsonl_path.is_file():
+        return None
+    latest: Decimal | None = None
+    cutoff = f'{day}T23:59:59Z'
+    with jsonl_path.open('r', encoding='utf-8') as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if not isinstance(row, dict):
+                continue
+            if str(row.get('symbol') or '').strip().upper() != sym:
+                continue
+            ts = str(row.get('timestamp_utc') or '').strip()
+            if not ts or ts > cutoff or row.get('close') is None:
+                continue
+            latest = _dec_price(row.get('close'), field_name='REFERENCE_PRICE')
+    return latest
+
+
+def _derive_equity_stop_price(*, entry_price: Decimal, action: str, stop_loss_bps: int) -> str:
+    if stop_loss_bps <= 0:
+        raise ValueError(f'EXECUTION_INTENT_STOP_LOSS_BPS_INVALID:{stop_loss_bps}')
+    bps = Decimal(stop_loss_bps) / Decimal('10000')
+    side = str(action or '').strip().upper()
+    if side == 'BUY':
+        return _decimal_price_text(entry_price * (Decimal('1') - bps))
+    if side == 'SELL':
+        return _decimal_price_text(entry_price * (Decimal('1') + bps))
+    raise ValueError(f'EXECUTION_INTENT_ACTION_UNSUPPORTED_FOR_STOP:{action}')
+
+
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _risk_contract_from_source(execution_intent: ExecutionIntentV1) -> tuple[Path | None, dict[str, Any] | None]:
+    contract_path = _source_ref_path(execution_intent, 'risk_contract_path:')
+    if contract_path is None or not contract_path.exists():
+        return None, None
+    contract = _read_json_obj(contract_path)
+    validate_risk_definition_contract_v1(contract)
+    if str(contract.get('validation_status') or '').strip().upper() != 'PASS':
+        blockers = ','.join(str(item) for item in contract.get('blockers') or [])
+        raise ValueError(f'EXECUTION_INTENT_RISK_CONTRACT_FAILED:{blockers or "UNKNOWN"}')
+    if str(contract.get('day_utc') or '').strip() != execution_intent.day_utc:
+        raise ValueError('EXECUTION_INTENT_RISK_CONTRACT_DAY_MISMATCH')
+    if str(contract.get('intent_id') or '').strip() != execution_intent.execution_intent_id:
+        raise ValueError('EXECUTION_INTENT_RISK_CONTRACT_INTENT_MISMATCH')
+    return contract_path, contract
+
+
+def _trend_protective_stop_from_contract(execution_intent: ExecutionIntentV1) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
+    contract_path, contract = _risk_contract_from_source(execution_intent)
+    if contract_path is None or contract is None:
+        return None, None, None, None
+    if str(contract.get('risk_type') or '').strip().upper() != 'STOP_BASED':
+        return None, None, None, None
+    stop_raw = contract.get('stop_loss_bps')
+    try:
+        stop_loss_bps = int(stop_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f'EXECUTION_INTENT_RISK_CONTRACT_STOP_LOSS_BPS_INVALID:{stop_raw}') from exc
+    if stop_loss_bps <= 0:
+        raise ValueError(f'EXECUTION_INTENT_RISK_CONTRACT_STOP_LOSS_BPS_INVALID:{stop_loss_bps}')
+
+    order_terms = dict(execution_intent.order_terms)
+    reference_price = _dec_price(contract.get('reference_price'), field_name='REFERENCE_PRICE')
+
+    reference_text = _decimal_price_text(reference_price)
+    stop_price = _derive_equity_stop_price(entry_price=reference_price, action=execution_intent.side, stop_loss_bps=stop_loss_bps)
+    return (
+        {'order_type': 'LIMIT', 'limit_price': reference_text, 'time_in_force': str(order_terms.get('time_in_force') or 'DAY')},
+        {'order_type': 'STOP', 'stop_price': stop_price, 'time_in_force': 'DAY', 'basis': 'ENTRY_REFERENCE_PRICE', 'stop_loss_bps': stop_loss_bps},
+        {'enabled': True, 'oca_group': None, 'transmit_sequence': 'PARENT_FALSE_FINAL_CHILD_TRUE'},
+        {'path': str(contract_path), 'contract_id': str(contract.get('contract_id') or ''), 'risk_type': 'STOP_BASED', 'sha256': _sha256_file(contract_path)},
+    )
 
 
 def _advisory_submission_obj(execution_intent: ExecutionIntentV1) -> dict[str, str]:
@@ -98,6 +229,7 @@ def _candidate_path(*, execution_intent: ExecutionIntentV1) -> Path:
 def _equity_order_plan_v2(execution_intent: ExecutionIntentV1) -> dict[str, Any]:
     if str(execution_intent.instrument.get('kind') or '').upper() != 'EQUITY':
         raise ValueError('EXECUTION_INTENT_ONLY_EQUITY_SUPPORTED')
+    stop_order_terms, protective_stop, bracket, risk_contract_ref = _trend_protective_stop_from_contract(execution_intent)
     plan = {
         'schema_id': 'equity_order_plan',
         'schema_version': 'v2',
@@ -109,7 +241,11 @@ def _equity_order_plan_v2(execution_intent: ExecutionIntentV1) -> dict[str, Any]
         'currency': str(execution_intent.instrument['currency']),
         'action': execution_intent.side,
         'qty_shares': int(execution_intent.quantity_shares),
-        'order_terms': dict(execution_intent.order_terms),
+        'order_terms': stop_order_terms if stop_order_terms is not None else dict(execution_intent.order_terms),
+        'protective_stop': protective_stop,
+        'take_profit': None,
+        'bracket': bracket,
+        'risk_contract_ref': risk_contract_ref,
         'engine_id': execution_intent.engine_id,
         'source_intent_id': execution_intent.execution_intent_id,
         'intent_sha256': execution_intent.idempotency_key,
