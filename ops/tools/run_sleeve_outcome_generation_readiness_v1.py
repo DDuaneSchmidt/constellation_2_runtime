@@ -86,10 +86,24 @@ def _outcome_matches(outcome: dict[str, Any], intent_id: str) -> bool:
     return str(outcome.get("intent_id") or "") == intent_id
 
 
-def _authorization_blockers(auth: dict[str, Any]) -> list[str]:
+def _authorization_blockers(auth: dict[str, Any], authorization_row: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    outcome = str(authorization_row.get("authorization_outcome") or "").strip().upper()
+    row_qty = authorization_row.get("authorized_quantity")
+    if authorization_row:
+        if outcome and outcome not in {"APPROVED", "RESIZED"}:
+            blockers.append("AUTHORIZATION_REJECTED")
+            blockers.append(f"AUTHORIZATION_STATUS_{outcome}")
+        if row_qty in (None, "", 0):
+            blockers.append("AUTHORIZATION_REJECTED")
+            blockers.append("AUTHORIZED_QUANTITY_ZERO_OR_MISSING")
+        if outcome not in {"APPROVED", "RESIZED"} or row_qty in (None, "", 0):
+            for code in authorization_row.get("reason_codes", []) if isinstance(authorization_row.get("reason_codes"), list) else []:
+                if str(code):
+                    blockers.append(str(code))
+        return sorted(set(blockers))
     if not auth:
         return ["AUTHORIZATION_ARTIFACT_MISSING"]
-    blockers: list[str] = []
     status = str(auth.get("status") or "").upper()
     decision = str((auth.get("authorization") or {}).get("decision") or auth.get("decision_enum") or "").upper()
     qty = (auth.get("authorization") or {}).get("authorized_quantity")
@@ -105,20 +119,52 @@ def _authorization_blockers(auth: dict[str, Any]) -> list[str]:
     return sorted(set(blockers))
 
 
-def _authorization_details(auth: dict[str, Any], auth_path: Path, day_utc: str, truth_root: Path) -> dict[str, Any]:
+def _authorization_details(
+    auth: dict[str, Any],
+    auth_path: Path,
+    day_utc: str,
+    truth_root: Path,
+    authorization_row: dict[str, Any],
+    capital_allocation_path: Path,
+) -> dict[str, Any]:
     authorization = auth.get("authorization") if isinstance(auth.get("authorization"), dict) else {}
     policy_rules = auth.get("constitutional_shadow", {}).get("decision", {}).get("blocker_rules") if isinstance(auth.get("constitutional_shadow"), dict) else []
     if not isinstance(policy_rules, list):
         policy_rules = []
-    reason_codes = auth.get("reason_codes") if isinstance(auth.get("reason_codes"), list) else []
-    rejection_reason = ",".join(str(code) for code in reason_codes if str(code)) or ",".join(str(rule) for rule in policy_rules if str(rule))
+    reason_codes = (
+        authorization_row.get("reason_codes")
+        if isinstance(authorization_row.get("reason_codes"), list)
+        else auth.get("reason_codes")
+        if isinstance(auth.get("reason_codes"), list)
+        else []
+    )
+    outcome = str(authorization_row.get("authorization_outcome") or "").strip().upper()
+    row_qty = authorization_row.get("authorized_quantity")
+    approved = outcome in {"APPROVED", "RESIZED"} and row_qty not in (None, "", 0)
+    rejection_reason = "" if approved else (
+        ",".join(str(code) for code in reason_codes if str(code))
+        or ",".join(str(rule) for rule in policy_rules if str(rule))
+    )
     return {
+        "source": "capital_authority_allocation_v1" if authorization_row else "engine_activity_authorization_v1",
+        "source_artifact": str(capital_allocation_path if authorization_row else auth_path),
         "artifact_path": str(auth_path),
-        "authorization_status": str(auth.get("status") or "MISSING").upper(),
-        "decision": str(authorization.get("decision") or auth.get("decision_enum") or "").upper(),
-        "authorized_quantity": authorization.get("authorized_quantity"),
+        "authorization_status": outcome or str(auth.get("status") or "MISSING").upper(),
+        "decision": outcome or str(authorization.get("decision") or auth.get("decision_enum") or "").upper(),
+        "authorized_quantity": row_qty if authorization_row else authorization.get("authorized_quantity"),
         "rejection_reason": rejection_reason,
-        "policy_rules": [str(rule) for rule in policy_rules if str(rule)],
+        "policy_rules": (
+            [str(code) for code in reason_codes if str(code)]
+            if authorization_row
+            else [str(rule) for rule in policy_rules if str(rule)]
+        ),
+        "projection_artifact": {
+            "path": str(auth_path),
+            "status": str(auth.get("status") or "MISSING").upper(),
+            "decision": str(authorization.get("decision") or auth.get("decision_enum") or "").upper(),
+            "authorized_quantity": authorization.get("authorized_quantity"),
+            "reason_codes": [str(code) for code in auth.get("reason_codes", [])] if isinstance(auth.get("reason_codes"), list) else [],
+        },
         "required_recovery_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_authorization_artifacts_day_v1.py --day_utc {day_utc} --truth_root {truth_root}",
     }
 
@@ -243,19 +289,67 @@ def _classifications(blockers: list[str]) -> list[str]:
     return sorted(set(out or ["UNKNOWN"]))
 
 
-def _execution_package_readiness(*, blockers: list[str], execution_package_path: str, day_utc: str) -> dict[str, Any]:
+def _execution_package_readiness(
+    *,
+    blockers: list[str],
+    execution_package_path: str,
+    day_utc: str,
+    latest_execution_build: dict[str, Any],
+) -> dict[str, Any]:
     if execution_package_path:
         status = "PRESENT"
+    elif latest_execution_build:
+        status = "BLOCKED_BY_EXECUTION_BUILD"
     elif "AUTHORIZATION_REJECTED" in blockers or "AUTHORIZED_QUANTITY_ZERO_OR_MISSING" in blockers:
         status = "BLOCKED_BY_AUTHORIZATION_REJECTED"
     else:
         status = "MISSING"
-    return {
+    readiness = {
         "status": status,
         "expected_path": execution_package_path,
-        "producer": "ops/tools/run_execution_build_authority_v1.py",
-        "recovery_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_execution_build_authority_v1.py --operation_type PAPER_SUBMIT --candidate_path <GOVERNED_PHASEC_CANDIDATE_PATH_FOR_{day_utc}>",
+        "producer": "ops/tools/run_execution_package_from_authorized_intent_v1.py",
+        "recovery_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_execution_package_from_authorized_intent_v1.py --day_utc {day_utc} --truth_root <EXECUTION_TRUTH_ROOT> --intent_id <AUTHORIZED_INTENT_ID>",
     }
+    if latest_execution_build:
+        first = latest_execution_build.get("first_real_blocker") if isinstance(latest_execution_build.get("first_real_blocker"), dict) else {}
+        readiness["latest_execution_build"] = {
+            "build_path": str(latest_execution_build.get("_path") or ""),
+            "closure_status": str(latest_execution_build.get("closure_status") or ""),
+            "first_real_blocker": first,
+            "blocking_chain": list(latest_execution_build.get("blocking_chain") or []),
+            "materializable_now": list(latest_execution_build.get("materializable_now") or []),
+        }
+    return readiness
+
+
+def _find_execution_package_for_intent(*, execution_root: Path, day_utc: str, intent_id: str, intent_hash: str) -> str:
+    day_root = (execution_root / "execution_package_v1" / day_utc).resolve()
+    if not day_root.exists() or not day_root.is_dir():
+        return ""
+    for path in sorted(day_root.glob("*/execution_package.v1.json")):
+        obj = read_json_v1(path)
+        if str(obj.get("intent_id") or "").strip() == intent_id:
+            return str(path.resolve())
+        if intent_hash and str(obj.get("intent_hash") or "").strip() == intent_hash:
+            return str(path.resolve())
+    return ""
+
+
+def _find_latest_execution_build_for_intent(*, truth_root: Path, day_utc: str, intent_id: str) -> dict[str, Any]:
+    build_root = truth_root / "reports" / "execution_build_v1" / day_utc
+    if not build_root.exists() or not build_root.is_dir():
+        return {}
+    matches: list[tuple[str, str, dict[str, Any]]] = []
+    for path in sorted(build_root.glob("*/execution_build.v1.json")):
+        obj = read_json_v1(path)
+        if str(obj.get("intent_id") or "").strip() != intent_id:
+            continue
+        generated = str(obj.get("generated_utc") or obj.get("generated_at") or "")
+        obj["_path"] = str(path.resolve())
+        matches.append((generated, str(path), obj))
+    if not matches:
+        return {}
+    return sorted(matches, key=lambda item: (item[0], item[1]))[-1][2]
 
 
 def _submit_trace_readiness(*, blockers: list[str], submit_traces: list[str], day_utc: str, truth_root: Path) -> dict[str, Any]:
@@ -306,8 +400,8 @@ def _next_step(blockers: list[str]) -> tuple[str, str]:
         )
     if "EXECUTION_PACKAGE_MISSING" in blockers:
         return (
-            "ops/tools/run_execution_build_authority_v1.py",
-            "PYTHONPATH=\"$PWD\" python3 ops/tools/run_execution_build_authority_v1.py --operation_type PAPER_SUBMIT --candidate_path <GOVERNED_ORDER_PLAN_CANDIDATE_PATH>",
+            "ops/tools/run_execution_package_from_authorized_intent_v1.py",
+            "PYTHONPATH=\"$PWD\" python3 ops/tools/run_execution_package_from_authorized_intent_v1.py --day_utc <DAY> --truth_root <EXECUTION_TRUTH_ROOT> --intent_id <AUTHORIZED_INTENT_ID>",
         )
     if "SUBMIT_DECISION_TRACE_MISSING" in blockers:
         return (
@@ -352,6 +446,18 @@ def build_sleeve_outcome_generation_readiness_v1(*, day_utc: str, truth_root: Pa
         sleeve_control = sleeve_controls.get(_strategy_scope_id(sleeve_id), {})
         submit_traces = _find_submit_trace(root, day_utc, intent_id)
         execution_package_path = str(rrow.get("execution_package_path") or "")
+        if not execution_package_path:
+            execution_package_path = _find_execution_package_for_intent(
+                execution_root=execution,
+                day_utc=day_utc,
+                intent_id=intent_id,
+                intent_hash=intent_hash,
+            )
+        latest_execution_build = _find_latest_execution_build_for_intent(
+            truth_root=root,
+            day_utc=day_utc,
+            intent_id=intent_id,
+        )
         symbol = str(score.get("symbol") or drow.get("symbol") or "")
         raw_missing_inputs = drow.get("missing_inputs") if isinstance(drow.get("missing_inputs"), list) else []
         missing_inputs = [
@@ -364,7 +470,7 @@ def build_sleeve_outcome_generation_readiness_v1(*, day_utc: str, truth_root: Pa
             and str(market.get("first_blocker") or "") == "OPTIONS_CHAIN_SNAPSHOT_MISSING"
             and str(symbol).upper() in {str(sym).upper() for sym in market.get("required_symbols", []) if str(sym)}
         )
-        blockers = _authorization_blockers(auth)
+        blockers = _authorization_blockers(auth, authorization_row)
         missing_evidence: list[str] = []
         if not execution_package_path:
             blockers.append("EXECUTION_PACKAGE_MISSING")
@@ -414,8 +520,20 @@ def build_sleeve_outcome_generation_readiness_v1(*, day_utc: str, truth_root: Pa
                     sleeve_control=sleeve_control,
                     capital_allocation_path=capital_allocation_path,
                 ),
-                "authorization_details": _authorization_details(auth, auth_path, day_utc, root),
-                "execution_package_readiness": _execution_package_readiness(blockers=unique_blockers, execution_package_path=execution_package_path, day_utc=day_utc),
+                "authorization_details": _authorization_details(
+                    auth,
+                    auth_path,
+                    day_utc,
+                    root,
+                    authorization_row,
+                    capital_allocation_path,
+                ),
+                "execution_package_readiness": _execution_package_readiness(
+                    blockers=unique_blockers,
+                    execution_package_path=execution_package_path,
+                    day_utc=day_utc,
+                    latest_execution_build=latest_execution_build,
+                ),
                 "submit_trace_readiness": _submit_trace_readiness(blockers=unique_blockers, submit_traces=submit_traces, day_utc=day_utc, truth_root=root),
                 "scoring_eligible": True,
                 "execution_ready_if_aegis_ready": not unique_blockers,

@@ -175,6 +175,67 @@ def test_options_market_data_blocker_is_kept_on_vol_income(tmp_path: Path) -> No
     assert rows["vol"]["sizing_audit"]["root_cause"] == "DEFINED_RISK_EVIDENCE_MISSING"
 
 
+def test_existing_execution_package_is_detected_from_execution_root(tmp_path: Path) -> None:
+    execution_root = tmp_path / "exec"
+    _seed(tmp_path, execution_root)
+    _write(
+        execution_root / "engine_activity_v1" / "authorization_v1" / DAY / f"{'a' * 64}.authorization.v1.json",
+        {"status": "APPROVED", "authorization": {"decision": "APPROVED", "authorized_quantity": 1}, "reason_codes": []},
+    )
+    package_path = execution_root / "execution_package_v1" / DAY / "submission" / "execution_package.v1.json"
+    _write(package_path, {"intent_id": "trend", "intent_hash": "a" * 64})
+
+    rows = {
+        row["intent_id"]: row
+        for row in report.build_sleeve_outcome_generation_readiness_v1(
+            day_utc=DAY,
+            truth_root=tmp_path,
+            execution_root=execution_root,
+        )["sleeve_results"]
+    }
+
+    assert rows["trend"]["execution_package_readiness"]["status"] == "PRESENT"
+    assert rows["trend"]["risk_sizing_result"]["execution_package_path"] == str(package_path.resolve())
+    assert "EXECUTION_PACKAGE_MISSING" not in rows["trend"]["outcome_generation_blockers"]
+    assert "SUBMIT_DECISION_TRACE_MISSING" in rows["trend"]["outcome_generation_blockers"]
+    assert "COMPLETED_OUTCOME_MISSING" in rows["trend"]["outcome_generation_blockers"]
+
+
+def test_blocked_execution_build_is_reported_in_package_readiness(tmp_path: Path) -> None:
+    execution_root = tmp_path / "exec"
+    _seed(tmp_path, execution_root)
+    _write(
+        execution_root / "engine_activity_v1" / "authorization_v1" / DAY / f"{'a' * 64}.authorization.v1.json",
+        {"status": "APPROVED", "authorization": {"decision": "APPROVED", "authorized_quantity": 1}, "reason_codes": []},
+    )
+    build_path = tmp_path / "reports" / "execution_build_v1" / DAY / "submission" / "execution_build.v1.json"
+    _write(
+        build_path,
+        {
+            "intent_id": "trend",
+            "generated_utc": f"{DAY}T12:00:00Z",
+            "closure_status": "BLOCKED",
+            "first_real_blocker": {"dependency_id": "global_context_package_v1", "status": "FAILED"},
+            "blocking_chain": [{"dependency_id": "global_context_package_v1", "status": "FAILED"}],
+            "materializable_now": ["global_context_package_v1"],
+        },
+    )
+
+    rows = {
+        row["intent_id"]: row
+        for row in report.build_sleeve_outcome_generation_readiness_v1(
+            day_utc=DAY,
+            truth_root=tmp_path,
+            execution_root=execution_root,
+        )["sleeve_results"]
+    }
+
+    readiness = rows["trend"]["execution_package_readiness"]
+    assert readiness["status"] == "BLOCKED_BY_EXECUTION_BUILD"
+    assert readiness["latest_execution_build"]["build_path"] == str(build_path.resolve())
+    assert readiness["latest_execution_build"]["first_real_blocker"]["dependency_id"] == "global_context_package_v1"
+
+
 def test_report_is_diagnostic_only_and_cannot_change_allocation_or_submit(tmp_path: Path) -> None:
     _seed(tmp_path, tmp_path / "exec")
 
