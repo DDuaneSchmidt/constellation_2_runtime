@@ -115,7 +115,8 @@ def _simple_dag(path: Path, *, first_output: str = "{truth_root}/reports/n1/{day
 
 def test_default_pre_submit_dag_runs_in_dependency_order() -> None:
     dag = orchestrator.load_producer_dag_v1()
-    ids = [node["producer_id"] for node in orchestrator.phase_nodes_v1(dag, "PRE_SUBMIT")]
+    nodes = orchestrator.phase_nodes_v1(dag, "PRE_SUBMIT")
+    ids = [node["producer_id"] for node in nodes]
 
     assert ids == [
         "broker_event_observer",
@@ -129,6 +130,10 @@ def test_default_pre_submit_dag_runs_in_dependency_order() -> None:
         "execution_build_v1",
         "execution_package_v1",
     ]
+    observer_node = nodes[0]
+    assert observer_node["command"] == 'PYTHONPATH="$PWD" ops/run/c2_execution_observer_v1.sh'
+    assert "BROKER_EVENT_OBSERVER_NOT_RUNNING" in observer_node["hard_blockers"]
+    assert "run_ib_broker_event_probe_v1.py" in observer_node["recovery_command"]
 
 
 def test_missing_artifact_blocks_and_downstream_is_not_run(tmp_path: Path) -> None:

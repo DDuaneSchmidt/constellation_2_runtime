@@ -5,7 +5,7 @@
   "producer_nodes": [
     {
       "producer_id": "broker_event_observer",
-      "command": "PYTHONPATH=\"$PWD\" python3 ops/ib/c2_execution_observer_v1.py --truth_root {execution_root} --environment {environment}",
+      "command": "PYTHONPATH=\"$PWD\" ops/run/c2_execution_observer_v1.sh",
       "execution_mode": "SERVICE_EVIDENCE_ONLY",
       "inputs": [],
       "outputs": [
@@ -22,8 +22,8 @@
       ],
       "freshness_requirement": {"freshness_seconds": 300, "must_be_same_day": true},
       "retry_policy": {"max_attempts": 0, "retry_delay_seconds": 0},
-      "hard_blockers": ["BROKER_EVENT_LOG_MISSING", "BROKER_EVENT_LOG_STALE"],
-      "recovery_command": "Start or keep the governed IB execution observer running during the target trading day."
+      "hard_blockers": ["BROKER_EVENT_LOG_MISSING", "BROKER_EVENT_LOG_STALE", "BROKER_EVENT_OBSERVER_NOT_RUNNING"],
+      "recovery_command": "Start or keep the governed IB execution observer running during the target trading day: PYTHONPATH=\"$PWD\" ops/run/c2_execution_observer_v1.sh; monitor with PYTHONPATH=\"$PWD\" python3 ops/tools/run_ib_broker_event_probe_v1.py --day_utc {day_utc} --environment {environment} --freshness_seconds 300."
     },
     {
       "producer_id": "broker_supply_v1",

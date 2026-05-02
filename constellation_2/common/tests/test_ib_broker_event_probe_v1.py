@@ -34,6 +34,23 @@ def _config(log_path: Path | None = None) -> probe.ProbeConfig:
     )
 
 
+def _diagnostic_fallback_config(log_path: Path | None = None) -> probe.ProbeConfig:
+    return probe.ProbeConfig(
+        day_utc=DAY,
+        environment="PAPER",
+        expected_account="DUO847203",
+        host="127.0.0.1",
+        port=4002,
+        observer_client_id=179,
+        probe_client_id=180,
+        broker_event_log_path=log_path or Path("/tmp/broker_event_log.v1.jsonl"),
+        timeout_seconds=12.0,
+        freshness_seconds=300.0,
+        request_open_orders=False,
+        require_observer_process=False,
+    )
+
+
 def _ctx(tmp_path: Path) -> bod.BodContext:
     truth = tmp_path / "truth"
     execution = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
@@ -190,12 +207,40 @@ def test_observer_running_probe_uses_event_log_without_connecting(monkeypatch, t
 
     assert payload["status"] == "PASS"
     assert payload["evidence_source"] == "broker_event_log"
+    assert payload["broker_event_log_monitor"]["observer_process_running"] is True
+    assert payload["broker_event_log_monitor"]["freshness_status"] == "FRESH"
     assert calls == []
 
 
-def test_observer_not_running_probe_connects_with_fallback_client(monkeypatch, tmp_path: Path) -> None:
+def test_observer_not_running_probe_is_blocked_by_default(monkeypatch, tmp_path: Path) -> None:
     truth_root = tmp_path / "truth"
     cfg = _config(tmp_path / "missing" / "broker_event_log.v1.jsonl")
+    calls: list[str] = []
+
+    class FakeProbe:
+        def __init__(self, config):
+            calls.append(str(config.probe_client_id))
+
+        def run(self):
+            return {"connected": True, "server_version": 178, "events": _valid_events(), "started_at_utc": "", "completed_at_utc": ""}
+
+    monkeypatch.setattr(probe, "_resolve_config", lambda *_args, **_kwargs: (cfg, truth_root))
+    monkeypatch.setattr(probe, "_observer_processes", lambda _cfg: [])
+    monkeypatch.setattr(probe, "_IbProbeClient", FakeProbe)
+
+    assert probe.main(["--day_utc", DAY, "--environment", "PAPER"]) == 2
+    payload = json.loads(probe.probe_artifact_path_v1(truth_root=truth_root, day_utc=DAY).read_text(encoding="utf-8"))
+
+    assert calls == []
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "BROKER_EVENT_LOG_MISSING"
+    assert payload["evidence_source"] == "broker_event_log"
+    assert payload["broker_event_log_monitor"]["observer_required"] is True
+
+
+def test_observer_not_running_fallback_probe_is_explicit_diagnostic_mode(monkeypatch, tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth"
+    cfg = _diagnostic_fallback_config(tmp_path / "missing" / "broker_event_log.v1.jsonl")
     seen_client_ids: list[int] = []
 
     class FakeProbe:
@@ -209,12 +254,25 @@ def test_observer_not_running_probe_connects_with_fallback_client(monkeypatch, t
     monkeypatch.setattr(probe, "_observer_processes", lambda _cfg: [])
     monkeypatch.setattr(probe, "_IbProbeClient", FakeProbe)
 
-    assert probe.main(["--day_utc", DAY, "--environment", "PAPER"]) == 0
+    assert probe.main(["--day_utc", DAY, "--environment", "PAPER", "--allow_fallback_probe", "YES"]) == 0
     payload = json.loads(probe.probe_artifact_path_v1(truth_root=truth_root, day_utc=DAY).read_text(encoding="utf-8"))
 
     assert seen_client_ids == [180]
     assert payload["status"] == "PASS"
     assert payload["evidence_source"] == "fallback_ib_probe_connection"
+
+
+def test_fresh_event_log_without_observer_process_blocks_startup_monitor(tmp_path: Path) -> None:
+    log_path = tmp_path / "broker_event_log.v1.jsonl"
+    _write_legacy_log(log_path)
+
+    payload = probe.evaluate_event_log_v1(_config(log_path), observer_processes=[])
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "BROKER_EVENT_OBSERVER_NOT_RUNNING"
+    assert payload["broker_event_log_monitor"]["broker_event_log_exists"] is True
+    assert payload["broker_event_log_monitor"]["observer_process_running"] is False
+    assert "ops/run/c2_execution_observer_v1.sh" in payload["operator_next_action"]
 
 
 def test_event_log_exists_but_stale_blocks(tmp_path: Path) -> None:

@@ -42,6 +42,7 @@ BLOCKERS = {
     "IB_UNKNOWN_HANDSHAKE_FAILURE",
     "BROKER_EVENT_LOG_MISSING",
     "BROKER_EVENT_LOG_STALE",
+    "BROKER_EVENT_OBSERVER_NOT_RUNNING",
     "BROKER_EVENT_CONTENT_INVALID",
 }
 
@@ -78,6 +79,7 @@ class ProbeConfig:
     timeout_seconds: float
     freshness_seconds: float
     request_open_orders: bool
+    require_observer_process: bool = True
 
 
 def _event(event_type: str, **fields: Any) -> dict[str, Any]:
@@ -165,6 +167,45 @@ def _log_fresh(path: Path, freshness_seconds: float) -> bool:
         return False
     age = max(0.0, time.time() - path.stat().st_mtime)
     return age <= float(freshness_seconds)
+
+
+def _log_age_seconds(path: Path) -> float | None:
+    if not path.exists() or not path.is_file():
+        return None
+    return max(0.0, time.time() - path.stat().st_mtime)
+
+
+def _observer_recovery_command(config: ProbeConfig) -> str:
+    return (
+        "Start or keep the governed IB execution observer running: "
+        "PYTHONPATH=\"$PWD\" ops/run/c2_execution_observer_v1.sh; then rerun "
+        f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_ib_broker_event_probe_v1.py "
+        f"--day_utc {config.day_utc} --environment {config.environment} --freshness_seconds {int(config.freshness_seconds)}"
+    )
+
+
+def _event_log_monitor_payload(config: ProbeConfig, observer_processes: list[str]) -> dict[str, Any]:
+    age = _log_age_seconds(config.broker_event_log_path)
+    exists = config.broker_event_log_path.exists() and config.broker_event_log_path.is_file()
+    if not exists:
+        freshness_status = "MISSING"
+    elif age is not None and age <= float(config.freshness_seconds):
+        freshness_status = "FRESH"
+    else:
+        freshness_status = "STALE"
+    return {
+        "observer_required": bool(config.require_observer_process),
+        "observer_process_running": bool(observer_processes),
+        "observer_process_count": len(observer_processes),
+        "expected_broker_event_log_path": str(config.broker_event_log_path),
+        "broker_event_log_exists": exists,
+        "broker_event_log_age_seconds": None if age is None else round(float(age), 3),
+        "freshness_seconds": float(config.freshness_seconds),
+        "freshness_status": freshness_status,
+        "producer": "ops/ib/c2_execution_observer_v1.py",
+        "startup_wrapper": "ops/run/c2_execution_observer_v1.sh",
+        "recovery_command": _observer_recovery_command(config),
+    }
 
 
 class _IbProbeClient:  # pragma: no cover - exercised by live verification, pure evaluator is unit-tested
@@ -432,18 +473,32 @@ def evaluate_event_log_v1(config: ProbeConfig, *, observer_processes: list[str])
     payload = evaluate_probe_v1(config, raw)
     payload["evidence_source"] = "broker_event_log"
     payload["observer_processes"] = list(observer_processes)
+    payload["broker_event_log_monitor"] = _event_log_monitor_payload(config, observer_processes)
+    payload["operator_next_action"] = ""
     if not path.exists() or not path.is_file():
         payload["status"] = "BLOCKED"
         payload["canonical_blocker"] = "BROKER_EVENT_LOG_MISSING"
+    elif bool(config.require_observer_process) and not observer_processes:
+        payload["status"] = "BLOCKED"
+        payload["canonical_blocker"] = "BROKER_EVENT_OBSERVER_NOT_RUNNING"
     elif not _log_fresh(path, config.freshness_seconds):
         payload["status"] = "BLOCKED"
         payload["canonical_blocker"] = "BROKER_EVENT_LOG_STALE"
     elif payload["status"] != "PASS":
         payload["canonical_blocker"] = "BROKER_EVENT_CONTENT_INVALID"
+    if payload["canonical_blocker"]:
+        payload["operator_next_action"] = _observer_recovery_command(config)
     return payload
 
 
-def _resolve_config(day_utc: str, environment: str, timeout_seconds: float, freshness_seconds: float, request_open_orders: bool) -> tuple[ProbeConfig, Path]:
+def _resolve_config(
+    day_utc: str,
+    environment: str,
+    timeout_seconds: float,
+    freshness_seconds: float,
+    request_open_orders: bool,
+    require_observer_process: bool = True,
+) -> tuple[ProbeConfig, Path]:
     ib_account = resolve_single_paper_ib_account_from_sleeve_registry(REPO_ROOT)
     profile = resolve_governed_paper_execution_profile(
         repo_root=REPO_ROOT,
@@ -476,6 +531,7 @@ def _resolve_config(day_utc: str, environment: str, timeout_seconds: float, fres
         timeout_seconds=float(timeout_seconds),
         freshness_seconds=float(freshness_seconds),
         request_open_orders=bool(request_open_orders),
+        require_observer_process=bool(require_observer_process),
     )
     return config, truth_root
 
@@ -487,6 +543,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout_seconds", type=float, default=12.0)
     parser.add_argument("--freshness_seconds", type=float, default=300.0)
     parser.add_argument("--request_open_orders", default="NO", choices=["YES", "NO"])
+    parser.add_argument("--allow_fallback_probe", default="NO", choices=["YES", "NO"])
     args = parser.parse_args(argv)
 
     day_utc = parse_day_utc_v1(args.day_utc)
@@ -497,11 +554,12 @@ def main(argv: list[str] | None = None) -> int:
         float(args.timeout_seconds),
         float(args.freshness_seconds),
         str(args.request_open_orders).strip().upper() == "YES",
+        str(args.allow_fallback_probe).strip().upper() != "YES",
     )
     path = probe_artifact_path_v1(truth_root=truth_root, day_utc=day_utc)
     observer_processes = _observer_processes(config)
     log_exists = config.broker_event_log_path.exists() and config.broker_event_log_path.is_file()
-    if observer_processes or log_exists:
+    if bool(config.require_observer_process) or observer_processes or log_exists:
         payload = evaluate_event_log_v1(config, observer_processes=observer_processes)
     else:
         try:
