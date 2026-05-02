@@ -106,6 +106,31 @@ def test_lineage_indexes_required_artifacts_and_flags_missing_contract(tmp_path:
     assert gate["canonical_blocker"] == "PRODUCER_CONTRACT_MISSING"
 
 
+def test_lineage_does_not_warn_for_required_authority_with_only_optional_missing_inputs(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _base_artifacts(ctx)
+    day_run_path = _report(ctx, "aegis_day_run_v1", "day_run.v1.json")
+    optional_submission_dir = ctx.execution_root / "execution_evidence_v1" / "submissions" / DAY
+    _with_contract(
+        day_run_path,
+        {
+            "schema_id": "aegis_day_run",
+            "schema_version": "aegis_day_run.v1",
+            "final_status": "NOT_READY",
+            "canonical_phase": "BOD_INPUTS",
+            "canonical_blocker": "TARGET_DAY_DATE_MISMATCH",
+            "source_repo_status": {"git_dirty_status": "CLEAN", "source_reproducibility_status": "REPRODUCIBLE"},
+        },
+        inputs=[optional_submission_dir],
+    )
+
+    payload = lineage.build_evidence_lineage_index_v1(ctx)
+    day_run = next(row for row in payload["lineage_nodes"] if row["artifact_type"] == "aegis_day_run_v1")
+
+    assert day_run["required_for_current_day"] is True
+    assert day_run["lineage_status"] == "PASS"
+
+
 def _invariant(payload: dict, invariant_id: str) -> dict:
     return next(row for row in payload["invariant_results"] if row["invariant_id"] == invariant_id)
 

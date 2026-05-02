@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://constellation/governance/04_DATA/SCHEMAS/C2/REPORTS/aegis_day_run.v1.schema.json",
+  "title": "aegis_day_run.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "environment",
+    "final_status",
+    "canonical_phase",
+    "canonical_blocker",
+    "root_cause_chain",
+    "downstream_consequences",
+    "phase_order",
+    "phase_results",
+    "created_at_utc",
+    "updated_at_utc",
+    "source_repo_status",
+    "operator_next_action",
+    "truth_root",
+    "execution_root",
+    "operator_input_root",
+    "ib_account",
+    "ledger_path",
+    "decision_ledger_path",
+    "producer_contract_v1"
+  ],
+  "properties": {
+    "schema_id": { "const": "aegis_day_run" },
+    "schema_version": { "const": "aegis_day_run.v1" },
+    "day_utc": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "environment": { "type": "string", "enum": ["PAPER"] },
+    "final_status": {
+      "type": "string",
+      "enum": [
+        "NOT_READY",
+        "PRE_MARKET_READY",
+        "PAPER_READY",
+        "PAPER_READY_WITH_DELAYED_DATA",
+        "TRADING_ACTIVE",
+        "EOD_COMPLETE"
+      ]
+    },
+    "canonical_phase": { "type": "string" },
+    "canonical_blocker": { "type": "string" },
+    "root_cause_chain": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "downstream_consequences": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": true }
+    },
+    "phase_order": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "phase_results": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["phase", "status", "canonical_blocker"],
+        "properties": {
+          "phase": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "minLength": 1 },
+          "canonical_blocker": { "type": "string" },
+          "operator_next_action": { "type": "string" }
+        }
+      }
+    },
+    "created_at_utc": { "type": "string", "minLength": 1 },
+    "updated_at_utc": { "type": "string", "minLength": 1 },
+    "source_repo_status": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["git_dirty_status", "dirty_path_count", "source_reproducibility_status"],
+      "properties": {
+        "git_dirty_status": { "type": "string", "minLength": 1 },
+        "dirty_path_count": { "type": "integer", "minimum": 0 },
+        "source_reproducibility_status": { "type": "string", "minLength": 1 }
+      }
+    },
+    "operator_next_action": { "type": "string" },
+    "truth_root": { "type": "string", "minLength": 1 },
+    "execution_root": { "type": "string", "minLength": 1 },
+    "operator_input_root": { "type": "string", "minLength": 1 },
+    "ib_account": { "type": "string", "minLength": 1 },
+    "ledger_path": { "type": "string", "minLength": 1 },
+    "decision_ledger_path": { "type": "string" },
+    "producer_contract_v1": { "type": "object" }
+  }
+}

@@ -31,6 +31,19 @@ SOURCE_BROKER_AUTHORITY = "BROKER_AUTHORITY"
 SOURCE_STATIC_POLICY = "STATIC_POLICY"
 DEFAULT_FRESHNESS_POLICY = "same_day_required; stale/contradictory/missing artifact => BLOCKED_OR_STALE"
 OPERATOR_INPUT_EXTERNAL_REQUIRED_METADATA = {
+    "paper_capital_seed": [
+        "schema_id",
+        "schema_version",
+        "day_utc",
+        "produced_utc",
+        "environment",
+        "ib_account",
+        "currency",
+        "seed_mode",
+        "cash_total",
+        "nlv_total",
+        "policy_ref",
+    ],
     "operator_statement": ["observed_at_utc", "currency", "cash_total", "nlv_total", "account_id"],
 }
 
@@ -263,13 +276,37 @@ def _operator_external_input_provenance(
         return {}
     payload = _read_json(path)
     missing = [key for key in required if payload.get(key) in (None, "")]
-    observed = str(payload.get("observed_at_utc") or "").strip()
-    if observed and not observed.startswith(f"{day_utc}T"):
-        missing.append("observed_at_utc_current_day")
+    if artifact == "paper_capital_seed":
+        if payload.get("schema_id") != "C2_PAPER_CAPITAL_SEED":
+            missing.append("schema_id_valid")
+        if payload.get("schema_version") != 1:
+            missing.append("schema_version_valid")
+        if str(payload.get("day_utc") or "").strip() != day_utc:
+            missing.append("day_utc_current_day")
+        if str(payload.get("produced_utc") or "").strip() and not str(payload.get("produced_utc")).startswith(f"{day_utc}T"):
+            missing.append("produced_utc_current_day")
+        if str(payload.get("environment") or "").strip().upper() != "PAPER":
+            missing.append("environment_paper")
+        if str(payload.get("currency") or "").strip().upper() != "USD":
+            missing.append("currency_usd")
+        policy_ref = payload.get("policy_ref") if isinstance(payload.get("policy_ref"), dict) else {}
+        for key in ("path", "policy_id", "sha256"):
+            if not str(policy_ref.get(key) or "").strip():
+                missing.append(f"policy_ref.{key}")
+        if str(payload.get("cash_total") or "").strip() != str(payload.get("nlv_total") or "").strip():
+            missing.append("cash_total_matches_nlv_total")
+    else:
+        observed = str(payload.get("observed_at_utc") or "").strip()
+        if observed and not observed.startswith(f"{day_utc}T"):
+            missing.append("observed_at_utc_current_day")
     status = "PASS" if not missing else "FAIL"
     return {
         "human_supplied_external_input": True,
-        "external_input_classification": "HUMAN_SUPPLIED_OPERATOR_STATEMENT",
+        "external_input_classification": (
+            "HUMAN_SUPPLIED_PAPER_CAPITAL_SEED"
+            if artifact == "paper_capital_seed"
+            else "HUMAN_SUPPLIED_OPERATOR_STATEMENT"
+        ),
         "external_input_provenance_status": status,
         "external_input_required_metadata": required,
         "external_input_missing_metadata": missing,

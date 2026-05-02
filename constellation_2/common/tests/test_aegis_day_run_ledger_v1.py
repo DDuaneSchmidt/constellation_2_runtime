@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 import ops.tools.aegis_chatgpt_packet as packet  # noqa: E402
 import ops.tools.run_aegis_day_v1 as day_run  # noqa: E402
 import ops.tools.run_market_open_data_gate_v1 as open_gate  # noqa: E402
+from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1  # noqa: E402
 
 
 def _ctx(tmp_path: Path, day: str = "2026-04-29") -> day_run.PhaseContext:
@@ -669,3 +670,29 @@ def test_day_run_ledger_path_is_under_truth_reports_not_repo(tmp_path: Path) -> 
     path = day_run._ledger_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     assert path == ctx.truth_root / "reports" / "aegis_day_run_v1" / ctx.day_utc / "day_run.v1.json"
     assert not str(path).startswith(str(day_run.REPO_ROOT))
+
+
+def test_day_run_payload_validates_declared_schema(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _install_phase_runners(monkeypatch, blocked_phase="BOD_INPUTS", blocker="TARGET_DAY_DATE_MISMATCH")
+    ctx = _ctx(tmp_path)
+    payload = day_run.build_day_run_payload(ctx)
+    payload["ledger_path"] = str(day_run._ledger_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc))
+    payload["decision_ledger_path"] = str(ctx.truth_root / "reports" / "decision_ledger_v1" / ctx.day_utc / "decision_ledger.v1.json")
+    payload["producer_contract_v1"] = {
+        "producer_name": "ops/tools/run_aegis_day_v1.py",
+        "producer_command": "python3 ops/tools/run_aegis_day_v1.py",
+        "code_version_git_commit": "0" * 40,
+        "source_dirty_status": "CLEAN",
+        "runtime_contract_path": "",
+        "input_artifacts": [],
+        "output_artifacts": [],
+        "schema_versions": {"aegis_day_run": "aegis_day_run.v1"},
+        "generated_at_utc": "2026-04-29T00:00:00Z",
+        "deterministic_fingerprint": "0" * 64,
+    }
+
+    validate_against_repo_schema_v1(
+        payload,
+        REPO_ROOT,
+        "governance/04_DATA/SCHEMAS/C2/REPORTS/aegis_day_run.v1.schema.json",
+    )

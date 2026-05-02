@@ -99,7 +99,7 @@ def _node(ctx: bod.BodContext, spec: dict[str, Any]) -> dict[str, Any]:
     blocking_class = str(spec.get("blocking_class") or "HARD_BLOCKER")
     required_now = _required_now(ctx, spec)
     if authoritative and not required_now:
-        status = "WARN"
+        status = "PASS"
         blocker = ""
         action = "Artifact is downstream of the current day-run blocker and is not required for this blocked state."
     elif not path.exists():
@@ -119,9 +119,13 @@ def _node(ctx: bod.BodContext, spec: dict[str, Any]) -> dict[str, Any]:
             else "Optional diagnostic inputs are missing; rerun upstream advisory producers if this evidence is needed."
         )
     elif missing_inputs:
-        status = "WARN"
+        status = "PASS" if authoritative else "WARN"
         blocker = ""
-        action = "Only optional or downstream lineage inputs are missing for the current blocked state."
+        action = (
+            "Lineage is complete for required inputs; optional or downstream inputs are absent for the current blocked state."
+            if authoritative
+            else "Only optional or downstream lineage inputs are missing for the current blocked state."
+        )
     elif not inputs:
         status = "UNKNOWN"
         blocker = ""

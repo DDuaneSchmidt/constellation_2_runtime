@@ -359,6 +359,73 @@ def test_operator_statement_is_human_supplied_external_input_with_provenance(tmp
     assert node["external_input_provenance_status"] == "PASS"
 
 
+def test_paper_capital_seed_is_human_supplied_external_input_with_provenance(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    seed = bod.resolve_paper_capital_seed_path(operator_input_root=ctx.operator_input_root, day_utc=ctx.day_utc)
+    seed.parent.mkdir(parents=True, exist_ok=True)
+    seed.write_text(
+        json.dumps(
+            {
+                "schema_id": "C2_PAPER_CAPITAL_SEED",
+                "schema_version": 1,
+                "day_utc": ctx.day_utc,
+                "produced_utc": f"{ctx.day_utc}T00:00:00Z",
+                "environment": "PAPER",
+                "ib_account": ctx.ib_account,
+                "currency": "USD",
+                "seed_mode": "EXPLICIT_USD",
+                "cash_total": "0.00",
+                "nlv_total": "0.00",
+                "policy_ref": {"path": "/policy.json", "policy_id": "C2_PAPER_CAPITAL_SEED_POLICY_V1", "sha256": "a" * 64},
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = graph.build_requirement_graph(ctx)
+    node = next(row for row in payload["requirements"] if row["requirement_id"] == "BOD_INPUTS:paper_capital_seed")
+
+    assert node["status"] == "SATISFIED"
+    assert node["canonical_blocker"] == ""
+    assert node["human_supplied_external_input"] is True
+    assert node["external_input_classification"] == "HUMAN_SUPPLIED_PAPER_CAPITAL_SEED"
+    assert node["external_input_provenance_status"] == "PASS"
+
+
+def test_paper_capital_seed_external_input_requires_schema_shaped_provenance(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    seed = bod.resolve_paper_capital_seed_path(operator_input_root=ctx.operator_input_root, day_utc=ctx.day_utc)
+    seed.parent.mkdir(parents=True, exist_ok=True)
+    seed.write_text(
+        json.dumps(
+            {
+                "schema_id": "WRONG",
+                "schema_version": 1,
+                "day_utc": ctx.day_utc,
+                "produced_utc": f"{ctx.day_utc}T00:00:00Z",
+                "environment": "PAPER",
+                "ib_account": ctx.ib_account,
+                "currency": "USD",
+                "seed_mode": "EXPLICIT_USD",
+                "cash_total": "0.00",
+                "nlv_total": "1.00",
+                "policy_ref": {},
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = graph.build_requirement_graph(ctx)
+    node = next(row for row in payload["requirements"] if row["requirement_id"] == "BOD_INPUTS:paper_capital_seed")
+
+    assert node["status"] == "BLOCKED"
+    assert node["canonical_blocker"] == "OPERATOR_INPUT_PROVENANCE_MISSING"
+    assert "schema_id_valid" in node["external_input_missing_metadata"]
+    assert "cash_total_matches_nlv_total" in node["external_input_missing_metadata"]
+
+
 def test_operator_statement_external_input_requires_provenance_metadata(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     statement = bod.resolve_operator_statement_path(operator_input_root=ctx.operator_input_root, day_utc=ctx.day_utc)
