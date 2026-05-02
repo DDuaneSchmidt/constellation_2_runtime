@@ -15,6 +15,7 @@ if str(REPO_ROOT) not in sys.path:
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
 from ops.tools import run_aegis_bod_prepare_v1 as bod
 from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
+from ops.tools.run_aegis_control_plane_v1 import control_plane_path
 from ops.tools.run_unified_truth_kernel_v1 import unified_truth_kernel_path
 
 SCHEMA_VERSION = "aegis_operator_projection.v1"
@@ -310,16 +311,75 @@ def _projection_from_kernel(ctx: bod.BodContext, kernel: dict[str, Any]) -> dict
     }
 
 
+def _projection_from_control_plane(ctx: bod.BodContext, control: dict[str, Any]) -> dict[str, Any]:
+    final_status = str(control.get("final_status") or "UNKNOWN").strip().upper()
+    blocker = str(control.get("canonical_blocker") or "").strip()
+    phase = str(control.get("current_phase") or "").strip()
+    recovery_commands = [str(item) for item in (control.get("recovery_commands") if isinstance(control.get("recovery_commands"), list) else []) if str(item or "").strip()]
+    evidence_paths = [str(item) for item in (control.get("evidence_paths") if isinstance(control.get("evidence_paths"), list) else []) if str(item or "").strip()]
+    deferred = [str(item) for item in (control.get("deferred_phases") if isinstance(control.get("deferred_phases"), list) else []) if str(item or "").strip()]
+    action = str(control.get("recovery_action") or "").strip()
+    next_valid_actions = recovery_commands[:1] if recovery_commands else ([action] if action else [])
+    return {
+        "schema_id": "aegis_operator_projection",
+        "schema_version": SCHEMA_VERSION,
+        "day_utc": ctx.day_utc,
+        "environment": ctx.environment,
+        "generated_at_utc": _now_iso(),
+        "status": "PASS" if final_status == "READY" else "BLOCKED",
+        "canonical_blocker": blocker,
+        "operator_next_action": action or "No current blocker.",
+        "final_status": "PAPER_READY" if final_status == "READY" else "NOT_READY",
+        "first_blocker": blocker,
+        "owner": str(control.get("blocker_owner") or phase),
+        "phase": phase,
+        "root_cause": str(control.get("blocker_reason") or blocker or "No current blocker."),
+        "downstream_consequences": [{"phase": item, "reason": f"Deferred by {phase}"} for item in deferred],
+        "deferred_downstream_phases": deferred,
+        "artifact_paths": evidence_paths,
+        "evidence_paths": evidence_paths,
+        "next_valid_actions": next_valid_actions,
+        "forbidden_actions": [],
+        "unsafe_actions": ["Do not act on downstream blockers until the current control-plane phase clears."],
+        "lineage_status": "SUPPORTING",
+        "consistency_status": "SUPPORTING",
+        "freshness_status": "SUPPORTING",
+        "action_validity_status": "SUPPORTING",
+        "truth_confidence": "CONTROL_PLANE_ORDERED",
+        "trade_health_status": "ADVISORY_ONLY",
+        "trade_health": {},
+        "learning_loop_status": {"automatic_deployment_allowed": False},
+        "pending_human_reviews": 0,
+        "blocked_promotions": [],
+        "rollback_recommendations": [],
+        "human_review_required": bool(final_status != "READY"),
+        "integrity_context": {
+            "aegis_control_plane_path": str(control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)),
+            "final_status_source": "aegis_day_run_ledger_v1",
+            "control_plane_role": "phase ownership and operator projection",
+        },
+        "confidence_in_diagnosis": "HIGH" if blocker else "MEDIUM",
+        "last_updated_at_utc": _now_iso(),
+        "authority_note": "Operator projection presents aegis_control_plane_v1 phase ownership; day-run ledger remains final readiness authority.",
+    }
+
+
 def run_operator_projection_v1(day_utc: str, environment: str, truth_root: str = "") -> tuple[Path, dict[str, Any]]:
     ctx = bod._resolve_context(day_utc, environment, truth_root)
+    cp_path = control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    control = _read_json(cp_path)
     kernel_path = unified_truth_kernel_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
-    payload = _projection_from_kernel(ctx, _read_json(kernel_path))
+    payload = (
+        _projection_from_control_plane(ctx, control)
+        if str(control.get("day_utc") or "") == ctx.day_utc
+        else _projection_from_kernel(ctx, _read_json(kernel_path))
+    )
     path = operator_projection_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     attach_producer_contract_v1(
         payload,
         producer_name="ops/tools/run_aegis_operator_projection_v1.py",
         producer_command=f"python3 ops/tools/run_aegis_operator_projection_v1.py --day_utc {ctx.day_utc} --environment {ctx.environment}",
-        input_artifacts=[kernel_path],
+        input_artifacts=[cp_path if str(control.get("day_utc") or "") == ctx.day_utc else kernel_path],
         output_artifacts=[path],
         schema_versions={"aegis_operator_projection": SCHEMA_VERSION},
     )

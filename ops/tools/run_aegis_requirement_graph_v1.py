@@ -21,6 +21,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
 from ops.tools import run_aegis_bod_prepare_v1 as bod
 from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
 from ops.tools import run_options_chain_snapshot_required_day_v1 as options_required
+from ops.tools.run_aegis_control_plane_v1 import control_plane_path, load_phase_registry_v1
 from ops.tools.run_intent_arbitration_v1 import intent_arbitration_path, selected_intent_pointer_path
 
 SCHEMA_VERSION = "aegis_requirement_graph.v1"
@@ -526,11 +527,44 @@ def _root_requirement(nodes: list[dict[str, Any]]) -> dict[str, Any]:
         "SUBMIT_BOUNDARY": 7,
         "PAPER_READY": 8,
     }
-    blocked = [node for node in nodes if node.get("status") in {"BLOCKED", "STALE"} and node.get("blocking_class") == "HARD_BLOCKER"]
+    blocked = [node for node in nodes if node.get("status") in {"BLOCKED", "STALE", "BLOCKING_CURRENT_RUN"} and node.get("blocking_class") == "HARD_BLOCKER"]
     if not blocked:
         return {}
     blocked.sort(key=lambda node: (phase_rank.get(str(node.get("owner_phase") or ""), 99), str(node.get("requirement_id") or "")))
     return blocked[0]
+
+
+def _control_phase_rank() -> dict[str, int]:
+    return {str(row.get("phase_id") or ""): int(row.get("phase_order") or 999) for row in load_phase_registry_v1()}
+
+
+def _apply_control_plane_statuses(payload: dict[str, Any], ctx: bod.BodContext) -> None:
+    control = _read_json(control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc))
+    if str(control.get("day_utc") or "") != ctx.day_utc:
+        return
+    current_phase = str(control.get("current_phase") or "").strip()
+    if not current_phase or str(control.get("final_status") or "").strip().upper() == "READY":
+        return
+    rank = _control_phase_rank()
+    current_rank = rank.get(current_phase, 999)
+    for node in payload.get("requirements", []):
+        if not isinstance(node, dict):
+            continue
+        status = str(node.get("status") or "").strip().upper()
+        if status == "SATISFIED":
+            continue
+        if str(node.get("blocking_class") or "") == "DIAGNOSTIC_ONLY":
+            node["status"] = "DIAGNOSTIC_ONLY"
+            continue
+        owner = str(node.get("owner_phase") or "").strip()
+        owner_rank = rank.get(owner, 999)
+        if owner_rank > current_rank:
+            node["status"] = "DEFERRED_BY_UPSTREAM_BLOCKER"
+            node["deferred_by_phase"] = current_phase
+            node["deferred_by_blocker"] = str(control.get("canonical_blocker") or "")
+            node["operator_next_action"] = f"Deferred until {current_phase} clears."
+        elif owner == current_phase:
+            node["status"] = "BLOCKING_CURRENT_RUN"
 
 
 def build_requirement_graph(ctx: bod.BodContext) -> dict[str, Any]:
@@ -600,7 +634,14 @@ def build_requirement_graph(ctx: bod.BodContext) -> dict[str, Any]:
         "root_requirement": root,
         "canonical_blocker": str(root.get("blocker") or "") if root else "",
         "operator_next_action": str(root.get("operator_next_action") or "") if root else "",
+        "control_plane_path": str(control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)),
     }
+    _apply_control_plane_statuses(payload, ctx)
+    root = _root_requirement(nodes)
+    payload["root_requirement"] = root
+    payload["status"] = "STALE" if str(root.get("status") or "") == "STALE" else ("BLOCKED" if root else "PASS")
+    payload["canonical_blocker"] = str(root.get("blocker") or root.get("canonical_blocker") or "") if root else ""
+    payload["operator_next_action"] = str(root.get("operator_next_action") or "") if root else ""
     return payload
 
 

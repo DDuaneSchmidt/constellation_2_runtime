@@ -138,7 +138,7 @@ def test_market_data_block_after_session_passes_is_canonical(monkeypatch: pytest
     _install_phase_runners(monkeypatch, blocked_phase="MARKET_DATA_BOD_PREP", blocker="OPTIONS_SNAPSHOT_ROOT_MISSING")
     payload = day_run.build_day_run_payload(_ctx(tmp_path))
     assert payload["phase_results"]["SESSION_AUTHORITY"]["status"] == "PASS"
-    assert payload["canonical_phase"] == "MARKET_DATA_BOD_PREP"
+    assert payload["canonical_phase"] == "MARKET_DATA"
     assert payload["canonical_blocker"] == "OPTIONS_SNAPSHOT_ROOT_MISSING"
 
 
@@ -315,7 +315,7 @@ def test_market_data_wrong_day_snapshot_does_not_satisfy_current_day(monkeypatch
 
     payload = day_run.build_day_run_payload(ctx)
 
-    assert payload["canonical_phase"] == "MARKET_DATA_BOD_PREP"
+    assert payload["canonical_phase"] == "MARKET_DATA"
     assert payload["canonical_blocker"] == "OPTIONS_CHAIN_SNAPSHOT_MISSING"
     assert payload["phase_results"]["STRATEGY_AND_RISK"]["status"] == "SKIPPED"
 
@@ -327,7 +327,7 @@ def test_specific_market_data_blocker_is_ledger_canonical_and_skips_downstream(
 
     payload = day_run.build_day_run_payload(_ctx(tmp_path))
 
-    assert payload["canonical_phase"] == "MARKET_DATA_BOD_PREP"
+    assert payload["canonical_phase"] == "MARKET_DATA"
     assert payload["canonical_blocker"] == "OPTIONS_QUOTES_MISSING_BID_ASK"
     assert payload["phase_results"]["STRATEGY_AND_RISK"]["status"] == "SKIPPED"
     assert payload["phase_results"]["AUTHORIZATION_PREP"]["status"] == "SKIPPED"
@@ -366,7 +366,7 @@ def test_day_ledger_reaches_pre_market_ready_before_market_open(
     payload = day_run.build_day_run_payload(_ctx(tmp_path))
 
     assert payload["final_status"] == "PRE_MARKET_READY"
-    assert payload["canonical_phase"] == "MARKET_OPEN_DATA_GATE"
+    assert payload["canonical_phase"] == "MARKET_DATA"
     assert payload["canonical_blocker"] == "MARKET_NOT_OPEN"
     assert payload["phase_results"]["AUTHORIZATION_FINAL"]["status"] == "SKIPPED"
     assert payload["phase_results"]["PAPER_READY"]["status"] == "SKIPPED"

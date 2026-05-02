@@ -21,6 +21,7 @@ from constellation_2.common.runtime_contract_v1 import resolve_runtime_data_root
 from ops.tools import run_aegis_bod_prepare_v1 as bod
 from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
 from ops.tools.run_decision_ledger_v1 import build_decision_ledger_v1
+from ops.tools.run_aegis_control_plane_v1 import build_control_plane_v1, control_plane_path
 
 SCHEMA_VERSION = "aegis_day_run.v1"
 PHASE_ORDER = [
@@ -951,6 +952,27 @@ def build_day_run_payload(ctx: PhaseContext) -> dict[str, Any]:
         else:
             final_status = "PAPER_READY"
 
+    control_plane = build_control_plane_v1(ctx, phase_results)
+    if control_plane.get("final_status") == "NOT_READY" and str(control_plane.get("canonical_blocker") or "") not in {"MARKET_NOT_OPEN", "MARKET_CLOSED"}:
+        canonical_phase = str(control_plane.get("current_phase") or canonical_phase)
+        canonical_blocker = str(control_plane.get("canonical_blocker") or canonical_blocker)
+        final_status = "NOT_READY"
+        root_cause_chain = [
+            {
+                "phase": canonical_phase,
+                "canonical_blocker": canonical_blocker,
+                "blocker_detail": str(control_plane.get("blocker_reason") or ""),
+            }
+        ]
+    elif control_plane.get("final_status") == "NOT_READY":
+        canonical_phase = str(control_plane.get("current_phase") or canonical_phase)
+        canonical_blocker = str(control_plane.get("canonical_blocker") or canonical_blocker)
+    control_plane_deferred = [
+        {"phase": str(phase), "reason": f"Deferred by {control_plane.get('current_phase')}"}
+        for phase in (control_plane.get("deferred_phases") if isinstance(control_plane.get("deferred_phases"), list) else [])
+    ]
+    downstream_consequences.extend(control_plane_deferred)
+
     payload = {
         "schema_id": "aegis_day_run",
         "schema_version": SCHEMA_VERSION,
@@ -966,7 +988,10 @@ def build_day_run_payload(ctx: PhaseContext) -> dict[str, Any]:
         "created_at_utc": created_at,
         "updated_at_utc": _now_iso(),
         "source_repo_status": _source_repo_status(),
-        "operator_next_action": _operator_next_action(canonical_phase, canonical_blocker),
+        "operator_next_action": str(control_plane.get("recovery_action") or "") or _operator_next_action(canonical_phase, canonical_blocker),
+        "control_plane_path": str(control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)),
+        "control_plane_current_phase": str(control_plane.get("current_phase") or ""),
+        "control_plane_canonical_blocker": str(control_plane.get("canonical_blocker") or ""),
         "truth_root": str(ctx.truth_root),
         "execution_root": str(ctx.execution_root),
         "operator_input_root": str(ctx.operator_input_root),
@@ -991,6 +1016,19 @@ def run_aegis_day_v1(day_utc: str, environment: str, truth_root: str = "") -> tu
         environment=ctx.environment,
         aegis_day_payload=payload,
     )
+    control_payload = build_control_plane_v1(ctx, payload.get("phase_results") if isinstance(payload.get("phase_results"), dict) else None)
+    control_output_path = control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    attach_producer_contract_v1(
+        control_payload,
+        producer_name="ops/tools/run_aegis_control_plane_v1.py",
+        producer_command=f"python3 ops/tools/run_aegis_control_plane_v1.py --day_utc {ctx.day_utc} --environment {ctx.environment}",
+        input_artifacts=[
+            *(str(item) for row in control_payload.get("phase_results", []) if isinstance(row, dict) for item in row.get("evidence_paths", []) if str(item or "").strip()),
+        ],
+        output_artifacts=[control_output_path],
+        schema_versions={"aegis_control_plane": "aegis_control_plane.v1"},
+    )
+    _write_json(control_output_path, control_payload)
     payload["decision_ledger_path"] = str(decision_ledger.get("artifact_path") or "")
     phase_outputs: list[str] = []
     for row in payload.get("phase_results", {}).values():
