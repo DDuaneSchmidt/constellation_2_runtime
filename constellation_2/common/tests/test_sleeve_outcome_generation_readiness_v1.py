@@ -75,6 +75,11 @@ def test_missing_execution_submit_and_outcome_evidence_blocks_readiness(tmp_path
     assert "SUBMIT_DECISION_TRACE_MISSING" in rows["trend"]["outcome_generation_blockers"]
     assert "COMPLETED_OUTCOME_MISSING" in rows["trend"]["outcome_generation_blockers"]
     assert "AUTHORIZATION_REJECTED" in rows["trend"]["outcome_generation_blockers"]
+    assert rows["trend"]["authorization_details"]["authorization_status"] == "REJECTED"
+    assert rows["trend"]["authorization_details"]["authorized_quantity"] == 0
+    assert rows["trend"]["execution_package_readiness"]["status"] == "BLOCKED_BY_AUTHORIZATION_REJECTED"
+    assert rows["trend"]["submit_trace_readiness"]["status"] == "EXPECTED_MISSING_SUBMIT_BOUNDARY_NOT_REACHED"
+    assert "EXECUTION_PACKAGE_DOWNSTREAM_OF_AUTHORIZATION" in rows["trend"]["root_cause_classification"]
 
 
 def test_options_market_data_blocker_is_kept_on_vol_income(tmp_path: Path) -> None:
@@ -86,6 +91,8 @@ def test_options_market_data_blocker_is_kept_on_vol_income(tmp_path: Path) -> No
     assert rows["vol"]["market_inputs"]["missing_inputs"] == ["OPTIONS_CHAIN_SNAPSHOT_MISSING"]
     assert "OPTIONS_CHAIN_SNAPSHOT_MISSING" not in rows["trend"]["outcome_generation_blockers"]
     assert rows["trend"]["market_inputs"]["missing_inputs"] == []
+    assert rows["vol"]["next_governed_producer"] == "ops/tools/run_options_chain_snapshot_required_day_v1.py"
+    assert "MISSING_OPTIONS_CHAIN_INPUT" in rows["vol"]["root_cause_classification"]
 
 
 def test_report_is_diagnostic_only_and_cannot_change_allocation_or_submit(tmp_path: Path) -> None:

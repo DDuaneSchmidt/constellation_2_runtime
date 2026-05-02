@@ -55,8 +55,12 @@
           "signal_trigger",
           "market_inputs",
           "risk_sizing_result",
+          "authorization_details",
+          "execution_package_readiness",
+          "submit_trace_readiness",
           "scoring_eligible",
           "execution_ready_if_aegis_ready",
+          "root_cause_classification",
           "why_did_not_submit",
           "missing_evidence",
           "next_governed_producer",
@@ -79,8 +83,31 @@
             "additionalProperties": true,
             "required": ["sizing_state", "execution_package_path", "final_quantity", "reason_code"]
           },
+          "authorization_details": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "artifact_path",
+              "authorization_status",
+              "authorized_quantity",
+              "rejection_reason",
+              "policy_rules",
+              "required_recovery_command"
+            ]
+          },
+          "execution_package_readiness": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["status", "expected_path", "producer", "recovery_command"]
+          },
+          "submit_trace_readiness": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["status", "producer", "recovery_command"]
+          },
           "scoring_eligible": { "type": "boolean" },
           "execution_ready_if_aegis_ready": { "type": "boolean" },
+          "root_cause_classification": { "type": "array", "items": { "type": "string" } },
           "why_did_not_submit": { "type": "array", "items": { "type": "string" } },
           "missing_evidence": { "type": "array", "items": { "type": "string" } },
           "next_governed_producer": { "type": "string", "minLength": 1 },

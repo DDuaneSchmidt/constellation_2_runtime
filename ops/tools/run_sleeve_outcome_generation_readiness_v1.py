@@ -95,6 +95,71 @@ def _authorization_blockers(auth: dict[str, Any]) -> list[str]:
     return sorted(set(blockers))
 
 
+def _authorization_details(auth: dict[str, Any], auth_path: Path, day_utc: str, truth_root: Path) -> dict[str, Any]:
+    authorization = auth.get("authorization") if isinstance(auth.get("authorization"), dict) else {}
+    policy_rules = auth.get("constitutional_shadow", {}).get("decision", {}).get("blocker_rules") if isinstance(auth.get("constitutional_shadow"), dict) else []
+    if not isinstance(policy_rules, list):
+        policy_rules = []
+    reason_codes = auth.get("reason_codes") if isinstance(auth.get("reason_codes"), list) else []
+    rejection_reason = ",".join(str(code) for code in reason_codes if str(code)) or ",".join(str(rule) for rule in policy_rules if str(rule))
+    return {
+        "artifact_path": str(auth_path),
+        "authorization_status": str(auth.get("status") or "MISSING").upper(),
+        "decision": str(authorization.get("decision") or auth.get("decision_enum") or "").upper(),
+        "authorized_quantity": authorization.get("authorized_quantity"),
+        "rejection_reason": rejection_reason,
+        "policy_rules": [str(rule) for rule in policy_rules if str(rule)],
+        "required_recovery_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_authorization_artifacts_day_v1.py --day_utc {day_utc} --truth_root {truth_root}",
+    }
+
+
+def _classifications(blockers: list[str]) -> list[str]:
+    out: list[str] = []
+    if "BUNDLE_B_HEADROOM_REJECTED" in blockers:
+        out.append("REAL_POLICY_REJECT")
+    if "OPTIONS_CHAIN_SNAPSHOT_MISSING" in blockers:
+        out.append("MISSING_OPTIONS_CHAIN_INPUT")
+    if any(code in blockers for code in ("AUTHZ_MISSING_DEFINED_RISK_EVIDENCE", "BUNDLE_B_REQUESTED_QUANTITY_UNPROVEN", "BUNDLE_B_REQUESTED_QUANTITY_ZERO")):
+        out.append("MISSING_DEFINED_RISK_OR_QUANTITY_EVIDENCE")
+    if "EXECUTION_PACKAGE_MISSING" in blockers:
+        out.append("EXECUTION_PACKAGE_DOWNSTREAM_OF_AUTHORIZATION")
+    if "SUBMIT_DECISION_TRACE_MISSING" in blockers:
+        out.append("SUBMIT_TRACE_DOWNSTREAM_OF_SUBMIT_BOUNDARY")
+    if "COMPLETED_OUTCOME_MISSING" in blockers:
+        out.append("OUTCOME_MISSING_NO_REAL_FILL_OR_POSITION_LIFECYCLE")
+    return sorted(set(out or ["UNKNOWN"]))
+
+
+def _execution_package_readiness(*, blockers: list[str], execution_package_path: str, day_utc: str) -> dict[str, Any]:
+    if execution_package_path:
+        status = "PRESENT"
+    elif "AUTHORIZATION_REJECTED" in blockers or "AUTHORIZED_QUANTITY_ZERO_OR_MISSING" in blockers:
+        status = "BLOCKED_BY_AUTHORIZATION_REJECTED"
+    else:
+        status = "MISSING"
+    return {
+        "status": status,
+        "expected_path": execution_package_path,
+        "producer": "ops/tools/run_execution_build_authority_v1.py",
+        "recovery_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_execution_build_authority_v1.py --operation_type PAPER_SUBMIT --candidate_path <GOVERNED_PHASEC_CANDIDATE_PATH_FOR_{day_utc}>",
+    }
+
+
+def _submit_trace_readiness(*, blockers: list[str], submit_traces: list[str], day_utc: str, truth_root: Path) -> dict[str, Any]:
+    if submit_traces:
+        status = "PRESENT"
+    elif "EXECUTION_PACKAGE_MISSING" in blockers or "AUTHORIZATION_REJECTED" in blockers:
+        status = "EXPECTED_MISSING_SUBMIT_BOUNDARY_NOT_REACHED"
+    else:
+        status = "MISSING"
+    return {
+        "status": status,
+        "producer": "ops/tools/run_submit_decision_trace_v1.py",
+        "recovery_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_submit_decision_trace_v1.py --day_utc {day_utc} --truth_root {truth_root} --environment PAPER",
+        "trace_paths": submit_traces,
+    }
+
+
 def _symbol_requires_market_input(market: dict[str, Any], symbol: str, code: str) -> bool:
     required_symbols = {str(sym).upper() for sym in market.get("required_symbols", []) if str(sym)}
     if code == "OPTIONS_CHAIN_SNAPSHOT_MISSING":
@@ -103,6 +168,11 @@ def _symbol_requires_market_input(market: dict[str, Any], symbol: str, code: str
 
 
 def _next_step(blockers: list[str]) -> tuple[str, str]:
+    if "OPTIONS_CHAIN_SNAPSHOT_MISSING" in blockers:
+        return (
+            "ops/tools/run_options_chain_snapshot_required_day_v1.py",
+            "PYTHONPATH=\"$PWD\" python3 ops/tools/run_options_chain_snapshot_required_day_v1.py --day_utc <DAY>",
+        )
     if "AUTHORIZATION_REJECTED" in blockers or "AUTHORIZED_QUANTITY_ZERO_OR_MISSING" in blockers:
         return (
             "ops/tools/run_authorization_artifacts_day_v1.py",
@@ -193,8 +263,12 @@ def build_sleeve_outcome_generation_readiness_v1(*, day_utc: str, truth_root: Pa
                     "account_net_liquidation_cents": rrow.get("account_net_liquidation_cents"),
                     "allowed_risk_cents": rrow.get("allowed_risk_cents"),
                 },
+                "authorization_details": _authorization_details(auth, auth_path, day_utc, root),
+                "execution_package_readiness": _execution_package_readiness(blockers=unique_blockers, execution_package_path=execution_package_path, day_utc=day_utc),
+                "submit_trace_readiness": _submit_trace_readiness(blockers=unique_blockers, submit_traces=submit_traces, day_utc=day_utc, truth_root=root),
                 "scoring_eligible": True,
                 "execution_ready_if_aegis_ready": not unique_blockers,
+                "root_cause_classification": _classifications(unique_blockers),
                 "why_did_not_submit": unique_blockers,
                 "missing_evidence": sorted(set(missing_evidence)),
                 "next_governed_producer": producer,
