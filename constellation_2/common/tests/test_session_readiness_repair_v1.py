@@ -130,6 +130,20 @@ def _readiness_economic_ok(*, day: str) -> dict:
     }
 
 
+def _readiness_intraday_live_required(*, truth_root: Path, day: str) -> tuple[Path, dict]:
+    path = truth_root / "reports" / "trading_day_readiness_authority_v1" / day / "trading_day_readiness_authority.v1.json"
+    payload = {
+        "day_utc": day,
+        "status": "PASS",
+        "readiness_mode": "INTRADAY_SUBMIT_READY",
+        "submit_allowed_by_mode": True,
+        "requires_live_account_truth": True,
+        "requires_same_day_broker_event_log": True,
+        "requires_submit_checks": True,
+    }
+    return path, payload
+
+
 def _readiness_authorization_pass_snapshot(*, truth_root: Path, day: str) -> dict:
     return {
         "binding": SimpleNamespace(sleeve_id="PRIMARY"),
@@ -194,6 +208,30 @@ class SessionReadinessRepairTests(unittest.TestCase):
                         },
                     }
                 ],
+            },
+        )
+        _write_json(
+            root / "governance" / "02_REGISTRIES" / "C2_BUNDLE_C_DRAWDOWN_POLICY_V1.json",
+            {
+                "registry_id": "C2_BUNDLE_C_DRAWDOWN_POLICY_V1",
+                "schema_id": "c2_bundle_c_drawdown_policy",
+                "schema_version": "v1",
+                "profiles": {
+                    "PRODUCTION": {
+                        "profile_id": "PRODUCTION",
+                        "applies_to_modes": ["LIVE", "PRODUCTION"],
+                        "operation_types": ["*"],
+                        "drawdown_basis": "ROLLING_PEAK_NAV",
+                        "drawdown_block_limit": "-0.100000",
+                    },
+                    "PAPER_BOOTSTRAP": {
+                        "profile_id": "PAPER_BOOTSTRAP",
+                        "applies_to_modes": ["PAPER"],
+                        "operation_types": ["fresh_paper_entry_v1"],
+                        "drawdown_basis": "ROLLING_PEAK_NAV",
+                        "drawdown_block_limit": "-0.010000",
+                    },
+                },
             },
         )
 
@@ -397,6 +435,10 @@ class SessionReadinessRepairTests(unittest.TestCase):
                 "_load_primary_scoped_authorization_snapshot",
                 return_value=_readiness_authorization_pass_snapshot(truth_root=truth_root, day=DAY),
             ), patch.object(
+                readiness_module,
+                "read_or_evaluate_trading_day_readiness_authority_v1",
+                return_value=_readiness_intraday_live_required(truth_root=truth_root, day=DAY),
+            ), patch.object(
                 readiness_module, "_refresh_policy_stack_for_day", lambda **kwargs: None
             ), patch.object(
                 readiness_module,
@@ -469,6 +511,10 @@ class SessionReadinessRepairTests(unittest.TestCase):
                 readiness_module,
                 "_load_primary_scoped_authorization_snapshot",
                 return_value=_readiness_authorization_pass_snapshot(truth_root=truth_root, day=DAY),
+            ), patch.object(
+                readiness_module,
+                "read_or_evaluate_trading_day_readiness_authority_v1",
+                return_value=_readiness_intraday_live_required(truth_root=truth_root, day=DAY),
             ), patch.object(
                 readiness_module, "_refresh_policy_stack_for_day", lambda **kwargs: None
             ), patch.object(
@@ -574,6 +620,10 @@ class SessionReadinessRepairTests(unittest.TestCase):
                 readiness_module,
                 "_load_primary_scoped_authorization_snapshot",
                 return_value=_readiness_authorization_pass_snapshot(truth_root=truth_root, day=DAY),
+            ), patch.object(
+                readiness_module,
+                "read_or_evaluate_trading_day_readiness_authority_v1",
+                return_value=_readiness_intraday_live_required(truth_root=truth_root, day=DAY),
             ), patch.object(
                 readiness_module, "_refresh_policy_stack_for_day", lambda **kwargs: None
             ), patch.object(
@@ -1156,6 +1206,7 @@ class SessionReadinessRepairTests(unittest.TestCase):
             global_truth = root / "constellation_2" / "runtime" / "truth"
             sleeve_truth = root / "constellation_2" / "runtime" / "truth_sleeves" / "PRIMARY" / "PAPER"
             day = DAY
+            self._write_minimal_registries(root)
             sleeve_truth.mkdir(parents=True, exist_ok=True)
 
             canonical_positions = global_truth / "positions_v1" / "snapshots" / day / "positions_snapshot.v5.json"

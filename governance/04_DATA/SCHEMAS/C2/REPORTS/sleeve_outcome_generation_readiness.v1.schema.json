@@ -19,6 +19,7 @@
     "readiness_effect",
     "submit_effect",
     "allocation_effect",
+    "same_day_execution_requirements",
     "scoring_eligible_sleeves",
     "sleeve_results",
     "summary",
@@ -39,6 +40,31 @@
     "readiness_effect": { "const": "NONE" },
     "submit_effect": { "const": "NONE" },
     "allocation_effect": { "const": "NONE" },
+    "same_day_execution_requirements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requirement_id",
+          "producer",
+          "producer_command",
+          "expected_artifact_path",
+          "freshness_threshold_seconds",
+          "must_be_produced_during_target_day",
+          "recovery_command"
+        ],
+        "properties": {
+          "requirement_id": { "type": "string", "minLength": 1 },
+          "producer": { "type": "string", "minLength": 1 },
+          "producer_command": { "type": "string", "minLength": 1 },
+          "expected_artifact_path": { "type": "string", "minLength": 1 },
+          "freshness_threshold_seconds": { "type": ["number", "null"], "minimum": 0 },
+          "must_be_produced_during_target_day": { "type": "boolean" },
+          "recovery_command": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
     "scoring_eligible_sleeves": {
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
@@ -62,6 +88,7 @@
           "scoring_eligible",
           "execution_ready_if_aegis_ready",
           "root_cause_classification",
+          "same_day_evidence_status",
           "why_did_not_submit",
           "missing_evidence",
           "next_governed_producer",
@@ -176,6 +203,31 @@
           "scoring_eligible": { "type": "boolean" },
           "execution_ready_if_aegis_ready": { "type": "boolean" },
           "root_cause_classification": { "type": "array", "items": { "type": "string" } },
+          "same_day_evidence_status": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "blocking_artifact",
+              "reason_codes",
+              "must_be_produced_during_target_day",
+              "recovery_command"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "NON_RECOVERABLE_STALE_SAME_DAY_EVIDENCE",
+                  "RECOVERABLE_DURING_TARGET_DAY_ONLY",
+                  "NOT_BLOCKED_BY_SAME_DAY_FRESHNESS"
+                ]
+              },
+              "blocking_artifact": { "type": "string" },
+              "reason_codes": { "type": "array", "items": { "type": "string" } },
+              "must_be_produced_during_target_day": { "type": "boolean" },
+              "recovery_command": { "type": "string" }
+            }
+          },
           "why_did_not_submit": { "type": "array", "items": { "type": "string" } },
           "missing_evidence": { "type": "array", "items": { "type": "string" } },
           "next_governed_producer": { "type": "string", "minLength": 1 },

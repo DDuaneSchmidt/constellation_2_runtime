@@ -254,6 +254,30 @@ def test_blocked_execution_build_is_reported_in_package_readiness(tmp_path: Path
     assert "run_session_authority_v1.py" in readiness["latest_execution_build"]["chain_map"][0]["recovery_command"]
 
 
+def test_stale_same_day_broker_evidence_is_marked_non_recoverable_for_past_day(tmp_path: Path) -> None:
+    _seed(tmp_path, tmp_path / "exec")
+    _write(_report(tmp_path, "submit_boundary_status_v1", "submit_boundary_status.v1.json"), {"submit_allowed": False, "canonical_blocker": "BROKER_EVENT_LOG_STALE"})
+
+    payload = report.build_sleeve_outcome_generation_readiness_v1(day_utc=DAY, truth_root=tmp_path, execution_root=tmp_path / "exec")
+    rows = {row["intent_id"]: row for row in payload["sleeve_results"]}
+
+    assert rows["trend"]["same_day_evidence_status"]["status"] == "NON_RECOVERABLE_STALE_SAME_DAY_EVIDENCE"
+    assert rows["trend"]["same_day_evidence_status"]["must_be_produced_during_target_day"] is True
+    assert "backfill" in rows["trend"]["same_day_evidence_status"]["recovery_command"].lower()
+    requirement_ids = {item["requirement_id"] for item in payload["same_day_execution_requirements"]}
+    assert {
+        "broker_event_observer",
+        "broker_supply_v1",
+        "runtime_resilience_authority_v1",
+        "session_readiness_refresh_v1",
+        "day_authority_decision_v1",
+        "target_day_admission_v1",
+        "day_activation_package_v1",
+        "global_context_package_v1",
+        "execution_package_v1",
+    }.issubset(requirement_ids)
+
+
 def test_report_is_diagnostic_only_and_cannot_change_allocation_or_submit(tmp_path: Path) -> None:
     _seed(tmp_path, tmp_path / "exec")
 

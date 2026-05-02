@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from ops.tools.run_execution_package_from_authorized_intent_v1 import _execution
 PRODUCER = "ops/tools/run_sleeve_outcome_generation_readiness_v1.py"
 SCHEMA = REPO_ROOT / "governance/04_DATA/SCHEMAS/C2/REPORTS/sleeve_outcome_generation_readiness.v1.schema.json"
 SCORING_ELIGIBLE_SLEEVES = ("C2_TREND_EQ_PRIMARY_V1", "C2_VOL_INCOME_DEFINED_RISK_V1")
+SAME_DAY_BROKER_FRESHNESS_SECONDS = 300
 
 
 def report_path(*, truth_root: Path, day_utc: str) -> Path:
@@ -397,6 +399,114 @@ def _options_chain_recovery(*, execution_root: Path, day_utc: str, symbol: str, 
     }
 
 
+def _same_day_execution_requirements(*, day_utc: str, truth_root: Path, execution_root: Path) -> list[dict[str, Any]]:
+    return [
+        {
+            "requirement_id": "broker_event_observer",
+            "producer": "ops/ib/c2_execution_observer_v1.py",
+            "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/ib/c2_execution_observer_v1.py --truth_root <EXECUTION_TRUTH_ROOT> --environment PAPER",
+            "expected_artifact_path": str(execution_root / "execution_evidence_v1" / "broker_events" / day_utc / "broker_event_log.v1.jsonl"),
+            "freshness_threshold_seconds": SAME_DAY_BROKER_FRESHNESS_SECONDS,
+            "must_be_produced_during_target_day": True,
+            "recovery_command": "Start or keep the governed IB execution observer running during the target trading day.",
+        },
+        {
+            "requirement_id": "broker_supply_v1",
+            "producer": "ops/tools/run_broker_supply_v1.py",
+            "producer_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_broker_supply_v1.py --day_utc {day_utc} --environment PAPER --truth_root {truth_root} --freshness_seconds {SAME_DAY_BROKER_FRESHNESS_SECONDS}",
+            "expected_artifact_path": str(truth_root / "reports" / "broker_supply_v1" / day_utc / "broker_supply.v1.json"),
+            "freshness_threshold_seconds": SAME_DAY_BROKER_FRESHNESS_SECONDS,
+            "must_be_produced_during_target_day": True,
+            "recovery_command": "Rerun broker supply after same-day broker events are fresh.",
+        },
+        {
+            "requirement_id": "runtime_resilience_authority_v1",
+            "producer": "ops/tools/run_runtime_resilience_authority_v1.py",
+            "producer_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_runtime_resilience_authority_v1.py --day_utc {day_utc} --environment PAPER --truth_root {truth_root} --freshness_seconds {SAME_DAY_BROKER_FRESHNESS_SECONDS}",
+            "expected_artifact_path": str(truth_root / "reports" / "runtime_resilience_authority_v1" / day_utc / "runtime_resilience_authority.v1.json"),
+            "freshness_threshold_seconds": SAME_DAY_BROKER_FRESHNESS_SECONDS,
+            "must_be_produced_during_target_day": True,
+            "recovery_command": "Rerun runtime resilience after broker supply and broker event probe are fresh.",
+        },
+        {
+            "requirement_id": "session_readiness_refresh_v1",
+            "producer": "ops/tools/run_session_readiness_refresh_v1.py",
+            "producer_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_session_readiness_refresh_v1.py --day_utc {day_utc}",
+            "expected_artifact_path": str(truth_root / "reports" / "session_readiness_refresh_v1" / day_utc / "session_readiness_refresh.v1.json"),
+            "freshness_threshold_seconds": None,
+            "must_be_produced_during_target_day": True,
+            "recovery_command": "Run governed same-day session readiness refresh after startup and broker evidence are current.",
+        },
+        {
+            "requirement_id": "day_authority_decision_v1",
+            "producer": "ops/tools/run_day_authority_decision_v1.py",
+            "producer_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_day_authority_decision_v1.py --day_utc {day_utc} --truth_root {truth_root}",
+            "expected_artifact_path": str(truth_root / "reports" / "day_authority_decision_v1" / day_utc / "day_authority_decision.v1.json"),
+            "freshness_threshold_seconds": None,
+            "must_be_produced_during_target_day": True,
+            "recovery_command": "Rerun day authority decision after governed session readiness refresh.",
+        },
+        {
+            "requirement_id": "target_day_admission_v1",
+            "producer": "ops/tools/run_session_authority_v1.py",
+            "producer_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_session_authority_v1.py --target_day {day_utc} --truth_root {truth_root} --environment PAPER --ib_account DUO847203 --phase admit",
+            "expected_artifact_path": str(truth_root / "target_day_admission_v1" / f"{day_utc}.json"),
+            "freshness_threshold_seconds": None,
+            "must_be_produced_during_target_day": True,
+            "recovery_command": "Run governed target-day admission after required same-day session gates pass.",
+        },
+        {
+            "requirement_id": "day_activation_package_v1",
+            "producer": "ops/tools/run_day_activation_authority_v1.py",
+            "producer_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_day_activation_authority_v1.py --operation_type fresh_paper_entry_v1 --day_utc {day_utc} --sleeve_id PRIMARY --environment PAPER --ib_account DUO847203 --materialize YES --emit_package YES",
+            "expected_artifact_path": str(execution_root / "day_activation_package_v1" / day_utc / "<submission_id>" / "day_activation_package.v1.json"),
+            "freshness_threshold_seconds": None,
+            "must_be_produced_during_target_day": True,
+            "recovery_command": "Run governed day activation only after target-day admission passes.",
+        },
+        {
+            "requirement_id": "global_context_package_v1",
+            "producer": "ops/tools/run_global_context_authority_v1.py",
+            "producer_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_global_context_authority_v1.py --operation_type fresh_paper_entry_v1 --day_utc {day_utc} --sleeve_id PRIMARY --environment PAPER --ib_account DUO847203 --materialize YES --emit_package YES",
+            "expected_artifact_path": str(execution_root / "global_context_package_v1" / day_utc / "<submission_id>" / "global_context_package.v1.json"),
+            "freshness_threshold_seconds": None,
+            "must_be_produced_during_target_day": True,
+            "recovery_command": "Run governed global context only after day activation passes.",
+        },
+        {
+            "requirement_id": "execution_package_v1",
+            "producer": "ops/tools/run_execution_package_from_authorized_intent_v1.py",
+            "producer_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_execution_package_from_authorized_intent_v1.py --day_utc {day_utc} --truth_root {execution_root} --intent_id <AUTHORIZED_INTENT_ID>",
+            "expected_artifact_path": str(execution_root / "execution_package_v1" / day_utc / "<submission_id>" / "execution_package.v1.json"),
+            "freshness_threshold_seconds": None,
+            "must_be_produced_during_target_day": True,
+            "recovery_command": "Run governed execution package producer only after authorization and upstream packages pass.",
+        },
+    ]
+
+
+def _same_day_evidence_status(*, blockers: list[str], day_utc: str) -> dict[str, Any]:
+    stale = "BROKER_EVENT_LOG_STALE" in set(blockers)
+    target = date.fromisoformat(day_utc)
+    today = datetime.now(UTC).date()
+    if stale and target < today:
+        status = "NON_RECOVERABLE_STALE_SAME_DAY_EVIDENCE"
+        recovery = "Do not backfill freshness. Prepare and run the governed same-day producer chain on the next valid trading day."
+    elif stale:
+        status = "RECOVERABLE_DURING_TARGET_DAY_ONLY"
+        recovery = "Refresh same-day broker event truth through the governed IB observer during the target trading day."
+    else:
+        status = "NOT_BLOCKED_BY_SAME_DAY_FRESHNESS"
+        recovery = ""
+    return {
+        "status": status,
+        "blocking_artifact": "broker_event_log.v1.jsonl" if stale else "",
+        "reason_codes": ["BROKER_EVENT_LOG_STALE"] if stale else [],
+        "must_be_produced_during_target_day": bool(stale),
+        "recovery_command": recovery,
+    }
+
+
 def _next_step(blockers: list[str]) -> tuple[str, str]:
     if "OPTIONS_CHAIN_SNAPSHOT_MISSING" in blockers:
         return (
@@ -548,6 +658,7 @@ def build_sleeve_outcome_generation_readiness_v1(*, day_utc: str, truth_root: Pa
                 "scoring_eligible": True,
                 "execution_ready_if_aegis_ready": not unique_blockers,
                 "root_cause_classification": _classifications(unique_blockers),
+                "same_day_evidence_status": _same_day_evidence_status(blockers=unique_blockers, day_utc=day_utc),
                 "why_did_not_submit": unique_blockers,
                 "missing_evidence": sorted(set(missing_evidence)),
                 "next_governed_producer": producer,
@@ -571,6 +682,7 @@ def build_sleeve_outcome_generation_readiness_v1(*, day_utc: str, truth_root: Pa
         "readiness_effect": "NONE",
         "submit_effect": "NONE",
         "allocation_effect": "NONE",
+        "same_day_execution_requirements": _same_day_execution_requirements(day_utc=day_utc, truth_root=root, execution_root=execution),
         "scoring_eligible_sleeves": list(SCORING_ELIGIBLE_SLEEVES),
         "sleeve_results": results,
         "summary": {
