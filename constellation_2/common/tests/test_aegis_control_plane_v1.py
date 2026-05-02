@@ -1168,6 +1168,42 @@ def test_projection_renders_promotion_validation_mismatch_without_deciding_readi
     assert payload["final_status"] == control["final_status"]
 
 
+def test_projection_renders_promotion_gate_status_when_present(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    production_truth = tmp_path / "production_truth"
+    candidate_truth = tmp_path / "candidate_truth"
+    ctx = _ctx_with_truth(tmp_path, production_truth)
+    _session_pass(ctx)
+    _write(
+        candidate_truth / "reports" / "aegis_promotion_validation_ledger_v1" / ctx.day_utc / "promotion_validation_ledger.v1.json",
+        {
+            "candidate_commit": "candidate-commit",
+            "promoted_commit": "promoted-commit",
+            "truth_root": str(candidate_truth),
+            "runtime_root": str(tmp_path),
+            "promotion_status": "CANDIDATE",
+            "blockers": [],
+        },
+    )
+    _write(
+        candidate_truth / "reports" / "aegis_production_promotion_gate_v1" / ctx.day_utc / "promo-1.json",
+        {
+            "promotion_status": "BLOCKED",
+            "blockers": [{"code": "HUMAN_APPROVAL_MISSING"}],
+        },
+    )
+    monkeypatch.setattr(cp.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+    cp.run_control_plane_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
+    monkeypatch.setattr(projection.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+
+    _out_path, payload = projection.run_operator_projection_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
+
+    assert payload["promotion_status"] == "BLOCKED"
+    assert payload["promotion_blockers"] == [{"code": "HUMAN_APPROVAL_MISSING"}]
+    assert payload["promotion_state"]["promotion_visibility_source"] == "aegis_production_promotion_gate_v1"
+    assert payload["candidate_commit"] == "candidate-commit"
+
+
 def test_submit_allowed_false_when_control_plane_not_ready(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
     _source_pass(monkeypatch)
     ctx = _ctx(tmp_path)

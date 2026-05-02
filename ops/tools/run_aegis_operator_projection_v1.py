@@ -56,15 +56,34 @@ def _packet_commit_from_root(runtime_root: Path) -> str:
     return ""
 
 
+def _latest_promotion_gate_v1(candidate_root: Path, day_utc: str) -> tuple[Path, dict[str, Any]]:
+    root = candidate_root / "reports" / "aegis_production_promotion_gate_v1" / day_utc
+    candidates = sorted(root.glob("*.json")) if root.exists() and root.is_dir() else []
+    if not candidates:
+        return root / "MISSING.json", {}
+    candidates.sort(key=lambda path: (path.stat().st_mtime, str(path)))
+    path = candidates[-1]
+    return path, _read_json(path)
+
+
 def _promotion_visibility_v1(ctx: bod.BodContext) -> dict[str, Any]:
-    ledger_path = promotion_validation_ledger_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    candidate_root = ctx.truth_root if ctx.truth_root.name == "candidate_truth" else (ctx.truth_root.parent / "candidate_truth").resolve()
+    production_ledger_path = promotion_validation_ledger_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    candidate_ledger_path = promotion_validation_ledger_path(truth_root=candidate_root, day_utc=ctx.day_utc)
+    ledger_path = production_ledger_path if production_ledger_path.exists() else candidate_ledger_path
     ledger = _read_json(ledger_path)
+    gate_path, gate = _latest_promotion_gate_v1(candidate_root, ctx.day_utc)
     production_version = read_production_version_v1()
     evaluated_commit = git_commit_v1()
     truth_root_text = str(ledger.get("truth_root") or "").strip()
     runtime_root_text = str(ledger.get("runtime_root") or "").strip()
-    promotion_status = str(ledger.get("promotion_status") or "VALIDATION_LEDGER_MISSING").strip()
-    blockers = ledger.get("blockers") if isinstance(ledger.get("blockers"), list) else [{"code": "PROMOTION_VALIDATION_LEDGER_MISSING", "path": str(ledger_path)}]
+    promotion_status = str(gate.get("promotion_status") or ledger.get("promotion_status") or "VALIDATION_LEDGER_MISSING").strip()
+    if isinstance(gate.get("blockers"), list):
+        blockers = gate["blockers"]
+    elif isinstance(ledger.get("blockers"), list):
+        blockers = ledger["blockers"]
+    else:
+        blockers = [{"code": "PROMOTION_VALIDATION_LEDGER_MISSING", "path": str(ledger_path)}]
     return {
         "candidate_commit": str(ledger.get("candidate_commit") or evaluated_commit),
         "promoted_commit": str(production_version.get("promoted_commit") or ledger.get("promoted_commit") or ""),
@@ -73,6 +92,8 @@ def _promotion_visibility_v1(ctx: bod.BodContext) -> dict[str, Any]:
         "promotion_status": promotion_status,
         "promotion_blockers": blockers,
         "promotion_validation_ledger_path": str(ledger_path),
+        "promotion_gate_path": str(gate_path),
+        "promotion_visibility_source": "aegis_production_promotion_gate_v1" if gate else "aegis_promotion_validation_ledger_v1",
         "truth_root_consistency": {
             "truth_root": str(ctx.truth_root),
             "ledger_truth_root": truth_root_text,
