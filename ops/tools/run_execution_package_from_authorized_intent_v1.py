@@ -38,6 +38,15 @@ def _read_json(path: Path) -> dict[str, Any]:
     return obj
 
 
+def _read_json_if_exists(path: Path) -> dict[str, Any]:
+    if not path.exists() or not path.is_file():
+        return {}
+    try:
+        return _read_json(path)
+    except Exception:
+        return {}
+
+
 def _capital_authority_path(truth_root: Path, day_utc: str) -> Path:
     return (
         truth_root
@@ -93,6 +102,126 @@ def _defined_risk_diagnostic(*, day_utc: str, exposure_type: str) -> dict[str, A
             f"--day_utc {day_utc} --truth_root <TRUTH_ROOT> --symbol <OPTION_UNDERLYING>"
         ),
     }
+
+
+def _node_status(payload: dict[str, Any], *fields: str) -> str:
+    for field in fields:
+        value = str(payload.get(field) or "").strip().upper()
+        if value:
+            return value
+    return "MISSING"
+
+
+def _node_blocker(payload: dict[str, Any]) -> str:
+    first = payload.get("first_real_blocker") if isinstance(payload.get("first_real_blocker"), dict) else {}
+    if first:
+        return str(first.get("dependency_id") or first.get("first_real_blocker_dependency_id") or "").strip()
+    codes = payload.get("blocking_reason_codes") or payload.get("blocking_codes")
+    if isinstance(codes, list) and codes:
+        return ",".join(str(code) for code in codes if str(code))
+    chain = payload.get("blocking_chain") or payload.get("blocker_chain")
+    if isinstance(chain, list) and chain:
+        first_chain = chain[0] if isinstance(chain[0], dict) else {}
+        return str(first_chain.get("blocker_code") or first_chain.get("dependency_id") or "").strip()
+    return ""
+
+
+def _classify_root_blocker(payload: dict[str, Any]) -> str:
+    codes = {str(code).strip().upper() for code in payload.get("blocking_reason_codes", []) if str(code).strip()} if isinstance(payload.get("blocking_reason_codes"), list) else set()
+    hidden = payload.get("hidden_dependency_check_result") if isinstance(payload.get("hidden_dependency_check_result"), dict) else {}
+    undeclared = hidden.get("undeclared_dependency_artifacts") if isinstance(hidden.get("undeclared_dependency_artifacts"), list) else []
+    if "HIDDEN_DEPENDENCY_DETECTED" in codes or undeclared:
+        return "DEFECTIVE_OR_MISSING_EVIDENCE"
+    if codes:
+        return "REAL_POLICY_OR_REQUIRED_GATE_FAILURE"
+    return "UNKNOWN"
+
+
+def _execution_build_chain_map(
+    *,
+    day_utc: str,
+    truth_root: Path,
+    build_obj: dict[str, Any],
+    build_path: str,
+    package_path: str,
+) -> list[dict[str, Any]]:
+    candidate_ref = build_obj.get("candidate_ref") if isinstance(build_obj.get("candidate_ref"), dict) else {}
+    canonical_root = Path(str(candidate_ref.get("canonical_truth_root") or "/home/node/constellation_runtime_data/truth")).resolve()
+    execution_root = Path(str(candidate_ref.get("execution_truth_root") or truth_root)).resolve()
+    sleeve_id = str(candidate_ref.get("sleeve_id") or "PRIMARY").strip() or "PRIMARY"
+    environment = str(candidate_ref.get("environment") or "PAPER").strip() or "PAPER"
+    ib_account = "DUO847203"
+    target_admission_path = (canonical_root / "target_day_admission_v1" / f"{day_utc}.json").resolve()
+    target_admission = _read_json_if_exists(target_admission_path)
+    execution_build_path = Path(str(build_path or "")).resolve() if str(build_path or "").strip() else Path()
+    execution_build = _read_json_if_exists(execution_build_path) if str(build_path or "").strip() else build_obj
+    global_build_path = ""
+    first = execution_build.get("first_real_blocker") if isinstance(execution_build.get("first_real_blocker"), dict) else {}
+    if first:
+        global_build_path = str(first.get("blocking_build_ref") or "")
+    global_build = _read_json_if_exists(Path(global_build_path)) if global_build_path else {}
+    day_build_path = ""
+    global_first = global_build.get("first_real_blocker") if isinstance(global_build.get("first_real_blocker"), dict) else {}
+    detail = str(global_first.get("detail") or "")
+    marker = "build_ref="
+    if marker in detail:
+        day_build_path = detail.split(marker, 1)[1].split(":", 1)[0]
+    day_build = _read_json_if_exists(Path(day_build_path)) if day_build_path else {}
+    submission_id = str(execution_build.get("submission_id") or "").strip()
+    expected_package_path = (
+        str(package_path)
+        if str(package_path or "").strip()
+        else str((execution_root / "execution_package_v1" / day_utc / submission_id / "execution_package.v1.json").resolve())
+        if submission_id
+        else ""
+    )
+    return [
+        {
+            "artifact": "target_day_admission_v1",
+            "status": _node_status(target_admission, "admission_status", "status"),
+            "blocker": _node_blocker(target_admission),
+            "artifact_path": str(target_admission_path),
+            "producer": "ops/tools/run_session_authority_v1.py",
+            "recovery_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_session_authority_v1.py --target_day {day_utc} --truth_root {canonical_root} --environment {environment} --ib_account {ib_account} --phase admit",
+            "blocker_classification": _classify_root_blocker(target_admission),
+        },
+        {
+            "artifact": "day_activation_package_v1",
+            "status": _node_status(day_build, "closure_status", "status"),
+            "blocker": _node_blocker(day_build),
+            "artifact_path": str(global_first.get("path") or ""),
+            "producer": "ops/tools/run_day_activation_authority_v1.py",
+            "recovery_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_day_activation_authority_v1.py --operation_type fresh_paper_entry_v1 --day_utc {day_utc} --sleeve_id {sleeve_id} --environment {environment} --ib_account {ib_account} --materialize YES --emit_package YES",
+            "blocker_classification": "BLOCKED_BY_UPSTREAM",
+        },
+        {
+            "artifact": "global_context_package_v1",
+            "status": _node_status(global_build, "closure_status", "status"),
+            "blocker": _node_blocker(global_build),
+            "artifact_path": str(first.get("path") or ""),
+            "producer": "ops/tools/run_global_context_authority_v1.py",
+            "recovery_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_global_context_authority_v1.py --operation_type fresh_paper_entry_v1 --day_utc {day_utc} --sleeve_id {sleeve_id} --environment {environment} --ib_account {ib_account} --materialize YES --emit_package YES",
+            "blocker_classification": "BLOCKED_BY_UPSTREAM",
+        },
+        {
+            "artifact": "execution_build_v1",
+            "status": _node_status(execution_build, "closure_status", "status"),
+            "blocker": _node_blocker(execution_build),
+            "artifact_path": str(execution_build_path) if str(build_path or "").strip() else "",
+            "producer": "ops/tools/run_execution_package_from_authorized_intent_v1.py",
+            "recovery_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_execution_package_from_authorized_intent_v1.py --day_utc {day_utc} --truth_root {truth_root} --intent_id <AUTHORIZED_INTENT_ID>",
+            "blocker_classification": "BLOCKED_BY_UPSTREAM",
+        },
+        {
+            "artifact": "execution_package_v1",
+            "status": "PRESENT" if expected_package_path and Path(expected_package_path).exists() else "MISSING",
+            "blocker": "" if expected_package_path and Path(expected_package_path).exists() else "EXECUTION_BUILD_NOT_COMPLETE",
+            "artifact_path": expected_package_path,
+            "producer": "ops/tools/run_execution_package_from_authorized_intent_v1.py",
+            "recovery_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_execution_package_from_authorized_intent_v1.py --day_utc {day_utc} --truth_root {truth_root} --intent_id <AUTHORIZED_INTENT_ID>",
+            "blocker_classification": "BLOCKED_BY_UPSTREAM",
+        },
+    ]
 
 
 def _build_execution_intent(*, day_utc: str, truth_root: Path, row: dict[str, Any], intent_obj: dict[str, Any], intent_path: Path) -> ExecutionIntentV1:
@@ -187,16 +316,24 @@ def build_execution_package_from_authorized_intent_v1(*, day_utc: str, truth_roo
     build_obj = result.get("build_obj") if isinstance(result.get("build_obj"), dict) else {}
     if str(build_obj.get("closure_status") or "").strip().upper() != "COMPLETE":
         first = build_obj.get("first_real_blocker") if isinstance(build_obj.get("first_real_blocker"), dict) else {}
+        build_path = str(result.get("build_path") or "")
         return _fail_payload(
             day_utc=day_utc,
             intent_id=intent_id,
             truth_root=truth_root,
             blocker=str(first.get("dependency_id") or "EXECUTION_PACKAGE_BUILD_NOT_COMPLETE"),
             details={
-                "build_path": str(result.get("build_path") or ""),
+                "build_path": build_path,
                 "first_real_blocker": first,
                 "blocking_chain": list(build_obj.get("blocking_chain") or []),
                 "materializable_now": list(build_obj.get("materializable_now") or []),
+                "chain_map": _execution_build_chain_map(
+                    day_utc=day_utc,
+                    truth_root=truth_root,
+                    build_obj=build_obj,
+                    build_path=build_path,
+                    package_path=str(result.get("package_path") or ""),
+                ),
             },
         )
     return {

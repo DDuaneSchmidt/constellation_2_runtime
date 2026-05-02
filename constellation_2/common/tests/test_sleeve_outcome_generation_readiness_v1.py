@@ -210,11 +210,26 @@ def test_blocked_execution_build_is_reported_in_package_readiness(tmp_path: Path
     )
     build_path = tmp_path / "reports" / "execution_build_v1" / DAY / "submission" / "execution_build.v1.json"
     _write(
+        tmp_path / "target_day_admission_v1" / f"{DAY}.json",
+        {
+            "admission_status": "BLOCKED",
+            "blocking_reason_codes": ["REQUIRED_GATE_FAIL"],
+            "blocker_chain": [{"artifact_id": "startup_materialization_input_convergence_v1", "blocker_code": "REQUIRED_GATE_FAIL"}],
+        },
+    )
+    _write(
         build_path,
         {
             "intent_id": "trend",
             "generated_utc": f"{DAY}T12:00:00Z",
             "closure_status": "BLOCKED",
+            "submission_id": "submission",
+            "candidate_ref": {
+                "canonical_truth_root": str(tmp_path),
+                "execution_truth_root": str(execution_root),
+                "sleeve_id": "PRIMARY",
+                "environment": "PAPER",
+            },
             "first_real_blocker": {"dependency_id": "global_context_package_v1", "status": "FAILED"},
             "blocking_chain": [{"dependency_id": "global_context_package_v1", "status": "FAILED"}],
             "materializable_now": ["global_context_package_v1"],
@@ -234,6 +249,9 @@ def test_blocked_execution_build_is_reported_in_package_readiness(tmp_path: Path
     assert readiness["status"] == "BLOCKED_BY_EXECUTION_BUILD"
     assert readiness["latest_execution_build"]["build_path"] == str(build_path.resolve())
     assert readiness["latest_execution_build"]["first_real_blocker"]["dependency_id"] == "global_context_package_v1"
+    assert readiness["latest_execution_build"]["chain_map"][0]["artifact"] == "target_day_admission_v1"
+    assert readiness["latest_execution_build"]["chain_map"][0]["blocker"] == "REQUIRED_GATE_FAIL"
+    assert "run_session_authority_v1.py" in readiness["latest_execution_build"]["chain_map"][0]["recovery_command"]
 
 
 def test_report_is_diagnostic_only_and_cannot_change_allocation_or_submit(tmp_path: Path) -> None:

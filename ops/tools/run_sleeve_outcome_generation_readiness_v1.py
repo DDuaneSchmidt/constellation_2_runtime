@@ -16,6 +16,7 @@ if str(REPO_ROOT) not in sys.path:
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1, resolve_fact_plane_truth_root_v1
 from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1, git_commit_v1, git_dirty_status_v1
 from ops.tools.aegis_truth_integrity_common_v1 import now_iso_v1, read_json_v1, write_json_v1
+from ops.tools.run_execution_package_from_authorized_intent_v1 import _execution_build_chain_map
 
 
 PRODUCER = "ops/tools/run_sleeve_outcome_generation_readiness_v1.py"
@@ -312,12 +313,21 @@ def _execution_package_readiness(
     }
     if latest_execution_build:
         first = latest_execution_build.get("first_real_blocker") if isinstance(latest_execution_build.get("first_real_blocker"), dict) else {}
+        build_path = str(latest_execution_build.get("_path") or "")
+        candidate_ref = latest_execution_build.get("candidate_ref") if isinstance(latest_execution_build.get("candidate_ref"), dict) else {}
         readiness["latest_execution_build"] = {
-            "build_path": str(latest_execution_build.get("_path") or ""),
+            "build_path": build_path,
             "closure_status": str(latest_execution_build.get("closure_status") or ""),
             "first_real_blocker": first,
             "blocking_chain": list(latest_execution_build.get("blocking_chain") or []),
             "materializable_now": list(latest_execution_build.get("materializable_now") or []),
+            "chain_map": _execution_build_chain_map(
+                day_utc=day_utc,
+                truth_root=Path(str(candidate_ref.get("execution_truth_root") or ".")),
+                build_obj=latest_execution_build,
+                build_path=build_path,
+                package_path=execution_package_path,
+            ),
         }
     return readiness
 

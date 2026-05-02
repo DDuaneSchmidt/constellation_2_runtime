@@ -162,3 +162,68 @@ def test_approved_defined_risk_intent_still_requires_governed_options_evidence(t
     assert result["status"] == "BLOCKED"
     assert result["blocker"] == "DEFINED_RISK_EXECUTION_PACKAGE_REQUIRES_GOVERNED_OPTIONS_EVIDENCE"
     assert result["package_path"] is None
+
+
+def test_blocked_trend_build_exposes_execution_chain_map(monkeypatch, tmp_path: Path) -> None:
+    _seed_capital(tmp_path, [_trend_row()])
+    _seed_intents(tmp_path)
+    _write(
+        tmp_path / "target_day_admission_v1" / f"{DAY}.json",
+        {
+            "admission_status": "BLOCKED",
+            "blocking_reason_codes": ["REQUIRED_GATE_FAIL"],
+            "blocker_chain": [{"artifact_id": "startup_materialization_input_convergence_v1", "blocker_code": "REQUIRED_GATE_FAIL"}],
+        },
+    )
+    build_path = tmp_path / "reports" / "execution_build_v1" / DAY / "submission" / "execution_build.v1.json"
+
+    def fake_stage(*, repo_root: Path, execution_intent):
+        candidate = tmp_path / "candidate.json"
+        _write(candidate, {"candidate": True})
+        return {"candidate_path": str(candidate)}
+
+    def fake_build(**kwargs):
+        return {
+            "build_obj": {
+                "closure_status": "BLOCKED",
+                "submission_id": "submission",
+                "candidate_ref": {
+                    "canonical_truth_root": str(tmp_path),
+                    "execution_truth_root": str(tmp_path),
+                    "sleeve_id": "PRIMARY",
+                    "environment": "PAPER",
+                },
+                "first_real_blocker": {
+                    "dependency_id": "global_context_package_v1",
+                    "path": str(tmp_path / "global_context_package.v1.json"),
+                },
+                "blocking_chain": [{"dependency_id": "global_context_package_v1", "status": "FAILED"}],
+                "materializable_now": ["global_context_package_v1"],
+            },
+            "build_path": str(build_path),
+            "package_path": "",
+        }
+
+    monkeypatch.setattr(tool, "stage_candidate_from_execution_intent_v1", fake_stage)
+    monkeypatch.setattr(tool, "run_execution_build_authority_v1", fake_build)
+
+    result = tool.build_execution_package_from_authorized_intent_v1(
+        day_utc=DAY,
+        truth_root=tmp_path,
+        intent_id=TREND_ID,
+    )
+
+    assert result["status"] == "BLOCKED"
+    chain = result["details"]["chain_map"]
+    assert [node["artifact"] for node in chain] == [
+        "target_day_admission_v1",
+        "day_activation_package_v1",
+        "global_context_package_v1",
+        "execution_build_v1",
+        "execution_package_v1",
+    ]
+    assert chain[0]["status"] == "BLOCKED"
+    assert chain[0]["blocker"] == "REQUIRED_GATE_FAIL"
+    assert "run_session_authority_v1.py" in chain[0]["recovery_command"]
+    assert chain[-1]["status"] == "MISSING"
+    assert chain[-1]["blocker"] == "EXECUTION_BUILD_NOT_COMPLETE"
