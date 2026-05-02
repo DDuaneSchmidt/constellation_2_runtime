@@ -547,8 +547,33 @@ def _apply_control_plane_statuses(payload: dict[str, Any], ctx: bod.BodContext) 
         return
     rank = _control_phase_rank()
     current_rank = rank.get(current_phase, 999)
+    control_blocker = str(control.get("canonical_blocker") or "").strip()
+    control_paths = [str(item) for item in (control.get("evidence_paths") if isinstance(control.get("evidence_paths"), list) else []) if str(item or "").strip()]
+    if control_blocker:
+        payload["requirements"].insert(
+            0,
+            _node(
+                requirement_id=f"{current_phase}:control_plane_current_blocker",
+                owner_phase=current_phase,
+                source_type=SOURCE_LIFECYCLE_PHASE,
+                source_id="AEGIS_CONTROL_PLANE",
+                instrument="",
+                required_artifact="control_plane_current_blocker",
+                expected_path=Path(control_paths[0]) if control_paths else control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc),
+                producer_command=str((control.get("recovery_commands") if isinstance(control.get("recovery_commands"), list) else [""])[0] if control.get("recovery_commands") else ""),
+                consumer="aegis_day_run_v1",
+                status="BLOCKING_CURRENT_RUN",
+                blocker=control_blocker,
+                blocker_detail=str(control.get("blocker_reason") or ""),
+                dependencies=[],
+                downstream_consequences=list(control.get("deferred_phases") if isinstance(control.get("deferred_phases"), list) else []),
+                operator_next_action=str(control.get("recovery_action") or ""),
+            ),
+        )
     for node in payload.get("requirements", []):
         if not isinstance(node, dict):
+            continue
+        if node.get("requirement_id") == f"{current_phase}:control_plane_current_blocker":
             continue
         status = str(node.get("status") or "").strip().upper()
         if status == "SATISFIED":
@@ -561,10 +586,14 @@ def _apply_control_plane_statuses(payload: dict[str, Any], ctx: bod.BodContext) 
         if owner_rank > current_rank:
             node["status"] = "DEFERRED_BY_UPSTREAM_BLOCKER"
             node["deferred_by_phase"] = current_phase
-            node["deferred_by_blocker"] = str(control.get("canonical_blocker") or "")
+            node["deferred_by_blocker"] = control_blocker
             node["operator_next_action"] = f"Deferred until {current_phase} clears."
         elif owner == current_phase:
-            node["status"] = "BLOCKING_CURRENT_RUN"
+            if str(node.get("canonical_blocker") or node.get("blocker") or "").strip() == control_blocker:
+                node["status"] = "BLOCKING_CURRENT_RUN"
+            else:
+                node["status"] = "DIAGNOSTIC_ONLY"
+                node["operator_next_action"] = f"Diagnostic only until {control_blocker} clears."
 
 
 def build_requirement_graph(ctx: bod.BodContext) -> dict[str, Any]:
