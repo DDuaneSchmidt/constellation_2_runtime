@@ -656,6 +656,32 @@ def _required_dep_path(results: Dict[str, Dict[str, Any]], dependency_id: str) -
     return path
 
 
+def _paper_bootstrap_execution_nav_path(ctx: EconomicContext, day_utc: str) -> Path:
+    return (ctx.execution_truth_root / 'accounting_v2' / 'nav' / day_utc / 'nav.v2.json').resolve()
+
+
+def _select_nav_evaluation_basis(
+    *,
+    ctx: EconomicContext,
+    canonical_nav_path: Path,
+    day_utc: str,
+) -> tuple[Path, str]:
+    if ctx.environment == 'PAPER' and ctx.operation_type == 'fresh_paper_entry_v1':
+        execution_nav_path = _paper_bootstrap_execution_nav_path(ctx, day_utc)
+        if execution_nav_path.exists() and execution_nav_path.is_file():
+            execution_nav_obj = _optional_json(execution_nav_path)
+            if isinstance(execution_nav_obj, dict):
+                status, _detail = _evaluate_semantics(
+                    dependency_id='accounting_nav_v2',
+                    obj=execution_nav_obj,
+                    path=execution_nav_path,
+                    ctx=ctx,
+                )
+                if status == STATUS_PRESENT:
+                    return execution_nav_path, 'EXECUTION_TRUTH_ROOT_PAPER_BOOTSTRAP'
+    return canonical_nav_path, 'CANONICAL_TRUTH_ROOT'
+
+
 def _load_marks_by_symbol(truth_root: Path, day_utc: str) -> tuple[Optional[Path], Dict[str, Dict[str, Any]]]:
     path = (truth_root / 'market_data_snapshot_v1' / 'broker_marks_v1' / day_utc / 'broker_marks.v1.json').resolve()
     obj = _optional_json(path)
@@ -822,14 +848,19 @@ def _extract_max_risk_pct(intent_obj: Dict[str, Any]) -> Optional[Decimal]:
 
 
 def _build_economic_evaluation(ctx: EconomicContext, results: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-    truth_root = ctx.canonical_truth_root
     day_utc = ctx.day_utc
     prev_day_utc = _day_str(_day_obj(day_utc) - timedelta(days=1))
 
     cash_path = _required_dep_path(results, 'cash_ledger_snapshot_v1')
     positions_path = _required_dep_path(results, 'positions_snapshot_v5')
     lifecycle_path = _required_dep_path(results, 'position_lifecycle_snapshot_v2')
-    nav_path = _required_dep_path(results, 'accounting_nav_v2')
+    canonical_nav_path = _required_dep_path(results, 'accounting_nav_v2')
+    nav_path, nav_basis = _select_nav_evaluation_basis(
+        ctx=ctx,
+        canonical_nav_path=canonical_nav_path,
+        day_utc=day_utc,
+    )
+    nav_truth_root = ctx.execution_truth_root if nav_basis == 'EXECUTION_TRUTH_ROOT_PAPER_BOOTSTRAP' else ctx.canonical_truth_root
     capauth_path = _required_dep_path(results, 'capital_authority_allocation_v1')
 
     cash_obj = _read_json(cash_path)
@@ -838,13 +869,13 @@ def _build_economic_evaluation(ctx: EconomicContext, results: Dict[str, Dict[str
     nav_obj = _read_json(nav_path)
     capauth_obj = _read_json(capauth_path)
 
-    prev_nav_path = (truth_root / 'accounting_v2' / 'nav' / prev_day_utc / 'nav.v2.json').resolve()
-    prev_positions_path = (truth_root / 'positions_v1' / 'snapshots' / prev_day_utc / 'positions_snapshot.v5.json').resolve()
+    prev_nav_path = (nav_truth_root / 'accounting_v2' / 'nav' / prev_day_utc / 'nav.v2.json').resolve()
+    prev_positions_path = (ctx.canonical_truth_root / 'positions_v1' / 'snapshots' / prev_day_utc / 'positions_snapshot.v5.json').resolve()
     prev_nav_obj = _optional_json(prev_nav_path)
     prev_positions_obj = _optional_json(prev_positions_path)
 
-    current_marks_path, current_marks = _load_marks_by_symbol(truth_root, day_utc)
-    prev_marks_path, prev_marks = _load_marks_by_symbol(truth_root, prev_day_utc)
+    current_marks_path, current_marks = _load_marks_by_symbol(ctx.canonical_truth_root, day_utc)
+    prev_marks_path, prev_marks = _load_marks_by_symbol(ctx.canonical_truth_root, prev_day_utc)
 
     nav_total = int(((nav_obj.get('nav') or {}) if isinstance(nav_obj.get('nav'), dict) else {}).get('nav_total') or 0)
     prev_nav_total = int(((prev_nav_obj.get('nav') or {}) if isinstance((prev_nav_obj or {}).get('nav'), dict) else {}).get('nav_total') or 0)
@@ -912,7 +943,7 @@ def _build_economic_evaluation(ctx: EconomicContext, results: Dict[str, Dict[str
         )
 
     nav_days: List[str] = []
-    nav_root = (truth_root / 'accounting_v2' / 'nav').resolve()
+    nav_root = (nav_truth_root / 'accounting_v2' / 'nav').resolve()
     if nav_root.exists() and nav_root.is_dir():
         for child in sorted(nav_root.iterdir()):
             if child.is_dir():
@@ -940,8 +971,8 @@ def _build_economic_evaluation(ctx: EconomicContext, results: Dict[str, Dict[str
     )
     external_rows: List[Dict[str, Any]] = []
     for symbol in target_symbols:
-        cur_close = _market_snapshot_close(_market_snapshot_path(truth_root, day_utc, symbol))
-        prev_close = _market_snapshot_close(_market_snapshot_path(truth_root, prev_day_utc, symbol))
+        cur_close = _market_snapshot_close(_market_snapshot_path(ctx.canonical_truth_root, day_utc, symbol))
+        prev_close = _market_snapshot_close(_market_snapshot_path(ctx.canonical_truth_root, prev_day_utc, symbol))
         if cur_close is None or prev_close is None or prev_close <= 0:
             continue
         benchmark_return = (cur_close / prev_close) - Decimal('1')
@@ -957,7 +988,7 @@ def _build_economic_evaluation(ctx: EconomicContext, results: Dict[str, Dict[str
             }
         )
 
-    fill_rows = _load_submission_fill_rows(truth_root, day_utc)
+    fill_rows = _load_submission_fill_rows(ctx.canonical_truth_root, day_utc)
     prev_positions_by_id = {
         str(item.get('position_id') or '').strip(): item
         for item in ((prev_positions_obj or {}).get('items') or [])
@@ -1002,7 +1033,7 @@ def _build_economic_evaluation(ctx: EconomicContext, results: Dict[str, Dict[str
         elif matching_fill is None:
             reason_codes.append('R_METRIC_CLOSE_FILL_MISSING')
         else:
-            intent_path = _find_intent_file(truth_root, str(item.get('opened_day_utc') or day_utc), str(item.get('intent_sha256') or ''))
+            intent_path = _find_intent_file(ctx.canonical_truth_root, str(item.get('opened_day_utc') or day_utc), str(item.get('intent_sha256') or ''))
             if intent_path is None:
                 reason_codes.append('R_METRIC_OPEN_INTENT_MISSING')
             else:
@@ -1011,7 +1042,7 @@ def _build_economic_evaluation(ctx: EconomicContext, results: Dict[str, Dict[str
                 if max_risk_pct is None or max_risk_pct <= 0:
                     reason_codes.append('R_METRIC_MAX_RISK_UNPROVEN')
                 else:
-                    entry_nav_path = (truth_root / 'accounting_v2' / 'nav' / str(item.get('opened_day_utc') or day_utc) / 'nav.v2.json').resolve()
+                    entry_nav_path = (nav_truth_root / 'accounting_v2' / 'nav' / str(item.get('opened_day_utc') or day_utc) / 'nav.v2.json').resolve()
                     entry_nav_obj = _optional_json(entry_nav_path)
                     entry_nav_total = int((((entry_nav_obj or {}).get('nav') or {}) if isinstance((entry_nav_obj or {}).get('nav'), dict) else {}).get('nav_total') or 0)
                     entry_qty = abs(int((prev_item or {}).get('qty') or 0))
@@ -1077,9 +1108,11 @@ def _build_economic_evaluation(ctx: EconomicContext, results: Dict[str, Dict[str
         {'type': 'cash_ledger_snapshot_v1', 'path': str(cash_path), 'sha256': _sha256_file(cash_path)},
         {'type': 'positions_snapshot_v5', 'path': str(positions_path), 'sha256': _sha256_file(positions_path)},
         {'type': 'position_lifecycle_snapshot_v2', 'path': str(lifecycle_path), 'sha256': _sha256_file(lifecycle_path)},
-        {'type': 'accounting_nav_v2', 'path': str(nav_path), 'sha256': _sha256_file(nav_path)},
+        {'type': 'accounting_nav_v2', 'path': str(nav_path), 'sha256': _sha256_file(nav_path), 'nav_basis': nav_basis},
         {'type': 'capital_authority_allocation_v1', 'path': str(capauth_path), 'sha256': _sha256_file(capauth_path)},
     ]
+    if nav_path != canonical_nav_path:
+        evaluation_manifest.append({'type': 'accounting_nav_v2_canonical_required', 'path': str(canonical_nav_path), 'sha256': _sha256_file(canonical_nav_path), 'nav_basis': 'CANONICAL_TRUTH_ROOT_REQUIRED_DEPENDENCY'})
     if prev_nav_obj is not None:
         evaluation_manifest.append({'type': 'accounting_nav_v2_prev', 'path': str(prev_nav_path), 'sha256': _sha256_file(prev_nav_path)})
     if prev_positions_obj is not None:
@@ -1108,6 +1141,8 @@ def _build_economic_evaluation(ctx: EconomicContext, results: Dict[str, Dict[str
                 'daily_pnl': int(portfolio_pnl),
                 'daily_return': (_decimal_text(portfolio_return) if portfolio_return is not None else None),
                 'status': ('OK' if portfolio_return is not None else 'GENESIS'),
+                'nav_basis': nav_basis,
+                'nav_path': str(nav_path),
             },
             'sleeves': sleeve_rows,
             'edges': engine_rows,
@@ -1146,6 +1181,8 @@ def _build_economic_evaluation(ctx: EconomicContext, results: Dict[str, Dict[str
         'risk_state': {
             'rolling_peak_nav': int(rolling_peak_nav),
             'drawdown_pct': _decimal_text(drawdown, DD_Q),
+            'nav_basis': nav_basis,
+            'nav_path': str(nav_path),
             'reason_codes': ([] if rolling_peak_nav > 0 else ['NO_NAV_HISTORY_AVAILABLE']),
         },
         'r_metrics_state': {
@@ -1174,6 +1211,7 @@ def _build_economic_evaluation(ctx: EconomicContext, results: Dict[str, Dict[str
             'positions_snapshot_v5': str(positions_path),
             'position_lifecycle_snapshot_v2': str(lifecycle_path),
             'accounting_nav_v2': str(nav_path),
+            'accounting_nav_v2_required_dependency': str(canonical_nav_path),
             'capital_authority_allocation_v1': str(capauth_path),
         },
     }

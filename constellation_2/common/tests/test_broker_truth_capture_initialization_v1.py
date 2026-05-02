@@ -450,7 +450,13 @@ def _write_operator_gate_inputs(truth_root: Path) -> None:
     )
 
 
-def _write_previous_day_economic_build(truth_root: Path, *, prev_day: str, drawdown_pct: str = "-0.010000") -> None:
+def _write_previous_day_economic_build(
+    truth_root: Path,
+    *,
+    prev_day: str,
+    drawdown_pct: str = "-0.005000",
+    operation_type: str = "fresh_paper_entry_v1",
+) -> None:
     canonical_truth_root = _canonical_truth_root_for_sleeve_truth(truth_root)
     _write_json(
         canonical_truth_root / "reports" / "economic_state_build_v1" / prev_day / "ctx-test" / "economic_state_build.v1.json",
@@ -458,6 +464,7 @@ def _write_previous_day_economic_build(truth_root: Path, *, prev_day: str, drawd
             "schema_id": "economic_state_build",
             "schema_version": "v1",
             "day_utc": prev_day,
+            "operation_type": operation_type,
             "closure_status": "COMPLETE",
             "economic_evaluation": {
                 "benchmark_state": {
@@ -821,6 +828,8 @@ def test_operator_daily_gate_fails_on_previous_day_bundle_c_drawdown(monkeypatch
     assert gate["checks"]["previous_day_economic_state_status"] == "OK"
     assert gate["checks"]["previous_day_drawdown_guard_status"] == "BLOCKED"
     assert gate["economic_state"]["drawdown_pct"] == "-0.110000"
+    assert gate["economic_state"]["drawdown_policy"]["profile_id"] == "PAPER_BOOTSTRAP"
+    assert gate["economic_state"]["drawdown_policy"]["drawdown_block_limit"] == "-0.010000"
     assert "BUNDLE_C_DRAWDOWN_LIMIT_EXCEEDED" in gate["reason_codes"]
 
     for gate_id, filename in {
@@ -879,6 +888,95 @@ def test_operator_daily_gate_fails_on_previous_day_bundle_c_drawdown(monkeypatch
         "replay_certification_gate_v1",
     ]
     assert validated_gate_stack["constitutional_lineage"]["artifact_type"] == "gate_stack_verdict_v1"
+
+
+def test_operator_daily_gate_paper_bootstrap_drawdown_profile_allows_tiny_drawdown(monkeypatch, tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    prev_day = "2026-04-12"
+    _write_submission_day(truth_root, submission_only=True)
+    source_path = _write_broker_event_day(
+        truth_root,
+        execdetails_total=0,
+        include_cash_capture=True,
+        include_position_capture=True,
+    )
+    _materialize_broker_fact_spine(truth_root=truth_root, source_path=source_path, monkeypatch=monkeypatch)
+    _write_operator_gate_inputs(truth_root)
+    _write_previous_day_economic_build(truth_root, prev_day=prev_day, drawdown_pct="-0.005000")
+    recon = _run_reconciliation(truth_root=truth_root)
+    assert recon["payload"]["status"] == "OK"
+
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "run_operator_daily_gate_v3.py",
+            "--day_utc",
+            DAY,
+            "--truth_root",
+            str(truth_root),
+            "--produced_utc",
+            f"{DAY}T00:00:00Z",
+            "--mode",
+            "PAPER",
+        ],
+    ):
+        rc = operator_gate_module.main()
+
+    gate_path = truth_root / "reports" / "operator_daily_gate_v3" / DAY / "operator_daily_gate.v3.json"
+    gate = json.loads(gate_path.read_text(encoding="utf-8"))
+    assert rc == 0
+    assert gate["status"] == "PASS"
+    assert gate["checks"]["previous_day_drawdown_guard_status"] == "PASS"
+    assert gate["economic_state"]["drawdown_policy"]["profile_id"] == "PAPER_BOOTSTRAP"
+    assert gate["economic_state"]["drawdown_policy"]["max_new_trades_per_day"] == 1
+
+
+def test_operator_daily_gate_live_mode_preserves_production_drawdown_limit(monkeypatch, tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    prev_day = "2026-04-12"
+    _write_submission_day(truth_root, submission_only=True)
+    source_path = _write_broker_event_day(
+        truth_root,
+        execdetails_total=0,
+        include_cash_capture=True,
+        include_position_capture=True,
+    )
+    _materialize_broker_fact_spine(truth_root=truth_root, source_path=source_path, monkeypatch=monkeypatch)
+    _write_operator_gate_inputs(truth_root)
+    _write_previous_day_economic_build(
+        truth_root,
+        prev_day=prev_day,
+        drawdown_pct="-0.020000",
+        operation_type="live_entry_v1",
+    )
+    recon = _run_reconciliation(truth_root=truth_root)
+    assert recon["payload"]["status"] == "OK"
+
+    with patch.object(
+        sys,
+        "argv",
+        [
+            "run_operator_daily_gate_v3.py",
+            "--day_utc",
+            DAY,
+            "--truth_root",
+            str(truth_root),
+            "--produced_utc",
+            f"{DAY}T00:00:00Z",
+            "--mode",
+            "LIVE",
+        ],
+    ):
+        rc = operator_gate_module.main()
+
+    gate_path = truth_root / "reports" / "operator_daily_gate_v3" / DAY / "operator_daily_gate.v3.json"
+    gate = json.loads(gate_path.read_text(encoding="utf-8"))
+    assert rc == 0
+    assert gate["status"] == "PASS"
+    assert gate["checks"]["previous_day_drawdown_guard_status"] == "PASS"
+    assert gate["economic_state"]["drawdown_policy"]["profile_id"] == "PRODUCTION"
+    assert gate["economic_state"]["drawdown_policy"]["drawdown_block_limit"] == "-0.100000"
 
 
 def test_operator_daily_gate_fails_closed_when_capital_risk_envelope_is_invalid_governed_payload(

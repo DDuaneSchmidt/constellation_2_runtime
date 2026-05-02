@@ -116,6 +116,7 @@
         "artifact_sha256",
         "drawdown_pct",
         "drawdown_guard_status",
+        "drawdown_policy",
         "policy_baseline_comparison_vs_portfolio_return",
         "external_benchmark_underperformer_count",
         "reason_codes"
@@ -127,6 +128,36 @@
         "artifact_sha256": { "type": "string" },
         "drawdown_pct": { "type": ["string", "null"] },
         "drawdown_guard_status": { "type": "string", "enum": ["PASS", "BLOCKED", "UNKNOWN"] },
+        "drawdown_policy": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "profile_id",
+            "drawdown_basis",
+            "drawdown_block_limit",
+            "max_trade_risk_pct_nav",
+            "max_daily_loss_pct_nav",
+            "max_weekly_loss_pct_nav",
+            "max_open_positions",
+            "max_new_trades_per_day",
+            "stop_after_consecutive_losses",
+            "reset_requires_governed_review",
+            "policy_path"
+          ],
+          "properties": {
+            "profile_id": { "type": "string", "minLength": 1 },
+            "drawdown_basis": { "type": "string", "minLength": 1 },
+            "drawdown_block_limit": { "type": "string", "minLength": 1 },
+            "max_trade_risk_pct_nav": { "type": "string", "minLength": 1 },
+            "max_daily_loss_pct_nav": { "type": "string", "minLength": 1 },
+            "max_weekly_loss_pct_nav": { "type": "string", "minLength": 1 },
+            "max_open_positions": { "type": "integer", "minimum": 0 },
+            "max_new_trades_per_day": { "type": "integer", "minimum": 0 },
+            "stop_after_consecutive_losses": { "type": "integer", "minimum": 0 },
+            "reset_requires_governed_review": { "type": "boolean" },
+            "policy_path": { "type": "string", "minLength": 1 }
+          }
+        },
         "policy_baseline_comparison_vs_portfolio_return": { "type": ["string", "null"] },
         "external_benchmark_underperformer_count": { "type": "integer", "minimum": 0 },
         "reason_codes": {

@@ -74,9 +74,9 @@ def _truth_root_from_args_or_env(truth_root_arg: str | None) -> Path:
 TRUTH = (REPO_ROOT / "constellation_2/runtime/truth").resolve()  # placeholder; overwritten in main()
 
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/operator_daily_gate.v3.schema.json"
+POLICY_RELPATH = "governance/02_REGISTRIES/C2_BUNDLE_C_DRAWDOWN_POLICY_V1.json"
 OUT_ROOT = (TRUTH / "reports" / "operator_daily_gate_v3").resolve()
 ECONOMIC_BUILD_FAMILY = "economic_state_build_v1"
-ECONOMIC_DRAWDOWN_BLOCK_LIMIT = Decimal("-0.100000")
 
 RECON_ROOT_V3 = (TRUTH / "reports" / "reconciliation_report_v3").resolve()
 POS_SNAP_ROOT = (TRUTH / "positions_v1/snapshots").resolve()
@@ -159,7 +159,35 @@ def _canonical_economic_truth_root() -> Path:
     return resolve_canonical_truth_root().resolve()
 
 
-def _load_previous_day_economic_build_state(*, truth_root: Path, day_utc: str) -> Dict[str, Any]:
+def _load_bundle_c_drawdown_policy() -> Dict[str, Any]:
+    policy_path = (REPO_ROOT / POLICY_RELPATH).resolve()
+    policy = _read_json(policy_path)
+    profiles = policy.get("profiles")
+    if not isinstance(profiles, dict):
+        raise SystemExit(f"FAIL: BUNDLE_C_DRAWDOWN_POLICY_INVALID:path={policy_path}")
+    return policy
+
+
+def _select_bundle_c_drawdown_profile(*, mode: str, operation_type: str) -> Dict[str, Any]:
+    policy = _load_bundle_c_drawdown_policy()
+    mode_text = str(mode or "").strip().upper()
+    op_text = str(operation_type or "").strip()
+    profiles = policy["profiles"]
+    for profile_id in ("PAPER_BOOTSTRAP", "PRODUCTION"):
+        profile = profiles.get(profile_id)
+        if not isinstance(profile, dict):
+            continue
+        modes = {str(item).strip().upper() for item in profile.get("applies_to_modes") or []}
+        ops = {str(item).strip() for item in profile.get("operation_types") or []}
+        if mode_text in modes and (not op_text or "*" in ops or op_text in ops):
+            return {**profile, "policy_path": str((REPO_ROOT / POLICY_RELPATH).resolve())}
+    production = profiles.get("PRODUCTION")
+    if not isinstance(production, dict):
+        raise SystemExit("FAIL: BUNDLE_C_DRAWDOWN_POLICY_PRODUCTION_PROFILE_MISSING")
+    return {**production, "policy_path": str((REPO_ROOT / POLICY_RELPATH).resolve())}
+
+
+def _load_previous_day_economic_build_state(*, truth_root: Path, day_utc: str, mode: str) -> Dict[str, Any]:
     prev_day_utc = _prior_day_utc(day_utc)
     # economic_state_build_v1 is governed as canonical truth, while this gate is
     # emitted under the execution truth root. Do not silently look for canonical
@@ -176,6 +204,7 @@ def _load_previous_day_economic_build_state(*, truth_root: Path, day_utc: str) -
         "drawdown_guard_status": "UNKNOWN",
         "policy_baseline_comparison_vs_portfolio_return": None,
         "external_benchmark_underperformer_count": 0,
+        "drawdown_policy": _select_bundle_c_drawdown_profile(mode=mode, operation_type=""),
         "reason_codes": ["BUNDLE_C_PREVIOUS_DAY_ECONOMIC_BUILD_MISSING"],
     }
     if not build_root.exists() or not build_root.is_dir():
@@ -225,13 +254,21 @@ def _load_previous_day_economic_build_state(*, truth_root: Path, day_utc: str) -
         }
 
     risk_state = evaluation.get("risk_state") if isinstance(evaluation.get("risk_state"), dict) else {}
+    operation_type = str(build_obj.get("operation_type") or "").strip()
+    drawdown_policy = _select_bundle_c_drawdown_profile(mode=mode, operation_type=operation_type)
+    block_limit = _decimal_or_none(drawdown_policy.get("drawdown_block_limit"))
+    if block_limit is None:
+        raise SystemExit(
+            "FAIL: BUNDLE_C_DRAWDOWN_POLICY_BLOCK_LIMIT_INVALID:"
+            f"profile={drawdown_policy.get('profile_id')}:path={drawdown_policy.get('policy_path')}"
+        )
     benchmark_state = evaluation.get("benchmark_state") if isinstance(evaluation.get("benchmark_state"), dict) else {}
     policy_baseline = benchmark_state.get("policy_baseline") if isinstance(benchmark_state.get("policy_baseline"), dict) else {}
     drawdown_pct = risk_state.get("drawdown_pct")
     drawdown_decimal = _decimal_or_none(drawdown_pct)
     drawdown_guard_status = "UNKNOWN"
     if drawdown_decimal is not None:
-        drawdown_guard_status = "BLOCKED" if drawdown_decimal <= ECONOMIC_DRAWDOWN_BLOCK_LIMIT else "PASS"
+        drawdown_guard_status = "BLOCKED" if drawdown_decimal <= block_limit else "PASS"
 
     external_underperformer_count = 0
     for row in benchmark_state.get("external_benchmarks") or []:
@@ -249,6 +286,7 @@ def _load_previous_day_economic_build_state(*, truth_root: Path, day_utc: str) -
         "artifact_sha256": build_sha256,
         "drawdown_pct": drawdown_pct,
         "drawdown_guard_status": drawdown_guard_status,
+        "drawdown_policy": drawdown_policy,
         "policy_baseline_comparison_vs_portfolio_return": policy_baseline.get("comparison_vs_portfolio_return"),
         "external_benchmark_underperformer_count": external_underperformer_count,
         "reason_codes": [],
@@ -432,7 +470,11 @@ def main() -> int:
             notes.append(f"missing_exit_intents_for_engines={','.join(missing_eids)}")
             exit_intents_satisfied = False
 
-    economic_state = _load_previous_day_economic_build_state(truth_root=TRUTH, day_utc=day)
+    economic_state = _load_previous_day_economic_build_state(
+        truth_root=TRUTH,
+        day_utc=day,
+        mode=str(args.mode).strip().upper(),
+    )
     if str(economic_state.get("artifact_path") or "").strip():
         input_manifest.append(
             {
@@ -448,7 +490,8 @@ def main() -> int:
                 "bundle_c_drawdown_block:"
                 f"source_day_utc={economic_state['source_day_utc']}:"
                 f"drawdown_pct={economic_state.get('drawdown_pct')}:"
-                f"limit_pct={str(ECONOMIC_DRAWDOWN_BLOCK_LIMIT)}"
+                f"limit_pct={str((economic_state.get('drawdown_policy') or {}).get('drawdown_block_limit') or '')}:"
+                f"profile={str((economic_state.get('drawdown_policy') or {}).get('profile_id') or '')}"
             )
         policy_comparison = _decimal_or_none(
             economic_state.get("policy_baseline_comparison_vs_portfolio_return")
@@ -646,6 +689,7 @@ def main() -> int:
             "artifact_sha256": str(economic_state.get("artifact_sha256") or ""),
             "drawdown_pct": economic_state.get("drawdown_pct"),
             "drawdown_guard_status": str(economic_state.get("drawdown_guard_status") or "UNKNOWN"),
+            "drawdown_policy": dict(economic_state.get("drawdown_policy") or {}),
             "policy_baseline_comparison_vs_portfolio_return": economic_state.get(
                 "policy_baseline_comparison_vs_portfolio_return"
             ),

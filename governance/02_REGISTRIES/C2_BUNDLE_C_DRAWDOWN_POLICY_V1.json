@@ -1,0 +1,37 @@
+{
+  "registry_id": "C2_BUNDLE_C_DRAWDOWN_POLICY_V1",
+  "schema_id": "c2_bundle_c_drawdown_policy",
+  "schema_version": "v1",
+  "owner": "operator_daily_gate_v3",
+  "description": "Bundle C drawdown guard profiles. Production/live limits are preserved; paper bootstrap has an explicit tighter cap for controlled outcome generation.",
+  "profiles": {
+    "PRODUCTION": {
+      "profile_id": "PRODUCTION",
+      "applies_to_modes": ["LIVE", "PRODUCTION"],
+      "operation_types": ["*"],
+      "drawdown_basis": "ROLLING_PEAK_NAV",
+      "drawdown_block_limit": "-0.100000",
+      "max_trade_risk_pct_nav": "0.010000",
+      "max_daily_loss_pct_nav": "0.020000",
+      "max_weekly_loss_pct_nav": "0.050000",
+      "max_open_positions": 5,
+      "max_new_trades_per_day": 3,
+      "stop_after_consecutive_losses": 3,
+      "reset_requires_governed_review": true
+    },
+    "PAPER_BOOTSTRAP": {
+      "profile_id": "PAPER_BOOTSTRAP",
+      "applies_to_modes": ["PAPER"],
+      "operation_types": ["fresh_paper_entry_v1"],
+      "drawdown_basis": "ROLLING_PEAK_NAV",
+      "drawdown_block_limit": "-0.010000",
+      "max_trade_risk_pct_nav": "0.001000",
+      "max_daily_loss_pct_nav": "0.005000",
+      "max_weekly_loss_pct_nav": "0.010000",
+      "max_open_positions": 1,
+      "max_new_trades_per_day": 1,
+      "stop_after_consecutive_losses": 2,
+      "reset_requires_governed_review": true
+    }
+  }
+}

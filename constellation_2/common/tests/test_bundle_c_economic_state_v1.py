@@ -292,7 +292,7 @@ def test_bundle_c_builds_canonical_economic_evaluation_from_bundle_a_and_b(tmp_p
     _run_nav(day, canonical_truth)
 
     _write_json(
-        canonical_truth / 'allocation_v1' / 'capital_authority_allocation_v1' / day / 'capital_authority_allocation.v1.json',
+        sleeve_root / SLEEVE / ENV / 'allocation_v1' / 'capital_authority_allocation_v1' / day / 'capital_authority_allocation.v1.json',
         _capauth(
             day,
             target_rows=[
@@ -329,6 +329,65 @@ def test_bundle_c_builds_canonical_economic_evaluation_from_bundle_a_and_b(tmp_p
     assert result['package_obj']['economic_evaluation_ref']['logical_name'] == 'economic_state_build_v1.economic_evaluation'
 
 
+def test_bundle_c_paper_bootstrap_uses_execution_nav_basis_when_available(tmp_path: Path, monkeypatch) -> None:
+    day = '2026-04-30'
+    canonical_truth = tmp_path / 'truth'
+    sleeve_root = tmp_path / 'truth_sleeves'
+    sleeve_truth = sleeve_root / SLEEVE / ENV
+    _patch_roots(monkeypatch, canonical_truth, sleeve_root)
+    _seed_raw_global_context(canonical_truth, sleeve_root, day)
+    _seal_global_context(day)
+
+    _write_json(canonical_truth / 'cash_ledger_v1' / 'snapshots' / day / 'cash_ledger_snapshot.v1.json', _cash_snapshot(day, 0))
+    _write_json(canonical_truth / 'positions_v1' / 'snapshots' / day / 'positions_snapshot.v5.json', _positions_snapshot(day, 0, []))
+    _write_json(canonical_truth / 'position_lifecycle_v2' / day / 'position_lifecycle_snapshot.v2.json', _lifecycle_snapshot(day, []))
+    _write_json(
+        canonical_truth / 'accounting_v2' / 'nav' / day / 'nav.v2.json',
+        {
+            'schema_id': 'C2_ACCOUNTING_NAV_V2',
+            'schema_version': 2,
+            'day_utc': day,
+            'status': 'ACTIVE',
+            'nav': {'nav_total': 0, 'gross_positions_value': 0},
+            'history': {'peak_nav': 1000000, 'drawdown_pct': '-1.000000'},
+        },
+    )
+    _write_json(
+        sleeve_truth / 'accounting_v2' / 'nav' / day / 'nav.v2.json',
+        {
+            'schema_id': 'C2_ACCOUNTING_NAV_V2',
+            'schema_version': 2,
+            'day_utc': day,
+            'status': 'ACTIVE',
+            'nav': {'nav_total': 1013002, 'gross_positions_value': 0},
+            'history': {'peak_nav': 1013002, 'drawdown_pct': '0.000000'},
+        },
+    )
+    _write_json(
+        sleeve_truth / 'allocation_v1' / 'capital_authority_allocation_v1' / day / 'capital_authority_allocation.v1.json',
+        _capauth(day, target_rows=[], per_sleeve=[]),
+    )
+
+    result = econ_module.run_economic_state_authority_v1(
+        repo_root=SOURCE_ROOT,
+        operation_type='fresh_paper_entry_v1',
+        day_utc=day,
+        sleeve_id=SLEEVE,
+        environment=ENV,
+        ib_account=ACCOUNT,
+        materialize=False,
+        emit_package=False,
+    )
+    econ = result['build_obj']['economic_evaluation']
+
+    assert result['build_obj']['closure_status'] == 'COMPLETE'
+    assert econ['performance_state']['portfolio']['current_nav_total'] == 1013002
+    assert econ['performance_state']['portfolio']['nav_basis'] == 'EXECUTION_TRUTH_ROOT_PAPER_BOOTSTRAP'
+    assert econ['risk_state']['drawdown_pct'] == '0.000000'
+    assert econ['risk_state']['nav_basis'] == 'EXECUTION_TRUTH_ROOT_PAPER_BOOTSTRAP'
+    assert econ['upstream_truth']['accounting_nav_v2_required_dependency'].endswith('/truth/accounting_v2/nav/2026-04-30/nav.v2.json')
+
+
 def test_bundle_c_computes_closed_trade_r_and_tax_characterization_conservatively(tmp_path: Path, monkeypatch) -> None:
     prev_day = '2026-04-20'
     day = '2026-04-21'
@@ -355,7 +414,7 @@ def test_bundle_c_computes_closed_trade_r_and_tax_characterization_conservativel
     _run_nav(day, canonical_truth)
 
     _write_json(
-        canonical_truth / 'allocation_v1' / 'capital_authority_allocation_v1' / day / 'capital_authority_allocation.v1.json',
+        sleeve_root / SLEEVE / ENV / 'allocation_v1' / 'capital_authority_allocation_v1' / day / 'capital_authority_allocation.v1.json',
         _capauth(
             day,
             target_rows=[{'intent_hash': '1' * 64, 'intent_id': 'intent-close-spy', 'engine_id': 'C2_TREND_EQ_PRIMARY_V1', 'symbol': 'SPY', 'strategy_sleeve_id': 'TREND', 'execution_sleeve_id': 'PRIMARY', 'account_id': ACCOUNT, 'target_notional_pct': '0', 'actual_notional_pct': '0', 'drift_notional_pct': '0', 'action_type': 'CLOSE', 'position_id': 'pos-spy'}],
@@ -405,7 +464,7 @@ def test_bundle_c_reallocation_signal_uses_deadband_to_avoid_thrashing(tmp_path:
     _run_nav(day, canonical_truth)
 
     _write_json(
-        canonical_truth / 'allocation_v1' / 'capital_authority_allocation_v1' / day / 'capital_authority_allocation.v1.json',
+        sleeve_root / SLEEVE / ENV / 'allocation_v1' / 'capital_authority_allocation_v1' / day / 'capital_authority_allocation.v1.json',
         _capauth(
             day,
             target_rows=[{'intent_hash': 'd' * 64, 'intent_id': 'intent-spy', 'engine_id': 'C2_TREND_EQ_PRIMARY_V1', 'symbol': 'SPY', 'strategy_sleeve_id': 'TREND', 'execution_sleeve_id': 'PRIMARY', 'account_id': ACCOUNT, 'target_notional_pct': '0.100000', 'actual_notional_pct': '0.100000', 'drift_notional_pct': '0.000000', 'action_type': 'HOLD', 'position_id': 'pos-spy'}],
