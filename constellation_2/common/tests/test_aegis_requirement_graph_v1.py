@@ -426,6 +426,40 @@ def test_paper_capital_seed_external_input_requires_schema_shaped_provenance(tmp
     assert "cash_total_matches_nlv_total" in node["external_input_missing_metadata"]
 
 
+def test_pre_open_bundle_requires_producer_contract_and_passes_with_contract(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    path = ctx.truth_root / "reports" / "pre_open_bundle_v1" / ctx.day_utc / "pre_open_bundle.v1.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "target_day": ctx.day_utc,
+                "materialization_state": "COMPLETE",
+                "completion_state": "COMPLETE",
+                "blocking_reason_codes": [],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    missing_payload = graph.build_requirement_graph(ctx)
+    missing_node = next(row for row in missing_payload["requirements"] if row["requirement_id"] == "BOD_INPUTS:pre_open_bundle")
+
+    assert missing_node["status"] == "BLOCKED"
+    assert missing_node["canonical_blocker"] == "REQUIRED_PRODUCER_CONTRACT_MISSING"
+
+    payload_with_contract = json.loads(path.read_text(encoding="utf-8"))
+    payload_with_contract["producer_contract_v1"] = {"deterministic_fingerprint": "test"}
+    path.write_text(json.dumps(payload_with_contract, sort_keys=True), encoding="utf-8")
+
+    satisfied_payload = graph.build_requirement_graph(ctx)
+    satisfied_node = next(row for row in satisfied_payload["requirements"] if row["requirement_id"] == "BOD_INPUTS:pre_open_bundle")
+
+    assert satisfied_node["status"] == "SATISFIED"
+    assert satisfied_node["canonical_blocker"] == ""
+
+
 def test_operator_statement_external_input_requires_provenance_metadata(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     statement = bod.resolve_operator_statement_path(operator_input_root=ctx.operator_input_root, day_utc=ctx.day_utc)

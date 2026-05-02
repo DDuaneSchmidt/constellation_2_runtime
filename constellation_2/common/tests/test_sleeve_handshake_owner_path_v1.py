@@ -248,7 +248,14 @@ class SleeveHandshakeOwnerPathTests(unittest.TestCase):
         self.assertIn("--truth_root", handshake_cmd)
         self.assertEqual(handshake_cmd[handshake_cmd.index("--truth_root") + 1], str(primary_truth_root))
         self.assertIn("producer_contract_v1", written_payload)
-        self.assertEqual(written_payload["producer_contract_v1"]["producer_name"], "ops/tools/run_pre_open_materializer_v1.py")
+        contract = written_payload["producer_contract_v1"]
+        self.assertEqual(contract["producer_name"], "ops/tools/run_pre_open_materializer_v1.py")
+        output_paths = [
+            str(row.get("path") or row)
+            for row in contract["output_artifacts"]
+        ]
+        self.assertIn(str(pre_open_tool.resolve_pre_open_bundle_path_v1(truth_root=canonical_truth_root, day_utc=DAY)), output_paths)
+        self.assertIn("deterministic_fingerprint", contract)
 
     def test_pre_open_tool_attempts_rollover_before_broker_checks_when_stale(self) -> None:
         calls: list[dict[str, object]] = []
@@ -642,6 +649,8 @@ class SleeveHandshakeOwnerPathTests(unittest.TestCase):
         self.assertNotIn("ops/tools/run_session_authority_v1.py", scripts)
         payload = dict(written_payload["payload"])
         self.assertNotIn("ROLLOVER_FAILED_STALE_AUTHORITY_HEAD", payload["blocking_reason_codes"])
+        self.assertIn("producer_contract_v1", payload)
+        self.assertEqual(payload["producer_contract_v1"]["producer_name"], "ops/tools/run_pre_open_materializer_v1.py")
 
     def test_pre_open_tool_does_not_force_stale_block_when_head_aligned_after_rollover_attempt(self) -> None:
         calls: list[dict[str, object]] = []
