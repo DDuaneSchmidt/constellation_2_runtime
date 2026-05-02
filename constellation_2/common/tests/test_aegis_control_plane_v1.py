@@ -17,6 +17,7 @@ from ops.tools import run_aegis_bod_prepare_v1 as bod  # noqa: E402
 
 DAY = "2026-05-04"
 KNOWN_FAILURE_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "readiness_domain_ownership_known_failure_v1.json"
+DOMAIN_DRIFT_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "readiness_domain_drift_known_good_vs_current_v1.json"
 
 
 def _ctx(tmp_path: Path) -> bod.BodContext:
@@ -59,6 +60,10 @@ def _write(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
 
 
+def _producer_contract() -> dict:
+    return {"producer_contract_v1": {"code_version_git_commit": cp._current_git_commit_v1(), "source_dirty_status": "CLEAN"}}
+
+
 def _source_pass(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(
         cp,
@@ -95,7 +100,7 @@ def _session_pass(ctx: bod.BodContext) -> None:
     )
     _write(
         ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json",
-        {"day_utc": ctx.day_utc, "bootstrap_status": "PASS"},
+        {"day_utc": ctx.day_utc, "bootstrap_status": "PASS", **_producer_contract()},
     )
     _write(ctx.truth_root / "market_calendar_v1" / "dataset_manifest.json", {"day_utc": ctx.day_utc, "coverage_status": "HEALTHY"})
 
@@ -107,7 +112,7 @@ def _session_supporting_authorities(ctx: bod.BodContext) -> None:
     )
     _write(
         ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json",
-        {"day_utc": ctx.day_utc, "bootstrap_status": "PASS"},
+        {"day_utc": ctx.day_utc, "bootstrap_status": "PASS", **_producer_contract()},
     )
 
 
@@ -188,7 +193,7 @@ def _session_blocked_artifacts(ctx: bod.BodContext) -> None:
     )
     _write(
         ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json",
-        {"day_utc": ctx.day_utc, "bootstrap_status": "READY"},
+        {"day_utc": ctx.day_utc, "bootstrap_status": "READY", **_producer_contract()},
     )
 
 
@@ -554,10 +559,22 @@ def test_readiness_registry_contract_is_mandatory_and_single_owner() -> None:
         for dep in domain["dependencies"]:
             dependency_id = dep["dependency_id"]
             assert dep["domain_owner"] == domain["domain_id"]
+            assert dep["owning_domain"] == domain["domain_id"]
             assert dependency_id not in owners
             owners[dependency_id] = dep["domain_owner"]
-            for key in ("expected_path", "schema_path", "producer_command", "recovery_action", "blocking_scope"):
+            for key in (
+                "expected_path",
+                "artifact_path",
+                "schema_path",
+                "producer_command",
+                "governed_producer",
+                "recovery_action",
+                "recovery_command",
+                "blocking_scope",
+            ):
                 assert dep[key]
+            assert dep["artifact_path"] == dep["expected_path"]
+            assert dep["governed_producer"] == dep["producer_command"]
 
 
 def test_registry_rejects_session_identity_leakage(monkeypatch) -> None:  # noqa: ANN001
@@ -569,10 +586,14 @@ def test_registry_rejects_session_identity_leakage(monkeypatch) -> None:  # noqa
                 {
                     "dependency_id": "runtime_resilience_authority_v1",
                     "domain_owner": "SESSION_IDENTITY",
+                    "owning_domain": "SESSION_IDENTITY",
                     "expected_path": "x",
+                    "artifact_path": "x",
                     "schema_path": "x",
                     "producer_command": "x",
+                    "governed_producer": "x",
                     "recovery_action": "x",
+                    "recovery_command": "x",
                     "blocking_scope": "SESSION_IDENTITY",
                     "blocker_codes_owned": ["IB_DISCONNECTED"],
                 }
@@ -598,6 +619,87 @@ def test_unknown_evaluated_dependency_fails_closed(monkeypatch, tmp_path: Path) 
     monkeypatch.setattr(cp, "_evaluate_domain_dependency", fake)
     with pytest.raises(RuntimeError, match="READINESS_DEPENDENCY_NOT_REGISTERED"):
         cp.build_control_plane_v1(ctx)
+
+
+def test_registry_rejects_missing_producer_contract_metadata() -> None:
+    bad = [
+        {
+            "domain_id": "SESSION_IDENTITY",
+            "domain_order": 1,
+            "dependencies": [
+                {
+                    "dependency_id": "paper_session_bootstrap_v1",
+                    "domain_owner": "SESSION_IDENTITY",
+                    "owning_domain": "SESSION_IDENTITY",
+                    "expected_path": "x",
+                    "artifact_path": "x",
+                    "schema_path": "x",
+                    "producer_command": "x",
+                    "governed_producer": "x",
+                    "recovery_action": "x",
+                    "blocking_scope": "SESSION_IDENTITY",
+                    "blocker_codes_owned": ["PAPER_SESSION_BOOTSTRAP_V1_MISSING"],
+                }
+            ],
+        }
+    ]
+    with pytest.raises(RuntimeError, match="READINESS_DEPENDENCY_CONTRACT_INCOMPLETE:paper_session_bootstrap_v1:recovery_command"):
+        cp._validate_readiness_domain_registry_v1(bad)
+
+
+def test_stale_artifact_git_commit_is_rejected(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _session_pass(ctx)
+    _write(
+        ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json",
+        {
+            "day_utc": ctx.day_utc,
+            "bootstrap_status": "PASS",
+            "producer_contract_v1": {"code_version_git_commit": "0000000000000000000000000000000000000000", "source_dirty_status": "CLEAN"},
+        },
+    )
+
+    payload = cp.build_control_plane_v1(ctx)
+
+    assert payload["current_domain"] == "SESSION_IDENTITY"
+    assert payload["canonical_blocker"] == "STALE_ARTIFACT_GIT_COMMIT_MISMATCH"
+    assert payload["failed_current_domain_dependencies"][0]["dependency_id"] == "paper_session_bootstrap_v1"
+
+
+def test_truth_root_mismatch_is_rejected(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _session_pass(ctx)
+    _write(
+        ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json",
+        {
+            "day_utc": ctx.day_utc,
+            "truth_root": str(tmp_path / "candidate_truth"),
+            "bootstrap_status": "PASS",
+            **_producer_contract(),
+        },
+    )
+
+    payload = cp.build_control_plane_v1(ctx)
+
+    assert payload["current_domain"] == "SESSION_IDENTITY"
+    assert payload["canonical_blocker"] == "TRUTH_ROOT_MISMATCH"
+
+
+def test_manual_bootstrap_pass_without_governed_metadata_is_rejected(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _session_pass(ctx)
+    _write(
+        ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json",
+        {"day_utc": ctx.day_utc, "bootstrap_status": "PASS"},
+    )
+
+    payload = cp.build_control_plane_v1(ctx)
+
+    assert payload["current_domain"] == "SESSION_IDENTITY"
+    assert payload["canonical_blocker"] == "PRODUCER_METADATA_MISSING"
 
 
 def test_projection_renders_control_plane_readiness_without_recomputing(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
@@ -675,3 +777,28 @@ def test_known_failure_golden_fixture_preserves_domain_ownership(monkeypatch, tm
         if row["domain_owner"] == "SESSION_IDENTITY"
         and row.get("blocking_reason") in set(fixture["ownership"].keys())
     ]
+
+
+def test_domain_drift_fixture_preserves_paths_producers_and_statuses(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    fixture = json.loads(DOMAIN_DRIFT_FIXTURE.read_text(encoding="utf-8"))["expected_current_failure"]
+    ctx = _ctx(tmp_path)
+    _session_pass(ctx)
+    _write(
+        ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json",
+        {"day_utc": ctx.day_utc, "bootstrap_status": "BLOCKED", "blocker_chain": ["NON_TRADING_DAY"], **_producer_contract()},
+    )
+
+    payload = cp.build_control_plane_v1(ctx)
+    by_id = {row["dependency_id"]: row for row in payload["readiness_dependency_inventory"]}
+
+    assert payload["current_domain"] == fixture["current_domain"]
+    assert payload["canonical_blocker"] == fixture["canonical_blocker"]
+    for expected in fixture["dependencies"]:
+        row = by_id[expected["dependency_id"]]
+        assert row["owning_domain"] == expected["owning_domain"]
+        assert row["artifact_path"].endswith(expected["artifact_path_suffix"])
+        assert expected["producer_contains"] in row["producer"]
+        assert expected["recovery_command_contains"] in row["recovery_command"]
+        assert row["status"] == expected["status"]
+        assert row["blocking_reason"] == expected["blocker_code"]

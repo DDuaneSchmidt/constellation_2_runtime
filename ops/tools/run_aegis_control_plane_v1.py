@@ -123,18 +123,34 @@ def _validate_readiness_domain_registry_v1(domains: list[dict[str, Any]]) -> Non
                 raise RuntimeError(f"READINESS_DOMAIN_INVALID_DEPENDENCY:{domain_id}")
             dependency_id = str(dep.get("dependency_id") or "").strip()
             owner = str(dep.get("domain_owner") or "").strip()
+            owning_domain = str(dep.get("owning_domain") or "").strip()
             if not dependency_id:
                 raise RuntimeError(f"READINESS_DEPENDENCY_WITHOUT_ID:{domain_id}")
             if not owner:
                 raise RuntimeError(f"READINESS_DEPENDENCY_WITHOUT_OWNER:{dependency_id}")
             if owner != domain_id:
                 raise RuntimeError(f"READINESS_DEPENDENCY_OWNER_MISMATCH:{dependency_id}:{owner}!={domain_id}")
+            if owning_domain != domain_id:
+                raise RuntimeError(f"READINESS_DEPENDENCY_OWNING_DOMAIN_MISMATCH:{dependency_id}:{owning_domain}!={domain_id}")
             if dependency_id in owners:
                 raise RuntimeError(f"READINESS_DEPENDENCY_MULTIPLE_OWNERS:{dependency_id}:{owners[dependency_id]}:{owner}")
             owners[dependency_id] = owner
-            for key in ("expected_path", "schema_path", "producer_command", "recovery_action", "blocking_scope"):
+            for key in (
+                "expected_path",
+                "artifact_path",
+                "schema_path",
+                "producer_command",
+                "governed_producer",
+                "recovery_action",
+                "recovery_command",
+                "blocking_scope",
+            ):
                 if dep.get(key) in (None, ""):
                     raise RuntimeError(f"READINESS_DEPENDENCY_CONTRACT_INCOMPLETE:{dependency_id}:{key}")
+            if str(dep.get("artifact_path") or "").strip() != str(dep.get("expected_path") or "").strip():
+                raise RuntimeError(f"READINESS_DEPENDENCY_ARTIFACT_PATH_MISMATCH:{dependency_id}")
+            if str(dep.get("governed_producer") or "").strip() != str(dep.get("producer_command") or "").strip():
+                raise RuntimeError(f"READINESS_DEPENDENCY_PRODUCER_MISMATCH:{dependency_id}")
             if owner == "SESSION_IDENTITY":
                 if dependency_id in SESSION_IDENTITY_FORBIDDEN_DEPENDENCIES:
                     raise RuntimeError(f"SESSION_IDENTITY_FORBIDDEN_DEPENDENCY:{dependency_id}")
@@ -157,10 +173,13 @@ def _assert_evaluated_dependencies_registered(inventory: list[dict[str, Any]], o
     for row in inventory:
         dependency_id = str(row.get("dependency_id") or "").strip()
         owner = str(row.get("domain_owner") or "").strip()
+        owning_domain = str(row.get("owning_domain") or "").strip()
         if not dependency_id or dependency_id not in owners:
             raise RuntimeError(f"READINESS_DEPENDENCY_NOT_REGISTERED:{dependency_id or '<blank>'}")
         if owner != owners[dependency_id]:
             raise RuntimeError(f"READINESS_DEPENDENCY_EVALUATED_UNDER_WRONG_OWNER:{dependency_id}:{owner}!={owners[dependency_id]}")
+        if owning_domain != owners[dependency_id]:
+            raise RuntimeError(f"READINESS_DEPENDENCY_EVALUATED_UNDER_WRONG_OWNING_DOMAIN:{dependency_id}:{owning_domain}!={owners[dependency_id]}")
 
 
 def _format_template(text: str, ctx: Any) -> str:
@@ -205,6 +224,80 @@ def _source_repo_status() -> dict[str, Any]:
         "canonical_repo_protection_status": str(protection.get("status") or "UNKNOWN").strip().upper(),
         "canonical_repo_protection_status_path": str(protection.get("protection_status_path") or "/home/node/constellation_runtime_data/repo_protection_v1/status.json"),
     }
+
+
+def _current_git_commit_v1() -> str:
+    proc = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(REPO_ROOT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    return str(proc.stdout or "").strip() if proc.returncode == 0 else ""
+
+
+def _nested_get(payload: dict[str, Any], path: tuple[str, ...]) -> str:
+    value: Any = payload
+    for key in path:
+        if not isinstance(value, dict):
+            return ""
+        value = value.get(key)
+    return str(value or "").strip()
+
+
+def _artifact_metadata_issue_v1(
+    *,
+    payload: dict[str, Any],
+    ctx: Any,
+    dependency_id: str,
+    require_producer_metadata: bool = False,
+) -> tuple[str, str]:
+    producer_contract = payload.get("producer_contract_v1") if isinstance(payload.get("producer_contract_v1"), dict) else {}
+    producer = payload.get("producer") if isinstance(payload.get("producer"), dict) else {}
+    git_commit = (
+        str(producer_contract.get("code_version_git_commit") or "").strip()
+        or str(producer.get("git_sha") or "").strip()
+        or str(payload.get("git_commit") or payload.get("source_git_commit") or payload.get("code_version_git_commit") or "").strip()
+    )
+    if require_producer_metadata and not (producer_contract or producer or git_commit):
+        return "PRODUCER_METADATA_MISSING", f"{dependency_id} has no governed producer metadata"
+    current_commit = _current_git_commit_v1()
+    if git_commit and current_commit and git_commit != current_commit:
+        return "STALE_ARTIFACT_GIT_COMMIT_MISMATCH", f"artifact_git_commit={git_commit} current_git_commit={current_commit}"
+    dirty_status = (
+        str(producer_contract.get("source_dirty_status") or "").strip().upper()
+        or str(payload.get("source_dirty_status") or "").strip().upper()
+    )
+    if dirty_status and dirty_status not in {"CLEAN", "PROTECTED"}:
+        return "STALE_ARTIFACT_DIRTY_SOURCE", f"source_dirty_status={dirty_status}"
+    truth_root = (
+        str(payload.get("truth_root") or payload.get("runtime_truth_root") or payload.get("canonical_truth_root") or "").strip()
+        or _nested_get(payload, ("truth_roots", "canonical_truth_root"))
+        or _nested_get(payload, ("truth_roots", "truth_root"))
+    )
+    if truth_root:
+        observed = Path(truth_root).expanduser().resolve()
+        expected = Path(ctx.truth_root).expanduser().resolve()
+        if observed != expected:
+            return "TRUTH_ROOT_MISMATCH", f"artifact_truth_root={observed} evaluated_truth_root={expected}"
+    runtime_root = str(payload.get("runtime_root") or "").strip() or _nested_get(payload, ("truth_roots", "runtime_root"))
+    if runtime_root:
+        observed_runtime = Path(runtime_root).expanduser().resolve()
+        expected_runtime = Path(ctx.runtime_root).expanduser().resolve()
+        if observed_runtime != expected_runtime:
+            return "RUNTIME_ROOT_MISMATCH", f"artifact_runtime_root={observed_runtime} evaluated_runtime_root={expected_runtime}"
+    generated_at = str(
+        payload.get("generated_at_utc")
+        or payload.get("generated_at")
+        or payload.get("produced_at_utc")
+        or payload.get("created_at_utc")
+        or ""
+    ).strip()
+    if len(generated_at) >= 10 and generated_at[:10] != ctx.day_utc:
+        return "STALE_ARTIFACT_GENERATED_AT_DAY_MISMATCH", f"generated_at_utc={generated_at} target_day={ctx.day_utc}"
+    return "", ""
 
 
 def _collect_codes(value: Any) -> list[str]:
@@ -257,11 +350,15 @@ def _phase_row(
 
 
 def _dependency_path(dep: dict[str, Any], ctx: Any) -> Path:
-    return Path(_format_template(str(dep.get("expected_path") or ""), ctx)).expanduser().resolve()
+    return Path(_format_template(str(dep.get("artifact_path") or dep.get("expected_path") or ""), ctx)).expanduser().resolve()
 
 
 def _dependency_command(dep: dict[str, Any], ctx: Any) -> str:
-    return _format_template(str(dep.get("producer_command") or ""), ctx)
+    return _format_template(str(dep.get("governed_producer") or dep.get("producer_command") or ""), ctx)
+
+
+def _dependency_recovery_command(dep: dict[str, Any], ctx: Any) -> str:
+    return _format_template(str(dep.get("recovery_command") or dep.get("producer_command") or ""), ctx)
 
 
 def _dependency_action(dep: dict[str, Any], ctx: Any) -> str:
@@ -296,21 +393,28 @@ def _dependency_result(
 ) -> dict[str, Any]:
     expected = path or _dependency_path(dep, ctx)
     command = _dependency_command(dep, ctx)
+    recovery_command = _dependency_recovery_command(dep, ctx)
     action = _dependency_action(dep, ctx)
     dependency_id = str(dep.get("dependency_id") or "").strip()
+    owning_domain = str(dep.get("owning_domain") or dep.get("domain_owner") or "").strip()
     return {
         "dependency_id": dependency_id,
         "domain_owner": str(dep.get("domain_owner") or "").strip(),
+        "owning_domain": owning_domain,
         "required_for": list(dep.get("required_for") if isinstance(dep.get("required_for"), list) else []),
         "blocking_scope": str(dep.get("blocking_scope") or "").strip(),
         "required": bool(dep.get("required") is True),
         "diagnostic_only": bool(dep.get("diagnostic_only") is True),
         "status": status,
         "expected_path": str(expected),
+        "artifact_path": str(expected),
+        "artifact": dependency_id,
         "schema_path": str(dep.get("schema_path") or "").strip(),
         "producer_command": command,
+        "producer": command,
+        "governed_producer": command,
         "recovery_action": action or f"Resolve {dependency_id}.",
-        "recovery_command": command,
+        "recovery_command": recovery_command,
         "blocking_reason": blocker,
         "evidence_path": str(expected),
         "detail": detail,
@@ -340,6 +444,13 @@ def _session_identity_dependency_result(dep: dict[str, Any], ctx: Any) -> dict[s
             path=path,
         )
     payload = _read_json(path)
+    metadata_blocker, metadata_detail = _artifact_metadata_issue_v1(
+        payload=payload,
+        ctx=ctx,
+        dependency_id=dependency_id,
+    )
+    if metadata_blocker:
+        return _dependency_result(dep=dep, ctx=ctx, status="STALE", blocker=metadata_blocker, detail=metadata_detail, path=path)
     codes = _collect_codes(payload)
     owned = _owned_dependency_blocker(dep, codes)
     if dependency_id == "active_session_v1":
@@ -389,6 +500,14 @@ def _session_identity_dependency_result(dep: dict[str, Any], ctx: Any) -> dict[s
                 if codes:
                     detail = f"{detail} reason_codes={','.join(codes[:6])}"
                 return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker=blocker, detail=detail, path=path)
+            producer_blocker, producer_detail = _artifact_metadata_issue_v1(
+                payload=payload,
+                ctx=ctx,
+                dependency_id=dependency_id,
+                require_producer_metadata=True,
+            )
+            if producer_blocker:
+                return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker=producer_blocker, detail=producer_detail, path=path)
         return _dependency_result(dep=dep, ctx=ctx, status="SATISFIED", path=path)
     if dependency_id == "market_calendar_day":
         if owned:
@@ -410,6 +529,14 @@ def _generic_dependency_result(dep: dict[str, Any], ctx: Any) -> dict[str, Any]:
             path=path,
         )
     payload = _read_json(path) if path.is_file() else {}
+    if payload:
+        metadata_blocker, metadata_detail = _artifact_metadata_issue_v1(
+            payload=payload,
+            ctx=ctx,
+            dependency_id=dependency_id,
+        )
+        if metadata_blocker:
+            return _dependency_result(dep=dep, ctx=ctx, status="STALE", blocker=metadata_blocker, detail=metadata_detail, path=path)
     codes = _collect_codes(payload)
     owned = _owned_dependency_blocker(dep, codes)
     status = _status(payload) if payload else "PASS"
