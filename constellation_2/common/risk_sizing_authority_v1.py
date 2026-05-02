@@ -119,7 +119,7 @@ def evaluate_risk_sizing_authority_v1(
     decisions: list[dict[str, Any]] = []
     if not unique_intents:
         state = "NO_INTENTS"
-    elif portfolio_state in {"", "MISSING_ACCOUNT_SNAPSHOT", "UNKNOWN"} or nav_cents is None:
+    elif portfolio_state in {"", "MISSING_ACCOUNT_SNAPSHOT", "UNKNOWN"} or nav_cents is None or nav_cents <= 0:
         state = "ACCOUNT_DATA_MISSING"
     elif str(risk.get("status") or "").strip().upper() not in {"PASS", "OK"}:
         state = "RISK_BLOCKED"

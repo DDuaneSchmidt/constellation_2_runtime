@@ -71,6 +71,29 @@ def test_missing_account_data(tmp_path: Path) -> None:
     assert payload["risk_sizing_state"] == "ACCOUNT_DATA_MISSING"
 
 
+def test_null_nav_cannot_be_downgraded_to_pass(tmp_path: Path) -> None:
+    _write_json(tmp_path / "intents_v1" / "snapshots" / DAY / f"{IH}.exposure_intent.v1.json", {"intent_id": "intent", "target_notional_pct": "0.01"})
+    _write_json(tmp_path / "reports" / "portfolio_account_authority_v1" / DAY / "portfolio_account_authority.v1.json", {"account_state": "OPERATOR_STATEMENT_ONLY", "account_values": {"net_liquidation_cents": None}})
+    _write_json(tmp_path / "reports" / "capital_risk_envelope_v2" / DAY / "capital_risk_envelope.v2.json", {"status": "PASS", "envelope": {"allowed_capital_at_risk_cents": 0, "nav_total_cents": None}})
+
+    payload = evaluate_risk_sizing_authority_v1(day_utc=DAY, truth_root=tmp_path, execution_root=tmp_path)
+
+    assert payload["status"] == "FAIL"
+    assert payload["risk_sizing_state"] == "ACCOUNT_DATA_MISSING"
+    assert payload["first_blocker"] == "ACCOUNT_DATA_MISSING"
+
+
+def test_nav_zero_blocks_risk_sizing(tmp_path: Path) -> None:
+    _write_json(tmp_path / "intents_v1" / "snapshots" / DAY / f"{IH}.exposure_intent.v1.json", {"intent_id": "intent", "target_notional_pct": "0.01"})
+    _write_json(tmp_path / "reports" / "portfolio_account_authority_v1" / DAY / "portfolio_account_authority.v1.json", {"account_state": "READY", "account_values": {"net_liquidation_cents": 0}})
+    _write_json(tmp_path / "reports" / "capital_risk_envelope_v2" / DAY / "capital_risk_envelope.v2.json", {"status": "PASS", "envelope": {"allowed_capital_at_risk_cents": 0, "nav_total_cents": 0}})
+
+    payload = evaluate_risk_sizing_authority_v1(day_utc=DAY, truth_root=tmp_path, execution_root=tmp_path)
+
+    assert payload["status"] == "FAIL"
+    assert payload["risk_sizing_state"] == "ACCOUNT_DATA_MISSING"
+
+
 def test_final_size_agrees_with_execution_package(tmp_path: Path) -> None:
     _base(tmp_path, final=10000, qty=2)
 
