@@ -26,7 +26,9 @@ def test_bootstrap_uses_bridge_helpers_only_at_authority_boundary() -> None:
 def test_bootstrap_canonical_truth_guard_semantics_remain_identical() -> None:
     relpath = "ops/tools/run_paper_session_bootstrap_v1.py"
     text = _read(relpath)
-    assert "if canonical_truth_root != authority.canonical_runtime_truth_root:" in text
+    assert "_allowed_paper_bootstrap_truth_root_v1" in text
+    assert "PHASE_CONTROLLED_PRODUCTION_TRUTH_ROOT" in text
+    assert "PHASE_CONTROLLED_CANDIDATE_TRUTH_ROOT" in text
     assert "PAPER_BOOTSTRAP_CANONICAL_TRUTH_REQUIRED" in text
 
 

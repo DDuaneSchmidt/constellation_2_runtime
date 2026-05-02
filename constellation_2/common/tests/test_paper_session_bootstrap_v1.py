@@ -643,6 +643,46 @@ def test_bootstrap_authority_guard_semantics_unchanged(monkeypatch: pytest.Monke
         )
 
 
+def test_bootstrap_accepts_phase_controlled_production_truth_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    operator_input_root = (tmp_path / "operator_root").resolve()
+    operator_input_root.mkdir(parents=True, exist_ok=True)
+    production_truth_root = Path("/home/node/constellation_runtime_data/production_truth").resolve()
+    legacy_canonical_truth_root = (tmp_path / "legacy_truth").resolve()
+    legacy_canonical_truth_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(bootstrap_module, "resolve_session_authority_target_day_v1", lambda raw: DAY)
+    monkeypatch.setattr(
+        bootstrap_module,
+        "resolve_decision_truth_root_bridge_v1",
+        lambda explicit_truth_root, repo_root=None, caller="": production_truth_root,
+    )
+    monkeypatch.setattr(
+        bootstrap_module,
+        "load_runtime_path_authority_bridge_v1",
+        lambda repo_root=None, caller="": SimpleNamespace(canonical_runtime_truth_root=legacy_canonical_truth_root),
+    )
+    monkeypatch.setattr(
+        bootstrap_module,
+        "resolve_governed_sleeve_truth_bindings",
+        lambda **_: (_ for _ in ()).throw(RuntimeError("STOP_AFTER_PHASE_CONTROLLED_ROOT_ACCEPTED")),
+    )
+
+    with pytest.raises(RuntimeError, match="STOP_AFTER_PHASE_CONTROLLED_ROOT_ACCEPTED"):
+        bootstrap_module.main(
+            [
+                "--day_utc",
+                DAY,
+                "--truth_root",
+                str(production_truth_root),
+                "--operator_input_root",
+                str(operator_input_root),
+            ]
+        )
+
+
 def test_bootstrap_fails_closed_outside_paper(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     canonical_truth_root = tmp_path / "truth"
     sleeve_truth_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"

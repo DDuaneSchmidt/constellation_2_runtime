@@ -47,6 +47,10 @@ from constellation_2.common.decision_authority_bridge_v1 import (
 from constellation_2.common.runtime_authority_snapshot_bridge_v1 import (
     load_runtime_path_authority_bridge_v1,
 )
+from constellation_2.common.runtime_path_authority_v1 import (
+    PHASE_CONTROLLED_CANDIDATE_TRUTH_ROOT,
+    PHASE_CONTROLLED_PRODUCTION_TRUTH_ROOT,
+)
 from constellation_2.common.session_authority_v1 import resolve_session_authority_target_day_v1
 from constellation_2.common.session_promotion_gate_v1 import (
     PROMOTION_STATE_PROMOTED,
@@ -78,6 +82,15 @@ RUN_STARTUP_AUTHORIZATION_CONVERGENCE_TOOL = (
 RUN_PRE_OPEN_MATERIALIZER_TOOL = (REPO_ROOT / "ops/tools/run_pre_open_materializer_v1.py").resolve()
 RUN_SESSION_AUTHORITY_TOOL = (REPO_ROOT / "ops/tools/run_session_authority_v1.py").resolve()
 RUN_DAY_ACTIVATION_TOOL = (REPO_ROOT / "ops/tools/run_day_activation_authority_v1.py").resolve()
+
+
+def _allowed_paper_bootstrap_truth_root_v1(canonical_truth_root: Path, authority: Any) -> bool:
+    resolved = Path(canonical_truth_root).resolve()
+    return resolved in {
+        Path(authority.canonical_runtime_truth_root).resolve(),
+        PHASE_CONTROLLED_PRODUCTION_TRUTH_ROOT,
+        PHASE_CONTROLLED_CANDIDATE_TRUTH_ROOT,
+    }
 RUN_POINTER_ATTEMPT_ALLOC_TOOL = (REPO_ROOT / "ops/tools/run_pointer_attempt_alloc_v1.py").resolve()
 RUN_POINTER_APPEND_TOOL = (REPO_ROOT / "ops/tools/run_pointer_append_v1.py").resolve()
 RUN_POINTER_HEADS_MATERIALIZE_TOOL = (REPO_ROOT / "ops/tools/run_pointer_heads_materialize_v1.py").resolve()
@@ -1722,7 +1735,7 @@ def main(argv: list[str] | None = None) -> int:
         repo_root=REPO_ROOT,
         caller="ops/tools/run_paper_session_bootstrap_v1.py",
     )
-    if canonical_truth_root != authority.canonical_runtime_truth_root:
+    if not _allowed_paper_bootstrap_truth_root_v1(canonical_truth_root, authority):
         raise SystemExit(
             f"FAIL: PAPER_BOOTSTRAP_CANONICAL_TRUTH_REQUIRED:requested={canonical_truth_root}:canonical={authority.canonical_runtime_truth_root}"
         )
