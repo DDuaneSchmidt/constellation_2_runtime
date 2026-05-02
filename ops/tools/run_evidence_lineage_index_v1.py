@@ -53,9 +53,13 @@ def _node(ctx: bod.BodContext, spec: dict[str, Any]) -> dict[str, Any]:
         blocker = "PRODUCER_CONTRACT_MISSING" if authoritative else ""
         action = "Add producer_contract_v1 metadata to this artifact producer."
     elif missing_inputs:
-        status = "FAIL"
-        blocker = "LINEAGE_INPUT_ARTIFACT_MISSING"
-        action = "Regenerate missing lineage input artifacts, then rerun the producer."
+        status = "FAIL" if authoritative else "WARN"
+        blocker = "LINEAGE_INPUT_ARTIFACT_MISSING" if authoritative else ""
+        action = (
+            "Regenerate missing authoritative lineage input artifacts, then rerun the producer."
+            if authoritative
+            else "Optional diagnostic inputs are missing; rerun upstream advisory producers if this evidence is needed."
+        )
     elif not inputs:
         status = "UNKNOWN"
         blocker = ""
