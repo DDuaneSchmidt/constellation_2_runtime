@@ -1076,12 +1076,13 @@ def test_projection_renders_control_plane_readiness_without_recomputing(monkeypa
 
     _out_path, payload = projection.run_operator_projection_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
 
-    for key in ("current_domain", "canonical_blocker", "submit_allowed"):
+    for key in ("current_domain", "current_phase", "canonical_blocker", "submit_allowed"):
         assert payload[key] == control[key]
     assert payload["phase"] == control["current_phase"]
     assert payload["final_status"] == control["final_status"]
     assert payload["failed_current_domain_dependencies"] == control["failed_current_domain_dependencies"]
     assert payload["deferred_downstream_domains"] == control["deferred_domains"]
+    assert payload["deferred_domains"] == control["deferred_domains"]
 
 
 def test_projection_blocks_when_control_plane_wrong_day_without_kernel_fallback(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
