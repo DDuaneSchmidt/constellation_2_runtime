@@ -320,6 +320,24 @@ def test_session_identity_does_not_own_runtime_resilience_missing(monkeypatch, t
     assert "runtime_resilience_authority_v1" not in {row["dependency_id"] for row in payload["session_precheck_failures"]}
 
 
+def test_session_identity_does_not_treat_blocked_bootstrap_as_satisfied(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _session_pass(ctx)
+    _write(
+        ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json",
+        {"day_utc": ctx.day_utc, "bootstrap_status": "BLOCKED", "blocker_chain": ["NON_TRADING_DAY"]},
+    )
+
+    payload = cp.build_control_plane_v1(ctx)
+
+    assert payload["current_domain"] == "SESSION_IDENTITY"
+    assert payload["canonical_blocker"] == "PAPER_SESSION_BOOTSTRAP_NOT_READY"
+    failed = payload["failed_current_domain_dependencies"]
+    assert [row["dependency_id"] for row in failed] == ["paper_session_bootstrap_v1"]
+    assert failed[0]["status"] == "FAIL"
+
+
 def test_domain_precheck_surfaces_only_current_domain_failures_at_once(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
     _source_pass(monkeypatch)
     ctx = _ctx(tmp_path)

@@ -374,6 +374,21 @@ def _session_identity_dependency_result(dep: dict[str, Any], ctx: Any) -> dict[s
             return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker="TARGET_DAY_DATE_MISMATCH", detail=f"artifact day={_payload_day(payload)}", path=path)
         if owned:
             return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker=owned, detail="session identity blocker", path=path)
+        if dependency_id == "paper_session_authority_v1":
+            authority_status = str(payload.get("authority_status") or "").strip().upper()
+            if authority_status != "GRANTED":
+                codes = [str(code).strip() for code in (payload.get("blocking_reason_codes") or payload.get("reason_codes") or []) if str(code).strip()]
+                blocker = codes[0] if codes else "PAPER_SESSION_AUTHORITY_NOT_GRANTED"
+                return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker=blocker, detail=f"authority_status={authority_status or 'UNKNOWN'}", path=path)
+        if dependency_id == "paper_session_bootstrap_v1":
+            bootstrap_status = str(payload.get("bootstrap_status") or payload.get("status") or "").strip().upper()
+            if bootstrap_status not in {"PASS", "COMPLETE", "BOOTSTRAPPED", "READY"}:
+                codes = [str(code).strip() for code in (payload.get("blocking_reason_codes") or payload.get("reason_codes") or payload.get("blocker_chain") or []) if str(code).strip()]
+                blocker = "PAPER_SESSION_BOOTSTRAP_NOT_READY"
+                detail = f"bootstrap_status={bootstrap_status or 'UNKNOWN'}"
+                if codes:
+                    detail = f"{detail} reason_codes={','.join(codes[:6])}"
+                return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker=blocker, detail=detail, path=path)
         return _dependency_result(dep=dep, ctx=ctx, status="SATISFIED", path=path)
     if dependency_id == "market_calendar_day":
         if owned:
