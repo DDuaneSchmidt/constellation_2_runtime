@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/sleeve_performance_control.v1.schema.json",
+  "title": "Sleeve Performance Control v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "generated_at",
+    "git_commit",
+    "git_dirty_status",
+    "truth_root",
+    "runtime_root",
+    "producer",
+    "artifact_path",
+    "authority",
+    "readiness_authority",
+    "allocation_authority",
+    "status",
+    "risk_sizing_status",
+    "nav_source",
+    "nav_value",
+    "risk_sizing_blocks_allocation",
+    "sleeve_results",
+    "producer_contract_v1"
+  ],
+  "properties": {
+    "schema_id": { "const": "sleeve_performance_control" },
+    "schema_version": { "const": "sleeve_performance_control.v1" },
+    "day_utc": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "generated_at": { "type": "string", "minLength": 1 },
+    "git_commit": { "type": "string", "minLength": 1 },
+    "git_dirty_status": { "type": "string", "enum": ["CLEAN", "DIRTY"] },
+    "truth_root": { "type": "string", "minLength": 1 },
+    "runtime_root": { "type": "string", "minLength": 1 },
+    "producer": { "const": "ops/tools/run_sleeve_performance_control_v1.py" },
+    "artifact_path": { "type": "string", "minLength": 1 },
+    "authority": { "const": "SLEEVE_PERFORMANCE_CONTROL" },
+    "readiness_authority": { "const": "aegis_control_plane_v1" },
+    "allocation_authority": { "const": "strategy_allocation_plan_v1" },
+    "status": { "type": "string", "enum": ["PASS", "BLOCKED", "EMPTY"] },
+    "risk_sizing_status": { "type": "string" },
+    "nav_source": { "type": "string" },
+    "nav_value": { "type": ["number", "null"] },
+    "risk_sizing_blocks_allocation": { "type": "boolean" },
+    "sleeve_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sleeve_id",
+          "intent_count",
+          "submitted_trade_count",
+          "completed_trade_count",
+          "outcome_status",
+          "edge_status",
+          "scorecard_status",
+          "selection_confidence",
+          "regime_confidence",
+          "decision_consistency",
+          "missed_opportunity_status",
+          "evidence_quality",
+          "allocation_eligible",
+          "blockers",
+          "evidence_refs"
+        ],
+        "properties": {
+          "sleeve_id": { "type": "string", "minLength": 1 },
+          "intent_count": { "type": "integer", "minimum": 0 },
+          "submitted_trade_count": { "type": "integer", "minimum": 0 },
+          "completed_trade_count": { "type": "integer", "minimum": 0 },
+          "outcome_status": { "type": "string" },
+          "edge_status": { "type": "string" },
+          "scorecard_status": { "type": "string" },
+          "selection_confidence": { "type": "string" },
+          "regime_confidence": { "type": "string" },
+          "decision_consistency": { "type": "string" },
+          "missed_opportunity_status": { "type": "string" },
+          "evidence_quality": { "type": "string", "enum": ["PROVEN", "PARTIAL", "NOT_ENOUGH_EVIDENCE"] },
+          "allocation_eligible": { "type": "boolean" },
+          "blockers": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["artifact_type", "path", "exists"],
+              "properties": {
+                "artifact_type": { "type": "string", "minLength": 1 },
+                "path": { "type": "string", "minLength": 1 },
+                "exists": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "producer_contract_v1": { "type": "object" }
+  }
+}

@@ -51,6 +51,10 @@ def strategy_execution_eligibility_path(*, truth_root: Path, day_utc: str) -> Pa
     return _report_path(truth_root, "strategy_execution_eligibility_v1", day_utc, "strategy_execution_eligibility.v1.json")
 
 
+def sleeve_performance_control_path(*, truth_root: Path, day_utc: str) -> Path:
+    return _report_path(truth_root, "sleeve_performance_control_v1", day_utc, "sleeve_performance_control.v1.json")
+
+
 def _validate(payload: dict[str, Any], schema_id: str) -> None:
     schema = json.loads(SCHEMAS[schema_id].read_text(encoding="utf-8"))
     errors = sorted(Draft202012Validator(schema).iter_errors(payload), key=lambda err: list(err.path))
@@ -165,18 +169,52 @@ def build_active_strategy_set_v1(
     }
 
 
-def build_strategy_allocation_plan_v1(*, day_utc: str, active_strategy_set: dict[str, Any], allocations: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    active = {
-        str(row.get("strategy_id") or "")
+def _eligible_sleeves(sleeve_performance_control: dict[str, Any] | None) -> set[str]:
+    if not isinstance(sleeve_performance_control, dict) or not sleeve_performance_control:
+        return set()
+    if str(sleeve_performance_control.get("authority") or "") != "SLEEVE_PERFORMANCE_CONTROL":
+        return set()
+    if Path(str(sleeve_performance_control.get("truth_root") or "/")).name != "production_truth":
+        return set()
+    rows = sleeve_performance_control.get("sleeve_results") if isinstance(sleeve_performance_control.get("sleeve_results"), list) else []
+    return {
+        str(row.get("sleeve_id") or "").strip().upper()
+        for row in rows
+        if isinstance(row, dict) and row.get("allocation_eligible") is True
+    }
+
+
+def build_strategy_allocation_plan_v1(
+    *,
+    day_utc: str,
+    active_strategy_set: dict[str, Any],
+    allocations: list[dict[str, Any]] | None = None,
+    sleeve_performance_control: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    active_rows = {
+        str(row.get("strategy_id") or ""): row
         for row in active_strategy_set.get("active_strategy_set", [])
         if isinstance(row, dict) and row.get("current_lifecycle_state") == "ACTIVE"
     }
+    eligible_sleeves = _eligible_sleeves(sleeve_performance_control)
     rows: list[dict[str, Any]] = []
     for row in allocations or []:
         item = dict(row)
         blockers: list[str] = []
-        if str(item.get("strategy_id") or "") not in active:
+        strategy_id = str(item.get("strategy_id") or "")
+        active = active_rows.get(strategy_id)
+        if active is None:
             blockers.append("STRATEGY_NOT_ACTIVE_APPROVED")
+        sleeve_id = str(item.get("sleeve_id") or (active or {}).get("sleeve_id") or strategy_id).strip().upper()
+        item["sleeve_id"] = sleeve_id
+        if not isinstance(sleeve_performance_control, dict) or not sleeve_performance_control:
+            blockers.append("SLEEVE_PERFORMANCE_CONTROL_MISSING")
+        elif str(sleeve_performance_control.get("authority") or "") != "SLEEVE_PERFORMANCE_CONTROL":
+            blockers.append("SLEEVE_PERFORMANCE_CONTROL_INVALID_AUTHORITY")
+        elif Path(str(sleeve_performance_control.get("truth_root") or "/")).name != "production_truth":
+            blockers.append("SLEEVE_PERFORMANCE_CONTROL_NOT_PRODUCTION_TRUTH")
+        elif sleeve_id not in eligible_sleeves:
+            blockers.append("SLEEVE_NOT_PERFORMANCE_ELIGIBLE")
         risk = item.get("risk_budget") if isinstance(item.get("risk_budget"), dict) else {}
         if float(risk.get("max_capital_at_risk_pct") or 0) <= 0:
             blockers.append("RISK_BUDGET_NOT_POSITIVE")
@@ -191,6 +229,7 @@ def build_strategy_allocation_plan_v1(*, day_utc: str, active_strategy_set: dict
         "status": "PASS" if rows and all(row["status"] == "APPROVED" for row in rows) else ("EMPTY" if not rows else "BLOCKED"),
         "authority": "ALLOCATION_PLANE",
         "safety_override_power": "NONE",
+        "performance_control_path": str(sleeve_performance_control.get("artifact_path") or "") if isinstance(sleeve_performance_control, dict) else "",
         "allocations": rows,
     }
 
@@ -287,13 +326,15 @@ def run_all_v1(day_utc: str, truth_root: Path) -> dict[str, Any]:
         inputs=[evidence_path],
         schema_id="active_strategy_set",
     )
-    allocation = build_strategy_allocation_plan_v1(day_utc=day, active_strategy_set=active, allocations=[])
+    performance_path = sleeve_performance_control_path(truth_root=root, day_utc=day)
+    performance_control = read_json_v1(performance_path)
+    allocation = build_strategy_allocation_plan_v1(day_utc=day, active_strategy_set=active, allocations=[], sleeve_performance_control=performance_control)
     allocation_path, allocation = _attach_and_write(
         payload=allocation,
         path=strategy_allocation_plan_path(truth_root=root, day_utc=day),
         producer_name="ops/tools/run_strategy_edge_governance_v1.py",
         command=f"python3 ops/tools/run_strategy_edge_governance_v1.py --day_utc {day}",
-        inputs=[active_path],
+        inputs=[active_path, performance_path],
         schema_id="strategy_allocation_plan",
     )
     eligibility = build_strategy_execution_eligibility_v1(
