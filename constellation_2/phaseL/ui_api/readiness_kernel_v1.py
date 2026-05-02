@@ -203,6 +203,12 @@ def _truth_freshness_by_artifact_path(root: Path, day: str) -> Dict[str, Dict[st
     return result
 
 
+def _unified_truth_kernel(root: Path, day: str) -> Tuple[Dict[str, Any], Path, str]:
+    path = (root / "reports" / "unified_truth_kernel_v1" / day / "unified_truth_kernel.v1.json").resolve()
+    doc, error = read_json_dict(path)
+    return (doc if isinstance(doc, dict) else {}, path, error)
+
+
 def _classification(status: str, blocker: str, doc: Dict[str, Any], day: str, freshness_record: Optional[Dict[str, Any]] = None) -> str:
     status_u = status.upper()
     blocker_u = blocker.upper()
@@ -429,6 +435,19 @@ def _overall(layers: Sequence[Dict[str, Any]]) -> Tuple[str, str, str]:
     return ("NOT_READY", ledger_blocker, str(ledger.get("next_action") or "Review the day-run ledger for the next required action."))
 
 
+def _overall_from_kernel(kernel: Dict[str, Any]) -> Tuple[str, str, str]:
+    final_status = _as_text(kernel.get("final_status")).upper()
+    blocker = _as_text(kernel.get("canonical_blocker") or kernel.get("first_blocker"))
+    action = _as_text(kernel.get("operator_next_action")) or "Review unified_truth_kernel_v1."
+    if not final_status:
+        return ("UNKNOWN", "UNIFIED_TRUTH_KERNEL_EMPTY", "Regenerate unified_truth_kernel_v1.")
+    if blocker or final_status in BLOCK_LIKE:
+        return ("BLOCKED", blocker or final_status, action)
+    if final_status in {"PRE_MARKET_READY", "PAPER_READY", "PAPER_READY_WITH_DELAYED_DATA", "TRADING_ACTIVE", "EOD_COMPLETE", "READY"}:
+        return ("READY", "", action)
+    return ("NOT_READY", blocker, action)
+
+
 def build_readiness_kernel_v1(
     day: Optional[str] = None,
     *,
@@ -447,7 +466,15 @@ def build_readiness_kernel_v1(
         if spec.layer_id == "STRUCTURE":
             layers.append(_build_phasec_layer(day=resolved_day, sleeve_truth_root=sleeve_root, freshness_records=freshness_records))
 
-    overall_status, canonical_blocker, operator_next_action = _overall(layers)
+    kernel, kernel_path, kernel_error = _unified_truth_kernel(root, resolved_day)
+    if kernel:
+        overall_status, canonical_blocker, operator_next_action = _overall_from_kernel(kernel)
+        final_readiness_authority = "unified_truth_kernel_v1 -> aegis_day_run_ledger_v1"
+        truth_resolution_source_path = str(kernel_path)
+    else:
+        overall_status, canonical_blocker, operator_next_action = _overall(layers)
+        final_readiness_authority = "aegis_day_run_ledger_v1"
+        truth_resolution_source_path = ""
     return {
         "schema_id": SCHEMA_ID,
         "schema_version": SCHEMA_VERSION,
@@ -456,12 +483,26 @@ def build_readiness_kernel_v1(
         "overall_status": overall_status,
         "canonical_blocker": canonical_blocker,
         "operator_next_action": operator_next_action,
-        "final_readiness_authority": "aegis_day_run_ledger_v1",
+        "final_readiness_authority": final_readiness_authority,
+        "truth_resolution_source_path": truth_resolution_source_path,
+        "unified_truth_kernel_status": _as_text(kernel.get("truth_confidence") if kernel else ""),
         "supporting_evidence_only_layers": [
             layer.get("layer_id")
             for layer in layers
             if layer.get("layer_id") != "LEDGER"
         ],
         "layers": layers,
-        "warnings": _aggregation_warnings(root, layers),
+        "warnings": _aggregation_warnings(root, layers)
+        + (
+            [
+                {
+                    "code": "UNIFIED_TRUTH_KERNEL_UNAVAILABLE",
+                    "message": "Falling back to day-run ledger direct read because unified_truth_kernel_v1 is unavailable.",
+                    "source_path": str(kernel_path),
+                    "read_error": kernel_error,
+                }
+            ]
+            if not kernel
+            else []
+        ),
     }

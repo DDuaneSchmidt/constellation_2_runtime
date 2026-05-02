@@ -15,6 +15,7 @@ if str(REPO_ROOT) not in sys.path:
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
 from ops.tools import run_aegis_bod_prepare_v1 as bod
 from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
+from ops.tools.run_unified_truth_kernel_v1 import unified_truth_kernel_path
 
 SCHEMA_VERSION = "aegis_operator_projection.v1"
 
@@ -173,29 +174,92 @@ def _projection_for(
     }
 
 
+def _labels(rows: list[Any]) -> list[str]:
+    labels: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        label = str(row.get("label") or row.get("action_id") or "").strip()
+        if label:
+            labels.append(label)
+    return labels
+
+
+def _kernel_artifact_paths(kernel: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+    for key in ("authoritative_artifacts", "diagnostic_artifacts", "advisory_artifacts", "unknown_or_untrusted_artifacts"):
+        rows = kernel.get(key) if isinstance(kernel.get(key), list) else []
+        for row in rows:
+            if isinstance(row, dict):
+                path = str(row.get("path") or "").strip()
+                if path:
+                    paths.append(path)
+    return list(dict.fromkeys(paths))
+
+
+def _projection_from_kernel(ctx: bod.BodContext, kernel: dict[str, Any]) -> dict[str, Any]:
+    final_status = str(kernel.get("final_status") or "UNKNOWN").strip().upper()
+    blocker = str(kernel.get("first_blocker") or kernel.get("canonical_blocker") or "").strip()
+    allowed = kernel.get("allowed_operator_actions") if isinstance(kernel.get("allowed_operator_actions"), list) else []
+    forbidden = kernel.get("forbidden_operator_actions") if isinstance(kernel.get("forbidden_operator_actions"), list) else []
+    trade_health = kernel.get("trade_health") if isinstance(kernel.get("trade_health"), dict) else {}
+    root_cause = blocker or "No blocker reported by unified truth kernel."
+    if kernel.get("unknown_or_untrusted_artifacts"):
+        root_cause = f"{root_cause}; truth_confidence={kernel.get('truth_confidence')}"
+    return {
+        "schema_id": "aegis_operator_projection",
+        "schema_version": SCHEMA_VERSION,
+        "day_utc": ctx.day_utc,
+        "environment": ctx.environment,
+        "generated_at_utc": _now_iso(),
+        "status": "PASS" if final_status not in {"UNKNOWN", "NOT_READY", "BLOCKED"} else "BLOCKED",
+        "canonical_blocker": blocker,
+        "operator_next_action": str(kernel.get("operator_next_action") or ""),
+        "final_status": final_status,
+        "first_blocker": blocker,
+        "owner": str(kernel.get("first_blocker_owner") or ""),
+        "phase": str(kernel.get("first_blocker_phase") or ""),
+        "root_cause": root_cause,
+        "downstream_consequences": kernel.get("downstream_consequences") if isinstance(kernel.get("downstream_consequences"), list) else [],
+        "artifact_paths": _kernel_artifact_paths(kernel),
+        "next_valid_actions": _labels(allowed),
+        "forbidden_actions": _labels(forbidden),
+        "unsafe_actions": list(kernel.get("unsafe_actions") if isinstance(kernel.get("unsafe_actions"), list) else []),
+        "lineage_status": str(kernel.get("lineage_status") or "UNKNOWN"),
+        "consistency_status": str(kernel.get("consistency_status") or "UNKNOWN"),
+        "freshness_status": str(kernel.get("freshness_status") or "UNKNOWN"),
+        "action_validity_status": str(kernel.get("action_validity_status") or "UNKNOWN"),
+        "truth_confidence": str(kernel.get("truth_confidence") or "UNKNOWN"),
+        "trade_health_status": str(kernel.get("trade_health_status") or "UNKNOWN"),
+        "trade_health": {
+            "selection_confidence": str(trade_health.get("selection_confidence") or "UNKNOWN"),
+            "edge_status": str(trade_health.get("edge_status") or "UNKNOWN"),
+            "regime_status": str(trade_health.get("regime_status") or "UNKNOWN"),
+            "outcome_status": str(trade_health.get("outcome_status") or "UNKNOWN"),
+            "human_review_required": bool(trade_health.get("human_review_required") is True),
+            "automatic_deployment_allowed": bool(trade_health.get("automatic_deployment_allowed") is True),
+        },
+        "human_review_required": bool(kernel.get("human_review_required") is True),
+        "integrity_context": {
+            "unified_truth_kernel_path": str(unified_truth_kernel_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)),
+            "final_status_source": str(kernel.get("final_status_source") or ""),
+        },
+        "confidence_in_diagnosis": str(kernel.get("truth_confidence") or "UNKNOWN"),
+        "last_updated_at_utc": _now_iso(),
+        "authority_note": "Operator projection presents unified_truth_kernel_v1 only; readiness and actions are not recomputed here.",
+    }
+
+
 def run_operator_projection_v1(day_utc: str, environment: str, truth_root: str = "") -> tuple[Path, dict[str, Any]]:
     ctx = bod._resolve_context(day_utc, environment, truth_root)
-    ledger_path = _report_path(ctx, "aegis_day_run_v1", "day_run.v1.json")
-    graph_path = _report_path(ctx, "aegis_requirement_graph_v1", "requirement_graph.v1.json")
-    lineage_path = _report_path(ctx, "evidence_lineage_index_v1", "evidence_lineage_index.v1.json")
-    consistency_path = _report_path(ctx, "state_consistency_v1", "state_consistency.v1.json")
-    freshness_path = _report_path(ctx, "truth_freshness_v1", "truth_freshness.v1.json")
-    action_path = _report_path(ctx, "action_validity_v1", "action_validity.v1.json")
-    payload = _projection_for(
-        ctx,
-        _read_json(ledger_path),
-        _read_json(graph_path),
-        _read_json(lineage_path),
-        _read_json(consistency_path),
-        _read_json(freshness_path),
-        _read_json(action_path),
-    )
+    kernel_path = unified_truth_kernel_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    payload = _projection_from_kernel(ctx, _read_json(kernel_path))
     path = operator_projection_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     attach_producer_contract_v1(
         payload,
         producer_name="ops/tools/run_aegis_operator_projection_v1.py",
         producer_command=f"python3 ops/tools/run_aegis_operator_projection_v1.py --day_utc {ctx.day_utc} --environment {ctx.environment}",
-        input_artifacts=[ledger_path, graph_path, lineage_path, consistency_path, freshness_path, action_path],
+        input_artifacts=[kernel_path],
         output_artifacts=[path],
         schema_versions={"aegis_operator_projection": SCHEMA_VERSION},
     )

@@ -536,6 +536,18 @@ def _day_run_ledger_path(roots: RootResolution, day_utc: str) -> Path | None:
     ).resolve()
 
 
+def _unified_truth_kernel_path(roots: RootResolution, day_utc: str) -> Path | None:
+    if roots.canonical_truth_root is None or not DATE_RE.match(str(day_utc or "")):
+        return None
+    return (
+        roots.canonical_truth_root
+        / "reports"
+        / "unified_truth_kernel_v1"
+        / day_utc
+        / "unified_truth_kernel.v1.json"
+    ).resolve()
+
+
 def _requirement_graph_path(roots: RootResolution, day_utc: str) -> Path | None:
     if roots.canonical_truth_root is None or not DATE_RE.match(str(day_utc or "")):
         return None
@@ -2277,6 +2289,8 @@ def _build_paper_status(
     current_day = _build_current_calendar_day_runtime_status(roots)
     latest_trading_day = _build_latest_trading_day_evidence_status(roots)
     day_run = _load_day_run_ledger_status(roots, current_day.day_utc)
+    unified_kernel_path = _unified_truth_kernel_path(roots, current_day.day_utc)
+    unified_kernel = _read_json(unified_kernel_path) if unified_kernel_path else {}
     day_run_payload = _read_json(Path(day_run.path)) if day_run.exists else {}
     phase_results = day_run_payload.get("phase_results") if isinstance(day_run_payload.get("phase_results"), dict) else {}
     market_data_bod_prep = phase_results.get("MARKET_DATA_BOD_PREP") if isinstance(phase_results.get("MARKET_DATA_BOD_PREP"), dict) else {}
@@ -2390,6 +2404,23 @@ def _build_paper_status(
             ),
             signals=signals,
             grade_profile=_build_grade_profile(signals),
+        )
+    if unified_kernel:
+        kernel_final_status = str(unified_kernel.get("final_status") or "").strip().upper()
+        kernel_blocker = str(unified_kernel.get("canonical_blocker") or unified_kernel.get("first_blocker") or "").strip()
+        final_decision = FinalReadinessDecision(
+            status=kernel_final_status or final_decision.status,
+            canonical_blocker=kernel_blocker,
+            owning_subsystem="unified_truth_kernel_v1",
+            owning_gate=str(unified_kernel.get("first_blocker_phase") or "UNIFIED_TRUTH_KERNEL"),
+            reason=(
+                "unified truth kernel final_status="
+                + (kernel_final_status or "UNKNOWN")
+                + "; final_status_source="
+                + str(unified_kernel.get("final_status_source") or "UNKNOWN")
+            ),
+            signals=signals,
+            grade_profile=final_decision.grade_profile,
         )
 
     section_lines = [
@@ -2570,6 +2601,21 @@ def _build_paper_status(
         f"- authorization_evidence_status: {authorization_supply.authorization.get('status', '')}",
         f"- authorized_intent_count: {len(authorization_supply.authorization_export.get('authorized_intents') or []) if isinstance(authorization_supply.authorization_export.get('authorized_intents'), list) else 0}",
         f"- operator_next_action: {authorization_supply.operator_next_action}",
+        "",
+        "## Aegis Unified Truth Kernel",
+        "",
+        f"- unified_truth_kernel_path: {str(unified_kernel_path) if unified_kernel_path else 'NOT_FOUND'}",
+        f"- unified_truth_kernel_exists: {'true' if bool(unified_kernel) else 'false'}",
+        f"- kernel_final_status: {unified_kernel.get('final_status', '') if unified_kernel else ''}",
+        f"- kernel_final_status_source: {unified_kernel.get('final_status_source', '') if unified_kernel else ''}",
+        f"- kernel_first_blocker: {unified_kernel.get('first_blocker', '') if unified_kernel else ''}",
+        f"- kernel_first_blocker_phase: {unified_kernel.get('first_blocker_phase', '') if unified_kernel else ''}",
+        f"- kernel_truth_confidence: {unified_kernel.get('truth_confidence', '') if unified_kernel else ''}",
+        f"- kernel_allowed_next_actions: {json.dumps(unified_kernel.get('allowed_operator_actions', []) if unified_kernel else [], sort_keys=True)}",
+        f"- kernel_forbidden_actions: {json.dumps(unified_kernel.get('forbidden_operator_actions', []) if unified_kernel else [], sort_keys=True)}",
+        f"- kernel_trade_health_summary: {json.dumps(unified_kernel.get('trade_health', {}) if unified_kernel else {}, sort_keys=True)}",
+        "- kernel_authority_note: day-run ledger remains final readiness source; kernel is the governed truth resolver for operator presentation.",
+        "- older_surface_role: supporting/diagnostic evidence only",
         "",
         "## Aegis Paper-Trading Status",
         "",

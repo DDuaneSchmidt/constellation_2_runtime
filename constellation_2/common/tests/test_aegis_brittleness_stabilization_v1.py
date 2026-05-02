@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -205,6 +206,34 @@ def test_packet_build_is_source_repo_read_only(monkeypatch) -> None:
     _export_id, text = packet._build_packet()  # noqa: SLF001
     assert "## Aegis Paper-Trading Status" in text
     assert str(packet.LATEST_PACKET_PATH).startswith("/home/node/constellation_runtime_data/")
+
+
+def test_packet_exports_unified_truth_kernel_fields(monkeypatch, tmp_path: Path) -> None:
+    roots = packet.RootResolution(
+        canonical_truth_root=tmp_path / "truth",
+        runtime_truth_root=tmp_path / "runtime",
+        truth_sleeves_root=tmp_path / "sleeves",
+        authority_source="test",
+        evidence="test",
+        error="",
+    )
+    day = "2026-04-28"
+    ledger_path = roots.canonical_truth_root / "reports" / "aegis_day_run_v1" / day / "day_run.v1.json"
+    kernel_path = roots.canonical_truth_root / "reports" / "unified_truth_kernel_v1" / day / "unified_truth_kernel.v1.json"
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    kernel_path.parent.mkdir(parents=True, exist_ok=True)
+    ledger_path.write_text(json.dumps({"day_utc": day, "final_status": "NOT_READY", "canonical_phase": "MARKET_OPEN_DATA_GATE", "canonical_blocker": "MARKET_CLOSED"}), encoding="utf-8")
+    kernel_path.write_text(json.dumps({"day_utc": day, "final_status": "NOT_READY", "final_status_source": "aegis_day_run_ledger_v1", "first_blocker": "MARKET_CLOSED", "first_blocker_phase": "MARKET_OPEN_DATA_GATE", "canonical_blocker": "MARKET_CLOSED", "truth_confidence": "MEDIUM", "allowed_operator_actions": [{"action_id": "inspect_market_data_artifacts", "label": "Inspect market data artifacts"}], "forbidden_operator_actions": [{"action_id": "submit_paper_order", "label": "Submit paper order"}], "trade_health": {"edge_status": "UNPROVEN"}}), encoding="utf-8")
+    monkeypatch.setattr(packet, "_build_current_calendar_day_runtime_status", lambda _roots: _current_day(status="BLOCKED", blocker="MARKET_CLOSED"))
+    monkeypatch.setattr(packet, "_build_latest_trading_day_evidence_status", lambda _roots: _latest(status="BLOCKED"))
+
+    text = packet._build_paper_status(roots).section
+
+    assert "## Aegis Unified Truth Kernel" in text
+    assert "- kernel_final_status: NOT_READY" in text
+    assert "- kernel_final_status_source: aegis_day_run_ledger_v1" in text
+    assert "Inspect market data artifacts" in text
+    assert "- older_surface_role: supporting/diagnostic evidence only" in text
 
 
 def test_preflight_runtime_outputs_default_outside_source_repo() -> None:

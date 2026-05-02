@@ -15,6 +15,7 @@ if str(REPO_ROOT) not in sys.path:
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
 from ops.tools import run_aegis_bod_prepare_v1 as bod
 from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
+from ops.tools.run_unified_truth_kernel_v1 import unified_truth_kernel_path
 
 SCHEMA_VERSION = "aegis_live_intelligence.v1"
 READY_STATUSES = {"PRE_MARKET_READY", "PAPER_READY", "PAPER_READY_WITH_DELAYED_DATA", "TRADING_ACTIVE", "EOD_COMPLETE"}
@@ -47,38 +48,44 @@ def _report_path(ctx: bod.BodContext, family: str, filename: str) -> Path:
     return (ctx.truth_root / "reports" / family / ctx.day_utc / filename).resolve()
 
 
+def _allowed_action_ids(kernel: dict[str, Any]) -> list[str]:
+    rows = kernel.get("allowed_operator_actions") if isinstance(kernel.get("allowed_operator_actions"), list) else []
+    return [str(row.get("action_id") or "") for row in rows if isinstance(row, dict) and str(row.get("action_id") or "").strip()]
+
+
+def _confidence_from_kernel(kernel: dict[str, Any]) -> str:
+    final_status = str(kernel.get("final_status") or "UNKNOWN").strip().upper()
+    if final_status not in READY_STATUSES:
+        return "CAPPED_BY_HARD_BLOCKER"
+    if str(kernel.get("consistency_status") or "").upper() == "FAIL":
+        return "CAPPED_BY_HARD_CONSISTENCY_FAILURE"
+    if str(kernel.get("freshness_status") or "").upper() == "FAIL":
+        return "CAPPED_BY_STALE_AUTHORITATIVE_ARTIFACT"
+    if str(kernel.get("lineage_status") or "").upper() == "FAIL":
+        return "CAPPED_BY_AUTHORITATIVE_LINEAGE_FAILURE"
+    if str(kernel.get("truth_confidence") or "").upper() in {"LOW", "UNKNOWN"}:
+        return "CAPPED_BY_UNTRUSTED_TRUTH"
+    return "ADVISORY_READY"
+
+
 def build_live_intelligence_v1(ctx: bod.BodContext) -> dict[str, Any]:
-    ledger_path = _report_path(ctx, "aegis_day_run_v1", "day_run.v1.json")
-    graph_path = _report_path(ctx, "aegis_requirement_graph_v1", "requirement_graph.v1.json")
-    projection_path = _report_path(ctx, "aegis_operator_projection_v1", "operator_projection.v1.json")
-    consistency_path = _report_path(ctx, "state_consistency_v1", "state_consistency.v1.json")
-    freshness_path = _report_path(ctx, "truth_freshness_v1", "truth_freshness.v1.json")
-    action_path = _report_path(ctx, "action_validity_v1", "action_validity.v1.json")
-    attribution_path = _report_path(ctx, "outcome_attribution_v1", "outcome_attribution.v1.json")
-    ledger = _read_json(ledger_path)
-    graph = _read_json(graph_path)
-    projection = _read_json(projection_path)
-    consistency = _read_json(consistency_path)
-    freshness = _read_json(freshness_path)
-    action_validity = _read_json(action_path)
-    attribution = _read_json(attribution_path)
-    final_status = str(ledger.get("final_status") or "UNKNOWN").strip().upper()
-    blocker = str(ledger.get("canonical_blocker") or "").strip()
-    upstream_ready = final_status in READY_STATUSES and bool(graph) and bool(projection)
-    confidence = "UNKNOWN"
+    kernel_path = unified_truth_kernel_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    kernel = _read_json(kernel_path)
+    final_status = str(kernel.get("final_status") or "UNKNOWN").strip().upper()
+    blocker = str(kernel.get("canonical_blocker") or kernel.get("first_blocker") or "").strip()
+    allowed_ids = _allowed_action_ids(kernel)
+    trade_actions_allowed = final_status in READY_STATUSES and any(action_id in allowed_ids for action_id in {"submit_paper_order", "enable_broker_transmit"})
+    confidence = _confidence_from_kernel(kernel)
+    trade_health = kernel.get("trade_health") if isinstance(kernel.get("trade_health"), dict) else {}
     opportunity = {"state": "UNKNOWN", "actionable_recommendations": []}
-    edge = {"state": "UNKNOWN", "proven_facts": [], "advisory_analysis": []}
+    edge = {"state": str(trade_health.get("edge_status") or "UNKNOWN"), "proven_facts": [], "advisory_analysis": []}
     drift = {"state": "UNKNOWN", "alerts": []}
     quality = {"state": "UNKNOWN", "score": None}
-    status = "PASS" if upstream_ready else "NOT_READY"
-    if blocker:
-        confidence = "CAPPED_BY_HARD_BLOCKER"
-    if str(consistency.get("status") or "") == "FAIL":
-        confidence = "CAPPED_BY_HARD_CONSISTENCY_FAILURE"
-    elif upstream_ready:
-        confidence = "ADVISORY_READY"
+    status = "PASS" if final_status in READY_STATUSES else "NOT_READY"
+    upstream_ready = final_status in READY_STATUSES
+    if trade_actions_allowed:
         opportunity = {"state": "ADVISORY_ONLY", "actionable_recommendations": [], "requires_human_review": True}
-        edge = {"state": "ADVISORY_ONLY", "proven_facts": ["day_run_ledger_ready"], "advisory_analysis": []}
+        edge["proven_facts"] = ["unified_truth_kernel_final_status=" + final_status]
         drift = {"state": "ADVISORY_ONLY", "alerts": []}
         quality = {"state": "ADVISORY_ONLY", "score": None}
     return {
@@ -99,23 +106,21 @@ def build_live_intelligence_v1(ctx: bod.BodContext) -> dict[str, Any]:
         "edge_metrics": edge,
         "drift_alerts": drift,
         "trade_quality_score": quality,
-        "state_consistency_status": str(consistency.get("status") or "UNKNOWN"),
-        "truth_freshness_status": str(freshness.get("status") or "UNKNOWN"),
-        "action_validity_status": str(action_validity.get("status") or "UNKNOWN"),
-        "outcome_attribution_status": str(attribution.get("status") or "UNKNOWN"),
-        "valid_action_ids": [
-            str(row.get("action_id") or "")
-            for row in (action_validity.get("action_rules") if isinstance(action_validity.get("action_rules"), list) else [])
-            if isinstance(row, dict) and row.get("status") == "ALLOWED"
-        ],
+        "state_consistency_status": str(kernel.get("consistency_status") or "UNKNOWN"),
+        "truth_freshness_status": str(kernel.get("freshness_status") or "UNKNOWN"),
+        "action_validity_status": str(kernel.get("action_validity_status") or "UNKNOWN"),
+        "outcome_attribution_status": str(trade_health.get("outcome_status") or "UNKNOWN"),
+        "valid_action_ids": allowed_ids,
         "facts_vs_advisory": {
-            "proven_facts": ["day_run_ledger_final_status=" + final_status] if final_status != "UNKNOWN" else [],
+            "proven_facts": ["unified_truth_kernel_final_status=" + final_status] if final_status != "UNKNOWN" else [],
             "advisory_analysis": [],
         },
         "requires_human_review": True,
         "cannot_modify_readiness": True,
         "submit_boundary_effect": "NONE",
-        "input_artifact_paths": [str(ledger_path), str(graph_path), str(projection_path), str(consistency_path), str(freshness_path), str(action_path), str(attribution_path)],
+        "kernel_final_status_source": str(kernel.get("final_status_source") or ""),
+        "trade_recommendations_suppressed": not trade_actions_allowed,
+        "input_artifact_paths": [str(kernel_path)],
     }
 
 
