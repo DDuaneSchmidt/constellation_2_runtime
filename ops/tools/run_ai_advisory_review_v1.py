@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from jsonschema import Draft202012Validator
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -28,9 +30,10 @@ from ops.tools.run_regime_confidence_v1 import regime_confidence_path
 from ops.tools.run_selection_quality_v1 import selection_quality_path
 from ops.tools.run_trade_outcome_v1 import trade_outcome_path
 from ops.tools.run_advisory_evidence_gateway_v1 import advisory_evidence_packet_path
-from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
+from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1, git_commit_v1, git_dirty_status_v1
 
 PAPER_MODE = "PAPER"
+SCHEMA_PATH = REPO_ROOT / "governance/04_DATA/SCHEMAS/C2/REPORTS/ai_advisory_review.v1.schema.json"
 
 
 def _now_iso() -> str:
@@ -42,6 +45,7 @@ def _canonical_bytes(payload: dict[str, Any]) -> bytes:
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    _validate_ai_advisory_schema(payload)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(_canonical_bytes(payload) + b"\n")
 
@@ -51,6 +55,13 @@ def _read_json(path: Path) -> dict[str, Any]:
         return read_json_object_v1(path)
     except Exception:
         return {}
+
+
+def _validate_ai_advisory_schema(payload: dict[str, Any]) -> None:
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    errors = sorted(Draft202012Validator(schema).iter_errors(payload), key=lambda err: list(err.path))
+    if errors:
+        raise ValueError("AI_ADVISORY_REVIEW_SCHEMA_INVALID:" + ";".join(str(err.message) for err in errors[:3]))
 
 
 def _float(value: Any, default: float = 0.0) -> float:
@@ -84,22 +95,34 @@ def _artifact_map(truth_root: Path, day_utc: str) -> dict[str, Path]:
 
 def build_ai_advisory_review_v1(*, day_utc: str, truth_root: Path, environment: str = PAPER_MODE) -> dict[str, Any]:
     truth_root = Path(truth_root).resolve()
+    runtime_root = truth_root
     out_path = ai_advisory_review_path(truth_root=truth_root, day_utc=day_utc)
     packet_path = advisory_evidence_packet_path(truth_root=truth_root, day_utc=day_utc)
     packet = _read_json(packet_path)
     packet_status = str(packet.get("status") or "").strip().upper()
     consumption_allowed = bool(packet.get("ai_consumption_allowed") is True)
+    generated_at = _now_iso()
+    base_contract = {
+        "artifact_id": "ai_advisory_review_v1",
+        "generated_at": generated_at,
+        "git_commit": git_commit_v1(),
+        "git_dirty_status": git_dirty_status_v1(),
+        "truth_root": str(truth_root),
+        "runtime_root": str(runtime_root),
+        "producer": "ops/tools/run_ai_advisory_review_v1.py",
+        "authority": "ADVISORY_ONLY",
+        "readiness_authority": "aegis_control_plane_v1",
+        "submit_authority": "aegis_submit_enforcement_v1",
+        "operator_action_authority": "CONTROL_PLANE_OR_GOVERNED_RECOVERY_ONLY",
+    }
     if not packet or packet_status != "PASS" or not consumption_allowed:
         payload = {
             "schema_id": "ai_advisory_review",
             "schema_version": "v1",
+            **base_contract,
             "day_utc": day_utc,
             "environment": environment,
             "status": "NO_GOVERNED_ADVISORY_INPUT",
-            "authority": "ADVISORY_ONLY",
-            "readiness_authority": "aegis_control_plane_v1",
-            "submit_authority": "aegis_submit_enforcement_v1",
-            "operator_action_authority": "CONTROL_PLANE_OR_GOVERNED_RECOVERY_ONLY",
             "advisory_evidence_packet_path": str(packet_path),
             "advisory_evidence_packet_status": packet_status or "MISSING",
             "control_plane_final_status_observed": str(packet.get("control_plane_final_status") or "UNKNOWN"),
@@ -109,12 +132,12 @@ def build_ai_advisory_review_v1(*, day_utc: str, truth_root: Path, environment: 
             "decisions_reviewed": 0,
             "anomaly_flags": ["NO_GOVERNED_ADVISORY_INPUT"],
             "recommendations": [],
+            "warnings": ["NO_GOVERNED_ADVISORY_INPUT"],
             "confidence": "NONE",
             "requires_human_review": True,
             "prohibited_actions_attempted": False,
             "evidence_paths": [str(packet_path)] if packet_path.exists() else [],
-            "produced_at_utc": _now_iso(),
-            "producer": "ops/tools/run_ai_advisory_review_v1.py",
+            "produced_at_utc": generated_at,
             "artifact_path": str(out_path),
         }
         attach_producer_contract_v1(
@@ -134,13 +157,10 @@ def build_ai_advisory_review_v1(*, day_utc: str, truth_root: Path, environment: 
     payload = {
         "schema_id": "ai_advisory_review",
         "schema_version": "v1",
+        **base_contract,
         "day_utc": day_utc,
         "environment": environment,
         "status": "PASS",
-        "authority": "ADVISORY_ONLY",
-        "readiness_authority": "aegis_control_plane_v1",
-        "submit_authority": "aegis_submit_enforcement_v1",
-        "operator_action_authority": "CONTROL_PLANE_OR_GOVERNED_RECOVERY_ONLY",
         "advisory_evidence_packet_path": str(packet_path),
         "advisory_evidence_packet_status": packet_status,
         "control_plane_final_status_observed": str(packet.get("control_plane_final_status") or "UNKNOWN"),
@@ -164,12 +184,12 @@ def build_ai_advisory_review_v1(*, day_utc: str, truth_root: Path, environment: 
         ],
         "anomaly_flags": [str(item) for item in packet.get("warnings", []) if str(item)],
         "recommendations": [],
+        "warnings": [str(item) for item in packet.get("warnings", []) if str(item)],
         "confidence": "LOW" if str(packet.get("control_plane_final_status") or "").upper() != "READY" else "MEDIUM",
         "requires_human_review": True,
         "prohibited_actions_attempted": False,
         "evidence_paths": [str(packet_path)],
-        "produced_at_utc": _now_iso(),
-        "producer": "ops/tools/run_ai_advisory_review_v1.py",
+        "produced_at_utc": generated_at,
         "artifact_path": str(out_path),
     }
     attach_producer_contract_v1(

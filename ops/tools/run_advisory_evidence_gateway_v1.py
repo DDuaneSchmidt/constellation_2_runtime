@@ -38,31 +38,36 @@ ADVISORY_CANDIDATES: tuple[dict[str, str], ...] = (
         "artifact_type": "eod_review_v1",
         "production_relpath": "reports/eod_review_v1/{day}/eod_review.v1.json",
         "legacy_relpath": "reports/eod_review_v1/{day}/eod_review.v1.json",
-        "schema_path": "",
+        "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/eod_review.v1.schema.json",
+        "governed_producer": "",
     },
     {
         "artifact_type": "ai_pattern_review_v1",
         "production_relpath": "reports/ai_pattern_review_v1/daily/{day}/ai_pattern_review.v1.json",
         "legacy_relpath": "reports/ai_pattern_review_v1/daily/{day}/ai_pattern_review.v1.json",
-        "schema_path": "",
+        "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/ai_pattern_review.v1.schema.json",
+        "governed_producer": "",
     },
     {
         "artifact_type": "operator_ai_process_review_v1",
         "production_relpath": "reports/operator_ai_process_review_v1/{day}/operator_ai_process_review.v1.json",
         "legacy_relpath": "reports/operator_ai_process_review_v1/{day}/operator_ai_process_review.v1.json",
-        "schema_path": "",
+        "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/operator_ai_process_review.v1.schema.json",
+        "governed_producer": "",
     },
     {
         "artifact_type": "ai_advisory_review_v1",
         "production_relpath": "reports/ai_advisory_review_v1/{day}/ai_advisory_review.v1.json",
         "legacy_relpath": "reports/ai_advisory_review_v1/{day}/ai_advisory_review.v1.json",
-        "schema_path": "",
+        "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/ai_advisory_review.v1.schema.json",
+        "governed_producer": "ops/tools/run_ai_advisory_review_v1.py",
     },
     {
         "artifact_type": "weekly_scorecard_view_v1",
         "production_relpath": "reports/weekly_scorecard_view_v1/{day}/weekly_scorecard_view.v1.json",
         "legacy_relpath": "../truth_sleeves/PRIMARY/PAPER/reports/weekly_scorecard_view_v1/{day}/weekly_scorecard_view.v1.json",
-        "schema_path": "governance/04_DATA/SCHEMAS/C2/EVALUATION/weekly_scorecard_view.v1.schema.json",
+        "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/weekly_scorecard_view.v1.schema.json",
+        "governed_producer": "constellation_2.common.governed_evaluation_v1",
     },
 )
 
@@ -126,6 +131,22 @@ def _artifact_day(payload: dict[str, Any]) -> str:
     return str(payload.get("day_utc") or payload.get("trading_day") or "").strip()
 
 
+def _artifact_commit(payload: dict[str, Any]) -> str:
+    top = str(payload.get("git_commit") or payload.get("code_version") or "").strip()
+    if top:
+        return top
+    pc = payload.get("producer_contract_v1") if isinstance(payload.get("producer_contract_v1"), dict) else {}
+    return str(pc.get("code_version_git_commit") or "").strip()
+
+
+def _artifact_dirty_status(payload: dict[str, Any]) -> str:
+    top = str(payload.get("git_dirty_status") or "").strip().upper()
+    if top:
+        return top
+    pc = payload.get("producer_contract_v1") if isinstance(payload.get("producer_contract_v1"), dict) else {}
+    return str(pc.get("source_dirty_status") or "").strip().upper()
+
+
 def _exclude(artifact_type: str, path: Path, reason: str) -> dict[str, Any]:
     return {"artifact_type": artifact_type, "path": str(path), "reason": reason}
 
@@ -148,7 +169,9 @@ def _validate_candidate(
     artifact_type: str,
     path: Path,
     schema_path: Path,
+    governed_producer: str,
     truth_root: Path,
+    runtime_root: Path,
     day_utc: str,
     promoted_commit: str,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -166,11 +189,39 @@ def _validate_candidate(
         return None, _exclude(artifact_type, path, "WRONG_DAY")
     if not _generated_at(payload):
         return None, _exclude(artifact_type, path, "MISSING_GENERATED_AT")
+    if artifact_type == "aegis_control_plane_v1":
+        pc = payload.get("producer_contract_v1") if isinstance(payload.get("producer_contract_v1"), dict) else {}
+        if not pc:
+            return None, _exclude(artifact_type, path, "MISSING_PRODUCER_CONTRACT")
+        if str(pc.get("source_dirty_status") or "").strip().upper() != "CLEAN":
+            return None, _exclude(artifact_type, path, "DIRTY_SOURCE_ARTIFACT")
+        if promoted_commit and str(pc.get("code_version_git_commit") or "").strip() != promoted_commit:
+            return None, _exclude(artifact_type, path, "PROMOTED_COMMIT_MISMATCH")
+        return _included_ref(artifact_type, path, payload, schema_path), None
+    try:
+        _assert_no_forbidden_authority_fields(payload)
+    except ValueError as exc:
+        return None, _exclude(artifact_type, path, str(exc))
+    if str(payload.get("authority") or "").strip() != "ADVISORY_ONLY":
+        return None, _exclude(artifact_type, path, "NOT_ADVISORY_ONLY")
+    if str(payload.get("readiness_authority") or "").strip() != "aegis_control_plane_v1":
+        return None, _exclude(artifact_type, path, "READINESS_AUTHORITY_NOT_CONTROL_PLANE")
+    if str(payload.get("truth_root") or "").strip() and str(Path(str(payload.get("truth_root"))).resolve()) != str(truth_root):
+        return None, _exclude(artifact_type, path, "ARTIFACT_TRUTH_ROOT_MISMATCH")
+    if str(payload.get("runtime_root") or "").strip() and str(Path(str(payload.get("runtime_root"))).resolve()) != str(runtime_root):
+        return None, _exclude(artifact_type, path, "ARTIFACT_RUNTIME_ROOT_MISMATCH")
+    if promoted_commit and _artifact_commit(payload) != promoted_commit:
+        return None, _exclude(artifact_type, path, "PROMOTED_COMMIT_MISMATCH")
+    if _artifact_dirty_status(payload) != "CLEAN":
+        return None, _exclude(artifact_type, path, "DIRTY_SOURCE_ARTIFACT")
     pc = payload.get("producer_contract_v1") if isinstance(payload.get("producer_contract_v1"), dict) else {}
     if not pc:
         return None, _exclude(artifact_type, path, "MISSING_PRODUCER_CONTRACT")
-    if str(pc.get("source_dirty_status") or "").strip().upper() != "CLEAN":
-        return None, _exclude(artifact_type, path, "DIRTY_SOURCE_ARTIFACT")
+    if not governed_producer:
+        return None, _exclude(artifact_type, path, "NOT_GOVERNED")
+    producer_name = str(pc.get("producer_name") or payload.get("producer") or "").strip()
+    if producer_name != governed_producer:
+        return None, _exclude(artifact_type, path, "UNAPPROVED_GOVERNED_PRODUCER")
     if promoted_commit and str(pc.get("code_version_git_commit") or "").strip() != promoted_commit:
         return None, _exclude(artifact_type, path, "PROMOTED_COMMIT_MISMATCH")
     return _included_ref(artifact_type, path, payload, schema_path), None
@@ -233,7 +284,9 @@ def build_advisory_evidence_packet_v1(*, day_utc: str, truth_root: Path, runtime
         artifact_type="aegis_control_plane_v1",
         path=control_plane_path,
         schema_path=control_plane_schema,
+        governed_producer="",
         truth_root=truth_root,
+        runtime_root=runtime_root,
         day_utc=day_utc,
         promoted_commit=promoted_commit,
     )
@@ -252,7 +305,9 @@ def build_advisory_evidence_packet_v1(*, day_utc: str, truth_root: Path, runtime
             artifact_type=candidate["artifact_type"],
             path=artifact_path,
             schema_path=schema_path,
+            governed_producer=str(candidate.get("governed_producer") or ""),
             truth_root=truth_root,
+            runtime_root=runtime_root,
             day_utc=day_utc,
             promoted_commit=promoted_commit,
         )

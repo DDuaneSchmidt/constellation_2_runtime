@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/weekly_scorecard_view.v1.schema.json",
+  "title": "Weekly Scorecard View v1 Advisory Contract",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "day_utc",
+    "generated_at",
+    "git_commit",
+    "git_dirty_status",
+    "truth_root",
+    "runtime_root",
+    "producer",
+    "authority",
+    "readiness_authority",
+    "advisory_status",
+    "portfolio_summary",
+    "sleeve_rows",
+    "source_refs",
+    "warnings",
+    "requires_human_review",
+    "producer_contract_v1"
+  ],
+  "not": {
+    "anyOf": [
+      { "required": ["final_status"] },
+      { "required": ["readiness"] },
+      { "required": ["ready"] },
+      { "required": ["submit_allowed"] },
+      { "required": ["authorized"] },
+      { "required": ["operator_next_action"] },
+      { "required": ["next_valid_actions"] }
+    ]
+  },
+  "properties": {
+    "schema_id": { "const": "C2_WEEKLY_SCORECARD_VIEW_V1" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "weekly_scorecard_view_v1" },
+    "day_utc": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "generated_at": { "type": "string", "minLength": 1 },
+    "generated_at_utc": { "type": "string" },
+    "git_commit": { "type": "string", "minLength": 1 },
+    "git_dirty_status": { "type": "string", "enum": ["CLEAN", "DIRTY"] },
+    "truth_root": { "type": "string", "minLength": 1 },
+    "runtime_root": { "type": "string", "minLength": 1 },
+    "producer": { "const": "constellation_2.common.governed_evaluation_v1" },
+    "authority": { "const": "ADVISORY_ONLY" },
+    "readiness_authority": { "const": "aegis_control_plane_v1" },
+    "advisory_status": { "type": "string" },
+    "surface_kind": { "type": "string" },
+    "window_label": { "type": "string" },
+    "portfolio_summary": { "type": "object" },
+    "sleeve_rows": { "type": "array", "items": { "type": "object" } },
+    "source_refs": { "type": "array", "items": { "type": "object" } },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "requires_human_review": { "type": "boolean" },
+    "producer_contract_v1": { "type": "object" }
+  }
+}

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator
 
 import ops.tools.run_advisory_evidence_gateway_v1 as gateway
 from ops.tools.run_ai_advisory_review_v1 import build_ai_advisory_review_v1
@@ -34,6 +35,10 @@ def _producer_contract(commit: str = COMMIT, dirty: str = "CLEAN") -> dict:
         "schema_versions": {},
         "deterministic_fingerprint": "f" * 64,
     }
+
+
+def _schema(name: str) -> dict:
+    return json.loads((gateway.REPO_ROOT / "governance" / "04_DATA" / "SCHEMAS" / "C2" / "REPORTS" / name).read_text(encoding="utf-8"))
 
 
 def _seed_production(tmp_path: Path, *, control_day: str = DAY, control_commit: str = COMMIT, dirty: str = "CLEAN") -> tuple[Path, Path]:
@@ -162,3 +167,153 @@ def test_ai_review_consumes_only_gateway_packet(tmp_path: Path) -> None:
     assert payload["evidence_paths"] == [str(path)]
     assert payload["recommendations"] == []
     assert payload["control_plane_final_status_observed"] == "NOT_READY"
+
+
+def test_ai_advisory_review_schema_rejects_missing_metadata_and_authority_fields(tmp_path: Path) -> None:
+    schema = _schema("ai_advisory_review.v1.schema.json")
+    valid = {
+        "schema_id": "ai_advisory_review",
+        "schema_version": "v1",
+        "artifact_id": "ai_advisory_review_v1",
+        "day_utc": DAY,
+        "generated_at": "2026-05-02T15:00:00Z",
+        "git_commit": COMMIT,
+        "git_dirty_status": "CLEAN",
+        "truth_root": str(tmp_path),
+        "runtime_root": str(tmp_path),
+        "producer": "ops/tools/run_ai_advisory_review_v1.py",
+        "authority": "ADVISORY_ONLY",
+        "readiness_authority": "aegis_control_plane_v1",
+        "submit_authority": "aegis_submit_enforcement_v1",
+        "operator_action_authority": "CONTROL_PLANE_OR_GOVERNED_RECOVERY_ONLY",
+        "environment": "PAPER",
+        "status": "NO_GOVERNED_ADVISORY_INPUT",
+        "advisory_evidence_packet_path": str(tmp_path / "packet.json"),
+        "advisory_evidence_packet_status": "BLOCKED",
+        "control_plane_final_status_observed": "NOT_READY",
+        "control_plane_current_domain_observed": "SESSION_IDENTITY",
+        "control_plane_canonical_blocker_observed": "NON_TRADING_DAY",
+        "control_plane_submit_allowed_observed": False,
+        "recommendations": [],
+        "warnings": [],
+        "requires_human_review": True,
+        "evidence_paths": [],
+        "producer_contract_v1": _producer_contract(),
+    }
+    Draft202012Validator(schema).validate(valid)
+
+    missing = dict(valid)
+    missing.pop("git_commit")
+    assert list(Draft202012Validator(schema).iter_errors(missing))
+
+    forbidden = dict(valid)
+    forbidden["submit_allowed"] = True
+    assert list(Draft202012Validator(schema).iter_errors(forbidden))
+
+
+def test_not_governed_eod_artifact_is_quarantined_even_when_schema_valid(tmp_path: Path) -> None:
+    prod, _runtime = _seed_production(tmp_path)
+    eod = prod / "reports" / "eod_review_v1" / DAY / "eod_review.v1.json"
+    _write(
+        eod,
+        {
+            "schema_id": "eod_review",
+            "schema_version": "v1",
+            "artifact_id": "eod_review_v1",
+            "day_utc": DAY,
+            "generated_at": "2026-05-02T15:00:00Z",
+            "git_commit": COMMIT,
+            "git_dirty_status": "CLEAN",
+            "truth_root": str(prod.resolve()),
+            "runtime_root": str(prod.resolve()),
+            "producer": "ops/tools/run_eod_review_v1.py",
+            "authority": "ADVISORY_ONLY",
+            "readiness_authority": "aegis_control_plane_v1",
+            "status": "PASS",
+            "advisory_summary": {},
+            "non_actionable_recommendations": [],
+            "warnings": [],
+            "requires_human_review": True,
+            "producer_contract_v1": _producer_contract(),
+        },
+    )
+
+    payload = gateway.build_advisory_evidence_packet_v1(day_utc=DAY, truth_root=prod, runtime_root=prod)
+
+    assert not any(row["artifact_type"] == "eod_review_v1" for row in payload["included_artifacts"])
+    assert any(row["artifact_type"] == "eod_review_v1" and row["reason"] == "NOT_GOVERNED" for row in payload["excluded_artifacts"])
+
+
+def test_migrated_weekly_scorecard_is_included_only_when_governed_and_schema_valid(tmp_path: Path) -> None:
+    prod, _runtime = _seed_production(tmp_path)
+    weekly = prod / "reports" / "weekly_scorecard_view_v1" / DAY / "weekly_scorecard_view.v1.json"
+    contract = _producer_contract()
+    contract["producer_name"] = "constellation_2.common.governed_evaluation_v1"
+    _write(
+        weekly,
+        {
+            "schema_id": "C2_WEEKLY_SCORECARD_VIEW_V1",
+            "schema_version": "v1",
+            "artifact_id": "weekly_scorecard_view_v1",
+            "day_utc": DAY,
+            "generated_at": "2026-05-02T15:00:00Z",
+            "generated_at_utc": "2026-05-02T15:00:00Z",
+            "git_commit": COMMIT,
+            "git_dirty_status": "CLEAN",
+            "truth_root": str(prod.resolve()),
+            "runtime_root": str(prod.resolve()),
+            "producer": "constellation_2.common.governed_evaluation_v1",
+            "authority": "ADVISORY_ONLY",
+            "readiness_authority": "aegis_control_plane_v1",
+            "advisory_status": "ANALYSIS_ONLY",
+            "surface_kind": "projection",
+            "window_label": "WEEK_ENDING_2026-05-02",
+            "portfolio_summary": {},
+            "sleeve_rows": [],
+            "source_refs": [],
+            "warnings": [],
+            "requires_human_review": True,
+            "producer_contract_v1": contract,
+        },
+    )
+
+    payload = gateway.build_advisory_evidence_packet_v1(day_utc=DAY, truth_root=prod, runtime_root=prod)
+
+    assert any(row["artifact_type"] == "weekly_scorecard_view_v1" for row in payload["included_artifacts"])
+
+
+def test_readiness_like_fields_are_quarantined_for_advisory_artifacts(tmp_path: Path) -> None:
+    prod, _runtime = _seed_production(tmp_path)
+    weekly = prod / "reports" / "weekly_scorecard_view_v1" / DAY / "weekly_scorecard_view.v1.json"
+    contract = _producer_contract()
+    contract["producer_name"] = "constellation_2.common.governed_evaluation_v1"
+    _write(
+        weekly,
+        {
+            "schema_id": "C2_WEEKLY_SCORECARD_VIEW_V1",
+            "schema_version": "v1",
+            "artifact_id": "weekly_scorecard_view_v1",
+            "day_utc": DAY,
+            "generated_at": "2026-05-02T15:00:00Z",
+            "git_commit": COMMIT,
+            "git_dirty_status": "CLEAN",
+            "truth_root": str(prod.resolve()),
+            "runtime_root": str(prod.resolve()),
+            "producer": "constellation_2.common.governed_evaluation_v1",
+            "authority": "ADVISORY_ONLY",
+            "readiness_authority": "aegis_control_plane_v1",
+            "advisory_status": "ANALYSIS_ONLY",
+            "portfolio_summary": {},
+            "sleeve_rows": [],
+            "source_refs": [],
+            "warnings": [],
+            "requires_human_review": True,
+            "producer_contract_v1": contract,
+            "final_status": "READY",
+        },
+    )
+
+    payload = gateway.build_advisory_evidence_packet_v1(day_utc=DAY, truth_root=prod, runtime_root=prod)
+
+    assert not any(row["artifact_type"] == "weekly_scorecard_view_v1" for row in payload["included_artifacts"])
+    assert any(row["artifact_type"] == "weekly_scorecard_view_v1" and str(row["reason"]).startswith("SCHEMA_INVALID") for row in payload["excluded_artifacts"])

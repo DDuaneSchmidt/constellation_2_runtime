@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/ai_pattern_review.v1.schema.json",
+  "title": "AI Pattern Review v1 Advisory Contract",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "day_utc",
+    "generated_at",
+    "git_commit",
+    "git_dirty_status",
+    "truth_root",
+    "runtime_root",
+    "producer",
+    "authority",
+    "readiness_authority",
+    "status",
+    "advisory_summary",
+    "non_actionable_recommendations",
+    "warnings",
+    "requires_human_review",
+    "producer_contract_v1"
+  ],
+  "not": {
+    "anyOf": [
+      { "required": ["final_status"] },
+      { "required": ["readiness"] },
+      { "required": ["ready"] },
+      { "required": ["submit_allowed"] },
+      { "required": ["authorized"] },
+      { "required": ["operator_next_action"] },
+      { "required": ["next_valid_actions"] }
+    ]
+  },
+  "properties": {
+    "schema_id": { "const": "ai_pattern_review" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "ai_pattern_review_v1" },
+    "day_utc": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "generated_at": { "type": "string", "minLength": 1 },
+    "git_commit": { "type": "string", "minLength": 1 },
+    "git_dirty_status": { "type": "string", "enum": ["CLEAN", "DIRTY"] },
+    "truth_root": { "type": "string", "minLength": 1 },
+    "runtime_root": { "type": "string", "minLength": 1 },
+    "producer": { "type": "string", "minLength": 1 },
+    "authority": { "const": "ADVISORY_ONLY" },
+    "readiness_authority": { "const": "aegis_control_plane_v1" },
+    "status": { "type": "string" },
+    "advisory_summary": { "type": "object" },
+    "non_actionable_recommendations": { "type": "array", "items": { "type": "object" } },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "requires_human_review": { "type": "boolean" },
+    "producer_contract_v1": { "type": "object" }
+  }
+}
