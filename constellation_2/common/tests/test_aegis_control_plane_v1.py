@@ -265,7 +265,19 @@ def test_session_partial_build_can_be_primary_when_hidden_dependency_absent(monk
     _source_pass(monkeypatch)
     ctx = _ctx(tmp_path)
     _write(ctx.truth_root / "active_session_v1" / "current.json", {"target_day": ctx.day_utc, "promotion_state": "BLOCKED", "blocking_codes": ["PARTIAL_BUILD"]})
-    _write(ctx.truth_root / "target_day_admission_v1" / f"{ctx.day_utc}.json", {"target_day": ctx.day_utc, "blocking_reason_codes": ["PARTIAL_BUILD"]})
+    _write(
+        ctx.truth_root / "target_day_admission_v1" / f"{ctx.day_utc}.json",
+        {
+            "target_day": ctx.day_utc,
+            "blocking_reason_codes": ["PARTIAL_BUILD"],
+            "hidden_dependency_check_result": {
+                "status": "FAIL",
+                "blocking_reason_code": "PARTIAL_BUILD",
+                "undeclared_dependency_artifacts": [],
+                "failing_producers": ["ops/tools/run_session_readiness_refresh_v1.py"],
+            },
+        },
+    )
     _write(ctx.truth_root / "target_day_build_v1" / f"{ctx.day_utc}.json", {"target_day": ctx.day_utc, "build_status": "BLOCKED", "artifact_results": [{"artifact_id": "capability_state_v1", "result_status": "FAIL"}]})
 
     payload = cp.build_control_plane_v1(ctx)
@@ -273,6 +285,50 @@ def test_session_partial_build_can_be_primary_when_hidden_dependency_absent(monk
     assert payload["canonical_blocker"] == "PARTIAL_BUILD"
     assert payload["current_session_sub_blocker"]["missing_or_failed_dependency"] == "capability_state_v1"
     assert payload["current_session_sub_blocker"]["evidence_path"].endswith("/target_day_build_v1/2026-05-04.json")
+
+
+def test_declared_session_dependency_missing_becomes_specific_blocker(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    missing_path = (
+        ctx.truth_root
+        / "reports"
+        / "runtime_resilience_authority_v1"
+        / ctx.day_utc
+        / "runtime_resilience_authority.v1.json"
+    )
+    _write(ctx.truth_root / "active_session_v1" / "current.json", {"target_day": ctx.day_utc, "promotion_state": "BLOCKED", "blocking_codes": ["PARTIAL_BUILD"]})
+    _write(ctx.truth_root / "target_day_admission_v1" / f"{ctx.day_utc}.json", {"target_day": ctx.day_utc, "blocking_reason_codes": ["PARTIAL_BUILD"]})
+    _write(
+        ctx.truth_root / "target_day_build_v1" / f"{ctx.day_utc}.json",
+        {
+            "target_day": ctx.day_utc,
+            "build_status": "BLOCKED",
+            "artifact_results": [
+                {
+                    "artifact_id": "runtime_resilience_authority_v1",
+                    "classification": "SESSION_AUTHORITY_DECLARED_DEPENDENCY",
+                    "result_status": "FAIL",
+                    "blocker_codes": ["RUNTIME_RESILIENCE_AUTHORITY_V1_MISSING"],
+                    "canonical_path": str(missing_path),
+                    "producer": {
+                        "command": (
+                            f'PYTHONPATH="$PWD" python3 ops/tools/run_runtime_resilience_authority_v1.py '
+                            f"--day_utc {ctx.day_utc} --truth_root {ctx.truth_root}"
+                        )
+                    },
+                }
+            ],
+        },
+    )
+
+    payload = cp.build_control_plane_v1(ctx)
+
+    assert payload["current_phase"] == "SESSION_AUTHORITY"
+    assert payload["canonical_blocker"] == "RUNTIME_RESILIENCE_AUTHORITY_V1_MISSING"
+    assert payload["current_session_sub_blocker"]["missing_or_failed_dependency"] == "runtime_resilience_authority_v1"
+    assert payload["evidence_paths"] == [str(missing_path)]
+    assert "run_runtime_resilience_authority_v1.py" in payload["recovery_commands"][0]
 
 
 def test_session_required_gate_fail_can_be_primary(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001

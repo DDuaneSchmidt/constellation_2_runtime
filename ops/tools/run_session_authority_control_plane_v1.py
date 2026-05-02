@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import re
 from datetime import date, timedelta
 from pathlib import Path
@@ -15,6 +16,7 @@ from constellation_2.common.paper_session_authority_v1 import (
     read_paper_session_authority_ref_v1,
 )
 from constellation_2.common.runtime_path_authority_v1 import classify_runtime_path_v1
+from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
 ROLE_REQUIRED_BINDING_INPUT = "REQUIRED_BINDING_INPUT"
 ROLE_REQUIRED_DERIVED_GATE = "REQUIRED_DERIVED_GATE"
@@ -30,6 +32,15 @@ REASON_TARGET_DAY_DATE_MISMATCH = "TARGET_DAY_DATE_MISMATCH"
 REASON_TARGET_DAY_ARTIFACT_MISSING = "TARGET_DAY_ARTIFACT_MISSING"
 REASON_PROVENANCE_MISSING = "PROVENANCE_MISSING"
 REASON_REQUIRED_GATE_FAIL = "REQUIRED_GATE_FAIL"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+TRADING_DAY_READINESS_AUTHORITY_SCHEMA = (
+    "governance/04_DATA/SCHEMAS/C2/REPORTS/trading_day_readiness_authority.v1.schema.json"
+)
+SAFETY_STATE_AUTHORITY_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/safety_state_authority.v1.schema.json"
+
+
+def _producer_command(script_relpath: str, *, day_flag: str, target_day: str, truth_root: Path) -> str:
+    return f'PYTHONPATH="$PWD" python3 {script_relpath} {day_flag} {target_day} --truth_root {truth_root}'
 
 
 def _path_family(path: Path) -> str:
@@ -940,6 +951,225 @@ def _paper_session_authority_row(*, truth_root: Path, target_day: str, required:
     )
 
 
+def _authority_report_path(*, truth_root: Path, artifact_id: str, target_day: str) -> Path:
+    filename_by_artifact = {
+        "runtime_resilience_authority_v1": "runtime_resilience_authority.v1.json",
+        "safety_state_authority_v1": "safety_state_authority.v1.json",
+        "trading_day_readiness_authority_v1": "trading_day_readiness_authority.v1.json",
+    }
+    filename = filename_by_artifact[artifact_id]
+    return (truth_root / "reports" / artifact_id / target_day / filename).resolve()
+
+
+def _authority_payload_status(
+    *,
+    artifact_id: str,
+    payload: Mapping[str, Any],
+) -> tuple[str, bool, List[str]]:
+    if artifact_id == "trading_day_readiness_authority_v1":
+        status = str(payload.get("readiness_mode") or payload.get("session_state") or "UNKNOWN").strip().upper()
+        blocker = str(payload.get("canonical_blocker") or "").strip().upper()
+        return status, blocker == "", ([blocker] if blocker else [])
+    status = str(payload.get("status") or payload.get("authority_status") or "UNKNOWN").strip().upper()
+    canonical = str(payload.get("canonical_blocker") or "").strip().upper()
+    reason_codes = [str(code).strip() for code in (payload.get("reason_codes") or []) if str(code).strip()]
+    blocker_codes = [str(code).strip() for code in (payload.get("blocking_codes") or []) if str(code).strip()]
+    codes = [canonical] if canonical else []
+    codes.extend(reason_codes or blocker_codes)
+    return status, status == "PASS", codes
+
+
+def _declared_session_authority_dependency_row(
+    *,
+    truth_root: Path,
+    target_day: str,
+    artifact_id: str,
+    schema_ref: str,
+    producer_command: str,
+    required: bool = True,
+) -> Dict[str, Any]:
+    authority_path = _authority_report_path(truth_root=truth_root, artifact_id=artifact_id, target_day=target_day)
+    if not authority_path.exists() or not authority_path.is_file():
+        return _result_row(
+            artifact_id=artifact_id,
+            required=required,
+            role_class=ROLE_REQUIRED_DERIVED_GATE,
+            classification="SESSION_AUTHORITY_DECLARED_DEPENDENCY",
+            authority_path=authority_path,
+            observed_status="MISSING",
+            result_status="FAIL",
+            blocker_codes=[f"{artifact_id.upper()}_MISSING"],
+            schema_status="MISSING",
+            schema_ref=schema_ref,
+            freshness_rule="TARGET_DAY_MATCH_AND_TIMESTAMP_PRESENT",
+            freshness_status="STALE",
+            target_day_expected=target_day,
+            target_day_observed="",
+            date_binding_status="MISSING",
+            provenance_required=True,
+            provenance_summary={"required": True, "present": False, "fields_present": [], "source": ""},
+            producer={"module": producer_command, "git_sha": ""},
+            source_refs=[],
+            explicit_reason_code=REASON_TARGET_DAY_ARTIFACT_MISSING,
+        )
+    try:
+        payload = json.loads(authority_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("AUTHORITY_PAYLOAD_NOT_OBJECT")
+        schema_status = "PRACTICAL_VALID"
+        if schema_ref:
+            validate_against_repo_schema_v1(payload, REPO_ROOT, schema_ref)
+            schema_status = "VALID"
+    except Exception:
+        return _result_row(
+            artifact_id=artifact_id,
+            required=required,
+            role_class=ROLE_REQUIRED_DERIVED_GATE,
+            classification="SESSION_AUTHORITY_DECLARED_DEPENDENCY",
+            authority_path=authority_path,
+            observed_status="INVALID",
+            result_status="FAIL",
+            blocker_codes=[f"{artifact_id.upper()}_INVALID"],
+            schema_status="INVALID",
+            schema_ref=schema_ref,
+            freshness_rule="TARGET_DAY_MATCH_AND_TIMESTAMP_PRESENT",
+            freshness_status="STALE",
+            target_day_expected=target_day,
+            target_day_observed="",
+            date_binding_status="UNKNOWN",
+            provenance_required=True,
+            provenance_summary={"required": True, "present": False, "fields_present": [], "source": ""},
+            producer={"module": producer_command, "git_sha": ""},
+            source_refs=[{"artifact_path": str(authority_path), "artifact_sha256": ""}],
+            explicit_reason_code=REASON_SCHEMA_INVALID,
+        )
+    observed_day = _extract_payload_day(payload)
+    observed_status, is_pass, blocker_codes = _authority_payload_status(artifact_id=artifact_id, payload=payload)
+    date_binding_status = "MATCH" if observed_day == target_day else ("MISSING" if not observed_day else "MISMATCH")
+    result_status = "PASS" if is_pass and date_binding_status == "MATCH" else "FAIL"
+    if date_binding_status != "MATCH":
+        blocker_codes = list(blocker_codes) + [f"{artifact_id.upper()}_DAY_MISMATCH"]
+    return _result_row(
+        artifact_id=artifact_id,
+        required=required,
+        role_class=ROLE_REQUIRED_DERIVED_GATE,
+        classification="SESSION_AUTHORITY_DECLARED_DEPENDENCY",
+        authority_path=authority_path,
+        observed_status=observed_status,
+        result_status=result_status,
+        blocker_codes=blocker_codes or ([] if result_status == "PASS" else [f"{artifact_id.upper()}_NOT_PASS"]),
+        schema_status=schema_status,
+        schema_ref=schema_ref,
+        freshness_rule="TARGET_DAY_MATCH_AND_TIMESTAMP_PRESENT",
+        freshness_status=_freshness_status(
+            payload=payload,
+            target_day=target_day,
+            observed_day=observed_day,
+            freshness_rule="TARGET_DAY_MATCH_AND_TIMESTAMP_PRESENT",
+        ),
+        target_day_expected=target_day,
+        target_day_observed=observed_day,
+        date_binding_status=date_binding_status,
+        provenance_required=True,
+        provenance_summary=_provenance_summary(payload=payload, required=True),
+        producer={
+            "module": producer_command,
+            "git_sha": str((payload.get("producer") or {}).get("git_sha") or "").strip(),
+        },
+        source_refs=[{"artifact_path": str(authority_path), "artifact_sha256": ""}],
+        observed_dependency_artifacts=_payload_dependencies(artifact_id, payload),
+        explicit_reason_code="" if result_status == "PASS" else REASON_REQUIRED_GATE_FAIL,
+    )
+
+
+def _target_day_session_authority_row(*, truth_root: Path, target_day: str) -> Dict[str, Any]:
+    authority_path = (
+        truth_root / "reports" / "paper_session_authority_v1" / target_day / "paper_session_authority.v1.json"
+    ).resolve()
+    producer_command = _producer_command(
+        "ops/tools/run_session_authority_v1.py",
+        day_flag="--target_day",
+        target_day=target_day,
+        truth_root=truth_root,
+    )
+    if not authority_path.exists() or not authority_path.is_file():
+        return _result_row(
+            artifact_id="target_day_session_authority_v1",
+            required=False,
+            role_class=ROLE_REQUIRED_EXECUTION_BOUNDARY,
+            classification="DOWNSTREAM_SESSION_AUTHORITY_SELF_CHECK",
+            authority_path=authority_path,
+            observed_status="MISSING",
+            result_status="FAIL",
+            blocker_codes=["TARGET_DAY_SESSION_AUTHORITY_V1_MISSING"],
+            schema_status="MISSING",
+            schema_ref=PAPER_SESSION_AUTHORITY_SCHEMA_RELPATH,
+            freshness_rule="TARGET_DAY_MATCH_AND_TIMESTAMP_PRESENT",
+            freshness_status="STALE",
+            target_day_expected=target_day,
+            target_day_observed="",
+            date_binding_status="MISSING",
+            provenance_required=True,
+            provenance_summary={"required": True, "present": False, "fields_present": [], "source": ""},
+            producer={"module": producer_command, "git_sha": ""},
+            explicit_reason_code=REASON_TARGET_DAY_ARTIFACT_MISSING,
+        )
+    try:
+        ref = read_paper_session_authority_ref_v1(truth_root=truth_root, day_utc=target_day)
+        payload = dict(ref.payload)
+        observed_day = str(payload.get("day_utc") or "").strip()
+        authority_status = str(payload.get("authority_status") or "UNKNOWN").strip().upper()
+    except Exception:
+        return _result_row(
+            artifact_id="target_day_session_authority_v1",
+            required=False,
+            role_class=ROLE_REQUIRED_EXECUTION_BOUNDARY,
+            classification="DOWNSTREAM_SESSION_AUTHORITY_SELF_CHECK",
+            authority_path=authority_path,
+            observed_status="INVALID",
+            result_status="FAIL",
+            blocker_codes=["TARGET_DAY_SESSION_AUTHORITY_V1_INVALID"],
+            schema_status="INVALID",
+            schema_ref=PAPER_SESSION_AUTHORITY_SCHEMA_RELPATH,
+            freshness_rule="TARGET_DAY_MATCH_AND_TIMESTAMP_PRESENT",
+            freshness_status="STALE",
+            target_day_expected=target_day,
+            target_day_observed="",
+            date_binding_status="UNKNOWN",
+            provenance_required=True,
+            provenance_summary={"required": True, "present": False, "fields_present": [], "source": ""},
+            producer={"module": producer_command, "git_sha": ""},
+            explicit_reason_code=REASON_SCHEMA_INVALID,
+        )
+    return _result_row(
+        artifact_id="target_day_session_authority_v1",
+        required=False,
+        role_class=ROLE_REQUIRED_EXECUTION_BOUNDARY,
+        classification="DOWNSTREAM_SESSION_AUTHORITY_SELF_CHECK",
+        authority_path=authority_path,
+        observed_status=authority_status,
+        result_status="PASS" if authority_status == "GRANTED" and observed_day == target_day else "FAIL",
+        blocker_codes=[] if authority_status == "GRANTED" else ["TARGET_DAY_SESSION_AUTHORITY_V1_NOT_GRANTED"],
+        schema_status="VALID",
+        schema_ref=PAPER_SESSION_AUTHORITY_SCHEMA_RELPATH,
+        freshness_rule="TARGET_DAY_MATCH_AND_TIMESTAMP_PRESENT",
+        freshness_status=_freshness_status(
+            payload=payload,
+            target_day=target_day,
+            observed_day=observed_day,
+            freshness_rule="TARGET_DAY_MATCH_AND_TIMESTAMP_PRESENT",
+        ),
+        target_day_expected=target_day,
+        target_day_observed=observed_day,
+        date_binding_status="MATCH" if observed_day == target_day else "MISMATCH",
+        provenance_required=True,
+        provenance_summary=_provenance_summary(payload=payload, required=True),
+        producer={"module": producer_command, "git_sha": ""},
+        source_refs=[{"artifact_path": str(authority_path), "artifact_sha256": ""}],
+        explicit_reason_code=REASON_REQUIRED_GATE_FAIL if authority_status != "GRANTED" else "",
+    )
+
+
 def read_optional_pre_open_bundle_surface_v1(*, truth_root: Path, target_day: str) -> ControlPlaneReadRefV1 | None:
     try:
         return read_control_plane_surface_v1(
@@ -1235,6 +1465,46 @@ def collect_target_day_build_artifact_rows_v1(
     )
     rows.extend(
         [
+            _declared_session_authority_dependency_row(
+                truth_root=truth_root,
+                target_day=target_day,
+                artifact_id="trading_day_readiness_authority_v1",
+                schema_ref=TRADING_DAY_READINESS_AUTHORITY_SCHEMA,
+                producer_command=_producer_command(
+                    "ops/tools/run_trading_day_readiness_authority_v1.py",
+                    day_flag="--target_day",
+                    target_day=target_day,
+                    truth_root=truth_root,
+                ),
+                required=True,
+            ),
+            _declared_session_authority_dependency_row(
+                truth_root=truth_root,
+                target_day=target_day,
+                artifact_id="runtime_resilience_authority_v1",
+                schema_ref="",
+                producer_command=_producer_command(
+                    "ops/tools/run_runtime_resilience_authority_v1.py",
+                    day_flag="--day_utc",
+                    target_day=target_day,
+                    truth_root=truth_root,
+                ),
+                required=True,
+            ),
+            _declared_session_authority_dependency_row(
+                truth_root=truth_root,
+                target_day=target_day,
+                artifact_id="safety_state_authority_v1",
+                schema_ref=SAFETY_STATE_AUTHORITY_SCHEMA,
+                producer_command=_producer_command(
+                    "ops/tools/run_safety_state_authority_v1.py",
+                    day_flag="--day_utc",
+                    target_day=target_day,
+                    truth_root=truth_root,
+                ),
+                required=True,
+            ),
+            _target_day_session_authority_row(truth_root=truth_root, target_day=target_day),
             _paper_session_authority_row(
                 truth_root=truth_root,
                 target_day=target_day,

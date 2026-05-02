@@ -191,7 +191,7 @@ def _compact_list(values: list[Any], *, limit: int = 6) -> str:
     return ",".join(items[:limit]) + suffix
 
 
-def _failed_build_dependency(build: dict[str, Any]) -> tuple[str, str]:
+def _failed_build_dependency(build: dict[str, Any]) -> dict[str, str]:
     artifacts = build.get("artifact_results") if isinstance(build.get("artifact_results"), list) else []
     for row in artifacts:
         if not isinstance(row, dict):
@@ -199,15 +199,22 @@ def _failed_build_dependency(build: dict[str, Any]) -> tuple[str, str]:
         if str(row.get("result_status") or "").strip().upper() in {"FAIL", "BLOCKED", "MISSING", "STALE"}:
             dep = str(row.get("artifact_id") or row.get("artifact_name") or "target_day_build_v1").strip()
             producer = row.get("producer") if isinstance(row.get("producer"), dict) else {}
-            command = str(producer.get("module") or "").strip()
-            return dep, command
+            blocker_codes = [str(code).strip() for code in (row.get("blocker_codes") or []) if str(code).strip()]
+            blocker_code = blocker_codes[0] if blocker_codes else "PARTIAL_BUILD"
+            command = str(producer.get("command") or producer.get("module") or "").strip()
+            return {
+                "dependency": dep,
+                "command": command,
+                "blocker_code": blocker_code,
+                "artifact_path": str(row.get("canonical_path") or row.get("authority_path") or "").strip(),
+            }
     required = build.get("required_artifacts") if isinstance(build.get("required_artifacts"), list) else []
     for row in required:
         if isinstance(row, dict):
             dep = str(row.get("artifact_id") or row.get("artifact_name") or row.get("canonical_path") or "").strip()
             if dep:
-                return dep, ""
-    return "target_day_build_v1", ""
+                return {"dependency": dep, "command": "", "blocker_code": "PARTIAL_BUILD", "artifact_path": ""}
+    return {"dependency": "target_day_build_v1", "command": "", "blocker_code": "PARTIAL_BUILD", "artifact_path": ""}
 
 
 def _required_gate_dependency(admission: dict[str, Any], pre_open: dict[str, Any]) -> tuple[str, str]:
@@ -237,8 +244,9 @@ def _session_sub_blockers(ctx: Any) -> list[dict[str, Any]]:
     codes = list(dict.fromkeys(codes))
     details: list[dict[str, Any]] = []
     hidden = admission.get("hidden_dependency_check_result") if isinstance(admission.get("hidden_dependency_check_result"), dict) else {}
-    if "HIDDEN_DEPENDENCY_DETECTED" in codes or str(hidden.get("status") or "").strip().upper() == "FAIL":
-        undeclared = hidden.get("undeclared_dependency_artifacts") if isinstance(hidden.get("undeclared_dependency_artifacts"), list) else []
+    hidden_reason = str(hidden.get("blocking_reason_code") or "").strip().upper()
+    undeclared = hidden.get("undeclared_dependency_artifacts") if isinstance(hidden.get("undeclared_dependency_artifacts"), list) else []
+    if "HIDDEN_DEPENDENCY_DETECTED" in codes or hidden_reason == "HIDDEN_DEPENDENCY_DETECTED" or undeclared:
         failing = hidden.get("failing_producers") if isinstance(hidden.get("failing_producers"), list) else []
         dependency = (
             f"undeclared_dependency_artifacts={_compact_list(undeclared)}"
@@ -259,16 +267,20 @@ def _session_sub_blockers(ctx: Any) -> list[dict[str, Any]]:
             }
         )
     if "PARTIAL_BUILD" in codes or str(build.get("build_status") or "").strip().upper() == "BLOCKED":
-        dependency, command = _failed_build_dependency(build)
+        dependency_detail = _failed_build_dependency(build)
+        dependency = str(dependency_detail.get("dependency") or "target_day_build_v1")
+        command = str(dependency_detail.get("command") or "")
+        sub_blocker_code = str(dependency_detail.get("blocker_code") or "PARTIAL_BUILD")
+        evidence_path = str(dependency_detail.get("artifact_path") or "") or str(paths["target_day_build"])
         details.append(
             {
-                "sub_blocker_code": "PARTIAL_BUILD",
+                "sub_blocker_code": sub_blocker_code,
                 "owning_artifact": "target_day_build_v1",
                 "missing_or_failed_dependency": dependency,
                 "producer_command": command or "constellation_2.common.session_authority_v1 target day build",
-                "recovery_action": "Complete the governed target-day build, then rerun session authority.",
-                "recovery_command": _session_command(ctx, phase="build"),
-                "evidence_path": str(paths["target_day_build"]),
+                "recovery_action": f"Produce or repair {dependency}, then rerun session authority.",
+                "recovery_command": command or _session_command(ctx, phase="build"),
+                "evidence_path": evidence_path,
             }
         )
     if "REQUIRED_GATE_FAIL" in codes:
@@ -288,10 +300,10 @@ def _session_sub_blockers(ctx: Any) -> list[dict[str, Any]]:
 
 
 def _primary_session_sub_blocker(sub_blockers: list[dict[str, Any]]) -> dict[str, Any]:
-    priority = {"HIDDEN_DEPENDENCY_DETECTED": 0, "PARTIAL_BUILD": 1, "REQUIRED_GATE_FAIL": 2}
+    priority = {"HIDDEN_DEPENDENCY_DETECTED": 0, "PARTIAL_BUILD": 2, "REQUIRED_GATE_FAIL": 3}
     if not sub_blockers:
         return {}
-    return sorted(sub_blockers, key=lambda row: priority.get(str(row.get("sub_blocker_code") or ""), 99))[0]
+    return sorted(sub_blockers, key=lambda row: priority.get(str(row.get("sub_blocker_code") or ""), 1))[0]
 
 
 def _recovery_action(phase_id: str, blockers: list[str], recovery_commands: list[str]) -> str:
