@@ -11,6 +11,8 @@
     {"action_id": "inspect_market_data_artifacts", "label": "Inspect market data artifacts", "description": "Inspect market data supply, authority, and gate artifacts.", "risk_level": "LOW", "authority_owner": "market_data_authority", "operator_confirmation_required": false},
     {"action_id": "inspect_authorization_diagnostics", "label": "Inspect authorization diagnostics", "description": "Inspect authorization and option-structure diagnostics.", "risk_level": "LOW", "authority_owner": "authorization_supply", "operator_confirmation_required": false},
     {"action_id": "submit_paper_order", "label": "Submit paper order", "description": "Submit a governed paper order.", "risk_level": "HIGH", "authority_owner": "submit_boundary_status_v1", "operator_confirmation_required": true},
-    {"action_id": "enable_broker_transmit", "label": "Enable broker transmit", "description": "Allow broker transmit path.", "risk_level": "HIGH", "authority_owner": "execution_mode_authority_v1", "operator_confirmation_required": true}
+    {"action_id": "enable_broker_transmit", "label": "Enable broker transmit", "description": "Allow broker transmit path.", "risk_level": "HIGH", "authority_owner": "execution_mode_authority_v1", "operator_confirmation_required": true},
+    {"action_id": "promote_strategy_change", "label": "Promote strategy change", "description": "Promote a human-approved strategy change after shadow evaluation and promotion gates pass.", "risk_level": "HIGH", "authority_owner": "strategy_change_governance", "operator_confirmation_required": true},
+    {"action_id": "recommend_strategy_rollback", "label": "Recommend strategy rollback", "description": "Prepare an advisory rollback recommendation for human review.", "risk_level": "MEDIUM", "authority_owner": "strategy_change_governance", "operator_confirmation_required": true}
   ]
 }

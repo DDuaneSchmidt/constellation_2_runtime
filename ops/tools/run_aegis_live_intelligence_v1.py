@@ -70,6 +70,7 @@ def _confidence_from_kernel(kernel: dict[str, Any]) -> str:
 
 def build_live_intelligence_v1(ctx: bod.BodContext) -> dict[str, Any]:
     kernel_path = unified_truth_kernel_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    recommendation_queue_path = _report_path(ctx, "ai_recommendation_queue_v1", "ai_recommendation_queue.v1.json")
     kernel = _read_json(kernel_path)
     final_status = str(kernel.get("final_status") or "UNKNOWN").strip().upper()
     blocker = str(kernel.get("canonical_blocker") or kernel.get("first_blocker") or "").strip()
@@ -120,7 +121,11 @@ def build_live_intelligence_v1(ctx: bod.BodContext) -> dict[str, Any]:
         "submit_boundary_effect": "NONE",
         "kernel_final_status_source": str(kernel.get("final_status_source") or ""),
         "trade_recommendations_suppressed": not trade_actions_allowed,
-        "input_artifact_paths": [str(kernel_path)],
+        "learning_loop_output_policy": "Live intelligence may inform ai_recommendation_queue_v1 only; it cannot write proposals or active strategy state.",
+        "recommendation_queue_path": str(recommendation_queue_path),
+        "direct_proposal_write_allowed": False,
+        "active_strategy_mutation_allowed": False,
+        "input_artifact_paths": [str(kernel_path), str(recommendation_queue_path)],
     }
 
 

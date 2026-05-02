@@ -203,6 +203,7 @@ def _projection_from_kernel(ctx: bod.BodContext, kernel: dict[str, Any]) -> dict
     allowed = kernel.get("allowed_operator_actions") if isinstance(kernel.get("allowed_operator_actions"), list) else []
     forbidden = kernel.get("forbidden_operator_actions") if isinstance(kernel.get("forbidden_operator_actions"), list) else []
     trade_health = kernel.get("trade_health") if isinstance(kernel.get("trade_health"), dict) else {}
+    learning_loop = kernel.get("learning_loop") if isinstance(kernel.get("learning_loop"), dict) else {}
     root_cause = blocker or "No blocker reported by unified truth kernel."
     if kernel.get("unknown_or_untrusted_artifacts"):
         root_cause = f"{root_cause}; truth_confidence={kernel.get('truth_confidence')}"
@@ -239,6 +240,19 @@ def _projection_from_kernel(ctx: bod.BodContext, kernel: dict[str, Any]) -> dict
             "human_review_required": bool(trade_health.get("human_review_required") is True),
             "automatic_deployment_allowed": bool(trade_health.get("automatic_deployment_allowed") is True),
         },
+        "learning_loop_status": {
+            "open_recommendation_count": int(learning_loop.get("open_recommendation_count") or 0),
+            "pending_proposal_count": int(learning_loop.get("pending_proposal_count") or 0),
+            "shadow_evaluation_status": str(learning_loop.get("shadow_evaluation_status") or "UNKNOWN"),
+            "promotion_gate_status": str(learning_loop.get("promotion_gate_status") or "UNKNOWN"),
+            "post_promotion_monitor_status": str(learning_loop.get("post_promotion_monitor_status") or "UNKNOWN"),
+            "blocked_promotions": list(learning_loop.get("blocked_promotions") if isinstance(learning_loop.get("blocked_promotions"), list) else []),
+            "rollback_recommended": bool(learning_loop.get("rollback_recommended") is True),
+            "automatic_deployment_allowed": False,
+        },
+        "pending_human_reviews": int(learning_loop.get("open_recommendation_count") or 0) + int(learning_loop.get("pending_proposal_count") or 0),
+        "blocked_promotions": list(learning_loop.get("blocked_promotions") if isinstance(learning_loop.get("blocked_promotions"), list) else []),
+        "rollback_recommendations": ["Review rollback recommendation"] if learning_loop.get("rollback_recommended") is True else [],
         "human_review_required": bool(kernel.get("human_review_required") is True),
         "integrity_context": {
             "unified_truth_kernel_path": str(unified_truth_kernel_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)),

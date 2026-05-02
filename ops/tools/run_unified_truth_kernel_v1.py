@@ -40,6 +40,14 @@ PERFORMANCE_ARTIFACTS: tuple[dict[str, str], ...] = (
     {"artifact_type": "strategy_change_governance_v1", "family": "strategy_change_governance_v1", "filename": "strategy_change_governance.v1.json"},
 )
 
+LEARNING_LOOP_ARTIFACTS: tuple[dict[str, str], ...] = (
+    {"artifact_type": "ai_recommendation_queue_v1", "family": "ai_recommendation_queue_v1", "filename": "ai_recommendation_queue.v1.json"},
+    {"artifact_type": "strategy_change_proposal_v1", "family": "strategy_change_proposal_v1", "filename": "strategy_change_proposal.v1.json"},
+    {"artifact_type": "shadow_evaluation_v1", "family": "shadow_evaluation_v1", "filename": "shadow_evaluation.v1.json"},
+    {"artifact_type": "strategy_promotion_gate_v1", "family": "strategy_promotion_gate_v1", "filename": "strategy_promotion_gate.v1.json"},
+    {"artifact_type": "post_promotion_monitor_v1", "family": "post_promotion_monitor_v1", "filename": "post_promotion_monitor.v1.json"},
+)
+
 
 def unified_truth_kernel_path(*, truth_root: Path, day_utc: str) -> Path:
     return (truth_root / "reports" / "unified_truth_kernel_v1" / day_utc / "unified_truth_kernel.v1.json").resolve()
@@ -151,6 +159,34 @@ def _trade_health(ctx: bod.BodContext) -> tuple[dict[str, Any], list[dict[str, A
     return trade_health, advisory_refs
 
 
+def _learning_loop(ctx: bod.BodContext) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    refs: list[dict[str, Any]] = []
+    payloads: dict[str, dict[str, Any]] = {}
+    for spec in LEARNING_LOOP_ARTIFACTS:
+        path = report_path_v1(ctx, spec["family"], spec["filename"])
+        payload = read_json_v1(path)
+        refs.append(_artifact_ref(spec["artifact_type"], path, payload, role="DIAGNOSTIC"))
+        payloads[spec["artifact_type"]] = payload
+    queue = payloads["ai_recommendation_queue_v1"]
+    proposal = payloads["strategy_change_proposal_v1"]
+    shadow = payloads["shadow_evaluation_v1"]
+    gate = payloads["strategy_promotion_gate_v1"]
+    monitor = payloads["post_promotion_monitor_v1"]
+    learning = {
+        "open_recommendation_count": int(queue.get("open_recommendation_count") or 0),
+        "pending_proposal_count": int(proposal.get("pending_proposal_count") or 0),
+        "shadow_evaluation_status": str(shadow.get("shadow_status") or status_of_v1(shadow)),
+        "promotion_gate_status": str(gate.get("promotion_status") or status_of_v1(gate)),
+        "post_promotion_monitor_status": status_of_v1(monitor),
+        "blocked_promotions": [str(item) for item in (gate.get("blockers") if isinstance(gate.get("blockers"), list) else [])],
+        "rollback_recommended": bool(monitor.get("rollback_recommended") is True),
+        "human_review_required": bool((queue.get("open_recommendation_count") or 0) or (proposal.get("pending_proposal_count") or 0) or monitor.get("human_review_required") is True),
+        "automatic_deployment_allowed": False,
+        "advisory_only": True,
+    }
+    return learning, refs
+
+
 def _confidence(*, ledger: dict[str, Any], lineage: dict[str, Any], consistency: dict[str, Any], freshness: dict[str, Any], authoritative_missing: list[dict[str, Any]], untrusted: list[dict[str, Any]]) -> str:
     if not ledger:
         return "UNKNOWN"
@@ -202,6 +238,8 @@ def build_unified_truth_kernel_v1(ctx: bod.BodContext) -> dict[str, Any]:
         diagnostic_artifacts.append(_artifact_ref(f"{key}_v1", path, payload, role="DIAGNOSTIC"))
 
     trade_health, advisory_artifacts = _trade_health(ctx)
+    learning_loop, learning_artifacts = _learning_loop(ctx)
+    diagnostic_artifacts.extend(learning_artifacts)
     authoritative_missing = [row for row in authoritative_artifacts if not row["exists"]]
     untrusted = authoritative_missing + _lineage_untrusted(lineage) + _freshness_untrusted(freshness)
     failed_consistency = [
@@ -230,7 +268,7 @@ def build_unified_truth_kernel_v1(ctx: bod.BodContext) -> dict[str, Any]:
     truth_confidence = _confidence(ledger=ledger, lineage=lineage, consistency=consistency, freshness=freshness, authoritative_missing=authoritative_missing, untrusted=untrusted)
     advisory_status = status_of_v1(live) if live else "UNKNOWN"
     trade_health_status = "ADVISORY_ONLY" if any(row["exists"] for row in advisory_artifacts) else "UNKNOWN"
-    human_review_required = bool(trade_health.get("human_review_required") is True or final_status not in READY_FINAL_STATUSES or bool(untrusted))
+    human_review_required = bool(trade_health.get("human_review_required") is True or learning_loop.get("human_review_required") is True or final_status not in READY_FINAL_STATUSES or bool(untrusted))
     operator_next_action = str((allowed[0] if allowed else {}).get("label") or (projection.get("operator_next_action") if projection else "") or ledger.get("operator_next_action") or "Regenerate unified truth inputs.")
 
     return {
@@ -254,6 +292,13 @@ def build_unified_truth_kernel_v1(ctx: bod.BodContext) -> dict[str, Any]:
         "advisory_intelligence_status": advisory_status,
         "trade_health_status": trade_health_status,
         "trade_health": trade_health,
+        "learning_loop": learning_loop,
+        "open_recommendation_count": learning_loop["open_recommendation_count"],
+        "pending_proposal_count": learning_loop["pending_proposal_count"],
+        "shadow_evaluation_status": learning_loop["shadow_evaluation_status"],
+        "promotion_gate_status": learning_loop["promotion_gate_status"],
+        "post_promotion_monitor_status": learning_loop["post_promotion_monitor_status"],
+        "automatic_deployment_allowed": False,
         "allowed_operator_actions": allowed,
         "forbidden_operator_actions": forbidden,
         "unsafe_actions": unsafe,
@@ -266,7 +311,7 @@ def build_unified_truth_kernel_v1(ctx: bod.BodContext) -> dict[str, Any]:
         "human_review_required": human_review_required,
         "generated_at_utc": now_iso_v1(),
         "authority_note": "Unified Truth Kernel reads day-run ledger final_status; advisory and performance artifacts cannot change readiness.",
-        "input_artifact_paths": [str(path) for path in paths.values()] + [row["path"] for row in advisory_artifacts],
+        "input_artifact_paths": [str(path) for path in paths.values()] + [row["path"] for row in advisory_artifacts] + [row["path"] for row in learning_artifacts],
     }
 
 

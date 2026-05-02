@@ -24,6 +24,11 @@ AUTHORITATIVE_ARTIFACTS: tuple[dict[str, Any], ...] = (
     {"artifact_type": "trading_day_control_plane_v1", "family": "trading_day_control_plane_v1", "filename": "trading_day_control_plane.v1.json", "blocking_class": "DIAGNOSTIC_ONLY", "authoritative": False},
     {"artifact_type": "aegis_operator_projection_v1", "family": "aegis_operator_projection_v1", "filename": "operator_projection.v1.json", "blocking_class": "DIAGNOSTIC_ONLY", "authoritative": False},
     {"artifact_type": "aegis_live_intelligence_v1", "family": "aegis_live_intelligence_v1", "filename": "live_intelligence.v1.json", "blocking_class": "DIAGNOSTIC_ONLY", "authoritative": False},
+    {"artifact_type": "ai_recommendation_queue_v1", "family": "ai_recommendation_queue_v1", "filename": "ai_recommendation_queue.v1.json", "blocking_class": "DIAGNOSTIC_ONLY", "authoritative": False},
+    {"artifact_type": "strategy_change_proposal_v1", "family": "strategy_change_proposal_v1", "filename": "strategy_change_proposal.v1.json", "blocking_class": "DIAGNOSTIC_ONLY", "authoritative": False},
+    {"artifact_type": "shadow_evaluation_v1", "family": "shadow_evaluation_v1", "filename": "shadow_evaluation.v1.json", "blocking_class": "DIAGNOSTIC_ONLY", "authoritative": False},
+    {"artifact_type": "strategy_promotion_gate_v1", "family": "strategy_promotion_gate_v1", "filename": "strategy_promotion_gate.v1.json", "blocking_class": "DIAGNOSTIC_ONLY", "authoritative": False},
+    {"artifact_type": "post_promotion_monitor_v1", "family": "post_promotion_monitor_v1", "filename": "post_promotion_monitor.v1.json", "blocking_class": "DIAGNOSTIC_ONLY", "authoritative": False},
 )
 
 

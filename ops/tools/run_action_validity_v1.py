@@ -70,12 +70,23 @@ def _rule(ctx: bod.BodContext, action: dict[str, Any], ledger: dict[str, Any], m
         else:
             status = "ALLOWED"
             reason = "Day-run ledger is ready; submit boundary must still authorize the concrete action."
+    elif action_id == "promote_strategy_change":
+        if not ready:
+            status = "FORBIDDEN"
+            reason = "Day-run ledger is not ready; strategy promotion cannot be eligible."
+            canonical_blocker = blocker or "DAY_RUN_LEDGER_NOT_READY"
+        else:
+            status = "ALLOWED"
+            reason = "Promotion may be evaluated only after human approval and promotion gate checks pass."
+    elif action_id == "recommend_strategy_rollback":
+        status = "ALLOWED"
+        reason = "Rollback recommendation is advisory and still requires governed approval before mutation."
     if status in {"FORBIDDEN", "BLOCKED"}:
         next_action = "Use an allowed diagnostic or regeneration action instead."
     return {
         **action,
-        "allowed_when": ["day_run_ready"] if action_id in {"submit_paper_order", "enable_broker_transmit"} else [],
-        "forbidden_when": ["day_run_blocked"] if action_id in {"submit_paper_order", "enable_broker_transmit"} else [],
+        "allowed_when": ["day_run_ready"] if action_id in {"submit_paper_order", "enable_broker_transmit", "promote_strategy_change"} else [],
+        "forbidden_when": ["day_run_blocked"] if action_id in {"submit_paper_order", "enable_broker_transmit", "promote_strategy_change"} else [],
         "required_preconditions": ["aegis_day_run_ledger_v1"],
         "expected_output_artifacts": [],
         "risk_level": risk,

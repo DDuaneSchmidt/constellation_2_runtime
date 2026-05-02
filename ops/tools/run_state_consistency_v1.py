@@ -53,6 +53,11 @@ def build_state_consistency_v1(ctx: bod.BodContext) -> dict[str, Any]:
         "submit_boundary": report_path_v1(ctx, "submit_boundary_status_v1", "submit_boundary_status.v1.json"),
         "operator_projection": report_path_v1(ctx, "aegis_operator_projection_v1", "operator_projection.v1.json"),
         "live": report_path_v1(ctx, "aegis_live_intelligence_v1", "live_intelligence.v1.json"),
+        "recommendation_queue": report_path_v1(ctx, "ai_recommendation_queue_v1", "ai_recommendation_queue.v1.json"),
+        "proposal": report_path_v1(ctx, "strategy_change_proposal_v1", "strategy_change_proposal.v1.json"),
+        "shadow": report_path_v1(ctx, "shadow_evaluation_v1", "shadow_evaluation.v1.json"),
+        "promotion": report_path_v1(ctx, "strategy_promotion_gate_v1", "strategy_promotion_gate.v1.json"),
+        "monitor": report_path_v1(ctx, "post_promotion_monitor_v1", "post_promotion_monitor.v1.json"),
     }
     ledger = read_json_v1(paths["ledger"])
     graph = read_json_v1(paths["requirement_graph"])
@@ -62,6 +67,11 @@ def build_state_consistency_v1(ctx: bod.BodContext) -> dict[str, Any]:
     submit = read_json_v1(paths["submit_boundary"])
     projection = read_json_v1(paths["operator_projection"])
     live = read_json_v1(paths["live"])
+    queue = read_json_v1(paths["recommendation_queue"])
+    proposal = read_json_v1(paths["proposal"])
+    shadow = read_json_v1(paths["shadow"])
+    promotion = read_json_v1(paths["promotion"])
+    monitor = read_json_v1(paths["monitor"])
     final_status = str(ledger.get("final_status") or "UNKNOWN").upper()
     ledger_blocker = blocker_of_v1(ledger)
     source = ledger.get("source_repo_status") if isinstance(ledger.get("source_repo_status"), dict) else {}
@@ -86,6 +96,13 @@ def build_state_consistency_v1(ctx: bod.BodContext) -> dict[str, Any]:
     missing = [row.get("expected_path") for row in reqs if isinstance(row, dict) and row.get("blocking_class", "HARD_BLOCKER") == "HARD_BLOCKER" and row.get("status") == "SATISFIED" and not Path(str(row.get("expected_path") or "")).exists()]
     graph_ok = status_of_v1(graph) != "PASS" or not missing
     results.append(_result("REQUIREMENT_GRAPH_PASS_REQUIRES_REQUIRED_ARTIFACTS_PRESENT", "HARD_BLOCKER", "PASS" if graph_ok else "FAIL", "aegis_requirement_graph_v1", [paths["requirement_graph"]], "PASS graph has present satisfied required artifacts", f"missing={missing}", "REQUIREMENT_GRAPH_ARTIFACT_MISSING", "Regenerate requirement graph and missing artifacts."))
+    learning_mutates = any(
+        payload.get("submit_allowed") is True
+        or payload.get("readiness_effect") not in {None, "", "NONE"}
+        or payload.get("active_strategy_mutation") is True
+        for payload in (queue, proposal, shadow, promotion, monitor)
+    )
+    results.append(_result("GOVERNED_LEARNING_LOOP_IS_ADVISORY_ONLY", "HARD_BLOCKER", "PASS" if not learning_mutates else "FAIL", "strategy_change_governance", [paths["recommendation_queue"], paths["proposal"], paths["shadow"], paths["promotion"], paths["monitor"]], "learning-loop artifacts cannot mutate readiness, submit, or active strategy state", f"learning_mutates={learning_mutates}", "LEARNING_LOOP_AUTHORITY_BYPASS", "Regenerate governed learning-loop artifacts as advisory-only."))
     hard_failures = [row for row in results if row["status"] == "FAIL" and row["severity"] == "HARD_BLOCKER"]
     return {
         "schema_id": "state_consistency",
