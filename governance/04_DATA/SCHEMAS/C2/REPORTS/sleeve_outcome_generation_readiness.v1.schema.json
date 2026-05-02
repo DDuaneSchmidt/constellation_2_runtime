@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/sleeve_outcome_generation_readiness.v1.schema.json",
+  "title": "Sleeve Outcome Generation Readiness v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "day_utc",
+    "generated_at",
+    "git_commit",
+    "git_dirty_status",
+    "truth_root",
+    "runtime_root",
+    "execution_root",
+    "producer",
+    "authority",
+    "readiness_effect",
+    "submit_effect",
+    "allocation_effect",
+    "scoring_eligible_sleeves",
+    "sleeve_results",
+    "summary",
+    "producer_contract_v1"
+  ],
+  "properties": {
+    "schema_id": { "const": "sleeve_outcome_generation_readiness" },
+    "schema_version": { "const": "sleeve_outcome_generation_readiness.v1" },
+    "day_utc": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "generated_at": { "type": "string", "minLength": 1 },
+    "git_commit": { "type": "string", "minLength": 1 },
+    "git_dirty_status": { "type": "string", "enum": ["CLEAN", "DIRTY"] },
+    "truth_root": { "type": "string", "minLength": 1 },
+    "runtime_root": { "type": "string", "minLength": 1 },
+    "execution_root": { "type": "string", "minLength": 1 },
+    "producer": { "const": "ops/tools/run_sleeve_outcome_generation_readiness_v1.py" },
+    "authority": { "const": "DIAGNOSTIC_ONLY" },
+    "readiness_effect": { "const": "NONE" },
+    "submit_effect": { "const": "NONE" },
+    "allocation_effect": { "const": "NONE" },
+    "scoring_eligible_sleeves": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "sleeve_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sleeve_id",
+          "intent_id",
+          "intent_artifact",
+          "signal_trigger",
+          "market_inputs",
+          "risk_sizing_result",
+          "scoring_eligible",
+          "execution_ready_if_aegis_ready",
+          "why_did_not_submit",
+          "missing_evidence",
+          "next_governed_producer",
+          "recovery_command",
+          "outcome_generation_blockers",
+          "evidence_paths"
+        ],
+        "properties": {
+          "sleeve_id": { "type": "string", "minLength": 1 },
+          "intent_id": { "type": "string", "minLength": 1 },
+          "intent_artifact": { "type": "string" },
+          "signal_trigger": { "type": "string" },
+          "market_inputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["symbol", "missing_inputs"]
+          },
+          "risk_sizing_result": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["sizing_state", "execution_package_path", "final_quantity", "reason_code"]
+          },
+          "scoring_eligible": { "type": "boolean" },
+          "execution_ready_if_aegis_ready": { "type": "boolean" },
+          "why_did_not_submit": { "type": "array", "items": { "type": "string" } },
+          "missing_evidence": { "type": "array", "items": { "type": "string" } },
+          "next_governed_producer": { "type": "string", "minLength": 1 },
+          "recovery_command": { "type": "string", "minLength": 1 },
+          "outcome_generation_blockers": { "type": "array", "items": { "type": "string" } },
+          "evidence_paths": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eligible_intent_count",
+        "execution_ready_count",
+        "completed_outcome_ready_count",
+        "allocation_eligibility_effect"
+      ],
+      "properties": {
+        "eligible_intent_count": { "type": "integer", "minimum": 0 },
+        "execution_ready_count": { "type": "integer", "minimum": 0 },
+        "completed_outcome_ready_count": { "type": "integer", "minimum": 0 },
+        "allocation_eligibility_effect": { "const": "NONE" }
+      }
+    },
+    "producer_contract_v1": { "type": "object" }
+  }
+}
