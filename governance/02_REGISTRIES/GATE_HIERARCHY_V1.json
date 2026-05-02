@@ -13,6 +13,9 @@
     {
       "gate_id": "operator_daily_gate_v3",
       "artifact_relpath": "operator_daily_gate.v3.json",
+      "owning_producer": "ops/tools/run_operator_daily_gate_v3.py",
+      "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_operator_daily_gate_v3.py --day_utc {DAY} --truth_root {TRUTH_ROOT} --produced_utc {DAY}T00:00:00Z --mode PAPER",
+      "recovery_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_gate_authority_plane_v1.py --day_utc {DAY} --truth_root {TRUTH_ROOT} --produced_utc {DAY}T00:00:00Z --mode PAPER",
       "class": "CLASS1_SYSTEM_HARD_STOP",
       "required": true,
       "blocking": true
@@ -20,6 +23,9 @@
     {
       "gate_id": "feed_attestation_gate_v1",
       "artifact_relpath": "feed_attestation_gate.v1.json",
+      "owning_producer": "ops/tools/run_feed_attestation_gate_v1.py",
+      "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_feed_attestation_gate_v1.py --day_utc {DAY} --truth_root {TRUTH_ROOT}",
+      "recovery_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_gate_authority_plane_v1.py --day_utc {DAY} --truth_root {TRUTH_ROOT} --produced_utc {DAY}T00:00:00Z --mode PAPER",
       "class": "CLASS1_SYSTEM_HARD_STOP",
       "required": true,
       "blocking": true
@@ -27,6 +33,9 @@
     {
       "gate_id": "heartbeat_gate_v1",
       "artifact_relpath": "heartbeat_gate.v1.json",
+      "owning_producer": "ops/tools/run_heartbeat_gate_v1.py",
+      "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_heartbeat_gate_v1.py --day_utc {DAY} --truth_root {TRUTH_ROOT}",
+      "recovery_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_gate_authority_plane_v1.py --day_utc {DAY} --truth_root {TRUTH_ROOT} --produced_utc {DAY}T00:00:00Z --mode PAPER",
       "class": "CLASS1_SYSTEM_HARD_STOP",
       "required": true,
       "blocking": true
@@ -34,6 +43,9 @@
     {
       "gate_id": "capital_risk_envelope_v2",
       "artifact_relpath": "capital_risk_envelope.v2.json",
+      "owning_producer": "ops/tools/run_c2_capital_risk_envelope_gate_v2.py",
+      "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_c2_capital_risk_envelope_gate_v2.py --out_day_utc {DAY} --input_day_utc {DAY} --produced_utc {DAY}T00:00:00Z --truth_root {TRUTH_ROOT}",
+      "recovery_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_gate_authority_plane_v1.py --day_utc {DAY} --truth_root {TRUTH_ROOT} --produced_utc {DAY}T00:00:00Z --mode PAPER",
       "class": "CLASS1_SYSTEM_HARD_STOP",
       "required": true,
       "blocking": true
@@ -41,6 +53,9 @@
     {
       "gate_id": "correlation_envelope_gate_v1",
       "artifact_relpath": "correlation_envelope_gate.v1.json",
+      "owning_producer": "ops/tools/run_correlation_envelope_gate_v1.py",
+      "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_correlation_envelope_gate_v1.py --day_utc {DAY} --truth_root {TRUTH_ROOT} --produced_utc {DAY}T00:00:00Z --mode PAPER",
+      "recovery_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_gate_authority_plane_v1.py --day_utc {DAY} --truth_root {TRUTH_ROOT} --produced_utc {DAY}T00:00:00Z --mode PAPER",
       "class": "CLASS1_SYSTEM_HARD_STOP",
       "required": true,
       "blocking": true
@@ -48,6 +63,9 @@
     {
       "gate_id": "liquidity_slippage_gate_v1",
       "artifact_relpath": "liquidity_slippage_gate.v1.json",
+      "owning_producer": "ops/tools/run_liquidity_slippage_gate_v1.py",
+      "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_liquidity_slippage_gate_v1.py --day_utc {DAY} --truth_root {TRUTH_ROOT}",
+      "recovery_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_gate_authority_plane_v1.py --day_utc {DAY} --truth_root {TRUTH_ROOT} --produced_utc {DAY}T00:00:00Z --mode PAPER",
       "class": "CLASS1_SYSTEM_HARD_STOP",
       "required": true,
       "blocking": true
@@ -55,6 +73,9 @@
     {
       "gate_id": "replay_certification_gate_v1",
       "artifact_relpath": "replay_certification_gate.v1.json",
+      "owning_producer": "ops/tools/run_replay_certification_gate_v1.py",
+      "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_replay_certification_gate_v1.py --day_utc {DAY} --truth_root {TRUTH_ROOT} --produced_utc {DAY}T00:00:00Z --mode PAPER",
+      "recovery_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_gate_authority_plane_v1.py --day_utc {DAY} --truth_root {TRUTH_ROOT} --produced_utc {DAY}T00:00:00Z --mode PAPER",
       "class": "CLASS1_SYSTEM_HARD_STOP",
       "required": true,
       "blocking": true

@@ -146,6 +146,13 @@ def _require_produced_utc_for_day(day: str, produced_utc: str) -> str:
     return v
 
 
+def _render_registry_command(template: Any, *, day: str, truth_root: Path) -> str:
+    text = str(template or "").strip()
+    if not text:
+        return ""
+    return text.replace("{DAY}", day).replace("{TRUTH_ROOT}", str(truth_root))
+
+
 def _eval_gate(*, truth_root: Path, day: str, gate: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Dict[str, str]]]:
     # Returns (gate_result, input_manifest_entries)
     gate_id = str(gate.get("gate_id") or "").strip()
@@ -257,6 +264,9 @@ def _eval_gate(*, truth_root: Path, day: str, gate: Dict[str, Any]) -> Tuple[Dic
     out = {
         "gate_id": gate_id,
         "gate_class": gclass,
+        "owning_producer": str(gate.get("owning_producer") or "").strip(),
+        "producer_command": _render_registry_command(gate.get("producer_command"), day=day, truth_root=truth_root),
+        "recovery_command": _render_registry_command(gate.get("recovery_command"), day=day, truth_root=truth_root),
         "required": required,
         "blocking": blocking,
         "status": status_upper,
@@ -437,6 +447,9 @@ def _compute_verdict(*, truth_root: Path, day: str, produced_utc: str) -> Dict[s
             {
                 "gate_id": str(g.get("gate_id")),
                 "gate_class": str(g.get("gate_class")),
+                "owning_producer": str(g.get("owning_producer") or ""),
+                "producer_command": str(g.get("producer_command") or ""),
+                "recovery_command": str(g.get("recovery_command") or ""),
                 "required": bool(g.get("required")),
                 "blocking": bool(g.get("blocking")),
                 "status": str(g.get("status")),

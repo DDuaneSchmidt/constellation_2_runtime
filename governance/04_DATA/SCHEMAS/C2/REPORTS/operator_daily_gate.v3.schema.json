@@ -132,7 +132,10 @@
         "reason_codes": {
           "type": "array",
           "items": { "type": "string", "minLength": 1, "maxLength": 128 }
-        }
+        },
+        "expected_artifact_root": { "type": "string" },
+        "producer_command": { "type": "string" },
+        "recovery_command": { "type": "string" }
       }
     }
   }

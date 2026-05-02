@@ -36,7 +36,7 @@ from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Tuple
 
-from constellation_2.common.runtime_contract_v1 import resolve_release_provenance
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root, resolve_release_provenance
 from constellation_2.common.constitutional_runtime_v1 import (
     FINALITY_PROVISIONAL,
     assert_constitutional_writer_allowed_v1,
@@ -155,12 +155,21 @@ def _decimal_or_none(raw: Any) -> Decimal | None:
         return None
 
 
+def _canonical_economic_truth_root() -> Path:
+    return resolve_canonical_truth_root().resolve()
+
+
 def _load_previous_day_economic_build_state(*, truth_root: Path, day_utc: str) -> Dict[str, Any]:
     prev_day_utc = _prior_day_utc(day_utc)
-    build_root = (truth_root / "reports" / ECONOMIC_BUILD_FAMILY / prev_day_utc).resolve()
+    # economic_state_build_v1 is governed as canonical truth, while this gate is
+    # emitted under the execution truth root. Do not silently look for canonical
+    # economic state inside the sleeve/execution root.
+    economic_truth_root = _canonical_economic_truth_root()
+    build_root = (economic_truth_root / "reports" / ECONOMIC_BUILD_FAMILY / prev_day_utc).resolve()
     unknown = {
         "status": "UNKNOWN",
         "source_day_utc": prev_day_utc,
+        "expected_artifact_root": str(build_root),
         "artifact_path": "",
         "artifact_sha256": "",
         "drawdown_pct": None,
@@ -235,6 +244,7 @@ def _load_previous_day_economic_build_state(*, truth_root: Path, day_utc: str) -
     return {
         "status": "OK",
         "source_day_utc": prev_day_utc,
+        "expected_artifact_root": str(build_root),
         "artifact_path": str(build_path),
         "artifact_sha256": build_sha256,
         "drawdown_pct": drawdown_pct,
@@ -639,10 +649,20 @@ def main() -> int:
             "policy_baseline_comparison_vs_portfolio_return": economic_state.get(
                 "policy_baseline_comparison_vs_portfolio_return"
             ),
-            "external_benchmark_underperformer_count": int(
+        "external_benchmark_underperformer_count": int(
                 economic_state.get("external_benchmark_underperformer_count") or 0
             ),
             "reason_codes": list(economic_state.get("reason_codes") or []),
+            "expected_artifact_root": str(economic_state.get("expected_artifact_root") or ""),
+            "producer_command": (
+                "PYTHONPATH=\"$PWD\" python3 ops/tools/run_economic_state_authority_v1.py "
+                f"--operation_type fresh_paper_entry_v1 --day_utc {economic_state.get('source_day_utc') or _prior_day_utc(day)} "
+                "--sleeve_id PRIMARY --environment PAPER --ib_account DUO847203 --materialize YES --emit_package YES"
+            ),
+            "recovery_command": (
+                "PYTHONPATH=\"$PWD\" python3 ops/tools/run_gate_authority_plane_v1.py "
+                f"--day_utc {day} --truth_root {TRUTH} --produced_utc {produced_utc} --mode {str(args.mode).strip().upper()}"
+            ),
         },
     }
 

@@ -36,6 +36,15 @@
           "gate_id": {
             "type": "string"
           },
+          "owning_producer": {
+            "type": "string"
+          },
+          "producer_command": {
+            "type": "string"
+          },
+          "recovery_command": {
+            "type": "string"
+          },
           "reason_codes": {
             "items": {
               "type": "string"

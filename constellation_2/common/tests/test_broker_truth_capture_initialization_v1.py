@@ -6,6 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -26,6 +28,19 @@ from constellation_2.common.constitutional_runtime_v1 import (
 
 
 DAY = "2026-04-13"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_operator_gate_canonical_truth(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(operator_gate_module, "_canonical_economic_truth_root", lambda: tmp_path / "truth")
+
+
+def _canonical_truth_root_for_sleeve_truth(truth_root: Path) -> Path:
+    parts = Path(truth_root).parts
+    if "truth_sleeves" in parts:
+        idx = parts.index("truth_sleeves")
+        return Path(*parts[:idx]) / "truth"
+    return Path(truth_root)
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -436,8 +451,9 @@ def _write_operator_gate_inputs(truth_root: Path) -> None:
 
 
 def _write_previous_day_economic_build(truth_root: Path, *, prev_day: str, drawdown_pct: str = "-0.010000") -> None:
+    canonical_truth_root = _canonical_truth_root_for_sleeve_truth(truth_root)
     _write_json(
-        truth_root / "reports" / "economic_state_build_v1" / prev_day / "ctx-test" / "economic_state_build.v1.json",
+        canonical_truth_root / "reports" / "economic_state_build_v1" / prev_day / "ctx-test" / "economic_state_build.v1.json",
         {
             "schema_id": "economic_state_build",
             "schema_version": "v1",
@@ -688,6 +704,11 @@ def test_operator_daily_gate_fails_closed_when_previous_day_bundle_c_missing(mon
     assert gate["first_blocker_code"] == "MISSING_PREVIOUS_DAY_ECONOMIC_STATE_FAILCLOSED"
     assert gate["missing_dependency_artifacts"] == ["economic_state_build_v1"]
     assert gate["checks"]["previous_day_economic_state_status"] == "UNKNOWN"
+    assert gate["economic_state"]["expected_artifact_root"].endswith(
+        "/truth/reports/economic_state_build_v1/2026-04-12"
+    )
+    assert "run_economic_state_authority_v1.py" in gate["economic_state"]["producer_command"]
+    assert "run_gate_authority_plane_v1.py" in gate["economic_state"]["recovery_command"]
     assert "MISSING_PREVIOUS_DAY_ECONOMIC_STATE_FAILCLOSED" in gate["reason_codes"]
     validated = validate_governed_artifact_payload_v1(
         repo_root=REPO_ROOT,
@@ -840,6 +861,9 @@ def test_operator_daily_gate_fails_on_previous_day_bundle_c_drawdown(monkeypatch
     assert gate_stack["missing_dependency_artifacts"] == []
     assert gate_stack["first_blocker_code"].startswith("GATE_REQUIRED_NOT_PASS:operator_daily_gate_v3:FAIL")
     assert operator_row["status"] == "FAIL"
+    assert operator_row["owning_producer"] == "ops/tools/run_operator_daily_gate_v3.py"
+    assert "run_operator_daily_gate_v3.py" in operator_row["producer_command"]
+    assert "run_gate_authority_plane_v1.py" in operator_row["recovery_command"]
     validated_gate_stack = validate_governed_artifact_payload_v1(
         repo_root=REPO_ROOT,
         artifact_id="gate_stack_verdict_v1",

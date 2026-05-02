@@ -19,6 +19,7 @@ from constellation_2.common.gate_authority_foundation_v1 import (  # noqa: E402
     write_gate_authority_plane,
 )
 from constellation_2.common.runtime_authority_bridge_v1 import resolve_truth_root_bridge_v1  # noqa: E402
+from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root  # noqa: E402
 from constellation_2.common.diagnostic_foundation_v1 import (  # noqa: E402
     _require_day_utc,
     _require_produced_utc,
@@ -98,7 +99,11 @@ def _prev_day_utc(day_utc: str) -> str:
 
 def _find_previous_day_complete_economic_state_build(*, truth_root: Path, day_utc: str) -> tuple[bool, str, str]:
     prev_day = _prev_day_utc(day_utc)
-    build_root = (truth_root / "reports" / "economic_state_build_v1" / prev_day).resolve()
+    # economic_state_build_v1 is a canonical-truth artifact. The gate authority
+    # may be running against an execution truth root, so searching that root
+    # would make governed economic builds look missing.
+    _ = truth_root
+    build_root = (resolve_canonical_truth_root().resolve() / "reports" / "economic_state_build_v1" / prev_day).resolve()
     if not build_root.exists() or not build_root.is_dir():
         return False, "", "PREVIOUS_DAY_ECONOMIC_STATE_BUILD_MISSING"
     candidates = sorted(build_root.glob("*/economic_state_build.v1.json"))
