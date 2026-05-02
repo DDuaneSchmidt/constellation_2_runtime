@@ -280,6 +280,19 @@ def _symbol_requires_market_input(market: dict[str, Any], symbol: str, code: str
     return True
 
 
+def _options_chain_recovery(*, execution_root: Path, day_utc: str, symbol: str, required: bool) -> dict[str, Any]:
+    expected_root = execution_root / "options_chain_snapshot_v1" / day_utc
+    return {
+        "required": bool(required),
+        "symbol": str(symbol or "").strip().upper(),
+        "expected_artifact_root": str(expected_root),
+        "expected_artifact_pattern": str(expected_root / "<capture_id>" / "options_chain_snapshot.v1.json"),
+        "producer": "ops/tools/run_options_chain_snapshot_required_day_v1.py",
+        "recovery_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_options_chain_snapshot_required_day_v1.py --day_utc {day_utc} --truth_root <TRUTH_ROOT> --symbol {str(symbol or '').strip().upper()}",
+        "same_day_only": True,
+    }
+
+
 def _next_step(blockers: list[str]) -> tuple[str, str]:
     if "OPTIONS_CHAIN_SNAPSHOT_MISSING" in blockers:
         return (
@@ -346,6 +359,11 @@ def build_sleeve_outcome_generation_readiness_v1(*, day_utc: str, truth_root: Pa
             for code in raw_missing_inputs
             if _symbol_requires_market_input(market, symbol, str(code))
         ]
+        options_required = "OPTIONS_CHAIN_SNAPSHOT_MISSING" in missing_inputs or (
+            str(market.get("status") or "").upper() == "FAIL"
+            and str(market.get("first_blocker") or "") == "OPTIONS_CHAIN_SNAPSHOT_MISSING"
+            and str(symbol).upper() in {str(sym).upper() for sym in market.get("required_symbols", []) if str(sym)}
+        )
         blockers = _authorization_blockers(auth)
         missing_evidence: list[str] = []
         if not execution_package_path:
@@ -373,6 +391,12 @@ def build_sleeve_outcome_generation_readiness_v1(*, day_utc: str, truth_root: Pa
                     "symbol": symbol,
                     "missing_inputs": missing_inputs,
                     "market_data_status": str(market.get("status") or "UNKNOWN"),
+                    "options_chain_recovery": _options_chain_recovery(
+                        execution_root=execution,
+                        day_utc=day_utc,
+                        symbol=symbol,
+                        required=options_required,
+                    ),
                 },
                 "risk_sizing_result": {
                     "sizing_state": str(rrow.get("sizing_state") or "MISSING"),

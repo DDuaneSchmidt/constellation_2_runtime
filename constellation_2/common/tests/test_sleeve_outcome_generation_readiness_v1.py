@@ -162,8 +162,14 @@ def test_options_market_data_blocker_is_kept_on_vol_income(tmp_path: Path) -> No
 
     assert "OPTIONS_CHAIN_SNAPSHOT_MISSING" in rows["vol"]["outcome_generation_blockers"]
     assert rows["vol"]["market_inputs"]["missing_inputs"] == ["OPTIONS_CHAIN_SNAPSHOT_MISSING"]
+    assert rows["vol"]["market_inputs"]["options_chain_recovery"]["required"] is True
+    assert rows["vol"]["market_inputs"]["options_chain_recovery"]["expected_artifact_pattern"].endswith(
+        "options_chain_snapshot_v1/2026-05-01/<capture_id>/options_chain_snapshot.v1.json"
+    )
+    assert "run_options_chain_snapshot_required_day_v1.py" in rows["vol"]["market_inputs"]["options_chain_recovery"]["recovery_command"]
     assert "OPTIONS_CHAIN_SNAPSHOT_MISSING" not in rows["trend"]["outcome_generation_blockers"]
     assert rows["trend"]["market_inputs"]["missing_inputs"] == []
+    assert rows["trend"]["market_inputs"]["options_chain_recovery"]["required"] is False
     assert rows["vol"]["next_governed_producer"] == "ops/tools/run_options_chain_snapshot_required_day_v1.py"
     assert "MISSING_OPTIONS_CHAIN_INPUT" in rows["vol"]["root_cause_classification"]
     assert rows["vol"]["sizing_audit"]["root_cause"] == "DEFINED_RISK_EVIDENCE_MISSING"

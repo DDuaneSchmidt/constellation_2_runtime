@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import json
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,11 @@ if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
 import ops.tools.run_capital_authority_allocation_day_v1 as allocation_module
+
+
+def _write(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
 
 
 def _edge_policy() -> dict:
@@ -106,6 +112,60 @@ def test_valid_exposure_intent_returns_no_unproven_reason() -> None:
         nav_total_cents=10_000_000,
     )
     assert reason_codes == []
+
+
+def test_long_equity_stop_risk_uses_same_day_market_price(tmp_path: Path) -> None:
+    day = "2026-05-01"
+    _write(
+        tmp_path / "market_data_snapshot_v1" / "snapshots" / day / "SPY.market_data_snapshot.v1.json",
+        {
+            "schema_id": "C2_MARKET_DATA_SNAPSHOT_V1",
+            "schema_version": "v1",
+            "day_utc": day,
+            "symbol": "SPY",
+            "close": "500.00",
+        },
+    )
+    intent = {
+        "schema_id": "exposure_intent",
+        "schema_version": "v1",
+        "exposure_type": "LONG_EQUITY",
+        "underlying": {"symbol": "SPY"},
+        "target_notional_pct": "0.01",
+        "constraints": {"max_risk_pct": "0.01", "stop_loss_bps": 1000},
+    }
+
+    sizing = allocation_module._extract_quantity_and_risk_per_unit_cents(
+        intent,
+        nav_total_cents=10_000_000,
+        day_utc=day,
+        intent_hash="a" * 64,
+        truth_root=tmp_path,
+        environment="PAPER",
+    )
+
+    assert sizing == (1, 5_000)
+
+
+def test_long_equity_stop_risk_fails_closed_without_price(tmp_path: Path) -> None:
+    intent = {
+        "schema_id": "exposure_intent",
+        "schema_version": "v1",
+        "exposure_type": "LONG_EQUITY",
+        "underlying": {"symbol": "SPY"},
+        "target_notional_pct": "0.01",
+        "constraints": {"max_risk_pct": "0.01", "stop_loss_bps": 1000},
+    }
+
+    reason_codes = allocation_module._specific_unproven_requested_quantity_reason_codes(
+        intent,
+        nav_total_cents=10_000_000,
+        day_utc="2026-05-01",
+        truth_root=tmp_path,
+        environment="PAPER",
+    )
+
+    assert "AUTHZ_MISSING_EQUITY_STOP_RISK_EVIDENCE" in reason_codes
 
 
 def test_headroom_metrics_rejects_when_required_risk_exceeds_available_headroom() -> None:

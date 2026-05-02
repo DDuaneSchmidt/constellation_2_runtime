@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import json
 from decimal import Decimal
 from pathlib import Path
 
@@ -12,6 +13,11 @@ from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_again
 import ops.tools.run_correlation_envelope_gate_v1 as correlation_gate_module
 
 
+def _write(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+
 def test_fixed_decimal_str_renders_scientific_notation_as_plain_decimal() -> None:
     rendered = correlation_gate_module._fixed_decimal_str(
         Decimal("5.071627647789142889350095082E-8")
@@ -19,6 +25,42 @@ def test_fixed_decimal_str_renders_scientific_notation_as_plain_decimal() -> Non
 
     assert rendered == "0.00000005071627647789142889350095082"
     assert "E" not in rendered
+
+
+def test_intent_scans_ignore_zero_cap_non_executable_engines(tmp_path: Path, monkeypatch) -> None:
+    day = "2026-05-01"
+    intents_root = tmp_path / "intents_v1" / "snapshots"
+    monkeypatch.setattr(correlation_gate_module, "IN_INTENTS", intents_root)
+    _write(
+        intents_root / day / "active.json",
+        {
+            "engine": {"engine_id": "C2_TREND_EQ_PRIMARY_V1"},
+            "underlying": {"symbol": "SPY"},
+            "target_notional_pct": "0.01",
+        },
+    )
+    _write(
+        intents_root / day / "inactive.json",
+        {
+            "engine": {"engine_id": "C2_CROSS_ASSET_TREND_V1"},
+            "underlying": {"symbol": "DBC"},
+            "target_notional_pct": "0.10",
+        },
+    )
+
+    active, counts = correlation_gate_module._scan_intents(
+        day,
+        executable_engine_ids={"C2_TREND_EQ_PRIMARY_V1"},
+    )
+    notionals = correlation_gate_module._scan_intents_notional_by_symbol(
+        day,
+        Decimal("1000000"),
+        executable_engine_ids={"C2_TREND_EQ_PRIMARY_V1"},
+    )
+
+    assert active == ["C2_TREND_EQ_PRIMARY_V1"]
+    assert counts == {"SPY": 1}
+    assert notionals == {"SPY": Decimal("10000.00")}
 
 
 def test_depth_liquidity_schema_accepts_fixed_decimal_impact_bps() -> None:

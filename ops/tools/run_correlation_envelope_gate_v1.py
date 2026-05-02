@@ -191,7 +191,7 @@ def _write_refreshable_gate(path: Path, obj: Dict[str, Any], day: str) -> None:
         expected_day_utc=day,
         expected_schema_id="C2_CORRELATION_ENVELOPE_GATE_V1",
         expected_schema_version=1,
-        preserve_statuses=("PASS",),
+        preserve_statuses=(),
     )
     if wr.action == "REFRESHED":
         print(
@@ -273,7 +273,32 @@ def _load_capauth_engine_to_sleeve() -> Dict[str, str]:
     return m
 
 
-def _scan_intents(day: str) -> Tuple[List[str], Dict[str, int]]:
+def _load_capauth_executable_engine_ids() -> set[str]:
+    pol = _read_json_obj(CAPAUTH_POLICY_PATH)
+    sleeves = pol.get("sleeves")
+    if not isinstance(sleeves, list) or not sleeves:
+        raise SystemExit("FAIL: CAPAUTH_POLICY_SLEEVES_INVALID_OR_EMPTY")
+    out: set[str] = set()
+    for sleeve in sleeves:
+        if not isinstance(sleeve, dict):
+            continue
+        limits = sleeve.get("limits") if isinstance(sleeve.get("limits"), dict) else {}
+        max_risk = limits.get("max_capital_at_risk_cents")
+        if not isinstance(max_risk, int) or max_risk <= 0:
+            continue
+        engine_ids = sleeve.get("engine_ids")
+        if not isinstance(engine_ids, list):
+            continue
+        for engine_id in engine_ids:
+            text = str(engine_id or "").strip()
+            if text:
+                out.add(text)
+    if not out:
+        raise SystemExit("FAIL: CAPAUTH_POLICY_EXECUTABLE_ENGINE_IDS_EMPTY")
+    return out
+
+
+def _scan_intents(day: str, *, executable_engine_ids: set[str] | None = None) -> Tuple[List[str], Dict[str, int]]:
     d = (IN_INTENTS / day).resolve()
     if not d.exists() or not d.is_dir():
         raise SystemExit(f"FAIL: INTENTS_DIR_MISSING: {str(d)}")
@@ -286,6 +311,8 @@ def _scan_intents(day: str) -> Tuple[List[str], Dict[str, int]]:
         o = _read_json_obj(p)
         eng = o.get("engine") if isinstance(o.get("engine"), dict) else {}
         engine_id = str(eng.get("engine_id") or "").strip()
+        if executable_engine_ids is not None and engine_id not in executable_engine_ids:
+            continue
         if engine_id:
             engine_ids.append(engine_id)
 
@@ -442,7 +469,7 @@ def _latest_close_and_adv(symbol: str, day: str, lookback_days: int) -> Tuple[De
     return (last_close, adv_shares, adv_dollar)
 
 
-def _scan_intents_notional_by_symbol(day: str, nav_total: Decimal) -> Dict[str, Decimal]:
+def _scan_intents_notional_by_symbol(day: str, nav_total: Decimal, *, executable_engine_ids: set[str] | None = None) -> Dict[str, Decimal]:
     d = (IN_INTENTS / day).resolve()
     if not d.exists() or not d.is_dir():
         raise SystemExit(f"FAIL: DEPTH_INTENTS_ROOT_MISSING: {str(d)}")
@@ -451,6 +478,10 @@ def _scan_intents_notional_by_symbol(day: str, nav_total: Decimal) -> Dict[str, 
     files = sorted([p for p in d.iterdir() if p.is_file() and p.name.endswith(".json")], key=lambda p: p.name)
     for p in files:
         o = _read_json_obj(p)
+        eng = o.get("engine") if isinstance(o.get("engine"), dict) else {}
+        engine_id = str(eng.get("engine_id") or "").strip()
+        if executable_engine_ids is not None and engine_id not in executable_engine_ids:
+            continue
 
         underlying = o.get("underlying")
         sym = ""
@@ -573,6 +604,7 @@ def main() -> int:
     policy = _read_json_obj(POLICY_PATH)
     policy_sha = _sha256_file(POLICY_PATH)
     engine_to_sleeve = _load_capauth_engine_to_sleeve()
+    executable_engine_ids = _load_capauth_executable_engine_ids()
 
     cse_policy = _read_json_obj(CSE_POLICY_PATH)
     cse_policy_sha = _sha256_file(CSE_POLICY_PATH)
@@ -598,7 +630,7 @@ def main() -> int:
             raise RuntimeError("MISSING_DEPTH_POLICY")
 
         all_eids, corr, _ = _load_engine_corr(day)
-        active_eids, sym_counts = _scan_intents(day)
+        active_eids, sym_counts = _scan_intents(day, executable_engine_ids=executable_engine_ids)
 
         sleeves = sorted(set(engine_to_sleeve.values()))
         for s in sleeves:
@@ -662,7 +694,7 @@ def main() -> int:
 
         max_stale = int(depth_policy.get("nav_fallback", {}).get("max_staleness_days", 0))
         nav_total, nav_path = _load_nav_snapshot(day, max_stale, depth_policy)
-        notional_by_symbol = _scan_intents_notional_by_symbol(day, nav_total)
+        notional_by_symbol = _scan_intents_notional_by_symbol(day, nav_total, executable_engine_ids=executable_engine_ids)
 
         rs = depth_policy.get("regime_selection")
         if not isinstance(rs, dict):

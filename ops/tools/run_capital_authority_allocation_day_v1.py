@@ -538,7 +538,11 @@ def _effective_sleeve_governance_multiplier_bp(
     env = str(environment or "").strip().upper()
     discovery_mode_active = bool(qualification_meta.get("discovery_mode_active") is True)
     discovery_override_multiplier_bp = int(qualification_meta.get("discovery_sleeve_governance_multiplier_bp") or 0)
-    if discovery_mode_active and env == "PAPER" and discovery_override_multiplier_bp > 0:
+    missing_or_invalid_action = str(qualification_meta.get("governance_artifact_status") or "").strip().upper() in {
+        "MISSING",
+        "INVALID",
+    }
+    if discovery_mode_active and env == "PAPER" and discovery_override_multiplier_bp > 0 and not missing_or_invalid_action:
         effective_multiplier_bp = int(discovery_override_multiplier_bp)
         reason_codes = [PAPER_DISCOVERY_SLEEVE_THROTTLE_RELAXED]
     return effective_multiplier_bp, reason_codes
@@ -1110,6 +1114,78 @@ def _outcome_priority(outcome: str) -> int:
     }.get(str(outcome or "").strip().upper(), -1)
 
 
+def _latest_market_close_cents(*, truth_root: Optional[Path], day_utc: str, symbol: str) -> Optional[int]:
+    if truth_root is None:
+        return None
+    day = str(day_utc or "").strip()
+    sym = str(symbol or "").strip().upper()
+    if not day or not sym:
+        return None
+    snapshot_path = (
+        Path(truth_root)
+        / "market_data_snapshot_v1"
+        / "snapshots"
+        / day
+        / f"{sym}.market_data_snapshot.v1.json"
+    ).resolve()
+    if snapshot_path.exists() and snapshot_path.is_file():
+        payload = _read_json_obj(snapshot_path)
+        if str(payload.get("day_utc") or "").strip() != day:
+            return None
+        if str(payload.get("symbol") or "").strip().upper() != sym:
+            return None
+        close = payload.get("close")
+        if close is not None:
+            cents = (Decimal(str(close).strip()) * Decimal("100")).to_integral_value(rounding=ROUND_CEILING)
+            return int(cents) if cents > 0 else None
+    jsonl_path = (Path(truth_root) / "market_data_snapshot_v1" / sym / f"{day[:4]}.jsonl").resolve()
+    if not jsonl_path.exists() or not jsonl_path.is_file():
+        return None
+    cutoff = f"{day}T23:59:59Z"
+    latest_close: Optional[Decimal] = None
+    try:
+        for line in jsonl_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if not isinstance(row, dict):
+                continue
+            ts = str(row.get("timestamp_utc") or "").strip()
+            if not ts or ts > cutoff:
+                continue
+            close = row.get("close")
+            if close is None:
+                continue
+            latest_close = Decimal(str(close).strip())
+    except Exception:
+        return None
+    if latest_close is None or latest_close <= 0:
+        return None
+    return int((latest_close * Decimal("100")).to_integral_value(rounding=ROUND_CEILING))
+
+
+def _long_equity_stop_risk_per_unit_cents(
+    intent_obj: Dict[str, Any],
+    *,
+    day_utc: str,
+    truth_root: Optional[Path],
+    stop_loss_bps: Any,
+) -> Optional[int]:
+    try:
+        stop_bps = int(stop_loss_bps)
+    except (TypeError, ValueError):
+        return None
+    if stop_bps <= 0:
+        return None
+    underlying = intent_obj.get("underlying") if isinstance(intent_obj.get("underlying"), dict) else {}
+    symbol = str(underlying.get("symbol") or "").strip().upper()
+    close_cents = _latest_market_close_cents(truth_root=truth_root, day_utc=day_utc, symbol=symbol)
+    if close_cents is None or close_cents <= 0:
+        return None
+    risk_per_unit = (Decimal(close_cents) * Decimal(stop_bps) / Decimal("10000")).to_integral_value(rounding=ROUND_CEILING)
+    return int(risk_per_unit) if risk_per_unit > 0 else None
+
+
 def _extract_quantity_and_risk_per_unit_cents(
     intent_obj: Dict[str, Any],
     *,
@@ -1168,6 +1244,17 @@ def _extract_quantity_and_risk_per_unit_cents(
             return None
         if nav_total_cents <= 0:
             return None
+        stop_loss_bps = constraints.get("stop_loss_bps")
+        if stop_loss_bps is not None:
+            risk_per_unit_cents = _long_equity_stop_risk_per_unit_cents(
+                intent_obj,
+                day_utc=day_utc,
+                truth_root=truth_root,
+                stop_loss_bps=stop_loss_bps,
+            )
+            if risk_per_unit_cents is None:
+                return None
+            return 1, int(risk_per_unit_cents)
         risk_per_unit_cents = int((Decimal(nav_total_cents) * max_risk_pct).to_integral_value(rounding=ROUND_CEILING))
         if risk_per_unit_cents <= 0:
             return None
@@ -1180,10 +1267,10 @@ def _specific_unproven_requested_quantity_reason_codes(
     intent_obj: Dict[str, Any],
     *,
     nav_total_cents: int,
-    day_utc: str,
-    intent_hash: str,
-    truth_root: Optional[Path],
-    environment: str,
+    day_utc: str = "",
+    intent_hash: str = "",
+    truth_root: Optional[Path] = None,
+    environment: str = "",
 ) -> List[str]:
     schema_id = str(intent_obj.get("schema_id") or "").strip()
     schema_version = str(intent_obj.get("schema_version") or "").strip()
@@ -1252,6 +1339,15 @@ def _specific_unproven_requested_quantity_reason_codes(
             codes.append("AUTHZ_MISSING_RISK_PER_UNIT")
         if nav_total_cents <= 0:
             codes.append("AUTHZ_MISSING_EXPOSURE_BUDGET_NAV_TOTAL_CENTS")
+        if constraints.get("stop_loss_bps") is not None:
+            stop_risk = _long_equity_stop_risk_per_unit_cents(
+                intent_obj,
+                day_utc=day_utc,
+                truth_root=truth_root,
+                stop_loss_bps=constraints.get("stop_loss_bps"),
+            )
+            if stop_risk is None:
+                codes.append("AUTHZ_MISSING_EQUITY_STOP_RISK_EVIDENCE")
         if (not codes) and int((Decimal(nav_total_cents) * max_risk_pct).to_integral_value(rounding=ROUND_CEILING)) <= 0:
             codes.append("AUTHZ_MISSING_RISK_PER_UNIT")
         return _unique_reason_codes(codes)
@@ -1969,6 +2065,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         qualification_meta = dict(
             qualification_by_sleeve.get(sleeve_limit.sleeve_id) or _bootstrap_zero_baseline_qualification_meta()
         )
+        qualification_meta["governance_artifact_status"] = str(governed_row.get("artifact_status") or "").strip().upper()
         qualified_allow = (int(allow) * bp) // 10000
         allowed_after_qualification = (qualified_allow * int(qualification_meta.get("capital_multiplier_bp") or 0)) // 10000
         discovery_headroom_cap_cents = int(qualification_meta.get("discovery_max_headroom_cents") or 0)
@@ -1984,7 +2081,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         economic_multiplier_bp = int((economic_signals_by_sleeve.get(sid) or {}).get("capital_multiplier_bp") or 10000)
         allowed_before_governance = (allowed_after_qualification * economic_multiplier_bp) // 10000
         qualification_by_sleeve[sid] = qualification_meta
-        governance_multiplier_bp = int(governed_row.get("headroom_multiplier_bp") or 10000)
+        raw_governance_multiplier_bp = governed_row.get("headroom_multiplier_bp")
+        governance_multiplier_bp = 10000 if raw_governance_multiplier_bp is None else int(raw_governance_multiplier_bp)
         governance_multiplier_bp, discovery_relax_reason_codes = _effective_sleeve_governance_multiplier_bp(
             governed_multiplier_bp=governance_multiplier_bp,
             environment=sleeve_environment,
