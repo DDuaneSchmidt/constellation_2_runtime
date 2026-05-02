@@ -317,13 +317,16 @@ def _projection_from_control_plane(ctx: bod.BodContext, control: dict[str, Any])
     final_status = str(control.get("final_status") or "UNKNOWN").strip().upper()
     blocker = str(control.get("canonical_blocker") or "").strip()
     phase = str(control.get("current_phase") or "").strip()
+    current_domain = str(control.get("current_domain") or phase).strip()
     recovery_commands = [str(item) for item in (control.get("recovery_commands") if isinstance(control.get("recovery_commands"), list) else []) if str(item or "").strip()]
     evidence_paths = [str(item) for item in (control.get("evidence_paths") if isinstance(control.get("evidence_paths"), list) else []) if str(item or "").strip()]
     deferred = [str(item) for item in (control.get("deferred_phases") if isinstance(control.get("deferred_phases"), list) else []) if str(item or "").strip()]
+    deferred_domains = [str(item) for item in (control.get("deferred_domains") if isinstance(control.get("deferred_domains"), list) else []) if str(item or "").strip()]
     action = str(control.get("recovery_action") or "").strip()
     current_session_sub = control.get("current_session_sub_blocker") if isinstance(control.get("current_session_sub_blocker"), dict) else {}
     session_inventory = list(control.get("session_dependency_inventory") if isinstance(control.get("session_dependency_inventory"), list) else [])
     session_failures = list(control.get("session_precheck_failures") if isinstance(control.get("session_precheck_failures"), list) else [])
+    failed_current_domain = list(control.get("failed_current_domain_dependencies") if isinstance(control.get("failed_current_domain_dependencies"), list) else [])
     if current_session_sub:
         evidence_paths = [str(current_session_sub.get("evidence_path") or "")] if current_session_sub.get("evidence_path") else evidence_paths
         command = str(current_session_sub.get("recovery_command") or current_session_sub.get("producer_command") or "").strip()
@@ -345,8 +348,25 @@ def _projection_from_control_plane(ctx: bod.BodContext, control: dict[str, Any])
             )
         )
         action = "Resolve all listed SESSION_AUTHORITY precheck failures, then rerun session authority."
+    if failed_current_domain:
+        evidence_paths = list(
+            dict.fromkeys(
+                str(row.get("evidence_path") or row.get("expected_path") or "")
+                for row in failed_current_domain
+                if isinstance(row, dict) and str(row.get("evidence_path") or row.get("expected_path") or "").strip()
+            )
+        )
+        recovery_commands = list(
+            dict.fromkeys(
+                str(row.get("recovery_command") or row.get("producer_command") or "")
+                for row in failed_current_domain
+                if isinstance(row, dict) and str(row.get("recovery_command") or row.get("producer_command") or "").strip()
+            )
+        )
+        if blocker.endswith("_PRECHECK_FAILED"):
+            action = f"Resolve all listed {current_domain} precheck failures, then rerun the control plane."
     next_valid_actions = recovery_commands[:1] if recovery_commands else ([action] if action else [])
-    if blocker == "SESSION_AUTHORITY_PRECHECK_FAILED" and recovery_commands:
+    if blocker.endswith("_PRECHECK_FAILED") and recovery_commands:
         next_valid_actions = recovery_commands
     return {
         "schema_id": "aegis_operator_projection",
@@ -362,13 +382,17 @@ def _projection_from_control_plane(ctx: bod.BodContext, control: dict[str, Any])
         "first_blocker": blocker,
         "owner": str(control.get("blocker_owner") or phase),
         "phase": phase,
+        "current_domain": current_domain,
         "root_cause": str(control.get("blocker_reason") or blocker or "No current blocker."),
         "current_session_sub_blocker": current_session_sub,
         "session_sub_blockers": list(control.get("session_sub_blockers") if isinstance(control.get("session_sub_blockers"), list) else []),
         "session_dependency_inventory": session_inventory,
         "session_precheck_failures": session_failures,
+        "failed_current_domain_dependencies": failed_current_domain,
+        "readiness_dependency_inventory": list(control.get("readiness_dependency_inventory") if isinstance(control.get("readiness_dependency_inventory"), list) else []),
         "downstream_consequences": [{"phase": item, "reason": f"Deferred by {phase}"} for item in deferred],
         "deferred_downstream_phases": deferred,
+        "deferred_downstream_domains": deferred_domains,
         "artifact_paths": evidence_paths,
         "evidence_paths": evidence_paths,
         "next_valid_actions": next_valid_actions,

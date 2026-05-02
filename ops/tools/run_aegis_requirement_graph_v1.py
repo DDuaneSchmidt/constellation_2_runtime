@@ -21,7 +21,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import (
 from ops.tools import run_aegis_bod_prepare_v1 as bod
 from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
 from ops.tools import run_options_chain_snapshot_required_day_v1 as options_required
-from ops.tools.run_aegis_control_plane_v1 import control_plane_path, load_phase_registry_v1
+from ops.tools.run_aegis_control_plane_v1 import control_plane_path, load_phase_registry_v1, load_readiness_domain_registry_v1
 from ops.tools.run_intent_arbitration_v1 import intent_arbitration_path, selected_intent_pointer_path
 
 SCHEMA_VERSION = "aegis_requirement_graph.v1"
@@ -527,7 +527,7 @@ def _root_requirement(nodes: list[dict[str, Any]]) -> dict[str, Any]:
         "SUBMIT_BOUNDARY": 7,
         "PAPER_READY": 8,
     }
-    blocked = [node for node in nodes if node.get("status") in {"BLOCKED", "STALE", "BLOCKING_CURRENT_RUN"} and node.get("blocking_class") == "HARD_BLOCKER"]
+    blocked = [node for node in nodes if node.get("status") in {"BLOCKED", "STALE", "BLOCKING_CURRENT_RUN", "BLOCKING_CURRENT_DOMAIN"} and node.get("blocking_class") == "HARD_BLOCKER"]
     if not blocked:
         return {}
     blocked.sort(key=lambda node: (phase_rank.get(str(node.get("owner_phase") or ""), 99), str(node.get("requirement_id") or "")))
@@ -538,15 +538,41 @@ def _control_phase_rank() -> dict[str, int]:
     return {str(row.get("phase_id") or ""): int(row.get("phase_order") or 999) for row in load_phase_registry_v1()}
 
 
+def _domain_rank() -> dict[str, int]:
+    return {str(row.get("domain_id") or ""): int(row.get("domain_order") or 999) for row in load_readiness_domain_registry_v1()}
+
+
+def _phase_to_domain() -> dict[str, str]:
+    mapping = {str(row.get("phase_id") or ""): str(row.get("domain_id") or "") for row in load_readiness_domain_registry_v1()}
+    mapping.update(
+        {
+            "SESSION_AUTHORITY": "SESSION_IDENTITY",
+            "BROKER_HEALTH": "BROKER_CONNECTIVITY",
+            "BOD_INPUTS": "CAPITAL_SAFETY",
+            "MARKET_DATA": "MARKET_FEED",
+            "FEED_ATTESTATION": "MARKET_FEED",
+            "STRATEGY_AND_RISK": "STRATEGY_INTENT",
+            "AUTHORIZATION": "AUTHORIZATION_KILL_SWITCH",
+            "KILL_SWITCH": "AUTHORIZATION_KILL_SWITCH",
+            "SUBMIT_BOUNDARY": "SUBMIT_BOUNDARY",
+            "EXECUTION": "EXECUTION",
+        }
+    )
+    return mapping
+
+
 def _apply_control_plane_statuses(payload: dict[str, Any], ctx: bod.BodContext) -> None:
     control = _read_json(control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc))
     if str(control.get("day_utc") or "") != ctx.day_utc:
         return
     current_phase = str(control.get("current_phase") or "").strip()
-    if not current_phase or str(control.get("final_status") or "").strip().upper() == "READY":
+    current_domain = str(control.get("current_domain") or "").strip()
+    if (not current_phase and not current_domain) or str(control.get("final_status") or "").strip().upper() == "READY":
         return
-    rank = _control_phase_rank()
-    current_rank = rank.get(current_phase, 999)
+    phase_to_domain = _phase_to_domain()
+    rank = _domain_rank()
+    current_domain = current_domain or phase_to_domain.get(current_phase, current_phase)
+    current_rank = rank.get(current_domain, 999)
     control_blocker = str(control.get("canonical_blocker") or "").strip()
     control_paths = [str(item) for item in (control.get("evidence_paths") if isinstance(control.get("evidence_paths"), list) else []) if str(item or "").strip()]
     if control_blocker:
@@ -570,6 +596,8 @@ def _apply_control_plane_statuses(payload: dict[str, Any], ctx: bod.BodContext) 
                 operator_next_action=str(control.get("recovery_action") or ""),
             ),
         )
+        payload["requirements"][0]["owner_domain"] = current_domain
+        payload["requirements"][0]["status"] = "BLOCKING_CURRENT_DOMAIN"
     for node in payload.get("requirements", []):
         if not isinstance(node, dict):
             continue
@@ -582,15 +610,18 @@ def _apply_control_plane_statuses(payload: dict[str, Any], ctx: bod.BodContext) 
             node["status"] = "DIAGNOSTIC_ONLY"
             continue
         owner = str(node.get("owner_phase") or "").strip()
-        owner_rank = rank.get(owner, 999)
+        owner_domain = str(node.get("owner_domain") or phase_to_domain.get(owner, owner)).strip()
+        node["owner_domain"] = owner_domain
+        owner_rank = rank.get(owner_domain, 999)
         if owner_rank > current_rank:
-            node["status"] = "DEFERRED_BY_UPSTREAM_BLOCKER"
+            node["status"] = "DEFERRED_BY_UPSTREAM_DOMAIN"
             node["deferred_by_phase"] = current_phase
+            node["deferred_by_domain"] = current_domain
             node["deferred_by_blocker"] = control_blocker
-            node["operator_next_action"] = f"Deferred until {current_phase} clears."
-        elif owner == current_phase:
-            if str(node.get("canonical_blocker") or node.get("blocker") or "").strip() == control_blocker:
-                node["status"] = "BLOCKING_CURRENT_RUN"
+            node["operator_next_action"] = f"Deferred until {current_domain} clears."
+        elif owner_domain == current_domain:
+            if str(node.get("canonical_blocker") or node.get("blocker") or "").strip() == control_blocker or control_blocker.endswith("_PRECHECK_FAILED"):
+                node["status"] = "BLOCKING_CURRENT_DOMAIN"
             else:
                 node["status"] = "DIAGNOSTIC_ONLY"
                 node["operator_next_action"] = f"Diagnostic only until {control_blocker} clears."

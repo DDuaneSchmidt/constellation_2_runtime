@@ -21,6 +21,7 @@ from ops.tools.repo_protection_common_v1 import read_protection_status_v1
 
 SCHEMA_VERSION = "aegis_control_plane.v1"
 REGISTRY_PATH = REPO_ROOT / "governance" / "02_REGISTRIES" / "aegis_control_plane_phase_registry_v1.json"
+DOMAIN_REGISTRY_PATH = REPO_ROOT / "governance" / "02_REGISTRIES" / "aegis_readiness_domain_registry_v1.json"
 
 
 def _now_iso() -> str:
@@ -51,6 +52,13 @@ def load_phase_registry_v1() -> list[dict[str, Any]]:
     phases = payload.get("phases") if isinstance(payload.get("phases"), list) else []
     rows = [row for row in phases if isinstance(row, dict)]
     return sorted(rows, key=lambda row: int(row.get("phase_order") or 999))
+
+
+def load_readiness_domain_registry_v1() -> list[dict[str, Any]]:
+    payload = _read_json(DOMAIN_REGISTRY_PATH)
+    domains = payload.get("domains") if isinstance(payload.get("domains"), list) else []
+    rows = [row for row in domains if isinstance(row, dict)]
+    return sorted(rows, key=lambda row: int(row.get("domain_order") or 999))
 
 
 def _format_template(text: str, ctx: Any) -> str:
@@ -143,6 +151,219 @@ def _phase_row(
         "recovery_action": recovery_action,
         "recovery_commands": recovery_commands,
         "blocker_reason": reason,
+    }
+
+
+def _dependency_path(dep: dict[str, Any], ctx: Any) -> Path:
+    return Path(_format_template(str(dep.get("expected_path") or ""), ctx)).expanduser().resolve()
+
+
+def _dependency_command(dep: dict[str, Any], ctx: Any) -> str:
+    return _format_template(str(dep.get("producer_command") or ""), ctx)
+
+
+def _dependency_action(dep: dict[str, Any], ctx: Any) -> str:
+    return _format_template(str(dep.get("recovery_action") or ""), ctx)
+
+
+def _code_matches(owned_code: str, observed_code: str) -> bool:
+    owned = str(owned_code or "").strip()
+    observed = str(observed_code or "").strip()
+    if not owned or not observed:
+        return False
+    return observed == owned or observed.startswith(f"{owned}:") or f":{owned}" in observed
+
+
+def _owned_dependency_blocker(dep: dict[str, Any], codes: list[str]) -> str:
+    owned_codes = [str(code).strip() for code in (dep.get("blocker_codes_owned") or []) if str(code or "").strip()]
+    for code in codes:
+        for owned in owned_codes:
+            if _code_matches(owned, code):
+                return owned
+    return ""
+
+
+def _dependency_result(
+    *,
+    dep: dict[str, Any],
+    ctx: Any,
+    status: str,
+    blocker: str = "",
+    detail: str = "",
+    path: Path | None = None,
+) -> dict[str, Any]:
+    expected = path or _dependency_path(dep, ctx)
+    command = _dependency_command(dep, ctx)
+    action = _dependency_action(dep, ctx)
+    dependency_id = str(dep.get("dependency_id") or "").strip()
+    return {
+        "dependency_id": dependency_id,
+        "domain_owner": str(dep.get("domain_owner") or "").strip(),
+        "required_for": list(dep.get("required_for") if isinstance(dep.get("required_for"), list) else []),
+        "blocking_scope": str(dep.get("blocking_scope") or "").strip(),
+        "required": bool(dep.get("required") is True),
+        "diagnostic_only": bool(dep.get("diagnostic_only") is True),
+        "status": status,
+        "expected_path": str(expected),
+        "schema_path": str(dep.get("schema_path") or "").strip(),
+        "producer_command": command,
+        "recovery_action": action or f"Resolve {dependency_id}.",
+        "recovery_command": command,
+        "blocking_reason": blocker,
+        "evidence_path": str(expected),
+        "detail": detail,
+    }
+
+
+def _payload_day(payload: dict[str, Any]) -> str:
+    return str(
+        payload.get("day_utc")
+        or payload.get("target_day")
+        or payload.get("active_day")
+        or payload.get("trading_day")
+        or ""
+    ).strip()
+
+
+def _session_identity_dependency_result(dep: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    path = _dependency_path(dep, ctx)
+    dependency_id = str(dep.get("dependency_id") or "").strip()
+    if not path.exists() or not path.is_file():
+        return _dependency_result(
+            dep=dep,
+            ctx=ctx,
+            status="MISSING",
+            blocker=f"{dependency_id.upper()}_MISSING",
+            detail="required session identity artifact is missing",
+            path=path,
+        )
+    payload = _read_json(path)
+    codes = _collect_codes(payload)
+    owned = _owned_dependency_blocker(dep, codes)
+    if dependency_id == "active_session_v1":
+        day_ok = str(payload.get("target_day") or payload.get("active_day") or "").strip() == ctx.day_utc
+        promoted = str(payload.get("promotion_state") or "").strip().upper() in {"PROMOTED", "PASS", "GRANTED"}
+        rolled = str(payload.get("rollover_status") or "").strip().upper() == "ROLLED_OVER"
+        if day_ok and (promoted or rolled):
+            return _dependency_result(dep=dep, ctx=ctx, status="SATISFIED", path=path)
+        return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker=owned or "TARGET_DAY_DATE_MISMATCH", detail="active session is not bound to the target day", path=path)
+    if dependency_id == "target_day_build_v1":
+        hidden = payload.get("hidden_dependency_check_result") if isinstance(payload.get("hidden_dependency_check_result"), dict) else {}
+        undeclared = [str(item).strip() for item in (hidden.get("undeclared_dependency_artifacts") or []) if str(item).strip()]
+        if undeclared:
+            return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker="HIDDEN_DEPENDENCY_DETECTED", detail="undeclared session identity dependency", path=path)
+        if _payload_day(payload) and _payload_day(payload) != ctx.day_utc:
+            return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker="TARGET_DAY_DATE_MISMATCH", detail=f"artifact day={_payload_day(payload)}", path=path)
+        return _dependency_result(dep=dep, ctx=ctx, status="SATISFIED", path=path)
+    if dependency_id == "target_day_admission_v1":
+        if _payload_day(payload) and _payload_day(payload) != ctx.day_utc:
+            return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker="TARGET_DAY_DATE_MISMATCH", detail=f"artifact day={_payload_day(payload)}", path=path)
+        if owned:
+            return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker=owned, detail="target-day admission identity blocker", path=path)
+        return _dependency_result(dep=dep, ctx=ctx, status="SATISFIED", path=path)
+    if dependency_id == "session_promotion_decision_v1":
+        if _payload_day(payload) and _payload_day(payload) != ctx.day_utc:
+            return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker="TARGET_DAY_DATE_MISMATCH", detail=f"artifact day={_payload_day(payload)}", path=path)
+        if owned and owned != "SESSION_PROMOTION_NOT_PROMOTED":
+            return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker=owned, detail="session promotion identity blocker", path=path)
+        return _dependency_result(dep=dep, ctx=ctx, status="SATISFIED", path=path)
+    if dependency_id in {"paper_session_authority_v1", "paper_session_bootstrap_v1"}:
+        if _payload_day(payload) and _payload_day(payload) != ctx.day_utc:
+            return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker="TARGET_DAY_DATE_MISMATCH", detail=f"artifact day={_payload_day(payload)}", path=path)
+        if owned:
+            return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker=owned, detail="session identity blocker", path=path)
+        return _dependency_result(dep=dep, ctx=ctx, status="SATISFIED", path=path)
+    if dependency_id == "market_calendar_day":
+        if owned:
+            return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker=owned, detail="target-day admission calendar blocker", path=path)
+        return _dependency_result(dep=dep, ctx=ctx, status="SATISFIED", path=path)
+    return _dependency_result(dep=dep, ctx=ctx, status="SATISFIED", path=path)
+
+
+def _generic_dependency_result(dep: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    path = _dependency_path(dep, ctx)
+    dependency_id = str(dep.get("dependency_id") or "").strip()
+    if not path.exists():
+        return _dependency_result(
+            dep=dep,
+            ctx=ctx,
+            status="MISSING",
+            blocker=f"{dependency_id.upper()}_MISSING",
+            detail="required dependency artifact is missing",
+            path=path,
+        )
+    payload = _read_json(path) if path.is_file() else {}
+    codes = _collect_codes(payload)
+    owned = _owned_dependency_blocker(dep, codes)
+    status = _status(payload) if payload else "PASS"
+    if owned:
+        return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker=owned, detail=f"owned blocker observed in {dependency_id}", path=path)
+    if status in {"FAIL", "FAILED", "BLOCKED", "DENIED", "NOT_READY"}:
+        return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker=f"{dependency_id.upper()}_BLOCKED", detail=f"artifact status={status}", path=path)
+    return _dependency_result(dep=dep, ctx=ctx, status="SATISFIED", path=path)
+
+
+def _evaluate_domain_dependency(dep: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    if str(dep.get("domain_owner") or "").strip() == "SESSION_IDENTITY":
+        return _session_identity_dependency_result(dep, ctx)
+    return _generic_dependency_result(dep, ctx)
+
+
+def _domain_failures(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    failures = []
+    for row in rows:
+        if row.get("required") is not True or row.get("diagnostic_only") is True:
+            continue
+        if str(row.get("status") or "").strip().upper() not in {"SATISFIED", "NOT_APPLICABLE"}:
+            failures.append(row)
+    return failures
+
+
+def _domain_phase_row(
+    *,
+    domain: dict[str, Any],
+    ctx: Any,
+    status: str,
+    dependency_rows: list[dict[str, Any]],
+    failures: list[dict[str, Any]] | None = None,
+    deferred_by: str = "",
+) -> dict[str, Any]:
+    domain_id = str(domain.get("domain_id") or "")
+    phase_id = str(domain.get("phase_id") or domain_id)
+    failed = failures or []
+    if deferred_by:
+        return {
+            "phase_id": phase_id,
+            "domain_id": domain_id,
+            "status": "DEFERRED_BY_UPSTREAM_DOMAIN",
+            "blocker_codes": [],
+            "evidence_paths": [str(row.get("expected_path") or "") for row in dependency_rows],
+            "recovery_action": f"Deferred until {deferred_by} clears.",
+            "recovery_commands": [],
+            "blocker_reason": f"deferred by {deferred_by}",
+            "dependency_results": dependency_rows,
+        }
+    blocker_codes = [str(row.get("blocking_reason") or "").split(":", 1)[0] for row in failed if str(row.get("blocking_reason") or "").strip()]
+    if len(failed) > 1:
+        blocker_codes = [f"{domain_id}_PRECHECK_FAILED"]
+    evidence_paths = [str(row.get("evidence_path") or row.get("expected_path") or "") for row in failed] or [str(row.get("expected_path") or "") for row in dependency_rows]
+    commands = [str(row.get("recovery_command") or row.get("producer_command") or "") for row in failed if str(row.get("recovery_command") or row.get("producer_command") or "").strip()]
+    action = (
+        f"Resolve all listed {domain_id} precheck failures, then rerun the control plane."
+        if len(failed) > 1
+        else str((failed[0] if failed else {}).get("recovery_action") or "No current blocker.")
+    )
+    return {
+        "phase_id": phase_id,
+        "domain_id": domain_id,
+        "status": status,
+        "blocker_codes": blocker_codes,
+        "evidence_paths": list(dict.fromkeys(path for path in evidence_paths if path)),
+        "recovery_action": action,
+        "recovery_commands": list(dict.fromkeys(commands)),
+        "blocker_reason": f"{len(failed)} required {domain_id} dependencies are missing or failed" if len(failed) > 1 else str((failed[0] if failed else {}).get("detail") or ""),
+        "dependency_results": dependency_rows,
+        "failed_dependencies": failed,
     }
 
 
@@ -895,39 +1116,66 @@ def _evaluate_phase(phase: dict[str, Any], ctx: Any, phase_results: dict[str, di
 
 def build_control_plane_v1(ctx: Any, phase_results: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
     phases = load_phase_registry_v1()
+    domains = load_readiness_domain_registry_v1()
     control_phase_results: list[dict[str, Any]] = []
+    domain_results: list[dict[str, Any]] = []
     deferred_phases: list[str] = []
+    deferred_domains: list[str] = []
     diagnostic_findings: list[dict[str, Any]] = []
+    readiness_inventory: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
     current_phase_order = 0
 
-    for phase in phases:
-        phase_order = int(phase.get("phase_order") or 999)
+    source_phase = next((phase for phase in phases if str(phase.get("phase_id") or "") == "SOURCE_INTEGRITY"), {})
+    if source_phase:
+        source_row = _evaluate_source_integrity(source_phase, ctx)
+        control_phase_results.append(source_row)
+        if source_row["status"] == "BLOCKING_CURRENT_RUN":
+            current = source_row
+            current_phase_order = int(source_phase.get("phase_order") or 0)
+
+    for domain in domains:
+        domain_id = str(domain.get("domain_id") or "")
+        phase_id = str(domain.get("phase_id") or domain_id)
+        dep_specs = [row for row in (domain.get("dependencies") or []) if isinstance(row, dict)]
+        dependency_rows = [_evaluate_domain_dependency(dep, ctx) for dep in dep_specs]
+        for row in dependency_rows:
+            row["domain_order"] = int(domain.get("domain_order") or 999)
+        readiness_inventory.extend(dependency_rows)
         if current is not None:
-            raw = _phase_row(
-                phase=phase,
+            raw = _domain_phase_row(
+                domain=domain,
                 ctx=ctx,
-                status="DEFERRED_BY_UPSTREAM_BLOCKER",
-                blocker_codes=[],
-                evidence_paths=[str(path) for path in _phase_paths(phase, ctx)],
-                reason=f"deferred by {current['phase_id']}",
+                status="DEFERRED_BY_UPSTREAM_DOMAIN",
+                dependency_rows=dependency_rows,
+                deferred_by=str(current.get("domain_id") or current.get("phase_id") or ""),
             )
-            raw["recovery_action"] = f"Deferred until {current['phase_id']} clears."
-            raw["recovery_commands"] = []
-            deferred_phases.append(raw["phase_id"])
+            deferred_domains.append(domain_id)
+            deferred_phases.append(phase_id)
             control_phase_results.append(raw)
+            domain_results.append(raw)
             continue
-        raw = _evaluate_phase(phase, ctx, phase_results)
-        if raw["status"] == "BLOCKING_CURRENT_RUN":
+        failures = _domain_failures(dependency_rows)
+        raw = _domain_phase_row(
+            domain=domain,
+            ctx=ctx,
+            status="BLOCKING_CURRENT_RUN" if failures else "PASS",
+            dependency_rows=dependency_rows,
+            failures=failures,
+        )
+        if failures:
             current = raw
-            current_phase_order = phase_order
+            current_phase_order = int(domain.get("domain_order") or 0)
         control_phase_results.append(raw)
+        domain_results.append(raw)
 
     current_blockers = (current or {}).get("blocker_codes") if isinstance((current or {}).get("blocker_codes"), list) else []
     canonical_blocker = str(current_blockers[0] if current_blockers else "")
     recovery_commands = list((current or {}).get("recovery_commands") or [])
     submit_row = next((row for row in control_phase_results if row.get("phase_id") == "SUBMIT_BOUNDARY"), {})
     submit_allowed = bool(submit_row.get("status") == "PASS" and current is None)
+    failed_current = list((current or {}).get("failed_dependencies") if isinstance((current or {}).get("failed_dependencies"), list) else [])
+    current_domain = str((current or {}).get("domain_id") or "")
     return {
         "schema_id": "aegis_control_plane",
         "schema_version": SCHEMA_VERSION,
@@ -936,23 +1184,30 @@ def build_control_plane_v1(ctx: Any, phase_results: dict[str, dict[str, Any]] | 
         "runtime_mode": runtime_mode_from_truth_root_v1(ctx.truth_root),
         "final_status": "NOT_READY" if current else "READY",
         "current_phase": str((current or {}).get("phase_id") or ""),
+        "current_domain": current_domain or str((current or {}).get("phase_id") or ""),
         "current_phase_order": current_phase_order,
         "canonical_blocker": canonical_blocker,
-        "blocker_owner": _owner_for_phase(phases, str((current or {}).get("phase_id") or "")),
+        "blocker_owner": _owner_for_domain(domains, current_domain) or _owner_for_phase(phases, str((current or {}).get("phase_id") or "")),
         "blocker_reason": str((current or {}).get("blocker_reason") or ""),
+        "domain_blocker_summary": str((current or {}).get("blocker_reason") or ""),
         "recovery_action": str((current or {}).get("recovery_action") or "No current blocker."),
         "recovery_commands": recovery_commands,
         "evidence_paths": list((current or {}).get("evidence_paths") or []),
+        "failed_current_domain_dependencies": failed_current,
+        "readiness_dependency_inventory": readiness_inventory,
         "current_session_sub_blocker": dict((current or {}).get("current_session_sub_blocker") or {}),
         "session_sub_blockers": list((current or {}).get("session_sub_blockers") or []),
-        "session_dependency_inventory": list((current or {}).get("session_dependency_inventory") or []),
-        "session_precheck_failures": list((current or {}).get("session_precheck_failures") or []),
+        "session_dependency_inventory": [row for row in readiness_inventory if row.get("domain_owner") == "SESSION_IDENTITY"],
+        "session_precheck_failures": [row for row in failed_current if row.get("domain_owner") == "SESSION_IDENTITY"],
         "phase_results": control_phase_results,
+        "domain_results": domain_results,
         "deferred_phases": deferred_phases,
+        "deferred_domains": deferred_domains,
         "diagnostic_findings": diagnostic_findings,
         "submit_allowed": submit_allowed,
         "generated_at_utc": _now_iso(),
         "phase_registry_path": str(REGISTRY_PATH),
+        "readiness_domain_registry_path": str(DOMAIN_REGISTRY_PATH),
     }
 
 
@@ -960,6 +1215,13 @@ def _owner_for_phase(phases: list[dict[str, Any]], phase_id: str) -> str:
     for phase in phases:
         if phase.get("phase_id") == phase_id:
             return str(phase.get("owner") or phase_id)
+    return ""
+
+
+def _owner_for_domain(domains: list[dict[str, Any]], domain_id: str) -> str:
+    for domain in domains:
+        if domain.get("domain_id") == domain_id:
+            return str(domain.get("owner") or domain_id)
     return ""
 
 

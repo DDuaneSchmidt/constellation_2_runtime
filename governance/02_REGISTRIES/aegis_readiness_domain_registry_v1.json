@@ -1,0 +1,93 @@
+{
+  "schema_id": "aegis_readiness_domain_registry",
+  "schema_version": "aegis_readiness_domain_registry.v1",
+  "domains": [
+    {
+      "domain_id": "SESSION_IDENTITY",
+      "domain_order": 1,
+      "owner": "session_identity_authority",
+      "phase_id": "SESSION_AUTHORITY",
+      "dependencies": [
+        {"dependency_id": "active_session_v1", "domain_owner": "SESSION_IDENTITY", "required_for": ["session_identity"], "blocking_scope": "SESSION_IDENTITY", "expected_path": "{truth_root}/active_session_v1/current.json", "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/active_session.v1.schema.json", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_session_authority_v1.py --target_day {day_utc} --truth_root {truth_root} --environment {environment} --ib_account {ib_account} --phase all", "recovery_action": "Run governed session alignment for the target day.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["TARGET_DAY_DATE_MISMATCH", "ACTIVE_SESSION_NOT_PROMOTED", "SESSION_AUTHORITY_MISSING"]},
+        {"dependency_id": "target_day_build_v1", "domain_owner": "SESSION_IDENTITY", "required_for": ["session_identity"], "blocking_scope": "SESSION_IDENTITY", "expected_path": "{truth_root}/target_day_build_v1/{day_utc}.json", "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/target_day_build.v1.schema.json", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_session_authority_v1.py --target_day {day_utc} --truth_root {truth_root} --environment {environment} --ib_account {ib_account} --phase build", "recovery_action": "Run governed target-day build.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["TARGET_DAY_DATE_MISMATCH", "HIDDEN_DEPENDENCY_DETECTED"]},
+        {"dependency_id": "target_day_admission_v1", "domain_owner": "SESSION_IDENTITY", "required_for": ["session_identity"], "blocking_scope": "SESSION_IDENTITY", "expected_path": "{truth_root}/target_day_admission_v1/{day_utc}.json", "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/target_day_admission.v1.schema.json", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_session_authority_v1.py --target_day {day_utc} --truth_root {truth_root} --environment {environment} --ib_account {ib_account} --phase admission", "recovery_action": "Run governed target-day admission.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["TARGET_DAY_DATE_MISMATCH", "HIDDEN_DEPENDENCY_DETECTED"]},
+        {"dependency_id": "session_promotion_decision_v1", "domain_owner": "SESSION_IDENTITY", "required_for": ["session_identity"], "blocking_scope": "SESSION_IDENTITY", "expected_path": "{truth_root}/reports/session_promotion_decision_v1/{day_utc}/session_promotion_decision.v1.json", "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/session_promotion_decision.v1.schema.json", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_session_authority_v1.py --target_day {day_utc} --truth_root {truth_root} --environment {environment} --ib_account {ib_account} --phase all", "recovery_action": "Run governed session promotion decision.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["TARGET_DAY_DATE_MISMATCH", "HIDDEN_DEPENDENCY_DETECTED", "SESSION_PROMOTION_NOT_PROMOTED"]},
+        {"dependency_id": "paper_session_authority_v1", "domain_owner": "SESSION_IDENTITY", "required_for": ["session_identity"], "blocking_scope": "SESSION_IDENTITY", "expected_path": "{truth_root}/reports/paper_session_authority_v1/{day_utc}/paper_session_authority.v1.json", "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/paper_session_authority.v1.schema.json", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_session_authority_v1.py --target_day {day_utc} --truth_root {truth_root} --environment {environment} --ib_account {ib_account} --phase all", "recovery_action": "Regenerate governed paper session authority.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["TARGET_DAY_DATE_MISMATCH", "HIDDEN_DEPENDENCY_DETECTED"]},
+        {"dependency_id": "paper_session_bootstrap_v1", "domain_owner": "SESSION_IDENTITY", "required_for": ["session_identity"], "blocking_scope": "SESSION_IDENTITY", "expected_path": "{truth_root}/reports/paper_session_bootstrap_v1/{day_utc}/paper_session_bootstrap.v1.json", "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/paper_session_bootstrap.v1.schema.json", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_paper_session_bootstrap_v1.py --day_utc {day_utc} --truth_root {truth_root} --operator_input_root {operator_input_root} --environment {environment} --ib_account {ib_account}", "recovery_action": "Run governed paper-session bootstrap.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["TARGET_DAY_DATE_MISMATCH", "PAPER_SESSION_BOOTSTRAP_NOT_READY"]},
+        {"dependency_id": "market_calendar_day", "domain_owner": "SESSION_IDENTITY", "required_for": ["target_day_admission"], "blocking_scope": "SESSION_IDENTITY", "expected_path": "{truth_root}/market_calendar_v1/dataset_manifest.json", "schema_path": "governance/04_DATA/SCHEMAS/C2/MARKET_DATA/market_calendar.v1.schema.json", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_market_calendar_coverage_refresh_v1.py --truth_root {truth_root} --required_target_day {day_utc} --mode REFRESH", "recovery_action": "Refresh governed market-calendar coverage for target-day admission.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["MARKET_CALENDAR_DAY_MISSING", "MARKET_DAY_MISSING"]}
+      ]
+    },
+    {
+      "domain_id": "BROKER_CONNECTIVITY",
+      "domain_order": 2,
+      "owner": "broker_connectivity_authority",
+      "phase_id": "BROKER_HEALTH",
+      "dependencies": [
+        {"dependency_id": "runtime_resilience_authority_v1", "domain_owner": "BROKER_CONNECTIVITY", "required_for": ["broker_connectivity"], "blocking_scope": "BROKER_CONNECTIVITY", "expected_path": "{truth_root}/reports/runtime_resilience_authority_v1/{day_utc}/runtime_resilience_authority.v1.json", "schema_path": "", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_runtime_resilience_authority_v1.py --day_utc {day_utc} --truth_root {truth_root}", "recovery_action": "Restore IB connectivity evidence, then rerun runtime resilience authority.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["IB_DISCONNECTED", "BROKER_CONNECTIVITY_UNAVAILABLE"]},
+        {"dependency_id": "broker_event_log", "domain_owner": "BROKER_CONNECTIVITY", "required_for": ["broker_health"], "blocking_scope": "BROKER_CONNECTIVITY", "expected_path": "{execution_root}/execution_evidence_v1/broker_events/{day_utc}/broker_event_log.v1.jsonl", "schema_path": "broker_event_raw.v1", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/ib/c2_execution_observer_v1.py --truth_root {execution_root} --day-utc {day_utc}", "recovery_action": "Start broker observer and produce broker event log.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["BROKER_EVENT_LOG_MISSING", "IB_EVENT_TIMEOUT"]},
+        {"dependency_id": "broker_event_day_manifest_v1", "domain_owner": "BROKER_CONNECTIVITY", "required_for": ["broker_health"], "blocking_scope": "BROKER_CONNECTIVITY", "expected_path": "{execution_root}/execution_evidence_v1/broker_events/{day_utc}/broker_event_day_manifest.v1.json", "schema_path": "broker_event_day_manifest.v1", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/ib/run_broker_event_day_manifest_v1.py --day_utc {day_utc} --truth_root {execution_root}", "recovery_action": "Generate broker event day manifest.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["BROKER_EVENT_LOG_MISSING"]},
+        {"dependency_id": "broker_supply_v1", "domain_owner": "BROKER_CONNECTIVITY", "required_for": ["broker_health"], "blocking_scope": "BROKER_CONNECTIVITY", "expected_path": "{truth_root}/reports/broker_supply_v1/{day_utc}/broker_supply.v1.json", "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/broker_supply.v1.schema.json", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_broker_supply_v1.py --day_utc {day_utc} --environment {environment} --truth_root {truth_root}", "recovery_action": "Run broker supply after broker observer evidence exists.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["BROKER_ACCOUNT_SUMMARY_MISSING", "BROKER_SUPPLY_BLOCKED"]}
+      ]
+    },
+    {
+      "domain_id": "CAPITAL_SAFETY",
+      "domain_order": 3,
+      "owner": "capital_safety_authority",
+      "phase_id": "BOD_INPUTS",
+      "dependencies": [
+        {"dependency_id": "paper_capital_seed", "domain_owner": "CAPITAL_SAFETY", "required_for": ["capital_safety"], "blocking_scope": "CAPITAL_SAFETY", "expected_path": "{operator_input_root}/operator_inputs/paper_capital_seed_v1/{day_utc}/paper_capital_seed.v1.json", "schema_path": "governance/04_DATA/SCHEMAS/C2/INPUTS/paper_capital_seed.v1.schema.json", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/ensure_paper_capital_seed_v1.py --day_utc {day_utc} --truth_root {operator_input_root} --ib_account {ib_account} --seed_usd 0.00 --allow_create YES", "recovery_action": "Provide or regenerate governed paper capital seed.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["PAPER_CAPITAL_SEED_MISSING"]},
+        {"dependency_id": "operator_statement", "domain_owner": "CAPITAL_SAFETY", "required_for": ["capital_safety"], "blocking_scope": "CAPITAL_SAFETY", "expected_path": "{operator_input_root}/operator_inputs/cash_ledger_operator_statements/{day_utc}/operator_statement.v1.json", "schema_path": "governance/04_DATA/SCHEMAS/C2/INPUTS/operator_statement.v1.schema.json", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/ensure_cash_ledger_operator_statement_v1.py --day_utc {day_utc} --truth_root {operator_input_root} --ib_account {ib_account} --mode GOVERNED_SEED --allow_create YES", "recovery_action": "Provide or regenerate governed operator statement.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["OPERATOR_STATEMENT_MISSING", "OPERATOR_STATEMENT_V1_MISSING"]},
+        {"dependency_id": "startup_materialization_input_convergence_v1", "domain_owner": "CAPITAL_SAFETY", "required_for": ["capital_safety"], "blocking_scope": "CAPITAL_SAFETY", "expected_path": "{truth_root}/reports/startup_materialization_input_convergence_v1/{day_utc}/startup_materialization_input_convergence.v1.json", "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/startup_materialization_input_convergence.v1.schema.json", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_startup_materialization_input_convergence_v1.py --day_utc {day_utc} --truth_root {truth_root} --ib_account {ib_account}", "recovery_action": "Run governed startup materialization input convergence.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["CASH_LEDGER_SNAPSHOT_V1_MISSING", "OPERATOR_STATEMENT_V1_MISSING", "STARTUP_MATERIALIZATION_INPUTS_PREP_V1_NOT_READY"]},
+        {"dependency_id": "safety_state_authority_v1", "domain_owner": "CAPITAL_SAFETY", "required_for": ["capital_safety"], "blocking_scope": "CAPITAL_SAFETY", "expected_path": "{truth_root}/reports/safety_state_authority_v1/{day_utc}/safety_state_authority.v1.json", "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/safety_state_authority.v1.schema.json", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_safety_state_authority_v1.py --day_utc {day_utc} --truth_root {truth_root}", "recovery_action": "Produce governed safety-state/NAV authority evidence.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["NAV_INVALID", "SAFETY_STATE_NAV_INVALID"]}
+      ]
+    },
+    {
+      "domain_id": "MARKET_FEED",
+      "domain_order": 4,
+      "owner": "market_feed_authority",
+      "phase_id": "MARKET_DATA",
+      "dependencies": [
+        {"dependency_id": "market_data_authority_v1", "domain_owner": "MARKET_FEED", "required_for": ["market_feed"], "blocking_scope": "MARKET_FEED", "expected_path": "{truth_root}/reports/market_data_authority_v1/{day_utc}/market_data_authority.v1.json", "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/market_data_authority.v1.schema.json", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_market_data_authority_v1.py --day_utc {day_utc}", "recovery_action": "Run governed market data authority.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["MARKET_DATA_AUTHORITY_BLOCKED", "MARKET_DATA_BLOCKED", "MISSING_REQUIRED_DATA", "MARKET_NOT_OPEN", "MARKET_CALENDAR_NON_TRADING_SESSION"]},
+        {"dependency_id": "feed_attestation_gate_v1", "domain_owner": "MARKET_FEED", "required_for": ["market_feed"], "blocking_scope": "MARKET_FEED", "expected_path": "{execution_root}/reports/feed_attestation_gate_v1/{day_utc}/feed_attestation_gate.v1.json", "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/feed_attestation_gate.v1.schema.json", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_gate_authority_plane_v1.py --day_utc {day_utc} --truth_root {truth_root} --mode {environment}", "recovery_action": "Refresh governed feed/liquidity attestation evidence.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["FAL_STALE", "FEED_ATTESTATION_BLOCKED", "FEED_ATTESTATION_GATE_NOT_PASS", "STALE_LIQUIDITY_DATASET"]}
+      ]
+    },
+    {
+      "domain_id": "STRATEGY_INTENT",
+      "domain_order": 5,
+      "owner": "strategy_intent_authority",
+      "phase_id": "AUTHORIZATION",
+      "dependencies": [
+        {"dependency_id": "trading_day_intent_generation_v1", "domain_owner": "STRATEGY_INTENT", "required_for": ["strategy_intent"], "blocking_scope": "STRATEGY_INTENT", "expected_path": "{truth_root}/reports/trading_day_intent_generation_v1/{day_utc}/trading_day_intent_generation.v1.json", "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/trading_day_intent_generation.v1.schema.json", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_trading_day_intent_generation_v1.py --day_utc {day_utc} --truth_root {truth_root}", "recovery_action": "Run governed trading-day intent generation after upstream domains pass.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["MISSING_REQUIRED_INPUTS", "POSITION_STATE_STALE", "TRADING_DAY_EXECUTION_CONTROL_PLANE_INTENT_GENERATION_FAILED"]}
+      ]
+    },
+    {
+      "domain_id": "AUTHORIZATION_KILL_SWITCH",
+      "domain_order": 6,
+      "owner": "authorization_kill_switch_authority",
+      "phase_id": "KILL_SWITCH",
+      "dependencies": [
+        {"dependency_id": "authorization_supply_v1", "domain_owner": "AUTHORIZATION_KILL_SWITCH", "required_for": ["authorization"], "blocking_scope": "AUTHORIZATION_KILL_SWITCH", "expected_path": "{truth_root}/reports/authorization_supply_v1/{day_utc}/authorization_supply.v1.json", "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/authorization_supply.v1.schema.json", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_authorization_supply_v1.py --day_utc {day_utc} --environment {environment}", "recovery_action": "Run governed authorization supply.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["AUTHORIZATION_EVIDENCE_MISSING", "AUTHORIZATION_GATE_NOT_PASS", "NO_ELIGIBLE_OPTION_STRUCTURE", "AUTHZ_MISSING_DEFINED_RISK_EVIDENCE"]},
+        {"dependency_id": "global_kill_switch_state_v1", "domain_owner": "AUTHORIZATION_KILL_SWITCH", "required_for": ["kill_switch"], "blocking_scope": "AUTHORIZATION_KILL_SWITCH", "expected_path": "{truth_root}/risk_v1/kill_switch_v1/{day_utc}/global_kill_switch_state.v1.json", "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/global_kill_switch_state.v1.schema.json", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_global_kill_switch_v1.py --day_utc {day_utc}", "recovery_action": "Resolve governed kill-switch authority state.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["C2_KILL_SWITCH_ACTIVE", "C2_KILL_SWITCH_DEFAULT_ACTIVE_MISSING_INPUTS", "KILL_SWITCH_STATE_MISSING"]}
+      ]
+    },
+    {
+      "domain_id": "SUBMIT_BOUNDARY",
+      "domain_order": 7,
+      "owner": "submit_boundary_authority",
+      "phase_id": "SUBMIT_BOUNDARY",
+      "dependencies": [
+        {"dependency_id": "trading_day_readiness_authority_v1", "domain_owner": "SUBMIT_BOUNDARY", "required_for": ["submit_boundary"], "blocking_scope": "SUBMIT_BOUNDARY", "expected_path": "{truth_root}/reports/trading_day_readiness_authority_v1/{day_utc}/trading_day_readiness_authority.v1.json", "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/trading_day_readiness_authority.v1.schema.json", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_trading_day_readiness_authority_v1.py --target_day {day_utc} --truth_root {truth_root}", "recovery_action": "Run governed trading-day readiness authority.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE", "NON_TRADING_DAY"]},
+        {"dependency_id": "submit_boundary_status_v1", "domain_owner": "SUBMIT_BOUNDARY", "required_for": ["submit_boundary"], "blocking_scope": "SUBMIT_BOUNDARY", "expected_path": "{truth_root}/reports/submit_boundary_status_v1/{day_utc}/submit_boundary_status.v1.json", "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/submit_boundary_status.v1.schema.json", "producer_command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_submit_boundary_status_v1.py --day_utc {day_utc} --truth_root {truth_root}", "recovery_action": "Run governed submit boundary status.", "required": true, "diagnostic_only": false, "blocker_codes_owned": ["SUBMIT_BOUNDARY_NOT_AUTHORIZED", "SUBMIT_BOUNDARY_READINESS_POLICY_NOT_PASS", "ACTION_VALIDITY_FORBIDS_SUBMIT"]}
+      ]
+    },
+    {
+      "domain_id": "EXECUTION",
+      "domain_order": 8,
+      "owner": "execution_authority",
+      "phase_id": "EXECUTION",
+      "dependencies": [
+        {"dependency_id": "execution_evidence_v1", "domain_owner": "EXECUTION", "required_for": ["execution"], "blocking_scope": "EXECUTION", "expected_path": "{execution_root}/execution_evidence_v1/submissions/{day_utc}", "schema_path": "broker_submission_record.v2", "producer_command": "governed submit tooling", "recovery_action": "Inspect governed execution evidence.", "required": false, "diagnostic_only": false, "blocker_codes_owned": ["EXECUTION_LEDGER_REVIEW_REQUIRED", "BROKER_SUBMISSION_FAILED", "EXECUTION_EVIDENCE_MISSING"]}
+      ]
+    }
+  ]
+}
