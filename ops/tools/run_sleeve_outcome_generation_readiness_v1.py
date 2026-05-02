@@ -474,6 +474,15 @@ def _same_day_execution_requirements(*, day_utc: str, truth_root: Path, executio
             "recovery_command": "Run governed global context only after day activation passes.",
         },
         {
+            "requirement_id": "execution_build_v1",
+            "producer": "ops/tools/run_execution_package_from_authorized_intent_v1.py",
+            "producer_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_execution_package_from_authorized_intent_v1.py --day_utc {day_utc} --truth_root {execution_root} --intent_id <AUTHORIZED_INTENT_ID>",
+            "expected_artifact_path": str(truth_root / "reports" / "execution_build_v1" / day_utc / "<submission_id>" / "execution_build.v1.json"),
+            "freshness_threshold_seconds": None,
+            "must_be_produced_during_target_day": True,
+            "recovery_command": "Run governed execution-package producer to build execution_build_v1 only after day activation and global context pass.",
+        },
+        {
             "requirement_id": "execution_package_v1",
             "producer": "ops/tools/run_execution_package_from_authorized_intent_v1.py",
             "producer_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_execution_package_from_authorized_intent_v1.py --day_utc {day_utc} --truth_root {execution_root} --intent_id <AUTHORIZED_INTENT_ID>",

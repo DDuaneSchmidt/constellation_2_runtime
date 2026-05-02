@@ -274,6 +274,7 @@ def test_stale_same_day_broker_evidence_is_marked_non_recoverable_for_past_day(t
         "target_day_admission_v1",
         "day_activation_package_v1",
         "global_context_package_v1",
+        "execution_build_v1",
         "execution_package_v1",
     }.issubset(requirement_ids)
 
