@@ -22,6 +22,7 @@ from constellation_2.common.paper_execution_authority_v1 import (
 )
 from constellation_2.common.pre_open_materializer_v1 import (
     derive_pre_open_bundle_payload_v1,
+    resolve_pre_open_bundle_path_v1,
     write_pre_open_bundle_v1,
 )
 from constellation_2.common.session_authority_v1 import resolve_session_authority_target_day_v1
@@ -29,6 +30,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import read_json_object_
 from constellation_2.common.trade_submit_readiness_authority_v1 import resolve_governed_sleeve_truth_bindings
 from constellation_2.common.truth_root_v1 import resolve_truth_root
 from constellation_2.common.trading_day_readiness_authority_v1 import read_or_evaluate_trading_day_readiness_authority_v1
+from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
 
 
 RUN_IB_API_HANDSHAKE_TOOL = (REPO_ROOT / "ops/tools/run_ib_api_handshake_spine_v1.py").resolve()
@@ -40,6 +42,32 @@ RUN_SESSION_AUTHORITY_TOOL = (REPO_ROOT / "ops/tools/run_session_authority_v1.py
 OWNER_TOOL = "ops/tools/run_pre_open_materializer_v1.py"
 PRIMARY_SLEEVE_ID = "PRIMARY"
 REASON_ROLLOVER_FAILED_STALE_AUTHORITY_HEAD = "ROLLOVER_FAILED_STALE_AUTHORITY_HEAD"
+
+
+def _producer_contract_inputs(payload: Dict[str, Any]) -> List[str]:
+    paths: List[str] = []
+    for row in payload.get("prerequisite_checks") or []:
+        if not isinstance(row, dict):
+            continue
+        for key in ("authority_path", "canonical_path"):
+            value = str(row.get(key) or "").strip()
+            if value:
+                paths.append(value)
+        for ref in row.get("source_refs") or []:
+            if isinstance(ref, dict) and str(ref.get("artifact_path") or "").strip():
+                paths.append(str(ref["artifact_path"]).strip())
+    for row in payload.get("producer_results") or []:
+        if not isinstance(row, dict):
+            continue
+        for ref in row.get("artifact_refs") or []:
+            if isinstance(ref, dict) and str(ref.get("artifact_path") or "").strip():
+                paths.append(str(ref["artifact_path"]).strip())
+    market_calendar = payload.get("market_calendar_status") if isinstance(payload.get("market_calendar_status"), dict) else {}
+    if str(market_calendar.get("artifact_path") or "").strip():
+        paths.append(str(market_calendar["artifact_path"]).strip())
+    if str(payload.get("readiness_authority_path") or "").strip():
+        paths.append(str(payload["readiness_authority_path"]).strip())
+    return list(dict.fromkeys(paths))
 
 
 def _resolve_truth_root(raw: str) -> Path:
@@ -384,6 +412,17 @@ def main(argv: List[str] | None = None) -> int:
         authority_head_aligned = _primary_scoped_head_matches_target_day(payload=payload, target_day=target_day)
         if not authority_head_aligned:
             _enforce_rollover_failed_stale_head_invariant(payload=payload)
+    attach_producer_contract_v1(
+        payload,
+        producer_name=OWNER_TOOL,
+        producer_command=(
+            f"python3 {OWNER_TOOL} --day_utc {target_day} --truth_root {truth_root} "
+            f"--environment {environment} --ib_account {ib_account}"
+        ),
+        input_artifacts=_producer_contract_inputs(payload),
+        output_artifacts=[resolve_pre_open_bundle_path_v1(truth_root=truth_root, day_utc=target_day)],
+        schema_versions={"pre_open_bundle": "v1"},
+    )
     ref = write_pre_open_bundle_v1(truth_root=truth_root, payload=payload)
     out = {
         "target_day": target_day,

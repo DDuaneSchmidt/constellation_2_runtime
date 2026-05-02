@@ -160,6 +160,7 @@ class SleeveHandshakeOwnerPathTests(unittest.TestCase):
             sha256="0" * 64,
             payload={"materialization_state": "COMPLETE", "blocking_reason_codes": []},
         )
+        written_payload: dict[str, object] = {}
 
         def fake_run_tool(cmd, *, script, env=None):
             calls.append({"cmd": list(cmd), "script": script, "env": dict(env or {})})
@@ -171,6 +172,10 @@ class SleeveHandshakeOwnerPathTests(unittest.TestCase):
                 "stderr": "",
                 "required_for_completion": True,
             }
+
+        def fake_write_pre_open_bundle_v1(*, truth_root, payload):
+            written_payload.update(payload)
+            return fake_ref
 
         with patch.object(
             pre_open_tool,
@@ -207,7 +212,7 @@ class SleeveHandshakeOwnerPathTests(unittest.TestCase):
         ), patch.object(
             pre_open_tool,
             "write_pre_open_bundle_v1",
-            return_value=fake_ref,
+            side_effect=fake_write_pre_open_bundle_v1,
         ), patch(
             "sys.argv",
             ["run_pre_open_materializer_v1.py", "--day_utc", DAY, "--truth_root", str(canonical_truth_root)],
@@ -242,6 +247,8 @@ class SleeveHandshakeOwnerPathTests(unittest.TestCase):
         )
         self.assertIn("--truth_root", handshake_cmd)
         self.assertEqual(handshake_cmd[handshake_cmd.index("--truth_root") + 1], str(primary_truth_root))
+        self.assertIn("producer_contract_v1", written_payload)
+        self.assertEqual(written_payload["producer_contract_v1"]["producer_name"], "ops/tools/run_pre_open_materializer_v1.py")
 
     def test_pre_open_tool_attempts_rollover_before_broker_checks_when_stale(self) -> None:
         calls: list[dict[str, object]] = []

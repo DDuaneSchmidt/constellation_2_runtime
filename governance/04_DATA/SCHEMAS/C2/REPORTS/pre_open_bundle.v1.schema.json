@@ -75,6 +75,10 @@
     },
     "built_at_utc": { "type": "string", "minLength": 20 },
     "producer": { "$ref": "#/$defs/producer" },
+    "producer_contract_v1": {
+      "type": "object",
+      "additionalProperties": true
+    },
     "readiness_authority_path": { "type": "string" },
     "readiness_mode": { "type": "string" },
     "evidence_policy_used": {
