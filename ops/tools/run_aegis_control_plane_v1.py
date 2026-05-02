@@ -158,6 +158,20 @@ def _session_authority_paths(ctx: Any) -> dict[str, Path]:
             / ctx.day_utc
             / "session_promotion_decision.v1.json"
         ).resolve(),
+        "paper_session_authority": (
+            ctx.truth_root
+            / "reports"
+            / "paper_session_authority_v1"
+            / ctx.day_utc
+            / "paper_session_authority.v1.json"
+        ).resolve(),
+        "paper_session_bootstrap": (
+            ctx.truth_root
+            / "reports"
+            / "paper_session_bootstrap_v1"
+            / ctx.day_utc
+            / "paper_session_bootstrap.v1.json"
+        ).resolve(),
         "pre_open_bundle": (
             ctx.truth_root
             / "reports"
@@ -180,6 +194,22 @@ def _startup_convergence_command(ctx: Any) -> str:
     return (
         f'PYTHONPATH="$PWD" python3 ops/tools/run_startup_materialization_input_convergence_v1.py '
         f"--day_utc {ctx.day_utc} --truth_root {ctx.truth_root} --ib_account {ctx.ib_account}"
+    )
+
+
+def _market_calendar_refresh_command(ctx: Any) -> str:
+    return (
+        f'PYTHONPATH="$PWD" python3 ops/tools/run_market_calendar_coverage_refresh_v1.py '
+        f"--truth_root {ctx.truth_root} --required_target_day {ctx.day_utc} --mode REFRESH"
+    )
+
+
+def _bootstrap_command(ctx: Any) -> str:
+    return (
+        f'PYTHONPATH="$PWD" python3 ops/tools/run_paper_session_bootstrap_v1.py '
+        f"--day_utc {ctx.day_utc} --truth_root {ctx.truth_root} "
+        f"--operator_input_root {ctx.operator_input_root} --environment {ctx.environment} "
+        f"--ib_account {ctx.ib_account}"
     )
 
 
@@ -229,6 +259,233 @@ def _required_gate_dependency(admission: dict[str, Any], pre_open: dict[str, Any
     if "REQUIRED_GATE_FAIL" in [str(item) for item in codes]:
         return "pre_open_bundle_v1", ""
     return "session_required_gate", ""
+
+
+def _schema_for_dependency(dependency_id: str) -> str:
+    return {
+        "active_session_v1": "governance/04_DATA/SCHEMAS/C2/REPORTS/active_session.v1.schema.json",
+        "target_day_build_v1": "governance/04_DATA/SCHEMAS/C2/REPORTS/target_day_build.v1.schema.json",
+        "target_day_admission_v1": "governance/04_DATA/SCHEMAS/C2/REPORTS/target_day_admission.v1.schema.json",
+        "session_promotion_decision_v1": "governance/04_DATA/SCHEMAS/C2/REPORTS/session_promotion_decision.v1.schema.json",
+        "paper_session_authority_v1": "governance/04_DATA/SCHEMAS/C2/REPORTS/paper_session_authority.v1.schema.json",
+        "paper_session_bootstrap_v1": "governance/04_DATA/SCHEMAS/C2/REPORTS/paper_session_bootstrap.v1.schema.json",
+        "pre_open_bundle_v1": "governance/04_DATA/SCHEMAS/C2/REPORTS/pre_open_bundle.v1.schema.json",
+        "market_calendar_day": "governance/04_DATA/SCHEMAS/C2/MARKET_DATA/market_calendar.v1.schema.json",
+        "runtime_resilience_authority_v1": "",
+        "safety_state_authority_v1": "governance/04_DATA/SCHEMAS/C2/REPORTS/safety_state_authority.v1.schema.json",
+        "trading_day_readiness_authority_v1": "governance/04_DATA/SCHEMAS/C2/REPORTS/trading_day_readiness_authority.v1.schema.json",
+    }.get(dependency_id, "")
+
+
+def _producer_command_for_dependency(dependency_id: str, ctx: Any) -> str:
+    if dependency_id in {"target_day_build_v1", "target_day_admission_v1", "active_session_v1", "session_promotion_decision_v1", "paper_session_authority_v1"}:
+        return _session_command(ctx, phase="all")
+    if dependency_id == "paper_session_bootstrap_v1":
+        return _bootstrap_command(ctx)
+    if dependency_id == "market_calendar_day":
+        return _market_calendar_refresh_command(ctx)
+    if dependency_id == "runtime_resilience_authority_v1":
+        return (
+            f'PYTHONPATH="$PWD" python3 ops/tools/run_runtime_resilience_authority_v1.py '
+            f"--day_utc {ctx.day_utc} --truth_root {ctx.truth_root}"
+        )
+    if dependency_id == "safety_state_authority_v1":
+        return (
+            f'PYTHONPATH="$PWD" python3 ops/tools/run_safety_state_authority_v1.py '
+            f"--day_utc {ctx.day_utc} --truth_root {ctx.truth_root} --environment {ctx.environment} "
+            f"--account {ctx.ib_account}"
+        )
+    if dependency_id == "trading_day_readiness_authority_v1":
+        return (
+            f'PYTHONPATH="$PWD" python3 ops/tools/run_trading_day_readiness_authority_v1.py '
+            f"--target_day {ctx.day_utc} --truth_root {ctx.truth_root} --environment {ctx.environment}"
+        )
+    if dependency_id == "startup_materialization_input_convergence_v1":
+        return _startup_convergence_command(ctx)
+    return _session_command(ctx, phase="build")
+
+
+def _recovery_action_for_dependency(dependency_id: str, blocker: str) -> str:
+    if dependency_id == "market_calendar_day":
+        return "Refresh governed market-calendar coverage, then rerun session authority."
+    if dependency_id == "paper_session_bootstrap_v1":
+        return "Run governed paper-session bootstrap, then rerun session authority."
+    if dependency_id in {"runtime_resilience_authority_v1", "safety_state_authority_v1", "trading_day_readiness_authority_v1"}:
+        return f"Produce or repair {dependency_id}, then rerun session authority."
+    if dependency_id == "hidden_dependency_check":
+        return "Declare the hidden dependency in the session authority inventory or remove the illegal undeclared consumer dependency."
+    if blocker:
+        return f"Resolve {blocker} for {dependency_id}, then rerun session authority."
+    return f"Produce or repair {dependency_id}, then rerun session authority."
+
+
+def _inventory_status_from_build_row(row: dict[str, Any]) -> str:
+    required = bool(row.get("required") is True)
+    result = str(row.get("result_status") or "").strip().upper()
+    if not required and result != "PASS":
+        return "NOT_APPLICABLE"
+    if result == "PASS":
+        return "SATISFIED"
+    observed = str(row.get("observed_status") or "").strip().upper()
+    schema = str(row.get("schema_status") or "").strip().upper()
+    date_binding = str(row.get("date_binding_status") or "").strip().upper()
+    freshness = str(row.get("freshness_status") or "").strip().upper()
+    if observed == "MISSING" or schema == "MISSING" or date_binding == "MISSING":
+        return "MISSING"
+    if freshness in {"STALE", "EXPIRED"}:
+        return "STALE"
+    return "FAIL"
+
+
+def _blocker_from_build_row(row: dict[str, Any], status: str) -> str:
+    codes = [str(code).strip() for code in (row.get("blocker_codes") or []) if str(code).strip()]
+    if codes:
+        return codes[0]
+    explicit = str(row.get("blocking_reason_code") or "").strip()
+    if explicit:
+        return explicit
+    return "" if status in {"SATISFIED", "NOT_APPLICABLE"} else f"{str(row.get('artifact_id') or 'DEPENDENCY').upper()}_{status}"
+
+
+def _inventory_row_from_build_row(row: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    dependency_id = str(row.get("artifact_id") or row.get("artifact_name") or "").strip()
+    status = _inventory_status_from_build_row(row)
+    blocker = _blocker_from_build_row(row, status)
+    expected_path = str(row.get("canonical_path") or row.get("authority_path") or "").strip()
+    producer = row.get("producer") if isinstance(row.get("producer"), dict) else {}
+    command = str(producer.get("module") or "").strip() or _producer_command_for_dependency(dependency_id, ctx)
+    return {
+        "dependency_id": dependency_id,
+        "required": bool(row.get("required") is True),
+        "status": status,
+        "expected_path": expected_path,
+        "schema_path": str(row.get("schema_ref") or _schema_for_dependency(dependency_id)),
+        "producer_command": command,
+        "recovery_action": _recovery_action_for_dependency(dependency_id, blocker),
+        "recovery_command": command,
+        "blocking_reason": blocker,
+        "evidence_path": expected_path,
+    }
+
+
+def _status_from_core_payload(*, dependency_id: str, path: Path, payload: dict[str, Any], ctx: Any) -> tuple[str, str]:
+    if not path.exists() or not path.is_file():
+        return "MISSING", f"{dependency_id.upper()}_MISSING"
+    if dependency_id == "active_session_v1":
+        ok = (
+            str(payload.get("target_day") or payload.get("active_day") or "").strip() == ctx.day_utc
+            and str(payload.get("promotion_state") or "").strip().upper() == "PROMOTED"
+        )
+        return ("SATISFIED", "") if ok else ("FAIL", str(payload.get("rollover_reason_code") or "ACTIVE_SESSION_NOT_PROMOTED").strip())
+    if dependency_id == "target_day_build_v1":
+        build_status = str(payload.get("build_status") or "").strip().upper()
+        closure = str(payload.get("closure_status") or "").strip().upper()
+        hidden_status = str((payload.get("hidden_dependency_check_result") or {}).get("status") or "").strip().upper()
+        ok = (
+            build_status in {"COMPLETE", "PASS"}
+            and closure in {"", "CLOSED"}
+            and hidden_status in {"", "PASS"}
+        )
+        hidden = payload.get("hidden_dependency_check_result") if isinstance(payload.get("hidden_dependency_check_result"), dict) else {}
+        return ("SATISFIED", "") if ok else ("FAIL", str(hidden.get("blocking_reason_code") or "TARGET_DAY_BUILD_NOT_CLOSED").strip())
+    if dependency_id == "target_day_admission_v1":
+        ok = str(payload.get("admission_status") or "").strip().upper() in {"ADMIT", "PASS"}
+        codes = [str(code).strip() for code in (payload.get("blocking_reason_codes") or []) if str(code).strip()]
+        return ("SATISFIED", "") if ok else ("FAIL", codes[0] if codes else "TARGET_DAY_ADMISSION_BLOCKED")
+    if dependency_id == "session_promotion_decision_v1":
+        ok = str(payload.get("promotion_state") or "").strip().upper() in {"PROMOTED", "PASS"}
+        codes = [str(code).strip() for code in (payload.get("blocked_reason_codes") or []) if str(code).strip()]
+        return ("SATISFIED", "") if ok else ("FAIL", codes[0] if codes else "SESSION_PROMOTION_NOT_PROMOTED")
+    if dependency_id == "paper_session_authority_v1":
+        ok = str(payload.get("authority_status") or "").strip().upper() == "GRANTED"
+        codes = [str(code).strip() for code in (payload.get("blocking_reason_codes") or []) if str(code).strip()]
+        return ("SATISFIED", "") if ok else ("FAIL", codes[0] if codes else "PAPER_SESSION_AUTHORITY_NOT_GRANTED")
+    if dependency_id == "paper_session_bootstrap_v1":
+        status = str(payload.get("bootstrap_status") or payload.get("status") or "").strip().upper()
+        ok = status in {"PASS", "COMPLETE", "BOOTSTRAPPED", "READY"}
+        codes = [str(code).strip() for code in (payload.get("blocking_reason_codes") or payload.get("reason_codes") or []) if str(code).strip()]
+        return ("SATISFIED", "") if ok else ("FAIL", codes[0] if codes else "PAPER_SESSION_BOOTSTRAP_NOT_READY")
+    return "SATISFIED", ""
+
+
+def _core_inventory_row(*, dependency_id: str, path: Path, required: bool, ctx: Any) -> dict[str, Any]:
+    payload = _read_json(path)
+    status, blocker = _status_from_core_payload(dependency_id=dependency_id, path=path, payload=payload, ctx=ctx)
+    if not required and status != "SATISFIED":
+        status = "NOT_APPLICABLE"
+    command = _producer_command_for_dependency(dependency_id, ctx)
+    return {
+        "dependency_id": dependency_id,
+        "required": required,
+        "status": status,
+        "expected_path": str(path),
+        "schema_path": _schema_for_dependency(dependency_id),
+        "producer_command": command,
+        "recovery_action": _recovery_action_for_dependency(dependency_id, blocker),
+        "recovery_command": command,
+        "blocking_reason": "" if status in {"SATISFIED", "NOT_APPLICABLE"} else blocker,
+        "evidence_path": str(path),
+    }
+
+
+def _session_dependency_inventory(ctx: Any) -> list[dict[str, Any]]:
+    paths = _session_authority_paths(ctx)
+    build = _read_json(paths["target_day_build"])
+    admission = _read_json(paths["target_day_admission"])
+    rows: list[dict[str, Any]] = []
+    core_specs = (
+        ("active_session_v1", paths["active_session"], True),
+        ("target_day_build_v1", paths["target_day_build"], True),
+        ("target_day_admission_v1", paths["target_day_admission"], True),
+        ("session_promotion_decision_v1", paths["session_promotion_decision"], True),
+        ("paper_session_authority_v1", paths["paper_session_authority"], True),
+        ("paper_session_bootstrap_v1", paths["paper_session_bootstrap"], True),
+    )
+    for dependency_id, path, required in core_specs:
+        rows.append(_core_inventory_row(dependency_id=dependency_id, path=path, required=required, ctx=ctx))
+    artifact_results = build.get("artifact_results") if isinstance(build.get("artifact_results"), list) else []
+    seen = {row["dependency_id"] for row in rows}
+    for item in artifact_results:
+        if not isinstance(item, dict):
+            continue
+        row = _inventory_row_from_build_row(item, ctx)
+        dependency_id = str(row.get("dependency_id") or "").strip()
+        if not dependency_id or dependency_id in seen:
+            continue
+        rows.append(row)
+        seen.add(dependency_id)
+    hidden = build.get("hidden_dependency_check_result") if isinstance(build.get("hidden_dependency_check_result"), dict) else {}
+    if not hidden and isinstance(admission.get("hidden_dependency_check_result"), dict):
+        hidden = admission["hidden_dependency_check_result"]
+    undeclared = [str(item).strip() for item in (hidden.get("undeclared_dependency_artifacts") or []) if str(item).strip()]
+    rows.append(
+        {
+            "dependency_id": "hidden_dependency_check",
+            "required": True,
+            "status": "FAIL" if undeclared else "SATISFIED",
+            "expected_path": str(paths["target_day_build"]),
+            "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/target_day_build.v1.schema.json",
+            "producer_command": "constellation_2.common.session_authority_v1 hidden dependency check",
+            "recovery_action": _recovery_action_for_dependency("hidden_dependency_check", "HIDDEN_DEPENDENCY_DETECTED"),
+            "recovery_command": _session_command(ctx, phase="build"),
+            "blocking_reason": f"HIDDEN_DEPENDENCY_DETECTED:{_compact_list(undeclared)}" if undeclared else "",
+            "evidence_path": str(paths["target_day_build"]),
+        }
+    )
+    return rows
+
+
+def _required_session_inventory_failures(inventory: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    bad = []
+    for row in inventory:
+        if row.get("required") is not True:
+            continue
+        if str(row.get("status") or "").strip().upper() in {"SATISFIED", "NOT_APPLICABLE"}:
+            continue
+        bad.append(row)
+    aggregate_ids = {"target_day_build_v1", "target_day_admission_v1", "session_promotion_decision_v1", "active_session_v1"}
+    concrete = [row for row in bad if str(row.get("dependency_id") or "") not in aggregate_ids]
+    return concrete if concrete else bad
 
 
 def _session_sub_blockers(ctx: Any) -> list[dict[str, Any]]:
@@ -392,6 +649,84 @@ def _evaluate_session_authority(phase: dict[str, Any], ctx: Any, phase_results: 
     codes: list[str] = []
     for _path, payload in payloads:
         codes.extend(_collect_codes(payload))
+    inventory = _session_dependency_inventory(ctx)
+    inventory_failures = _required_session_inventory_failures(inventory)
+    if inventory_failures:
+        if len(inventory_failures) > 1:
+            blocker_code = "SESSION_AUTHORITY_PRECHECK_FAILED"
+            reason = f"{len(inventory_failures)} required session dependencies are missing, stale, or failed"
+            evidence = [
+                str(row.get("evidence_path") or row.get("expected_path") or "")
+                for row in inventory_failures
+                if str(row.get("evidence_path") or row.get("expected_path") or "").strip()
+            ]
+            command_rows = [
+                str(row.get("recovery_command") or row.get("producer_command") or "")
+                for row in inventory_failures
+                if str(row.get("recovery_command") or row.get("producer_command") or "").strip()
+            ]
+            current_sub = {
+                "sub_blocker_code": blocker_code,
+                "owning_artifact": "SESSION_AUTHORITY_PRECHECK",
+                "missing_or_failed_dependency": ",".join(str(row.get("dependency_id") or "") for row in inventory_failures[:6]),
+                "producer_command": command_rows[0] if command_rows else _session_command(ctx, phase="build"),
+                "recovery_action": "Resolve all listed SESSION_AUTHORITY precheck failures, then rerun session authority.",
+                "recovery_command": command_rows[0] if command_rows else _session_command(ctx, phase="build"),
+                "evidence_path": evidence[0] if evidence else str(session_paths["target_day_build"]),
+            }
+            row = _phase_row(
+                phase=phase,
+                ctx=ctx,
+                status="BLOCKING_CURRENT_RUN",
+                blocker_codes=[blocker_code],
+                evidence_paths=evidence or [str(session_paths["target_day_build"])],
+                reason=reason,
+            )
+            row["session_dependency_inventory"] = inventory
+            row["session_precheck_failures"] = inventory_failures
+            row["session_sub_blockers"] = [
+                {
+                    "sub_blocker_code": str(item.get("blocking_reason") or item.get("status") or ""),
+                    "owning_artifact": str(item.get("dependency_id") or ""),
+                    "missing_or_failed_dependency": str(item.get("dependency_id") or ""),
+                    "producer_command": str(item.get("producer_command") or ""),
+                    "recovery_action": str(item.get("recovery_action") or ""),
+                    "recovery_command": str(item.get("recovery_command") or ""),
+                    "evidence_path": str(item.get("evidence_path") or item.get("expected_path") or ""),
+                }
+                for item in inventory_failures
+            ]
+            row["current_session_sub_blocker"] = current_sub
+            row["recovery_action"] = str(current_sub["recovery_action"])
+            row["recovery_commands"] = list(dict.fromkeys(command_rows))
+            return row
+        only = inventory_failures[0]
+        blocker_code = str(only.get("blocking_reason") or "").split(":", 1)[0] or f"{str(only.get('dependency_id') or 'SESSION_DEPENDENCY').upper()}_{str(only.get('status') or 'FAIL')}"
+        only_evidence_path = str(only.get("evidence_path") or only.get("expected_path") or session_paths["target_day_build"])
+        current_sub = {
+            "sub_blocker_code": blocker_code,
+            "owning_artifact": str(only.get("dependency_id") or ""),
+            "missing_or_failed_dependency": str(only.get("dependency_id") or ""),
+            "producer_command": str(only.get("producer_command") or ""),
+            "recovery_action": str(only.get("recovery_action") or ""),
+            "recovery_command": str(only.get("recovery_command") or ""),
+            "evidence_path": only_evidence_path,
+        }
+        row = _phase_row(
+            phase=phase,
+            ctx=ctx,
+            status="BLOCKING_CURRENT_RUN",
+            blocker_codes=[blocker_code],
+            evidence_paths=[only_evidence_path],
+            reason=str(only.get("dependency_id") or ""),
+        )
+        row["session_dependency_inventory"] = inventory
+        row["session_precheck_failures"] = inventory_failures
+        row["session_sub_blockers"] = [current_sub]
+        row["current_session_sub_blocker"] = current_sub
+        row["recovery_action"] = str(current_sub["recovery_action"])
+        row["recovery_commands"] = [str(current_sub["recovery_command"])]
+        return row
     sub_blockers = _session_sub_blockers(ctx)
     primary_sub = _primary_session_sub_blocker(sub_blockers)
     if primary_sub:
@@ -405,6 +740,8 @@ def _evaluate_session_authority(phase: dict[str, Any], ctx: Any, phase_results: 
         )
         row["session_sub_blockers"] = sub_blockers
         row["current_session_sub_blocker"] = primary_sub
+        row["session_dependency_inventory"] = inventory
+        row["session_precheck_failures"] = inventory_failures
         row["recovery_action"] = str(primary_sub["recovery_action"])
         row["recovery_commands"] = [str(primary_sub["recovery_command"])]
         return row
@@ -608,6 +945,8 @@ def build_control_plane_v1(ctx: Any, phase_results: dict[str, dict[str, Any]] | 
         "evidence_paths": list((current or {}).get("evidence_paths") or []),
         "current_session_sub_blocker": dict((current or {}).get("current_session_sub_blocker") or {}),
         "session_sub_blockers": list((current or {}).get("session_sub_blockers") or []),
+        "session_dependency_inventory": list((current or {}).get("session_dependency_inventory") or []),
+        "session_precheck_failures": list((current or {}).get("session_precheck_failures") or []),
         "phase_results": control_phase_results,
         "deferred_phases": deferred_phases,
         "diagnostic_findings": diagnostic_findings,

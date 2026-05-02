@@ -90,6 +90,21 @@ def _session_pass(ctx: bod.BodContext) -> None:
         ctx.truth_root / "reports" / "paper_session_authority_v1" / ctx.day_utc / "paper_session_authority.v1.json",
         {"day_utc": ctx.day_utc, "authority_status": "GRANTED"},
     )
+    _write(
+        ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json",
+        {"day_utc": ctx.day_utc, "bootstrap_status": "PASS"},
+    )
+
+
+def _session_supporting_authorities(ctx: bod.BodContext) -> None:
+    _write(
+        ctx.truth_root / "reports" / "paper_session_authority_v1" / ctx.day_utc / "paper_session_authority.v1.json",
+        {"day_utc": ctx.day_utc, "authority_status": "GRANTED"},
+    )
+    _write(
+        ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json",
+        {"day_utc": ctx.day_utc, "bootstrap_status": "PASS"},
+    )
 
 
 def _session_blocked_artifacts(ctx: bod.BodContext) -> None:
@@ -142,12 +157,15 @@ def _session_blocked_artifacts(ctx: bod.BodContext) -> None:
             "artifact_results": [
                 {
                     "artifact_id": "startup_materialization_input_convergence_v1",
+                    "required": True,
                     "result_status": "FAIL",
+                    "blocker_codes": ["REQUIRED_GATE_FAIL"],
                     "producer": {"module": "ops/tools/run_startup_materialization_input_convergence_v1.py"},
                 }
             ],
         },
     )
+    _session_supporting_authorities(ctx)
     _write(
         ctx.truth_root / "reports" / "session_promotion_decision_v1" / ctx.day_utc / "session_promotion_decision.v1.json",
         {
@@ -206,7 +224,7 @@ def test_session_failure_defers_broker_bod_feed_and_submit(monkeypatch, tmp_path
     payload = cp.build_control_plane_v1(ctx)
 
     assert payload["current_phase"] == "SESSION_AUTHORITY"
-    assert payload["canonical_blocker"] == "TARGET_DAY_DATE_MISMATCH"
+    assert payload["canonical_blocker"] == "SESSION_AUTHORITY_PRECHECK_FAILED"
     assert {"BROKER_HEALTH", "BOD_INPUTS", "FEED_ATTESTATION", "SUBMIT_BOUNDARY"} <= set(payload["deferred_phases"])
 
 
@@ -221,7 +239,7 @@ def test_skipped_or_missing_session_authority_blocks_before_bod(monkeypatch, tmp
     payload = cp.build_control_plane_v1(ctx, phase_results=phase_results)
 
     assert payload["current_phase"] == "SESSION_AUTHORITY"
-    assert payload["canonical_blocker"] == "SESSION_AUTHORITY_MISSING"
+    assert payload["canonical_blocker"] == "SESSION_AUTHORITY_PRECHECK_FAILED"
     assert "BOD_INPUTS" in payload["deferred_phases"]
 
 
@@ -238,7 +256,7 @@ def test_control_plane_does_not_use_legacy_session_root_for_production(monkeypat
     payload = cp.build_control_plane_v1(ctx)
 
     assert payload["current_phase"] == "SESSION_AUTHORITY"
-    assert payload["canonical_blocker"] in {"SESSION_AUTHORITY_MISSING", "SESSION_AUTHORITY_DENIED"}
+    assert payload["canonical_blocker"] == "SESSION_AUTHORITY_PRECHECK_FAILED"
     assert all(str(production_truth) in path or "repo_protection" in path for path in payload["evidence_paths"])
 
 
@@ -251,14 +269,14 @@ def test_session_hidden_dependency_is_decomposed_and_defers_downstream(monkeypat
     payload = cp.build_control_plane_v1(ctx)
 
     assert payload["current_phase"] == "SESSION_AUTHORITY"
-    assert payload["canonical_blocker"] == "HIDDEN_DEPENDENCY_DETECTED"
-    assert payload["evidence_paths"] == [str(ctx.truth_root / "target_day_admission_v1" / f"{ctx.day_utc}.json")]
-    assert payload["current_session_sub_blocker"]["owning_artifact"] == "target_day_admission_v1"
-    assert "runtime_resilience_authority_v1" in payload["current_session_sub_blocker"]["missing_or_failed_dependency"]
-    assert "run_session_authority_v1.py" in payload["recovery_commands"][0]
+    assert payload["canonical_blocker"] == "SESSION_AUTHORITY_PRECHECK_FAILED"
+    assert str(ctx.truth_root / "target_day_build_v1" / f"{ctx.day_utc}.json") in payload["evidence_paths"]
+    assert payload["current_session_sub_blocker"]["owning_artifact"] == "SESSION_AUTHORITY_PRECHECK"
+    assert "hidden_dependency_check" in {row["dependency_id"] for row in payload["session_precheck_failures"]}
+    assert any("run_session_authority_v1.py" in command for command in payload["recovery_commands"])
     assert {"BROKER_HEALTH", "FEED_ATTESTATION", "KILL_SWITCH", "SUBMIT_BOUNDARY"} <= set(payload["deferred_phases"])
     sub_codes = {row["sub_blocker_code"] for row in payload["session_sub_blockers"]}
-    assert {"HIDDEN_DEPENDENCY_DETECTED", "PARTIAL_BUILD", "REQUIRED_GATE_FAIL"} <= sub_codes
+    assert any(str(code).startswith("HIDDEN_DEPENDENCY_DETECTED") for code in sub_codes)
 
 
 def test_session_partial_build_can_be_primary_when_hidden_dependency_absent(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
@@ -278,7 +296,8 @@ def test_session_partial_build_can_be_primary_when_hidden_dependency_absent(monk
             },
         },
     )
-    _write(ctx.truth_root / "target_day_build_v1" / f"{ctx.day_utc}.json", {"target_day": ctx.day_utc, "build_status": "BLOCKED", "artifact_results": [{"artifact_id": "capability_state_v1", "result_status": "FAIL"}]})
+    _session_supporting_authorities(ctx)
+    _write(ctx.truth_root / "target_day_build_v1" / f"{ctx.day_utc}.json", {"target_day": ctx.day_utc, "build_status": "BLOCKED", "artifact_results": [{"artifact_id": "capability_state_v1", "required": True, "result_status": "FAIL", "blocker_codes": ["PARTIAL_BUILD"]}]})
 
     payload = cp.build_control_plane_v1(ctx)
 
@@ -299,6 +318,7 @@ def test_declared_session_dependency_missing_becomes_specific_blocker(monkeypatc
     )
     _write(ctx.truth_root / "active_session_v1" / "current.json", {"target_day": ctx.day_utc, "promotion_state": "BLOCKED", "blocking_codes": ["PARTIAL_BUILD"]})
     _write(ctx.truth_root / "target_day_admission_v1" / f"{ctx.day_utc}.json", {"target_day": ctx.day_utc, "blocking_reason_codes": ["PARTIAL_BUILD"]})
+    _session_supporting_authorities(ctx)
     _write(
         ctx.truth_root / "target_day_build_v1" / f"{ctx.day_utc}.json",
         {
@@ -307,6 +327,7 @@ def test_declared_session_dependency_missing_becomes_specific_blocker(monkeypatc
             "artifact_results": [
                 {
                     "artifact_id": "runtime_resilience_authority_v1",
+                    "required": True,
                     "classification": "SESSION_AUTHORITY_DECLARED_DEPENDENCY",
                     "result_status": "FAIL",
                     "blocker_codes": ["RUNTIME_RESILIENCE_AUTHORITY_V1_MISSING"],
@@ -331,6 +352,70 @@ def test_declared_session_dependency_missing_becomes_specific_blocker(monkeypatc
     assert "run_runtime_resilience_authority_v1.py" in payload["recovery_commands"][0]
 
 
+def test_session_precheck_surfaces_multiple_required_failures_at_once(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    market_path = ctx.truth_root / "market_calendar_v1" / "dataset_manifest.json"
+    runtime_path = (
+        ctx.truth_root
+        / "reports"
+        / "runtime_resilience_authority_v1"
+        / ctx.day_utc
+        / "runtime_resilience_authority.v1.json"
+    )
+    _write(ctx.truth_root / "active_session_v1" / "current.json", {"target_day": ctx.day_utc, "promotion_state": "BLOCKED", "blocking_codes": ["PARTIAL_BUILD"]})
+    _write(ctx.truth_root / "target_day_admission_v1" / f"{ctx.day_utc}.json", {"target_day": ctx.day_utc, "blocking_reason_codes": ["PARTIAL_BUILD"]})
+    _session_supporting_authorities(ctx)
+    _write(
+        ctx.truth_root / "target_day_build_v1" / f"{ctx.day_utc}.json",
+        {
+            "target_day": ctx.day_utc,
+            "build_status": "BLOCKED",
+            "hidden_dependency_check_result": {"status": "PASS", "undeclared_dependency_artifacts": []},
+            "artifact_results": [
+                {
+                    "artifact_id": "market_calendar_day",
+                    "required": True,
+                    "result_status": "FAIL",
+                    "observed_status": "MISSING",
+                    "schema_status": "MISSING",
+                    "date_binding_status": "MISSING",
+                    "freshness_status": "STALE",
+                    "blocker_codes": ["MARKET_CALENDAR_DAY_MISSING"],
+                    "canonical_path": str(market_path),
+                },
+                {
+                    "artifact_id": "runtime_resilience_authority_v1",
+                    "required": True,
+                    "result_status": "FAIL",
+                    "observed_status": "MISSING",
+                    "schema_status": "MISSING",
+                    "date_binding_status": "MISSING",
+                    "freshness_status": "STALE",
+                    "blocker_codes": ["RUNTIME_RESILIENCE_AUTHORITY_V1_MISSING"],
+                    "canonical_path": str(runtime_path),
+                },
+                {
+                    "artifact_id": "pre_open_bundle_v1",
+                    "required": True,
+                    "result_status": "PASS",
+                    "canonical_path": str(ctx.truth_root / "reports" / "pre_open_bundle_v1" / ctx.day_utc / "pre_open_bundle.v1.json"),
+                },
+            ],
+        },
+    )
+
+    payload = cp.build_control_plane_v1(ctx)
+
+    assert payload["current_phase"] == "SESSION_AUTHORITY"
+    assert payload["canonical_blocker"] == "SESSION_AUTHORITY_PRECHECK_FAILED"
+    failed_ids = {row["dependency_id"] for row in payload["session_precheck_failures"]}
+    assert {"market_calendar_day", "runtime_resilience_authority_v1"} <= failed_ids
+    satisfied = [row for row in payload["session_dependency_inventory"] if row["dependency_id"] == "pre_open_bundle_v1"]
+    assert satisfied and satisfied[0]["status"] == "SATISFIED"
+    assert "BROKER_HEALTH" in payload["deferred_phases"]
+
+
 def test_session_required_gate_fail_can_be_primary(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
     _source_pass(monkeypatch)
     ctx = _ctx(tmp_path)
@@ -340,7 +425,23 @@ def test_session_required_gate_fail_can_be_primary(monkeypatch, tmp_path: Path) 
         ctx.truth_root / "target_day_admission_v1" / f"{ctx.day_utc}.json",
         {"target_day": ctx.day_utc, "blocking_reason_codes": ["REQUIRED_GATE_FAIL"], "blocker_chain": [{"artifact_id": "startup_materialization_input_convergence_v1", "artifact_path": str(gate_path), "blocker_code": "REQUIRED_GATE_FAIL"}]},
     )
-    _write(ctx.truth_root / "target_day_build_v1" / f"{ctx.day_utc}.json", {"target_day": ctx.day_utc, "build_status": "PASS"})
+    _write(
+        ctx.truth_root / "target_day_build_v1" / f"{ctx.day_utc}.json",
+        {
+            "target_day": ctx.day_utc,
+            "build_status": "BLOCKED",
+            "artifact_results": [
+                {
+                    "artifact_id": "startup_materialization_input_convergence_v1",
+                    "required": True,
+                    "result_status": "FAIL",
+                    "blocker_codes": ["REQUIRED_GATE_FAIL"],
+                    "canonical_path": str(gate_path),
+                }
+            ],
+        },
+    )
+    _session_supporting_authorities(ctx)
 
     payload = cp.build_control_plane_v1(ctx)
 
@@ -421,12 +522,12 @@ def test_operator_projection_shows_exact_session_recovery_without_downstream_act
 
     _out_path, payload = projection.run_operator_projection_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
 
-    assert payload["canonical_blocker"] == "HIDDEN_DEPENDENCY_DETECTED"
-    assert payload["operator_next_action"] == "Resolve undeclared session dependencies, then rerun governed session alignment."
-    assert payload["evidence_paths"] == [str(ctx.truth_root / "target_day_admission_v1" / f"{ctx.day_utc}.json")]
-    assert payload["next_valid_actions"] == [
-        f'PYTHONPATH="$PWD" python3 ops/tools/run_session_authority_v1.py --target_day {ctx.day_utc} --truth_root {ctx.truth_root} --environment PAPER --ib_account DU123456 --phase all'
-    ]
+    assert payload["canonical_blocker"] == "SESSION_AUTHORITY_PRECHECK_FAILED"
+    assert payload["operator_next_action"] == "Resolve all listed SESSION_AUTHORITY precheck failures, then rerun session authority."
+    assert payload["session_precheck_failures"]
+    assert any(row["dependency_id"] == "hidden_dependency_check" for row in payload["session_precheck_failures"])
+    assert str(ctx.truth_root / "target_day_build_v1" / f"{ctx.day_utc}.json") in payload["evidence_paths"]
+    assert payload["next_valid_actions"]
     assert not [action for action in payload["next_valid_actions"] if "broker" in action.lower() or "kill" in action.lower() or "submit" in action.lower()]
 
 
