@@ -63,6 +63,7 @@ def _seed_ready(tmp_path: Path, runtime_mode: str = "PRODUCTION") -> tuple[Path,
                 "status": "ACTIVE",
             },
         )
+    _write(_report(truth, "aegis_control_plane_v1", "control_plane.v1.json"), {"final_status": "READY", "submit_allowed": True, "canonical_blocker": ""})
     _write(_report(truth, "aegis_day_run_v1", "day_run.v1.json"), {"final_status": "PAPER_READY", "canonical_blocker": ""})
     _write(
         _report(truth, "submit_boundary_status_v1", "submit_boundary_status.v1.json"),
@@ -164,6 +165,24 @@ def test_blocked_ledger_kill_switch_forbidden_action_packet_and_freshness_all_ha
     assert any(row["code"] == "REQUIRED_AUTHORITY_NOT_FRESH" for row in _evaluate(truth, execution, runtime)["blockers"])
 
 
+def test_control_plane_not_ready_blocks_even_when_legacy_gates_are_ready(tmp_path: Path) -> None:
+    truth, execution, runtime = _seed_ready(tmp_path)
+    _write(
+        _report(truth, "aegis_control_plane_v1", "control_plane.v1.json"),
+        {
+            "final_status": "NOT_READY",
+            "submit_allowed": False,
+            "canonical_blocker": "SESSION_IDENTITY_PRECHECK_FAILED",
+        },
+    )
+
+    result = _evaluate(truth, execution, runtime)
+
+    assert result["ok"] is False
+    assert result["canonical_blocker"] == "CONTROL_PLANE_NOT_READY"
+    assert any(row["code"] == "CONTROL_PLANE_NOT_READY" for row in result["blockers"])
+
+
 def test_submit_entrypoints_use_shared_enforcement_gate() -> None:
     repo = enforcement.REPO_ROOT
     required = [
@@ -173,7 +192,9 @@ def test_submit_entrypoints_use_shared_enforcement_gate() -> None:
         repo / "constellation_2" / "phaseD" / "tools" / "c2_submit_paper_v5.py",
     ]
     for path in required:
-        assert "aegis_submit_enforcement_v1" in path.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8")
+        assert "aegis_submit_enforcement_v1" in text
+        assert "require_submit_enforcement_v1" in text or "evaluate_submit_enforcement_v1" in text
 
     for legacy in ("c2_submit_paper_v1.py", "c2_submit_paper_v2.py", "c2_submit_paper_v3.py", "c2_submit_paper_v4.py"):
         text = (repo / "constellation_2" / "phaseD" / "tools" / legacy).read_text(encoding="utf-8")

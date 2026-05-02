@@ -422,22 +422,76 @@ def _projection_from_control_plane(ctx: bod.BodContext, control: dict[str, Any])
     }
 
 
+def _projection_control_plane_unavailable(ctx: bod.BodContext, *, control_path: Path, reason: str) -> dict[str, Any]:
+    return {
+        "schema_id": "aegis_operator_projection",
+        "schema_version": SCHEMA_VERSION,
+        "day_utc": ctx.day_utc,
+        "environment": ctx.environment,
+        "runtime_mode": runtime_mode_from_truth_root_v1(ctx.truth_root),
+        "generated_at_utc": _now_iso(),
+        "status": "BLOCKED",
+        "canonical_blocker": "CONTROL_PLANE_UNAVAILABLE",
+        "operator_next_action": f"Regenerate aegis_control_plane_v1 for {ctx.day_utc}; projection will not recompute readiness.",
+        "final_status": "UNKNOWN",
+        "first_blocker": "CONTROL_PLANE_UNAVAILABLE",
+        "owner": "aegis_control_plane_v1",
+        "phase": "",
+        "current_domain": "",
+        "root_cause": reason,
+        "current_session_sub_blocker": {},
+        "session_sub_blockers": [],
+        "session_dependency_inventory": [],
+        "session_precheck_failures": [],
+        "failed_current_domain_dependencies": [],
+        "readiness_dependency_inventory": [],
+        "downstream_consequences": [],
+        "deferred_downstream_phases": [],
+        "deferred_downstream_domains": [],
+        "submit_allowed": False,
+        "artifact_paths": [str(control_path)],
+        "evidence_paths": [str(control_path)],
+        "next_valid_actions": [f'PYTHONPATH="$PWD" python3 ops/tools/run_aegis_control_plane_v1.py --day_utc {ctx.day_utc} --environment {ctx.environment} --truth_root {ctx.truth_root}'],
+        "forbidden_actions": [],
+        "unsafe_actions": ["Do not use kernel, requirement graph, day-run, or packet artifacts to infer projection readiness while control plane is unavailable."],
+        "lineage_status": "UNKNOWN",
+        "consistency_status": "UNKNOWN",
+        "freshness_status": "UNKNOWN",
+        "action_validity_status": "UNKNOWN",
+        "truth_confidence": "CONTROL_PLANE_UNAVAILABLE",
+        "trade_health_status": "ADVISORY_ONLY",
+        "trade_health": {},
+        "learning_loop_status": {"automatic_deployment_allowed": False},
+        "pending_human_reviews": 0,
+        "blocked_promotions": [],
+        "rollback_recommendations": [],
+        "human_review_required": True,
+        "integrity_context": {
+            "aegis_control_plane_path": str(control_path),
+            "final_status_source": "aegis_control_plane_v1",
+            "control_plane_role": "sole readiness authority for projection",
+        },
+        "confidence_in_diagnosis": "LOW",
+        "last_updated_at_utc": _now_iso(),
+        "authority_note": "Operator projection is render-only and refuses to compute readiness without a current aegis_control_plane_v1 artifact.",
+    }
+
+
 def run_operator_projection_v1(day_utc: str, environment: str, truth_root: str = "") -> tuple[Path, dict[str, Any]]:
     ctx = bod._resolve_context(day_utc, environment, truth_root)
     cp_path = control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     control = _read_json(cp_path)
-    kernel_path = unified_truth_kernel_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
-    payload = (
-        _projection_from_control_plane(ctx, control)
-        if str(control.get("day_utc") or "") == ctx.day_utc
-        else _projection_from_kernel(ctx, _read_json(kernel_path))
+    payload = _projection_from_control_plane(ctx, control) if str(control.get("day_utc") or "") == ctx.day_utc else _projection_control_plane_unavailable(
+        ctx,
+        control_path=cp_path,
+        reason=f"control_plane_day={str(control.get('day_utc') or 'MISSING')} target_day={ctx.day_utc}",
     )
     path = operator_projection_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     attach_producer_contract_v1(
         payload,
         producer_name="ops/tools/run_aegis_operator_projection_v1.py",
         producer_command=f"python3 ops/tools/run_aegis_operator_projection_v1.py --day_utc {ctx.day_utc} --environment {ctx.environment}",
-        input_artifacts=[cp_path if str(control.get("day_utc") or "") == ctx.day_utc else kernel_path],
+        input_artifacts=[cp_path],
         output_artifacts=[path],
         schema_versions={"aegis_operator_projection": SCHEMA_VERSION},
     )

@@ -64,6 +64,21 @@ def _producer_contract() -> dict:
     return {"producer_contract_v1": {"code_version_git_commit": cp._current_git_commit_v1(), "source_dirty_status": "CLEAN"}}
 
 
+def _artifact_meta(ctx: bod.BodContext) -> dict:
+    return {"truth_root": str(ctx.truth_root), **_producer_contract()}
+
+
+def _bootstrap_meta(ctx: bod.BodContext) -> dict:
+    return {
+        "truth_roots": {
+            "canonical_truth_root": str(ctx.truth_root),
+            "sleeve_truth_root": str(ctx.execution_root),
+            "operator_input_root": str(ctx.operator_input_root),
+        },
+        **_producer_contract(),
+    }
+
+
 def _source_pass(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(
         cp,
@@ -100,7 +115,7 @@ def _session_pass(ctx: bod.BodContext) -> None:
     )
     _write(
         ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json",
-        {"day_utc": ctx.day_utc, "bootstrap_status": "PASS", **_producer_contract()},
+        {"day_utc": ctx.day_utc, "bootstrap_status": "PASS", **_bootstrap_meta(ctx)},
     )
     _write(ctx.truth_root / "market_calendar_v1" / "dataset_manifest.json", {"day_utc": ctx.day_utc, "coverage_status": "HEALTHY"})
 
@@ -112,7 +127,7 @@ def _session_supporting_authorities(ctx: bod.BodContext) -> None:
     )
     _write(
         ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json",
-        {"day_utc": ctx.day_utc, "bootstrap_status": "PASS", **_producer_contract()},
+        {"day_utc": ctx.day_utc, "bootstrap_status": "PASS", **_bootstrap_meta(ctx)},
     )
 
 
@@ -193,62 +208,62 @@ def _session_blocked_artifacts(ctx: bod.BodContext) -> None:
     )
     _write(
         ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json",
-        {"day_utc": ctx.day_utc, "bootstrap_status": "READY", **_producer_contract()},
+        {"day_utc": ctx.day_utc, "bootstrap_status": "READY", **_bootstrap_meta(ctx)},
     )
 
 
 def _broker_pass(ctx: bod.BodContext) -> None:
     _write(
         ctx.truth_root / "reports" / "runtime_resilience_authority_v1" / ctx.day_utc / "runtime_resilience_authority.v1.json",
-        {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": ""},
+        {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": "", **_artifact_meta(ctx)},
     )
     log = ctx.execution_root / "execution_evidence_v1" / "broker_events" / ctx.day_utc / "broker_event_log.v1.jsonl"
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text("", encoding="utf-8")
-    _write(log.parent / "broker_event_day_manifest.v1.json", {"day_utc": ctx.day_utc, "status": "PASS"})
-    _write(ctx.truth_root / "reports" / "broker_supply_v1" / ctx.day_utc / "broker_supply.v1.json", {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": ""})
+    _write(log.parent / "broker_event_day_manifest.v1.json", {"day_utc": ctx.day_utc, "status": "PASS", "truth_root": str(ctx.execution_root), **_producer_contract()})
+    _write(ctx.truth_root / "reports" / "broker_supply_v1" / ctx.day_utc / "broker_supply.v1.json", {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": "", **_artifact_meta(ctx)})
 
 
 def _bod_pass(ctx: bod.BodContext) -> None:
-    _write(ctx.operator_input_root / "operator_inputs" / "paper_capital_seed_v1" / ctx.day_utc / "paper_capital_seed.v1.json", {"day_utc": ctx.day_utc})
-    _write(ctx.operator_input_root / "operator_inputs" / "cash_ledger_operator_statements" / ctx.day_utc / "operator_statement.v1.json", {"day_utc": ctx.day_utc})
+    _write(ctx.operator_input_root / "operator_inputs" / "paper_capital_seed_v1" / ctx.day_utc / "paper_capital_seed.v1.json", {"day_utc": ctx.day_utc, "truth_root": str(ctx.operator_input_root), **_producer_contract()})
+    _write(ctx.operator_input_root / "operator_inputs" / "cash_ledger_operator_statements" / ctx.day_utc / "operator_statement.v1.json", {"day_utc": ctx.day_utc, "truth_root": str(ctx.operator_input_root), **_producer_contract()})
     _write(ctx.truth_root / "reports" / "pre_open_bundle_v1" / ctx.day_utc / "pre_open_bundle.v1.json", {"target_day": ctx.day_utc, "producer_contract_v1": {"deterministic_fingerprint": "x"}})
     _write(
         ctx.truth_root / "reports" / "startup_materialization_input_convergence_v1" / ctx.day_utc / "startup_materialization_input_convergence.v1.json",
-        {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": ""},
+        {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": "", **_artifact_meta(ctx)},
     )
     _write(
         ctx.truth_root / "reports" / "safety_state_authority_v1" / ctx.day_utc / "safety_state_authority.v1.json",
-        {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": ""},
+        {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": "", **_artifact_meta(ctx)},
     )
 
 
 def _market_pass(ctx: bod.BodContext) -> None:
-    _write(ctx.truth_root / "reports" / "market_data_supply_v1" / ctx.day_utc / "market_data_supply.v1.json", {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": ""})
-    _write(ctx.truth_root / "reports" / "market_data_authority_v1" / ctx.day_utc / "market_data_authority.v1.json", {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": ""})
+    _write(ctx.truth_root / "reports" / "market_data_supply_v1" / ctx.day_utc / "market_data_supply.v1.json", {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": "", **_artifact_meta(ctx)})
+    _write(ctx.truth_root / "reports" / "market_data_authority_v1" / ctx.day_utc / "market_data_authority.v1.json", {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": "", **_artifact_meta(ctx)})
 
 
 def _feed_pass(ctx: bod.BodContext) -> None:
-    _write(ctx.execution_root / "reports" / "feed_attestation_gate_v1" / ctx.day_utc / "feed_attestation_gate.v1.json", {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": ""})
+    _write(ctx.execution_root / "reports" / "feed_attestation_gate_v1" / ctx.day_utc / "feed_attestation_gate.v1.json", {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": "", "truth_root": str(ctx.execution_root), **_producer_contract()})
 
 
 def _auth_pass(ctx: bod.BodContext) -> None:
-    _write(ctx.truth_root / "reports" / "authorization_supply_v1" / ctx.day_utc / "authorization_supply.v1.json", {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": ""})
+    _write(ctx.truth_root / "reports" / "authorization_supply_v1" / ctx.day_utc / "authorization_supply.v1.json", {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": "", **_artifact_meta(ctx)})
     _write(ctx.execution_root / "reports" / "authorization_gate_verdict_v1" / ctx.day_utc / "authorization_gate_verdict.v1.json", {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": ""})
 
 
 def _strategy_pass(ctx: bod.BodContext) -> None:
-    _write(ctx.truth_root / "reports" / "trading_day_intent_generation_v1" / ctx.day_utc / "trading_day_intent_generation.v1.json", {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": ""})
+    _write(ctx.truth_root / "reports" / "trading_day_intent_generation_v1" / ctx.day_utc / "trading_day_intent_generation.v1.json", {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": "", **_artifact_meta(ctx)})
 
 
 def _authorization_kill_pass(ctx: bod.BodContext) -> None:
     _auth_pass(ctx)
-    _write(ctx.truth_root / "risk_v1" / "kill_switch_v1" / ctx.day_utc / "global_kill_switch_state.v1.json", {"day_utc": ctx.day_utc, "state": "INACTIVE", "status": "PASS", "canonical_blocker": ""})
+    _write(ctx.truth_root / "risk_v1" / "kill_switch_v1" / ctx.day_utc / "global_kill_switch_state.v1.json", {"day_utc": ctx.day_utc, "state": "INACTIVE", "status": "PASS", "canonical_blocker": "", **_artifact_meta(ctx)})
 
 
 def _submit_boundary_pass(ctx: bod.BodContext) -> None:
-    _write(ctx.truth_root / "reports" / "trading_day_readiness_authority_v1" / ctx.day_utc / "trading_day_readiness_authority.v1.json", {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": ""})
-    _write(ctx.truth_root / "reports" / "submit_boundary_status_v1" / ctx.day_utc / "submit_boundary_status.v1.json", {"day_utc": ctx.day_utc, "status": "PASS", "submit_allowed": True, "canonical_blocker": ""})
+    _write(ctx.truth_root / "reports" / "trading_day_readiness_authority_v1" / ctx.day_utc / "trading_day_readiness_authority.v1.json", {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": "", **_artifact_meta(ctx)})
+    _write(ctx.truth_root / "reports" / "submit_boundary_status_v1" / ctx.day_utc / "submit_boundary_status.v1.json", {"day_utc": ctx.day_utc, "status": "PASS", "submit_allowed": True, "canonical_blocker": "", **_artifact_meta(ctx)})
 
 
 def test_session_failure_defers_broker_bod_feed_and_submit(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
@@ -391,7 +406,7 @@ def test_domain_precheck_surfaces_only_current_domain_failures_at_once(monkeypat
     _session_pass(ctx)
     _write(
         runtime_path,
-        {"day_utc": ctx.day_utc, "status": "BLOCKED", "reason_codes": ["IB_DISCONNECTED"], "canonical_blocker": "IB_DISCONNECTED"},
+        {"day_utc": ctx.day_utc, "status": "BLOCKED", "reason_codes": ["IB_DISCONNECTED"], "canonical_blocker": "IB_DISCONNECTED", **_artifact_meta(ctx)},
     )
 
     payload = cp.build_control_plane_v1(ctx)
@@ -425,7 +440,7 @@ def test_feed_attestation_is_current_only_after_earlier_phases_pass(monkeypatch,
     _broker_pass(ctx)
     _bod_pass(ctx)
     _market_pass(ctx)
-    _write(ctx.execution_root / "reports" / "feed_attestation_gate_v1" / ctx.day_utc / "feed_attestation_gate.v1.json", {"day_utc": ctx.day_utc, "status": "FAIL", "reason_codes": ["FAL_STALE"]})
+    _write(ctx.execution_root / "reports" / "feed_attestation_gate_v1" / ctx.day_utc / "feed_attestation_gate.v1.json", {"day_utc": ctx.day_utc, "status": "FAIL", "reason_codes": ["FAL_STALE"], "truth_root": str(ctx.execution_root), **_producer_contract()})
 
     payload = cp.build_control_plane_v1(ctx)
 
@@ -441,11 +456,11 @@ def test_capital_safety_owns_nav_and_cash_failures_after_broker_passes(monkeypat
     _broker_pass(ctx)
     _write(
         ctx.truth_root / "reports" / "safety_state_authority_v1" / ctx.day_utc / "safety_state_authority.v1.json",
-        {"day_utc": ctx.day_utc, "status": "BLOCKED", "reason_codes": ["NAV_INVALID"], "canonical_blocker": "NAV_INVALID"},
+        {"day_utc": ctx.day_utc, "status": "BLOCKED", "reason_codes": ["NAV_INVALID"], "canonical_blocker": "NAV_INVALID", **_artifact_meta(ctx)},
     )
     _write(
         ctx.truth_root / "reports" / "startup_materialization_input_convergence_v1" / ctx.day_utc / "startup_materialization_input_convergence.v1.json",
-        {"day_utc": ctx.day_utc, "status": "BLOCKED", "reason_codes": ["CASH_LEDGER_SNAPSHOT_V1_MISSING"], "canonical_blocker": "CASH_LEDGER_SNAPSHOT_V1_MISSING"},
+        {"day_utc": ctx.day_utc, "status": "BLOCKED", "reason_codes": ["CASH_LEDGER_SNAPSHOT_V1_MISSING"], "canonical_blocker": "CASH_LEDGER_SNAPSHOT_V1_MISSING", **_artifact_meta(ctx)},
     )
 
     payload = cp.build_control_plane_v1(ctx)
@@ -467,7 +482,7 @@ def test_strategy_intent_owns_missing_intent_inputs_after_feed_passes(monkeypatc
     _feed_pass(ctx)
     _write(
         ctx.truth_root / "reports" / "trading_day_intent_generation_v1" / ctx.day_utc / "trading_day_intent_generation.v1.json",
-        {"day_utc": ctx.day_utc, "status": "BLOCKED", "reason_codes": ["MISSING_REQUIRED_INPUTS"], "canonical_blocker": "MISSING_REQUIRED_INPUTS"},
+        {"day_utc": ctx.day_utc, "status": "BLOCKED", "reason_codes": ["MISSING_REQUIRED_INPUTS"], "canonical_blocker": "MISSING_REQUIRED_INPUTS", **_artifact_meta(ctx)},
     )
 
     payload = cp.build_control_plane_v1(ctx)
@@ -488,7 +503,7 @@ def test_submit_boundary_owns_submit_mode_after_prior_domains_pass(monkeypatch, 
     _authorization_kill_pass(ctx)
     _write(
         ctx.truth_root / "reports" / "trading_day_readiness_authority_v1" / ctx.day_utc / "trading_day_readiness_authority.v1.json",
-        {"day_utc": ctx.day_utc, "status": "BLOCKED", "canonical_blocker": "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE"},
+        {"day_utc": ctx.day_utc, "status": "BLOCKED", "canonical_blocker": "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE", **_artifact_meta(ctx)},
     )
 
     payload = cp.build_control_plane_v1(ctx)
@@ -521,7 +536,7 @@ def test_kill_switch_blocker_is_owned_by_kill_switch(monkeypatch, tmp_path: Path
     _feed_pass(ctx)
     _strategy_pass(ctx)
     _auth_pass(ctx)
-    _write(ctx.truth_root / "risk_v1" / "kill_switch_v1" / ctx.day_utc / "global_kill_switch_state.v1.json", {"day_utc": ctx.day_utc, "state": "ACTIVE", "reason_codes": ["C2_KILL_SWITCH_ACTIVE"]})
+    _write(ctx.truth_root / "risk_v1" / "kill_switch_v1" / ctx.day_utc / "global_kill_switch_state.v1.json", {"day_utc": ctx.day_utc, "state": "ACTIVE", "reason_codes": ["C2_KILL_SWITCH_ACTIVE"], **_artifact_meta(ctx)})
 
     payload = cp.build_control_plane_v1(ctx)
 
@@ -610,6 +625,12 @@ def test_readiness_registry_contract_is_mandatory_and_single_owner() -> None:
                 assert dep[key]
             assert dep["artifact_path"] == dep["expected_path"]
             assert dep["governed_producer"] == dep["producer_command"]
+            if dep.get("schema_exempt") is True:
+                assert dep.get("schema_exempt_reason")
+            else:
+                assert (REPO_ROOT / dep["schema_path"]).exists()
+            if dep.get("metadata_exempt") is True:
+                assert dep.get("metadata_exempt_reason")
 
 
 def test_registry_rejects_session_identity_leakage(monkeypatch) -> None:  # noqa: ANN001
@@ -619,12 +640,12 @@ def test_registry_rejects_session_identity_leakage(monkeypatch) -> None:  # noqa
             "domain_order": 1,
             "dependencies": [
                 {
-                    "dependency_id": "runtime_resilience_authority_v1",
+                    "dependency_id": "active_session_v1",
                     "domain_owner": "SESSION_IDENTITY",
                     "owning_domain": "SESSION_IDENTITY",
                     "expected_path": "x",
                     "artifact_path": "x",
-                    "schema_path": "x",
+                    "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/active_session.v1.schema.json",
                     "producer_command": "x",
                     "governed_producer": "x",
                     "recovery_action": "x",
@@ -635,7 +656,34 @@ def test_registry_rejects_session_identity_leakage(monkeypatch) -> None:  # noqa
             ],
         }
     ]
-    with pytest.raises(RuntimeError, match="SESSION_IDENTITY_FORBIDDEN_DEPENDENCY"):
+    with pytest.raises(RuntimeError, match="SESSION_IDENTITY_FORBIDDEN_BLOCKER"):
+        cp._validate_readiness_domain_registry_v1(bad)
+
+
+def test_session_identity_uses_positive_dependency_allowlist() -> None:
+    bad = [
+        {
+            "domain_id": "SESSION_IDENTITY",
+            "domain_order": 1,
+            "dependencies": [
+                {
+                    "dependency_id": "new_downstream_readiness_v1",
+                    "domain_owner": "SESSION_IDENTITY",
+                    "owning_domain": "SESSION_IDENTITY",
+                    "expected_path": "x",
+                    "artifact_path": "x",
+                    "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/paper_session_bootstrap.v1.schema.json",
+                    "producer_command": "x",
+                    "governed_producer": "x",
+                    "recovery_action": "x",
+                    "recovery_command": "x",
+                    "blocking_scope": "SESSION_IDENTITY",
+                    "blocker_codes_owned": ["NEW_DOWNSTREAM_BLOCKER"],
+                }
+            ],
+        }
+    ]
+    with pytest.raises(RuntimeError, match="SESSION_IDENTITY_DEPENDENCY_NOT_ALLOWLISTED"):
         cp._validate_readiness_domain_registry_v1(bad)
 
 
@@ -737,6 +785,23 @@ def test_manual_bootstrap_pass_without_governed_metadata_is_rejected(monkeypatch
     assert payload["canonical_blocker"] == "PRODUCER_METADATA_MISSING"
 
 
+def test_generic_required_dependency_without_metadata_fails(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _session_pass(ctx)
+    _broker_pass(ctx)
+    _write(
+        ctx.truth_root / "reports" / "broker_supply_v1" / ctx.day_utc / "broker_supply.v1.json",
+        {"day_utc": ctx.day_utc, "status": "PASS", "canonical_blocker": ""},
+    )
+
+    payload = cp.build_control_plane_v1(ctx)
+
+    assert payload["current_domain"] == "BROKER_CONNECTIVITY"
+    assert payload["canonical_blocker"] == "PRODUCER_METADATA_MISSING"
+    assert [row["dependency_id"] for row in payload["failed_current_domain_dependencies"]] == ["broker_supply_v1"]
+
+
 def test_projection_renders_control_plane_readiness_without_recomputing(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
     _source_pass(monkeypatch)
     ctx = _ctx(tmp_path)
@@ -753,6 +818,39 @@ def test_projection_renders_control_plane_readiness_without_recomputing(monkeypa
     assert payload["final_status"] == control["final_status"]
     assert payload["failed_current_domain_dependencies"] == control["failed_current_domain_dependencies"]
     assert payload["deferred_downstream_domains"] == control["deferred_domains"]
+
+
+def test_projection_blocks_when_control_plane_wrong_day_without_kernel_fallback(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    cp_path = cp.control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    _write(
+        cp_path,
+        {
+            "day_utc": "2026-05-03",
+            "final_status": "READY",
+            "canonical_blocker": "",
+            "submit_allowed": True,
+        },
+    )
+    _write(
+        projection.unified_truth_kernel_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc),
+        {
+            "day_utc": ctx.day_utc,
+            "final_status": "READY",
+            "canonical_blocker": "",
+            "operator_next_action": "kernel fallback should not be used",
+        },
+    )
+    monkeypatch.setattr(projection.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+
+    _out_path, payload = projection.run_operator_projection_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "CONTROL_PLANE_UNAVAILABLE"
+    assert payload["final_status"] == "UNKNOWN"
+    assert payload["submit_allowed"] is False
+    assert "kernel fallback should not be used" not in payload["operator_next_action"]
 
 
 def test_submit_allowed_false_when_control_plane_not_ready(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
@@ -774,23 +872,23 @@ def test_known_failure_golden_fixture_preserves_domain_ownership(monkeypatch, tm
     bootstrap.unlink()
     _write(
         ctx.truth_root / "reports" / "runtime_resilience_authority_v1" / ctx.day_utc / "runtime_resilience_authority.v1.json",
-        {"day_utc": ctx.day_utc, "status": "BLOCKED", "canonical_blocker": "IB_DISCONNECTED"},
+        {"day_utc": ctx.day_utc, "status": "BLOCKED", "canonical_blocker": "IB_DISCONNECTED", **_artifact_meta(ctx)},
     )
     _write(
         ctx.truth_root / "reports" / "safety_state_authority_v1" / ctx.day_utc / "safety_state_authority.v1.json",
-        {"day_utc": ctx.day_utc, "status": "BLOCKED", "canonical_blocker": "NAV_INVALID"},
+        {"day_utc": ctx.day_utc, "status": "BLOCKED", "canonical_blocker": "NAV_INVALID", **_artifact_meta(ctx)},
     )
     _write(
         ctx.truth_root / "reports" / "startup_materialization_input_convergence_v1" / ctx.day_utc / "startup_materialization_input_convergence.v1.json",
-        {"day_utc": ctx.day_utc, "status": "BLOCKED", "canonical_blocker": "CASH_LEDGER_SNAPSHOT_V1_MISSING"},
+        {"day_utc": ctx.day_utc, "status": "BLOCKED", "canonical_blocker": "CASH_LEDGER_SNAPSHOT_V1_MISSING", **_artifact_meta(ctx)},
     )
     _write(
         ctx.truth_root / "reports" / "trading_day_intent_generation_v1" / ctx.day_utc / "trading_day_intent_generation.v1.json",
-        {"day_utc": ctx.day_utc, "status": "BLOCKED", "canonical_blocker": "MISSING_REQUIRED_INPUTS"},
+        {"day_utc": ctx.day_utc, "status": "BLOCKED", "canonical_blocker": "MISSING_REQUIRED_INPUTS", **_artifact_meta(ctx)},
     )
     _write(
         ctx.truth_root / "reports" / "trading_day_readiness_authority_v1" / ctx.day_utc / "trading_day_readiness_authority.v1.json",
-        {"day_utc": ctx.day_utc, "status": "BLOCKED", "canonical_blocker": "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE"},
+        {"day_utc": ctx.day_utc, "status": "BLOCKED", "canonical_blocker": "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE", **_artifact_meta(ctx)},
     )
 
     payload = cp.build_control_plane_v1(ctx)

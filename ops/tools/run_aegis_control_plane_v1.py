@@ -40,6 +40,15 @@ SESSION_IDENTITY_FORBIDDEN_DEPENDENCIES = {
     "submit_boundary_status_v1",
     "execution_evidence_v1",
 }
+SESSION_IDENTITY_ALLOWED_DEPENDENCIES = {
+    "active_session_v1",
+    "target_day_build_v1",
+    "target_day_admission_v1",
+    "session_promotion_decision_v1",
+    "paper_session_authority_v1",
+    "paper_session_bootstrap_v1",
+    "market_calendar_day",
+}
 SESSION_IDENTITY_FORBIDDEN_BLOCKERS = {
     "IB_DISCONNECTED",
     "BROKER_ACCOUNT_SUMMARY_MISSING",
@@ -138,7 +147,6 @@ def _validate_readiness_domain_registry_v1(domains: list[dict[str, Any]]) -> Non
             for key in (
                 "expected_path",
                 "artifact_path",
-                "schema_path",
                 "producer_command",
                 "governed_producer",
                 "recovery_action",
@@ -151,7 +159,20 @@ def _validate_readiness_domain_registry_v1(domains: list[dict[str, Any]]) -> Non
                 raise RuntimeError(f"READINESS_DEPENDENCY_ARTIFACT_PATH_MISMATCH:{dependency_id}")
             if str(dep.get("governed_producer") or "").strip() != str(dep.get("producer_command") or "").strip():
                 raise RuntimeError(f"READINESS_DEPENDENCY_PRODUCER_MISMATCH:{dependency_id}")
+            schema_path = str(dep.get("schema_path") or "").strip()
+            schema_exempt = dep.get("schema_exempt") is True
+            if schema_exempt:
+                if not str(dep.get("schema_exempt_reason") or "").strip():
+                    raise RuntimeError(f"READINESS_DEPENDENCY_SCHEMA_EXEMPTION_REASON_MISSING:{dependency_id}")
+            elif not schema_path:
+                raise RuntimeError(f"READINESS_DEPENDENCY_CONTRACT_INCOMPLETE:{dependency_id}:schema_path")
+            elif not (REPO_ROOT / schema_path).exists():
+                raise RuntimeError(f"READINESS_DEPENDENCY_SCHEMA_PATH_MISSING:{dependency_id}:{schema_path}")
+            if dep.get("metadata_exempt") is True and not str(dep.get("metadata_exempt_reason") or "").strip():
+                raise RuntimeError(f"READINESS_DEPENDENCY_METADATA_EXEMPTION_REASON_MISSING:{dependency_id}")
             if owner == "SESSION_IDENTITY":
+                if dependency_id not in SESSION_IDENTITY_ALLOWED_DEPENDENCIES:
+                    raise RuntimeError(f"SESSION_IDENTITY_DEPENDENCY_NOT_ALLOWLISTED:{dependency_id}")
                 if dependency_id in SESSION_IDENTITY_FORBIDDEN_DEPENDENCIES:
                     raise RuntimeError(f"SESSION_IDENTITY_FORBIDDEN_DEPENDENCY:{dependency_id}")
                 owned_codes = {str(code).strip() for code in (dep.get("blocker_codes_owned") or []) if str(code or "").strip()}
@@ -253,6 +274,7 @@ def _artifact_metadata_issue_v1(
     ctx: Any,
     dependency_id: str,
     require_producer_metadata: bool = False,
+    allowed_truth_roots: list[Path] | None = None,
 ) -> tuple[str, str]:
     producer_contract = payload.get("producer_contract_v1") if isinstance(payload.get("producer_contract_v1"), dict) else {}
     producer = payload.get("producer") if isinstance(payload.get("producer"), dict) else {}
@@ -277,11 +299,13 @@ def _artifact_metadata_issue_v1(
         or _nested_get(payload, ("truth_roots", "canonical_truth_root"))
         or _nested_get(payload, ("truth_roots", "truth_root"))
     )
+    if require_producer_metadata and not truth_root:
+        return "TRUTH_ROOT_METADATA_MISSING", f"{dependency_id} has no truth-root metadata"
     if truth_root:
         observed = Path(truth_root).expanduser().resolve()
-        expected = Path(ctx.truth_root).expanduser().resolve()
-        if observed != expected:
-            return "TRUTH_ROOT_MISMATCH", f"artifact_truth_root={observed} evaluated_truth_root={expected}"
+        allowed = [Path(root).expanduser().resolve() for root in (allowed_truth_roots or [Path(ctx.truth_root)])]
+        if observed not in allowed:
+            return "TRUTH_ROOT_MISMATCH", f"artifact_truth_root={observed} evaluated_truth_roots={','.join(str(root) for root in allowed)}"
     runtime_root = str(payload.get("runtime_root") or "").strip() or _nested_get(payload, ("truth_roots", "runtime_root"))
     if runtime_root:
         observed_runtime = Path(runtime_root).expanduser().resolve()
@@ -553,11 +577,23 @@ def _generic_dependency_result(dep: dict[str, Any], ctx: Any) -> dict[str, Any]:
             path=path,
         )
     payload = _read_json(path) if path.is_file() else {}
-    if payload:
+    require_metadata = bool(dep.get("required") is True and dep.get("metadata_exempt") is not True)
+    allowed_roots = [Path(ctx.truth_root)]
+    try:
+        resolved_path = path.resolve()
+        for root in (Path(ctx.operator_input_root), Path(ctx.execution_root)):
+            if resolved_path == root.resolve() or root.resolve() in resolved_path.parents:
+                allowed_roots = [root]
+                break
+    except Exception:
+        pass
+    if payload or require_metadata:
         metadata_blocker, metadata_detail = _artifact_metadata_issue_v1(
             payload=payload,
             ctx=ctx,
             dependency_id=dependency_id,
+            require_producer_metadata=require_metadata,
+            allowed_truth_roots=allowed_roots,
         )
         if metadata_blocker:
             return _dependency_result(dep=dep, ctx=ctx, status="STALE", blocker=metadata_blocker, detail=metadata_detail, path=path)

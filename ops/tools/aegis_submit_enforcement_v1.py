@@ -159,12 +159,14 @@ def evaluate_submit_enforcement_v1(
     day = str(day_utc).strip()
     mode = runtime_mode_from_truth_root_v1(truth, runtime_mode)
     paths = {
+        "control_plane": _report_path(truth, "aegis_control_plane_v1", day, "control_plane.v1.json"),
         "day_run": _report_path(truth, "aegis_day_run_v1", day, "day_run.v1.json"),
         "submit_boundary": _report_path(truth, "submit_boundary_status_v1", day, "submit_boundary_status.v1.json"),
         "action_validity": _report_path(truth, "action_validity_v1", day, "action_validity.v1.json"),
         "truth_freshness": _report_path(truth, "truth_freshness_v1", day, "truth_freshness.v1.json"),
         "kill_switch": (execution / "risk_v1" / "kill_switch_v1" / day / "global_kill_switch_state.v1.json").resolve(),
     }
+    control_plane = _read_json(paths["control_plane"])
     ledger = _read_json(paths["day_run"])
     boundary = _read_json(paths["submit_boundary"])
     action_validity = _read_json(paths["action_validity"])
@@ -212,6 +214,19 @@ def evaluate_submit_enforcement_v1(
                     "promoted_commit": promoted_commit,
                 }
             )
+
+    control_final_status = str(control_plane.get("final_status") or "").strip().upper()
+    control_submit_allowed = control_plane.get("submit_allowed") is True
+    if control_final_status != "READY" or not control_submit_allowed:
+        blockers.append(
+            {
+                "code": "CONTROL_PLANE_NOT_READY",
+                "path": str(paths["control_plane"]),
+                "final_status": control_final_status or "MISSING",
+                "submit_allowed": str(control_submit_allowed),
+                "canonical_blocker": str(control_plane.get("canonical_blocker") or ""),
+            }
+        )
 
     final_status = str(ledger.get("final_status") or "").strip().upper()
     if final_status not in READY_FINAL_STATUSES or str(ledger.get("canonical_blocker") or "").strip():
