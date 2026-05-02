@@ -7,13 +7,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
-from constellation_2.common.capital.constants_v1 import CASHFLOW_SCENARIOS_V1
 from constellation_2.common.configuration_activation_authority_v1 import (
     POLICY_SNAPSHOT_ARTIFACT_ID,
     POLICY_SNAPSHOT_SCHEMA,
     REQUIRED_GOVERNANCE_UTILITY_RELPATHS,
     WRITER_ID,
     run_configuration_activation_authority_v1,
+)
+from constellation_2.common.configuration_catalog_v1 import (
+    CATALOG_PATH,
+    build_active_configuration_v1,
+    catalog_entries_by_key_v1,
+    default_catalog_values_v1,
+    load_configuration_catalog_v1,
+    validate_catalog_values_v1,
+    write_active_configuration_artifacts_v1,
 )
 from constellation_2.common.configuration_activation_family_validator_v1 import (
     ConfigurationActivationFamilyValidationError,
@@ -53,15 +61,19 @@ LIFECYCLE_REJECTED = "REJECTED"
 VALIDATION_PASS = "PASS"
 VALIDATION_FAIL = "FAIL"
 
-HORIZON_MONTHS_MIN = 1
-HORIZON_MONTHS_MAX = 120
-
-EDITABLE_FIELD_NAMES = (
+REQUIRED_FIELD_NAMES = (
     "scenario",
     "include_inheritance",
     "horizon_months",
     "start_month",
 )
+EDITABLE_FIELD_NAMES = (
+    *tuple(catalog_entries_by_key_v1().keys()),
+)
+ADVISORY_FIELD_NAMES = ("operator_parameters",)
+LEGACY_PARAMETER_ALIASES = {
+    "portfolio_headroom_multiplier_bp": "discovery_headroom_multiplier_bp",
+}
 
 LOCKED_FIELD_ROWS = (
     {
@@ -230,7 +242,13 @@ def _extract_proposed_values(payload: Mapping[str, Any]) -> Dict[str, Any]:
         source = dict(candidate)
     else:
         source = dict(payload)
-    missing = [field for field in EDITABLE_FIELD_NAMES if field not in source]
+    values: Dict[str, Any] = {}
+    for raw_key, value in source.items():
+        key = LEGACY_PARAMETER_ALIASES.get(str(raw_key), str(raw_key))
+        if key in ADVISORY_FIELD_NAMES:
+            continue
+        values[key] = value
+    missing = [field for field in REQUIRED_FIELD_NAMES if field not in values]
     if missing:
         raise ConfigurationWorkflowApiError(
             "Draft payload is missing required capital-cashflow fields.",
@@ -238,7 +256,7 @@ def _extract_proposed_values(payload: Mapping[str, Any]) -> Dict[str, Any]:
             reason_codes=["CONFIGURATION_DRAFT_FIELDS_MISSING"],
             details={"missing_fields": missing},
         )
-    return {field: source.get(field) for field in EDITABLE_FIELD_NAMES}
+    return values
 
 
 def _validate_start_month(text: str) -> bool:
@@ -249,49 +267,68 @@ def _validate_start_month(text: str) -> bool:
     return True
 
 
-def _validate_values(values: Mapping[str, Any]) -> tuple[Dict[str, Any], list[str]]:
+def _normalize_operator_parameters(value: Any) -> tuple[list[dict[str, str]], list[str]]:
+    if value in (None, ""):
+        return [], []
+    if not isinstance(value, list):
+        return [], ["OPERATOR_PARAMETERS_MUST_BE_ARRAY"]
+
+    rows: list[dict[str, str]] = []
     reason_codes: list[str] = []
-    normalized: Dict[str, Any] = {}
+    seen: set[str] = set()
+    if len(value) > 50:
+        reason_codes.append("OPERATOR_PARAMETERS_TOO_MANY")
+    for raw in value[:50]:
+        if not isinstance(raw, Mapping):
+            reason_codes.append("OPERATOR_PARAMETER_ROW_MUST_BE_OBJECT")
+            continue
+        parameter_name = str(raw.get("parameter_name") or "").strip()
+        value_text = str(raw.get("value_text") or "").strip()
+        value_kind = str(raw.get("value_kind") or "text").strip().lower() or "text"
+        notes = str(raw.get("notes") or "").strip()
+        if not parameter_name:
+            reason_codes.append("OPERATOR_PARAMETER_NAME_REQUIRED")
+            continue
+        if len(parameter_name) > 128 or not all(ch.isalnum() or ch in "._:-/" for ch in parameter_name):
+            reason_codes.append("OPERATOR_PARAMETER_NAME_INVALID")
+            continue
+        if parameter_name in seen:
+            reason_codes.append("OPERATOR_PARAMETER_NAME_DUPLICATE")
+            continue
+        if not value_text:
+            reason_codes.append("OPERATOR_PARAMETER_VALUE_REQUIRED")
+            continue
+        if len(value_text) > 512:
+            reason_codes.append("OPERATOR_PARAMETER_VALUE_TOO_LONG")
+            continue
+        if value_kind not in {"text", "number", "money", "boolean", "percent", "json"}:
+            reason_codes.append("OPERATOR_PARAMETER_VALUE_KIND_INVALID")
+            continue
+        if len(notes) > 512:
+            reason_codes.append("OPERATOR_PARAMETER_NOTES_TOO_LONG")
+            continue
+        seen.add(parameter_name)
+        rows.append(
+            {
+                "parameter_name": parameter_name,
+                "value_text": value_text,
+                "value_kind": value_kind,
+                "notes": notes,
+            }
+        )
+    rows.sort(key=lambda item: item["parameter_name"])
+    return rows, reason_codes
 
-    scenario = values.get("scenario")
-    scenario_text = str(scenario or "").strip().lower()
-    if scenario_text not in CASHFLOW_SCENARIOS_V1:
-        reason_codes.append("CAPITAL_CASHFLOW_SCENARIO_INVALID")
-    else:
-        normalized["scenario"] = scenario_text
 
-    include_inheritance = values.get("include_inheritance")
-    if not isinstance(include_inheritance, bool):
-        reason_codes.append("CAPITAL_CASHFLOW_INCLUDE_INHERITANCE_MUST_BE_BOOL")
-    else:
-        normalized["include_inheritance"] = include_inheritance
-
-    horizon_raw = values.get("horizon_months")
-    if isinstance(horizon_raw, bool) or not isinstance(horizon_raw, int):
-        reason_codes.append("CAPITAL_CASHFLOW_HORIZON_MONTHS_MUST_BE_INTEGER")
-    else:
-        if horizon_raw < HORIZON_MONTHS_MIN or horizon_raw > HORIZON_MONTHS_MAX:
-            reason_codes.append("CAPITAL_CASHFLOW_HORIZON_MONTHS_OUT_OF_RANGE")
-        else:
-            normalized["horizon_months"] = int(horizon_raw)
-
-    start_month = values.get("start_month")
-    start_month_text = str(start_month or "").strip()
-    if not start_month_text or not _validate_start_month(start_month_text):
-        reason_codes.append("CAPITAL_CASHFLOW_START_MONTH_INVALID_FORMAT")
-    else:
-        normalized["start_month"] = start_month_text
-
-    return normalized, sorted(set(reason_codes))
+def _validate_values(values: Mapping[str, Any]) -> tuple[Dict[str, Any], list[str]]:
+    validation = validate_catalog_values_v1(values, environment="PAPER", approval_status="VALIDATED")
+    return dict(validation.normalized_values), list(validation.reason_codes)
 
 
 def _fallback_values() -> Dict[str, Any]:
-    return {
-        "scenario": "florida",
-        "include_inheritance": False,
-        "horizon_months": 24,
-        "start_month": datetime.now(timezone.utc).strftime("%Y-%m"),
-    }
+    values = default_catalog_values_v1(environment="PAPER")
+    values["start_month"] = datetime.now(timezone.utc).strftime("%Y-%m")
+    return values
 
 
 def _source_document_path(*, truth_root: Path, draft_id: str) -> Path:
@@ -479,39 +516,37 @@ def resolve_effective_capital_cashflow_inputs_v1() -> Dict[str, Any]:
 
 
 def build_configuration_catalog_v1() -> Dict[str, Any]:
+    catalog = load_configuration_catalog_v1()
     editable_fields = [
         {
-            "parameter_name": "capital_cashflow.scenario",
+            "parameter_name": str(row["parameter_key"]),
+            "parameter_key": str(row["parameter_key"]),
+            "display_name": str(row["display_name"]),
             "state": "editable",
-            "owning_domain": "capital_cashflow",
-            "required": True,
-            "validation": {"enum": list(CASHFLOW_SCENARIOS_V1)},
-            "reason": "Low-risk scenario selector for deterministic projection.",
-        },
-        {
-            "parameter_name": "capital_cashflow.include_inheritance",
-            "state": "editable",
-            "owning_domain": "capital_cashflow",
-            "required": True,
-            "validation": {"type": "boolean"},
-            "reason": "Explicit deterministic vs nondeterministic projection toggle.",
-        },
-        {
-            "parameter_name": "capital_cashflow.horizon_months",
-            "state": "editable",
-            "owning_domain": "capital_cashflow",
-            "required": True,
-            "validation": {"type": "integer", "minimum": HORIZON_MONTHS_MIN, "maximum": HORIZON_MONTHS_MAX},
-            "reason": "Projection horizon control with bounded safety range.",
-        },
-        {
-            "parameter_name": "capital_cashflow.start_month",
-            "state": "editable",
-            "owning_domain": "capital_cashflow",
-            "required": True,
-            "validation": {"format": "YYYY-MM"},
-            "reason": "Projection anchor month, validated against backend-supported month format.",
-        },
+            "owning_domain": str(row["owner_domain"]),
+            "owner_domain": str(row["owner_domain"]),
+            "required": "required" in list(row.get("validation_rules") or []),
+            "type": str(row["type"]),
+            "default_value": row.get("default_value"),
+            "allowed_values": list(row.get("allowed_values") or []),
+            "minimum": row.get("min"),
+            "maximum": row.get("max"),
+            "environment_scope": list(row.get("environment_scope") or []),
+            "target_policy_artifact": str(row["target_policy_artifact"]),
+            "target_field_path": str(row["target_field_path"]),
+            "requires_approval": bool(row["requires_approval"]),
+            "effective_from": str(row["effective_from"]),
+            "validation_rules": list(row.get("validation_rules") or []),
+            "validation": {
+                "type": str(row["type"]),
+                "allowed_values": list(row.get("allowed_values") or []),
+                "minimum": row.get("min"),
+                "maximum": row.get("max"),
+                "rules": list(row.get("validation_rules") or []),
+            },
+            "reason": str(row["description"]),
+        }
+        for row in catalog["parameters"]
     ]
     coverage_rows = [
         {
@@ -533,7 +568,9 @@ def build_configuration_catalog_v1() -> Dict[str, Any]:
     )
     return {
         "ok": True,
-        "catalog_id": "aegis_configuration_catalog_v1",
+        "catalog_id": str(catalog.get("catalog_id") or "aegis_operator_configuration_catalog_v1"),
+        "catalog_path": str(CATALOG_PATH),
+        "catalog_sha256": sha256_file_v1(CATALOG_PATH),
         "generated_utc": _utc_now_iso(),
         "lifecycle": [
             LIFECYCLE_DRAFT,
@@ -543,6 +580,7 @@ def build_configuration_catalog_v1() -> Dict[str, Any]:
             LIFECYCLE_SUPERSEDED,
             LIFECYCLE_REJECTED,
         ],
+        "parameters": editable_fields,
         "editable_fields": editable_fields,
         "locked_fields": [dict(row) for row in LOCKED_FIELD_ROWS],
         "coverage": coverage_rows,
@@ -563,20 +601,64 @@ def build_configuration_current_v1() -> Dict[str, Any]:
     }
 
 
+def _active_configuration_current() -> dict[str, Any] | None:
+    path = (_truth_root() / "active_configuration_v1" / "current.json").resolve()
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _diff_values(current_values: Mapping[str, Any], proposed_values: Mapping[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for field in sorted(proposed_values.keys()):
+        if current_values.get(field) != proposed_values.get(field):
+            rows.append(
+                {
+                    "field": field,
+                    "current_value": current_values.get(field),
+                    "proposed_value": proposed_values.get(field),
+                }
+            )
+    return rows
+
+
 def create_configuration_draft_v1(payload: Any) -> Dict[str, Any]:
     request = _ensure_payload_object(payload)
     values = _extract_proposed_values(request)
+    advisory_unmapped_parameters, advisory_reason_codes = _normalize_operator_parameters(
+        request.get("operator_parameters"),
+    )
+    if advisory_reason_codes:
+        raise ConfigurationWorkflowApiError(
+            "Advisory operator parameters are invalid.",
+            status_code=400,
+            reason_codes=advisory_reason_codes,
+        )
+    active_configuration = _active_configuration_current() or {}
+    config_version_base = str(active_configuration.get("config_version") or "NO_ACTIVE_CONFIGURATION")
+    current_values = dict(build_configuration_current_v1().get("current_values") or {})
+    diff_from_active = _diff_values(current_values, values)
     now = _utc_now_iso()
     draft_id = f"cfgdraft_{uuid.uuid4().hex}"
     draft = {
         "schema_id": DRAFT_SCHEMA_ID,
         "schema_version": "v1",
         "draft_id": draft_id,
+        "config_version_base": config_version_base,
         "domain": "capital_cashflow",
         "status": LIFECYCLE_DRAFT,
+        "created_by": str(request.get("created_by") or "operator"),
+        "created_at": now,
         "created_at_utc": now,
         "updated_at_utc": now,
         "proposed_values": dict(values),
+        "advisory_unmapped_parameters": advisory_unmapped_parameters,
+        "diff_from_active": diff_from_active,
+        "validation_status": "NOT_VALIDATED",
         "validation": None,
         "review": None,
         "activation": None,
@@ -612,7 +694,9 @@ def validate_configuration_draft_v1(draft_id: str) -> Dict[str, Any]:
             reason_codes=["CONFIGURATION_DRAFT_VALUES_MISSING"],
             details={"draft_id": draft_id},
         )
-    normalized, reason_codes = _validate_values(proposed)
+    catalog_validation = validate_catalog_values_v1(proposed, environment="PAPER", approval_status="VALIDATED")
+    normalized = dict(catalog_validation.normalized_values)
+    reason_codes = list(catalog_validation.reason_codes)
     validation_status = VALIDATION_PASS if not reason_codes else VALIDATION_FAIL
     draft["validation"] = {
         "validated_at_utc": _utc_now_iso(),
@@ -620,7 +704,9 @@ def validate_configuration_draft_v1(draft_id: str) -> Dict[str, Any]:
         "reason_codes": list(reason_codes),
         "blocking_reason_codes": list(reason_codes),
         "normalized_values": dict(normalized) if validation_status == VALIDATION_PASS else None,
+        "parameter_refs_used": list(catalog_validation.parameter_refs_used),
     }
+    draft["validation_status"] = validation_status
     draft["status"] = LIFECYCLE_VALIDATED if validation_status == VALIDATION_PASS else LIFECYCLE_DRAFT
     draft["updated_at_utc"] = _utc_now_iso()
     _append_lifecycle_event(
@@ -739,14 +825,19 @@ def activate_configuration_draft_v1(draft_id: str) -> Dict[str, Any]:
         )
 
     normalized_values = dict(validation.get("normalized_values") or {})
-    _, reason_codes = _validate_values(normalized_values)
-    if reason_codes:
+    activation_validation = validate_catalog_values_v1(
+        normalized_values,
+        environment="PAPER",
+        approval_status="ACTIVATED",
+    )
+    if activation_validation.reason_codes:
         raise ConfigurationWorkflowApiError(
             "Activation failed due to invalid normalized values.",
             status_code=409,
-            reason_codes=["CONFIGURATION_ACTIVATE_VALUES_INVALID", *reason_codes],
+            reason_codes=["CONFIGURATION_ACTIVATE_VALUES_INVALID", *activation_validation.reason_codes],
             details={"draft_id": draft_id},
         )
+    normalized_values = dict(activation_validation.normalized_values)
 
     effective_at_utc = _utc_now_iso()
     truth_root = _truth_root()
@@ -755,9 +846,16 @@ def activate_configuration_draft_v1(draft_id: str) -> Dict[str, Any]:
         "schema_id": SOURCE_DOCUMENT_SCHEMA_ID,
         "schema_version": "v1",
         "draft_id": draft_id,
+        "config_version_base": str(draft.get("config_version_base") or "NO_ACTIVE_CONFIGURATION"),
         "domain": "capital_cashflow",
         "generated_at_utc": effective_at_utc,
         "values": normalized_values,
+        "advisory_unmapped_parameters": list(draft.get("advisory_unmapped_parameters") or []),
+        "catalog_ref": {
+            "path": str(CATALOG_PATH),
+            "sha256": sha256_file_v1(CATALOG_PATH),
+        },
+        "parameter_refs_used": list(activation_validation.parameter_refs_used),
     }
     _write_json_dict(source_document_path, source_document_payload)
     policy_snapshot_path = _write_policy_snapshot(
@@ -791,10 +889,30 @@ def activate_configuration_draft_v1(draft_id: str) -> Dict[str, Any]:
             details={"draft_id": draft_id},
         )
 
+    active_configuration = build_active_configuration_v1(
+        config_version_base=str(draft.get("config_version_base") or "NO_ACTIVE_CONFIGURATION"),
+        proposed_values=normalized_values,
+        approved_diff=list(review.get("changed_fields") or []),
+        activated_by=str(draft.get("created_by") or "operator"),
+        truth_root=truth_root,
+        runtime_root=_runtime_root(),
+        prior_config_version=None
+        if str(draft.get("config_version_base") or "") == "NO_ACTIVE_CONFIGURATION"
+        else str(draft.get("config_version_base") or ""),
+    )
+    active_artifacts = write_active_configuration_artifacts_v1(
+        active_configuration=active_configuration,
+        truth_root=truth_root,
+    )
+
     superseded_ids = _mark_superseded_activated_drafts(activated_draft_id=draft_id)
     draft["activation"] = {
         "activated_at_utc": _utc_now_iso(),
         "status": LIFECYCLE_ACTIVATED,
+        "config_version": str(active_configuration["config_version"]),
+        "active_configuration_path": str(active_artifacts["active_configuration_path"]),
+        "active_configuration_current_path": str(active_artifacts["active_configuration_current_path"]),
+        "materialized_policy_refs": list(active_artifacts["materialized_policy_refs"]),
         "policy_snapshot_path": str(activation_result.policy_snapshot_ref.path),
         "validation_result_path": str(activation_result.validation_result_ref.path),
         "compiled_active_config_path": str(activation_result.compiled_active_config_ref.path),

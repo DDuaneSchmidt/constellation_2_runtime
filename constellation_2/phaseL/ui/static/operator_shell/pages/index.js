@@ -2849,6 +2849,46 @@ function _configFieldValue(proposed, current, name, fallback) {
   return fallback;
 }
 
+function _operatorParametersToText(rows = []) {
+  return safeList(rows).map((row) => {
+    const name = inlineText(row.parameter_name);
+    const value = inlineText(row.value_text);
+    return name && value ? `${name} = ${value}` : "";
+  }).filter(Boolean).join("\n");
+}
+
+function _renderConfigurationCatalogInput(row, proposedValues, currentValues) {
+  const key = inlineText(row.parameter_key || row.parameter_name);
+  const label = inlineText(row.display_name || row.parameter_name || key);
+  const type = inlineText(row.type || row.validation?.type || "text");
+  const value = _configFieldValue(proposedValues, currentValues, key, row.default_value ?? "");
+  const escapedValue = escapeHtml(String(value ?? ""));
+  const minAttr = row.minimum !== undefined && row.minimum !== null ? ` min="${escapeHtml(String(row.minimum))}"` : "";
+  const maxAttr = row.maximum !== undefined && row.maximum !== null ? ` max="${escapeHtml(String(row.maximum))}"` : "";
+  if (type === "boolean") {
+    return `<div class="line-list">
+      <label>
+        <input type="checkbox" name="${escapeHtml(key)}" value="true" ${Boolean(value) ? "checked" : ""} />
+        ${escapeHtml(label)}
+      </label>
+    </div>`;
+  }
+  if (type === "enum") {
+    return `<div class="line-list">
+      <label for="cfg_${escapeHtml(key)}">${escapeHtml(label)}</label>
+      <select id="cfg_${escapeHtml(key)}" name="${escapeHtml(key)}">
+        ${safeList(row.allowed_values).map((item) => `<option value="${escapeHtml(String(item))}" ${String(item) === String(value) ? "selected" : ""}>${escapeHtml(String(item))}</option>`).join("")}
+      </select>
+    </div>`;
+  }
+  const inputType = type === "integer" ? "number" : type === "month" ? "month" : "text";
+  const stepAttr = type === "integer" ? ` step="1"` : "";
+  return `<div class="line-list">
+    <label for="cfg_${escapeHtml(key)}">${escapeHtml(label)}</label>
+    <input id="cfg_${escapeHtml(key)}" name="${escapeHtml(key)}" type="${inputType}"${minAttr}${maxAttr}${stepAttr} value="${escapedValue}" />
+  </div>`;
+}
+
 async function renderConfigurationPage(state) {
   const [catalog, current] = await Promise.all([
     fetchConfigurationCatalog(),
@@ -2874,6 +2914,7 @@ async function renderConfigurationPage(state) {
 
   const currentValues = current.current_values || {};
   const proposedValues = draft?.proposed_values || {};
+  const catalogFields = safeList(catalog.editable_fields);
   const scenario = String(
     _configFieldValue(proposedValues, currentValues, "scenario", "florida") || "florida",
   ).toLowerCase();
@@ -2886,6 +2927,13 @@ async function renderConfigurationPage(state) {
   const startMonth = String(
     _configFieldValue(proposedValues, currentValues, "start_month", ""),
   );
+  const operatorParameters = safeList(draft?.advisory_unmapped_parameters || []);
+  const operatorParametersText = _operatorParametersToText(operatorParameters);
+  const currentCatalogRows = catalogFields.map((row) => ({
+    parameter: row.display_name || row.parameter_key,
+    value: String(currentValues[row.parameter_key] ?? row.default_value ?? "n/a"),
+    owner: row.owner_domain || row.owning_domain || "",
+  }));
   const canRunDraftActions = Boolean(draft?.draft_id);
   const disableDraftAction = canRunDraftActions ? "" : "disabled";
   const validation = draft?.validation || {};
@@ -2907,40 +2955,53 @@ async function renderConfigurationPage(state) {
           { label: "Include inheritance", value: String(Boolean(currentValues.include_inheritance)) },
           { label: "Horizon (months)", value: String(currentValues.horizon_months ?? "n/a") },
           { label: "Start month", value: String(currentValues.start_month || "n/a") },
+          { label: "Catalog path", value: catalog.catalog_path || "n/a" },
           { label: "Reason codes", value: safeList(current.reason_codes).join(", ") || "none" },
         ]),
       }),
       renderCardSection({
+        eyebrow: "Catalog",
+        title: "Editable Catalog Values",
+        subtitle: "Only parameters present in the governed catalog can be drafted and activated.",
+        body: renderSimpleTable({
+          columns: [
+            { key: "parameter", label: "Parameter" },
+            { key: "value", label: "Current value" },
+            { key: "owner", label: "Owner" },
+          ],
+          rows: currentCatalogRows,
+          emptyMessage: "No editable catalog parameters are available.",
+        }),
+      }),
+      renderCardSection({
         eyebrow: "Draft",
-        title: "Capital Cashflow Draft Editor",
+        title: "Catalog Draft Editor",
         subtitle: "Draft writes are non-authoritative until validation, review, and activation succeed.",
         body: `
           <form class="configuration-workflow-form" autocomplete="off">
             <input type="hidden" name="configuration_action" value="create_draft" />
+            ${catalogFields.map((row) => _renderConfigurationCatalogInput(row, proposedValues, currentValues)).join("")}
             <div class="line-list">
-              <label for="cfg_scenario">Scenario</label>
-              <select id="cfg_scenario" name="scenario">
-                ${safeList(catalog.editable_fields?.find((item) => item.parameter_name === "capital_cashflow.scenario")?.validation?.enum || ["florida", "chile", "base"])
-                  .map((item) => `<option value="${escapeHtml(String(item))}" ${String(item) === scenario ? "selected" : ""}>${escapeHtml(String(item))}</option>`).join("")}
-              </select>
-            </div>
-            <div class="line-list">
-              <label>
-                <input type="checkbox" name="include_inheritance" value="true" ${includeInheritance ? "checked" : ""} />
-                Include inheritance
-              </label>
-            </div>
-            <div class="line-list">
-              <label for="cfg_horizon_months">Horizon (months)</label>
-              <input id="cfg_horizon_months" name="horizon_months" type="number" min="1" max="120" step="1" value="${escapeHtml(horizonMonths)}" />
-            </div>
-            <div class="line-list">
-              <label for="cfg_start_month">Start month</label>
-              <input id="cfg_start_month" name="start_month" type="month" value="${escapeHtml(startMonth)}" />
+              <label for="cfg_operator_parameters">Operator parameters</label>
+              <textarea id="cfg_operator_parameters" name="operator_parameters_text" rows="6" placeholder="parameter.name = value">${escapeHtml(operatorParametersText)}</textarea>
             </div>
             <button type="submit">Create Draft</button>
           </form>
         `,
+      }),
+      renderCardSection({
+        eyebrow: "Captured",
+        title: "Operator Configuration Parameters",
+        subtitle: "Draft-captured parameters are audited in the configuration source document.",
+        body: renderSimpleTable({
+          columns: [
+            { key: "parameter_name", label: "Parameter" },
+            { key: "value_kind", label: "Kind" },
+            { key: "value_text", label: "Value" },
+          ],
+          rows: operatorParameters,
+          emptyMessage: "No operator parameters are captured in the current draft/context.",
+        }),
       }),
       renderCardSection({
         eyebrow: "Lifecycle",
@@ -4681,16 +4742,18 @@ export async function executeConfigurationWorkflow(formData, state) {
   let result;
 
   if (action === "create_draft") {
-    const scenario = String(formData?.get("scenario") || "florida").toLowerCase();
-    const includeInheritance = ["1", "true", "yes", "on"].includes(String(formData?.get("include_inheritance") || "").toLowerCase());
-    const horizonRaw = String(formData?.get("horizon_months") || "").trim();
-    const horizonMonths = Number.parseInt(horizonRaw, 10);
-    const startMonth = String(formData?.get("start_month") || "").trim();
+    const catalog = await fetchConfigurationCatalog();
+    const payload = {};
+    safeList(catalog.editable_fields).forEach((row) => {
+      const key = String(row.parameter_key || row.parameter_name || "").trim();
+      if (!key) {
+        return;
+      }
+      payload[key] = _parseConfigurationCatalogValue(formData?.get(key), row);
+    });
     result = await createConfigurationDraft({
-      scenario,
-      include_inheritance: includeInheritance,
-      horizon_months: Number.isFinite(horizonMonths) ? horizonMonths : null,
-      start_month: startMonth,
+      ...payload,
+      operator_parameters: _parseOperatorParameters(formData?.get("operator_parameters_text")),
     });
   } else if (action === "validate_draft") {
     result = await validateConfigurationDraft(draftId);
@@ -4735,6 +4798,57 @@ function _parseJsonInput(raw, fallback) {
   } catch {
     return fallback;
   }
+}
+
+function _operatorParameterValueKind(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "text";
+  }
+  if (text.startsWith("$")) {
+    return "money";
+  }
+  if (text.endsWith("%")) {
+    return "percent";
+  }
+  if (["true", "false"].includes(text.toLowerCase())) {
+    return "boolean";
+  }
+  if ((text.startsWith("{") && text.endsWith("}")) || (text.startsWith("[") && text.endsWith("]"))) {
+    return "json";
+  }
+  return Number.isFinite(Number(text)) ? "number" : "text";
+}
+
+function _parseOperatorParameters(raw) {
+  return String(raw || "")
+    .split(/\n/g)
+    .map((line) => String(line || "").trim())
+    .filter(Boolean)
+    .map((line) => {
+      const separatorIndex = line.indexOf("=");
+      const parameterName = separatorIndex >= 0 ? line.slice(0, separatorIndex).trim() : line;
+      const valueText = separatorIndex >= 0 ? line.slice(separatorIndex + 1).trim() : "";
+      return {
+        parameter_name: parameterName,
+        value_kind: _operatorParameterValueKind(valueText),
+        value_text: valueText,
+        notes: "",
+      };
+    })
+    .filter((row) => row.parameter_name && row.value_text);
+}
+
+function _parseConfigurationCatalogValue(raw, row) {
+  const type = String(row?.type || row?.validation?.type || "text").trim();
+  if (type === "boolean") {
+    return ["1", "true", "yes", "on"].includes(String(raw || "").trim().toLowerCase());
+  }
+  if (type === "integer") {
+    const parsed = Number.parseInt(String(raw || "").trim(), 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return String(raw || "").trim();
 }
 
 export async function executeReliabilityWorkflow(formData, state) {

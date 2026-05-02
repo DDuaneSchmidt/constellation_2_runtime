@@ -12,6 +12,11 @@ if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
 import ops.tools.run_liquidity_slippage_gate_v1 as gate_module
+from constellation_2.common.configuration_catalog_v1 import (
+    build_active_configuration_v1,
+    default_catalog_values_v1,
+    write_active_configuration_artifacts_v1,
+)
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -213,6 +218,86 @@ def test_liquidity_gate_replaces_stale_existing_output_when_inputs_change() -> N
         assert row["decision"] == "PASS"
         assert row["metrics"]["close"] == "650.00"
         assert row["metrics"]["nav_total_cents"] == 10000000
+        assert payload["policy"]["config_version_used"] == "STATIC_GOVERNANCE_BASELINE"
+
+
+def test_liquidity_gate_consumes_materialized_active_configuration_policy() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        day_utc = "2026-04-14"
+        _write_market_data(
+            truth_root,
+            symbol="SPY",
+            day_rows=[
+                ("2026-03-26", "638.00"),
+                ("2026-03-27", "639.00"),
+                ("2026-03-30", "640.00"),
+                ("2026-04-01", "641.00"),
+                ("2026-04-02", "642.00"),
+                ("2026-04-03", "643.00"),
+                ("2026-04-06", "644.00"),
+                ("2026-04-07", "645.00"),
+                ("2026-04-08", "646.00"),
+                ("2026-04-09", "647.00"),
+                ("2026-04-10", "650.00"),
+            ],
+        )
+        _write_intent(truth_root, day_utc, target_notional_pct="0.01")
+        _write_nav(truth_root, day_utc, nav_total=100000)
+
+        values = default_catalog_values_v1(environment="PAPER")
+        values["liquidity_max_notional_per_symbol_usd"] = "100"
+        active_configuration = build_active_configuration_v1(
+            config_version_base="NO_ACTIVE_CONFIGURATION",
+            proposed_values=values,
+            approved_diff=[
+                {
+                    "field": "liquidity_max_notional_per_symbol_usd",
+                    "current_value": "25000",
+                    "proposed_value": "100",
+                }
+            ],
+            activated_by="test",
+            truth_root=truth_root,
+            runtime_root=truth_root.parent,
+            prior_config_version=None,
+        )
+        write_active_configuration_artifacts_v1(
+            active_configuration=active_configuration,
+            truth_root=truth_root,
+        )
+
+        with patch.object(gate_module, "_require_supported_truth_root", return_value=truth_root):
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "run_liquidity_slippage_gate_v1.py",
+                    "--day_utc",
+                    day_utc,
+                    "--truth_root",
+                    str(truth_root),
+                ],
+            ):
+                rc = gate_module.main()
+        assert rc == 1
+
+        payload = json.loads(
+            (
+                truth_root
+                / "reports"
+                / "liquidity_slippage_gate_v1"
+                / day_utc
+                / "liquidity_slippage_gate.v1.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert payload["status"] == "FAIL"
+        assert payload["policy"]["config_version_used"] == active_configuration["config_version"]
+        assert payload["policy"]["policy_artifact_used"] == "C2_LIQUIDITY_SLIPPAGE_POLICY_V1"
+        assert {
+            row["parameter_key"] for row in payload["policy"]["parameter_refs_used"]
+        } >= {"liquidity_max_notional_per_symbol_usd"}
+        assert payload["results"]["per_intent"][0]["reason_codes"] == ["LIQPOL_NOTIONAL_EXCEEDS_CAP"]
 
 
 def test_liquidity_gate_skips_zero_cap_non_executable_engines() -> None:

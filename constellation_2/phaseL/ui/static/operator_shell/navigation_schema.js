@@ -14,6 +14,7 @@ export const NAVIGATION_SCHEMA = [
           { id: "command_overview", label: "Overview", icon: "◫", route: "/", truthOwner: "policy_runtime", description: "Command readiness and operating truth." },
           { id: "command_exceptions", label: "Exceptions", icon: "!", route: "/operations", badgeCount: 3, truthOwner: "exception_authority", description: "Active governed exceptions." },
           { id: "command_policy", label: "Policy", icon: "§", route: "/policy", truthOwner: "policy_evolution_state_v1", description: "Policy state and governed changes." },
+          { id: "command_configuration", label: "Configuration", icon: "▣", route: "/configuration", truthOwner: "configuration_activation_authority_v1", description: "Governed draft, validation, review, and activation for editable Aegis parameters." },
           { id: "command_evidence", label: "Evidence", icon: "□", route: "/reports", truthOwner: "evidence_store", description: "Evidence references and report artifacts." },
           { id: "command_decisions", label: "Decisions", icon: "✓", route: "/audit", truthOwner: "decision_log", description: "Governed decision history." },
         ],

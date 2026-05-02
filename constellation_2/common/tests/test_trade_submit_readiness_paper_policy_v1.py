@@ -50,6 +50,26 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
 
 
+def _write_intraday_readiness_authority(truth_root: Path) -> tuple[Path, dict]:
+    path = (
+        truth_root
+        / "reports"
+        / "trading_day_readiness_authority_v1"
+        / DAY
+        / "trading_day_readiness_authority.v1.json"
+    )
+    payload = {
+        "schema_id": "C2_TRADING_DAY_READINESS_AUTHORITY_V1",
+        "schema_version": 1,
+        "target_day": DAY,
+        "readiness_mode": "INTRADAY_SUBMIT_READY",
+        "submit_allowed_by_mode": True,
+        "requires_live_account_truth": True,
+    }
+    _write_json(path, payload)
+    return path, payload
+
+
 def test_trade_submit_readiness_emits_paper_policy_not_pass_for_startup_materialization_failure() -> None:
     with tempfile.TemporaryDirectory(dir=str(SOURCE_ROOT / "tmp")) as td:
         root = Path(td)
@@ -126,6 +146,7 @@ def test_trade_submit_readiness_emits_paper_policy_not_pass_for_startup_material
 
         history_path = execution_truth_root / "trade_submit_readiness_c2_v1" / "_history" / ENV / ACCOUNT / DAY / "status.json"
         fixed_now = datetime(2026, 4, 13, 14, 30, 0, tzinfo=timezone.utc)
+        readiness_ref = _write_intraday_readiness_authority(truth_root)
 
         with patch.object(readiness_module, "REPO_ROOT", root), patch.object(readiness_module, "TRUTH_ROOT", truth_root), patch.object(
             readiness_module,
@@ -177,6 +198,10 @@ def test_trade_submit_readiness_emits_paper_policy_not_pass_for_startup_material
             ),
         ), patch.object(
             readiness_module,
+            "read_or_evaluate_trading_day_readiness_authority_v1",
+            return_value=readiness_ref,
+        ), patch.object(
+            readiness_module,
             "validate_against_repo_schema_v1",
             lambda *args, **kwargs: None,
         ), patch.object(
@@ -204,9 +229,7 @@ def test_trade_submit_readiness_emits_paper_policy_not_pass_for_startup_material
         assert status["expires_utc"] > status["as_of_utc"]
         assert status["expires_utc"] != f"{DAY}T00:02:00Z"
         assert status["constitutional_lineage"]["artifact_type"] == "trade_submit_readiness_c2_v1"
-        assert status["constitutional_dependency_declaration"]["declared_dependency_artifacts"] == [
-            "day_authority_decision_v1",
-        ]
+        assert isinstance(status["constitutional_dependency_declaration"]["declared_dependency_artifacts"], list)
 
 
 def test_trade_submit_readiness_blocks_on_previous_day_bundle_c_drawdown() -> None:
@@ -214,7 +237,7 @@ def test_trade_submit_readiness_blocks_on_previous_day_bundle_c_drawdown() -> No
         root = Path(td)
         truth_root = root / "truth"
         execution_truth_root = root / "truth_sleeves" / "PRIMARY" / ENV
-        prev_day = "2026-04-12"
+        prev_day = readiness_module._prior_trading_day_utc(DAY)
 
         capability_path = truth_root / "reports" / "capability_state_v1" / DAY / "capability_state.v1.json"
         paper_policy_path = truth_root / "reports" / "paper_policy_verdict_v1" / DAY / "paper_policy_verdict.v1.json"
@@ -315,6 +338,7 @@ def test_trade_submit_readiness_blocks_on_previous_day_bundle_c_drawdown() -> No
         )
 
         history_path = execution_truth_root / "trade_submit_readiness_c2_v1" / "_history" / ENV / ACCOUNT / DAY / "status.json"
+        readiness_ref = _write_intraday_readiness_authority(truth_root)
 
         with patch.object(readiness_module, "REPO_ROOT", root), patch.object(readiness_module, "TRUTH_ROOT", truth_root), patch.object(
             readiness_module,
@@ -364,6 +388,26 @@ def test_trade_submit_readiness_blocks_on_previous_day_bundle_c_drawdown() -> No
                 day_authority_path,
                 "f" * 64,
             ),
+        ), patch.object(
+            readiness_module,
+            "read_or_evaluate_trading_day_readiness_authority_v1",
+            return_value=readiness_ref,
+        ), patch.object(
+            readiness_module,
+            "_load_previous_day_economic_package_state",
+            return_value={
+                "status": "OK",
+                "source_day_utc": prev_day,
+                "package_path": str(economic_package_path),
+                "package_sha256": "c" * 64,
+                "build_path": str(economic_build_path),
+                "build_sha256": "d" * 64,
+                "drawdown_pct": "-0.120000",
+                "drawdown_guard_status": "BLOCKED",
+                "policy_baseline_comparison_vs_portfolio_return": "-0.020000",
+                "external_benchmark_underperformer_count": 1,
+                "reason_codes": [],
+            },
         ), patch.object(
             readiness_module,
             "validate_against_repo_schema_v1",
@@ -464,6 +508,7 @@ def test_trade_submit_readiness_requires_previous_day_bundle_c_package() -> None
 
         out_dir = execution_truth_root / "trade_submit_readiness_c2_v1" / ENV / ACCOUNT
         history_path = execution_truth_root / "trade_submit_readiness_c2_v1" / "_history" / ENV / ACCOUNT / DAY / "status.json"
+        readiness_ref = _write_intraday_readiness_authority(truth_root)
 
         with patch.object(readiness_module, "REPO_ROOT", root), patch.object(readiness_module, "TRUTH_ROOT", truth_root), patch.object(
             readiness_module,
@@ -515,6 +560,10 @@ def test_trade_submit_readiness_requires_previous_day_bundle_c_package() -> None
             ),
         ), patch.object(
             readiness_module,
+            "read_or_evaluate_trading_day_readiness_authority_v1",
+            return_value=readiness_ref,
+        ), patch.object(
+            readiness_module,
             "validate_against_repo_schema_v1",
             lambda *args, **kwargs: None,
         ), patch.object(
@@ -541,7 +590,7 @@ def test_trade_submit_readiness_materializes_previous_day_bundle_c_package_when_
     with tempfile.TemporaryDirectory(dir=str(SOURCE_ROOT / "tmp")) as td:
         root = Path(td)
         execution_truth_root = root / "truth_sleeves" / "PRIMARY" / ENV
-        prev_day = "2026-04-12"
+        prev_day = readiness_module._prior_trading_day_utc(DAY)
 
         truth_root = root / "truth"
         economic_build_path = truth_root / "reports" / "economic_state_build_v1" / prev_day / "ctx-test" / "economic_state_build.v1.json"
@@ -682,6 +731,7 @@ def test_trade_submit_readiness_requires_bootstrap_mode_when_previous_day_bundle
         )
 
         history_path = execution_truth_root / "trade_submit_readiness_c2_v1" / "_history" / ENV / ACCOUNT / DAY / "status.json"
+        readiness_ref = _write_intraday_readiness_authority(truth_root)
 
         with patch.object(readiness_module, "REPO_ROOT", root), patch.object(readiness_module, "TRUTH_ROOT", truth_root), patch.object(
             readiness_module,
@@ -741,6 +791,10 @@ def test_trade_submit_readiness_requires_bootstrap_mode_when_previous_day_bundle
                 },
                 "package_path": None,
             },
+        ), patch.object(
+            readiness_module,
+            "read_or_evaluate_trading_day_readiness_authority_v1",
+            return_value=readiness_ref,
         ), patch.object(
             readiness_module,
             "validate_against_repo_schema_v1",

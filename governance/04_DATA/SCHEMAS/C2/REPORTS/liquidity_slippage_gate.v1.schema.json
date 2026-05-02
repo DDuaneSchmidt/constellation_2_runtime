@@ -64,7 +64,22 @@
         "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
         "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
         "schema_path": { "type": "string", "minLength": 1, "maxLength": 1024 },
-        "schema_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        "schema_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "config_version_used": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "policy_artifact_used": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "parameter_refs_used": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["parameter_key", "target_field_path", "value"],
+            "properties": {
+              "parameter_key": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "target_field_path": { "type": "string", "minLength": 1, "maxLength": 512 },
+              "value": {}
+            }
+          }
+        }
       }
     },
 

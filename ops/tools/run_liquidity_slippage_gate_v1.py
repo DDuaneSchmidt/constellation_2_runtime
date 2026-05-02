@@ -38,6 +38,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.common.paper_session_fact_plane_v1 import resolve_authoritative_repo_root_v1
+from constellation_2.common.configuration_catalog_v1 import resolve_materialized_policy_for_gate_v1
 from constellation_2.common.runtime_contract_v1 import resolve_release_provenance
 from constellation_2.common.runtime_contract_v1 import require_truth_root_under_contract
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
@@ -472,14 +473,31 @@ def main() -> int:
     if not POLICY_PATH.exists():
         raise SystemExit(f"FAIL: LIQPOL_POLICY_MISSING: {POLICY_PATH}")
 
-    pol = _read_json_obj(POLICY_PATH)
+    materialized_policy_ref = resolve_materialized_policy_for_gate_v1(
+        truth_root=TRUTH_ROOT,
+        target_policy_artifact="C2_LIQUIDITY_SLIPPAGE_POLICY_V1",
+    )
+    if materialized_policy_ref is None:
+        pol = _read_json_obj(POLICY_PATH)
+        pol_sha = _sha256_file(POLICY_PATH)
+        pol_path = POLICY_PATH
+        config_version_used = "STATIC_GOVERNANCE_BASELINE"
+        policy_artifact_used = "C2_LIQUIDITY_SLIPPAGE_POLICY_V1"
+        parameter_refs_used: List[Dict[str, Any]] = []
+    else:
+        pol = dict(materialized_policy_ref["effective_policy"])
+        pol_sha = str(materialized_policy_ref["sha256"])
+        pol_path = Path(str(materialized_policy_ref["path"])).resolve()
+        config_version_used = str(materialized_policy_ref["config_version_used"])
+        policy_artifact_used = str(materialized_policy_ref["policy_artifact_used"])
+        parameter_refs_used = list(materialized_policy_ref["parameter_refs_used"])
+        input_manifest.append({"type": "materialized_configuration_policy", "path": str(pol_path), "sha256": pol_sha})
     validate_against_repo_schema_v1(pol, REPO_ROOT, POLICY_SCHEMA_RELPATH)
 
-    pol_sha = _sha256_file(POLICY_PATH)
     pol_schema_path = (REPO_ROOT / POLICY_SCHEMA_RELPATH).resolve()
     pol_schema_sha = _sha256_file(pol_schema_path)
 
-    input_manifest.append({"type": "policy_manifest", "path": str(POLICY_PATH), "sha256": pol_sha})
+    input_manifest.append({"type": "policy_manifest", "path": str(pol_path), "sha256": pol_sha})
     input_manifest.append({"type": "policy_schema", "path": str(pol_schema_path), "sha256": pol_schema_sha})
 
     executable_engine_ids, all_policy_engine_ids, capauth_policy_path, capauth_policy_sha = (
@@ -510,7 +528,15 @@ def main() -> int:
             "status": status,
             "reason_codes": reason_codes,
             "input_manifest": input_manifest,
-            "policy": {"path": str(POLICY_PATH), "sha256": pol_sha, "schema_path": str(pol_schema_path), "schema_sha256": pol_schema_sha},
+            "policy": {
+                "path": str(pol_path),
+                "sha256": pol_sha,
+                "schema_path": str(pol_schema_path),
+                "schema_sha256": pol_schema_sha,
+                "config_version_used": config_version_used,
+                "policy_artifact_used": policy_artifact_used,
+                "parameter_refs_used": parameter_refs_used,
+            },
             "results": {"per_intent": [], "totals": {"intents_total": 0, "intents_failed": 0, "intents_passed": 0, "intents_skipped": 0}},
             "gate_sha256": "0" * 64,
         }
@@ -845,7 +871,15 @@ def main() -> int:
         "reason_codes": reason_codes,
         "recovery_commands": recovery_commands,
         "input_manifest": input_manifest,
-        "policy": {"path": str(POLICY_PATH), "sha256": pol_sha, "schema_path": str(pol_schema_path), "schema_sha256": pol_schema_sha},
+        "policy": {
+            "path": str(pol_path),
+            "sha256": pol_sha,
+            "schema_path": str(pol_schema_path),
+            "schema_sha256": pol_schema_sha,
+            "config_version_used": config_version_used,
+            "policy_artifact_used": policy_artifact_used,
+            "parameter_refs_used": parameter_refs_used,
+        },
         "results": {"per_intent": per_intent, "totals": totals},
         "gate_sha256": "0" * 64,
     }
