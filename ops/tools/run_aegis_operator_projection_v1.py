@@ -14,9 +14,10 @@ if str(REPO_ROOT) not in sys.path:
 
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
 from ops.tools import run_aegis_bod_prepare_v1 as bod
-from ops.tools.aegis_runtime_mode_v1 import runtime_mode_from_truth_root_v1
+from ops.tools.aegis_runtime_mode_v1 import git_commit_v1, read_production_version_v1, runtime_mode_from_truth_root_v1
 from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
 from ops.tools.run_aegis_control_plane_v1 import control_plane_path
+from ops.tools.run_aegis_promotion_validation_ledger_v1 import promotion_validation_ledger_path
 
 SCHEMA_VERSION = "aegis_operator_projection.v1"
 
@@ -42,6 +43,47 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def operator_projection_path(*, truth_root: Path, day_utc: str) -> Path:
     return (truth_root / "reports" / "aegis_operator_projection_v1" / day_utc / "operator_projection.v1.json").resolve()
+
+
+def _packet_commit_from_root(runtime_root: Path) -> str:
+    path = runtime_root / "exports" / "aegis_state" / "latest" / "chatgpt_aegis_packet.md"
+    if not path.exists() or not path.is_file():
+        return ""
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines()[:80]:
+        text = line.strip()
+        if text.startswith("- git_commit:"):
+            return text.split(":", 1)[1].strip()
+    return ""
+
+
+def _promotion_visibility_v1(ctx: bod.BodContext) -> dict[str, Any]:
+    ledger_path = promotion_validation_ledger_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    ledger = _read_json(ledger_path)
+    production_version = read_production_version_v1()
+    evaluated_commit = git_commit_v1()
+    truth_root_text = str(ledger.get("truth_root") or "").strip()
+    runtime_root_text = str(ledger.get("runtime_root") or "").strip()
+    promotion_status = str(ledger.get("promotion_status") or "VALIDATION_LEDGER_MISSING").strip()
+    blockers = ledger.get("blockers") if isinstance(ledger.get("blockers"), list) else [{"code": "PROMOTION_VALIDATION_LEDGER_MISSING", "path": str(ledger_path)}]
+    return {
+        "candidate_commit": str(ledger.get("candidate_commit") or evaluated_commit),
+        "promoted_commit": str(production_version.get("promoted_commit") or ledger.get("promoted_commit") or ""),
+        "evaluated_commit": evaluated_commit,
+        "packet_commit": str(ledger.get("packet_commit") or _packet_commit_from_root(ctx.truth_root.parent)),
+        "promotion_status": promotion_status,
+        "promotion_blockers": blockers,
+        "promotion_validation_ledger_path": str(ledger_path),
+        "truth_root_consistency": {
+            "truth_root": str(ctx.truth_root),
+            "ledger_truth_root": truth_root_text,
+            "consistent": bool(truth_root_text and Path(truth_root_text).expanduser().resolve() == ctx.truth_root.resolve()),
+        },
+        "runtime_root_consistency": {
+            "runtime_root": str(ctx.truth_root.parent.resolve()),
+            "ledger_runtime_root": runtime_root_text,
+            "consistent": bool(runtime_root_text and Path(runtime_root_text).expanduser().resolve() == ctx.truth_root.parent.resolve()),
+        },
+    }
 
 
 def _projection_from_control_plane(ctx: bod.BodContext, control: dict[str, Any]) -> dict[str, Any]:
@@ -99,6 +141,7 @@ def _projection_from_control_plane(ctx: bod.BodContext, control: dict[str, Any])
     next_valid_actions = recovery_commands[:1] if recovery_commands else ([action] if action else [])
     if blocker.endswith("_PRECHECK_FAILED") and recovery_commands:
         next_valid_actions = recovery_commands
+    promotion_visibility = _promotion_visibility_v1(ctx)
     return {
         "schema_id": "aegis_operator_projection",
         "schema_version": SCHEMA_VERSION,
@@ -141,6 +184,15 @@ def _projection_from_control_plane(ctx: bod.BodContext, control: dict[str, Any])
         "trade_health_status": "ADVISORY_ONLY",
         "trade_health": {},
         "learning_loop_status": {"automatic_deployment_allowed": False},
+        "promotion_state": promotion_visibility,
+        "candidate_commit": promotion_visibility["candidate_commit"],
+        "promoted_commit": promotion_visibility["promoted_commit"],
+        "evaluated_commit": promotion_visibility["evaluated_commit"],
+        "packet_commit": promotion_visibility["packet_commit"],
+        "promotion_status": promotion_visibility["promotion_status"],
+        "promotion_blockers": promotion_visibility["promotion_blockers"],
+        "truth_root_consistency": promotion_visibility["truth_root_consistency"],
+        "runtime_root_consistency": promotion_visibility["runtime_root_consistency"],
         "pending_human_reviews": 0,
         "blocked_promotions": [],
         "rollback_recommendations": [],
@@ -158,6 +210,7 @@ def _projection_from_control_plane(ctx: bod.BodContext, control: dict[str, Any])
 
 
 def _projection_control_plane_unavailable(ctx: bod.BodContext, *, control_path: Path, reason: str) -> dict[str, Any]:
+    promotion_visibility = _promotion_visibility_v1(ctx)
     return {
         "schema_id": "aegis_operator_projection",
         "schema_version": SCHEMA_VERSION,
@@ -200,6 +253,15 @@ def _projection_control_plane_unavailable(ctx: bod.BodContext, *, control_path: 
         "trade_health_status": "ADVISORY_ONLY",
         "trade_health": {},
         "learning_loop_status": {"automatic_deployment_allowed": False},
+        "promotion_state": promotion_visibility,
+        "candidate_commit": promotion_visibility["candidate_commit"],
+        "promoted_commit": promotion_visibility["promoted_commit"],
+        "evaluated_commit": promotion_visibility["evaluated_commit"],
+        "packet_commit": promotion_visibility["packet_commit"],
+        "promotion_status": promotion_visibility["promotion_status"],
+        "promotion_blockers": promotion_visibility["promotion_blockers"],
+        "truth_root_consistency": promotion_visibility["truth_root_consistency"],
+        "runtime_root_consistency": promotion_visibility["runtime_root_consistency"],
         "pending_human_reviews": 0,
         "blocked_promotions": [],
         "rollback_recommendations": [],

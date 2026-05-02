@@ -584,7 +584,7 @@ def test_operator_projection_shows_exact_session_recovery_without_downstream_act
     ctx = _ctx(tmp_path)
     _session_blocked_artifacts(ctx)
     monkeypatch.setattr(cp.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
-    cp.run_control_plane_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
+    _cp_path, control = cp.run_control_plane_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
     monkeypatch.setattr(projection.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
 
     _out_path, payload = projection.run_operator_projection_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
@@ -1139,6 +1139,33 @@ def test_projection_integrity_context_names_control_plane_as_readiness_source(mo
     assert payload["integrity_context"]["final_status_source"] == "aegis_control_plane_v1"
     assert payload["integrity_context"]["readiness_source"] == "aegis_control_plane_v1"
     assert "day_run_ledger" not in payload["authority_note"]
+
+
+def test_projection_renders_promotion_validation_mismatch_without_deciding_readiness(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _session_pass(ctx)
+    _write(
+        ctx.truth_root / "reports" / "aegis_promotion_validation_ledger_v1" / ctx.day_utc / "promotion_validation_ledger.v1.json",
+        {
+            "candidate_commit": "candidate-commit",
+            "promoted_commit": "promoted-commit",
+            "truth_root": str(tmp_path / "other_truth"),
+            "runtime_root": str(tmp_path / "other_runtime"),
+            "promotion_status": "CANDIDATE",
+            "blockers": [{"code": "PROMOTION_VALIDATION_TRUTH_ROOT_MISMATCH"}],
+        },
+    )
+    monkeypatch.setattr(cp.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+    _cp_path, control = cp.run_control_plane_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
+    monkeypatch.setattr(projection.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+
+    _out_path, payload = projection.run_operator_projection_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
+
+    assert payload["promotion_status"] == "CANDIDATE"
+    assert payload["promotion_blockers"] == [{"code": "PROMOTION_VALIDATION_TRUTH_ROOT_MISMATCH"}]
+    assert payload["truth_root_consistency"]["consistent"] is False
+    assert payload["final_status"] == control["final_status"]
 
 
 def test_submit_allowed_false_when_control_plane_not_ready(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001

@@ -25,6 +25,7 @@ from ops.tools.aegis_runtime_mode_v1 import (
 )
 from ops.tools.aegis_submit_enforcement_v1 import packet_currentness_v1
 from ops.tools.run_aegis_production_promotion_gate_v1 import promotion_gate_path
+from ops.tools.run_aegis_promotion_validation_ledger_v1 import promotion_validation_ledger_path
 
 
 def promotion_manifest_path(production_root: Path, promotion_id: str) -> Path:
@@ -40,6 +41,7 @@ def _default_artifacts(day_utc: str) -> list[str]:
         f"reports/submit_boundary_status_v1/{day_utc}/submit_boundary_status.v1.json",
         f"reports/action_validity_v1/{day_utc}/action_validity.v1.json",
         f"reports/truth_freshness_v1/{day_utc}/truth_freshness.v1.json",
+        f"reports/aegis_promotion_validation_ledger_v1/{day_utc}/promotion_validation_ledger.v1.json",
     ]
 
 
@@ -74,6 +76,14 @@ def promote_candidate_to_production_v1(*, day_utc: str, promotion_id: str, candi
         "status": "PROMOTED",
     }
     manifest_path = promotion_manifest_path(production_root, promotion_id)
+    validation_ledger_src = read_json_v1(promotion_validation_ledger_path(truth_root=candidate_root, day_utc=day_utc))
+    if validation_ledger_src:
+        validation_ledger_src["promotion_status"] = "PROMOTED"
+        validation_ledger_src["promoted_commit"] = commit
+        validation_ledger_src["promotion_id"] = promotion_id
+        validation_ledger_src["production_version_path"] = str(version_path)
+        validation_ledger_src["generated_at"] = now_iso_v1()
+        write_json_v1(promotion_validation_ledger_path(truth_root=production_root, day_utc=day_utc), validation_ledger_src)
     write_json_v1(manifest_path, manifest)
     env = dict(os.environ)
     env["AEGIS_RUNTIME_MODE"] = "PRODUCTION"

@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from ops.tools.aegis_runtime_mode_v1 import CANDIDATE_TRUTH_ROOT, PRODUCTION_TRUTH_ROOT, git_commit_v1, read_json_v1, write_json_v1, now_iso_v1
 from ops.tools.run_aegis_promotion_candidate_v1 import promotion_candidate_path
+from ops.tools.run_aegis_promotion_validation_ledger_v1 import promotion_validation_ledger_path
 
 SCHEMA_VERSION = "aegis_production_promotion_gate.v1"
 
@@ -28,6 +29,8 @@ def promotion_gate_path(candidate_root: Path, day_utc: str, promotion_id: str) -
 def build_promotion_gate_v1(*, day_utc: str, promotion_id: str, candidate_root: Path, production_root: Path) -> dict[str, Any]:
     del production_root
     candidate = read_json_v1(promotion_candidate_path(candidate_root=candidate_root, day_utc=day_utc))
+    ledger_path = promotion_validation_ledger_path(truth_root=candidate_root, day_utc=day_utc)
+    ledger = read_json_v1(ledger_path)
     approval = read_json_v1(approval_path(candidate_root, promotion_id))
     required = [
         "repo_local_import_proof",
@@ -37,6 +40,14 @@ def build_promotion_gate_v1(*, day_utc: str, promotion_id: str, candidate_root: 
         "submit_firewall_fail_closed",
         "control_plane_one_blocker",
         "operator_projection_has_evidence",
+        "validation_ledger_present",
+        "validation_ledger_clean",
+        "validation_ledger_import_pass",
+        "validation_ledger_tests_pass",
+        "validation_ledger_registry_schema_pass",
+        "validation_ledger_control_plane_complete",
+        "validation_ledger_commit_matches_candidate",
+        "validation_ledger_truth_root_consistent",
         "explicit_human_approval",
     ]
     satisfied: list[str] = []
@@ -45,6 +56,58 @@ def build_promotion_gate_v1(*, day_utc: str, promotion_id: str, candidate_root: 
         satisfied.append("repo_local_import_proof")
     else:
         blockers.append({"code": "PROMOTION_CANDIDATE_MISSING"})
+    if ledger:
+        satisfied.append("validation_ledger_present")
+    else:
+        blockers.append({"code": "PROMOTION_VALIDATION_LEDGER_MISSING", "path": str(ledger_path)})
+    current_commit = git_commit_v1()
+    if ledger:
+        if str(ledger.get("candidate_commit") or "").strip() == current_commit:
+            satisfied.append("validation_ledger_commit_matches_candidate")
+        else:
+            blockers.append(
+                {
+                    "code": "PROMOTION_VALIDATION_LEDGER_COMMIT_MISMATCH",
+                    "candidate_commit": str(candidate.get("candidate_commit") or ""),
+                    "ledger_candidate_commit": str(ledger.get("candidate_commit") or ""),
+                    "current_commit": current_commit,
+                }
+            )
+        if ledger.get("repo_clean") is True:
+            satisfied.append("validation_ledger_clean")
+        else:
+            blockers.append({"code": "PROMOTION_VALIDATION_REPO_DIRTY"})
+        import_result = ledger.get("import_preflight_result") if isinstance(ledger.get("import_preflight_result"), dict) else {}
+        if import_result.get("status") == "PASS":
+            satisfied.append("validation_ledger_import_pass")
+        else:
+            blockers.append({"code": "PROMOTION_VALIDATION_IMPORT_PREFLIGHT_FAILED"})
+        focused_result = ledger.get("focused_test_result") if isinstance(ledger.get("focused_test_result"), dict) else {}
+        if focused_result.get("status") == "PASS":
+            satisfied.append("validation_ledger_tests_pass")
+        else:
+            blockers.append({"code": "PROMOTION_VALIDATION_TESTS_FAILED"})
+        registry_result = ledger.get("registry_validation_result") if isinstance(ledger.get("registry_validation_result"), dict) else {}
+        schema_result = ledger.get("schema_validation_result") if isinstance(ledger.get("schema_validation_result"), dict) else {}
+        if registry_result.get("status") == "PASS" and schema_result.get("status") == "PASS":
+            satisfied.append("validation_ledger_registry_schema_pass")
+        else:
+            blockers.append({"code": "PROMOTION_VALIDATION_REGISTRY_SCHEMA_FAILED"})
+        control_result = ledger.get("control_plane_result") if isinstance(ledger.get("control_plane_result"), dict) else {}
+        if control_result.get("status") == "PASS":
+            satisfied.append("validation_ledger_control_plane_complete")
+        else:
+            blockers.append({"code": "PROMOTION_VALIDATION_CONTROL_PLANE_FAILED"})
+        ledger_blockers = ledger.get("blockers") if isinstance(ledger.get("blockers"), list) else []
+        for row in ledger_blockers:
+            code = str(row.get("code") if isinstance(row, dict) else row).strip()
+            if code:
+                blockers.append({"code": "PROMOTION_VALIDATION_LEDGER_BLOCKER", "ledger_blocker": code})
+        truth_root = str(ledger.get("truth_root") or "").strip()
+        if truth_root and Path(truth_root).resolve() == candidate_root.resolve():
+            satisfied.append("validation_ledger_truth_root_consistent")
+        else:
+            blockers.append({"code": "PROMOTION_VALIDATION_TRUTH_ROOT_MISMATCH", "truth_root": truth_root, "expected_truth_root": str(candidate_root.resolve())})
     tests = candidate.get("tests_run") if isinstance(candidate.get("tests_run"), list) else []
     if tests and all("failed" not in str(item).lower() for item in tests):
         satisfied.append("candidate_tests_pass")
@@ -70,7 +133,7 @@ def build_promotion_gate_v1(*, day_utc: str, promotion_id: str, candidate_root: 
         satisfied.extend(["control_plane_one_blocker", "operator_projection_has_evidence"])
     else:
         blockers.append({"code": "PROMOTION_EVIDENCE_MISSING"})
-    if approval.get("status") == "APPROVED" and approval.get("promotion_id") == promotion_id and approval.get("candidate_commit") == git_commit_v1():
+    if approval.get("status") == "APPROVED" and approval.get("promotion_id") == promotion_id and approval.get("candidate_commit") == current_commit:
         satisfied.append("explicit_human_approval")
     elif approval.get("status") == "REJECTED":
         blockers.append({"code": "HUMAN_APPROVAL_REJECTED"})
@@ -91,6 +154,7 @@ def build_promotion_gate_v1(*, day_utc: str, promotion_id: str, candidate_root: 
         "operator_next_action": "Run promote_aegis_candidate_to_production_v1.py." if status == "APPROVED_FOR_PROMOTION" else "Resolve promotion gate blockers; do not promote.",
         "approval_path": str(approval_path(candidate_root, promotion_id)),
         "candidate_report_path": str(promotion_candidate_path(candidate_root=candidate_root, day_utc=day_utc)),
+        "promotion_validation_ledger_path": str(ledger_path),
     }
 
 

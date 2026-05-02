@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ops.tools.aegis_runtime_mode_v1 import production_version_path_v1, read_production_version_v1, runtime_mode_from_truth_root_v1
+from ops.tools.run_aegis_promotion_validation_ledger_v1 import promotion_validation_ledger_path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 READY_FINAL_STATUSES = {
@@ -145,6 +146,67 @@ def _freshness_blockers(freshness: dict[str, Any]) -> list[dict[str, str]]:
     return blockers
 
 
+def _promotion_validation_blockers(
+    *,
+    truth: Path,
+    day: str,
+    current_commit: str,
+    promoted_commit: str,
+    packet: dict[str, Any],
+    control_plane: dict[str, Any],
+) -> tuple[Path, dict[str, Any], list[dict[str, str]]]:
+    path = promotion_validation_ledger_path(truth_root=truth, day_utc=day)
+    ledger = _read_json(path)
+    blockers: list[dict[str, str]] = []
+    if not ledger:
+        blockers.append({"code": "PROMOTION_VALIDATION_LEDGER_MISSING", "path": str(path)})
+        return path, ledger, blockers
+    status = str(ledger.get("promotion_status") or "").strip().upper()
+    ledger_commit = str(ledger.get("candidate_commit") or "").strip()
+    if status not in {"APPROVED", "PROMOTED"}:
+        blockers.append({"code": "PROMOTION_VALIDATION_LEDGER_NOT_APPROVED", "path": str(path), "promotion_status": status or "MISSING"})
+    if ledger_commit != current_commit or ledger_commit != promoted_commit:
+        blockers.append(
+            {
+                "code": "PROMOTION_VALIDATION_LEDGER_COMMIT_MISMATCH",
+                "path": str(path),
+                "ledger_candidate_commit": ledger_commit,
+                "current_git_commit": current_commit,
+                "promoted_commit": promoted_commit,
+            }
+        )
+    if ledger.get("repo_clean") is not True:
+        blockers.append({"code": "PROMOTION_VALIDATION_REPO_NOT_CLEAN", "path": str(path)})
+    for field, code in (
+        ("import_preflight_result", "PROMOTION_VALIDATION_IMPORT_PREFLIGHT_FAILED"),
+        ("focused_test_result", "PROMOTION_VALIDATION_TESTS_FAILED"),
+        ("registry_validation_result", "PROMOTION_VALIDATION_REGISTRY_FAILED"),
+        ("schema_validation_result", "PROMOTION_VALIDATION_SCHEMA_FAILED"),
+        ("control_plane_result", "PROMOTION_VALIDATION_CONTROL_PLANE_FAILED"),
+    ):
+        result = ledger.get(field) if isinstance(ledger.get(field), dict) else {}
+        if result.get("status") != "PASS":
+            blockers.append({"code": code, "path": str(path)})
+    ledger_truth_root = str(ledger.get("truth_root") or "").strip()
+    if not ledger_truth_root or Path(ledger_truth_root).expanduser().resolve() != truth.resolve():
+        blockers.append({"code": "PROMOTION_VALIDATION_TRUTH_ROOT_MISMATCH", "path": str(path), "truth_root": ledger_truth_root})
+    packet_commit = str(packet.get("packet_git_commit") or "").strip()
+    if packet_commit and promoted_commit and packet_commit != promoted_commit:
+        blockers.append({"code": "PACKET_PROMOTED_COMMIT_MISMATCH", "path": str(packet.get("path") or ""), "packet_git_commit": packet_commit, "promoted_commit": promoted_commit})
+    contract = control_plane.get("producer_contract_v1") if isinstance(control_plane.get("producer_contract_v1"), dict) else {}
+    control_commit = str(contract.get("code_version_git_commit") or control_plane.get("source_git_commit") or "").strip()
+    if not control_commit or control_commit != promoted_commit:
+        blockers.append({"code": "CONTROL_PLANE_COMMIT_MISMATCH", "path": str(path), "control_plane_commit": control_commit or "MISSING", "promoted_commit": promoted_commit})
+    dirty_status = str(contract.get("source_dirty_status") or control_plane.get("source_dirty_status") or "").strip().upper()
+    if dirty_status and dirty_status != "CLEAN":
+        blockers.append({"code": "CONTROL_PLANE_DIRTY_SOURCE", "source_dirty_status": dirty_status})
+    outputs = contract.get("output_artifacts") if isinstance(contract.get("output_artifacts"), list) else []
+    output_paths = [str(row.get("path") or "") for row in outputs if isinstance(row, dict)]
+    if output_paths and not any(str(Path(item).expanduser().resolve()).startswith(str(truth.resolve()) + "/") for item in output_paths if item):
+        blockers.append({"code": "CONTROL_PLANE_TRUTH_ROOT_MISMATCH", "truth_root": str(truth), "control_plane_outputs": ",".join(output_paths)})
+    return path, ledger, blockers
+
+
 def evaluate_submit_enforcement_v1(
     *,
     truth_root: Path,
@@ -281,6 +343,19 @@ def evaluate_submit_enforcement_v1(
             }
         )
 
+    promotion_ledger_path = promotion_validation_ledger_path(truth_root=truth, day_utc=day)
+    promotion_ledger: dict[str, Any] = {}
+    if mode == "PRODUCTION" and promoted_commit:
+        promotion_ledger_path, promotion_ledger, promotion_blockers = _promotion_validation_blockers(
+            truth=truth,
+            day=day,
+            current_commit=current_commit,
+            promoted_commit=promoted_commit,
+            packet=packet,
+            control_plane=control_plane,
+        )
+        blockers.extend(promotion_blockers)
+
     blockers.extend(_freshness_blockers(freshness))
     return {
         "ok": not blockers,
@@ -291,6 +366,8 @@ def evaluate_submit_enforcement_v1(
         "runtime_mode": mode,
         "production_version_path": str(production_version_path),
         "production_promoted_commit": promoted_commit,
+        "promotion_validation_ledger_path": str(promotion_ledger_path),
+        "promotion_validation_status": str(promotion_ledger.get("promotion_status") or ""),
         "current_git_commit": current_commit,
         "packet_currentness": packet,
         "action_id": action_id,

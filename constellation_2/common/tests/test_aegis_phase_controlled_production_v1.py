@@ -12,6 +12,7 @@ import ops.tools.promote_aegis_candidate_to_production_v1 as promote
 import ops.tools.rollback_aegis_production_v1 as rollback
 import ops.tools.run_aegis_production_promotion_gate_v1 as gate
 import ops.tools.run_aegis_promotion_candidate_v1 as candidate
+import ops.tools.run_aegis_promotion_validation_ledger_v1 as validation
 
 
 DAY = "2026-05-04"
@@ -66,7 +67,18 @@ def _seed_roots(tmp_path: Path) -> tuple[Path, Path]:
         (cand, "PAPER_READY", "", False),
     ):
         _report(root, "aegis_day_run_v1", "day_run.v1.json", {"final_status": status, "canonical_blocker": blocker})
-        _report(root, "aegis_control_plane_v1", "control_plane.v1.json", {"final_status": "READY", "canonical_blocker": "", "runtime_mode": "PRODUCTION" if root == prod else "CANDIDATE"})
+        _report(
+            root,
+            "aegis_control_plane_v1",
+            "control_plane.v1.json",
+            {
+                "day_utc": DAY,
+                "final_status": "READY",
+                "canonical_blocker": "",
+                "submit_allowed": False,
+                "runtime_mode": "PRODUCTION" if root == prod else "CANDIDATE",
+            },
+        )
         _report(root, "submit_boundary_status_v1", "submit_boundary_status.v1.json", {"status": "PASS", "submit_allowed": submit})
         _report(root, "action_validity_v1", "action_validity.v1.json", {"action_rules": [{"action_id": "submit_paper_order", "status": "ALLOWED" if submit else "FORBIDDEN"}]})
         _report(root, "truth_freshness_v1", "truth_freshness.v1.json", {"status": "PASS"})
@@ -84,6 +96,8 @@ def _stable_git(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(enforcement, "_git_dirty_status", lambda: "CLEAN")
     monkeypatch.setattr(candidate, "git_commit_v1", lambda: COMMIT)
     monkeypatch.setattr(gate, "git_commit_v1", lambda: COMMIT)
+    monkeypatch.setattr(validation, "git_commit_v1", lambda: COMMIT)
+    monkeypatch.setattr(validation, "git_dirty_status_v1", lambda: "CLEAN")
     monkeypatch.setattr(promote, "git_commit_v1", lambda: COMMIT)
     monkeypatch.setattr(rollback, "git_commit_v1", lambda: COMMIT)
 
@@ -122,6 +136,7 @@ def test_promotion_candidate_blocks_regression_stale_packet_and_submit_expansion
 def test_promotion_gate_requires_approval_tests_packet_and_no_regression(tmp_path: Path) -> None:
     prod, cand = _seed_roots(tmp_path)
     _, candidate_payload = candidate.run_promotion_candidate_v1(DAY, str(cand), str(prod), ["focused tests passed"])
+    validation.run_promotion_validation_ledger_v1(day_utc=DAY, truth_root=str(cand), runtime_root=str(cand), focused_tests_passed=True, focused_test_details=["focused tests passed"])
     assert candidate_payload["promotion_recommendation"] == "APPROVE"
 
     _, payload = gate.run_promotion_gate_v1(DAY, "promo-1", str(cand), str(prod))
@@ -156,6 +171,7 @@ def test_promotion_gate_requires_approval_tests_packet_and_no_regression(tmp_pat
 def test_promotion_activation_updates_version_copies_manifest_and_regenerates_packet(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     prod, cand = _seed_roots(tmp_path)
     _, candidate_payload = candidate.run_promotion_candidate_v1(DAY, str(cand), str(prod), ["focused tests passed"])
+    validation.run_promotion_validation_ledger_v1(day_utc=DAY, truth_root=str(cand), runtime_root=str(cand), focused_tests_passed=True, focused_test_details=["focused tests passed"])
     _write(
         gate.approval_path(cand, "promo-2"),
         {
@@ -182,6 +198,40 @@ def test_promotion_activation_updates_version_copies_manifest_and_regenerates_pa
     assert manifest["status"] == "PROMOTED"
     assert any(row["status"] == "COPIED" for row in manifest["copied_artifacts"])
     assert candidate_payload["candidate_commit"] == COMMIT
+
+
+def test_validation_ledger_and_gate_block_dirty_repo_failed_tests_schema_and_control_plane(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    prod, cand = _seed_roots(tmp_path)
+    monkeypatch.setattr(validation, "git_dirty_status_v1", lambda: "DIRTY")
+    _path, payload = validation.run_promotion_validation_ledger_v1(day_utc=DAY, truth_root=str(cand), runtime_root=str(cand), focused_tests_passed=True)
+    assert any(row["code"] == "REPO_DIRTY" for row in payload["blockers"])
+
+    monkeypatch.setattr(validation, "git_dirty_status_v1", lambda: "CLEAN")
+    _path, payload = validation.run_promotion_validation_ledger_v1(day_utc=DAY, truth_root=str(cand), runtime_root=str(cand), focused_tests_passed=False)
+    assert any(row["code"] == "FOCUSED_TESTS_NOT_PROVEN_PASS" for row in payload["blockers"])
+
+    original_registry_validation = validation._validate_registry_contract_v1
+    monkeypatch.setattr(
+        validation,
+        "_validate_registry_contract_v1",
+        lambda: ({"status": "FAIL", "blockers": [{"code": "REGISTRY_DEPENDENCY_FIELD_MISSING"}]}, {"status": "FAIL", "schema_checked": 0}),
+    )
+    _path, payload = validation.run_promotion_validation_ledger_v1(day_utc=DAY, truth_root=str(cand), runtime_root=str(cand), focused_tests_passed=True)
+    assert any(row["code"] == "REGISTRY_VALIDATION_FAILED" for row in payload["blockers"])
+    assert any(row["code"] == "SCHEMA_VALIDATION_FAILED" for row in payload["blockers"])
+    monkeypatch.setattr(validation, "_validate_registry_contract_v1", original_registry_validation)
+
+    (cand / "reports" / "aegis_control_plane_v1" / DAY / "control_plane.v1.json").unlink()
+    _path, payload = validation.run_promotion_validation_ledger_v1(day_utc=DAY, truth_root=str(cand), runtime_root=str(cand), focused_tests_passed=True)
+    assert any(row["code"] == "CONTROL_PLANE_EVALUATION_FAILED" for row in payload["blockers"])
+
+    candidate.run_promotion_candidate_v1(DAY, str(cand), str(prod), ["focused tests passed"])
+    _write(
+        gate.approval_path(cand, "promo-invalid"),
+        {"promotion_id": "promo-invalid", "candidate_commit": COMMIT, "rollback_commit": PREV_COMMIT, "status": "APPROVED"},
+    )
+    _gate_path, gate_payload = gate.run_promotion_gate_v1(DAY, "promo-invalid", str(cand), str(prod))
+    assert any(row["code"] == "PROMOTION_VALIDATION_LEDGER_BLOCKER" for row in gate_payload["blockers"])
 
 
 def test_rollback_restores_previous_commit_and_marks_prior_promotion(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
