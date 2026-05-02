@@ -13,6 +13,8 @@ from constellation_2.common.runtime_path_authority_v1 import load_runtime_path_a
 
 LOGGER = logging.getLogger(__name__)
 REPO_ROOT = Path(__file__).resolve().parents[2]
+PHASE_CONTROLLED_PRODUCTION_TRUTH_ROOT = Path("/home/node/constellation_runtime_data/production_truth").resolve()
+PHASE_CONTROLLED_CANDIDATE_TRUTH_ROOT = Path("/home/node/constellation_runtime_data/candidate_truth").resolve()
 
 
 @dataclass(frozen=True)
@@ -157,9 +159,17 @@ def _classify_runtime_path_bridge_v1(
         path_class = "ACTIVE_RELEASE_ROOT"
     elif _under(resolved, root=authority.active_release_root):
         path_class = "ACTIVE_RELEASE_SUBPATH"
+    elif resolved == PHASE_CONTROLLED_PRODUCTION_TRUTH_ROOT:
+        path_class = "PHASE_CONTROLLED_PRODUCTION_TRUTH_ROOT"
+    elif _under(resolved, root=PHASE_CONTROLLED_PRODUCTION_TRUTH_ROOT):
+        path_class = "PHASE_CONTROLLED_PRODUCTION_TRUTH_SUBPATH"
+    elif resolved == PHASE_CONTROLLED_CANDIDATE_TRUTH_ROOT:
+        path_class = "PHASE_CONTROLLED_CANDIDATE_TRUTH_ROOT"
+    elif _under(resolved, root=PHASE_CONTROLLED_CANDIDATE_TRUTH_ROOT):
+        path_class = "PHASE_CONTROLLED_CANDIDATE_TRUTH_SUBPATH"
 
-    policy_read_allowed = path_class.startswith("CANONICAL_RUNTIME_TRUTH")
-    policy_write_allowed = path_class.startswith("CANONICAL_RUNTIME_TRUTH")
+    policy_read_allowed = path_class.startswith("CANONICAL_RUNTIME_TRUTH") or path_class.startswith("PHASE_CONTROLLED_")
+    policy_write_allowed = path_class.startswith("CANONICAL_RUNTIME_TRUTH") or path_class.startswith("PHASE_CONTROLLED_")
     advisory_repo_read_allowed = policy_read_allowed or path_class.startswith("AUTHORITATIVE_REPO_TRUTH")
     return {
         "path": str(resolved),

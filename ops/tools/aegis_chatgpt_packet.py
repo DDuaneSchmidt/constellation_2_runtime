@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -22,11 +23,13 @@ from ops.tools.repo_protection_common_v1 import (
 )
 from ops.tools.require_canonical_repo_clean_v1 import evaluate_canonical_cleanliness_v1
 from constellation_2.common.paper_submit_mode_status_v1 import classify_paper_submit_mode_status_v1
+from ops.tools.aegis_runtime_mode_v1 import normalize_runtime_mode_v1, read_production_version_v1, runtime_truth_root_v1
 
+PACKET_OUTPUT_ROOT = Path(os.environ.get("AEGIS_PACKET_ROOT") or RUNTIME_DATA_ROOT).expanduser().resolve()
 LATEST_PACKET_PATH = (
-    RUNTIME_DATA_ROOT / "exports" / "aegis_state" / "latest" / "chatgpt_aegis_packet.md"
+    PACKET_OUTPUT_ROOT / "exports" / "aegis_state" / "latest" / "chatgpt_aegis_packet.md"
 ).resolve()
-ARCHIVE_ROOT = (RUNTIME_DATA_ROOT / "exports" / "aegis_state" / "archive").resolve()
+ARCHIVE_ROOT = (PACKET_OUTPUT_ROOT / "exports" / "aegis_state" / "archive").resolve()
 OPERATOR_GATE_STATE_ROOT = (Path.home() / ".local" / "state" / "constellation_2").resolve()
 ACTIVE_RUNTIME_CONTRACT_PATH = (
     RUNTIME_DATA_ROOT
@@ -2995,6 +2998,10 @@ def _build_packet() -> tuple[str, str]:
     now = _utc_now()
     generated_at_utc = _iso_utc(now)
     commit = _git_commit()
+    runtime_mode = normalize_runtime_mode_v1(os.environ.get("AEGIS_RUNTIME_MODE"))
+    runtime_truth_root = runtime_truth_root_v1(runtime_mode)
+    production_version = read_production_version_v1()
+    promoted_commit = str(production_version.get("promoted_commit") or "")
     branch = _git_branch()
     cleanliness = evaluate_canonical_cleanliness_v1(REPO_ROOT)
     status_lines = _git_status_short_lines()
@@ -3026,6 +3033,10 @@ def _build_packet() -> tuple[str, str]:
         "- export_id: " + export_id,
         "- generated_at_utc: " + generated_at_utc,
         "- source_repo_path: " + str(REPO_ROOT),
+        "- runtime_mode: " + runtime_mode,
+        "- runtime_truth_root: " + str(runtime_truth_root),
+        "- production_promoted_commit: " + promoted_commit,
+        "- production_version_status: " + str(production_version.get("status") or "MISSING"),
         "- git_branch: " + branch,
         "- git_commit: " + commit,
         "- git_dirty_status: " + dirty,

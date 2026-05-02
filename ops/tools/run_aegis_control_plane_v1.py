@@ -15,6 +15,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
 from ops.tools import run_aegis_bod_prepare_v1 as bod
+from ops.tools.aegis_runtime_mode_v1 import assert_candidate_cannot_write_production_v1, runtime_mode_from_truth_root_v1
 from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
 from ops.tools.repo_protection_common_v1 import read_protection_status_v1
 
@@ -576,6 +577,7 @@ def build_control_plane_v1(ctx: Any, phase_results: dict[str, dict[str, Any]] | 
         "schema_version": SCHEMA_VERSION,
         "day_utc": ctx.day_utc,
         "environment": ctx.environment,
+        "runtime_mode": runtime_mode_from_truth_root_v1(ctx.truth_root),
         "final_status": "NOT_READY" if current else "READY",
         "current_phase": str((current or {}).get("phase_id") or ""),
         "current_phase_order": current_phase_order,
@@ -603,10 +605,13 @@ def _owner_for_phase(phases: list[dict[str, Any]], phase_id: str) -> str:
     return ""
 
 
-def run_control_plane_v1(day_utc: str, environment: str, truth_root: str = "") -> tuple[Path, dict[str, Any]]:
+def run_control_plane_v1(day_utc: str, environment: str, truth_root: str = "", runtime_mode: str = "") -> tuple[Path, dict[str, Any]]:
     ctx = bod._resolve_context(day_utc, environment, truth_root)
+    mode = runtime_mode_from_truth_root_v1(ctx.truth_root, runtime_mode)
     payload = build_control_plane_v1(ctx)
+    payload["runtime_mode"] = mode
     path = control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    assert_candidate_cannot_write_production_v1(runtime_mode=mode, output_path=path)
     input_paths: list[str] = [str(REGISTRY_PATH)]
     for row in payload["phase_results"]:
         input_paths.extend(str(item) for item in row.get("evidence_paths", []) if str(item or "").strip())
@@ -627,8 +632,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--day_utc", required=True)
     parser.add_argument("--environment", default="PAPER", choices=["PAPER"])
     parser.add_argument("--truth_root", default="")
+    parser.add_argument("--runtime_mode", default="")
     args = parser.parse_args(argv)
-    path, payload = run_control_plane_v1(parse_day_utc_v1(args.day_utc), str(args.environment).strip().upper(), str(args.truth_root or ""))
+    path, payload = run_control_plane_v1(parse_day_utc_v1(args.day_utc), str(args.environment).strip().upper(), str(args.truth_root or ""), str(args.runtime_mode or ""))
     print(json.dumps({"status": payload["final_status"], "current_phase": payload["current_phase"], "canonical_blocker": payload["canonical_blocker"], "control_plane_path": str(path)}, sort_keys=True))
     return 0 if payload["final_status"] == "READY" else 2
 

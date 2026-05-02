@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from ops.tools.aegis_runtime_mode_v1 import production_version_path_v1, read_production_version_v1, runtime_mode_from_truth_root_v1
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 READY_FINAL_STATUSES = {
@@ -78,17 +79,23 @@ def _packet_metadata(path: Path) -> dict[str, str]:
     return meta
 
 
-def packet_currentness_v1(*, runtime_root: Path | None = None) -> dict[str, Any]:
+def packet_currentness_v1(*, runtime_root: Path | None = None, runtime_mode: str | None = None) -> dict[str, Any]:
     path = _packet_path(runtime_root)
     meta = _packet_metadata(path)
     current_commit = _git_commit()
     packet_commit = str(meta.get("git_commit") or "").strip()
+    packet_mode = str(meta.get("runtime_mode") or "").strip().upper()
+    expected_mode = str(runtime_mode or "").strip().upper()
     dirty = _git_dirty_status()
-    stale = not path.exists() or not packet_commit or packet_commit != current_commit or dirty != "CLEAN"
+    mode_mismatch = bool(expected_mode and packet_mode and packet_mode != expected_mode)
+    missing_mode = bool(expected_mode and not packet_mode)
+    stale = not path.exists() or not packet_commit or packet_commit != current_commit or dirty != "CLEAN" or mode_mismatch or missing_mode
     return {
         "path": str(path),
         "exists": path.exists(),
         "generated_at_utc": str(meta.get("generated_at_utc") or ""),
+        "runtime_mode": packet_mode,
+        "expected_runtime_mode": expected_mode,
         "packet_git_commit": packet_commit,
         "current_git_commit": current_commit,
         "current_git_dirty_status": dirty,
@@ -145,10 +152,12 @@ def evaluate_submit_enforcement_v1(
     day_utc: str,
     action_id: str = "submit_paper_order",
     runtime_root: Path | None = None,
+    runtime_mode: str | None = None,
 ) -> dict[str, Any]:
     truth = Path(truth_root).resolve()
     execution = Path(execution_root).resolve()
     day = str(day_utc).strip()
+    mode = runtime_mode_from_truth_root_v1(truth, runtime_mode)
     paths = {
         "day_run": _report_path(truth, "aegis_day_run_v1", day, "day_run.v1.json"),
         "submit_boundary": _report_path(truth, "submit_boundary_status_v1", day, "submit_boundary_status.v1.json"),
@@ -162,6 +171,47 @@ def evaluate_submit_enforcement_v1(
     freshness = _read_json(paths["truth_freshness"])
     kill_switch = _read_json(paths["kill_switch"])
     blockers: list[dict[str, str]] = []
+
+    if mode != "PRODUCTION":
+        blockers.append(
+            {
+                "code": "CANDIDATE_RUNTIME_SUBMIT_DISABLED",
+                "runtime_mode": mode,
+                "path": str(truth),
+            }
+        )
+    elif truth.name != "production_truth" and "production_truth" not in set(truth.parts):
+        blockers.append(
+            {
+                "code": "PRODUCTION_SUBMIT_REQUIRES_PRODUCTION_TRUTH",
+                "path": str(truth),
+            }
+        )
+
+    production_version_path = production_version_path_v1(truth)
+    production_version = read_production_version_v1(truth)
+    promoted_commit = str(production_version.get("promoted_commit") or "").strip()
+    current_commit = _git_commit()
+    if mode == "PRODUCTION":
+        if not production_version:
+            blockers.append({"code": "PRODUCTION_VERSION_MISSING", "path": str(production_version_path)})
+        elif str(production_version.get("status") or "").strip().upper() != "ACTIVE":
+            blockers.append(
+                {
+                    "code": "PRODUCTION_VERSION_NOT_ACTIVE",
+                    "path": str(production_version_path),
+                    "status": str(production_version.get("status") or "MISSING"),
+                }
+            )
+        elif current_commit != promoted_commit:
+            blockers.append(
+                {
+                    "code": "UNPROMOTED_PRODUCTION_COMMIT",
+                    "path": str(production_version_path),
+                    "current_git_commit": current_commit,
+                    "promoted_commit": promoted_commit,
+                }
+            )
 
     final_status = str(ledger.get("final_status") or "").strip().upper()
     if final_status not in READY_FINAL_STATUSES or str(ledger.get("canonical_blocker") or "").strip():
@@ -205,7 +255,7 @@ def evaluate_submit_enforcement_v1(
             }
         )
 
-    packet = packet_currentness_v1(runtime_root=runtime_root)
+    packet = packet_currentness_v1(runtime_root=runtime_root, runtime_mode=mode)
     if packet["status"] != "CURRENT":
         blockers.append(
             {
@@ -223,6 +273,10 @@ def evaluate_submit_enforcement_v1(
         "canonical_blocker": str(blockers[0]["code"]) if blockers else "",
         "blockers": blockers,
         "checked_paths": {key: str(path) for key, path in paths.items()},
+        "runtime_mode": mode,
+        "production_version_path": str(production_version_path),
+        "production_promoted_commit": promoted_commit,
+        "current_git_commit": current_commit,
         "packet_currentness": packet,
         "action_id": action_id,
     }
