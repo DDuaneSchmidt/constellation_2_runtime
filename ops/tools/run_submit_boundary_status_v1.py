@@ -867,6 +867,56 @@ def main(argv: List[str] | None = None) -> int:
         failed_checks.append(day_readiness_row)
         blocking_codes.extend(day_readiness_codes)
     try:
+        kill_switch_result = resolve_kill_switch_authority_v1(
+            canonical_truth_root=truth_root,
+            day_utc=day_utc,
+        )
+        kill_switch_path = Path(str(getattr(kill_switch_result, "canonical_path", ""))).resolve()
+        source_paths["global_kill_switch_state_v1"] = str(kill_switch_path)
+        kill_switch_codes = [
+            str(code).strip()
+            for code in (getattr(kill_switch_result, "reason_codes", ()) or ())
+            if str(code).strip()
+        ]
+        kill_switch_state = str(getattr(kill_switch_result, "state", "") or "").strip().upper()
+        kill_switch_ok = (
+            str(getattr(kill_switch_result, "status", "") or "").strip().upper() == KILL_SWITCH_STATUS_PASS
+            and kill_switch_state == "INACTIVE"
+            and bool(getattr(kill_switch_result, "allow_entries", False) is True)
+        )
+        kill_switch_row = _check_row(
+            logical_name="global_kill_switch_state_v1",
+            path=kill_switch_path,
+            status="PASS" if kill_switch_ok else "FAIL",
+            day_utc=day_utc,
+            reason_codes=kill_switch_codes
+            or [str(getattr(kill_switch_result, "reason_code", "") or "").strip()]
+            or (["KILL_SWITCH_ACTIVE"] if kill_switch_state == "ACTIVE" else ["GLOBAL_KILL_SWITCH_STATE_MISSING"]),
+        )
+        required_checks.append(kill_switch_row)
+        if not kill_switch_ok:
+            submission_authorized = False
+            boundary_status = "BLOCKED"
+            failed_checks.append(kill_switch_row)
+            blocking_codes.extend(kill_switch_row["reason_codes"])
+    except Exception as exc:
+        kill_switch_path = (truth_root / "risk_v1" / "kill_switch_v1" / day_utc / "global_kill_switch_state.v1.json").resolve()
+        source_paths["global_kill_switch_state_v1"] = str(kill_switch_path)
+        kill_switch_row = _check_row(
+            logical_name="global_kill_switch_state_v1",
+            path=kill_switch_path,
+            status="MISSING",
+            day_utc=day_utc,
+            reason_codes=[f"SUBMIT_BOUNDARY_KILL_SWITCH_UNAVAILABLE:{type(exc).__name__}"],
+        )
+        required_checks.append(kill_switch_row)
+        failed_checks.append(kill_switch_row)
+        submission_authorized = False
+        boundary_status = "BLOCKED"
+        freshness_verdict = "UNKNOWN"
+        linkage_verdict = "UNLINKED"
+        blocking_codes.extend(kill_switch_row["reason_codes"])
+    try:
         runtime_resilience_payload = build_runtime_resilience_authority_v1(
             day_utc=day_utc,
             truth_root=truth_root,

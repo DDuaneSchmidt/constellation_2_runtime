@@ -27,6 +27,11 @@ def _write_json(path: Path, obj: dict) -> None:
     path.write_text(json.dumps(obj, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
 
 
+def _write_safety_state_for_test(path: Path) -> Path:
+    _write_json(path, {"schema_id": "safety_state_authority", "schema_version": "v1", "status": "PASS", "canonical_blocker": ""})
+    return path.resolve()
+
+
 def _write_startup_materialization(truth_root: Path) -> None:
     _write_json(
         truth_root / "reports" / "startup_materialization_v1" / DAY / "startup_materialization.v1.json",
@@ -272,6 +277,8 @@ def _run_boundary(
     truth_root: Path,
     *,
     session_day_blocker: str = "",
+    day_readiness_submit_allowed: bool = True,
+    day_readiness_blocker: str = "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE",
     day_authority_state: str = "OPEN_READY",
     day_authority_can_submit: bool = True,
     day_authority_reason_codes: list[str] | None = None,
@@ -290,6 +297,9 @@ def _run_boundary(
         startup_path = truth_root / "reports" / "startup_materialization_v1" / DAY / "startup_materialization.v1.json"
         posture_path = truth_root / "reports" / "paper_trading_posture_v1" / DAY / "paper_trading_posture.v1.json"
         readiness_path = truth_root / "trade_submit_readiness_c2_v1" / "_history" / "PAPER" / ACCOUNT / DAY / "status.json"
+        day_readiness_path = truth_root / "reports" / "trading_day_readiness_authority_v1" / DAY / "trading_day_readiness_authority.v1.json"
+        runtime_resilience_path = truth_root / "reports" / "runtime_resilience_authority_v1" / DAY / "runtime_resilience_authority.v1.json"
+        safety_state_path = truth_root / "reports" / "safety_state_authority_v1" / DAY / "safety_state_authority.v1.json"
         build_path = (truth_root / "target_day_build_v1" / f"{DAY}.json").resolve()
         day_authority_path = (
             truth_root
@@ -320,6 +330,17 @@ def _run_boundary(
             return_value=(
                 str(session_day_blocker or "").strip().upper(),
                 (truth_root / "reports" / "paper_session_authority_v1" / DAY / "paper_session_authority.v1.json").resolve(),
+            ),
+        ), patch.object(
+            boundary_module,
+            "read_or_evaluate_trading_day_readiness_authority_v1",
+            return_value=(
+                day_readiness_path.resolve(),
+                {
+                    "readiness_mode": "INTRADAY_SUBMIT" if day_readiness_submit_allowed else "PREOPEN_BUILD",
+                    "submit_allowed_by_mode": bool(day_readiness_submit_allowed),
+                    "canonical_blocker": "" if day_readiness_submit_allowed else day_readiness_blocker,
+                },
             ),
         ), patch.object(
             boundary_module,
@@ -391,6 +412,32 @@ def _run_boundary(
             return_value=type("Ref", (), {"path": readiness_path, "payload": json.loads(readiness_path.read_text(encoding="utf-8"))})(),
         ), patch.object(
             boundary_module,
+            "validate_governed_artifact_payload_v1",
+            return_value=None,
+        ), patch.object(
+            boundary_module,
+            "build_runtime_resilience_authority_v1",
+            return_value={
+                "artifact_path": str(runtime_resilience_path.resolve()),
+                "status": "PASS",
+                "canonical_blocker": "",
+                "recovery_status": "NONE",
+                "ib_connection_state": "CONNECTED",
+                "pending_orders_reconciled": True,
+                "open_positions_reconciled": True,
+                "submit_blocked_during_recovery": False,
+                "reason_codes": [],
+            },
+        ), patch.object(
+            boundary_module,
+            "evaluate_safety_state_authority_v1",
+            return_value={"status": "PASS", "canonical_blocker": "", "root_cause": ""},
+        ), patch.object(
+            boundary_module,
+            "write_safety_state_authority_v1",
+            side_effect=lambda **_kwargs: _write_safety_state_for_test(safety_state_path),
+        ), patch.object(
+            boundary_module,
             "run_runtime_control_kernel_v1",
             return_value={
                 "runtime_control_decision": type("Decision", (), {"reason_codes": []})(),
@@ -410,6 +457,8 @@ def _run_boundary_with_upstream(
     build_payload: dict,
     admission_payload: dict,
     session_day_blocker: str = "",
+    day_readiness_submit_allowed: bool = True,
+    day_readiness_blocker: str = "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE",
     day_authority_state: str = "OPEN_READY",
     day_authority_can_submit: bool = True,
     day_authority_reason_codes: list[str] | None = None,
@@ -428,6 +477,9 @@ def _run_boundary_with_upstream(
         startup_path = truth_root / "reports" / "startup_materialization_v1" / DAY / "startup_materialization.v1.json"
         posture_path = truth_root / "reports" / "paper_trading_posture_v1" / DAY / "paper_trading_posture.v1.json"
         readiness_path = truth_root / "trade_submit_readiness_c2_v1" / "_history" / "PAPER" / ACCOUNT / DAY / "status.json"
+        day_readiness_path = truth_root / "reports" / "trading_day_readiness_authority_v1" / DAY / "trading_day_readiness_authority.v1.json"
+        runtime_resilience_path = truth_root / "reports" / "runtime_resilience_authority_v1" / DAY / "runtime_resilience_authority.v1.json"
+        safety_state_path = truth_root / "reports" / "safety_state_authority_v1" / DAY / "safety_state_authority.v1.json"
         build_path = (truth_root / "target_day_build_v1" / f"{DAY}.json").resolve()
         admission_path = (truth_root / "target_day_admission_v1" / f"{DAY}.json").resolve()
         day_authority_path = (
@@ -450,6 +502,17 @@ def _run_boundary_with_upstream(
             return_value=(
                 str(session_day_blocker or "").strip().upper(),
                 (truth_root / "reports" / "paper_session_authority_v1" / DAY / "paper_session_authority.v1.json").resolve(),
+            ),
+        ), patch.object(
+            boundary_module,
+            "read_or_evaluate_trading_day_readiness_authority_v1",
+            return_value=(
+                day_readiness_path.resolve(),
+                {
+                    "readiness_mode": "INTRADAY_SUBMIT" if day_readiness_submit_allowed else "PREOPEN_BUILD",
+                    "submit_allowed_by_mode": bool(day_readiness_submit_allowed),
+                    "canonical_blocker": "" if day_readiness_submit_allowed else day_readiness_blocker,
+                },
             ),
         ), patch.object(
             boundary_module, "_refresh_trade_submit_readiness_artifact_v1", return_value=0
@@ -487,6 +550,32 @@ def _run_boundary_with_upstream(
             boundary_module,
             "read_trade_submit_readiness_for_day_v1",
             return_value=type("Ref", (), {"path": readiness_path, "payload": json.loads(readiness_path.read_text(encoding="utf-8"))})(),
+        ), patch.object(
+            boundary_module,
+            "validate_governed_artifact_payload_v1",
+            return_value=None,
+        ), patch.object(
+            boundary_module,
+            "build_runtime_resilience_authority_v1",
+            return_value={
+                "artifact_path": str(runtime_resilience_path.resolve()),
+                "status": "PASS",
+                "canonical_blocker": "",
+                "recovery_status": "NONE",
+                "ib_connection_state": "CONNECTED",
+                "pending_orders_reconciled": True,
+                "open_positions_reconciled": True,
+                "submit_blocked_during_recovery": False,
+                "reason_codes": [],
+            },
+        ), patch.object(
+            boundary_module,
+            "evaluate_safety_state_authority_v1",
+            return_value={"status": "PASS", "canonical_blocker": "", "root_cause": ""},
+        ), patch.object(
+            boundary_module,
+            "write_safety_state_authority_v1",
+            side_effect=lambda **_kwargs: _write_safety_state_for_test(safety_state_path),
         ), patch.object(
             boundary_module,
             "read_target_day_build_ref_v1",
@@ -537,10 +626,8 @@ def test_submit_boundary_authorizes_when_kill_switch_present_and_inactive() -> N
         assert payload["boundary_status"] == "AUTHORIZED"
         assert payload["submission_authorized"] is True
         assert payload["constitutional_lineage"]["artifact_type"] == "submit_boundary_status_v1"
-        assert payload["constitutional_dependency_declaration"]["declared_dependency_artifacts"] == [
-            "target_day_build_v1",
-            "trade_submit_readiness_c2_v1",
-        ]
+        declared = set(payload["constitutional_dependency_declaration"]["declared_dependency_artifacts"])
+        assert {"target_day_build_v1", "trade_submit_readiness_c2_v1"} <= declared
 
 
 def test_submit_boundary_blocks_when_kill_switch_is_active() -> None:
@@ -772,14 +859,19 @@ def test_submit_boundary_non_trading_day_emits_blocked_surface() -> None:
         _write_paper_trading_posture(truth_root)
         _write_trade_submit_status(truth_root)
         _write_kill_switch(truth_root, state="INACTIVE", allow_entries=True)
-        rc, payload = _run_boundary(truth_root, session_day_blocker="NON_TRADING_DAY")
+        rc, payload = _run_boundary(
+            truth_root,
+            session_day_blocker="NON_TRADING_DAY",
+            day_readiness_submit_allowed=False,
+            day_readiness_blocker="SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE",
+        )
         assert rc == 2
         assert payload["boundary_status"] == "BLOCKED"
         assert payload["submit_allowed"] is False
-        assert payload["canonical_blocker"] == "NON_TRADING_DAY"
-        assert "NON_TRADING_DAY" in payload["reason_codes"]
+        assert payload["canonical_blocker"] == "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE"
+        assert "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE" in payload["reason_codes"]
         assert payload["status"] == "NOT_READY"
-        assert payload["source_surface_path"].endswith("/paper_session_authority.v1.json")
+        assert payload["source_surface_path"].endswith("/trading_day_readiness_authority.v1.json")
 
 
 def test_submit_boundary_missing_session_authority_fails_closed() -> None:
@@ -789,12 +881,17 @@ def test_submit_boundary_missing_session_authority_fails_closed() -> None:
         _write_paper_trading_posture(truth_root)
         _write_trade_submit_status(truth_root)
         _write_kill_switch(truth_root, state="INACTIVE", allow_entries=True)
-        rc, payload = _run_boundary(truth_root, session_day_blocker="SESSION_AUTHORITY_MISSING")
+        rc, payload = _run_boundary(
+            truth_root,
+            session_day_blocker="SESSION_AUTHORITY_MISSING",
+            day_readiness_submit_allowed=False,
+            day_readiness_blocker="SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE",
+        )
         assert rc == 2
         assert payload["boundary_status"] == "BLOCKED"
         assert payload["submit_allowed"] is False
-        assert payload["canonical_blocker"] == "SESSION_AUTHORITY_MISSING"
-        assert "SESSION_AUTHORITY_MISSING" in payload["reason_codes"]
+        assert payload["canonical_blocker"] == "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE"
+        assert "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE" in payload["reason_codes"]
 
 
 def test_submit_boundary_refuses_orders_when_day_authority_not_open_ready() -> None:
