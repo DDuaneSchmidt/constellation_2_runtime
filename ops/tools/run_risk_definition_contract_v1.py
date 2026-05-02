@@ -73,13 +73,18 @@ def _find_intent_by_id(*, truth_root: Path, day_utc: str, intent_id: str) -> tup
     day_root = Path(truth_root).resolve() / "intents_v1" / "snapshots" / day_utc
     if not day_root.exists():
         raise FileNotFoundError(f"INTENTS_DAY_DIR_MISSING:{day_root}")
+    matches: list[tuple[int, str, str, Path, dict[str, Any]]] = []
     for path in sorted(day_root.glob("*.json")):
         obj = _read_json(path)
         if str(obj.get("intent_id") or "").strip() == intent_id:
             name = path.name
             suffix = ".exposure_intent.v1.json"
             intent_hash = name[: -len(suffix)] if name.endswith(suffix) else canonical_hash_for_c2_artifact_v1(obj)
-            return intent_hash.lower(), path.resolve(), obj
+            stat = path.stat()
+            matches.append((int(stat.st_mtime_ns), name, intent_hash.lower(), path.resolve(), obj))
+    if matches:
+        _mtime_ns, _name, resolved_hash, resolved_path, resolved_obj = sorted(matches, key=lambda item: (item[0], item[1]))[-1]
+        return resolved_hash, resolved_path, resolved_obj
     raise FileNotFoundError(f"EXPOSURE_INTENT_NOT_FOUND:intent_id={intent_id}")
 
 
@@ -187,6 +192,7 @@ def build_risk_definition_contract_v1(*, day_utc: str, truth_root: Path, intent_
         "intent_id": resolved_intent_id,
         "intent_hash": resolved_hash,
         "instrument": {"kind": "OPTION_STRATEGY" if risk_type == "DEFINED_RISK" else "EQUITY", "symbol": symbol, "currency": currency},
+        "contract_type": risk_type,
         "risk_type": risk_type,
         "source_intent_path": str(source_path.resolve()),
         "generated_at": _now_iso(),

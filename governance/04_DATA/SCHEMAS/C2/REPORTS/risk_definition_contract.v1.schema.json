@@ -12,6 +12,7 @@
     "sleeve_id",
     "intent_id",
     "instrument",
+    "contract_type",
     "risk_type",
     "source_intent_path",
     "generated_at",
@@ -39,6 +40,7 @@
         "kind": { "type": "string" }
       }
     },
+    "contract_type": { "enum": ["STOP_BASED", "DEFINED_RISK"] },
     "risk_type": { "enum": ["STOP_BASED", "DEFINED_RISK"] },
     "source_intent_path": { "type": "string", "minLength": 1 },
     "generated_at": { "type": "string", "minLength": 1 },

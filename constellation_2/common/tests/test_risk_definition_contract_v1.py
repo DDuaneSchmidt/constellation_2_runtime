@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from ops.tools.run_risk_definition_contract_v1 import (
@@ -22,9 +23,12 @@ def _write(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
 
 
-def _seed_trend(root: Path, *, with_price: bool = True) -> None:
+def _seed_trend(root: Path, *, with_price: bool = True, with_stop_loss_bps: bool = True, intent_hash: str = TREND_HASH) -> None:
+    constraints = {"max_risk_pct": "0.01"}
+    if with_stop_loss_bps:
+        constraints["stop_loss_bps"] = 1000
     _write(
-        root / "intents_v1" / "snapshots" / DAY / f"{TREND_HASH}.exposure_intent.v1.json",
+        root / "intents_v1" / "snapshots" / DAY / f"{intent_hash}.exposure_intent.v1.json",
         {
             "schema_id": "exposure_intent",
             "schema_version": "v1",
@@ -33,7 +37,7 @@ def _seed_trend(root: Path, *, with_price: bool = True) -> None:
             "exposure_type": "LONG_EQUITY",
             "underlying": {"symbol": "SPY", "currency": "USD"},
             "target_notional_pct": "0.01",
-            "constraints": {"max_risk_pct": "0.01", "stop_loss_bps": 1000},
+            "constraints": constraints,
         },
     )
     if with_price:
@@ -80,6 +84,7 @@ def test_trend_stop_loss_bps_creates_valid_stop_based_contract(tmp_path: Path) -
     payload = build_risk_definition_contract_v1(day_utc=DAY, truth_root=tmp_path, intent_hash=TREND_HASH)
     validate_risk_definition_contract_v1(payload)
     assert payload["validation_status"] == "PASS"
+    assert payload["contract_type"] == "STOP_BASED"
     assert payload["risk_type"] == "STOP_BASED"
     assert payload["reference_price"] == "500.00"
     assert payload["risk_per_unit"] == 5000
@@ -92,6 +97,33 @@ def test_missing_reference_price_blocks_stop_based_contract(tmp_path: Path) -> N
     validate_risk_definition_contract_v1(payload)
     assert payload["validation_status"] == "FAIL"
     assert "RISK_CONTRACT_REFERENCE_PRICE_MISSING" in payload["blockers"]
+
+
+def test_missing_stop_loss_bps_blocks_stop_based_contract(tmp_path: Path) -> None:
+    _seed_trend(tmp_path, with_stop_loss_bps=False)
+    payload = build_risk_definition_contract_v1(day_utc=DAY, truth_root=tmp_path, intent_hash=TREND_HASH)
+    validate_risk_definition_contract_v1(payload)
+    assert payload["validation_status"] == "FAIL"
+    assert "RISK_CONTRACT_STOP_LOSS_BPS_MISSING" in payload["blockers"]
+
+
+def test_intent_id_lookup_uses_latest_same_day_snapshot(tmp_path: Path) -> None:
+    stale_hash = "0" * 64
+    corrected_hash = "f" * 64
+    _seed_trend(tmp_path, with_stop_loss_bps=False, intent_hash=stale_hash)
+    stale_path = tmp_path / "intents_v1" / "snapshots" / DAY / f"{stale_hash}.exposure_intent.v1.json"
+    os.utime(stale_path, (1, 1))
+    _seed_trend(tmp_path, with_stop_loss_bps=True, intent_hash=corrected_hash)
+    corrected_path = tmp_path / "intents_v1" / "snapshots" / DAY / f"{corrected_hash}.exposure_intent.v1.json"
+    os.utime(corrected_path, (2, 2))
+
+    payload = build_risk_definition_contract_v1(day_utc=DAY, truth_root=tmp_path, intent_id=TREND_ID)
+    validate_risk_definition_contract_v1(payload)
+
+    assert payload["validation_status"] == "PASS"
+    assert payload["intent_hash"] == corrected_hash
+    assert payload["source_intent_path"] == str(corrected_path.resolve())
+    assert payload["stop_loss_bps"] == 1000
 
 
 def test_vol_missing_defined_risk_evidence_fails_closed(tmp_path: Path) -> None:
@@ -107,6 +139,7 @@ def test_valid_defined_risk_contract_can_pass_preconditions(tmp_path: Path) -> N
     payload = build_risk_definition_contract_v1(day_utc=DAY, truth_root=tmp_path, intent_hash=VOL_HASH)
     validate_risk_definition_contract_v1(payload)
     assert payload["validation_status"] == "PASS"
+    assert payload["contract_type"] == "DEFINED_RISK"
     assert payload["risk_type"] == "DEFINED_RISK"
     assert payload["max_loss"] == 40000
     assert payload["quantity_basis"]["quantity"] == 1

@@ -191,6 +191,7 @@ def _seed_risk_contract(root: Path, *, risk_type: str, stop_loss_bps: int = 1000
         'intent_id': INTENT_ID,
         'intent_hash': INTENT_HASH,
         'instrument': {'kind': 'EQUITY' if risk_type == 'STOP_BASED' else 'OPTION_STRATEGY', 'symbol': 'SPY', 'currency': 'USD'},
+        'contract_type': risk_type,
         'risk_type': risk_type,
         'source_intent_path': str((root / SLEEVE / ENV / 'intents_v1' / 'snapshots' / DAY / f'{INTENT_HASH}.exposure_intent.v1.json').resolve()),
         'generated_at': f'{DAY}T00:00:00Z',

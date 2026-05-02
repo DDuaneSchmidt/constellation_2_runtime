@@ -99,6 +99,7 @@ def _seed_contract(root: Path, *, intent_hash: str, intent_id: str, risk_type: s
         "intent_id": intent_id,
         "intent_hash": intent_hash,
         "instrument": {"kind": "EQUITY" if risk_type == "STOP_BASED" else "OPTION_STRATEGY", "symbol": "SPY" if risk_type == "STOP_BASED" else "IWM", "currency": "USD"},
+        "contract_type": risk_type,
         "risk_type": risk_type,
         "source_intent_path": str((root / "intents_v1" / "snapshots" / DAY / f"{intent_hash}.exposure_intent.v1.json").resolve()),
         "generated_at": f"{DAY}T00:00:00Z",
