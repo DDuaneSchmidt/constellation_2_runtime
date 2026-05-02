@@ -332,6 +332,47 @@ def test_present_lifecycle_requirement_passes(tmp_path: Path) -> None:
     assert node["canonical_blocker"] == ""
 
 
+def test_operator_statement_is_human_supplied_external_input_with_provenance(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    statement = bod.resolve_operator_statement_path(operator_input_root=ctx.operator_input_root, day_utc=ctx.day_utc)
+    statement.parent.mkdir(parents=True, exist_ok=True)
+    statement.write_text(
+        json.dumps(
+            {
+                "observed_at_utc": f"{ctx.day_utc}T00:00:00Z",
+                "currency": "USD",
+                "cash_total": "0.00",
+                "nlv_total": "0.00",
+                "account_id": ctx.ib_account,
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = graph.build_requirement_graph(ctx)
+    node = next(row for row in payload["requirements"] if row["requirement_id"] == "BOD_INPUTS:operator_statement")
+
+    assert node["status"] == "SATISFIED"
+    assert node["canonical_blocker"] == ""
+    assert node["human_supplied_external_input"] is True
+    assert node["external_input_provenance_status"] == "PASS"
+
+
+def test_operator_statement_external_input_requires_provenance_metadata(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    statement = bod.resolve_operator_statement_path(operator_input_root=ctx.operator_input_root, day_utc=ctx.day_utc)
+    statement.parent.mkdir(parents=True, exist_ok=True)
+    statement.write_text(json.dumps({"observed_at_utc": f"{ctx.day_utc}T00:00:00Z"}, sort_keys=True), encoding="utf-8")
+
+    payload = graph.build_requirement_graph(ctx)
+    node = next(row for row in payload["requirements"] if row["requirement_id"] == "BOD_INPUTS:operator_statement")
+
+    assert node["status"] == "BLOCKED"
+    assert node["canonical_blocker"] == "OPERATOR_INPUT_PROVENANCE_MISSING"
+    assert "currency" in node["external_input_missing_metadata"]
+
+
 def test_stale_lifecycle_requirement_is_explicit(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     target = ctx.truth_root / "reports" / "market_data_authority_v1" / ctx.day_utc / "market_data_authority.v1.json"

@@ -11,6 +11,7 @@ from constellation_2.common.paper_session_path_alignment_v1 import (
     resolve_session_readiness_refresh_path,
 )
 from ops.tools import run_day_authority_decision_v1 as tool_module
+from ops.tools import run_submit_boundary_status_v1 as submit_boundary
 
 
 DAY = "2026-04-14"
@@ -155,6 +156,38 @@ def test_canonical_helper_materializes_from_refresh_report_with_canonical_writer
     ref = read_day_authority_decision_v1(truth_root=tmp_path, trading_day=DAY)
     assert ref.payload["run_metadata"]["producer_module"] == "ops/tools/run_day_authority_decision_v1.py"
     assert ref.payload["constitutional_dependency_declaration"]["dependency_refs"][0]["artifact_id"] == "session_readiness_refresh_v1"
+
+
+def test_submit_boundary_pre_refresh_repairs_legacy_day_authority_shape(tmp_path: Path) -> None:
+    _write_refresh_report(
+        tmp_path,
+        authority_result=_authority_result(validation_state="FAIL", blocking_class="BOD_INPUTS", reason_code="TARGET_DAY_DATE_MISMATCH"),
+    )
+    legacy_path = tmp_path / "reports" / "day_authority_decision_v1" / DAY / "day_authority_decision.v1.json"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "schema_id": "day_authority_decision",
+                "schema_version": "v1",
+                "decision_id": f"day-authority-{DAY}",
+                "trading_day": DAY,
+                "decision_state": "BLOCKED",
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    rc = submit_boundary._refresh_day_authority_decision_artifact_v1(truth_root=tmp_path, day_utc=DAY)
+
+    assert rc == 0
+    ref = read_day_authority_decision_v1(truth_root=tmp_path, trading_day=DAY)
+    assert ref.payload["decision_state"] == "BLOCKED"
+    assert ref.payload["constitutional_dependency_declaration"]["declared_dependency_artifacts"] == [
+        "session_readiness_refresh_v1"
+    ]
+    assert ref.payload["constitutional_lineage"]["artifact_type"] == "day_authority_decision_v1"
 
 
 def test_run_day_authority_tool_requires_refresh_report(tmp_path: Path) -> None:

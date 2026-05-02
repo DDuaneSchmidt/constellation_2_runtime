@@ -30,6 +30,9 @@ SOURCE_OPERATOR_INPUT = "OPERATOR_INPUT_CONTRACT"
 SOURCE_BROKER_AUTHORITY = "BROKER_AUTHORITY"
 SOURCE_STATIC_POLICY = "STATIC_POLICY"
 DEFAULT_FRESHNESS_POLICY = "same_day_required; stale/contradictory/missing artifact => BLOCKED_OR_STALE"
+OPERATOR_INPUT_EXTERNAL_REQUIRED_METADATA = {
+    "operator_statement": ["observed_at_utc", "currency", "cash_total", "nlv_total", "account_id"],
+}
 
 
 def _now_iso() -> str:
@@ -249,6 +252,30 @@ def _path_action(path: Path, action: str, *, day_utc: str) -> str:
     return "" if path.exists() else action
 
 
+def _operator_external_input_provenance(
+    *,
+    artifact: str,
+    path: Path,
+    day_utc: str,
+) -> dict[str, Any]:
+    required = OPERATOR_INPUT_EXTERNAL_REQUIRED_METADATA.get(str(artifact or "").strip(), [])
+    if not required:
+        return {}
+    payload = _read_json(path)
+    missing = [key for key in required if payload.get(key) in (None, "")]
+    observed = str(payload.get("observed_at_utc") or "").strip()
+    if observed and not observed.startswith(f"{day_utc}T"):
+        missing.append("observed_at_utc_current_day")
+    status = "PASS" if not missing else "FAIL"
+    return {
+        "human_supplied_external_input": True,
+        "external_input_classification": "HUMAN_SUPPLIED_OPERATOR_STATEMENT",
+        "external_input_provenance_status": status,
+        "external_input_required_metadata": required,
+        "external_input_missing_metadata": missing,
+    }
+
+
 def _option_requirement_nodes(
     *,
     day_utc: str,
@@ -407,34 +434,46 @@ def _lifecycle_nodes(ctx: bod.BodContext) -> list[dict[str, Any]]:
     for owner_phase, source_type, artifact, path, command, consumer, blocker in items:
         status = _status_for_path(path, day_utc=day)
         canonical_blocker = _path_blocker(path, blocker, day_utc=day)
+        provenance: dict[str, Any] = {}
         if status == "SATISFIED" and path.is_file() and path.suffix == ".json":
             payload = _read_json(path)
             if not isinstance(payload.get("producer_contract_v1"), dict):
-                status = "BLOCKED"
-                canonical_blocker = "REQUIRED_PRODUCER_CONTRACT_MISSING"
+                provenance = (
+                    _operator_external_input_provenance(artifact=artifact, path=path, day_utc=day)
+                    if source_type == SOURCE_OPERATOR_INPUT
+                    else {}
+                )
+                if provenance.get("external_input_provenance_status") != "PASS":
+                    status = "BLOCKED"
+                    canonical_blocker = (
+                        "OPERATOR_INPUT_PROVENANCE_MISSING"
+                        if provenance
+                        else "REQUIRED_PRODUCER_CONTRACT_MISSING"
+                    )
         fresh_row = freshness_by_path.get(str(path.resolve()))
         if fresh_row and str(fresh_row.get("freshness_status") or "") in {"STALE", "EXPIRED", "UNKNOWN"}:
             if str(fresh_row.get("blocking_class") or "") == "HARD_BLOCKER":
                 status = "STALE" if fresh_row.get("freshness_status") != "UNKNOWN" else "BLOCKED"
                 canonical_blocker = str(fresh_row.get("canonical_blocker") or "TRUTH_FRESHNESS_UNKNOWN")
-        nodes.append(
-            _node(
-                requirement_id=f"{owner_phase}:{artifact}",
-                owner_phase=owner_phase,
-                source_type=source_type,
-                source_id=owner_phase,
-                instrument="",
-                required_artifact=artifact,
-                expected_path=path,
-                producer_command=command,
-                consumer=consumer,
-                status=status,
-                blocker=canonical_blocker,
-                blocker_detail="" if status == "SATISFIED" else f"expected artifact missing or stale at {path}",
-                downstream_consequences=[],
-                operator_next_action=str((fresh_row or {}).get("operator_next_action") or "") or _path_action(path, f"Run {command}", day_utc=day),
-            )
+        node = _node(
+            requirement_id=f"{owner_phase}:{artifact}",
+            owner_phase=owner_phase,
+            source_type=source_type,
+            source_id=owner_phase,
+            instrument="",
+            required_artifact=artifact,
+            expected_path=path,
+            producer_command=command,
+            consumer=consumer,
+            status=status,
+            blocker=canonical_blocker,
+            blocker_detail="" if status == "SATISFIED" else f"expected artifact missing or stale at {path}",
+            downstream_consequences=[],
+            operator_next_action=str((fresh_row or {}).get("operator_next_action") or "") or _path_action(path, f"Run {command}", day_utc=day),
         )
+        if provenance:
+            node.update(provenance)
+        nodes.append(node)
     return nodes
 
 

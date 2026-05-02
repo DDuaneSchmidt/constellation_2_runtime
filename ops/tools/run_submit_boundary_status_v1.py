@@ -533,11 +533,35 @@ def _closure_state_for_boundary(boundary_status: str, blocking_codes: List[str])
     return "OPEN"
 
 
+def _refresh_day_authority_decision_artifact_v1(*, truth_root: Path, day_utc: str) -> int:
+    import ops.tools.run_day_authority_decision_v1 as day_authority_module
+
+    try:
+        day_authority_module.write_day_authority_decision_from_refresh_report_v1(
+            day_utc=day_utc,
+            truth_root=Path(truth_root).resolve(),
+            producer_git_sha=repo_git_sha_v1(),
+        )
+        return 0
+    except SystemExit as exc:
+        if "session_readiness_refresh_missing" in str(exc):
+            return 0
+        return 2
+    except Exception:
+        return 2
+
+
 def _refresh_trade_submit_readiness_artifact_v1(*, truth_root: Path, day_utc: str, ib_account: str, environment: str = "PAPER") -> int:
     import ops.tools.run_trade_submit_readiness_c2_v1 as readiness_module
 
     resolved_truth_root = Path(truth_root).resolve()
     resolved_truth_root.mkdir(parents=True, exist_ok=True)
+    day_authority_refresh_rc = _refresh_day_authority_decision_artifact_v1(
+        truth_root=resolved_truth_root,
+        day_utc=day_utc,
+    )
+    if day_authority_refresh_rc != 0:
+        return int(day_authority_refresh_rc)
     authoritative_repo_root = resolve_authoritative_repo_root_v1(readiness_module.REPO_ROOT)
     original_repo_root = readiness_module.REPO_ROOT
     original_truth_root = readiness_module.TRUTH_ROOT

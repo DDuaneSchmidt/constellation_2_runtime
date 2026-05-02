@@ -310,6 +310,14 @@ def test_projection_uses_concrete_blocker_evidence_for_known_hard_blockers(tmp_p
     assert "paper_session_authority.v1.json" in session["evidence_paths"][0]
     assert "run_paper_session_bootstrap_v1.py" in session["operator_next_action"]
 
+    mismatch = projection._projection_from_kernel(ctx, {**base_kernel, "first_blocker": "TARGET_DAY_DATE_MISMATCH", "canonical_blocker": "TARGET_DAY_DATE_MISMATCH"})
+    assert "paper capital seed" in mismatch["operator_next_action"]
+    assert "operator statement" in mismatch["operator_next_action"]
+    assert "pre-open bundle" in mismatch["operator_next_action"]
+    assert any("paper_capital_seed.v1.json" in path for path in mismatch["evidence_paths"])
+    assert any("operator_statement.v1.json" in path for path in mismatch["evidence_paths"])
+    assert any("pre_open_bundle.v1.json" in path for path in mismatch["evidence_paths"])
+
 
 def test_ui_readiness_kernel_uses_unified_truth_kernel_when_present(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)

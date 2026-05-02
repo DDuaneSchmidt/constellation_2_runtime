@@ -214,6 +214,27 @@ def _blocker_context(ctx: bod.BodContext, blocker: str) -> dict[str, Any]:
             "next_valid_actions": ["Run paper session bootstrap", "Rerun day"],
             "root_cause": "Paper session authority artifact is missing for the current day.",
         }
+    if blocker == "TARGET_DAY_DATE_MISMATCH":
+        capital_seed_path = bod.resolve_paper_capital_seed_path(operator_input_root=ctx.operator_input_root, day_utc=ctx.day_utc)
+        operator_statement_path = bod.resolve_operator_statement_path(operator_input_root=ctx.operator_input_root, day_utc=ctx.day_utc)
+        pre_open_bundle_path = ctx.truth_root / "reports" / "pre_open_bundle_v1" / ctx.day_utc / "pre_open_bundle.v1.json"
+        return {
+            "evidence_paths": [
+                str(capital_seed_path.resolve()),
+                str(operator_statement_path.resolve()),
+                str(pre_open_bundle_path.resolve()),
+            ],
+            "operator_next_action": (
+                "Provide or regenerate paper capital seed, operator statement, and pre-open bundle, "
+                "then rerun run_aegis_day_v1.py."
+            ),
+            "next_valid_actions": [
+                "Provide/regenerate paper capital seed",
+                "Provide/regenerate operator statement",
+                "Regenerate pre-open bundle",
+            ],
+            "root_cause": "Target-day prerequisites are missing or dated for a different day.",
+        }
     return {}
 
 
