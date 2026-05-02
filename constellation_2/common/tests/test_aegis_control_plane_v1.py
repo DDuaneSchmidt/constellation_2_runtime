@@ -13,11 +13,17 @@ if str(REPO_ROOT) not in sys.path:
 import ops.tools.run_aegis_control_plane_v1 as cp  # noqa: E402
 import ops.tools.run_aegis_operator_projection_v1 as projection  # noqa: E402
 import ops.tools.run_aegis_requirement_graph_v1 as graph  # noqa: E402
+from constellation_2.phaseB.lib.validate_against_schema_v1 import SchemaValidationError, validate_against_repo_schema_v1  # noqa: E402
 from ops.tools import run_aegis_bod_prepare_v1 as bod  # noqa: E402
 
 DAY = "2026-05-04"
 KNOWN_FAILURE_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "readiness_domain_ownership_known_failure_v1.json"
 DOMAIN_DRIFT_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "readiness_domain_drift_known_good_vs_current_v1.json"
+REPORT_CONTRACT_SCHEMAS = [
+    "governance/04_DATA/SCHEMAS/C2/REPORTS/runtime_resilience_authority.v1.schema.json",
+    "governance/04_DATA/SCHEMAS/C2/REPORTS/broker_supply.v1.schema.json",
+    "governance/04_DATA/SCHEMAS/C2/REPORTS/authorization_supply.v1.schema.json",
+]
 
 
 def _ctx(tmp_path: Path) -> bod.BodContext:
@@ -631,6 +637,81 @@ def test_readiness_registry_contract_is_mandatory_and_single_owner() -> None:
                 assert (REPO_ROOT / dep["schema_path"]).exists()
             if dep.get("metadata_exempt") is True:
                 assert dep.get("metadata_exempt_reason")
+
+
+def test_readiness_contract_schemas_reject_missing_contract_fields() -> None:
+    for schema_path in REPORT_CONTRACT_SCHEMAS:
+        with pytest.raises(SchemaValidationError):
+            validate_against_repo_schema_v1({"day_utc": DAY, "status": "PASS"}, REPO_ROOT, schema_path)
+        with pytest.raises(SchemaValidationError):
+            validate_against_repo_schema_v1(
+                {
+                    "day_utc": DAY,
+                    "status": "BLOCKED",
+                    "generated_at_utc": f"{DAY}T13:00:00Z",
+                    "producer": {"module": "ops/tools/example.py", "git_sha": "a" * 40},
+                    "truth_root": "/tmp/truth",
+                },
+                REPO_ROOT,
+                schema_path,
+            )
+
+    with pytest.raises(SchemaValidationError):
+        validate_against_repo_schema_v1(
+            {"day_utc": DAY, "cash_total": 100000, "nlv_total": 100000},
+            REPO_ROOT,
+            "governance/04_DATA/SCHEMAS/C2/INPUTS/paper_capital_seed.v1.schema.json",
+        )
+    with pytest.raises(SchemaValidationError):
+        validate_against_repo_schema_v1(
+            {"account_id": "DU123456", "observed_at_utc": f"{DAY}T13:00:00Z"},
+            REPO_ROOT,
+            "governance/04_DATA/SCHEMAS/C2/INPUTS/operator_statement.v1.schema.json",
+        )
+
+
+def test_readiness_contract_schemas_accept_governed_artifact_shapes() -> None:
+    base_report = {
+        "day_utc": DAY,
+        "status": "BLOCKED",
+        "canonical_blocker": "TEST_BLOCKER",
+        "reason_codes": ["TEST_BLOCKER"],
+        "generated_at_utc": f"{DAY}T13:00:00Z",
+        "producer": {"repo": "constellation", "module": "ops/tools/example.py", "git_sha": "a" * 40},
+        "truth_root": "/tmp/truth",
+    }
+    for schema_path in REPORT_CONTRACT_SCHEMAS:
+        validate_against_repo_schema_v1(base_report, REPO_ROOT, schema_path)
+
+    validate_against_repo_schema_v1(
+        {
+            "schema_id": "paper_capital_seed",
+            "schema_version": "v1",
+            "day_utc": DAY,
+            "environment": "PAPER",
+            "ib_account": "DU123456",
+            "produced_utc": f"{DAY}T13:00:00Z",
+            "seed_mode": "OPERATOR_SUPPLIED",
+            "cash_total": 100000,
+            "nlv_total": 100000,
+            "currency": "USD",
+        },
+        REPO_ROOT,
+        "governance/04_DATA/SCHEMAS/C2/INPUTS/paper_capital_seed.v1.schema.json",
+    )
+    validate_against_repo_schema_v1(
+        {
+            "account_id": "DU123456",
+            "observed_at_utc": f"{DAY}T13:00:00Z",
+            "nlv_total": 100000,
+            "cash_total": 100000,
+            "available_funds": 100000,
+            "excess_liquidity": 100000,
+            "currency": "USD",
+        },
+        REPO_ROOT,
+        "governance/04_DATA/SCHEMAS/C2/INPUTS/operator_statement.v1.schema.json",
+    )
 
 
 def test_registry_rejects_session_identity_leakage(monkeypatch) -> None:  # noqa: ANN001

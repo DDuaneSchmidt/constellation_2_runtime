@@ -150,6 +150,54 @@ def test_requirement_graph_and_kernel_cannot_override_control_plane(tmp_path: Pa
     assert payload["truth_resolution_source_path"].endswith("control_plane.v1.json")
 
 
+def test_legacy_ready_surfaces_cannot_override_control_plane_submit_block(tmp_path: Path, monkeypatch) -> None:
+    import ops.tools.aegis_submit_enforcement_v1 as enforcement
+
+    monkeypatch.setattr(enforcement, "_git_commit", lambda: COMMIT)
+    monkeypatch.setattr(enforcement, "_git_dirty_status", lambda: "CLEAN")
+    truth_root = tmp_path / "production_truth"
+    sleeve_root = tmp_path / "sleeve"
+    _seed_control_plane(truth_root)
+    _write_json(
+        truth_root,
+        "governance/production_version.v1.json",
+        {"schema_version": "production_version.v1", "promoted_commit": COMMIT, "status": "ACTIVE"},
+    )
+    _write_json(
+        truth_root,
+        f"reports/submit_boundary_status_v1/{DAY}/submit_boundary_status.v1.json",
+        {"status": "PASS", "submit_allowed": True, "submission_authorized": True},
+    )
+    _write_json(
+        truth_root,
+        f"reports/action_validity_v1/{DAY}/action_validity.v1.json",
+        {"action_rules": [{"action_id": "submit_paper_order", "status": "ALLOWED"}]},
+    )
+    _write_json(
+        truth_root,
+        f"reports/truth_freshness_v1/{DAY}/truth_freshness.v1.json",
+        {
+            "freshness_records": [
+                {"artifact_type": "aegis_day_run_v1", "freshness_status": "FRESH"},
+                {"artifact_type": "submit_boundary_status_v1", "freshness_status": "FRESH"},
+                {"artifact_type": "action_validity_v1", "freshness_status": "FRESH"},
+            ]
+        },
+    )
+    _write_json(
+        sleeve_root,
+        f"risk_v1/kill_switch_v1/{DAY}/global_kill_switch_state.v1.json",
+        {"state": "INACTIVE", "active": False},
+    )
+
+    payload = build_readiness_kernel_v1(DAY, truth_root=truth_root, sleeve_truth_root=sleeve_root)
+
+    assert payload["overall_status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "HIDDEN_DEPENDENCY_DETECTED"
+    assert payload["submit_status"] == "BLOCKED"
+    assert payload["submit_canonical_blocker"] == "CONTROL_PLANE_NOT_READY"
+
+
 def test_server_and_ui_are_wired_to_control_plane_readiness() -> None:
     repo = Path(__file__).resolve().parents[4]
     server = (repo / "constellation_2/phaseL/ui/server/run_ops_dashboard_v1.py").read_text(encoding="utf-8")
