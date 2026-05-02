@@ -13,6 +13,9 @@ from constellation_2.common.runtime_contract_v1 import (
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+RUNTIME_DATA_ROOT = Path("/home/node/constellation_runtime_data").resolve()
+PHASE_CONTROLLED_PRODUCTION_TRUTH_ROOT = (RUNTIME_DATA_ROOT / "production_truth").resolve()
+PHASE_CONTROLLED_CANDIDATE_TRUTH_ROOT = (RUNTIME_DATA_ROOT / "candidate_truth").resolve()
 
 
 @dataclass(frozen=True)
@@ -91,9 +94,17 @@ def classify_runtime_path_v1(
         path_class = "ACTIVE_RELEASE_ROOT"
     elif _under(resolved, selected.active_release_root):
         path_class = "ACTIVE_RELEASE_SUBPATH"
+    elif resolved == PHASE_CONTROLLED_PRODUCTION_TRUTH_ROOT:
+        path_class = "PHASE_CONTROLLED_PRODUCTION_TRUTH_ROOT"
+    elif _under(resolved, PHASE_CONTROLLED_PRODUCTION_TRUTH_ROOT):
+        path_class = "PHASE_CONTROLLED_PRODUCTION_TRUTH_SUBPATH"
+    elif resolved == PHASE_CONTROLLED_CANDIDATE_TRUTH_ROOT:
+        path_class = "PHASE_CONTROLLED_CANDIDATE_TRUTH_ROOT"
+    elif _under(resolved, PHASE_CONTROLLED_CANDIDATE_TRUTH_ROOT):
+        path_class = "PHASE_CONTROLLED_CANDIDATE_TRUTH_SUBPATH"
 
-    policy_read_allowed = path_class.startswith("CANONICAL_RUNTIME_TRUTH")
-    policy_write_allowed = path_class.startswith("CANONICAL_RUNTIME_TRUTH")
+    policy_read_allowed = path_class.startswith("CANONICAL_RUNTIME_TRUTH") or path_class.startswith("PHASE_CONTROLLED_")
+    policy_write_allowed = path_class.startswith("CANONICAL_RUNTIME_TRUTH") or path_class.startswith("PHASE_CONTROLLED_")
     advisory_repo_read_allowed = policy_read_allowed or path_class.startswith("AUTHORITATIVE_REPO_TRUTH")
     return {
         "path": str(resolved),

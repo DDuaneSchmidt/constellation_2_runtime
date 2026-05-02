@@ -25,6 +25,23 @@ def test_decision_truth_root_defaults_to_canonical_runtime_truth(monkeypatch: py
     assert resolve_decision_truth_root_v1("", repo_root=Path("/home/node/constellation")) == authority.canonical_runtime_truth_root
 
 
+def test_phase_controlled_production_truth_root_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    authority = RuntimePathAuthorityV1(
+        authoritative_repo_root=Path("/tmp/repo"),
+        canonical_runtime_truth_root=Path("/tmp/truth"),
+        canonical_runtime_truth_sleeves_root=Path("/tmp/truth_sleeves"),
+        authoritative_repo_truth_root=Path("/tmp/repo/constellation_2/runtime/truth"),
+        authoritative_repo_truth_sleeves_root=Path("/tmp/repo/constellation_2/runtime/truth_sleeves"),
+        active_release_root=Path("/tmp/release"),
+    )
+    monkeypatch.setattr(runtime_path_module, "load_runtime_path_authority_v1", lambda repo_root=None: authority)
+
+    assert resolve_decision_truth_root_v1(
+        "/home/node/constellation_runtime_data/production_truth",
+        repo_root=Path("/home/node/constellation"),
+    ) == Path("/home/node/constellation_runtime_data/production_truth")
+
+
 def test_shadow_repo_root_is_rejected_for_authoritative_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runtime_path_module, "resolve_authoritative_repo_root_v1", lambda _repo: Path("/home/node/constellation"))
     monkeypatch.setattr(runtime_path_module, "load_release_current_runtime_authority_v1", lambda caller: {"release_root": "/home/node/constellation_releases/rel-001"})

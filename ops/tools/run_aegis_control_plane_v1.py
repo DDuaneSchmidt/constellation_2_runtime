@@ -403,7 +403,14 @@ def _evaluate_session_authority(phase: dict[str, Any], ctx: Any, phase_results: 
     if day_row:
         return day_row
     if _legacy_phase_row("SESSION_AUTHORITY", phase_results).get("status") == "SKIPPED":
-        return _phase_row(phase=phase, ctx=ctx, status="UNKNOWN", evidence_paths=[str(path) for path in all_paths], reason="session authority was not evaluated by day-run after an upstream block")
+        return _phase_row(
+            phase=phase,
+            ctx=ctx,
+            status="BLOCKING_CURRENT_RUN",
+            blocker_codes=["SESSION_AUTHORITY_MISSING"],
+            evidence_paths=[str(path) for path in all_paths],
+            reason="session authority was not evaluated by day-run; production session authority evidence is required before downstream phases",
+        )
     active_payload = _read_json(session_paths["active_session"])
     promotion_state = str(active_payload.get("promotion_state") or "").strip().upper()
     rollover_status = str(active_payload.get("rollover_status") or "").strip().upper()

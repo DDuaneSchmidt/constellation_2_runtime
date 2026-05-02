@@ -34,6 +34,23 @@ def _ctx(tmp_path: Path) -> bod.BodContext:
     )
 
 
+def _ctx_with_truth(tmp_path: Path, truth: Path) -> bod.BodContext:
+    execution = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    runtime = tmp_path / "runtime"
+    operator = tmp_path / "operator"
+    for path in (truth, execution, runtime, operator):
+        path.mkdir(parents=True, exist_ok=True)
+    return bod.BodContext(
+        day_utc=DAY,
+        environment="PAPER",
+        truth_root=truth,
+        execution_root=execution,
+        runtime_root=runtime,
+        operator_input_root=operator,
+        ib_account="DU123456",
+    )
+
+
 def _write(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
@@ -191,6 +208,38 @@ def test_session_failure_defers_broker_bod_feed_and_submit(monkeypatch, tmp_path
     assert payload["current_phase"] == "SESSION_AUTHORITY"
     assert payload["canonical_blocker"] == "TARGET_DAY_DATE_MISMATCH"
     assert {"BROKER_HEALTH", "BOD_INPUTS", "FEED_ATTESTATION", "SUBMIT_BOUNDARY"} <= set(payload["deferred_phases"])
+
+
+def test_skipped_or_missing_session_authority_blocks_before_bod(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _broker_pass(ctx)
+    _bod_pass(ctx)
+    phase_results = {"SESSION_AUTHORITY": {"status": "SKIPPED"}}
+    monkeypatch.setattr(cp, "_evaluate_broker_health", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("broker should be deferred")))
+
+    payload = cp.build_control_plane_v1(ctx, phase_results=phase_results)
+
+    assert payload["current_phase"] == "SESSION_AUTHORITY"
+    assert payload["canonical_blocker"] == "SESSION_AUTHORITY_MISSING"
+    assert "BOD_INPUTS" in payload["deferred_phases"]
+
+
+def test_control_plane_does_not_use_legacy_session_root_for_production(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    production_truth = tmp_path / "production_truth"
+    legacy_truth = tmp_path / "truth"
+    ctx = _ctx_with_truth(tmp_path, production_truth)
+    legacy_ctx = _ctx_with_truth(tmp_path, legacy_truth)
+    _session_pass(legacy_ctx)
+    _broker_pass(ctx)
+    _bod_pass(ctx)
+
+    payload = cp.build_control_plane_v1(ctx)
+
+    assert payload["current_phase"] == "SESSION_AUTHORITY"
+    assert payload["canonical_blocker"] in {"SESSION_AUTHORITY_MISSING", "SESSION_AUTHORITY_DENIED"}
+    assert all(str(production_truth) in path or "repo_protection" in path for path in payload["evidence_paths"])
 
 
 def test_session_hidden_dependency_is_decomposed_and_defers_downstream(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
