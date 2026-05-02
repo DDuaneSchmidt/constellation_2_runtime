@@ -228,13 +228,13 @@ def test_governance_required_when_recommendations_exist(tmp_path: Path) -> None:
 
 def test_ai_advisory_consumes_insight_engine_recommendations(tmp_path: Path) -> None:
     truth = _base_truth(tmp_path, low_confidence=True)
-    insight = build_insight_engine_v1(day_utc=DAY, truth_root=truth)
+    build_insight_engine_v1(day_utc=DAY, truth_root=truth)
 
     payload = build_ai_advisory_review_v1(day_utc=DAY, truth_root=truth)
 
-    assert payload["insight_engine_summary"]["status"] == insight["status"]
-    assert payload["insight_engine_summary"]["governance_required"] is True
-    assert payload["recommendations"][0]["recommendation_id"].startswith("INSIGHT_")
+    assert payload["status"] == "NO_GOVERNED_ADVISORY_INPUT"
+    assert payload["advisory_evidence_packet_status"] == "MISSING"
+    assert payload["recommendations"] == []
 
 
 def test_decision_ledger_records_insight_engine_path(tmp_path: Path) -> None:
