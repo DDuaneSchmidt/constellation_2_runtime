@@ -45,6 +45,19 @@
           "operator_next_action"
         ],
         "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "SATISFIED",
+              "BLOCKED",
+              "STALE",
+              "BLOCKING_CURRENT_RUN",
+              "BLOCKING_CURRENT_DOMAIN",
+              "DEFERRED_BY_UPSTREAM_BLOCKER",
+              "DEFERRED_BY_UPSTREAM_DOMAIN",
+              "DIAGNOSTIC_ONLY"
+            ]
+          },
           "blocking_class": {
             "type": "string",
             "enum": ["HARD_BLOCKER", "SOFT_BLOCKER", "DIAGNOSTIC_ONLY", "REPORTING_ONLY"]

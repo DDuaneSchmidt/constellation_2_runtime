@@ -4,6 +4,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -14,6 +16,7 @@ import ops.tools.run_aegis_requirement_graph_v1 as graph  # noqa: E402
 from ops.tools import run_aegis_bod_prepare_v1 as bod  # noqa: E402
 
 DAY = "2026-05-04"
+KNOWN_FAILURE_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "readiness_domain_ownership_known_failure_v1.json"
 
 
 def _ctx(tmp_path: Path) -> bod.BodContext:
@@ -523,3 +526,134 @@ def test_requirement_graph_defers_downstream_missing_artifacts_when_broker_is_cu
     assert broker_node["status"] == "BLOCKING_CURRENT_DOMAIN"
     assert broker_node["canonical_blocker"] == "BROKER_EVENT_LOG_MISSING"
     assert deferred_market
+
+
+def test_readiness_registry_contract_is_mandatory_and_single_owner() -> None:
+    domains = cp.load_readiness_domain_registry_v1()
+    owners: dict[str, str] = {}
+    for domain in domains:
+        assert domain["domain_id"]
+        for dep in domain["dependencies"]:
+            dependency_id = dep["dependency_id"]
+            assert dep["domain_owner"] == domain["domain_id"]
+            assert dependency_id not in owners
+            owners[dependency_id] = dep["domain_owner"]
+            for key in ("expected_path", "schema_path", "producer_command", "recovery_action", "blocking_scope"):
+                assert dep[key]
+
+
+def test_registry_rejects_session_identity_leakage(monkeypatch) -> None:  # noqa: ANN001
+    bad = [
+        {
+            "domain_id": "SESSION_IDENTITY",
+            "domain_order": 1,
+            "dependencies": [
+                {
+                    "dependency_id": "runtime_resilience_authority_v1",
+                    "domain_owner": "SESSION_IDENTITY",
+                    "expected_path": "x",
+                    "schema_path": "x",
+                    "producer_command": "x",
+                    "recovery_action": "x",
+                    "blocking_scope": "SESSION_IDENTITY",
+                    "blocker_codes_owned": ["IB_DISCONNECTED"],
+                }
+            ],
+        }
+    ]
+    with pytest.raises(RuntimeError, match="SESSION_IDENTITY_FORBIDDEN_DEPENDENCY"):
+        cp._validate_readiness_domain_registry_v1(bad)
+
+
+def test_unknown_evaluated_dependency_fails_closed(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _session_pass(ctx)
+    original = cp._evaluate_domain_dependency
+
+    def fake(dep, context):  # noqa: ANN001
+        row = original(dep, context)
+        if row["dependency_id"] == "runtime_resilience_authority_v1":
+            row["dependency_id"] = "unregistered_runtime_dependency_v1"
+        return row
+
+    monkeypatch.setattr(cp, "_evaluate_domain_dependency", fake)
+    with pytest.raises(RuntimeError, match="READINESS_DEPENDENCY_NOT_REGISTERED"):
+        cp.build_control_plane_v1(ctx)
+
+
+def test_projection_renders_control_plane_readiness_without_recomputing(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _session_pass(ctx)
+    monkeypatch.setattr(cp.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+    _cp_path, control = cp.run_control_plane_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
+    monkeypatch.setattr(projection.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+
+    _out_path, payload = projection.run_operator_projection_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
+
+    for key in ("current_domain", "canonical_blocker", "submit_allowed"):
+        assert payload[key] == control[key]
+    assert payload["phase"] == control["current_phase"]
+    assert payload["final_status"] == control["final_status"]
+    assert payload["failed_current_domain_dependencies"] == control["failed_current_domain_dependencies"]
+    assert payload["deferred_downstream_domains"] == control["deferred_domains"]
+
+
+def test_submit_allowed_false_when_control_plane_not_ready(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+
+    payload = cp.build_control_plane_v1(ctx)
+
+    assert payload["final_status"] == "NOT_READY"
+    assert payload["submit_allowed"] is False
+
+
+def test_known_failure_golden_fixture_preserves_domain_ownership(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    fixture = json.loads(KNOWN_FAILURE_FIXTURE.read_text(encoding="utf-8"))["expected"]
+    ctx = _ctx(tmp_path)
+    _session_pass(ctx)
+    bootstrap = ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json"
+    bootstrap.unlink()
+    _write(
+        ctx.truth_root / "reports" / "runtime_resilience_authority_v1" / ctx.day_utc / "runtime_resilience_authority.v1.json",
+        {"day_utc": ctx.day_utc, "status": "BLOCKED", "canonical_blocker": "IB_DISCONNECTED"},
+    )
+    _write(
+        ctx.truth_root / "reports" / "safety_state_authority_v1" / ctx.day_utc / "safety_state_authority.v1.json",
+        {"day_utc": ctx.day_utc, "status": "BLOCKED", "canonical_blocker": "NAV_INVALID"},
+    )
+    _write(
+        ctx.truth_root / "reports" / "startup_materialization_input_convergence_v1" / ctx.day_utc / "startup_materialization_input_convergence.v1.json",
+        {"day_utc": ctx.day_utc, "status": "BLOCKED", "canonical_blocker": "CASH_LEDGER_SNAPSHOT_V1_MISSING"},
+    )
+    _write(
+        ctx.truth_root / "reports" / "trading_day_intent_generation_v1" / ctx.day_utc / "trading_day_intent_generation.v1.json",
+        {"day_utc": ctx.day_utc, "status": "BLOCKED", "canonical_blocker": "MISSING_REQUIRED_INPUTS"},
+    )
+    _write(
+        ctx.truth_root / "reports" / "trading_day_readiness_authority_v1" / ctx.day_utc / "trading_day_readiness_authority.v1.json",
+        {"day_utc": ctx.day_utc, "status": "BLOCKED", "canonical_blocker": "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE"},
+    )
+
+    payload = cp.build_control_plane_v1(ctx)
+
+    assert payload["current_domain"] == fixture["current_domain"]
+    assert payload["current_phase"] == fixture["current_phase"]
+    assert payload["canonical_blocker"] == fixture["canonical_blocker"]
+    assert [row["dependency_id"] for row in payload["failed_current_domain_dependencies"]] == [fixture["failed_current_domain_dependency"]]
+    blockers_to_domains = {
+        row["blocking_reason"]: row["domain_owner"]
+        for row in payload["readiness_dependency_inventory"]
+        if row.get("blocking_reason")
+    }
+    for blocker, owner in fixture["ownership"].items():
+        assert blockers_to_domains[blocker] == owner
+    assert not [
+        row
+        for row in payload["readiness_dependency_inventory"]
+        if row["domain_owner"] == "SESSION_IDENTITY"
+        and row.get("blocking_reason") in set(fixture["ownership"].keys())
+    ]

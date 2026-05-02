@@ -1,0 +1,17 @@
+{
+  "schema_id": "readiness_domain_ownership_known_failure_fixture",
+  "schema_version": "v1",
+  "expected": {
+    "current_domain": "SESSION_IDENTITY",
+    "current_phase": "SESSION_AUTHORITY",
+    "canonical_blocker": "PAPER_SESSION_BOOTSTRAP_V1_MISSING",
+    "failed_current_domain_dependency": "paper_session_bootstrap_v1",
+    "ownership": {
+      "IB_DISCONNECTED": "BROKER_CONNECTIVITY",
+      "NAV_INVALID": "CAPITAL_SAFETY",
+      "CASH_LEDGER_SNAPSHOT_V1_MISSING": "CAPITAL_SAFETY",
+      "MISSING_REQUIRED_INPUTS": "STRATEGY_INTENT",
+      "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE": "SUBMIT_BOUNDARY"
+    }
+  }
+}

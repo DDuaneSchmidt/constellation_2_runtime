@@ -22,6 +22,50 @@ from ops.tools.repo_protection_common_v1 import read_protection_status_v1
 SCHEMA_VERSION = "aegis_control_plane.v1"
 REGISTRY_PATH = REPO_ROOT / "governance" / "02_REGISTRIES" / "aegis_control_plane_phase_registry_v1.json"
 DOMAIN_REGISTRY_PATH = REPO_ROOT / "governance" / "02_REGISTRIES" / "aegis_readiness_domain_registry_v1.json"
+SESSION_IDENTITY_FORBIDDEN_DEPENDENCIES = {
+    "runtime_resilience_authority_v1",
+    "broker_event_log",
+    "broker_event_day_manifest_v1",
+    "broker_supply_v1",
+    "safety_state_authority_v1",
+    "startup_materialization_input_convergence_v1",
+    "paper_capital_seed",
+    "operator_statement",
+    "market_data_authority_v1",
+    "feed_attestation_gate_v1",
+    "trading_day_intent_generation_v1",
+    "authorization_supply_v1",
+    "global_kill_switch_state_v1",
+    "trading_day_readiness_authority_v1",
+    "submit_boundary_status_v1",
+    "execution_evidence_v1",
+}
+SESSION_IDENTITY_FORBIDDEN_BLOCKERS = {
+    "IB_DISCONNECTED",
+    "BROKER_ACCOUNT_SUMMARY_MISSING",
+    "BROKER_EVENT_LOG_MISSING",
+    "NAV_INVALID",
+    "SAFETY_STATE_NAV_INVALID",
+    "CASH_LEDGER_SNAPSHOT_V1_MISSING",
+    "OPERATOR_STATEMENT_MISSING",
+    "OPERATOR_STATEMENT_V1_MISSING",
+    "PAPER_CAPITAL_SEED_MISSING",
+    "MARKET_DATA_AUTHORITY_BLOCKED",
+    "MARKET_DATA_BLOCKED",
+    "MISSING_REQUIRED_DATA",
+    "FAL_STALE",
+    "FEED_ATTESTATION_BLOCKED",
+    "MISSING_REQUIRED_INPUTS",
+    "POSITION_STATE_STALE",
+    "AUTHORIZATION_GATE_NOT_PASS",
+    "NO_ELIGIBLE_OPTION_STRUCTURE",
+    "C2_KILL_SWITCH_ACTIVE",
+    "C2_KILL_SWITCH_DEFAULT_ACTIVE_MISSING_INPUTS",
+    "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE",
+    "SUBMIT_BOUNDARY_NOT_AUTHORIZED",
+    "SUBMIT_BOUNDARY_READINESS_POLICY_NOT_PASS",
+    "EXECUTION_EVIDENCE_MISSING",
+}
 
 
 def _now_iso() -> str:
@@ -56,9 +100,67 @@ def load_phase_registry_v1() -> list[dict[str, Any]]:
 
 def load_readiness_domain_registry_v1() -> list[dict[str, Any]]:
     payload = _read_json(DOMAIN_REGISTRY_PATH)
+    if not payload:
+        raise RuntimeError(f"READINESS_DOMAIN_REGISTRY_MISSING:{DOMAIN_REGISTRY_PATH}")
     domains = payload.get("domains") if isinstance(payload.get("domains"), list) else []
     rows = [row for row in domains if isinstance(row, dict)]
-    return sorted(rows, key=lambda row: int(row.get("domain_order") or 999))
+    out = sorted(rows, key=lambda row: int(row.get("domain_order") or 999))
+    _validate_readiness_domain_registry_v1(out)
+    return out
+
+
+def _validate_readiness_domain_registry_v1(domains: list[dict[str, Any]]) -> None:
+    if not domains:
+        raise RuntimeError("READINESS_DOMAIN_REGISTRY_EMPTY")
+    owners: dict[str, str] = {}
+    for domain in domains:
+        domain_id = str(domain.get("domain_id") or "").strip()
+        if not domain_id:
+            raise RuntimeError("READINESS_DOMAIN_WITHOUT_ID")
+        dependencies = domain.get("dependencies") if isinstance(domain.get("dependencies"), list) else []
+        for dep in dependencies:
+            if not isinstance(dep, dict):
+                raise RuntimeError(f"READINESS_DOMAIN_INVALID_DEPENDENCY:{domain_id}")
+            dependency_id = str(dep.get("dependency_id") or "").strip()
+            owner = str(dep.get("domain_owner") or "").strip()
+            if not dependency_id:
+                raise RuntimeError(f"READINESS_DEPENDENCY_WITHOUT_ID:{domain_id}")
+            if not owner:
+                raise RuntimeError(f"READINESS_DEPENDENCY_WITHOUT_OWNER:{dependency_id}")
+            if owner != domain_id:
+                raise RuntimeError(f"READINESS_DEPENDENCY_OWNER_MISMATCH:{dependency_id}:{owner}!={domain_id}")
+            if dependency_id in owners:
+                raise RuntimeError(f"READINESS_DEPENDENCY_MULTIPLE_OWNERS:{dependency_id}:{owners[dependency_id]}:{owner}")
+            owners[dependency_id] = owner
+            for key in ("expected_path", "schema_path", "producer_command", "recovery_action", "blocking_scope"):
+                if dep.get(key) in (None, ""):
+                    raise RuntimeError(f"READINESS_DEPENDENCY_CONTRACT_INCOMPLETE:{dependency_id}:{key}")
+            if owner == "SESSION_IDENTITY":
+                if dependency_id in SESSION_IDENTITY_FORBIDDEN_DEPENDENCIES:
+                    raise RuntimeError(f"SESSION_IDENTITY_FORBIDDEN_DEPENDENCY:{dependency_id}")
+                owned_codes = {str(code).strip() for code in (dep.get("blocker_codes_owned") or []) if str(code or "").strip()}
+                leaked = sorted(owned_codes & SESSION_IDENTITY_FORBIDDEN_BLOCKERS)
+                if leaked:
+                    raise RuntimeError(f"SESSION_IDENTITY_FORBIDDEN_BLOCKER:{dependency_id}:{','.join(leaked)}")
+
+
+def _registered_dependency_owners(domains: list[dict[str, Any]]) -> dict[str, str]:
+    owners: dict[str, str] = {}
+    for domain in domains:
+        for dep in domain.get("dependencies") or []:
+            if isinstance(dep, dict):
+                owners[str(dep.get("dependency_id") or "").strip()] = str(dep.get("domain_owner") or "").strip()
+    return owners
+
+
+def _assert_evaluated_dependencies_registered(inventory: list[dict[str, Any]], owners: dict[str, str]) -> None:
+    for row in inventory:
+        dependency_id = str(row.get("dependency_id") or "").strip()
+        owner = str(row.get("domain_owner") or "").strip()
+        if not dependency_id or dependency_id not in owners:
+            raise RuntimeError(f"READINESS_DEPENDENCY_NOT_REGISTERED:{dependency_id or '<blank>'}")
+        if owner != owners[dependency_id]:
+            raise RuntimeError(f"READINESS_DEPENDENCY_EVALUATED_UNDER_WRONG_OWNER:{dependency_id}:{owner}!={owners[dependency_id]}")
 
 
 def _format_template(text: str, ctx: Any) -> str:
@@ -1117,6 +1219,7 @@ def _evaluate_phase(phase: dict[str, Any], ctx: Any, phase_results: dict[str, di
 def build_control_plane_v1(ctx: Any, phase_results: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
     phases = load_phase_registry_v1()
     domains = load_readiness_domain_registry_v1()
+    registered_owners = _registered_dependency_owners(domains)
     control_phase_results: list[dict[str, Any]] = []
     domain_results: list[dict[str, Any]] = []
     deferred_phases: list[str] = []
@@ -1174,6 +1277,9 @@ def build_control_plane_v1(ctx: Any, phase_results: dict[str, dict[str, Any]] | 
     recovery_commands = list((current or {}).get("recovery_commands") or [])
     submit_row = next((row for row in control_phase_results if row.get("phase_id") == "SUBMIT_BOUNDARY"), {})
     submit_allowed = bool(submit_row.get("status") == "PASS" and current is None)
+    if current is not None and submit_allowed:
+        raise RuntimeError("CONTROL_PLANE_SUBMIT_ALLOWED_WHILE_NOT_READY")
+    _assert_evaluated_dependencies_registered(readiness_inventory, registered_owners)
     failed_current = list((current or {}).get("failed_dependencies") if isinstance((current or {}).get("failed_dependencies"), list) else [])
     current_domain = str((current or {}).get("domain_id") or "")
     return {
