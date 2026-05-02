@@ -343,6 +343,41 @@ def test_session_identity_does_not_treat_blocked_bootstrap_as_satisfied(monkeypa
     assert failed[0]["status"] == "FAIL"
 
 
+def test_non_trading_day_blocks_session_identity_without_fake_readiness(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _session_pass(ctx)
+    _write(
+        ctx.truth_root / "reports" / "paper_session_authority_v1" / ctx.day_utc / "paper_session_authority.v1.json",
+        {"day_utc": ctx.day_utc, "authority_status": "DENIED", "blocking_reason_codes": ["NON_TRADING_DAY"]},
+    )
+    _write(
+        ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json",
+        {
+            "day_utc": ctx.day_utc,
+            "bootstrap_status": "BLOCKED",
+            "blocker_chain": ["NON_TRADING_DAY"],
+            "canonical_stop_surface": "market_calendar_day",
+            **_producer_contract(),
+        },
+    )
+
+    payload = cp.build_control_plane_v1(ctx)
+
+    assert payload["current_domain"] == "SESSION_IDENTITY"
+    assert payload["current_phase"] == "SESSION_AUTHORITY"
+    assert payload["canonical_blocker"] == "SESSION_IDENTITY_PRECHECK_FAILED"
+    assert payload["final_status"] == "NOT_READY"
+    assert payload["submit_allowed"] is False
+    assert {"BROKER_CONNECTIVITY", "CAPITAL_SAFETY", "SUBMIT_BOUNDARY"} <= set(payload["deferred_domains"])
+    failed = {row["dependency_id"]: row for row in payload["failed_current_domain_dependencies"]}
+    assert failed["paper_session_authority_v1"]["reason_codes"] == ["NON_TRADING_DAY"]
+    assert failed["paper_session_bootstrap_v1"]["reason_codes"] == ["NON_TRADING_DAY"]
+    assert failed["paper_session_authority_v1"]["artifact_path"].endswith("paper_session_authority.v1.json")
+    assert "run_session_authority_v1.py" in failed["paper_session_authority_v1"]["producer"]
+    assert "run_paper_session_bootstrap_v1.py" in failed["paper_session_bootstrap_v1"]["recovery_command"]
+
+
 def test_domain_precheck_surfaces_only_current_domain_failures_at_once(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
     _source_pass(monkeypatch)
     ctx = _ctx(tmp_path)

@@ -390,6 +390,7 @@ def _dependency_result(
     blocker: str = "",
     detail: str = "",
     path: Path | None = None,
+    reason_codes: list[str] | None = None,
 ) -> dict[str, Any]:
     expected = path or _dependency_path(dep, ctx)
     command = _dependency_command(dep, ctx)
@@ -397,6 +398,12 @@ def _dependency_result(
     action = _dependency_action(dep, ctx)
     dependency_id = str(dep.get("dependency_id") or "").strip()
     owning_domain = str(dep.get("owning_domain") or dep.get("domain_owner") or "").strip()
+    normalized_reason_codes = [
+        str(code).split(":", 1)[0].strip()
+        for code in (reason_codes if reason_codes is not None else ([blocker] if blocker else []))
+        if str(code or "").strip()
+    ]
+    normalized_reason_codes = list(dict.fromkeys(normalized_reason_codes))
     return {
         "dependency_id": dependency_id,
         "domain_owner": str(dep.get("domain_owner") or "").strip(),
@@ -416,6 +423,7 @@ def _dependency_result(
         "recovery_action": action or f"Resolve {dependency_id}.",
         "recovery_command": recovery_command,
         "blocking_reason": blocker,
+        "reason_codes": normalized_reason_codes,
         "evidence_path": str(expected),
         "detail": detail,
     }
@@ -484,13 +492,21 @@ def _session_identity_dependency_result(dep: dict[str, Any], ctx: Any) -> dict[s
         if _payload_day(payload) and _payload_day(payload) != ctx.day_utc:
             return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker="TARGET_DAY_DATE_MISMATCH", detail=f"artifact day={_payload_day(payload)}", path=path)
         if owned:
-            return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker=owned, detail="session identity blocker", path=path)
+            return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker=owned, detail="session identity blocker", path=path, reason_codes=codes)
         if dependency_id == "paper_session_authority_v1":
             authority_status = str(payload.get("authority_status") or "").strip().upper()
             if authority_status != "GRANTED":
                 codes = [str(code).strip() for code in (payload.get("blocking_reason_codes") or payload.get("reason_codes") or []) if str(code).strip()]
                 blocker = codes[0] if codes else "PAPER_SESSION_AUTHORITY_NOT_GRANTED"
-                return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker=blocker, detail=f"authority_status={authority_status or 'UNKNOWN'}", path=path)
+                return _dependency_result(
+                    dep=dep,
+                    ctx=ctx,
+                    status="FAIL",
+                    blocker=blocker,
+                    detail=f"authority_status={authority_status or 'UNKNOWN'}",
+                    path=path,
+                    reason_codes=codes or [blocker],
+                )
         if dependency_id == "paper_session_bootstrap_v1":
             bootstrap_status = str(payload.get("bootstrap_status") or payload.get("status") or "").strip().upper()
             if bootstrap_status not in {"PASS", "COMPLETE", "BOOTSTRAPPED", "READY"}:
@@ -499,7 +515,15 @@ def _session_identity_dependency_result(dep: dict[str, Any], ctx: Any) -> dict[s
                 detail = f"bootstrap_status={bootstrap_status or 'UNKNOWN'}"
                 if codes:
                     detail = f"{detail} reason_codes={','.join(codes[:6])}"
-                return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker=blocker, detail=detail, path=path)
+                return _dependency_result(
+                    dep=dep,
+                    ctx=ctx,
+                    status="FAIL",
+                    blocker=blocker,
+                    detail=detail,
+                    path=path,
+                    reason_codes=codes or [blocker],
+                )
             producer_blocker, producer_detail = _artifact_metadata_issue_v1(
                 payload=payload,
                 ctx=ctx,
