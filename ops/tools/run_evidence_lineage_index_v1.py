@@ -73,12 +73,28 @@ def _required_now(ctx: bod.BodContext, spec: dict[str, Any]) -> bool:
     return PHASE_RANK.get(artifact_phase, 99) <= PHASE_RANK.get(blocked_phase, 99)
 
 
+def _optional_or_downstream_missing_input(ctx: bod.BodContext, row: dict[str, Any]) -> bool:
+    path = str(row.get("path") or "")
+    if "/execution_evidence_v1/submissions/" in path:
+        return True
+    if "/trading_day_closure_authority_v1/" in path:
+        return True
+    if "/ib_broker_event_probe_v1/" in path:
+        return True
+    ledger = read_json_v1(report_path_v1(ctx, "aegis_day_run_v1", "day_run.v1.json"))
+    blocked_phase = str(ledger.get("canonical_phase") or "").strip()
+    if blocked_phase and PHASE_RANK.get(blocked_phase, 99) < PHASE_RANK["SUBMIT_BOUNDARY"]:
+        return any(token in path for token in ("/authorization", "/submit", "/strategy", "/trading_day_closure"))
+    return False
+
+
 def _node(ctx: bod.BodContext, spec: dict[str, Any]) -> dict[str, Any]:
     path = report_path_v1(ctx, str(spec["family"]), str(spec["filename"]))
     payload = read_json_v1(path)
     contract = payload.get("producer_contract_v1") if isinstance(payload.get("producer_contract_v1"), dict) else {}
     inputs = _input_refs(contract)
     missing_inputs = [row for row in inputs if row.get("exists") is False]
+    hard_missing_inputs = [row for row in missing_inputs if not _optional_or_downstream_missing_input(ctx, row)]
     authoritative = bool(spec.get("authoritative"))
     blocking_class = str(spec.get("blocking_class") or "HARD_BLOCKER")
     required_now = _required_now(ctx, spec)
@@ -94,7 +110,7 @@ def _node(ctx: bod.BodContext, spec: dict[str, Any]) -> dict[str, Any]:
         status = "FAIL" if authoritative else "WARN"
         blocker = "PRODUCER_CONTRACT_MISSING" if authoritative else ""
         action = "Add producer_contract_v1 metadata to this artifact producer."
-    elif missing_inputs:
+    elif hard_missing_inputs:
         status = "FAIL" if authoritative else "WARN"
         blocker = "LINEAGE_INPUT_ARTIFACT_MISSING" if authoritative else ""
         action = (
@@ -102,6 +118,10 @@ def _node(ctx: bod.BodContext, spec: dict[str, Any]) -> dict[str, Any]:
             if authoritative
             else "Optional diagnostic inputs are missing; rerun upstream advisory producers if this evidence is needed."
         )
+    elif missing_inputs:
+        status = "WARN"
+        blocker = ""
+        action = "Only optional or downstream lineage inputs are missing for the current blocked state."
     elif not inputs:
         status = "UNKNOWN"
         blocker = ""
