@@ -101,6 +101,8 @@ def _build(tmp_path: Path, monkeypatch, *, submit_allowed: bool = False, event_d
     _intraday_readiness(truth, execution, submit_allowed=submit_allowed)
     _healthy_runtime_inputs(truth, execution, event_day=event_day, connected=connected)
     payload = build_runtime_resilience_authority_v1(day_utc=DAY, truth_root=truth, execution_root=execution, runtime_root=runtime, environment="PAPER", broker_account="DU123")
+    assert payload["truth_root"] == str(truth.resolve())
+    assert payload["producer"]["module"] == "ops/tools/run_runtime_resilience_authority_v1.py"
     return truth, execution, runtime, payload
 
 

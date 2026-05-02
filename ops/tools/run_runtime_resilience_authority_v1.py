@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 import time
 from datetime import UTC, datetime
@@ -42,6 +43,13 @@ def _canonical_bytes(payload: dict[str, Any]) -> bytes:
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(_canonical_bytes(payload) + b"\n")
+
+
+def _git_sha() -> str:
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT), text=True).strip()
+    except Exception:
+        return "UNKNOWN"
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -374,6 +382,12 @@ def build_runtime_resilience_authority_v1(
         "schema_version": SCHEMA_VERSION,
         "day_utc": day_utc,
         "environment": environment,
+        "truth_root": str(truth_root),
+        "producer": {
+            "repo": REPO_ROOT.name,
+            "module": "ops/tools/run_runtime_resilience_authority_v1.py",
+            "git_sha": _git_sha(),
+        },
         "status": status,
         "ib_connection_state": ib_connection_state,
         "account_summary_state": account_summary_state,
@@ -396,6 +410,7 @@ def build_runtime_resilience_authority_v1(
         "reason_codes": normalized,
         "evidence_paths": sorted(set(evidence_paths)),
         "operator_next_action": _operator_action(canonical_blocker, restart_detected),
+        "generated_at_utc": _now_iso(),
         "produced_at_utc": _now_iso(),
         "readiness_authority_path": str(readiness_path),
         "readiness_mode": readiness_mode,

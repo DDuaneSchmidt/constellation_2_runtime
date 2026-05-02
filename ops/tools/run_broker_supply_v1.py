@@ -318,6 +318,7 @@ def build_broker_supply(ctx: bod.BodContext, *, freshness_seconds: float = 300.0
         "schema_version": SCHEMA_VERSION,
         "day_utc": ctx.day_utc,
         "environment": ctx.environment,
+        "truth_root": str(ctx.truth_root.resolve()),
         "generated_at_utc": _now_iso(),
         "status": status,
         "canonical_blocker": blocker,

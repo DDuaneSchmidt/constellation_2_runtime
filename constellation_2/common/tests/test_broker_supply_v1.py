@@ -110,6 +110,7 @@ def test_valid_event_log_with_account_values_passes(monkeypatch: pytest.MonkeyPa
     _write_log(ctx)
     payload = broker_supply.build_broker_supply(ctx)
     assert payload["status"] == "PASS"
+    assert payload["truth_root"] == str(ctx.truth_root.resolve())
     assert payload["account_values"]["net_liquidation_cents"] == 10_000_000
     assert payload["account_values"]["total_cash_value_cents"] == 9_500_000
     assert payload["capital_supply_export"]["usable_for_capital_supply"] is True
