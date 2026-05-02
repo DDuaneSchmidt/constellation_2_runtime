@@ -30,7 +30,14 @@ def _registry() -> list[dict[str, Any]]:
     return [row for row in rows if isinstance(row, dict)]
 
 
-def _rule(ctx: bod.BodContext, action: dict[str, Any], ledger: dict[str, Any], market_supply: dict[str, Any], authorization: dict[str, Any]) -> dict[str, Any]:
+def _rule(
+    ctx: bod.BodContext,
+    action: dict[str, Any],
+    ledger: dict[str, Any],
+    market_supply: dict[str, Any],
+    authorization: dict[str, Any],
+    post_promotion_monitor: dict[str, Any],
+) -> dict[str, Any]:
     action_id = str(action.get("action_id") or "")
     final_status = str(ledger.get("final_status") or "UNKNOWN").upper()
     blocker = blocker_of_v1(ledger)
@@ -79,8 +86,12 @@ def _rule(ctx: bod.BodContext, action: dict[str, Any], ledger: dict[str, Any], m
             status = "ALLOWED"
             reason = "Promotion may be evaluated only after human approval and promotion gate checks pass."
     elif action_id == "recommend_strategy_rollback":
-        status = "ALLOWED"
-        reason = "Rollback recommendation is advisory and still requires governed approval before mutation."
+        if post_promotion_monitor.get("rollback_recommended") is True:
+            status = "ALLOWED"
+            reason = "Post-promotion monitor recommends rollback; recommendation remains advisory and requires governed approval before mutation."
+        else:
+            status = "BLOCKED"
+            reason = "Post-promotion monitor does not currently recommend rollback."
     if status in {"FORBIDDEN", "BLOCKED"}:
         next_action = "Use an allowed diagnostic or regeneration action instead."
     return {
@@ -101,7 +112,8 @@ def build_action_validity_v1(ctx: bod.BodContext) -> dict[str, Any]:
     ledger = read_json_v1(report_path_v1(ctx, "aegis_day_run_v1", "day_run.v1.json"))
     market_supply = read_json_v1(report_path_v1(ctx, "market_data_supply_v1", "market_data_supply.v1.json"))
     authorization = read_json_v1(report_path_v1(ctx, "authorization_supply_v1", "authorization_supply.v1.json"))
-    rules = [_rule(ctx, action, ledger, market_supply, authorization) for action in _registry()]
+    post_promotion_monitor = read_json_v1(report_path_v1(ctx, "post_promotion_monitor_v1", "post_promotion_monitor.v1.json"))
+    rules = [_rule(ctx, action, ledger, market_supply, authorization, post_promotion_monitor) for action in _registry()]
     forbidden = [row for row in rules if row["status"] == "FORBIDDEN"]
     return {
         "schema_id": "action_validity",
@@ -122,7 +134,7 @@ def run_action_validity_v1(day_utc: str, environment: str, truth_root: str = "")
     ctx = bod._resolve_context(day_utc, environment, truth_root)
     payload = build_action_validity_v1(ctx)
     path = action_validity_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
-    attach_producer_contract_v1(payload, producer_name="ops/tools/run_action_validity_v1.py", producer_command=f"python3 ops/tools/run_action_validity_v1.py --day_utc {ctx.day_utc} --environment {ctx.environment}", input_artifacts=[REGISTRY_PATH, report_path_v1(ctx, "aegis_day_run_v1", "day_run.v1.json"), report_path_v1(ctx, "market_data_supply_v1", "market_data_supply.v1.json"), report_path_v1(ctx, "authorization_supply_v1", "authorization_supply.v1.json")], output_artifacts=[path], schema_versions={"action_validity": SCHEMA_VERSION})
+    attach_producer_contract_v1(payload, producer_name="ops/tools/run_action_validity_v1.py", producer_command=f"python3 ops/tools/run_action_validity_v1.py --day_utc {ctx.day_utc} --environment {ctx.environment}", input_artifacts=[REGISTRY_PATH, report_path_v1(ctx, "aegis_day_run_v1", "day_run.v1.json"), report_path_v1(ctx, "market_data_supply_v1", "market_data_supply.v1.json"), report_path_v1(ctx, "authorization_supply_v1", "authorization_supply.v1.json"), report_path_v1(ctx, "post_promotion_monitor_v1", "post_promotion_monitor.v1.json")], output_artifacts=[path], schema_versions={"action_validity": SCHEMA_VERSION})
     write_json_v1(path, payload)
     return path, payload
 

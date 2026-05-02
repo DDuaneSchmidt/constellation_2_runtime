@@ -231,3 +231,19 @@ def test_unified_kernel_and_live_surface_learning_loop_without_authority(tmp_pat
     assert payload["automatic_deployment_allowed"] is False
     assert live_payload["direct_proposal_write_allowed"] is False
     assert live_payload["active_strategy_mutation_allowed"] is False
+
+
+def test_rollback_recommendation_action_is_state_specific(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _base(ctx)
+    blocked = action_validity.build_action_validity_v1(ctx)
+    rollback_rule = next(row for row in blocked["action_rules"] if row["action_id"] == "recommend_strategy_rollback")
+    assert rollback_rule["status"] == "BLOCKED"
+
+    _write(
+        monitor.post_promotion_monitor_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc),
+        {"day_utc": DAY, "status": "ROLLBACK_RECOMMENDED", "rollback_recommended": True},
+    )
+    allowed = action_validity.build_action_validity_v1(ctx)
+    rollback_rule = next(row for row in allowed["action_rules"] if row["action_id"] == "recommend_strategy_rollback")
+    assert rollback_rule["status"] == "ALLOWED"
