@@ -15,6 +15,9 @@
     "default_equity_reference_price",
     "default_equity_reference_price_source",
     "default_equity_reference_price_artifact_path",
+    "equity_reference_prices_by_symbol",
+    "equity_reference_price_sources_by_symbol",
+    "equity_reference_price_artifact_paths_by_symbol",
     "required_inputs_checked",
     "blocking_codes",
     "producer",
@@ -36,6 +39,18 @@
     "default_equity_reference_price": { "type": "string" },
     "default_equity_reference_price_source": { "type": "string", "minLength": 1 },
     "default_equity_reference_price_artifact_path": { "type": "string" },
+    "equity_reference_prices_by_symbol": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "equity_reference_price_sources_by_symbol": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "equity_reference_price_artifact_paths_by_symbol": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
     "required_inputs_checked": {
       "type": "array",
       "items": { "$ref": "#/$defs/factDependency" }

@@ -149,6 +149,27 @@ def _dec_strict(value: str, name: str) -> Decimal:
         raise MaterializerError(f"DECIMAL_PARSE_FAILED: {name}={value!r}") from e
 
 
+def _parse_symbol_price_map(raw: str) -> Dict[str, str]:
+    text = str(raw or "").strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise MaterializerError("EQUITY_REFERENCE_PRICES_BY_SYMBOL_JSON_INVALID") from e
+    if not isinstance(parsed, dict):
+        raise MaterializerError("EQUITY_REFERENCE_PRICES_BY_SYMBOL_JSON_NOT_OBJECT")
+    prices: Dict[str, str] = {}
+    for raw_symbol, raw_price in parsed.items():
+        symbol = str(raw_symbol or "").strip().upper()
+        price = str(raw_price or "").strip()
+        if not symbol:
+            raise MaterializerError("EQUITY_REFERENCE_PRICES_BY_SYMBOL_EMPTY_SYMBOL")
+        _dec_strict(price, f"equity_reference_prices_by_symbol[{symbol}]")
+        prices[symbol] = price
+    return prices
+
+
 def _list_intent_files(day_utc: str, truth_root: Path) -> List[Path]:
     day_dir = (_intents_root(truth_root) / day_utc).resolve()
     if not day_dir.exists() or not day_dir.is_dir():
@@ -858,7 +879,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument(
         "--default_equity_reference_price",
         default="",
-        help="Required for LONG_EQUITY entry intents (target_notional_pct > 0). Applied to all equity entry intents for the run.",
+        help="Fallback reference price for LONG_EQUITY entry intents when no per-symbol price is supplied.",
+    )
+    ap.add_argument(
+        "--equity_reference_prices_by_symbol_json",
+        default="",
+        help="Optional JSON object mapping LONG_EQUITY symbols to governed same-day reference prices.",
     )
     args = ap.parse_args(argv)
 
@@ -871,6 +897,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     eval_time_utc = str(args.eval_time_utc or "").strip()
     if not eval_time_utc.endswith("Z"):
         raise SystemExit("FAIL: EVAL_TIME_UTC_MUST_END_WITH_Z")
+    try:
+        equity_reference_prices_by_symbol = _parse_symbol_price_map(args.equity_reference_prices_by_symbol_json)
+    except MaterializerError as e:
+        raise SystemExit(f"FAIL: {e}") from e
 
     out_day_dir = (_phasec_root(execution_truth_root) / day_utc).resolve()
     out_day_dir.mkdir(parents=True, exist_ok=True)
@@ -979,12 +1009,17 @@ def main(argv: Optional[List[str]] = None) -> int:
                         "symbol": symbol,
                         "resolved_close": same_day_close,
                         "default_equity_reference_price": str(args.default_equity_reference_price or "").strip() or None,
+                        "symbol_equity_reference_price": equity_reference_prices_by_symbol.get(symbol) or None,
                     }
-                    if target_pct > Decimal("0") and same_day_close is not None and str(args.default_equity_reference_price or "").strip():
+                    symbol_reference_price = (
+                        equity_reference_prices_by_symbol.get(symbol)
+                        or str(args.default_equity_reference_price or "").strip()
+                    )
+                    if target_pct > Decimal("0") and same_day_close is not None and str(symbol_reference_price or "").strip():
                         try:
                             same_day_market_close_passed = (
                                 _dec_strict(str(same_day_close), "same_day_close")
-                                == _dec_strict(str(args.default_equity_reference_price).strip(), "default_equity_reference_price")
+                                == _dec_strict(str(symbol_reference_price).strip(), "equity_reference_price")
                             )
                         except MaterializerError:
                             same_day_market_close_passed = False
@@ -1011,7 +1046,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                         intent_obj=intent_obj,
                         intent_hash=intent_hash,
                         intent_sha256=intent_sha256,
-                        default_equity_reference_price=str(args.default_equity_reference_price or ""),
+                        default_equity_reference_price=str(symbol_reference_price or ""),
                     )
                     if status == "RELEASED":
                         identity_dir = Path(out_path).resolve()

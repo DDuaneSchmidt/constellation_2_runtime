@@ -43,6 +43,7 @@ def test_startup_materialization_invokes_phasec_materializer_with_execution_trut
             truth_root=tmp_path / "truth",
             execution_truth_root=tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER",
             default_equity_reference_price="679.91",
+            equity_reference_prices_by_symbol={"SPY": "679.91", "DBC": "23.45"},
         )
 
     assert calls
@@ -51,6 +52,9 @@ def test_startup_materialization_invokes_phasec_materializer_with_execution_trut
     assert cmd[cmd.index("--truth_root") + 1] == str(tmp_path / "truth")
     assert "--execution_truth_root" in cmd
     assert cmd[cmd.index("--execution_truth_root") + 1] == str(tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER")
+    assert "--equity_reference_prices_by_symbol_json" in cmd
+    per_symbol_prices = json.loads(cmd[cmd.index("--equity_reference_prices_by_symbol_json") + 1])
+    assert per_symbol_prices == {"DBC": "23.45", "SPY": "679.91"}
 
 
 def test_phasec_materializer_help_prefers_authoritative_repo_over_shadow_pythonpath() -> None:
@@ -173,3 +177,90 @@ def test_phasec_entry_transformer_uses_execution_truth_root(tmp_path: Path) -> N
     transformer_cmd = calls[0]
     assert "--truth_root" in transformer_cmd
     assert transformer_cmd[transformer_cmd.index("--truth_root") + 1] == str(execution_truth_root)
+
+
+def test_phasec_materializer_selects_symbol_reference_price(tmp_path: Path) -> None:
+    read_truth_root = tmp_path / "truth"
+    execution_truth_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    read_truth_root.mkdir(parents=True)
+    execution_truth_root.mkdir(parents=True)
+
+    day_utc = "2026-04-16"
+    attempt_day_dir = execution_truth_root / "phaseC_preflight_v1" / day_utc / "attempt_A0001"
+    attempt_day_dir.mkdir(parents=True, exist_ok=True)
+    intent_path = tmp_path / "dbc.exposure_intent.v1.json"
+    intent_path.write_text(
+        json.dumps(
+            {
+                "schema_id": "exposure_intent",
+                "target_notional_pct": "0.10",
+                "underlying": {"symbol": "DBC"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, *, cwd):
+        calls.append(cmd)
+        out_dir = Path(cmd[cmd.index("--out_dir") + 1])
+        out_dir.mkdir(parents=True, exist_ok=True)
+        tool_name = Path(cmd[1]).name
+        if tool_name == "c2_risk_transformer_offline_v1.py":
+            (out_dir / "equity_intent.v1.json").write_text(
+                json.dumps(
+                    {
+                        "intent_id": "intent-1",
+                        "engine": {"engine_id": "cross_asset_trend"},
+                        "underlying": {"symbol": "DBC", "currency": "USD"},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (out_dir / "lineage_envelope.v1.json").write_text(json.dumps({"ok": True}) + "\n", encoding="utf-8")
+            (out_dir / "equity_order_plan.v2.json").write_text(json.dumps({"plan_id": "plan-1", "qty_shares": 1}) + "\n", encoding="utf-8")
+        else:
+            (out_dir / "submit_preflight_decision.v1.json").write_text(json.dumps({"decision": "ALLOW"}) + "\n", encoding="utf-8")
+            (out_dir / "mapping_ledger_record.v2.json").write_text(json.dumps({"ok": True}) + "\n", encoding="utf-8")
+            (out_dir / "binding_record.v2.json").write_text(
+                json.dumps({"submission_id": "a" * 64}) + "\n",
+                encoding="utf-8",
+            )
+            (out_dir / "equity_order_plan.v2.json").write_text(json.dumps({"plan_id": "plan-1", "qty_shares": 1}) + "\n", encoding="utf-8")
+
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return Result()
+
+    with patch.object(materializer_module, "_run", side_effect=fake_run), patch.object(
+        materializer_module, "validate_against_repo_schema_v1", return_value=None
+    ):
+        status, out_path = materializer_module._materialize_equity_intent(
+            truth_root=read_truth_root,
+            execution_truth_root=execution_truth_root,
+            day_utc=day_utc,
+            eval_time_utc=f"{day_utc}T00:00:00Z",
+            attempt_id="A0001",
+            prior_active_attempt_id=None,
+            attempt_day_dir=attempt_day_dir,
+            intent_path=intent_path,
+            intent_obj={
+                "schema_id": "exposure_intent",
+                "target_notional_pct": "0.10",
+            },
+            intent_hash="a" * 64,
+            intent_sha256="b" * 64,
+            default_equity_reference_price="23.45",
+        )
+
+    assert status == "RELEASED"
+    assert Path(out_path).exists()
+    transformer_cmd = calls[0]
+    assert "--equity_reference_price" in transformer_cmd
+    assert transformer_cmd[transformer_cmd.index("--equity_reference_price") + 1] == "23.45"

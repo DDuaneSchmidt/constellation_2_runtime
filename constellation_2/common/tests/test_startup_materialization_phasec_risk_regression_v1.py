@@ -23,6 +23,7 @@ def _write_startup_inputs_prep(truth_root: Path, *, day_utc: str, status: str, b
             "day_utc": day_utc,
             "status": status,
             "default_equity_reference_price": "655.83" if status == "PASS" else "",
+            "equity_reference_prices_by_symbol": {"SPY": "655.83"} if status == "PASS" else {},
             "blocking_codes": list(blocking_codes or []),
             "produced_at_utc": f"{day_utc}T00:00:00Z",
             "producer": {"repo": "constellation", "module": "test", "git_sha": "a" * 40},

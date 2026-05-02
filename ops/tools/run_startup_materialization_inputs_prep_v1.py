@@ -155,6 +155,9 @@ def _positive_equity_entry_symbols(intent_files: List[Path]) -> List[str]:
             intent_obj = read_json_object_v1(path)
         except ValueError:
             continue
+        exposure_type = str(intent_obj.get("exposure_type") or "").strip().upper()
+        if exposure_type != "LONG_EQUITY":
+            continue
         underlying = intent_obj.get("underlying")
         symbol = ""
         if isinstance(underlying, dict):
@@ -170,6 +173,36 @@ def _positive_equity_entry_symbols(intent_files: List[Path]) -> List[str]:
         if target_pct > Decimal("0"):
             symbols.append(symbol)
     return sorted(set(symbols))
+
+
+def _resolve_same_day_reference_price_for_symbol(
+    *,
+    truth_root: Path,
+    day_utc: str,
+    symbol: str,
+    produced_at_utc: str,
+) -> tuple[str, List[Path]]:
+    same_day_close, same_day_paths = _same_day_market_close_sources(
+        truth_root=truth_root,
+        day_utc=day_utc,
+        symbol=symbol,
+        evaluation_time_utc=produced_at_utc,
+    )
+    evaluation_dt = _parse_utc_timestamp(produced_at_utc)
+    if not str(same_day_close or "").strip() and evaluation_dt is not None and evaluation_dt >= _core_session_open_utc(day_utc):
+        _run_market_data_refresh_for_symbol(
+            day_utc=day_utc,
+            truth_root=truth_root,
+            symbol=symbol,
+            run_utc=produced_at_utc,
+        )
+        same_day_close, same_day_paths = _same_day_market_close_sources(
+            truth_root=truth_root,
+            day_utc=day_utc,
+            symbol=symbol,
+            evaluation_time_utc=produced_at_utc,
+        )
+    return (str(same_day_close or "").strip(), list(same_day_paths or []))
 
 
 def _gate_price_from_payload(*, gate_payload: Dict[str, Any], symbol: str) -> Optional[str]:
@@ -240,6 +273,9 @@ def main(argv: List[str] | None = None) -> int:
     default_equity_reference_price = ""
     default_equity_reference_price_source = "NONE"
     default_equity_reference_price_artifact_path = ""
+    equity_reference_prices_by_symbol: Dict[str, str] = {}
+    equity_reference_price_sources_by_symbol: Dict[str, str] = {}
+    equity_reference_price_artifact_paths_by_symbol: Dict[str, str] = {}
     liquidity_gate_path = _liquidity_gate_artifact_path(truth_root=truth_root, day_utc=day_utc)
     liquidity_gate_result: Dict[str, Any] = {
         "returncode": 0,
@@ -256,55 +292,60 @@ def main(argv: List[str] | None = None) -> int:
     elif not equity_entry_symbols:
         status = "PASS"
         human_readable_summary = "No positive equity entry intents require a default reference price."
-    elif len(equity_entry_symbols) > 1:
-        blocking_codes.append("STARTUP_MATERIALIZATION_FAIL:DEFAULT_EQUITY_REFERENCE_PRICE_MULTI_SYMBOL_UNSUPPORTED")
-        status = "BLOCKED_VALID"
-        human_readable_summary = "Multiple positive equity entry symbols require deterministic reference-price resolution."
     else:
-        symbol = equity_entry_symbols[0]
-        same_day_close, same_day_paths = _same_day_market_close_sources(
-            truth_root=truth_root,
-            day_utc=day_utc,
-            symbol=symbol,
-            evaluation_time_utc=produced_at_utc,
-        )
-        evaluation_dt = _parse_utc_timestamp(produced_at_utc)
-        if not str(same_day_close or "").strip() and evaluation_dt is not None and evaluation_dt >= _core_session_open_utc(day_utc):
-            _run_market_data_refresh_for_symbol(
-                day_utc=day_utc,
-                truth_root=truth_root,
-                symbol=symbol,
-                run_utc=produced_at_utc,
-            )
-            same_day_close, same_day_paths = _same_day_market_close_sources(
+        missing_symbols: List[str] = []
+        for symbol in equity_entry_symbols:
+            same_day_close, same_day_paths = _resolve_same_day_reference_price_for_symbol(
                 truth_root=truth_root,
                 day_utc=day_utc,
                 symbol=symbol,
-                evaluation_time_utc=produced_at_utc,
+                produced_at_utc=produced_at_utc,
             )
-        for source_path in same_day_paths:
-            inputs_checked.append(
-                build_fact_dependency_row_v1(
-                    logical_name=f"same_day_core_session_price_source:{source_path.name}",
-                    absolute_path=source_path,
-                    status="PRESENT" if source_path.exists() else "MISSING",
-                    reason_codes=[] if source_path.exists() else ["STARTUP_MATERIALIZATION_MISSING_DEPENDENCY:SAME_DAY_CORE_SESSION_PRICE_SOURCE_MISSING"],
-                    day_utc=day_utc,
+            for source_path in same_day_paths:
+                inputs_checked.append(
+                    build_fact_dependency_row_v1(
+                        logical_name=f"same_day_core_session_price_source:{symbol}:{source_path.name}",
+                        absolute_path=source_path,
+                        status="PRESENT" if source_path.exists() else "MISSING",
+                        reason_codes=[] if source_path.exists() else ["STARTUP_MATERIALIZATION_MISSING_DEPENDENCY:SAME_DAY_CORE_SESSION_PRICE_SOURCE_MISSING"],
+                        day_utc=day_utc,
+                    )
                 )
-            )
-        if str(same_day_close or "").strip():
-            default_equity_reference_price = str(same_day_close).strip()
-            default_equity_reference_price_source = "SAME_DAY_CORE_SESSION_PRICE"
-            default_equity_reference_price_artifact_path = str(same_day_paths[-1]) if same_day_paths else ""
+            if str(same_day_close or "").strip():
+                equity_reference_prices_by_symbol[symbol] = str(same_day_close).strip()
+                equity_reference_price_sources_by_symbol[symbol] = "SAME_DAY_CORE_SESSION_PRICE"
+                equity_reference_price_artifact_paths_by_symbol[symbol] = str(same_day_paths[-1]) if same_day_paths else ""
+            else:
+                missing_symbols.append(symbol)
+                blocking_codes.append(
+                    f"STARTUP_MATERIALIZATION_MISSING_DEPENDENCY:DEFAULT_EQUITY_REFERENCE_PRICE_UNAVAILABLE:{symbol}"
+                )
+
+        if not missing_symbols:
+            if len(equity_entry_symbols) == 1:
+                only_symbol = equity_entry_symbols[0]
+                default_equity_reference_price = equity_reference_prices_by_symbol.get(only_symbol, "")
+                default_equity_reference_price_source = equity_reference_price_sources_by_symbol.get(
+                    only_symbol,
+                    "SAME_DAY_CORE_SESSION_PRICE",
+                )
+                default_equity_reference_price_artifact_path = equity_reference_price_artifact_paths_by_symbol.get(
+                    only_symbol,
+                    "",
+                )
+            else:
+                default_equity_reference_price_source = "SAME_DAY_CORE_SESSION_PRICE_PER_SYMBOL"
             status = "PASS"
             human_readable_summary = (
-                f"Resolved default equity reference price from a governed positive same-day core-session price for {symbol}."
+                "Resolved governed positive same-day core-session equity reference prices for "
+                f"{', '.join(equity_entry_symbols)}."
             )
         else:
             blocking_codes.append("STARTUP_MATERIALIZATION_MISSING_DEPENDENCY:DEFAULT_EQUITY_REFERENCE_PRICE_UNAVAILABLE")
             status = "BLOCKED_VALID"
             human_readable_summary = (
-                f"No governed positive same-day 09:30+ America/New_York core-session price is yet available for {symbol}."
+                "No governed positive same-day 09:30+ America/New_York core-session price is yet available for "
+                f"{', '.join(missing_symbols)}."
             )
 
     payload: Dict[str, Any] = {
@@ -318,6 +359,9 @@ def main(argv: List[str] | None = None) -> int:
         "default_equity_reference_price": default_equity_reference_price,
         "default_equity_reference_price_source": default_equity_reference_price_source,
         "default_equity_reference_price_artifact_path": default_equity_reference_price_artifact_path,
+        "equity_reference_prices_by_symbol": equity_reference_prices_by_symbol,
+        "equity_reference_price_sources_by_symbol": equity_reference_price_sources_by_symbol,
+        "equity_reference_price_artifact_paths_by_symbol": equity_reference_price_artifact_paths_by_symbol,
         "required_inputs_checked": inputs_checked,
         "blocking_codes": sorted(set(blocking_codes)),
         "producer": producer_block_v1(

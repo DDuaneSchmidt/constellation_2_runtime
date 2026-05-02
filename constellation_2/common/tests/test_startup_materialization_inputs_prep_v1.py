@@ -20,13 +20,21 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
 
 
-def _write_intent(truth_root: Path, day_utc: str, *, symbol: str = "SPY", target_notional_pct: str = "0.01") -> None:
+def _write_intent(
+    truth_root: Path,
+    day_utc: str,
+    *,
+    symbol: str = "SPY",
+    target_notional_pct: str = "0.01",
+    exposure_type: str = "LONG_EQUITY",
+) -> None:
     _write_json(
         truth_root / "intents_v1" / "snapshots" / day_utc / f"{symbol.lower()}.exposure_intent.v1.json",
         {
             "schema_id": "exposure_intent",
             "schema_version": "v1",
             "intent_id": f"intent:{symbol}:{day_utc}",
+            "exposure_type": exposure_type,
             "underlying": {"symbol": symbol},
             "target_notional_pct": target_notional_pct,
         },
@@ -68,25 +76,34 @@ def _write_market_data(truth_root: Path, *, symbol: str, day_rows: list[tuple[st
     year_path.write_text(payload, encoding="utf-8")
     import hashlib
 
-    _write_json(
-        md_root / "dataset_manifest.json",
-        {
+    manifest_path = md_root / "dataset_manifest.json"
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    else:
+        manifest = {
             "created_utc": "2026-04-08T00:00:00Z",
             "source_snapshot_utc": "2026-04-08T00:00:00Z",
             "dataset_version": "v1",
             "date_range": {"start": day_rows[0][0], "end": day_rows[-1][0]},
-            "files": [
-                {
-                    "symbol": symbol,
-                    "year": 2026,
-                    "file": f"{symbol}/2026.jsonl",
-                    "sha256": hashlib.sha256(payload.encode("utf-8")).hexdigest(),
-                }
-            ],
-            "symbols": [symbol],
+            "files": [],
+            "symbols": [],
             "global_hash": "b" * 64,
-        },
+        }
+    manifest["files"] = [
+        row
+        for row in manifest.get("files", [])
+        if not (row.get("symbol") == symbol and row.get("year") == 2026)
+    ]
+    manifest["files"].append(
+        {
+            "symbol": symbol,
+            "year": 2026,
+            "file": f"{symbol}/2026.jsonl",
+            "sha256": hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+        }
     )
+    manifest["symbols"] = sorted(set(list(manifest.get("symbols", [])) + [symbol]))
+    _write_json(md_root / "dataset_manifest.json", manifest)
 
 
 def _write_liquidity_gate(truth_root: Path, day_utc: str, *, status: str, close: str = "650.00") -> Path:
@@ -163,6 +180,7 @@ def test_inputs_prep_uses_same_day_core_session_price_when_present_after_open() 
         assert payload["session_id"] == canonical_paper_session_id_v1(day_utc)
         assert payload["default_equity_reference_price_source"] == "SAME_DAY_CORE_SESSION_PRICE"
         assert payload["default_equity_reference_price"] == "655.83"
+        assert payload["equity_reference_prices_by_symbol"] == {"SPY": "655.83"}
 
 
 def test_inputs_prep_rejects_same_day_price_before_core_session_open() -> None:
@@ -231,6 +249,7 @@ def test_inputs_prep_materializes_same_day_market_data_after_open_when_missing()
         assert payload["status"] == "PASS"
         assert payload["default_equity_reference_price_source"] == "SAME_DAY_CORE_SESSION_PRICE"
         assert payload["default_equity_reference_price"] == "655.83"
+        assert payload["equity_reference_prices_by_symbol"] == {"SPY": "655.83"}
         assert payload["default_equity_reference_price_artifact_path"].endswith("/market_data_snapshot_v1/SPY/2026.jsonl")
 
 
@@ -317,6 +336,101 @@ def test_inputs_prep_fails_closed_when_same_day_price_is_nonpositive() -> None:
         assert payload["status"] == "BLOCKED_VALID"
         assert payload["default_equity_reference_price"] == ""
         assert "STARTUP_MATERIALIZATION_MISSING_DEPENDENCY:DEFAULT_EQUITY_REFERENCE_PRICE_UNAVAILABLE" in payload["blocking_codes"]
+
+
+def test_inputs_prep_supports_multiple_long_equity_reference_prices() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        day_utc = "2026-04-08"
+        _write_intent(truth_root, day_utc, symbol="SPY")
+        _write_intent(truth_root, day_utc, symbol="DBC")
+        _write_market_data(
+            truth_root,
+            symbol="SPY",
+            day_rows=[("2026-04-08", "655.83", "2026-04-08T13:31:00Z")],
+        )
+        _write_market_data(
+            truth_root,
+            symbol="DBC",
+            day_rows=[("2026-04-08", "23.45", "2026-04-08T13:31:00Z")],
+        )
+        with patch.object(prep_module, "now_utc_iso_v1", return_value="2026-04-08T13:35:00Z"):
+            rc = prep_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+
+        assert rc == 0
+        payload = json.loads(
+            (
+                truth_root
+                / "reports"
+                / "startup_materialization_inputs_prep_v1"
+                / day_utc
+                / "startup_materialization_inputs_prep.v1.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert payload["status"] == "PASS"
+        assert payload["equity_entry_symbols"] == ["DBC", "SPY"]
+        assert payload["default_equity_reference_price"] == ""
+        assert payload["default_equity_reference_price_source"] == "SAME_DAY_CORE_SESSION_PRICE_PER_SYMBOL"
+        assert payload["equity_reference_prices_by_symbol"] == {"DBC": "23.45", "SPY": "655.83"}
+        assert not any("MULTI_SYMBOL_UNSUPPORTED" in code for code in payload["blocking_codes"])
+
+
+def test_inputs_prep_does_not_count_short_vol_as_equity_reference_symbol() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        day_utc = "2026-04-08"
+        _write_intent(truth_root, day_utc, symbol="SPY", exposure_type="LONG_EQUITY")
+        _write_intent(truth_root, day_utc, symbol="IWM", exposure_type="SHORT_VOL_DEFINED")
+        _write_market_data(
+            truth_root,
+            symbol="SPY",
+            day_rows=[("2026-04-08", "655.83", "2026-04-08T13:31:00Z")],
+        )
+        with patch.object(prep_module, "now_utc_iso_v1", return_value="2026-04-08T13:35:00Z"):
+            rc = prep_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+
+        assert rc == 0
+        payload = json.loads(
+            (
+                truth_root
+                / "reports"
+                / "startup_materialization_inputs_prep_v1"
+                / day_utc
+                / "startup_materialization_inputs_prep.v1.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert payload["status"] == "PASS"
+        assert payload["equity_entry_symbols"] == ["SPY"]
+        assert payload["equity_reference_prices_by_symbol"] == {"SPY": "655.83"}
+
+
+def test_inputs_prep_fails_closed_when_one_multi_symbol_price_is_missing() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        day_utc = "2026-04-08"
+        _write_intent(truth_root, day_utc, symbol="SPY")
+        _write_intent(truth_root, day_utc, symbol="DBC")
+        _write_market_data(
+            truth_root,
+            symbol="SPY",
+            day_rows=[("2026-04-08", "655.83", "2026-04-08T13:31:00Z")],
+        )
+        with patch.object(prep_module, "now_utc_iso_v1", return_value="2026-04-08T13:35:00Z"):
+            rc = prep_module.main(["--day_utc", day_utc, "--truth_root", str(truth_root)])
+
+        assert rc == 2
+        payload = json.loads(
+            (
+                truth_root
+                / "reports"
+                / "startup_materialization_inputs_prep_v1"
+                / day_utc
+                / "startup_materialization_inputs_prep.v1.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert payload["status"] == "BLOCKED_VALID"
+        assert payload["equity_reference_prices_by_symbol"] == {"SPY": "655.83"}
+        assert "STARTUP_MATERIALIZATION_MISSING_DEPENDENCY:DEFAULT_EQUITY_REFERENCE_PRICE_UNAVAILABLE:DBC" in payload["blocking_codes"]
 
 
 def test_risk_transformer_uses_accounting_v2_under_truth_root() -> None:

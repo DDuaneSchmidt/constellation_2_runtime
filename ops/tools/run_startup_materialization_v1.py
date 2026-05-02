@@ -151,6 +151,7 @@ def _run_phasec_materializer(
     truth_root: Path,
     execution_truth_root: Path,
     default_equity_reference_price: str = "",
+    equity_reference_prices_by_symbol: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     cmd = [
         sys.executable,
@@ -166,6 +167,18 @@ def _run_phasec_materializer(
     ]
     if str(default_equity_reference_price or "").strip():
         cmd.extend(["--default_equity_reference_price", str(default_equity_reference_price).strip()])
+    clean_symbol_prices = {
+        str(symbol or "").strip().upper(): str(price or "").strip()
+        for symbol, price in (equity_reference_prices_by_symbol or {}).items()
+        if str(symbol or "").strip() and str(price or "").strip()
+    }
+    if clean_symbol_prices:
+        cmd.extend(
+            [
+                "--equity_reference_prices_by_symbol_json",
+                json.dumps(clean_symbol_prices, sort_keys=True, separators=(",", ":")),
+            ]
+        )
     proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True, check=False)
     return {
         "cmd": cmd,
@@ -538,6 +551,7 @@ def main(argv: List[str] | None = None) -> int:
     prep_blocking_codes: List[str] = []
     phasec_risk_prep_blocking_codes: List[str] = []
     default_equity_reference_price = ""
+    equity_reference_prices_by_symbol: Dict[str, str] = {}
     if inputs_prep_payload is None:
         inputs_checked.append(
             build_fact_dependency_row_v1(
@@ -569,6 +583,13 @@ def main(argv: List[str] | None = None) -> int:
             default_equity_reference_price = str(
                 inputs_prep_payload.get("default_equity_reference_price") or ""
             ).strip()
+            raw_symbol_prices = inputs_prep_payload.get("equity_reference_prices_by_symbol")
+            if isinstance(raw_symbol_prices, dict):
+                equity_reference_prices_by_symbol = {
+                    str(symbol or "").strip().upper(): str(price or "").strip()
+                    for symbol, price in raw_symbol_prices.items()
+                    if str(symbol or "").strip() and str(price or "").strip()
+                }
         elif prep_status in {"BLOCKED_VALID", "BLOCKED_BY_DEFECT"}:
             prep_blocking_codes.extend(prep_codes or ["STARTUP_MATERIALIZATION_FAIL:INPUTS_PREP_BLOCKED"])
         else:
@@ -651,6 +672,7 @@ def main(argv: List[str] | None = None) -> int:
             truth_root=intent_truth_root,
             execution_truth_root=execution_truth_root,
             default_equity_reference_price=default_equity_reference_price,
+            equity_reference_prices_by_symbol=equity_reference_prices_by_symbol,
         )
         identity_dirs = discover_phasec_identity_dirs_v1(truth_root=execution_truth_root, day_utc=day_utc)
         materialized_outputs = _identity_output_rows(identity_dirs, day_utc=day_utc)
