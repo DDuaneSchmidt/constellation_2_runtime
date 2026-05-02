@@ -78,6 +78,29 @@
     "max_gain": { "type": ["integer", "null"], "minimum": 0 },
     "breakeven": { "type": ["string", "null"] },
     "options_chain_ref": { "type": ["string", "null"] },
+    "order_plan_ref": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["path", "plan_id", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "plan_id": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "defined_risk_proof": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["source", "defined_risk_proven", "max_loss_usd", "contracts", "width_points", "multiplier"],
+      "properties": {
+        "source": { "type": "string", "minLength": 1 },
+        "defined_risk_proven": { "type": "boolean" },
+        "max_loss_usd": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+        "contracts": { "type": "integer", "minimum": 1 },
+        "width_points": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+        "multiplier": { "type": "integer", "minimum": 1 }
+      }
+    },
     "canonical_json_hash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }
   },
   "allOf": [
@@ -87,7 +110,7 @@
     },
     {
       "if": { "properties": { "risk_type": { "const": "DEFINED_RISK" }, "validation_status": { "const": "PASS" } } },
-      "then": { "required": ["structure_type", "strikes", "expiry", "max_loss", "options_chain_ref", "quantity_basis"] }
+      "then": { "required": ["structure_type", "strikes", "expiry", "max_loss", "options_chain_ref", "order_plan_ref", "defined_risk_proof", "quantity_basis"] }
     }
   ]
 }

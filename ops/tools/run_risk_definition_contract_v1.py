@@ -20,6 +20,8 @@ from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artif
 
 PRODUCER = "ops/tools/run_risk_definition_contract_v1.py"
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/risk_definition_contract.v1.schema.json"
+ORDER_PLAN_SCHEMA_RELPATH = "constellation_2/schemas/order_plan.v1.schema.json"
+OPTIONS_CHAIN_SCHEMA_RELPATH = "constellation_2/schemas/options_chain_snapshot.v1.schema.json"
 
 
 def _git_sha() -> str:
@@ -40,6 +42,16 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not isinstance(obj, dict):
         raise ValueError(f"TOP_LEVEL_NOT_OBJECT:{path}")
     return obj
+
+
+def _sha256_file(path: Path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> str:
@@ -155,6 +167,29 @@ def _latest_phasec_order_plan(*, truth_root: Path, day_utc: str, intent_hash: st
     return sorted(candidates, key=lambda item: (item.stat().st_mtime_ns, str(item)))[-1].resolve() if candidates else None
 
 
+def _latest_phasec_veto(*, truth_root: Path, day_utc: str, intent_hash: str) -> Path | None:
+    roots = [Path(truth_root).resolve()]
+    sleeve_root = (Path(truth_root).resolve().parent / "truth_sleeves" / "PRIMARY" / "PAPER").resolve()
+    if sleeve_root.exists():
+        roots.append(sleeve_root)
+    candidates: list[Path] = []
+    for root in roots:
+        candidates.extend((root / "phaseC_preflight_v1" / day_utc).glob(f"attempt_*/{intent_hash.lower()}.veto_record.v1.json"))
+    return sorted(candidates, key=lambda item: (item.stat().st_mtime_ns, str(item)))[-1].resolve() if candidates else None
+
+
+def _phasec_veto_blocker(veto_path: Path | None) -> str:
+    if veto_path is None or not veto_path.exists() or not veto_path.is_file():
+        return ""
+    try:
+        veto = _read_json(veto_path)
+    except Exception:
+        return "RISK_CONTRACT_DEFINED_RISK_PHASEC_VETO_UNREADABLE"
+    reason = str(veto.get("reason_detail") or veto.get("reason_code") or "UNKNOWN").strip()
+    normalized = reason.split(":", 1)[0].strip().upper() if reason else "UNKNOWN"
+    return f"RISK_CONTRACT_DEFINED_RISK_PHASEC_VETO:{normalized}"
+
+
 def _options_chain_ref(order_plan: dict[str, Any]) -> str:
     for ref in order_plan.get("source_refs") or order_plan.get("evidence_refs") or []:
         if not isinstance(ref, dict):
@@ -164,6 +199,143 @@ def _options_chain_ref(order_plan: dict[str, Any]) -> str:
             return raw
     raw = str(order_plan.get("options_chain_ref") or "").strip()
     return raw
+
+
+def _validate_with_schema(payload: dict[str, Any], relpath: str, error_prefix: str) -> None:
+    schema = json.loads((REPO_ROOT / relpath).read_text(encoding="utf-8"))
+    errors = sorted(Draft202012Validator(schema).iter_errors(payload), key=lambda err: list(err.path))
+    if errors:
+        raise ValueError(error_prefix + ":" + ";".join(error.message for error in errors[:3]))
+
+
+def _structure_decision_supply_path(order_plan_path: Path) -> Path:
+    return (order_plan_path.parent / "structure_decision_supply.v1.json").resolve()
+
+
+def _options_chain_ref_from_structure_supply(order_plan_path: Path) -> tuple[str, str]:
+    supply_path = _structure_decision_supply_path(order_plan_path)
+    if not supply_path.exists() or not supply_path.is_file():
+        return "", ""
+    supply = _read_json(supply_path)
+    market_open_data = supply.get("market_open_data") if isinstance(supply.get("market_open_data"), dict) else {}
+    snapshot_path = str(market_open_data.get("snapshot_path") or "").strip()
+    if snapshot_path:
+        return snapshot_path, str(supply_path)
+    return "", str(supply_path)
+
+
+def _order_plan_ref(order_plan_path: Path, order_plan: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "path": str(order_plan_path.resolve()),
+        "plan_id": str(order_plan.get("plan_id") or ""),
+        "sha256": _sha256_file(order_plan_path.resolve()),
+    }
+
+
+def _defined_risk_proof_ref(order_plan: dict[str, Any]) -> dict[str, Any]:
+    risk_proof = order_plan.get("risk_proof") if isinstance(order_plan.get("risk_proof"), dict) else {}
+    return {
+        "source": "order_plan.risk_proof",
+        "defined_risk_proven": risk_proof.get("defined_risk_proven") is True,
+        "max_loss_usd": str(risk_proof.get("max_loss_usd") or ""),
+        "contracts": risk_proof.get("contracts"),
+        "width_points": str(risk_proof.get("width_points") or ""),
+        "multiplier": risk_proof.get("multiplier"),
+    }
+
+
+def _options_chain_contract_index(snapshot: dict[str, Any]) -> dict[tuple[str, str, str], dict[str, Any]]:
+    contracts = snapshot.get("contracts")
+    if not isinstance(contracts, list):
+        return {}
+    out: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for contract in contracts:
+        if not isinstance(contract, dict):
+            continue
+        key = (
+            str(contract.get("expiry_utc") or "").strip(),
+            str(contract.get("right") or "").strip().upper(),
+            str(contract.get("strike") or "").strip(),
+        )
+        out[key] = contract
+    return out
+
+
+def _validate_defined_risk_order_plan(
+    *,
+    order_plan_path: Path,
+    order_plan: dict[str, Any],
+    source_intent: dict[str, Any],
+    day_utc: str,
+) -> list[str]:
+    blockers: list[str] = []
+    try:
+        _validate_with_schema(order_plan, ORDER_PLAN_SCHEMA_RELPATH, "RISK_CONTRACT_DEFINED_RISK_ORDER_PLAN_SCHEMA_INVALID")
+    except Exception as exc:
+        blockers.append(f"RISK_CONTRACT_DEFINED_RISK_ORDER_PLAN_INVALID:{type(exc).__name__}")
+        return blockers
+
+    if str(order_plan.get("structure") or "").strip().upper() != "VERTICAL_SPREAD":
+        blockers.append("RISK_CONTRACT_DEFINED_RISK_STRUCTURE_UNSUPPORTED")
+    underlying = source_intent.get("underlying") if isinstance(source_intent.get("underlying"), dict) else {}
+    plan_underlying = order_plan.get("underlying") if isinstance(order_plan.get("underlying"), dict) else {}
+    if str(plan_underlying.get("symbol") or "").strip().upper() != str(underlying.get("symbol") or "").strip().upper():
+        blockers.append("RISK_CONTRACT_DEFINED_RISK_ORDER_PLAN_SYMBOL_MISMATCH")
+    legs = order_plan.get("legs")
+    if not isinstance(legs, list) or len(legs) < 2:
+        blockers.append("RISK_CONTRACT_DEFINED_RISK_LEGS_MISSING")
+    else:
+        actions = {str(leg.get("action") or "").strip().upper() for leg in legs if isinstance(leg, dict)}
+        expiries = {str(leg.get("expiry_utc") or "").strip() for leg in legs if isinstance(leg, dict)}
+        rights = {str(leg.get("right") or "").strip().upper() for leg in legs if isinstance(leg, dict)}
+        if actions != {"BUY", "SELL"}:
+            blockers.append("RISK_CONTRACT_DEFINED_RISK_LEG_ACTIONS_INVALID")
+        if len(expiries) != 1 or not next(iter(expiries), ""):
+            blockers.append("RISK_CONTRACT_DEFINED_RISK_EXPIRY_MISSING")
+        if len(rights) != 1 or not next(iter(rights), ""):
+            blockers.append("RISK_CONTRACT_DEFINED_RISK_RIGHT_MISSING")
+
+    chain_ref = _options_chain_ref(order_plan)
+    if not chain_ref:
+        chain_ref, _supply_ref = _options_chain_ref_from_structure_supply(order_plan_path)
+    if not chain_ref:
+        blockers.append("RISK_CONTRACT_OPTIONS_CHAIN_REF_MISSING")
+        return blockers
+    chain_path = Path(chain_ref).expanduser().resolve()
+    if not chain_path.exists() or not chain_path.is_file():
+        blockers.append("RISK_CONTRACT_OPTIONS_CHAIN_REF_MISSING")
+        return blockers
+    try:
+        chain = _read_json(chain_path)
+        _validate_with_schema(chain, OPTIONS_CHAIN_SCHEMA_RELPATH, "RISK_CONTRACT_OPTIONS_CHAIN_SCHEMA_INVALID")
+    except Exception as exc:
+        blockers.append(f"RISK_CONTRACT_OPTIONS_CHAIN_INVALID:{type(exc).__name__}")
+        return blockers
+    if not str(chain.get("as_of_utc") or "").startswith(day_utc):
+        blockers.append("RISK_CONTRACT_OPTIONS_CHAIN_WRONG_DAY")
+    chain_underlying = chain.get("underlying") if isinstance(chain.get("underlying"), dict) else {}
+    if str(chain_underlying.get("symbol") or "").strip().upper() != str(underlying.get("symbol") or "").strip().upper():
+        blockers.append("RISK_CONTRACT_OPTIONS_CHAIN_SYMBOL_MISMATCH")
+    chain_index = _options_chain_contract_index(chain)
+    for idx, leg in enumerate(legs if isinstance(legs, list) else []):
+        if not isinstance(leg, dict):
+            continue
+        key = (
+            str(leg.get("expiry_utc") or "").strip(),
+            str(leg.get("right") or "").strip().upper(),
+            str(leg.get("strike") or "").strip(),
+        )
+        contract = chain_index.get(key)
+        if contract is None:
+            blockers.append(f"RISK_CONTRACT_DEFINED_RISK_LEG_NOT_IN_OPTIONS_CHAIN:{idx}")
+            continue
+        ib = contract.get("ib") if isinstance(contract.get("ib"), dict) else {}
+        try:
+            if int(leg.get("ib_conId")) != int(ib.get("conId")):
+                blockers.append(f"RISK_CONTRACT_DEFINED_RISK_LEG_CONID_MISMATCH:{idx}")
+        except Exception:
+            blockers.append(f"RISK_CONTRACT_DEFINED_RISK_LEG_CONID_MISSING:{idx}")
+    return blockers
 
 
 def build_risk_definition_contract_v1(*, day_utc: str, truth_root: Path, intent_hash: str = "", intent_id: str = "") -> dict[str, Any]:
@@ -214,6 +386,8 @@ def build_risk_definition_contract_v1(*, day_utc: str, truth_root: Path, intent_
         "max_gain": None,
         "breakeven": None,
         "options_chain_ref": None,
+        "order_plan_ref": None,
+        "defined_risk_proof": None,
         "canonical_json_hash": None
     }
     if not resolved_intent_id:
@@ -246,11 +420,26 @@ def build_risk_definition_contract_v1(*, day_utc: str, truth_root: Path, intent_
     elif risk_type == "DEFINED_RISK":
         order_plan_path = _latest_phasec_order_plan(truth_root=truth_root, day_utc=day_utc, intent_hash=resolved_hash)
         order_plan = _read_json(order_plan_path) if order_plan_path is not None else {}
+        if order_plan:
+            blockers.extend(
+                _validate_defined_risk_order_plan(
+                    order_plan_path=order_plan_path,
+                    order_plan=order_plan,
+                    source_intent=intent_obj,
+                    day_utc=day_utc,
+                )
+            )
         risk_proof = order_plan.get("risk_proof") if isinstance(order_plan.get("risk_proof"), dict) else {}
         legs = order_plan.get("legs") if isinstance(order_plan.get("legs"), list) else []
         chain_ref = _options_chain_ref(order_plan)
+        chain_ref_source = ""
+        if order_plan and not chain_ref and order_plan_path is not None:
+            chain_ref, chain_ref_source = _options_chain_ref_from_structure_supply(order_plan_path)
         if not order_plan:
             blockers.append("RISK_CONTRACT_DEFINED_RISK_ORDER_PLAN_MISSING")
+            veto_blocker = _phasec_veto_blocker(_latest_phasec_veto(truth_root=truth_root, day_utc=day_utc, intent_hash=resolved_hash))
+            if veto_blocker:
+                blockers.append(veto_blocker)
         if risk_proof.get("defined_risk_proven") is not True:
             blockers.append("RISK_CONTRACT_DEFINED_RISK_NOT_PROVEN")
         if not legs:
@@ -271,7 +460,7 @@ def build_risk_definition_contract_v1(*, day_utc: str, truth_root: Path, intent_
             blockers.append("RISK_CONTRACT_DEFINED_RISK_QUANTITY_MISSING")
         if max_loss <= 0:
             blockers.append("RISK_CONTRACT_DEFINED_RISK_MAX_LOSS_MISSING")
-        if legs and quantity > 0 and max_loss > 0 and chain_ref:
+        if not blockers and legs and quantity > 0 and max_loss > 0 and chain_ref:
             payload.update(
                 {
                     "structure_type": str(order_plan.get("structure") or "DEFINED_RISK_OPTIONS"),
@@ -290,6 +479,8 @@ def build_risk_definition_contract_v1(*, day_utc: str, truth_root: Path, intent_
                     "max_gain": None,
                     "breakeven": None,
                     "options_chain_ref": chain_ref,
+                    "order_plan_ref": _order_plan_ref(order_plan_path, order_plan) if order_plan_path is not None else None,
+                    "defined_risk_proof": _defined_risk_proof_ref(order_plan),
                     "quantity_basis": {"basis": "DEFINED_RISK_CONTRACTS", "quantity": quantity},
                     "risk_per_unit": (max_loss + quantity - 1) // quantity,
                 }

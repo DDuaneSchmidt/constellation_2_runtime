@@ -62,19 +62,87 @@ def _seed_vol(root: Path, *, defined: bool = False) -> None:
         },
     )
     if defined:
+        chain_path = root / "options_chain_snapshot_v1" / DAY / "capture" / "options_chain_snapshot.v1.json"
+        _write(
+            chain_path,
+            {
+                "schema_id": "options_chain_snapshot",
+                "schema_version": "v1",
+                "as_of_utc": f"{DAY}T14:00:00Z",
+                "underlying": {"symbol": "IWM", "spot_price": "190.00", "spot_as_of_utc": f"{DAY}T14:00:00Z"},
+                "contracts": [
+                    {
+                        "contract_key": "IWM|2026-05-15T00:00:00Z|PUT|190.00",
+                        "expiry_utc": "2026-05-15T00:00:00Z",
+                        "strike": "190.00",
+                        "right": "PUT",
+                        "bid": "2.00",
+                        "ask": "2.10",
+                        "open_interest": 100,
+                        "volume": 10,
+                        "ib": {
+                            "conId": 1001,
+                            "localSymbol": "IWM   260515P00190000",
+                            "tradingClass": "IWM",
+                            "exchange": "SMART",
+                            "currency": "USD",
+                            "multiplier": 100,
+                        },
+                    },
+                    {
+                        "contract_key": "IWM|2026-05-15T00:00:00Z|PUT|185.00",
+                        "expiry_utc": "2026-05-15T00:00:00Z",
+                        "strike": "185.00",
+                        "right": "PUT",
+                        "bid": "1.00",
+                        "ask": "1.10",
+                        "open_interest": 100,
+                        "volume": 10,
+                        "ib": {
+                            "conId": 1002,
+                            "localSymbol": "IWM   260515P00185000",
+                            "tradingClass": "IWM",
+                            "exchange": "SMART",
+                            "currency": "USD",
+                            "multiplier": 100,
+                        },
+                    },
+                ],
+                "provenance": {
+                    "source": "test_governed_snapshot",
+                    "capture_method": "fixture",
+                    "capture_host": "localhost",
+                    "capture_run_id": "fixture",
+                },
+            },
+        )
         phasec = root / "phaseC_preflight_v1" / DAY / "attempt_A0001" / VOL_HASH
         _write(
             phasec / "order_plan.v1.json",
             {
                 "schema_id": "order_plan",
                 "schema_version": "v1",
+                "plan_id": "plan-" + VOL_HASH[:16],
+                "created_at_utc": f"{DAY}T14:01:00Z",
+                "intent_hash": "c" * 64,
                 "structure": "VERTICAL_SPREAD",
+                "underlying": {"symbol": "IWM", "currency": "USD"},
                 "legs": [
-                    {"action": "SELL", "right": "PUT", "strike": "190.00", "expiry_utc": "2026-05-15T00:00:00Z"},
-                    {"action": "BUY", "right": "PUT", "strike": "185.00", "expiry_utc": "2026-05-15T00:00:00Z"},
+                    {"action": "SELL", "ratio": 1, "right": "PUT", "strike": "190.00", "expiry_utc": "2026-05-15T00:00:00Z", "ib_conId": 1001, "ib_localSymbol": "IWM   260515P00190000"},
+                    {"action": "BUY", "ratio": 1, "right": "PUT", "strike": "185.00", "expiry_utc": "2026-05-15T00:00:00Z", "ib_conId": 1002, "ib_localSymbol": "IWM   260515P00185000"},
                 ],
-                "risk_proof": {"defined_risk_proven": True, "contracts": 1, "max_loss_usd": "400.00"},
-                "options_chain_ref": str(root / "options_chain_snapshot_v1" / DAY / "capture" / "options_chain_snapshot.v1.json"),
+                "order_terms": {"order_type": "LIMIT", "limit_price": "1.00", "time_in_force": "DAY", "is_credit": True, "tick_rounding": "ROUND_DOWN"},
+                "exit_policy_ref": {"policy_id": "test"},
+                "risk_proof": {"defined_risk_proven": True, "contracts": 1, "max_loss_usd": "400.00", "width_points": "5.00", "multiplier": 100},
+            },
+        )
+        _write(
+            phasec / "structure_decision_supply.v1.json",
+            {
+                "schema_id": "structure_decision_supply",
+                "day_utc": DAY,
+                "status": "PASS",
+                "market_open_data": {"snapshot_path": str(chain_path), "freshness_certificate_path": str(chain_path.parent / "freshness_certificate.v1.json")},
             },
         )
 
@@ -134,6 +202,18 @@ def test_vol_missing_defined_risk_evidence_fails_closed(tmp_path: Path) -> None:
     assert "RISK_CONTRACT_DEFINED_RISK_ORDER_PLAN_MISSING" in payload["blockers"]
 
 
+def test_defined_risk_contract_surfaces_phasec_veto_when_order_plan_missing(tmp_path: Path) -> None:
+    _seed_vol(tmp_path)
+    _write(
+        tmp_path / "phaseC_preflight_v1" / DAY / "attempt_A0001" / f"{VOL_HASH}.veto_record.v1.json",
+        {"schema_id": "veto_record", "reason_code": "C2_SUBMIT_FAIL_CLOSED_REQUIRED", "reason_detail": "OPTIONS_SNAPSHOT_ROOT_MISSING:path"},
+    )
+    payload = build_risk_definition_contract_v1(day_utc=DAY, truth_root=tmp_path, intent_hash=VOL_HASH)
+    validate_risk_definition_contract_v1(payload)
+    assert payload["validation_status"] == "FAIL"
+    assert "RISK_CONTRACT_DEFINED_RISK_PHASEC_VETO:OPTIONS_SNAPSHOT_ROOT_MISSING" in payload["blockers"]
+
+
 def test_valid_defined_risk_contract_can_pass_preconditions(tmp_path: Path) -> None:
     _seed_vol(tmp_path, defined=True)
     payload = build_risk_definition_contract_v1(day_utc=DAY, truth_root=tmp_path, intent_hash=VOL_HASH)
@@ -143,6 +223,20 @@ def test_valid_defined_risk_contract_can_pass_preconditions(tmp_path: Path) -> N
     assert payload["risk_type"] == "DEFINED_RISK"
     assert payload["max_loss"] == 40000
     assert payload["quantity_basis"]["quantity"] == 1
+    assert payload["order_plan_ref"]["path"].endswith("order_plan.v1.json")
+    assert payload["defined_risk_proof"]["defined_risk_proven"] is True
+
+
+def test_defined_risk_order_plan_must_match_options_chain(tmp_path: Path) -> None:
+    _seed_vol(tmp_path, defined=True)
+    plan_path = tmp_path / "phaseC_preflight_v1" / DAY / "attempt_A0001" / VOL_HASH / "order_plan.v1.json"
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    plan["legs"][0]["ib_conId"] = 9999
+    _write(plan_path, plan)
+    payload = build_risk_definition_contract_v1(day_utc=DAY, truth_root=tmp_path, intent_hash=VOL_HASH)
+    validate_risk_definition_contract_v1(payload)
+    assert payload["validation_status"] == "FAIL"
+    assert "RISK_CONTRACT_DEFINED_RISK_LEG_CONID_MISMATCH:0" in payload["blockers"]
 
 
 def test_loader_rejects_missing_contract(tmp_path: Path) -> None:

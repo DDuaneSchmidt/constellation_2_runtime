@@ -121,6 +121,8 @@ def _seed_contract(root: Path, *, intent_hash: str, intent_id: str, risk_type: s
         "max_gain": None,
         "breakeven": None,
         "options_chain_ref": None if risk_type == "STOP_BASED" else "/tmp/options_chain_snapshot.v1.json",
+        "order_plan_ref": None if risk_type == "STOP_BASED" else {"path": "/tmp/order_plan.v1.json", "plan_id": "plan-1234567890abcdef", "sha256": "a" * 64},
+        "defined_risk_proof": None if risk_type == "STOP_BASED" else {"source": "order_plan.risk_proof", "defined_risk_proven": True, "max_loss_usd": "400.00", "contracts": 1, "width_points": "5.00", "multiplier": 100},
         "canonical_json_hash": None,
     }
     payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)

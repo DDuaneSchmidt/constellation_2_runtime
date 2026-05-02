@@ -12,8 +12,8 @@ CRITICAL TEST ISOLATION CONTRACT:
 - It MUST NOT delete or compare intents from other engines.
 
 NOTE:
-- Repo bootstrap market data sample is 10 rows ending 2017-01-17 (proven).
-- Default test day uses that last available day.
+- Repo bootstrap market data sample is current-repo local. The test copies it
+  into a temporary truth root so it never mutates runtime evidence.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ import unittest
 from pathlib import Path
 from typing import List
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+REPO_ROOT = Path(__file__).resolve().parents[4]
 RUNNER = (
     REPO_ROOT
     / "constellation_2"
@@ -36,7 +36,7 @@ RUNNER = (
     / "run"
     / "run_vol_income_defined_risk_intents_day_v1.py"
 ).resolve()
-INTENTS_ROOT = (REPO_ROOT / "constellation_2" / "runtime" / "truth" / "intents_v1" / "snapshots").resolve()
+MARKET_DATA_FIXTURE_ROOT = (REPO_ROOT / "constellation_2" / "runtime" / "truth" / "market_data_snapshot_v1").resolve()
 
 ENGINE_ID = "C2_VOL_INCOME_DEFINED_RISK_V1"
 
@@ -62,23 +62,20 @@ class TestVolIncomeDefinedRiskDeterminismV1(unittest.TestCase):
         self.assertTrue(RUNNER.exists(), f"missing runner: {RUNNER}")
 
     def test_deterministic_output_bytes_v1(self) -> None:
-        day = os.environ.get("C2_VOL_TEST_DAY_UTC", "2017-01-17").strip()
+        day = os.environ.get("C2_VOL_TEST_DAY_UTC", "2026-04-16").strip()
         symbol = os.environ.get("C2_VOL_TEST_SYMBOL", "SPY").strip().upper()
 
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
-
-            day_dir = (INTENTS_ROOT / day).resolve()
-            backup_dir = td_path / "backup_day_dir"
-            existed = day_dir.exists()
-
-            if existed:
-                shutil.copytree(day_dir, backup_dir)
+            truth_root = (td_path / "truth").resolve()
+            shutil.copytree(MARKET_DATA_FIXTURE_ROOT, truth_root / "market_data_snapshot_v1")
+            day_dir = (truth_root / "intents_v1" / "snapshots" / day).resolve()
 
             try:
                 p1 = subprocess.run(
                     ["python3", "-m", "constellation_2.phaseI.vol_income_defined_risk.run.run_vol_income_defined_risk_intents_day_v1",
-                     "--day_utc", day, "--mode", "PAPER", "--symbol", symbol],
+                     "--day_utc", day, "--mode", "PAPER", "--symbol", symbol,
+                     "--truth_root", str(truth_root)],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
@@ -99,7 +96,8 @@ class TestVolIncomeDefinedRiskDeterminismV1(unittest.TestCase):
 
                 p2 = subprocess.run(
                     ["python3", "-m", "constellation_2.phaseI.vol_income_defined_risk.run.run_vol_income_defined_risk_intents_day_v1",
-                     "--day_utc", day, "--mode", "PAPER", "--symbol", symbol],
+                     "--day_utc", day, "--mode", "PAPER", "--symbol", symbol,
+                     "--truth_root", str(truth_root)],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
@@ -118,8 +116,6 @@ class TestVolIncomeDefinedRiskDeterminismV1(unittest.TestCase):
             finally:
                 if day_dir.exists():
                     shutil.rmtree(day_dir)
-                if existed:
-                    shutil.copytree(backup_dir, day_dir)
 
 
 if __name__ == "__main__":
