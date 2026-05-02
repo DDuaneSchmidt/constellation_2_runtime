@@ -360,10 +360,9 @@ def _selected_intent_projection() -> Tuple[str, str, str]:
 
 def _runtime_status_projection(day_utc: Optional[str] = None) -> Dict[str, Any]:
     day = _projection_day(day_utc)
-    truth_root = _canonical_truth_root()
+    readiness = build_readiness_kernel_v1(day)
+    truth_root = Path(str(readiness.get("truth_root") or _canonical_truth_root())).resolve()
     runtime_truth = _runtime_truth_root()
-    day_run_path = _canonical_report_path("aegis_day_run_v1", day, "day_run.v1.json")
-    day_run = _read_json_dict_or_empty(day_run_path)
     selected_intent_id, selected_intent_status, selected_pointer_path = _selected_intent_projection()
     portfolio_state = _artifact_projection_payload(
         day_utc=day,
@@ -383,16 +382,9 @@ def _runtime_status_projection(day_utc: Optional[str] = None) -> Dict[str, Any]:
         filename="decision_ledger.v1.json",
         label="decision_ledger",
     )
-    source_status = ""
-    if isinstance(day_run.get("source_repo_status"), dict):
-        source_status = str(day_run["source_repo_status"].get("source_reproducibility_status") or "").strip()
-
-    final_status = str(day_run.get("final_status") or "").strip().upper()
-    canonical_phase = str(day_run.get("canonical_phase") or "").strip().upper()
-    canonical_blocker = str(day_run.get("canonical_blocker") or "").strip()
     missing = []
-    if not day_run:
-        missing.append("AEGIS_DAY_RUN_MISSING")
+    if readiness.get("primary_ui_authority") != "aegis_control_plane_v1" or readiness.get("canonical_blocker") == "CONTROL_PLANE_MISSING":
+        missing.append("AEGIS_CONTROL_PLANE_MISSING")
     if not portfolio_state.get("ok"):
         missing.extend(portfolio_state.get("reason_codes") or [])
     if not portfolio_scoring.get("ok"):
@@ -400,13 +392,13 @@ def _runtime_status_projection(day_utc: Optional[str] = None) -> Dict[str, Any]:
     packet_path = _latest_packet_path()
 
     status = "PASS"
-    if not day_run:
+    if "AEGIS_CONTROL_PLANE_MISSING" in missing:
         status = "FAIL"
     elif missing:
         status = "DEGRADED"
 
     return {
-        "ok": bool(day_run),
+        "ok": bool(readiness.get("canonical_blocker") != "CONTROL_PLANE_MISSING"),
         "status": status,
         "reason_codes": missing,
         "projection_contract_version": PROJECTION_CONTRACT_VERSION,
@@ -414,18 +406,23 @@ def _runtime_status_projection(day_utc: Optional[str] = None) -> Dict[str, Any]:
         "day_utc": day,
         "truth_root": str(truth_root),
         "runtime_truth_root": str(runtime_truth),
-        "final_status": final_status or "UNKNOWN",
-        "canonical_phase": canonical_phase,
-        "canonical_blocker": canonical_blocker,
-        "source_integrity_status": source_status or "UNKNOWN",
+        "final_status": str(readiness.get("overall_status") or "UNKNOWN"),
+        "canonical_phase": str(readiness.get("current_phase") or ""),
+        "canonical_blocker": str(readiness.get("canonical_blocker") or ""),
+        "source_integrity_status": "SUPPORTING_EVIDENCE_ONLY",
+        "runtime_mode": str(readiness.get("runtime_mode") or ""),
+        "production_version_status": str(readiness.get("production_version_status") or ""),
+        "promoted_commit": str(readiness.get("promoted_commit") or ""),
+        "submit_status": str(readiness.get("submit_status") or ""),
+        "submit_canonical_blocker": str(readiness.get("submit_canonical_blocker") or ""),
         "selected_intent_id": selected_intent_id,
         "selected_intent_status": selected_intent_status,
         "portfolio_state_status": str(portfolio_state.get("status") or "UNKNOWN"),
         "portfolio_scoring_status": str(portfolio_scoring.get("status") or "UNKNOWN"),
         "decision_ledger_status": str(decision_ledger.get("status") or "UNKNOWN"),
-        "operator_next_action": str(day_run.get("operator_next_action") or "").strip(),
+        "operator_next_action": str(readiness.get("operator_next_action") or "").strip(),
         "artifact_paths": {
-            "day_run": str(day_run_path),
+            "control_plane": str(readiness.get("primary_authority_path") or ""),
             "selected_intent_pointer": selected_pointer_path,
             "portfolio_state": str(portfolio_state.get("artifact_path") or ""),
             "portfolio_scoring": str(portfolio_scoring.get("artifact_path") or ""),

@@ -673,40 +673,46 @@ function ellipsisText(value, maxChars = 120) {
 
 function renderReadinessKernelLadder(readinessKernel, state) {
   const layers = safeList(readinessKernel?.layers);
-  if (!layers.length) {
-    return `<div class="empty-state">Readiness kernel did not return source layers.</div>`;
-  }
+  const evidencePaths = safeList(readinessKernel?.evidence_paths).map((item) => inlineText(item)).filter(Boolean);
+  const recoveryCommands = safeList(readinessKernel?.recovery_commands).map((item) => inlineText(item)).filter(Boolean);
+  const deferred = safeList(readinessKernel?.deferred_phases).map((item) => inlineText(item)).filter(Boolean);
+  const submit = readinessKernel?.submit || {};
+  const productionVersion = readinessKernel?.production_version || {};
+  const packet = readinessKernel?.packet || {};
   return `
     <div class="metric-grid">
-      ${layers.map((row) => renderMetricCard({
-        label: row.label || row.layer_id,
-        value: row.status || "UNKNOWN",
-        semantic: row.semantic || "unknown",
-        semantics: state.semantics,
-      })).join("")}
+      ${renderMetricCard({ label: "Runtime mode", value: readinessKernel?.runtime_mode || "UNKNOWN", semantic: readinessKernel?.runtime_mode === "PRODUCTION" ? "healthy" : "warning", semantics: state.semantics })}
+      ${renderMetricCard({ label: "Production version", value: productionVersion.status || readinessKernel?.production_version_status || "UNKNOWN", semantic: productionVersion.status === "ACTIVE" ? "healthy" : "blocked", semantics: state.semantics })}
+      ${renderMetricCard({ label: "Packet", value: packet.status || readinessKernel?.packet_status || "UNKNOWN", semantic: packet.status === "CURRENT" ? "healthy" : "blocked", semantics: state.semantics })}
+      ${renderMetricCard({ label: "Submit", value: readinessKernel?.submit_status || "UNKNOWN", semantic: readinessKernel?.submit_status === "ALLOWED" ? "healthy" : "blocked", semantics: state.semantics })}
+      ${renderMetricCard({ label: "Current phase", value: readinessKernel?.current_phase || "UNKNOWN", semantic: readinessKernel?.overall_status === "READY" ? "healthy" : "blocked", semantics: state.semantics })}
+      ${renderMetricCard({ label: "Canonical blocker", value: readinessKernel?.canonical_blocker || "NONE", semantic: readinessKernel?.canonical_blocker ? "blocked" : "healthy", semantics: state.semantics })}
     </div>
     <div style="margin-top:12px;" class="stack-list">
-      ${layers.map((row) => {
-        const label = inlineText(row.label || row.layer_id || "Layer");
-        const status = inlineText(row.status || "UNKNOWN");
-        const classification = inlineText(row.classification || "UNKNOWN");
-        const blocker = inlineText(row.canonical_blocker || "");
-        const nextAction = inlineText(row.next_action || "");
-        const sourcePath = inlineText(row.source_path || "");
-        return `
-          <div class="evidence-row">
-            <div>
-              <strong>${escapeHtml(label)}</strong>
-              <div style="font-size:12px;opacity:0.78;">${escapeHtml(classification)}${blocker ? ` · ${escapeHtml(blocker)}` : ""}</div>
-              ${nextAction ? `<div style="font-size:12px;opacity:0.82;">Next: ${escapeHtml(nextAction)}</div>` : ""}
-            </div>
-            <div style="text-align:right;min-width:160px;">
-              ${renderSemanticBadge(status, row.semantic || "unknown", state.semantics)}
-              ${sourcePath ? `<div title="${escapeHtml(sourcePath)}" style="font-size:11px;opacity:0.62;margin-top:4px;">${escapeHtml(ellipsisText(sourcePath, 52))}</div>` : ""}
-            </div>
-          </div>
-        `;
-      }).join("")}
+      <div class="evidence-row">
+        <div>
+          <strong>${escapeHtml(readinessKernel?.current_phase || "UNKNOWN")}</strong>
+          <div style="font-size:12px;opacity:0.78;">Owner: ${escapeHtml(readinessKernel?.blocker_owner || "UNKNOWN")}</div>
+          <div style="font-size:12px;opacity:0.82;">Action: ${escapeHtml(readinessKernel?.recovery_action || readinessKernel?.operator_next_action || "No recovery action reported.")}</div>
+        </div>
+        <div style="text-align:right;min-width:160px;">
+          ${renderSemanticBadge(readinessKernel?.canonical_blocker || "NONE", readinessKernel?.canonical_blocker ? "blocked" : "healthy", state.semantics)}
+        </div>
+      </div>
+      <div class="evidence-row">
+        <div>
+          <strong>Submit firewall</strong>
+          <div style="font-size:12px;opacity:0.78;">Source: ${escapeHtml(readinessKernel?.submit_source || submit.source || "submit_firewall")}</div>
+          <div style="font-size:12px;opacity:0.82;">Blocker: ${escapeHtml(readinessKernel?.submit_canonical_blocker || submit.canonical_blocker || "NONE")}</div>
+        </div>
+        <div style="text-align:right;min-width:160px;">
+          ${renderSemanticBadge(readinessKernel?.submit_status || submit.status || "UNKNOWN", readinessKernel?.submit_status === "ALLOWED" ? "healthy" : "blocked", state.semantics)}
+        </div>
+      </div>
+      ${recoveryCommands.length ? `<div class="evidence-row"><div><strong>Recovery command</strong><div style="font-size:12px;opacity:0.82;">${recoveryCommands.map((cmd) => escapeHtml(cmd)).join("<br />")}</div></div></div>` : ""}
+      ${evidencePaths.length ? `<div class="evidence-row"><div><strong>Evidence paths</strong><div style="font-size:12px;opacity:0.82;">${evidencePaths.map((path) => escapeHtml(path)).join("<br />")}</div></div></div>` : ""}
+      ${deferred.length ? `<div class="evidence-row"><div><strong>Deferred downstream phases</strong><div class="chip-list" style="margin-top:6px;">${deferred.map((phase) => `<span class="support-chip">${escapeHtml(phase)}</span>`).join("")}</div></div></div>` : ""}
+      ${layers.length ? `<div class="evidence-row"><div><strong>Phase results</strong><div style="font-size:12px;opacity:0.82;">${layers.map((row) => `${escapeHtml(row.layer_id || row.label || "phase")}: ${escapeHtml(row.status || "UNKNOWN")}`).join("<br />")}</div></div></div>` : ""}
     </div>
   `;
 }
@@ -2526,8 +2532,8 @@ async function renderOperationsPage(state) {
     html: [
       renderCardSection({
         eyebrow: "Readiness",
-        title: "Runtime Readiness Ladder",
-        subtitle: "Directly rendered from readiness_kernel_v1 source artifact reads.",
+        title: "Phase-Controlled Readiness",
+        subtitle: "Rendered from aegis_control_plane_v1; requirement graph, kernel, day-run, submit boundary, action validity, and packet are supporting evidence only.",
         body: renderReadinessKernelLadder(readinessKernel, state),
       }),
       renderCardSection({

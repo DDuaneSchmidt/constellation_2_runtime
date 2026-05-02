@@ -122,6 +122,23 @@ def test_runtime_status_projection_reads_current_canonical_artifacts_only(
     _write_json(truth / "reports/portfolio_state_v1" / day / "portfolio_state.v1.json", {"day_utc": day, "status": "PASS"})
     _write_json(truth / "reports/portfolio_scoring_v1" / day / "portfolio_scoring.v1.json", {"day_utc": day, "status": "PASS"})
     _write_json(truth / "reports/decision_ledger_v1" / day / "decision_ledger.v1.json", {"day_utc": day, "status": "PASS"})
+    monkeypatch.setattr(
+        server,
+        "build_readiness_kernel_v1",
+        lambda _day: {
+            "truth_root": str(truth),
+            "overall_status": "BLOCKED",
+            "current_phase": "MARKET_OPEN_DATA_GATE",
+            "canonical_blocker": "MARKET_CLOSED",
+            "operator_next_action": "wait",
+            "runtime_mode": "PRODUCTION",
+            "production_version_status": "ACTIVE",
+            "promoted_commit": "a" * 40,
+            "submit_status": "BLOCKED",
+            "submit_canonical_blocker": "DAY_RUN_LEDGER_NOT_READY",
+            "primary_ui_authority": "aegis_control_plane_v1",
+        },
+    )
     monkeypatch.setattr(server, "_canonical_truth_root", lambda: truth)
     monkeypatch.setattr(server, "_runtime_truth_root", lambda: runtime_truth)
     monkeypatch.setattr(server, "_latest_packet_path", lambda: packet)
@@ -130,7 +147,9 @@ def test_runtime_status_projection_reads_current_canonical_artifacts_only(
 
     assert payload["status"] == "PASS"
     assert payload["truth_root"] == str(truth)
-    assert payload["final_status"] == "NOT_READY"
+    assert payload["final_status"] == "BLOCKED"
+    assert payload["runtime_mode"] == "PRODUCTION"
+    assert payload["production_version_status"] == "ACTIVE"
     assert payload["canonical_blocker"] == "MARKET_CLOSED"
     assert payload["selected_intent_id"] == "intent_iwm"
 
@@ -142,14 +161,23 @@ def test_runtime_status_projection_degrades_when_projection_artifact_missing(
     truth = tmp_path / "truth"
     runtime_truth = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
     runtime_truth.mkdir(parents=True)
-    _write_json(truth / "reports/aegis_day_run_v1" / day / "day_run.v1.json", {"day_utc": day, "final_status": "NOT_READY"})
+    monkeypatch.setattr(
+        server,
+        "build_readiness_kernel_v1",
+        lambda _day: {
+            "truth_root": str(truth),
+            "overall_status": "UNKNOWN",
+            "canonical_blocker": "CONTROL_PLANE_MISSING",
+            "primary_ui_authority": "aegis_control_plane_v1",
+        },
+    )
     monkeypatch.setattr(server, "_canonical_truth_root", lambda: truth)
     monkeypatch.setattr(server, "_runtime_truth_root", lambda: runtime_truth)
 
     payload = server._runtime_status_projection(day)
 
-    assert payload["status"] == "DEGRADED"
-    assert "PORTFOLIO_STATE_MISSING" in payload["reason_codes"]
+    assert payload["status"] == "FAIL"
+    assert "AEGIS_CONTROL_PLANE_MISSING" in payload["reason_codes"]
 
 
 def test_runtime_status_projection_reads_nested_selected_intent(
@@ -175,6 +203,7 @@ def test_aegis_runtime_route_and_offline_guidance_are_present() -> None:
 
     assert "/aegis-runtime" in server.OpsHandler.SHELL_ROUTES
     assert "fetchRuntimeStatus" in pages
+    assert "Phase-Controlled Readiness" in pages
     assert "BACKEND_UNAVAILABLE" in pages
     assert "npm run aegis:ui:restart" in pages
     assert "aegis.runtime.lastKnownTruth.v1" in pages

@@ -2,10 +2,21 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .common import GLOBAL_TRUTH_ROOT, SLEEVE_TRUTH_ROOT, iso_from_mtime, read_json_dict, resolve_ui_day
+from ops.tools.aegis_runtime_mode_v1 import (
+    CANDIDATE_TRUTH_ROOT,
+    PRODUCTION_TRUTH_ROOT,
+    normalize_runtime_mode_v1,
+    production_version_path_v1,
+    read_json_v1,
+    read_production_version_v1,
+    runtime_mode_from_truth_root_v1,
+)
+from ops.tools.aegis_submit_enforcement_v1 import evaluate_submit_enforcement_v1, packet_currentness_v1
 
 
 SCHEMA_ID = "readiness_kernel"
@@ -38,6 +49,106 @@ BLOCK_LIKE = {
 
 OUT_OF_SESSION_BLOCKERS = {"MARKET_CLOSED", "MARKET_NOT_OPEN", "OUT_OF_SESSION"}
 EXTERNAL_PREFIXES = ("IB_", "MARKET_", "OPTIONS_", "BROKER_", "TWS_")
+
+
+def _phase_controlled_truth_root(runtime_mode: Optional[str] = None) -> Path:
+    mode = normalize_runtime_mode_v1(runtime_mode or os.environ.get("AEGIS_UI_RUNTIME_MODE") or os.environ.get("AEGIS_RUNTIME_MODE"))
+    return PRODUCTION_TRUTH_ROOT if mode == "PRODUCTION" else CANDIDATE_TRUTH_ROOT
+
+
+def _latest_control_plane_day(root: Path) -> str:
+    family = (root / "reports" / "aegis_control_plane_v1").resolve()
+    if not family.exists() or not family.is_dir():
+        return ""
+    days = sorted(path.name for path in family.iterdir() if path.is_dir())
+    return days[-1] if days else ""
+
+
+def _control_plane_path(root: Path, day: str) -> Path:
+    return (root / "reports" / "aegis_control_plane_v1" / day / "control_plane.v1.json").resolve()
+
+
+def _packet_status(root: Path, runtime_mode: str) -> Dict[str, Any]:
+    return packet_currentness_v1(runtime_root=root, runtime_mode=runtime_mode)
+
+
+def _production_version_status(root: Path, runtime_mode: str) -> Dict[str, Any]:
+    path = production_version_path_v1(root)
+    if runtime_mode != "PRODUCTION":
+        return {
+            "path": str(path),
+            "present": False,
+            "status": "NOT_REQUIRED_FOR_CANDIDATE",
+            "promoted_commit": "",
+            "promotion_id": "",
+        }
+    payload = read_production_version_v1(root)
+    return {
+        "path": str(path),
+        "present": bool(payload),
+        "status": str(payload.get("status") or "MISSING").strip().upper() if payload else "MISSING",
+        "promoted_commit": str(payload.get("promoted_commit") or "").strip(),
+        "promotion_id": str(payload.get("promotion_id") or "").strip(),
+    }
+
+
+def _supporting_path(root: Path, family: str, day: str, filename: str) -> str:
+    return str((root / "reports" / family / day / filename).resolve())
+
+
+def _submit_projection(root: Path, sleeve_root: Path, day: str, runtime_mode: str) -> Dict[str, Any]:
+    try:
+        result = evaluate_submit_enforcement_v1(
+            truth_root=root,
+            execution_root=sleeve_root,
+            runtime_root=root,
+            day_utc=day,
+            action_id="submit_paper_order",
+            runtime_mode=runtime_mode,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "status": "BLOCKED",
+            "source": "submit_firewall",
+            "canonical_blocker": f"SUBMIT_FIREWALL_UNAVAILABLE:{type(exc).__name__}",
+            "blockers": [{"code": f"SUBMIT_FIREWALL_UNAVAILABLE:{type(exc).__name__}", "detail": str(exc)}],
+        }
+    return {
+        "status": "ALLOWED" if result.get("ok") is True else "BLOCKED",
+        "source": "submit_firewall",
+        "canonical_blocker": str(result.get("canonical_blocker") or ""),
+        "blockers": result.get("blockers") if isinstance(result.get("blockers"), list) else [],
+        "checked_paths": result.get("checked_paths") if isinstance(result.get("checked_paths"), dict) else {},
+        "packet_currentness": result.get("packet_currentness") if isinstance(result.get("packet_currentness"), dict) else {},
+    }
+
+
+def _phase_rows(control: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows = control.get("phase_results") if isinstance(control.get("phase_results"), list) else []
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        status = _as_text(row.get("status") or "UNKNOWN")
+        semantic = "blocked" if status == "BLOCKING_CURRENT_RUN" else ("warning" if status == "DEFERRED_BY_UPSTREAM_BLOCKER" else ("healthy" if status == "PASS" else "unknown"))
+        out.append(
+            {
+                "layer_id": _as_text(row.get("phase_id")),
+                "label": _as_text(row.get("phase_id")).replace("_", " ").title(),
+                "status": status,
+                "classification": status,
+                "semantic": semantic,
+                "canonical_blocker": (_as_text(row.get("blocker_codes")[0]) if isinstance(row.get("blocker_codes"), list) and row.get("blocker_codes") else ""),
+                "source_path": "",
+                "source_sha256": "",
+                "next_action": _as_text(row.get("recovery_action")),
+                "evidence_summary": {
+                    "evidence_paths": row.get("evidence_paths") if isinstance(row.get("evidence_paths"), list) else [],
+                    "recovery_commands": row.get("recovery_commands") if isinstance(row.get("recovery_commands"), list) else [],
+                },
+            }
+        )
+    return out
 
 
 @dataclass(frozen=True)
@@ -455,54 +566,89 @@ def build_readiness_kernel_v1(
     sleeve_truth_root: Optional[Path] = None,
     environment: str = DEFAULT_ENVIRONMENT,
 ) -> Dict[str, Any]:
-    resolved_day = resolve_ui_day(day) or _as_text(day) or "UNKNOWN"
-    root = (truth_root or GLOBAL_TRUTH_ROOT).resolve()
+    root = (truth_root or _phase_controlled_truth_root()).resolve()
     sleeve_root = (sleeve_truth_root or SLEEVE_TRUTH_ROOT).resolve()
-
-    layers: List[Dict[str, Any]] = []
-    freshness_records = _truth_freshness_by_artifact_path(root, resolved_day)
-    for spec in _layer_specs(resolved_day):
-        layers.append(_build_layer_from_file(spec=spec, path=_find_path(root, spec), day=resolved_day, freshness_records=freshness_records))
-        if spec.layer_id == "STRUCTURE":
-            layers.append(_build_phasec_layer(day=resolved_day, sleeve_truth_root=sleeve_root, freshness_records=freshness_records))
-
-    kernel, kernel_path, kernel_error = _unified_truth_kernel(root, resolved_day)
-    if kernel:
-        overall_status, canonical_blocker, operator_next_action = _overall_from_kernel(kernel)
-        final_readiness_authority = "aegis_day_run_ledger_v1"
-        truth_resolution_source_path = str(kernel_path)
+    explicit_day = _as_text(day)
+    resolved_day = explicit_day or _latest_control_plane_day(root) or resolve_ui_day(day) or "UNKNOWN"
+    runtime_mode = runtime_mode_from_truth_root_v1(root)
+    control_path = _control_plane_path(root, resolved_day)
+    control, control_error = read_json_dict(control_path)
+    control = control if isinstance(control, dict) else {}
+    packet = _packet_status(root, runtime_mode)
+    production_version = _production_version_status(root, runtime_mode)
+    submit = _submit_projection(root, sleeve_root, resolved_day, runtime_mode)
+    if not control:
+        layers: List[Dict[str, Any]] = []
+        overall_status = "UNKNOWN"
+        canonical_blocker = "CONTROL_PLANE_MISSING"
+        operator_next_action = f"Generate aegis_control_plane_v1 for {resolved_day}."
+        current_phase = ""
+        blocker_owner = ""
+        recovery_commands: List[str] = []
+        evidence_paths: List[str] = [str(control_path)]
+        deferred_phases: List[str] = []
     else:
-        overall_status, canonical_blocker, operator_next_action = _overall(layers)
-        final_readiness_authority = "aegis_day_run_ledger_v1"
-        truth_resolution_source_path = ""
+        layers = _phase_rows(control)
+        control_final = _as_text(control.get("final_status")).upper()
+        overall_status = "READY" if control_final == "READY" else "BLOCKED"
+        canonical_blocker = _as_text(control.get("canonical_blocker"))
+        operator_next_action = _as_text(control.get("recovery_action"))
+        current_phase = _as_text(control.get("current_phase"))
+        blocker_owner = _as_text(control.get("blocker_owner"))
+        recovery_commands = [str(item) for item in control.get("recovery_commands", []) if str(item or "").strip()] if isinstance(control.get("recovery_commands"), list) else []
+        evidence_paths = [str(item) for item in control.get("evidence_paths", []) if str(item or "").strip()] if isinstance(control.get("evidence_paths"), list) else []
+        deferred_phases = [str(item) for item in control.get("deferred_phases", []) if str(item or "").strip()] if isinstance(control.get("deferred_phases"), list) else []
     return {
         "schema_id": SCHEMA_ID,
         "schema_version": SCHEMA_VERSION,
         "day_utc": resolved_day,
         "environment": environment,
+        "runtime_mode": runtime_mode,
+        "truth_root": str(root),
+        "primary_ui_authority": "aegis_control_plane_v1",
+        "primary_authority_path": str(control_path),
+        "control_plane_error": control_error or "",
         "overall_status": overall_status,
         "canonical_blocker": canonical_blocker,
+        "current_phase": current_phase,
+        "blocker_owner": blocker_owner,
         "operator_next_action": operator_next_action,
-        "final_readiness_authority": final_readiness_authority,
-        "truth_resolution_source_path": truth_resolution_source_path,
-        "unified_truth_kernel_status": _as_text(kernel.get("truth_confidence") if kernel else ""),
-        "supporting_evidence_only_layers": [
-            layer.get("layer_id")
-            for layer in layers
-            if layer.get("layer_id") != "LEDGER"
-        ],
+        "recovery_action": operator_next_action,
+        "recovery_commands": recovery_commands,
+        "evidence_paths": evidence_paths,
+        "deferred_phases": deferred_phases,
+        "submit": submit,
+        "submit_status": submit.get("status"),
+        "submit_source": submit.get("source"),
+        "submit_canonical_blocker": submit.get("canonical_blocker"),
+        "packet": packet,
+        "packet_status": packet.get("status"),
+        "production_version": production_version,
+        "production_version_status": production_version.get("status"),
+        "promoted_commit": production_version.get("promoted_commit"),
+        "final_readiness_authority": "aegis_control_plane_v1",
+        "truth_resolution_source_path": str(control_path) if control else "",
+        "unified_truth_kernel_status": "SUPPORTING_EVIDENCE_ONLY",
+        "supporting_evidence_only_paths": {
+            "requirement_graph": _supporting_path(root, "aegis_requirement_graph_v1", resolved_day, "requirement_graph.v1.json"),
+            "unified_truth_kernel": _supporting_path(root, "unified_truth_kernel_v1", resolved_day, "unified_truth_kernel.v1.json"),
+            "day_run": _supporting_path(root, "aegis_day_run_v1", resolved_day, "day_run.v1.json"),
+            "submit_boundary": _supporting_path(root, "submit_boundary_status_v1", resolved_day, "submit_boundary_status.v1.json"),
+            "action_validity": _supporting_path(root, "action_validity_v1", resolved_day, "action_validity.v1.json"),
+            "packet": str(Path(packet.get("path") or "")),
+        },
+        "supporting_evidence_only_layers": [layer.get("layer_id") for layer in layers if layer.get("status") != "BLOCKING_CURRENT_RUN"],
         "layers": layers,
-        "warnings": _aggregation_warnings(root, layers)
-        + (
+        "warnings": (
             [
                 {
-                    "code": "UNIFIED_TRUTH_KERNEL_UNAVAILABLE",
-                    "message": "Falling back to day-run ledger direct read because unified_truth_kernel_v1 is unavailable.",
-                    "source_path": str(kernel_path),
-                    "read_error": kernel_error,
+                    "code": "CONTROL_PLANE_UNAVAILABLE",
+                    "message": "UI cannot resolve readiness without aegis_control_plane_v1.",
+                    "source_path": str(control_path),
+                    "read_error": control_error,
                 }
             ]
-            if not kernel
+            if not control
             else []
         ),
     }
