@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/active_strategy_set.v1.schema.json",
+  "title": "Active Strategy Set v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_id", "schema_version", "day_utc", "generated_at_utc", "status", "active_strategy_set", "authority", "producer_contract_v1"],
+  "properties": {
+    "schema_id": { "const": "active_strategy_set" },
+    "schema_version": { "const": "active_strategy_set.v1" },
+    "day_utc": { "type": "string" },
+    "generated_at_utc": { "type": "string" },
+    "status": { "type": "string" },
+    "authority": { "const": "STRATEGY_CONTROL_PLANE" },
+    "active_strategy_set": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["strategy_id", "version", "linked_signals", "approved_regimes", "kill_criteria", "current_lifecycle_state", "approval_artifact", "status"],
+        "properties": {
+          "strategy_id": { "type": "string" },
+          "version": { "type": "string" },
+          "linked_signals": { "type": "array", "items": { "type": "string" } },
+          "approved_regimes": { "type": "array", "items": { "type": "string" } },
+          "kill_criteria": { "type": "array", "items": { "type": "object" } },
+          "current_lifecycle_state": { "type": "string", "enum": ["ACTIVE", "INACTIVE", "DISABLED", "BLOCKED"] },
+          "approval_artifact": { "type": "string" },
+          "status": { "type": "string" }
+        }
+      }
+    },
+    "producer_contract_v1": { "type": "object" }
+  }
+}

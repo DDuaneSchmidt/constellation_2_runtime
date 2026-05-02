@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/strategy_execution_eligibility.v1.schema.json",
+  "title": "Strategy Execution Eligibility v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_id", "schema_version", "day_utc", "generated_at_utc", "status", "submit_allowed", "blockers", "authority", "producer_contract_v1"],
+  "properties": {
+    "schema_id": { "const": "strategy_execution_eligibility" },
+    "schema_version": { "const": "strategy_execution_eligibility.v1" },
+    "day_utc": { "type": "string" },
+    "generated_at_utc": { "type": "string" },
+    "status": { "type": "string", "enum": ["ALLOWED", "BLOCKED"] },
+    "submit_allowed": { "type": "boolean" },
+    "authority": { "const": "AEGIS_EXECUTION_PLANE_VIEW" },
+    "blockers": { "type": "array", "items": { "type": "object" } },
+    "producer_contract_v1": { "type": "object" }
+  }
+}

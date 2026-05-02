@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/strategy_allocation_plan.v1.schema.json",
+  "title": "Strategy Allocation Plan v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_id", "schema_version", "day_utc", "generated_at_utc", "status", "allocations", "authority", "producer_contract_v1"],
+  "properties": {
+    "schema_id": { "const": "strategy_allocation_plan" },
+    "schema_version": { "const": "strategy_allocation_plan.v1" },
+    "day_utc": { "type": "string" },
+    "generated_at_utc": { "type": "string" },
+    "status": { "type": "string" },
+    "authority": { "const": "ALLOCATION_PLANE" },
+    "allocations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["strategy_id", "risk_budget", "allocation_reason", "correlation_constraints", "drawdown_constraints", "confidence_adjustment", "status"],
+        "properties": {
+          "strategy_id": { "type": "string" },
+          "risk_budget": { "type": "object" },
+          "allocation_reason": { "type": "string" },
+          "correlation_constraints": { "type": "object" },
+          "drawdown_constraints": { "type": "object" },
+          "confidence_adjustment": { "type": "number" },
+          "status": { "type": "string" }
+        }
+      }
+    },
+    "producer_contract_v1": { "type": "object" }
+  }
+}

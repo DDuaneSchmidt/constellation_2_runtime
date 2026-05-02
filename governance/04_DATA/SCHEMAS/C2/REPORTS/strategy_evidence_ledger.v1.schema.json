@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/strategy_evidence_ledger.v1.schema.json",
+  "title": "Strategy Evidence Ledger v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_id", "schema_version", "day_utc", "generated_at_utc", "status", "evidence", "authority", "producer_contract_v1"],
+  "properties": {
+    "schema_id": { "const": "strategy_evidence_ledger" },
+    "schema_version": { "const": "strategy_evidence_ledger.v1" },
+    "day_utc": { "type": "string" },
+    "generated_at_utc": { "type": "string" },
+    "status": { "type": "string" },
+    "authority": { "const": "EVIDENCE_VALIDATION_ONLY" },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["proposal_id", "strategy_id", "validation_dataset", "out_of_sample_result", "paper_result", "decay_checks", "regime_sensitivity", "failure_modes", "confidence_score", "approval_recommendation", "status"],
+        "properties": {
+          "proposal_id": { "type": "string" },
+          "strategy_id": { "type": "string" },
+          "validation_dataset": { "type": "object" },
+          "out_of_sample_result": { "type": "object" },
+          "paper_result": { "type": "object" },
+          "decay_checks": { "type": "object" },
+          "regime_sensitivity": { "type": "object" },
+          "failure_modes": { "type": "array", "items": { "type": "string" } },
+          "confidence_score": { "type": "number", "minimum": 0, "maximum": 1 },
+          "approval_recommendation": { "type": "string", "enum": ["APPROVE", "REJECT", "REVIEW"] },
+          "status": { "type": "string", "enum": ["PASS", "FAIL", "REVIEW"] }
+        }
+      }
+    },
+    "producer_contract_v1": { "type": "object" }
+  }
+}
