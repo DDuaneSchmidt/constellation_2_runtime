@@ -13,6 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from constellation_2.phaseB.lib.validate_against_schema_v1 import SchemaValidationError, validate_against_repo_schema_v1
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
 from ops.tools import run_aegis_bod_prepare_v1 as bod
 from ops.tools.aegis_runtime_mode_v1 import assert_candidate_cannot_write_production_v1, runtime_mode_from_truth_root_v1
@@ -170,6 +171,10 @@ def _validate_readiness_domain_registry_v1(domains: list[dict[str, Any]]) -> Non
                 raise RuntimeError(f"READINESS_DEPENDENCY_SCHEMA_PATH_MISSING:{dependency_id}:{schema_path}")
             if dep.get("metadata_exempt") is True and not str(dep.get("metadata_exempt_reason") or "").strip():
                 raise RuntimeError(f"READINESS_DEPENDENCY_METADATA_EXEMPTION_REASON_MISSING:{dependency_id}")
+            if dep.get("schema_instance_exempt") is True and not str(dep.get("schema_instance_exempt_reason") or "").strip():
+                raise RuntimeError(f"READINESS_DEPENDENCY_SCHEMA_INSTANCE_EXEMPTION_REASON_MISSING:{dependency_id}")
+            if dep.get("freshness_exempt") is True and not str(dep.get("freshness_exempt_reason") or "").strip():
+                raise RuntimeError(f"READINESS_DEPENDENCY_FRESHNESS_EXEMPTION_REASON_MISSING:{dependency_id}")
             if owner == "SESSION_IDENTITY":
                 if dependency_id not in SESSION_IDENTITY_ALLOWED_DEPENDENCIES:
                     raise RuntimeError(f"SESSION_IDENTITY_DEPENDENCY_NOT_ALLOWLISTED:{dependency_id}")
@@ -266,6 +271,121 @@ def _nested_get(payload: dict[str, Any], path: tuple[str, ...]) -> str:
             return ""
         value = value.get(key)
     return str(value or "").strip()
+
+
+def _artifact_schema_issue_v1(*, dep: dict[str, Any], path: Path, payload: dict[str, Any]) -> tuple[str, str]:
+    dependency_id = str(dep.get("dependency_id") or "").strip()
+    if dep.get("schema_exempt") is True or dep.get("schema_instance_exempt") is True:
+        return "", ""
+    schema_path = str(dep.get("schema_path") or "").strip()
+    if not schema_path:
+        return "SCHEMA_PATH_MISSING", f"{dependency_id} has no registry schema_path"
+    if not (REPO_ROOT / schema_path).exists():
+        return "SCHEMA_PATH_MISSING", f"{dependency_id} schema_path does not exist: {schema_path}"
+    if path.suffix == ".jsonl":
+        return "SCHEMA_INSTANCE_EXEMPTION_REQUIRED", f"{dependency_id} is a JSONL artifact and must declare schema_instance_exempt"
+    if not payload:
+        return "SCHEMA_INSTANCE_INVALID", f"{dependency_id} is not a valid JSON object"
+    if not (payload.get("schema_id") or payload.get("schema_version") or dep.get("require_schema_instance_validation") is True):
+        return "", ""
+    try:
+        validate_against_repo_schema_v1(payload, REPO_ROOT, schema_path)
+    except SchemaValidationError as exc:
+        first_line = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+        return "SCHEMA_INSTANCE_INVALID", f"{dependency_id} failed {schema_path}: {first_line}"
+    return "", ""
+
+
+def _artifact_timestamp_v1(payload: dict[str, Any]) -> str:
+    producer_contract = payload.get("producer_contract_v1") if isinstance(payload.get("producer_contract_v1"), dict) else {}
+    for value in (
+        payload.get("generated_at_utc"),
+        payload.get("generated_at"),
+        payload.get("generated_utc"),
+        payload.get("produced_at_utc"),
+        payload.get("produced_utc"),
+        payload.get("decided_at_utc"),
+        payload.get("created_at_utc"),
+        payload.get("created_utc"),
+        payload.get("observed_at_utc"),
+        payload.get("updated_at_utc"),
+        producer_contract.get("generated_at_utc"),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _has_contract_surface_v1(payload: dict[str, Any]) -> bool:
+    return bool(
+        payload.get("schema_id")
+        or payload.get("schema_version")
+        or isinstance(payload.get("producer"), dict)
+        or isinstance(payload.get("producer_contract_v1"), dict)
+        or payload.get("git_commit")
+        or payload.get("source_git_commit")
+        or _artifact_timestamp_v1(payload)
+    )
+
+
+def _parse_utc_timestamp_v1(value: str) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _artifact_freshness_issue_v1(
+    *,
+    dep: dict[str, Any],
+    payload: dict[str, Any],
+    ctx: Any,
+    require_freshness_metadata: bool,
+) -> tuple[str, str]:
+    dependency_id = str(dep.get("dependency_id") or "").strip()
+    if dep.get("freshness_exempt") is True:
+        return "", ""
+    policy = dep.get("freshness_policy") if isinstance(dep.get("freshness_policy"), dict) else {}
+    artifact_day = _payload_day(payload)
+    if artifact_day and artifact_day != ctx.day_utc:
+        return "ARTIFACT_DAY_MISMATCH", f"artifact_day={artifact_day} target_day={ctx.day_utc}"
+    timestamp = _artifact_timestamp_v1(payload)
+    require_timestamp = bool((require_freshness_metadata and _has_contract_surface_v1(payload)) or policy.get("require_timestamp") is True)
+    if require_timestamp and not timestamp:
+        return "FRESHNESS_TIMESTAMP_MISSING", f"{dependency_id} has no generated/produced/observed timestamp"
+    if timestamp:
+        if len(timestamp) >= 10 and timestamp[:10] != ctx.day_utc:
+            return "STALE_ARTIFACT_GENERATED_AT_DAY_MISMATCH", f"artifact_timestamp={timestamp} target_day={ctx.day_utc}"
+        max_age_raw = policy.get("max_age_seconds")
+        try:
+            max_age_seconds = int(max_age_raw) if max_age_raw not in (None, "") else 0
+        except (TypeError, ValueError):
+            max_age_seconds = 0
+        if max_age_seconds > 0:
+            parsed = _parse_utc_timestamp_v1(timestamp)
+            if parsed is None:
+                return "FRESHNESS_TIMESTAMP_INVALID", f"{dependency_id} timestamp is not ISO-8601: {timestamp}"
+            age_seconds = int((datetime.now(UTC) - parsed).total_seconds())
+            if age_seconds > max_age_seconds:
+                return "ARTIFACT_FRESHNESS_EXPIRED", f"age_seconds={age_seconds} max_age_seconds={max_age_seconds}"
+    session_field = str(policy.get("session_field") or "").strip()
+    expected_session = str(policy.get("expected_session") or "").strip()
+    require_session = bool(policy.get("require_session") is True)
+    if session_field and expected_session:
+        observed = str(payload.get(session_field) or "").strip()
+        expected = _format_template(expected_session, ctx)
+        if require_session and not observed:
+            return "SESSION_SCOPE_MISSING", f"{dependency_id} missing {session_field}"
+        if observed and observed != expected:
+            return "SESSION_SCOPE_MISMATCH", f"{session_field}={observed} expected={expected}"
+    return "", ""
 
 
 def _artifact_metadata_issue_v1(
@@ -476,6 +596,9 @@ def _session_identity_dependency_result(dep: dict[str, Any], ctx: Any) -> dict[s
             path=path,
         )
     payload = _read_json(path)
+    schema_blocker, schema_detail = _artifact_schema_issue_v1(dep=dep, path=path, payload=payload)
+    if schema_blocker:
+        return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker=schema_blocker, detail=schema_detail, path=path)
     metadata_blocker, metadata_detail = _artifact_metadata_issue_v1(
         payload=payload,
         ctx=ctx,
@@ -483,6 +606,14 @@ def _session_identity_dependency_result(dep: dict[str, Any], ctx: Any) -> dict[s
     )
     if metadata_blocker:
         return _dependency_result(dep=dep, ctx=ctx, status="STALE", blocker=metadata_blocker, detail=metadata_detail, path=path)
+    freshness_blocker, freshness_detail = _artifact_freshness_issue_v1(
+        dep=dep,
+        payload=payload,
+        ctx=ctx,
+        require_freshness_metadata=bool(dep.get("required") is True and dep.get("freshness_exempt") is not True),
+    )
+    if freshness_blocker:
+        return _dependency_result(dep=dep, ctx=ctx, status="STALE", blocker=freshness_blocker, detail=freshness_detail, path=path)
     codes = _collect_codes(payload)
     owned = _owned_dependency_blocker(dep, codes)
     if dependency_id == "active_session_v1":
@@ -588,6 +719,9 @@ def _generic_dependency_result(dep: dict[str, Any], ctx: Any) -> dict[str, Any]:
     except Exception:
         pass
     if payload or require_metadata:
+        schema_blocker, schema_detail = _artifact_schema_issue_v1(dep=dep, path=path, payload=payload)
+        if schema_blocker:
+            return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker=schema_blocker, detail=schema_detail, path=path)
         metadata_blocker, metadata_detail = _artifact_metadata_issue_v1(
             payload=payload,
             ctx=ctx,
@@ -597,6 +731,14 @@ def _generic_dependency_result(dep: dict[str, Any], ctx: Any) -> dict[str, Any]:
         )
         if metadata_blocker:
             return _dependency_result(dep=dep, ctx=ctx, status="STALE", blocker=metadata_blocker, detail=metadata_detail, path=path)
+        freshness_blocker, freshness_detail = _artifact_freshness_issue_v1(
+            dep=dep,
+            payload=payload,
+            ctx=ctx,
+            require_freshness_metadata=bool(dep.get("required") is True and dep.get("freshness_exempt") is not True),
+        )
+        if freshness_blocker:
+            return _dependency_result(dep=dep, ctx=ctx, status="STALE", blocker=freshness_blocker, detail=freshness_detail, path=path)
     codes = _collect_codes(payload)
     owned = _owned_dependency_blocker(dep, codes)
     status = _status(payload) if payload else "PASS"
@@ -1448,6 +1590,21 @@ def build_control_plane_v1(ctx: Any, phase_results: dict[str, dict[str, Any]] | 
             row["domain_order"] = int(domain.get("domain_order") or 999)
         readiness_inventory.extend(dependency_rows)
         if current is not None:
+            deferred_failures = _domain_failures(dependency_rows)
+            for failure in deferred_failures:
+                diagnostic_findings.append(
+                    {
+                        "classification": "DEFERRED_EVIDENCE_ONLY",
+                        "domain_id": domain_id,
+                        "phase_id": phase_id,
+                        "dependency_id": str(failure.get("dependency_id") or ""),
+                        "status": str(failure.get("status") or ""),
+                        "blocking_reason": str(failure.get("blocking_reason") or ""),
+                        "evidence_path": str(failure.get("evidence_path") or failure.get("expected_path") or ""),
+                        "deferred_by": str(current.get("domain_id") or current.get("phase_id") or ""),
+                        "actionable": False,
+                    }
+                )
             raw = _domain_phase_row(
                 domain=domain,
                 ctx=ctx,
@@ -1455,6 +1612,7 @@ def build_control_plane_v1(ctx: Any, phase_results: dict[str, dict[str, Any]] | 
                 dependency_rows=dependency_rows,
                 deferred_by=str(current.get("domain_id") or current.get("phase_id") or ""),
             )
+            raw["deferred_evidence_findings"] = deferred_failures
             deferred_domains.append(domain_id)
             deferred_phases.append(phase_id)
             control_phase_results.append(raw)

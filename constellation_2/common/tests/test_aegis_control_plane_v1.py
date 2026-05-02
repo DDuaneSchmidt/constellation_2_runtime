@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -67,7 +68,15 @@ def _write(path: Path, payload: dict) -> None:
 
 
 def _producer_contract() -> dict:
-    return {"producer_contract_v1": {"code_version_git_commit": cp._current_git_commit_v1(), "source_dirty_status": "CLEAN"}}
+    return {
+        "producer_contract_v1": {
+            "code_version_git_commit": cp._current_git_commit_v1(),
+            "source_dirty_status": "CLEAN",
+            "generated_at_utc": f"{DAY}T13:00:00Z",
+            "producer_name": "test",
+            "producer_command": "test",
+        }
+    }
 
 
 def _artifact_meta(ctx: bod.BodContext) -> dict:
@@ -714,6 +723,180 @@ def test_readiness_contract_schemas_accept_governed_artifact_shapes() -> None:
     )
 
 
+def test_control_plane_validates_required_dependency_schema_instances(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    dep = next(
+        row
+        for domain in cp.load_readiness_domain_registry_v1()
+        for row in domain["dependencies"]
+        if row["dependency_id"] == "runtime_resilience_authority_v1"
+    )
+    path = cp._dependency_path(dep, ctx)
+    _write(
+        path,
+        {
+            "schema_id": "runtime_resilience_authority",
+            "schema_version": "v1",
+            "day_utc": ctx.day_utc,
+            "status": "PASS",
+            "generated_at_utc": f"{ctx.day_utc}T13:00:00Z",
+            "producer": {"repo": "constellation", "module": "ops/tools/run_runtime_resilience_authority_v1.py", "git_sha": cp._current_git_commit_v1()},
+            "truth_root": str(ctx.truth_root),
+        },
+    )
+
+    result = cp._evaluate_domain_dependency(dep, ctx)
+
+    assert result["status"] == "SATISFIED"
+
+    _write(
+        path,
+        {
+            "schema_id": "runtime_resilience_authority",
+            "schema_version": "v1",
+            "day_utc": ctx.day_utc,
+            "generated_at_utc": f"{ctx.day_utc}T13:00:00Z",
+            "producer": {"repo": "constellation", "module": "ops/tools/run_runtime_resilience_authority_v1.py", "git_sha": cp._current_git_commit_v1()},
+            "truth_root": str(ctx.truth_root),
+        },
+    )
+
+    result = cp._evaluate_domain_dependency(dep, ctx)
+
+    assert result["status"] == "FAIL"
+    assert result["blocking_reason"] == "SCHEMA_INSTANCE_INVALID"
+
+
+def test_registry_missing_schema_path_and_exemptions_are_explicit() -> None:
+    bad = [
+        {
+            "domain_id": "BROKER_CONNECTIVITY",
+            "domain_order": 2,
+            "dependencies": [
+                {
+                    "dependency_id": "runtime_resilience_authority_v1",
+                    "domain_owner": "BROKER_CONNECTIVITY",
+                    "owning_domain": "BROKER_CONNECTIVITY",
+                    "expected_path": "x",
+                    "artifact_path": "x",
+                    "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/missing.schema.json",
+                    "producer_command": "x",
+                    "governed_producer": "x",
+                    "recovery_action": "x",
+                    "recovery_command": "x",
+                    "blocking_scope": "BROKER_CONNECTIVITY",
+                }
+            ],
+        }
+    ]
+    with pytest.raises(RuntimeError, match="READINESS_DEPENDENCY_SCHEMA_PATH_MISSING"):
+        cp._validate_readiness_domain_registry_v1(bad)
+
+    domains = cp.load_readiness_domain_registry_v1()
+    broker_event = next(
+        row
+        for domain in domains
+        for row in domain["dependencies"]
+        if row["dependency_id"] == "broker_event_log"
+    )
+    market_calendar = next(
+        row
+        for domain in domains
+        for row in domain["dependencies"]
+        if row["dependency_id"] == "market_calendar_day"
+    )
+    assert broker_event["schema_instance_exempt_reason"]
+    assert market_calendar["schema_instance_exempt_reason"]
+
+
+def test_control_plane_freshness_policy_fails_closed(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):  # noqa: ANN001
+            return datetime(2026, 5, 4, 13, 0, 0, tzinfo=UTC)
+
+    monkeypatch.setattr(cp, "datetime", FixedDateTime)
+    dep = {
+        "dependency_id": "runtime_resilience_authority_v1",
+        "domain_owner": "BROKER_CONNECTIVITY",
+        "owning_domain": "BROKER_CONNECTIVITY",
+        "required_for": ["broker_health"],
+        "blocking_scope": "BROKER_CONNECTIVITY",
+        "expected_path": "{truth_root}/reports/runtime_resilience_authority_v1/{day_utc}/runtime_resilience_authority.v1.json",
+        "artifact_path": "{truth_root}/reports/runtime_resilience_authority_v1/{day_utc}/runtime_resilience_authority.v1.json",
+        "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/runtime_resilience_authority.v1.schema.json",
+        "producer_command": "x",
+        "governed_producer": "x",
+        "recovery_action": "x",
+        "recovery_command": "x",
+        "required": True,
+        "diagnostic_only": False,
+        "freshness_policy": {"require_timestamp": True, "max_age_seconds": 1},
+    }
+    payload = {
+        "schema_id": "runtime_resilience_authority",
+        "schema_version": "v1",
+        "day_utc": ctx.day_utc,
+        "status": "PASS",
+        "generated_at_utc": f"{ctx.day_utc}T00:00:00Z",
+        "producer": {"repo": "constellation", "module": "ops/tools/run_runtime_resilience_authority_v1.py", "git_sha": cp._current_git_commit_v1()},
+        "truth_root": str(ctx.truth_root),
+    }
+
+    blocker, _detail = cp._artifact_freshness_issue_v1(dep=dep, payload=payload, ctx=ctx, require_freshness_metadata=True)
+    assert blocker == "ARTIFACT_FRESHNESS_EXPIRED"
+
+    missing_timestamp = dict(payload)
+    missing_timestamp.pop("generated_at_utc")
+    blocker, _detail = cp._artifact_freshness_issue_v1(dep=dep, payload=missing_timestamp, ctx=ctx, require_freshness_metadata=True)
+    assert blocker == "FRESHNESS_TIMESTAMP_MISSING"
+
+    wrong_session_dep = dict(dep)
+    wrong_session_dep["freshness_policy"] = {"session_field": "session_id", "expected_session": "{day_utc}:PAPER", "require_session": True}
+    wrong_session = dict(payload)
+    wrong_session["session_id"] = "2026-05-03:PAPER"
+    blocker, _detail = cp._artifact_freshness_issue_v1(dep=wrong_session_dep, payload=wrong_session, ctx=ctx, require_freshness_metadata=True)
+    assert blocker == "SESSION_SCOPE_MISMATCH"
+
+    exempt_dep = dict(dep)
+    exempt_dep["freshness_exempt"] = True
+    blocker, _detail = cp._artifact_freshness_issue_v1(dep=exempt_dep, payload={}, ctx=ctx, require_freshness_metadata=True)
+    assert blocker == ""
+
+
+def test_stale_deferred_downstream_artifacts_are_quarantined_not_actionable(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _session_pass(ctx)
+    _write(
+        ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json",
+        {"day_utc": ctx.day_utc, "bootstrap_status": "BLOCKED", "blocker_chain": ["NON_TRADING_DAY"], **_producer_contract()},
+    )
+    _write(
+        ctx.truth_root / "reports" / "runtime_resilience_authority_v1" / ctx.day_utc / "runtime_resilience_authority.v1.json",
+        {
+            "schema_id": "runtime_resilience_authority",
+            "schema_version": "v1",
+            "day_utc": ctx.day_utc,
+            "generated_at_utc": f"{ctx.day_utc}T13:00:00Z",
+            "producer": {"repo": "constellation", "module": "ops/tools/run_runtime_resilience_authority_v1.py", "git_sha": cp._current_git_commit_v1()},
+            "truth_root": str(ctx.truth_root),
+        },
+    )
+
+    payload = cp.build_control_plane_v1(ctx)
+
+    assert payload["current_domain"] == "SESSION_IDENTITY"
+    assert payload["canonical_blocker"] == "PAPER_SESSION_BOOTSTRAP_NOT_READY"
+    findings = [row for row in payload["diagnostic_findings"] if row.get("dependency_id") == "runtime_resilience_authority_v1"]
+    assert findings
+    assert findings[0]["classification"] == "DEFERRED_EVIDENCE_ONLY"
+    assert findings[0]["actionable"] is False
+
+
 def test_registry_rejects_session_identity_leakage(monkeypatch) -> None:  # noqa: ANN001
     bad = [
         {
@@ -915,7 +1098,7 @@ def test_projection_blocks_when_control_plane_wrong_day_without_kernel_fallback(
         },
     )
     _write(
-        projection.unified_truth_kernel_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc),
+        ctx.truth_root / "reports" / "unified_truth_kernel_v1" / ctx.day_utc / "unified_truth_kernel.v1.json",
         {
             "day_utc": ctx.day_utc,
             "final_status": "READY",
@@ -932,6 +1115,29 @@ def test_projection_blocks_when_control_plane_wrong_day_without_kernel_fallback(
     assert payload["final_status"] == "UNKNOWN"
     assert payload["submit_allowed"] is False
     assert "kernel fallback should not be used" not in payload["operator_next_action"]
+
+
+def test_projection_has_no_kernel_readiness_fallback_path() -> None:
+    text = (REPO_ROOT / "ops" / "tools" / "run_aegis_operator_projection_v1.py").read_text(encoding="utf-8")
+
+    assert "_projection_from_kernel" not in text
+    assert "run_unified_truth_kernel_v1" not in text
+    assert "unified_truth_kernel_path" not in text
+
+
+def test_projection_integrity_context_names_control_plane_as_readiness_source(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _session_pass(ctx)
+    monkeypatch.setattr(cp.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+    cp.run_control_plane_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
+    monkeypatch.setattr(projection.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+
+    _out_path, payload = projection.run_operator_projection_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
+
+    assert payload["integrity_context"]["final_status_source"] == "aegis_control_plane_v1"
+    assert payload["integrity_context"]["readiness_source"] == "aegis_control_plane_v1"
+    assert "day_run_ledger" not in payload["authority_note"]
 
 
 def test_submit_allowed_false_when_control_plane_not_ready(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001

@@ -38,46 +38,63 @@ def _write(path: Path, payload: dict) -> None:
 
 def test_operator_projection_source_reproducibility_action(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    _write(
-        ctx.truth_root / "reports" / "aegis_day_run_v1" / ctx.day_utc / "day_run.v1.json",
+    payload = projection._projection_from_control_plane(
+        ctx,
         {
             "day_utc": ctx.day_utc,
             "final_status": "NOT_READY",
-            "canonical_phase": "SOURCE_INTEGRITY",
+            "current_phase": "SOURCE_INTEGRITY",
+            "current_domain": "SOURCE_INTEGRITY",
             "canonical_blocker": "SOURCE_REPRODUCIBILITY_BLOCKED",
-            "root_cause_chain": [{"blocker_detail": "git tree is dirty"}],
-            "downstream_consequences": [],
+            "recovery_action": "Clean/protect the canonical repo.",
+            "recovery_commands": ["protect repo"],
+            "evidence_paths": ["/tmp/repo_protection.json"],
         },
     )
 
-    payload = projection._projection_for(ctx, json.loads((ctx.truth_root / "reports" / "aegis_day_run_v1" / ctx.day_utc / "day_run.v1.json").read_text()), {})
-
     assert payload["first_blocker"] == "SOURCE_REPRODUCIBILITY_BLOCKED"
-    assert payload["owner"] == "source_reproducibility_authority"
-    assert "Clean/protect" in payload["next_valid_actions"][0]
+    assert payload["owner"] == "SOURCE_INTEGRITY"
+    assert "Clean/protect" in payload["operator_next_action"]
+    assert payload["next_valid_actions"] == ["protect repo"]
 
 
 def test_operator_projection_market_data_points_to_supply_artifacts(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    payload = projection._projection_for(
+    payload = projection._projection_from_control_plane(
         ctx,
-        {"final_status": "NOT_READY", "canonical_phase": "MARKET_DATA_BOD_PREP", "canonical_blocker": "MARKET_DATA_BLOCKED"},
-        {},
+        {
+            "day_utc": ctx.day_utc,
+            "final_status": "NOT_READY",
+            "current_phase": "MARKET_DATA",
+            "current_domain": "MARKET_FEED",
+            "canonical_blocker": "MARKET_DATA_BLOCKED",
+            "recovery_action": "Inspect market data authority.",
+            "recovery_commands": ["rerun market data"],
+            "evidence_paths": [str(ctx.truth_root / "reports/market_data_supply_v1/2026-04-29/market_data_supply.v1.json")],
+        },
     )
 
-    assert payload["owner"] == "market_data_authority"
+    assert payload["current_domain"] == "MARKET_FEED"
     assert any("market_data_supply_v1" in path for path in payload["artifact_paths"])
 
 
 def test_operator_projection_no_eligible_structure_points_to_authorization(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    payload = projection._projection_for(
+    payload = projection._projection_from_control_plane(
         ctx,
-        {"final_status": "NOT_READY", "canonical_phase": "AUTHORIZATION_FINAL", "canonical_blocker": "NO_ELIGIBLE_OPTION_STRUCTURE"},
-        {},
+        {
+            "day_utc": ctx.day_utc,
+            "final_status": "NOT_READY",
+            "current_phase": "KILL_SWITCH",
+            "current_domain": "AUTHORIZATION_KILL_SWITCH",
+            "canonical_blocker": "NO_ELIGIBLE_OPTION_STRUCTURE",
+            "recovery_action": "Inspect authorization diagnostics.",
+            "recovery_commands": ["rerun authorization"],
+            "evidence_paths": [str(ctx.truth_root / "reports/authorization_supply_v1/2026-04-29/authorization_supply.v1.json")],
+        },
     )
 
-    assert payload["owner"] == "authorization_supply"
+    assert payload["current_domain"] == "AUTHORIZATION_KILL_SWITCH"
     assert any("authorization_supply_v1" in path for path in payload["artifact_paths"])
 
 
