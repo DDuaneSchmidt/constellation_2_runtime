@@ -169,6 +169,54 @@ def test_ai_review_consumes_only_gateway_packet(tmp_path: Path) -> None:
     assert payload["control_plane_final_status_observed"] == "NOT_READY"
 
 
+def test_ai_advisory_review_is_schema_valid_but_not_gateway_input(tmp_path: Path) -> None:
+    prod, _runtime = _seed_production(tmp_path)
+    ai_review = prod / "reports" / "ai_advisory_review_v1" / DAY / "ai_advisory_review.v1.json"
+    contract = _producer_contract()
+    contract["producer_name"] = "ops/tools/run_ai_advisory_review_v1.py"
+    _write(
+        ai_review,
+        {
+            "schema_id": "ai_advisory_review",
+            "schema_version": "v1",
+            "artifact_id": "ai_advisory_review_v1",
+            "day_utc": DAY,
+            "generated_at": "2026-05-02T15:00:00Z",
+            "git_commit": COMMIT,
+            "git_dirty_status": "CLEAN",
+            "truth_root": str(prod.resolve()),
+            "runtime_root": str(prod.resolve()),
+            "producer": "ops/tools/run_ai_advisory_review_v1.py",
+            "authority": "ADVISORY_ONLY",
+            "readiness_authority": "aegis_control_plane_v1",
+            "submit_authority": "aegis_submit_enforcement_v1",
+            "operator_action_authority": "CONTROL_PLANE_OR_GOVERNED_RECOVERY_ONLY",
+            "environment": "PAPER",
+            "status": "PASS",
+            "advisory_evidence_packet_path": str(prod / "reports" / "advisory_evidence_packet_v1" / DAY / "advisory_evidence_packet.v1.json"),
+            "advisory_evidence_packet_status": "PASS",
+            "control_plane_final_status_observed": "NOT_READY",
+            "control_plane_current_domain_observed": "SESSION_IDENTITY",
+            "control_plane_canonical_blocker_observed": "NON_TRADING_DAY",
+            "control_plane_submit_allowed_observed": False,
+            "recommendations": [],
+            "warnings": [],
+            "requires_human_review": True,
+            "evidence_paths": [],
+            "producer_contract_v1": contract,
+        },
+    )
+
+    payload = gateway.build_advisory_evidence_packet_v1(day_utc=DAY, truth_root=prod, runtime_root=prod)
+
+    assert not any(row["artifact_type"] == "ai_advisory_review_v1" for row in payload["included_artifacts"])
+    assert any(
+        row["artifact_type"] == "ai_advisory_review_v1"
+        and row["reason"] == "ADVISORY_CONSUMER_OUTPUT_NOT_GATEWAY_INPUT"
+        for row in payload["excluded_artifacts"]
+    )
+
+
 def test_ai_advisory_review_schema_rejects_missing_metadata_and_authority_fields(tmp_path: Path) -> None:
     schema = _schema("ai_advisory_review.v1.schema.json")
     valid = {

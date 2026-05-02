@@ -61,6 +61,7 @@ ADVISORY_CANDIDATES: tuple[dict[str, str], ...] = (
         "legacy_relpath": "reports/ai_advisory_review_v1/{day}/ai_advisory_review.v1.json",
         "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/ai_advisory_review.v1.schema.json",
         "governed_producer": "ops/tools/run_ai_advisory_review_v1.py",
+        "gateway_role": "CONSUMER_OUTPUT",
     },
     {
         "artifact_type": "weekly_scorecard_view_v1",
@@ -301,6 +302,9 @@ def build_advisory_evidence_packet_v1(*, day_utc: str, truth_root: Path, runtime
         schema_text = candidate.get("schema_path", "")
         schema_path = (REPO_ROOT / schema_text).resolve() if schema_text else Path("/__missing_schema__")
         artifact_path = (truth_root / candidate["production_relpath"].format(day=day_utc)).resolve()
+        if candidate.get("gateway_role") == "CONSUMER_OUTPUT":
+            excluded.append(_exclude(candidate["artifact_type"], artifact_path, "ADVISORY_CONSUMER_OUTPUT_NOT_GATEWAY_INPUT"))
+            continue
         inc, exc = _validate_candidate(
             artifact_type=candidate["artifact_type"],
             path=artifact_path,
