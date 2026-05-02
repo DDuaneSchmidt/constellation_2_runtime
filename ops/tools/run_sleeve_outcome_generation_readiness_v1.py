@@ -44,6 +44,16 @@ def _read_inputs(root: Path, day: str) -> tuple[dict[str, Path], dict[str, dict[
     return paths, {name: read_json_v1(path) for name, path in paths.items()}
 
 
+def _capital_allocation_path(execution_root: Path, day: str) -> Path:
+    return (
+        execution_root
+        / "allocation_v1"
+        / "capital_authority_allocation_v1"
+        / day
+        / "capital_authority_allocation.v1.json"
+    )
+
+
 def _rows(payload: dict[str, Any], key: str) -> list[dict[str, Any]]:
     return [row for row in payload.get(key, []) if isinstance(row, dict)] if isinstance(payload.get(key), list) else []
 
@@ -110,6 +120,109 @@ def _authorization_details(auth: dict[str, Any], auth_path: Path, day_utc: str, 
         "rejection_reason": rejection_reason,
         "policy_rules": [str(rule) for rule in policy_rules if str(rule)],
         "required_recovery_command": f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_authorization_artifacts_day_v1.py --day_utc {day_utc} --truth_root {truth_root}",
+    }
+
+
+def _authorization_rows_by_intent(capital_allocation: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    decision_chain = capital_allocation.get("decision_chain") if isinstance(capital_allocation.get("decision_chain"), dict) else {}
+    rows = decision_chain.get("authorized_trade_intents") if isinstance(decision_chain.get("authorized_trade_intents"), list) else []
+    return {
+        str(row.get("intent_id") or ""): row
+        for row in rows
+        if isinstance(row, dict) and str(row.get("intent_id") or "")
+    }
+
+
+def _sleeve_controls_by_scope(capital_allocation: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    control_state = (
+        capital_allocation.get("governed_evaluation_control_state")
+        if isinstance(capital_allocation.get("governed_evaluation_control_state"), dict)
+        else {}
+    )
+    rows = control_state.get("sleeve_controls") if isinstance(control_state.get("sleeve_controls"), list) else []
+    return {
+        str(row.get("scope_id") or ""): row
+        for row in rows
+        if isinstance(row, dict) and str(row.get("scope_id") or "")
+    }
+
+
+def _strategy_scope_id(sleeve_id: str) -> str:
+    text = str(sleeve_id or "").strip()
+    return text[:-3] if text.endswith("_V1") else text
+
+
+def _read_intent_obj(intent_path: str) -> dict[str, Any]:
+    if not str(intent_path or "").strip():
+        return {}
+    try:
+        return read_json_v1(Path(str(intent_path)).expanduser().resolve())
+    except Exception:
+        return {}
+
+
+def _sizing_root_cause(*, row: dict[str, Any], sleeve_control: dict[str, Any]) -> str:
+    requested_quantity = int(row.get("requested_quantity") or 0)
+    risk_per_unit = int(row.get("risk_per_unit_cents") or 0)
+    required = int(row.get("required_risk_cents") or 0)
+    sleeve_headroom = int(row.get("available_sleeve_headroom_cents") or 0)
+    reason_codes = {str(code) for code in row.get("reason_codes", []) if str(code)} if isinstance(row.get("reason_codes"), list) else set()
+    control_state = str(sleeve_control.get("control_state") or "").strip()
+    artifact_status = str(sleeve_control.get("artifact_status") or "").strip()
+    if "AUTHZ_MISSING_DEFINED_RISK_EVIDENCE" in reason_codes:
+        return "DEFINED_RISK_EVIDENCE_MISSING"
+    if requested_quantity <= 0 or risk_per_unit <= 0:
+        return "QUANTITY_OR_DEFINED_RISK_UNPROVEN"
+    if "BUNDLE_B_HEADROOM_REJECTED" in reason_codes and required > sleeve_headroom:
+        if control_state == "fail_safe_block_new_risk" or artifact_status == "MISSING":
+            return "REAL_HEADROOM_POLICY_REJECT_WITH_GOVERNANCE_FAILSAFE"
+        return "REAL_HEADROOM_POLICY_REJECT"
+    return "NO_SIZING_DEFECT_DETECTED"
+
+
+def _sizing_audit(
+    *,
+    sleeve_id: str,
+    intent_path: str,
+    risk_row: dict[str, Any],
+    authorization_row: dict[str, Any],
+    sleeve_control: dict[str, Any],
+    capital_allocation_path: Path,
+) -> dict[str, Any]:
+    intent_obj = _read_intent_obj(intent_path)
+    constraints = intent_obj.get("constraints") if isinstance(intent_obj.get("constraints"), dict) else {}
+    row = authorization_row if authorization_row else {}
+    return {
+        "source": "capital_authority_allocation_v1",
+        "source_artifact": str(capital_allocation_path),
+        "requested_target_pct": str(
+            row.get("target_notional_pct")
+            or intent_obj.get("target_notional_pct")
+            or ""
+        ),
+        "nav_basis": {
+            "account_net_liquidation_cents": risk_row.get("account_net_liquidation_cents"),
+            "allowed_risk_cents": risk_row.get("allowed_risk_cents"),
+        },
+        "risk_per_unit_cents": row.get("risk_per_unit_cents"),
+        "stop_distance_bps": constraints.get("stop_loss_bps"),
+        "requested_quantity": row.get("requested_quantity"),
+        "requested_quantity_basis": row.get("requested_quantity_basis"),
+        "authorized_quantity": row.get("authorized_quantity"),
+        "final_quantity": risk_row.get("final_quantity"),
+        "required_risk_cents": row.get("required_risk_cents"),
+        "sleeve_headroom_cents": row.get("available_sleeve_headroom_cents"),
+        "portfolio_headroom_cents": row.get("available_portfolio_headroom_cents"),
+        "policy_reason_codes": [str(code) for code in row.get("reason_codes", [])] if isinstance(row.get("reason_codes"), list) else [],
+        "sleeve_governance_control": {
+            "scope_id": str(sleeve_control.get("scope_id") or _strategy_scope_id(sleeve_id)),
+            "artifact_status": str(sleeve_control.get("artifact_status") or ""),
+            "control_state": str(sleeve_control.get("control_state") or ""),
+            "diagnostic": str(sleeve_control.get("diagnostic") or ""),
+            "effective_headroom_cents": sleeve_control.get("effective_headroom_cents"),
+            "reason_codes": [str(code) for code in sleeve_control.get("reason_codes", [])] if isinstance(sleeve_control.get("reason_codes"), list) else [],
+        },
+        "root_cause": _sizing_root_cause(row=row, sleeve_control=sleeve_control),
     }
 
 
@@ -199,6 +312,10 @@ def build_sleeve_outcome_generation_readiness_v1(*, day_utc: str, truth_root: Pa
     runtime = Path(runtime_root or truth_root).resolve()
     execution = Path(execution_root or truth_root).resolve()
     paths, payloads = _read_inputs(root, day_utc)
+    capital_allocation_path = _capital_allocation_path(execution, day_utc)
+    capital_allocation = read_json_v1(capital_allocation_path)
+    authorization_rows = _authorization_rows_by_intent(capital_allocation)
+    sleeve_controls = _sleeve_controls_by_scope(capital_allocation)
     diag = _by_intent(_rows(payloads["sleeve_intent_quality_diagnostics"], "intent_diagnostics"))
     scoring_rows = [
         row for row in _rows(payloads["portfolio_scoring"], "rankings")
@@ -218,6 +335,8 @@ def build_sleeve_outcome_generation_readiness_v1(*, day_utc: str, truth_root: Pa
         intent_hash = str(rrow.get("intent_hash") or Path(intent_path).name.split(".", 1)[0]).strip()
         auth_path = _authorization_path(execution, day_utc, intent_hash)
         auth = read_json_v1(auth_path) if auth_path.exists() else {}
+        authorization_row = authorization_rows.get(intent_id, {})
+        sleeve_control = sleeve_controls.get(_strategy_scope_id(sleeve_id), {})
         submit_traces = _find_submit_trace(root, day_utc, intent_id)
         execution_package_path = str(rrow.get("execution_package_path") or "")
         symbol = str(score.get("symbol") or drow.get("symbol") or "")
@@ -263,6 +382,14 @@ def build_sleeve_outcome_generation_readiness_v1(*, day_utc: str, truth_root: Pa
                     "account_net_liquidation_cents": rrow.get("account_net_liquidation_cents"),
                     "allowed_risk_cents": rrow.get("allowed_risk_cents"),
                 },
+                "sizing_audit": _sizing_audit(
+                    sleeve_id=sleeve_id,
+                    intent_path=intent_path,
+                    risk_row=rrow,
+                    authorization_row=authorization_row,
+                    sleeve_control=sleeve_control,
+                    capital_allocation_path=capital_allocation_path,
+                ),
                 "authorization_details": _authorization_details(auth, auth_path, day_utc, root),
                 "execution_package_readiness": _execution_package_readiness(blockers=unique_blockers, execution_package_path=execution_package_path, day_utc=day_utc),
                 "submit_trace_readiness": _submit_trace_readiness(blockers=unique_blockers, submit_traces=submit_traces, day_utc=day_utc, truth_root=root),
@@ -274,7 +401,7 @@ def build_sleeve_outcome_generation_readiness_v1(*, day_utc: str, truth_root: Pa
                 "next_governed_producer": producer,
                 "recovery_command": command.replace("<DAY>", day_utc).replace("<TRUTH_ROOT>", str(root)),
                 "outcome_generation_blockers": unique_blockers,
-                "evidence_paths": sorted(set([intent_path, str(auth_path), *submit_traces, *[str(path) for path in paths.values() if path.exists()]])),
+                "evidence_paths": sorted(set([intent_path, str(auth_path), str(capital_allocation_path), *submit_traces, *[str(path) for path in paths.values() if path.exists()]])),
             }
         )
     return {
@@ -310,14 +437,17 @@ def _validate(payload: dict[str, Any]) -> None:
         raise ValueError("SLEEVE_OUTCOME_GENERATION_READINESS_SCHEMA_INVALID:" + ";".join(str(err.message) for err in errors[:3]))
 
 
-def write_report_v1(*, truth_root: Path, day_utc: str, payload: dict[str, Any], command: str) -> Path:
+def write_report_v1(*, truth_root: Path, day_utc: str, payload: dict[str, Any], command: str, execution_root: Path | None = None) -> Path:
     path = report_path(truth_root=truth_root, day_utc=day_utc)
     input_paths, _ = _read_inputs(truth_root, day_utc)
+    contract_inputs = list(input_paths.values())
+    if execution_root is not None:
+        contract_inputs.append(_capital_allocation_path(execution_root, day_utc))
     attach_producer_contract_v1(
         payload,
         producer_name=PRODUCER,
         producer_command=command,
-        input_artifacts=input_paths.values(),
+        input_artifacts=contract_inputs,
         output_artifacts=[path],
         schema_versions={"sleeve_outcome_generation_readiness_v1": "sleeve_outcome_generation_readiness.v1"},
     )
@@ -339,7 +469,7 @@ def main(argv: list[str] | None = None) -> int:
     execution_root = Path(args.execution_root).expanduser().resolve() if str(args.execution_root or "").strip() else truth_root
     payload = build_sleeve_outcome_generation_readiness_v1(day_utc=day, truth_root=truth_root, runtime_root=runtime_root, execution_root=execution_root)
     command = f"PYTHONPATH=\"$PWD\" python3 {PRODUCER} --day_utc {day} --truth_root {truth_root} --runtime_root {runtime_root} --execution_root {execution_root}"
-    path = write_report_v1(truth_root=truth_root, day_utc=day, payload=payload, command=command)
+    path = write_report_v1(truth_root=truth_root, day_utc=day, payload=payload, command=command, execution_root=execution_root)
     print(json.dumps({"status": "PASS", "path": str(path), "eligible_intent_count": payload["summary"]["eligible_intent_count"], "execution_ready_count": payload["summary"]["execution_ready_count"]}, sort_keys=True))
     return 0
 

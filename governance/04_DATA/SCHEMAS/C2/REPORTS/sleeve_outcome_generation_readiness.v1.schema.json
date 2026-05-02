@@ -55,6 +55,7 @@
           "signal_trigger",
           "market_inputs",
           "risk_sizing_result",
+          "sizing_audit",
           "authorization_details",
           "execution_package_readiness",
           "submit_trace_readiness",
@@ -82,6 +83,73 @@
             "type": "object",
             "additionalProperties": true,
             "required": ["sizing_state", "execution_package_path", "final_quantity", "reason_code"]
+          },
+          "sizing_audit": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "source_artifact",
+              "requested_target_pct",
+              "nav_basis",
+              "risk_per_unit_cents",
+              "stop_distance_bps",
+              "requested_quantity",
+              "requested_quantity_basis",
+              "authorized_quantity",
+              "final_quantity",
+              "required_risk_cents",
+              "sleeve_headroom_cents",
+              "portfolio_headroom_cents",
+              "policy_reason_codes",
+              "sleeve_governance_control",
+              "root_cause"
+            ],
+            "properties": {
+              "source": { "const": "capital_authority_allocation_v1" },
+              "source_artifact": { "type": "string" },
+              "requested_target_pct": { "type": "string" },
+              "nav_basis": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["account_net_liquidation_cents", "allowed_risk_cents"],
+                "properties": {
+                  "account_net_liquidation_cents": { "type": ["integer", "null"] },
+                  "allowed_risk_cents": { "type": ["integer", "null"] }
+                }
+              },
+              "risk_per_unit_cents": { "type": ["integer", "null"] },
+              "stop_distance_bps": { "type": ["integer", "null"] },
+              "requested_quantity": { "type": ["integer", "null"] },
+              "requested_quantity_basis": { "type": ["string", "null"] },
+              "authorized_quantity": { "type": ["integer", "null"] },
+              "final_quantity": { "type": ["integer", "null"] },
+              "required_risk_cents": { "type": ["integer", "null"] },
+              "sleeve_headroom_cents": { "type": ["integer", "null"] },
+              "portfolio_headroom_cents": { "type": ["integer", "null"] },
+              "policy_reason_codes": { "type": "array", "items": { "type": "string" } },
+              "sleeve_governance_control": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "scope_id",
+                  "artifact_status",
+                  "control_state",
+                  "diagnostic",
+                  "effective_headroom_cents",
+                  "reason_codes"
+                ],
+                "properties": {
+                  "scope_id": { "type": "string" },
+                  "artifact_status": { "type": "string" },
+                  "control_state": { "type": "string" },
+                  "diagnostic": { "type": "string" },
+                  "effective_headroom_cents": { "type": ["integer", "null"] },
+                  "reason_codes": { "type": "array", "items": { "type": "string" } }
+                }
+              },
+              "root_cause": { "type": "string", "minLength": 1 }
+            }
           },
           "authorization_details": {
             "type": "object",

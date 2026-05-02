@@ -52,6 +52,63 @@ def _seed(root: Path, execution_root: Path) -> None:
     _write(_report(root, "submit_boundary_status_v1", "submit_boundary_status.v1.json"), {"submit_allowed": False, "canonical_blocker": "AEGIS_NOT_READY"})
     _write(_report(root, "trade_outcome_v1", "trade_outcome.v1.json"), {"intent_id": "vol", "outcome_status": "UNKNOWN"})
     _write(_report(root, "sleeve_intent_trade_attribution_v1", "sleeve_intent_trade_attribution.v1.json"), {"opportunities": []})
+    _write(
+        execution_root / "allocation_v1" / "capital_authority_allocation_v1" / DAY / "capital_authority_allocation.v1.json",
+        {
+            "decision_chain": {
+                "authorized_trade_intents": [
+                    {
+                        "intent_id": "trend",
+                        "requested_quantity": 1,
+                        "requested_quantity_basis": "INTENT_RISK_BUDGET",
+                        "authorized_quantity": 0,
+                        "target_notional_pct": "0.01",
+                        "risk_per_unit_cents": 10000,
+                        "required_risk_cents": 10000,
+                        "available_sleeve_headroom_cents": 5000,
+                        "available_portfolio_headroom_cents": 20000,
+                        "reason_codes": ["BUNDLE_B_HEADROOM_REJECTED"],
+                    },
+                    {
+                        "intent_id": "vol",
+                        "requested_quantity": 0,
+                        "requested_quantity_basis": "UNPROVEN_INTENT_RISK_BUDGET",
+                        "authorized_quantity": 0,
+                        "target_notional_pct": "0.01",
+                        "risk_per_unit_cents": 0,
+                        "required_risk_cents": 0,
+                        "available_sleeve_headroom_cents": 5000,
+                        "available_portfolio_headroom_cents": 20000,
+                        "reason_codes": [
+                            "AUTHZ_MISSING_DEFINED_RISK_EVIDENCE",
+                            "BUNDLE_B_REQUESTED_QUANTITY_UNPROVEN",
+                            "BUNDLE_B_REQUESTED_QUANTITY_ZERO",
+                        ],
+                    },
+                ]
+            },
+            "governed_evaluation_control_state": {
+                "sleeve_controls": [
+                    {
+                        "scope_id": "C2_TREND_EQ_PRIMARY",
+                        "artifact_status": "MISSING",
+                        "control_state": "fail_safe_block_new_risk",
+                        "diagnostic": "MISSING_ACTION_ARTIFACT:/tmp/sleeve_governance_action_state.v1.json",
+                        "effective_headroom_cents": 5000,
+                        "reason_codes": ["SLEEVE_ACTION_ARTIFACT_FAILSAFE_BLOCK"],
+                    },
+                    {
+                        "scope_id": "C2_VOL_INCOME_DEFINED_RISK",
+                        "artifact_status": "MISSING",
+                        "control_state": "fail_safe_block_new_risk",
+                        "diagnostic": "MISSING_ACTION_ARTIFACT:/tmp/sleeve_governance_action_state.v1.json",
+                        "effective_headroom_cents": 5000,
+                        "reason_codes": ["SLEEVE_ACTION_ARTIFACT_FAILSAFE_BLOCK"],
+                    },
+                ]
+            },
+        },
+    )
     for intent_hash in ["a" * 64, "b" * 64]:
         _write(execution_root / "engine_activity_v1" / "authorization_v1" / DAY / f"{intent_hash}.authorization.v1.json", {"status": "REJECTED", "authorization": {"decision": "REJECTED", "authorized_quantity": 0}, "reason_codes": ["BUNDLE_B_HEADROOM_REJECTED"]})
 
@@ -82,6 +139,22 @@ def test_missing_execution_submit_and_outcome_evidence_blocks_readiness(tmp_path
     assert "EXECUTION_PACKAGE_DOWNSTREAM_OF_AUTHORIZATION" in rows["trend"]["root_cause_classification"]
 
 
+def test_trend_sizing_audit_exposes_formula_and_headroom_reject(tmp_path: Path) -> None:
+    _seed(tmp_path, tmp_path / "exec")
+
+    rows = {row["intent_id"]: row for row in report.build_sleeve_outcome_generation_readiness_v1(day_utc=DAY, truth_root=tmp_path, execution_root=tmp_path / "exec")["sleeve_results"]}
+    audit = rows["trend"]["sizing_audit"]
+
+    assert audit["requested_target_pct"] == "0.01"
+    assert audit["nav_basis"]["account_net_liquidation_cents"] == 1000000
+    assert audit["risk_per_unit_cents"] == 10000
+    assert audit["requested_quantity"] == 1
+    assert audit["required_risk_cents"] == 10000
+    assert audit["sleeve_headroom_cents"] == 5000
+    assert audit["root_cause"] == "REAL_HEADROOM_POLICY_REJECT_WITH_GOVERNANCE_FAILSAFE"
+    assert audit["sleeve_governance_control"]["control_state"] == "fail_safe_block_new_risk"
+
+
 def test_options_market_data_blocker_is_kept_on_vol_income(tmp_path: Path) -> None:
     _seed(tmp_path, tmp_path / "exec")
 
@@ -93,6 +166,7 @@ def test_options_market_data_blocker_is_kept_on_vol_income(tmp_path: Path) -> No
     assert rows["trend"]["market_inputs"]["missing_inputs"] == []
     assert rows["vol"]["next_governed_producer"] == "ops/tools/run_options_chain_snapshot_required_day_v1.py"
     assert "MISSING_OPTIONS_CHAIN_INPUT" in rows["vol"]["root_cause_classification"]
+    assert rows["vol"]["sizing_audit"]["root_cause"] == "DEFINED_RISK_EVIDENCE_MISSING"
 
 
 def test_report_is_diagnostic_only_and_cannot_change_allocation_or_submit(tmp_path: Path) -> None:
