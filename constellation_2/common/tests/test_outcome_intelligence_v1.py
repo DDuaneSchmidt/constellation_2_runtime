@@ -221,9 +221,9 @@ def test_ai_advisory_consumes_outcome_intelligence_read_only(tmp_path: Path) -> 
     payload = build_ai_advisory_review_v1(day_utc=DAY, truth_root=truth)
 
     assert _sha(scoring_path) == before
-    assert payload["trade_outcome_summary"]["outcome_status"] == "CLOSED"
-    assert payload["decision_consistency_summary"]["decision_flip_detected"] is True
-    assert payload["missed_opportunity_summary"]["alternative_count"] == 1
+    assert payload["status"] == "NO_GOVERNED_ADVISORY_INPUT"
+    assert payload["advisory_evidence_packet_status"] == "MISSING"
+    assert payload["recommendations"] == []
     assert payload["requires_human_review"] is True
     assert payload["prohibited_actions_attempted"] is False
 

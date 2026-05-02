@@ -196,7 +196,9 @@ def test_ai_advisory_is_read_only_and_requires_human_review(tmp_path: Path) -> N
     assert _sha(scoring_path) == before
     assert payload["requires_human_review"] is True
     assert payload["prohibited_actions_attempted"] is False
-    assert payload["recommendations"]
+    assert payload["status"] == "NO_GOVERNED_ADVISORY_INPUT"
+    assert payload["recommendations"] == []
+    assert payload["authority"] == "ADVISORY_ONLY"
 
 
 def test_strategy_governance_blocks_premature_changes(tmp_path: Path) -> None:

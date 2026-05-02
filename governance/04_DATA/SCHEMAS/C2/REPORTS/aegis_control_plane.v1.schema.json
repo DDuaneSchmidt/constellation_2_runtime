@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/aegis_control_plane.v1.schema.json",
+  "title": "Aegis Control Plane v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "day_utc",
+    "final_status",
+    "current_domain",
+    "current_phase",
+    "canonical_blocker",
+    "submit_allowed",
+    "producer_contract_v1"
+  ],
+  "properties": {
+    "day_utc": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "final_status": { "type": "string" },
+    "current_domain": { "type": "string" },
+    "current_phase": { "type": "string" },
+    "canonical_blocker": { "type": "string" },
+    "submit_allowed": { "type": "boolean" },
+    "producer_contract_v1": {
+      "type": "object",
+      "required": ["code_version_git_commit", "source_dirty_status", "generated_at_utc"],
+      "properties": {
+        "code_version_git_commit": { "type": "string" },
+        "source_dirty_status": { "type": "string" },
+        "generated_at_utc": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  }
+}
