@@ -54,8 +54,98 @@ def _source_pass(monkeypatch) -> None:  # noqa: ANN001
 
 def _session_pass(ctx: bod.BodContext) -> None:
     _write(
+        ctx.truth_root / "active_session_v1" / "current.json",
+        {
+            "active_day": ctx.day_utc,
+            "target_day": ctx.day_utc,
+            "promotion_state": "PROMOTED",
+            "rollover_status": "ROLLED_OVER",
+            "target_day_admission_status": "PASS",
+        },
+    )
+    _write(ctx.truth_root / "target_day_build_v1" / f"{ctx.day_utc}.json", {"target_day": ctx.day_utc, "build_status": "PASS"})
+    _write(ctx.truth_root / "target_day_admission_v1" / f"{ctx.day_utc}.json", {"target_day": ctx.day_utc, "admission_status": "PASS"})
+    _write(
+        ctx.truth_root / "reports" / "session_promotion_decision_v1" / ctx.day_utc / "session_promotion_decision.v1.json",
+        {"target_day": ctx.day_utc, "promotion_state": "PROMOTED", "target_day_admission_status": "PASS"},
+    )
+    _write(
         ctx.truth_root / "reports" / "paper_session_authority_v1" / ctx.day_utc / "paper_session_authority.v1.json",
         {"day_utc": ctx.day_utc, "authority_status": "GRANTED"},
+    )
+
+
+def _session_blocked_artifacts(ctx: bod.BodContext) -> None:
+    _write(
+        ctx.truth_root / "active_session_v1" / "current.json",
+        {
+            "active_day": "2026-05-02",
+            "target_day": ctx.day_utc,
+            "promotion_state": "BLOCKED",
+            "rollover_status": "ROLLOVER_WITHHELD",
+            "rollover_reason_code": "HIDDEN_DEPENDENCY_DETECTED",
+            "blocking_codes": ["HIDDEN_DEPENDENCY_DETECTED", "PARTIAL_BUILD", "REQUIRED_GATE_FAIL"],
+        },
+    )
+    _write(
+        ctx.truth_root / "target_day_admission_v1" / f"{ctx.day_utc}.json",
+        {
+            "target_day": ctx.day_utc,
+            "admission_status": "BLOCKED",
+            "blocking_reason_codes": ["HIDDEN_DEPENDENCY_DETECTED", "PARTIAL_BUILD", "REQUIRED_GATE_FAIL"],
+            "hidden_dependency_check_result": {
+                "status": "FAIL",
+                "undeclared_dependency_artifacts": [
+                    "runtime_resilience_authority_v1",
+                    "safety_state_authority_v1",
+                    "trading_day_readiness_authority_v1",
+                ],
+                "failing_producers": ["ops/tools/run_startup_materialization_input_convergence_v1.py"],
+            },
+            "blocker_chain": [
+                {
+                    "artifact_id": "startup_materialization_input_convergence_v1",
+                    "artifact_path": str(
+                        ctx.truth_root
+                        / "reports"
+                        / "startup_materialization_input_convergence_v1"
+                        / ctx.day_utc
+                        / "startup_materialization_input_convergence.v1.json"
+                    ),
+                    "blocker_code": "REQUIRED_GATE_FAIL",
+                }
+            ],
+        },
+    )
+    _write(
+        ctx.truth_root / "target_day_build_v1" / f"{ctx.day_utc}.json",
+        {
+            "target_day": ctx.day_utc,
+            "build_status": "BLOCKED",
+            "artifact_results": [
+                {
+                    "artifact_id": "startup_materialization_input_convergence_v1",
+                    "result_status": "FAIL",
+                    "producer": {"module": "ops/tools/run_startup_materialization_input_convergence_v1.py"},
+                }
+            ],
+        },
+    )
+    _write(
+        ctx.truth_root / "reports" / "session_promotion_decision_v1" / ctx.day_utc / "session_promotion_decision.v1.json",
+        {
+            "target_day": ctx.day_utc,
+            "promotion_state": "BLOCKED",
+            "blocked_reason_codes": ["HIDDEN_DEPENDENCY_DETECTED", "PARTIAL_BUILD", "REQUIRED_GATE_FAIL"],
+        },
+    )
+    _write(
+        ctx.truth_root / "reports" / "pre_open_bundle_v1" / ctx.day_utc / "pre_open_bundle.v1.json",
+        {
+            "target_day": ctx.day_utc,
+            "materialization_state": "INCOMPLETE",
+            "blocking_reason_codes": ["REQUIRED_GATE_FAIL", "TARGET_DAY_DATE_MISMATCH"],
+        },
     )
     _write(
         ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json",
@@ -101,6 +191,57 @@ def test_session_failure_defers_broker_bod_feed_and_submit(monkeypatch, tmp_path
     assert payload["current_phase"] == "SESSION_AUTHORITY"
     assert payload["canonical_blocker"] == "TARGET_DAY_DATE_MISMATCH"
     assert {"BROKER_HEALTH", "BOD_INPUTS", "FEED_ATTESTATION", "SUBMIT_BOUNDARY"} <= set(payload["deferred_phases"])
+
+
+def test_session_hidden_dependency_is_decomposed_and_defers_downstream(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _session_blocked_artifacts(ctx)
+    monkeypatch.setattr(cp, "_evaluate_broker_health", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("downstream phase evaluated")))
+
+    payload = cp.build_control_plane_v1(ctx)
+
+    assert payload["current_phase"] == "SESSION_AUTHORITY"
+    assert payload["canonical_blocker"] == "HIDDEN_DEPENDENCY_DETECTED"
+    assert payload["evidence_paths"] == [str(ctx.truth_root / "target_day_admission_v1" / f"{ctx.day_utc}.json")]
+    assert payload["current_session_sub_blocker"]["owning_artifact"] == "target_day_admission_v1"
+    assert "runtime_resilience_authority_v1" in payload["current_session_sub_blocker"]["missing_or_failed_dependency"]
+    assert "run_session_authority_v1.py" in payload["recovery_commands"][0]
+    assert {"BROKER_HEALTH", "FEED_ATTESTATION", "KILL_SWITCH", "SUBMIT_BOUNDARY"} <= set(payload["deferred_phases"])
+    sub_codes = {row["sub_blocker_code"] for row in payload["session_sub_blockers"]}
+    assert {"HIDDEN_DEPENDENCY_DETECTED", "PARTIAL_BUILD", "REQUIRED_GATE_FAIL"} <= sub_codes
+
+
+def test_session_partial_build_can_be_primary_when_hidden_dependency_absent(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _write(ctx.truth_root / "active_session_v1" / "current.json", {"target_day": ctx.day_utc, "promotion_state": "BLOCKED", "blocking_codes": ["PARTIAL_BUILD"]})
+    _write(ctx.truth_root / "target_day_admission_v1" / f"{ctx.day_utc}.json", {"target_day": ctx.day_utc, "blocking_reason_codes": ["PARTIAL_BUILD"]})
+    _write(ctx.truth_root / "target_day_build_v1" / f"{ctx.day_utc}.json", {"target_day": ctx.day_utc, "build_status": "BLOCKED", "artifact_results": [{"artifact_id": "capability_state_v1", "result_status": "FAIL"}]})
+
+    payload = cp.build_control_plane_v1(ctx)
+
+    assert payload["canonical_blocker"] == "PARTIAL_BUILD"
+    assert payload["current_session_sub_blocker"]["missing_or_failed_dependency"] == "capability_state_v1"
+    assert payload["current_session_sub_blocker"]["evidence_path"].endswith("/target_day_build_v1/2026-05-04.json")
+
+
+def test_session_required_gate_fail_can_be_primary(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    gate_path = ctx.truth_root / "reports" / "startup_materialization_input_convergence_v1" / ctx.day_utc / "startup_materialization_input_convergence.v1.json"
+    _write(ctx.truth_root / "active_session_v1" / "current.json", {"target_day": ctx.day_utc, "promotion_state": "BLOCKED", "blocking_codes": ["REQUIRED_GATE_FAIL"]})
+    _write(
+        ctx.truth_root / "target_day_admission_v1" / f"{ctx.day_utc}.json",
+        {"target_day": ctx.day_utc, "blocking_reason_codes": ["REQUIRED_GATE_FAIL"], "blocker_chain": [{"artifact_id": "startup_materialization_input_convergence_v1", "artifact_path": str(gate_path), "blocker_code": "REQUIRED_GATE_FAIL"}]},
+    )
+    _write(ctx.truth_root / "target_day_build_v1" / f"{ctx.day_utc}.json", {"target_day": ctx.day_utc, "build_status": "PASS"})
+
+    payload = cp.build_control_plane_v1(ctx)
+
+    assert payload["canonical_blocker"] == "REQUIRED_GATE_FAIL"
+    assert payload["current_session_sub_blocker"]["missing_or_failed_dependency"] == "startup_materialization_input_convergence_v1"
+    assert payload["current_session_sub_blocker"]["evidence_path"] == str(gate_path)
 
 
 def test_broker_health_failure_defers_downstream(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
@@ -163,6 +304,25 @@ def test_operator_projection_uses_one_control_plane_blocker(monkeypatch, tmp_pat
     assert payload["operator_next_action"] == control["recovery_action"]
     assert payload["evidence_paths"]
     assert "SUBMIT_BOUNDARY" in payload["deferred_downstream_phases"]
+
+
+def test_operator_projection_shows_exact_session_recovery_without_downstream_actions(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _session_blocked_artifacts(ctx)
+    monkeypatch.setattr(cp.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+    cp.run_control_plane_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
+    monkeypatch.setattr(projection.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+
+    _out_path, payload = projection.run_operator_projection_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
+
+    assert payload["canonical_blocker"] == "HIDDEN_DEPENDENCY_DETECTED"
+    assert payload["operator_next_action"] == "Resolve undeclared session dependencies, then rerun governed session alignment."
+    assert payload["evidence_paths"] == [str(ctx.truth_root / "target_day_admission_v1" / f"{ctx.day_utc}.json")]
+    assert payload["next_valid_actions"] == [
+        f'PYTHONPATH="$PWD" python3 ops/tools/run_session_authority_v1.py --target_day {ctx.day_utc} --truth_root {ctx.truth_root} --environment PAPER --ib_account DU123456 --phase all'
+    ]
+    assert not [action for action in payload["next_valid_actions"] if "broker" in action.lower() or "kill" in action.lower() or "submit" in action.lower()]
 
 
 def test_requirement_graph_defers_downstream_missing_artifacts_when_broker_is_current(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001

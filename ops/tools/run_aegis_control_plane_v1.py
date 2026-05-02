@@ -145,6 +145,154 @@ def _phase_row(
     }
 
 
+def _session_authority_paths(ctx: Any) -> dict[str, Path]:
+    return {
+        "active_session": (ctx.truth_root / "active_session_v1" / "current.json").resolve(),
+        "target_day_build": (ctx.truth_root / "target_day_build_v1" / f"{ctx.day_utc}.json").resolve(),
+        "target_day_admission": (ctx.truth_root / "target_day_admission_v1" / f"{ctx.day_utc}.json").resolve(),
+        "session_promotion_decision": (
+            ctx.truth_root
+            / "reports"
+            / "session_promotion_decision_v1"
+            / ctx.day_utc
+            / "session_promotion_decision.v1.json"
+        ).resolve(),
+        "pre_open_bundle": (
+            ctx.truth_root
+            / "reports"
+            / "pre_open_bundle_v1"
+            / ctx.day_utc
+            / "pre_open_bundle.v1.json"
+        ).resolve(),
+    }
+
+
+def _session_command(ctx: Any, *, phase: str = "all") -> str:
+    return (
+        f'PYTHONPATH="$PWD" python3 ops/tools/run_session_authority_v1.py '
+        f"--target_day {ctx.day_utc} --truth_root {ctx.truth_root} "
+        f"--environment {ctx.environment} --ib_account {ctx.ib_account} --phase {phase}"
+    )
+
+
+def _startup_convergence_command(ctx: Any) -> str:
+    return (
+        f'PYTHONPATH="$PWD" python3 ops/tools/run_startup_materialization_input_convergence_v1.py '
+        f"--day_utc {ctx.day_utc} --truth_root {ctx.truth_root} --ib_account {ctx.ib_account}"
+    )
+
+
+def _compact_list(values: list[Any], *, limit: int = 6) -> str:
+    items = [str(item).strip() for item in values if str(item or "").strip()]
+    if not items:
+        return ""
+    suffix = "" if len(items) <= limit else f",...(+{len(items) - limit})"
+    return ",".join(items[:limit]) + suffix
+
+
+def _failed_build_dependency(build: dict[str, Any]) -> tuple[str, str]:
+    artifacts = build.get("artifact_results") if isinstance(build.get("artifact_results"), list) else []
+    for row in artifacts:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("result_status") or "").strip().upper() in {"FAIL", "BLOCKED", "MISSING", "STALE"}:
+            dep = str(row.get("artifact_id") or row.get("artifact_name") or "target_day_build_v1").strip()
+            producer = row.get("producer") if isinstance(row.get("producer"), dict) else {}
+            command = str(producer.get("module") or "").strip()
+            return dep, command
+    required = build.get("required_artifacts") if isinstance(build.get("required_artifacts"), list) else []
+    for row in required:
+        if isinstance(row, dict):
+            dep = str(row.get("artifact_id") or row.get("artifact_name") or row.get("canonical_path") or "").strip()
+            if dep:
+                return dep, ""
+    return "target_day_build_v1", ""
+
+
+def _required_gate_dependency(admission: dict[str, Any], pre_open: dict[str, Any]) -> tuple[str, str]:
+    chain = admission.get("blocker_chain") if isinstance(admission.get("blocker_chain"), list) else []
+    for row in chain:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("blocker_code") or "").strip() == "REQUIRED_GATE_FAIL":
+            dep = str(row.get("artifact_id") or row.get("artifact_name") or row.get("artifact_path") or "").strip()
+            return dep or "session_required_gate", str(row.get("artifact_path") or "").strip()
+    codes = pre_open.get("blocking_reason_codes") if isinstance(pre_open.get("blocking_reason_codes"), list) else []
+    if "REQUIRED_GATE_FAIL" in [str(item) for item in codes]:
+        return "pre_open_bundle_v1", ""
+    return "session_required_gate", ""
+
+
+def _session_sub_blockers(ctx: Any) -> list[dict[str, Any]]:
+    paths = _session_authority_paths(ctx)
+    active = _read_json(paths["active_session"])
+    build = _read_json(paths["target_day_build"])
+    admission = _read_json(paths["target_day_admission"])
+    promotion = _read_json(paths["session_promotion_decision"])
+    pre_open = _read_json(paths["pre_open_bundle"])
+    codes: list[str] = []
+    for payload in (active, admission, promotion, pre_open):
+        codes.extend(_collect_codes(payload))
+    codes = list(dict.fromkeys(codes))
+    details: list[dict[str, Any]] = []
+    hidden = admission.get("hidden_dependency_check_result") if isinstance(admission.get("hidden_dependency_check_result"), dict) else {}
+    if "HIDDEN_DEPENDENCY_DETECTED" in codes or str(hidden.get("status") or "").strip().upper() == "FAIL":
+        undeclared = hidden.get("undeclared_dependency_artifacts") if isinstance(hidden.get("undeclared_dependency_artifacts"), list) else []
+        failing = hidden.get("failing_producers") if isinstance(hidden.get("failing_producers"), list) else []
+        dependency = (
+            f"undeclared_dependency_artifacts={_compact_list(undeclared)}"
+            if undeclared
+            else f"failing_producers={_compact_list(failing)}"
+            if failing
+            else str(hidden.get("summary") or "hidden dependency check failed")
+        )
+        details.append(
+            {
+                "sub_blocker_code": "HIDDEN_DEPENDENCY_DETECTED",
+                "owning_artifact": "target_day_admission_v1",
+                "missing_or_failed_dependency": dependency,
+                "producer_command": "constellation_2.common.session_authority_v1 hidden dependency check",
+                "recovery_action": "Resolve undeclared session dependencies, then rerun governed session alignment.",
+                "recovery_command": _session_command(ctx, phase="all"),
+                "evidence_path": str(paths["target_day_admission"]),
+            }
+        )
+    if "PARTIAL_BUILD" in codes or str(build.get("build_status") or "").strip().upper() == "BLOCKED":
+        dependency, command = _failed_build_dependency(build)
+        details.append(
+            {
+                "sub_blocker_code": "PARTIAL_BUILD",
+                "owning_artifact": "target_day_build_v1",
+                "missing_or_failed_dependency": dependency,
+                "producer_command": command or "constellation_2.common.session_authority_v1 target day build",
+                "recovery_action": "Complete the governed target-day build, then rerun session authority.",
+                "recovery_command": _session_command(ctx, phase="build"),
+                "evidence_path": str(paths["target_day_build"]),
+            }
+        )
+    if "REQUIRED_GATE_FAIL" in codes:
+        dependency, artifact_path = _required_gate_dependency(admission, pre_open)
+        details.append(
+            {
+                "sub_blocker_code": "REQUIRED_GATE_FAIL",
+                "owning_artifact": "target_day_admission_v1",
+                "missing_or_failed_dependency": dependency,
+                "producer_command": _startup_convergence_command(ctx) if dependency == "startup_materialization_input_convergence_v1" else _session_command(ctx, phase="build"),
+                "recovery_action": "Regenerate the failed governed session prerequisite, then rerun session authority.",
+                "recovery_command": _startup_convergence_command(ctx) if dependency == "startup_materialization_input_convergence_v1" else _session_command(ctx, phase="all"),
+                "evidence_path": artifact_path or str(paths["target_day_admission"]),
+            }
+        )
+    return details
+
+
+def _primary_session_sub_blocker(sub_blockers: list[dict[str, Any]]) -> dict[str, Any]:
+    priority = {"HIDDEN_DEPENDENCY_DETECTED": 0, "PARTIAL_BUILD": 1, "REQUIRED_GATE_FAIL": 2}
+    if not sub_blockers:
+        return {}
+    return sorted(sub_blockers, key=lambda row: priority.get(str(row.get("sub_blocker_code") or ""), 99))[0]
+
+
 def _recovery_action(phase_id: str, blockers: list[str], recovery_commands: list[str]) -> str:
     blocker = blockers[0] if blockers else ""
     if blocker == "TARGET_DAY_DATE_MISMATCH":
@@ -225,13 +373,28 @@ def _row_from_day_run_phase(phase: dict[str, Any], ctx: Any, row: dict[str, Any]
 
 
 def _evaluate_session_authority(phase: dict[str, Any], ctx: Any, phase_results: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
-    paths = _phase_paths(phase, ctx)
-    pre_open = (ctx.truth_root / "reports" / "pre_open_bundle_v1" / ctx.day_utc / "pre_open_bundle.v1.json").resolve()
-    all_paths = list(dict.fromkeys([*paths, pre_open]))
+    session_paths = _session_authority_paths(ctx)
+    all_paths = list(session_paths.values())
     payloads = _payloads(all_paths)
     codes: list[str] = []
     for _path, payload in payloads:
         codes.extend(_collect_codes(payload))
+    sub_blockers = _session_sub_blockers(ctx)
+    primary_sub = _primary_session_sub_blocker(sub_blockers)
+    if primary_sub:
+        row = _phase_row(
+            phase=phase,
+            ctx=ctx,
+            status="BLOCKING_CURRENT_RUN",
+            blocker_codes=[str(primary_sub["sub_blocker_code"])],
+            evidence_paths=[str(primary_sub["evidence_path"])],
+            reason=str(primary_sub["missing_or_failed_dependency"]),
+        )
+        row["session_sub_blockers"] = sub_blockers
+        row["current_session_sub_blocker"] = primary_sub
+        row["recovery_action"] = str(primary_sub["recovery_action"])
+        row["recovery_commands"] = [str(primary_sub["recovery_command"])]
+        return row
     owned = _owned_code(phase, codes)
     if owned:
         return _phase_row(phase=phase, ctx=ctx, status="BLOCKING_CURRENT_RUN", blocker_codes=[owned], evidence_paths=[str(path) for path in all_paths], reason=f"{owned} belongs to SESSION_AUTHORITY")
@@ -240,12 +403,15 @@ def _evaluate_session_authority(phase: dict[str, Any], ctx: Any, phase_results: 
         return day_row
     if _legacy_phase_row("SESSION_AUTHORITY", phase_results).get("status") == "SKIPPED":
         return _phase_row(phase=phase, ctx=ctx, status="UNKNOWN", evidence_paths=[str(path) for path in all_paths], reason="session authority was not evaluated by day-run after an upstream block")
-    session_payload = _read_json(paths[0]) if paths else {}
-    authority_status = str(session_payload.get("authority_status") or "").strip().upper()
-    if authority_status in {"GRANTED", "AUTHORIZED"}:
+    active_payload = _read_json(session_paths["active_session"])
+    promotion_state = str(active_payload.get("promotion_state") or "").strip().upper()
+    rollover_status = str(active_payload.get("rollover_status") or "").strip().upper()
+    if promotion_state in {"PROMOTED", "PASS", "GRANTED"} or rollover_status == "ROLLED_OVER":
         return _phase_row(phase=phase, ctx=ctx, status="PASS", evidence_paths=[str(path) for path in all_paths])
-    blocker = "SESSION_AUTHORITY_DENIED" if authority_status == "DENIED" else "SESSION_AUTHORITY_MISSING"
-    return _phase_row(phase=phase, ctx=ctx, status="BLOCKING_CURRENT_RUN", blocker_codes=[blocker], evidence_paths=[str(path) for path in all_paths], reason=f"paper_session_authority={authority_status or 'MISSING'}")
+    if active_payload or payloads:
+        blocker = str(active_payload.get("rollover_reason_code") or active_payload.get("first_blocker_code") or "SESSION_AUTHORITY_DENIED").strip()
+        return _phase_row(phase=phase, ctx=ctx, status="BLOCKING_CURRENT_RUN", blocker_codes=[blocker], evidence_paths=[str(path) for path in all_paths], reason=f"promotion_state={promotion_state or 'UNKNOWN'} rollover_status={rollover_status or 'UNKNOWN'}")
+    return _phase_row(phase=phase, ctx=ctx, status="BLOCKING_CURRENT_RUN", blocker_codes=["SESSION_AUTHORITY_MISSING"], evidence_paths=[str(path) for path in all_paths], reason="session authority artifacts are missing")
 
 
 def _evaluate_broker_health(phase: dict[str, Any], ctx: Any) -> dict[str, Any]:
@@ -379,23 +545,23 @@ def build_control_plane_v1(ctx: Any, phase_results: dict[str, dict[str, Any]] | 
     current_phase_order = 0
 
     for phase in phases:
-        raw = _evaluate_phase(phase, ctx, phase_results)
         phase_order = int(phase.get("phase_order") or 999)
         if current is not None:
-            if raw.get("blocker_codes"):
-                diagnostic_findings.append(
-                    {
-                        "phase_id": raw["phase_id"],
-                        "blocker_codes": raw.get("blocker_codes") or [],
-                        "evidence_paths": raw.get("evidence_paths") or [],
-                        "deferred_by_phase": current["phase_id"],
-                    }
-                )
-            raw["status"] = "DEFERRED_BY_UPSTREAM_BLOCKER"
+            raw = _phase_row(
+                phase=phase,
+                ctx=ctx,
+                status="DEFERRED_BY_UPSTREAM_BLOCKER",
+                blocker_codes=[],
+                evidence_paths=[str(path) for path in _phase_paths(phase, ctx)],
+                reason=f"deferred by {current['phase_id']}",
+            )
             raw["recovery_action"] = f"Deferred until {current['phase_id']} clears."
             raw["recovery_commands"] = []
             deferred_phases.append(raw["phase_id"])
-        elif raw["status"] == "BLOCKING_CURRENT_RUN":
+            control_phase_results.append(raw)
+            continue
+        raw = _evaluate_phase(phase, ctx, phase_results)
+        if raw["status"] == "BLOCKING_CURRENT_RUN":
             current = raw
             current_phase_order = phase_order
         control_phase_results.append(raw)
@@ -419,6 +585,8 @@ def build_control_plane_v1(ctx: Any, phase_results: dict[str, dict[str, Any]] | 
         "recovery_action": str((current or {}).get("recovery_action") or "No current blocker."),
         "recovery_commands": recovery_commands,
         "evidence_paths": list((current or {}).get("evidence_paths") or []),
+        "current_session_sub_blocker": dict((current or {}).get("current_session_sub_blocker") or {}),
+        "session_sub_blockers": list((current or {}).get("session_sub_blockers") or []),
         "phase_results": control_phase_results,
         "deferred_phases": deferred_phases,
         "diagnostic_findings": diagnostic_findings,

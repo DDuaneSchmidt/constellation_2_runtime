@@ -319,6 +319,12 @@ def _projection_from_control_plane(ctx: bod.BodContext, control: dict[str, Any])
     evidence_paths = [str(item) for item in (control.get("evidence_paths") if isinstance(control.get("evidence_paths"), list) else []) if str(item or "").strip()]
     deferred = [str(item) for item in (control.get("deferred_phases") if isinstance(control.get("deferred_phases"), list) else []) if str(item or "").strip()]
     action = str(control.get("recovery_action") or "").strip()
+    current_session_sub = control.get("current_session_sub_blocker") if isinstance(control.get("current_session_sub_blocker"), dict) else {}
+    if current_session_sub:
+        evidence_paths = [str(current_session_sub.get("evidence_path") or "")] if current_session_sub.get("evidence_path") else evidence_paths
+        command = str(current_session_sub.get("recovery_command") or current_session_sub.get("producer_command") or "").strip()
+        recovery_commands = [command] if command else recovery_commands
+        action = str(current_session_sub.get("recovery_action") or action).strip()
     next_valid_actions = recovery_commands[:1] if recovery_commands else ([action] if action else [])
     return {
         "schema_id": "aegis_operator_projection",
@@ -334,6 +340,8 @@ def _projection_from_control_plane(ctx: bod.BodContext, control: dict[str, Any])
         "owner": str(control.get("blocker_owner") or phase),
         "phase": phase,
         "root_cause": str(control.get("blocker_reason") or blocker or "No current blocker."),
+        "current_session_sub_blocker": current_session_sub,
+        "session_sub_blockers": list(control.get("session_sub_blockers") if isinstance(control.get("session_sub_blockers"), list) else []),
         "downstream_consequences": [{"phase": item, "reason": f"Deferred by {phase}"} for item in deferred],
         "deferred_downstream_phases": deferred,
         "artifact_paths": evidence_paths,
