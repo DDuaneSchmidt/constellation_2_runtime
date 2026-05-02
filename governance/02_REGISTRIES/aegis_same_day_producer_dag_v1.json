@@ -1,0 +1,264 @@
+{
+  "registry_id": "aegis_same_day_producer_dag_v1",
+  "schema_version": "v1",
+  "description": "Governed same-day producer DAG. The orchestrator prepares and validates artifacts only; control plane remains readiness authority and submit enforcement remains execution authority.",
+  "producer_nodes": [
+    {
+      "producer_id": "broker_event_observer",
+      "command": "PYTHONPATH=\"$PWD\" python3 ops/ib/c2_execution_observer_v1.py --truth_root {execution_root} --environment {environment}",
+      "execution_mode": "SERVICE_EVIDENCE_ONLY",
+      "inputs": [],
+      "outputs": [
+        {
+          "artifact_id": "broker_event_log_v1",
+          "path": "{execution_root}/execution_evidence_v1/broker_events/{day_utc}/broker_event_log.v1.jsonl",
+          "artifact_type": "jsonl",
+          "schema_path": "",
+          "required": true,
+          "target_day_required": true,
+          "truth_root_required": "execution_root",
+          "freshness_seconds": 300
+        }
+      ],
+      "freshness_requirement": {"freshness_seconds": 300, "must_be_same_day": true},
+      "retry_policy": {"max_attempts": 0, "retry_delay_seconds": 0},
+      "hard_blockers": ["BROKER_EVENT_LOG_MISSING", "BROKER_EVENT_LOG_STALE"],
+      "recovery_command": "Start or keep the governed IB execution observer running during the target trading day."
+    },
+    {
+      "producer_id": "broker_supply_v1",
+      "command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_broker_supply_v1.py --day_utc {day_utc} --environment {environment} --truth_root {truth_root} --freshness_seconds 300",
+      "execution_mode": "ONE_SHOT",
+      "inputs": ["broker_event_observer"],
+      "outputs": [
+        {
+          "artifact_id": "broker_supply_v1",
+          "path": "{truth_root}/reports/broker_supply_v1/{day_utc}/broker_supply.v1.json",
+          "artifact_type": "json",
+          "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/broker_supply.v1.schema.json",
+          "required": true,
+          "target_day_required": true,
+          "truth_root_required": "truth_root",
+          "freshness_seconds": 300
+        }
+      ],
+      "freshness_requirement": {"freshness_seconds": 300, "must_be_same_day": true},
+      "retry_policy": {"max_attempts": 1, "retry_delay_seconds": 0},
+      "hard_blockers": ["BROKER_SUPPLY_MISSING", "BROKER_SUPPLY_STALE", "BROKER_SUPPLY_INVALID"],
+      "recovery_command": "Rerun broker supply after same-day broker events are fresh."
+    },
+    {
+      "producer_id": "runtime_resilience_authority_v1",
+      "command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_runtime_resilience_authority_v1.py --day_utc {day_utc} --environment {environment} --truth_root {truth_root} --freshness_seconds 300",
+      "execution_mode": "ONE_SHOT",
+      "inputs": ["broker_supply_v1"],
+      "outputs": [
+        {
+          "artifact_id": "runtime_resilience_authority_v1",
+          "path": "{truth_root}/reports/runtime_resilience_authority_v1/{day_utc}/runtime_resilience_authority.v1.json",
+          "artifact_type": "json",
+          "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/runtime_resilience_authority.v1.schema.json",
+          "required": true,
+          "target_day_required": true,
+          "truth_root_required": "truth_root",
+          "freshness_seconds": 300
+        }
+      ],
+      "freshness_requirement": {"freshness_seconds": 300, "must_be_same_day": true},
+      "retry_policy": {"max_attempts": 1, "retry_delay_seconds": 0},
+      "hard_blockers": ["RUNTIME_RESILIENCE_MISSING", "RUNTIME_RESILIENCE_STALE", "RUNTIME_RESILIENCE_INVALID"],
+      "recovery_command": "Rerun runtime resilience after broker supply and broker event probe are fresh."
+    },
+    {
+      "producer_id": "session_readiness_refresh_v1",
+      "command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_session_readiness_refresh_v1.py --day_utc {day_utc}",
+      "execution_mode": "ONE_SHOT",
+      "inputs": ["runtime_resilience_authority_v1"],
+      "outputs": [
+        {
+          "artifact_id": "session_readiness_refresh_v1",
+          "path": "{truth_root}/reports/session_readiness_refresh_v1/{day_utc}/session_readiness_refresh.v1.json",
+          "artifact_type": "json",
+          "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/session_readiness_refresh.v1.schema.json",
+          "required": true,
+          "target_day_required": true,
+          "truth_root_required": "truth_root",
+          "freshness_seconds": null
+        }
+      ],
+      "freshness_requirement": {"freshness_seconds": null, "must_be_same_day": true},
+      "retry_policy": {"max_attempts": 1, "retry_delay_seconds": 0},
+      "hard_blockers": ["SESSION_READINESS_REFRESH_MISSING", "SESSION_READINESS_REFRESH_INVALID"],
+      "recovery_command": "Run governed same-day session readiness refresh after startup and broker evidence are current."
+    },
+    {
+      "producer_id": "day_authority_decision_v1",
+      "command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_day_authority_decision_v1.py --day_utc {day_utc} --truth_root {truth_root}",
+      "execution_mode": "ONE_SHOT",
+      "inputs": ["session_readiness_refresh_v1"],
+      "outputs": [
+        {
+          "artifact_id": "day_authority_decision_v1",
+          "path": "{truth_root}/reports/day_authority_decision_v1/{day_utc}/day_authority_decision.v1.json",
+          "artifact_type": "json",
+          "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/day_authority_decision.v1.schema.json",
+          "required": true,
+          "target_day_required": true,
+          "truth_root_required": "truth_root",
+          "freshness_seconds": null
+        }
+      ],
+      "freshness_requirement": {"freshness_seconds": null, "must_be_same_day": true},
+      "retry_policy": {"max_attempts": 1, "retry_delay_seconds": 0},
+      "hard_blockers": ["DAY_AUTHORITY_DECISION_MISSING", "DAY_AUTHORITY_DECISION_INVALID"],
+      "recovery_command": "Rerun day authority decision after governed session readiness refresh."
+    },
+    {
+      "producer_id": "target_day_admission_v1",
+      "command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_session_authority_v1.py --target_day {day_utc} --truth_root {truth_root} --environment {environment} --ib_account {ib_account} --phase admit",
+      "execution_mode": "ONE_SHOT",
+      "inputs": ["day_authority_decision_v1"],
+      "outputs": [
+        {
+          "artifact_id": "target_day_admission_v1",
+          "path": "{truth_root}/target_day_admission_v1/{day_utc}.json",
+          "artifact_type": "json",
+          "schema_path": "governance/04_DATA/SCHEMAS/C2/REPORTS/target_day_admission.v1.schema.json",
+          "required": true,
+          "target_day_required": true,
+          "truth_root_required": "truth_root",
+          "freshness_seconds": null
+        }
+      ],
+      "freshness_requirement": {"freshness_seconds": null, "must_be_same_day": true},
+      "retry_policy": {"max_attempts": 1, "retry_delay_seconds": 0},
+      "hard_blockers": ["TARGET_DAY_ADMISSION_MISSING", "TARGET_DAY_ADMISSION_INVALID"],
+      "recovery_command": "Run governed target-day admission after required same-day session gates pass."
+    },
+    {
+      "producer_id": "day_activation_package_v1",
+      "command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_day_activation_authority_v1.py --operation_type fresh_paper_entry_v1 --day_utc {day_utc} --sleeve_id PRIMARY --environment {environment} --ib_account {ib_account} --materialize YES --emit_package YES",
+      "execution_mode": "ONE_SHOT",
+      "inputs": ["target_day_admission_v1"],
+      "outputs": [
+        {
+          "artifact_id": "day_activation_package_v1",
+          "path": "{execution_root}/day_activation_package_v1/{day_utc}/<submission_id>/day_activation_package.v1.json",
+          "artifact_type": "json",
+          "schema_path": "",
+          "required": true,
+          "target_day_required": true,
+          "truth_root_required": "execution_root",
+          "freshness_seconds": null
+        }
+      ],
+      "freshness_requirement": {"freshness_seconds": null, "must_be_same_day": true},
+      "retry_policy": {"max_attempts": 1, "retry_delay_seconds": 0},
+      "hard_blockers": ["DAY_ACTIVATION_PACKAGE_MISSING", "DAY_ACTIVATION_PACKAGE_INVALID"],
+      "recovery_command": "Run governed day activation only after target-day admission passes."
+    },
+    {
+      "producer_id": "global_context_package_v1",
+      "command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_global_context_authority_v1.py --operation_type fresh_paper_entry_v1 --day_utc {day_utc} --sleeve_id PRIMARY --environment {environment} --ib_account {ib_account} --materialize YES --emit_package YES",
+      "execution_mode": "ONE_SHOT",
+      "inputs": ["day_activation_package_v1"],
+      "outputs": [
+        {
+          "artifact_id": "global_context_package_v1",
+          "path": "{execution_root}/global_context_package_v1/{day_utc}/<submission_id>/global_context_package.v1.json",
+          "artifact_type": "json",
+          "schema_path": "",
+          "required": true,
+          "target_day_required": true,
+          "truth_root_required": "execution_root",
+          "freshness_seconds": null
+        }
+      ],
+      "freshness_requirement": {"freshness_seconds": null, "must_be_same_day": true},
+      "retry_policy": {"max_attempts": 1, "retry_delay_seconds": 0},
+      "hard_blockers": ["GLOBAL_CONTEXT_PACKAGE_MISSING", "GLOBAL_CONTEXT_PACKAGE_INVALID"],
+      "recovery_command": "Run governed global context only after day activation passes."
+    },
+    {
+      "producer_id": "execution_build_v1",
+      "command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_execution_package_from_authorized_intent_v1.py --day_utc {day_utc} --truth_root {execution_root} --intent_id {intent_id}",
+      "execution_mode": "ONE_SHOT",
+      "inputs": ["global_context_package_v1"],
+      "outputs": [
+        {
+          "artifact_id": "execution_build_v1",
+          "path": "{truth_root}/reports/execution_build_v1/{day_utc}/<submission_id>/execution_build.v1.json",
+          "artifact_type": "json",
+          "schema_path": "",
+          "required": true,
+          "target_day_required": true,
+          "truth_root_required": "truth_root",
+          "freshness_seconds": null
+        }
+      ],
+      "freshness_requirement": {"freshness_seconds": null, "must_be_same_day": true},
+      "retry_policy": {"max_attempts": 1, "retry_delay_seconds": 0},
+      "hard_blockers": ["EXECUTION_BUILD_MISSING", "EXECUTION_BUILD_INVALID"],
+      "recovery_command": "Run governed execution-package producer to build execution_build_v1 only after day activation and global context pass."
+    },
+    {
+      "producer_id": "execution_package_v1",
+      "command": "PYTHONPATH=\"$PWD\" python3 ops/tools/run_execution_package_from_authorized_intent_v1.py --day_utc {day_utc} --truth_root {execution_root} --intent_id {intent_id}",
+      "execution_mode": "ONE_SHOT",
+      "inputs": ["execution_build_v1"],
+      "outputs": [
+        {
+          "artifact_id": "execution_package_v1",
+          "path": "{execution_root}/execution_package_v1/{day_utc}/<submission_id>/execution_package.v1.json",
+          "artifact_type": "json",
+          "schema_path": "",
+          "required": true,
+          "target_day_required": true,
+          "truth_root_required": "execution_root",
+          "freshness_seconds": null
+        }
+      ],
+      "freshness_requirement": {"freshness_seconds": null, "must_be_same_day": true},
+      "retry_policy": {"max_attempts": 1, "retry_delay_seconds": 0},
+      "hard_blockers": ["EXECUTION_PACKAGE_MISSING", "EXECUTION_PACKAGE_INVALID"],
+      "recovery_command": "Run governed execution package producer only after authorization and upstream packages pass."
+    }
+  ],
+  "phase_scheduler": {
+    "PRE_OPEN": {
+      "required_producers": ["session_readiness_refresh_v1", "day_authority_decision_v1", "target_day_admission_v1"],
+      "allowed_producers": ["session_readiness_refresh_v1", "day_authority_decision_v1", "target_day_admission_v1"],
+      "forbidden_producers": ["execution_package_v1"],
+      "freshness_thresholds": {},
+      "stop_conditions": ["PRODUCER_FAILED", "ARTIFACT_INVALID"]
+    },
+    "MARKET_OPEN": {
+      "required_producers": ["broker_event_observer", "broker_supply_v1", "runtime_resilience_authority_v1"],
+      "allowed_producers": ["broker_event_observer", "broker_supply_v1", "runtime_resilience_authority_v1"],
+      "forbidden_producers": ["execution_package_v1"],
+      "freshness_thresholds": {"broker_event_observer": 300, "broker_supply_v1": 300, "runtime_resilience_authority_v1": 300},
+      "stop_conditions": ["PRODUCER_FAILED", "ARTIFACT_INVALID", "STALE_ARTIFACT"]
+    },
+    "INTRADAY": {
+      "required_producers": ["broker_event_observer", "broker_supply_v1", "runtime_resilience_authority_v1", "session_readiness_refresh_v1", "day_authority_decision_v1", "target_day_admission_v1"],
+      "allowed_producers": ["broker_event_observer", "broker_supply_v1", "runtime_resilience_authority_v1", "session_readiness_refresh_v1", "day_authority_decision_v1", "target_day_admission_v1"],
+      "forbidden_producers": ["execution_package_v1"],
+      "freshness_thresholds": {"broker_event_observer": 300, "broker_supply_v1": 300, "runtime_resilience_authority_v1": 300},
+      "stop_conditions": ["PRODUCER_FAILED", "ARTIFACT_INVALID", "STALE_ARTIFACT"]
+    },
+    "PRE_SUBMIT": {
+      "required_producers": ["broker_event_observer", "broker_supply_v1", "runtime_resilience_authority_v1", "session_readiness_refresh_v1", "day_authority_decision_v1", "target_day_admission_v1", "day_activation_package_v1", "global_context_package_v1", "execution_build_v1", "execution_package_v1"],
+      "allowed_producers": ["broker_event_observer", "broker_supply_v1", "runtime_resilience_authority_v1", "session_readiness_refresh_v1", "day_authority_decision_v1", "target_day_admission_v1", "day_activation_package_v1", "global_context_package_v1", "execution_build_v1", "execution_package_v1"],
+      "forbidden_producers": [],
+      "freshness_thresholds": {"broker_event_observer": 300, "broker_supply_v1": 300, "runtime_resilience_authority_v1": 300},
+      "stop_conditions": ["PRODUCER_FAILED", "ARTIFACT_INVALID", "STALE_ARTIFACT"]
+    },
+    "EOD": {
+      "required_producers": ["broker_event_observer", "broker_supply_v1", "runtime_resilience_authority_v1"],
+      "allowed_producers": ["broker_event_observer", "broker_supply_v1", "runtime_resilience_authority_v1"],
+      "forbidden_producers": ["execution_package_v1"],
+      "freshness_thresholds": {"broker_event_observer": 300, "broker_supply_v1": 300, "runtime_resilience_authority_v1": 300},
+      "stop_conditions": ["PRODUCER_FAILED", "ARTIFACT_INVALID", "STALE_ARTIFACT"]
+    }
+  }
+}
