@@ -23,10 +23,17 @@ def _write(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
 
 
-def _seed_trend(root: Path, *, with_price: bool = True, with_stop_loss_bps: bool = True, intent_hash: str = TREND_HASH) -> None:
+def _seed_trend(
+    root: Path,
+    *,
+    with_price: bool = True,
+    with_stop_loss_bps: bool = True,
+    stop_loss_bps: object = 1000,
+    intent_hash: str = TREND_HASH,
+) -> None:
     constraints = {"max_risk_pct": "0.01"}
     if with_stop_loss_bps:
-        constraints["stop_loss_bps"] = 1000
+        constraints["stop_loss_bps"] = stop_loss_bps
     _write(
         root / "intents_v1" / "snapshots" / DAY / f"{intent_hash}.exposure_intent.v1.json",
         {
@@ -45,6 +52,12 @@ def _seed_trend(root: Path, *, with_price: bool = True, with_stop_loss_bps: bool
             root / "market_data_snapshot_v1" / "snapshots" / DAY / "SPY.market_data_snapshot.v1.json",
             {"schema_id": "C2_MARKET_DATA_SNAPSHOT_V1", "day_utc": DAY, "symbol": "SPY", "close": "500.00"},
         )
+
+
+def _write_contract(root: Path, *, intent_hash: str, payload: dict) -> Path:
+    path = risk_contract_path_v1(truth_root=root, day_utc=DAY, intent_hash=intent_hash)
+    _write(path, payload)
+    return path
 
 
 def _seed_vol(root: Path, *, defined: bool = False) -> None:
@@ -175,6 +188,21 @@ def test_missing_stop_loss_bps_blocks_stop_based_contract(tmp_path: Path) -> Non
     assert "RISK_CONTRACT_STOP_LOSS_BPS_MISSING" in payload["blockers"]
 
 
+def test_bad_stop_loss_bps_values_fail_closed(tmp_path: Path) -> None:
+    for value, expected in [
+        (0, "RISK_CONTRACT_STOP_LOSS_BPS_MISSING"),
+        (-1, "RISK_CONTRACT_STOP_LOSS_BPS_MISSING"),
+        ("not-numeric", "RISK_CONTRACT_STOP_LOSS_BPS_MISSING"),
+        (9999, "RISK_CONTRACT_STOP_LOSS_BPS_POLICY_MISMATCH:expected=1000:actual=9999"),
+    ]:
+        root = tmp_path / str(value).replace("/", "_")
+        _seed_trend(root, stop_loss_bps=value)
+        payload = build_risk_definition_contract_v1(day_utc=DAY, truth_root=root, intent_hash=TREND_HASH)
+        validate_risk_definition_contract_v1(payload)
+        assert payload["validation_status"] == "FAIL"
+        assert any(str(blocker).startswith(expected) for blocker in payload["blockers"])
+
+
 def test_intent_id_lookup_uses_latest_same_day_snapshot(tmp_path: Path) -> None:
     stale_hash = "0" * 64
     corrected_hash = "f" * 64
@@ -249,3 +277,70 @@ def test_loader_rejects_missing_contract(tmp_path: Path) -> None:
     assert path == risk_contract_path_v1(truth_root=tmp_path, day_utc=DAY, intent_hash=TREND_HASH)
     assert payload == {}
     assert blocker == "RISK_DEFINITION_CONTRACT_MISSING"
+
+
+def test_loader_rejects_stale_or_wrong_producer_contract(tmp_path: Path) -> None:
+    _seed_trend(tmp_path)
+    payload = build_risk_definition_contract_v1(day_utc=DAY, truth_root=tmp_path, intent_hash=TREND_HASH)
+    validate_risk_definition_contract_v1(payload)
+
+    stale = dict(payload)
+    stale["git_commit"] = "0" * 40
+    _write_contract(tmp_path, intent_hash=TREND_HASH, payload=stale)
+    _path, _payload, blocker = load_valid_risk_definition_contract_v1(
+        truth_root=tmp_path,
+        day_utc=DAY,
+        intent_hash=TREND_HASH,
+        intent_id=TREND_ID,
+    )
+    assert blocker == "RISK_DEFINITION_CONTRACT_GIT_COMMIT_MISMATCH"
+
+    wrong_producer = dict(payload)
+    wrong_producer["producer"] = {"repo": "constellation", "module": "other.py", "git_sha": payload["git_commit"]}
+    _write_contract(tmp_path, intent_hash=TREND_HASH, payload=wrong_producer)
+    _path, _payload, blocker = load_valid_risk_definition_contract_v1(
+        truth_root=tmp_path,
+        day_utc=DAY,
+        intent_hash=TREND_HASH,
+        intent_id=TREND_ID,
+    )
+    assert blocker == "RISK_DEFINITION_CONTRACT_PRODUCER_MISMATCH"
+
+
+def test_loader_rejects_wrong_day_truth_root_or_source_intent_identity(tmp_path: Path) -> None:
+    _seed_trend(tmp_path)
+    payload = build_risk_definition_contract_v1(day_utc=DAY, truth_root=tmp_path, intent_hash=TREND_HASH)
+    validate_risk_definition_contract_v1(payload)
+
+    wrong_day = dict(payload)
+    wrong_day["day_utc"] = "2026-05-02"
+    _write_contract(tmp_path, intent_hash=TREND_HASH, payload=wrong_day)
+    _path, _payload, blocker = load_valid_risk_definition_contract_v1(
+        truth_root=tmp_path,
+        day_utc=DAY,
+        intent_hash=TREND_HASH,
+        intent_id=TREND_ID,
+    )
+    assert blocker == "RISK_DEFINITION_CONTRACT_DAY_MISMATCH"
+
+    wrong_root = dict(payload)
+    wrong_root["truth_root"] = str((tmp_path / "other_root").resolve())
+    _write_contract(tmp_path, intent_hash=TREND_HASH, payload=wrong_root)
+    _path, _payload, blocker = load_valid_risk_definition_contract_v1(
+        truth_root=tmp_path,
+        day_utc=DAY,
+        intent_hash=TREND_HASH,
+        intent_id=TREND_ID,
+    )
+    assert blocker == "RISK_DEFINITION_CONTRACT_TRUTH_ROOT_MISMATCH"
+
+    wrong_source = dict(payload)
+    wrong_source["source_intent_path"] = str((tmp_path / "intents_v1" / "snapshots" / "2026-05-02" / f"{TREND_HASH}.exposure_intent.v1.json").resolve())
+    _write_contract(tmp_path, intent_hash=TREND_HASH, payload=wrong_source)
+    _path, _payload, blocker = load_valid_risk_definition_contract_v1(
+        truth_root=tmp_path,
+        day_utc=DAY,
+        intent_hash=TREND_HASH,
+        intent_id=TREND_ID,
+    )
+    assert blocker == "RISK_DEFINITION_CONTRACT_SOURCE_INTENT_PATH_MISMATCH"

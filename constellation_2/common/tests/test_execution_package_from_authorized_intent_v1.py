@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from constellation_2.common.advisory import execution_package_builder_from_execution_intent_v1 as builder_module
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1
 from ops.tools import run_execution_package_from_authorized_intent_v1 as tool
+from ops.tools import run_risk_definition_contract_v1 as risk_tool
 
 
 DAY = "2026-05-01"
@@ -90,6 +91,7 @@ def _seed_intents(root: Path) -> None:
 
 
 def _seed_contract(root: Path, *, intent_hash: str, intent_id: str, risk_type: str) -> None:
+    git_sha = risk_tool._git_sha()  # noqa: SLF001 - fixtures must match governed loader freshness checks.
     payload = {
         "schema_id": "risk_definition_contract_v1",
         "schema_version": "v1",
@@ -103,9 +105,9 @@ def _seed_contract(root: Path, *, intent_hash: str, intent_id: str, risk_type: s
         "risk_type": risk_type,
         "source_intent_path": str((root / "intents_v1" / "snapshots" / DAY / f"{intent_hash}.exposure_intent.v1.json").resolve()),
         "generated_at": f"{DAY}T00:00:00Z",
-        "git_commit": "7d64db4a5e4d68af1d89a56edf64fb9024bb218a",
+        "git_commit": git_sha,
         "truth_root": str(root.resolve()),
-        "producer": {"repo": "constellation", "module": "ops/tools/run_risk_definition_contract_v1.py", "git_sha": "7d64db4a5e4d68af1d89a56edf64fb9024bb218a"},
+        "producer": {"repo": "constellation", "module": "ops/tools/run_risk_definition_contract_v1.py", "git_sha": git_sha},
         "validation_status": "PASS",
         "blockers": [],
         "stop_loss_bps": 1000 if risk_type == "STOP_BASED" else None,

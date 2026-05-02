@@ -164,6 +164,27 @@ def _outcome_for_sleeve(outcome: dict[str, Any], sleeve_id: str) -> str:
     return str(outcome.get("outcome_status") or outcome.get("status") or "UNKNOWN").strip().upper()
 
 
+def _outcome_has_real_evidence(outcome: dict[str, Any], sleeve_id: str) -> bool:
+    if not outcome or _canonical_sleeve_id(outcome.get("sleeve_id")) != sleeve_id:
+        return False
+    for key in (
+        "fill_refs",
+        "fills",
+        "submission_refs",
+        "execution_refs",
+        "evidence_refs",
+        "lifecycle_refs",
+        "position_lifecycle_refs",
+    ):
+        value = outcome.get(key)
+        if isinstance(value, list) and any(isinstance(row, dict) or str(row).strip() for row in value):
+            return True
+    for key in ("submission_id", "order_id", "perm_id", "fill_id", "position_lifecycle_id", "outcome_ref"):
+        if str(outcome.get(key) or "").strip():
+            return True
+    return False
+
+
 def _risk_sizing(payload: dict[str, Any]) -> tuple[str, str, float | None, bool, str]:
     status = _status(payload)
     envelope = payload.get("risk_envelope") if isinstance(payload.get("risk_envelope"), dict) else {}
@@ -216,6 +237,7 @@ def build_sleeve_performance_control_v1(*, day_utc: str, truth_root: Path, runti
     for sleeve_id in _sleeve_ids(payloads):
         intent_count, submitted_count, completed_count = _attribution_counts(attribution, sleeve_id)
         outcome_status = _outcome_for_sleeve(outcome, sleeve_id)
+        outcome_has_real_evidence = _outcome_has_real_evidence(outcome, sleeve_id)
         edge_status = _edge_for_sleeve(edge, sleeve_id)
         scorecard_status = _scorecard_for_sleeve(scorecard, sleeve_id)
         selection_confidence = (
@@ -234,6 +256,8 @@ def build_sleeve_performance_control_v1(*, day_utc: str, truth_root: Path, runti
             blockers.append("NO_COMPLETED_TRADES")
         if outcome_status not in {"CLOSED"}:
             blockers.append(f"TRADE_OUTCOME_{outcome_status}")
+        elif not outcome_has_real_evidence:
+            blockers.append("TRADE_OUTCOME_PROOF_MISSING")
         if edge_status in {"MISSING", "UNKNOWN", "UNPROVEN", "DEGRADED", "NOT_ENOUGH_EVIDENCE"}:
             blockers.append(f"EDGE_{edge_status}")
         if scorecard_status in {"MISSING", "UNKNOWN", "NOT_ENOUGH_EVIDENCE", "INSUFFICIENT_SAMPLE", "DEGRADED"}:

@@ -16,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from constellation_2.common.c2_risk_policy_loader_v1 import RiskPolicyLoaderError, load_risk_policy_for_engine_or_fail
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1
 
 PRODUCER = "ops/tools/run_risk_definition_contract_v1.py"
@@ -403,6 +404,18 @@ def build_risk_definition_contract_v1(*, day_utc: str, truth_root: Path, intent_
             stop_bps = 0
         if stop_bps <= 0:
             blockers.append("RISK_CONTRACT_STOP_LOSS_BPS_MISSING")
+        else:
+            engine_id = str(engine.get("engine_id") or "").strip()
+            try:
+                governed_policy = load_risk_policy_for_engine_or_fail(engine_id)
+                governed_stop_bps = int(governed_policy.get("stop_loss_bps_default"))
+            except (RiskPolicyLoaderError, TypeError, ValueError) as exc:
+                blockers.append(f"RISK_CONTRACT_GOVERNED_POLICY_UNAVAILABLE:{type(exc).__name__}")
+                governed_stop_bps = 0
+            if governed_stop_bps > 0 and stop_bps != governed_stop_bps:
+                blockers.append(
+                    f"RISK_CONTRACT_STOP_LOSS_BPS_POLICY_MISMATCH:expected={governed_stop_bps}:actual={stop_bps}"
+                )
         price, price_source = _market_reference_price(truth_root=truth_root, day_utc=day_utc, symbol=symbol)
         if price is None:
             blockers.append("RISK_CONTRACT_REFERENCE_PRICE_MISSING")
@@ -517,6 +530,25 @@ def load_valid_risk_definition_contract_v1(*, truth_root: Path, day_utc: str, in
         return path, payload, "RISK_DEFINITION_CONTRACT_INTENT_ID_MISMATCH"
     if str(payload.get("truth_root") or "") != str(Path(truth_root).resolve()):
         return path, payload, "RISK_DEFINITION_CONTRACT_TRUTH_ROOT_MISMATCH"
+    if str(payload.get("git_commit") or "").strip() != _git_sha():
+        return path, payload, "RISK_DEFINITION_CONTRACT_GIT_COMMIT_MISMATCH"
+    producer = payload.get("producer") if isinstance(payload.get("producer"), dict) else {}
+    if str(producer.get("module") or "").strip() != PRODUCER:
+        return path, payload, "RISK_DEFINITION_CONTRACT_PRODUCER_MISMATCH"
+    if str(producer.get("git_sha") or "").strip() != _git_sha():
+        return path, payload, "RISK_DEFINITION_CONTRACT_PRODUCER_GIT_COMMIT_MISMATCH"
+    source_path = Path(str(payload.get("source_intent_path") or "")).expanduser().resolve()
+    expected_source_path = _intent_path(truth_root=Path(truth_root).resolve(), day_utc=day_utc, intent_hash=intent_hash)
+    if source_path != expected_source_path:
+        return path, payload, "RISK_DEFINITION_CONTRACT_SOURCE_INTENT_PATH_MISMATCH"
+    if not source_path.exists() or not source_path.is_file():
+        return path, payload, "RISK_DEFINITION_CONTRACT_SOURCE_INTENT_MISSING"
+    try:
+        source_intent = _read_json(source_path)
+    except Exception:
+        return path, payload, "RISK_DEFINITION_CONTRACT_SOURCE_INTENT_INVALID"
+    if str(source_intent.get("intent_id") or "").strip() != str(payload.get("intent_id") or "").strip():
+        return path, payload, "RISK_DEFINITION_CONTRACT_SOURCE_INTENT_ID_MISMATCH"
     if str(payload.get("validation_status") or "").upper() != "PASS":
         blockers = ",".join(str(item) for item in payload.get("blockers") or [])
         return path, payload, f"RISK_DEFINITION_CONTRACT_FAILED:{blockers or 'UNKNOWN'}"

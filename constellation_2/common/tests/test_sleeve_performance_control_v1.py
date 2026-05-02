@@ -57,7 +57,17 @@ def _seed_performance_inputs(
     )
     _write(
         _report(root, "trade_outcome_v1", "trade_outcome.v1.json"),
-        {"day_utc": DAY, "status": "PASS", "outcome_status": outcome_status, "intent_id": "intent-1", "sleeve_id": SLEEVE, "realized_pnl": 5.0, "return_pct": 0.01},
+        {
+            "day_utc": DAY,
+            "status": "PASS",
+            "outcome_status": outcome_status,
+            "intent_id": "intent-1",
+            "sleeve_id": SLEEVE,
+            "submission_id": "submission-1",
+            "fill_refs": [{"path": str(root / "execution_evidence_v1" / "fills" / DAY / "fill-1.json")}],
+            "realized_pnl": 5.0,
+            "return_pct": 0.01,
+        },
     )
     _write(
         _report(root, "edge_attribution_v1", "edge_attribution.v1.json"),
@@ -152,6 +162,21 @@ def test_unknown_trade_outcome_blocks_sleeve_proof(tmp_path: Path) -> None:
 
     assert row["allocation_eligible"] is False
     assert "TRADE_OUTCOME_UNKNOWN" in row["blockers"]
+
+
+def test_placeholder_trade_outcome_without_fill_or_submission_proof_blocks_allocation(tmp_path: Path) -> None:
+    root = _production_root(tmp_path)
+    _seed_performance_inputs(root)
+    outcome_path = _report(root, "trade_outcome_v1", "trade_outcome.v1.json")
+    outcome = json.loads(outcome_path.read_text(encoding="utf-8"))
+    outcome.pop("submission_id", None)
+    outcome.pop("fill_refs", None)
+    _write(outcome_path, outcome)
+
+    row = next(item for item in _control(root)["sleeve_results"] if item["sleeve_id"] == SLEEVE)
+
+    assert row["allocation_eligible"] is False
+    assert "TRADE_OUTCOME_PROOF_MISSING" in row["blockers"]
 
 
 def test_unproven_edge_blocks_allocation_influence(tmp_path: Path) -> None:
