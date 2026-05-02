@@ -15,20 +15,6 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1, read_json_object_v1, resolve_fact_plane_truth_root_v1
-from constellation_2.common.safety_state_authority_v1 import safety_state_authority_output_path
-from constellation_2.common.trading_day_readiness_authority_v1 import trading_day_readiness_authority_output_path
-from ops.tools.run_decision_ledger_v1 import decision_ledger_path
-from ops.tools.run_decision_consistency_v1 import decision_consistency_path
-from ops.tools.run_edge_attribution_v1 import edge_attribution_path
-from ops.tools.run_insight_engine_v1 import insight_engine_path
-from ops.tools.run_intent_lifecycle_state_v1 import intent_lifecycle_state_path
-from ops.tools.run_missed_opportunity_v1 import missed_opportunity_path
-from ops.tools.run_portfolio_activation_gate_v1 import portfolio_activation_gate_path
-from ops.tools.run_portfolio_scoring_v1 import portfolio_scoring_path
-from ops.tools.run_position_lifecycle_state_v1 import position_lifecycle_state_path
-from ops.tools.run_regime_confidence_v1 import regime_confidence_path
-from ops.tools.run_selection_quality_v1 import selection_quality_path
-from ops.tools.run_trade_outcome_v1 import trade_outcome_path
 from ops.tools.run_advisory_evidence_gateway_v1 import advisory_evidence_packet_path
 from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1, git_commit_v1, git_dirty_status_v1
 
@@ -64,33 +50,8 @@ def _validate_ai_advisory_schema(payload: dict[str, Any]) -> None:
         raise ValueError("AI_ADVISORY_REVIEW_SCHEMA_INVALID:" + ";".join(str(err.message) for err in errors[:3]))
 
 
-def _float(value: Any, default: float = 0.0) -> float:
-    try:
-        return float(str(value).strip())
-    except Exception:
-        return default
-
-
 def ai_advisory_review_path(*, truth_root: Path, day_utc: str) -> Path:
     return Path(truth_root).resolve() / "reports" / "ai_advisory_review_v1" / day_utc / "ai_advisory_review.v1.json"
-
-
-def _artifact_map(truth_root: Path, day_utc: str) -> dict[str, Path]:
-    return {
-        "decision_ledger_v1": decision_ledger_path(truth_root=truth_root, day_utc=day_utc),
-        "selection_quality_v1": selection_quality_path(truth_root=truth_root, day_utc=day_utc),
-        "edge_attribution_v1": edge_attribution_path(truth_root=truth_root, day_utc=day_utc),
-        "regime_confidence_v1": regime_confidence_path(truth_root=truth_root, day_utc=day_utc),
-        "trade_outcome_v1": trade_outcome_path(truth_root=truth_root, day_utc=day_utc),
-        "decision_consistency_v1": decision_consistency_path(truth_root=truth_root, day_utc=day_utc),
-        "missed_opportunity_v1": missed_opportunity_path(truth_root=truth_root, day_utc=day_utc),
-        "portfolio_scoring_v1": portfolio_scoring_path(truth_root=truth_root, day_utc=day_utc),
-        "portfolio_activation_gate_v1": portfolio_activation_gate_path(truth_root=truth_root, day_utc=day_utc),
-        "intent_lifecycle_state_v1": intent_lifecycle_state_path(truth_root=truth_root, day_utc=day_utc),
-        "position_lifecycle_state_v1": position_lifecycle_state_path(truth_root=truth_root, day_utc=day_utc),
-        "safety_state_authority_v1": safety_state_authority_output_path(truth_root=truth_root, day_utc=day_utc),
-        "trading_day_readiness_authority_v1": trading_day_readiness_authority_output_path(truth_root=truth_root, target_day=day_utc),
-    }
 
 
 def build_ai_advisory_review_v1(*, day_utc: str, truth_root: Path, environment: str = PAPER_MODE) -> dict[str, Any]:
