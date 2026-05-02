@@ -198,6 +198,12 @@ def test_promotion_activation_updates_version_copies_manifest_and_regenerates_pa
     assert manifest["status"] == "PROMOTED"
     assert any(row["status"] == "COPIED" for row in manifest["copied_artifacts"])
     assert candidate_payload["candidate_commit"] == COMMIT
+    promoted_ledger = runtime_mode.read_json_v1(prod / "reports" / "aegis_promotion_validation_ledger_v1" / DAY / "promotion_validation_ledger.v1.json")
+    assert promoted_ledger["promotion_status"] == "PROMOTED"
+    assert promoted_ledger["candidate_commit"] == COMMIT
+    assert promoted_ledger["promoted_commit"] == COMMIT
+    assert promoted_ledger["truth_root"] == str(prod.resolve())
+    assert promoted_ledger["runtime_root"] == str(prod.resolve())
 
 
 def test_validation_ledger_and_gate_block_dirty_repo_failed_tests_schema_and_control_plane(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -82,6 +82,8 @@ def promote_candidate_to_production_v1(*, day_utc: str, promotion_id: str, candi
         validation_ledger_src["promoted_commit"] = commit
         validation_ledger_src["promotion_id"] = promotion_id
         validation_ledger_src["production_version_path"] = str(version_path)
+        validation_ledger_src["truth_root"] = str(production_root.resolve())
+        validation_ledger_src["runtime_root"] = str(production_root.resolve())
         validation_ledger_src["generated_at"] = now_iso_v1()
         write_json_v1(promotion_validation_ledger_path(truth_root=production_root, day_utc=day_utc), validation_ledger_src)
     write_json_v1(manifest_path, manifest)

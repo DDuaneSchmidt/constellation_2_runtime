@@ -202,7 +202,7 @@ def _promotion_validation_blockers(
                 "expected_runtime_root": str(expected_runtime_root),
             }
         )
-    if truth.resolve().parent != expected_runtime_root:
+    if truth.resolve() != expected_runtime_root and truth.resolve().parent != expected_runtime_root:
         blockers.append(
             {
                 "code": "PRODUCTION_TRUTH_RUNTIME_ROOT_MISMATCH",
