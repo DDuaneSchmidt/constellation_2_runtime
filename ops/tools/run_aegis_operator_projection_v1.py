@@ -84,27 +84,55 @@ def _promotion_visibility_v1(ctx: bod.BodContext) -> dict[str, Any]:
         blockers = ledger["blockers"]
     else:
         blockers = [{"code": "PROMOTION_VALIDATION_LEDGER_MISSING", "path": str(ledger_path)}]
+    candidate_commit = str(ledger.get("candidate_commit") or evaluated_commit)
+    promoted_commit = str(production_version.get("promoted_commit") or ledger.get("promoted_commit") or "")
+    packet_commit = str(ledger.get("packet_commit") or _packet_commit_from_root(ctx.truth_root.parent))
+    truth_consistent = bool(truth_root_text and Path(truth_root_text).expanduser().resolve() == ctx.truth_root.resolve())
+    runtime_consistent = bool(runtime_root_text and Path(runtime_root_text).expanduser().resolve() == ctx.truth_root.parent.resolve())
+    mismatch_flags = {
+        "candidate_commit_differs_from_promoted": bool(candidate_commit and promoted_commit and candidate_commit != promoted_commit),
+        "evaluated_commit_differs_from_promoted": bool(evaluated_commit and promoted_commit and evaluated_commit != promoted_commit),
+        "packet_commit_differs_from_evaluated": bool(packet_commit and evaluated_commit and packet_commit != evaluated_commit),
+        "truth_root_mismatch": not truth_consistent,
+        "runtime_root_mismatch": not runtime_consistent,
+        "promotion_gate_blocked": promotion_status not in {"APPROVED_FOR_PROMOTION", "PROMOTED", "APPROVED"},
+    }
     return {
-        "candidate_commit": str(ledger.get("candidate_commit") or evaluated_commit),
-        "promoted_commit": str(production_version.get("promoted_commit") or ledger.get("promoted_commit") or ""),
+        "candidate_commit": candidate_commit,
+        "promoted_commit": promoted_commit,
         "evaluated_commit": evaluated_commit,
-        "packet_commit": str(ledger.get("packet_commit") or _packet_commit_from_root(ctx.truth_root.parent)),
+        "packet_commit": packet_commit,
         "promotion_status": promotion_status,
         "promotion_blockers": blockers,
+        "promotion_mismatch_flags": mismatch_flags,
         "promotion_validation_ledger_path": str(ledger_path),
         "promotion_gate_path": str(gate_path),
         "promotion_visibility_source": "aegis_production_promotion_gate_v1" if gate else "aegis_promotion_validation_ledger_v1",
         "truth_root_consistency": {
             "truth_root": str(ctx.truth_root),
             "ledger_truth_root": truth_root_text,
-            "consistent": bool(truth_root_text and Path(truth_root_text).expanduser().resolve() == ctx.truth_root.resolve()),
+            "consistent": truth_consistent,
         },
         "runtime_root_consistency": {
             "runtime_root": str(ctx.truth_root.parent.resolve()),
             "ledger_runtime_root": runtime_root_text,
-            "consistent": bool(runtime_root_text and Path(runtime_root_text).expanduser().resolve() == ctx.truth_root.parent.resolve()),
+            "consistent": runtime_consistent,
         },
     }
+
+
+def _why_not_ready_summary(final_status: str, current_domain: str, failed_current_domain: list[Any], blocker: str) -> str:
+    if final_status == "READY":
+        return "SYSTEM READY."
+    reason = blocker or "UNKNOWN"
+    for row in failed_current_domain:
+        if not isinstance(row, dict):
+            continue
+        codes = row.get("reason_codes") if isinstance(row.get("reason_codes"), list) else []
+        reason = str(codes[0] if codes else row.get("blocking_reason") or blocker or "UNKNOWN")
+        if reason:
+            break
+    return f"SYSTEM NOT READY BECAUSE: {current_domain or 'UNKNOWN'} -> {reason}"
 
 
 def _projection_from_control_plane(ctx: bod.BodContext, control: dict[str, Any]) -> dict[str, Any]:
@@ -163,6 +191,7 @@ def _projection_from_control_plane(ctx: bod.BodContext, control: dict[str, Any])
     if blocker.endswith("_PRECHECK_FAILED") and recovery_commands:
         next_valid_actions = recovery_commands
     promotion_visibility = _promotion_visibility_v1(ctx)
+    why_not_ready = _why_not_ready_summary(final_status, current_domain, failed_current_domain, blocker)
     return {
         "schema_id": "aegis_operator_projection",
         "schema_version": SCHEMA_VERSION,
@@ -173,6 +202,7 @@ def _projection_from_control_plane(ctx: bod.BodContext, control: dict[str, Any])
         "status": "PASS" if final_status == "READY" else "BLOCKED",
         "canonical_blocker": blocker,
         "operator_next_action": action or "No current blocker.",
+        "why_not_ready_summary": why_not_ready,
         "final_status": final_status,
         "first_blocker": blocker,
         "owner": str(control.get("blocker_owner") or phase),
@@ -212,6 +242,7 @@ def _projection_from_control_plane(ctx: bod.BodContext, control: dict[str, Any])
         "packet_commit": promotion_visibility["packet_commit"],
         "promotion_status": promotion_visibility["promotion_status"],
         "promotion_blockers": promotion_visibility["promotion_blockers"],
+        "promotion_mismatch_flags": promotion_visibility["promotion_mismatch_flags"],
         "truth_root_consistency": promotion_visibility["truth_root_consistency"],
         "runtime_root_consistency": promotion_visibility["runtime_root_consistency"],
         "pending_human_reviews": 0,
@@ -227,6 +258,7 @@ def _projection_from_control_plane(ctx: bod.BodContext, control: dict[str, Any])
         "confidence_in_diagnosis": "HIGH" if blocker else "MEDIUM",
         "last_updated_at_utc": _now_iso(),
         "authority_note": "Operator projection is render-only and presents aegis_control_plane_v1 readiness without recomputing or falling back to legacy surfaces.",
+        "deferred_domain_note": "Deferred domains are not failed and are not actionable until the current domain clears.",
     }
 
 
@@ -242,6 +274,7 @@ def _projection_control_plane_unavailable(ctx: bod.BodContext, *, control_path: 
         "status": "BLOCKED",
         "canonical_blocker": "CONTROL_PLANE_UNAVAILABLE",
         "operator_next_action": f"Regenerate aegis_control_plane_v1 for {ctx.day_utc}; projection will not recompute readiness.",
+        "why_not_ready_summary": "SYSTEM NOT READY BECAUSE: CONTROL_PLANE -> CONTROL_PLANE_UNAVAILABLE",
         "final_status": "UNKNOWN",
         "first_blocker": "CONTROL_PLANE_UNAVAILABLE",
         "owner": "aegis_control_plane_v1",
@@ -281,6 +314,7 @@ def _projection_control_plane_unavailable(ctx: bod.BodContext, *, control_path: 
         "packet_commit": promotion_visibility["packet_commit"],
         "promotion_status": promotion_visibility["promotion_status"],
         "promotion_blockers": promotion_visibility["promotion_blockers"],
+        "promotion_mismatch_flags": promotion_visibility["promotion_mismatch_flags"],
         "truth_root_consistency": promotion_visibility["truth_root_consistency"],
         "runtime_root_consistency": promotion_visibility["runtime_root_consistency"],
         "pending_human_reviews": 0,
@@ -295,6 +329,7 @@ def _projection_control_plane_unavailable(ctx: bod.BodContext, *, control_path: 
         "confidence_in_diagnosis": "LOW",
         "last_updated_at_utc": _now_iso(),
         "authority_note": "Operator projection is render-only and refuses to compute readiness without a current aegis_control_plane_v1 artifact.",
+        "deferred_domain_note": "Deferred domains are not failed and are not actionable while control plane is unavailable.",
     }
 
 

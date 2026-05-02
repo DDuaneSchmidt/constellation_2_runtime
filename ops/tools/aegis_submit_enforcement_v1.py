@@ -149,6 +149,7 @@ def _freshness_blockers(freshness: dict[str, Any]) -> list[dict[str, str]]:
 def _promotion_validation_blockers(
     *,
     truth: Path,
+    runtime_root: Path | None,
     day: str,
     current_commit: str,
     promoted_commit: str,
@@ -190,6 +191,25 @@ def _promotion_validation_blockers(
     ledger_truth_root = str(ledger.get("truth_root") or "").strip()
     if not ledger_truth_root or Path(ledger_truth_root).expanduser().resolve() != truth.resolve():
         blockers.append({"code": "PROMOTION_VALIDATION_TRUTH_ROOT_MISMATCH", "path": str(path), "truth_root": ledger_truth_root})
+    expected_runtime_root = Path(runtime_root).expanduser().resolve() if runtime_root is not None else truth.resolve().parent
+    ledger_runtime_root = str(ledger.get("runtime_root") or "").strip()
+    if not ledger_runtime_root or Path(ledger_runtime_root).expanduser().resolve() != expected_runtime_root:
+        blockers.append(
+            {
+                "code": "PROMOTION_VALIDATION_RUNTIME_ROOT_MISMATCH",
+                "path": str(path),
+                "runtime_root": ledger_runtime_root,
+                "expected_runtime_root": str(expected_runtime_root),
+            }
+        )
+    if truth.resolve().parent != expected_runtime_root:
+        blockers.append(
+            {
+                "code": "PRODUCTION_TRUTH_RUNTIME_ROOT_MISMATCH",
+                "truth_root": str(truth),
+                "runtime_root": str(expected_runtime_root),
+            }
+        )
     packet_commit = str(packet.get("packet_git_commit") or "").strip()
     if packet_commit and promoted_commit and packet_commit != promoted_commit:
         blockers.append({"code": "PACKET_PROMOTED_COMMIT_MISMATCH", "path": str(packet.get("path") or ""), "packet_git_commit": packet_commit, "promoted_commit": promoted_commit})
@@ -348,6 +368,7 @@ def evaluate_submit_enforcement_v1(
     if mode == "PRODUCTION" and promoted_commit:
         promotion_ledger_path, promotion_ledger, promotion_blockers = _promotion_validation_blockers(
             truth=truth,
+            runtime_root=runtime_root,
             day=day,
             current_commit=current_commit,
             promoted_commit=promoted_commit,

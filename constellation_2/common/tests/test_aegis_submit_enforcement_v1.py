@@ -48,7 +48,7 @@ def _stable_git(monkeypatch: pytest.MonkeyPatch) -> None:
 def _seed_ready(tmp_path: Path, runtime_mode: str = "PRODUCTION") -> tuple[Path, Path, Path]:
     truth = tmp_path / ("candidate_truth" if runtime_mode == "CANDIDATE" else "production_truth")
     execution = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
-    runtime = tmp_path / "runtime"
+    runtime = truth.parent
     if runtime_mode == "PRODUCTION":
         _write(
             truth / "governance" / "production_version.v1.json",
@@ -149,6 +149,9 @@ def test_candidate_runtime_and_unpromoted_commit_hard_block_submit(tmp_path: Pat
     result = _evaluate(truth, execution, runtime, runtime_mode="CANDIDATE")
     assert result["ok"] is False
     assert result["canonical_blocker"] == "CANDIDATE_RUNTIME_SUBMIT_DISABLED"
+    _packet(runtime, runtime_mode="PRODUCTION")
+    result = _evaluate(truth, execution, runtime, runtime_mode="CANDIDATE")
+    assert any(row["code"] == "AEGIS_PACKET_STALE" for row in result["blockers"])
 
     truth, execution, runtime = _seed_ready(tmp_path / "unpromoted")
     _write(
@@ -185,6 +188,44 @@ def test_candidate_runtime_and_unpromoted_commit_hard_block_submit(tmp_path: Pat
     )
     result = _evaluate(truth, execution, runtime)
     assert any(row["code"] == "PROMOTION_VALIDATION_LEDGER_COMMIT_MISMATCH" for row in result["blockers"])
+
+    truth, execution, runtime = _seed_ready(tmp_path / "rolled_back_ledger")
+    _write(
+        _report(truth, "aegis_promotion_validation_ledger_v1", "promotion_validation_ledger.v1.json"),
+        {
+            "candidate_commit": COMMIT,
+            "repo_clean": True,
+            "import_preflight_result": {"status": "PASS"},
+            "focused_test_result": {"status": "PASS"},
+            "registry_validation_result": {"status": "PASS"},
+            "schema_validation_result": {"status": "PASS"},
+            "control_plane_result": {"status": "PASS"},
+            "truth_root": str(truth.resolve()),
+            "runtime_root": str(runtime.resolve()),
+            "promotion_status": "ROLLED_BACK",
+        },
+    )
+    result = _evaluate(truth, execution, runtime)
+    assert any(row["code"] == "PROMOTION_VALIDATION_LEDGER_NOT_APPROVED" for row in result["blockers"])
+
+    truth, execution, runtime = _seed_ready(tmp_path / "runtime_mismatch")
+    _write(
+        _report(truth, "aegis_promotion_validation_ledger_v1", "promotion_validation_ledger.v1.json"),
+        {
+            "candidate_commit": COMMIT,
+            "repo_clean": True,
+            "import_preflight_result": {"status": "PASS"},
+            "focused_test_result": {"status": "PASS"},
+            "registry_validation_result": {"status": "PASS"},
+            "schema_validation_result": {"status": "PASS"},
+            "control_plane_result": {"status": "PASS"},
+            "truth_root": str(truth.resolve()),
+            "runtime_root": str((tmp_path / "other_runtime").resolve()),
+            "promotion_status": "PROMOTED",
+        },
+    )
+    result = _evaluate(truth, execution, runtime)
+    assert any(row["code"] == "PROMOTION_VALIDATION_RUNTIME_ROOT_MISMATCH" for row in result["blockers"])
 
 
 def test_blocked_ledger_kill_switch_forbidden_action_packet_and_freshness_all_hard_block(tmp_path: Path) -> None:
@@ -272,3 +313,27 @@ def test_submit_entrypoints_use_shared_enforcement_gate() -> None:
     for legacy in ("c2_submit_paper_v1.py", "c2_submit_paper_v2.py", "c2_submit_paper_v3.py", "c2_submit_paper_v4.py"):
         text = (repo / "constellation_2" / "phaseD" / "tools" / legacy).read_text(encoding="utf-8")
         assert "LEGACY_EXECUTION_SUBMISSION_PATH_DISABLED" in text
+
+
+def test_submit_capable_entrypoint_scan_has_no_parallel_permission_chain() -> None:
+    repo = enforcement.REPO_ROOT
+    roots = [repo / "ops" / "tools", repo / "constellation_2" / "phaseD" / "tools", repo / "constellation_2" / "phaseD" / "lib"]
+    suspect_files: list[Path] = []
+    for root in roots:
+        for path in sorted(root.rglob("*.py")):
+            if path.name == "aegis_submit_enforcement_v1.py":
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            name = path.name
+            submit_named_entrypoint = "submit" in name and "submit_boundary" not in name and "readiness" not in name
+            submit_capable = "placeOrder" in text or "broker.submit" in text or (
+                submit_named_entrypoint and ("READY_TO_SUBMIT" in text or "submit_paper_order" in text)
+            )
+            if submit_capable:
+                suspect_files.append(path)
+                assert (
+                    "aegis_submit_enforcement_v1" in text
+                    or "LEGACY_EXECUTION_SUBMISSION_PATH_DISABLED" in text
+                    or "submit boundary evidence only" in text
+                ), str(path.relative_to(repo))
+    assert suspect_files

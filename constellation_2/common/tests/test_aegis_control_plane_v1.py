@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -648,6 +649,47 @@ def test_readiness_registry_contract_is_mandatory_and_single_owner() -> None:
                 assert dep.get("metadata_exempt_reason")
 
 
+def test_readiness_registry_completeness_scanner_covers_dependency_usages() -> None:
+    domains = cp.load_readiness_domain_registry_v1()
+    registered = {
+        str(dep.get("dependency_id") or "").strip()
+        for domain in domains
+        for dep in domain.get("dependencies", [])
+        if isinstance(dep, dict)
+    }
+    source_paths = [
+        REPO_ROOT / "ops" / "tools" / "run_aegis_control_plane_v1.py",
+        REPO_ROOT / "governance" / "02_REGISTRIES" / "aegis_readiness_domain_registry_v1.json",
+    ]
+    used: set[str] = set()
+    for path in source_paths:
+        text = path.read_text(encoding="utf-8")
+        used.update(re.findall(r'dependency_id["\']?\s*(?:==|:)\s*["\']([A-Za-z0-9_]+)["\']', text))
+        used.update(re.findall(r'["\'](broker_event_log|market_calendar_day|paper_capital_seed|operator_statement)["\']', text))
+    readiness_like = {item for item in used if item in registered or item.endswith("_v1") or item in {"broker_event_log", "market_calendar_day", "paper_capital_seed", "operator_statement"}}
+    unknown = sorted(item for item in readiness_like if item not in registered)
+    assert unknown == []
+
+
+def test_required_readiness_dependencies_have_schema_validation_or_explicit_exemption() -> None:
+    missing: list[str] = []
+    for domain in cp.load_readiness_domain_registry_v1():
+        for dep in domain.get("dependencies", []):
+            if not isinstance(dep, dict) or dep.get("required") is not True or dep.get("diagnostic_only") is True:
+                continue
+            dep_id = str(dep.get("dependency_id") or "")
+            if dep.get("schema_exempt") is True:
+                if not str(dep.get("schema_exempt_reason") or "").strip():
+                    missing.append(dep_id)
+                continue
+            schema_path = str(dep.get("schema_path") or "").strip()
+            if not schema_path or not (REPO_ROOT / schema_path).exists():
+                missing.append(dep_id)
+            if dep.get("schema_instance_exempt") is True and not str(dep.get("schema_instance_exempt_reason") or "").strip():
+                missing.append(dep_id)
+    assert missing == []
+
+
 def test_readiness_contract_schemas_reject_missing_contract_fields() -> None:
     for schema_path in REPORT_CONTRACT_SCHEMAS:
         with pytest.raises(SchemaValidationError):
@@ -768,6 +810,45 @@ def test_control_plane_validates_required_dependency_schema_instances(monkeypatc
     assert result["blocking_reason"] == "SCHEMA_INSTANCE_INVALID"
 
 
+def test_control_plane_dependency_result_includes_lineage_when_available(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    input_path = ctx.truth_root / "inputs" / "runtime_resilience_input.v1.json"
+    _write(input_path, {"day_utc": ctx.day_utc})
+    dep = next(
+        row
+        for domain in cp.load_readiness_domain_registry_v1()
+        for row in domain["dependencies"]
+        if row["dependency_id"] == "runtime_resilience_authority_v1"
+    )
+    path = cp._dependency_path(dep, ctx)
+    _write(
+        path,
+        {
+            "schema_id": "runtime_resilience_authority",
+            "schema_version": "v1",
+            "day_utc": ctx.day_utc,
+            "status": "PASS",
+            "generated_at_utc": f"{ctx.day_utc}T13:00:00Z",
+            "producer": {"repo": "constellation", "module": "ops/tools/run_runtime_resilience_authority_v1.py", "git_sha": cp._current_git_commit_v1()},
+            "truth_root": str(ctx.truth_root),
+            "producer_contract_v1": {
+                "producer_name": "ops/tools/run_runtime_resilience_authority_v1.py",
+                "producer_command": "run runtime resilience",
+                "code_version_git_commit": cp._current_git_commit_v1(),
+                "source_dirty_status": "CLEAN",
+                "input_artifacts": [{"path": str(input_path)}],
+            },
+        },
+    )
+
+    result = cp._evaluate_domain_dependency(dep, ctx)
+
+    assert str(input_path) in result["upstream_artifacts"]
+    assert "ops/tools/run_runtime_resilience_authority_v1.py" in result["upstream_producers"]
+    assert str(ctx.truth_root) in result["upstream_truth_roots"]
+
+
 def test_registry_missing_schema_path_and_exemptions_are_explicit() -> None:
     bad = [
         {
@@ -865,6 +946,22 @@ def test_control_plane_freshness_policy_fails_closed(monkeypatch, tmp_path: Path
     exempt_dep["freshness_exempt"] = True
     blocker, _detail = cp._artifact_freshness_issue_v1(dep=exempt_dep, payload={}, ctx=ctx, require_freshness_metadata=True)
     assert blocker == ""
+
+
+def test_control_plane_build_is_reproducible_after_stable_normalization(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _session_pass(ctx)
+
+    first = cp.build_control_plane_v1(ctx)
+    second = cp.build_control_plane_v1(ctx)
+
+    def stable(payload: dict) -> dict:
+        copy = json.loads(json.dumps(payload, sort_keys=True))
+        copy["generated_at_utc"] = "<normalized>"
+        return copy
+
+    assert stable(first) == stable(second)
 
 
 def test_stale_deferred_downstream_artifacts_are_quarantined_not_actionable(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
@@ -1083,6 +1180,31 @@ def test_projection_renders_control_plane_readiness_without_recomputing(monkeypa
     assert payload["failed_current_domain_dependencies"] == control["failed_current_domain_dependencies"]
     assert payload["deferred_downstream_domains"] == control["deferred_domains"]
     assert payload["deferred_domains"] == control["deferred_domains"]
+    assert payload["why_not_ready_summary"].startswith("SYSTEM NOT READY BECAUSE:")
+    assert payload["deferred_domain_note"] == "Deferred domains are not failed and are not actionable until the current domain clears."
+
+
+def test_projection_why_not_ready_summary_uses_current_domain_reason(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _session_pass(ctx)
+    _write(
+        ctx.truth_root / "reports" / "paper_session_authority_v1" / ctx.day_utc / "paper_session_authority.v1.json",
+        {"day_utc": ctx.day_utc, "authority_status": "DENIED", "reason_codes": ["NON_TRADING_DAY"]},
+    )
+    _write(
+        ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json",
+        {"day_utc": ctx.day_utc, "bootstrap_status": "BLOCKED", "reason_codes": ["NON_TRADING_DAY"], **_bootstrap_meta(ctx)},
+    )
+    monkeypatch.setattr(cp.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+    cp.run_control_plane_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
+    monkeypatch.setattr(projection.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+
+    _out_path, payload = projection.run_operator_projection_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
+
+    assert payload["current_domain"] == "SESSION_IDENTITY"
+    assert payload["why_not_ready_summary"] == "SYSTEM NOT READY BECAUSE: SESSION_IDENTITY -> NON_TRADING_DAY"
+    assert payload["deferred_domain_note"] == "Deferred domains are not failed and are not actionable until the current domain clears."
 
 
 def test_projection_blocks_when_control_plane_wrong_day_without_kernel_fallback(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001

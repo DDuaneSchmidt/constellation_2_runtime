@@ -548,6 +548,33 @@ def _dependency_result(
         if str(code or "").strip()
     ]
     normalized_reason_codes = list(dict.fromkeys(normalized_reason_codes))
+    lineage_payload = _read_json(expected) if expected.exists() and expected.is_file() and expected.suffix != ".jsonl" else {}
+    producer_contract = lineage_payload.get("producer_contract_v1") if isinstance(lineage_payload.get("producer_contract_v1"), dict) else {}
+    input_refs = producer_contract.get("input_artifacts") if isinstance(producer_contract.get("input_artifacts"), list) else []
+    upstream_artifacts = [
+        str(row.get("path") or "").strip()
+        for row in input_refs
+        if isinstance(row, dict) and str(row.get("path") or "").strip()
+    ]
+    upstream_artifacts = list(dict.fromkeys(upstream_artifacts))
+    upstream_producers = [
+        str(item).strip()
+        for item in (producer_contract.get("producer_name"), producer_contract.get("producer_command"), lineage_payload.get("producer_name"), lineage_payload.get("producer_command"))
+        if str(item or "").strip()
+    ]
+    upstream_producers = list(dict.fromkeys(upstream_producers))
+    upstream_truth_roots = [
+        str(item).strip()
+        for item in (
+            lineage_payload.get("truth_root"),
+            lineage_payload.get("runtime_truth_root"),
+            lineage_payload.get("canonical_truth_root"),
+            _nested_get(lineage_payload, ("truth_roots", "truth_root")),
+            _nested_get(lineage_payload, ("truth_roots", "canonical_truth_root")),
+        )
+        if str(item or "").strip()
+    ]
+    upstream_truth_roots = list(dict.fromkeys(upstream_truth_roots))
     return {
         "dependency_id": dependency_id,
         "domain_owner": str(dep.get("domain_owner") or "").strip(),
@@ -570,6 +597,9 @@ def _dependency_result(
         "reason_codes": normalized_reason_codes,
         "evidence_path": str(expected),
         "detail": detail,
+        "upstream_artifacts": upstream_artifacts,
+        "upstream_producers": upstream_producers,
+        "upstream_truth_roots": upstream_truth_roots,
     }
 
 
