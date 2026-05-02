@@ -65,16 +65,26 @@ def _write_market_data(truth_root: Path, *, symbol: str, day_rows: list[tuple[st
     )
 
 
-def _write_intent(truth_root: Path, day_utc: str) -> None:
+def _write_intent(
+    truth_root: Path,
+    day_utc: str,
+    *,
+    symbol: str = "SPY",
+    engine_id: str | None = None,
+    target_notional_pct: str = "0.01",
+) -> None:
+    payload = {
+        "schema_id": "exposure_intent",
+        "schema_version": "v1",
+        "intent_id": f"intent:{symbol}:{engine_id or 'NO_ENGINE'}:{day_utc}",
+        "underlying": {"symbol": symbol},
+        "target_notional_pct": target_notional_pct,
+    }
+    if engine_id:
+        payload["engine"] = {"engine_id": engine_id}
     _write_json(
-        truth_root / "intents_v1" / "snapshots" / day_utc / "spy.exposure_intent.v1.json",
-        {
-            "schema_id": "exposure_intent",
-            "schema_version": "v1",
-            "intent_id": f"intent:SPY:{day_utc}",
-            "underlying": {"symbol": "SPY"},
-            "target_notional_pct": "0.01",
-        },
+        truth_root / "intents_v1" / "snapshots" / day_utc / f"{symbol.lower()}_{engine_id or 'no_engine'}.exposure_intent.v1.json",
+        payload,
     )
 
 
@@ -203,3 +213,136 @@ def test_liquidity_gate_replaces_stale_existing_output_when_inputs_change() -> N
         assert row["decision"] == "PASS"
         assert row["metrics"]["close"] == "650.00"
         assert row["metrics"]["nav_total_cents"] == 10000000
+
+
+def test_liquidity_gate_skips_zero_cap_non_executable_engines() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        day_utc = "2026-04-14"
+        _write_market_data(
+            truth_root,
+            symbol="SPY",
+            day_rows=[
+                ("2026-03-26", "638.00"),
+                ("2026-03-27", "639.00"),
+                ("2026-03-30", "640.00"),
+                ("2026-04-01", "641.00"),
+                ("2026-04-02", "642.00"),
+                ("2026-04-03", "643.00"),
+                ("2026-04-06", "644.00"),
+                ("2026-04-07", "645.00"),
+                ("2026-04-08", "646.00"),
+                ("2026-04-09", "647.00"),
+                ("2026-04-10", "650.00"),
+            ],
+        )
+        _write_intent(
+            truth_root,
+            day_utc,
+            symbol="DBC",
+            engine_id="C2_CROSS_ASSET_TREND_V1",
+            target_notional_pct="0.10",
+        )
+        _write_intent(
+            truth_root,
+            day_utc,
+            symbol="SPY",
+            engine_id="C2_TREND_EQ_PRIMARY_V1",
+            target_notional_pct="0.01",
+        )
+        _write_nav(truth_root, day_utc, nav_total=100000)
+
+        with patch.object(gate_module, "_require_supported_truth_root", return_value=truth_root):
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "run_liquidity_slippage_gate_v1.py",
+                    "--day_utc",
+                    day_utc,
+                    "--truth_root",
+                    str(truth_root),
+                ],
+            ):
+                rc = gate_module.main()
+
+        assert rc == 0
+        payload = json.loads(
+            (
+                truth_root
+                / "reports"
+                / "liquidity_slippage_gate_v1"
+                / day_utc
+                / "liquidity_slippage_gate.v1.json"
+            ).read_text(encoding="utf-8")
+        )
+        rows = {row["engine_id"]: row for row in payload["results"]["per_intent"]}
+        assert payload["status"] == "PASS"
+        assert rows["C2_CROSS_ASSET_TREND_V1"]["decision"] == "SKIP"
+        assert rows["C2_CROSS_ASSET_TREND_V1"]["reason_codes"] == [
+            "LIQPOL_ENGINE_NOT_EXECUTABLE_BY_CAPITAL_POLICY"
+        ]
+        assert "zero-cap non-executable" in rows["C2_CROSS_ASSET_TREND_V1"]["recovery_command"]
+        assert rows["C2_TREND_EQ_PRIMARY_V1"]["decision"] == "PASS"
+
+
+def test_liquidity_gate_keeps_real_executable_notional_reject_fail_closed() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        day_utc = "2026-04-14"
+        _write_market_data(
+            truth_root,
+            symbol="SPY",
+            day_rows=[
+                ("2026-03-26", "638.00"),
+                ("2026-03-27", "639.00"),
+                ("2026-03-30", "640.00"),
+                ("2026-04-01", "641.00"),
+                ("2026-04-02", "642.00"),
+                ("2026-04-03", "643.00"),
+                ("2026-04-06", "644.00"),
+                ("2026-04-07", "645.00"),
+                ("2026-04-08", "646.00"),
+                ("2026-04-09", "647.00"),
+                ("2026-04-10", "650.00"),
+            ],
+        )
+        _write_intent(
+            truth_root,
+            day_utc,
+            symbol="SPY",
+            engine_id="C2_TREND_EQ_PRIMARY_V1",
+            target_notional_pct="0.50",
+        )
+        _write_nav(truth_root, day_utc, nav_total=100000)
+
+        with patch.object(gate_module, "_require_supported_truth_root", return_value=truth_root):
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "run_liquidity_slippage_gate_v1.py",
+                    "--day_utc",
+                    day_utc,
+                    "--truth_root",
+                    str(truth_root),
+                ],
+            ):
+                rc = gate_module.main()
+
+        assert rc == 1
+        payload = json.loads(
+            (
+                truth_root
+                / "reports"
+                / "liquidity_slippage_gate_v1"
+                / day_utc
+                / "liquidity_slippage_gate.v1.json"
+            ).read_text(encoding="utf-8")
+        )
+        row = payload["results"]["per_intent"][0]
+        assert payload["status"] == "FAIL"
+        assert row["decision"] == "FAIL"
+        assert row["reason_codes"] == ["LIQPOL_NOTIONAL_EXCEEDS_CAP"]
+        assert "approved governance" in row["recovery_command"]
+        assert payload["recovery_commands"] == [row["recovery_command"]]

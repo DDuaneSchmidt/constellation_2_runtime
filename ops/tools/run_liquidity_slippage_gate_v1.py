@@ -51,6 +51,7 @@ TRUTH_ROOT = resolve_truth_root_bridge_v1(
 )
 
 POLICY_PATH = (REPO_ROOT / "governance" / "02_REGISTRIES" / "C2_LIQUIDITY_SLIPPAGE_POLICY_V1.json").resolve()
+CAPAUTH_POLICY_PATH = (REPO_ROOT / "governance" / "02_REGISTRIES" / "C2_CAPITAL_AUTHORITY_POLICY_V1.json").resolve()
 POLICY_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RISK/liquidity_slippage_policy.v1.schema.json"
 
 OUT_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/liquidity_slippage_gate.v1.schema.json"
@@ -296,6 +297,59 @@ def _policy_effective(policy: Dict[str, Any], symbol: str) -> Dict[str, Any]:
     return eff
 
 
+def _load_capauth_engine_execution_sets() -> Tuple[set[str], set[str], Path, str]:
+    if not CAPAUTH_POLICY_PATH.exists():
+        raise SystemExit(f"FAIL: LIQPOL_CAPITAL_AUTHORITY_POLICY_MISSING: {CAPAUTH_POLICY_PATH}")
+    policy = _read_json_obj(CAPAUTH_POLICY_PATH)
+    sleeves = policy.get("sleeves")
+    if not isinstance(sleeves, list) or not sleeves:
+        raise SystemExit("FAIL: LIQPOL_CAPITAL_AUTHORITY_POLICY_SLEEVES_INVALID_OR_EMPTY")
+
+    all_engine_ids: set[str] = set()
+    executable_engine_ids: set[str] = set()
+    for sleeve in sleeves:
+        if not isinstance(sleeve, dict):
+            continue
+        limits = sleeve.get("limits") if isinstance(sleeve.get("limits"), dict) else {}
+        max_risk = limits.get("max_capital_at_risk_cents")
+        engine_ids = sleeve.get("engine_ids")
+        if not isinstance(engine_ids, list):
+            continue
+        is_executable = isinstance(max_risk, int) and max_risk > 0
+        for engine_id_raw in engine_ids:
+            engine_id = str(engine_id_raw or "").strip()
+            if not engine_id:
+                continue
+            all_engine_ids.add(engine_id)
+            if is_executable:
+                executable_engine_ids.add(engine_id)
+
+    if not all_engine_ids:
+        raise SystemExit("FAIL: LIQPOL_CAPITAL_AUTHORITY_POLICY_ENGINE_IDS_EMPTY")
+    if not executable_engine_ids:
+        raise SystemExit("FAIL: LIQPOL_CAPITAL_AUTHORITY_POLICY_EXECUTABLE_ENGINE_IDS_EMPTY")
+    return executable_engine_ids, all_engine_ids, CAPAUTH_POLICY_PATH, _sha256_file(CAPAUTH_POLICY_PATH)
+
+
+def _recovery_command_for_reason(reason_codes: List[str], *, symbol: str) -> str:
+    reasons = set(reason_codes)
+    if "LIQPOL_MARKET_DATA_FILE_MISSING" in reasons:
+        return f"PYTHONPATH=\"$PWD\" python3 ops/tools/run_market_data_snapshot_required_day_v1.py --symbol {symbol}"
+    if "LIQPOL_INSUFFICIENT_HISTORY" in reasons or "LIQPOL_ADV_BELOW_MIN" in reasons:
+        return f"refresh governed market_data_snapshot_v1 history for {symbol} before rerunning liquidity_slippage_gate_v1"
+    if "LIQPOL_NOTIONAL_EXCEEDS_CAP" in reasons:
+        return "reduce governed intent notional or update capital policy only through approved governance"
+    if "LIQPOL_PARTICIPATION_EXCEEDS_CAP" in reasons or "LIQPOL_SLIPPAGE_EXCEEDS_CAP" in reasons:
+        return f"provide fresher governed liquidity evidence for {symbol} or leave intent rejected"
+    if "LIQPOL_ENGINE_NOT_EXECUTABLE_BY_CAPITAL_POLICY" in reasons:
+        return "no recovery required for liquidity gate; engine is zero-cap non-executable by capital authority policy"
+    if "LIQPOL_ENGINE_NOT_IN_CAPITAL_POLICY" in reasons:
+        return "register engine in C2_CAPITAL_AUTHORITY_POLICY_V1 before liquidity gate evaluation"
+    if "LIQPOL_PASS" in reasons:
+        return "none"
+    return "rerun governed liquidity_slippage_gate_v1 after fixing listed input evidence"
+
+
 @dataclass(frozen=True)
 class Bar:
     ts: str
@@ -428,6 +482,13 @@ def main() -> int:
     input_manifest.append({"type": "policy_manifest", "path": str(POLICY_PATH), "sha256": pol_sha})
     input_manifest.append({"type": "policy_schema", "path": str(pol_schema_path), "sha256": pol_schema_sha})
 
+    executable_engine_ids, all_policy_engine_ids, capauth_policy_path, capauth_policy_sha = (
+        _load_capauth_engine_execution_sets()
+    )
+    input_manifest.append(
+        {"type": "capital_authority_policy", "path": str(capauth_policy_path), "sha256": capauth_policy_sha}
+    )
+
     if not DATASET_MANIFEST.exists():
         raise SystemExit(f"FAIL: LIQPOL_MARKET_DATA_FILE_MISSING: {DATASET_MANIFEST}")
 
@@ -518,8 +579,71 @@ def main() -> int:
             est_notional = (Decimal(nav_cents) / Decimal(100)) * tnp
             est_notional_2dp = Decimal(_decimal_str_2dp(est_notional))
 
+            if engine_id and engine_id != "UNKNOWN" and engine_id in all_policy_engine_ids and engine_id not in executable_engine_ids:
+                skipped += 1
+                rc = ["LIQPOL_ENGINE_NOT_EXECUTABLE_BY_CAPITAL_POLICY"]
+                per_intent.append(
+                    {
+                        "intent_hash": sha,
+                        "engine_id": engine_id,
+                        "symbol": symbol,
+                        "decision": "SKIP",
+                        "reason_codes": rc,
+                        "recovery_command": _recovery_command_for_reason(rc, symbol=symbol),
+                        "metrics": {
+                            "nav_total_cents": nav_cents,
+                            "target_notional_pct": _decimal_str_6dp(tnp),
+                            "est_notional_usd": _decimal_str_2dp(est_notional_2dp),
+                            "close": "0.00",
+                            "est_shares": 0,
+                            "adv_shares": 0,
+                            "adv_dollar": "0.00",
+                            "participation_pct_adv": "0.000000",
+                            "est_slippage_bps": "0.00",
+                            "caps": {
+                                "max_participation_pct_adv": _decimal_str_6dp(cap_part),
+                                "max_est_slippage_bps": _decimal_str_2dp(cap_slip),
+                                "max_notional_per_symbol_usd": str(cap_notional.quantize(Decimal("1"), rounding=ROUND_DOWN)),
+                            },
+                        },
+                    }
+                )
+                continue
+
+            if engine_id and engine_id != "UNKNOWN" and engine_id not in all_policy_engine_ids:
+                failed += 1
+                rc = ["LIQPOL_ENGINE_NOT_IN_CAPITAL_POLICY", "LIQPOL_FAIL_CLOSED_REQUIRED"]
+                per_intent.append(
+                    {
+                        "intent_hash": sha,
+                        "engine_id": engine_id,
+                        "symbol": symbol,
+                        "decision": "FAIL",
+                        "reason_codes": rc,
+                        "recovery_command": _recovery_command_for_reason(rc, symbol=symbol),
+                        "metrics": {
+                            "nav_total_cents": nav_cents,
+                            "target_notional_pct": _decimal_str_6dp(tnp),
+                            "est_notional_usd": _decimal_str_2dp(est_notional_2dp),
+                            "close": "0.00",
+                            "est_shares": 0,
+                            "adv_shares": 0,
+                            "adv_dollar": "0.00",
+                            "participation_pct_adv": "0.000000",
+                            "est_slippage_bps": "0.00",
+                            "caps": {
+                                "max_participation_pct_adv": _decimal_str_6dp(cap_part),
+                                "max_est_slippage_bps": _decimal_str_2dp(cap_slip),
+                                "max_notional_per_symbol_usd": str(cap_notional.quantize(Decimal("1"), rounding=ROUND_DOWN)),
+                            },
+                        },
+                    }
+                )
+                continue
+
             # IMPORTANT: zero-notional intents are SKIP (not parse failure)
             if est_notional_2dp <= Decimal("0"):
+                rc = ["LIQPOL_NOTIONAL_ZERO"]
                 skipped += 1
                 per_intent.append(
                     {
@@ -527,7 +651,8 @@ def main() -> int:
                         "engine_id": engine_id,
                         "symbol": symbol,
                         "decision": "SKIP",
-                        "reason_codes": ["LIQPOL_NOTIONAL_ZERO"],
+                        "reason_codes": rc,
+                        "recovery_command": _recovery_command_for_reason(rc, symbol=symbol),
                         "metrics": {
                             "nav_total_cents": nav_cents,
                             "target_notional_pct": _decimal_str_6dp(tnp),
@@ -552,6 +677,7 @@ def main() -> int:
             data_path, data_sha, bars = _load_bars_for_symbol_year(symbol, year)
             if not bars:
                 if symbol in allow_missing:
+                    rc = ["LIQPOL_MARKET_DATA_FILE_MISSING"]
                     skipped += 1
                     per_intent.append(
                         {
@@ -559,7 +685,8 @@ def main() -> int:
                             "engine_id": engine_id,
                             "symbol": symbol,
                             "decision": "SKIP",
-                            "reason_codes": ["LIQPOL_MARKET_DATA_FILE_MISSING"],
+                            "reason_codes": rc,
+                            "recovery_command": _recovery_command_for_reason(rc, symbol=symbol),
                             "metrics": {
                                 "nav_total_cents": nav_cents,
                                 "target_notional_pct": _decimal_str_6dp(tnp),
@@ -642,6 +769,7 @@ def main() -> int:
                     "symbol": symbol,
                     "decision": decision,
                     "reason_codes": rc,
+                    "recovery_command": _recovery_command_for_reason(rc, symbol=symbol),
                     "metrics": {
                         "nav_total_cents": nav_cents,
                         "target_notional_pct": _decimal_str_6dp(tnp),
@@ -665,13 +793,15 @@ def main() -> int:
             raise
         except Exception as e:
             failed += 1
+            rc = ["LIQPOL_INTENT_PARSE_ERROR", f"LIQPOL_EXC:{type(e).__name__}", "LIQPOL_FAIL_CLOSED_REQUIRED"]
             per_intent.append(
                 {
                     "intent_hash": sha,
                     "engine_id": engine_id,
                     "symbol": symbol,
                     "decision": "FAIL",
-                    "reason_codes": ["LIQPOL_INTENT_PARSE_ERROR", f"LIQPOL_EXC:{type(e).__name__}", "LIQPOL_FAIL_CLOSED_REQUIRED"],
+                    "reason_codes": rc,
+                    "recovery_command": _recovery_command_for_reason(rc, symbol=symbol),
                     "metrics": {
                         "nav_total_cents": nav_cents,
                         "target_notional_pct": _decimal_str_6dp(tnp) if isinstance(tnp, Decimal) else "0.000000",
@@ -695,6 +825,15 @@ def main() -> int:
 
     status = "PASS" if failed == 0 else "FAIL"
     reason_codes = ["LIQPOL_PASS"] if status == "PASS" else ["LIQPOL_FAIL_CLOSED_REQUIRED"]
+    recovery_commands = sorted(
+        {
+            str(row.get("recovery_command") or "").strip()
+            for row in per_intent
+            if str(row.get("decision") or "").strip() == "FAIL"
+            and str(row.get("recovery_command") or "").strip()
+            and str(row.get("recovery_command") or "").strip() != "none"
+        }
+    )
 
     out_obj: Dict[str, Any] = {
         "schema_id": "liquidity_slippage_gate",
@@ -704,6 +843,7 @@ def main() -> int:
         "producer": {"repo": "constellation", "module": "ops/tools/run_liquidity_slippage_gate_v1.py", "git_sha": _git_sha()},
         "status": status,
         "reason_codes": reason_codes,
+        "recovery_commands": recovery_commands,
         "input_manifest": input_manifest,
         "policy": {"path": str(POLICY_PATH), "sha256": pol_sha, "schema_path": str(pol_schema_path), "schema_sha256": pol_schema_sha},
         "results": {"per_intent": per_intent, "totals": totals},
