@@ -18,6 +18,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from constellation_2.common.c2_risk_policy_loader_v1 import RiskPolicyLoaderError, load_risk_policy_for_engine_or_fail
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1
+from ops.tools.aegis_artifact_ledger_v1 import infer_runtime_root_v1, write_artifact_ledger_record_v1
+from ops.tools.aegis_runtime_mode_v1 import runtime_mode_from_truth_root_v1
 
 PRODUCER = "ops/tools/run_risk_definition_contract_v1.py"
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/risk_definition_contract.v1.schema.json"
@@ -575,6 +577,17 @@ def main(argv: list[str] | None = None) -> int:
         intent_hash=str(payload["intent_hash"]),
     )
     sha = _write_json(out, payload)
+    write_artifact_ledger_record_v1(
+        artifact_path=out,
+        artifact_type="risk_definition_contract_v1",
+        truth_root=Path(args.truth_root).expanduser().resolve(),
+        runtime_root=infer_runtime_root_v1(Path(args.truth_root).expanduser().resolve()),
+        runtime_mode=runtime_mode_from_truth_root_v1(Path(args.truth_root).expanduser().resolve()),
+        day=str(args.day_utc).strip(),
+        recovery_command=f"PYTHONPATH=\"$PWD\" python3 {PRODUCER} --day_utc {str(args.day_utc).strip()} --truth_root {Path(args.truth_root).expanduser().resolve()} --intent_hash {str(payload['intent_hash'])}",
+        sleeve=str(payload.get("sleeve_id") or ""),
+        artifact_id=f"risk_definition_contract_v1:{str(args.day_utc).strip()}:{str(payload['intent_hash'])}",
+    )
     print(json.dumps({"status": payload["validation_status"], "path": str(out), "sha256": sha, "blockers": payload["blockers"]}, sort_keys=True))
     return 0 if payload["validation_status"] == "PASS" else 2
 

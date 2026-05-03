@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 import ops.tools.aegis_submit_enforcement_v1 as enforcement
+import ops.tools.aegis_artifact_ledger_v1 as ledger
 import ops.tools.run_aegis_control_plane_v1 as cp
 
 
@@ -45,6 +46,47 @@ def _stable_git(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(enforcement, "_git_commit", lambda: COMMIT)
     monkeypatch.setattr(enforcement, "_git_dirty_status", lambda: "CLEAN")
     monkeypatch.setattr(cp, "_current_git_commit_v1", lambda: COMMIT)
+    monkeypatch.setattr(ledger, "git_commit_v1", lambda: COMMIT)
+
+
+def _attest_control_plane(truth: Path, runtime: Path, runtime_mode: str = "PRODUCTION") -> None:
+    control_path = _report(truth, "aegis_control_plane_v1", "control_plane.v1.json")
+    ledger_path, record = ledger.write_artifact_ledger_record_v1(
+        artifact_path=control_path,
+        artifact_type="aegis_control_plane_v1",
+        truth_root=truth,
+        runtime_root=runtime,
+        runtime_mode=runtime_mode,
+        day=DAY,
+    )
+    if runtime_mode == "PRODUCTION":
+        attestation_path = ledger.promotion_attestation_path_v1(truth_root=truth, day=DAY, artifact_id=record["artifact_id"])
+        _write(
+            attestation_path,
+            {
+                "schema_id": "aegis_promotion_attestation",
+                "schema_version": "aegis_promotion_attestation.v1",
+                "attestation_id": "test-attestation",
+                "artifact_id": record["artifact_id"],
+                "artifact_type": "aegis_control_plane_v1",
+                "source_candidate_artifact_path": str(control_path.resolve()),
+                "source_candidate_artifact_hash": record["artifact_hash"],
+                "source_ledger_record_ref": {
+                    "ledger_record_id": record["ledger_record_id"],
+                    "artifact_id": record["artifact_id"],
+                    "artifact_hash": record["artifact_hash"],
+                    "ledger_path": str(ledger_path),
+                },
+                "destination_production_path": str(control_path.resolve()),
+                "destination_production_hash": record["artifact_hash"],
+                "promotion_policy_version": "test",
+                "producer_module": "ops/tools/run_candidate_to_production_promotion_v1.py",
+                "producer_git_commit": COMMIT,
+                "promoted_at": "2026-04-29T14:00:00Z",
+                "validation_status": "PASS",
+                "blockers": [],
+            },
+        )
 
 
 def _seed_ready(tmp_path: Path, runtime_mode: str = "PRODUCTION") -> tuple[Path, Path, Path]:
@@ -80,6 +122,7 @@ def _seed_ready(tmp_path: Path, runtime_mode: str = "PRODUCTION") -> tuple[Path,
             "submit_allowed": True,
             "canonical_blocker": "",
             "producer_contract_v1": {
+                "producer_name": "ops/tools/run_aegis_control_plane_v1.py",
                 "code_version_git_commit": COMMIT,
                 "source_dirty_status": "CLEAN",
                 "generated_at_utc": "2026-04-29T14:00:00Z",
@@ -87,6 +130,7 @@ def _seed_ready(tmp_path: Path, runtime_mode: str = "PRODUCTION") -> tuple[Path,
             },
         },
     )
+    _attest_control_plane(truth, runtime, runtime_mode)
     if runtime_mode == "PRODUCTION":
         _write(
             _report(truth, "aegis_promotion_validation_ledger_v1", "promotion_validation_ledger.v1.json"),
@@ -258,6 +302,7 @@ def test_submit_enforcement_rejects_copied_candidate_control_plane_in_production
             "canonical_blocker": "",
             "evidence_paths": [str(candidate_truth / "target_day_build_v1" / f"{DAY}.json")],
             "producer_contract_v1": {
+                "producer_name": "ops/tools/run_aegis_control_plane_v1.py",
                 "code_version_git_commit": COMMIT,
                 "source_dirty_status": "CLEAN",
                 "generated_at_utc": "2026-04-29T14:00:00Z",
@@ -324,6 +369,7 @@ def test_blocked_ledger_kill_switch_forbidden_action_packet_and_freshness_all_ha
             "submit_allowed": True,
             "canonical_blocker": "",
             "producer_contract_v1": {
+                "producer_name": "ops/tools/run_aegis_control_plane_v1.py",
                 "code_version_git_commit": "b" * 40,
                 "source_dirty_status": "CLEAN",
                 "generated_at_utc": "2026-04-29T14:00:00Z",
@@ -331,6 +377,7 @@ def test_blocked_ledger_kill_switch_forbidden_action_packet_and_freshness_all_ha
             },
         },
     )
+    _attest_control_plane(truth, runtime, "PRODUCTION")
     assert any(row["code"] == "CONTROL_PLANE_COMMIT_MISMATCH" for row in _evaluate(truth, execution, runtime)["blockers"])
 
 
@@ -351,6 +398,7 @@ def test_control_plane_not_ready_blocks_even_when_legacy_gates_are_ready(tmp_pat
             "submit_allowed": False,
             "canonical_blocker": "SESSION_IDENTITY_PRECHECK_FAILED",
             "producer_contract_v1": {
+                "producer_name": "ops/tools/run_aegis_control_plane_v1.py",
                 "code_version_git_commit": COMMIT,
                 "source_dirty_status": "CLEAN",
                 "generated_at_utc": "2026-04-29T14:00:00Z",
@@ -358,6 +406,7 @@ def test_control_plane_not_ready_blocks_even_when_legacy_gates_are_ready(tmp_pat
             },
         },
     )
+    _attest_control_plane(truth, runtime, "PRODUCTION")
 
     result = _evaluate(truth, execution, runtime)
 

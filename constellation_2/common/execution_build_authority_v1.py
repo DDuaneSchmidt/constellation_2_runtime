@@ -38,6 +38,8 @@ from constellation_2.common.sleeve_execution_root_v1 import resolve_sleeve_execu
 from constellation_2.common.trade_submit_readiness_authority_v1 import resolve_governed_account_binding
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+from ops.tools.aegis_artifact_ledger_v1 import infer_runtime_root_v1, write_artifact_ledger_record_v1
+from ops.tools.aegis_runtime_mode_v1 import runtime_mode_from_truth_root_v1
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_REGISTRY_RELPATH = 'governance/02_REGISTRIES/C2_EXECUTION_BUILD_MANIFESTS_V1.json'
@@ -1242,6 +1244,18 @@ def run_execution_build_authority_v1(*, repo_root: Path, operation_type: str, ca
     validate_against_repo_schema_v1(build_obj, repo_root, BUILD_SCHEMA_RELPATH)
     build_path = _build_artifact_path(ctx)
     build_sha = _write_canonical_json(build_path, build_obj)
+    write_artifact_ledger_record_v1(
+        artifact_path=build_path,
+        artifact_type='execution_build_v1',
+        truth_root=ctx.canonical_truth_root,
+        runtime_root=infer_runtime_root_v1(ctx.canonical_truth_root),
+        runtime_mode=runtime_mode_from_truth_root_v1(ctx.canonical_truth_root),
+        day=ctx.day_utc,
+        recovery_command='PYTHONPATH="$PWD" python3 ops/tools/run_execution_package_from_authorized_intent_v1.py',
+        account=ctx.ib_account,
+        sleeve=ctx.sleeve_id,
+        artifact_id=f'execution_build_v1:{ctx.day_utc}:{ctx.submission_id}',
+    )
 
     package_path = None
     package_obj = None
@@ -1350,5 +1364,17 @@ def run_execution_build_authority_v1(*, repo_root: Path, operation_type: str, ca
         validate_against_repo_schema_v1(package_obj, repo_root, PACKAGE_SCHEMA_RELPATH)
         package_path = _package_path(ctx)
         _write_canonical_json(package_path, package_obj)
+        write_artifact_ledger_record_v1(
+            artifact_path=package_path,
+            artifact_type='execution_package_v1',
+            truth_root=ctx.execution_truth_root,
+            runtime_root=infer_runtime_root_v1(ctx.execution_truth_root),
+            runtime_mode=runtime_mode_from_truth_root_v1(ctx.execution_truth_root),
+            day=ctx.day_utc,
+            recovery_command='PYTHONPATH="$PWD" python3 ops/tools/run_execution_package_from_authorized_intent_v1.py',
+            account=ctx.ib_account,
+            sleeve=ctx.sleeve_id,
+            artifact_id=f'execution_package_v1:{ctx.day_utc}:{ctx.submission_id}',
+        )
 
     return {'context': ctx, 'manifest': manifest, 'results': results, 'build_path': build_path, 'build_obj': build_obj, 'package_path': package_path, 'package_obj': package_obj}

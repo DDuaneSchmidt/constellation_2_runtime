@@ -16,6 +16,11 @@ if str(REPO_ROOT) not in sys.path:
 from constellation_2.phaseB.lib.validate_against_schema_v1 import SchemaValidationError, validate_against_repo_schema_v1
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
 from ops.tools import run_aegis_bod_prepare_v1 as bod
+from ops.tools.aegis_artifact_ledger_v1 import (
+    verify_artifact_ledger_record_v1,
+    verify_promotion_attestation_v1,
+    write_artifact_ledger_record_v1,
+)
 from ops.tools.aegis_runtime_mode_v1 import assert_candidate_cannot_write_production_v1, runtime_mode_from_truth_root_v1
 from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
 from ops.tools.repo_protection_common_v1 import read_protection_status_v1
@@ -275,6 +280,47 @@ def require_control_plane_self_binding_v1(payload: dict[str, Any], *, actual_pat
     issues = control_plane_self_binding_issues_v1(payload, actual_path=actual_path, include_producer_freshness=False)
     if issues:
         raise RuntimeError("CONTROL_PLANE_SELF_BINDING_INVALID:" + json.dumps(issues, sort_keys=True))
+
+
+def control_plane_acceptance_issues_v1(
+    payload: dict[str, Any],
+    *,
+    actual_path: Path,
+    require_ledger: bool = True,
+    require_promotion: bool | None = None,
+) -> list[dict[str, str]]:
+    actual = Path(actual_path).expanduser().resolve()
+    issues = control_plane_self_binding_issues_v1(payload, actual_path=actual)
+    day = str(payload.get("day_utc") or "").strip()
+    truth_root_text = str(payload.get("truth_root") or "").strip()
+    runtime_root_text = str(payload.get("runtime_root") or "").strip()
+    runtime_mode = str(payload.get("runtime_mode") or "").strip().upper()
+    if not day or not truth_root_text or not runtime_root_text or runtime_mode not in {"PRODUCTION", "CANDIDATE"}:
+        return issues
+    truth_root = Path(truth_root_text).expanduser().resolve()
+    runtime_root = Path(runtime_root_text).expanduser().resolve()
+    if require_ledger:
+        issues.extend(
+            verify_artifact_ledger_record_v1(
+                artifact_path=actual,
+                artifact_type="aegis_control_plane_v1",
+                truth_root=truth_root,
+                runtime_root=runtime_root,
+                runtime_mode=runtime_mode,
+                day=day,
+            )
+        )
+    promotion_required = bool(require_promotion) if require_promotion is not None else (truth_root.name == "production_truth")
+    if promotion_required:
+        issues.extend(
+            verify_promotion_attestation_v1(
+                truth_root=truth_root,
+                day=day,
+                artifact_path=actual,
+                artifact_type="aegis_control_plane_v1",
+            )
+        )
+    return issues
 
 
 def load_phase_registry_v1() -> list[dict[str, Any]]:
@@ -1949,6 +1995,15 @@ def run_control_plane_v1(day_utc: str, environment: str, truth_root: str = "", r
         "governance/04_DATA/SCHEMAS/C2/REPORTS/aegis_control_plane.v1.schema.json",
     )
     _write_json(path, payload)
+    write_artifact_ledger_record_v1(
+        artifact_path=path,
+        artifact_type="aegis_control_plane_v1",
+        truth_root=ctx.truth_root,
+        runtime_root=ctx.runtime_root,
+        runtime_mode=mode,
+        day=ctx.day_utc,
+        recovery_command=payload.get("recovery_action") or "",
+    )
     return path, payload
 
 

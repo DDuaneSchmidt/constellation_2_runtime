@@ -14,7 +14,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1, resolve_fact_plane_truth_root_v1
+from ops.tools.aegis_artifact_ledger_v1 import write_artifact_ledger_record_v1
 from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1, git_commit_v1, git_dirty_status_v1
+from ops.tools.aegis_runtime_mode_v1 import runtime_mode_from_truth_root_v1
 from ops.tools.aegis_truth_integrity_common_v1 import now_iso_v1, read_json_v1, write_json_v1
 
 
@@ -348,6 +350,15 @@ def write_sleeve_performance_control_v1(*, truth_root: Path, day_utc: str, paylo
     )
     _validate(payload)
     write_json_v1(path, payload)
+    write_artifact_ledger_record_v1(
+        artifact_path=path,
+        artifact_type="sleeve_performance_control_v1",
+        truth_root=truth_root,
+        runtime_root=Path(str(payload.get("runtime_root") or truth_root)).expanduser().resolve(),
+        runtime_mode=runtime_mode_from_truth_root_v1(truth_root),
+        day=day_utc,
+        recovery_command=command,
+    )
     return path
 
 

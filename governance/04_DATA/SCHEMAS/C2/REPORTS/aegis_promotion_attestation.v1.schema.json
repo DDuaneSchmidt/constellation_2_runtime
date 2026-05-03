@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/aegis_promotion_attestation.v1.schema.json",
+  "title": "aegis_promotion_attestation.v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "attestation_id",
+    "artifact_id",
+    "artifact_type",
+    "source_candidate_artifact_path",
+    "source_candidate_artifact_hash",
+    "source_ledger_record_ref",
+    "destination_production_path",
+    "destination_production_hash",
+    "promotion_policy_version",
+    "producer_module",
+    "producer_git_commit",
+    "promoted_at",
+    "validation_status",
+    "blockers"
+  ],
+  "properties": {
+    "schema_id": { "const": "aegis_promotion_attestation" },
+    "schema_version": { "const": "aegis_promotion_attestation.v1" },
+    "attestation_id": { "type": "string", "minLength": 1 },
+    "artifact_id": { "type": "string", "minLength": 1 },
+    "artifact_type": { "type": "string", "minLength": 1 },
+    "source_candidate_artifact_path": { "type": "string", "minLength": 1 },
+    "source_candidate_artifact_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "source_ledger_record_ref": { "type": "object" },
+    "destination_production_path": { "type": "string", "minLength": 1 },
+    "destination_production_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "promotion_policy_version": { "type": "string", "minLength": 1 },
+    "producer_module": { "type": "string", "minLength": 1 },
+    "producer_git_commit": { "type": "string", "minLength": 1 },
+    "promoted_at": { "type": "string", "minLength": 1 },
+    "validation_status": { "type": "string", "minLength": 1 },
+    "blockers": { "type": "array" }
+  }
+}

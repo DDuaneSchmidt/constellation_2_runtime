@@ -16,7 +16,7 @@ from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1
 from ops.tools import run_aegis_bod_prepare_v1 as bod
 from ops.tools.aegis_runtime_mode_v1 import git_commit_v1, read_production_version_v1, runtime_mode_from_truth_root_v1
 from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
-from ops.tools.run_aegis_control_plane_v1 import control_plane_path, control_plane_self_binding_issues_v1
+from ops.tools.run_aegis_control_plane_v1 import control_plane_acceptance_issues_v1, control_plane_path
 from ops.tools.run_aegis_promotion_validation_ledger_v1 import promotion_validation_ledger_path
 
 SCHEMA_VERSION = "aegis_operator_projection.v1"
@@ -347,7 +347,7 @@ def run_operator_projection_v1(day_utc: str, environment: str, truth_root: str =
     ctx = bod._resolve_context(day_utc, environment, truth_root)
     cp_path = control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     control = _read_json(cp_path)
-    integrity_issues = control_plane_self_binding_issues_v1(control, actual_path=cp_path) if control else [
+    integrity_issues = control_plane_acceptance_issues_v1(control, actual_path=cp_path) if control else [
         {"code": "CONTROL_PLANE_UNAVAILABLE", "path": str(cp_path), "detail": "control plane artifact missing or unreadable"}
     ]
     if str(control.get("day_utc") or "") != ctx.day_utc:
