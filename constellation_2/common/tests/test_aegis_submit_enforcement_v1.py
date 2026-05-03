@@ -399,7 +399,7 @@ def test_control_plane_not_ready_blocks_even_when_legacy_gates_are_ready(tmp_pat
             "canonical_blocker": "SESSION_IDENTITY_PRECHECK_FAILED",
             "producer_contract_v1": {
                 "producer_name": "ops/tools/run_aegis_control_plane_v1.py",
-                "code_version_git_commit": COMMIT,
+                "code_version_git_commit": "b" * 40,
                 "source_dirty_status": "CLEAN",
                 "generated_at_utc": "2026-04-29T14:00:00Z",
                 "output_artifacts": [{"path": str(control_path.resolve())}],
@@ -413,6 +413,48 @@ def test_control_plane_not_ready_blocks_even_when_legacy_gates_are_ready(tmp_pat
     assert result["ok"] is False
     assert result["canonical_blocker"] == "CONTROL_PLANE_NOT_READY"
     assert any(row["code"] == "CONTROL_PLANE_NOT_READY" for row in result["blockers"])
+
+
+def test_control_plane_not_ready_is_primary_when_promotion_is_stale(tmp_path: Path) -> None:
+    truth, execution, runtime = _seed_ready(tmp_path)
+    control_path = _report(truth, "aegis_control_plane_v1", "control_plane.v1.json")
+    _write(
+        control_path,
+        {
+            "day_utc": DAY,
+            "truth_root": str(truth.resolve()),
+            "runtime_root": str(runtime.resolve()),
+            "runtime_mode": "PRODUCTION",
+            "artifact_path": str(control_path.resolve()),
+            "actual_artifact_path": str(control_path.resolve()),
+            "producer_contract_output_artifact_path": str(control_path.resolve()),
+            "final_status": "NOT_READY",
+            "submit_allowed": False,
+            "canonical_blocker": "SESSION_IDENTITY_PRECHECK_FAILED",
+            "producer_contract_v1": {
+                "producer_name": "ops/tools/run_aegis_control_plane_v1.py",
+                "code_version_git_commit": COMMIT,
+                "source_dirty_status": "CLEAN",
+                "generated_at_utc": "2026-04-29T14:00:00Z",
+                "output_artifacts": [{"path": str(control_path.resolve())}],
+            },
+        },
+    )
+    _attest_control_plane(truth, runtime, "PRODUCTION")
+    _write(
+        truth / "governance" / "production_version.v1.json",
+        {"schema_version": "production_version.v1", "promoted_commit": "b" * 40, "status": "ACTIVE"},
+    )
+
+    result = _evaluate(truth, execution, runtime)
+
+    assert result["ok"] is False
+    assert result["canonical_blocker"] == "CONTROL_PLANE_NOT_READY"
+    codes = [row["code"] for row in result["blockers"]]
+    assert codes[0] == "CONTROL_PLANE_NOT_READY"
+    assert codes.index("CONTROL_PLANE_NOT_READY") < codes.index("UNPROMOTED_PRODUCTION_COMMIT")
+    assert "UNPROMOTED_PRODUCTION_COMMIT" in codes
+    assert "CONTROL_PLANE_COMMIT_MISMATCH" in codes
 
 
 def test_submit_entrypoints_use_shared_enforcement_gate() -> None:

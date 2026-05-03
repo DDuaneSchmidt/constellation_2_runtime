@@ -867,6 +867,16 @@ def _session_identity_dependency_result(dep: dict[str, Any], ctx: Any) -> dict[s
             detail="required session identity artifact is missing",
             path=path,
         )
+    manifest_blocker, manifest_detail, manifest_path = _paired_manifest_issue_v1(dependency_id=dependency_id, path=path, ctx=ctx)
+    if manifest_blocker:
+        return _dependency_result(
+            dep=dep,
+            ctx=ctx,
+            status="FAIL",
+            blocker=manifest_blocker,
+            detail=manifest_detail,
+            path=manifest_path or path,
+        )
     payload = _read_json(path)
     schema_blocker, schema_detail = _artifact_schema_issue_v1(dep=dep, path=path, payload=payload)
     if schema_blocker:
@@ -979,6 +989,9 @@ def _generic_dependency_result(dep: dict[str, Any], ctx: Any) -> dict[str, Any]:
             detail="required dependency artifact is missing",
             path=path,
         )
+    paired_blocker, paired_detail, paired_path = _paired_manifest_issue_v1(dependency_id=dependency_id, path=path, ctx=ctx)
+    if paired_blocker:
+        return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker=paired_blocker, detail=paired_detail, path=paired_path or path)
     payload = _read_json(path) if path.is_file() else {}
     require_metadata = bool(dep.get("required") is True and dep.get("metadata_exempt") is not True)
     allowed_roots = [Path(ctx.truth_root)]
@@ -1019,6 +1032,33 @@ def _generic_dependency_result(dep: dict[str, Any], ctx: Any) -> dict[str, Any]:
     if status in {"FAIL", "FAILED", "BLOCKED", "DENIED", "NOT_READY"}:
         return _dependency_result(dep=dep, ctx=ctx, status="FAIL", blocker=f"{dependency_id.upper()}_BLOCKED", detail=f"artifact status={status}", path=path)
     return _dependency_result(dep=dep, ctx=ctx, status="SATISFIED", path=path)
+
+
+def _paired_manifest_issue_v1(*, dependency_id: str, path: Path, ctx: Any) -> tuple[str, str, Path | None]:
+    if dependency_id == "broker_event_log":
+        manifest_path = path.parent / "broker_event_day_manifest.v1.json"
+        manifest = _read_json(manifest_path)
+        if not manifest:
+            return "BROKER_EVENT_DAY_MANIFEST_MISSING", "broker_event_log requires paired broker_event_day_manifest_v1", manifest_path
+        if str(manifest.get("day_utc") or manifest.get("day") or "")[:10] != ctx.day_utc:
+            return "BROKER_EVENT_DAY_MANIFEST_DAY_MISMATCH", f"manifest_day={manifest.get('day_utc') or manifest.get('day')} target_day={ctx.day_utc}", manifest_path
+        manifest_truth = str(manifest.get("truth_root") or "").strip()
+        if manifest_truth and Path(manifest_truth).expanduser().resolve() != Path(ctx.execution_root).expanduser().resolve():
+            return "BROKER_EVENT_DAY_MANIFEST_TRUTH_ROOT_MISMATCH", f"manifest_truth_root={manifest_truth} execution_root={ctx.execution_root}", manifest_path
+        status = str(manifest.get("status") or manifest.get("validation_status") or "").strip().upper()
+        if status and status not in {"PASS", "READY", "CURRENT"}:
+            return "BROKER_EVENT_DAY_MANIFEST_NOT_PASS", f"manifest_status={status}", manifest_path
+    if dependency_id == "market_calendar_day":
+        calendar_path = Path(ctx.truth_root) / "market_calendar_v1" / "NYSE" / f"{str(ctx.day_utc)[:4]}.jsonl"
+        if not calendar_path.exists() or not calendar_path.is_file():
+            return "MARKET_CALENDAR_YEAR_MISSING", "market calendar dataset manifest requires paired NYSE year JSONL", calendar_path
+        try:
+            rows = calendar_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            rows = []
+        if not any(ctx.day_utc in row for row in rows):
+            return "MARKET_CALENDAR_DAY_MISSING", f"target_day={ctx.day_utc} not found in NYSE year JSONL", calendar_path
+    return "", "", None
 
 
 def _evaluate_domain_dependency(dep: dict[str, Any], ctx: Any) -> dict[str, Any]:
@@ -1071,7 +1111,45 @@ def _domain_phase_row(
         if len(failed) > 1
         else str((failed[0] if failed else {}).get("recovery_action") or "No current blocker.")
     )
-    return {
+    blocker_reason = f"{len(failed)} required {domain_id} dependencies are missing or failed" if len(failed) > 1 else str((failed[0] if failed else {}).get("detail") or "")
+    current_sub_blocker: dict[str, Any] = {}
+    session_sub_blockers: list[dict[str, Any]] = []
+    supporting_stale_dependencies: list[dict[str, Any]] = []
+    if domain_id == "SESSION_IDENTITY" and failed:
+        non_trading_day = _non_trading_day_sub_blocker(ctx)
+        if non_trading_day:
+            blocker_reason = "NON_TRADING_DAY"
+            action = str(non_trading_day["recovery_action"])
+            commands = []
+            current_sub_blocker = non_trading_day
+            supporting_stale_dependencies = failed
+        else:
+            first = failed[0]
+            current_sub_blocker = {
+                "sub_blocker_code": str(first.get("blocking_reason") or first.get("status") or ""),
+                "owning_artifact": str(first.get("dependency_id") or ""),
+                "missing_or_failed_dependency": str(first.get("dependency_id") or ""),
+                "producer_command": str(first.get("producer_command") or ""),
+                "recovery_action": str(first.get("recovery_action") or ""),
+                "recovery_command": str(first.get("recovery_command") or ""),
+                "evidence_path": str(first.get("evidence_path") or first.get("expected_path") or ""),
+            }
+        session_sub_blockers = [
+            *([non_trading_day] if current_sub_blocker.get("sub_blocker_code") == "NON_TRADING_DAY" else []),
+            *[
+                {
+                    "sub_blocker_code": str(item.get("blocking_reason") or item.get("status") or ""),
+                    "owning_artifact": str(item.get("dependency_id") or ""),
+                    "missing_or_failed_dependency": str(item.get("dependency_id") or ""),
+                    "producer_command": str(item.get("producer_command") or ""),
+                    "recovery_action": str(item.get("recovery_action") or ""),
+                    "recovery_command": str(item.get("recovery_command") or ""),
+                    "evidence_path": str(item.get("evidence_path") or item.get("expected_path") or ""),
+                }
+                for item in failed
+            ],
+        ]
+    row = {
         "phase_id": phase_id,
         "domain_id": domain_id,
         "status": status,
@@ -1079,10 +1157,16 @@ def _domain_phase_row(
         "evidence_paths": list(dict.fromkeys(path for path in evidence_paths if path)),
         "recovery_action": action,
         "recovery_commands": list(dict.fromkeys(commands)),
-        "blocker_reason": f"{len(failed)} required {domain_id} dependencies are missing or failed" if len(failed) > 1 else str((failed[0] if failed else {}).get("detail") or ""),
+        "blocker_reason": blocker_reason,
         "dependency_results": dependency_rows,
         "failed_dependencies": failed,
     }
+    if current_sub_blocker:
+        row["current_session_sub_blocker"] = current_sub_blocker
+        row["session_sub_blockers"] = session_sub_blockers
+    if supporting_stale_dependencies:
+        row["supporting_stale_dependencies"] = supporting_stale_dependencies
+    return row
 
 
 def _session_authority_paths(ctx: Any) -> dict[str, Path]:
@@ -1495,8 +1579,41 @@ def _session_sub_blockers(ctx: Any) -> list[dict[str, Any]]:
     return details
 
 
+def _non_trading_day_sub_blocker(ctx: Any) -> dict[str, Any]:
+    paths = _session_authority_paths(ctx)
+    candidates = [
+        paths["target_day_build"],
+        paths["target_day_admission"],
+        paths["paper_session_authority"],
+        paths["paper_session_bootstrap"],
+        ctx.truth_root / "market_calendar_v1" / "NYSE" / f"{str(ctx.day_utc)[:4]}.jsonl",
+    ]
+    for path in candidates:
+        text = ""
+        payload = _read_json(path)
+        if payload:
+            text = json.dumps(payload, sort_keys=True)
+        elif path.exists() and path.is_file():
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                text = ""
+        if "NON_TRADING_DAY" not in text:
+            continue
+        return {
+            "sub_blocker_code": "NON_TRADING_DAY",
+            "owning_artifact": "market_calendar_day",
+            "missing_or_failed_dependency": "market_calendar_day",
+            "producer_command": "governed market calendar/session authority",
+            "recovery_action": "Target day is a governed non-trading day; do not force readiness or hand-edit stale session artifacts.",
+            "recovery_command": "",
+            "evidence_path": str(path.resolve()),
+        }
+    return {}
+
+
 def _primary_session_sub_blocker(sub_blockers: list[dict[str, Any]]) -> dict[str, Any]:
-    priority = {"HIDDEN_DEPENDENCY_DETECTED": 0, "PARTIAL_BUILD": 2, "REQUIRED_GATE_FAIL": 3}
+    priority = {"NON_TRADING_DAY": 0, "HIDDEN_DEPENDENCY_DETECTED": 1, "PARTIAL_BUILD": 2, "REQUIRED_GATE_FAIL": 3}
     if not sub_blockers:
         return {}
     return sorted(sub_blockers, key=lambda row: priority.get(str(row.get("sub_blocker_code") or ""), 1))[0]
@@ -1590,10 +1707,11 @@ def _evaluate_session_authority(phase: dict[str, Any], ctx: Any, phase_results: 
         codes.extend(_collect_codes(payload))
     inventory = _session_dependency_inventory(ctx)
     inventory_failures = _required_session_inventory_failures(inventory)
+    non_trading_day = _non_trading_day_sub_blocker(ctx)
     if inventory_failures:
         if len(inventory_failures) > 1:
             blocker_code = "SESSION_AUTHORITY_PRECHECK_FAILED"
-            reason = f"{len(inventory_failures)} required session dependencies are missing, stale, or failed"
+            reason = "NON_TRADING_DAY" if non_trading_day else f"{len(inventory_failures)} required session dependencies are missing, stale, or failed"
             evidence = [
                 str(row.get("evidence_path") or row.get("expected_path") or "")
                 for row in inventory_failures
@@ -1604,7 +1722,7 @@ def _evaluate_session_authority(phase: dict[str, Any], ctx: Any, phase_results: 
                 for row in inventory_failures
                 if str(row.get("recovery_command") or row.get("producer_command") or "").strip()
             ]
-            current_sub = {
+            current_sub = non_trading_day or {
                 "sub_blocker_code": blocker_code,
                 "owning_artifact": "SESSION_AUTHORITY_PRECHECK",
                 "missing_or_failed_dependency": ",".join(str(row.get("dependency_id") or "") for row in inventory_failures[:6]),
@@ -1635,14 +1753,17 @@ def _evaluate_session_authority(phase: dict[str, Any], ctx: Any, phase_results: 
                 }
                 for item in inventory_failures
             ]
+            if non_trading_day:
+                row["session_sub_blockers"] = [non_trading_day, *row["session_sub_blockers"]]
+                row["supporting_stale_dependencies"] = inventory_failures
             row["current_session_sub_blocker"] = current_sub
             row["recovery_action"] = str(current_sub["recovery_action"])
-            row["recovery_commands"] = list(dict.fromkeys(command_rows))
+            row["recovery_commands"] = [] if non_trading_day else list(dict.fromkeys(command_rows))
             return row
         only = inventory_failures[0]
         blocker_code = str(only.get("blocking_reason") or "").split(":", 1)[0] or f"{str(only.get('dependency_id') or 'SESSION_DEPENDENCY').upper()}_{str(only.get('status') or 'FAIL')}"
         only_evidence_path = str(only.get("evidence_path") or only.get("expected_path") or session_paths["target_day_build"])
-        current_sub = {
+        current_sub = non_trading_day or {
             "sub_blocker_code": blocker_code,
             "owning_artifact": str(only.get("dependency_id") or ""),
             "missing_or_failed_dependency": str(only.get("dependency_id") or ""),
@@ -1662,11 +1783,13 @@ def _evaluate_session_authority(phase: dict[str, Any], ctx: Any, phase_results: 
         row["session_dependency_inventory"] = inventory
         row["session_precheck_failures"] = inventory_failures
         row["session_sub_blockers"] = [current_sub]
+        if non_trading_day:
+            row["supporting_stale_dependencies"] = inventory_failures
         row["current_session_sub_blocker"] = current_sub
         row["recovery_action"] = str(current_sub["recovery_action"])
-        row["recovery_commands"] = [str(current_sub["recovery_command"])]
+        row["recovery_commands"] = [str(current_sub["recovery_command"])] if str(current_sub["recovery_command"]).strip() else []
         return row
-    sub_blockers = _session_sub_blockers(ctx)
+    sub_blockers = [non_trading_day, *_session_sub_blockers(ctx)] if non_trading_day else _session_sub_blockers(ctx)
     primary_sub = _primary_session_sub_blocker(sub_blockers)
     if primary_sub:
         row = _phase_row(
@@ -1937,6 +2060,7 @@ def build_control_plane_v1(ctx: Any, phase_results: dict[str, dict[str, Any]] | 
         "readiness_dependency_inventory": readiness_inventory,
         "current_session_sub_blocker": dict((current or {}).get("current_session_sub_blocker") or {}),
         "session_sub_blockers": list((current or {}).get("session_sub_blockers") or []),
+        "supporting_stale_dependencies": list((current or {}).get("supporting_stale_dependencies") or []),
         "session_dependency_inventory": [row for row in readiness_inventory if row.get("domain_owner") == "SESSION_IDENTITY"],
         "session_precheck_failures": [row for row in failed_current if row.get("domain_owner") == "SESSION_IDENTITY"],
         "phase_results": control_phase_results,

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/aegis_desired_state.v1.schema.json",
+  "title": "aegis_desired_state.v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "target_day",
+    "account",
+    "sleeve_universe",
+    "runtime_root",
+    "candidate_truth_root",
+    "production_truth_root",
+    "runtime_mode",
+    "desired_production_commit",
+    "safety_policy_version",
+    "promotion_policy_version",
+    "allowed_producers",
+    "allowed_recovery_commands",
+    "submit_allowed",
+    "no_submit"
+  ],
+  "properties": {
+    "schema_id": { "const": "aegis_desired_state" },
+    "schema_version": { "const": "aegis_desired_state.v1" },
+    "target_day": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "account": { "type": "string", "minLength": 1 },
+    "sleeve_universe": { "type": "array", "items": { "type": "string" } },
+    "runtime_root": { "type": "string", "minLength": 1 },
+    "candidate_truth_root": { "type": "string", "minLength": 1 },
+    "production_truth_root": { "type": "string", "minLength": 1 },
+    "runtime_mode": { "type": "string", "enum": ["CANDIDATE", "PRODUCTION"] },
+    "desired_production_commit": { "type": "string", "minLength": 1 },
+    "safety_policy_version": { "type": "string", "minLength": 1 },
+    "promotion_policy_version": { "type": "string", "minLength": 1 },
+    "allowed_producers": { "type": "array", "items": { "type": "string" } },
+    "allowed_recovery_commands": { "type": "array", "items": { "type": "string" } },
+    "submit_allowed": { "const": false },
+    "no_submit": { "const": true }
+  }
+}

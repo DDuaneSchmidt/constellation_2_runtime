@@ -169,6 +169,7 @@ def _session_pass(ctx: bod.BodContext) -> None:
         {"day_utc": ctx.day_utc, "bootstrap_status": "PASS", **_bootstrap_meta(ctx)},
     )
     _write(ctx.truth_root / "market_calendar_v1" / "dataset_manifest.json", {"day_utc": ctx.day_utc, "coverage_status": "HEALTHY"})
+    _write(ctx.truth_root / "market_calendar_v1" / "NYSE" / f"{ctx.day_utc[:4]}.jsonl", json.dumps({"day": ctx.day_utc, "status": "TRADING_DAY"}))
 
 
 def _session_supporting_authorities(ctx: bod.BodContext) -> None:
@@ -442,6 +443,46 @@ def test_non_trading_day_blocks_session_identity_without_fake_readiness(monkeypa
     assert failed["paper_session_authority_v1"]["artifact_path"].endswith("paper_session_authority.v1.json")
     assert "run_session_authority_v1.py" in failed["paper_session_authority_v1"]["producer"]
     assert "run_paper_session_bootstrap_v1.py" in failed["paper_session_bootstrap_v1"]["recovery_command"]
+
+
+def test_non_trading_day_remains_root_cause_when_session_artifacts_are_stale(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _session_pass(ctx)
+    stale_contract = {
+        "producer_contract_v1": {
+            "code_version_git_commit": cp._current_git_commit_v1(),
+            "source_dirty_status": "CLEAN",
+            "generated_at_utc": "2026-05-03T13:00:00Z",
+            "producer_name": "test",
+            "producer_command": "test",
+        }
+    }
+    _write(
+        ctx.truth_root / "target_day_build_v1" / f"{ctx.day_utc}.json",
+        {"target_day": ctx.day_utc, "build_status": "BLOCKED", "blocking_reason_codes": ["NON_TRADING_DAY"], **stale_contract},
+    )
+    _write(
+        ctx.truth_root / "reports" / "paper_session_authority_v1" / ctx.day_utc / "paper_session_authority.v1.json",
+        {"day_utc": ctx.day_utc, "authority_status": "DENIED", "blocking_reason_codes": ["NON_TRADING_DAY"], **stale_contract},
+    )
+    _write(
+        ctx.truth_root / "reports" / "paper_session_bootstrap_v1" / ctx.day_utc / "paper_session_bootstrap.v1.json",
+        {"day_utc": ctx.day_utc, "bootstrap_status": "BLOCKED", "blocker_chain": ["NON_TRADING_DAY"], **stale_contract},
+    )
+
+    payload = cp.build_control_plane_v1(ctx)
+    monkeypatch.setattr(projection.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+    monkeypatch.setattr(projection, "control_plane_acceptance_issues_v1", lambda *_args, **_kwargs: [])
+    _write(cp.control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc), payload)
+    _out_path, projected = projection.run_operator_projection_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
+
+    assert payload["current_domain"] == "SESSION_IDENTITY"
+    assert payload["current_session_sub_blocker"]["sub_blocker_code"] == "NON_TRADING_DAY"
+    assert payload["blocker_reason"] == "NON_TRADING_DAY"
+    assert payload["supporting_stale_dependencies"]
+    assert any(row["blocking_reason"] == "STALE_ARTIFACT_GENERATED_AT_DAY_MISMATCH" for row in payload["failed_current_domain_dependencies"])
+    assert projected["why_not_ready_summary"] == "SYSTEM NOT READY BECAUSE: SESSION_IDENTITY -> NON_TRADING_DAY"
 
 
 def test_domain_precheck_surfaces_only_current_domain_failures_at_once(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
@@ -1023,6 +1064,53 @@ def test_registry_missing_schema_path_and_exemptions_are_explicit() -> None:
     assert market_calendar["schema_instance_exempt_reason"]
 
 
+def test_broker_event_log_requires_paired_day_manifest(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _session_pass(ctx)
+    _broker_pass(ctx)
+    manifest = (
+        ctx.execution_root
+        / "execution_evidence_v1"
+        / "broker_events"
+        / ctx.day_utc
+        / "broker_event_day_manifest.v1.json"
+    )
+    manifest.unlink()
+
+    payload = cp.build_control_plane_v1(ctx)
+    broker_event = next(row for row in payload["readiness_dependency_inventory"] if row["dependency_id"] == "broker_event_log")
+
+    assert payload["current_domain"] == "BROKER_CONNECTIVITY"
+    assert broker_event["status"] == "FAIL"
+    assert broker_event["blocking_reason"] == "BROKER_EVENT_DAY_MANIFEST_MISSING"
+
+    _write(manifest, {"day_utc": "2026-05-01", "status": "PASS", "truth_root": str(ctx.execution_root), **_producer_contract()})
+    payload = cp.build_control_plane_v1(ctx)
+    broker_event = next(row for row in payload["readiness_dependency_inventory"] if row["dependency_id"] == "broker_event_log")
+    assert broker_event["blocking_reason"] == "BROKER_EVENT_DAY_MANIFEST_DAY_MISMATCH"
+
+
+def test_market_calendar_day_requires_paired_jsonl_coverage(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _session_pass(ctx)
+    calendar_year = ctx.truth_root / "market_calendar_v1" / "NYSE" / f"{ctx.day_utc[:4]}.jsonl"
+    calendar_year.unlink()
+
+    payload = cp.build_control_plane_v1(ctx)
+    calendar_day = next(row for row in payload["readiness_dependency_inventory"] if row["dependency_id"] == "market_calendar_day")
+
+    assert payload["current_domain"] == "SESSION_IDENTITY"
+    assert calendar_day["status"] == "FAIL"
+    assert calendar_day["blocking_reason"] == "MARKET_CALENDAR_YEAR_MISSING"
+
+    _write(calendar_year, json.dumps({"day": "2026-05-01", "status": "TRADING_DAY"}))
+    payload = cp.build_control_plane_v1(ctx)
+    calendar_day = next(row for row in payload["readiness_dependency_inventory"] if row["dependency_id"] == "market_calendar_day")
+    assert calendar_day["blocking_reason"] == "MARKET_CALENDAR_DAY_MISSING"
+
+
 def test_control_plane_freshness_policy_fails_closed(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
     _source_pass(monkeypatch)
     ctx = _ctx(tmp_path)
@@ -1362,6 +1450,7 @@ def test_projection_blocks_when_control_plane_wrong_day_without_kernel_fallback(
         },
     )
     monkeypatch.setattr(projection.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+    monkeypatch.setattr(projection, "control_plane_acceptance_issues_v1", lambda *_args, **_kwargs: [])
 
     _out_path, payload = projection.run_operator_projection_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
 
@@ -1471,6 +1560,55 @@ def test_projection_renders_promotion_validation_mismatch_without_deciding_readi
     assert payload["promotion_blockers"] == [{"code": "PROMOTION_VALIDATION_TRUTH_ROOT_MISMATCH"}]
     assert payload["truth_root_consistency"]["consistent"] is False
     assert payload["final_status"] == control["final_status"]
+
+
+def test_projection_control_plane_blocker_not_obscured_by_promotion_visibility(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    ctx = _ctx(tmp_path)
+    _write(
+        cp.control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc),
+        {
+            "day_utc": ctx.day_utc,
+            "truth_root": str(ctx.truth_root),
+            "runtime_root": str(ctx.runtime_root),
+            "runtime_mode": "CANDIDATE",
+            "artifact_path": str(cp.control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)),
+            "actual_artifact_path": str(cp.control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)),
+            "producer_contract_output_artifact_path": str(cp.control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)),
+            "final_status": "NOT_READY",
+            "current_domain": "SESSION_IDENTITY",
+            "current_phase": "SESSION_AUTHORITY",
+            "canonical_blocker": "SESSION_IDENTITY_PRECHECK_FAILED",
+            "submit_allowed": False,
+            "failed_current_domain_dependencies": [],
+            "producer_contract_v1": {
+                "code_version_git_commit": cp._current_git_commit_v1(),
+                "source_dirty_status": "CLEAN",
+                "generated_at_utc": f"{ctx.day_utc}T13:00:00Z",
+                "output_artifacts": [{"path": str(cp.control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc))}],
+            },
+        },
+    )
+    _write(
+        ctx.truth_root / "reports" / "aegis_promotion_validation_ledger_v1" / ctx.day_utc / "promotion_validation_ledger.v1.json",
+        {
+            "candidate_commit": "candidate-commit",
+            "promoted_commit": "promoted-commit",
+            "truth_root": str(tmp_path / "other_truth"),
+            "runtime_root": str(tmp_path / "other_runtime"),
+            "promotion_status": "CANDIDATE",
+            "blockers": [{"code": "PROMOTION_VALIDATION_TRUTH_ROOT_MISMATCH"}],
+        },
+    )
+    monkeypatch.setattr(projection.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+    monkeypatch.setattr(projection, "control_plane_acceptance_issues_v1", lambda *_args, **_kwargs: [])
+
+    _out_path, payload = projection.run_operator_projection_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "SESSION_IDENTITY_PRECHECK_FAILED"
+    assert payload["promotion_blockers"] == [{"code": "PROMOTION_VALIDATION_TRUTH_ROOT_MISMATCH"}]
+    assert payload["integrity_context"]["readiness_source"] == "aegis_control_plane_v1"
 
 
 def test_projection_renders_promotion_gate_status_when_present(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001

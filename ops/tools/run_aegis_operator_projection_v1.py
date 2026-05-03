@@ -121,14 +121,28 @@ def _promotion_visibility_v1(ctx: bod.BodContext) -> dict[str, Any]:
     }
 
 
-def _why_not_ready_summary(final_status: str, current_domain: str, failed_current_domain: list[Any], blocker: str) -> str:
+def _why_not_ready_summary(
+    final_status: str,
+    current_domain: str,
+    failed_current_domain: list[Any],
+    blocker: str,
+    current_session_sub_blocker: dict[str, Any] | None = None,
+) -> str:
     if final_status == "READY":
         return "SYSTEM READY."
     reason = blocker or "UNKNOWN"
+    sub_blocker = str((current_session_sub_blocker or {}).get("sub_blocker_code") or "").strip()
+    if sub_blocker:
+        reason = sub_blocker
     for row in failed_current_domain:
         if not isinstance(row, dict):
             continue
         codes = row.get("reason_codes") if isinstance(row.get("reason_codes"), list) else []
+        if "NON_TRADING_DAY" in codes:
+            reason = "NON_TRADING_DAY"
+            break
+        if reason == sub_blocker:
+            continue
         reason = str(codes[0] if codes else row.get("blocking_reason") or blocker or "UNKNOWN")
         if reason:
             break
@@ -191,7 +205,7 @@ def _projection_from_control_plane(ctx: bod.BodContext, control: dict[str, Any])
     if blocker.endswith("_PRECHECK_FAILED") and recovery_commands:
         next_valid_actions = recovery_commands
     promotion_visibility = _promotion_visibility_v1(ctx)
-    why_not_ready = _why_not_ready_summary(final_status, current_domain, failed_current_domain, blocker)
+    why_not_ready = _why_not_ready_summary(final_status, current_domain, failed_current_domain, blocker, current_session_sub)
     return {
         "schema_id": "aegis_operator_projection",
         "schema_version": SCHEMA_VERSION,

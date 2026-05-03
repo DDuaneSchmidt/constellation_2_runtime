@@ -256,6 +256,19 @@ def evaluate_submit_enforcement_v1(
     freshness = _read_json(paths["truth_freshness"])
     kill_switch = _read_json(paths["kill_switch"])
     blockers: list[dict[str, str]] = []
+
+    control_final_status = str(control_plane.get("final_status") or "").strip().upper()
+    control_submit_allowed = control_plane.get("submit_allowed") is True
+    if control_final_status != "READY" or not control_submit_allowed:
+        blockers.append(
+            {
+                "code": "CONTROL_PLANE_NOT_READY",
+                "path": str(paths["control_plane"]),
+                "final_status": control_final_status or "MISSING",
+                "submit_allowed": str(control_submit_allowed),
+                "canonical_blocker": str(control_plane.get("canonical_blocker") or ""),
+            }
+        )
     for issue in control_plane_acceptance_issues_v1(control_plane, actual_path=paths["control_plane"]):
         blockers.append({key: str(value) for key, value in issue.items()})
 
@@ -299,19 +312,6 @@ def evaluate_submit_enforcement_v1(
                     "promoted_commit": promoted_commit,
                 }
             )
-
-    control_final_status = str(control_plane.get("final_status") or "").strip().upper()
-    control_submit_allowed = control_plane.get("submit_allowed") is True
-    if control_final_status != "READY" or not control_submit_allowed:
-        blockers.append(
-            {
-                "code": "CONTROL_PLANE_NOT_READY",
-                "path": str(paths["control_plane"]),
-                "final_status": control_final_status or "MISSING",
-                "submit_allowed": str(control_submit_allowed),
-                "canonical_blocker": str(control_plane.get("canonical_blocker") or ""),
-            }
-        )
 
     final_status = str(ledger.get("final_status") or "").strip().upper()
     if final_status not in READY_FINAL_STATUSES or str(ledger.get("canonical_blocker") or "").strip():
