@@ -1647,6 +1647,66 @@ def test_projection_renders_promotion_gate_status_when_present(monkeypatch, tmp_
     assert payload["candidate_commit"] == "candidate-commit"
 
 
+def test_projection_prefers_current_promoted_production_state_over_prior_gate(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
+    _source_pass(monkeypatch)
+    production_truth = tmp_path / "production_truth"
+    candidate_truth = tmp_path / "candidate_truth"
+    ctx = _ctx_with_truth(tmp_path, production_truth)
+    control_path = cp.control_plane_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    commit = projection.git_commit_v1()
+    _write(
+        control_path,
+        {
+            "day_utc": ctx.day_utc,
+            "truth_root": str(ctx.truth_root),
+            "runtime_root": str(ctx.runtime_root),
+            "runtime_mode": "PRODUCTION",
+            "artifact_path": str(control_path),
+            "actual_artifact_path": str(control_path),
+            "producer_contract_output_artifact_path": str(control_path),
+            "final_status": "NOT_READY",
+            "current_domain": "SESSION_IDENTITY",
+            "current_phase": "SESSION_AUTHORITY",
+            "canonical_blocker": "SESSION_IDENTITY_PRECHECK_FAILED",
+            "submit_allowed": False,
+            "failed_current_domain_dependencies": [],
+            "producer_contract_v1": {
+                "code_version_git_commit": commit,
+                "source_dirty_status": "CLEAN",
+                "generated_at_utc": f"{ctx.day_utc}T13:00:00Z",
+                "output_artifacts": [{"path": str(control_path)}],
+            },
+        },
+    )
+    _write(
+        ctx.truth_root / "governance" / "production_version.v1.json",
+        {"schema_version": "production_version.v1", "promoted_commit": commit, "status": "ACTIVE"},
+    )
+    _write(
+        ctx.truth_root / "reports" / "aegis_promotion_validation_ledger_v1" / ctx.day_utc / "promotion_validation_ledger.v1.json",
+        {
+            "candidate_commit": commit,
+            "promoted_commit": commit,
+            "truth_root": str(ctx.truth_root),
+            "runtime_root": str(ctx.runtime_root),
+            "promotion_status": "PROMOTED",
+            "blockers": [],
+        },
+    )
+    _write(
+        candidate_truth / "reports" / "aegis_production_promotion_gate_v1" / ctx.day_utc / "promo-approved.json",
+        {"promotion_status": "APPROVED_FOR_PROMOTION", "blockers": []},
+    )
+    monkeypatch.setattr(projection.bod, "_resolve_context", lambda *_args, **_kwargs: ctx)
+    monkeypatch.setattr(projection, "control_plane_acceptance_issues_v1", lambda *_args, **_kwargs: [])
+
+    _out_path, payload = projection.run_operator_projection_v1(ctx.day_utc, ctx.environment, str(ctx.truth_root))
+
+    assert payload["promotion_status"] == "PROMOTED"
+    assert payload["promotion_blockers"] == []
+    assert payload["promotion_state"]["promotion_visibility_source"] == "aegis_promotion_validation_ledger_v1"
+
+
 def test_submit_allowed_false_when_control_plane_not_ready(monkeypatch, tmp_path: Path) -> None:  # noqa: ANN001
     _source_pass(monkeypatch)
     ctx = _ctx(tmp_path)

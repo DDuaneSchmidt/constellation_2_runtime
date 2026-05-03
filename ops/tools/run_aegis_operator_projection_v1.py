@@ -77,15 +77,30 @@ def _promotion_visibility_v1(ctx: bod.BodContext) -> dict[str, Any]:
     evaluated_commit = git_commit_v1()
     truth_root_text = str(ledger.get("truth_root") or "").strip()
     runtime_root_text = str(ledger.get("runtime_root") or "").strip()
-    promotion_status = str(gate.get("promotion_status") or ledger.get("promotion_status") or "VALIDATION_LEDGER_MISSING").strip()
-    if isinstance(gate.get("blockers"), list):
-        blockers = gate["blockers"]
-    elif isinstance(ledger.get("blockers"), list):
-        blockers = ledger["blockers"]
-    else:
-        blockers = [{"code": "PROMOTION_VALIDATION_LEDGER_MISSING", "path": str(ledger_path)}]
     candidate_commit = str(ledger.get("candidate_commit") or evaluated_commit)
     promoted_commit = str(production_version.get("promoted_commit") or ledger.get("promoted_commit") or "")
+    ledger_status = str(ledger.get("promotion_status") or "").strip()
+    ledger_blockers = ledger.get("blockers") if isinstance(ledger.get("blockers"), list) else []
+    production_is_current = bool(
+        ledger_status == "PROMOTED"
+        and not ledger_blockers
+        and promoted_commit
+        and promoted_commit == evaluated_commit
+        and str(ledger.get("promoted_commit") or "").strip() == promoted_commit
+    )
+    if production_is_current:
+        promotion_status = "PROMOTED"
+        blockers = []
+        promotion_visibility_source = "aegis_promotion_validation_ledger_v1"
+    else:
+        promotion_status = str(gate.get("promotion_status") or ledger.get("promotion_status") or "VALIDATION_LEDGER_MISSING").strip()
+        if isinstance(gate.get("blockers"), list):
+            blockers = gate["blockers"]
+        elif isinstance(ledger.get("blockers"), list):
+            blockers = ledger["blockers"]
+        else:
+            blockers = [{"code": "PROMOTION_VALIDATION_LEDGER_MISSING", "path": str(ledger_path)}]
+        promotion_visibility_source = "aegis_production_promotion_gate_v1" if gate else "aegis_promotion_validation_ledger_v1"
     packet_commit = str(ledger.get("packet_commit") or _packet_commit_from_root(ctx.truth_root.parent))
     truth_consistent = bool(truth_root_text and Path(truth_root_text).expanduser().resolve() == ctx.truth_root.resolve())
     runtime_consistent = bool(runtime_root_text and Path(runtime_root_text).expanduser().resolve() == ctx.truth_root.parent.resolve())
@@ -107,7 +122,7 @@ def _promotion_visibility_v1(ctx: bod.BodContext) -> dict[str, Any]:
         "promotion_mismatch_flags": mismatch_flags,
         "promotion_validation_ledger_path": str(ledger_path),
         "promotion_gate_path": str(gate_path),
-        "promotion_visibility_source": "aegis_production_promotion_gate_v1" if gate else "aegis_promotion_validation_ledger_v1",
+        "promotion_visibility_source": promotion_visibility_source,
         "truth_root_consistency": {
             "truth_root": str(ctx.truth_root),
             "ledger_truth_root": truth_root_text,
