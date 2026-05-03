@@ -203,7 +203,10 @@ def test_promotion_activation_updates_version_copies_manifest_and_regenerates_pa
     assert promoted_ledger["candidate_commit"] == COMMIT
     assert promoted_ledger["promoted_commit"] == COMMIT
     assert promoted_ledger["truth_root"] == str(prod.resolve())
-    assert promoted_ledger["runtime_root"] == str(prod.resolve())
+    assert promoted_ledger["runtime_root"] == str(prod.parent.resolve())
+    assert manifest["packet_currentness"]["path"] == str(
+        (prod.parent / "exports" / "aegis_state" / "latest" / "chatgpt_aegis_packet.md").resolve()
+    )
 
 
 def test_validation_ledger_and_gate_block_dirty_repo_failed_tests_schema_and_control_plane(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -50,6 +50,7 @@ def promote_candidate_to_production_v1(*, day_utc: str, promotion_id: str, candi
     if gate.get("promotion_status") != "APPROVED_FOR_PROMOTION":
         raise SystemExit("FAIL: PROMOTION_GATE_NOT_APPROVED " + json.dumps({"promotion_id": promotion_id, "status": gate.get("promotion_status")}, sort_keys=True))
     commit = git_commit_v1()
+    production_runtime_root = production_root.parent.resolve()
     copied = copy_candidate_artifacts_v1(candidate_root=candidate_root, production_root=production_root, relative_paths=_default_artifacts(day_utc))
     version_path = production_version_path_v1(production_root)
     prior = read_json_v1(version_path)
@@ -83,18 +84,18 @@ def promote_candidate_to_production_v1(*, day_utc: str, promotion_id: str, candi
         validation_ledger_src["promotion_id"] = promotion_id
         validation_ledger_src["production_version_path"] = str(version_path)
         validation_ledger_src["truth_root"] = str(production_root.resolve())
-        validation_ledger_src["runtime_root"] = str(production_root.resolve())
+        validation_ledger_src["runtime_root"] = str(production_runtime_root)
         validation_ledger_src["generated_at"] = now_iso_v1()
         write_json_v1(promotion_validation_ledger_path(truth_root=production_root, day_utc=day_utc), validation_ledger_src)
     write_json_v1(manifest_path, manifest)
     env = dict(os.environ)
     env["AEGIS_RUNTIME_MODE"] = "PRODUCTION"
-    env["AEGIS_PACKET_ROOT"] = str(production_root)
+    env["AEGIS_PACKET_ROOT"] = str(production_runtime_root)
     packet = subprocess.run([sys.executable, "ops/tools/aegis_chatgpt_packet.py"], cwd=str(REPO_ROOT), env=env, capture_output=True, text=True, check=False)
     manifest["packet_returncode"] = int(packet.returncode)
     manifest["packet_stdout"] = str(packet.stdout or "").strip()[-1200:]
     manifest["packet_stderr"] = str(packet.stderr or "").strip()[-1200:]
-    manifest["packet_currentness"] = packet_currentness_v1(runtime_root=production_root, runtime_mode="PRODUCTION")
+    manifest["packet_currentness"] = packet_currentness_v1(runtime_root=production_runtime_root, runtime_mode="PRODUCTION")
     write_json_v1(manifest_path, manifest)
     if packet.returncode != 0:
         raise SystemExit("FAIL: PRODUCTION_PACKET_REGEN_FAILED " + manifest["packet_stderr"])
