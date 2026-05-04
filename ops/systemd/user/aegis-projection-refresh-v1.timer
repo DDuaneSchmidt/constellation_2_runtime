@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Aegis projection refresh every 60 seconds
+
+[Timer]
+OnBootSec=12s
+OnUnitActiveSec=60s
+AccuracySec=1s
+Unit=aegis-projection-refresh-v1.service
+
+[Install]
+WantedBy=timers.target

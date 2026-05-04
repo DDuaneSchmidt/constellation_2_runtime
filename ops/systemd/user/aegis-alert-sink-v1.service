@@ -1,0 +1,8 @@
+[Unit]
+Description=Aegis local alert sink v1
+
+[Service]
+Type=oneshot
+Environment=PYTHONDONTWRITEBYTECODE=1
+WorkingDirectory=/home/node/constellation
+ExecStart=/bin/bash -lc 'TODAY=$(date -u +%%F); python3 -B ops/tools/run_aegis_alert_sink_v1.py --target-day "$TODAY" --truth-root /home/node/constellation_runtime_data/truth --environment PAPER'

@@ -1,0 +1,5 @@
+{
+  "schema_version": "unified_truth_state.v1",
+  "type": "object",
+  "required": ["schema_version", "target_day", "environment", "final_status", "primary_blocker", "owner", "severity", "truth_confidence", "evidence_event_ids", "evidence_paths", "secondary_conditions", "stale_inputs", "missing_inputs", "contradictions", "operator_next_action", "generated_at_utc"]
+}

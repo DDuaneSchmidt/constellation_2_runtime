@@ -37,6 +37,12 @@
     "app:logs": "python3 ops/runtime/supervisor.py logs",
     "trading:prepare": "python3 ops/tools/run_trading_prepare_v1.py",
     "trading:preflight": "python3 ops/tools/run_trading_preflight_v1.py",
-    "trading:preflight:json": "python3 ops/tools/run_trading_preflight_v1.py --json"
+    "trading:preflight:json": "python3 ops/tools/run_trading_preflight_v1.py --json",
+    "aegis:truth:resolve": "python3 -B ops/tools/run_aegis_truth_resolver_v1.py --target-day ${TARGET_DAY:-$(date -u +%F)} --environment ${AEGIS_ENVIRONMENT:-PAPER}",
+    "aegis:portal:probe": "python3 -B ops/tools/run_portal_availability_probe_v1.py --target-day ${TARGET_DAY:-$(date -u +%F)} --environment ${AEGIS_ENVIRONMENT:-PAPER}",
+    "aegis:alerts:run": "python3 -B ops/tools/run_aegis_alert_sink_v1.py --target-day ${TARGET_DAY:-$(date -u +%F)} --environment ${AEGIS_ENVIRONMENT:-PAPER}",
+    "aegis:projection:refresh": "python3 -B ops/tools/run_aegis_projection_refresh_v1.py --target-day ${TARGET_DAY:-$(date -u +%F)} --environment ${AEGIS_ENVIRONMENT:-PAPER}",
+    "aegis:mutation:check": "python3 -B ops/tools/run_protected_mutation_check_v1.py --target-day ${TARGET_DAY:-$(date -u +%F)} --environment ${AEGIS_ENVIRONMENT:-PAPER} --path /home/node/constellation --operation check",
+    "aegis:truth:test": "python3 -B -m pytest constellation_2/aegis_truth/tests"
   }
 }

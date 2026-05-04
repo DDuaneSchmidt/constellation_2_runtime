@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Aegis portal availability probe every 15 seconds
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=15s
+AccuracySec=1s
+Unit=aegis-portal-probe-v1.service
+
+[Install]
+WantedBy=timers.target
