@@ -10,7 +10,8 @@ from constellation_2.aegis_truth.state_machines.portal_surface_state_v1 import b
 from constellation_2.aegis_truth.state_machines.projection_freshness_state_v1 import build_projection_freshness_state
 from constellation_2.aegis_truth.state_machines.repo_protection_state_v1 import build_repo_protection_state
 from constellation_2.aegis_truth.state_machines.trading_readiness_state_v1 import AUTHORITATIVE_INPUTS, build_trading_readiness_state
-from ops.tools.run_aegis_control_plane_kernel_v1 import build_control_plane_kernel
+from ops.tools.run_aegis_control_plane_kernel_v1 import build_control_plane_kernel, write_control_plane_kernel
+from ops.tools.run_aegis_truth_resolver_v1 import write_compatible_truth_state
 
 DAY = "2026-05-04"
 
@@ -119,3 +120,14 @@ def test_all_green_kernel_ready(tmp_path: Path) -> None:
     assert kernel["final_status"] == "READY"
     assert kernel["primary_blocker"] is None
     assert kernel["active_alerts"] == []
+
+
+
+def test_legacy_truth_resolver_uses_kernel_compatibility_when_kernel_exists(tmp_path: Path) -> None:
+    _green_base(tmp_path)
+    append_event(_event("TRADING_SAFETY_BLOCKED", "BLOCKED", "trading_safety", "ERROR", "safety blocked"), truth_root=tmp_path)
+    write_control_plane_kernel(target_day=DAY, truth_root=tmp_path, environment="PAPER")
+    _path, state, source = write_compatible_truth_state(target_day=DAY, truth_root=tmp_path, environment="PAPER")
+    assert source == "aegis_control_plane_kernel.v1"
+    assert state["final_status"] == "BLOCKED"
+    assert state["compatibility_note"].startswith("Derived from aegis_control_plane_kernel")
