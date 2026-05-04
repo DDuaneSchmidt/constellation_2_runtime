@@ -43,6 +43,14 @@
     "aegis:alerts:run": "python3 -B ops/tools/run_aegis_alert_sink_v1.py --target-day ${TARGET_DAY:-$(date -u +%F)} --environment ${AEGIS_ENVIRONMENT:-PAPER}",
     "aegis:projection:refresh": "python3 -B ops/tools/run_aegis_projection_refresh_v1.py --target-day ${TARGET_DAY:-$(date -u +%F)} --environment ${AEGIS_ENVIRONMENT:-PAPER}",
     "aegis:mutation:check": "python3 -B ops/tools/run_protected_mutation_check_v1.py --target-day ${TARGET_DAY:-$(date -u +%F)} --environment ${AEGIS_ENVIRONMENT:-PAPER} --path /home/node/constellation --operation check",
-    "aegis:truth:test": "python3 -B -m pytest constellation_2/aegis_truth/tests"
+    "aegis:truth:test": "python3 -B -m pytest constellation_2/aegis_truth/tests",
+    "aegis:state:alerts": "python3 -B ops/tools/run_alert_lifecycle_state_v1.py --target-day ${TARGET_DAY:-$(date -u +%F)} --environment ${AEGIS_ENVIRONMENT:-PAPER}",
+    "aegis:state:portal": "python3 -B ops/tools/run_portal_surface_state_v1.py --target-day ${TARGET_DAY:-$(date -u +%F)} --environment ${AEGIS_ENVIRONMENT:-PAPER}",
+    "aegis:state:trading": "python3 -B ops/tools/run_trading_readiness_state_v1.py --target-day ${TARGET_DAY:-$(date -u +%F)} --environment ${AEGIS_ENVIRONMENT:-PAPER}",
+    "aegis:state:projection": "python3 -B ops/tools/run_projection_freshness_state_v1.py --target-day ${TARGET_DAY:-$(date -u +%F)} --environment ${AEGIS_ENVIRONMENT:-PAPER}",
+    "aegis:state:repo": "python3 -B ops/tools/run_repo_protection_state_v1.py --target-day ${TARGET_DAY:-$(date -u +%F)} --environment ${AEGIS_ENVIRONMENT:-PAPER}",
+    "aegis:kernel:run": "python3 -B ops/tools/run_aegis_control_plane_kernel_v1.py --target-day ${TARGET_DAY:-$(date -u +%F)} --environment ${AEGIS_ENVIRONMENT:-PAPER}",
+    "aegis:kernel:test": "PYTHONDONTWRITEBYTECODE=1 python3 -B -m pytest constellation_2/aegis_truth/tests",
+    "aegis:kernel:refresh": "npm run aegis:portal:probe && npm run aegis:state:portal && npm run aegis:state:trading && npm run aegis:state:projection && npm run aegis:state:repo && npm run aegis:kernel:run && npm run aegis:state:alerts && npm run aegis:projection:refresh"
   }
 }
