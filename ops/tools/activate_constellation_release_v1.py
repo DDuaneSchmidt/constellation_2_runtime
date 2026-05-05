@@ -21,6 +21,7 @@ from constellation_2.common.release_current_shadow_validator_v1 import (
 RELEASES_ROOT = Path("/home/node/constellation_releases").resolve()
 ACTIVE_POINTER = Path("/home/node/constellation_active")
 RUNTIME_DATA_ROOT = Path("/home/node/constellation_runtime_data").resolve()
+CURRENT_RELEASE_MANIFEST = (RUNTIME_DATA_ROOT / "truth" / "releases" / "current_release.v1.json").resolve()
 RELEASE_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RELEASES/release_manifest.v1.schema.json"
 ACTIVATION_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/RELEASES/activation_receipt.v1.schema.json"
 WRITE_RUNTIME_CONTRACT_TOOL = (REPO_ROOT / "ops/tools/write_active_runtime_contract_v1.py").resolve()
@@ -46,6 +47,12 @@ def _utc_now_compact() -> str:
 
 def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _load_json_if_present(path: Path) -> dict | None:
+    if not path.exists() or not path.is_file():
+        return None
+    return _load_json(path)
 
 
 def _latest_release_id_or_fail() -> str:
@@ -122,6 +129,48 @@ def _restore_prior_active_pointer_or_fail(prior_target: Path | None) -> None:
             ACTIVE_POINTER.unlink()
         return
     _atomic_activate_symlink(prior_target)
+
+
+def _write_current_release_manifest_v1(
+    *,
+    release_id: str,
+    release_root: Path,
+    manifest: dict,
+    release_manifest_hash: str,
+    activated_at_utc: str,
+    approval_id: str,
+    previous_release: dict | None,
+) -> None:
+    CURRENT_RELEASE_MANIFEST.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": "aegis_current_release.v1",
+        "release_id": str(release_id),
+        "release_path": str(release_root.resolve()),
+        "commit": str(manifest["git_sha"]),
+        "release_manifest_hash": str(release_manifest_hash),
+        "bundle_hash": "",
+        "approval_id": str(approval_id),
+        "activated_at_utc": str(activated_at_utc),
+        "previous_release": previous_release,
+    }
+    tmp = CURRENT_RELEASE_MANIFEST.with_name(
+        f".{CURRENT_RELEASE_MANIFEST.name}.tmp.{os.getpid()}"
+    )
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(str(tmp), str(CURRENT_RELEASE_MANIFEST))
+
+
+def _restore_current_release_manifest_v1(prior_payload: dict | None) -> None:
+    if prior_payload is None:
+        if CURRENT_RELEASE_MANIFEST.exists():
+            CURRENT_RELEASE_MANIFEST.unlink()
+        return
+    CURRENT_RELEASE_MANIFEST.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CURRENT_RELEASE_MANIFEST.with_name(
+        f".{CURRENT_RELEASE_MANIFEST.name}.restore.{os.getpid()}"
+    )
+    tmp.write_text(json.dumps(prior_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(str(tmp), str(CURRENT_RELEASE_MANIFEST))
 
 
 def _acquire_activation_lock_or_fail(*, release_id: str, release_root: Path) -> None:
@@ -207,16 +256,46 @@ def _post_activation_verify_or_fail(*, release_root: Path) -> None:
         )
 
 
-def _activate_runtime_authority_stack_or_fail(*, release_id: str, release_root: Path, prior_target: Path | None) -> None:
+def _activate_runtime_authority_stack_or_fail(
+    *,
+    release_id: str,
+    release_root: Path,
+    manifest: dict,
+    release_manifest_hash: str,
+    activated_at_utc: str,
+    approval_id: str,
+    prior_target: Path | None,
+    prior_current_release: dict | None,
+) -> None:
     _acquire_activation_lock_or_fail(release_id=release_id, release_root=release_root)
+    current_release_written = False
     try:
         _atomic_activate_symlink(release_root)
         try:
+            _write_current_release_manifest_v1(
+                release_id=release_id,
+                release_root=release_root,
+                manifest=manifest,
+                release_manifest_hash=release_manifest_hash,
+                activated_at_utc=activated_at_utc,
+                approval_id=approval_id,
+                previous_release=prior_current_release,
+            )
+            current_release_written = True
             _write_active_runtime_contract_or_fail()
             _materialize_release_current_or_fail()
             _post_activation_verify_or_fail(release_root=release_root)
         except SystemExit:
             _restore_prior_active_pointer_or_fail(prior_target)
+            if current_release_written:
+                _restore_current_release_manifest_v1(prior_current_release)
+            if prior_target is not None:
+                _write_active_runtime_contract_or_fail()
+            raise
+        except Exception:
+            _restore_prior_active_pointer_or_fail(prior_target)
+            if current_release_written:
+                _restore_current_release_manifest_v1(prior_current_release)
             if prior_target is not None:
                 _write_active_runtime_contract_or_fail()
             raise
@@ -243,17 +322,27 @@ def main() -> int:
 
     manifest = _require_manifest_for_release(release_root)
     _verify_release_parity_or_fail(release_root=release_root, manifest=manifest)
+    release_manifest_hash = _sha256_file((release_root / "release_manifest.v1.json").resolve())
     prior_release_id = _current_active_release_id()
 
     RUNTIME_DATA_ROOT.mkdir(parents=True, exist_ok=True)
     prior_target = ACTIVE_POINTER.resolve() if ACTIVE_POINTER.exists() else None
+    prior_current_release = _load_json_if_present(CURRENT_RELEASE_MANIFEST)
+    activated_at_utc = _utc_now_iso()
+    receipt_id = f"{_utc_now_compact()}__{release_id}"
+    approval_id = f"activation_receipt:{receipt_id}"
     _activate_runtime_authority_stack_or_fail(
         release_id=release_id,
         release_root=release_root,
+        manifest=manifest,
+        release_manifest_hash=release_manifest_hash,
+        activated_at_utc=activated_at_utc,
+        approval_id=approval_id,
         prior_target=prior_target,
+        prior_current_release=prior_current_release,
     )
 
-    receipt_dir = (RUNTIME_DATA_ROOT / "activations_v1" / f"{_utc_now_compact()}__{release_id}").resolve()
+    receipt_dir = (RUNTIME_DATA_ROOT / "activations_v1" / receipt_id).resolve()
     receipt_dir.mkdir(parents=True, exist_ok=False)
     receipt = {
         "schema_id": "activation_receipt.v1",
@@ -265,7 +354,7 @@ def main() -> int:
         "runtime_data_root": str(RUNTIME_DATA_ROOT),
         "services_reloaded": [],
         "parity_verified": True,
-        "generated_at_utc": _utc_now_iso(),
+        "generated_at_utc": activated_at_utc,
         "status": "ACTIVATED",
     }
 
