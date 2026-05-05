@@ -63,6 +63,19 @@ def _same_day_options_readiness(monkeypatch: pytest.MonkeyPatch, ctx: bod.BodCon
     monkeypatch.setattr(open_gate, "read_or_evaluate_trading_day_readiness_authority_v1", lambda **_kwargs: (path, payload))
 
 
+def _stale_preopen_readiness(monkeypatch: pytest.MonkeyPatch, ctx: bod.BodContext) -> None:
+    path = ctx.truth_root / "reports" / "trading_day_readiness_authority_v1" / ctx.day_utc / "trading_day_readiness_authority.v1.json"
+    payload = {
+        "status": "PASS",
+        "readiness_mode": "PREOPEN_ADMISSION",
+        "requires_same_day_options_snapshot": False,
+        "session_state": "PRE_MARKET",
+        "operator_next_action": "preopen",
+        "evidence_policy": {"policy_id": "PREOPEN_CARRY_FORWARD_V1"},
+    }
+    monkeypatch.setattr(open_gate, "read_or_evaluate_trading_day_readiness_authority_v1", lambda **_kwargs: (path, payload))
+
+
 def _diag(ctx: bod.BodContext, errors: list[int], *, valid_quotes: int = 0, spot: bool = False, contracts: int = 0) -> Path:
     path = (
         ctx.execution_root
@@ -709,6 +722,112 @@ def test_market_open_gate_passes_during_market_with_valid_supply(monkeypatch: py
     assert payload["canonical_blocker"] == ""
 
 
+def test_market_open_gate_regular_hours_ignores_stale_preopen_readiness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _stale_preopen_readiness(monkeypatch, ctx)
+    _selected_pointer(ctx, symbol="IWM")
+    mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    mds_path.parent.mkdir(parents=True, exist_ok=True)
+    mds_path.write_text('{"status":"PASS","canonical_blocker":"","requirements":[{"instrument":"IWM"}],"artifacts":[]}\n', encoding="utf-8")
+    _snapshot(ctx, symbol="IWM")
+    monkeypatch.setattr(open_gate, "_market_session_state", lambda: "REGULAR")
+    monkeypatch.setattr(open_gate, "_run_market_data_supply", lambda _ctx: {"exit_code": 0})
+
+    payload = open_gate.build_market_open_data_gate(ctx)
+
+    assert payload["status"] == "PASS"
+    assert payload["canonical_blocker"] == ""
+    assert payload["readiness_mode"] == "PREOPEN_ADMISSION"
+    assert payload["diagnostics"]["market_session_result"] == "REGULAR"
+    assert payload["diagnostics"]["readiness_session_result"] == "PRE_MARKET"
+
+
+def test_market_open_gate_closed_session_fails_closed_even_with_valid_data(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _same_day_options_readiness(monkeypatch, ctx, session_state="AFTER_HOURS")
+    _selected_pointer(ctx)
+    _snapshot(ctx)
+    monkeypatch.setattr(open_gate, "_market_session_state", lambda: "AFTER_HOURS")
+    monkeypatch.setattr(open_gate, "_run_market_data_supply", lambda _ctx: pytest.fail("market data supply should not run after hours"))
+
+    payload = open_gate.build_market_open_data_gate(ctx)
+
+    assert payload["status"] == "PENDING"
+    assert payload["canonical_blocker"] == "MARKET_NOT_OPEN"
+    assert payload["diagnostics"]["specific_fail_closed_reason"] == "MARKET_CLOSED"
+
+
+def test_market_open_gate_missing_evidence_fails_closed_as_market_not_open(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _same_day_options_readiness(monkeypatch, ctx)
+    _selected_pointer(ctx)
+    mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    mds_path.parent.mkdir(parents=True, exist_ok=True)
+    mds_path.write_text('{"status":"BLOCKED","canonical_blocker":"OPTIONS_SNAPSHOT_STALE","requirements":[{"instrument":"SPY"}]}\n', encoding="utf-8")
+    monkeypatch.setattr(open_gate, "_market_session_state", lambda: "REGULAR")
+    monkeypatch.setattr(open_gate, "_run_market_data_supply", lambda _ctx: {"exit_code": 2})
+    monkeypatch.setattr(
+        open_gate,
+        "_run_capture",
+        lambda _ctx, instrument: {"instrument": instrument, "status": "BLOCKED", "blocker": "OPTIONS_SNAPSHOT_STALE", "snapshot_path": "", "freshness_certificate_path": ""},
+    )
+
+    payload = open_gate.build_market_open_data_gate(ctx)
+
+    assert payload["status"] == "PENDING"
+    assert payload["canonical_blocker"] == "MARKET_NOT_OPEN"
+    assert payload["diagnostics"]["specific_fail_closed_reason"] == "OPTIONS_SNAPSHOT_STALE"
+    assert payload["diagnostics"]["quote_completeness_result"]["missing_symbols"] == ["SPY"]
+
+
+def test_market_open_gate_stale_evidence_fails_closed_as_market_not_open(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _same_day_options_readiness(monkeypatch, ctx)
+    _selected_pointer(ctx)
+    _snapshot(ctx, fresh=False)
+    mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    mds_path.parent.mkdir(parents=True, exist_ok=True)
+    mds_path.write_text('{"status":"BLOCKED","canonical_blocker":"OPTIONS_SNAPSHOT_STALE","requirements":[{"instrument":"SPY"}]}\n', encoding="utf-8")
+    monkeypatch.setattr(open_gate, "_market_session_state", lambda: "REGULAR")
+    monkeypatch.setattr(open_gate, "_run_market_data_supply", lambda _ctx: {"exit_code": 2})
+    monkeypatch.setattr(
+        open_gate,
+        "_run_capture",
+        lambda _ctx, instrument: {"instrument": instrument, "status": "BLOCKED", "blocker": "OPTIONS_SNAPSHOT_STALE", "snapshot_path": "", "freshness_certificate_path": ""},
+    )
+
+    payload = open_gate.build_market_open_data_gate(ctx)
+
+    assert payload["status"] == "PENDING"
+    assert payload["canonical_blocker"] == "MARKET_NOT_OPEN"
+    assert payload["diagnostics"]["specific_fail_closed_reason"] == "OPTIONS_SNAPSHOT_STALE"
+    assert payload["diagnostics"]["quote_completeness_result"]["stale_symbols"] == ["SPY"]
+
+
+def test_market_open_gate_incomplete_quote_evidence_fails_closed_as_market_not_open(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _same_day_options_readiness(monkeypatch, ctx)
+    _selected_pointer(ctx)
+    _snapshot(ctx, quotes=False)
+    mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    mds_path.parent.mkdir(parents=True, exist_ok=True)
+    mds_path.write_text('{"status":"BLOCKED","canonical_blocker":"OPTIONS_QUOTES_MISSING_BID_ASK","requirements":[{"instrument":"SPY"}]}\n', encoding="utf-8")
+    monkeypatch.setattr(open_gate, "_market_session_state", lambda: "REGULAR")
+    monkeypatch.setattr(open_gate, "_run_market_data_supply", lambda _ctx: {"exit_code": 2})
+    monkeypatch.setattr(
+        open_gate,
+        "_run_capture",
+        lambda _ctx, instrument: {"instrument": instrument, "status": "BLOCKED", "blocker": "OPTIONS_QUOTES_MISSING_BID_ASK", "snapshot_path": "", "freshness_certificate_path": ""},
+    )
+
+    payload = open_gate.build_market_open_data_gate(ctx)
+
+    assert payload["status"] == "PENDING"
+    assert payload["canonical_blocker"] == "MARKET_NOT_OPEN"
+    assert payload["diagnostics"]["specific_fail_closed_reason"] == "OPTIONS_QUOTES_MISSING_BID_ASK"
+    assert payload["diagnostics"]["quote_completeness_result"]["incomplete_quote_fields"] == ["bid", "ask"]
+
+
 def test_market_open_gate_uses_selected_intent_symbol(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _same_day_options_readiness(monkeypatch, ctx)
@@ -782,8 +901,9 @@ def test_market_open_gate_failed_capture_reports_specific_blocker(monkeypatch: p
 
     payload = open_gate.build_market_open_data_gate(ctx)
 
-    assert payload["status"] == "BLOCKED"
-    assert payload["canonical_blocker"] == "OPTIONS_DELAYED_QUOTES_NOT_RETURNED_BY_IB"
+    assert payload["status"] == "PENDING"
+    assert payload["canonical_blocker"] == "MARKET_NOT_OPEN"
+    assert payload["diagnostics"]["specific_fail_closed_reason"] == "OPTIONS_DELAYED_QUOTES_NOT_RETURNED_BY_IB"
 
 
 def test_market_open_gate_missing_freshness_certificate_is_specific(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -817,8 +937,9 @@ def test_market_open_gate_missing_freshness_certificate_is_specific(monkeypatch:
 
     payload = open_gate.build_market_open_data_gate(ctx)
 
-    assert payload["status"] == "BLOCKED"
-    assert payload["canonical_blocker"] == "OPTIONS_FRESHNESS_CERTIFICATE_MISSING"
+    assert payload["status"] == "PENDING"
+    assert payload["canonical_blocker"] == "MARKET_NOT_OPEN"
+    assert payload["diagnostics"]["specific_fail_closed_reason"] == "OPTIONS_FRESHNESS_CERTIFICATE_MISSING"
 
 
 def test_day_ledger_market_data_phase_consumes_supply_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

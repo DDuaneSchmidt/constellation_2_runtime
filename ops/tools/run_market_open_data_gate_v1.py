@@ -48,8 +48,8 @@ ALLOWED_BLOCKERS = {
 }
 
 
-def _now_iso() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+def _dt_iso(dt: datetime) -> str:
+    return dt.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -197,6 +197,26 @@ def _snapshot_age_seconds(snapshot: dict[str, Any], now_utc: datetime) -> int | 
     return max(0, int((now_utc - as_of).total_seconds()))
 
 
+def _snapshot_evidence_timestamp(snapshot: dict[str, Any]) -> datetime | None:
+    as_of = _parse_iso(snapshot.get("as_of_utc"))
+    if as_of is not None:
+        return as_of
+    underlying = snapshot.get("underlying") if isinstance(snapshot.get("underlying"), dict) else {}
+    return _parse_iso(underlying.get("spot_as_of_utc"))
+
+
+def _quote_completeness_result(validation: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "result": "PASS" if not validation.get("blocker") else "FAIL",
+        "quote_count": int(validation.get("quote_count") or 0),
+        "missing_symbols": validation.get("missing_symbols") if isinstance(validation.get("missing_symbols"), list) else [],
+        "stale_symbols": validation.get("stale_symbols") if isinstance(validation.get("stale_symbols"), list) else [],
+        "missing_contracts": validation.get("missing_contracts") if isinstance(validation.get("missing_contracts"), list) else [],
+        "stale_contracts": validation.get("stale_contracts") if isinstance(validation.get("stale_contracts"), list) else [],
+        "incomplete_quote_fields": validation.get("incomplete_quote_fields") if isinstance(validation.get("incomplete_quote_fields"), list) else [],
+    }
+
+
 def _validate_current_snapshot(ctx: bod.BodContext, instrument: str, now_utc: datetime) -> dict[str, Any]:
     snapshot_path, cert_path, snapshot, cert = _latest_snapshot_for_symbol(
         execution_root=ctx.execution_root,
@@ -208,12 +228,22 @@ def _validate_current_snapshot(ctx: bod.BodContext, instrument: str, now_utc: da
         "snapshot_path": str(snapshot_path or ""),
         "freshness_certificate_path": str(cert_path or ""),
         "snapshot_age_seconds": _snapshot_age_seconds(snapshot, now_utc) if snapshot else None,
+        "evidence_timestamp_utc": "",
+        "observed_evidence_age_seconds": _snapshot_age_seconds(snapshot, now_utc) if snapshot else None,
+        "valid_until_utc": "",
+        "allowed_freshness_threshold_seconds": None,
         "quote_count": 0,
         "blocker": "",
         "options_snapshot_symbol": "",
+        "missing_symbols": [],
+        "stale_symbols": [],
+        "missing_contracts": [],
+        "stale_contracts": [],
+        "incomplete_quote_fields": [],
     }
     if snapshot_path is None or not snapshot:
         result["blocker"] = "OPTIONS_SNAPSHOT_STALE"
+        result["missing_symbols"] = [instrument.upper()]
         return result
     expected_root = (ctx.execution_root / "options_chain_snapshot_v1" / ctx.day_utc).resolve()
     if not str(snapshot_path).startswith(str(expected_root)):
@@ -224,28 +254,41 @@ def _validate_current_snapshot(ctx: bod.BodContext, instrument: str, now_utc: da
     result["options_snapshot_symbol"] = observed_symbol
     if observed_symbol != instrument.upper():
         result["blocker"] = "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+        result["missing_symbols"] = [instrument.upper()]
         return result
     if underlying.get("spot_price") in (None, "") and underlying.get("spot") in (None, "") and snapshot.get("spot_price") in (None, ""):
         result["blocker"] = "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+        result["incomplete_quote_fields"] = ["underlying.spot_price"]
         return result
+    evidence_timestamp = _snapshot_evidence_timestamp(snapshot)
+    if evidence_timestamp is not None:
+        result["evidence_timestamp_utc"] = _dt_iso(evidence_timestamp)
     if not str(snapshot.get("as_of_utc") or "").strip() or not str(underlying.get("spot_as_of_utc") or "").strip():
         result["blocker"] = "OPTIONS_SNAPSHOT_STALE"
+        result["stale_symbols"] = [instrument.upper()]
         return result
     contracts = snapshot.get("contracts")
     if not isinstance(contracts, list) or not contracts:
         result["blocker"] = "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+        result["missing_contracts"] = [instrument.upper()]
         return result
     quote_count = sum(1 for row in contracts if isinstance(row, dict) and _has_bid_ask(row))
     result["quote_count"] = quote_count
     if quote_count <= 0:
         result["blocker"] = "OPTIONS_QUOTES_MISSING_BID_ASK"
+        result["incomplete_quote_fields"] = ["bid", "ask"]
         return result
     if cert_path is None or not cert_path.exists() or not cert:
         result["blocker"] = "OPTIONS_FRESHNESS_CERTIFICATE_MISSING"
         return result
     valid_until = _parse_iso(cert.get("valid_until_utc"))
+    if valid_until is not None:
+        result["valid_until_utc"] = _dt_iso(valid_until)
+        if evidence_timestamp is not None:
+            result["allowed_freshness_threshold_seconds"] = max(0, int((valid_until - evidence_timestamp).total_seconds()))
     if valid_until is None or valid_until < now_utc:
         result["blocker"] = "OPTIONS_SNAPSHOT_STALE"
+        result["stale_symbols"] = [instrument.upper()]
         return result
     return result
 
@@ -258,8 +301,10 @@ def _blocker_from_supply(supply: dict[str, Any]) -> str:
 
 
 def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
-    generated_at = _now_iso()
-    now_utc = datetime.now(UTC)
+    now_utc = datetime.now(UTC).replace(microsecond=0)
+    generated_at = _dt_iso(now_utc)
+    evaluated_local = now_utc.astimezone(ZoneInfo("America/New_York")).replace(microsecond=0)
+    session_state = _market_session_state()
     readiness_path, readiness = read_or_evaluate_trading_day_readiness_authority_v1(
         target_day=ctx.day_utc,
         truth_root=ctx.truth_root,
@@ -268,46 +313,95 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
     )
     readiness_mode = str(readiness.get("readiness_mode") or "").strip().upper()
     selected_intent_status, selected_instrument = _selected_intent_state(ctx)
+    supply_path = market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     symbol_diagnostics: dict[str, Any] = {
         "selected_intent_status": selected_intent_status,
         "selected_intent_symbol": selected_instrument,
-        "required_options_symbol": selected_instrument if bool(readiness.get("requires_same_day_options_snapshot") is True) else "",
+        "required_options_symbol": selected_instrument if selected_intent_status == "SELECTED" else "",
         "options_snapshot_symbol": "",
         "symbol_source": "SELECTED_INTENT" if selected_instrument else "NONE",
         "stale_default_symbol_detected": False,
     }
-    if not bool(readiness.get("requires_same_day_options_snapshot") is True):
-        status = "PASS" if readiness_mode in {"AFTER_HOURS_CLOSURE", "HISTORICAL_REPLAY"} else "PENDING"
-        blocker = "" if status == "PASS" else "MARKET_NOT_OPEN"
+
+    def _diagnostics(
+        *,
+        status: str,
+        blocker: str,
+        specific_reason: str = "",
+        snapshot_validation: dict[str, Any] | None = None,
+        actual_evidence_path: str = "",
+    ) -> dict[str, Any]:
+        validation = snapshot_validation or {}
+        return {
+            "gate_decision": status,
+            "canonical_blocker": blocker,
+            "specific_fail_closed_reason": specific_reason,
+            "expected_evidence_path": str((ctx.execution_root / "options_chain_snapshot_v1" / ctx.day_utc).resolve()),
+            "actual_evidence_path": actual_evidence_path or str(validation.get("snapshot_path") or ""),
+            "truth_root": str(ctx.truth_root),
+            "execution_root": str(ctx.execution_root),
+            "environment": ctx.environment,
+            "evaluated_timestamp_utc": generated_at,
+            "evaluated_timestamp_local": evaluated_local.isoformat(),
+            "evaluated_timezone": "America/New_York",
+            "market_session_result": session_state,
+            "readiness_session_result": str(readiness.get("session_state") or ""),
+            "readiness_mode": readiness_mode,
+            "requires_same_day_options_snapshot": bool(readiness.get("requires_same_day_options_snapshot") is True),
+            "evidence_timestamp": str(validation.get("evidence_timestamp_utc") or ""),
+            "observed_evidence_age_seconds": validation.get("observed_evidence_age_seconds"),
+            "allowed_freshness_threshold_seconds": validation.get("allowed_freshness_threshold_seconds"),
+            "freshness_certificate_valid_until_utc": str(validation.get("valid_until_utc") or ""),
+            "quote_completeness_result": _quote_completeness_result(validation),
+        }
+
+    def _payload(
+        *,
+        status: str,
+        blocker: str,
+        action: str,
+        command_result: dict[str, Any] | None = None,
+        snapshot_validation: dict[str, Any] | None = None,
+        capture_attempted: bool = False,
+        capture_result: dict[str, Any] | None = None,
+        specific_reason: str = "",
+    ) -> dict[str, Any]:
+        validation = snapshot_validation or {}
         return {
             "schema_id": "market_open_data_gate",
             "schema_version": SCHEMA_VERSION,
             "day_utc": ctx.day_utc,
             "environment": ctx.environment,
             "generated_at_utc": generated_at,
-            "market_session_state": str(readiness.get("session_state") or ""),
+            "market_session_state": session_state,
             "status": status,
             "canonical_blocker": blocker,
             "readiness_authority_path": str(readiness_path),
             "readiness_mode": readiness_mode,
             "evidence_policy_used": readiness.get("evidence_policy") if isinstance(readiness.get("evidence_policy"), dict) else {},
             "carry_forward_source_used": "",
-            "mode_specific_blocker": bool(blocker),
-            "market_data_supply_path": str(market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)),
-            "command_result": {},
-            "snapshot_path": "",
-            "freshness_certificate_path": "",
-            "snapshot_age_seconds": None,
-            "capture_attempted_by_gate": False,
-            "capture_result": {},
+            "mode_specific_blocker": bool(blocker and session_state != "REGULAR"),
+            "market_data_supply_path": str(supply_path),
+            "command_result": command_result or {},
+            "snapshot_path": str(validation.get("snapshot_path") or ""),
+            "freshness_certificate_path": str(validation.get("freshness_certificate_path") or ""),
+            "snapshot_age_seconds": validation.get("snapshot_age_seconds"),
+            "capture_attempted_by_gate": capture_attempted,
+            "capture_result": capture_result or {},
             **symbol_diagnostics,
-            "operator_next_action": str(readiness.get("operator_next_action") or ""),
+            "operator_next_action": action,
+            "diagnostics": _diagnostics(
+                status=status,
+                blocker=blocker,
+                specific_reason=specific_reason,
+                snapshot_validation=validation,
+            ),
         }
-    session_state = _market_session_state()
-    supply_path = market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+
     command_result: dict[str, Any] = {}
     capture_result: dict[str, Any] = {}
     capture_attempted = False
+    fail_closed_reason = ""
     instrument = selected_instrument
     snapshot_validation: dict[str, Any] = {}
     if selected_intent_status != "SELECTED":
@@ -320,14 +414,17 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
             "freshness_certificate_path": "",
             "snapshot_age_seconds": None,
         }
-    elif session_state in {"PRE_MARKET", "NON_TRADING_DAY"}:
+    elif session_state != "REGULAR":
+        specific = "MARKET_NOT_OPEN" if session_state in {"PRE_MARKET", "NON_TRADING_DAY"} else "MARKET_CLOSED"
         status = "PENDING"
         blocker = "MARKET_NOT_OPEN"
-        action = "Rerun market-open data gate after 09:30 ET during regular US options market hours."
-    elif session_state == "AFTER_HOURS":
-        status = "BLOCKED"
-        blocker = "MARKET_CLOSED"
-        action = "Rerun market-open data gate during regular US options market hours; submit-time quote freshness is not evaluated after market close."
+        action = "Rerun market-open data gate during regular US options market hours."
+        snapshot_validation = {
+            "blocker": specific,
+            "snapshot_path": "",
+            "freshness_certificate_path": "",
+            "snapshot_age_seconds": None,
+        }
     else:
         command_result = _run_market_data_supply(ctx)
         supply = _read_json(supply_path)
@@ -350,25 +447,14 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
                 "freshness_certificate_path": "",
                 "snapshot_age_seconds": None,
             }
-            return {
-                "schema_id": "market_open_data_gate",
-                "schema_version": SCHEMA_VERSION,
-                "day_utc": ctx.day_utc,
-                "environment": ctx.environment,
-                "generated_at_utc": generated_at,
-                "market_session_state": session_state,
-                "status": status,
-                "canonical_blocker": blocker,
-                "market_data_supply_path": str(supply_path),
-                "command_result": command_result,
-                "snapshot_path": "",
-                "freshness_certificate_path": "",
-                "snapshot_age_seconds": None,
-                "capture_attempted_by_gate": False,
-                "capture_result": {},
-                **symbol_diagnostics,
-                "operator_next_action": action,
-            }
+            return _payload(
+                status="PENDING",
+                blocker="MARKET_NOT_OPEN",
+                action=action,
+                command_result=command_result,
+                snapshot_validation=snapshot_validation,
+                specific_reason=blocker,
+            )
         snapshot_validation = _validate_current_snapshot(ctx, instrument, now_utc)
         symbol_diagnostics["options_snapshot_symbol"] = str(snapshot_validation.get("options_snapshot_symbol") or "")
         supply_status = str(supply.get("status") or "").strip().upper()
@@ -397,33 +483,31 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
         if supply_status == "PASS" and not snapshot_validation.get("blocker") and not blocker:
             status = "PASS"
         else:
-            status = "BLOCKED"
+            status = "PENDING"
             blocker = blocker or str(snapshot_validation.get("blocker") or "") or "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+            fail_closed_reason = blocker
+            blocker = "MARKET_NOT_OPEN"
         action = "" if status == "PASS" else f"Capture current {instrument} option bid/ask quotes and freshness certificate during regular market hours, then rerun this gate."
-    return {
-        "schema_id": "market_open_data_gate",
-        "schema_version": SCHEMA_VERSION,
-        "day_utc": ctx.day_utc,
-        "environment": ctx.environment,
-        "generated_at_utc": generated_at,
-        "market_session_state": session_state,
-        "status": status,
-        "canonical_blocker": blocker,
-        "readiness_authority_path": str(readiness_path),
-        "readiness_mode": readiness_mode,
-        "evidence_policy_used": readiness.get("evidence_policy") if isinstance(readiness.get("evidence_policy"), dict) else {},
-        "carry_forward_source_used": "",
-        "mode_specific_blocker": bool(blocker and readiness_mode in {"PREOPEN_BUILD", "PREOPEN_ADMISSION", "AFTER_HOURS_CLOSURE", "HISTORICAL_REPLAY"}),
-        "market_data_supply_path": str(supply_path),
-        "command_result": command_result,
-        "snapshot_path": str(snapshot_validation.get("snapshot_path") or ""),
-        "freshness_certificate_path": str(snapshot_validation.get("freshness_certificate_path") or ""),
-        "snapshot_age_seconds": snapshot_validation.get("snapshot_age_seconds"),
-        "capture_attempted_by_gate": capture_attempted,
-        "capture_result": capture_result,
-        **symbol_diagnostics,
-        "operator_next_action": action,
-    }
+        return _payload(
+            status=status,
+            blocker=blocker,
+            action=action,
+            command_result=command_result,
+            snapshot_validation=snapshot_validation,
+            capture_attempted=capture_attempted,
+            capture_result=capture_result,
+            specific_reason=fail_closed_reason,
+        )
+    return _payload(
+        status=status,
+        blocker=blocker,
+        action=action,
+        command_result=command_result,
+        snapshot_validation=snapshot_validation,
+        capture_attempted=capture_attempted,
+        capture_result=capture_result,
+        specific_reason=str(snapshot_validation.get("blocker") or blocker or ""),
+    )
 
 
 def run_market_open_data_gate_v1(day_utc: str, environment: str, truth_root: str = "") -> tuple[Path, dict[str, Any]]:
