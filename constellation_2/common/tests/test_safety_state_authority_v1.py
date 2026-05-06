@@ -201,6 +201,70 @@ def test_bootstrap_zero_accounting_nav_falls_back_to_broker_capital_supply(tmp_p
     assert payload["nav_prior_cents"] == 1000000
 
 
+def test_prior_bootstrap_zero_accounting_nav_falls_back_to_prior_broker_capital_supply(tmp_path: Path) -> None:
+    _base_safety_inputs(tmp_path, current_nav_cents=0, prior_nav_cents=0)
+    _write_json(
+        tmp_path / "accounting_v2" / "nav" / DAY / "nav.v2.json",
+        {
+            "schema_id": "C2_ACCOUNTING_NAV_V2",
+            "schema_version": 2,
+            "day_utc": DAY,
+            "status": "BOOTSTRAP",
+            "nav": {"nav_total": 0, "cash_total": 0, "currency": "USD"},
+            "history": {"peak_nav": 0, "drawdown_abs": 0, "drawdown_pct": "0.000000"},
+            "reason_codes": ["DAY0_BOOTSTRAP_MISSING_CASH_OR_POSITIONS_ALLOWED"],
+        },
+    )
+    _write_json(
+        tmp_path / "accounting_v2" / "nav" / PRIOR_DAY / "nav.v2.json",
+        {
+            "schema_id": "C2_ACCOUNTING_NAV_V2",
+            "schema_version": 2,
+            "day_utc": PRIOR_DAY,
+            "status": "BOOTSTRAP",
+            "nav": {"nav_total": 0, "cash_total": 0, "currency": "USD"},
+            "history": {"peak_nav": 0, "drawdown_abs": 0, "drawdown_pct": "0.000000"},
+            "reason_codes": ["DAY0_BOOTSTRAP_MISSING_CASH_OR_POSITIONS_ALLOWED"],
+        },
+    )
+    for day in (DAY, PRIOR_DAY):
+        _write_json(
+            tmp_path / "reports" / "capital_supply_v1" / day / "capital_supply.v1.json",
+            {
+                "day_utc": day,
+                "status": "PASS",
+                "selected_source": {
+                    "source_type": "BROKER_ACCOUNT",
+                    "status": "VALID",
+                    "net_liquidation_cents": 101347744,
+                    "cash_total_cents": 100766465,
+                },
+                "nav_evidence": {
+                    "status": "BROKER_SUPPLY_VALID",
+                    "nav_total_cents": 101347744,
+                    "cash_total_cents": 100766465,
+                },
+            },
+        )
+
+    payload = evaluate_safety_state_authority_v1(
+        day_utc=DAY,
+        truth_root=tmp_path,
+        execution_root=tmp_path,
+        account=ACCOUNT,
+        environment="PAPER",
+    )
+
+    assert payload["nav_valid"] is True
+    assert payload["nav_source"].startswith("capital_supply_v1:")
+    assert payload["nav_current_cents"] == 101347744
+    assert payload["nav_prior_cents"] == 101347744
+    assert payload["drawdown_pct"] == "0.000000"
+    assert payload["upstream_artifact_paths"]["prior_capital_supply_v1"].endswith(
+        f"/reports/capital_supply_v1/{PRIOR_DAY}/capital_supply.v1.json"
+    )
+
+
 def test_failed_envelope_negative_drawdown_does_not_override_canonical_nav_drawdown(tmp_path: Path) -> None:
     _base_safety_inputs(tmp_path)
     _write_json(

@@ -284,6 +284,10 @@ def evaluate_safety_state_authority_v1(
 
     current_nav_path = (truth_root / "accounting_v2" / "nav" / day_utc / "nav.v2.json").resolve()
     prior_nav_path = _prior_nav_path(truth_root, day_utc)
+    prior_nav_day = prior_nav_path.parent.name
+    prior_capital_supply_path = (
+        truth_root / "reports" / "capital_supply_v1" / prior_nav_day / "capital_supply.v1.json"
+    ).resolve()
     portfolio_path = (truth_root / "reports" / "portfolio_account_authority_v1" / day_utc / "portfolio_account_authority.v1.json").resolve()
     broker_supply_path = (truth_root / "reports" / "broker_supply_v1" / day_utc / "broker_supply.v1.json").resolve()
     capital_supply_path = (truth_root / "reports" / "capital_supply_v1" / day_utc / "capital_supply.v1.json").resolve()
@@ -301,6 +305,7 @@ def evaluate_safety_state_authority_v1(
 
     current_nav = _read_json(current_nav_path)
     prior_nav = _read_json(prior_nav_path)
+    prior_capital_supply = _read_json(prior_capital_supply_path)
     portfolio = _read_json(portfolio_path)
     broker_supply = _read_json(broker_supply_path)
     capital_supply = _read_json(capital_supply_path)
@@ -317,6 +322,7 @@ def evaluate_safety_state_authority_v1(
         ("portfolio_account_authority_v1", portfolio_path, portfolio),
         ("nav_current_v2", current_nav_path, current_nav),
         ("nav_prior_v2", prior_nav_path, prior_nav),
+        ("prior_capital_supply_v1", prior_capital_supply_path, prior_capital_supply),
         ("global_kill_switch_state_v1", kill_switch_path, kill_switch),
         ("capital_risk_envelope_v2", capital_envelope_path, capital_envelope),
         ("trade_submit_readiness_c2_v1", readiness_path, readiness),
@@ -353,21 +359,21 @@ def evaluate_safety_state_authority_v1(
             nav_current_cents = cents
             break
 
-    nav_prior_cents = _extract_only_cents(
-        current_nav,
-        ("nav_prior_cents", "prior_nav_cents", "previous_nav_cents", "rolling_peak_nav_cents"),
-    )
-    if nav_prior_cents is None:
-        nav_prior_cents = _extract_accounting_peak_cents(current_nav)
-    if nav_prior_cents is None:
-        nav_prior_cents = _extract_accounting_nav_cents(prior_nav)
-    if nav_prior_cents is None:
-        nav_prior_cents = _extract_cents(prior_nav)
-    if nav_prior_cents is None:
-        nav_prior_cents = _extract_only_cents(
+    prior_candidates: list[int | None] = [
+        _extract_only_cents(
+            current_nav,
+            ("nav_prior_cents", "prior_nav_cents", "previous_nav_cents", "rolling_peak_nav_cents"),
+        ),
+        _extract_accounting_peak_cents(current_nav),
+        _extract_accounting_nav_cents(prior_nav),
+        _extract_cents(prior_nav),
+        _extract_cents(prior_capital_supply),
+        _extract_only_cents(
             capital_envelope,
             ("nav_prior_cents", "prior_nav_cents", "rolling_peak_nav_cents", "peak_nav_cents"),
-        )
+        ),
+    ]
+    nav_prior_cents = next((cents for cents in prior_candidates if cents is not None and cents > 0), None)
 
     nav_valid = bool(nav_current_cents is not None and nav_current_cents > 0 and nav_prior_cents is not None and nav_prior_cents > 0)
 
@@ -493,6 +499,7 @@ def evaluate_safety_state_authority_v1(
             "portfolio_account_authority_v1": str(portfolio_path),
             "nav_current_v2": str(current_nav_path),
             "nav_prior_v2": str(prior_nav_path),
+            "prior_capital_supply_v1": str(prior_capital_supply_path),
             "global_kill_switch_state_v1": str(kill_switch_path),
             "capital_risk_envelope_v2": str(capital_envelope_path),
             "trade_submit_readiness_c2_v1": str(readiness_path),
