@@ -535,7 +535,14 @@ def main() -> int:
             ]
         )
     )
-    return 0 if report.get("final_status") in {PAPER_READY, MARKET_NOT_OPEN} else 2
+    return _process_exit_code_for_report(report)
+
+
+def _process_exit_code_for_report(report: dict[str, Any]) -> int:
+    final_status = str(report.get("final_status") or "").strip().upper()
+    if final_status in {PAPER_READY, MARKET_NOT_OPEN, BLOCKED}:
+        return 0
+    return 2
 
 
 if __name__ == "__main__":

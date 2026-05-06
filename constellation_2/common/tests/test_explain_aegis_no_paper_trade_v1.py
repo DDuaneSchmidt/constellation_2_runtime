@@ -15,8 +15,17 @@ assert SPEC.loader is not None
 sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
+KERNEL_TOOL_PATH = REPO_ROOT / "ops/tools/run_aegis_paper_ready_kernel_v1.py"
+KERNEL_SPEC = importlib.util.spec_from_file_location("run_aegis_paper_ready_kernel_v1", KERNEL_TOOL_PATH)
+assert KERNEL_SPEC is not None
+KERNEL_MODULE = importlib.util.module_from_spec(KERNEL_SPEC)
+assert KERNEL_SPEC.loader is not None
+sys.modules[KERNEL_SPEC.name] = KERNEL_MODULE
+KERNEL_SPEC.loader.exec_module(KERNEL_MODULE)
+
 build_no_trade_explanation_v1 = MODULE.build_no_trade_explanation_v1
 render_explanation_v1 = MODULE.render_explanation_v1
+kernel_exit_code_for_report = KERNEL_MODULE._process_exit_code_for_report
 
 
 DAY = "2026-05-05"
@@ -55,6 +64,43 @@ def _journal_success() -> list[str]:
         "2026-05-05T13:30:00-04:00 node systemd[1]: Starting aegis-paper-ready-kernel-v1.service - Aegis PAPER ready kernel v1...",
         "2026-05-05T13:30:10-04:00 node systemd[1]: Finished aegis-paper-ready-kernel-v1.service - Aegis PAPER ready kernel v1.",
     ]
+
+
+def _journal_blocked_nonzero() -> list[str]:
+    return [
+        "2026-05-05T13:30:00-04:00 node systemd[1]: Starting aegis-paper-ready-kernel-v1.service - Aegis PAPER ready kernel v1...",
+        "2026-05-05T13:30:10-04:00 node run_current_release_tool_v1.sh[1]: BLOCKED target_day=2026-05-05 first_blocker=OPTIONS_SNAPSHOT_CAPTURE_FAILED submit_allowed=false submission_authorized=false broker_transmit_enabled=null",
+        "2026-05-05T13:30:10-04:00 node systemd[1]: aegis-paper-ready-kernel-v1.service: Main process exited, code=exited, status=2/INVALIDARGUMENT",
+        "2026-05-05T13:30:10-04:00 node systemd[1]: aegis-paper-ready-kernel-v1.service: Failed with result 'exit-code'.",
+        "2026-05-05T13:30:10-04:00 node systemd[1]: Failed to start aegis-paper-ready-kernel-v1.service - Aegis PAPER ready kernel v1.",
+    ]
+
+
+def _journal_runtime_exception() -> list[str]:
+    return [
+        "2026-05-05T13:30:00-04:00 node systemd[1]: Starting aegis-paper-ready-kernel-v1.service - Aegis PAPER ready kernel v1...",
+        "2026-05-05T13:30:01-04:00 node run_current_release_tool_v1.sh[1]: Traceback (most recent call last):",
+        "2026-05-05T13:30:01-04:00 node run_current_release_tool_v1.sh[1]: RuntimeError: broker tool crashed",
+        "2026-05-05T13:30:01-04:00 node systemd[1]: aegis-paper-ready-kernel-v1.service: Failed with result 'exit-code'.",
+        "2026-05-05T13:30:01-04:00 node systemd[1]: Failed to start aegis-paper-ready-kernel-v1.service - Aegis PAPER ready kernel v1.",
+    ]
+
+
+def _write_kernel_report(runtime: Path, *, final_status: str = "BLOCKED", first_blocker: str = "OPTIONS_SNAPSHOT_CAPTURE_FAILED") -> None:
+    _write(
+        runtime / f"truth/reports/aegis_paper_ready_kernel_v1/{DAY}/paper_ready_kernel.v1.json",
+        {
+            "schema_version": "aegis_paper_ready_kernel.v1",
+            "target_day": DAY,
+            "scheduled_run": True,
+            "final_status": final_status,
+            "first_blocker": first_blocker,
+            "submit_allowed": False,
+            "submission_authorized": False,
+            "broker_transmit_enabled": None,
+            "generated_at_utc": "2026-05-05T17:30:10Z",
+        },
+    )
 
 
 def _populate(runtime: Path, fail_at: str) -> None:
@@ -102,6 +148,54 @@ def test_identifies_kernel_launch_failure(tmp_path: Path) -> None:
     result = build_no_trade_explanation_v1(runtime_root=runtime, active_link=active, day_utc=DAY, journal_lines=lines)
     assert result.first_blocker == "PAPER_READY_KERNEL_DID_NOT_START"
     assert result.classification == "BUG"
+
+
+def test_failed_systemd_exit_with_valid_blocked_kernel_artifact_is_completed(tmp_path: Path) -> None:
+    runtime, active = _base_runtime(tmp_path)
+    _populate(runtime, "MARKET_NOT_OPEN")
+    _write_kernel_report(runtime)
+
+    result = build_no_trade_explanation_v1(runtime_root=runtime, active_link=active, day_utc=DAY, journal_lines=_journal_blocked_nonzero())
+
+    kernel_gate = next(gate for gate in result.ordered_gate_results if gate.state == "KERNEL_STARTED")
+    assert kernel_gate.status == "PASS"
+    assert kernel_gate.reason_code == ""
+    assert result.first_blocker == "MARKET_NOT_OPEN"
+    assert result.submit_allowed is False
+
+
+def test_runtime_exception_without_kernel_artifact_is_kernel_failed(tmp_path: Path) -> None:
+    runtime, active = _base_runtime(tmp_path)
+
+    result = build_no_trade_explanation_v1(runtime_root=runtime, active_link=active, day_utc=DAY, journal_lines=_journal_runtime_exception())
+
+    assert result.first_blocker == "PAPER_READY_KERNEL_FAILED"
+    assert result.classification == "BUG"
+
+
+def test_runtime_exception_is_not_masked_by_older_kernel_artifact(tmp_path: Path) -> None:
+    runtime, active = _base_runtime(tmp_path)
+    _write_kernel_report(runtime)
+
+    result = build_no_trade_explanation_v1(
+        runtime_root=runtime,
+        active_link=active,
+        day_utc=DAY,
+        journal_lines=[
+            "2026-05-05T13:31:00-04:00 node systemd[1]: Starting aegis-paper-ready-kernel-v1.service - Aegis PAPER ready kernel v1...",
+            "2026-05-05T13:31:01-04:00 node run_current_release_tool_v1.sh[1]: RuntimeError: broker tool crashed",
+            "2026-05-05T13:31:01-04:00 node systemd[1]: aegis-paper-ready-kernel-v1.service: Failed with result 'exit-code'.",
+        ],
+    )
+
+    assert result.first_blocker == "PAPER_READY_KERNEL_FAILED"
+
+
+def test_kernel_process_exit_zero_for_valid_blocked_report() -> None:
+    assert kernel_exit_code_for_report({"final_status": "BLOCKED", "submit_allowed": False}) == 0
+    assert kernel_exit_code_for_report({"final_status": "MARKET_NOT_OPEN"}) == 0
+    assert kernel_exit_code_for_report({"final_status": "PAPER_READY"}) == 0
+    assert kernel_exit_code_for_report({"final_status": "ERROR"}) == 2
 
 
 def test_identifies_market_not_open_and_prints_paths(tmp_path: Path) -> None:

@@ -255,8 +255,50 @@ def _latest_service_run(lines: list[str]) -> dict[str, Any]:
         "timer_fired": True,
         "kernel_started": not failed and finished,
         "lines": run_lines,
+        "started_at": _journal_timestamp(run_lines[0]),
         "failure_line": next((line for line in run_lines if "can't open file" in line or "Failed with result" in line), ""),
     }
+
+
+def _journal_timestamp(line: str) -> str:
+    token = line.split(" ", 1)[0].strip()
+    try:
+        value = datetime.fromisoformat(token.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    return value.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _parse_utc(value: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+    except ValueError:
+        return None
+
+
+def _kernel_completed_from_artifact(payload: dict[str, Any], evidence: ArtifactEvidence, *, latest_start_utc: str = "") -> bool:
+    if not _evidence_current(evidence):
+        return False
+    final_status = str(payload.get("final_status") or "").strip().upper()
+    completed = (
+        str(payload.get("schema_version") or "").strip() == "aegis_paper_ready_kernel.v1"
+        and payload.get("scheduled_run") is True
+        and final_status in {"PAPER_READY", "MARKET_NOT_OPEN", "BLOCKED"}
+    )
+    if not completed:
+        return False
+    latest_start = _parse_utc(latest_start_utc) if latest_start_utc else None
+    artifact_time = _parse_utc(evidence.timestamp) if evidence.timestamp else None
+    if latest_start is not None:
+        return artifact_time is not None and artifact_time >= latest_start
+    return True
+
+
+def _kernel_start_blocker(failure_line: str) -> str:
+    text = failure_line.lower()
+    if "can't open file" in text or "no such file or directory" in text or "exec" in text:
+        return "PAPER_READY_KERNEL_DID_NOT_START"
+    return "PAPER_READY_KERNEL_FAILED"
 
 
 def _read_submit_boundary(runtime_root: Path, day_utc: str) -> tuple[dict[str, Any], ArtifactEvidence]:
@@ -401,17 +443,38 @@ def build_no_trade_explanation_v1(
         )
     )
 
-    kernel_started = bool(run.get("kernel_started") is True)
+    kernel_report_path = truth / "reports" / "aegis_paper_ready_kernel_v1" / day_utc / "paper_ready_kernel.v1.json"
+    kernel_report, kernel_report_evidence = _artifact(
+        logical_name="paper_ready_kernel_v1",
+        path=kernel_report_path,
+        day_utc=day_utc,
+    )
+    kernel_completed = _kernel_completed_from_artifact(
+        kernel_report,
+        kernel_report_evidence,
+        latest_start_utc=str(run.get("started_at") or ""),
+    )
+    kernel_started = bool(run.get("kernel_started") is True) or kernel_completed
     failure_line = str(run.get("failure_line") or "").strip()
+    kernel_blocker = "" if kernel_started else _kernel_start_blocker(failure_line)
+    kernel_evidence = (
+        kernel_report_evidence
+        if kernel_completed or kernel_report_evidence.exists
+        else ArtifactEvidence("systemd_journal", f"journalctl --user -u {PAPER_SERVICE}", timer_fired, stale_status="CURRENT" if timer_fired else "MISSING")
+    )
     gates.append(
         _gate(
             5,
             "KERNEL_STARTED",
             STATUS_PASS if kernel_started else STATUS_FAIL,
-            "" if kernel_started else "PAPER_READY_KERNEL_DID_NOT_START",
-            "Paper-ready kernel started and completed." if kernel_started else (failure_line or "Paper-ready kernel did not complete successfully."),
-            ArtifactEvidence("systemd_journal", f"journalctl --user -u {PAPER_SERVICE}", timer_fired, stale_status="CURRENT" if timer_fired else "MISSING"),
-            "Fix the service/launcher/runtime error, then wait for the next scheduled paper-ready run.",
+            kernel_blocker,
+            "Paper-ready kernel started and completed."
+            if kernel_started
+            else (failure_line or "Paper-ready kernel failed before writing a valid scheduled-run artifact."),
+            kernel_evidence,
+            "Fix the service/launcher/runtime error, then wait for the next scheduled paper-ready run."
+            if kernel_blocker == "PAPER_READY_KERNEL_DID_NOT_START"
+            else "Fix the paper-ready kernel runtime failure, then wait for the next scheduled paper-ready run.",
             "BUG",
         )
     )
