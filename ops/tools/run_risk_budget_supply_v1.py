@@ -185,11 +185,16 @@ def _intent_hash(path: Path, payload: dict[str, Any]) -> str:
 
 
 def _selected_intent_pointer(ctx: bod.BodContext) -> dict[str, Any]:
-    pointer_path = (ctx.truth_root / "pointers" / "selected_intent_pointer.v1.json").resolve()
-    payload = _read_json(pointer_path)
-    if not payload or str(payload.get("day_utc") or "").strip() != ctx.day_utc:
-        return {}
-    return payload
+    roots = [ctx.truth_root]
+    if ctx.execution_root != ctx.truth_root:
+        roots.append(ctx.execution_root)
+    for root in roots:
+        pointer_path = (root / "pointers" / "selected_intent_pointer.v1.json").resolve()
+        payload = _read_json(pointer_path)
+        if not payload or str(payload.get("day_utc") or "").strip() != ctx.day_utc:
+            continue
+        return payload
+    return {}
 
 
 def _selected_intent_identity(pointer: dict[str, Any]) -> dict[str, str]:
@@ -284,6 +289,47 @@ def _intent_budgets(ctx: bod.BodContext, nav_total_cents: int) -> tuple[list[dic
             row["allowed_risk_cents"] = int((Decimal(nav_total_cents) * target).to_integral_value(rounding=ROUND_FLOOR))
         budgets.append(row)
     return budgets, blocker
+
+
+def _non_selected_intent_diagnostics(ctx: bod.BodContext) -> list[dict[str, Any]]:
+    pointer = _selected_intent_pointer(ctx)
+    selected_identity = _selected_intent_identity(pointer)
+    selected_present = any(str(value or "").strip() for value in selected_identity.values())
+    if not selected_present:
+        return []
+
+    roots = [ctx.execution_root, ctx.truth_root] if ctx.execution_root != ctx.truth_root else [ctx.truth_root]
+    seen: set[str] = set()
+    rows: list[dict[str, Any]] = []
+    for root in roots:
+        for path in _json_files(root / "intents_v1" / "snapshots" / ctx.day_utc):
+            payload = _read_json(path)
+            if not payload or str(payload.get("day_utc") or ctx.day_utc) != ctx.day_utc:
+                continue
+            key = _intent_hash(path, payload)
+            if key in seen:
+                continue
+            seen.add(key)
+            if _matches_selected_intent(path, payload, selected_identity):
+                continue
+            target = _target_pct(payload)
+            blocker = ""
+            if target is None:
+                blocker = "INTENT_BUDGET_MISSING"
+            elif target < 0 or target > MAX_ACCOUNT_RISK_PCT:
+                blocker = "INTENT_BUDGET_COMPUTE_FAILED"
+            rows.append(
+                {
+                    "intent_id": str(payload.get("intent_id") or key).strip(),
+                    "instrument": _instrument(payload),
+                    "target_pct": str(target) if target is not None else "",
+                    "status": "DIAGNOSTIC_ONLY",
+                    "blocker": blocker,
+                    "selection_status": "NON_SELECTED",
+                    "source_path": str(path),
+                }
+            )
+    return rows
 
 
 def _cents_to_floor_dollars(cents: int) -> int:
@@ -529,6 +575,7 @@ def build_risk_budget_supply(ctx: bod.BodContext) -> dict[str, Any]:
     nav_basis: dict[str, Any] = {}
     policy: dict[str, Any] = {}
     budgets: list[dict[str, Any]] = []
+    non_selected_diagnostics: list[dict[str, Any]] = []
     adapter: dict[str, Any] = {}
     envelope: dict[str, Any] = {}
     export: dict[str, Any] = {
@@ -554,6 +601,7 @@ def build_risk_budget_supply(ctx: bod.BodContext) -> dict[str, Any]:
             status = "BLOCKED"
         else:
             budgets, blocker = _intent_budgets(ctx, nav_total)
+            non_selected_diagnostics = _non_selected_intent_diagnostics(ctx)
             if blocker:
                 status = "BLOCKED"
     if not blocker:
@@ -597,6 +645,7 @@ def build_risk_budget_supply(ctx: bod.BodContext) -> dict[str, Any]:
         "nav_basis": nav_basis,
         "budget_policy": policy,
         "intent_budgets": budgets,
+        "non_selected_intent_diagnostics": non_selected_diagnostics,
         "capital_risk_envelope_adapter": adapter,
         "capital_risk_envelope": envelope,
         "risk_sizing_export": export,

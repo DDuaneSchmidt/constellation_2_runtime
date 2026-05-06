@@ -277,6 +277,65 @@ def test_selected_intent_pointer_limits_budgeting_to_selected_snapshot(monkeypat
     assert [row["intent_id"] for row in payload["intent_budgets"]] == ["intent_1"]
 
 
+def test_execution_root_selected_pointer_limits_canonical_risk_budgeting(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _capital_supply(ctx)
+    selected_path = _intent(ctx, target="0.01")
+    _write_json(
+        ctx.execution_root / "intents_v1" / "snapshots" / ctx.day_utc / "nonselected.exposure_intent.v1.json",
+        {
+            "intent_id": "nonselected_intent",
+            "target_notional_pct": "0.10",
+            "underlying": {"symbol": "DBC"},
+        },
+    )
+    _write_json(
+        ctx.truth_root / "pointers" / "selected_intent_pointer.v1.json",
+        {"day_utc": "2026-04-28", "status": "BLOCKED", "canonical_blocker": "MISSING_REQUIRED_INPUTS", "selected_intent": {}},
+    )
+    _write_json(
+        ctx.execution_root / "pointers" / "selected_intent_pointer.v1.json",
+        {
+            "day_utc": ctx.day_utc,
+            "status": "SELECTED",
+            "canonical_blocker": "",
+            "selected_intent": {"intent_id": "intent_1", "intent_path": str(selected_path)},
+        },
+    )
+    _pass_envelope(monkeypatch)
+
+    payload = supply.build_risk_budget_supply(ctx)
+
+    assert payload["status"] == "PASS"
+    assert [row["intent_id"] for row in payload["intent_budgets"]] == ["intent_1"]
+    assert payload["risk_sizing_export"]["usable_for_risk_sizing"] is True
+    diagnostics = payload["non_selected_intent_diagnostics"]
+    assert [row["intent_id"] for row in diagnostics] == ["nonselected_intent"]
+    assert diagnostics[0]["status"] == "DIAGNOSTIC_ONLY"
+    assert diagnostics[0]["blocker"] == "INTENT_BUDGET_COMPUTE_FAILED"
+
+
+def test_execution_root_selected_intent_budget_failure_still_blocks(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _capital_supply(ctx)
+    selected_path = _intent(ctx, target="0.10")
+    _write_json(
+        ctx.execution_root / "pointers" / "selected_intent_pointer.v1.json",
+        {
+            "day_utc": ctx.day_utc,
+            "status": "SELECTED",
+            "canonical_blocker": "",
+            "selected_intent": {"intent_id": "intent_1", "intent_path": str(selected_path)},
+        },
+    )
+
+    payload = supply.build_risk_budget_supply(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "INTENT_BUDGET_COMPUTE_FAILED"
+    assert payload["intent_budgets"][0]["intent_id"] == "intent_1"
+
+
 def test_intent_budget_compute_failure_blocks(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _capital_supply(ctx)
