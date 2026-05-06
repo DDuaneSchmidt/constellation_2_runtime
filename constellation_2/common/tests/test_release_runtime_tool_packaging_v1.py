@@ -8,6 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 import ops.tools.build_constellation_release_v1 as build_release
+import ops.tools.run_aegis_paper_ready_kernel_v1 as paper_ready_kernel
 
 
 REQUIRED_CURRENT_RELEASE_TOOLS = (
@@ -23,8 +24,34 @@ REQUIRED_CURRENT_RELEASE_TOOLS = (
 )
 
 
+def _paper_ready_kernel_python_tool_refs() -> tuple[str, ...]:
+    stages = paper_ready_kernel._stages(
+        target_day="2026-05-06",
+        canonical_truth_root=Path("/tmp/canonical_truth"),
+        paper_sleeve_root=Path("/tmp/paper_sleeve"),
+        environment="PAPER",
+        ib_account="DUO847203",
+        release_commit="0" * 40,
+    )
+    refs: list[str] = []
+    for stage in stages:
+        command = stage.command
+        if len(command) < 2 or command[0] != "python3":
+            continue
+        tool = command[1]
+        if tool.startswith("ops/tools/") or tool.startswith("constellation_2/"):
+            refs.append(tool)
+    return tuple(sorted(set(refs)))
+
+
 def test_timer_invoked_runtime_tools_exist_in_source() -> None:
     missing = [rel for rel in REQUIRED_CURRENT_RELEASE_TOOLS if not (REPO_ROOT / rel).is_file()]
+
+    assert missing == []
+
+
+def test_paper_ready_kernel_referenced_python_tools_exist_in_source() -> None:
+    missing = [rel for rel in _paper_ready_kernel_python_tool_refs() if not (REPO_ROOT / rel).is_file()]
 
     assert missing == []
 
@@ -35,6 +62,16 @@ def test_release_packaging_includes_timer_invoked_runtime_tools(tmp_path: Path) 
     copied = set(build_release._copy_tree_filtered(build_release.REPO_ROOT / "ops", release_root))
 
     missing = [rel for rel in REQUIRED_CURRENT_RELEASE_TOOLS if rel not in copied]
+    assert missing == []
+
+
+def test_release_packaging_includes_paper_ready_kernel_referenced_python_tools(tmp_path: Path) -> None:
+    release_root = tmp_path / "release"
+
+    copied = set(build_release._copy_tree_filtered(build_release.REPO_ROOT / "ops", release_root))
+    copied.update(build_release._copy_tree_filtered(build_release.REPO_ROOT / "constellation_2", release_root))
+
+    missing = [rel for rel in _paper_ready_kernel_python_tool_refs() if rel not in copied]
     assert missing == []
 
 
