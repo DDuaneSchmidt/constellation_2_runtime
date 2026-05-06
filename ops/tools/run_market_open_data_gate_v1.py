@@ -27,9 +27,12 @@ from ops.tools.run_intent_arbitration_v1 import selected_intent_pointer_path
 from constellation_2.common.trading_day_readiness_authority_v1 import read_or_evaluate_trading_day_readiness_authority_v1
 
 SCHEMA_VERSION = "market_open_data_gate.v1"
+DEFAULT_OPTIONS_CAPTURE_TIMEOUT_SECONDS = 180
+PARENT_CAPTURE_TIMEOUT_CUSHION_SECONDS = 45
 REFRESHABLE_BLOCKERS = {
     "OPTIONS_SNAPSHOT_STALE",
     "OPTIONS_SNAPSHOT_CAPTURE_FAILED",
+    "OPTIONS_CAPTURE_TIMEOUT",
     "OPTIONS_QUOTES_MISSING",
     "OPTIONS_QUOTES_MISSING_BID_ASK",
     "OPTIONS_DELAYED_QUOTES_NOT_RETURNED_BY_IB",
@@ -40,12 +43,24 @@ ALLOWED_BLOCKERS = {
     "MARKET_CLOSED",
     "OPTIONS_SNAPSHOT_STALE",
     "OPTIONS_SNAPSHOT_CAPTURE_FAILED",
+    "OPTIONS_CAPTURE_TIMEOUT",
     "OPTIONS_QUOTES_MISSING_BID_ASK",
     "OPTIONS_DELAYED_QUOTES_NOT_RETURNED_BY_IB",
     "OPTIONS_MARKET_DATA_PERMISSION_DENIED",
     "OPTIONS_FRESHNESS_CERTIFICATE_MISSING",
     "OPTIONS_SNAPSHOT_SYMBOL_MISMATCH",
 }
+
+
+def _options_capture_timeout_seconds() -> int:
+    raw = str(os.environ.get("C2_OPTIONS_SNAPSHOT_STEP_TIMEOUT_SECONDS") or "").strip()
+    if not raw:
+        return DEFAULT_OPTIONS_CAPTURE_TIMEOUT_SECONDS
+    try:
+        timeout = int(raw)
+    except ValueError:
+        return DEFAULT_OPTIONS_CAPTURE_TIMEOUT_SECONDS
+    return max(1, timeout)
 
 
 def _dt_iso(dt: datetime) -> str:
@@ -92,8 +107,12 @@ def _run_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
         ctx.day_utc,
         "--environment",
         ctx.environment,
+        "--truth_root",
+        str(ctx.truth_root),
     ]
-    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True, check=False, timeout=300)
+    env = dict(os.environ)
+    env["C2_TRUTH_ROOT"] = str(ctx.truth_root)
+    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True, check=False, env=env, timeout=300)
     return {
         "command": " ".join(cmd),
         "exit_code": int(proc.returncode),
@@ -103,6 +122,8 @@ def _run_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
 
 
 def _run_capture(ctx: bod.BodContext, instrument: str) -> dict[str, Any]:
+    child_timeout = _options_capture_timeout_seconds()
+    parent_timeout = child_timeout + PARENT_CAPTURE_TIMEOUT_CUSHION_SECONDS
     cmd = [
         sys.executable,
         "ops/tools/run_options_chain_snapshot_required_day_v1.py",
@@ -117,7 +138,22 @@ def _run_capture(ctx: bod.BodContext, instrument: str) -> dict[str, Any]:
     ]
     env = dict(os.environ)
     env["C2_TRUTH_ROOT"] = str(ctx.execution_root)
-    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True, check=False, env=env, timeout=120)
+    env.setdefault("C2_OPTIONS_SNAPSHOT_STEP_TIMEOUT_SECONDS", str(child_timeout))
+    try:
+        proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True, check=False, env=env, timeout=parent_timeout)
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "instrument": instrument,
+            "command": " ".join(cmd),
+            "status": "BLOCKED",
+            "blocker": "OPTIONS_CAPTURE_TIMEOUT",
+            "snapshot_path": str((ctx.execution_root / "options_chain_snapshot_v1" / ctx.day_utc).resolve()),
+            "freshness_certificate_path": "",
+            "exit_code": 124,
+            "stdout_summary": str(exc.stdout or "").strip()[-1200:],
+            "stderr_summary": f"MARKET_OPEN_GATE_CAPTURE_PARENT_TIMEOUT:{parent_timeout}s",
+            "timeout_seconds": int(parent_timeout),
+        }
     blocker = ""
     snapshot_path = ""
     cert_path = ""
@@ -150,6 +186,7 @@ def _run_capture(ctx: bod.BodContext, instrument: str) -> dict[str, Any]:
         "exit_code": int(proc.returncode),
         "stdout_summary": str(proc.stdout or "").strip()[-1200:],
         "stderr_summary": str(proc.stderr or "").strip()[-1200:],
+        "timeout_seconds": int(child_timeout),
     }
 
 
@@ -486,7 +523,6 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
             status = "PENDING"
             blocker = blocker or str(snapshot_validation.get("blocker") or "") or "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
             fail_closed_reason = blocker
-            blocker = "MARKET_NOT_OPEN"
         action = "" if status == "PASS" else f"Capture current {instrument} option bid/ask quotes and freshness certificate during regular market hours, then rerun this gate."
         return _payload(
             status=status,

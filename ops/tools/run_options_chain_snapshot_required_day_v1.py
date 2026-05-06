@@ -38,6 +38,7 @@ OPTIONS_CAPTURE_SPECIFIC_BLOCKERS = {
     "OPTIONS_CAPTURE_TIMEOUT",
     "OPTIONS_CAPTURE_IMPLEMENTATION_ERROR",
 }
+DEFAULT_OPTIONS_SNAPSHOT_STEP_TIMEOUT_SECONDS = 180
 
 
 def _utc_now_iso() -> str:
@@ -205,7 +206,7 @@ def _snapshot_valid_for_symbol(*, truth_root: Path, day_utc: str, symbol: str, e
 def _run_tool(cmd: List[str], *, truth_root: Path) -> Dict[str, Any]:
     env = dict(os.environ)
     env["C2_TRUTH_ROOT"] = str(truth_root)
-    timeout_s = int(str(os.environ.get("C2_OPTIONS_SNAPSHOT_STEP_TIMEOUT_SECONDS") or "60").strip())
+    timeout_s = int(str(os.environ.get("C2_OPTIONS_SNAPSHOT_STEP_TIMEOUT_SECONDS") or str(DEFAULT_OPTIONS_SNAPSHOT_STEP_TIMEOUT_SECONDS)).strip())
     try:
         proc = subprocess.run(
             cmd,
@@ -217,12 +218,14 @@ def _run_tool(cmd: List[str], *, truth_root: Path) -> Dict[str, Any]:
             timeout=timeout_s,
         )
     except subprocess.TimeoutExpired as exc:
+        diagnostic_path = _write_timeout_diagnostic(cmd=cmd, truth_root=truth_root, timeout_seconds=timeout_s)
         return {
             "cmd": cmd,
             "return_code": 124,
             "stdout": str(exc.stdout or "").strip(),
             "stderr": f"OPTIONS_SNAPSHOT_CAPTURE_TIMEOUT:{timeout_s}s",
             "timed_out": True,
+            "diagnostic_path": str(diagnostic_path),
         }
     return {
         "cmd": cmd,
@@ -230,6 +233,48 @@ def _run_tool(cmd: List[str], *, truth_root: Path) -> Dict[str, Any]:
         "stdout": str(proc.stdout or "").strip(),
         "stderr": str(proc.stderr or "").strip(),
     }
+
+
+def _arg_after(cmd: Sequence[str], name: str) -> str:
+    try:
+        idx = list(cmd).index(name)
+    except ValueError:
+        return ""
+    if idx + 1 >= len(cmd):
+        return ""
+    return str(cmd[idx + 1] or "").strip()
+
+
+def _write_timeout_diagnostic(*, cmd: Sequence[str], truth_root: Path, timeout_seconds: int) -> Path:
+    day_utc = _arg_after(cmd, "--day_utc") or "UNKNOWN_DAY"
+    symbol = (_arg_after(cmd, "--symbol") or "UNKNOWN").upper()
+    run_id = f"ib_capture_{symbol}_{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}_timeout"
+    out_dir = (truth_root / "reports" / "options_chain_capture_ib_day_v1" / day_utc / run_id).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = (out_dir / "options_chain_capture_diagnostic.v1.json").resolve()
+    payload = {
+        "schema_id": "options_chain_capture_diagnostic",
+        "schema_version": "v1",
+        "status": "FAIL",
+        "error": "OPTIONS_CAPTURE_TIMEOUT",
+        "reason_code": "OPTIONS_CAPTURE_TIMEOUT",
+        "symbol": symbol,
+        "day_utc": day_utc,
+        "timeout_seconds": int(timeout_seconds),
+        "child_command": [str(item) for item in cmd],
+        "last_known_stage": "SUBPROCESS_TIMEOUT",
+        "ib_errors": [],
+        "contract_count": None,
+        "quote_count": None,
+        "attempted_output_artifacts": {
+            "raw_root": str((truth_root / "options_chain_raw_v1" / day_utc).resolve()),
+            "snapshot_root": str((truth_root / "options_chain_snapshot_v1" / day_utc).resolve()),
+            "diagnostic_path": str(path),
+        },
+        "generated_at_utc": _utc_now_iso(),
+    }
+    path.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    return path
 
 
 def _walk_json_strings(value: Any) -> List[str]:
@@ -275,7 +320,11 @@ def _read_capture_diagnostic(path: Path | None) -> Dict[str, Any]:
 
 def _classify_options_capture_failure(capture_result: Dict[str, Any]) -> Dict[str, Any]:
     if bool(capture_result.get("timed_out")) or "OPTIONS_SNAPSHOT_CAPTURE_TIMEOUT" in str(capture_result.get("stderr") or ""):
-        return {"reason_code": "OPTIONS_CAPTURE_TIMEOUT", "capture_diagnostic_path": ""}
+        return {
+            "reason_code": "OPTIONS_CAPTURE_TIMEOUT",
+            "capture_diagnostic_path": str(capture_result.get("diagnostic_path") or ""),
+            "capture_error": str(capture_result.get("stderr") or ""),
+        }
 
     diagnostic_path = _diagnostic_path_from_capture_result(capture_result)
     diagnostic = _read_capture_diagnostic(diagnostic_path)
