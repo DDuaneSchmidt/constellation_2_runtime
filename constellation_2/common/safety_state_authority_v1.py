@@ -342,13 +342,13 @@ def evaluate_safety_state_authority_v1(
         ("accounting_nav_v2", current_nav_path, current_nav, _extract_accounting_nav_cents(current_nav)),
         ("nav_v2", current_nav_path, current_nav, _extract_cents(current_nav)),
         ("portfolio_account_authority_v1", portfolio_path, portfolio, _extract_cents(portfolio)),
-        ("capital_risk_envelope_v2", capital_envelope_path, capital_envelope, _extract_cents(capital_envelope)),
         ("capital_supply_v1", capital_supply_path, capital_supply, _extract_cents(capital_supply)),
+        ("capital_risk_envelope_v2", capital_envelope_path, capital_envelope, _extract_cents(capital_envelope)),
     ]
     nav_source = ""
     nav_current_cents: int | None = None
     for source_name, source_path, _payload, cents in current_candidates:
-        if cents is not None:
+        if cents is not None and cents > 0:
             nav_source = f"{source_name}:{source_path}"
             nav_current_cents = cents
             break
