@@ -98,6 +98,20 @@ def _session_for_same_day(local_dt: datetime) -> tuple[str, str]:
     return "AFTER_HOURS", "AFTER_HOURS_CLOSURE"
 
 
+def _session_for_target_day(*, target_day: str, now: datetime, replay_mode: bool = False) -> tuple[str, str, str]:
+    local = now.astimezone(ZoneInfo(TIMEZONE))
+    current_day = local.date().isoformat()
+    target = str(target_day).strip()
+    if replay_mode:
+        return current_day, "PAST_TARGET_DAY" if target < current_day else "CLOSED", "HISTORICAL_REPLAY"
+    if target > current_day:
+        return current_day, "FUTURE_TARGET_DAY", "PREOPEN_BUILD"
+    if target < current_day:
+        return current_day, "PAST_TARGET_DAY", "HISTORICAL_REPLAY"
+    session_state, readiness_mode = _session_for_same_day(local)
+    return current_day, session_state, readiness_mode
+
+
 def _policy_for_mode(readiness_mode: str) -> tuple[dict[str, Any], list[str], list[str], bool, bool, bool, bool, str, str, str]:
     if readiness_mode in PREOPEN_MODES:
         evidence_policy = {
@@ -192,20 +206,8 @@ def evaluate_trading_day_readiness_authority_v1(
     truth_root = Path(truth_root).resolve()
     execution_root = Path(execution_root).resolve() if execution_root is not None else truth_root
     now = current_time_utc if isinstance(current_time_utc, datetime) else (_parse_utc(current_time_utc) if current_time_utc else _utc_now())
-    local = now.astimezone(ZoneInfo(TIMEZONE))
-    current_day = local.date().isoformat()
     target = str(target_day).strip()
-    if replay_mode:
-        session_state = "PAST_TARGET_DAY" if target < current_day else "CLOSED"
-        readiness_mode = "HISTORICAL_REPLAY"
-    elif target > current_day:
-        session_state = "FUTURE_TARGET_DAY"
-        readiness_mode = "PREOPEN_BUILD"
-    elif target < current_day:
-        session_state = "PAST_TARGET_DAY"
-        readiness_mode = "HISTORICAL_REPLAY"
-    else:
-        session_state, readiness_mode = _session_for_same_day(local)
+    current_day, session_state, readiness_mode = _session_for_target_day(target_day=target, now=now, replay_mode=replay_mode)
 
     (
         evidence_policy,
@@ -272,13 +274,23 @@ def read_or_evaluate_trading_day_readiness_authority_v1(
 ) -> tuple[Path, dict[str, Any]]:
     path = trading_day_readiness_authority_output_path(truth_root=truth_root, target_day=target_day).resolve()
     payload = _read_json(path)
-    if payload is None or str(payload.get("target_day") or payload.get("day_utc") or "").strip() != target_day:
+    now = current_time_utc if isinstance(current_time_utc, datetime) else (_parse_utc(current_time_utc) if current_time_utc else _utc_now())
+    current_day, expected_session_state, expected_readiness_mode = _session_for_target_day(target_day=target_day, now=now)
+    cached_target_day = str(payload.get("target_day") or payload.get("day_utc") or "").strip() if payload else ""
+    cache_current = (
+        payload is not None
+        and cached_target_day == target_day
+        and str(payload.get("current_day") or "").strip() == current_day
+        and str(payload.get("session_state") or "").strip().upper() == expected_session_state
+        and str(payload.get("readiness_mode") or "").strip().upper() == expected_readiness_mode
+    )
+    if not cache_current:
         payload = evaluate_trading_day_readiness_authority_v1(
             target_day=target_day,
             truth_root=truth_root,
             execution_root=execution_root,
             environment=environment,
-            current_time_utc=current_time_utc,
+            current_time_utc=now,
         )
         path = write_trading_day_readiness_authority_v1(truth_root=truth_root, target_day=target_day, payload=payload).resolve()
     return path, payload

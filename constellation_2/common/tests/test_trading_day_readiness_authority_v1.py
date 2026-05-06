@@ -7,7 +7,11 @@ SOURCE_ROOT = Path("/home/node/constellation")
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
-from constellation_2.common.trading_day_readiness_authority_v1 import evaluate_trading_day_readiness_authority_v1
+from constellation_2.common.trading_day_readiness_authority_v1 import (
+    evaluate_trading_day_readiness_authority_v1,
+    read_or_evaluate_trading_day_readiness_authority_v1,
+    write_trading_day_readiness_authority_v1,
+)
 from constellation_2.common.pre_open_materializer_v1 import apply_trading_day_readiness_policy_to_pre_open_checks_v1
 from ops.tools.run_submit_boundary_status_v1 import _canonical_blocker_for_boundary_v1
 
@@ -44,6 +48,58 @@ def test_intraday_mode_requires_same_day_broker_and_options_evidence(tmp_path: P
     assert payload["requires_same_day_options_snapshot"] is True
     assert payload["requires_live_account_truth"] is True
     assert payload["submit_allowed_by_mode"] is True
+
+
+def test_read_or_evaluate_refreshes_preopen_cache_during_regular_session(tmp_path: Path) -> None:
+    truth = tmp_path / "truth"
+    execution = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    stale = evaluate_trading_day_readiness_authority_v1(
+        target_day="2026-05-01",
+        truth_root=truth,
+        execution_root=execution,
+        environment="PAPER",
+        current_time_utc="2026-04-30T22:00:00Z",
+    )
+    write_trading_day_readiness_authority_v1(truth_root=truth, target_day="2026-05-01", payload=stale)
+
+    _, payload = read_or_evaluate_trading_day_readiness_authority_v1(
+        target_day="2026-05-01",
+        truth_root=truth,
+        execution_root=execution,
+        environment="PAPER",
+        current_time_utc="2026-05-01T15:00:00Z",
+    )
+
+    assert payload["session_state"] == "REGULAR_OPEN"
+    assert payload["readiness_mode"] == "INTRADAY_SUBMIT_READY"
+    assert payload["submit_allowed_by_mode"] is True
+    assert payload["canonical_blocker"] == ""
+
+
+def test_read_or_evaluate_rejects_wrong_day_cache_fail_closed(tmp_path: Path) -> None:
+    truth = tmp_path / "truth"
+    execution = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    wrong_day = evaluate_trading_day_readiness_authority_v1(
+        target_day="2026-05-01",
+        truth_root=truth,
+        execution_root=execution,
+        environment="PAPER",
+        current_time_utc="2026-05-01T15:00:00Z",
+    )
+    write_trading_day_readiness_authority_v1(truth_root=truth, target_day="2026-05-02", payload=wrong_day)
+
+    _, payload = read_or_evaluate_trading_day_readiness_authority_v1(
+        target_day="2026-05-02",
+        truth_root=truth,
+        execution_root=execution,
+        environment="PAPER",
+        current_time_utc="2026-05-01T15:00:00Z",
+    )
+
+    assert payload["target_day"] == "2026-05-02"
+    assert payload["session_state"] == "FUTURE_TARGET_DAY"
+    assert payload["readiness_mode"] == "PREOPEN_BUILD"
+    assert payload["submit_allowed_by_mode"] is False
 
 
 def test_after_hours_closure_does_not_require_market_open_quotes(tmp_path: Path) -> None:

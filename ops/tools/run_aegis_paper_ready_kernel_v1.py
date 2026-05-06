@@ -90,6 +90,23 @@ def run_paper_ready_kernel_v1(
         ib_account=ib_account,
         release_commit=release_commit,
     )
+    refresh_stage, refresh_result = _refresh_trading_day_readiness_authority(
+        report=report,
+        runner=runner,
+        workdir=workdir,
+        canonical_root=canonical_root,
+        sleeve_root=sleeve_root,
+        target_day=target_day,
+        environment=environment,
+    )
+    if refresh_result["status"] != "PASS":
+        return _finish_blocked_report(
+            report=report,
+            stage=refresh_stage,
+            result=refresh_result,
+            canonical_truth_root=canonical_root,
+            target_day=target_day,
+        )
     for stage in stages:
         _assert_safe_command(stage.command)
         truth_root = sleeve_root if stage.truth_role == "PAPER_SLEEVE" else canonical_root
@@ -235,7 +252,7 @@ def _stages(
         _stage("authorization_artifacts", "authorization", ["python3", "ops/tools/run_authorization_artifacts_day_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("engine_activity_v1/authorization_v1") / target_day, ("OK", "PASS", "READY", "AUTHORIZED"), "python3 ops/tools/run_authorization_artifacts_day_v1.py --day_utc {day} --truth_root {sleeve}", "Write governed authorization artifacts for approved intents."),
         _stage("authorization_supply", "authorization", ["python3", "ops/tools/run_authorization_supply_v1.py", "--day_utc", target_day, "--environment", environment, "--truth_root", str(canonical_truth_root)], "CANONICAL", Path("reports/authorization_supply_v1") / target_day / "authorization_supply.v1.json", ("PASS", "OK", "READY", "AUTHORIZED"), "python3 ops/tools/run_authorization_supply_v1.py --day_utc {day} --environment PAPER --truth_root {canonical}", "Refresh canonical authorization supply from PAPER sleeve authorization evidence."),
         _stage("global_kill_switch", "risk", ["python3", "ops/tools/run_global_kill_switch_v1.py", "--day_utc", target_day], "CANONICAL", Path("risk_v1/kill_switch_v1") / target_day / "global_kill_switch_state.v1.json", ("INACTIVE", "PASS", "OK"), "python3 ops/tools/run_global_kill_switch_v1.py --day_utc {day}", "Refresh governed global kill switch from current authorization evidence."),
-        _stage("trading_day_readiness_authority", "trading_day", ["python3", "ops/tools/run_trading_day_readiness_authority_v1.py", "--target_day", target_day, "--truth_root", str(canonical_truth_root), "--execution_root", str(paper_sleeve_root), "--environment", environment], "CANONICAL", Path("reports/trading_day_readiness_authority_v1") / target_day / "trading_day_readiness_authority.v1.json", ("PASS", "OK", "READY"), "python3 ops/tools/run_trading_day_readiness_authority_v1.py --target_day {day} --truth_root {canonical} --execution_root {sleeve} --environment PAPER", "Refresh trading-day readiness authority at the current scheduled mode."),
+        _stage("trading_day_readiness_authority", "trading_day", ["python3", "ops/tools/run_trading_day_readiness_authority_v1.py", "--target_day", target_day, "--truth_root", str(canonical_truth_root), "--execution_root", str(paper_sleeve_root), "--environment", environment], "CANONICAL", Path("reports/trading_day_readiness_authority_v1") / target_day / "trading_day_readiness_authority.v1.json", ("PASS", "OK", "READY", "SUBMIT_ALLOWED"), "python3 ops/tools/run_trading_day_readiness_authority_v1.py --target_day {day} --truth_root {canonical} --execution_root {sleeve} --environment PAPER", "Refresh trading-day readiness authority at the current scheduled mode."),
         _stage("submit_boundary_status", "submit_boundary", ["python3", "ops/tools/run_submit_boundary_status_v1.py", "--day_utc", target_day, "--truth_root", str(canonical_truth_root)], "CANONICAL", Path("reports/submit_boundary_status_v1") / target_day / "submit_boundary_status.v1.json", ("AUTHORIZED", "PASS", "OK", "READY", "SUBMIT_ALLOWED"), "python3 ops/tools/run_submit_boundary_status_v1.py --day_utc {day} --truth_root {canonical}", "Refresh submit boundary status after all upstream authorities are current."),
     ]
 
@@ -346,6 +363,74 @@ def _base_report(*, target_day: str, environment: str, generated_at_utc: str, ca
         "submit_boundary_status": None,
         "generated_at_utc": generated_at_utc,
     }
+
+
+def _refresh_trading_day_readiness_authority(
+    *,
+    report: dict[str, Any],
+    runner: Callable[[list[str], Path], subprocess.CompletedProcess[str]],
+    workdir: Path,
+    canonical_root: Path,
+    sleeve_root: Path,
+    target_day: str,
+    environment: str,
+) -> tuple[KernelStage, dict[str, Any]]:
+    stage = _stage(
+        "trading_day_readiness_authority_refresh",
+        "trading_day",
+        [
+            "python3",
+            "ops/tools/run_trading_day_readiness_authority_v1.py",
+            "--target_day",
+            target_day,
+            "--truth_root",
+            str(canonical_root),
+            "--execution_root",
+            str(sleeve_root),
+            "--environment",
+            environment,
+        ],
+        "CANONICAL",
+        Path("reports/trading_day_readiness_authority_v1") / target_day / "trading_day_readiness_authority.v1.json",
+        ("PASS",),
+        "python3 ops/tools/run_trading_day_readiness_authority_v1.py --target_day {day} --truth_root {canonical} --execution_root {sleeve} --environment PAPER",
+        "Refresh trading-day readiness authority at the current scheduled mode.",
+    )
+    _assert_safe_command(stage.command)
+    artifact_path = canonical_root / stage.artifact_rel
+    completed = runner(stage.command, workdir)
+    result: dict[str, Any] = {
+        "stage_id": stage.stage_id,
+        "owner": stage.owner,
+        "truth_role": stage.truth_role,
+        "producer_command": _command_text(stage.command),
+        "repair_command": stage.repair_command,
+        "artifact_path": str(artifact_path),
+        "status": "RUNNING",
+        "returncode": completed.returncode,
+        "stdout_tail": (completed.stdout or "")[-1000:],
+        "stderr_tail": (completed.stderr or "")[-1000:],
+        "freshness_role": "CURRENT_SESSION_REFRESH",
+    }
+    result.update(_validate_operational_refresh_artifact(artifact_path=artifact_path, target_day=target_day, stage=stage))
+    report["stage_results"].append(result)
+    report["artifact_paths"][stage.stage_id] = str(artifact_path)
+    _refresh_summary_fields(report, canonical_root=canonical_root, sleeve_root=sleeve_root, target_day=target_day)
+    if completed.returncode != 0 and result["status"] == "PASS":
+        result.update(_blocked("TRADING_DAY_READINESS_AUTHORITY_REFRESH_FAILED", result.get("artifact_status", "UNKNOWN"), "producer exited nonzero during operational authority refresh", stage, failed_field="returncode", expected_value=0, actual_value=completed.returncode))
+    return stage, result
+
+
+def _validate_operational_refresh_artifact(*, artifact_path: Path, target_day: str, stage: KernelStage) -> dict[str, Any]:
+    if not artifact_path.exists():
+        return _blocked("MISSING_ARTIFACT", "MISSING", str(artifact_path), stage)
+    try:
+        data = json.loads(artifact_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return _blocked("ARTIFACT_JSON_INVALID", "INVALID", f"{type(exc).__name__}: {exc}", stage)
+    if _wrong_day(data, target_day):
+        return _blocked("TARGET_DAY_DATE_MISMATCH", _status_of(data), "artifact day does not match target day", stage)
+    return {"status": "PASS", "artifact_status": str(data.get("readiness_mode") or _status_of(data)).upper()}
 
 
 def _refresh_summary_fields(report: dict[str, Any], *, canonical_root: Path, sleeve_root: Path, target_day: str) -> None:

@@ -517,7 +517,11 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
                 blocker = str(capture_result.get("blocker") or "") or "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
         if blocker == "OPTIONS_QUOTES_MISSING":
             blocker = "OPTIONS_QUOTES_MISSING_BID_ASK"
-        if supply_status == "PASS" and not snapshot_validation.get("blocker") and not blocker:
+        snapshot_is_current = bool(snapshot_validation.get("snapshot_path")) and not snapshot_validation.get("blocker")
+        supply_allows_current_snapshot = supply_status == "PASS" or (
+            supply_status == "SKIPPED" and not _blocker_from_supply(supply)
+        )
+        if snapshot_is_current and supply_allows_current_snapshot and not blocker:
             status = "PASS"
         else:
             status = "PENDING"

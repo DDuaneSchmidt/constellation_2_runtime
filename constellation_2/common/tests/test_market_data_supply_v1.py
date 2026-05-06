@@ -723,6 +723,24 @@ def test_market_open_gate_passes_during_market_with_valid_supply(monkeypatch: py
     assert payload["canonical_blocker"] == ""
 
 
+def test_market_open_gate_passes_with_fresh_snapshot_when_supply_has_no_requirements(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _same_day_options_readiness(monkeypatch, ctx)
+    _selected_pointer(ctx, symbol="IWM")
+    mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    mds_path.parent.mkdir(parents=True, exist_ok=True)
+    mds_path.write_text('{"status":"SKIPPED","canonical_blocker":"","requirements":[],"artifacts":[]}\n', encoding="utf-8")
+    _snapshot(ctx, symbol="IWM")
+    monkeypatch.setattr(open_gate, "_market_session_state", lambda: "REGULAR")
+    monkeypatch.setattr(open_gate, "_run_market_data_supply", lambda _ctx: {"exit_code": 0})
+
+    payload = open_gate.build_market_open_data_gate(ctx)
+
+    assert payload["status"] == "PASS"
+    assert payload["canonical_blocker"] == ""
+    assert payload["diagnostics"]["quote_completeness_result"]["result"] == "PASS"
+
+
 def test_market_open_gate_regular_hours_ignores_stale_preopen_readiness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _stale_preopen_readiness(monkeypatch, ctx)
