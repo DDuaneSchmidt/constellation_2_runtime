@@ -20,6 +20,38 @@ KERNEL_TOOL = "ops/tools/run_aegis_paper_ready_kernel_v1.py"
 
 STATUS_PASS = "PASS"
 STATUS_FAIL = "FAIL"
+KERNEL_STAGE_ORDER = {
+    "broker_supply": 1,
+    "cash_ledger_from_broker": 2,
+    "positions_snapshot": 3,
+    "accounting_nav": 4,
+    "accounting_nav_compat_bridge": 5,
+    "capital_supply": 6,
+    "trading_day_intent_generation": 7,
+    "portfolio_activation_gate": 8,
+    "portfolio_scoring": 9,
+    "intent_arbitration": 10,
+    "risk_budget_supply": 11,
+    "market_open_data_gate": 12,
+    "structure_decision_supply": 13,
+    "capital_authority_allocation": 14,
+    "phasec_identity_materializer": 15,
+    "authorization_artifacts": 16,
+    "authorization_supply": 17,
+    "global_kill_switch": 18,
+    "trading_day_readiness_authority": 19,
+    "submit_boundary_status": 20,
+}
+KERNEL_STAGE_GATE_STATE = {
+    "trading_day_intent_generation": "INTENT_AVAILABLE",
+    "intent_arbitration": "INTENT_SELECTED",
+    "trading_day_readiness_authority": "TRADING_DAY_MODE_VALID",
+    "risk_budget_supply": "RISK_VALID",
+    "market_open_data_gate": "MARKET_SESSION_VALID",
+    "authorization_supply": "AUTHORIZATION_VALID",
+    "global_kill_switch": "KILL_SWITCH_CLEAR",
+    "submit_boundary_status": "SUBMIT_BOUNDARY_READY",
+}
 
 
 @dataclass(frozen=True)
@@ -294,6 +326,25 @@ def _kernel_completed_from_artifact(payload: dict[str, Any], evidence: ArtifactE
     return True
 
 
+def _kernel_failed_before_stage(payload: dict[str, Any], stage_id: str) -> bool:
+    if str(payload.get("final_status") or "").strip().upper() != "BLOCKED":
+        return False
+    failed_stage_id = str(payload.get("failed_stage_id") or "").strip()
+    failed_order = KERNEL_STAGE_ORDER.get(failed_stage_id)
+    target_order = KERNEL_STAGE_ORDER.get(stage_id)
+    return isinstance(failed_order, int) and isinstance(target_order, int) and failed_order < target_order
+
+
+def _kernel_preferred_blocker_gate(kernel_report: dict[str, Any], gates: list[GateResult]) -> GateResult | None:
+    if str(kernel_report.get("final_status") or "").strip().upper() != "BLOCKED":
+        return None
+    failed_stage_id = str(kernel_report.get("failed_stage_id") or "").strip()
+    state = KERNEL_STAGE_GATE_STATE.get(failed_stage_id)
+    if not state:
+        return None
+    return next((gate for gate in gates if gate.state == state and gate.status == STATUS_FAIL), None)
+
+
 def _kernel_start_blocker(failure_line: str) -> str:
     text = failure_line.lower()
     if "can't open file" in text or "no such file or directory" in text or "exec" in text:
@@ -503,13 +554,31 @@ def build_no_trade_explanation_v1(
     market_path = sleeve / "reports" / "market_open_data_gate_v1" / day_utc / "market_open_data_gate.v1.json"
     market, market_evidence = _artifact(logical_name="market_open_data_gate_v1", path=market_path, day_utc=day_utc)
     market_ok = _evidence_current(market_evidence) and str(market.get("status") or "").upper() == "PASS" and not str(market.get("canonical_blocker") or "").strip()
+    market_not_reached = kernel_completed and _kernel_failed_before_stage(kernel_report, "market_open_data_gate")
     gates.append(
-        _gate(9, "MARKET_SESSION_VALID", STATUS_PASS if market_ok else STATUS_FAIL, "" if market_ok else str(market.get("canonical_blocker") or "MARKET_SESSION_INVALID"), "Market session/data gate passed." if market_ok else "Market session is not submit-valid or market-open data gate is blocking.", market_evidence, "Wait for regular market session and require fresh quote-complete market data evidence.", _classification_for_missing_or_stale(market_evidence, "EXPECTED_SAFETY"))
+        _gate(
+            9,
+            "MARKET_SESSION_VALID",
+            STATUS_PASS if market_ok else STATUS_FAIL,
+            "" if market_ok else ("MARKET_GATE_NOT_REACHED" if market_not_reached else str(market.get("canonical_blocker") or "MARKET_SESSION_INVALID")),
+            "Market session/data gate passed."
+            if market_ok
+            else (
+                f"Market-open data gate was not reached because the kernel stopped at {str(kernel_report.get('failed_stage_id') or '<unknown>')}."
+                if market_not_reached
+                else "Market session is not submit-valid or market-open data gate is blocking."
+            ),
+            market_evidence,
+            f"Resolve {str(kernel_report.get('first_blocker') or 'the upstream kernel blocker')}, then wait for the next scheduled paper-ready run."
+            if market_not_reached
+            else "Wait for regular market session and require fresh quote-complete market data evidence.",
+            "NOT_REACHED" if market_not_reached else _classification_for_missing_or_stale(market_evidence, "EXPECTED_SAFETY"),
+        )
     )
 
     capture_attempted = _evidence_current(market_evidence) and bool(market.get("capture_attempted_by_gate") is True)
     gates.append(
-        _gate(10, "MARKET_DATA_CAPTURE_ATTEMPTED", STATUS_PASS if capture_attempted else STATUS_FAIL, "" if capture_attempted else "MARKET_DATA_CAPTURE_NOT_ATTEMPTED", "Market data capture was attempted by the gate." if capture_attempted else "Market data capture was not attempted by the gate.", market_evidence, "Run the scheduled market-open gate in a valid session with selected-intent symbol available.", _classification_for_missing_or_stale(market_evidence, "EXPECTED_SAFETY"))
+        _gate(10, "MARKET_DATA_CAPTURE_ATTEMPTED", STATUS_PASS if capture_attempted else STATUS_FAIL, "" if capture_attempted else ("MARKET_DATA_CAPTURE_NOT_REACHED" if market_not_reached else "MARKET_DATA_CAPTURE_NOT_ATTEMPTED"), "Market data capture was attempted by the gate." if capture_attempted else ("Market data capture was not reached because an upstream kernel stage blocked." if market_not_reached else "Market data capture was not attempted by the gate."), market_evidence, f"Resolve {str(kernel_report.get('first_blocker') or 'the upstream kernel blocker')}, then wait for the next scheduled paper-ready run." if market_not_reached else "Run the scheduled market-open gate in a valid session with selected-intent symbol available.", "NOT_REACHED" if market_not_reached else _classification_for_missing_or_stale(market_evidence, "EXPECTED_SAFETY"))
     )
 
     supply_path = sleeve / "reports" / "market_data_supply_v1" / day_utc / "market_data_supply.v1.json"
@@ -519,7 +588,7 @@ def build_no_trade_explanation_v1(
         or str(market.get("quote_completeness_status") or "").upper() == "PASS"
     )
     gates.append(
-        _gate(11, "QUOTE_COMPLETE", STATUS_PASS if quote_ok else STATUS_FAIL, "" if quote_ok else str(supply.get("canonical_blocker") or "QUOTE_COMPLETENESS_FAILED"), "Quote completeness passed." if quote_ok else "Fresh quote-complete market data evidence is missing or failed.", supply_evidence, "Produce fresh underlying/options quote-complete market data for the selected intent.", _classification_for_missing_or_stale(supply_evidence, "MISSING_EVIDENCE"))
+        _gate(11, "QUOTE_COMPLETE", STATUS_PASS if quote_ok else STATUS_FAIL, "" if quote_ok else ("QUOTE_COMPLETENESS_NOT_REACHED" if market_not_reached else str(supply.get("canonical_blocker") or "QUOTE_COMPLETENESS_FAILED")), "Quote completeness passed." if quote_ok else ("Quote completeness was not reached because an upstream kernel stage blocked." if market_not_reached else "Fresh quote-complete market data evidence is missing or failed."), supply_evidence, f"Resolve {str(kernel_report.get('first_blocker') or 'the upstream kernel blocker')}, then wait for the next scheduled paper-ready run." if market_not_reached else "Produce fresh underlying/options quote-complete market data for the selected intent.", "NOT_REACHED" if market_not_reached else _classification_for_missing_or_stale(supply_evidence, "MISSING_EVIDENCE"))
     )
 
     runtime_path = truth / "reports" / "runtime_resilience_authority_v1" / day_utc / "runtime_resilience_authority.v1.json"
@@ -590,7 +659,7 @@ def build_no_trade_explanation_v1(
         ]
     )
 
-    first = next((gate for gate in gates if gate.status == STATUS_FAIL), gates[-1])
+    first = _kernel_preferred_blocker_gate(kernel_report, gates) or next((gate for gate in gates if gate.status == STATUS_FAIL), gates[-1])
     return NoTradeExplanation(
         day_utc=day_utc,
         active_release_id=active_release_id,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -104,6 +105,20 @@ def _positions_v2(ctx: bod.BodContext) -> Path:
             "reason_codes": ["TEST"],
             "input_manifest": [{"type": "other", "path": str(ctx.execution_root), "sha256": "0" * 64, "day_utc": ctx.day_utc, "producer": "test"}],
             "positions": {"currency": "USD", "asof_utc": f"{ctx.day_utc}T00:00:00Z", "items": [], "notes": []},
+        },
+    )
+
+
+def _capital_risk_report(ctx: bod.BodContext, *, status: str, reason_codes: list[str]) -> Path:
+    return _write_json(
+        ctx.execution_root / "reports" / "capital_risk_envelope_v2" / ctx.day_utc / "capital_risk_envelope.v2.json",
+        {
+            "schema_id": "capital_risk_envelope",
+            "schema_version": "v2",
+            "day_utc": ctx.day_utc,
+            "produced_utc": f"{ctx.day_utc}T00:00:00Z",
+            "status": status,
+            "reason_codes": reason_codes,
         },
     )
 
@@ -354,6 +369,65 @@ def test_capital_risk_envelope_failure_preserves_reason_codes(monkeypatch: pytes
     assert payload["canonical_blocker"] == "CAPITAL_RISK_ENVELOPE_BLOCKED"
     assert payload["capital_risk_envelope"]["reason_codes"] == ["B2_PORTFOLIO_CAPITAL_AT_RISK_EXCEEDS_ENVELOPE"]
     assert "B2_NAV_TOTAL_MISSING_OR_INVALID" not in payload["capital_risk_envelope"]["reason_codes"]
+
+
+def test_risk_budget_rechecks_fresh_pass_capital_risk_artifact_after_transient_fail(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _capital_supply(ctx)
+    _intent(ctx)
+    _positions_v2(ctx)
+    path = _capital_risk_report(ctx, status="FAIL", reason_codes=["B2_INPUTS_MISSING_FAILCLOSED"])
+    wrote_pass = False
+
+    def fake_run(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        return SimpleNamespace(returncode=2, stdout="action=EXISTS", stderr="FAIL")
+
+    def fake_sleep(_seconds: float) -> None:
+        nonlocal wrote_pass
+        if not wrote_pass:
+            _capital_risk_report(ctx, status="PASS", reason_codes=[])
+            wrote_pass = True
+
+    monkeypatch.setattr(supply.subprocess, "run", fake_run)
+    monkeypatch.setattr(supply.time, "sleep", fake_sleep)
+    monkeypatch.setattr(supply, "CAPITAL_RISK_ENVELOPE_PASS_RECHECK_SECONDS", 0.2)
+    monkeypatch.setattr(supply, "CAPITAL_RISK_ENVELOPE_PASS_RECHECK_INTERVAL_SECONDS", 0.05)
+
+    payload = supply.build_risk_budget_supply(ctx)
+
+    assert path.exists()
+    assert payload["status"] == "PASS"
+    assert payload["canonical_blocker"] == ""
+    assert payload["capital_risk_envelope"]["status"] == "PASS"
+    assert payload["capital_risk_envelope"]["pass_recheck_attempted"] is True
+    assert payload["capital_risk_envelope"]["fresh_pass_observed_after_invocation_start"] is True
+    assert payload["risk_sizing_export"]["usable_for_risk_sizing"] is True
+
+
+def test_risk_budget_still_blocks_when_capital_risk_artifact_remains_fail(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _capital_supply(ctx)
+    _intent(ctx)
+    _positions_v2(ctx)
+    _capital_risk_report(ctx, status="FAIL", reason_codes=["B2_INPUTS_MISSING_FAILCLOSED"])
+
+    def fake_run(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        return SimpleNamespace(returncode=2, stdout="action=EXISTS", stderr="FAIL")
+
+    monkeypatch.setattr(supply.subprocess, "run", fake_run)
+    monkeypatch.setattr(supply.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(supply, "CAPITAL_RISK_ENVELOPE_PASS_RECHECK_SECONDS", 0.05)
+    monkeypatch.setattr(supply, "CAPITAL_RISK_ENVELOPE_PASS_RECHECK_INTERVAL_SECONDS", 0.05)
+
+    payload = supply.build_risk_budget_supply(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "CAPITAL_RISK_ENVELOPE_BLOCKED"
+    assert payload["capital_risk_envelope"]["status"] == "FAIL"
+    assert payload["capital_risk_envelope"]["pass_recheck_attempted"] is True
+    assert payload["risk_sizing_export"]["usable_for_risk_sizing"] is False
 
 
 def test_capital_risk_envelope_no_longer_reports_missing_nav_with_valid_risk_budget(tmp_path: Path) -> None:

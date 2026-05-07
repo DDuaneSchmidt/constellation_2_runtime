@@ -6,6 +6,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import time
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation, ROUND_FLOOR
 from pathlib import Path
@@ -24,6 +25,8 @@ SCHEMA_VERSION = "risk_budget_supply.v1"
 POLICY_ID = "C2_CAPITAL_RISK_ENVELOPE_CONTRACT_V2"
 POLICY_SOURCE = (REPO_ROOT / "governance/05_CONTRACTS/C2/capital_risk_envelope_v2.contract.md").resolve()
 MAX_ACCOUNT_RISK_PCT = Decimal("0.020000")
+CAPITAL_RISK_ENVELOPE_PASS_RECHECK_SECONDS = 15.0
+CAPITAL_RISK_ENVELOPE_PASS_RECHECK_INTERVAL_SECONDS = 1.0
 
 ALLOWED_BLOCKERS = {
     "CAPITAL_SUPPLY_MISSING",
@@ -65,6 +68,13 @@ def _sha256_file(path: Path) -> str:
     if not path.exists() or not path.is_file():
         return "0" * 64
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _file_mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def _int(value: Any) -> int | None:
@@ -515,7 +525,65 @@ def _materialize_capital_risk_envelope_adapter(
     }
 
 
+def _read_current_capital_risk_pass(
+    *,
+    path: Path,
+    ctx: bod.BodContext,
+    started_at_epoch: float,
+    before_sha: str,
+) -> tuple[dict[str, Any], str, bool]:
+    payload = _read_json(path)
+    status = str(payload.get("status") or "").strip().upper()
+    schema_id = str(payload.get("schema_id") or "").strip()
+    schema_version = str(payload.get("schema_version") or "").strip()
+    day_utc = str(payload.get("day_utc") or "").strip()
+    reason_codes = payload.get("reason_codes") if isinstance(payload.get("reason_codes"), list) else []
+    after_sha = _sha256_file(path)
+    fresh_after_start = _file_mtime(path) >= started_at_epoch - 0.5 and after_sha != before_sha
+    valid_current_pass = (
+        schema_id == "capital_risk_envelope"
+        and schema_version == "v2"
+        and day_utc == ctx.day_utc
+        and status == "PASS"
+        and not reason_codes
+    )
+    return payload, status, bool(valid_current_pass and fresh_after_start)
+
+
+def _wait_for_current_capital_risk_pass(
+    *,
+    path: Path,
+    ctx: bod.BodContext,
+    started_at_epoch: float,
+    before_sha: str,
+) -> tuple[dict[str, Any], str, bool]:
+    payload, status, fresh_pass = _read_current_capital_risk_pass(
+        path=path,
+        ctx=ctx,
+        started_at_epoch=started_at_epoch,
+        before_sha=before_sha,
+    )
+    if fresh_pass:
+        return payload, status, True
+    deadline = time.monotonic() + max(0.0, CAPITAL_RISK_ENVELOPE_PASS_RECHECK_SECONDS)
+    interval = max(0.05, CAPITAL_RISK_ENVELOPE_PASS_RECHECK_INTERVAL_SECONDS)
+    while time.monotonic() < deadline:
+        time.sleep(interval)
+        payload, status, fresh_pass = _read_current_capital_risk_pass(
+            path=path,
+            ctx=ctx,
+            started_at_epoch=started_at_epoch,
+            before_sha=before_sha,
+        )
+        if fresh_pass:
+            return payload, status, True
+    return payload, status, False
+
+
 def _run_capital_risk_envelope(ctx: bod.BodContext) -> tuple[dict[str, Any], str]:
+    path = (ctx.execution_root / "reports" / "capital_risk_envelope_v2" / ctx.day_utc / "capital_risk_envelope.v2.json").resolve()
+    before_sha = _sha256_file(path)
+    started_at_epoch = time.time()
     cmd = [
         sys.executable,
         "ops/tools/run_c2_capital_risk_envelope_gate_v2.py",
@@ -529,20 +597,36 @@ def _run_capital_risk_envelope(ctx: bod.BodContext) -> tuple[dict[str, Any], str
         str(ctx.execution_root),
     ]
     proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True, check=False, timeout=60)
-    path = (ctx.execution_root / "reports" / "capital_risk_envelope_v2" / ctx.day_utc / "capital_risk_envelope.v2.json").resolve()
-    payload = _read_json(path)
-    status = str(payload.get("status") or "").strip().upper()
+    payload, status, fresh_pass_after_start = _read_current_capital_risk_pass(
+        path=path,
+        ctx=ctx,
+        started_at_epoch=started_at_epoch,
+        before_sha=before_sha,
+    )
+    pass_recheck_attempted = False
+    if not fresh_pass_after_start and (proc.returncode != 0 or status != "PASS"):
+        pass_recheck_attempted = True
+        payload, status, fresh_pass_after_start = _wait_for_current_capital_risk_pass(
+            path=path,
+            ctx=ctx,
+            started_at_epoch=started_at_epoch,
+            before_sha=before_sha,
+        )
     result = {
         "command": " ".join(cmd),
         "path": str(path),
         "exists": path.exists(),
         "status": status or "MISSING",
         "exit_code": int(proc.returncode),
+        "pass_recheck_attempted": pass_recheck_attempted,
+        "fresh_pass_observed_after_invocation_start": fresh_pass_after_start,
+        "artifact_sha256_before": before_sha,
+        "artifact_sha256_after": _sha256_file(path),
         "reason_codes": payload.get("reason_codes") if isinstance(payload.get("reason_codes"), list) else [],
         "stdout_summary": str(proc.stdout or "").strip()[-1200:],
         "stderr_summary": str(proc.stderr or "").strip()[-1200:],
     }
-    return result, "" if proc.returncode == 0 and status == "PASS" else "CAPITAL_RISK_ENVELOPE_BLOCKED"
+    return result, "" if (proc.returncode == 0 and status == "PASS") or fresh_pass_after_start else "CAPITAL_RISK_ENVELOPE_BLOCKED"
 
 
 def _operator_action(blocker: str, ctx: bod.BodContext, capital_supply: dict[str, Any] | None = None) -> str:

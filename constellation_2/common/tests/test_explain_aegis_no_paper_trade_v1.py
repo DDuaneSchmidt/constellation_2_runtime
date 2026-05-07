@@ -86,7 +86,7 @@ def _journal_runtime_exception() -> list[str]:
     ]
 
 
-def _write_kernel_report(runtime: Path, *, final_status: str = "BLOCKED", first_blocker: str = "OPTIONS_SNAPSHOT_CAPTURE_FAILED") -> None:
+def _write_kernel_report(runtime: Path, *, final_status: str = "BLOCKED", first_blocker: str = "OPTIONS_SNAPSHOT_CAPTURE_FAILED", failed_stage_id: str = "") -> None:
     _write(
         runtime / f"truth/reports/aegis_paper_ready_kernel_v1/{DAY}/paper_ready_kernel.v1.json",
         {
@@ -95,6 +95,7 @@ def _write_kernel_report(runtime: Path, *, final_status: str = "BLOCKED", first_
             "scheduled_run": True,
             "final_status": final_status,
             "first_blocker": first_blocker,
+            "failed_stage_id": failed_stage_id,
             "submit_allowed": False,
             "submission_authorized": False,
             "broker_transmit_enabled": None,
@@ -205,6 +206,43 @@ def test_identifies_market_not_open_and_prints_paths(tmp_path: Path) -> None:
     text = render_explanation_v1(result)
     assert result.first_blocker == "MARKET_NOT_OPEN"
     assert "market_open_data_gate.v1.json" in text
+
+
+def test_kernel_upstream_risk_failure_preferred_over_downstream_missing_market_gate(tmp_path: Path) -> None:
+    runtime, active = _base_runtime(tmp_path)
+    _populate(runtime, "NONE")
+    sleeve = runtime / "truth_sleeves/PRIMARY/PAPER"
+    (sleeve / f"reports/market_open_data_gate_v1/{DAY}/market_open_data_gate.v1.json").unlink()
+    (sleeve / f"reports/market_data_supply_v1/{DAY}/market_data_supply.v1.json").unlink()
+    _write(
+        sleeve / f"reports/risk_budget_supply_v1/{DAY}/risk_budget_supply.v1.json",
+        {"day_utc": DAY, "status": "BLOCKED", "canonical_blocker": "CAPITAL_RISK_ENVELOPE_BLOCKED", "generated_at_utc": "2026-05-05T13:30:08Z"},
+    )
+    _write_kernel_report(runtime, first_blocker="CAPITAL_RISK_ENVELOPE_BLOCKED", failed_stage_id="risk_budget_supply")
+
+    result = build_no_trade_explanation_v1(runtime_root=runtime, active_link=active, day_utc=DAY, journal_lines=_journal_success())
+
+    assert result.first_blocker == "CAPITAL_RISK_ENVELOPE_BLOCKED"
+    risk_gate = next(gate for gate in result.ordered_gate_results if gate.state == "RISK_VALID")
+    market_gate = next(gate for gate in result.ordered_gate_results if gate.state == "MARKET_SESSION_VALID")
+    assert risk_gate.reason_code == "CAPITAL_RISK_ENVELOPE_BLOCKED"
+    assert market_gate.reason_code == "MARKET_GATE_NOT_REACHED"
+    assert market_gate.classification == "NOT_REACHED"
+
+
+def test_market_gate_missing_still_reported_when_kernel_reached_market_gate(tmp_path: Path) -> None:
+    runtime, active = _base_runtime(tmp_path)
+    _populate(runtime, "NONE")
+    sleeve = runtime / "truth_sleeves/PRIMARY/PAPER"
+    (sleeve / f"reports/market_open_data_gate_v1/{DAY}/market_open_data_gate.v1.json").unlink()
+    (sleeve / f"reports/market_data_supply_v1/{DAY}/market_data_supply.v1.json").unlink()
+    _write_kernel_report(runtime, first_blocker="MISSING_ARTIFACT", failed_stage_id="market_open_data_gate")
+
+    result = build_no_trade_explanation_v1(runtime_root=runtime, active_link=active, day_utc=DAY, journal_lines=_journal_success())
+
+    assert result.first_blocker == "MARKET_SESSION_INVALID"
+    market_gate = next(gate for gate in result.ordered_gate_results if gate.state == "MARKET_SESSION_VALID")
+    assert market_gate.classification == "MISSING_EVIDENCE"
 
 
 def test_identifies_stale_artifact(tmp_path: Path) -> None:
