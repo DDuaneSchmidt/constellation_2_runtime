@@ -43,24 +43,24 @@ def _patch_probe_config(monkeypatch, truth: Path, execution: Path) -> None:
     monkeypatch.setattr(runtime_module.probe, "_resolve_config", lambda *_args, **_kwargs: (config, truth))
 
 
-def _intraday_readiness(truth: Path, execution: Path, *, submit_allowed: bool = True) -> None:
-    _write_json(
-        truth / "reports" / "trading_day_readiness_authority_v1" / DAY / "trading_day_readiness_authority.v1.json",
-        {
-            "schema_id": "C2_TRADING_DAY_READINESS_AUTHORITY_V1",
-            "target_day": DAY,
-            "day_utc": DAY,
-            "readiness_mode": "INTRADAY_SUBMIT_READY" if submit_allowed else "PREOPEN_BUILD",
-            "requires_same_day_broker_event_log": submit_allowed,
-            "submit_allowed_by_mode": submit_allowed,
-            "canonical_blocker": "" if submit_allowed else "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE",
-            "evidence_policy": {},
-            "allowed_carry_forward_sources": ["broker_event_log"] if not submit_allowed else [],
-            "artifact_paths": {
-                "same_day_broker_event_log": str(execution / "execution_evidence_v1" / "broker_events" / DAY / "broker_event_log.v1.jsonl")
-            },
+def _intraday_readiness(truth: Path, execution: Path, *, submit_allowed: bool = True) -> tuple[Path, dict]:
+    path = truth / "reports" / "trading_day_readiness_authority_v1" / DAY / "trading_day_readiness_authority.v1.json"
+    payload = {
+        "schema_id": "C2_TRADING_DAY_READINESS_AUTHORITY_V1",
+        "target_day": DAY,
+        "day_utc": DAY,
+        "readiness_mode": "INTRADAY_SUBMIT_READY" if submit_allowed else "PREOPEN_BUILD",
+        "requires_same_day_broker_event_log": submit_allowed,
+        "submit_allowed_by_mode": submit_allowed,
+        "canonical_blocker": "" if submit_allowed else "SUBMIT_NOT_ALLOWED_BY_TRADING_DAY_MODE",
+        "evidence_policy": {},
+        "allowed_carry_forward_sources": ["broker_event_log"] if not submit_allowed else [],
+        "artifact_paths": {
+            "same_day_broker_event_log": str(execution / "execution_evidence_v1" / "broker_events" / DAY / "broker_event_log.v1.jsonl")
         },
-    )
+    }
+    _write_json(path, payload)
+    return path, payload
 
 
 def _healthy_runtime_inputs(truth: Path, execution: Path, *, event_day: str = DAY, connected: bool = True) -> None:
@@ -98,7 +98,8 @@ def _build(tmp_path: Path, monkeypatch, *, submit_allowed: bool = False, event_d
     execution = tmp_path / "execution"
     runtime = tmp_path / "runtime"
     _patch_probe_config(monkeypatch, truth, execution)
-    _intraday_readiness(truth, execution, submit_allowed=submit_allowed)
+    readiness_path, readiness = _intraday_readiness(truth, execution, submit_allowed=submit_allowed)
+    monkeypatch.setattr(runtime_module, "read_or_evaluate_trading_day_readiness_authority_v1", lambda **_kwargs: (readiness_path, readiness))
     _healthy_runtime_inputs(truth, execution, event_day=event_day, connected=connected)
     payload = build_runtime_resilience_authority_v1(day_utc=DAY, truth_root=truth, execution_root=execution, runtime_root=runtime, environment="PAPER", broker_account="DU123")
     assert payload["truth_root"] == str(truth.resolve())
@@ -124,6 +125,65 @@ def test_disconnected_ib_blocks(tmp_path: Path, monkeypatch) -> None:
     assert payload["ib_connection_state"] == "DISCONNECTED"
     assert payload["status"] == "BLOCKED"
     assert payload["canonical_blocker"] == "IB_DISCONNECTED"
+
+
+def test_fresh_sleeve_broker_supply_can_prove_connection_when_probe_missing(tmp_path: Path, monkeypatch) -> None:
+    truth = tmp_path / "truth"
+    execution = tmp_path / "execution"
+    runtime = tmp_path / "runtime"
+    _patch_probe_config(monkeypatch, truth, execution)
+    readiness_path, readiness = _intraday_readiness(truth, execution, submit_allowed=True)
+    monkeypatch.setattr(runtime_module, "read_or_evaluate_trading_day_readiness_authority_v1", lambda **_kwargs: (readiness_path, readiness))
+    _write_json(
+        execution / "reports" / "broker_supply_v1" / DAY / "broker_supply.v1.json",
+        {
+            "status": "PASS",
+            "account": "DU123",
+            "generated_at_utc": f"{DAY}T14:00:00Z",
+            "account_values": {"net_liquidation_cents": 100000, "total_cash_value_cents": 90000},
+        },
+    )
+    _write_json(execution / "reports" / "capital_supply_v1" / DAY / "capital_supply.v1.json", {"status": "PASS"})
+    _write_json(truth / "reports" / "runtime_service_authority_v1" / DAY / "runtime_service_authority.v1.json", {"status": "PASS", "service_state": "MANUAL_MODE_READY", "produced_utc": f"{DAY}T14:00:00Z"})
+    _write_json(execution / "reports" / "market_open_data_gate_v1" / DAY / "market_open_data_gate.v1.json", {"status": "PASS", "generated_at_utc": f"{DAY}T14:00:00Z"})
+    _write_json(truth / "reports" / "position_lifecycle_state_v1" / DAY / "position_lifecycle_state.v1.json", {"status": "PASS", "counts": {"pending_order_count": 0, "open_position_count": 0}, "rows": []})
+    _write_json(execution / "submission_index_v1" / DAY / "submission_index.v1.json", {"status": "PASS", "attempts": []})
+    _write_json(execution / "execution_evidence_v1" / "current_head" / DAY / "current_head.v1.json", {"status": "PASS"})
+    _write_jsonl(
+        execution / "execution_evidence_v1" / "broker_events" / DAY / "broker_event_log.v1.jsonl",
+        [{"event_type": "nextValidId", "received_utc": f"{DAY}T14:00:00Z"}],
+    )
+
+    payload = build_runtime_resilience_authority_v1(day_utc=DAY, truth_root=truth, execution_root=execution, runtime_root=runtime, environment="PAPER", broker_account="DU123")
+
+    assert payload["ib_connection_state"] == "CONNECTED"
+    assert payload["account_summary_state"] == "PRESENT"
+    assert "IB_DISCONNECTED" not in payload["reason_codes"]
+    assert "ACCOUNT_SUMMARY_MISSING" not in payload["reason_codes"]
+    assert payload["canonical_blocker"] == ""
+    assert payload["status"] == "PASS"
+    assert payload["evidence_paths"]
+    assert any("/execution/reports/broker_supply_v1/" in path for path in payload["evidence_paths"])
+
+
+def test_missing_probe_and_broker_supply_still_blocks(tmp_path: Path, monkeypatch) -> None:
+    truth = tmp_path / "truth"
+    execution = tmp_path / "execution"
+    runtime = tmp_path / "runtime"
+    _patch_probe_config(monkeypatch, truth, execution)
+    readiness_path, readiness = _intraday_readiness(truth, execution, submit_allowed=True)
+    monkeypatch.setattr(runtime_module, "read_or_evaluate_trading_day_readiness_authority_v1", lambda **_kwargs: (readiness_path, readiness))
+    _write_jsonl(
+        execution / "execution_evidence_v1" / "broker_events" / DAY / "broker_event_log.v1.jsonl",
+        [{"event_type": "nextValidId", "received_utc": f"{DAY}T14:00:00Z"}],
+    )
+
+    payload = build_runtime_resilience_authority_v1(day_utc=DAY, truth_root=truth, execution_root=execution, runtime_root=runtime, environment="PAPER", broker_account="DU123")
+
+    assert payload["ib_connection_state"] == "UNKNOWN"
+    assert payload["account_summary_state"] == "MISSING"
+    assert payload["canonical_blocker"] == "IB_DISCONNECTED"
+    assert "ACCOUNT_SUMMARY_MISSING" in payload["reason_codes"]
 
 
 def test_stale_broker_event_log_blocks_intraday_submit(tmp_path: Path, monkeypatch) -> None:

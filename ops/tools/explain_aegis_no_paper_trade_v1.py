@@ -48,6 +48,7 @@ KERNEL_STAGE_GATE_STATE = {
     "trading_day_readiness_authority": "TRADING_DAY_MODE_VALID",
     "risk_budget_supply": "RISK_VALID",
     "market_open_data_gate": "MARKET_SESSION_VALID",
+    "structure_decision_supply": "STRUCTURE_DECISION_VALID",
     "authorization_supply": "AUTHORIZATION_VALID",
     "global_kill_switch": "KILL_SWITCH_CLEAR",
     "submit_boundary_status": "SUBMIT_BOUNDARY_READY",
@@ -345,6 +346,14 @@ def _kernel_preferred_blocker_gate(kernel_report: dict[str, Any], gates: list[Ga
     return next((gate for gate in gates if gate.state == state and gate.status == STATUS_FAIL), None)
 
 
+def _market_gate_quote_complete(market: dict[str, Any]) -> bool:
+    if str(market.get("quote_completeness_status") or "").strip().upper() == "PASS":
+        return True
+    diagnostics = market.get("diagnostics") if isinstance(market.get("diagnostics"), dict) else {}
+    quote_result = diagnostics.get("quote_completeness_result") if isinstance(diagnostics.get("quote_completeness_result"), dict) else {}
+    return str(quote_result.get("result") or "").strip().upper() == "PASS"
+
+
 def _kernel_start_blocker(failure_line: str) -> str:
     text = failure_line.lower()
     if "can't open file" in text or "no such file or directory" in text or "exec" in text:
@@ -583,12 +592,13 @@ def build_no_trade_explanation_v1(
 
     supply_path = sleeve / "reports" / "market_data_supply_v1" / day_utc / "market_data_supply.v1.json"
     supply, supply_evidence = _artifact(logical_name="market_data_supply_v1", path=supply_path, day_utc=day_utc)
+    market_quote_ok = _evidence_current(market_evidence) and market_ok and _market_gate_quote_complete(market)
     quote_ok = _evidence_current(supply_evidence) and (
         str(supply.get("status") or "").upper() in {"PASS", "READY", "QUOTE_COMPLETE"}
-        or str(market.get("quote_completeness_status") or "").upper() == "PASS"
-    )
+    ) or market_quote_ok
+    quote_evidence = market_evidence if market_quote_ok else supply_evidence
     gates.append(
-        _gate(11, "QUOTE_COMPLETE", STATUS_PASS if quote_ok else STATUS_FAIL, "" if quote_ok else ("QUOTE_COMPLETENESS_NOT_REACHED" if market_not_reached else str(supply.get("canonical_blocker") or "QUOTE_COMPLETENESS_FAILED")), "Quote completeness passed." if quote_ok else ("Quote completeness was not reached because an upstream kernel stage blocked." if market_not_reached else "Fresh quote-complete market data evidence is missing or failed."), supply_evidence, f"Resolve {str(kernel_report.get('first_blocker') or 'the upstream kernel blocker')}, then wait for the next scheduled paper-ready run." if market_not_reached else "Produce fresh underlying/options quote-complete market data for the selected intent.", "NOT_REACHED" if market_not_reached else _classification_for_missing_or_stale(supply_evidence, "MISSING_EVIDENCE"))
+        _gate(11, "QUOTE_COMPLETE", STATUS_PASS if quote_ok else STATUS_FAIL, "" if quote_ok else ("QUOTE_COMPLETENESS_NOT_REACHED" if market_not_reached else str(supply.get("canonical_blocker") or "QUOTE_COMPLETENESS_FAILED")), "Quote completeness passed." if quote_ok else ("Quote completeness was not reached because an upstream kernel stage blocked." if market_not_reached else "Fresh quote-complete market data evidence is missing or failed."), quote_evidence, f"Resolve {str(kernel_report.get('first_blocker') or 'the upstream kernel blocker')}, then wait for the next scheduled paper-ready run." if market_not_reached else "Produce fresh underlying/options quote-complete market data for the selected intent.", "NOT_REACHED" if market_not_reached else _classification_for_missing_or_stale(quote_evidence, "MISSING_EVIDENCE"))
     )
 
     runtime_path = truth / "reports" / "runtime_resilience_authority_v1" / day_utc / "runtime_resilience_authority.v1.json"
@@ -625,19 +635,26 @@ def build_no_trade_explanation_v1(
         _gate(16, "RISK_VALID", STATUS_PASS if risk_ok else STATUS_FAIL, "" if risk_ok else str(risk.get("canonical_blocker") or "RISK_INVALID"), "Risk budget evidence is valid." if risk_ok else "Risk budget/sizing evidence is missing or invalid.", risk_evidence, "Refresh risk budget and risk sizing authority for the selected intent.", _classification_for_missing_or_stale(risk_evidence, "MISSING_EVIDENCE"))
     )
 
+    structure_path = sleeve / "reports" / "structure_decision_supply_v1" / day_utc / "structure_decision_supply.v1.json"
+    structure, structure_evidence = _artifact(logical_name="structure_decision_supply_v1", path=structure_path, day_utc=day_utc)
+    structure_ok = _evidence_current(structure_evidence) and str(structure.get("status") or "").upper() in {"PASS", "READY", "OK"} and not str(structure.get("canonical_blocker") or "").strip()
+    gates.append(
+        _gate(17, "STRUCTURE_DECISION_VALID", STATUS_PASS if structure_ok else STATUS_FAIL, "" if structure_ok else str(structure.get("canonical_blocker") or "STRUCTURE_DECISION_NOT_READY"), "Option structure decision is eligible." if structure_ok else "No eligible option structure decision is available.", structure_evidence, "Keep fail-closed; inspect structure diagnostics or wait for a future governed policy/snapshot change.", _classification_for_missing_or_stale(structure_evidence, "EXPECTED_SAFETY"))
+    )
+
     auth_path = sleeve / "reports" / "authorization_gate_verdict_v1" / day_utc / "authorization_gate_verdict.v1.json"
     auth, auth_evidence = _artifact(logical_name="authorization_gate_verdict_v1", path=auth_path, day_utc=day_utc)
     auth_dir = sleeve / "engine_activity_v1" / "authorization_v1" / day_utc
     auth_ok = _evidence_current(auth_evidence) and str(auth.get("status") or "").upper() in {"PASS", "READY"} and auth_dir.is_dir() and any(auth_dir.rglob("*.json*"))
     gates.append(
-        _gate(17, "AUTHORIZATION_VALID", STATUS_PASS if auth_ok else STATUS_FAIL, "" if auth_ok else _first_reason(auth, "AUTHORIZATION_MISSING"), "Selected intent is authorized." if auth_ok else "Selected intent authorization evidence is missing or failed.", auth_evidence, "Produce required authorization gates and governed selected-intent authorization evidence.", _classification_for_missing_or_stale(auth_evidence, "MISSING_EVIDENCE"))
+        _gate(18, "AUTHORIZATION_VALID", STATUS_PASS if auth_ok else STATUS_FAIL, "" if auth_ok else _first_reason(auth, "AUTHORIZATION_MISSING"), "Selected intent is authorized." if auth_ok else "Selected intent authorization evidence is missing or failed.", auth_evidence, "Produce required authorization gates and governed selected-intent authorization evidence.", _classification_for_missing_or_stale(auth_evidence, "MISSING_EVIDENCE"))
     )
 
     kill_path = truth / "risk_v1" / "kill_switch_v1" / day_utc / "global_kill_switch_state.v1.json"
     kill, kill_evidence = _artifact(logical_name="global_kill_switch_state_v1", path=kill_path, day_utc=day_utc)
     kill_clear = _evidence_current(kill_evidence) and str(kill.get("state") or "").upper() == "INACTIVE" and bool(kill.get("allow_entries") is True)
     gates.append(
-        _gate(18, "KILL_SWITCH_CLEAR", STATUS_PASS if kill_clear else STATUS_FAIL, "" if kill_clear else _first_reason(kill, "C2_KILL_SWITCH_ACTIVE"), "Kill switch is clear for PAPER entries." if kill_clear else "Kill switch is active or entries are not allowed.", kill_evidence, "Clear upstream authorization/session blockers, then refresh the governed kill-switch artifact.", _classification_for_missing_or_stale(kill_evidence, "EXPECTED_SAFETY"))
+        _gate(19, "KILL_SWITCH_CLEAR", STATUS_PASS if kill_clear else STATUS_FAIL, "" if kill_clear else _first_reason(kill, "C2_KILL_SWITCH_ACTIVE"), "Kill switch is clear for PAPER entries." if kill_clear else "Kill switch is active or entries are not allowed.", kill_evidence, "Clear upstream authorization/session blockers, then refresh the governed kill-switch artifact.", _classification_for_missing_or_stale(kill_evidence, "EXPECTED_SAFETY"))
     )
 
     submit, submit_evidence = _read_submit_boundary(runtime_root, day_utc)
@@ -651,11 +668,11 @@ def build_no_trade_explanation_v1(
 
     gates.extend(
         [
-            _gate(19, "SUBMIT_BOUNDARY_READY", STATUS_PASS if submit_ready else STATUS_FAIL, "" if submit_ready else str(submit.get("canonical_blocker") or "SUBMIT_BOUNDARY_NOT_READY"), "Submit boundary is ready." if submit_ready else "Submit boundary is not ready.", submit_evidence, "Refresh submit boundary after every upstream authority is current and passing.", _classification_for_missing_or_stale(submit_evidence, "EXPECTED_SAFETY")),
-            _gate(20, "SUBMIT_ALLOWED_TRUE", STATUS_PASS if submit_allowed else STATUS_FAIL, "" if submit_allowed else "SUBMIT_ALLOWED_FALSE", "Submit boundary reports submit_allowed=true." if submit_allowed else "Submit boundary reports submit_allowed=false.", submit_evidence, "Do not submit; clear upstream blockers and refresh submit boundary.", "EXPECTED_SAFETY"),
-            _gate(21, "SUBMISSION_AUTHORIZED_TRUE", STATUS_PASS if submission_authorized else STATUS_FAIL, "" if submission_authorized else "SUBMISSION_AUTHORIZED_FALSE", "Submission is authorized." if submission_authorized else "Submission is not authorized.", submit_evidence, "Do not submit; obtain only governed explicit PAPER authorization when required.", "EXPECTED_SAFETY"),
-            _gate(22, "BROKER_TRANSMIT_ENABLED_TRUE", STATUS_PASS if broker_transmit_enabled else STATUS_FAIL, "" if broker_transmit_enabled else "BROKER_TRANSMIT_ENABLED_FALSE", "Broker transmit is enabled by governed path." if broker_transmit_enabled else "Broker transmit is disabled.", submit_evidence, "Do not enable transmit manually; wait for governed transmit authority if applicable.", "EXPECTED_SAFETY"),
-            _gate(23, "ORDER_SUBMISSION_ATTEMPTED", STATUS_PASS if order_attempted else STATUS_FAIL, "" if order_attempted else "NO_ORDER_SUBMISSION_ATTEMPTED", "A broker submission attempt exists." if order_attempted else "No order submission was attempted.", ArtifactEvidence("execution_evidence_submissions", str(sleeve / "execution_evidence_v1" / "submissions" / day_utc), order_attempted, stale_status="CURRENT" if order_attempted else "MISSING"), "No action required unless all readiness and authorization gates pass.", "EXPECTED_SAFETY"),
+            _gate(20, "SUBMIT_BOUNDARY_READY", STATUS_PASS if submit_ready else STATUS_FAIL, "" if submit_ready else str(submit.get("canonical_blocker") or "SUBMIT_BOUNDARY_NOT_READY"), "Submit boundary is ready." if submit_ready else "Submit boundary is not ready.", submit_evidence, "Refresh submit boundary after every upstream authority is current and passing.", _classification_for_missing_or_stale(submit_evidence, "EXPECTED_SAFETY")),
+            _gate(21, "SUBMIT_ALLOWED_TRUE", STATUS_PASS if submit_allowed else STATUS_FAIL, "" if submit_allowed else "SUBMIT_ALLOWED_FALSE", "Submit boundary reports submit_allowed=true." if submit_allowed else "Submit boundary reports submit_allowed=false.", submit_evidence, "Do not submit; clear upstream blockers and refresh submit boundary.", "EXPECTED_SAFETY"),
+            _gate(22, "SUBMISSION_AUTHORIZED_TRUE", STATUS_PASS if submission_authorized else STATUS_FAIL, "" if submission_authorized else "SUBMISSION_AUTHORIZED_FALSE", "Submission is authorized." if submission_authorized else "Submission is not authorized.", submit_evidence, "Do not submit; obtain only governed explicit PAPER authorization when required.", "EXPECTED_SAFETY"),
+            _gate(23, "BROKER_TRANSMIT_ENABLED_TRUE", STATUS_PASS if broker_transmit_enabled else STATUS_FAIL, "" if broker_transmit_enabled else "BROKER_TRANSMIT_ENABLED_FALSE", "Broker transmit is enabled by governed path." if broker_transmit_enabled else "Broker transmit is disabled.", submit_evidence, "Do not enable transmit manually; wait for governed transmit authority if applicable.", "EXPECTED_SAFETY"),
+            _gate(24, "ORDER_SUBMISSION_ATTEMPTED", STATUS_PASS if order_attempted else STATUS_FAIL, "" if order_attempted else "NO_ORDER_SUBMISSION_ATTEMPTED", "A broker submission attempt exists." if order_attempted else "No order submission was attempted.", ArtifactEvidence("execution_evidence_submissions", str(sleeve / "execution_evidence_v1" / "submissions" / day_utc), order_attempted, stale_status="CURRENT" if order_attempted else "MISSING"), "No action required unless all readiness and authorization gates pass.", "EXPECTED_SAFETY"),
         ]
     )
 

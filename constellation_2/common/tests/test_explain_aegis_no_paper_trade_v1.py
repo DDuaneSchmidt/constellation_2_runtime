@@ -126,6 +126,10 @@ def _populate(runtime: Path, fail_at: str) -> None:
     _write(truth / f"reports/safety_state_authority_v1/{DAY}/safety_state_authority.v1.json", safety)
     _write(sleeve / f"reports/capital_supply_v1/{DAY}/capital_supply.v1.json", {"day_utc": DAY, "status": "PASS", "generated_at_utc": "2026-05-05T13:30:07Z"})
     _write(sleeve / f"reports/risk_budget_supply_v1/{DAY}/risk_budget_supply.v1.json", {"day_utc": DAY, "status": "PASS", "generated_at_utc": "2026-05-05T13:30:08Z"})
+    structure = {"day_utc": DAY, "status": "PASS", "canonical_blocker": "", "generated_at_utc": "2026-05-05T13:30:08Z"}
+    if fail_at == "STRUCTURE":
+        structure.update({"status": "BLOCKED", "canonical_blocker": "NO_ELIGIBLE_OPTION_STRUCTURE"})
+    _write(sleeve / f"reports/structure_decision_supply_v1/{DAY}/structure_decision_supply.v1.json", structure)
     auth = {"day_utc": DAY, "status": "PASS", "produced_utc": "2026-05-05T13:30:09Z"}
     if fail_at == "AUTHORIZATION":
         auth = {"day_utc": DAY, "status": "FAIL", "reason_codes": ["AUTHORIZATION_MISSING"], "produced_utc": "2026-05-05T13:30:09Z"}
@@ -243,6 +247,58 @@ def test_market_gate_missing_still_reported_when_kernel_reached_market_gate(tmp_
     assert result.first_blocker == "MARKET_SESSION_INVALID"
     market_gate = next(gate for gate in result.ordered_gate_results if gate.state == "MARKET_SESSION_VALID")
     assert market_gate.classification == "MISSING_EVIDENCE"
+
+
+def test_kernel_structure_failure_preferred_over_downstream_governance_gates(tmp_path: Path) -> None:
+    runtime, active = _base_runtime(tmp_path)
+    _populate(runtime, "STRUCTURE")
+    _write_kernel_report(runtime, first_blocker="NO_ELIGIBLE_OPTION_STRUCTURE", failed_stage_id="structure_decision_supply")
+
+    result = build_no_trade_explanation_v1(runtime_root=runtime, active_link=active, day_utc=DAY, journal_lines=_journal_success())
+
+    assert result.first_blocker == "NO_ELIGIBLE_OPTION_STRUCTURE"
+    structure_gate = next(gate for gate in result.ordered_gate_results if gate.state == "STRUCTURE_DECISION_VALID")
+    assert structure_gate.reason_code == "NO_ELIGIBLE_OPTION_STRUCTURE"
+    assert structure_gate.classification == "EXPECTED_SAFETY"
+
+
+def test_quote_complete_uses_market_gate_diagnostics_when_supply_skipped(tmp_path: Path) -> None:
+    runtime, active = _base_runtime(tmp_path)
+    _populate(runtime, "STRUCTURE")
+    sleeve = runtime / "truth_sleeves/PRIMARY/PAPER"
+    _write(
+        sleeve / f"reports/market_open_data_gate_v1/{DAY}/market_open_data_gate.v1.json",
+        {
+            "day_utc": DAY,
+            "status": "PASS",
+            "canonical_blocker": "",
+            "capture_attempted_by_gate": True,
+            "generated_at_utc": "2026-05-05T13:30:03Z",
+            "diagnostics": {"quote_completeness_result": {"result": "PASS"}},
+        },
+    )
+    _write(sleeve / f"reports/market_data_supply_v1/{DAY}/market_data_supply.v1.json", {"day_utc": DAY, "status": "SKIPPED", "canonical_blocker": "", "generated_at_utc": "2026-05-05T13:30:04Z"})
+    _write_kernel_report(runtime, first_blocker="NO_ELIGIBLE_OPTION_STRUCTURE", failed_stage_id="structure_decision_supply")
+
+    result = build_no_trade_explanation_v1(runtime_root=runtime, active_link=active, day_utc=DAY, journal_lines=_journal_success())
+
+    assert result.first_blocker == "NO_ELIGIBLE_OPTION_STRUCTURE"
+    quote_gate = next(gate for gate in result.ordered_gate_results if gate.state == "QUOTE_COMPLETE")
+    assert quote_gate.status == "PASS"
+    assert quote_gate.artifact_path.endswith("market_open_data_gate.v1.json")
+
+
+def test_quote_complete_still_fails_without_supply_or_market_gate_quote_pass(tmp_path: Path) -> None:
+    runtime, active = _base_runtime(tmp_path)
+    _populate(runtime, "NONE")
+    sleeve = runtime / "truth_sleeves/PRIMARY/PAPER"
+    _write(sleeve / f"reports/market_data_supply_v1/{DAY}/market_data_supply.v1.json", {"day_utc": DAY, "status": "SKIPPED", "canonical_blocker": "", "generated_at_utc": "2026-05-05T13:30:04Z"})
+
+    result = build_no_trade_explanation_v1(runtime_root=runtime, active_link=active, day_utc=DAY, journal_lines=_journal_success())
+
+    assert result.first_blocker == "QUOTE_COMPLETENESS_FAILED"
+    quote_gate = next(gate for gate in result.ordered_gate_results if gate.state == "QUOTE_COMPLETE")
+    assert quote_gate.status == "FAIL"
 
 
 def test_identifies_stale_artifact(tmp_path: Path) -> None:

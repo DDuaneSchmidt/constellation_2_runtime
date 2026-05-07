@@ -135,12 +135,23 @@ def _state_from_artifact(payload: dict[str, Any], path: Path, *, pass_statuses: 
     return "PRESENT" if status else "DEGRADED"
 
 
-def _account_summary_state(*, broker_supply: dict[str, Any], broker_path: Path, event_types: set[str]) -> tuple[str, str]:
+def _first_existing_path(*paths: Path) -> Path:
+    for path in paths:
+        if path.exists():
+            return path
+    return paths[0]
+
+
+def _account_summary_state(*, broker_supply: dict[str, Any], broker_path: Path, event_types: set[str], day_utc: str) -> tuple[str, str]:
     if not broker_path.exists():
+        return "MISSING", ""
+    if _status(broker_supply) not in {"PASS", "READY", "OK"}:
         return "MISSING", ""
     values = broker_supply.get("account_values") if isinstance(broker_supply.get("account_values"), dict) else {}
     has_values = values.get("net_liquidation_cents") is not None and values.get("total_cash_value_cents") is not None
     latest = str(broker_supply.get("generated_at_utc") or broker_supply.get("produced_at_utc") or "").strip()
+    if latest and _timestamp_day(latest) != day_utc:
+        return "MISSING", latest
     if has_values and ("accountSummary" in event_types or "updateAccountValue" in event_types or broker_supply):
         return "PRESENT", latest
     if "accountSummary" in event_types or "updateAccountValue" in event_types:
@@ -148,10 +159,12 @@ def _account_summary_state(*, broker_supply: dict[str, Any], broker_path: Path, 
     return "MISSING", latest
 
 
-def _ib_connection_state(*, probe_payload: dict[str, Any], account_summary_state: str) -> str:
+def _ib_connection_state(*, probe_payload: dict[str, Any], account_summary_state: str, broker_event_log_state: str) -> str:
     conn = probe_payload.get("connection") if isinstance(probe_payload.get("connection"), dict) else {}
     connected = bool(conn.get("connected") is True or probe_payload.get("status") == "PASS")
     if not probe_payload:
+        if account_summary_state == "PRESENT" and broker_event_log_state == "PRESENT":
+            return "CONNECTED"
         return "UNKNOWN"
     if not connected:
         return "DISCONNECTED"
@@ -299,8 +312,14 @@ def build_runtime_resilience_authority_v1(
         environment=environment,
     )
     readiness_mode = str(readiness.get("readiness_mode") or "").strip().upper()
-    broker_path = broker_supply_path(truth_root=truth_root, day_utc=day_utc)
-    capital_path = capital_supply_path(truth_root=truth_root, day_utc=day_utc)
+    broker_path = _first_existing_path(
+        broker_supply_path(truth_root=truth_root, day_utc=day_utc),
+        broker_supply_path(truth_root=execution_root, day_utc=day_utc),
+    )
+    capital_path = _first_existing_path(
+        capital_supply_path(truth_root=truth_root, day_utc=day_utc),
+        capital_supply_path(truth_root=execution_root, day_utc=day_utc),
+    )
     runtime_service_path = truth_root / "reports" / "runtime_service_authority_v1" / day_utc / "runtime_service_authority.v1.json"
     probe_path = probe.probe_artifact_path_v1(truth_root=truth_root, day_utc=day_utc)
     position_path = position_lifecycle_state_path(truth_root=truth_root, day_utc=day_utc)
@@ -318,10 +337,12 @@ def build_runtime_resilience_authority_v1(
     current_head = _read_json(head_path)
     events = _event_rows(event_path)
     event_types = _event_types(events)
-    account_summary_state, last_account_summary = _account_summary_state(broker_supply=broker, broker_path=broker_path, event_types=event_types)
+    account_summary_state, last_account_summary = _account_summary_state(broker_supply=broker, broker_path=broker_path, event_types=event_types, day_utc=day_utc)
     broker_event_log_state, last_broker_event = _broker_event_state(path=event_path, rows=events, day_utc=day_utc, readiness=readiness)
     market_data_heartbeat_state, last_market_data, market_path = _market_data_state(truth_root=truth_root, day_utc=day_utc)
-    ib_connection_state = _ib_connection_state(probe_payload=probe_payload, account_summary_state=account_summary_state)
+    if market_data_heartbeat_state == "MISSING" and execution_root != truth_root:
+        market_data_heartbeat_state, last_market_data, market_path = _market_data_state(truth_root=execution_root, day_utc=day_utc)
+    ib_connection_state = _ib_connection_state(probe_payload=probe_payload, account_summary_state=account_summary_state, broker_event_log_state=broker_event_log_state)
     if _status(runtime_service) == "RECONNECTING" or str(runtime_service.get("service_state") or "").upper() == "RECONNECTING":
         ib_connection_state = "RECONNECTING"
     restart_detected = _restart_detected(runtime_root, runtime_service)
