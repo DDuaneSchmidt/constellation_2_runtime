@@ -15,6 +15,12 @@ This guide is the operator contract for release, launcher, and scheduled Aegis c
 | Paper-ready timer service | systemd only: `aegis-paper-ready-kernel-v1.timer` invokes `run_current_release_tool_v1.sh run_aegis_paper_ready_kernel_v1 --target-day @today_utc@ --environment PAPER --scheduled-run true` | Manual paper-ready runs unless explicitly requested; direct source invocation for scheduled authority | Active release | Current-release manifest; runtime truth artifacts used by the kernel | Writes scheduled paper-ready/readiness artifacts | `systemctl --user status aegis-paper-ready-kernel-v1.timer --no-pager` |
 | Post-trade measurement timer service | systemd only: `aegis-post-trade-measurement-v1.timer` invokes `run_current_release_tool_v1.sh run_sleeve_economic_truth_pipeline_v1 --target-day @today_utc@ --truth-root /home/node/constellation_runtime_data/truth --execution-root /home/node/constellation_runtime_data/truth_sleeves/PRIMARY/PAPER --scheduled-run true` | Direct source invocation for scheduled authority when active-release behavior is required | Active release | Current-release manifest; truth and PAPER sleeve roots from service args | Writes post-trade/economic-truth measurement artifacts | `systemctl --user status aegis-post-trade-measurement-v1.timer --no-pager` |
 
+## IB Gateway Ownership
+
+`ib-gateway@node.service` is the canonical supervised IB Gateway owner for the local PAPER runtime. The user unit `c2-ib-gateway.service` is deprecated and must remain non-owning: it must not launch IB Gateway, kill IBC/Gateway processes, or compete for port `4002`.
+
+Trading readiness must be derived from broker/account evidence, not from the deprecated user unit state. The governed evidence path is `ib_broker_event_probe_v1`, `broker_supply_v1`, `runtime_resilience_authority_v1`, and downstream submit-boundary artifacts. A failed or inactive `c2-ib-gateway.service` is a cleanup signal, not a trading-readiness authority.
+
 ## NPM Contracts Used By Aegis
 
 Run active-release npm scripts through the current-release launcher when validating deployed behavior:

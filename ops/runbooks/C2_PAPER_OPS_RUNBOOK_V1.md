@@ -127,6 +127,10 @@ Use this checklist for the next governed paper attempt. Check in order and stop 
 
 ## Install / Update unit files (authoritative definitions are in repo)
 
+IB Gateway ownership is intentionally separate from these user units. The canonical supervised Gateway owner is the system unit `ib-gateway@node.service`. The deprecated user unit `c2-ib-gateway.service` must not launch, stop, or kill Gateway/IBC processes.
+
+Do not use `c2-ib-gateway.service` state as PAPER trading readiness. Broker/account evidence remains authoritative through `ib_broker_event_probe_v1`, `broker_supply_v1`, `runtime_resilience_authority_v1`, and the submit boundary.
+
 Authoritative unit files live in:
 
 - `ops/systemd/user/c2-supervisor.service`

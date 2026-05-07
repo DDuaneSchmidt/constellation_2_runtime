@@ -50,6 +50,39 @@ def test_execution_observer_service_uses_canonical_wrapper() -> None:
     assert "--client-id 179" not in text
 
 
+def test_deprecated_ib_gateway_user_unit_is_non_owning() -> None:
+    text = _read("ops/systemd/user/c2-ib-gateway.service")
+    assert "DEPRECATED" in text
+    assert "ib-gateway@node.service" in text
+    assert "ExecStartPre" not in text
+    assert "pkill" not in text
+    assert "ibcstart.sh" not in text
+    assert "ibcalpha.ibc.IbcGateway" not in text
+    assert "/opt/ib/ibgateway" not in text
+    assert "Type=oneshot" in text
+
+
+def test_ib_gateway_docs_identify_canonical_system_owner() -> None:
+    command_contracts = _read("ops/docs/aegis_operator_command_contracts_v1.md")
+    runbook = _read("ops/runbooks/C2_PAPER_OPS_RUNBOOK_V1.md")
+    for text in (command_contracts, runbook):
+        assert "ib-gateway@node.service" in text
+        assert "c2-ib-gateway.service" in text
+        assert "broker/account evidence" in text.lower()
+        assert "runtime_resilience_authority_v1" in text
+
+
+def test_trading_readiness_sources_do_not_depend_on_deprecated_gateway_user_unit() -> None:
+    for relpath in (
+        "ops/tools/run_runtime_resilience_authority_v1.py",
+        "ops/tools/run_broker_supply_v1.py",
+        "ops/tools/run_submit_boundary_status_v1.py",
+    ):
+        text = _read(relpath)
+        assert "c2-ib-gateway.service" not in text
+        assert "systemctl --user status c2-ib-gateway.service" not in text
+
+
 def test_touched_wrappers_are_shell_parseable() -> None:
     for relpath in (
         "ops/run/c2_paper_day_orchestrator_systemd_entry_v1.sh",
