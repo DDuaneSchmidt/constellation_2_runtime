@@ -216,6 +216,35 @@ def _prior_nav_path(truth_root: Path, day_utc: str) -> Path:
     return (nav_root / "__prior_missing__" / "nav.v2.json").resolve()
 
 
+def _payload_for_day(payload: dict[str, Any] | None, expected_day: str) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    observed_day = _artifact_day(payload)
+    if observed_day and observed_day != expected_day:
+        return None
+    return payload
+
+
+def _append_input_issue(
+    stale_or_conflicting_inputs: list[dict[str, Any]],
+    *,
+    artifact: str,
+    path: Path,
+    condition: str,
+    expected_day_utc: str,
+    observed_day_utc: str | None = None,
+) -> None:
+    row = {
+        "artifact": artifact,
+        "path": str(path),
+        "condition": condition,
+        "expected_day_utc": expected_day_utc,
+        "observed_day_utc": observed_day_utc,
+    }
+    if row not in stale_or_conflicting_inputs:
+        stale_or_conflicting_inputs.append(row)
+
+
 def safety_state_authority_output_path(*, truth_root: Path, day_utc: str) -> Path:
     return Path(truth_root).resolve() / "reports" / "safety_state_authority_v1" / day_utc / "safety_state_authority.v1.json"
 
@@ -282,15 +311,18 @@ def evaluate_safety_state_authority_v1(
     account = str(account or "").strip()
     environment = str(environment or "PAPER").strip().upper()
 
-    current_nav_path = (truth_root / "accounting_v2" / "nav" / day_utc / "nav.v2.json").resolve()
-    prior_nav_path = _prior_nav_path(truth_root, day_utc)
+    execution_scoped_evidence = execution_root != truth_root
+    evidence_root = execution_root if execution_scoped_evidence else truth_root
+
+    current_nav_path = (evidence_root / "accounting_v2" / "nav" / day_utc / "nav.v2.json").resolve()
+    prior_nav_path = _prior_nav_path(evidence_root, day_utc)
     prior_nav_day = prior_nav_path.parent.name
     prior_capital_supply_path = (
-        truth_root / "reports" / "capital_supply_v1" / prior_nav_day / "capital_supply.v1.json"
+        evidence_root / "reports" / "capital_supply_v1" / prior_nav_day / "capital_supply.v1.json"
     ).resolve()
-    portfolio_path = (truth_root / "reports" / "portfolio_account_authority_v1" / day_utc / "portfolio_account_authority.v1.json").resolve()
-    broker_supply_path = (truth_root / "reports" / "broker_supply_v1" / day_utc / "broker_supply.v1.json").resolve()
-    capital_supply_path = (truth_root / "reports" / "capital_supply_v1" / day_utc / "capital_supply.v1.json").resolve()
+    portfolio_path = (evidence_root / "reports" / "portfolio_account_authority_v1" / day_utc / "portfolio_account_authority.v1.json").resolve()
+    broker_supply_path = (evidence_root / "reports" / "broker_supply_v1" / day_utc / "broker_supply.v1.json").resolve()
+    capital_supply_path = (evidence_root / "reports" / "capital_supply_v1" / day_utc / "capital_supply.v1.json").resolve()
     kill_switch_path = (truth_root / "risk_v1" / "kill_switch_v1" / day_utc / "global_kill_switch_state.v1.json").resolve()
     capital_envelope_path = (execution_root / "reports" / "capital_risk_envelope_v2" / day_utc / "capital_risk_envelope.v2.json").resolve()
     readiness_path = (execution_root / "trade_submit_readiness_c2_v1" / "_history" / environment / account / day_utc / "status.json").resolve()
@@ -344,12 +376,48 @@ def evaluate_safety_state_authority_v1(
             stale_or_conflicting_inputs=stale_or_conflicting_inputs,
         )
 
+    current_nav_for_day = _payload_for_day(current_nav, day_utc)
+    prior_nav_for_day = _payload_for_day(prior_nav, prior_nav_day)
+    prior_capital_supply_for_day = _payload_for_day(prior_capital_supply, prior_nav_day)
+    portfolio_for_day = _payload_for_day(portfolio, day_utc)
+    broker_supply_for_day = _payload_for_day(broker_supply, day_utc)
+    capital_supply_for_day = _payload_for_day(capital_supply, day_utc)
+    capital_envelope_for_day = _payload_for_day(capital_envelope, day_utc)
+
+    if execution_scoped_evidence:
+        for name, path, payload_for_day in (
+            ("broker_supply_v1", broker_supply_path, broker_supply_for_day),
+            ("capital_supply_v1", capital_supply_path, capital_supply_for_day),
+        ):
+            if payload_for_day is None:
+                continue
+            status = _normalize_status(payload_for_day.get("status"))
+            if status not in PASS_STATUSES:
+                _append_input_issue(
+                    stale_or_conflicting_inputs,
+                    artifact=name,
+                    path=path,
+                    condition="STATUS_NOT_PASS",
+                    expected_day_utc=day_utc,
+                    observed_day_utc=_artifact_day(payload_for_day) or None,
+                )
+            cents = _extract_cents(payload_for_day)
+            if cents is None or cents <= 0:
+                _append_input_issue(
+                    stale_or_conflicting_inputs,
+                    artifact=name,
+                    path=path,
+                    condition="NON_POSITIVE_NAV_EVIDENCE",
+                    expected_day_utc=day_utc,
+                    observed_day_utc=_artifact_day(payload_for_day) or None,
+                )
+
     current_candidates: list[tuple[str, Path, dict[str, Any] | None, int | None]] = [
-        ("accounting_nav_v2", current_nav_path, current_nav, _extract_accounting_nav_cents(current_nav)),
-        ("nav_v2", current_nav_path, current_nav, _extract_cents(current_nav)),
-        ("portfolio_account_authority_v1", portfolio_path, portfolio, _extract_cents(portfolio)),
-        ("capital_supply_v1", capital_supply_path, capital_supply, _extract_cents(capital_supply)),
-        ("capital_risk_envelope_v2", capital_envelope_path, capital_envelope, _extract_cents(capital_envelope)),
+        ("accounting_nav_v2", current_nav_path, current_nav_for_day, _extract_accounting_nav_cents(current_nav_for_day)),
+        ("nav_v2", current_nav_path, current_nav_for_day, _extract_cents(current_nav_for_day)),
+        ("portfolio_account_authority_v1", portfolio_path, portfolio_for_day, _extract_cents(portfolio_for_day)),
+        ("capital_supply_v1", capital_supply_path, capital_supply_for_day, _extract_cents(capital_supply_for_day)),
+        ("capital_risk_envelope_v2", capital_envelope_path, capital_envelope_for_day, _extract_cents(capital_envelope_for_day)),
     ]
     nav_source = ""
     nav_current_cents: int | None = None
@@ -361,15 +429,15 @@ def evaluate_safety_state_authority_v1(
 
     prior_candidates: list[int | None] = [
         _extract_only_cents(
-            current_nav,
+            current_nav_for_day,
             ("nav_prior_cents", "prior_nav_cents", "previous_nav_cents", "rolling_peak_nav_cents"),
         ),
-        _extract_accounting_peak_cents(current_nav),
-        _extract_accounting_nav_cents(prior_nav),
-        _extract_cents(prior_nav),
-        _extract_cents(prior_capital_supply),
+        _extract_accounting_peak_cents(current_nav_for_day),
+        _extract_accounting_nav_cents(prior_nav_for_day),
+        _extract_cents(prior_nav_for_day),
+        _extract_cents(prior_capital_supply_for_day),
         _extract_only_cents(
-            capital_envelope,
+            capital_envelope_for_day,
             ("nav_prior_cents", "prior_nav_cents", "rolling_peak_nav_cents", "peak_nav_cents"),
         ),
     ]
@@ -377,15 +445,15 @@ def evaluate_safety_state_authority_v1(
 
     nav_valid = bool(nav_current_cents is not None and nav_current_cents > 0 and nav_prior_cents is not None and nav_prior_cents > 0)
 
-    envelope = capital_envelope.get("envelope") if isinstance(capital_envelope, dict) and isinstance(capital_envelope.get("envelope"), dict) else {}
+    envelope = capital_envelope_for_day.get("envelope") if isinstance(capital_envelope_for_day, dict) and isinstance(capital_envelope_for_day.get("envelope"), dict) else {}
     capital_envelope_status = _normalize_status(
-        (capital_envelope or {}).get("status")
-        or (capital_envelope or {}).get("capital_risk_status")
+        (capital_envelope_for_day or {}).get("status")
+        or (capital_envelope_for_day or {}).get("capital_risk_status")
         or envelope.get("status")
         or "MISSING"
     )
 
-    drawdown_limit = _extract_decimal(capital_envelope, "drawdown_limit_pct", "risk_breach_drawdown_pct", "max_drawdown_pct")
+    drawdown_limit = _extract_decimal(capital_envelope_for_day, "drawdown_limit_pct", "risk_breach_drawdown_pct", "max_drawdown_pct")
     if drawdown_limit is None:
         drawdown_limit = Decimal("-0.100000")
     elif drawdown_limit > 0:
@@ -451,7 +519,8 @@ def evaluate_safety_state_authority_v1(
     diagnostic_missing = {
         str(row.get("artifact"))
         for row in stale_or_conflicting_inputs
-        if row.get("condition") == "MISSING" and row.get("artifact") in {"broker_supply_v1", "capital_supply_v1"}
+        if row.get("condition") in {"MISSING", "STALE_OR_WRONG_DAY", "STATUS_NOT_PASS", "NON_POSITIVE_NAV_EVIDENCE"}
+        and row.get("artifact") in {"broker_supply_v1", "capital_supply_v1"}
     }
     if not canonical_blocker and diagnostic_missing:
         canonical_blocker = "SAFETY_INPUTS_DEGRADED"

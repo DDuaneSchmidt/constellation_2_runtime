@@ -54,6 +54,83 @@ def _base_safety_inputs(root: Path, *, current_nav_cents: int = 1000000, prior_n
     )
 
 
+def _base_paper_execution_inputs(
+    truth_root: Path,
+    execution_root: Path,
+    *,
+    current_nav_cents: int = 101380203,
+    prior_nav_cents: int = 101364311,
+) -> None:
+    _base_safety_inputs(execution_root, current_nav_cents=current_nav_cents, prior_nav_cents=prior_nav_cents)
+    _write_json(
+        execution_root / "accounting_v2" / "nav" / DAY / "nav.v2.json",
+        {
+            "day_utc": DAY,
+            "status": "ACTIVE",
+            "nav": {"nav_total_cents": current_nav_cents, "cash_total_cents": current_nav_cents, "currency": "USD"},
+            "history": {"peak_nav_cents": prior_nav_cents},
+        },
+    )
+    _write_json(
+        execution_root / "accounting_v2" / "nav" / PRIOR_DAY / "nav.v2.json",
+        {
+            "day_utc": PRIOR_DAY,
+            "status": "ACTIVE",
+            "nav": {"nav_total_cents": prior_nav_cents, "cash_total_cents": prior_nav_cents, "currency": "USD"},
+            "history": {"peak_nav_cents": prior_nav_cents},
+        },
+    )
+    _write_json(
+        execution_root / "reports" / "broker_supply_v1" / DAY / "broker_supply.v1.json",
+        {
+            "day_utc": DAY,
+            "status": "PASS",
+            "account_values": {
+                "net_liquidation_cents": current_nav_cents,
+                "total_cash_value_cents": current_nav_cents,
+            },
+        },
+    )
+    _write_json(
+        execution_root / "reports" / "capital_supply_v1" / DAY / "capital_supply.v1.json",
+        {
+            "day_utc": DAY,
+            "status": "PASS",
+            "selected_source": {
+                "source_type": "BROKER_ACCOUNT",
+                "status": "VALID",
+                "net_liquidation_cents": current_nav_cents,
+            },
+            "nav_evidence": {
+                "status": "BROKER_SUPPLY_VALID",
+                "nav_total_cents": current_nav_cents,
+            },
+        },
+    )
+    _write_json(
+        truth_root / "accounting_v2" / "nav" / DAY / "nav.v2.json",
+        {
+            "day_utc": DAY,
+            "status": "BOOTSTRAP",
+            "nav": {"nav_total": 0, "cash_total": 0, "currency": "USD"},
+            "history": {"peak_nav": 0},
+        },
+    )
+    _write_json(
+        truth_root / "accounting_v2" / "nav" / PRIOR_DAY / "nav.v2.json",
+        {
+            "day_utc": PRIOR_DAY,
+            "status": "BOOTSTRAP",
+            "nav": {"nav_total": 0, "cash_total": 0, "currency": "USD"},
+            "history": {"peak_nav": 0},
+        },
+    )
+    _write_json(
+        truth_root / "risk_v1" / "kill_switch_v1" / DAY / "global_kill_switch_state.v1.json",
+        {"day_utc": DAY, "state": "INACTIVE", "allow_entries": True, "allow_exits": True, "reason_codes": []},
+    )
+
+
 def test_nav_invalid_does_not_report_negative_100_drawdown_and_explains_kill_switch_dependency(tmp_path: Path) -> None:
     _base_safety_inputs(tmp_path, current_nav_cents=0, prior_nav_cents=1000000)
     _write_json(
@@ -81,6 +158,98 @@ def test_nav_invalid_does_not_report_negative_100_drawdown_and_explains_kill_swi
     assert payload["drawdown_pct"] is None
     assert payload["drawdown_status"] == "NAV_INVALID"
     assert "kill_switch_dependency=state:ACTIVE" in payload["root_cause"]
+
+
+def test_paper_execution_root_nav_and_capital_override_canonical_bootstrap_zero(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth"
+    execution_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    _base_paper_execution_inputs(truth_root, execution_root)
+
+    payload = evaluate_safety_state_authority_v1(
+        day_utc=DAY,
+        truth_root=truth_root,
+        execution_root=execution_root,
+        account=ACCOUNT,
+        environment="PAPER",
+    )
+
+    assert payload["status"] == "PASS"
+    assert payload["nav_valid"] is True
+    assert payload["nav_current_cents"] == 101380203
+    assert payload["nav_prior_cents"] == 101364311
+    assert payload["nav_source"].startswith(f"accounting_nav_v2:{execution_root}")
+    assert payload["upstream_artifact_paths"]["broker_supply_v1"].startswith(str(execution_root))
+    assert payload["upstream_artifact_paths"]["capital_supply_v1"].startswith(str(execution_root))
+
+
+def test_paper_execution_root_prior_nav_is_resolved_from_sleeve(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth"
+    execution_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    _base_paper_execution_inputs(truth_root, execution_root, prior_nav_cents=987654321)
+
+    payload = evaluate_safety_state_authority_v1(
+        day_utc=DAY,
+        truth_root=truth_root,
+        execution_root=execution_root,
+        account=ACCOUNT,
+        environment="PAPER",
+    )
+
+    assert payload["nav_prior_cents"] == 987654321
+    assert payload["upstream_artifact_paths"]["nav_prior_v2"].startswith(str(execution_root))
+
+
+def test_stale_paper_execution_broker_evidence_fails_closed(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth"
+    execution_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    _base_paper_execution_inputs(truth_root, execution_root)
+    _write_json(
+        execution_root / "reports" / "broker_supply_v1" / DAY / "broker_supply.v1.json",
+        {
+            "day_utc": PRIOR_DAY,
+            "status": "PASS",
+            "account_values": {"net_liquidation_cents": 101380203},
+        },
+    )
+
+    payload = evaluate_safety_state_authority_v1(
+        day_utc=DAY,
+        truth_root=truth_root,
+        execution_root=execution_root,
+        account=ACCOUNT,
+        environment="PAPER",
+    )
+
+    assert payload["status"] == "DEGRADED"
+    assert payload["canonical_blocker"] == "SAFETY_INPUTS_DEGRADED"
+    assert payload["allow_entries"] is False
+
+
+def test_non_positive_paper_execution_capital_evidence_fails_closed(tmp_path: Path) -> None:
+    truth_root = tmp_path / "truth"
+    execution_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    _base_paper_execution_inputs(truth_root, execution_root)
+    _write_json(
+        execution_root / "reports" / "capital_supply_v1" / DAY / "capital_supply.v1.json",
+        {
+            "day_utc": DAY,
+            "status": "PASS",
+            "selected_source": {"source_type": "BROKER_ACCOUNT", "status": "VALID", "net_liquidation_cents": 0},
+            "nav_evidence": {"status": "BROKER_SUPPLY_VALID", "nav_total_cents": 0},
+        },
+    )
+
+    payload = evaluate_safety_state_authority_v1(
+        day_utc=DAY,
+        truth_root=truth_root,
+        execution_root=execution_root,
+        account=ACCOUNT,
+        environment="PAPER",
+    )
+
+    assert payload["status"] == "DEGRADED"
+    assert payload["canonical_blocker"] == "SAFETY_INPUTS_DEGRADED"
+    assert payload["allow_entries"] is False
 
 
 def test_real_drawdown_breach_blocks_without_disabling_kill_switch(tmp_path: Path) -> None:

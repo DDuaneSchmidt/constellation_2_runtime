@@ -282,6 +282,8 @@ def _run_boundary(
     day_authority_state: str = "OPEN_READY",
     day_authority_can_submit: bool = True,
     day_authority_reason_codes: list[str] | None = None,
+    safety_payload: dict | None = None,
+    safety_call_args: list[dict] | None = None,
 ) -> tuple[int, dict]:
     with tempfile.TemporaryDirectory() as td:
         repo_root = Path(td)
@@ -310,6 +312,13 @@ def _run_boundary(
         ).resolve()
         authority_reason_codes = list(day_authority_reason_codes or [])
         authority_canonical_blocker = authority_reason_codes[0] if authority_reason_codes else ""
+        safety_result = dict(safety_payload or {"status": "PASS", "canonical_blocker": "", "root_cause": ""})
+
+        def _evaluate_safety_for_test(**kwargs: object) -> dict:
+            if safety_call_args is not None:
+                safety_call_args.append(dict(kwargs))
+            return safety_result
+
         _write_json(
             build_path,
             {
@@ -431,7 +440,7 @@ def _run_boundary(
         ), patch.object(
             boundary_module,
             "evaluate_safety_state_authority_v1",
-            return_value={"status": "PASS", "canonical_blocker": "", "root_cause": ""},
+            side_effect=_evaluate_safety_for_test,
         ), patch.object(
             boundary_module,
             "write_safety_state_authority_v1",
@@ -628,6 +637,29 @@ def test_submit_boundary_authorizes_when_kill_switch_present_and_inactive() -> N
         assert payload["constitutional_lineage"]["artifact_type"] == "submit_boundary_status_v1"
         declared = set(payload["constitutional_dependency_declaration"]["declared_dependency_artifacts"])
         assert {"target_day_build_v1", "trade_submit_readiness_c2_v1"} <= declared
+
+
+def test_submit_boundary_uses_paper_execution_root_for_safety_state() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        truth_root = Path(td) / "truth"
+        expected_execution_root = (truth_root.parent / "truth_sleeves" / "PRIMARY" / "PAPER").resolve()
+        safety_calls: list[dict] = []
+        _write_startup_materialization(truth_root)
+        _write_paper_trading_posture(truth_root)
+        _write_trade_submit_status(truth_root)
+        _write_kill_switch(truth_root, state="INACTIVE", allow_entries=True)
+
+        rc, payload = _run_boundary(
+            truth_root,
+            safety_call_args=safety_calls,
+            safety_payload={"status": "PASS", "canonical_blocker": "", "root_cause": ""},
+        )
+
+        assert rc == 0
+        assert safety_calls
+        assert safety_calls[0]["truth_root"] == truth_root.resolve()
+        assert safety_calls[0]["execution_root"] == expected_execution_root
+        assert "NAV_INVALID" not in payload["blocking_codes"]
 
 
 def test_submit_boundary_blocks_when_kill_switch_is_active() -> None:
