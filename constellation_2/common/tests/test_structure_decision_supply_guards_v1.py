@@ -125,8 +125,8 @@ def test_structure_diagnostics_include_nearest_misses_when_no_candidate_is_eligi
                     "max_expiries_to_capture": 7,
                     "expiries_available": [{"dte": 1, "expiry_yyyymmdd": "20260430"}],
                     "expiries_evaluated": [{"dte": 1, "expiry_yyyymmdd": "20260430"}],
-                    "expiries_omitted": [],
-                    "omission_reason": "",
+                    "expiries_omitted": [{"dte": 2, "expiry_yyyymmdd": "20260501", "reason": "CAPTURE_TIME_BUDGET_EXHAUSTED"}],
+                    "omission_reason": "CAPTURE_TIME_BUDGET_EXHAUSTED",
                 }
             }
         },
@@ -170,3 +170,6 @@ def test_structure_diagnostics_include_nearest_misses_when_no_candidate_is_eligi
     assert diagnostics["nearest_miss_diagnostics"]["top_by_max_loss_excess"][0]["max_loss_excess_cents"] == 9500
     assert diagnostics["nearest_miss_diagnostics"]["top_clearly_otm_by_max_loss_excess"][0]["sell_strike"] == "105.00"
     assert diagnostics["dte_coverage"]["expiries_evaluated"] == [{"dte": 1, "expiry_yyyymmdd": "20260430"}]
+    assert diagnostics["dte_coverage"]["expiries_omitted"] == [
+        {"dte": 2, "expiry_yyyymmdd": "20260501", "reason": "CAPTURE_TIME_BUDGET_EXHAUSTED"}
+    ]

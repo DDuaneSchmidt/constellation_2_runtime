@@ -435,6 +435,125 @@ def test_capture_reports_bounded_dte_window_omissions(monkeypatch, tmp_path: Pat
     assert len(payload["contracts"]) == 2
 
 
+def test_capture_time_budget_publishes_nearest_expiry_partial_snapshot(monkeypatch, tmp_path: Path) -> None:
+    day_utc = "2026-04-24"
+    monotonic_values = iter([0.0, 0.0, 0.95])
+
+    class _FakeClient:
+        def connect_and_wait(self, *, host: str, port: int, client_id: int) -> None:
+            return None
+
+        def reqMarketDataType(self, marketDataType: int) -> None:  # noqa: N802
+            return None
+
+        def request_contract_details(self, contract: SimpleNamespace):
+            if str(contract.secType) == "STK":
+                return [SimpleNamespace(contract=_contract(sec_type="STK", con_id=101, local_symbol="SPY"))]
+            con_id = int(str(contract.lastTradeDateOrContractMonth)[-2:] + "502")
+            return [SimpleNamespace(contract=_contract(sec_type="OPT", con_id=con_id, local_symbol=f"SPY   {contract.lastTradeDateOrContractMonth}P00500000"))]
+
+        def request_snapshot(
+            self,
+            contract: SimpleNamespace,
+            generic_ticks: str,
+            timeout_seconds: float = 4.0,
+            snapshot: bool = True,
+        ):
+            if str(contract.secType) == "STK":
+                return {"last": "500.12"}
+            return {"bid": "1.00", "ask": "1.10", "volume": 1, "open_interest": 1, "observed_tick_types": [1, 2]}
+
+        def request_secdef(self, *, symbol: str, underlying_con_id: int):
+            return [{"trading_class": "SPY", "expirations": ["20260425", "20260426", "20260427"], "strikes": [500.0]}]
+
+        def disconnect(self) -> None:
+            return None
+
+        def error_events(self):
+            return []
+
+    monkeypatch.setattr(capture_module, "_IbCaptureClient", _FakeClient)
+    monkeypatch.setattr(capture_module.time, "monotonic", lambda: next(monotonic_values, 0.95))
+
+    raw_path, payload = capture_module._capture_raw_chain(
+        day_utc=day_utc,
+        eval_time_utc=f"{day_utc}T20:00:00Z",
+        symbol="SPY",
+        truth_root=tmp_path,
+        ib_host="127.0.0.1",
+        ib_port=4002,
+        ib_client_id=7,
+        max_capture_seconds=1,
+    )
+
+    coverage = payload["policy"]["dte_window_policy"]
+    diagnostic = json.loads(Path(payload["provenance"]["capture_diagnostic_path"]).read_text(encoding="utf-8"))
+    assert raw_path.exists()
+    assert [row["expiry_yyyymmdd"] for row in coverage["expiries_evaluated"]] == ["20260425"]
+    assert [row["expiry_yyyymmdd"] for row in coverage["expiries_omitted"]] == ["20260426", "20260427"]
+    assert {row["reason"] for row in coverage["expiries_omitted"]} == {"CAPTURE_TIME_BUDGET_EXHAUSTED"}
+    assert coverage["omission_reason"] == "CAPTURE_TIME_BUDGET_EXHAUSTED"
+    assert diagnostic["dte_coverage"] == coverage
+    assert len(payload["contracts"]) == 1
+
+
+def test_capture_time_budget_with_zero_completed_expiries_fails_with_diagnostic(monkeypatch, tmp_path: Path) -> None:
+    day_utc = "2026-04-24"
+    monotonic_values = iter([0.0, 1.1, 1.1, 1.1])
+
+    class _FakeClient:
+        def connect_and_wait(self, *, host: str, port: int, client_id: int) -> None:
+            return None
+
+        def reqMarketDataType(self, marketDataType: int) -> None:  # noqa: N802
+            return None
+
+        def request_contract_details(self, contract: SimpleNamespace):
+            if str(contract.secType) == "STK":
+                return [SimpleNamespace(contract=_contract(sec_type="STK", con_id=101, local_symbol="SPY"))]
+            return [SimpleNamespace(contract=_contract(sec_type="OPT", con_id=202, local_symbol="SPY   260425P00500000"))]
+
+        def request_snapshot(
+            self,
+            contract: SimpleNamespace,
+            generic_ticks: str,
+            timeout_seconds: float = 4.0,
+            snapshot: bool = True,
+        ):
+            if str(contract.secType) == "STK":
+                return {"last": "500.12"}
+            return {"bid": "1.00", "ask": "1.10", "volume": 1, "open_interest": 1, "observed_tick_types": [1, 2]}
+
+        def request_secdef(self, *, symbol: str, underlying_con_id: int):
+            return [{"trading_class": "SPY", "expirations": ["20260425"], "strikes": [500.0]}]
+
+        def disconnect(self) -> None:
+            return None
+
+        def error_events(self):
+            return []
+
+    monkeypatch.setattr(capture_module, "_IbCaptureClient", _FakeClient)
+    monkeypatch.setattr(capture_module.time, "monotonic", lambda: next(monotonic_values, 1.1))
+
+    with pytest.raises(capture_module.CaptureError, match="OPTIONS_CAPTURE_TIMEOUT") as excinfo:
+        capture_module._capture_raw_chain(
+            day_utc=day_utc,
+            eval_time_utc=f"{day_utc}T20:00:00Z",
+            symbol="SPY",
+            truth_root=tmp_path,
+            ib_host="127.0.0.1",
+            ib_port=4002,
+            ib_client_id=7,
+            max_capture_seconds=1,
+        )
+
+    assert excinfo.value.diagnostic_path is not None
+    diagnostic = json.loads(excinfo.value.diagnostic_path.read_text(encoding="utf-8"))
+    assert diagnostic["dte_coverage"]["expiries_evaluated"] == []
+    assert diagnostic["dte_coverage"]["expiries_omitted"][0]["reason"] == "CAPTURE_TIME_BUDGET_EXHAUSTED"
+
+
 def test_tick_option_computation_handles_none_values() -> None:
     client = capture_module._IbCaptureClient()
     client.tickOptionComputation(

@@ -206,6 +206,33 @@ def _snapshot(
     return snap, cert
 
 
+def _add_dte_coverage(snapshot_path: Path, *, omitted: bool = False) -> None:
+    payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    payload["provenance"]["capture_method"] = "IBKR_SNAPSHOT_DAY_ANCHORED"
+    payload["derived"] = {
+        "derivation_policy": {
+            "dte_method": "CALENDAR_DAYS_UTC",
+            "dte_window_policy": {
+                "policy_dte_min": 1,
+                "policy_dte_max": 7,
+                "max_expiries_to_capture": 7,
+                "expiries_available": [
+                    {"dte": 1, "expiry_yyyymmdd": "20260430"},
+                    {"dte": 2, "expiry_yyyymmdd": "20260501"},
+                ],
+                "expiries_evaluated": [{"dte": 1, "expiry_yyyymmdd": "20260430"}],
+                "expiries_omitted": (
+                    [{"dte": 2, "expiry_yyyymmdd": "20260501", "reason": "CAPTURE_TIME_BUDGET_EXHAUSTED"}]
+                    if omitted
+                    else []
+                ),
+                "omission_reason": "CAPTURE_TIME_BUDGET_EXHAUSTED" if omitted else "",
+            },
+        }
+    }
+    snapshot_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+
 def _selected_pointer(ctx: bod.BodContext, *, symbol: str = "SPY") -> Path:
     intent_path = ctx.execution_root / "intents_v1" / "snapshots" / ctx.day_utc / f"{symbol.lower()}.exposure_intent.v1.json"
     intent_path.parent.mkdir(parents=True, exist_ok=True)
@@ -865,6 +892,49 @@ def test_market_open_gate_uses_selected_intent_symbol(monkeypatch: pytest.Monkey
     assert payload["status"] == "PASS"
     assert payload["canonical_blocker"] == ""
     assert "/options_chain_snapshot_v1/" in payload["snapshot_path"]
+
+
+def test_market_open_gate_passes_with_explicit_dte_coverage_and_omissions(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _same_day_options_readiness(monkeypatch, ctx)
+    _selected_pointer(ctx, symbol="IWM")
+    mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    mds_path.parent.mkdir(parents=True, exist_ok=True)
+    mds_path.write_text('{"status":"PASS","canonical_blocker":"","requirements":[{"instrument":"IWM"}],"artifacts":[]}\n', encoding="utf-8")
+    snapshot_path, _cert_path = _snapshot(ctx, symbol="IWM")
+    _add_dte_coverage(snapshot_path, omitted=True)
+    monkeypatch.setattr(open_gate, "_market_session_state", lambda: "REGULAR")
+    monkeypatch.setattr(open_gate, "_run_market_data_supply", lambda _ctx: {"exit_code": 0})
+
+    payload = open_gate.build_market_open_data_gate(ctx)
+
+    assert payload["status"] == "PASS"
+    coverage = payload["diagnostics"]["dte_coverage"]
+    assert coverage["expiries_evaluated"] == [{"dte": 1, "expiry_yyyymmdd": "20260430"}]
+    assert coverage["expiries_omitted"] == [{"dte": 2, "expiry_yyyymmdd": "20260501", "reason": "CAPTURE_TIME_BUDGET_EXHAUSTED"}]
+
+
+def test_market_open_gate_rejects_real_capture_snapshot_without_dte_coverage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _same_day_options_readiness(monkeypatch, ctx)
+    _selected_pointer(ctx, symbol="IWM")
+    mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    mds_path.parent.mkdir(parents=True, exist_ok=True)
+    mds_path.write_text('{"status":"PASS","canonical_blocker":"","requirements":[{"instrument":"IWM"}],"artifacts":[]}\n', encoding="utf-8")
+    snapshot_path, _cert_path = _snapshot(ctx, symbol="IWM")
+    payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    payload["provenance"]["capture_method"] = "IBKR_SNAPSHOT_DAY_ANCHORED"
+    snapshot_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    monkeypatch.setattr(open_gate, "_market_session_state", lambda: "REGULAR")
+    monkeypatch.setattr(open_gate, "_run_market_data_supply", lambda _ctx: {"exit_code": 0})
+
+    payload = open_gate.build_market_open_data_gate(ctx)
+
+    assert payload["status"] == "PENDING"
+    assert payload["canonical_blocker"] == "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+    assert payload["diagnostics"]["quote_completeness_result"]["incomplete_quote_fields"] == [
+        "derived.derivation_policy.dte_window_policy"
+    ]
 
 
 def test_market_open_gate_stale_snapshot_attempts_capture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

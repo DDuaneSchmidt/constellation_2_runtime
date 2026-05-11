@@ -39,6 +39,7 @@ OPTIONS_CAPTURE_SPECIFIC_BLOCKERS = {
     "OPTIONS_CAPTURE_IMPLEMENTATION_ERROR",
 }
 DEFAULT_OPTIONS_SNAPSHOT_STEP_TIMEOUT_SECONDS = 180
+DEFAULT_OPTIONS_CAPTURE_MAX_SECONDS = 150
 
 
 def _utc_now_iso() -> str:
@@ -358,6 +359,9 @@ def _classify_options_capture_failure(capture_result: Dict[str, Any]) -> Dict[st
 
 
 def _capture_symbol(*, truth_root: Path, day_utc: str, symbol: str, eval_time_utc: str) -> Dict[str, Any]:
+    step_timeout = int(str(os.environ.get("C2_OPTIONS_SNAPSHOT_STEP_TIMEOUT_SECONDS") or str(DEFAULT_OPTIONS_SNAPSHOT_STEP_TIMEOUT_SECONDS)).strip())
+    default_capture_budget = max(1, min(DEFAULT_OPTIONS_CAPTURE_MAX_SECONDS, step_timeout - 30))
+    max_capture_seconds = int(str(os.environ.get("C2_OPTIONS_CAPTURE_MAX_SECONDS") or str(default_capture_budget)).strip())
     return _run_tool(
         [
             sys.executable,
@@ -376,6 +380,8 @@ def _capture_symbol(*, truth_root: Path, day_utc: str, symbol: str, eval_time_ut
             str(os.environ.get("C2_IB_PORT") or "4002").strip(),
             "--ib_client_id",
             str(os.environ.get("C2_IB_CLIENT_ID") or "7").strip(),
+            "--max_capture_seconds",
+            str(max_capture_seconds),
         ],
         truth_root=truth_root,
     )

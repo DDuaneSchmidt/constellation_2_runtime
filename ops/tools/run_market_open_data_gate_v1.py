@@ -254,6 +254,13 @@ def _quote_completeness_result(validation: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _snapshot_dte_coverage(snapshot: dict[str, Any]) -> dict[str, Any]:
+    derived = snapshot.get("derived") if isinstance(snapshot.get("derived"), dict) else {}
+    derivation_policy = derived.get("derivation_policy") if isinstance(derived.get("derivation_policy"), dict) else {}
+    coverage = derivation_policy.get("dte_window_policy") if isinstance(derivation_policy.get("dte_window_policy"), dict) else {}
+    return dict(coverage) if coverage else {}
+
+
 def _validate_current_snapshot(ctx: bod.BodContext, instrument: str, now_utc: datetime) -> dict[str, Any]:
     snapshot_path, cert_path, snapshot, cert = _latest_snapshot_for_symbol(
         execution_root=ctx.execution_root,
@@ -270,6 +277,7 @@ def _validate_current_snapshot(ctx: bod.BodContext, instrument: str, now_utc: da
         "valid_until_utc": "",
         "allowed_freshness_threshold_seconds": None,
         "quote_count": 0,
+        "dte_coverage": {},
         "blocker": "",
         "options_snapshot_symbol": "",
         "missing_symbols": [],
@@ -309,6 +317,14 @@ def _validate_current_snapshot(ctx: bod.BodContext, instrument: str, now_utc: da
         result["blocker"] = "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
         result["missing_contracts"] = [instrument.upper()]
         return result
+    result["dte_coverage"] = _snapshot_dte_coverage(snapshot)
+    provenance = snapshot.get("provenance") if isinstance(snapshot.get("provenance"), dict) else {}
+    if str(provenance.get("capture_method") or "").strip() == "IBKR_SNAPSHOT_DAY_ANCHORED":
+        coverage = result["dte_coverage"]
+        if not coverage or not isinstance(coverage.get("expiries_evaluated"), list) or not isinstance(coverage.get("expiries_omitted"), list):
+            result["blocker"] = "OPTIONS_SNAPSHOT_CAPTURE_FAILED"
+            result["incomplete_quote_fields"] = ["derived.derivation_policy.dte_window_policy"]
+            return result
     quote_count = sum(1 for row in contracts if isinstance(row, dict) and _has_bid_ask(row))
     result["quote_count"] = quote_count
     if quote_count <= 0:
@@ -390,6 +406,7 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
             "allowed_freshness_threshold_seconds": validation.get("allowed_freshness_threshold_seconds"),
             "freshness_certificate_valid_until_utc": str(validation.get("valid_until_utc") or ""),
             "quote_completeness_result": _quote_completeness_result(validation),
+            "dte_coverage": validation.get("dte_coverage") if isinstance(validation.get("dte_coverage"), dict) else {},
         }
 
     def _payload(

@@ -32,6 +32,8 @@ from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_r
 GOVERNED_POLICY_DTE_MIN_DEFAULT = 1
 GOVERNED_POLICY_DTE_MAX_DEFAULT = 7
 GOVERNED_MAX_EXPIRIES_TO_CAPTURE_DEFAULT = 7
+GOVERNED_MAX_CAPTURE_SECONDS_DEFAULT = 150
+CAPTURE_TIME_BUDGET_OMISSION_REASON = "CAPTURE_TIME_BUDGET_EXHAUSTED"
 
 
 class CaptureError(Exception):
@@ -386,6 +388,55 @@ def _expiry_window_diagnostics(
     }
 
 
+def _bounded_expiry_coverage(
+    *,
+    base_coverage: Dict[str, Any],
+    completed_expiry_yyyymmdd: Sequence[str],
+    time_budget_exhausted: bool,
+) -> Dict[str, Any]:
+    completed = {str(item) for item in completed_expiry_yyyymmdd}
+    evaluated: List[Dict[str, Any]] = []
+    omitted: List[Dict[str, Any]] = []
+    for row in base_coverage.get("expiries_evaluated") or []:
+        if not isinstance(row, dict):
+            continue
+        expiry = str(row.get("expiry_yyyymmdd") or "").strip()
+        if expiry in completed:
+            evaluated.append({"dte": int(row.get("dte") or 0), "expiry_yyyymmdd": expiry})
+        else:
+            omitted.append(
+                {
+                    "dte": int(row.get("dte") or 0),
+                    "expiry_yyyymmdd": expiry,
+                    "reason": CAPTURE_TIME_BUDGET_OMISSION_REASON if time_budget_exhausted else "NOT_EVALUATED",
+                }
+            )
+    for row in base_coverage.get("expiries_omitted") or []:
+        if not isinstance(row, dict):
+            continue
+        omitted.append(
+            {
+                "dte": int(row.get("dte") or 0),
+                "expiry_yyyymmdd": str(row.get("expiry_yyyymmdd") or "").strip(),
+                "reason": str(row.get("reason") or base_coverage.get("omission_reason") or "MAX_EXPIRIES_TO_CAPTURE"),
+            }
+        )
+    omission_reason = ""
+    if any(row.get("reason") == CAPTURE_TIME_BUDGET_OMISSION_REASON for row in omitted):
+        omission_reason = CAPTURE_TIME_BUDGET_OMISSION_REASON
+    elif omitted:
+        omission_reason = str(base_coverage.get("omission_reason") or "MAX_EXPIRIES_TO_CAPTURE")
+    return {
+        "policy_dte_min": int(base_coverage.get("policy_dte_min") or 0),
+        "policy_dte_max": int(base_coverage.get("policy_dte_max") or 0),
+        "max_expiries_to_capture": int(base_coverage.get("max_expiries_to_capture") or 0),
+        "expiries_available": list(base_coverage.get("expiries_available") or []),
+        "expiries_evaluated": evaluated,
+        "expiries_omitted": omitted,
+        "omission_reason": omission_reason,
+    }
+
+
 def _expiry_candidates(
     *,
     expirations: Sequence[str],
@@ -536,6 +587,17 @@ def _write_capture_diagnostic(*, truth_root: Path, day_utc: str, run_id: str, di
     return path
 
 
+def _capture_budget_exhausted(*, start_monotonic: float, max_capture_seconds: int) -> bool:
+    return (time.monotonic() - float(start_monotonic)) >= float(max(1, int(max_capture_seconds)))
+
+
+def _capture_budget_nearly_exhausted(*, start_monotonic: float, max_capture_seconds: int) -> bool:
+    max_seconds = max(1, int(max_capture_seconds))
+    elapsed = time.monotonic() - float(start_monotonic)
+    remaining = float(max_seconds) - elapsed
+    return remaining <= min(12.0, max(1.0, float(max_seconds) * 0.10))
+
+
 def _capture_raw_chain(
     *,
     day_utc: str,
@@ -548,9 +610,11 @@ def _capture_raw_chain(
     policy_dte_min: int = GOVERNED_POLICY_DTE_MIN_DEFAULT,
     policy_dte_max: int = GOVERNED_POLICY_DTE_MAX_DEFAULT,
     max_expiries_to_capture: int = GOVERNED_MAX_EXPIRIES_TO_CAPTURE_DEFAULT,
+    max_capture_seconds: int = GOVERNED_MAX_CAPTURE_SECONDS_DEFAULT,
 ) -> Tuple[Path, Dict[str, Any]]:
     capture_tag = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_id = f"ib_capture_{symbol}_{capture_tag}_{uuid.uuid4().hex[:8]}"
+    start_monotonic = time.monotonic()
     client = _IbCaptureClient()
     selected_market_data_type: Optional[int] = None
     spot_price_2dp = ""
@@ -575,6 +639,11 @@ def _capture_raw_chain(
         "attempted_market_data_types": [],
         "attempts": [],
         "attempt_failures": [],
+        "capture_bounds": {
+            "max_expiries_to_capture": int(max_expiries_to_capture),
+            "max_capture_seconds": int(max_capture_seconds),
+            "nearest_expiry_first": True,
+        },
     }
     diagnostic_path: Optional[Path] = None
     try:
@@ -652,8 +721,23 @@ def _capture_raw_chain(
                     raise CaptureError(f"NO_STRIKES_AVAILABLE:{symbol}")
 
                 captured_rows: List[Tuple[ContractWithMeta, Dict[str, Any]]] = []
+                completed_expiries: List[str] = []
+                time_budget_exhausted = False
                 for expiry in expiries:
+                    if completed_expiries and _capture_budget_nearly_exhausted(
+                        start_monotonic=start_monotonic,
+                        max_capture_seconds=int(max_capture_seconds),
+                    ):
+                        time_budget_exhausted = True
+                        break
+                    expiry_rows: List[Tuple[ContractWithMeta, Dict[str, Any]]] = []
                     for strike in strikes:
+                        if _capture_budget_exhausted(
+                            start_monotonic=start_monotonic,
+                            max_capture_seconds=int(max_capture_seconds),
+                        ):
+                            time_budget_exhausted = True
+                            break
                         attempt["contract_request_count"] = int(attempt["contract_request_count"]) + 1
                         option = _option_contract(
                             symbol=symbol,
@@ -729,9 +813,51 @@ def _capture_raw_chain(
                                     "invalid_reason": invalid_reason if not valid_quote else None,
                                 }
                             )
-                        captured_rows.append((meta, ticks))
+                        expiry_rows.append((meta, ticks))
                         time.sleep(0.03)
+                    if time_budget_exhausted:
+                        break
+                    captured_rows.extend(expiry_rows)
+                    completed_expiries.append(expiry)
+                    bounded_coverage = _bounded_expiry_coverage(
+                        base_coverage=expiry_coverage,
+                        completed_expiry_yyyymmdd=completed_expiries,
+                        time_budget_exhausted=False,
+                    )
+                    diagnostic["dte_coverage"] = bounded_coverage
+                    attempt["dte_coverage"] = bounded_coverage
+                    _write_capture_diagnostic(
+                        truth_root=truth_root,
+                        day_utc=day_utc,
+                        run_id=run_id,
+                        diagnostic=diagnostic,
+                    )
 
+                if time_budget_exhausted:
+                    expiry_coverage = _bounded_expiry_coverage(
+                        base_coverage=expiry_coverage,
+                        completed_expiry_yyyymmdd=completed_expiries,
+                        time_budget_exhausted=True,
+                    )
+                    diagnostic["dte_coverage"] = dict(expiry_coverage)
+                    attempt["dte_coverage"] = dict(expiry_coverage)
+                    attempt["time_budget_exhausted"] = True
+                    _write_capture_diagnostic(
+                        truth_root=truth_root,
+                        day_utc=day_utc,
+                        run_id=run_id,
+                        diagnostic=diagnostic,
+                    )
+                    if not completed_expiries:
+                        raise CaptureError(f"OPTIONS_CAPTURE_TIMEOUT:{CAPTURE_TIME_BUDGET_OMISSION_REASON}")
+                else:
+                    expiry_coverage = _bounded_expiry_coverage(
+                        base_coverage=expiry_coverage,
+                        completed_expiry_yyyymmdd=completed_expiries,
+                        time_budget_exhausted=False,
+                    )
+                    diagnostic["dte_coverage"] = dict(expiry_coverage)
+                    attempt["dte_coverage"] = dict(expiry_coverage)
                 contracts = _contract_rows_to_raw_contracts(rows=captured_rows)
                 attempt["selected"] = True
                 selected_market_data_type = market_data_type
@@ -840,6 +966,7 @@ def main() -> int:
     ap.add_argument("--policy_dte_min", type=int, default=GOVERNED_POLICY_DTE_MIN_DEFAULT, help="Governed minimum calendar DTE to capture for option-chain coverage diagnostics.")
     ap.add_argument("--policy_dte_max", type=int, default=GOVERNED_POLICY_DTE_MAX_DEFAULT, help="Governed maximum calendar DTE to capture for option-chain coverage diagnostics.")
     ap.add_argument("--max_expiries_to_capture", type=int, default=GOVERNED_MAX_EXPIRIES_TO_CAPTURE_DEFAULT, help="Bound on evaluated expiries; omitted expiries are reported in artifacts.")
+    ap.add_argument("--max_capture_seconds", type=int, default=GOVERNED_MAX_CAPTURE_SECONDS_DEFAULT, help="Bound on in-process IB capture expansion before publishing a partial evaluated-expiry snapshot or fail-closing.")
     args = ap.parse_args()
 
     try:
@@ -863,6 +990,7 @@ def main() -> int:
             policy_dte_min=int(args.policy_dte_min),
             policy_dte_max=int(args.policy_dte_max),
             max_expiries_to_capture=int(args.max_expiries_to_capture),
+            max_capture_seconds=int(args.max_capture_seconds),
         )
         print(
             json.dumps(
