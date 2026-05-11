@@ -29,6 +29,10 @@ except Exception as exc:  # noqa: BLE001
 
 from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
 
+GOVERNED_POLICY_DTE_MIN_DEFAULT = 1
+GOVERNED_POLICY_DTE_MAX_DEFAULT = 7
+GOVERNED_MAX_EXPIRIES_TO_CAPTURE_DEFAULT = 7
+
 
 class CaptureError(Exception):
     def __init__(self, message: str, *, diagnostic_path: Optional[Path] = None) -> None:
@@ -345,7 +349,14 @@ def _strike_candidates(*, strikes: Sequence[str], spot: Decimal) -> List[str]:
     return sorted({format(item.quantize(Decimal("0.01")), "f") for item in selected})
 
 
-def _expiry_candidates(*, expirations: Sequence[str], day_utc: str) -> List[str]:
+def _expiry_window_diagnostics(
+    *,
+    expirations: Sequence[str],
+    day_utc: str,
+    policy_dte_min: int,
+    policy_dte_max: int,
+    max_expiries_to_capture: int,
+) -> Dict[str, Any]:
     base_day = date.fromisoformat(day_utc)
     candidates: List[Tuple[int, str]] = []
     for raw in expirations:
@@ -354,11 +365,43 @@ def _expiry_candidates(*, expirations: Sequence[str], day_utc: str) -> List[str]
             continue
         exp_day = date(int(value[0:4]), int(value[4:6]), int(value[6:8]))
         dte = (exp_day - base_day).days
-        if 1 <= dte <= 7:
+        if int(policy_dte_min) <= dte <= int(policy_dte_max):
             candidates.append((dte, value))
-    if not candidates:
-        return []
-    return [item[1] for item in sorted(candidates)[:1]]
+    ordered = sorted(candidates)
+    cap = max(0, int(max_expiries_to_capture))
+    evaluated = ordered[:cap]
+    omitted = ordered[cap:]
+    omission_reason = f"MAX_EXPIRIES_TO_CAPTURE:{cap}" if omitted else ""
+    return {
+        "policy_dte_min": int(policy_dte_min),
+        "policy_dte_max": int(policy_dte_max),
+        "max_expiries_to_capture": cap,
+        "expiries_available": [{"dte": int(dte), "expiry_yyyymmdd": expiry} for dte, expiry in ordered],
+        "expiries_evaluated": [{"dte": int(dte), "expiry_yyyymmdd": expiry} for dte, expiry in evaluated],
+        "expiries_omitted": [
+            {"dte": int(dte), "expiry_yyyymmdd": expiry, "reason": omission_reason}
+            for dte, expiry in omitted
+        ],
+        "omission_reason": omission_reason,
+    }
+
+
+def _expiry_candidates(
+    *,
+    expirations: Sequence[str],
+    day_utc: str,
+    policy_dte_min: int = GOVERNED_POLICY_DTE_MIN_DEFAULT,
+    policy_dte_max: int = GOVERNED_POLICY_DTE_MAX_DEFAULT,
+    max_expiries_to_capture: int = GOVERNED_MAX_EXPIRIES_TO_CAPTURE_DEFAULT,
+) -> List[str]:
+    diagnostics = _expiry_window_diagnostics(
+        expirations=expirations,
+        day_utc=day_utc,
+        policy_dte_min=policy_dte_min,
+        policy_dte_max=policy_dte_max,
+        max_expiries_to_capture=max_expiries_to_capture,
+    )
+    return [str(row["expiry_yyyymmdd"]) for row in diagnostics["expiries_evaluated"]]
 
 
 def _stock_contract(symbol: str) -> Contract:
@@ -502,6 +545,9 @@ def _capture_raw_chain(
     ib_host: str,
     ib_port: int,
     ib_client_id: int,
+    policy_dte_min: int = GOVERNED_POLICY_DTE_MIN_DEFAULT,
+    policy_dte_max: int = GOVERNED_POLICY_DTE_MAX_DEFAULT,
+    max_expiries_to_capture: int = GOVERNED_MAX_EXPIRIES_TO_CAPTURE_DEFAULT,
 ) -> Tuple[Path, Dict[str, Any]]:
     capture_tag = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_id = f"ib_capture_{symbol}_{capture_tag}_{uuid.uuid4().hex[:8]}"
@@ -547,7 +593,15 @@ def _capture_raw_chain(
         if not secdef_rows:
             raise CaptureError(f"SECDEF_ROWS_MISSING:{symbol}")
         secdef = secdef_rows[0]
-        expiries = _expiry_candidates(expirations=secdef.get("expirations") or [], day_utc=day_utc)
+        expiry_coverage = _expiry_window_diagnostics(
+            expirations=secdef.get("expirations") or [],
+            day_utc=day_utc,
+            policy_dte_min=int(policy_dte_min),
+            policy_dte_max=int(policy_dte_max),
+            max_expiries_to_capture=int(max_expiries_to_capture),
+        )
+        diagnostic["dte_coverage"] = dict(expiry_coverage)
+        expiries = [str(row["expiry_yyyymmdd"]) for row in expiry_coverage["expiries_evaluated"]]
         if not expiries:
             raise CaptureError(f"NO_EXPIRY_IN_DTE_WINDOW:{symbol}")
         trading_class = str(secdef.get("trading_class") or "").strip()
@@ -751,6 +805,15 @@ def _capture_raw_chain(
         },
         "policy": {
             "dte_method": "CALENDAR_DAYS_UTC",
+            "dte_window_policy": {
+                "policy_dte_min": int(policy_dte_min),
+                "policy_dte_max": int(policy_dte_max),
+                "max_expiries_to_capture": int(max_expiries_to_capture),
+                "expiries_available": list(expiry_coverage.get("expiries_available", [])),
+                "expiries_evaluated": list(expiry_coverage.get("expiries_evaluated", [])),
+                "expiries_omitted": list(expiry_coverage.get("expiries_omitted", [])),
+                "omission_reason": str(expiry_coverage.get("omission_reason") or ""),
+            },
             "liquidity_policy": {
                 "min_open_interest": 0,
                 "min_volume": 1,
@@ -774,6 +837,9 @@ def main() -> int:
     ap.add_argument("--ib_host", default="127.0.0.1")
     ap.add_argument("--ib_port", type=int, default=4002)
     ap.add_argument("--ib_client_id", type=int, default=7)
+    ap.add_argument("--policy_dte_min", type=int, default=GOVERNED_POLICY_DTE_MIN_DEFAULT, help="Governed minimum calendar DTE to capture for option-chain coverage diagnostics.")
+    ap.add_argument("--policy_dte_max", type=int, default=GOVERNED_POLICY_DTE_MAX_DEFAULT, help="Governed maximum calendar DTE to capture for option-chain coverage diagnostics.")
+    ap.add_argument("--max_expiries_to_capture", type=int, default=GOVERNED_MAX_EXPIRIES_TO_CAPTURE_DEFAULT, help="Bound on evaluated expiries; omitted expiries are reported in artifacts.")
     args = ap.parse_args()
 
     try:
@@ -794,6 +860,9 @@ def main() -> int:
             ib_host=str(args.ib_host or "127.0.0.1").strip(),
             ib_port=int(args.ib_port),
             ib_client_id=int(args.ib_client_id),
+            policy_dte_min=int(args.policy_dte_min),
+            policy_dte_max=int(args.policy_dte_max),
+            max_expiries_to_capture=int(args.max_expiries_to_capture),
         )
         print(
             json.dumps(

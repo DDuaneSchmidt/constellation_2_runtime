@@ -234,6 +234,57 @@ def _contract_ok(row: dict[str, Any], *, right: str, max_spread: Decimal) -> boo
     return (ask - bid) <= max_spread
 
 
+def _nearest_miss_row(
+    *,
+    expiry: str,
+    sell: dict[str, Any],
+    buy: dict[str, Any],
+    width: Decimal,
+    credit: Decimal,
+    max_loss_cents: int,
+    max_risk_cents: int,
+    multiplier: int,
+    snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    sell_strike = _dec(sell.get("strike")) or Decimal("0")
+    buy_strike = _dec(buy.get("strike")) or Decimal("0")
+    additional_credit_needed = Decimal(max_loss_cents - max_risk_cents) / Decimal(multiplier * 100)
+    underlying = snapshot.get("underlying") if isinstance(snapshot.get("underlying"), dict) else {}
+    spot = _dec(underlying.get("spot_price"))
+    clearly_otm = bool(spot is not None and spot > 0 and sell_strike <= spot - width)
+    return {
+        "failed_rule": "MAX_LOSS_EXCEEDS_RISK",
+        "expiry_utc": expiry,
+        "sell_strike": str(sell_strike),
+        "buy_strike": str(buy_strike),
+        "width_points": str(width),
+        "net_credit": str(credit),
+        "max_loss_cents": int(max_loss_cents),
+        "effective_max_risk_cents": int(max_risk_cents),
+        "max_loss_excess_cents": int(max_loss_cents - max_risk_cents),
+        "additional_credit_needed": str(additional_credit_needed),
+        "clearly_otm": clearly_otm,
+        "distance_from_threshold": {
+            "threshold": "effective_max_risk_cents",
+            "actual": int(max_loss_cents),
+            "limit": int(max_risk_cents),
+            "excess_cents": int(max_loss_cents - max_risk_cents),
+        },
+    }
+
+
+def _trim_nearest_misses(rows: list[dict[str, Any]], *, clearly_otm_only: bool = False, limit: int = 10) -> list[dict[str, Any]]:
+    filtered = [row for row in rows if not clearly_otm_only or row.get("clearly_otm") is True]
+    filtered.sort(
+        key=lambda row: (
+            int(row.get("max_loss_excess_cents") or 0),
+            Decimal(str(row.get("sell_strike") or "0")),
+            Decimal(str(row.get("buy_strike") or "0")),
+        )
+    )
+    return filtered[:limit]
+
+
 def _leg_from_contract(row: dict[str, Any], *, action: str, price_field: str) -> dict[str, Any]:
     ib = row.get("ib") if isinstance(row.get("ib"), dict) else {}
     price = _contract_price(row, price_field)
@@ -325,6 +376,42 @@ def _target_width_points(policy: dict[str, Any]) -> Decimal | None:
     selection = _selection_policy(policy)
     width_policy = selection.get("width_policy") if isinstance(selection.get("width_policy"), dict) else {}
     return _dec(width_policy.get("width_points"))
+
+
+def _structure_dte_coverage(snapshot: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
+    selection = _selection_policy(policy)
+    expiry_policy = selection.get("expiry_policy") if isinstance(selection.get("expiry_policy"), dict) else {}
+    policy_dte_min = int(expiry_policy.get("target_dte_min") or 0)
+    policy_dte_max = int(expiry_policy.get("target_dte_max") or 0)
+    derived = snapshot.get("derived") if isinstance(snapshot.get("derived"), dict) else {}
+    derivation_policy = derived.get("derivation_policy") if isinstance(derived.get("derivation_policy"), dict) else {}
+    raw_coverage = derivation_policy.get("dte_window_policy") if isinstance(derivation_policy.get("dte_window_policy"), dict) else {}
+    if raw_coverage:
+        return {
+            "policy_dte_min": int(raw_coverage.get("policy_dte_min") or policy_dte_min),
+            "policy_dte_max": int(raw_coverage.get("policy_dte_max") or policy_dte_max),
+            "max_expiries_to_capture": int(raw_coverage.get("max_expiries_to_capture") or 0),
+            "expiries_available": list(raw_coverage.get("expiries_available") or []),
+            "expiries_evaluated": list(raw_coverage.get("expiries_evaluated") or []),
+            "expiries_omitted": list(raw_coverage.get("expiries_omitted") or []),
+            "omission_reason": str(raw_coverage.get("omission_reason") or ""),
+        }
+    evaluated = sorted(
+        {
+            str(row.get("expiry_utc") or "").strip()
+            for row in snapshot.get("contracts") or []
+            if isinstance(row, dict) and str(row.get("expiry_utc") or "").strip()
+        }
+    )
+    return {
+        "policy_dte_min": policy_dte_min,
+        "policy_dte_max": policy_dte_max,
+        "max_expiries_to_capture": 0,
+        "expiries_available": [],
+        "expiries_evaluated": [{"expiry_utc": expiry} for expiry in evaluated],
+        "expiries_omitted": [],
+        "omission_reason": "LEGACY_SNAPSHOT_WITHOUT_DTE_COVERAGE_DIAGNOSTICS",
+    }
 
 
 def _selected_width_points(selected: dict[str, Any]) -> Decimal | None:
@@ -430,6 +517,7 @@ def _select_vertical_put_credit_spread(
         selected_symbol=_symbol(intent),
         allowed_symbols=_allowed_symbols_for_engine(engine_id),
     )
+    diagnostics["dte_coverage"] = _structure_dte_coverage(snapshot, policy)
     template = policy.get("options_template") if isinstance(policy.get("options_template"), dict) else {}
     strategy = template.get("strategy") if isinstance(template.get("strategy"), dict) else {}
     risk = template.get("risk") if isinstance(template.get("risk"), dict) else {}
@@ -464,6 +552,7 @@ def _select_vertical_put_credit_spread(
     for row in contracts:
         by_expiry.setdefault(str(row.get("expiry_utc") or ""), []).append(row)
     candidates: list[dict[str, Any]] = []
+    max_loss_nearest_misses: list[dict[str, Any]] = []
     for expiry, rows in by_expiry.items():
         ordered = sorted(rows, key=lambda item: _dec(item.get("strike")) or Decimal("0"))
         for sell in ordered:
@@ -492,6 +581,19 @@ def _select_vertical_put_credit_spread(
                     continue
                 if max_loss_cents > max_risk_cents:
                     _bump_rejection(diagnostics, "MAX_LOSS_EXCEEDS_RISK")
+                    max_loss_nearest_misses.append(
+                        _nearest_miss_row(
+                            expiry=expiry,
+                            sell=sell,
+                            buy=buy,
+                            width=width,
+                            credit=credit,
+                            max_loss_cents=max_loss_cents,
+                            max_risk_cents=max_risk_cents,
+                            multiplier=multiplier,
+                            snapshot=snapshot,
+                        )
+                    )
                     continue
                 candidates.append(
                     {
@@ -506,6 +608,10 @@ def _select_vertical_put_credit_spread(
                     }
                 )
     diagnostics["candidates_eligible"] = len(candidates)
+    diagnostics["nearest_miss_diagnostics"] = {
+        "top_by_max_loss_excess": _trim_nearest_misses(max_loss_nearest_misses),
+        "top_clearly_otm_by_max_loss_excess": _trim_nearest_misses(max_loss_nearest_misses, clearly_otm_only=True),
+    }
     if not candidates:
         return {}, "NO_ELIGIBLE_OPTION_STRUCTURE", diagnostics
     candidates.sort(key=lambda item: (int(item["max_loss_cents"]), Decimal(str(item["width_points"])), Decimal(str(item["net_credit"]))))

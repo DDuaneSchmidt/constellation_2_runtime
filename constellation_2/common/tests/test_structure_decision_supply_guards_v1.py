@@ -9,6 +9,7 @@ if str(SOURCE_ROOT) not in sys.path:
 
 from ops.tools.run_structure_decision_supply_v1 import (  # noqa: E402
     _near_itm_same_week_disallowed,
+    _select_vertical_put_credit_spread,
     _selected_legs_exist_in_snapshot,
     _selected_structure_guard_blocker,
 )
@@ -110,3 +111,62 @@ def test_illiquid_structure_fails_candidate_guard() -> None:
     blocker, _action = _selected_structure_guard_blocker(_selected(), _policy(), snapshot)
 
     assert blocker == "NO_ELIGIBLE_OPTION_STRUCTURE"
+
+
+def test_structure_diagnostics_include_nearest_misses_when_no_candidate_is_eligible() -> None:
+    snapshot = {
+        "as_of_utc": "2026-04-29T14:30:00Z",
+        "underlying": {"spot_price": "110.00"},
+        "derived": {
+            "derivation_policy": {
+                "dte_window_policy": {
+                    "policy_dte_min": 1,
+                    "policy_dte_max": 7,
+                    "max_expiries_to_capture": 7,
+                    "expiries_available": [{"dte": 1, "expiry_yyyymmdd": "20260430"}],
+                    "expiries_evaluated": [{"dte": 1, "expiry_yyyymmdd": "20260430"}],
+                    "expiries_omitted": [],
+                    "omission_reason": "",
+                }
+            }
+        },
+        "contracts": [
+            {"contract_key": "SPY-20260430-P-98", "expiry_utc": "2026-04-30T00:00:00Z", "strike": "98.00", "right": "PUT", "bid": "0.04", "ask": "0.05", "ib": {"conId": 826251098}},
+            {"contract_key": "SPY-20260430-P-100", "expiry_utc": "2026-04-30T00:00:00Z", "strike": "100.00", "right": "PUT", "bid": "0.09", "ask": "0.10", "ib": {"conId": 826251100}},
+            {"contract_key": "SPY-20260430-P-103", "expiry_utc": "2026-04-30T00:00:00Z", "strike": "103.00", "right": "PUT", "bid": "0.40", "ask": "0.45", "ib": {"conId": 826251103}},
+            {"contract_key": "SPY-20260430-P-105", "expiry_utc": "2026-04-30T00:00:00Z", "strike": "105.00", "right": "PUT", "bid": "1.00", "ask": "1.05", "ib": {"conId": 849302105}},
+            {"contract_key": "SPY-20260430-P-108", "expiry_utc": "2026-04-30T00:00:00Z", "strike": "108.00", "right": "PUT", "bid": "2.00", "ask": "2.05", "ib": {"conId": 849302108}},
+        ],
+    }
+    policy = {
+        "options_template": {
+            "strategy": {"right": "PUT", "direction": "CREDIT"},
+            "risk": {"max_risk_usd": "250.00", "max_contracts": 1, "multiplier": 100},
+            "selection_policy": {
+                "expiry_policy": {"mode": "DTE_WINDOW", "target_dte_min": 1, "target_dte_max": 7},
+                "width_policy": {"width_points": "5.00"},
+                "liquidity_policy": {"max_bid_ask_spread": "0.10"},
+            },
+        }
+    }
+    risk_budget = {
+        "intent_budgets": [
+            {"intent_id": "intent-1", "allowed_risk_cents": 100000},
+        ]
+    }
+
+    selected, blocker, diagnostics = _select_vertical_put_credit_spread(
+        intent={"engine": {"engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1"}, "underlying": {"symbol": "SPY"}, "option": {"structure": "PUT"}},
+        policy=policy,
+        snapshot=snapshot,
+        risk_budget=risk_budget,
+        intent_id="intent-1",
+    )
+
+    assert selected == {}
+    assert blocker == "NO_ELIGIBLE_OPTION_STRUCTURE"
+    assert diagnostics["rejected_by_reason"]["MAX_LOSS_EXCEEDS_RISK"] == 3
+    assert diagnostics["nearest_miss_diagnostics"]["top_by_max_loss_excess"][0]["sell_strike"] == "108.00"
+    assert diagnostics["nearest_miss_diagnostics"]["top_by_max_loss_excess"][0]["max_loss_excess_cents"] == 9500
+    assert diagnostics["nearest_miss_diagnostics"]["top_clearly_otm_by_max_loss_excess"][0]["sell_strike"] == "105.00"
+    assert diagnostics["dte_coverage"]["expiries_evaluated"] == [{"dte": 1, "expiry_yyyymmdd": "20260430"}]

@@ -79,6 +79,55 @@ def _require_int_nonneg(x: Any, field_name: str) -> int:
     return x
 
 
+def _optional_dte_coverage(raw_policy: Dict[str, Any]) -> Dict[str, Any] | None:
+    raw = raw_policy.get("dte_window_policy")
+    if raw is None:
+        return None
+    obj = _require_dict(raw, "policy.dte_window_policy")
+    policy_dte_min = _require_int_nonneg(obj.get("policy_dte_min"), "policy.dte_window_policy.policy_dte_min")
+    policy_dte_max = _require_int_nonneg(obj.get("policy_dte_max"), "policy.dte_window_policy.policy_dte_max")
+    if policy_dte_min > policy_dte_max:
+        raise RawInputError("POLICY_DTE_WINDOW_INVALID")
+    max_expiries_to_capture = _require_int_nonneg(
+        obj.get("max_expiries_to_capture"),
+        "policy.dte_window_policy.max_expiries_to_capture",
+    )
+
+    def _rows(field_name: str, *, with_reason: bool = False) -> List[Dict[str, Any]]:
+        rows = _require_list(obj.get(field_name), f"policy.dte_window_policy.{field_name}")
+        out: List[Dict[str, Any]] = []
+        for index, row in enumerate(rows):
+            row_obj = _require_dict(row, f"policy.dte_window_policy.{field_name}[{index}]")
+            normalized = {
+                "dte": _require_int_nonneg(row_obj.get("dte"), f"policy.dte_window_policy.{field_name}[{index}].dte"),
+                "expiry_yyyymmdd": _require_str(
+                    row_obj.get("expiry_yyyymmdd"),
+                    f"policy.dte_window_policy.{field_name}[{index}].expiry_yyyymmdd",
+                    min_len=8,
+                    max_len=8,
+                ),
+            }
+            if with_reason:
+                normalized["reason"] = _require_str(
+                    row_obj.get("reason"),
+                    f"policy.dte_window_policy.{field_name}[{index}].reason",
+                    min_len=1,
+                    max_len=200,
+                )
+            out.append(normalized)
+        return out
+
+    return {
+        "policy_dte_min": policy_dte_min,
+        "policy_dte_max": policy_dte_max,
+        "max_expiries_to_capture": max_expiries_to_capture,
+        "expiries_available": _rows("expiries_available"),
+        "expiries_evaluated": _rows("expiries_evaluated"),
+        "expiries_omitted": _rows("expiries_omitted", with_reason=True),
+        "omission_reason": _require_str(obj.get("omission_reason"), "policy.dte_window_policy.omission_reason", min_len=0, max_len=200),
+    }
+
+
 def _dte_days_calendar(as_of_utc: str, expiry_utc: str) -> int:
     as_of = datetime.fromisoformat(as_of_utc.replace("Z", "+00:00")).date()
     exp = datetime.fromisoformat(expiry_utc.replace("Z", "+00:00")).date()
@@ -147,6 +196,9 @@ def build_options_chain_snapshot_v1(raw: Dict[str, Any], repo_root: Path) -> Dic
         },
         "pricing_policy": {"mid_definition": "(bid+ask)/2"},
     }
+    dte_coverage = _optional_dte_coverage(pol_raw)
+    if dte_coverage is not None:
+        derivation_policy["dte_window_policy"] = dte_coverage
 
     contracts_in = _require_list(raw.get("contracts"), "contracts")
     if len(contracts_in) < 1:
