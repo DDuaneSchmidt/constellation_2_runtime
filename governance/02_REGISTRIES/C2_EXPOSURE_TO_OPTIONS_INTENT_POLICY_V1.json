@@ -27,7 +27,7 @@
           "direction": "CREDIT"
         },
         "risk": {
-          "max_risk_usd": "250.00",
+          "max_risk_usd": "350.00",
           "max_contracts": 1,
           "multiplier": 100
         },

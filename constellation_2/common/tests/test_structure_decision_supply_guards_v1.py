@@ -39,6 +39,28 @@ def _policy() -> dict:
     }
 
 
+def _selection_policy(max_risk_usd: str = "350.00") -> dict:
+    return {
+        "options_template": {
+            "strategy": {"right": "PUT", "direction": "CREDIT"},
+            "risk": {"max_risk_usd": max_risk_usd, "max_contracts": 1, "multiplier": 100},
+            "selection_policy": {
+                "expiry_policy": {"mode": "DTE_WINDOW", "target_dte_min": 1, "target_dte_max": 7},
+                "width_policy": {"width_points": "5.00"},
+                "liquidity_policy": {"max_bid_ask_spread": "0.10"},
+            },
+        }
+    }
+
+
+def _risk_budget(allowed_risk_cents: int = 100000) -> dict:
+    return {
+        "intent_budgets": [
+            {"intent_id": "intent-1", "allowed_risk_cents": allowed_risk_cents},
+        ]
+    }
+
+
 def _selected(sell: str = "105", buy: str = "100") -> dict:
     return {
         "expiry_utc": "2026-04-30T00:00:00Z",
@@ -111,6 +133,80 @@ def test_illiquid_structure_fails_candidate_guard() -> None:
     blocker, _action = _selected_structure_guard_blocker(_selected(), _policy(), snapshot)
 
     assert blocker == "NO_ELIGIBLE_OPTION_STRUCTURE"
+
+
+def test_defined_risk_policy_allows_max_loss_up_to_350_dollars() -> None:
+    snapshot = {
+        "as_of_utc": "2026-04-29T14:30:00Z",
+        "underlying": {"spot_price": "110.00"},
+        "contracts": [
+            {"contract_key": "SPY-20260430-P-100", "expiry_utc": "2026-04-30T00:00:00Z", "strike": "100.00", "right": "PUT", "bid": "0.45", "ask": "0.50", "ib": {"conId": 826251100}},
+            {"contract_key": "SPY-20260430-P-105", "expiry_utc": "2026-04-30T00:00:00Z", "strike": "105.00", "right": "PUT", "bid": "2.00", "ask": "2.05", "ib": {"conId": 849302105}},
+        ],
+    }
+
+    selected, blocker, diagnostics = _select_vertical_put_credit_spread(
+        intent={"engine": {"engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1"}, "underlying": {"symbol": "SPY"}, "option": {"structure": "PUT"}},
+        policy=_selection_policy("350.00"),
+        snapshot=snapshot,
+        risk_budget=_risk_budget(),
+        intent_id="intent-1",
+    )
+
+    assert blocker == ""
+    assert selected["max_loss_cents"] == 35000
+    assert selected["quantity_basis"]["policy_max_risk_cents"] == 35000
+    assert diagnostics["candidates_eligible"] == 1
+
+
+def test_defined_risk_policy_blocks_max_loss_above_350_dollars() -> None:
+    snapshot = {
+        "as_of_utc": "2026-04-29T14:30:00Z",
+        "underlying": {"spot_price": "110.00"},
+        "contracts": [
+            {"contract_key": "SPY-20260430-P-100", "expiry_utc": "2026-04-30T00:00:00Z", "strike": "100.00", "right": "PUT", "bid": "0.45", "ask": "0.51", "ib": {"conId": 826251100}},
+            {"contract_key": "SPY-20260430-P-105", "expiry_utc": "2026-04-30T00:00:00Z", "strike": "105.00", "right": "PUT", "bid": "2.00", "ask": "2.05", "ib": {"conId": 849302105}},
+        ],
+    }
+
+    selected, blocker, diagnostics = _select_vertical_put_credit_spread(
+        intent={"engine": {"engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1"}, "underlying": {"symbol": "SPY"}, "option": {"structure": "PUT"}},
+        policy=_selection_policy("350.00"),
+        snapshot=snapshot,
+        risk_budget=_risk_budget(),
+        intent_id="intent-1",
+    )
+
+    assert selected == {}
+    assert blocker == "NO_ELIGIBLE_OPTION_STRUCTURE"
+    assert diagnostics["rejected_by_reason"]["MAX_LOSS_EXCEEDS_RISK"] == 1
+    assert diagnostics["nearest_miss_diagnostics"]["top_by_max_loss_excess"][0]["max_loss_cents"] == 35100
+    assert diagnostics["nearest_miss_diagnostics"]["top_by_max_loss_excess"][0]["max_loss_excess_cents"] == 100
+
+
+def test_width_otm_and_credit_rules_remain_unchanged_after_max_loss_increase() -> None:
+    assert _selected_structure_guard_blocker(_selected("103", "100"), _policy(), _snapshot())[0] == "NO_ELIGIBLE_OPTION_STRUCTURE"
+    assert _selected_structure_guard_blocker(_selected("108", "103"), _policy(), _snapshot())[0] == "NO_ELIGIBLE_OPTION_STRUCTURE"
+
+    snapshot = {
+        "as_of_utc": "2026-04-29T14:30:00Z",
+        "underlying": {"spot_price": "110.00"},
+        "contracts": [
+            {"contract_key": "SPY-20260430-P-100", "expiry_utc": "2026-04-30T00:00:00Z", "strike": "100.00", "right": "PUT", "bid": "2.00", "ask": "2.05", "ib": {"conId": 826251100}},
+            {"contract_key": "SPY-20260430-P-105", "expiry_utc": "2026-04-30T00:00:00Z", "strike": "105.00", "right": "PUT", "bid": "1.00", "ask": "1.05", "ib": {"conId": 849302105}},
+        ],
+    }
+    selected, blocker, diagnostics = _select_vertical_put_credit_spread(
+        intent={"engine": {"engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1"}, "underlying": {"symbol": "SPY"}, "option": {"structure": "PUT"}},
+        policy=_selection_policy("350.00"),
+        snapshot=snapshot,
+        risk_budget=_risk_budget(),
+        intent_id="intent-1",
+    )
+
+    assert selected == {}
+    assert blocker == "NO_ELIGIBLE_OPTION_STRUCTURE"
+    assert diagnostics["rejected_by_reason"]["NON_POSITIVE_CREDIT"] == 1
 
 
 def test_structure_diagnostics_include_nearest_misses_when_no_candidate_is_eligible() -> None:
