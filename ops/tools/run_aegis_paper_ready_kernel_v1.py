@@ -264,6 +264,7 @@ def _stages(
         _stage("risk_budget_supply", "risk_budget", ["python3", "ops/tools/run_risk_budget_supply_v1.py", "--day_utc", target_day, "--environment", environment, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/risk_budget_supply_v1") / target_day / "risk_budget_supply.v1.json", ("PASS", "OK", "READY"), "python3 ops/tools/run_risk_budget_supply_v1.py --day_utc {day} --environment PAPER --truth_root {sleeve}", "Compute risk budget from NAV, selected intent, and capital risk envelope."),
         _stage("market_open_data_gate", "market_data", ["python3", "ops/tools/run_market_open_data_gate_v1.py", "--day_utc", target_day, "--environment", environment, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/market_open_data_gate_v1") / target_day / "market_open_data_gate.v1.json", ("PASS", "OK", "READY"), "python3 ops/tools/run_market_open_data_gate_v1.py --day_utc {day} --environment PAPER --truth_root {sleeve}", "Wait for market open, then produce current quote-complete options data."),
         _stage("structure_decision_supply", "structure", ["python3", "ops/tools/run_structure_decision_supply_v1.py", "--day_utc", target_day, "--environment", environment, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/structure_decision_supply_v1") / target_day / "structure_decision_supply.v1.json", ("PASS", "OK", "READY"), "python3 ops/tools/run_structure_decision_supply_v1.py --day_utc {day} --environment PAPER --truth_root {sleeve}", "Build option structure decision from market-open data."),
+        _stage("paper_authority_head_freshness", "authorization", ["python3", "-c", "pass"], "PAPER_SLEEVE", Path("run_pointer_v2/canonical_authority_head.v1.json"), ("PASS",), "Inspect PAPER authorization_gate_verdict_v1 and canonical authority head; do not synthesize authority.", "Resolve same-day PAPER authorization gate verdict and canonical authority head before capital allocation."),
         _stage("capital_authority_allocation", "authorization", ["python3", "ops/tools/run_capital_authority_allocation_day_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root), "--canonical_sequence_owner", "ops/tools/run_c2_paper_day_orchestrator_v2.py"], "PAPER_SLEEVE", Path("allocation_v1/capital_authority_allocation_v1") / target_day / "capital_authority_allocation.v1.json", ("OK", "PASS", "READY"), "python3 ops/tools/run_capital_authority_allocation_day_v1.py --day_utc {day} --truth_root {sleeve} --canonical_sequence_owner ops/tools/run_c2_paper_day_orchestrator_v2.py", "Allocate capital authority for the selected intent."),
         _stage("phasec_identity_materializer", "authorization", ["python3", "ops/tools/run_phasec_identity_materializer_day_v1.py", "--day_utc", target_day, "--eval_time_utc", _iso(datetime.now(UTC)), "--truth_root", str(canonical_truth_root), "--execution_truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("phaseC_preflight_v1") / target_day, ("OK", "PASS", "READY", "SUCCESS"), "python3 ops/tools/run_phasec_identity_materializer_day_v1.py --day_utc {day} --eval_time_utc $(date -u +%FT%TZ) --truth_root {canonical} --execution_truth_root {sleeve}", "Materialize Phase C identity and defined-risk proof into the PAPER sleeve."),
         _stage("authorization_artifacts", "authorization", ["python3", "ops/tools/run_authorization_artifacts_day_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("engine_activity_v1/authorization_v1") / target_day, ("OK", "PASS", "READY", "AUTHORIZED"), "python3 ops/tools/run_authorization_artifacts_day_v1.py --day_utc {day} --truth_root {sleeve}", "Write governed authorization artifacts for approved intents."),
@@ -286,11 +287,30 @@ def _validate_stage_artifact(*, stage: KernelStage, artifact_path: Path | None, 
             return _blocked("MISSING_ARTIFACT", "MISSING", f"{artifact_path} exists but is empty", stage)
         return {"status": "PASS", "artifact_status": "OK"}
     if not artifact_path.exists():
+        if stage.stage_id == "paper_authority_head_freshness":
+            return _authority_head_blocked(
+                "AUTHORITY_HEAD_NOT_READY_FOR_DAY",
+                "MISSING",
+                "PAPER canonical authority head is missing before capital allocation",
+                stage,
+                target_day=target_day,
+                artifact_path=artifact_path,
+                failed_field="run_pointer_v2/canonical_authority_head.v1.json",
+                expected_value="same-day PASS or BOOTSTRAP_PASS authoritative head",
+                actual_value="missing",
+            )
         return _blocked("MISSING_ARTIFACT", "MISSING", str(artifact_path), stage)
     try:
         data = json.loads(artifact_path.read_text(encoding="utf-8"))
     except Exception as exc:
         return _blocked("ARTIFACT_JSON_INVALID", "INVALID", f"{type(exc).__name__}: {exc}", stage)
+    if stage.stage_id == "paper_authority_head_freshness":
+        return _validate_paper_authority_head_freshness(
+            data=data,
+            artifact_path=artifact_path,
+            target_day=target_day,
+            stage=stage,
+        )
     if _wrong_day(data, target_day):
         return _blocked("TARGET_DAY_DATE_MISMATCH", _status_of(data), "artifact day does not match target day", stage)
     blocker = _blocker_of(data)
@@ -461,6 +481,295 @@ def _validate_portfolio_bootstrap_acceptance(*, data: dict[str, Any], artifact_s
         "portfolio_bootstrap_reason": PORTFOLIO_BOOTSTRAP_REASON,
         "detail": "portfolio activation gate bootstrap status accepted for PAPER only",
     }
+
+
+def _validate_paper_authority_head_freshness(
+    *,
+    data: dict[str, Any],
+    artifact_path: Path,
+    target_day: str,
+    stage: KernelStage,
+) -> dict[str, Any]:
+    schema_id = str(data.get("schema_id") or "").strip()
+    schema_version = str(data.get("schema_version") or "").strip()
+    observed_day = str(data.get("day_utc") or "").strip()
+    artifact_status = str(data.get("status") or "").strip().upper() or "UNKNOWN"
+    authoritative = data.get("authoritative") is True
+    points_to = str(data.get("points_to") or "").strip()
+    allowed_statuses = {"PASS", "BOOTSTRAP_PASS"}
+
+    if schema_id != "c2_run_pointer_canonical_authority_head":
+        return _authority_head_blocked(
+            "AUTHORITY_HEAD_NOT_READY_FOR_DAY",
+            artifact_status,
+            "PAPER canonical authority head schema_id is invalid",
+            stage,
+            target_day=target_day,
+            artifact_path=artifact_path,
+            head_data=data,
+            failed_field="schema_id",
+            expected_value="c2_run_pointer_canonical_authority_head",
+            actual_value=schema_id,
+        )
+    if schema_version != "v1":
+        return _authority_head_blocked(
+            "AUTHORITY_HEAD_NOT_READY_FOR_DAY",
+            artifact_status,
+            "PAPER canonical authority head schema_version is invalid",
+            stage,
+            target_day=target_day,
+            artifact_path=artifact_path,
+            head_data=data,
+            failed_field="schema_version",
+            expected_value="v1",
+            actual_value=schema_version,
+        )
+    if observed_day != target_day:
+        return _authority_head_blocked(
+            "AUTHORITY_HEAD_DAY_MISMATCH",
+            artifact_status,
+            "PAPER canonical authority head does not match the target day",
+            stage,
+            target_day=target_day,
+            artifact_path=artifact_path,
+            head_data=data,
+            failed_field="day_utc",
+            expected_value=target_day,
+            actual_value=observed_day,
+        )
+    if artifact_status not in allowed_statuses:
+        return _authority_head_blocked(
+            "AUTHORITY_HEAD_NOT_READY_FOR_DAY",
+            artifact_status,
+            "PAPER canonical authority head is not PASS or BOOTSTRAP_PASS",
+            stage,
+            target_day=target_day,
+            artifact_path=artifact_path,
+            head_data=data,
+            failed_field="status",
+            expected_value=sorted(allowed_statuses),
+            actual_value=artifact_status,
+        )
+    if not authoritative:
+        return _authority_head_blocked(
+            "AUTHORITY_HEAD_NOT_READY_FOR_DAY",
+            artifact_status,
+            "PAPER canonical authority head is not authoritative",
+            stage,
+            target_day=target_day,
+            artifact_path=artifact_path,
+            head_data=data,
+            failed_field="authoritative",
+            expected_value=True,
+            actual_value=data.get("authoritative"),
+        )
+    if not points_to:
+        return _authority_head_blocked(
+            "AUTHORITY_HEAD_NOT_READY_FOR_DAY",
+            artifact_status,
+            "PAPER canonical authority head does not point to an authorization verdict",
+            stage,
+            target_day=target_day,
+            artifact_path=artifact_path,
+            head_data=data,
+            failed_field="points_to",
+            expected_value="same-day authorization_gate_verdict_v1",
+            actual_value=points_to,
+        )
+
+    verdict_path = _resolve_authority_points_to(points_to=points_to, authority_head_path=artifact_path)
+    verdict = _read_json(verdict_path)
+    if verdict is None:
+        return _authority_head_blocked(
+            "AUTHORITY_HEAD_NOT_READY_FOR_DAY",
+            artifact_status,
+            "PAPER canonical authority head points to a missing or invalid authorization verdict",
+            stage,
+            target_day=target_day,
+            artifact_path=artifact_path,
+            head_data=data,
+            failed_field="points_to",
+            expected_value="existing same-day authorization_gate_verdict_v1",
+            actual_value=points_to,
+        )
+    verdict_schema_id = str(verdict.get("schema_id") or "").strip()
+    verdict_schema_version = str(verdict.get("schema_version") or "").strip()
+    verdict_day = str(verdict.get("day_utc") or "").strip()
+    verdict_status = _status_of(verdict)
+    verdict_name = verdict_path.name
+    verdict_text = str(verdict_path)
+    if verdict_name == "authorization_gate_verdict.v1.json" or "authorization_gate_verdict_v1" in verdict_text:
+        if verdict_schema_id != "authorization_gate_verdict_v1" or verdict_schema_version not in {"1", "v1"}:
+            return _authority_head_blocked(
+                "AUTHORITY_HEAD_NOT_READY_FOR_DAY",
+                artifact_status,
+                "PAPER canonical authority head points to an invalid authorization_gate_verdict_v1",
+                stage,
+                target_day=target_day,
+                artifact_path=artifact_path,
+                head_data=data,
+                verdict_data=verdict,
+                failed_field="points_to.schema",
+                expected_value="authorization_gate_verdict_v1/v1",
+                actual_value=f"{verdict_schema_id}/{verdict_schema_version}",
+            )
+    elif verdict_name == "gate_stack_verdict.v1.json" or "gate_stack_verdict_v1" in verdict_text:
+        if verdict_schema_id != "gate_stack_verdict" or verdict_schema_version != "v1":
+            return _authority_head_blocked(
+                "AUTHORITY_HEAD_NOT_READY_FOR_DAY",
+                artifact_status,
+                "PAPER canonical authority head points to an invalid gate_stack_verdict_v1",
+                stage,
+                target_day=target_day,
+                artifact_path=artifact_path,
+                head_data=data,
+                verdict_data=verdict,
+                failed_field="points_to.schema",
+                expected_value="gate_stack_verdict/v1",
+                actual_value=f"{verdict_schema_id}/{verdict_schema_version}",
+            )
+    else:
+        return _authority_head_blocked(
+            "AUTHORITY_HEAD_NOT_READY_FOR_DAY",
+            artifact_status,
+            "PAPER canonical authority head points to an unsupported verdict artifact",
+            stage,
+            target_day=target_day,
+            artifact_path=artifact_path,
+            head_data=data,
+            verdict_data=verdict,
+            failed_field="points_to",
+            expected_value="authorization_gate_verdict_v1 or gate_stack_verdict_v1",
+            actual_value=points_to,
+        )
+    if verdict_day != target_day:
+        return _authority_head_blocked(
+            "AUTHORITY_HEAD_DAY_MISMATCH",
+            artifact_status,
+            "PAPER canonical authority head points to a verdict for the wrong day",
+            stage,
+            target_day=target_day,
+            artifact_path=artifact_path,
+            head_data=data,
+            verdict_data=verdict,
+            failed_field="points_to.day_utc",
+            expected_value=target_day,
+            actual_value=verdict_day,
+        )
+    if verdict_status not in allowed_statuses:
+        return _authority_head_blocked(
+            "AUTHORITY_HEAD_NOT_READY_FOR_DAY",
+            artifact_status,
+            "PAPER same-day authorization verdict is not PASS or BOOTSTRAP_PASS",
+            stage,
+            target_day=target_day,
+            artifact_path=artifact_path,
+            head_data=data,
+            verdict_data=verdict,
+            failed_field="points_to.status",
+            expected_value=sorted(allowed_statuses),
+            actual_value=verdict_status,
+        )
+    return {
+        "status": "PASS",
+        "artifact_status": artifact_status,
+        "authority_head_freshness": _authority_head_diagnostics(
+            target_day=target_day,
+            artifact_path=artifact_path,
+            head_data=data,
+            verdict_data=verdict,
+        ),
+        "detail": "same-day PAPER canonical authority head is fresh before capital allocation",
+    }
+
+
+def _authority_head_blocked(
+    blocker: str,
+    artifact_status: str,
+    detail: str,
+    stage: KernelStage,
+    *,
+    target_day: str,
+    artifact_path: Path,
+    failed_field: str,
+    expected_value: Any,
+    actual_value: Any,
+    head_data: dict[str, Any] | None = None,
+    verdict_data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    result = _blocked(
+        blocker,
+        artifact_status,
+        detail,
+        stage,
+        failed_field=failed_field,
+        expected_value=expected_value,
+        actual_value=actual_value,
+    )
+    result["authority_head_freshness"] = _authority_head_diagnostics(
+        target_day=target_day,
+        artifact_path=artifact_path,
+        head_data=head_data or {},
+        verdict_data=verdict_data,
+    )
+    return result
+
+
+def _authority_head_diagnostics(
+    *,
+    target_day: str,
+    artifact_path: Path,
+    head_data: dict[str, Any],
+    verdict_data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    points_to = str(head_data.get("points_to") or "").strip()
+    pointed_verdict = verdict_data if isinstance(verdict_data, dict) else None
+    if pointed_verdict is None and points_to:
+        pointed_verdict = _read_json(_resolve_authority_points_to(points_to=points_to, authority_head_path=artifact_path))
+    same_day_verdict = _read_json(_same_day_authorization_gate_verdict_path(authority_head_path=artifact_path, target_day=target_day))
+    diagnostics_verdict = same_day_verdict if isinstance(same_day_verdict, dict) else pointed_verdict
+    return {
+        "expected_day_utc": target_day,
+        "observed_head_day_utc": str(head_data.get("day_utc") or "").strip(),
+        "observed_status": str(head_data.get("status") or "").strip().upper(),
+        "authoritative": head_data.get("authoritative") is True,
+        "points_to": points_to,
+        "points_to_verdict_status": _status_of(pointed_verdict) if isinstance(pointed_verdict, dict) else "",
+        "same_day_authorization_verdict_status": _status_of(same_day_verdict) if isinstance(same_day_verdict, dict) else "",
+        "authorization_missing_inputs": _authorization_missing_inputs(diagnostics_verdict if isinstance(diagnostics_verdict, dict) else {}),
+        "authorization_failure_reasons": _authorization_failure_reasons(diagnostics_verdict if isinstance(diagnostics_verdict, dict) else {}),
+    }
+
+
+def _resolve_authority_points_to(*, points_to: str, authority_head_path: Path) -> Path:
+    raw = Path(points_to)
+    if raw.is_absolute():
+        return raw.resolve()
+    sleeve_root = authority_head_path.parent.parent
+    return (sleeve_root / raw).resolve()
+
+
+def _same_day_authorization_gate_verdict_path(*, authority_head_path: Path, target_day: str) -> Path:
+    sleeve_root = authority_head_path.parent.parent
+    return sleeve_root / "reports" / "authorization_gate_verdict_v1" / target_day / "authorization_gate_verdict.v1.json"
+
+
+def _authorization_failure_reasons(verdict: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    for key in ("reason_codes", "blocking_reason_codes", "failure_reasons", "blocking_codes"):
+        raw = verdict.get(key)
+        if isinstance(raw, list):
+            values.extend(str(item).strip() for item in raw if str(item).strip())
+    return sorted(dict.fromkeys(values))
+
+
+def _authorization_missing_inputs(verdict: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
+    for reason in _authorization_failure_reasons(verdict):
+        parts = [part for part in reason.split(":") if part]
+        if parts and parts[-1].upper() == "MISSING" and len(parts) >= 2:
+            missing.append(parts[-2])
+    return sorted(dict.fromkeys(missing))
 
 
 def _blocked(blocker: str, artifact_status: str, detail: str, stage: KernelStage, *, failed_field: str = "status", expected_value: Any = "PASS", actual_value: Any = None) -> dict[str, Any]:
