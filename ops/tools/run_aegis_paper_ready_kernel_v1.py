@@ -26,6 +26,8 @@ PAPER_READY = "PAPER_READY"
 BLOCKED = "BLOCKED"
 MARKET_NOT_OPEN = "MARKET_NOT_OPEN"
 ERROR = "ERROR"
+BOOTSTRAP_ACCEPTED_FOR_PAPER = "BOOTSTRAP_ACCEPTED_FOR_PAPER"
+PORTFOLIO_BOOTSTRAP_REASON = "PORTFOLIO_STATE_BOOTSTRAP_ACCEPTED_FOR_PAPER_NO_SUPPRESSION_APPLIED"
 
 
 @dataclass(frozen=True)
@@ -358,6 +360,8 @@ def _validate_stage_artifact(*, stage: KernelStage, artifact_path: Path | None, 
                 expected_value=[],
                 actual_value=normalized_missing,
             )
+    if stage.stage_id == "portfolio_activation_gate" and artifact_status == BOOTSTRAP_ACCEPTED_FOR_PAPER:
+        return _validate_portfolio_bootstrap_acceptance(data=data, artifact_status=artifact_status, stage=stage)
     if stage.stage_id == "intent_arbitration" and artifact_status not in stage.pass_statuses:
         return _blocked(blocker or "NO_SELECTED_INTENT", artifact_status, "intent arbitration did not select an executable intent", stage)
     if stage.stage_id == "global_kill_switch":
@@ -371,6 +375,92 @@ def _validate_stage_artifact(*, stage: KernelStage, artifact_path: Path | None, 
     if artifact_status not in stage.pass_statuses:
         return _blocked(blocker or f"ARTIFACT_STATUS_{artifact_status}", artifact_status, "artifact status does not satisfy stage contract", stage)
     return {"status": "PASS", "artifact_status": artifact_status}
+
+
+def _validate_portfolio_bootstrap_acceptance(*, data: dict[str, Any], artifact_status: str, stage: KernelStage) -> dict[str, Any]:
+    environment = str(data.get("environment") or "").strip().upper()
+    if environment != "PAPER":
+        return _blocked(
+            "PORTFOLIO_ACTIVATION_GATE_BOOTSTRAP_NOT_PAPER",
+            artifact_status,
+            "portfolio bootstrap acceptance is valid only for PAPER",
+            stage,
+            failed_field="environment",
+            expected_value="PAPER",
+            actual_value=environment or None,
+        )
+    canonical_blocker = str(data.get("canonical_blocker") or data.get("first_blocker") or data.get("primary_blocker") or "").strip()
+    if canonical_blocker:
+        return _blocked(
+            "PORTFOLIO_ACTIVATION_GATE_BOOTSTRAP_HAS_BLOCKER",
+            artifact_status,
+            "portfolio bootstrap acceptance cannot carry a canonical blocker",
+            stage,
+            failed_field="canonical_blocker",
+            expected_value="",
+            actual_value=canonical_blocker,
+        )
+    approved = data.get("approved_executable_intents")
+    if not isinstance(approved, list) or not approved:
+        return _blocked(
+            "PORTFOLIO_ACTIVATION_GATE_BOOTSTRAP_EVIDENCE_MISSING",
+            artifact_status,
+            "portfolio bootstrap acceptance requires approved executable intent evidence",
+            stage,
+            failed_field="approved_executable_intents",
+            expected_value="non-empty list",
+            actual_value=type(approved).__name__,
+        )
+    for index, row in enumerate(approved):
+        if not isinstance(row, dict):
+            return _blocked(
+                "PORTFOLIO_ACTIVATION_GATE_BOOTSTRAP_EVIDENCE_INVALID",
+                artifact_status,
+                "portfolio bootstrap approved intent evidence must be object rows",
+                stage,
+                failed_field=f"approved_executable_intents[{index}]",
+                expected_value="object",
+                actual_value=type(row).__name__,
+            )
+        if row.get("allowed_by_portfolio_gate") is not True:
+            return _blocked(
+                "PORTFOLIO_ACTIVATION_GATE_BOOTSTRAP_EVIDENCE_INVALID",
+                artifact_status,
+                "portfolio bootstrap approved intents must be explicitly allowed by portfolio gate",
+                stage,
+                failed_field=f"approved_executable_intents[{index}].allowed_by_portfolio_gate",
+                expected_value=True,
+                actual_value=row.get("allowed_by_portfolio_gate"),
+            )
+        if str(row.get("portfolio_gate_decision") or "").strip().upper() != "ALLOW":
+            return _blocked(
+                "PORTFOLIO_ACTIVATION_GATE_BOOTSTRAP_EVIDENCE_INVALID",
+                artifact_status,
+                "portfolio bootstrap approved intents must carry an ALLOW gate decision",
+                stage,
+                failed_field=f"approved_executable_intents[{index}].portfolio_gate_decision",
+                expected_value="ALLOW",
+                actual_value=row.get("portfolio_gate_decision"),
+            )
+        reasons = row.get("reason_codes")
+        normalized_reasons = [str(reason).strip().upper() for reason in reasons] if isinstance(reasons, list) else []
+        if PORTFOLIO_BOOTSTRAP_REASON not in normalized_reasons:
+            return _blocked(
+                "PORTFOLIO_ACTIVATION_GATE_BOOTSTRAP_EVIDENCE_INVALID",
+                artifact_status,
+                "portfolio bootstrap approved intents must carry the governed PAPER bootstrap reason code",
+                stage,
+                failed_field=f"approved_executable_intents[{index}].reason_codes",
+                expected_value=PORTFOLIO_BOOTSTRAP_REASON,
+                actual_value=normalized_reasons,
+            )
+    return {
+        "status": "PASS",
+        "artifact_status": artifact_status,
+        "paper_bootstrap_accepted": True,
+        "portfolio_bootstrap_reason": PORTFOLIO_BOOTSTRAP_REASON,
+        "detail": "portfolio activation gate bootstrap status accepted for PAPER only",
+    }
 
 
 def _blocked(blocker: str, artifact_status: str, detail: str, stage: KernelStage, *, failed_field: str = "status", expected_value: Any = "PASS", actual_value: Any = None) -> dict[str, Any]:
