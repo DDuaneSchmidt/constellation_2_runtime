@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/shadow_candidate_arbitration.v1.schema.json",
+  "title": "shadow_candidate_arbitration.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "run_id",
+    "day_utc",
+    "environment",
+    "produced_at_utc",
+    "status",
+    "canonical_blocker",
+    "candidate_generation_manifest_path",
+    "sleeve_invocation_ledger_path",
+    "portfolio_scoring_path",
+    "production_arbitration_path",
+    "selected_intent_pointer_path",
+    "ranked_candidates",
+    "shadow_winner",
+    "production_selected_intent",
+    "winner_matches_production",
+    "difference_reason",
+    "comparison_diagnostics",
+    "non_authoritative",
+    "execution_authority_granted",
+    "order_submission_attempted",
+    "trading_behavior_changed",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "shadow_candidate_arbitration" },
+    "schema_version": { "const": "v1" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "environment": { "type": "string", "minLength": 1 },
+    "produced_at_utc": { "type": "string", "minLength": 20 },
+    "status": { "type": "string", "enum": ["PASS", "DIAGNOSTIC_UNAVAILABLE"] },
+    "canonical_blocker": { "type": "string" },
+    "candidate_generation_manifest_path": { "type": "string" },
+    "sleeve_invocation_ledger_path": { "type": "string" },
+    "portfolio_scoring_path": { "type": "string" },
+    "production_arbitration_path": { "type": "string" },
+    "selected_intent_pointer_path": { "type": "string" },
+    "ranked_candidates": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ranked_candidate" }
+    },
+    "shadow_winner": {
+      "oneOf": [
+        { "$ref": "#/$defs/ranked_candidate" },
+        {
+          "type": "object",
+          "maxProperties": 0
+        }
+      ]
+    },
+    "production_selected_intent": { "$ref": "#/$defs/production_selected_intent" },
+    "winner_matches_production": { "type": "boolean" },
+    "difference_reason": { "type": "string" },
+    "comparison_diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score_delta", "missing_candidate_reasons", "gate_reasons"],
+      "properties": {
+        "score_delta": { "type": "string" },
+        "missing_candidate_reasons": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "gate_reasons": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "non_authoritative": { "const": true },
+    "execution_authority_granted": { "const": false },
+    "order_submission_attempted": { "const": false },
+    "trading_behavior_changed": { "const": false },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "ranked_candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_id",
+        "diagnostic_rank",
+        "shadow_executable_rank",
+        "executable_candidate",
+        "candidate_status",
+        "engine_id",
+        "symbol_or_pair",
+        "raw_intent_id",
+        "raw_intent_path",
+        "raw_intent_hash",
+        "portfolio_gate_decision",
+        "allowed_by_portfolio_gate",
+        "portfolio_score_rank",
+        "portfolio_score_total",
+        "portfolio_score_components",
+        "reason_codes",
+        "rejection_reason",
+        "non_executable_reason",
+        "lineage_hash"
+      ],
+      "properties": {
+        "candidate_id": { "type": "string", "minLength": 1 },
+        "diagnostic_rank": { "type": "integer", "minimum": 0 },
+        "shadow_executable_rank": { "type": "integer", "minimum": 0 },
+        "executable_candidate": { "type": "boolean" },
+        "candidate_status": { "type": "string", "minLength": 1 },
+        "engine_id": { "type": "string" },
+        "symbol_or_pair": { "type": "string" },
+        "raw_intent_id": { "type": "string" },
+        "raw_intent_path": { "type": "string" },
+        "raw_intent_hash": { "type": "string" },
+        "portfolio_gate_decision": { "type": "string" },
+        "allowed_by_portfolio_gate": { "type": "boolean" },
+        "portfolio_score_rank": { "type": "integer", "minimum": 0 },
+        "portfolio_score_total": { "type": "string" },
+        "portfolio_score_components": {
+          "type": "object",
+          "additionalProperties": { "type": ["number", "integer", "string", "boolean", "null"] }
+        },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "rejection_reason": { "type": "string" },
+        "non_executable_reason": { "type": "string" },
+        "lineage_hash": { "type": "string" }
+      }
+    },
+    "production_selected_intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intent_id", "engine_id", "symbol", "source_intent_path", "source_intent_hash"],
+      "properties": {
+        "intent_id": { "type": "string" },
+        "engine_id": { "type": "string" },
+        "symbol": { "type": "string" },
+        "source_intent_path": { "type": "string" },
+        "source_intent_hash": { "type": "string" }
+      }
+    }
+  }
+}
