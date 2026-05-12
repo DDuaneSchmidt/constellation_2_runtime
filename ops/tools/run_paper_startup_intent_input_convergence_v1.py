@@ -30,7 +30,9 @@ from constellation_2.common.trading_day_readiness_authority_v1 import (  # noqa:
 )
 
 
-DEFAULT_BRIDGE_SYMBOL = "SPY"
+ENGINE_MODEL_REGISTRY_RELPATH = Path("governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json")
+SLEEVE_CONTRACTS_RELPATH = Path("governance/02_REGISTRIES/SLEEVE_CONTRACTS_V1.json")
+DAILY_MARKET_SNAPSHOT_TEMPLATE = "market_data_snapshot_v1/snapshots/{day}/{symbol}.market_data_snapshot.v1.json"
 
 
 def _git_sha() -> str:
@@ -63,6 +65,95 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _active_engine_allowed_symbols_by_id(*, repo_root: Path = REPO_ROOT) -> Dict[str, List[str]]:
+    registry_path = Path(repo_root).resolve() / ENGINE_MODEL_REGISTRY_RELPATH
+    payload = _read_json(registry_path)
+    engines = payload.get("engines")
+    if not isinstance(engines, list):
+        raise ValueError(f"ENGINE_REGISTRY_ENGINES_NOT_LIST:path={registry_path}")
+    active: Dict[str, List[str]] = {}
+    for row in engines:
+        if not isinstance(row, dict):
+            continue
+        engine_id = str(row.get("engine_id") or "").strip()
+        activation_status = str(row.get("activation_status") or "").strip().upper()
+        if not engine_id or activation_status != "ACTIVE":
+            continue
+        symbols = [
+            str(symbol).strip().upper()
+            for symbol in (row.get("allowed_symbols") or [])
+            if str(symbol).strip()
+        ]
+        active[engine_id] = sorted(dict.fromkeys(symbols))
+    return active
+
+
+def _required_daily_market_snapshot_symbols_v1(*, repo_root: Path = REPO_ROOT) -> Dict[str, Any]:
+    repo = Path(repo_root).resolve()
+    engine_registry_path = repo / ENGINE_MODEL_REGISTRY_RELPATH
+    sleeve_contracts_path = repo / SLEEVE_CONTRACTS_RELPATH
+    active_symbols = _active_engine_allowed_symbols_by_id(repo_root=repo)
+    contracts_payload = _read_json(sleeve_contracts_path)
+    contracts = contracts_payload.get("contracts")
+    if not isinstance(contracts, list):
+        raise ValueError(f"SLEEVE_CONTRACTS_NOT_LIST:path={sleeve_contracts_path}")
+
+    required_symbols: List[str] = []
+    engines: List[Dict[str, Any]] = []
+    for contract in contracts:
+        if not isinstance(contract, dict):
+            continue
+        engine_id = str(contract.get("engine_id") or "").strip()
+        if engine_id not in active_symbols:
+            continue
+        if bool(contract.get("can_generate_intents")) is not True:
+            continue
+        matching_inputs: List[Dict[str, str]] = []
+        for required_input in contract.get("required_inputs") or []:
+            if not isinstance(required_input, dict):
+                continue
+            if bool(required_input.get("required")) is not True:
+                continue
+            if str(required_input.get("truth_owner") or "").strip() != "sleeve_truth_root":
+                continue
+            if str(required_input.get("required_scope") or "").strip() != "allowed_symbols":
+                continue
+            if str(required_input.get("expected_artifact_type") or "").strip() != "json":
+                continue
+            path_template = str(required_input.get("path_template") or "").strip()
+            if path_template != DAILY_MARKET_SNAPSHOT_TEMPLATE:
+                continue
+            symbols = active_symbols.get(engine_id, [])
+            required_symbols.extend(symbols)
+            matching_inputs.append(
+                {
+                    "name": str(required_input.get("name") or "").strip(),
+                    "path_template": path_template,
+                }
+            )
+        if matching_inputs:
+            engines.append(
+                {
+                    "engine_id": engine_id,
+                    "required_symbols": active_symbols.get(engine_id, []),
+                    "required_inputs": matching_inputs,
+                }
+            )
+
+    return {
+        "required_snapshot_symbols": sorted(dict.fromkeys(required_symbols)),
+        "source_registry_paths": [
+            str(engine_registry_path),
+            str(sleeve_contracts_path),
+        ],
+        "source_registry_hashes": {
+            "ENGINE_MODEL_REGISTRY_V1": _sha256_file(engine_registry_path),
+            "SLEEVE_CONTRACTS_V1": _sha256_file(sleeve_contracts_path),
+        },
+        "required_snapshot_engines": engines,
+    }
 
 
 def _tool_result(script_relpath: str, *args: str, extra_env: Dict[str, str] | None = None) -> Dict[str, Any]:
@@ -154,6 +245,74 @@ def _artifact_result(
     }
 
 
+def _daily_market_snapshot_convergence_result(
+    *,
+    sleeve_truth_root: Path,
+    target_day: str,
+    required_symbols: List[str],
+) -> tuple[Dict[str, Any], List[str], List[str], List[Dict[str, Any]]]:
+    normalized_required_symbols = sorted(
+        dict.fromkeys(str(item).strip().upper() for item in required_symbols if str(item).strip())
+    )
+    per_symbol_results: List[Dict[str, Any]] = []
+    materialized_symbols: List[str] = []
+    missing_symbols: List[str] = []
+    for symbol in normalized_required_symbols:
+        artifact_path = (
+            Path(sleeve_truth_root).resolve()
+            / "market_data_snapshot_v1"
+            / "snapshots"
+            / str(target_day).strip()
+            / f"{symbol}.market_data_snapshot.v1.json"
+        )
+        row = _artifact_result(
+            artifact_id=f"market_data_snapshot_v1:{symbol}",
+            artifact_path=artifact_path,
+            target_day=target_day,
+            required=True,
+            acceptable_statuses=("OK",),
+            presence_only=True,
+        )
+        row["symbol"] = symbol
+        per_symbol_results.append(row)
+        if bool(row.get("ready")) is True:
+            materialized_symbols.append(symbol)
+        else:
+            missing_symbols.append(symbol)
+
+    ready = bool(normalized_required_symbols) and not missing_symbols
+    aggregate_path = (
+        Path(sleeve_truth_root).resolve()
+        / "market_data_snapshot_v1"
+        / "snapshots"
+        / str(target_day).strip()
+    )
+    reason_codes = [f"MARKET_DATA_SNAPSHOT_V1_MISSING_SYMBOL:{symbol}" for symbol in missing_symbols]
+    return (
+        {
+            "artifact_id": "market_data_snapshot_v1",
+            "required": True,
+            "artifact_path": str(aggregate_path),
+            "schema_id": "market_data_snapshot_v1",
+            "target_day_expected": str(target_day).strip(),
+            "target_day_observed": str(target_day).strip() if ready else "",
+            "observed_status": "OK" if ready else "MISSING",
+            "ready": ready,
+            "reason_codes": reason_codes,
+            "blocker_code": "" if ready else "MARKET_DATA_SNAPSHOT_V1_MISSING_SYMBOLS",
+            "summary": ""
+            if ready
+            else f"market_data_snapshot_v1 missing symbols: {', '.join(missing_symbols) if missing_symbols else 'NONE'}",
+            "required_snapshot_symbols": normalized_required_symbols,
+            "materialized_snapshot_symbols": materialized_symbols,
+            "missing_snapshot_symbols": missing_symbols,
+        },
+        materialized_symbols,
+        missing_symbols,
+        per_symbol_results,
+    )
+
+
 def _not_required_artifact_result(*, artifact_id: str, artifact_path: Path, target_day: str, reason: str) -> Dict[str, Any]:
     return {
         "artifact_id": artifact_id,
@@ -190,13 +349,13 @@ def main(argv: List[str] | None = None) -> int:
     ap.add_argument("--truth_root", default="")
     ap.add_argument("--environment", required=True, choices=["PAPER", "LIVE"])
     ap.add_argument("--ib_account", required=True)
-    ap.add_argument("--bridge_symbol", default=DEFAULT_BRIDGE_SYMBOL)
+    ap.add_argument("--bridge_symbol", default="")
     args = ap.parse_args(argv)
 
     day_utc = str(args.day_utc).strip()
     environment = str(args.environment).strip().upper()
     ib_account = str(args.ib_account).strip()
-    bridge_symbol = str(args.bridge_symbol).strip().upper() or DEFAULT_BRIDGE_SYMBOL
+    bridge_symbol = str(args.bridge_symbol).strip().upper()
     truth_root = resolve_decision_truth_root_v1(args.truth_root, repo_root=REPO_ROOT)
     binding = _resolve_primary_binding(environment=environment, ib_account=ib_account)
     sleeve_truth_root = Path(binding.truth_root).resolve()
@@ -210,16 +369,39 @@ def main(argv: List[str] | None = None) -> int:
     preopen_mode = readiness_mode in PREOPEN_MODES
     git_sha = _git_sha()
     shared_env = {"C2_MODE": environment, "C2_TRUTH_ROOT": str(sleeve_truth_root)}
-    bridge_symbol_used_for_market_snapshot = not preopen_mode
+    snapshot_requirements = (
+        {
+            "required_snapshot_symbols": [],
+            "source_registry_paths": [
+                str((REPO_ROOT / ENGINE_MODEL_REGISTRY_RELPATH).resolve()),
+                str((REPO_ROOT / SLEEVE_CONTRACTS_RELPATH).resolve()),
+            ],
+            "source_registry_hashes": {},
+            "required_snapshot_engines": [],
+        }
+        if preopen_mode
+        else _required_daily_market_snapshot_symbols_v1(repo_root=REPO_ROOT)
+    )
+    required_snapshot_symbols = [
+        str(symbol).strip().upper()
+        for symbol in (snapshot_requirements.get("required_snapshot_symbols") or [])
+        if str(symbol).strip()
+    ]
     symbol_diagnostics = {
         "selected_intent_symbol": "",
         "required_options_symbol": "",
         "options_snapshot_symbol": "",
-        "symbol_source": "PREOPEN_NOT_REQUIRED" if preopen_mode else "BRIDGE_SYMBOL_ARGUMENT",
+        "symbol_source": "PREOPEN_NOT_REQUIRED" if preopen_mode else "ENGINE_MODEL_REGISTRY_V1+SLEEVE_CONTRACTS_V1",
         "stale_default_symbol_detected": False,
         "bridge_symbol": bridge_symbol,
-        "bridge_symbol_source": "DEFAULT_ARGUMENT" if bridge_symbol == DEFAULT_BRIDGE_SYMBOL else "OPERATOR_ARGUMENT",
-        "bridge_symbol_used_for_market_snapshot": bridge_symbol_used_for_market_snapshot,
+        "bridge_symbol_source": "DEPRECATED_ARGUMENT_IGNORED" if bridge_symbol else "NOT_PROVIDED",
+        "bridge_symbol_used_for_market_snapshot": False,
+        "required_snapshot_symbols": required_snapshot_symbols,
+        "materialized_snapshot_symbols": [],
+        "missing_snapshot_symbols": [],
+        "source_registry_paths": snapshot_requirements.get("source_registry_paths") or [],
+        "source_registry_hashes": snapshot_requirements.get("source_registry_hashes") or {},
+        "required_snapshot_engines": snapshot_requirements.get("required_snapshot_engines") or [],
     }
 
     source_refs: List[Dict[str, Any]] = []
@@ -295,7 +477,7 @@ def main(argv: List[str] | None = None) -> int:
             ]
         )
     else:
-        for result in (
+        source_refs.append(
             _tool_result(
                 "ops/tools/run_regime_snapshot_v2.py",
                 "--day_utc",
@@ -303,17 +485,19 @@ def main(argv: List[str] | None = None) -> int:
                 "--truth_root",
                 str(sleeve_truth_root),
                 extra_env={"C2_MODE": environment},
-            ),
-            _tool_result(
-                "constellation_2/phaseJ/tools/build_defensive_tail_required_inputs_day_v1.py",
-                "--day_utc",
-                day_utc,
-                "--symbol",
-                bridge_symbol,
-                extra_env=shared_env,
-            ),
-        ):
-            source_refs.append(result)
+            )
+        )
+        for symbol in required_snapshot_symbols:
+            source_refs.append(
+                _tool_result(
+                    "constellation_2/phaseJ/tools/build_defensive_tail_required_inputs_day_v1.py",
+                    "--day_utc",
+                    day_utc,
+                    "--symbol",
+                    symbol,
+                    extra_env=shared_env,
+                )
+            )
 
     artifact_results = [
         _artifact_result(
@@ -355,6 +539,19 @@ def main(argv: List[str] | None = None) -> int:
             ]
         )
     else:
+        (
+            market_snapshot_result,
+            materialized_snapshot_symbols,
+            missing_snapshot_symbols,
+            per_symbol_market_snapshot_results,
+        ) = _daily_market_snapshot_convergence_result(
+            sleeve_truth_root=sleeve_truth_root,
+            target_day=day_utc,
+            required_symbols=required_snapshot_symbols,
+        )
+        symbol_diagnostics["materialized_snapshot_symbols"] = materialized_snapshot_symbols
+        symbol_diagnostics["missing_snapshot_symbols"] = missing_snapshot_symbols
+        symbol_diagnostics["market_data_snapshot_results"] = per_symbol_market_snapshot_results
         artifact_results.extend(
             [
                 _artifact_result(
@@ -381,14 +578,7 @@ def main(argv: List[str] | None = None) -> int:
                     acceptable_statuses=("OK",),
                     presence_only=True,
                 ),
-                _artifact_result(
-                    artifact_id="market_data_snapshot_v1",
-                    artifact_path=sleeve_truth_root / "market_data_snapshot_v1" / "snapshots" / day_utc / f"{bridge_symbol}.market_data_snapshot.v1.json",
-                    target_day=day_utc,
-                    required=True,
-                    acceptable_statuses=("OK",),
-                    presence_only=True,
-                ),
+                market_snapshot_result,
             ]
         )
     required_input_ids = ["positions_snapshot_v1"] if preopen_mode else [
