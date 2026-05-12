@@ -1,0 +1,30 @@
+{
+  "schema_id": "c2_paper_multi_intent_execution_policy",
+  "schema_version": "v1",
+  "policy_id": "C2_PAPER_MULTI_INTENT_EXECUTION_POLICY_V1",
+  "environment": "PAPER",
+  "multi_intent_paper_execution_enabled": false,
+  "shadow_multi_intent_plan": false,
+  "max_paper_intents_per_run": 1,
+  "max_total_paper_risk_cents": 0,
+  "per_engine_max_intents": {},
+  "per_symbol_max_intents": {},
+  "correlation_regime_suppression_retained": true,
+  "execution_authority": "NOT_GRANTED",
+  "paper_execution_stage": "PLAN_ONLY_DISABLED_DEFAULT",
+  "future_execution_requirements": [
+    "authorization_pass_required_per_intent",
+    "kill_switch_inactive_required",
+    "submit_boundary_ready_required",
+    "broker_transmit_explicitly_enabled_required",
+    "aggregate_risk_pass_required",
+    "unsupported_paired_execution_blocked"
+  ],
+  "non_goals": [
+    "order_submission",
+    "transmit_enablement",
+    "approval_creation",
+    "kill_switch_mutation",
+    "runtime_policy_relaxation"
+  ]
+}

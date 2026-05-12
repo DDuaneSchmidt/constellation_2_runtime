@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/paper_multi_intent_execution_plan.v1.schema.json",
+  "title": "paper_multi_intent_execution_plan.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "run_id",
+    "produced_at_utc",
+    "plan_mode",
+    "multi_intent_paper_execution_enabled",
+    "shadow_multi_intent_plan",
+    "selected_intent_pointer_authoritative",
+    "current_selected_intent_id",
+    "selected_candidates",
+    "rejected_candidates",
+    "selected_candidate_count",
+    "rejected_candidate_count",
+    "total_risk",
+    "per_intent_risk",
+    "correlation_bucket",
+    "authorization_status",
+    "kill_switch_status",
+    "submit_boundary_status",
+    "broker_transmit_enabled",
+    "order_submission_attempted",
+    "trading_behavior_changed",
+    "execution_requirements",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "paper_multi_intent_execution_plan" },
+    "schema_version": { "const": "v1" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "produced_at_utc": { "type": "string", "minLength": 20 },
+    "plan_mode": {
+      "type": "string",
+      "enum": [
+        "DISABLED_ONE_INTENT_COMPAT",
+        "SHADOW_MULTI_INTENT_PLAN",
+        "FUTURE_GOVERNED_MULTI_INTENT_PLAN"
+      ]
+    },
+    "multi_intent_paper_execution_enabled": { "type": "boolean" },
+    "shadow_multi_intent_plan": { "type": "boolean" },
+    "selected_intent_pointer_authoritative": { "type": "boolean" },
+    "current_selected_intent_id": { "type": "string" },
+    "selected_candidates": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/candidate" }
+    },
+    "rejected_candidates": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/rejected_candidate" }
+    },
+    "selected_candidate_count": { "type": "integer", "minimum": 0 },
+    "rejected_candidate_count": { "type": "integer", "minimum": 0 },
+    "total_risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["risk_cents", "max_total_paper_risk_cents"],
+      "properties": {
+        "risk_cents": { "type": "integer", "minimum": 0 },
+        "max_total_paper_risk_cents": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "per_intent_risk": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["candidate_id", "risk_cents"],
+        "properties": {
+          "candidate_id": { "type": "string", "minLength": 1 },
+          "risk_cents": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "correlation_bucket": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "authorization_status": { "$ref": "#/$defs/status_summary" },
+    "kill_switch_status": { "$ref": "#/$defs/status_summary" },
+    "submit_boundary_status": { "$ref": "#/$defs/status_summary" },
+    "broker_transmit_enabled": { "type": "boolean" },
+    "order_submission_attempted": { "const": false },
+    "trading_behavior_changed": { "const": false },
+    "execution_requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorization_pass_required_per_intent",
+        "kill_switch_inactive_required",
+        "submit_boundary_ready_required",
+        "broker_transmit_explicitly_enabled_required",
+        "aggregate_risk_pass_required",
+        "unsupported_paired_execution_blocked"
+      ],
+      "properties": {
+        "authorization_pass_required_per_intent": { "const": true },
+        "kill_switch_inactive_required": { "const": true },
+        "submit_boundary_ready_required": { "const": true },
+        "broker_transmit_explicitly_enabled_required": { "const": true },
+        "aggregate_risk_pass_required": { "const": true },
+        "unsupported_paired_execution_blocked": { "const": true }
+      }
+    },
+    "canonical_json_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "$defs": {
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_id",
+        "intent_id",
+        "engine_id",
+        "symbol",
+        "strategy_variant",
+        "decision_type",
+        "risk_cents",
+        "correlation_bucket",
+        "regime_bucket",
+        "rank",
+        "score",
+        "source_intent_path",
+        "source_intent_hash"
+      ],
+      "properties": {
+        "candidate_id": { "type": "string", "minLength": 1 },
+        "intent_id": { "type": "string" },
+        "engine_id": { "type": "string" },
+        "symbol": { "type": "string" },
+        "strategy_variant": { "type": "string" },
+        "decision_type": { "type": "string", "minLength": 1 },
+        "risk_cents": { "type": "integer", "minimum": 0 },
+        "correlation_bucket": { "type": "string" },
+        "regime_bucket": { "type": "string" },
+        "rank": { "type": "integer", "minimum": 0 },
+        "score": { "type": "string" },
+        "source_intent_path": { "type": "string" },
+        "source_intent_hash": { "type": "string" }
+      }
+    },
+    "rejected_candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_id",
+        "intent_id",
+        "engine_id",
+        "symbol",
+        "strategy_variant",
+        "decision_type",
+        "risk_cents",
+        "correlation_bucket",
+        "regime_bucket",
+        "rank",
+        "score",
+        "source_intent_path",
+        "source_intent_hash",
+        "rejection_reason",
+        "rejection_details"
+      ],
+      "properties": {
+        "candidate_id": { "type": "string", "minLength": 1 },
+        "intent_id": { "type": "string" },
+        "engine_id": { "type": "string" },
+        "symbol": { "type": "string" },
+        "strategy_variant": { "type": "string" },
+        "decision_type": { "type": "string", "minLength": 1 },
+        "risk_cents": { "type": "integer", "minimum": 0 },
+        "correlation_bucket": { "type": "string" },
+        "regime_bucket": { "type": "string" },
+        "rank": { "type": "integer", "minimum": 0 },
+        "score": { "type": "string" },
+        "source_intent_path": { "type": "string" },
+        "source_intent_hash": { "type": "string" },
+        "rejection_reason": { "type": "string", "minLength": 1 },
+        "rejection_details": { "type": "string" }
+      }
+    },
+    "status_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "source_status", "reason"],
+      "properties": {
+        "status": { "type": "string", "minLength": 1 },
+        "source_status": { "type": "string" },
+        "reason": { "type": "string" }
+      }
+    }
+  }
+}
