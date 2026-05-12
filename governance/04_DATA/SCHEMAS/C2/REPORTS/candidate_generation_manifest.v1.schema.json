@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/candidate_generation_manifest.v1.schema.json",
+  "title": "candidate_generation_manifest.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "run_id",
+    "day_utc",
+    "environment",
+    "produced_at_utc",
+    "source_rollup_path",
+    "portfolio_activation_gate_path",
+    "candidate_rows",
+    "summary",
+    "selected_intent_pointer_authoritative",
+    "execution_authority_granted",
+    "order_submission_attempted",
+    "trading_behavior_changed",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "candidate_generation_manifest" },
+    "schema_version": { "const": "v1" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "environment": { "type": "string", "minLength": 1 },
+    "produced_at_utc": { "type": "string", "minLength": 20 },
+    "source_rollup_path": { "type": "string" },
+    "portfolio_activation_gate_path": { "type": "string" },
+    "candidate_rows": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/candidate" }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_count", "status_counts"],
+      "properties": {
+        "candidate_count": { "type": "integer", "minimum": 0 },
+        "status_counts": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "selected_intent_pointer_authoritative": { "const": true },
+    "execution_authority_granted": { "const": false },
+    "order_submission_attempted": { "const": false },
+    "trading_behavior_changed": { "const": false },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_id",
+        "engine_id",
+        "symbol_or_pair",
+        "status",
+        "reason_codes",
+        "rejection_reason",
+        "raw_intent_id",
+        "raw_intent_path",
+        "raw_intent_hash",
+        "lifecycle_decision",
+        "lifecycle_reason_codes",
+        "portfolio_gate_decision",
+        "allowed_by_portfolio_gate",
+        "input_artifact_paths",
+        "output_artifact_paths",
+        "lineage_hash"
+      ],
+      "properties": {
+        "candidate_id": { "type": "string", "minLength": 1 },
+        "engine_id": { "type": "string" },
+        "symbol_or_pair": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["CANDIDATE_CREATED", "NO_SIGNAL", "BLOCKED", "SUPPRESSED", "SIGNAL_ONLY", "UNKNOWN"]
+        },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "rejection_reason": { "type": "string" },
+        "raw_intent_id": { "type": "string" },
+        "raw_intent_path": { "type": "string" },
+        "raw_intent_hash": { "type": "string" },
+        "lifecycle_decision": { "type": "string" },
+        "lifecycle_reason_codes": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "portfolio_gate_decision": { "type": "string" },
+        "allowed_by_portfolio_gate": { "type": "boolean" },
+        "input_artifact_paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "output_artifact_paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "lineage_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  }
+}

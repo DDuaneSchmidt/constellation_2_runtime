@@ -16,6 +16,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from constellation_2.common.candidate_observability_v1 import (
+    build_candidate_generation_manifest_v1,
+    build_sleeve_invocation_ledger_v1,
+    write_candidate_generation_manifest_v1,
+    write_sleeve_invocation_ledger_v1,
+)
 from constellation_2.common.paper_session_fact_plane_v1 import (
     collect_intent_files_v1,
     parse_day_utc_v1,
@@ -867,6 +873,31 @@ def build_sleeve_evaluation_kernel(*, day_utc: str, truth_root: Path, environmen
         "artifact_path": str(rollup_path),
     }
     _write_json(rollup_path, payload)
+    run_id = f"sleeve_evaluation_kernel_v1:{day_utc}"
+    try:
+        produced_at = str(payload.get("created_at_utc") or _now_iso())
+        ledger = build_sleeve_invocation_ledger_v1(
+            day_utc=day_utc,
+            environment=environment,
+            truth_root=truth_root,
+            outcomes=outcomes,
+            run_id=run_id,
+            scheduled_run_at_utc=produced_at,
+            produced_at_utc=produced_at,
+        )
+        write_sleeve_invocation_ledger_v1(truth_root=truth_root, payload=ledger)
+        manifest = build_candidate_generation_manifest_v1(
+            day_utc=day_utc,
+            environment=environment,
+            truth_root=truth_root,
+            outcomes=outcomes,
+            run_id=run_id,
+            produced_at_utc=produced_at,
+            source_rollup_path=str(rollup_path),
+        )
+        write_candidate_generation_manifest_v1(truth_root=truth_root, payload=manifest)
+    except Exception:
+        pass
     return payload
 
 

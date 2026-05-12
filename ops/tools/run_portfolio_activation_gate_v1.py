@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from constellation_2.common.candidate_observability_v1 import build_candidate_generation_manifest_v1, write_candidate_generation_manifest_v1
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1, read_json_object_v1, resolve_fact_plane_truth_root_v1
 from ops.tools.run_intent_lifecycle_state_v1 import intent_lifecycle_state_path
 from ops.tools.run_portfolio_state_v1 import build_portfolio_state_v1, portfolio_state_path
@@ -350,6 +351,20 @@ def build_portfolio_activation_gate_v1(
         "artifact_path": str(out_path),
     }
     _write_json(out_path, payload)
+    try:
+        manifest = build_candidate_generation_manifest_v1(
+            day_utc=day_utc,
+            environment=environment,
+            truth_root=truth_root,
+            outcomes=outcomes if isinstance(outcomes, list) else [],
+            run_id=f"sleeve_evaluation_kernel_v1:{day_utc}",
+            produced_at_utc=str(payload.get("produced_at_utc") or _now_iso()),
+            source_rollup_path=str(rollup_path),
+            portfolio_gate=payload,
+        )
+        write_candidate_generation_manifest_v1(truth_root=truth_root, payload=manifest)
+    except Exception:
+        pass
     return payload
 
 

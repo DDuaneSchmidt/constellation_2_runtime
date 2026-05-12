@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/c2/reports/sleeve_invocation_ledger.v1.schema.json",
+  "title": "sleeve_invocation_ledger.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "run_id",
+    "day_utc",
+    "environment",
+    "scheduled_run_at_utc",
+    "produced_at_utc",
+    "invocations",
+    "invocation_count",
+    "execution_authority_granted",
+    "order_submission_attempted",
+    "trading_behavior_changed",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "sleeve_invocation_ledger" },
+    "schema_version": { "const": "v1" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "environment": { "type": "string", "minLength": 1 },
+    "scheduled_run_at_utc": { "type": "string", "minLength": 20 },
+    "produced_at_utc": { "type": "string", "minLength": 20 },
+    "invocations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/invocation" }
+    },
+    "invocation_count": { "type": "integer", "minimum": 0 },
+    "execution_authority_granted": { "const": false },
+    "order_submission_attempted": { "const": false },
+    "trading_behavior_changed": { "const": false },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "invocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "day_utc",
+        "scheduled_run_at_utc",
+        "engine_id",
+        "symbol_or_pair",
+        "status",
+        "reason_codes",
+        "input_artifact_paths",
+        "output_artifact_paths",
+        "produced_at_utc",
+        "lineage_hash"
+      ],
+      "properties": {
+        "run_id": { "type": "string", "minLength": 1 },
+        "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "scheduled_run_at_utc": { "type": "string", "minLength": 20 },
+        "engine_id": { "type": "string" },
+        "symbol_or_pair": { "type": "string" },
+        "status": { "type": "string", "minLength": 1 },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "input_artifact_paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "output_artifact_paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "produced_at_utc": { "type": "string", "minLength": 20 },
+        "lineage_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  }
+}
