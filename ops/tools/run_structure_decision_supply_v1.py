@@ -25,6 +25,7 @@ from ops.tools.run_intent_arbitration_v1 import intent_arbitration_path, selecte
 
 SCHEMA_VERSION = "structure_decision_supply.v1"
 POLICY_PATH = REPO_ROOT / "governance" / "02_REGISTRIES" / "C2_EXPOSURE_TO_OPTIONS_INTENT_POLICY_V1.json"
+EQUITY_POLICY_PATH = REPO_ROOT / "governance" / "02_REGISTRIES" / "C2_EQUITY_STRUCTURE_POLICY_V1.json"
 ENGINE_REGISTRY_PATH = REPO_ROOT / "governance" / "02_REGISTRIES" / "ENGINE_MODEL_REGISTRY_V1.json"
 ALLOWED_BLOCKERS = {
     "ACTIVE_INTENT_MISSING",
@@ -33,6 +34,8 @@ ALLOWED_BLOCKERS = {
     "RISK_BUDGET_SUPPLY_BLOCKED",
     "NO_ELIGIBLE_OPTION_STRUCTURE",
     "STRUCTURE_POLICY_MISSING",
+    "EQUITY_STRUCTURE_POLICY_MISSING",
+    "EQUITY_STRUCTURE_POLICY_INVALID",
     "STRUCTURE_DECISION_VALIDATION_FAILED",
     "INTENT_ARBITRATION_MISSING",
     "NO_EXECUTABLE_INTENT",
@@ -96,6 +99,14 @@ def _symbol(payload: dict[str, Any]) -> str:
 def _engine_id(payload: dict[str, Any]) -> str:
     engine = payload.get("engine") if isinstance(payload.get("engine"), dict) else {}
     return str(engine.get("engine_id") or payload.get("engine_id") or "").strip()
+
+
+def _exposure_type(payload: dict[str, Any]) -> str:
+    return str(payload.get("exposure_type") or "").strip().upper()
+
+
+def _target_notional_pct(payload: dict[str, Any]) -> str:
+    return str(payload.get("target_notional_pct") or "").strip()
 
 
 def _allowed_symbols_for_engine(engine_id: str) -> list[str]:
@@ -200,6 +211,120 @@ def _policy_for_intent(intent: dict[str, Any]) -> dict[str, Any]:
         if isinstance(row, dict) and str(row.get("engine_id") or "").strip() == engine_id:
             return row
     return {}
+
+
+def _equity_policy_for_intent(intent: dict[str, Any]) -> dict[str, Any]:
+    policy = _read_json(EQUITY_POLICY_PATH)
+    engine_id = _engine_id(intent)
+    for row in policy.get("engine_policies") or []:
+        if isinstance(row, dict) and str(row.get("engine_id") or "").strip() == engine_id:
+            return row
+    return {}
+
+
+def _validate_equity_policy(intent: dict[str, Any], policy: dict[str, Any]) -> tuple[bool, str]:
+    requirements = policy.get("exposure_requirements") if isinstance(policy.get("exposure_requirements"), dict) else {}
+    template = policy.get("structure_template") if isinstance(policy.get("structure_template"), dict) else {}
+    safety = template.get("safety") if isinstance(template.get("safety"), dict) else {}
+    symbol = _symbol(intent)
+    target_notional_pct = _target_notional_pct(intent)
+    allowed_symbols = [
+        str(item).strip().upper()
+        for item in requirements.get("allowed_symbols") or []
+        if str(item).strip()
+    ]
+    allowed_notional = [
+        str(item).strip()
+        for item in requirements.get("allowed_target_notional_pct") or []
+        if str(item).strip()
+    ]
+    if str(requirements.get("exposure_type") or "").strip().upper() != "LONG_EQUITY":
+        return False, "Equity structure policy must explicitly govern LONG_EQUITY exposure."
+    if symbol not in allowed_symbols:
+        return False, "Equity structure policy does not allow the selected symbol."
+    if target_notional_pct not in allowed_notional:
+        return False, "Equity structure policy does not allow the selected target_notional_pct."
+    if str(template.get("structure_type") or "").strip().upper() != "EQUITY_SPOT":
+        return False, "Equity structure policy must emit EQUITY_SPOT."
+    if str(template.get("order_intent_type") or "").strip().upper() != "EQUITY_BUY":
+        return False, "LONG_EQUITY policy must emit EQUITY_BUY order intent evidence."
+    if safety.get("execution_authority_granted") is not False:
+        return False, "Equity structure policy must not grant execution authority."
+    if safety.get("order_submission_attempted") is not False:
+        return False, "Equity structure policy must not mark order submission attempted."
+    if safety.get("trading_behavior_changed") is not False:
+        return False, "Equity structure policy must not change trading behavior."
+    return True, ""
+
+
+def _build_equity_spot_decision(
+    *,
+    ctx: bod.BodContext,
+    intent_path: Path,
+    intent: dict[str, Any],
+    policy: dict[str, Any],
+    risk_budget: dict[str, Any],
+    market_open_data: dict[str, Any],
+    intent_id: str,
+) -> dict[str, Any]:
+    template = policy.get("structure_template") if isinstance(policy.get("structure_template"), dict) else {}
+    safety = template.get("safety") if isinstance(template.get("safety"), dict) else {}
+    constraints = intent.get("constraints") if isinstance(intent.get("constraints"), dict) else {}
+    diagnostics = {
+        "intent_id": intent_id,
+        "selected_symbol": _symbol(intent),
+        "engine_id": _engine_id(intent),
+        "exposure_type": _exposure_type(intent),
+        "structure_type": "EQUITY_SPOT",
+        "equity_structure_policy_path": str(EQUITY_POLICY_PATH),
+        "market_open_data_gate_path": str(market_open_data.get("market_open_data_gate_path") or ""),
+        "options_policy_queried": False,
+        "execution_authority_granted": False,
+        "order_submission_attempted": False,
+        "trading_behavior_changed": False,
+    }
+    decision = {
+        "day_utc": ctx.day_utc,
+        "intent_id": intent_id,
+        "intent_hash": _intent_hash(intent_path, intent),
+        "intent_path": str(intent_path),
+        "selected_structure": "EQUITY_SPOT",
+        "structure_type": "EQUITY_SPOT",
+        "symbol": _symbol(intent),
+        "exposure_type": "LONG_EQUITY",
+        "target_notional_pct": _target_notional_pct(intent),
+        "order_intent_type": "EQUITY_BUY",
+        "execution_authority_granted": False,
+        "order_submission_attempted": False,
+        "trading_behavior_changed": False,
+        "equity_structure_policy": {
+            "path": str(EQUITY_POLICY_PATH),
+            "engine_id": _engine_id(intent),
+            "status": "PRESENT",
+            "structure_type": "EQUITY_SPOT",
+        },
+        "pricing_inputs": {
+            "snapshot_path": str(market_open_data.get("snapshot_path") or ""),
+            "freshness_certificate_path": str(market_open_data.get("freshness_certificate_path") or ""),
+            "data_mode": "MARKET_OPEN_GATE_SUPPLIED",
+        },
+        "risk_bounds": {
+            "target_notional_pct": _target_notional_pct(intent),
+            "max_risk_pct": str(constraints.get("max_risk_pct") or ""),
+            "risk_budget_status": str(risk_budget.get("status") or ""),
+        },
+        "safety": {
+            "execution_authority_granted": bool(safety.get("execution_authority_granted")),
+            "order_submission_attempted": bool(safety.get("order_submission_attempted")),
+            "trading_behavior_changed": bool(safety.get("trading_behavior_changed")),
+            "requires_submit_boundary": safety.get("requires_submit_boundary") is True,
+        },
+        "structure_diagnostics": diagnostics,
+    }
+    decision["structure_decision_hash"] = hashlib.sha256(
+        canonical_structure_decision_json_v1(decision).encode("utf-8")
+    ).hexdigest()
+    return decision
 
 
 def _snapshot_from_gate(ctx: bod.BodContext) -> tuple[Path | None, Path | None, dict[str, Any], dict[str, Any]]:
@@ -695,7 +820,8 @@ def build_structure_decision_supply_v1(ctx: bod.BodContext) -> dict[str, Any]:
             "intent_path": str(path),
             "instrument": _symbol(payload),
             "engine_id": _engine_id(payload),
-            "requires_defined_risk": True,
+            "exposure_type": _exposure_type(payload),
+            "requires_defined_risk": _exposure_type(payload) != "LONG_EQUITY",
         }
         for path, payload in intents
     ]
@@ -717,11 +843,53 @@ def build_structure_decision_supply_v1(ctx: bod.BodContext) -> dict[str, Any]:
     if snapshot_path is None or not snapshot:
         return _blocked(ctx, "MARKET_OPEN_DATA_MISSING", "Run market-open data gate and produce current-day quote-complete options snapshot.", active_intents=active_rows, risk_budget_input=risk_input, market_open_data=market_open_data)
     decisions: list[dict[str, Any]] = []
+    policy_paths: list[dict[str, Any]] = []
     for intent_path, intent in intents:
         intent_id = _intent_id(intent_path, intent)
+        if _exposure_type(intent) == "LONG_EQUITY":
+            policy = _equity_policy_for_intent(intent)
+            if not policy:
+                return _blocked(
+                    ctx,
+                    "EQUITY_STRUCTURE_POLICY_MISSING",
+                    "Add governed equity structure policy for the active LONG_EQUITY intent engine.",
+                    active_intents=active_rows,
+                    risk_budget_input=risk_input,
+                    market_open_data=market_open_data,
+                    structure_policy={"path": str(EQUITY_POLICY_PATH), "engine_id": _engine_id(intent), "status": "MISSING"},
+                )
+            valid_policy, policy_error = _validate_equity_policy(intent, policy)
+            if not valid_policy:
+                return _blocked(
+                    ctx,
+                    "EQUITY_STRUCTURE_POLICY_INVALID",
+                    policy_error,
+                    active_intents=active_rows,
+                    risk_budget_input=risk_input,
+                    market_open_data=market_open_data,
+                    structure_policy={"path": str(EQUITY_POLICY_PATH), "engine_id": _engine_id(intent), "status": "INVALID"},
+                )
+            decisions.append(
+                _build_equity_spot_decision(
+                    ctx=ctx,
+                    intent_path=intent_path,
+                    intent=intent,
+                    policy=policy,
+                    risk_budget=risk_budget,
+                    market_open_data=market_open_data,
+                    intent_id=intent_id,
+                )
+            )
+            policy_paths.append(
+                {"path": str(EQUITY_POLICY_PATH), "engine_id": _engine_id(intent), "policy_type": "EQUITY_STRUCTURE", "status": "PRESENT"}
+            )
+            continue
         policy = _policy_for_intent(intent)
         if not policy:
             return _blocked(ctx, "STRUCTURE_POLICY_MISSING", "Add governed exposure-to-options policy for the active intent engine.", active_intents=active_rows, risk_budget_input=risk_input, market_open_data=market_open_data)
+        policy_paths.append(
+            {"path": str(POLICY_PATH), "engine_id": _engine_id(intent), "policy_type": "OPTIONS_DEFINED_RISK", "status": "PRESENT"}
+        )
         selected, select_blocker, diagnostics = _select_vertical_put_credit_spread(intent=intent, policy=policy, snapshot=snapshot, risk_budget=risk_budget, intent_id=intent_id)
         diagnostics["option_chain_snapshot_path"] = str(snapshot_path)
         if select_blocker:
@@ -769,6 +937,36 @@ def build_structure_decision_supply_v1(ctx: bod.BodContext) -> dict[str, Any]:
             canonical_structure_decision_json_v1(decision).encode("utf-8")
         ).hexdigest()
         decisions.append(decision)
+    export_decisions: list[dict[str, Any]] = []
+    authorization_usable = True
+    for row in decisions:
+        if row.get("selected_structure") == "EQUITY_SPOT":
+            authorization_usable = False
+            export_decisions.append(
+                {
+                    "intent_id": row["intent_id"],
+                    "intent_hash": row["intent_hash"],
+                    "selected_structure": "EQUITY_SPOT",
+                    "structure_type": "EQUITY_SPOT",
+                    "symbol": row["symbol"],
+                    "exposure_type": "LONG_EQUITY",
+                    "target_notional_pct": row["target_notional_pct"],
+                    "order_intent_type": "EQUITY_BUY",
+                    "execution_authority_granted": False,
+                    "order_submission_attempted": False,
+                    "trading_behavior_changed": False,
+                }
+            )
+            continue
+        export_decisions.append(
+            {
+                "intent_id": row["intent_id"],
+                "intent_hash": row["intent_hash"],
+                "selected_structure": row["selected_structure"],
+                "legs": row["option_structure"]["legs"],
+                "max_loss_cents": row["option_structure"]["max_loss_cents"],
+            }
+        )
     return {
         "schema_id": "structure_decision_supply",
         "schema_version": SCHEMA_VERSION,
@@ -780,22 +978,13 @@ def build_structure_decision_supply_v1(ctx: bod.BodContext) -> dict[str, Any]:
         "active_intents": active_rows,
         "market_open_data": market_open_data,
         "risk_budget_input": risk_input,
-        "structure_policy": {"path": str(POLICY_PATH), "status": "PRESENT"},
+        "structure_policy": {"status": "PRESENT", "policies": policy_paths},
         "structure_diagnostics": [row["structure_diagnostics"] for row in decisions if isinstance(row.get("structure_diagnostics"), dict)],
         "structure_decisions": decisions,
         "structure_export": {
-            "usable_for_authorization_supply": True,
+            "usable_for_authorization_supply": authorization_usable,
             "decision_count": len(decisions),
-            "decisions": [
-                {
-                    "intent_id": row["intent_id"],
-                    "intent_hash": row["intent_hash"],
-                    "selected_structure": row["selected_structure"],
-                    "legs": row["option_structure"]["legs"],
-                    "max_loss_cents": row["option_structure"]["max_loss_cents"],
-                }
-                for row in decisions
-            ],
+            "decisions": export_decisions,
         },
         "operator_next_action": "",
     }

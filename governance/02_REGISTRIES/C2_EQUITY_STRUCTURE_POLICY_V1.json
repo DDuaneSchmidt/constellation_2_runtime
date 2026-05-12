@@ -1,0 +1,38 @@
+{
+  "engine_policies": [
+    {
+      "engine_id": "C2_TREND_EQ_PRIMARY_V1",
+      "exposure_requirements": {
+        "allowed_risk_class": [
+          "TREND"
+        ],
+        "allowed_symbols": [
+          "SPY"
+        ],
+        "allowed_target_notional_pct": [
+          "0.01"
+        ],
+        "exposure_type": "LONG_EQUITY",
+        "required_engine_suite": "C2_HYBRID_V1"
+      },
+      "structure_template": {
+        "allowed_action": "BUY",
+        "order_intent_type": "EQUITY_BUY",
+        "order_terms": {
+          "order_type": "LIMIT",
+          "reference_price_source": "MARKET_OPEN_DATA_GATE",
+          "time_in_force": "DAY"
+        },
+        "safety": {
+          "execution_authority_granted": false,
+          "order_submission_attempted": false,
+          "requires_submit_boundary": true,
+          "trading_behavior_changed": false
+        },
+        "structure_type": "EQUITY_SPOT"
+      }
+    }
+  ],
+  "schema_id": "c2_equity_structure_policy",
+  "schema_version": "v1"
+}

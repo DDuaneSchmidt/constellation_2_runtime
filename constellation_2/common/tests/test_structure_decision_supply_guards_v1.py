@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -13,6 +14,8 @@ from ops.tools.run_structure_decision_supply_v1 import (  # noqa: E402
     _selected_legs_exist_in_snapshot,
     _selected_structure_guard_blocker,
 )
+from ops.tools import run_structure_decision_supply_v1 as structure_supply  # noqa: E402
+from ops.tools.run_aegis_bod_prepare_v1 import BodContext  # noqa: E402
 
 
 def _snapshot() -> dict:
@@ -59,6 +62,103 @@ def _risk_budget(allowed_risk_cents: int = 100000) -> dict:
             {"intent_id": "intent-1", "allowed_risk_cents": allowed_risk_cents},
         ]
     }
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+
+
+def _ctx(tmp_path: Path) -> BodContext:
+    root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    return BodContext(
+        day_utc="2026-05-12",
+        environment="PAPER",
+        truth_root=root,
+        execution_root=root,
+        runtime_root=tmp_path / "runtime",
+        operator_input_root=tmp_path / "operator",
+        ib_account="DU1234567",
+    )
+
+
+def _equity_intent() -> dict:
+    return {
+        "schema_id": "exposure_intent",
+        "schema_version": "v1",
+        "day_utc": "2026-05-12",
+        "intent_id": "c2_trend_eq_spy_2026-05-12_v1",
+        "intent_hash": "intenthash",
+        "exposure_type": "LONG_EQUITY",
+        "engine": {"engine_id": "C2_TREND_EQ_PRIMARY_V1", "mode": "PAPER", "suite": "C2_HYBRID_V1"},
+        "underlying": {"symbol": "SPY", "currency": "USD"},
+        "target_notional_pct": "0.01",
+        "constraints": {"max_risk_pct": "0.01", "stop_loss_bps": 1000},
+    }
+
+
+def _equity_policy() -> dict:
+    return {
+        "schema_id": "c2_equity_structure_policy",
+        "schema_version": "v1",
+        "engine_policies": [
+            {
+                "engine_id": "C2_TREND_EQ_PRIMARY_V1",
+                "exposure_requirements": {
+                    "exposure_type": "LONG_EQUITY",
+                    "required_engine_suite": "C2_HYBRID_V1",
+                    "allowed_target_notional_pct": ["0.01"],
+                    "allowed_risk_class": ["TREND"],
+                    "allowed_symbols": ["SPY"],
+                },
+                "structure_template": {
+                    "structure_type": "EQUITY_SPOT",
+                    "order_intent_type": "EQUITY_BUY",
+                    "allowed_action": "BUY",
+                    "order_terms": {
+                        "order_type": "LIMIT",
+                        "time_in_force": "DAY",
+                        "reference_price_source": "MARKET_OPEN_DATA_GATE",
+                    },
+                    "safety": {
+                        "execution_authority_granted": False,
+                        "order_submission_attempted": False,
+                        "trading_behavior_changed": False,
+                        "requires_submit_boundary": True,
+                    },
+                },
+            }
+        ],
+    }
+
+
+def _write_equity_structure_inputs(ctx: BodContext, intent_payload: dict | None = None) -> Path:
+    intent_path = ctx.execution_root / "intents_v1" / "snapshots" / ctx.day_utc / "intent.exposure_intent.v1.json"
+    _write_json(intent_path, intent_payload or _equity_intent())
+    _write_json(
+        ctx.truth_root / "pointers" / "selected_intent_pointer.v1.json",
+        {
+            "status": "SELECTED",
+            "selected_intent": {
+                "intent_id": "c2_trend_eq_spy_2026-05-12_v1",
+                "symbol": "SPY",
+                "intent_path": str(intent_path),
+            },
+        },
+    )
+    _write_json(
+        ctx.truth_root / "reports" / "risk_budget_supply_v1" / ctx.day_utc / "risk_budget_supply.v1.json",
+        {"status": "PASS", "intent_budgets": [{"intent_id": "c2_trend_eq_spy_2026-05-12_v1", "allowed_risk_cents": 100000}]},
+    )
+    snapshot_path = ctx.execution_root / "options_chain_snapshot_v1" / ctx.day_utc / "capture" / "options_chain_snapshot.v1.json"
+    cert_path = ctx.execution_root / "options_chain_snapshot_v1" / ctx.day_utc / "capture" / "freshness_certificate.v1.json"
+    _write_json(snapshot_path, {"as_of_utc": "2026-05-12T19:31:00Z", "underlying": {"symbol": "SPY", "spot_price": "620.00"}, "contracts": []})
+    _write_json(cert_path, {"status": "PASS"})
+    _write_json(
+        ctx.truth_root / "reports" / "market_open_data_gate_v1" / ctx.day_utc / "market_open_data_gate.v1.json",
+        {"status": "PASS", "snapshot_path": str(snapshot_path), "freshness_certificate_path": str(cert_path)},
+    )
+    return intent_path
 
 
 def _selected(sell: str = "105", buy: str = "100") -> dict:
@@ -269,3 +369,60 @@ def test_structure_diagnostics_include_nearest_misses_when_no_candidate_is_eligi
     assert diagnostics["dte_coverage"]["expiries_omitted"] == [
         {"dte": 2, "expiry_yyyymmdd": "20260501", "reason": "CAPTURE_TIME_BUDGET_EXHAUSTED"}
     ]
+
+
+def test_long_equity_intent_does_not_query_options_policy(monkeypatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _write_equity_structure_inputs(ctx)
+    equity_policy_path = tmp_path / "governance" / "C2_EQUITY_STRUCTURE_POLICY_V1.json"
+    _write_json(equity_policy_path, _equity_policy())
+    monkeypatch.setattr(structure_supply, "EQUITY_POLICY_PATH", equity_policy_path)
+    monkeypatch.setattr(structure_supply, "POLICY_PATH", tmp_path / "missing-options-policy.json")
+
+    payload = structure_supply.build_structure_decision_supply_v1(ctx)
+
+    assert payload["status"] == "PASS"
+    assert payload["structure_decisions"][0]["selected_structure"] == "EQUITY_SPOT"
+    assert payload["structure_decisions"][0]["structure_diagnostics"]["options_policy_queried"] is False
+
+
+def test_missing_equity_policy_fails_closed(monkeypatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _write_equity_structure_inputs(ctx)
+    monkeypatch.setattr(structure_supply, "EQUITY_POLICY_PATH", tmp_path / "missing-equity-policy.json")
+
+    payload = structure_supply.build_structure_decision_supply_v1(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "EQUITY_STRUCTURE_POLICY_MISSING"
+    assert payload["structure_export"]["usable_for_authorization_supply"] is False
+
+
+def test_valid_equity_policy_emits_non_authoritative_equity_spot_structure(monkeypatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _write_equity_structure_inputs(ctx)
+    equity_policy_path = tmp_path / "governance" / "C2_EQUITY_STRUCTURE_POLICY_V1.json"
+    _write_json(equity_policy_path, _equity_policy())
+    monkeypatch.setattr(structure_supply, "EQUITY_POLICY_PATH", equity_policy_path)
+
+    payload = structure_supply.build_structure_decision_supply_v1(ctx)
+
+    assert payload["status"] == "PASS"
+    assert payload["canonical_blocker"] == ""
+    assert payload["active_intents"][0]["requires_defined_risk"] is False
+    assert payload["active_intents"][0]["exposure_type"] == "LONG_EQUITY"
+    decision = payload["structure_decisions"][0]
+    assert decision["structure_type"] == "EQUITY_SPOT"
+    assert decision["symbol"] == "SPY"
+    assert decision["exposure_type"] == "LONG_EQUITY"
+    assert decision["target_notional_pct"] == "0.01"
+    assert decision["order_intent_type"] == "EQUITY_BUY"
+    assert decision["execution_authority_granted"] is False
+    assert decision["order_submission_attempted"] is False
+    assert decision["trading_behavior_changed"] is False
+    assert payload["structure_export"]["usable_for_authorization_supply"] is False
+    export = payload["structure_export"]["decisions"][0]
+    assert export["selected_structure"] == "EQUITY_SPOT"
+    assert export["execution_authority_granted"] is False
+    assert export["order_submission_attempted"] is False
+    assert export["trading_behavior_changed"] is False
