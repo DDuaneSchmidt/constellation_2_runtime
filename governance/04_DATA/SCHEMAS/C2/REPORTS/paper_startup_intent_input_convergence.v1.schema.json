@@ -71,7 +71,32 @@
             "items": { "type": "string", "minLength": 1 }
           },
           "blocker_code": { "type": "string" },
-          "summary": { "type": "string" }
+          "summary": { "type": "string" },
+          "symbol": { "type": "string" },
+          "required_snapshot_symbols": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "materialized_snapshot_symbols": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "missing_snapshot_symbols": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "source_registry_paths": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "source_registry_hashes": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
+          "required_snapshot_engines": {
+            "type": "array",
+            "items": { "type": "object" }
+          }
         }
       }
     },
@@ -103,14 +128,46 @@
         "required_options_symbol",
         "options_snapshot_symbol",
         "symbol_source",
-        "stale_default_symbol_detected"
+        "stale_default_symbol_detected",
+        "bridge_symbol_used_for_market_snapshot"
       ],
       "properties": {
         "selected_intent_symbol": { "type": "string" },
         "required_options_symbol": { "type": "string" },
         "options_snapshot_symbol": { "type": "string" },
         "symbol_source": { "type": "string" },
-        "stale_default_symbol_detected": { "type": "boolean" }
+        "stale_default_symbol_detected": { "type": "boolean" },
+        "bridge_symbol": { "type": "string" },
+        "bridge_symbol_source": { "type": "string" },
+        "bridge_symbol_used_for_market_snapshot": { "type": "boolean" },
+        "required_snapshot_symbols": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "materialized_snapshot_symbols": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "missing_snapshot_symbols": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "source_registry_paths": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "source_registry_hashes": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "required_snapshot_engines": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "market_data_snapshot_results": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
       }
     }
   }

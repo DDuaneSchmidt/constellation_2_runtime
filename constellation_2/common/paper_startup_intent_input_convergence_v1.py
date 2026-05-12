@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
@@ -66,10 +67,11 @@ def derive_paper_startup_intent_input_convergence_payload_v1(
 ) -> Dict[str, Any]:
     blocker_rows = blocker_chain or _normalize_blocker_chain(artifact_results)
     convergence_status = "SUCCESS" if not blocker_rows else "BLOCKED"
+    generated_utc = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     return {
         "schema_id": "paper_startup_intent_input_convergence_v1",
         "schema_version": 1,
-        "generated_utc": f"{str(target_day).strip()}T00:00:00Z",
+        "generated_utc": generated_utc,
         "target_day": str(target_day).strip(),
         "environment": str(environment).strip().upper(),
         "ib_account": str(ib_account).strip(),
@@ -97,4 +99,5 @@ def write_paper_startup_intent_input_convergence_v1(*, truth_root: Path, payload
         payload=payload,
         schema_relpath=SCHEMA_RELPATH,
         volatile_field_names=("generated_utc",),
+        refresh_semantic_noop=True,
     )

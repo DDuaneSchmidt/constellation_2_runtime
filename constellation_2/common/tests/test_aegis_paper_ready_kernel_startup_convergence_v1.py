@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 SOURCE_ROOT = Path("/home/node/constellation")
@@ -30,6 +31,8 @@ def _runner(
     sleeve_root: Path,
     startup_status: str,
     startup_missing_symbols: list[str] | None = None,
+    startup_returncode: int | None = None,
+    startup_write_artifact: bool = True,
     call_log: list[str],
 ):
     def run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -73,24 +76,27 @@ def _runner(
             )
         elif script == "run_paper_startup_intent_input_convergence_v1.py":
             missing = startup_missing_symbols or []
-            _write_json(
-                canonical_root
-                / "reports/paper_startup_intent_input_convergence_v1"
-                / DAY
-                / "paper_startup_intent_input_convergence.v1.json",
-                {
-                    "target_day": DAY,
-                    "convergence_status": startup_status,
-                    "symbol_diagnostics": {
-                        "required_snapshot_symbols": ["TLT"],
-                        "materialized_snapshot_symbols": [] if missing else ["TLT"],
-                        "missing_snapshot_symbols": missing,
-                        "symbol_source": "ENGINE_MODEL_REGISTRY_V1+SLEEVE_CONTRACTS_V1",
-                        "bridge_symbol_used_for_market_snapshot": False,
+            if startup_write_artifact:
+                _write_json(
+                    canonical_root
+                    / "reports/paper_startup_intent_input_convergence_v1"
+                    / DAY
+                    / "paper_startup_intent_input_convergence.v1.json",
+                    {
+                        "target_day": DAY,
+                        "generated_utc": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                        "convergence_status": startup_status,
+                        "symbol_diagnostics": {
+                            "required_snapshot_symbols": ["TLT"],
+                            "materialized_snapshot_symbols": [] if missing else ["TLT"],
+                            "missing_snapshot_symbols": missing,
+                            "symbol_source": "ENGINE_MODEL_REGISTRY_V1+SLEEVE_CONTRACTS_V1",
+                            "bridge_symbol_used_for_market_snapshot": False,
+                        },
                     },
-                },
-            )
-            return subprocess.CompletedProcess(command, 0 if startup_status == "SUCCESS" else 2, stdout="{}\n", stderr="")
+                )
+            rc = startup_returncode if startup_returncode is not None else (0 if startup_status == "SUCCESS" else 2)
+            return subprocess.CompletedProcess(command, rc, stdout="{}\n", stderr="startup convergence stderr")
         elif script == "run_trading_day_intent_generation_v1.py":
             _write_json(
                 sleeve_root / "reports/trading_day_intent_generation_v1" / DAY / "trading_day_intent_generation.v1.json",
@@ -170,6 +176,7 @@ def test_stale_spy_bridge_startup_artifact_is_refreshed_before_intent_generation
         stale_path,
         {
             "target_day": DAY,
+            "generated_utc": (datetime.now(UTC) - timedelta(hours=1)).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
             "convergence_status": "SUCCESS",
             "symbol_diagnostics": {
                 "bridge_symbol": "SPY",
@@ -197,3 +204,118 @@ def test_stale_spy_bridge_startup_artifact_is_refreshed_before_intent_generation
     assert "run_paper_startup_intent_input_convergence_v1.py" in calls
     assert refreshed["symbol_diagnostics"]["bridge_symbol_used_for_market_snapshot"] is False
     assert refreshed["symbol_diagnostics"]["required_snapshot_symbols"] == ["TLT"]
+
+
+def test_nonzero_startup_convergence_return_code_blocks_even_with_prior_success_artifact(tmp_path: Path) -> None:
+    canonical_root = tmp_path / "truth"
+    sleeve_root = tmp_path / "truth_sleeves/PRIMARY/PAPER"
+    stale_path = (
+        canonical_root
+        / "reports/paper_startup_intent_input_convergence_v1"
+        / DAY
+        / "paper_startup_intent_input_convergence.v1.json"
+    )
+    _write_json(
+        stale_path,
+        {
+            "target_day": DAY,
+            "generated_utc": (datetime.now(UTC) - timedelta(hours=1)).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            "convergence_status": "SUCCESS",
+            "symbol_diagnostics": {
+                "required_snapshot_symbols": ["TLT"],
+                "materialized_snapshot_symbols": ["TLT"],
+                "missing_snapshot_symbols": [],
+                "symbol_source": "ENGINE_MODEL_REGISTRY_V1+SLEEVE_CONTRACTS_V1",
+                "bridge_symbol_used_for_market_snapshot": False,
+            },
+        },
+    )
+    calls: list[str] = []
+
+    report = kernel.run_paper_ready_kernel_v1(
+        target_day=DAY,
+        canonical_truth_root=canonical_root,
+        paper_sleeve_root=sleeve_root,
+        require_current_release=False,
+        command_runner=_runner(
+            canonical_root=canonical_root,
+            sleeve_root=sleeve_root,
+            startup_status="SUCCESS",
+            startup_returncode=1,
+            startup_write_artifact=False,
+            call_log=calls,
+        ),
+    )
+
+    assert report["failed_stage_id"] == "paper_startup_intent_input_convergence"
+    assert report["first_blocker"] == "PAPER_STARTUP_INTENT_INPUT_CONVERGENCE_STALE"
+    assert "run_trading_day_intent_generation_v1.py" not in calls
+
+
+def test_stale_spy_bridge_startup_artifact_is_rejected_after_fresh_subprocess_failure(tmp_path: Path) -> None:
+    canonical_root = tmp_path / "truth"
+    sleeve_root = tmp_path / "truth_sleeves/PRIMARY/PAPER"
+    stale_path = (
+        canonical_root
+        / "reports/paper_startup_intent_input_convergence_v1"
+        / DAY
+        / "paper_startup_intent_input_convergence.v1.json"
+    )
+    _write_json(
+        stale_path,
+        {
+            "target_day": DAY,
+            "generated_utc": "2099-01-01T00:00:00Z",
+            "convergence_status": "SUCCESS",
+            "symbol_diagnostics": {
+                "bridge_symbol": "SPY",
+                "bridge_symbol_used_for_market_snapshot": True,
+                "symbol_source": "BRIDGE_SYMBOL_ARGUMENT",
+            },
+        },
+    )
+    calls: list[str] = []
+
+    report = kernel.run_paper_ready_kernel_v1(
+        target_day=DAY,
+        canonical_truth_root=canonical_root,
+        paper_sleeve_root=sleeve_root,
+        require_current_release=False,
+        command_runner=_runner(
+            canonical_root=canonical_root,
+            sleeve_root=sleeve_root,
+            startup_status="SUCCESS",
+            startup_returncode=1,
+            startup_write_artifact=False,
+            call_log=calls,
+        ),
+    )
+
+    assert report["failed_stage_id"] == "paper_startup_intent_input_convergence"
+    assert report["first_blocker"] == "PAPER_STARTUP_INTENT_INPUT_CONVERGENCE_STALE_BRIDGE_SYMBOL"
+    assert "run_trading_day_intent_generation_v1.py" not in calls
+
+
+def test_nonzero_startup_convergence_return_code_blocks_even_with_fresh_success_artifact(tmp_path: Path) -> None:
+    canonical_root = tmp_path / "truth"
+    sleeve_root = tmp_path / "truth_sleeves/PRIMARY/PAPER"
+    calls: list[str] = []
+
+    report = kernel.run_paper_ready_kernel_v1(
+        target_day=DAY,
+        canonical_truth_root=canonical_root,
+        paper_sleeve_root=sleeve_root,
+        require_current_release=False,
+        command_runner=_runner(
+            canonical_root=canonical_root,
+            sleeve_root=sleeve_root,
+            startup_status="SUCCESS",
+            startup_returncode=1,
+            call_log=calls,
+        ),
+    )
+
+    assert report["failed_stage_id"] == "paper_startup_intent_input_convergence"
+    assert report["first_blocker"] == "PAPER_STARTUP_INTENT_INPUT_CONVERGENCE_FAILED"
+    assert report["failed_field"] == "returncode"
+    assert "run_trading_day_intent_generation_v1.py" not in calls

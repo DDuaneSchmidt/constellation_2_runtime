@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+SOURCE_ROOT = Path("/home/node/constellation")
+if str(SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SOURCE_ROOT))
 
 from constellation_2.common.paper_startup_intent_input_convergence_v1 import (
     derive_paper_startup_intent_input_convergence_payload_v1,
+    write_paper_startup_intent_input_convergence_v1,
 )
 
 
@@ -112,3 +118,66 @@ def test_intent_input_convergence_records_readiness_mode_and_symbol_diagnostics(
     assert payload["readiness_mode"] == "PREOPEN_BUILD"
     assert payload["symbol_diagnostics"]["symbol_source"] == "PREOPEN_NOT_REQUIRED"
     assert payload["symbol_diagnostics"]["stale_default_symbol_detected"] is False
+
+
+def test_intent_input_convergence_snapshot_symbol_diagnostics_validate_and_persist(tmp_path: Path) -> None:
+    payload = derive_paper_startup_intent_input_convergence_payload_v1(
+        truth_root=tmp_path,
+        target_day=DAY,
+        sleeve_id="PRIMARY",
+        environment="PAPER",
+        ib_account="DU1234567",
+        sleeve_truth_root=tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER",
+        required_inputs=["market_data_snapshot_v1"],
+        artifact_results=[
+            {
+                **_row("market_data_snapshot_v1", ready=True, observed_status="OK"),
+                "required_snapshot_symbols": ["TLT"],
+                "materialized_snapshot_symbols": ["TLT"],
+                "missing_snapshot_symbols": [],
+                "source_registry_paths": ["/tmp/ENGINE_MODEL_REGISTRY_V1.json"],
+                "source_registry_hashes": {"ENGINE_MODEL_REGISTRY_V1": "a" * 64},
+                "required_snapshot_engines": [
+                    {
+                        "engine_id": "C2_DEFENSIVE_TAIL_V1",
+                        "required_symbols": ["TLT"],
+                    }
+                ],
+            }
+        ],
+        source_refs=[],
+        symbol_diagnostics={
+            "selected_intent_symbol": "",
+            "required_options_symbol": "",
+            "options_snapshot_symbol": "",
+            "symbol_source": "ENGINE_MODEL_REGISTRY_V1+SLEEVE_CONTRACTS_V1",
+            "stale_default_symbol_detected": False,
+            "bridge_symbol": "",
+            "bridge_symbol_source": "NOT_PROVIDED",
+            "bridge_symbol_used_for_market_snapshot": False,
+            "required_snapshot_symbols": ["TLT"],
+            "materialized_snapshot_symbols": ["TLT"],
+            "missing_snapshot_symbols": [],
+            "source_registry_paths": ["/tmp/ENGINE_MODEL_REGISTRY_V1.json"],
+            "source_registry_hashes": {"ENGINE_MODEL_REGISTRY_V1": "a" * 64},
+            "required_snapshot_engines": [
+                {
+                    "engine_id": "C2_DEFENSIVE_TAIL_V1",
+                    "required_symbols": ["TLT"],
+                }
+            ],
+            "market_data_snapshot_results": [
+                {
+                    "artifact_id": "market_data_snapshot_v1:TLT",
+                    "symbol": "TLT",
+                    "ready": True,
+                }
+            ],
+        },
+    )
+
+    ref = write_paper_startup_intent_input_convergence_v1(truth_root=tmp_path, payload=payload)
+
+    assert ref.payload["symbol_diagnostics"]["required_snapshot_symbols"] == ["TLT"]
+    assert ref.payload["symbol_diagnostics"]["materialized_snapshot_symbols"] == ["TLT"]
+    assert ref.payload["symbol_diagnostics"]["missing_snapshot_symbols"] == []

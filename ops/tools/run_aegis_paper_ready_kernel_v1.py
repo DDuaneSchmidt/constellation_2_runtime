@@ -122,6 +122,7 @@ def run_paper_ready_kernel_v1(
             "status": "RUNNING",
         }
 
+        stage_started_at = now_fn()
         completed = runner(stage.command, workdir)
         result["returncode"] = completed.returncode
         result["stdout_tail"] = (completed.stdout or "")[-1000:]
@@ -130,8 +131,21 @@ def run_paper_ready_kernel_v1(
             stage=stage,
             artifact_path=artifact_path,
             target_day=target_day,
+            min_generated_at_utc=_iso(stage_started_at) if stage.stage_id == "paper_startup_intent_input_convergence" else "",
         )
         result.update(validation)
+        if stage.stage_id == "paper_startup_intent_input_convergence" and completed.returncode != 0 and result["status"] == "PASS":
+            result.update(
+                _blocked(
+                    "PAPER_STARTUP_INTENT_INPUT_CONVERGENCE_FAILED",
+                    result.get("artifact_status", "UNKNOWN"),
+                    "startup convergence producer exited nonzero; stale prior artifact cannot satisfy the scheduled run",
+                    stage,
+                    failed_field="returncode",
+                    expected_value=0,
+                    actual_value=completed.returncode,
+                )
+            )
         report["stage_results"].append(result)
         if artifact_path is not None:
             report["artifact_paths"][stage.stage_id] = str(artifact_path)
@@ -262,7 +276,7 @@ def _stage(stage_id: str, owner: str, command: list[str], truth_role: str, artif
     return KernelStage(stage_id, owner, command, truth_role, artifact_rel, pass_statuses, repair_command, next_action)
 
 
-def _validate_stage_artifact(*, stage: KernelStage, artifact_path: Path | None, target_day: str) -> dict[str, Any]:
+def _validate_stage_artifact(*, stage: KernelStage, artifact_path: Path | None, target_day: str, min_generated_at_utc: str = "") -> dict[str, Any]:
     if artifact_path is None:
         return {"status": "PASS", "artifact_status": "OK"}
     if artifact_path.is_dir():
@@ -297,6 +311,39 @@ def _validate_stage_artifact(*, stage: KernelStage, artifact_path: Path | None, 
             return _blocked("CASH_TOTAL_NONPOSITIVE", artifact_status, "cash_total_cents must be positive", stage, failed_field="cash_total_cents", expected_value="> 0", actual_value=cash)
         if nlv <= 0:
             return _blocked("NLV_TOTAL_NONPOSITIVE", artifact_status, "nlv_total_cents must be positive", stage, failed_field="nlv_total_cents", expected_value="> 0", actual_value=nlv)
+    if stage.stage_id == "paper_startup_intent_input_convergence":
+        generated_utc = str(data.get("generated_utc") or data.get("produced_at_utc") or "").strip()
+        if not generated_utc:
+            return _blocked(
+                "PAPER_STARTUP_INTENT_INPUT_CONVERGENCE_FRESHNESS_MISSING",
+                artifact_status,
+                "startup convergence artifact must carry generated_utc for scheduled kernel validation",
+                stage,
+                failed_field="generated_utc",
+                expected_value=f">= {min_generated_at_utc}" if min_generated_at_utc else "present",
+                actual_value=generated_utc,
+            )
+        if min_generated_at_utc and _iso_before(generated_utc, min_generated_at_utc):
+            return _blocked(
+                "PAPER_STARTUP_INTENT_INPUT_CONVERGENCE_STALE",
+                artifact_status,
+                "startup convergence artifact predates this stage invocation",
+                stage,
+                failed_field="generated_utc",
+                expected_value=f">= {min_generated_at_utc}",
+                actual_value=generated_utc,
+            )
+        symbol_diagnostics = data.get("symbol_diagnostics") if isinstance(data.get("symbol_diagnostics"), dict) else {}
+        if symbol_diagnostics.get("bridge_symbol_used_for_market_snapshot") is True:
+            return _blocked(
+                "PAPER_STARTUP_INTENT_INPUT_CONVERGENCE_STALE_BRIDGE_SYMBOL",
+                artifact_status,
+                "startup convergence artifact still reports deprecated bridge-symbol market snapshot materialization",
+                stage,
+                failed_field="symbol_diagnostics.bridge_symbol_used_for_market_snapshot",
+                expected_value=False,
+                actual_value=True,
+            )
     if stage.stage_id == "paper_startup_intent_input_convergence" and artifact_status not in stage.pass_statuses:
         symbol_diagnostics = data.get("symbol_diagnostics") if isinstance(data.get("symbol_diagnostics"), dict) else {}
         missing_symbols = symbol_diagnostics.get("missing_snapshot_symbols")
@@ -588,6 +635,28 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     except Exception:
         return None
     return None
+
+
+def _iso_before(left: str, right: str) -> bool:
+    left_dt = _parse_iso_utc(left)
+    right_dt = _parse_iso_utc(right)
+    if left_dt is None or right_dt is None:
+        return True
+    return left_dt < right_dt
+
+
+def _parse_iso_utc(value: str) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        normalized = text.replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
+    except ValueError:
+        return None
 
 
 def _iso(value: datetime) -> str:
