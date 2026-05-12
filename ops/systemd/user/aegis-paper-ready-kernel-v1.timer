@@ -1,0 +1,17 @@
+[Unit]
+Description=Scheduled Aegis PAPER ready kernel v1 windows
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 09:31:00 America/New_York
+OnCalendar=Mon..Fri *-*-* 10:15:00 America/New_York
+OnCalendar=Mon..Fri *-*-* 11:00:00 America/New_York
+OnCalendar=Mon..Fri *-*-* 11:45:00 America/New_York
+OnCalendar=Mon..Fri *-*-* 13:30:00 America/New_York
+OnCalendar=Mon..Fri *-*-* 14:30:00 America/New_York
+OnCalendar=Mon..Fri *-*-* 15:30:00 America/New_York
+AccuracySec=30s
+Persistent=false
+Unit=aegis-paper-ready-kernel-v1.service
+
+[Install]
+WantedBy=timers.target
