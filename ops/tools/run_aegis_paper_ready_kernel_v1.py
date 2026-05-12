@@ -240,6 +240,7 @@ def _stages(
         _stage("accounting_nav", "accounting", ["python3", "ops/tools/run_accounting_nav_v2_day_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root), "--producer_git_sha", release_commit], "PAPER_SLEEVE", Path("accounting_v2/nav") / target_day / "nav.v2.json", ("ACTIVE", "PASS", "OK"), "python3 ops/tools/run_accounting_nav_v2_day_v1.py --day_utc {day} --truth_root {sleeve} --producer_git_sha <current_release_commit>", "Recompute NAV from broker-backed PAPER sleeve cash ledger."),
         _stage("accounting_nav_compat_bridge", "accounting", ["python3", "ops/tools/bridge_accounting_nav_v2_to_compat_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("accounting_compat_v1/nav") / target_day / "nav_snapshot.v1.json", ("OK", "PASS", "ACTIVE"), "python3 ops/tools/bridge_accounting_nav_v2_to_compat_v1.py --day_utc {day} --truth_root {sleeve}", "Bridge NAV v2 into the compatibility NAV surface."),
         _stage("capital_supply", "capital_supply", ["python3", "ops/tools/run_capital_supply_v1.py", "--day_utc", target_day, "--environment", environment, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/capital_supply_v1") / target_day / "capital_supply.v1.json", ("PASS", "OK", "READY"), "python3 ops/tools/run_capital_supply_v1.py --day_utc {day} --environment PAPER --truth_root {sleeve}", "Produce PAPER sleeve capital supply from broker supply."),
+        _stage("paper_startup_intent_input_convergence", "intent", ["python3", "ops/tools/run_paper_startup_intent_input_convergence_v1.py", "--day_utc", target_day, "--truth_root", str(canonical_truth_root), "--environment", environment, "--ib_account", ib_account], "CANONICAL", Path("reports/paper_startup_intent_input_convergence_v1") / target_day / "paper_startup_intent_input_convergence.v1.json", ("SUCCESS", "PASS", "OK"), "python3 ops/tools/run_paper_startup_intent_input_convergence_v1.py --day_utc {day} --truth_root {canonical} --environment PAPER --ib_account DUO847203", "Refresh registry-derived PAPER startup input convergence before intent generation."),
         _stage("trading_day_intent_generation", "intent", ["python3", "ops/tools/run_trading_day_intent_generation_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/trading_day_intent_generation_v1") / target_day / "trading_day_intent_generation.v1.json", ("INTENTS_PRESENT", "VALID_ZERO", "PASS", "OK"), "python3 ops/tools/run_trading_day_intent_generation_v1.py --day_utc {day} --truth_root {sleeve}", "Generate current-day PAPER intents before portfolio scoring."),
         _stage("portfolio_activation_gate", "portfolio", ["python3", "ops/tools/run_portfolio_activation_gate_v1.py", "--day_utc", target_day, "--environment", environment, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/portfolio_activation_gate_v1") / target_day / "portfolio_activation_gate.v1.json", ("PASS", "ALLOW", "OK", "READY", "DEGRADED"), "python3 ops/tools/run_portfolio_activation_gate_v1.py --day_utc {day} --environment PAPER --truth_root {sleeve}", "Refresh portfolio activation gate."),
         _stage("portfolio_scoring", "portfolio", ["python3", "ops/tools/run_portfolio_scoring_v1.py", "--day_utc", target_day, "--environment", environment, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/portfolio_scoring_v1") / target_day / "portfolio_scoring.v1.json", ("PASS", "SCORED", "BOOTSTRAP_ACCEPTED_FOR_PAPER", "OK", "DEGRADED"), "python3 ops/tools/run_portfolio_scoring_v1.py --day_utc {day} --environment PAPER --truth_root {sleeve}", "Score current-day PAPER sleeve intents."),
@@ -296,6 +297,20 @@ def _validate_stage_artifact(*, stage: KernelStage, artifact_path: Path | None, 
             return _blocked("CASH_TOTAL_NONPOSITIVE", artifact_status, "cash_total_cents must be positive", stage, failed_field="cash_total_cents", expected_value="> 0", actual_value=cash)
         if nlv <= 0:
             return _blocked("NLV_TOTAL_NONPOSITIVE", artifact_status, "nlv_total_cents must be positive", stage, failed_field="nlv_total_cents", expected_value="> 0", actual_value=nlv)
+    if stage.stage_id == "paper_startup_intent_input_convergence" and artifact_status not in stage.pass_statuses:
+        symbol_diagnostics = data.get("symbol_diagnostics") if isinstance(data.get("symbol_diagnostics"), dict) else {}
+        missing_symbols = symbol_diagnostics.get("missing_snapshot_symbols")
+        if isinstance(missing_symbols, list) and missing_symbols:
+            normalized_missing = [str(symbol).strip().upper() for symbol in missing_symbols if str(symbol).strip()]
+            return _blocked(
+                "MARKET_DATA_SNAPSHOT_V1_MISSING_SYMBOLS",
+                artifact_status,
+                "startup convergence missing required registry-derived market snapshots",
+                stage,
+                failed_field="symbol_diagnostics.missing_snapshot_symbols",
+                expected_value=[],
+                actual_value=normalized_missing,
+            )
     if stage.stage_id == "intent_arbitration" and artifact_status not in stage.pass_statuses:
         return _blocked(blocker or "NO_SELECTED_INTENT", artifact_status, "intent arbitration did not select an executable intent", stage)
     if stage.stage_id == "global_kill_switch":
@@ -502,7 +517,7 @@ def _command_text(command: list[str]) -> str:
 
 
 def _status_of(data: dict[str, Any]) -> str:
-    for key in ("status", "final_status", "boundary_status", "state", "decision"):
+    for key in ("status", "final_status", "boundary_status", "state", "decision", "convergence_status"):
         value = data.get(key)
         if isinstance(value, str) and value:
             return value.upper()
