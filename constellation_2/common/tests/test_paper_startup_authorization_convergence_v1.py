@@ -1,7 +1,14 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from constellation_2.common.capability_state_v1 import write_capability_state_v1
 from constellation_2.common.paper_policy_verdict_v1 import (
@@ -12,11 +19,62 @@ from constellation_2.common.paper_startup_authorization_convergence_v1 import (
     derive_paper_startup_authorization_convergence_payload_v1,
 )
 import ops.tools.run_paper_startup_authorization_convergence_v1 as convergence_module
-from ops.tools.run_paper_startup_authorization_convergence_v1 import _artifact_result
+from ops.tools.run_paper_startup_authorization_convergence_v1 import _artifact_result, _tool_result
 
 
 DAY = "2026-04-10"
-REPO_ROOT = Path("/home/node/constellation")
+
+
+def test_tool_result_injects_repo_root_pythonpath_for_producers(monkeypatch) -> None:
+    captured = {}
+
+    def fake_run(command, *, cwd, env, capture_output, text):  # noqa: ANN001
+        captured["command"] = command
+        captured["cwd"] = cwd
+        captured["env"] = dict(env)
+        captured["capture_output"] = capture_output
+        captured["text"] = text
+        return SimpleNamespace(returncode=17, stdout="producer stdout\n", stderr="producer stderr\n")
+
+    monkeypatch.setenv("PYTHONPATH", "/already/present")
+    monkeypatch.setattr(convergence_module.subprocess, "run", fake_run)
+
+    result = _tool_result("ops/tools/run_correlation_envelope_gate_v1.py", "--day_utc", DAY)
+
+    pythonpath_entries = captured["env"]["PYTHONPATH"].split(os.pathsep)
+    assert pythonpath_entries[0] == str(convergence_module.REPO_ROOT)
+    assert "/already/present" in pythonpath_entries
+    assert captured["cwd"] == str(convergence_module.REPO_ROOT)
+    assert result["return_code"] == 17
+    assert result["python_executable"] == sys.executable
+    assert result["pythonpath_present"] is True
+    assert result["pythonpath_contains_repo_root"] is True
+    assert result["pythonpath_redacted"] == "<set>"
+    assert result["producer_command"] == result["command"]
+    assert result["stderr_tail"] == "producer stderr"
+
+
+def test_gate_producer_scripts_import_with_clean_environment(tmp_path: Path) -> None:
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "PYTHONPATH": "",
+        "PYTHONNOUSERSITE": "1",
+    }
+    for relpath in (
+        "ops/tools/run_paper_startup_authorization_convergence_v1.py",
+        "ops/tools/run_correlation_envelope_gate_v1.py",
+        "ops/tools/run_replay_certification_gate_v1.py",
+    ):
+        completed = subprocess.run(
+            [sys.executable, str((REPO_ROOT / relpath).resolve()), "--help"],
+            cwd=str(tmp_path),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr
+        assert "ModuleNotFoundError" not in completed.stderr
 
 
 def _convergence_row(

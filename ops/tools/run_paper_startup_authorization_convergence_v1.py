@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -64,15 +65,44 @@ def _read_json(path: Path) -> Dict[str, Any]:
     return payload
 
 
+def _subprocess_env() -> Dict[str, str]:
+    env = dict(os.environ)
+    existing_pythonpath = str(env.get("PYTHONPATH") or "").strip()
+    entries = [str(REPO_ROOT)]
+    if existing_pythonpath:
+        entries.extend(part for part in existing_pythonpath.split(os.pathsep) if part)
+    deduped = list(dict.fromkeys(entries))
+    env["PYTHONPATH"] = os.pathsep.join(deduped)
+    return env
+
+
+def _tail_text(value: str, *, limit: int = 2000) -> str:
+    text = str(value or "")
+    if len(text) <= limit:
+        return text
+    return text[-limit:]
+
+
 def _tool_result(script_relpath: str, *args: str) -> Dict[str, Any]:
     command = [sys.executable, str((REPO_ROOT / script_relpath).resolve()), *args]
-    proc = subprocess.run(command, cwd=str(REPO_ROOT), capture_output=True, text=True)
+    env = _subprocess_env()
+    proc = subprocess.run(command, cwd=str(REPO_ROOT), env=env, capture_output=True, text=True)
+    pythonpath = str(env.get("PYTHONPATH") or "")
+    pythonpath_entries = [part for part in pythonpath.split(os.pathsep) if part]
     return {
         "script": script_relpath,
         "command": command,
+        "producer_command": command,
+        "python_executable": sys.executable,
+        "cwd": str(REPO_ROOT),
+        "pythonpath_present": bool(pythonpath),
+        "pythonpath_contains_repo_root": str(REPO_ROOT) in pythonpath_entries,
+        "pythonpath_entry_count": len(pythonpath_entries),
+        "pythonpath_redacted": "<set>" if pythonpath else "",
         "return_code": int(proc.returncode),
         "stdout": proc.stdout.strip(),
         "stderr": proc.stderr.strip(),
+        "stderr_tail": _tail_text(proc.stderr.strip()),
     }
 
 

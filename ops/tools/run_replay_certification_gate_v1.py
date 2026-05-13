@@ -25,11 +25,13 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict
 
-from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1
-
 _THIS_FILE = Path(__file__).resolve()
 _REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
 REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1
 
 def _require_truth_root(p: str) -> Path:
     s = (p or "").strip()

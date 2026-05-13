@@ -31,16 +31,19 @@ import hashlib
 import json
 import subprocess
 import os
+import sys
 from decimal import Decimal, InvalidOperation
 from math import sqrt
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1
-
 _THIS_FILE = Path(__file__).resolve()
 _REPO_ROOT_FROM_FILE = _THIS_FILE.parents[2]
 REPO_ROOT = _REPO_ROOT_FROM_FILE.resolve()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.phaseF.accounting.lib.day_artifact_refresh_v1 import write_day_artifact_refreshable_v1
 
 def _truth_root_from_args_or_env(truth_root_arg: str | None) -> Path:
     if truth_root_arg is not None and str(truth_root_arg).strip():
