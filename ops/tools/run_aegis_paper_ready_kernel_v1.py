@@ -153,6 +153,28 @@ def run_paper_ready_kernel_v1(
                 )
             continue
 
+        if stage.stage_id == "exposure_net" and artifact_path is not None and artifact_path.exists():
+            result.update(
+                _validate_existing_exposure_net_for_reuse(
+                    artifact_path=artifact_path,
+                    target_day=target_day,
+                    sleeve_root=sleeve_root,
+                    stage=stage,
+                )
+            )
+            report["stage_results"].append(result)
+            report["artifact_paths"][stage.stage_id] = str(artifact_path)
+            _refresh_summary_fields(report, canonical_root=canonical_root, sleeve_root=sleeve_root, target_day=target_day)
+            if result["status"] != "PASS":
+                return _finish_blocked_report(
+                    report=report,
+                    stage=stage,
+                    result=result,
+                    canonical_truth_root=canonical_root,
+                    target_day=target_day,
+                )
+            continue
+
         stage_started_at = now_fn()
         completed = runner(stage.command, workdir)
         result["returncode"] = completed.returncode
@@ -1212,6 +1234,161 @@ def _validate_operational_refresh_artifact(*, artifact_path: Path, target_day: s
     if _wrong_day(data, target_day):
         return _blocked("TARGET_DAY_DATE_MISMATCH", _status_of(data), "artifact day does not match target day", stage)
     return {"status": "PASS", "artifact_status": str(data.get("readiness_mode") or _status_of(data)).upper()}
+
+
+def _validate_existing_exposure_net_for_reuse(
+    *,
+    artifact_path: Path,
+    target_day: str,
+    sleeve_root: Path,
+    stage: KernelStage,
+) -> dict[str, Any]:
+    try:
+        artifact_path.resolve().relative_to(sleeve_root.resolve())
+    except ValueError:
+        return _blocked(
+            "EXPOSURE_NET_WRONG_SLEEVE",
+            "INVALID",
+            "existing exposure_net_v1 artifact is outside the PAPER sleeve truth root",
+            stage,
+            failed_field="artifact_path",
+            expected_value=str(sleeve_root),
+            actual_value=str(artifact_path),
+        )
+
+    data = _read_json(artifact_path)
+    if not isinstance(data, dict):
+        return _blocked("EXPOSURE_NET_ARTIFACT_INVALID", "INVALID", "existing exposure_net_v1 is not valid JSON", stage)
+    schema_id = str(data.get("schema_id") or "").strip()
+    schema_version = data.get("schema_version")
+    artifact_status = _status_of(data)
+    if schema_id != "C2_EXPOSURE_NET_V1" or str(schema_version) not in {"1", "v1"}:
+        return _blocked(
+            "EXPOSURE_NET_SCHEMA_INVALID",
+            artifact_status,
+            "existing exposure_net_v1 has unexpected schema identity",
+            stage,
+            failed_field="schema_id/schema_version",
+            expected_value="C2_EXPOSURE_NET_V1/1",
+            actual_value=f"{schema_id}/{schema_version}",
+        )
+    if _wrong_day(data, target_day):
+        return _blocked(
+            "TARGET_DAY_DATE_MISMATCH",
+            artifact_status,
+            "existing exposure_net_v1 day does not match target day",
+            stage,
+            failed_field="day_utc",
+            expected_value=target_day,
+            actual_value=data.get("day_utc"),
+        )
+    if artifact_status not in {"OK", "PASS", "READY"}:
+        return _blocked(
+            "EXPOSURE_NET_STATUS_NOT_OK",
+            artifact_status,
+            "existing exposure_net_v1 status is not reusable",
+            stage,
+        )
+
+    pointer_path = sleeve_root / "pointers" / "selected_intent_pointer.v1.json"
+    pointer = _read_json(pointer_path)
+    if not isinstance(pointer, dict) or _status_of(pointer) != "SELECTED":
+        return _blocked(
+            "EXPOSURE_NET_SELECTED_INTENT_MISSING",
+            artifact_status,
+            "existing exposure_net_v1 reuse requires the current PAPER selected intent pointer",
+            stage,
+            failed_field="selected_intent_pointer.status",
+            expected_value="SELECTED",
+            actual_value=(pointer or {}).get("status") if isinstance(pointer, dict) else "MISSING",
+        )
+    selected = pointer.get("selected_intent") if isinstance(pointer.get("selected_intent"), dict) else {}
+    intent_path_text = str(selected.get("intent_path") or "").strip()
+    intent_hash = str(selected.get("intent_hash") or "").strip().lower()
+    if not intent_path_text or not intent_hash:
+        return _blocked(
+            "EXPOSURE_NET_SELECTED_INTENT_INCOMPLETE",
+            artifact_status,
+            "selected intent pointer must include intent_path and intent_hash before exposure_net reuse",
+            stage,
+            failed_field="selected_intent.intent_path/intent_hash",
+            expected_value="present",
+            actual_value=selected,
+        )
+    intent_path = Path(intent_path_text).expanduser().resolve()
+    try:
+        intent_path.relative_to(sleeve_root.resolve())
+    except ValueError:
+        return _blocked(
+            "EXPOSURE_NET_SELECTED_INTENT_WRONG_SLEEVE",
+            artifact_status,
+            "selected intent path is outside the PAPER sleeve truth root",
+            stage,
+            failed_field="selected_intent.intent_path",
+            expected_value=str(sleeve_root),
+            actual_value=str(intent_path),
+        )
+    if not intent_path.exists() or not intent_path.is_file():
+        return _blocked(
+            "EXPOSURE_NET_SELECTED_INTENT_MISSING",
+            artifact_status,
+            "selected intent artifact is missing before exposure_net reuse",
+            stage,
+            failed_field="selected_intent.intent_path",
+            expected_value="existing file",
+            actual_value=str(intent_path),
+        )
+    actual_intent_hash = _sha256_file(intent_path).lower()
+    if actual_intent_hash != intent_hash:
+        return _blocked(
+            "EXPOSURE_NET_SELECTED_INTENT_HASH_MISMATCH",
+            artifact_status,
+            "selected intent hash does not match the selected intent artifact bytes",
+            stage,
+            failed_field="selected_intent.intent_hash",
+            expected_value=actual_intent_hash,
+            actual_value=intent_hash,
+        )
+
+    manifest = data.get("input_manifest")
+    if not isinstance(manifest, list):
+        return _blocked(
+            "EXPOSURE_NET_INPUT_MANIFEST_MISSING",
+            artifact_status,
+            "existing exposure_net_v1 must preserve an input manifest for reuse",
+            stage,
+            failed_field="input_manifest",
+            expected_value="list",
+            actual_value=type(manifest).__name__,
+        )
+    selected_covered = False
+    for row in manifest:
+        if not isinstance(row, dict):
+            continue
+        row_path = str(row.get("path") or "").strip()
+        row_sha = str(row.get("sha256") or "").strip().lower()
+        if row_path == str(intent_path) and row_sha == intent_hash:
+            selected_covered = True
+            break
+    if not selected_covered:
+        return _blocked(
+            "EXPOSURE_NET_SELECTED_INTENT_NOT_IN_INPUT_MANIFEST",
+            artifact_status,
+            "existing exposure_net_v1 input manifest does not cover the current selected intent",
+            stage,
+            failed_field="input_manifest",
+            expected_value={"path": str(intent_path), "sha256": intent_hash},
+            actual_value=manifest,
+        )
+
+    return {
+        "status": "PASS",
+        "artifact_status": artifact_status,
+        "reuse_existing": True,
+        "detail": "existing same-day exposure_net_v1 validated and reused without invoking producer",
+        "selected_intent_path": str(intent_path),
+        "selected_intent_hash": intent_hash,
+    }
 
 
 def _refresh_summary_fields(report: dict[str, Any], *, canonical_root: Path, sleeve_root: Path, target_day: str) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -50,6 +51,84 @@ def _write_authority(root: Path) -> None:
             "points_to": str(_verdict_path(root)),
         },
     )
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_selected_intent(sleeve_root: Path) -> Path:
+    intent_path = sleeve_root / "intents_v1" / "snapshots" / DAY / "intent-1.exposure_intent.v1.json"
+    _write_json(
+        intent_path,
+        {
+            "schema_id": "exposure_intent",
+            "schema_version": "v1",
+            "day_utc": DAY,
+            "intent_id": "intent-1",
+            "engine": {"engine_id": "C2_TREND_EQ_PRIMARY_V1", "mode": "PAPER"},
+            "underlying": {"symbol": "SPY"},
+            "exposure_type": "LONG_EQUITY",
+            "target_notional_pct": "0.01",
+        },
+    )
+    intent_hash = _sha256(intent_path)
+    selected = {
+        "intent_id": "intent-1",
+        "intent_hash": intent_hash,
+        "intent_path": str(intent_path),
+        "engine_id": "C2_TREND_EQ_PRIMARY_V1",
+        "symbol": "SPY",
+    }
+    _write_json(
+        sleeve_root / "pointers" / "selected_intent_pointer.v1.json",
+        {
+            "schema_id": "selected_intent_pointer",
+            "schema_version": "v1",
+            "day_utc": DAY,
+            "status": "SELECTED",
+            "canonical_blocker": "",
+            "selected_intent": selected,
+        },
+    )
+    _write_json(
+        sleeve_root / "reports" / "intent_arbitration_v1" / DAY / "intent_arbitration.v1.json",
+        {
+            "schema_id": "intent_arbitration_v1",
+            "schema_version": "v1",
+            "day_utc": DAY,
+            "status": "SELECTED",
+            "selected_intent": selected,
+        },
+    )
+    return intent_path
+
+
+def _write_exposure_net(sleeve_root: Path, *, day_utc: str = DAY, status: str = "OK", intent_path: Path | None = None) -> Path:
+    manifest = []
+    if intent_path is not None:
+        manifest.append(
+            {
+                "day_utc": DAY,
+                "path": str(intent_path),
+                "producer": "intents_v1",
+                "sha256": _sha256(intent_path),
+                "type": "intents_snapshot",
+            }
+        )
+    path = sleeve_root / "risk_v1" / "exposure_net_v1" / DAY / "exposure_net.v1.json"
+    _write_json(
+        path,
+        {
+            "schema_id": "C2_EXPOSURE_NET_V1",
+            "schema_version": 1,
+            "day_utc": day_utc,
+            "status": status,
+            "input_manifest": manifest,
+            "portfolio": {"used_capital_at_risk_cents": 0},
+        },
+    )
+    return path
 
 
 def test_exposure_net_stage_runs_after_authority_freshness_and_before_capital_allocation() -> None:
@@ -131,7 +210,7 @@ def _runner_until_exposure_net(
         elif script == "run_portfolio_scoring_v1.py":
             _write_json(sleeve_root / "reports/portfolio_scoring_v1" / DAY / "portfolio_scoring.v1.json", {"day_utc": DAY, "status": "PASS"})
         elif script == "run_intent_arbitration_v1.py":
-            _write_json(sleeve_root / "reports/intent_arbitration_v1" / DAY / "intent_arbitration.v1.json", {"day_utc": DAY, "status": "SELECTED", "selected_intent_id": "intent-1"})
+            _write_selected_intent(sleeve_root)
         elif script == "run_risk_budget_supply_v1.py":
             _write_json(sleeve_root / "reports/risk_budget_supply_v1" / DAY / "risk_budget_supply.v1.json", {"day_utc": DAY, "status": "PASS"})
         elif script == "run_market_open_data_gate_v1.py":
@@ -147,6 +226,37 @@ def _runner_until_exposure_net(
             return subprocess.CompletedProcess(command, exposure_net_returncode, stdout="", stderr="producer failed")
         elif script == "run_capital_authority_allocation_day_v1.py":
             raise AssertionError("capital allocation must not run when exposure_net is unavailable")
+        return subprocess.CompletedProcess(command, 0, stdout="{}\n", stderr="")
+
+    return runner
+
+
+def _runner_with_existing_exposure_net(
+    *,
+    canonical_root: Path,
+    sleeve_root: Path,
+    call_log: list[str],
+):
+    def runner(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        script = Path(command[1]).name if len(command) > 1 else ""
+        call_log.append(script)
+        if script == "run_exposure_net_day_v1.py":
+            raise AssertionError("existing valid exposure_net must be reused without invoking producer")
+        if script == "run_capital_authority_allocation_day_v1.py":
+            _write_json(
+                sleeve_root / "allocation_v1/capital_authority_allocation_v1" / DAY / "capital_authority_allocation.v1.json",
+                {"schema_id": "C2_CAPITAL_AUTHORITY_ALLOCATION_V1", "schema_version": 1, "day_utc": DAY, "status": "OK"},
+            )
+        elif script == "run_phasec_identity_materializer_day_v1.py":
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr="stop after allocation")
+        else:
+            return _runner_until_exposure_net(
+                canonical_root=canonical_root,
+                sleeve_root=sleeve_root,
+                call_log=[],
+                exposure_net_returncode=0,
+                write_exposure_net=False,
+            )(command, cwd)
         return subprocess.CompletedProcess(command, 0, stdout="{}\n", stderr="")
 
     return runner
@@ -178,6 +288,87 @@ def test_missing_exposure_net_stops_before_capital_authority_allocation(tmp_path
     assert "run_capital_authority_allocation_day_v1.py" not in call_log
     assert report["submit_allowed"] is False
     assert report["submission_authorized"] is False
+
+
+def test_valid_existing_exposure_net_is_reused_without_overwrite_and_allocation_proceeds(tmp_path: Path) -> None:
+    canonical_root = tmp_path / "truth"
+    sleeve_root = tmp_path / "truth_sleeves/PRIMARY/PAPER"
+    _write_authority(sleeve_root)
+    intent_path = _write_selected_intent(sleeve_root)
+    exposure_path = _write_exposure_net(sleeve_root, intent_path=intent_path)
+    before = exposure_path.read_bytes()
+    call_log: list[str] = []
+
+    report = kernel.run_paper_ready_kernel_v1(
+        target_day=DAY,
+        canonical_truth_root=canonical_root,
+        paper_sleeve_root=sleeve_root,
+        require_current_release=False,
+        command_runner=_runner_with_existing_exposure_net(
+            canonical_root=canonical_root,
+            sleeve_root=sleeve_root,
+            call_log=call_log,
+        ),
+    )
+
+    exposure_stage = next(row for row in report["stage_results"] if row["stage_id"] == "exposure_net")
+    assert exposure_stage["status"] == "PASS"
+    assert exposure_stage["reuse_existing"] is True
+    assert "run_exposure_net_day_v1.py" not in call_log
+    assert "run_capital_authority_allocation_day_v1.py" in call_log
+    assert exposure_path.read_bytes() == before
+
+
+def test_wrong_day_existing_exposure_net_blocks_before_allocation(tmp_path: Path) -> None:
+    canonical_root = tmp_path / "truth"
+    sleeve_root = tmp_path / "truth_sleeves/PRIMARY/PAPER"
+    _write_authority(sleeve_root)
+    intent_path = _write_selected_intent(sleeve_root)
+    _write_exposure_net(sleeve_root, day_utc="2026-05-12", intent_path=intent_path)
+    call_log: list[str] = []
+
+    report = kernel.run_paper_ready_kernel_v1(
+        target_day=DAY,
+        canonical_truth_root=canonical_root,
+        paper_sleeve_root=sleeve_root,
+        require_current_release=False,
+        command_runner=_runner_with_existing_exposure_net(
+            canonical_root=canonical_root,
+            sleeve_root=sleeve_root,
+            call_log=call_log,
+        ),
+    )
+
+    assert report["failed_stage_id"] == "exposure_net"
+    assert report["first_blocker"] == "TARGET_DAY_DATE_MISMATCH"
+    assert "run_exposure_net_day_v1.py" not in call_log
+    assert "run_capital_authority_allocation_day_v1.py" not in call_log
+
+
+def test_existing_exposure_net_missing_selected_intent_manifest_blocks_before_allocation(tmp_path: Path) -> None:
+    canonical_root = tmp_path / "truth"
+    sleeve_root = tmp_path / "truth_sleeves/PRIMARY/PAPER"
+    _write_authority(sleeve_root)
+    _write_selected_intent(sleeve_root)
+    _write_exposure_net(sleeve_root)
+    call_log: list[str] = []
+
+    report = kernel.run_paper_ready_kernel_v1(
+        target_day=DAY,
+        canonical_truth_root=canonical_root,
+        paper_sleeve_root=sleeve_root,
+        require_current_release=False,
+        command_runner=_runner_with_existing_exposure_net(
+            canonical_root=canonical_root,
+            sleeve_root=sleeve_root,
+            call_log=call_log,
+        ),
+    )
+
+    assert report["failed_stage_id"] == "exposure_net"
+    assert report["first_blocker"] == "EXPOSURE_NET_SELECTED_INTENT_NOT_IN_INPUT_MANIFEST"
+    assert "run_exposure_net_day_v1.py" not in call_log
+    assert "run_capital_authority_allocation_day_v1.py" not in call_log
 
 
 def test_nonzero_exposure_net_producer_exit_blocks_even_with_valid_artifact(tmp_path: Path) -> None:
