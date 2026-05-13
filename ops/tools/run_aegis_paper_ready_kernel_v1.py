@@ -177,6 +177,18 @@ def run_paper_ready_kernel_v1(
                     actual_value=completed.returncode,
                 )
             )
+        if stage.stage_id == "exposure_net" and completed.returncode != 0 and result["status"] == "PASS":
+            result.update(
+                _blocked(
+                    "EXPOSURE_NET_PRODUCER_FAILED",
+                    result.get("artifact_status", "UNKNOWN"),
+                    "exposure-net producer exited nonzero; capital allocation cannot rely on this stage",
+                    stage,
+                    failed_field="returncode",
+                    expected_value=0,
+                    actual_value=completed.returncode,
+                )
+            )
         report["stage_results"].append(result)
         if artifact_path is not None:
             report["artifact_paths"][stage.stage_id] = str(artifact_path)
@@ -295,6 +307,7 @@ def _stages(
         _stage("structure_decision_supply", "structure", ["python3", "ops/tools/run_structure_decision_supply_v1.py", "--day_utc", target_day, "--environment", environment, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/structure_decision_supply_v1") / target_day / "structure_decision_supply.v1.json", ("PASS", "OK", "READY"), "python3 ops/tools/run_structure_decision_supply_v1.py --day_utc {day} --environment PAPER --truth_root {sleeve}", "Build option structure decision from market-open data."),
         _stage("paper_authority_pointer_refresh", "authorization", ["python3", "ops/tools/run_pointer_append_v1.py", "--guarded-by", "authorization_gate_verdict_v1"], "PAPER_SLEEVE", Path("run_pointer_v2/canonical_authority_head.v1.json"), ("PASS", "BOOTSTRAP_PASS"), "Run governed pointer append/head materialization only after same-day PAPER authorization verdict PASS.", "Refresh the same-day PAPER canonical authority head from the governed PASS authorization verdict before capital allocation."),
         _stage("paper_authority_head_freshness", "authorization", ["python3", "-c", "pass"], "PAPER_SLEEVE", Path("run_pointer_v2/canonical_authority_head.v1.json"), ("PASS",), "Inspect PAPER authorization_gate_verdict_v1 and canonical authority head; do not synthesize authority.", "Resolve same-day PAPER authorization gate verdict and canonical authority head before capital allocation."),
+        _stage("exposure_net", "risk", ["python3", "ops/tools/run_exposure_net_day_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("risk_v1/exposure_net_v1") / target_day / "exposure_net.v1.json", ("OK", "PASS", "READY"), "python3 ops/tools/run_exposure_net_day_v1.py --day_utc {day} --truth_root {sleeve}", "Produce same-day exposure_net_v1 before capital authority allocation."),
         _stage("capital_authority_allocation", "authorization", ["python3", "ops/tools/run_capital_authority_allocation_day_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root), "--canonical_sequence_owner", "ops/tools/run_c2_paper_day_orchestrator_v2.py"], "PAPER_SLEEVE", Path("allocation_v1/capital_authority_allocation_v1") / target_day / "capital_authority_allocation.v1.json", ("OK", "PASS", "READY"), "python3 ops/tools/run_capital_authority_allocation_day_v1.py --day_utc {day} --truth_root {sleeve} --canonical_sequence_owner ops/tools/run_c2_paper_day_orchestrator_v2.py", "Allocate capital authority for the selected intent."),
         _stage("phasec_identity_materializer", "authorization", ["python3", "ops/tools/run_phasec_identity_materializer_day_v1.py", "--day_utc", target_day, "--eval_time_utc", _iso(datetime.now(UTC)), "--truth_root", str(canonical_truth_root), "--execution_truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("phaseC_preflight_v1") / target_day, ("OK", "PASS", "READY", "SUCCESS"), "python3 ops/tools/run_phasec_identity_materializer_day_v1.py --day_utc {day} --eval_time_utc $(date -u +%FT%TZ) --truth_root {canonical} --execution_truth_root {sleeve}", "Materialize Phase C identity and defined-risk proof into the PAPER sleeve."),
         _stage("authorization_artifacts", "authorization", ["python3", "ops/tools/run_authorization_artifacts_day_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("engine_activity_v1/authorization_v1") / target_day, ("OK", "PASS", "READY", "AUTHORIZED"), "python3 ops/tools/run_authorization_artifacts_day_v1.py --day_utc {day} --truth_root {sleeve}", "Write governed authorization artifacts for approved intents."),
