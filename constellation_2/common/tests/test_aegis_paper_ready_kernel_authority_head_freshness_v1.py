@@ -156,6 +156,7 @@ def test_authority_head_stage_is_before_capital_allocation() -> None:
     )
     stage_ids = [stage.stage_id for stage in stages]
 
+    assert stage_ids.index("paper_authority_pointer_refresh") < stage_ids.index("paper_authority_head_freshness")
     assert stage_ids.index("paper_authority_head_freshness") < stage_ids.index("capital_authority_allocation")
 
 
@@ -220,7 +221,7 @@ def test_kernel_blocks_at_authority_head_before_running_capital_allocation(tmp_p
             _write_json(sleeve_root / "reports/market_open_data_gate_v1" / DAY / "market_open_data_gate.v1.json", {"day_utc": DAY, "status": "PASS"})
         elif script == "run_structure_decision_supply_v1.py":
             _write_json(sleeve_root / "reports/structure_decision_supply_v1" / DAY / "structure_decision_supply.v1.json", {"day_utc": DAY, "status": "PASS"})
-        elif script == "-c":
+        elif script == "run_pointer_append_v1.py":
             pass
         elif script == "run_capital_authority_allocation_day_v1.py":
             raise AssertionError("capital allocation must not run when authority head is missing")
@@ -234,7 +235,7 @@ def test_kernel_blocks_at_authority_head_before_running_capital_allocation(tmp_p
         command_runner=runner,
     )
 
-    assert report["failed_stage_id"] == "paper_authority_head_freshness"
+    assert report["failed_stage_id"] == "paper_authority_pointer_refresh"
     assert report["first_blocker"] == "AUTHORITY_HEAD_NOT_READY_FOR_DAY"
     assert "run_capital_authority_allocation_day_v1.py" not in call_log
     assert report["submit_allowed"] is False

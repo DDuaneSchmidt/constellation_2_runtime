@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,8 @@ CANONICAL_TRUTH_ROOT = Path("/home/node/constellation_runtime_data/truth")
 PAPER_SLEEVE_ROOT = Path("/home/node/constellation_runtime_data/truth_sleeves/PRIMARY/PAPER")
 CURRENT_RELEASE_MANIFEST = CANONICAL_TRUTH_ROOT / "releases" / "current_release.v1.json"
 REPORT_REL = Path("reports/aegis_paper_ready_kernel_v1")
+GATE_HIERARCHY_POLICY_REL = Path("governance/02_REGISTRIES/GATE_HIERARCHY_V1.json")
+PAPER_DAY_ORCHESTRATOR_SERVICE_REL = Path("ops/systemd/user/c2-paper-day-orchestrator.service")
 
 PAPER_READY = "PAPER_READY"
 BLOCKED = "BLOCKED"
@@ -123,6 +126,32 @@ def run_paper_ready_kernel_v1(
             "artifact_path": str(artifact_path) if artifact_path else "",
             "status": "RUNNING",
         }
+
+        if stage.stage_id == "paper_authority_pointer_refresh":
+            result.update(
+                _run_paper_authority_pointer_refresh_stage(
+                    stage=stage,
+                    artifact_path=artifact_path,
+                    target_day=target_day,
+                    sleeve_root=sleeve_root,
+                    runner=runner,
+                    workdir=workdir,
+                    release_commit=release_commit,
+                )
+            )
+            report["stage_results"].append(result)
+            if artifact_path is not None:
+                report["artifact_paths"][stage.stage_id] = str(artifact_path)
+            _refresh_summary_fields(report, canonical_root=canonical_root, sleeve_root=sleeve_root, target_day=target_day)
+            if result["status"] != "PASS":
+                return _finish_blocked_report(
+                    report=report,
+                    stage=stage,
+                    result=result,
+                    canonical_truth_root=canonical_root,
+                    target_day=target_day,
+                )
+            continue
 
         stage_started_at = now_fn()
         completed = runner(stage.command, workdir)
@@ -264,6 +293,7 @@ def _stages(
         _stage("risk_budget_supply", "risk_budget", ["python3", "ops/tools/run_risk_budget_supply_v1.py", "--day_utc", target_day, "--environment", environment, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/risk_budget_supply_v1") / target_day / "risk_budget_supply.v1.json", ("PASS", "OK", "READY"), "python3 ops/tools/run_risk_budget_supply_v1.py --day_utc {day} --environment PAPER --truth_root {sleeve}", "Compute risk budget from NAV, selected intent, and capital risk envelope."),
         _stage("market_open_data_gate", "market_data", ["python3", "ops/tools/run_market_open_data_gate_v1.py", "--day_utc", target_day, "--environment", environment, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/market_open_data_gate_v1") / target_day / "market_open_data_gate.v1.json", ("PASS", "OK", "READY"), "python3 ops/tools/run_market_open_data_gate_v1.py --day_utc {day} --environment PAPER --truth_root {sleeve}", "Wait for market open, then produce current quote-complete options data."),
         _stage("structure_decision_supply", "structure", ["python3", "ops/tools/run_structure_decision_supply_v1.py", "--day_utc", target_day, "--environment", environment, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/structure_decision_supply_v1") / target_day / "structure_decision_supply.v1.json", ("PASS", "OK", "READY"), "python3 ops/tools/run_structure_decision_supply_v1.py --day_utc {day} --environment PAPER --truth_root {sleeve}", "Build option structure decision from market-open data."),
+        _stage("paper_authority_pointer_refresh", "authorization", ["python3", "ops/tools/run_pointer_append_v1.py", "--guarded-by", "authorization_gate_verdict_v1"], "PAPER_SLEEVE", Path("run_pointer_v2/canonical_authority_head.v1.json"), ("PASS", "BOOTSTRAP_PASS"), "Run governed pointer append/head materialization only after same-day PAPER authorization verdict PASS.", "Refresh the same-day PAPER canonical authority head from the governed PASS authorization verdict before capital allocation."),
         _stage("paper_authority_head_freshness", "authorization", ["python3", "-c", "pass"], "PAPER_SLEEVE", Path("run_pointer_v2/canonical_authority_head.v1.json"), ("PASS",), "Inspect PAPER authorization_gate_verdict_v1 and canonical authority head; do not synthesize authority.", "Resolve same-day PAPER authorization gate verdict and canonical authority head before capital allocation."),
         _stage("capital_authority_allocation", "authorization", ["python3", "ops/tools/run_capital_authority_allocation_day_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root), "--canonical_sequence_owner", "ops/tools/run_c2_paper_day_orchestrator_v2.py"], "PAPER_SLEEVE", Path("allocation_v1/capital_authority_allocation_v1") / target_day / "capital_authority_allocation.v1.json", ("OK", "PASS", "READY"), "python3 ops/tools/run_capital_authority_allocation_day_v1.py --day_utc {day} --truth_root {sleeve} --canonical_sequence_owner ops/tools/run_c2_paper_day_orchestrator_v2.py", "Allocate capital authority for the selected intent."),
         _stage("phasec_identity_materializer", "authorization", ["python3", "ops/tools/run_phasec_identity_materializer_day_v1.py", "--day_utc", target_day, "--eval_time_utc", _iso(datetime.now(UTC)), "--truth_root", str(canonical_truth_root), "--execution_truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("phaseC_preflight_v1") / target_day, ("OK", "PASS", "READY", "SUCCESS"), "python3 ops/tools/run_phasec_identity_materializer_day_v1.py --day_utc {day} --eval_time_utc $(date -u +%FT%TZ) --truth_root {canonical} --execution_truth_root {sleeve}", "Materialize Phase C identity and defined-risk proof into the PAPER sleeve."),
@@ -481,6 +511,283 @@ def _validate_portfolio_bootstrap_acceptance(*, data: dict[str, Any], artifact_s
         "portfolio_bootstrap_reason": PORTFOLIO_BOOTSTRAP_REASON,
         "detail": "portfolio activation gate bootstrap status accepted for PAPER only",
     }
+
+
+def _run_paper_authority_pointer_refresh_stage(
+    *,
+    stage: KernelStage,
+    artifact_path: Path | None,
+    target_day: str,
+    sleeve_root: Path,
+    runner: Callable[[list[str], Path], subprocess.CompletedProcess[str]],
+    workdir: Path,
+    release_commit: str,
+) -> dict[str, Any]:
+    if artifact_path is None:
+        return _blocked(
+            "AUTHORITY_HEAD_NOT_READY_FOR_DAY",
+            "MISSING",
+            "authority pointer refresh stage has no authority-head artifact path",
+            stage,
+            failed_field="artifact_path",
+            expected_value="run_pointer_v2/canonical_authority_head.v1.json",
+            actual_value="",
+        )
+
+    verdict_path = _same_day_authorization_gate_verdict_path(authority_head_path=artifact_path, target_day=target_day)
+    verdict = _read_json(verdict_path)
+    verdict_validation = _validate_same_day_authorization_verdict_for_pointer_refresh(
+        verdict=verdict,
+        verdict_path=verdict_path,
+        target_day=target_day,
+        stage=stage,
+    )
+    if verdict_validation["status"] != "PASS":
+        return verdict_validation
+
+    current_head = _read_json(artifact_path)
+    if isinstance(current_head, dict):
+        current_validation = _validate_paper_authority_head_freshness(
+            data=current_head,
+            artifact_path=artifact_path,
+            target_day=target_day,
+            stage=stage,
+        )
+        if current_validation["status"] == "PASS":
+            current_validation["authority_pointer_refresh"] = {
+                "action": "SKIPPED_HEAD_ALREADY_FRESH",
+                "authorization_verdict_path": str(verdict_path),
+                "append_attempted": False,
+                "head_materialization_attempted": False,
+            }
+            current_validation["detail"] = "same-day PAPER authority head was already fresh"
+            return current_validation
+
+    cfg_hash = _sha256_file((workdir / PAPER_DAY_ORCHESTRATOR_SERVICE_REL).resolve())
+    policy_hash = _sha256_file((workdir / GATE_HIERARCHY_POLICY_REL).resolve())
+
+    attempt_cmd = [
+        "python3",
+        "ops/tools/run_pointer_attempt_alloc_v1.py",
+        "--day_utc",
+        target_day,
+        "--mode",
+        "PAPER",
+        "--orchestrator_config_hash",
+        cfg_hash,
+        "--git_sha",
+        release_commit,
+        "--truth_root",
+        str(sleeve_root),
+    ]
+    attempt_completed = runner(attempt_cmd, workdir)
+    subcommands: list[dict[str, Any]] = [_command_result("run_pointer_attempt_alloc_v1", attempt_cmd, attempt_completed)]
+    if attempt_completed.returncode != 0:
+        return _authority_pointer_refresh_blocked(
+            stage=stage,
+            blocker="AUTHORITY_POINTER_REFRESH_FAILED",
+            detail="pointer attempt allocation failed",
+            failed_field="run_pointer_attempt_alloc_v1.returncode",
+            expected_value=0,
+            actual_value=attempt_completed.returncode,
+            verdict_path=verdict_path,
+            subcommands=subcommands,
+        )
+
+    attempt_payload = _json_stdout(attempt_completed.stdout)
+    attempt_id = str(attempt_payload.get("attempt_id") or "").strip()
+    attempt_seq = _int_value(attempt_payload.get("attempt_seq"))
+    if not attempt_id or attempt_seq <= 0:
+        return _authority_pointer_refresh_blocked(
+            stage=stage,
+            blocker="AUTHORITY_POINTER_REFRESH_FAILED",
+            detail="pointer attempt allocation did not return a valid attempt id",
+            failed_field="run_pointer_attempt_alloc_v1.stdout",
+            expected_value="attempt_id and positive attempt_seq",
+            actual_value=(attempt_completed.stdout or "")[-500:],
+            verdict_path=verdict_path,
+            subcommands=subcommands,
+        )
+
+    append_cmd = [
+        "python3",
+        "ops/tools/run_pointer_append_v1.py",
+        "--day_utc",
+        target_day,
+        "--attempt_id",
+        attempt_id,
+        "--attempt_seq",
+        str(attempt_seq),
+        "--mode",
+        "PAPER",
+        "--status",
+        "PASS",
+        "--authoritative",
+        "YES",
+        "--policy_hash",
+        policy_hash,
+        "--orchestrator_config_hash",
+        cfg_hash,
+        "--produced_utc",
+        f"{target_day}T00:00:00Z",
+        "--points_to",
+        str(verdict_path),
+        "--git_sha",
+        release_commit,
+        "--truth_root",
+        str(sleeve_root),
+    ]
+    append_completed = runner(append_cmd, workdir)
+    subcommands.append(_command_result("run_pointer_append_v1", append_cmd, append_completed))
+    if append_completed.returncode != 0:
+        return _authority_pointer_refresh_blocked(
+            stage=stage,
+            blocker="AUTHORITY_POINTER_REFRESH_FAILED",
+            detail="pointer append failed",
+            failed_field="run_pointer_append_v1.returncode",
+            expected_value=0,
+            actual_value=append_completed.returncode,
+            verdict_path=verdict_path,
+            subcommands=subcommands,
+        )
+
+    heads_cmd = [
+        "python3",
+        "ops/tools/run_pointer_heads_materialize_v1.py",
+        "--fail_if_no_authority_head",
+        "YES",
+        "--expected_day_utc",
+        target_day,
+        "--truth_root",
+        str(sleeve_root),
+    ]
+    heads_completed = runner(heads_cmd, workdir)
+    subcommands.append(_command_result("run_pointer_heads_materialize_v1", heads_cmd, heads_completed))
+    if heads_completed.returncode != 0:
+        return _authority_pointer_refresh_blocked(
+            stage=stage,
+            blocker="AUTHORITY_POINTER_REFRESH_FAILED",
+            detail="pointer head materialization failed",
+            failed_field="run_pointer_heads_materialize_v1.returncode",
+            expected_value=0,
+            actual_value=heads_completed.returncode,
+            verdict_path=verdict_path,
+            subcommands=subcommands,
+        )
+
+    refreshed_head = _read_json(artifact_path)
+    if not isinstance(refreshed_head, dict):
+        return _authority_pointer_refresh_blocked(
+            stage=stage,
+            blocker="AUTHORITY_HEAD_NOT_READY_FOR_DAY",
+            detail="pointer refresh completed but same-day authority head is missing or invalid",
+            failed_field="run_pointer_v2/canonical_authority_head.v1.json",
+            expected_value="fresh same-day authority head",
+            actual_value="missing_or_invalid",
+            verdict_path=verdict_path,
+            subcommands=subcommands,
+        )
+    validation = _validate_paper_authority_head_freshness(
+        data=refreshed_head,
+        artifact_path=artifact_path,
+        target_day=target_day,
+        stage=stage,
+    )
+    validation["authority_pointer_refresh"] = {
+        "action": "MATERIALIZED",
+        "authorization_verdict_path": str(verdict_path),
+        "append_attempted": True,
+        "head_materialization_attempted": True,
+        "subcommands": subcommands,
+    }
+    if validation["status"] != "PASS":
+        validation["detail"] = "pointer refresh did not produce a fresh same-day authority head"
+    return validation
+
+
+def _validate_same_day_authorization_verdict_for_pointer_refresh(
+    *,
+    verdict: dict[str, Any] | None,
+    verdict_path: Path,
+    target_day: str,
+    stage: KernelStage,
+) -> dict[str, Any]:
+    if not isinstance(verdict, dict):
+        return _blocked(
+            "AUTHORITY_HEAD_NOT_READY_FOR_DAY",
+            "MISSING",
+            "same-day PAPER authorization verdict is missing before authority pointer refresh",
+            stage,
+            failed_field="authorization_gate_verdict_v1",
+            expected_value="same-day PASS or BOOTSTRAP_PASS verdict",
+            actual_value=str(verdict_path),
+        )
+    schema_id = str(verdict.get("schema_id") or "").strip()
+    schema_version = str(verdict.get("schema_version") or "").strip()
+    verdict_day = str(verdict.get("day_utc") or "").strip()
+    verdict_status = _status_of(verdict)
+    allowed_statuses = {"PASS", "BOOTSTRAP_PASS"}
+    if schema_id != "authorization_gate_verdict_v1" or schema_version not in {"1", "v1"}:
+        return _blocked(
+            "AUTHORITY_HEAD_NOT_READY_FOR_DAY",
+            verdict_status,
+            "same-day PAPER authorization verdict schema is invalid",
+            stage,
+            failed_field="authorization_gate_verdict_v1.schema",
+            expected_value="authorization_gate_verdict_v1/v1",
+            actual_value=f"{schema_id}/{schema_version}",
+        )
+    if verdict_day != target_day:
+        return _blocked(
+            "AUTHORITY_HEAD_DAY_MISMATCH",
+            verdict_status,
+            "same-day PAPER authorization verdict day does not match target day",
+            stage,
+            failed_field="authorization_gate_verdict_v1.day_utc",
+            expected_value=target_day,
+            actual_value=verdict_day,
+        )
+    if verdict_status not in allowed_statuses:
+        return _blocked(
+            "AUTHORITY_HEAD_NOT_READY_FOR_DAY",
+            verdict_status,
+            "same-day PAPER authorization verdict is not PASS or BOOTSTRAP_PASS",
+            stage,
+            failed_field="authorization_gate_verdict_v1.status",
+            expected_value=sorted(allowed_statuses),
+            actual_value=verdict_status,
+        )
+    return {"status": "PASS", "artifact_status": verdict_status}
+
+
+def _authority_pointer_refresh_blocked(
+    *,
+    stage: KernelStage,
+    blocker: str,
+    detail: str,
+    failed_field: str,
+    expected_value: Any,
+    actual_value: Any,
+    verdict_path: Path,
+    subcommands: list[dict[str, Any]],
+) -> dict[str, Any]:
+    result = _blocked(
+        blocker,
+        "FAILED",
+        detail,
+        stage,
+        failed_field=failed_field,
+        expected_value=expected_value,
+        actual_value=actual_value,
+    )
+    result["authority_pointer_refresh"] = {
+        "action": "FAILED",
+        "authorization_verdict_path": str(verdict_path),
+        "append_attempted": any(row.get("tool") == "run_pointer_append_v1" for row in subcommands),
+        "head_materialization_attempted": any(row.get("tool") == "run_pointer_heads_materialize_v1" for row in subcommands),
+        "subcommands": subcommands,
+    }
+    return result
 
 
 def _validate_paper_authority_head_freshness(
@@ -1034,6 +1341,31 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     except Exception:
         return None
     return None
+
+
+def _json_stdout(stdout: str | None) -> dict[str, Any]:
+    text = str(stdout or "").strip()
+    if not text:
+        return {}
+    try:
+        obj = json.loads(text)
+    except Exception:
+        return {}
+    return obj if isinstance(obj, dict) else {}
+
+
+def _command_result(tool: str, command: list[str], completed: subprocess.CompletedProcess[str]) -> dict[str, Any]:
+    return {
+        "tool": tool,
+        "command": _command_text(command),
+        "returncode": completed.returncode,
+        "stdout_tail": (completed.stdout or "")[-500:],
+        "stderr_tail": (completed.stderr or "")[-500:],
+    }
+
+
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _iso_before(left: str, right: str) -> bool:
