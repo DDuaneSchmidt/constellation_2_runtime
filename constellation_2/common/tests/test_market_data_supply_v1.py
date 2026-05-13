@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 import ops.tools.aegis_chatgpt_packet as packet  # noqa: E402
 import ops.tools.run_aegis_day_v1 as day_run  # noqa: E402
 import ops.tools.run_ib_market_data_entitlement_probe_v1 as entitlement  # noqa: E402
+import ops.tools.run_aegis_requirement_graph_v1 as req_graph  # noqa: E402
 import ops.tools.run_market_open_data_gate_v1 as open_gate  # noqa: E402
 import ops.tools.run_market_data_supply_v1 as supply  # noqa: E402
 import ops.tools.run_options_chain_snapshot_required_day_v1 as options_required  # noqa: E402
@@ -270,6 +271,45 @@ def _selected_pointer(ctx: bod.BodContext, *, symbol: str = "SPY") -> Path:
     return pointer
 
 
+def _selected_long_equity_pointer(ctx: bod.BodContext, *, symbol: str = "QQQ") -> Path:
+    intent_path = ctx.execution_root / "intents_v1" / "snapshots" / ctx.day_utc / f"{symbol.lower()}_long.exposure_intent.v1.json"
+    intent_path.parent.mkdir(parents=True, exist_ok=True)
+    intent_path.write_text(
+        json.dumps(
+            {
+                "schema_id": "exposure_intent",
+                "schema_version": "v1",
+                "day_utc": ctx.day_utc,
+                "intent_id": f"intent_{symbol.lower()}_long",
+                "underlying": {"symbol": symbol},
+                "symbol": symbol,
+                "exposure_type": "LONG_EQUITY",
+                "target_notional_pct": "0.10",
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    pointer = open_gate.selected_intent_pointer_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    pointer.parent.mkdir(parents=True, exist_ok=True)
+    pointer.write_text(
+        json.dumps(
+            {
+                "schema_id": "selected_intent_pointer",
+                "schema_version": "v1",
+                "day_utc": ctx.day_utc,
+                "environment": "PAPER",
+                "status": "SELECTED",
+                "canonical_blocker": "",
+                "selected_intent": {"intent_id": f"intent_{symbol.lower()}_long", "intent_path": str(intent_path), "symbol": symbol},
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    return pointer
+
+
 def test_owned_spy_active_intent_creates_market_data_requirements(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _requirement(ctx)
@@ -279,6 +319,71 @@ def test_owned_spy_active_intent_creates_market_data_requirements(tmp_path: Path
     assert payload["requirements"]
     assert payload["requirements"][0]["source_type"] == "ACTIVE_INTENT"
     assert payload["requirements"][0]["instrument"] == "SPY"
+
+
+def test_long_equity_selected_intent_creates_equity_market_data_requirements(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _selected_long_equity_pointer(ctx, symbol="QQQ")
+
+    payload = req_graph.build_requirement_graph(ctx)
+
+    rows = [
+        row for row in payload["requirements"]
+        if row.get("owner_phase") == "MARKET_DATA"
+        and row.get("source_type") == "ACTIVE_INTENT"
+        and row.get("instrument") == "QQQ"
+    ]
+    assert [row["required_artifact"] for row in rows] == [
+        "underlying_spot",
+        "bid_ask_quotes",
+        "freshness_certificate",
+    ]
+    assert payload["active_intents"][0]["requires_equity_market_data"] is True
+
+
+def test_missing_requirement_graph_blocks_when_selected_intent_is_active(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _selected_long_equity_pointer(ctx, symbol="QQQ")
+
+    payload = supply.build_market_data_supply(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "MARKET_DATA_REQUIREMENT_GRAPH_MISSING"
+    assert payload["active_selected_intent"]["symbol"] == "QQQ"
+
+
+def test_empty_requirement_graph_blocks_for_active_selected_intent(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _selected_long_equity_pointer(ctx, symbol="QQQ")
+    path = ctx.truth_root / "reports" / "aegis_requirement_graph_v1" / ctx.day_utc / "requirement_graph.v1.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"day_utc": ctx.day_utc, "requirements": []}), encoding="utf-8")
+
+    payload = supply.build_market_data_supply(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "MARKET_DATA_REQUIREMENTS_EMPTY_FOR_ACTIVE_INTENT"
+
+
+def test_valid_qqq_long_equity_market_evidence_allows_supply_pass(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _selected_long_equity_pointer(ctx, symbol="QQQ")
+    graph = req_graph.build_requirement_graph(ctx)
+    graph_path = ctx.truth_root / "reports" / "aegis_requirement_graph_v1" / ctx.day_utc / "requirement_graph.v1.json"
+    graph_path.parent.mkdir(parents=True, exist_ok=True)
+    graph_path.write_text(json.dumps(graph, sort_keys=True), encoding="utf-8")
+    _diag(ctx, [], valid_quotes=1, spot=True, contracts=1)
+    _snapshot(ctx, symbol="QQQ")
+    monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
+    monkeypatch.setattr(supply, "_run_capture", lambda _ctx, instrument: {"instrument": instrument, "status": "PASS", "blocker": "", "snapshot_path": "x", "freshness_certificate_path": "y"})
+    monkeypatch.setattr(supply, "validate_against_repo_schema_v1", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(supply, "_run_market_data_authority", lambda _ctx: ({"exit_code": 0}, ""))
+
+    payload = supply.build_market_data_supply(ctx)
+
+    assert payload["status"] == "PASS"
+    assert payload["canonical_blocker"] == ""
+    assert {row["instrument"] for row in payload["requirements"]} == {"QQQ"}
 
 
 def test_unowned_default_requirement_blocks(tmp_path: Path) -> None:

@@ -147,6 +147,52 @@ def test_exposure_net_stage_runs_after_authority_freshness_and_before_capital_al
     assert stage_ids.index("exposure_net") < stage_ids.index("capital_authority_allocation")
 
 
+def test_market_data_requirement_graph_and_supply_run_before_authorization_supply() -> None:
+    stages = kernel._stages(
+        target_day=DAY,
+        canonical_truth_root=Path("/tmp/canonical"),
+        paper_sleeve_root=Path("/tmp/sleeve"),
+        environment="PAPER",
+        ib_account="DUO847203",
+        release_commit="0" * 40,
+    )
+    stage_ids = [stage.stage_id for stage in stages]
+
+    assert stage_ids.index("intent_arbitration") < stage_ids.index("aegis_requirement_graph")
+    assert stage_ids.index("aegis_requirement_graph") < stage_ids.index("market_open_data_gate")
+    assert stage_ids.index("market_open_data_gate") < stage_ids.index("market_data_supply")
+    assert stage_ids.index("market_data_supply") < stage_ids.index("authorization_supply")
+
+
+def test_requirement_graph_without_selected_intent_market_rows_blocks() -> None:
+    stage = kernel._stage(
+        "aegis_requirement_graph",
+        "market_data",
+        ["python3", "ops/tools/run_aegis_requirement_graph_v1.py"],
+        "PAPER_SLEEVE",
+        Path("reports/aegis_requirement_graph_v1") / DAY / "requirement_graph.v1.json",
+        ("PASS", "BLOCKED", "STALE"),
+        "run graph",
+        "fix graph",
+    )
+    artifact_path = Path("/tmp/sleeve/reports/aegis_requirement_graph_v1") / DAY / "requirement_graph.v1.json"
+    result = kernel._validate_requirement_graph_for_market_data_supply(
+        data={
+            "day_utc": DAY,
+            "status": "PASS",
+            "truth_root": "/tmp/sleeve",
+            "active_intents": [{"intent_id": "intent-1", "instrument": "QQQ"}],
+            "requirements": [],
+        },
+        artifact_path=artifact_path,
+        target_day=DAY,
+        stage=stage,
+    )
+
+    assert result["status"] == "BLOCKED"
+    assert result["first_blocker"] == "MARKET_DATA_REQUIREMENTS_EMPTY_FOR_ACTIVE_INTENT"
+
+
 def test_authorization_supply_uses_paper_sleeve_evidence_after_allocation() -> None:
     stages = kernel._stages(
         target_day=DAY,
@@ -211,10 +257,34 @@ def _runner_until_exposure_net(
             _write_json(sleeve_root / "reports/portfolio_scoring_v1" / DAY / "portfolio_scoring.v1.json", {"day_utc": DAY, "status": "PASS"})
         elif script == "run_intent_arbitration_v1.py":
             _write_selected_intent(sleeve_root)
+        elif script == "run_aegis_requirement_graph_v1.py":
+            _write_json(
+                sleeve_root / "reports/aegis_requirement_graph_v1" / DAY / "requirement_graph.v1.json",
+                {
+                    "schema_id": "aegis_requirement_graph",
+                    "schema_version": "aegis_requirement_graph.v1",
+                    "day_utc": DAY,
+                    "status": "BLOCKED",
+                    "truth_root": str(sleeve_root),
+                    "active_intents": [{"intent_id": "intent-1", "instrument": "SPY", "requires_equity_market_data": True}],
+                    "requirements": [
+                        {
+                            "owner_phase": "MARKET_DATA",
+                            "source_type": "ACTIVE_INTENT",
+                            "source_id": "intent-1",
+                            "instrument": "SPY",
+                            "required_artifact": "underlying_spot",
+                            "status": "BLOCKED",
+                        }
+                    ],
+                },
+            )
         elif script == "run_risk_budget_supply_v1.py":
             _write_json(sleeve_root / "reports/risk_budget_supply_v1" / DAY / "risk_budget_supply.v1.json", {"day_utc": DAY, "status": "PASS"})
         elif script == "run_market_open_data_gate_v1.py":
             _write_json(sleeve_root / "reports/market_open_data_gate_v1" / DAY / "market_open_data_gate.v1.json", {"day_utc": DAY, "status": "PASS"})
+        elif script == "run_market_data_supply_v1.py":
+            _write_json(sleeve_root / "reports/market_data_supply_v1" / DAY / "market_data_supply.v1.json", {"day_utc": DAY, "status": "PASS", "requirements": [{"instrument": "SPY"}]})
         elif script == "run_structure_decision_supply_v1.py":
             _write_json(sleeve_root / "reports/structure_decision_supply_v1" / DAY / "structure_decision_supply.v1.json", {"day_utc": DAY, "status": "PASS"})
         elif script == "run_exposure_net_day_v1.py":

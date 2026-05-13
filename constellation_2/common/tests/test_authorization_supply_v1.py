@@ -267,6 +267,24 @@ def test_market_data_supply_blocked_prevents_phasec(monkeypatch: pytest.MonkeyPa
     assert called is False
 
 
+def test_market_data_supply_skipped_does_not_satisfy_active_intent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _intent(ctx)
+    _market_supply(ctx, "SKIPPED", "")
+    called = False
+
+    def _phasec(_ctx):  # noqa: ANN001
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(auth, "_run_phasec_identity_materializer", _phasec)
+    payload = auth.build_authorization_supply_v1(ctx)
+
+    assert payload["canonical_blocker"] == "MARKET_DATA_SUPPLY_BLOCKED"
+    assert payload["market_data_input"]["status"] == "SKIPPED"
+    assert called is False
+
+
 def test_risk_budget_supply_blocked_prevents_phasec(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _intent(ctx)

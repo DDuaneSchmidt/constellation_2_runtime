@@ -324,8 +324,10 @@ def _stages(
         _stage("portfolio_activation_gate", "portfolio", ["python3", "ops/tools/run_portfolio_activation_gate_v1.py", "--day_utc", target_day, "--environment", environment, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/portfolio_activation_gate_v1") / target_day / "portfolio_activation_gate.v1.json", ("PASS", "ALLOW", "OK", "READY", "DEGRADED"), "python3 ops/tools/run_portfolio_activation_gate_v1.py --day_utc {day} --environment PAPER --truth_root {sleeve}", "Refresh portfolio activation gate."),
         _stage("portfolio_scoring", "portfolio", ["python3", "ops/tools/run_portfolio_scoring_v1.py", "--day_utc", target_day, "--environment", environment, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/portfolio_scoring_v1") / target_day / "portfolio_scoring.v1.json", ("PASS", "SCORED", "BOOTSTRAP_ACCEPTED_FOR_PAPER", "OK", "DEGRADED"), "python3 ops/tools/run_portfolio_scoring_v1.py --day_utc {day} --environment PAPER --truth_root {sleeve}", "Score current-day PAPER sleeve intents."),
         _stage("intent_arbitration", "intent", ["python3", "ops/tools/run_intent_arbitration_v1.py", "--day_utc", target_day, "--environment", environment, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/intent_arbitration_v1") / target_day / "intent_arbitration.v1.json", ("SELECTED", "PASS", "OK"), "python3 ops/tools/run_intent_arbitration_v1.py --day_utc {day} --environment PAPER --truth_root {sleeve}", "Select the executable PAPER intent."),
+        _stage("aegis_requirement_graph", "market_data", ["python3", "ops/tools/run_aegis_requirement_graph_v1.py", "--day_utc", target_day, "--environment", environment, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/aegis_requirement_graph_v1") / target_day / "requirement_graph.v1.json", ("PASS", "BLOCKED", "STALE"), "python3 ops/tools/run_aegis_requirement_graph_v1.py --day_utc {day} --environment PAPER --truth_root {sleeve}", "Build same-day PAPER-sleeve market-data requirements for the selected intent."),
         _stage("risk_budget_supply", "risk_budget", ["python3", "ops/tools/run_risk_budget_supply_v1.py", "--day_utc", target_day, "--environment", environment, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/risk_budget_supply_v1") / target_day / "risk_budget_supply.v1.json", ("PASS", "OK", "READY"), "python3 ops/tools/run_risk_budget_supply_v1.py --day_utc {day} --environment PAPER --truth_root {sleeve}", "Compute risk budget from NAV, selected intent, and capital risk envelope."),
         _stage("market_open_data_gate", "market_data", ["python3", "ops/tools/run_market_open_data_gate_v1.py", "--day_utc", target_day, "--environment", environment, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/market_open_data_gate_v1") / target_day / "market_open_data_gate.v1.json", ("PASS", "OK", "READY"), "python3 ops/tools/run_market_open_data_gate_v1.py --day_utc {day} --environment PAPER --truth_root {sleeve}", "Wait for market open, then produce current quote-complete options data."),
+        _stage("market_data_supply", "market_data", ["python3", "ops/tools/run_market_data_supply_v1.py", "--day_utc", target_day, "--environment", environment, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/market_data_supply_v1") / target_day / "market_data_supply.v1.json", ("PASS", "OK", "READY"), "python3 ops/tools/run_market_data_supply_v1.py --day_utc {day} --environment PAPER --truth_root {sleeve}", "Validate market-data supply against same-day selected-intent requirements before authorization."),
         _stage("structure_decision_supply", "structure", ["python3", "ops/tools/run_structure_decision_supply_v1.py", "--day_utc", target_day, "--environment", environment, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/structure_decision_supply_v1") / target_day / "structure_decision_supply.v1.json", ("PASS", "OK", "READY"), "python3 ops/tools/run_structure_decision_supply_v1.py --day_utc {day} --environment PAPER --truth_root {sleeve}", "Build option structure decision from market-open data."),
         _stage("paper_authority_pointer_refresh", "authorization", ["python3", "ops/tools/run_pointer_append_v1.py", "--guarded-by", "authorization_gate_verdict_v1"], "PAPER_SLEEVE", Path("run_pointer_v2/canonical_authority_head.v1.json"), ("PASS", "BOOTSTRAP_PASS"), "Run governed pointer append/head materialization only after same-day PAPER authorization verdict PASS.", "Refresh the same-day PAPER canonical authority head from the governed PASS authorization verdict before capital allocation."),
         _stage("paper_authority_head_freshness", "authorization", ["python3", "-c", "pass"], "PAPER_SLEEVE", Path("run_pointer_v2/canonical_authority_head.v1.json"), ("PASS",), "Inspect PAPER authorization_gate_verdict_v1 and canonical authority head; do not synthesize authority.", "Resolve same-day PAPER authorization gate verdict and canonical authority head before capital allocation."),
@@ -371,6 +373,13 @@ def _validate_stage_artifact(*, stage: KernelStage, artifact_path: Path | None, 
         return _blocked("ARTIFACT_JSON_INVALID", "INVALID", f"{type(exc).__name__}: {exc}", stage)
     if stage.stage_id == "paper_authority_head_freshness":
         return _validate_paper_authority_head_freshness(
+            data=data,
+            artifact_path=artifact_path,
+            target_day=target_day,
+            stage=stage,
+        )
+    if stage.stage_id == "aegis_requirement_graph":
+        return _validate_requirement_graph_for_market_data_supply(
             data=data,
             artifact_path=artifact_path,
             target_day=target_day,
@@ -460,6 +469,71 @@ def _validate_stage_artifact(*, stage: KernelStage, artifact_path: Path | None, 
     if artifact_status not in stage.pass_statuses:
         return _blocked(blocker or f"ARTIFACT_STATUS_{artifact_status}", artifact_status, "artifact status does not satisfy stage contract", stage)
     return {"status": "PASS", "artifact_status": artifact_status}
+
+
+def _validate_requirement_graph_for_market_data_supply(
+    *,
+    data: dict[str, Any],
+    artifact_path: Path,
+    target_day: str,
+    stage: KernelStage,
+) -> dict[str, Any]:
+    artifact_status = _status_of(data)
+    if _wrong_day(data, target_day):
+        return _blocked("TARGET_DAY_DATE_MISMATCH", artifact_status, "requirement graph day does not match target day", stage)
+    expected_root = artifact_path.parents[3].resolve()
+    observed_root = Path(str(data.get("truth_root") or "")).expanduser().resolve() if str(data.get("truth_root") or "").strip() else None
+    if observed_root is None or observed_root != expected_root:
+        return _blocked(
+            "REQUIREMENT_GRAPH_WRONG_TRUTH_ROOT",
+            artifact_status,
+            "requirement graph must be produced under the PAPER sleeve root used by the kernel",
+            stage,
+            failed_field="truth_root",
+            expected_value=str(expected_root),
+            actual_value=str(observed_root) if observed_root is not None else "",
+        )
+    active_intents = data.get("active_intents") if isinstance(data.get("active_intents"), list) else []
+    selected_intents = [
+        row for row in active_intents
+        if isinstance(row, dict) and str(row.get("intent_id") or "").strip()
+    ]
+    if not selected_intents:
+        return {"status": "PASS", "artifact_status": artifact_status, "selected_intent_market_data_required": False}
+    requirements = data.get("requirements") if isinstance(data.get("requirements"), list) else []
+    market_rows = [
+        row for row in requirements
+        if isinstance(row, dict)
+        and str(row.get("owner_phase") or "").strip().upper() == "MARKET_DATA"
+        and str(row.get("source_type") or "").strip().upper() == "ACTIVE_INTENT"
+        and str(row.get("instrument") or "").strip()
+        and str(row.get("source_id") or "").strip()
+    ]
+    selected_keys = {
+        (str(row.get("intent_id") or "").strip(), str(row.get("instrument") or "").strip().upper())
+        for row in selected_intents
+    }
+    covered_keys = {
+        (str(row.get("source_id") or "").strip(), str(row.get("instrument") or "").strip().upper())
+        for row in market_rows
+    }
+    missing = sorted(f"{intent_id}:{symbol}" for intent_id, symbol in selected_keys if (intent_id, symbol) not in covered_keys)
+    if missing:
+        return _blocked(
+            "MARKET_DATA_REQUIREMENTS_EMPTY_FOR_ACTIVE_INTENT",
+            artifact_status,
+            "selected PAPER intent lacks explicit MARKET_DATA requirements",
+            stage,
+            failed_field="requirements[owner_phase=MARKET_DATA,source_type=ACTIVE_INTENT]",
+            expected_value=sorted(f"{intent_id}:{symbol}" for intent_id, symbol in selected_keys),
+            actual_value=sorted(f"{intent_id}:{symbol}" for intent_id, symbol in covered_keys),
+        )
+    return {
+        "status": "PASS",
+        "artifact_status": artifact_status,
+        "selected_intent_market_data_required": True,
+        "market_data_requirement_count": len(market_rows),
+    }
 
 
 def _validate_portfolio_bootstrap_acceptance(*, data: dict[str, Any], artifact_status: str, stage: KernelStage) -> dict[str, Any]:

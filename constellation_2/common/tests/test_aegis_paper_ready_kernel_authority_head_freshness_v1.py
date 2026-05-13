@@ -215,10 +215,25 @@ def test_kernel_blocks_at_authority_head_before_running_capital_allocation(tmp_p
             _write_json(sleeve_root / "reports/portfolio_scoring_v1" / DAY / "portfolio_scoring.v1.json", {"day_utc": DAY, "status": "PASS"})
         elif script == "run_intent_arbitration_v1.py":
             _write_json(sleeve_root / "reports/intent_arbitration_v1" / DAY / "intent_arbitration.v1.json", {"day_utc": DAY, "status": "SELECTED", "selected_intent_id": "intent-1"})
+        elif script == "run_aegis_requirement_graph_v1.py":
+            _write_json(
+                sleeve_root / "reports/aegis_requirement_graph_v1" / DAY / "requirement_graph.v1.json",
+                {
+                    "schema_id": "aegis_requirement_graph",
+                    "schema_version": "aegis_requirement_graph.v1",
+                    "day_utc": DAY,
+                    "status": "PASS",
+                    "truth_root": str(sleeve_root),
+                    "active_intents": [],
+                    "requirements": [],
+                },
+            )
         elif script == "run_risk_budget_supply_v1.py":
             _write_json(sleeve_root / "reports/risk_budget_supply_v1" / DAY / "risk_budget_supply.v1.json", {"day_utc": DAY, "status": "PASS"})
         elif script == "run_market_open_data_gate_v1.py":
             _write_json(sleeve_root / "reports/market_open_data_gate_v1" / DAY / "market_open_data_gate.v1.json", {"day_utc": DAY, "status": "PASS"})
+        elif script == "run_market_data_supply_v1.py":
+            _write_json(sleeve_root / "reports/market_data_supply_v1" / DAY / "market_data_supply.v1.json", {"day_utc": DAY, "status": "PASS", "requirements": []})
         elif script == "run_structure_decision_supply_v1.py":
             _write_json(sleeve_root / "reports/structure_decision_supply_v1" / DAY / "structure_decision_supply.v1.json", {"day_utc": DAY, "status": "PASS"})
         elif script == "run_pointer_append_v1.py":

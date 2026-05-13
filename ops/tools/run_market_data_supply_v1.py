@@ -21,6 +21,7 @@ from ops.tools import run_aegis_bod_prepare_v1 as bod
 from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
 from ops.tools.run_aegis_requirement_graph_v1 import requirement_graph_path
 from ops.tools.run_ib_market_data_entitlement_probe_v1 import entitlement_probe_path_v1
+from ops.tools.run_intent_arbitration_v1 import selected_intent_pointer_path
 
 SCHEMA_VERSION = "market_data_supply.v1"
 OPTIONS_CHAIN_SCHEMA = "constellation_2/schemas/options_chain_snapshot.v1.schema.json"
@@ -42,6 +43,8 @@ ALLOWED_BLOCKERS = {
     "OPTIONS_QUOTE_VALIDATION_TOO_STRICT",
     "OPTIONS_QUOTE_FIELDS_UNSUPPORTED",
     "OPTIONS_MARKET_DATA_POLICY_REJECTED_QUOTE_TYPE",
+    "MARKET_DATA_REQUIREMENT_GRAPH_MISSING",
+    "MARKET_DATA_REQUIREMENTS_EMPTY_FOR_ACTIVE_INTENT",
 }
 PAPER_DELAYED_POLICY_RELATIVE_PATH = Path("governance/paper_market_data_policy_v1.json")
 MARKET_DATA_REQUIREMENT_ARTIFACTS = {
@@ -90,6 +93,29 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def market_data_supply_path(*, truth_root: Path, day_utc: str) -> Path:
     return (truth_root / "reports" / "market_data_supply_v1" / day_utc / "market_data_supply.v1.json").resolve()
+
+
+def _active_selected_intent(ctx: bod.BodContext) -> dict[str, Any]:
+    pointer = _read_json(selected_intent_pointer_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc))
+    if str(pointer.get("status") or "").strip().upper() != "SELECTED":
+        return {}
+    selected = pointer.get("selected_intent") if isinstance(pointer.get("selected_intent"), dict) else {}
+    intent_id = str(selected.get("intent_id") or "").strip()
+    symbol = str(selected.get("symbol") or "").strip().upper()
+    intent_path = str(selected.get("intent_path") or "").strip()
+    exposure_type = ""
+    if intent_path:
+        payload = _read_json(Path(intent_path).expanduser().resolve())
+        underlying = payload.get("underlying") if isinstance(payload.get("underlying"), dict) else {}
+        symbol = str(underlying.get("symbol") or payload.get("symbol") or symbol).strip().upper()
+        exposure_type = str(payload.get("exposure_type") or payload.get("intent_type") or "").strip().upper()
+        intent_id = str(payload.get("intent_id") or intent_id).strip()
+    return {
+        "intent_id": intent_id,
+        "symbol": symbol,
+        "intent_path": intent_path,
+        "exposure_type": exposure_type,
+    }
 
 
 def _entitlement_probe_path(ctx: bod.BodContext, instrument: str) -> Path:
@@ -703,7 +729,10 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
     market_session_state = _market_session_state()
     req_path = requirement_graph_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     requirement_graph = _read_json(req_path)
-    requirements, unowned = _requirement_rows(requirement_graph if str(requirement_graph.get("day_utc") or "") == ctx.day_utc else {})
+    active_selected_intent = _active_selected_intent(ctx)
+    graph_day = str(requirement_graph.get("day_utc") or "").strip()
+    graph_usable = bool(requirement_graph) and graph_day == ctx.day_utc
+    requirements, unowned = _requirement_rows(requirement_graph if graph_usable else {})
     provider_checks: list[dict[str, Any]] = []
     capture_attempts: list[dict[str, Any]] = []
     artifacts: list[dict[str, Any]] = []
@@ -711,6 +740,8 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
     authority_result: dict[str, Any] = {}
     delayed_policy = _delayed_data_policy(ctx)
     blocker = ""
+    if active_selected_intent and not graph_usable:
+        blocker = "MARKET_DATA_REQUIREMENT_GRAPH_MISSING"
     if unowned is not None:
         requirements.append(
             {
@@ -723,6 +754,8 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
             }
         )
         blocker = "MARKET_DATA_REQUIREMENT_UNOWNED"
+    if active_selected_intent and graph_usable and not requirements and not blocker:
+        blocker = "MARKET_DATA_REQUIREMENTS_EMPTY_FOR_ACTIVE_INTENT"
     if not requirements and not blocker:
         return {
             "schema_id": "market_data_supply",
@@ -734,6 +767,9 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
             "status": "SKIPPED",
             "canonical_blocker": "",
             "requirements": [],
+            "active_selected_intent": active_selected_intent,
+            "requirement_graph_path": str(req_path),
+            "requirement_graph_status": "MISSING" if not requirement_graph else ("WRONG_DAY" if graph_day != ctx.day_utc else "PRESENT"),
             "provider_checks": [],
             "capture_attempts": [],
             "artifacts": [],
@@ -750,6 +786,37 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
             "policy_source_path": str(delayed_policy.get("policy_path") or ""),
             "ib_error_codes": [],
             "operator_next_action": "",
+        }
+    if blocker in {"MARKET_DATA_REQUIREMENT_GRAPH_MISSING", "MARKET_DATA_REQUIREMENTS_EMPTY_FOR_ACTIVE_INTENT"}:
+        return {
+            "schema_id": "market_data_supply",
+            "schema_version": SCHEMA_VERSION,
+            "day_utc": ctx.day_utc,
+            "environment": ctx.environment,
+            "generated_at_utc": eval_time_utc,
+            "market_session_state": market_session_state,
+            "status": "BLOCKED",
+            "canonical_blocker": blocker,
+            "requirements": requirements,
+            "active_selected_intent": active_selected_intent,
+            "requirement_graph_path": str(req_path),
+            "requirement_graph_status": "MISSING" if not requirement_graph else ("WRONG_DAY" if graph_day != ctx.day_utc else "EMPTY_FOR_ACTIVE_INTENT"),
+            "provider_checks": [],
+            "capture_attempts": [],
+            "artifacts": [],
+            "authority_result": {},
+            "entitlement_probe_path": "",
+            "entitlement_status": "NOT_EVALUATED",
+            "tested_data_types": [],
+            "live_data_available": False,
+            "delayed_data_available": False,
+            "delayed_data_accepted_by_policy": False,
+            "delayed_data_policy": delayed_policy,
+            "delayed_data_used": False,
+            "market_data_mode": "UNKNOWN",
+            "policy_source_path": str(delayed_policy.get("policy_path") or ""),
+            "ib_error_codes": [],
+            "operator_next_action": "Produce same-day PAPER-sleeve aegis_requirement_graph_v1 with MARKET_DATA requirements for the selected intent.",
         }
     instruments = sorted({str(row.get("instrument") or "").strip().upper() for row in requirements if row.get("instrument")})
     provider_blocker = ""
@@ -856,6 +923,9 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
         "status": status,
         "canonical_blocker": blocker,
         "requirements": requirements,
+        "active_selected_intent": active_selected_intent,
+        "requirement_graph_path": str(req_path),
+        "requirement_graph_status": "PRESENT" if graph_usable else ("MISSING" if not requirement_graph else "WRONG_DAY"),
         "provider_checks": provider_checks,
         "capture_attempts": capture_attempts,
         "artifacts": artifacts,
