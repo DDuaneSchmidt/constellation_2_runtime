@@ -97,6 +97,22 @@ def _equity_intent() -> dict:
     }
 
 
+def _cross_asset_qqq_intent(*, target_notional_pct: str = "0.10", max_risk_pct: str = "0.02", symbol: str = "QQQ") -> dict:
+    return {
+        "schema_id": "exposure_intent",
+        "schema_version": "v1",
+        "day_utc": "2026-05-12",
+        "intent_id": "c2_cross_asset_trend_qqq_2026-05-12_v1",
+        "intent_hash": "crossassetintenthash",
+        "exposure_type": "LONG_EQUITY",
+        "engine": {"engine_id": "C2_CROSS_ASSET_TREND_V1", "mode": "PAPER", "suite": "C2_HYBRID_V1"},
+        "underlying": {"symbol": symbol, "currency": "USD"},
+        "target_notional_pct": target_notional_pct,
+        "constraints": {"max_risk_pct": max_risk_pct},
+        "risk_class": "CROSS_ASSET_TREND",
+    }
+
+
 def _equity_policy() -> dict:
     return {
         "schema_id": "c2_equity_structure_policy",
@@ -127,32 +143,62 @@ def _equity_policy() -> dict:
                         "requires_submit_boundary": True,
                     },
                 },
+            },
+            {
+                "engine_id": "C2_CROSS_ASSET_TREND_V1",
+                "exposure_requirements": {
+                    "exposure_type": "LONG_EQUITY",
+                    "required_engine_suite": "C2_HYBRID_V1",
+                    "allowed_target_notional_pct": ["0.10"],
+                    "allowed_risk_class": ["CROSS_ASSET_TREND"],
+                    "allowed_symbols": ["QQQ"],
+                    "max_risk_pct_max": "0.02",
+                },
+                "structure_template": {
+                    "structure_type": "EQUITY_SPOT",
+                    "order_intent_type": "EQUITY_BUY",
+                    "allowed_action": "BUY",
+                    "order_terms": {
+                        "order_type": "LIMIT",
+                        "time_in_force": "DAY",
+                        "reference_price_source": "MARKET_OPEN_DATA_GATE",
+                    },
+                    "safety": {
+                        "execution_authority_granted": False,
+                        "order_submission_attempted": False,
+                        "trading_behavior_changed": False,
+                        "requires_submit_boundary": True,
+                    },
+                },
             }
         ],
     }
 
 
 def _write_equity_structure_inputs(ctx: BodContext, intent_payload: dict | None = None) -> Path:
+    intent_payload = intent_payload or _equity_intent()
+    intent_id = str(intent_payload.get("intent_id") or "intent").strip()
+    symbol = structure_supply._symbol(intent_payload)
     intent_path = ctx.execution_root / "intents_v1" / "snapshots" / ctx.day_utc / "intent.exposure_intent.v1.json"
-    _write_json(intent_path, intent_payload or _equity_intent())
+    _write_json(intent_path, intent_payload)
     _write_json(
         ctx.truth_root / "pointers" / "selected_intent_pointer.v1.json",
         {
             "status": "SELECTED",
             "selected_intent": {
-                "intent_id": "c2_trend_eq_spy_2026-05-12_v1",
-                "symbol": "SPY",
+                "intent_id": intent_id,
+                "symbol": symbol,
                 "intent_path": str(intent_path),
             },
         },
     )
     _write_json(
         ctx.truth_root / "reports" / "risk_budget_supply_v1" / ctx.day_utc / "risk_budget_supply.v1.json",
-        {"status": "PASS", "intent_budgets": [{"intent_id": "c2_trend_eq_spy_2026-05-12_v1", "allowed_risk_cents": 100000}]},
+        {"status": "PASS", "intent_budgets": [{"intent_id": intent_id, "allowed_risk_cents": 100000}]},
     )
     snapshot_path = ctx.execution_root / "options_chain_snapshot_v1" / ctx.day_utc / "capture" / "options_chain_snapshot.v1.json"
     cert_path = ctx.execution_root / "options_chain_snapshot_v1" / ctx.day_utc / "capture" / "freshness_certificate.v1.json"
-    _write_json(snapshot_path, {"as_of_utc": "2026-05-12T19:31:00Z", "underlying": {"symbol": "SPY", "spot_price": "620.00"}, "contracts": []})
+    _write_json(snapshot_path, {"as_of_utc": "2026-05-12T19:31:00Z", "underlying": {"symbol": symbol, "spot_price": "620.00"}, "contracts": []})
     _write_json(cert_path, {"status": "PASS"})
     _write_json(
         ctx.truth_root / "reports" / "market_open_data_gate_v1" / ctx.day_utc / "market_open_data_gate.v1.json",
@@ -426,3 +472,74 @@ def test_valid_equity_policy_emits_non_authoritative_equity_spot_structure(monke
     assert export["execution_authority_granted"] is False
     assert export["order_submission_attempted"] is False
     assert export["trading_behavior_changed"] is False
+
+
+def test_cross_asset_qqq_long_equity_policy_emits_non_authoritative_equity_spot(monkeypatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _write_equity_structure_inputs(ctx, _cross_asset_qqq_intent())
+    equity_policy_path = tmp_path / "governance" / "C2_EQUITY_STRUCTURE_POLICY_V1.json"
+    _write_json(equity_policy_path, _equity_policy())
+    monkeypatch.setattr(structure_supply, "EQUITY_POLICY_PATH", equity_policy_path)
+
+    payload = structure_supply.build_structure_decision_supply_v1(ctx)
+
+    assert payload["status"] == "PASS"
+    assert payload["canonical_blocker"] == ""
+    assert payload["active_intents"][0]["engine_id"] == "C2_CROSS_ASSET_TREND_V1"
+    decision = payload["structure_decisions"][0]
+    assert decision["structure_type"] == "EQUITY_SPOT"
+    assert decision["symbol"] == "QQQ"
+    assert decision["exposure_type"] == "LONG_EQUITY"
+    assert decision["target_notional_pct"] == "0.10"
+    assert decision["risk_bounds"]["max_risk_pct"] == "0.02"
+    assert decision["execution_authority_granted"] is False
+    assert decision["order_submission_attempted"] is False
+    assert decision["trading_behavior_changed"] is False
+    assert decision["structure_diagnostics"]["usable_for_authorization_supply"] is False
+    assert payload["structure_export"]["usable_for_authorization_supply"] is False
+    export = payload["structure_export"]["decisions"][0]
+    assert export["execution_authority_granted"] is False
+    assert export["order_submission_attempted"] is False
+    assert export["trading_behavior_changed"] is False
+
+
+def test_cross_asset_unsupported_symbol_fails_closed(monkeypatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _write_equity_structure_inputs(ctx, _cross_asset_qqq_intent(symbol="SPY"))
+    equity_policy_path = tmp_path / "governance" / "C2_EQUITY_STRUCTURE_POLICY_V1.json"
+    _write_json(equity_policy_path, _equity_policy())
+    monkeypatch.setattr(structure_supply, "EQUITY_POLICY_PATH", equity_policy_path)
+
+    payload = structure_supply.build_structure_decision_supply_v1(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "EQUITY_STRUCTURE_POLICY_INVALID"
+    assert payload["structure_export"]["usable_for_authorization_supply"] is False
+
+
+def test_cross_asset_target_notional_above_policy_fails_closed(monkeypatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _write_equity_structure_inputs(ctx, _cross_asset_qqq_intent(target_notional_pct="0.11"))
+    equity_policy_path = tmp_path / "governance" / "C2_EQUITY_STRUCTURE_POLICY_V1.json"
+    _write_json(equity_policy_path, _equity_policy())
+    monkeypatch.setattr(structure_supply, "EQUITY_POLICY_PATH", equity_policy_path)
+
+    payload = structure_supply.build_structure_decision_supply_v1(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "EQUITY_STRUCTURE_POLICY_INVALID"
+    assert payload["structure_export"]["usable_for_authorization_supply"] is False
+
+
+def test_cross_asset_max_risk_above_policy_fails_closed(monkeypatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _write_equity_structure_inputs(ctx, _cross_asset_qqq_intent(max_risk_pct="0.020001"))
+    equity_policy_path = tmp_path / "governance" / "C2_EQUITY_STRUCTURE_POLICY_V1.json"
+    _write_json(equity_policy_path, _equity_policy())
+    monkeypatch.setattr(structure_supply, "EQUITY_POLICY_PATH", equity_policy_path)
+
+    payload = structure_supply.build_structure_decision_supply_v1(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "EQUITY_STRUCTURE_POLICY_INVALID"
+    assert payload["structure_export"]["usable_for_authorization_supply"] is False

@@ -31,6 +31,39 @@
         },
         "structure_type": "EQUITY_SPOT"
       }
+    },
+    {
+      "engine_id": "C2_CROSS_ASSET_TREND_V1",
+      "exposure_requirements": {
+        "allowed_risk_class": [
+          "CROSS_ASSET_TREND"
+        ],
+        "allowed_symbols": [
+          "QQQ"
+        ],
+        "allowed_target_notional_pct": [
+          "0.10"
+        ],
+        "exposure_type": "LONG_EQUITY",
+        "max_risk_pct_max": "0.02",
+        "required_engine_suite": "C2_HYBRID_V1"
+      },
+      "structure_template": {
+        "allowed_action": "BUY",
+        "order_intent_type": "EQUITY_BUY",
+        "order_terms": {
+          "order_type": "LIMIT",
+          "reference_price_source": "MARKET_OPEN_DATA_GATE",
+          "time_in_force": "DAY"
+        },
+        "safety": {
+          "execution_authority_granted": false,
+          "order_submission_attempted": false,
+          "requires_submit_boundary": true,
+          "trading_behavior_changed": false
+        },
+        "structure_type": "EQUITY_SPOT"
+      }
     }
   ],
   "schema_id": "c2_equity_structure_policy",

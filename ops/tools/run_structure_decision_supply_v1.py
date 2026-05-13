@@ -109,6 +109,11 @@ def _target_notional_pct(payload: dict[str, Any]) -> str:
     return str(payload.get("target_notional_pct") or "").strip()
 
 
+def _max_risk_pct(payload: dict[str, Any]) -> str:
+    constraints = payload.get("constraints") if isinstance(payload.get("constraints"), dict) else {}
+    return str(constraints.get("max_risk_pct") or "").strip()
+
+
 def _allowed_symbols_for_engine(engine_id: str) -> list[str]:
     registry = _read_json(ENGINE_REGISTRY_PATH)
     for row in registry.get("engines") if isinstance(registry.get("engines"), list) else []:
@@ -228,6 +233,7 @@ def _validate_equity_policy(intent: dict[str, Any], policy: dict[str, Any]) -> t
     safety = template.get("safety") if isinstance(template.get("safety"), dict) else {}
     symbol = _symbol(intent)
     target_notional_pct = _target_notional_pct(intent)
+    max_risk_pct = _max_risk_pct(intent)
     allowed_symbols = [
         str(item).strip().upper()
         for item in requirements.get("allowed_symbols") or []
@@ -238,12 +244,19 @@ def _validate_equity_policy(intent: dict[str, Any], policy: dict[str, Any]) -> t
         for item in requirements.get("allowed_target_notional_pct") or []
         if str(item).strip()
     ]
+    max_risk_pct_max = _dec(requirements.get("max_risk_pct_max"))
+    intent_max_risk = _dec(max_risk_pct)
     if str(requirements.get("exposure_type") or "").strip().upper() != "LONG_EQUITY":
         return False, "Equity structure policy must explicitly govern LONG_EQUITY exposure."
     if symbol not in allowed_symbols:
         return False, "Equity structure policy does not allow the selected symbol."
     if target_notional_pct not in allowed_notional:
         return False, "Equity structure policy does not allow the selected target_notional_pct."
+    if max_risk_pct_max is not None:
+        if intent_max_risk is None:
+            return False, "Equity structure policy requires numeric constraints.max_risk_pct."
+        if intent_max_risk <= 0 or intent_max_risk > max_risk_pct_max:
+            return False, "Equity structure policy does not allow the selected max_risk_pct."
     if str(template.get("structure_type") or "").strip().upper() != "EQUITY_SPOT":
         return False, "Equity structure policy must emit EQUITY_SPOT."
     if str(template.get("order_intent_type") or "").strip().upper() != "EQUITY_BUY":
@@ -277,6 +290,7 @@ def _build_equity_spot_decision(
         "exposure_type": _exposure_type(intent),
         "structure_type": "EQUITY_SPOT",
         "equity_structure_policy_path": str(EQUITY_POLICY_PATH),
+        "usable_for_authorization_supply": False,
         "market_open_data_gate_path": str(market_open_data.get("market_open_data_gate_path") or ""),
         "options_policy_queried": False,
         "execution_authority_granted": False,
