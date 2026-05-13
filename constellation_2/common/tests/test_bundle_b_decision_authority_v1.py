@@ -8,9 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from constellation_2.common.governed_evaluation_v1 import materialize_governed_evaluation_day_v1
-from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
-
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
@@ -19,6 +16,9 @@ def _repo_root() -> Path:
 REPO_ROOT = _repo_root()
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+from constellation_2.common.governed_evaluation_v1 import materialize_governed_evaluation_day_v1
+from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
 
 import ops.tools.run_authorization_artifacts_day_v1 as auth_writer
 import ops.tools.run_capital_authority_allocation_day_v1 as bundle_b
@@ -336,6 +336,50 @@ def _mock_passthrough_governed_control(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bundle_b, "resolve_capital_authority_runtime_control_v1", _resolver)
 
 
+def _mock_policy_sleeve_headroom(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    sleeve_id: str,
+    max_capital_at_risk_cents: int,
+) -> None:
+    policy = json.loads(bundle_b.POLICY_PATH.read_text(encoding="utf-8"))
+    for sleeve in policy.get("sleeves") or []:
+        if sleeve.get("sleeve_id") == sleeve_id:
+            sleeve.setdefault("limits", {})["max_capital_at_risk_cents"] = int(max_capital_at_risk_cents)
+            break
+    monkeypatch.setattr(bundle_b, "_load_policy", lambda: policy)
+
+
+def _mock_risk_contracts(
+    monkeypatch: pytest.MonkeyPatch,
+    contracts: dict[str, tuple[str, int, int]],
+) -> None:
+    def _fake_risk_contract_status(
+        *,
+        truth_root: Path | None,
+        day_utc: str,
+        intent_hash: str,
+        intent_id: str = "",
+    ) -> tuple[Path, dict, str]:
+        key = intent_id or intent_hash
+        if key not in contracts:
+            return Path(), {}, "RISK_DEFINITION_CONTRACT_MISSING"
+        risk_type, quantity, risk_per_unit = contracts[key]
+        return (
+            Path(str(truth_root or "")) / "risk_definition_contract_v1" / day_utc / intent_hash / "risk_definition_contract.v1.json",
+            {
+                "contract_id": f"test-contract-{key}",
+                "risk_type": risk_type,
+                "validation_status": "PASS",
+                "quantity_basis": {"basis": "TEST", "quantity": int(quantity)},
+                "risk_per_unit": int(risk_per_unit),
+            },
+            "",
+        )
+
+    monkeypatch.setattr(bundle_b, "_risk_contract_status", _fake_risk_contract_status)
+
+
 def _binding(*, sleeve_id: str, mode: str, enabled: bool, account_id: str, allowed_engine_ids: tuple[str, ...]) -> bundle_b.ExecutionBinding:
     return bundle_b.ExecutionBinding(
         execution_sleeve_id=sleeve_id,
@@ -351,6 +395,40 @@ def _strategy_sleeve_for_engine(engine_id: str) -> str:
     sleeves = bundle_b._parse_sleeves(bundle_b._load_policy())
     mapping = bundle_b._build_engine_to_sleeve(sleeves)
     return mapping[engine_id]
+
+
+def _seed_cross_asset_qqq_intent_fixture(
+    truth_root: Path,
+    day_utc: str,
+    *,
+    headroom_cents: int = 100_000,
+    nav_total_cents: int = 1_000_000,
+) -> Path:
+    _seed_authority_inputs(truth_root, day_utc, headroom_cents=headroom_cents, nav_total_cents=nav_total_cents)
+    positions_path = _seed_positions_snapshot(truth_root, day_utc, cash_total_cents=nav_total_cents, items=[])
+    _seed_intents(
+        truth_root,
+        day_utc,
+        [
+            _exposure_intent(
+                day_utc=day_utc,
+                intent_id="intent-cross-qqq",
+                engine_id="C2_CROSS_ASSET_TREND_V1",
+                symbol="QQQ",
+                target_notional_pct="0.100000",
+                max_risk_pct="0.01",
+            ),
+        ],
+    )
+    return positions_path
+
+
+def _cross_asset_authorized_row(alloc: dict) -> dict:
+    rows = {
+        row["intent_id"]: row
+        for row in alloc["decision_chain"]["authorized_trade_intents"]
+    }
+    return rows["intent-cross-qqq"]
 
 
 def _seed_previous_day_economic_build(
@@ -614,6 +692,149 @@ def _run_auth_writer(day_utc: str, truth_root: Path, monkeypatch: pytest.MonkeyP
     return truth_root / "engine_activity_v1" / "authorization_v1" / day_utc
 
 
+def test_cross_asset_missing_account_engine_binding_blocks_without_account_mapping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    day_utc = "2026-05-13"
+    truth_root = tmp_path / "truth"
+    positions_path = _seed_cross_asset_qqq_intent_fixture(truth_root, day_utc)
+
+    _mock_positions_loader(monkeypatch, positions_path)
+    _mock_sleeve_edge(monkeypatch)
+    _mock_passthrough_governed_control(monkeypatch)
+    monkeypatch.setattr(
+        bundle_b,
+        "_load_execution_bindings",
+        lambda: (
+            [
+                _binding(
+                    sleeve_id="PRIMARY",
+                    mode="PAPER",
+                    enabled=True,
+                    account_id=ACCOUNT_ID,
+                    allowed_engine_ids=("C2_TREND_EQ_PRIMARY_V1",),
+                )
+            ],
+            "1" * 64,
+            "2" * 64,
+        ),
+    )
+
+    alloc = _read_json(_run_bundle_b(day_utc, truth_root))
+    candidate = alloc["decision_chain"]["candidate_actions"][0]
+    authorized = _cross_asset_authorized_row(alloc)
+
+    assert candidate["account_id"] == ""
+    assert candidate["execution_sleeve_id"] == ""
+    assert "BUNDLE_B_NO_EXECUTION_BINDING_FOR_ENGINE_MODE" in candidate["reason_codes"]
+    assert "BUNDLE_B_ACCOUNT_MAPPING_BLOCKED" in candidate["reason_codes"]
+    assert authorized["authorization_outcome"] == "BLOCKED"
+    assert "BUNDLE_B_EXECUTION_BINDING_BLOCKED" in authorized["reason_codes"]
+
+
+def test_cross_asset_account_engine_binding_resolves_without_granting_submit_authority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    day_utc = "2026-05-13"
+    truth_root = tmp_path / "truth"
+    positions_path = _seed_cross_asset_qqq_intent_fixture(
+        truth_root,
+        day_utc,
+        headroom_cents=1_000_000,
+    )
+
+    _mock_positions_loader(monkeypatch, positions_path)
+    _mock_sleeve_edge(monkeypatch)
+    _mock_passthrough_governed_control(monkeypatch)
+    _mock_policy_sleeve_headroom(
+        monkeypatch,
+        sleeve_id="C2_CROSS_ASSET_TREND",
+        max_capital_at_risk_cents=100_000,
+    )
+    monkeypatch.setattr(
+        bundle_b,
+        "_load_execution_bindings",
+        lambda: (
+            [
+                _binding(
+                    sleeve_id="PRIMARY",
+                    mode="PAPER",
+                    enabled=True,
+                    account_id=ACCOUNT_ID,
+                    allowed_engine_ids=("C2_CROSS_ASSET_TREND_V1",),
+                )
+            ],
+            "3" * 64,
+            "4" * 64,
+        ),
+    )
+
+    alloc_path = _run_bundle_b(day_utc, truth_root)
+    alloc = _read_json(alloc_path)
+    candidate = alloc["decision_chain"]["candidate_actions"][0]
+    authorized = _cross_asset_authorized_row(alloc)
+
+    assert candidate["account_id"] == ACCOUNT_ID
+    assert candidate["execution_sleeve_id"] == "PRIMARY"
+    for code in (
+        "BUNDLE_B_NO_EXECUTION_BINDING_FOR_ENGINE_MODE",
+        "BUNDLE_B_ACCOUNT_MAPPING_BLOCKED",
+        "BUNDLE_B_EXECUTION_BINDING_BLOCKED",
+    ):
+        assert code not in candidate["reason_codes"]
+        assert code not in authorized["reason_codes"]
+    assert authorized["authorization_outcome"] == "APPROVED"
+    assert authorized["authorized_quantity"] > 0
+
+    auth_dir = _run_auth_writer(day_utc, truth_root, monkeypatch)
+    auth_payload = _read_json(auth_dir / f"{authorized['intent_hash']}.authorization.v1.json")
+    assert auth_payload["status"] == "AUTHORIZED"
+    assert auth_payload.get("order_submission_attempted") is not True
+    assert auth_payload.get("broker_transmit_enabled") is not True
+    assert not (truth_root / "reports" / "submit_boundary_status_v1" / day_utc / "submit_boundary_status.v1.json").exists()
+
+
+def test_cross_asset_missing_sleeve_edge_evidence_remains_independently_blocking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    day_utc = "2026-05-13"
+    truth_root = tmp_path / "truth"
+    positions_path = _seed_cross_asset_qqq_intent_fixture(truth_root, day_utc)
+
+    _mock_positions_loader(monkeypatch, positions_path)
+    _mock_passthrough_governed_control(monkeypatch)
+    monkeypatch.setattr(
+        bundle_b,
+        "_load_execution_bindings",
+        lambda: (
+            [
+                _binding(
+                    sleeve_id="PRIMARY",
+                    mode="PAPER",
+                    enabled=True,
+                    account_id=ACCOUNT_ID,
+                    allowed_engine_ids=("C2_CROSS_ASSET_TREND_V1",),
+                )
+            ],
+            "5" * 64,
+            "6" * 64,
+        ),
+    )
+
+    alloc = _read_json(_run_bundle_b(day_utc, truth_root))
+    candidate = alloc["decision_chain"]["candidate_actions"][0]
+    authorized = _cross_asset_authorized_row(alloc)
+    per_intent = {row["intent_id"]: row for row in alloc["per_intent"]}["intent-cross-qqq"]
+
+    assert candidate["account_id"] == ACCOUNT_ID
+    assert candidate["execution_sleeve_id"] == "PRIMARY"
+    assert "BUNDLE_B_NO_EXECUTION_BINDING_FOR_ENGINE_MODE" not in candidate["reason_codes"]
+    assert any(code.startswith("SLEEVE_EDGE_SNAPSHOT_MISSING") for code in per_intent["reason_codes"])
+    assert "SLEEVE_EDGE_MEASUREMENT_INVALID" in per_intent["reason_codes"]
+    assert per_intent["qualification_state"] == "MEASUREMENT_INVALID"
+    assert authorized["authorized_quantity"] == 0
+
+
 def test_bundle_b_builds_canonical_chain_for_imported_and_native_positions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     day_utc = "2026-04-20"
     truth_root = tmp_path / "truth"
@@ -726,7 +947,7 @@ def test_bundle_b_emits_resized_blocked_and_rejected_outcomes(tmp_path: Path, mo
     truth_root = tmp_path / "truth"
     _seed_authority_inputs(truth_root, day_utc, headroom_cents=20_000, nav_total_cents=1_000_000)
     positions_path = _seed_positions_snapshot(truth_root, day_utc, cash_total_cents=1_000_000, items=[])
-    _seed_intents(
+    intent_paths = _seed_intents(
         truth_root,
         day_utc,
         [
@@ -739,6 +960,8 @@ def test_bundle_b_emits_resized_blocked_and_rejected_outcomes(tmp_path: Path, mo
     _mock_positions_loader(monkeypatch, positions_path)
     _mock_sleeve_edge(monkeypatch)
     _mock_passthrough_governed_control(monkeypatch)
+    options_hash = bundle_b._intent_hash_from_snapshot_path(intent_paths["intent-options-resize"])
+    _mock_risk_contracts(monkeypatch, {options_hash: ("DEFINED_RISK", 3, 10_000)})
     monkeypatch.setattr(
         bundle_b,
         "_load_execution_bindings",
@@ -807,6 +1030,7 @@ def test_bundle_b_short_vol_defined_uses_phasec_defined_risk_when_headroom_suffi
     _mock_positions_loader(monkeypatch, positions_path)
     _mock_sleeve_edge(monkeypatch)
     _mock_passthrough_governed_control(monkeypatch)
+    _mock_risk_contracts(monkeypatch, {"intent-short-vol-defined": ("DEFINED_RISK", 1, 38_800)})
     monkeypatch.setattr(
         bundle_b,
         "_load_execution_bindings",
@@ -870,6 +1094,7 @@ def test_bundle_b_short_vol_defined_rejects_when_defined_risk_exceeds_headroom(
     _mock_positions_loader(monkeypatch, positions_path)
     _mock_sleeve_edge(monkeypatch)
     _mock_passthrough_governed_control(monkeypatch)
+    _mock_risk_contracts(monkeypatch, {"intent-short-vol-headroom-blocked": ("DEFINED_RISK", 1, 38_800)})
     monkeypatch.setattr(
         bundle_b,
         "_load_execution_bindings",
@@ -995,6 +1220,7 @@ def test_bundle_b_short_vol_defined_ignores_non_matching_phasec_intent_hash(
     _mock_positions_loader(monkeypatch, positions_path)
     _mock_sleeve_edge(monkeypatch)
     _mock_passthrough_governed_control(monkeypatch)
+    _mock_risk_contracts(monkeypatch, {"intent-short-vol-current": ("DEFINED_RISK", 1, 38_800)})
     monkeypatch.setattr(
         bundle_b,
         "_load_execution_bindings",
