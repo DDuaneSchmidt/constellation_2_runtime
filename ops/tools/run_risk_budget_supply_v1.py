@@ -265,38 +265,77 @@ def _instrument(payload: dict[str, Any]) -> str:
     return str(payload.get("instrument") or payload.get("symbol") or underlying.get("symbol") or "").strip()
 
 
-def _target_pct(payload: dict[str, Any]) -> Decimal | None:
+def _target_notional_pct(payload: dict[str, Any]) -> Decimal | None:
+    return _decimal(payload.get("target_notional_pct"))
+
+
+def _max_risk_pct(payload: dict[str, Any]) -> Decimal | None:
+    constraints = payload.get("constraints") if isinstance(payload.get("constraints"), dict) else {}
+    return _decimal(constraints.get("max_risk_pct"))
+
+
+def _exposure_type(payload: dict[str, Any]) -> str:
+    return str(payload.get("exposure_type") or "").strip().upper()
+
+
+def _legacy_target_pct(payload: dict[str, Any]) -> Decimal | None:
     constraints = payload.get("constraints") if isinstance(payload.get("constraints"), dict) else {}
     return _decimal(payload.get("target_notional_pct") or constraints.get("max_risk_pct"))
+
+
+def _risk_budget_pct(payload: dict[str, Any]) -> tuple[Decimal | None, str, str]:
+    if _exposure_type(payload) == "LONG_EQUITY":
+        max_risk = _max_risk_pct(payload)
+        if max_risk is None:
+            return None, "constraints.max_risk_pct", "INTENT_BUDGET_MISSING"
+        if max_risk <= 0 or max_risk > MAX_ACCOUNT_RISK_PCT:
+            return max_risk, "constraints.max_risk_pct", "INTENT_BUDGET_COMPUTE_FAILED"
+        return max_risk, "constraints.max_risk_pct", ""
+
+    target = _legacy_target_pct(payload)
+    if target is None:
+        return None, "target_notional_pct_or_constraints.max_risk_pct", "INTENT_BUDGET_MISSING"
+    if target < 0 or target > MAX_ACCOUNT_RISK_PCT:
+        return target, "target_notional_pct_or_constraints.max_risk_pct", "INTENT_BUDGET_COMPUTE_FAILED"
+    return target, "target_notional_pct_or_constraints.max_risk_pct", ""
+
+
+def _notional_target_cents(nav_total_cents: int, target_notional: Decimal | None) -> int | None:
+    if target_notional is None:
+        return None
+    return int((Decimal(nav_total_cents) * target_notional).to_integral_value(rounding=ROUND_FLOOR))
 
 
 def _intent_budgets(ctx: bod.BodContext, nav_total_cents: int) -> tuple[list[dict[str, Any]], str]:
     budgets: list[dict[str, Any]] = []
     blocker = ""
     for path, intent in _active_intents(ctx):
-        target = _target_pct(intent)
+        target_notional = _target_notional_pct(intent)
+        max_risk = _max_risk_pct(intent)
+        risk_budget_pct, risk_budget_pct_source, row_blocker = _risk_budget_pct(intent)
         intent_id = str(intent.get("intent_id") or _intent_hash(path, intent)).strip()
         instrument = _instrument(intent)
         row = {
             "intent_id": intent_id,
             "instrument": instrument,
-            "target_pct": str(target) if target is not None else "",
+            "exposure_type": _exposure_type(intent),
+            "target_pct": str(risk_budget_pct) if risk_budget_pct is not None else "",
+            "target_notional_pct": str(target_notional) if target_notional is not None else "",
+            "risk_budget_pct_source": risk_budget_pct_source,
+            "max_risk_pct": str(max_risk) if max_risk is not None else "",
             "allowed_risk_cents": None,
+            "notional_target_cents": _notional_target_cents(nav_total_cents, target_notional),
             "nav_total_cents": nav_total_cents,
             "status": "PASS",
             "blocker": "",
             "source_path": str(path),
         }
-        if target is None:
+        if row_blocker:
             row["status"] = "BLOCKED"
-            row["blocker"] = "INTENT_BUDGET_MISSING"
-            blocker = blocker or "INTENT_BUDGET_MISSING"
-        elif target < 0 or target > MAX_ACCOUNT_RISK_PCT:
-            row["status"] = "BLOCKED"
-            row["blocker"] = "INTENT_BUDGET_COMPUTE_FAILED"
-            blocker = blocker or "INTENT_BUDGET_COMPUTE_FAILED"
+            row["blocker"] = row_blocker
+            blocker = blocker or row_blocker
         else:
-            row["allowed_risk_cents"] = int((Decimal(nav_total_cents) * target).to_integral_value(rounding=ROUND_FLOOR))
+            row["allowed_risk_cents"] = int((Decimal(nav_total_cents) * risk_budget_pct).to_integral_value(rounding=ROUND_FLOOR))
         budgets.append(row)
     return budgets, blocker
 
@@ -322,17 +361,18 @@ def _non_selected_intent_diagnostics(ctx: bod.BodContext) -> list[dict[str, Any]
             seen.add(key)
             if _matches_selected_intent(path, payload, selected_identity):
                 continue
-            target = _target_pct(payload)
-            blocker = ""
-            if target is None:
-                blocker = "INTENT_BUDGET_MISSING"
-            elif target < 0 or target > MAX_ACCOUNT_RISK_PCT:
-                blocker = "INTENT_BUDGET_COMPUTE_FAILED"
+            target_notional = _target_notional_pct(payload)
+            max_risk = _max_risk_pct(payload)
+            target, risk_budget_pct_source, blocker = _risk_budget_pct(payload)
             rows.append(
                 {
                     "intent_id": str(payload.get("intent_id") or key).strip(),
                     "instrument": _instrument(payload),
+                    "exposure_type": _exposure_type(payload),
                     "target_pct": str(target) if target is not None else "",
+                    "target_notional_pct": str(target_notional) if target_notional is not None else "",
+                    "risk_budget_pct_source": risk_budget_pct_source,
+                    "max_risk_pct": str(max_risk) if max_risk is not None else "",
                     "status": "DIAGNOSTIC_ONLY",
                     "blocker": blocker,
                     "selection_status": "NON_SELECTED",

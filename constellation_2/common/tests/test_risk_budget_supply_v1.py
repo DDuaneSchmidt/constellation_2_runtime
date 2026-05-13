@@ -64,14 +64,27 @@ def _capital_supply(
     )
 
 
-def _intent(ctx: bod.BodContext, *, target: str = "0.01") -> Path:
+def _intent(
+    ctx: bod.BodContext,
+    *,
+    target: str = "0.01",
+    exposure_type: str | None = None,
+    max_risk_pct: str | None = None,
+    intent_id: str = "intent_1",
+    symbol: str = "SPY",
+) -> Path:
+    payload = {
+        "intent_id": intent_id,
+        "target_notional_pct": target,
+        "underlying": {"symbol": symbol},
+    }
+    if exposure_type is not None:
+        payload["exposure_type"] = exposure_type
+    if max_risk_pct is not None:
+        payload["constraints"] = {"max_risk_pct": max_risk_pct}
     return _write_json(
         ctx.execution_root / "intents_v1" / "snapshots" / ctx.day_utc / "i1.exposure_intent.v1.json",
-        {
-            "intent_id": "intent_1",
-            "target_notional_pct": target,
-            "underlying": {"symbol": "SPY"},
-        },
+        payload,
     )
 
 
@@ -241,6 +254,82 @@ def test_active_current_day_intent_receives_computed_budget(monkeypatch: pytest.
     payload = supply.build_risk_budget_supply(ctx)
     assert payload["intent_budgets"][0]["allowed_risk_cents"] == 200_000
     assert payload["intent_budgets"][0]["instrument"] == "SPY"
+
+
+def test_long_equity_uses_max_risk_pct_not_notional_target(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _capital_supply(ctx, nav=101_416_990)
+    intent_path = _intent(
+        ctx,
+        target="0.10",
+        exposure_type="LONG_EQUITY",
+        max_risk_pct="0.02",
+        intent_id="c2_cross_asset_trend_qqq_2026-05-13_v1",
+        symbol="QQQ",
+    )
+    _selected_pointer(ctx, intent_id="c2_cross_asset_trend_qqq_2026-05-13_v1", intent_path=intent_path)
+    _pass_envelope(monkeypatch)
+
+    payload = supply.build_risk_budget_supply(ctx)
+    budget = payload["intent_budgets"][0]
+
+    assert payload["status"] == "PASS"
+    assert payload["canonical_blocker"] == ""
+    assert budget["exposure_type"] == "LONG_EQUITY"
+    assert budget["instrument"] == "QQQ"
+    assert budget["target_notional_pct"] == "0.10"
+    assert budget["risk_budget_pct_source"] == "constraints.max_risk_pct"
+    assert budget["max_risk_pct"] == "0.02"
+    assert budget["target_pct"] == "0.02"
+    assert budget["allowed_risk_cents"] == 2_028_339
+    assert budget["notional_target_cents"] == 10_141_699
+    assert payload["risk_sizing_export"]["usable_for_risk_sizing"] is True
+
+
+def test_long_equity_missing_max_risk_pct_fails_closed(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _capital_supply(ctx)
+    intent_path = _intent(ctx, target="0.10", exposure_type="LONG_EQUITY", symbol="QQQ")
+    _selected_pointer(ctx, intent_path=intent_path)
+
+    payload = supply.build_risk_budget_supply(ctx)
+    budget = payload["intent_budgets"][0]
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "INTENT_BUDGET_MISSING"
+    assert budget["blocker"] == "INTENT_BUDGET_MISSING"
+    assert budget["risk_budget_pct_source"] == "constraints.max_risk_pct"
+    assert budget["target_notional_pct"] == "0.10"
+
+
+def test_long_equity_max_risk_pct_above_cap_fails_closed(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _capital_supply(ctx)
+    intent_path = _intent(ctx, target="0.10", exposure_type="LONG_EQUITY", max_risk_pct="0.020001", symbol="QQQ")
+    _selected_pointer(ctx, intent_path=intent_path)
+
+    payload = supply.build_risk_budget_supply(ctx)
+    budget = payload["intent_budgets"][0]
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "INTENT_BUDGET_COMPUTE_FAILED"
+    assert budget["blocker"] == "INTENT_BUDGET_COMPUTE_FAILED"
+    assert budget["max_risk_pct"] == "0.020001"
+
+
+def test_long_equity_invalid_max_risk_pct_fails_closed(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _capital_supply(ctx)
+    intent_path = _intent(ctx, target="0.10", exposure_type="LONG_EQUITY", max_risk_pct="not-a-number", symbol="QQQ")
+    _selected_pointer(ctx, intent_path=intent_path)
+
+    payload = supply.build_risk_budget_supply(ctx)
+    budget = payload["intent_budgets"][0]
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "INTENT_BUDGET_MISSING"
+    assert budget["blocker"] == "INTENT_BUDGET_MISSING"
+    assert budget["max_risk_pct"] == ""
 
 
 def test_no_executable_intent_pointer_ignores_stale_day_snapshots(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
