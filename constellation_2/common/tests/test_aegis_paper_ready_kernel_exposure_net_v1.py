@@ -68,6 +68,24 @@ def test_exposure_net_stage_runs_after_authority_freshness_and_before_capital_al
     assert stage_ids.index("exposure_net") < stage_ids.index("capital_authority_allocation")
 
 
+def test_authorization_supply_uses_paper_sleeve_evidence_after_allocation() -> None:
+    stages = kernel._stages(
+        target_day=DAY,
+        canonical_truth_root=Path("/tmp/canonical"),
+        paper_sleeve_root=Path("/tmp/sleeve"),
+        environment="PAPER",
+        ib_account="DUO847203",
+        release_commit="0" * 40,
+    )
+    stage_ids = [stage.stage_id for stage in stages]
+    auth_supply = stages[stage_ids.index("authorization_supply")]
+
+    assert stage_ids.index("capital_authority_allocation") < stage_ids.index("authorization_supply")
+    assert auth_supply.truth_role == "PAPER_SLEEVE"
+    assert auth_supply.command[-1] == "/tmp/sleeve"
+    assert auth_supply.artifact_rel == Path("reports/authorization_supply_v1") / DAY / "authorization_supply.v1.json"
+
+
 def _runner_until_exposure_net(
     *,
     canonical_root: Path,
