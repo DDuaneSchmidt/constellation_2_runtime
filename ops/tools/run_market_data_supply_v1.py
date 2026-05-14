@@ -824,7 +824,7 @@ def _validate_snapshot(*, ctx: bod.BodContext, instrument: str, eval_time_utc: s
     return "", artifact
 
 
-def _run_market_data_authority(ctx: bod.BodContext) -> tuple[dict[str, Any], str]:
+def _run_market_data_authority(ctx: bod.BodContext, requirement_graph_path: Path | None = None) -> tuple[dict[str, Any], str]:
     cmd = [
         sys.executable,
         "ops/tools/run_market_data_authority_v1.py",
@@ -835,6 +835,15 @@ def _run_market_data_authority(ctx: bod.BodContext) -> tuple[dict[str, Any], str
         "--execution_root",
         str(ctx.execution_root),
     ]
+    if requirement_graph_path is not None:
+        cmd.extend(
+            [
+                "--scope",
+                "SELECTED_INTENT_REQUIREMENT_GRAPH",
+                "--requirement_graph_path",
+                str(requirement_graph_path),
+            ]
+        )
     proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True, check=False, timeout=60)
     try:
         summary = json.loads(str(proc.stdout or "").splitlines()[-1])
@@ -1100,7 +1109,7 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
                     blocker = validation_blocker
                     break
         if not blocker:
-            authority_result, authority_blocker = _run_market_data_authority(data_ctx)
+            authority_result, authority_blocker = _run_market_data_authority(data_ctx, req_path)
             if authority_blocker:
                 blocker = authority_blocker
     status = "PRE_MARKET_PENDING" if blocker == "MARKET_OPEN_DATA_PENDING" else ("PASS" if not blocker else "BLOCKED")

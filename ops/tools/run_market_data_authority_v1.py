@@ -12,6 +12,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from constellation_2.common.decision_authority_bridge_v1 import resolve_decision_truth_root_bridge_v1
 from constellation_2.common.market_data_authority_v1 import (
+    SCOPE_ALL_ACTIVE_INTENTS,
+    SCOPE_SELECTED_INTENT_REQUIREMENT_GRAPH,
     evaluate_market_data_authority_v1,
     write_market_data_authority_v1,
 )
@@ -47,6 +49,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--day_utc", required=True)
     parser.add_argument("--truth_root", default="")
     parser.add_argument("--execution_root", default="")
+    parser.add_argument(
+        "--scope",
+        default=SCOPE_ALL_ACTIVE_INTENTS,
+        choices=[SCOPE_ALL_ACTIVE_INTENTS, SCOPE_SELECTED_INTENT_REQUIREMENT_GRAPH],
+    )
+    parser.add_argument("--requirement_graph_path", default="")
     args = parser.parse_args(argv)
 
     day_utc = parse_day_utc_v1(args.day_utc)
@@ -56,7 +64,14 @@ def main(argv: list[str] | None = None) -> int:
         caller="ops/tools/run_market_data_authority_v1.py",
     )
     execution_root = _resolve_execution_root(str(args.execution_root))
-    payload = evaluate_market_data_authority_v1(day_utc=day_utc, truth_root=truth_root, execution_root=execution_root)
+    requirement_graph_path = Path(str(args.requirement_graph_path)).expanduser().resolve() if str(args.requirement_graph_path or "").strip() else None
+    payload = evaluate_market_data_authority_v1(
+        day_utc=day_utc,
+        truth_root=truth_root,
+        execution_root=execution_root,
+        evaluation_scope=str(args.scope),
+        requirement_graph_path=requirement_graph_path,
+    )
     validate_against_repo_schema_v1(payload, REPO_ROOT, SCHEMA)
     output_path = write_market_data_authority_v1(truth_root=truth_root, day_utc=day_utc, payload=payload)
     print(

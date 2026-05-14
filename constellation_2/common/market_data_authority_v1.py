@@ -19,6 +19,8 @@ STATES = {
     "COVERAGE_GAP",
     "INVALID_SCHEMA",
 }
+SCOPE_ALL_ACTIVE_INTENTS = "ALL_ACTIVE_INTENTS"
+SCOPE_SELECTED_INTENT_REQUIREMENT_GRAPH = "SELECTED_INTENT_REQUIREMENT_GRAPH"
 
 
 def _utc_now_iso() -> str:
@@ -76,6 +78,13 @@ def _is_option_intent(payload: dict[str, Any]) -> bool:
     return "option" in text
 
 
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().upper()
+    return text not in {"", "0", "FALSE", "NO", "N", "NONE", "NULL"}
+
+
 def _discover_intents(roots: list[Path], day_utc: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -117,6 +126,165 @@ def _latest_snapshot_for_symbol(roots: list[Path], day_utc: str, symbol: str) ->
     return candidates[-1]
 
 
+def _latest_equity_snapshot_for_symbol(
+    roots: list[Path],
+    day_utc: str,
+    symbol: str,
+) -> tuple[Path | None, dict[str, Any] | None, Path | None, dict[str, Any] | None]:
+    candidates: list[tuple[Path, dict[str, Any], Path, dict[str, Any]]] = []
+    for root in roots:
+        day_root = root / "market_data_snapshot_v1" / "snapshots" / day_utc
+        snapshot_path = day_root / f"{symbol.upper()}.market_data_snapshot.v1.json"
+        snapshot = _read_json(snapshot_path) or {}
+        if not snapshot:
+            continue
+        observed = str(snapshot.get("symbol") or "").strip().upper()
+        cert_candidates = [
+            day_root / f"{symbol.upper()}.freshness_certificate.v1.json",
+            day_root / f"{symbol.upper()}.market_data_freshness_certificate.v1.json",
+        ]
+        cert_path = next((path for path in cert_candidates if path.exists() and path.is_file()), cert_candidates[0])
+        cert = _read_json(cert_path) or {}
+        if observed == symbol.upper():
+            candidates.append((snapshot_path.resolve(), snapshot, cert_path.resolve(), cert))
+    if not candidates:
+        return None, None, None, None
+    candidates.sort(key=lambda item: str(item[0]))
+    return candidates[-1]
+
+
+def _selected_market_data_requirements(requirement_graph_path: Path | None, day_utc: str) -> list[dict[str, Any]]:
+    if requirement_graph_path is None:
+        return []
+    payload = _read_json(Path(requirement_graph_path)) or {}
+    if str(payload.get("day_utc") or "").strip() != day_utc:
+        return []
+    rows = payload.get("requirements")
+    if not isinstance(rows, list):
+        return []
+    selected: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("owner_phase") or "").strip().upper() != "MARKET_DATA":
+            continue
+        if str(row.get("source_type") or "").strip().upper() != "ACTIVE_INTENT":
+            continue
+        if row.get("required") is False:
+            continue
+        selected.append(row)
+    return selected
+
+
+def _symbol_groups_from_requirements(requirements: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+    options: set[str] = set()
+    equities: set[str] = set()
+    for row in requirements:
+        symbol = str(row.get("instrument") or "").strip().upper()
+        if not symbol:
+            continue
+        family = str(row.get("market_data_family") or "").strip().upper()
+        artifact = str(row.get("required_artifact") or row.get("data_type") or "").strip().upper()
+        requirement_id = str(row.get("requirement_id") or "").strip().upper()
+        if family == "OPTIONS" or artifact in {"OPTION_CHAIN", "OPTIONS_SNAPSHOT", "OPTIONS_SNAPSHOT_ARTIFACT"} or "OPTION" in requirement_id:
+            options.add(symbol)
+            continue
+        if family == "EQUITY" or artifact in {"UNDERLYING_SPOT", "BID_ASK_QUOTES", "FRESHNESS_CERTIFICATE"}:
+            equities.add(symbol)
+    return sorted(options), sorted(equities)
+
+
+def _option_coverage_row(
+    *,
+    roots: list[Path],
+    day_utc: str,
+    symbol: str,
+    produced_dt: datetime,
+) -> dict[str, Any]:
+    snapshot_path, snapshot, cert_path, cert = _latest_snapshot_for_symbol(roots, day_utc, symbol)
+    if snapshot_path is None or snapshot is None:
+        return {
+            "symbol": symbol,
+            "required": True,
+            "market_data_family": "OPTIONS",
+            "state": "MISSING_REQUIRED_DATA",
+            "snapshot_path": "",
+            "freshness_certificate_path": "",
+            "contract_count": 0,
+            "fresh": False,
+            "valid_schema": False,
+            "blocker_code": "OPTIONS_CHAIN_SNAPSHOT_MISSING",
+        }
+    underlying = snapshot.get("underlying") if isinstance(snapshot.get("underlying"), dict) else {}
+    observed_symbol = str(underlying.get("symbol") or snapshot.get("symbol") or "").strip().upper()
+    contracts = snapshot.get("contracts") if isinstance(snapshot.get("contracts"), list) else []
+    valid_schema = str(snapshot.get("schema_id") or "").strip() in {"options_chain_snapshot", "options_chain_snapshot_v1"} and bool(contracts)
+    valid_until = _parse_iso((cert or {}).get("valid_until_utc"))
+    fresh = bool(valid_until and valid_until >= produced_dt)
+    state = "READY"
+    blocker = ""
+    if observed_symbol != symbol:
+        state = "COVERAGE_GAP"
+        blocker = "OPTIONS_CHAIN_SYMBOL_COVERAGE_GAP"
+    elif not valid_schema:
+        state = "INVALID_SCHEMA"
+        blocker = "OPTIONS_CHAIN_SNAPSHOT_INVALID_SCHEMA"
+    elif not fresh:
+        state = "STALE"
+        blocker = "OPTIONS_CHAIN_SNAPSHOT_STALE"
+    return {
+        "symbol": symbol,
+        "required": True,
+        "market_data_family": "OPTIONS",
+        "state": state,
+        "snapshot_path": str(snapshot_path),
+        "freshness_certificate_path": str(cert_path or ""),
+        "contract_count": len(contracts),
+        "fresh": fresh,
+        "valid_schema": valid_schema,
+        "blocker_code": blocker,
+    }
+
+
+def _equity_coverage_row(
+    *,
+    roots: list[Path],
+    day_utc: str,
+    symbol: str,
+    produced_dt: datetime,
+) -> dict[str, Any]:
+    snapshot_path, snapshot, cert_path, cert = _latest_equity_snapshot_for_symbol(roots, day_utc, symbol)
+    base = {
+        "symbol": symbol,
+        "required": True,
+        "market_data_family": "EQUITY",
+        "snapshot_path": str(snapshot_path or ""),
+        "freshness_certificate_path": str(cert_path or ""),
+        "contract_count": 0,
+    }
+    if snapshot_path is None or snapshot is None:
+        return {**base, "state": "MISSING_REQUIRED_DATA", "fresh": False, "valid_schema": False, "blocker_code": "EQUITY_MARKET_DATA_SNAPSHOT_MISSING"}
+    if not cert:
+        return {**base, "state": "MISSING_REQUIRED_DATA", "fresh": False, "valid_schema": True, "blocker_code": "EQUITY_FRESHNESS_CERTIFICATE_MISSING"}
+    observed_symbol = str(snapshot.get("symbol") or "").strip().upper()
+    if observed_symbol != symbol:
+        return {**base, "state": "COVERAGE_GAP", "fresh": False, "valid_schema": False, "blocker_code": "EQUITY_MARKET_DATA_SYMBOL_COVERAGE_GAP"}
+    quote = snapshot.get("quote") if isinstance(snapshot.get("quote"), dict) else {}
+    bid = snapshot.get("bid") or quote.get("bid")
+    ask = snapshot.get("ask") or quote.get("ask")
+    spot = snapshot.get("spot") or snapshot.get("last") or snapshot.get("close")
+    if not _truthy(bid) or not _truthy(ask):
+        return {**base, "state": "MISSING_REQUIRED_DATA", "fresh": False, "valid_schema": False, "blocker_code": "EQUITY_QUOTES_MISSING_BID_ASK"}
+    if not _truthy(spot):
+        return {**base, "state": "MISSING_REQUIRED_DATA", "fresh": False, "valid_schema": False, "blocker_code": "EQUITY_MARKET_DATA_SNAPSHOT_INVALID"}
+    quote_ts = _parse_iso(snapshot.get("quote_as_of_utc") or snapshot.get("timestamp_utc"))
+    valid_until = _parse_iso((cert or {}).get("valid_until_utc"))
+    fresh = bool(quote_ts and quote_ts.date().isoformat() == day_utc and valid_until and valid_until >= produced_dt)
+    if not fresh:
+        return {**base, "state": "STALE", "fresh": False, "valid_schema": True, "blocker_code": "EQUITY_MARKET_DATA_STALE"}
+    return {**base, "state": "READY", "fresh": True, "valid_schema": True, "blocker_code": ""}
+
+
 def market_data_authority_output_path(*, truth_root: Path, day_utc: str) -> Path:
     return (
         Path(truth_root).resolve()
@@ -152,66 +320,60 @@ def evaluate_market_data_authority_v1(
     truth_root: Path,
     execution_root: Path | None = None,
     produced_utc: str | None = None,
+    evaluation_scope: str = SCOPE_ALL_ACTIVE_INTENTS,
+    requirement_graph_path: Path | None = None,
 ) -> dict[str, Any]:
     truth_root = Path(truth_root).resolve()
     execution_root = Path(execution_root).resolve() if execution_root is not None else truth_root
     roots = [execution_root, truth_root] if execution_root != truth_root else [truth_root]
     produced = produced_utc or _utc_now_iso()
     produced_dt = _parse_iso(produced) or datetime.now(UTC)
+    scope = str(evaluation_scope or SCOPE_ALL_ACTIVE_INTENTS).strip().upper()
+    if scope not in {SCOPE_ALL_ACTIVE_INTENTS, SCOPE_SELECTED_INTENT_REQUIREMENT_GRAPH}:
+        raise ValueError(f"unsupported market-data authority evaluation scope: {evaluation_scope}")
     intents = _discover_intents(roots, day_utc)
-    option_intents = [row for row in intents if row.get("requires_options") and row.get("symbol")]
-    required_symbols = sorted({str(row.get("symbol") or "").upper() for row in option_intents if row.get("symbol")})
-
     coverage: list[dict[str, Any]] = []
-    for symbol in required_symbols:
-        snapshot_path, snapshot, cert_path, cert = _latest_snapshot_for_symbol(roots, day_utc, symbol)
-        if snapshot_path is None or snapshot is None:
+    selected_requirements_missing = False
+    if scope == SCOPE_SELECTED_INTENT_REQUIREMENT_GRAPH:
+        requirements = _selected_market_data_requirements(requirement_graph_path, day_utc)
+        selected_requirements_missing = not requirements
+        option_symbols, equity_symbols = _symbol_groups_from_requirements(requirements)
+        required_symbols = sorted({*option_symbols, *equity_symbols})
+        option_intents = [
+            row for row in intents
+            if str(row.get("symbol") or "").strip().upper() in option_symbols
+            and row.get("requires_options")
+        ]
+        if selected_requirements_missing:
             coverage.append(
                 {
-                    "symbol": symbol,
+                    "symbol": "",
                     "required": True,
+                    "market_data_family": "",
                     "state": "MISSING_REQUIRED_DATA",
                     "snapshot_path": "",
                     "freshness_certificate_path": "",
                     "contract_count": 0,
                     "fresh": False,
                     "valid_schema": False,
-                    "blocker_code": "OPTIONS_CHAIN_SNAPSHOT_MISSING",
+                    "blocker_code": "MARKET_DATA_REQUIREMENT_GRAPH_MISSING",
                 }
             )
-            continue
-        underlying = snapshot.get("underlying") if isinstance(snapshot.get("underlying"), dict) else {}
-        observed_symbol = str(underlying.get("symbol") or snapshot.get("symbol") or "").strip().upper()
-        contracts = snapshot.get("contracts") if isinstance(snapshot.get("contracts"), list) else []
-        valid_schema = str(snapshot.get("schema_id") or "").strip() in {"options_chain_snapshot", "options_chain_snapshot_v1"} and bool(contracts)
-        valid_until = _parse_iso((cert or {}).get("valid_until_utc"))
-        fresh = bool(valid_until and valid_until >= produced_dt)
-        state = "READY"
-        blocker = ""
-        if observed_symbol != symbol:
-            state = "COVERAGE_GAP"
-            blocker = "OPTIONS_CHAIN_SYMBOL_COVERAGE_GAP"
-        elif not valid_schema:
-            state = "INVALID_SCHEMA"
-            blocker = "OPTIONS_CHAIN_SNAPSHOT_INVALID_SCHEMA"
-        elif not fresh:
-            state = "STALE"
-            blocker = "OPTIONS_CHAIN_SNAPSHOT_STALE"
-        coverage.append(
-            {
-                "symbol": symbol,
-                "required": True,
-                "state": state,
-                "snapshot_path": str(snapshot_path),
-                "freshness_certificate_path": str(cert_path or ""),
-                "contract_count": len(contracts),
-                "fresh": fresh,
-                "valid_schema": valid_schema,
-                "blocker_code": blocker,
-            }
-        )
+        for symbol in option_symbols:
+            coverage.append(_option_coverage_row(roots=roots, day_utc=day_utc, symbol=symbol, produced_dt=produced_dt))
+        for symbol in equity_symbols:
+            coverage.append(_equity_coverage_row(roots=roots, day_utc=day_utc, symbol=symbol, produced_dt=produced_dt))
+    else:
+        option_intents = [row for row in intents if row.get("requires_options") and row.get("symbol")]
+        required_symbols = sorted({str(row.get("symbol") or "").upper() for row in option_intents if row.get("symbol")})
+        for symbol in required_symbols:
+            coverage.append(_option_coverage_row(roots=roots, day_utc=day_utc, symbol=symbol, produced_dt=produced_dt))
 
-    if not intents:
+    if selected_requirements_missing:
+        state = "MISSING_REQUIRED_DATA"
+    elif scope == SCOPE_SELECTED_INTENT_REQUIREMENT_GRAPH and not required_symbols:
+        state = "NOT_REQUIRED"
+    elif not intents:
         state = "NO_INTENTS"
     elif not required_symbols:
         state = "NOT_REQUIRED"
@@ -241,6 +403,8 @@ def evaluate_market_data_authority_v1(
         "day_utc": day_utc,
         "produced_utc": produced,
         "authority_scope": "ACTIVE_INTENT_MARKET_DATA",
+        "evaluation_scope": scope,
+        "requirement_graph_path": str(Path(requirement_graph_path).resolve()) if requirement_graph_path is not None else "",
         "status": status,
         "market_data_state": state,
         "phase_context": phase_context,

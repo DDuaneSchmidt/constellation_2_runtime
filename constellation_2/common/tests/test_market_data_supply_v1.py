@@ -418,6 +418,33 @@ def test_owned_spy_active_intent_creates_market_data_requirements(tmp_path: Path
     assert payload["requirements"][0]["instrument"] == "SPY"
 
 
+def test_market_data_supply_invokes_selected_intent_authority_scope(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    graph_path = _requirement(ctx)
+    seen: dict[str, object] = {}
+
+    def _run(cmd, **_kwargs):  # noqa: ANN001
+        seen["cmd"] = cmd
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"status":"PASS","market_data_state":"READY","required_symbols":["SPY"],"first_blocker":""}\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr(supply.subprocess, "run", _run)
+
+    result, blocker = supply._run_market_data_authority(ctx, graph_path)
+
+    cmd = seen["cmd"]
+    assert isinstance(cmd, list)
+    assert "--scope" in cmd
+    assert cmd[cmd.index("--scope") + 1] == "SELECTED_INTENT_REQUIREMENT_GRAPH"
+    assert "--requirement_graph_path" in cmd
+    assert cmd[cmd.index("--requirement_graph_path") + 1] == str(graph_path)
+    assert result["exit_code"] == 0
+    assert blocker == ""
+
+
 def test_long_equity_selected_intent_creates_equity_market_data_requirements(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _selected_long_equity_pointer(ctx, symbol="QQQ")
@@ -528,7 +555,7 @@ def test_valid_qqq_long_equity_market_evidence_allows_supply_pass(monkeypatch: p
     monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
     monkeypatch.setattr(supply, "_run_capture", lambda *_args, **_kwargs: pytest.fail("LONG_EQUITY must not invoke options-chain capture"))
     monkeypatch.setattr(supply, "validate_against_repo_schema_v1", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(supply, "_run_market_data_authority", lambda _ctx: ({"exit_code": 0}, ""))
+    monkeypatch.setattr(supply, "_run_market_data_authority", lambda *_args, **_kwargs: ({"exit_code": 0}, ""))
 
     payload = supply.build_market_data_supply(ctx)
 
@@ -585,7 +612,7 @@ def test_spy_long_equity_market_data_supply_does_not_invoke_options_capture(monk
     _equity_snapshot(ctx, symbol="SPY")
     monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
     monkeypatch.setattr(supply, "_run_capture", lambda *_args, **_kwargs: pytest.fail("LONG_EQUITY must not invoke options-chain capture"))
-    monkeypatch.setattr(supply, "_run_market_data_authority", lambda _ctx: ({"exit_code": 0}, ""))
+    monkeypatch.setattr(supply, "_run_market_data_authority", lambda *_args, **_kwargs: ({"exit_code": 0}, ""))
 
     payload = supply.build_market_data_supply(ctx)
 
@@ -614,7 +641,7 @@ def test_long_equity_supply_reads_equity_evidence_from_selected_sleeve_root(monk
     _equity_snapshot(alt_ctx, symbol="DIA")
     monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
     monkeypatch.setattr(supply, "_run_capture", lambda *_args, **_kwargs: pytest.fail("LONG_EQUITY must not invoke options-chain capture"))
-    monkeypatch.setattr(supply, "_run_market_data_authority", lambda authority_ctx: ({"exit_code": 0, "execution_root": str(authority_ctx.execution_root)}, ""))
+    monkeypatch.setattr(supply, "_run_market_data_authority", lambda authority_ctx, *_args, **_kwargs: ({"exit_code": 0, "execution_root": str(authority_ctx.execution_root)}, ""))
 
     payload = supply.build_market_data_supply(ctx)
 
@@ -712,7 +739,7 @@ def test_long_equity_with_options_flag_still_requires_equity_evidence(monkeypatc
     monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
     monkeypatch.setattr(supply, "_run_capture", lambda *_args, **_kwargs: pytest.fail("existing option snapshot should avoid capture"))
     monkeypatch.setattr(supply, "validate_against_repo_schema_v1", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(supply, "_run_market_data_authority", lambda _ctx: pytest.fail("missing equity evidence should block before authority"))
+    monkeypatch.setattr(supply, "_run_market_data_authority", lambda *_args, **_kwargs: pytest.fail("missing equity evidence should block before authority"))
 
     payload = supply.build_market_data_supply(ctx)
 
@@ -818,7 +845,7 @@ def test_live_market_data_available_lets_supply_attempt_capture(monkeypatch: pyt
     monkeypatch.setattr(supply, "_run_capture", _capture)
     monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
     monkeypatch.setattr(supply, "validate_against_repo_schema_v1", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(supply, "_run_market_data_authority", lambda _ctx: ({"exit_code": 0}, ""))
+    monkeypatch.setattr(supply, "_run_market_data_authority", lambda *_args, **_kwargs: ({"exit_code": 0}, ""))
 
     payload = supply.build_market_data_supply(ctx)
 
@@ -834,7 +861,7 @@ def test_live_unavailable_delayed_available_policy_enabled_passes(monkeypatch: p
     _snapshot(ctx, market_data_type=3)
     monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
     monkeypatch.setattr(supply, "validate_against_repo_schema_v1", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(supply, "_run_market_data_authority", lambda _ctx: ({"exit_code": 0}, ""))
+    monkeypatch.setattr(supply, "_run_market_data_authority", lambda *_args, **_kwargs: ({"exit_code": 0}, ""))
 
     payload = supply.build_market_data_supply(ctx)
 
@@ -860,7 +887,7 @@ def test_delayed_policy_makes_supply_continue_to_capture(monkeypatch: pytest.Mon
     monkeypatch.setattr(supply, "_run_capture", _capture)
     monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
     monkeypatch.setattr(supply, "validate_against_repo_schema_v1", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(supply, "_run_market_data_authority", lambda _ctx: ({"exit_code": 0}, ""))
+    monkeypatch.setattr(supply, "_run_market_data_authority", lambda *_args, **_kwargs: ({"exit_code": 0}, ""))
 
     payload = supply.build_market_data_supply(ctx)
 
@@ -1013,7 +1040,7 @@ def test_valid_current_day_snapshot_and_freshness_pass(monkeypatch: pytest.Monke
     _snapshot(ctx)
     monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
     monkeypatch.setattr(supply, "validate_against_repo_schema_v1", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(supply, "_run_market_data_authority", lambda _ctx: ({"exit_code": 0}, ""))
+    monkeypatch.setattr(supply, "_run_market_data_authority", lambda *_args, **_kwargs: ({"exit_code": 0}, ""))
 
     payload = supply.build_market_data_supply(ctx)
 
