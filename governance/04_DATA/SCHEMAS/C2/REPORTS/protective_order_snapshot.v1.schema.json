@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/protective_order_snapshot.v1.schema.json",
+  "title": "protective_order_snapshot.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "day_utc",
+    "run_id",
+    "snapshot_time_utc",
+    "protective_orders",
+    "missing_stop_warnings",
+    "observational_only",
+    "broker_submit_required",
+    "transmit_automation_required",
+    "source_artifact_lineage",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "protective_order_snapshot" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "protective_order_snapshot_v1" },
+    "day_utc": { "type": "string" },
+    "run_id": { "type": "string" },
+    "snapshot_time_utc": { "type": "string", "minLength": 20 },
+    "protective_orders": { "type": "array", "items": { "$ref": "#/$defs/protective_order" } },
+    "missing_stop_warnings": { "type": "array", "items": { "type": "string" } },
+    "observational_only": { "const": true },
+    "broker_submit_required": { "const": false },
+    "transmit_automation_required": { "const": false },
+    "source_artifact_lineage": { "type": "array", "items": { "type": "object" } },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "protective_order": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot_time_utc",
+        "position_id",
+        "candidate_id",
+        "symbol",
+        "quantity",
+        "stop_exists",
+        "stop_price",
+        "stop_quantity",
+        "protection_status",
+        "missing_stop_warning",
+        "operator_action_required"
+      ],
+      "properties": {
+        "snapshot_time_utc": { "type": "string" },
+        "position_id": { "type": "string" },
+        "candidate_id": { "type": "string" },
+        "symbol": { "type": "string" },
+        "quantity": { "type": "integer" },
+        "stop_exists": { "type": "boolean" },
+        "stop_price": { "type": "string" },
+        "stop_quantity": { "type": "integer" },
+        "protection_status": { "type": "string", "enum": ["PROTECTED", "PARTIALLY_PROTECTED", "UNPROTECTED", "UNKNOWN"] },
+        "missing_stop_warning": { "type": "boolean" },
+        "operator_action_required": { "type": "boolean" }
+      }
+    }
+  }
+}

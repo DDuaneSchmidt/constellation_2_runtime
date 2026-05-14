@@ -232,6 +232,13 @@ def build_aegis_lite_eod_report_v1(
     sandbox_research_notes: list[dict[str, Any]] | None = None,
     operator_notes: str = "",
     source_artifact_lineage: list[dict[str, Any]] | None = None,
+    manual_operator_decisions: list[dict[str, Any]] | None = None,
+    manual_execution_events: list[dict[str, Any]] | None = None,
+    portfolio_position_snapshot: dict[str, Any] | None = None,
+    protective_order_snapshot: dict[str, Any] | None = None,
+    trade_outcome_attribution: dict[str, Any] | None = None,
+    edge_cluster: dict[str, Any] | None = None,
+    operator_execution_queue: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized = [normalize_trade_candidate_v1(candidate, ordinal=idx + 1) for idx, candidate in enumerate(candidates)]
     notes_by_id = {
@@ -245,7 +252,17 @@ def build_aegis_lite_eod_report_v1(
         _governance_integrity_gate(report_candidates, governance_status or {}, overlap_review),
         _report_completeness_gate(report_candidates, overlap_review),
     ]
-    warnings = _report_warnings(report_candidates, overlap_review, gates)
+    feedback = _feedback_summary(
+        manual_operator_decisions=manual_operator_decisions or [],
+        manual_execution_events=manual_execution_events or [],
+        portfolio_position_snapshot=portfolio_position_snapshot or {},
+        protective_order_snapshot=protective_order_snapshot or {},
+        trade_outcome_attribution=trade_outcome_attribution or {},
+        edge_cluster=edge_cluster or {},
+        operator_execution_queue=operator_execution_queue or {},
+    )
+    feedback["warnings"] = _dedupe([*feedback["warnings"], *_position_concentration_warnings(report_candidates, feedback["open_manual_positions"])])
+    warnings = _dedupe([*_report_warnings(report_candidates, overlap_review, gates), *feedback["warnings"]])
     blockers = _report_blockers(report_candidates, gates)
     manual_ready = (
         not blockers
@@ -297,6 +314,17 @@ def build_aegis_lite_eod_report_v1(
             "correlated_exposure_groups": overlap_review.get("correlated_exposure_groups") or [],
             "portfolio_concentration_warnings": overlap_review.get("portfolio_concentration_warnings") or [],
         },
+        "open_manual_positions": feedback["open_manual_positions"],
+        "missing_stop_warnings": feedback["missing_stop_warnings"],
+        "prior_day_manual_decisions": feedback["prior_day_manual_decisions"],
+        "manual_execution_events": feedback["manual_execution_events"],
+        "current_exposure_by_edge_cluster": feedback["current_exposure_by_edge_cluster"],
+        "current_exposure_by_sleeve": feedback["current_exposure_by_sleeve"],
+        "manual_execution_queue": feedback["manual_execution_queue"],
+        "skipped_candidate_tracking": feedback["skipped_candidate_tracking"],
+        "unsupported_manual_execution_warnings": feedback["unsupported_manual_execution_warnings"],
+        "performance_summary": feedback["performance_summary"],
+        "edge_clusters": feedback["edge_clusters"],
         "manual_execution_checklist": _manual_execution_checklist(),
         "do_not_trade_blockers": blockers,
         "warnings": warnings,
@@ -632,3 +660,96 @@ def _report_blockers(candidates: list[dict[str, Any]], gates: list[dict[str, Any
         for code in candidate["blockers"]:
             blockers.append(f"{candidate['candidate_id']}:{code}")
     return _dedupe(blockers)
+
+
+def _feedback_summary(
+    *,
+    manual_operator_decisions: list[dict[str, Any]],
+    manual_execution_events: list[dict[str, Any]],
+    portfolio_position_snapshot: dict[str, Any],
+    protective_order_snapshot: dict[str, Any],
+    trade_outcome_attribution: dict[str, Any],
+    edge_cluster: dict[str, Any],
+    operator_execution_queue: dict[str, Any],
+) -> dict[str, Any]:
+    positions = _objects(portfolio_position_snapshot.get("open_positions"))
+    missing_stop_warnings = _string_list(protective_order_snapshot.get("missing_stop_warnings"))
+    unsupported = _string_list(operator_execution_queue.get("unsupported_manual_execution_warnings"))
+    decisions = _objects(manual_operator_decisions)
+    attributions = _objects(trade_outcome_attribution.get("attributions"))
+    skipped = [
+        {
+            "candidate_id": str(row.get("candidate_id") or ""),
+            "decision": str(row.get("decision") or ""),
+            "decision_reason_codes": _string_list(row.get("decision_reason_codes")),
+        }
+        for row in decisions
+        if str(row.get("decision") or "").upper() in {"SKIPPED", "WATCHLIST", "REJECTED"}
+    ]
+    warnings = [
+        *[f"MISSING_PROTECTIVE_STOP:{item}" for item in missing_stop_warnings],
+        *[f"UNSUPPORTED_MANUAL_EXECUTION:{item}" for item in unsupported],
+    ]
+    return {
+        "open_manual_positions": positions,
+        "missing_stop_warnings": missing_stop_warnings,
+        "prior_day_manual_decisions": decisions,
+        "manual_execution_events": _objects(manual_execution_events),
+        "current_exposure_by_edge_cluster": _objects(portfolio_position_snapshot.get("exposure_by_edge_cluster")),
+        "current_exposure_by_sleeve": _objects(portfolio_position_snapshot.get("exposure_by_sleeve")),
+        "manual_execution_queue": _objects(operator_execution_queue.get("execution_queue")),
+        "skipped_candidate_tracking": skipped,
+        "unsupported_manual_execution_warnings": unsupported,
+        "performance_summary": _performance_summary(attributions),
+        "edge_clusters": _objects(edge_cluster.get("edge_clusters")),
+        "warnings": _dedupe(warnings),
+    }
+
+
+def _position_concentration_warnings(candidates: list[dict[str, Any]], positions: list[dict[str, Any]]) -> list[str]:
+    open_symbols = {str(row.get("symbol") or "").upper() for row in positions if str(row.get("symbol") or "")}
+    warnings: list[str] = []
+    for candidate in candidates:
+        symbol = str(candidate.get("symbol") or "").upper()
+        if symbol and symbol in open_symbols:
+            warnings.append(f"{candidate['candidate_id']}:{symbol}:OPEN_POSITION_CONCENTRATION")
+    return warnings
+
+
+def _performance_summary(attributions: list[dict[str, Any]]) -> dict[str, Any]:
+    if not attributions:
+        return {
+            "status": "UNAVAILABLE",
+            "candidate_count": 0,
+            "skipped_candidate_count": 0,
+            "reason_codes": ["TRADE_OUTCOME_ATTRIBUTION_MISSING"],
+        }
+    skipped = [
+        row
+        for row in attributions
+        if str(row.get("operator_execution_quality") or "").upper() in {"SKIPPED", "NOT_IMPLEMENTED"}
+        or str(row.get("skipped_trade_outcome") or "")
+    ]
+    return {
+        "status": "AVAILABLE",
+        "candidate_count": len(attributions),
+        "skipped_candidate_count": len(skipped),
+        "reason_codes": [],
+        "sleeve_signal_quality": _quality_counts(attributions, "sleeve_signal_quality"),
+        "implementation_quality": _quality_counts(attributions, "implementation_quality"),
+        "operator_execution_quality": _quality_counts(attributions, "operator_execution_quality"),
+    }
+
+
+def _quality_counts(rows: list[dict[str, Any]], field_name: str) -> list[dict[str, Any]]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        key = str(row.get(field_name) or "UNKNOWN")
+        counts[key] = counts.get(key, 0) + 1
+    return [{"status": key, "count": value} for key, value in sorted(counts.items())]
+
+
+def _objects(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]

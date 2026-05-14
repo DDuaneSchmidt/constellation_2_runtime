@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/operator_execution_queue.v1.schema.json",
+  "title": "operator_execution_queue.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "day_utc",
+    "run_id",
+    "execution_queue",
+    "unsupported_manual_execution_warnings",
+    "manual_execution_only",
+    "broker_submit_required",
+    "transmit_automation_required",
+    "source_artifact_lineage",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "operator_execution_queue" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "operator_execution_queue_v1" },
+    "day_utc": { "type": "string" },
+    "run_id": { "type": "string" },
+    "execution_queue": { "type": "array", "items": { "$ref": "#/$defs/queue_item" } },
+    "unsupported_manual_execution_warnings": { "type": "array", "items": { "type": "string" } },
+    "manual_execution_only": { "const": true },
+    "broker_submit_required": { "const": false },
+    "transmit_automation_required": { "const": false },
+    "source_artifact_lineage": { "type": "array", "items": { "type": "object" } },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "queue_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "execution_order",
+        "candidate_id",
+        "priority_rank",
+        "trade_class",
+        "manual_execution_recipe",
+        "required_orders",
+        "stop_required",
+        "skip_ok_flag",
+        "overlap_group",
+        "edge_cluster_id",
+        "risk_bucket",
+        "operator_confirmations",
+        "queue_status",
+        "reason_codes"
+      ],
+      "properties": {
+        "run_id": { "type": "string" },
+        "execution_order": { "type": "integer", "minimum": 1 },
+        "candidate_id": { "type": "string" },
+        "priority_rank": { "type": "integer", "minimum": 1 },
+        "trade_class": { "type": "string" },
+        "manual_execution_recipe": { "type": "string" },
+        "required_orders": { "type": "array", "items": { "type": "string" } },
+        "stop_required": { "type": "boolean" },
+        "skip_ok_flag": { "type": "boolean" },
+        "overlap_group": { "type": "string" },
+        "edge_cluster_id": { "type": "string" },
+        "risk_bucket": { "type": "string" },
+        "operator_confirmations": { "type": "array", "items": { "type": "string" } },
+        "queue_status": { "type": "string", "enum": ["READY_FOR_MANUAL_REVIEW", "UNSUPPORTED_MANUAL_EXECUTION"] },
+        "reason_codes": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

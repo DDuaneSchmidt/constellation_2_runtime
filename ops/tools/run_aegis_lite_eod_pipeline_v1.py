@@ -63,6 +63,13 @@ def build_aegis_lite_eod_pipeline_v1(
         sandbox_research_notes=_objects(input_payload.get("sandbox_research_notes")),
         operator_notes=operator_notes or str(input_payload.get("operator_notes") or ""),
         source_artifact_lineage=[*source_lineage, artifact_ref_v1(overlap_path, artifact_type="sleeve_edge_overlap_review_v1")],
+        manual_operator_decisions=_objects(input_payload.get("manual_operator_decisions")),
+        manual_execution_events=_objects(input_payload.get("manual_execution_events")),
+        portfolio_position_snapshot=_object(input_payload.get("portfolio_position_snapshot")),
+        protective_order_snapshot=_object(input_payload.get("protective_order_snapshot")),
+        trade_outcome_attribution=_object(input_payload.get("trade_outcome_attribution")),
+        edge_cluster=_object(input_payload.get("edge_cluster")),
+        operator_execution_queue=_object(input_payload.get("operator_execution_queue")),
     )
     out_path = Path(str(report["artifact_path"]))
     attach_producer_contract_v1(

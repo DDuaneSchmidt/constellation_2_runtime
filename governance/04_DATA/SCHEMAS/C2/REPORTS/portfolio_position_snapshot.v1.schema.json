@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/portfolio_position_snapshot.v1.schema.json",
+  "title": "portfolio_position_snapshot.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "day_utc",
+    "run_id",
+    "snapshot_time_utc",
+    "source",
+    "open_positions",
+    "cash",
+    "net_liquidation",
+    "gross_exposure",
+    "net_exposure",
+    "exposure_by_symbol",
+    "exposure_by_edge_cluster",
+    "exposure_by_sleeve",
+    "observational_only",
+    "broker_submit_required",
+    "transmit_automation_required",
+    "source_artifact_lineage",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "portfolio_position_snapshot" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "portfolio_position_snapshot_v1" },
+    "day_utc": { "type": "string" },
+    "run_id": { "type": "string" },
+    "snapshot_time_utc": { "type": "string", "minLength": 20 },
+    "source": { "type": "string", "enum": ["MANUAL", "CSV_IMPORT", "READ_ONLY_IB_FUTURE"] },
+    "open_positions": { "type": "array", "items": { "$ref": "#/$defs/position" } },
+    "cash": { "type": "string" },
+    "net_liquidation": { "type": "string" },
+    "gross_exposure": { "type": "string" },
+    "net_exposure": { "type": "string" },
+    "exposure_by_symbol": { "type": "array", "items": { "$ref": "#/$defs/exposure" } },
+    "exposure_by_edge_cluster": { "type": "array", "items": { "$ref": "#/$defs/exposure" } },
+    "exposure_by_sleeve": { "type": "array", "items": { "$ref": "#/$defs/exposure" } },
+    "observational_only": { "const": true },
+    "broker_submit_required": { "const": false },
+    "transmit_automation_required": { "const": false },
+    "source_artifact_lineage": { "type": "array", "items": { "type": "object" } },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "position": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "position_id",
+        "candidate_id",
+        "sleeve_id",
+        "edge_cluster_id",
+        "symbol",
+        "direction",
+        "quantity",
+        "average_entry_price",
+        "current_reference_price",
+        "unrealized_pnl"
+      ],
+      "properties": {
+        "position_id": { "type": "string" },
+        "candidate_id": { "type": "string" },
+        "sleeve_id": { "type": "string" },
+        "edge_cluster_id": { "type": "string" },
+        "symbol": { "type": "string" },
+        "direction": { "type": "string" },
+        "quantity": { "type": "integer" },
+        "average_entry_price": { "type": "string" },
+        "current_reference_price": { "type": "string" },
+        "unrealized_pnl": { "type": "string" }
+      }
+    },
+    "exposure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "net_quantity"],
+      "properties": {
+        "key": { "type": "string" },
+        "net_quantity": { "type": "integer" }
+      }
+    }
+  }
+}

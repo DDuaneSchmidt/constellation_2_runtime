@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/edge_cluster.v1.schema.json",
+  "title": "edge_cluster.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "day_utc",
+    "run_id",
+    "edge_clusters",
+    "source_artifact_lineage",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "edge_cluster" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "edge_cluster_v1" },
+    "day_utc": { "type": "string" },
+    "run_id": { "type": "string" },
+    "edge_clusters": { "type": "array", "items": { "$ref": "#/$defs/edge_cluster" } },
+    "source_artifact_lineage": { "type": "array", "items": { "type": "object" } },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "edge_cluster": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "edge_cluster_id",
+        "thesis_id",
+        "edge_family",
+        "regime_dependency",
+        "shared_risk_tags",
+        "correlated_symbols",
+        "candidates_in_cluster",
+        "duplicate_thesis_flag",
+        "distinct_edge_flag",
+        "recommended_portfolio_expression",
+        "concentration_warning",
+        "governance_recommendation"
+      ],
+      "properties": {
+        "edge_cluster_id": { "type": "string" },
+        "thesis_id": { "type": "string" },
+        "edge_family": { "type": "string" },
+        "regime_dependency": { "type": "string" },
+        "shared_risk_tags": { "type": "array", "items": { "type": "string" } },
+        "correlated_symbols": { "type": "array", "items": { "type": "string" } },
+        "candidates_in_cluster": { "type": "array", "items": { "type": "string" } },
+        "duplicate_thesis_flag": { "type": "boolean" },
+        "distinct_edge_flag": { "type": "boolean" },
+        "recommended_portfolio_expression": { "type": "string" },
+        "concentration_warning": { "type": "boolean" },
+        "governance_recommendation": { "type": "string" }
+      }
+    }
+  }
+}

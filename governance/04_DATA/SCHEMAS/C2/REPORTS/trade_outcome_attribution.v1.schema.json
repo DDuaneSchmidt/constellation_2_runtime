@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/trade_outcome_attribution.v1.schema.json",
+  "title": "trade_outcome_attribution.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "day_utc",
+    "run_id",
+    "attributions",
+    "ib_execution_required",
+    "source_artifact_lineage",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "trade_outcome_attribution" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "trade_outcome_attribution_v1" },
+    "day_utc": { "type": "string" },
+    "run_id": { "type": "string" },
+    "attributions": { "type": "array", "items": { "$ref": "#/$defs/attribution" } },
+    "ib_execution_required": { "const": false },
+    "source_artifact_lineage": { "type": "array", "items": { "type": "object" } },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "attribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_id",
+        "run_id",
+        "sleeve_id",
+        "edge_cluster_id",
+        "recommended_entry_reference",
+        "actual_entry_price",
+        "actual_exit_price",
+        "model_forward_returns",
+        "realized_pnl",
+        "unrealized_pnl",
+        "MAE",
+        "MFE",
+        "operator_slippage",
+        "skipped_trade_outcome",
+        "governance_adjustment_effect",
+        "sleeve_signal_quality",
+        "implementation_quality",
+        "operator_execution_quality"
+      ],
+      "properties": {
+        "candidate_id": { "type": "string" },
+        "run_id": { "type": "string" },
+        "sleeve_id": { "type": "string" },
+        "edge_cluster_id": { "type": "string" },
+        "recommended_entry_reference": { "type": "string" },
+        "actual_entry_price": { "type": "string" },
+        "actual_exit_price": { "type": "string" },
+        "model_forward_returns": { "type": "array", "items": { "type": "string" } },
+        "realized_pnl": { "type": "string" },
+        "unrealized_pnl": { "type": "string" },
+        "MAE": { "type": "string" },
+        "MFE": { "type": "string" },
+        "operator_slippage": { "type": "string" },
+        "skipped_trade_outcome": { "type": "string" },
+        "governance_adjustment_effect": { "type": "string" },
+        "sleeve_signal_quality": { "type": "string" },
+        "implementation_quality": { "type": "string" },
+        "operator_execution_quality": { "type": "string" }
+      }
+    }
+  }
+}

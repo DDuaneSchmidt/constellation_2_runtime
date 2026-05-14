@@ -24,6 +24,8 @@ It includes:
 - Operator notes and source artifact lineage.
 - Run receipt and audit archive location.
 
+When feedback artifacts are available, the report also includes open manual positions, missing stop warnings, prior-day operator decisions, manual execution events, current exposure by edge cluster and sleeve, skipped candidate tracking, unsupported manual execution warnings, the operator execution queue, edge clusters, and performance summary.
+
 ## Manual Execution Only
 
 The artifact always declares:
