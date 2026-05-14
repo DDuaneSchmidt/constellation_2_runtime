@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/sleeve_edge_overlap_review.v1.schema.json",
+  "title": "sleeve_edge_overlap_review.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "day_utc",
+    "run_id",
+    "generated_at_utc",
+    "status",
+    "distinct_edge_count",
+    "edge_groups",
+    "shared_risk_groups",
+    "duplicate_thesis_groups",
+    "correlated_exposure_groups",
+    "portfolio_concentration_warnings",
+    "governance_adjustments",
+    "candidate_level_overlap_notes",
+    "source_artifact_lineage",
+    "reason_codes",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "sleeve_edge_overlap_review" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "sleeve_edge_overlap_review_v1" },
+    "day_utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "generated_at_utc": { "type": "string", "minLength": 20 },
+    "status": { "type": "string", "enum": ["PASS", "REVIEW_REQUIRED"] },
+    "distinct_edge_count": { "type": "integer", "minimum": 0 },
+    "edge_groups": { "type": "array", "items": { "$ref": "#/$defs/edge_group" } },
+    "shared_risk_groups": { "type": "array", "items": { "$ref": "#/$defs/shared_risk_group" } },
+    "duplicate_thesis_groups": { "type": "array", "items": { "$ref": "#/$defs/duplicate_thesis_group" } },
+    "correlated_exposure_groups": { "type": "array", "items": { "$ref": "#/$defs/correlated_exposure_group" } },
+    "portfolio_concentration_warnings": { "type": "array", "items": { "$ref": "#/$defs/concentration_warning" } },
+    "governance_adjustments": { "type": "array", "items": { "$ref": "#/$defs/governance_adjustment" } },
+    "candidate_level_overlap_notes": { "type": "array", "items": { "$ref": "#/$defs/candidate_note" } },
+    "source_artifact_lineage": { "type": "array", "items": { "$ref": "#/$defs/artifact_ref" } },
+    "reason_codes": { "type": "array", "items": { "type": "string" } },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_type", "path", "exists", "sha256"],
+      "properties": {
+        "artifact_type": { "type": "string" },
+        "path": { "type": "string" },
+        "exists": { "type": "boolean" },
+        "sha256": { "type": "string" }
+      }
+    },
+    "edge_group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "edge_group_id",
+        "edge_family",
+        "direction",
+        "shared_risk_tags",
+        "regime_dependency",
+        "macro_sensitivity",
+        "volatility_liquidity_dependency",
+        "candidate_ids"
+      ],
+      "properties": {
+        "edge_group_id": { "type": "string" },
+        "edge_family": { "type": "string" },
+        "direction": { "type": "string" },
+        "shared_risk_tags": { "type": "array", "items": { "type": "string" } },
+        "regime_dependency": { "type": "string" },
+        "macro_sensitivity": { "type": "string" },
+        "volatility_liquidity_dependency": { "type": "string" },
+        "candidate_ids": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "shared_risk_group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shared_risk_group_id", "risk_tag", "candidate_ids"],
+      "properties": {
+        "shared_risk_group_id": { "type": "string" },
+        "risk_tag": { "type": "string" },
+        "candidate_ids": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "duplicate_thesis_group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["duplicate_thesis_group_id", "thesis_id", "candidate_ids"],
+      "properties": {
+        "duplicate_thesis_group_id": { "type": "string" },
+        "thesis_id": { "type": "string" },
+        "candidate_ids": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "correlated_exposure_group": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["correlated_exposure_group_id", "symbol", "candidate_ids"],
+      "properties": {
+        "correlated_exposure_group_id": { "type": "string" },
+        "symbol": { "type": "string" },
+        "candidate_ids": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "concentration_warning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["warning_id", "symbol", "candidate_ids", "reason_codes"],
+      "properties": {
+        "warning_id": { "type": "string" },
+        "symbol": { "type": "string" },
+        "candidate_ids": { "type": "array", "items": { "type": "string" } },
+        "reason_codes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "governance_adjustment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_id", "recommendation", "reason_codes"],
+      "properties": {
+        "candidate_id": { "type": "string" },
+        "recommendation": { "$ref": "#/$defs/recommendation" },
+        "reason_codes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "candidate_note": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_id",
+        "sleeve_id",
+        "symbol",
+        "direction",
+        "edge_family",
+        "thesis_id",
+        "shared_risk_tags",
+        "correlated_symbols",
+        "overlap_group_id",
+        "duplicate_thesis_flag",
+        "concentration_warning_flag",
+        "governance_recommendation",
+        "reason_codes"
+      ],
+      "properties": {
+        "candidate_id": { "type": "string" },
+        "sleeve_id": { "type": "string" },
+        "symbol": { "type": "string" },
+        "direction": { "type": "string" },
+        "edge_family": { "type": "string" },
+        "thesis_id": { "type": "string" },
+        "shared_risk_tags": { "type": "array", "items": { "type": "string" } },
+        "correlated_symbols": { "type": "array", "items": { "type": "string" } },
+        "overlap_group_id": { "type": "string" },
+        "duplicate_thesis_flag": { "type": "boolean" },
+        "concentration_warning_flag": { "type": "boolean" },
+        "governance_recommendation": { "$ref": "#/$defs/recommendation" },
+        "reason_codes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "recommendation": {
+      "type": "string",
+      "enum": [
+        "approve",
+        "approve_reduced_size",
+        "prefer_best_candidate_in_group",
+        "block_due_to_duplicate_edge",
+        "block_due_to_concentration",
+        "manual_review_required"
+      ]
+    }
+  }
+}
