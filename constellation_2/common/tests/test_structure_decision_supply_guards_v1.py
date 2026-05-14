@@ -97,6 +97,21 @@ def _equity_intent() -> dict:
     }
 
 
+def _option_intent() -> dict:
+    return {
+        "schema_id": "exposure_intent",
+        "schema_version": "v1",
+        "day_utc": "2026-05-12",
+        "intent_id": "c2_vol_income_spy_2026-05-12_v1",
+        "intent_hash": "optionintenthash",
+        "exposure_type": "SHORT_VOL_DEFINED",
+        "requires_options": True,
+        "engine": {"engine_id": "C2_VOL_INCOME_DEFINED_RISK_V1", "mode": "PAPER", "suite": "C2_OPTIONS_7"},
+        "underlying": {"symbol": "SPY", "currency": "USD"},
+        "option": {"structure": "PUT", "requires_options": True},
+    }
+
+
 def _cross_asset_qqq_intent(*, target_notional_pct: str = "0.10", max_risk_pct: str = "0.02", symbol: str = "QQQ") -> dict:
     return {
         "schema_id": "exposure_intent",
@@ -175,6 +190,56 @@ def _equity_policy() -> dict:
     }
 
 
+def _write_equity_snapshot_gate(ctx: BodContext, symbol: str) -> tuple[Path, Path]:
+    snapshot_path = ctx.execution_root / "market_data_snapshot_v1" / "snapshots" / ctx.day_utc / f"{symbol}.market_data_snapshot.v1.json"
+    cert_path = ctx.execution_root / "market_data_snapshot_v1" / "snapshots" / ctx.day_utc / f"{symbol}.freshness_certificate.v1.json"
+    _write_json(
+        snapshot_path,
+        {
+            "schema_id": "market_data_snapshot_v1",
+            "schema_version": "v1",
+            "day_utc": ctx.day_utc,
+            "symbol": symbol,
+            "quote_as_of_utc": "2026-05-12T19:31:00Z",
+            "timestamp_utc": "2026-05-12T19:31:00Z",
+            "bid": "619.99",
+            "ask": "620.01",
+            "last": "620.00",
+            "close": "618.00",
+            "spot": "620.00",
+        },
+    )
+    _write_json(
+        cert_path,
+        {
+            "schema_id": "market_data_freshness_certificate",
+            "schema_version": "v1",
+            "day_utc": ctx.day_utc,
+            "symbol": symbol,
+            "evaluated_at_utc": "2026-05-12T19:31:00Z",
+            "evidence_as_of_utc": "2026-05-12T19:31:00Z",
+            "valid_until_utc": "2026-05-12T19:36:00Z",
+        },
+    )
+    _write_json(
+        ctx.truth_root / "reports" / "market_open_data_gate_v1" / ctx.day_utc / "market_open_data_gate.v1.json",
+        {"status": "PASS", "snapshot_path": str(snapshot_path), "freshness_certificate_path": str(cert_path)},
+    )
+    return snapshot_path, cert_path
+
+
+def _write_options_snapshot_gate(ctx: BodContext, symbol: str) -> tuple[Path, Path]:
+    snapshot_path = ctx.execution_root / "options_chain_snapshot_v1" / ctx.day_utc / "capture" / "options_chain_snapshot.v1.json"
+    cert_path = ctx.execution_root / "options_chain_snapshot_v1" / ctx.day_utc / "capture" / "freshness_certificate.v1.json"
+    _write_json(snapshot_path, {"as_of_utc": "2026-05-12T19:31:00Z", "underlying": {"symbol": symbol, "spot_price": "620.00"}, "contracts": []})
+    _write_json(cert_path, {"status": "PASS"})
+    _write_json(
+        ctx.truth_root / "reports" / "market_open_data_gate_v1" / ctx.day_utc / "market_open_data_gate.v1.json",
+        {"status": "PASS", "snapshot_path": str(snapshot_path), "freshness_certificate_path": str(cert_path)},
+    )
+    return snapshot_path, cert_path
+
+
 def _write_equity_structure_inputs(ctx: BodContext, intent_payload: dict | None = None) -> Path:
     intent_payload = intent_payload or _equity_intent()
     intent_id = str(intent_payload.get("intent_id") or "intent").strip()
@@ -196,14 +261,10 @@ def _write_equity_structure_inputs(ctx: BodContext, intent_payload: dict | None 
         ctx.truth_root / "reports" / "risk_budget_supply_v1" / ctx.day_utc / "risk_budget_supply.v1.json",
         {"status": "PASS", "intent_budgets": [{"intent_id": intent_id, "allowed_risk_cents": 100000}]},
     )
-    snapshot_path = ctx.execution_root / "options_chain_snapshot_v1" / ctx.day_utc / "capture" / "options_chain_snapshot.v1.json"
-    cert_path = ctx.execution_root / "options_chain_snapshot_v1" / ctx.day_utc / "capture" / "freshness_certificate.v1.json"
-    _write_json(snapshot_path, {"as_of_utc": "2026-05-12T19:31:00Z", "underlying": {"symbol": symbol, "spot_price": "620.00"}, "contracts": []})
-    _write_json(cert_path, {"status": "PASS"})
-    _write_json(
-        ctx.truth_root / "reports" / "market_open_data_gate_v1" / ctx.day_utc / "market_open_data_gate.v1.json",
-        {"status": "PASS", "snapshot_path": str(snapshot_path), "freshness_certificate_path": str(cert_path)},
-    )
+    if structure_supply._uses_equity_market_open_data(intent_payload):
+        _write_equity_snapshot_gate(ctx, symbol)
+    else:
+        _write_options_snapshot_gate(ctx, symbol)
     return intent_path
 
 
@@ -430,6 +491,103 @@ def test_long_equity_intent_does_not_query_options_policy(monkeypatch, tmp_path:
     assert payload["status"] == "PASS"
     assert payload["structure_decisions"][0]["selected_structure"] == "EQUITY_SPOT"
     assert payload["structure_decisions"][0]["structure_diagnostics"]["options_policy_queried"] is False
+    assert "market_data_snapshot_v1/snapshots/2026-05-12/SPY.market_data_snapshot.v1.json" in payload["market_open_data"]["snapshot_path"]
+
+
+def test_long_equity_valid_equity_snapshot_feeds_pricing_inputs(monkeypatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _write_equity_structure_inputs(ctx)
+    equity_policy_path = tmp_path / "governance" / "C2_EQUITY_STRUCTURE_POLICY_V1.json"
+    _write_json(equity_policy_path, _equity_policy())
+    monkeypatch.setattr(structure_supply, "EQUITY_POLICY_PATH", equity_policy_path)
+
+    payload = structure_supply.build_structure_decision_supply_v1(ctx)
+
+    expected = ctx.execution_root / "market_data_snapshot_v1" / "snapshots" / ctx.day_utc / "SPY.market_data_snapshot.v1.json"
+    assert payload["status"] == "PASS"
+    assert payload["market_open_data"]["snapshot_path"] == str(expected.resolve())
+    assert payload["structure_decisions"][0]["pricing_inputs"]["snapshot_path"] == str(expected.resolve())
+
+
+def test_long_equity_missing_equity_snapshot_blocks(monkeypatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _write_equity_structure_inputs(ctx)
+    equity_policy_path = tmp_path / "governance" / "C2_EQUITY_STRUCTURE_POLICY_V1.json"
+    _write_json(equity_policy_path, _equity_policy())
+    monkeypatch.setattr(structure_supply, "EQUITY_POLICY_PATH", equity_policy_path)
+    snapshot_path = ctx.execution_root / "market_data_snapshot_v1" / "snapshots" / ctx.day_utc / "SPY.market_data_snapshot.v1.json"
+    snapshot_path.unlink()
+
+    payload = structure_supply.build_structure_decision_supply_v1(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "MARKET_OPEN_DATA_MISSING"
+    assert payload["market_open_data"]["snapshot_path"] == ""
+
+
+def test_long_equity_invalid_or_stale_equity_snapshot_blocks(monkeypatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _write_equity_structure_inputs(ctx)
+    equity_policy_path = tmp_path / "governance" / "C2_EQUITY_STRUCTURE_POLICY_V1.json"
+    _write_json(equity_policy_path, _equity_policy())
+    monkeypatch.setattr(structure_supply, "EQUITY_POLICY_PATH", equity_policy_path)
+    cert_path = ctx.execution_root / "market_data_snapshot_v1" / "snapshots" / ctx.day_utc / "SPY.freshness_certificate.v1.json"
+    cert = json.loads(cert_path.read_text(encoding="utf-8"))
+    cert["status"] = "STALE"
+    _write_json(cert_path, cert)
+
+    payload = structure_supply.build_structure_decision_supply_v1(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "MARKET_OPEN_DATA_MISSING"
+    assert payload["market_open_data"]["freshness_certificate_path"] == str(cert_path.resolve())
+
+
+def test_long_equity_wrong_root_day_or_symbol_equity_snapshot_fails_closed(monkeypatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _write_equity_structure_inputs(ctx)
+    equity_policy_path = tmp_path / "governance" / "C2_EQUITY_STRUCTURE_POLICY_V1.json"
+    _write_json(equity_policy_path, _equity_policy())
+    monkeypatch.setattr(structure_supply, "EQUITY_POLICY_PATH", equity_policy_path)
+    wrong_snapshot = tmp_path / "wrong_root" / "market_data_snapshot_v1" / "snapshots" / ctx.day_utc / "SPY.market_data_snapshot.v1.json"
+    wrong_cert = tmp_path / "wrong_root" / "market_data_snapshot_v1" / "snapshots" / ctx.day_utc / "SPY.freshness_certificate.v1.json"
+    _write_json(wrong_snapshot, {"day_utc": ctx.day_utc, "symbol": "SPY", "quote_as_of_utc": "2026-05-12T19:31:00Z", "bid": "1", "ask": "2", "spot": "1"})
+    _write_json(wrong_cert, {"day_utc": ctx.day_utc, "symbol": "SPY", "evidence_as_of_utc": "2026-05-12T19:31:00Z", "valid_until_utc": "2026-05-12T19:36:00Z"})
+    _write_json(
+        ctx.truth_root / "reports" / "market_open_data_gate_v1" / ctx.day_utc / "market_open_data_gate.v1.json",
+        {"status": "PASS", "snapshot_path": str(wrong_snapshot), "freshness_certificate_path": str(wrong_cert)},
+    )
+
+    payload = structure_supply.build_structure_decision_supply_v1(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "MARKET_OPEN_DATA_MISSING"
+    assert payload["market_open_data"]["snapshot_path"] == ""
+
+
+def test_option_exposure_still_rejects_equity_snapshot_path(monkeypatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _write_equity_structure_inputs(ctx, _option_intent())
+    _write_equity_snapshot_gate(ctx, "SPY")
+    monkeypatch.setattr(structure_supply, "POLICY_PATH", tmp_path / "missing-options-policy.json")
+
+    payload = structure_supply.build_structure_decision_supply_v1(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "MARKET_OPEN_DATA_MISSING"
+    assert payload["market_open_data"]["snapshot_path"] == ""
+
+
+def test_option_exposure_still_accepts_options_chain_snapshot_before_policy(monkeypatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _write_equity_structure_inputs(ctx, _option_intent())
+    monkeypatch.setattr(structure_supply, "POLICY_PATH", tmp_path / "missing-options-policy.json")
+
+    payload = structure_supply.build_structure_decision_supply_v1(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "STRUCTURE_POLICY_MISSING"
+    assert "options_chain_snapshot_v1/2026-05-12" in payload["market_open_data"]["snapshot_path"]
 
 
 def test_missing_equity_policy_fails_closed(monkeypatch, tmp_path: Path) -> None:

@@ -105,6 +105,21 @@ def _exposure_type(payload: dict[str, Any]) -> str:
     return str(payload.get("exposure_type") or "").strip().upper()
 
 
+def _requires_options(payload: dict[str, Any]) -> bool:
+    value = payload.get("requires_options")
+    if isinstance(value, bool):
+        return value
+    option = payload.get("option") if isinstance(payload.get("option"), dict) else {}
+    value = option.get("requires_options")
+    if isinstance(value, bool):
+        return value
+    return False
+
+
+def _uses_equity_market_open_data(payload: dict[str, Any]) -> bool:
+    return _exposure_type(payload) in {"LONG_EQUITY", "EQUITY_SPOT"} and not _requires_options(payload)
+
+
 def _target_notional_pct(payload: dict[str, Any]) -> str:
     return str(payload.get("target_notional_pct") or "").strip()
 
@@ -202,11 +217,27 @@ def _market_open_gate_path(ctx: bod.BodContext) -> Path:
     return ctx.truth_root / "reports" / "market_open_data_gate_v1" / ctx.day_utc / "market_open_data_gate.v1.json"
 
 
+def _parse_utc(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+    except ValueError:
+        return None
+
+
 def _dec(value: Any) -> Decimal | None:
     try:
         return Decimal(str(value))
     except (InvalidOperation, ValueError):
         return None
+
+
+def _positive_dec(value: Any) -> Decimal | None:
+    parsed = _dec(value)
+    if parsed is None or parsed <= 0:
+        return None
+    return parsed
 
 
 def _policy_for_intent(intent: dict[str, Any]) -> dict[str, Any]:
@@ -341,7 +372,39 @@ def _build_equity_spot_decision(
     return decision
 
 
-def _snapshot_from_gate(ctx: bod.BodContext) -> tuple[Path | None, Path | None, dict[str, Any], dict[str, Any]]:
+def _equity_snapshot_valid(*, ctx: bod.BodContext, symbol: str, snapshot: dict[str, Any], cert: dict[str, Any]) -> bool:
+    if str(snapshot.get("day_utc") or "").strip() != ctx.day_utc:
+        return False
+    if str(snapshot.get("symbol") or "").strip().upper() != symbol:
+        return False
+    bid = _positive_dec(snapshot.get("bid"))
+    ask = _positive_dec(snapshot.get("ask"))
+    spot = _positive_dec(snapshot.get("spot") or snapshot.get("last") or snapshot.get("close"))
+    if bid is None or ask is None or spot is None or ask < bid:
+        return False
+    snapshot_as_of = str(snapshot.get("quote_as_of_utc") or snapshot.get("timestamp_utc") or "").strip()
+    if not snapshot_as_of or _parse_utc(snapshot_as_of) is None:
+        return False
+    cert_status = str(cert.get("status") or "").strip().upper()
+    cert_blocker = str(cert.get("canonical_blocker") or cert.get("blocker") or "").strip().upper()
+    if cert_status in {"BLOCKED", "STALE", "EXPIRED", "FAIL", "FAILED"} or cert_blocker:
+        return False
+    cert_day = str(cert.get("day_utc") or ctx.day_utc).strip()
+    cert_symbol = str(cert.get("symbol") or symbol).strip().upper()
+    if cert_day != ctx.day_utc or cert_symbol != symbol:
+        return False
+    evidence_as_of = str(cert.get("evidence_as_of_utc") or cert.get("snapshot_as_of_utc") or snapshot_as_of).strip()
+    valid_until = str(cert.get("valid_until_utc") or "").strip()
+    evidence_dt = _parse_utc(evidence_as_of)
+    valid_until_dt = _parse_utc(valid_until)
+    if evidence_dt is None or valid_until_dt is None or valid_until_dt < evidence_dt:
+        return False
+    return True
+
+
+def _snapshot_from_gate(
+    ctx: bod.BodContext, intents: list[tuple[Path, dict[str, Any]]] | None = None
+) -> tuple[Path | None, Path | None, dict[str, Any], dict[str, Any]]:
     gate = _read_json(_market_open_gate_path(ctx))
     if str(gate.get("status") or "").strip().upper() != "PASS":
         return None, None, {}, {}
@@ -349,6 +412,22 @@ def _snapshot_from_gate(ctx: bod.BodContext) -> tuple[Path | None, Path | None, 
     cert_path = Path(str(gate.get("freshness_certificate_path") or "")).resolve()
     if not snapshot_path.exists() or not snapshot_path.is_file():
         return None, cert_path, {}, _read_json(cert_path)
+    active_intents = intents or []
+    if active_intents and all(_uses_equity_market_open_data(intent) for _path, intent in active_intents):
+        symbol = _symbol(active_intents[0][1])
+        expected_snapshot = (
+            ctx.execution_root / "market_data_snapshot_v1" / "snapshots" / ctx.day_utc / f"{symbol}.market_data_snapshot.v1.json"
+        ).resolve()
+        expected_cert = (
+            ctx.execution_root / "market_data_snapshot_v1" / "snapshots" / ctx.day_utc / f"{symbol}.freshness_certificate.v1.json"
+        ).resolve()
+        if snapshot_path != expected_snapshot or cert_path != expected_cert or not cert_path.exists() or not cert_path.is_file():
+            return None, cert_path, {}, _read_json(cert_path)
+        snapshot = _read_json(snapshot_path)
+        cert = _read_json(cert_path)
+        if not _equity_snapshot_valid(ctx=ctx, symbol=symbol, snapshot=snapshot, cert=cert):
+            return None, cert_path, {}, cert
+        return snapshot_path, cert_path, snapshot, cert
     expected = (ctx.execution_root / "options_chain_snapshot_v1" / ctx.day_utc).resolve()
     if not str(snapshot_path).startswith(str(expected)):
         return None, cert_path, {}, _read_json(cert_path)
@@ -847,7 +926,7 @@ def build_structure_decision_supply_v1(ctx: bod.BodContext) -> dict[str, Any]:
     risk_input = {"path": str(risk_path), "status": risk_status or "MISSING", "canonical_blocker": str(risk_budget.get("canonical_blocker") or "")}
     if risk_status != "PASS":
         return _blocked(ctx, "RISK_BUDGET_SUPPLY_BLOCKED", "Resolve Risk Budget Supply before structure selection.", active_intents=active_rows, risk_budget_input=risk_input)
-    snapshot_path, cert_path, snapshot, _cert = _snapshot_from_gate(ctx)
+    snapshot_path, cert_path, snapshot, _cert = _snapshot_from_gate(ctx, intents)
     market_open_data = {
         "market_open_data_gate_path": str(_market_open_gate_path(ctx)),
         "snapshot_path": str(snapshot_path or ""),
@@ -855,7 +934,7 @@ def build_structure_decision_supply_v1(ctx: bod.BodContext) -> dict[str, Any]:
         "status": "PASS" if snapshot else "MISSING",
     }
     if snapshot_path is None or not snapshot:
-        return _blocked(ctx, "MARKET_OPEN_DATA_MISSING", "Run market-open data gate and produce current-day quote-complete options snapshot.", active_intents=active_rows, risk_budget_input=risk_input, market_open_data=market_open_data)
+        return _blocked(ctx, "MARKET_OPEN_DATA_MISSING", "Run market-open data gate and produce current-day quote-complete snapshot for the selected intent.", active_intents=active_rows, risk_budget_input=risk_input, market_open_data=market_open_data)
     decisions: list[dict[str, Any]] = []
     policy_paths: list[dict[str, Any]] = []
     for intent_path, intent in intents:
