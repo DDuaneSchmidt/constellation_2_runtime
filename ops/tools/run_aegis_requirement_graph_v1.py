@@ -497,7 +497,10 @@ def _equity_requirement_nodes(
             required_artifact="underlying_spot",
             market_data_family="EQUITY",
             expected_path=snapshot_path or root,
-            producer_command=f"python3 constellation_2/phaseJ/tools/ib_historical_market_data_snapshot_downloader_v1.py --symbol {symbol}",
+            producer_command=(
+                f"python3 ops/tools/run_equity_market_data_snapshot_required_day_v1.py "
+                f"--day_utc {day_utc} --truth_root {execution_root} --symbol {symbol} --symbols_from_intents NO"
+            ),
             consumer="market_data_supply_v1",
             status=snapshot_status,
             blocker="" if snapshot_status == "SATISFIED" else missing_blocker,
@@ -514,7 +517,10 @@ def _equity_requirement_nodes(
             required_artifact="bid_ask_quotes",
             market_data_family="EQUITY",
             expected_path=snapshot_path or root,
-            producer_command=f"python3 constellation_2/phaseJ/tools/ib_historical_market_data_snapshot_downloader_v1.py --symbol {symbol}",
+            producer_command=(
+                f"python3 ops/tools/run_equity_market_data_snapshot_required_day_v1.py "
+                f"--day_utc {day_utc} --truth_root {execution_root} --symbol {symbol} --symbols_from_intents NO"
+            ),
             consumer="market_data_supply_v1",
             status=snapshot_status,
             blocker="" if snapshot_status == "SATISFIED" else missing_blocker,
@@ -531,7 +537,10 @@ def _equity_requirement_nodes(
             required_artifact="freshness_certificate",
             market_data_family="EQUITY",
             expected_path=cert_path or (root / "*/freshness_certificate.v1.json"),
-            producer_command=f"python3 constellation_2/phaseJ/tools/ib_historical_market_data_snapshot_downloader_v1.py --symbol {symbol}",
+            producer_command=(
+                f"python3 ops/tools/run_equity_market_data_snapshot_required_day_v1.py "
+                f"--day_utc {day_utc} --truth_root {execution_root} --symbol {symbol} --symbols_from_intents NO"
+            ),
             consumer="market_data_supply_v1",
             status=cert_status,
             blocker="" if cert_status == "SATISFIED" else "EQUITY_FRESHNESS_CERTIFICATE_MISSING",

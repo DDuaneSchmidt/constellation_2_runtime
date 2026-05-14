@@ -52,6 +52,7 @@ ALLOWED_BLOCKERS = {
     "OPTIONS_FRESHNESS_CERTIFICATE_MISSING",
     "OPTIONS_SNAPSHOT_SYMBOL_MISMATCH",
 }
+EQUITY_EXPOSURE_TYPES = {"LONG_EQUITY", "EQUITY_SPOT"}
 
 
 def _options_capture_timeout_seconds() -> int:
@@ -117,6 +118,36 @@ def _run_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
     proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True, check=False, env=env, timeout=300)
     return {
         "command": " ".join(cmd),
+        "exit_code": int(proc.returncode),
+        "stdout_summary": str(proc.stdout or "").strip()[-1200:],
+        "stderr_summary": str(proc.stderr or "").strip()[-1200:],
+    }
+
+
+def _run_equity_capture(ctx: bod.BodContext, instrument: str, eval_time_utc: str) -> dict[str, Any]:
+    cmd = [
+        sys.executable,
+        "ops/tools/run_equity_market_data_snapshot_required_day_v1.py",
+        "--day_utc",
+        ctx.day_utc,
+        "--environment",
+        ctx.environment,
+        "--truth_root",
+        str(ctx.execution_root),
+        "--symbol",
+        instrument,
+        "--symbols_from_intents",
+        "NO",
+        "--eval_time_utc",
+        eval_time_utc,
+    ]
+    env = dict(os.environ)
+    env["C2_TRUTH_ROOT"] = str(ctx.execution_root)
+    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True, check=False, env=env, timeout=120)
+    return {
+        "instrument": instrument,
+        "command": " ".join(cmd),
+        "status": "PASS" if proc.returncode == 0 else "BLOCKED",
         "exit_code": int(proc.returncode),
         "stdout_summary": str(proc.stdout or "").strip()[-1200:],
         "stderr_summary": str(proc.stderr or "").strip()[-1200:],
@@ -488,6 +519,8 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
             "snapshot_age_seconds": validation.get("snapshot_age_seconds"),
             "capture_attempted_by_gate": capture_attempted,
             "capture_result": capture_result or {},
+            "equity_capture_attempted_by_gate": bool(equity_capture_result),
+            "equity_capture_result": equity_capture_result or {},
             **symbol_diagnostics,
             "operator_next_action": action,
             "diagnostics": _diagnostics(
@@ -500,6 +533,7 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
 
     command_result: dict[str, Any] = {}
     capture_result: dict[str, Any] = {}
+    equity_capture_result: dict[str, Any] = {}
     capture_attempted = False
     fail_closed_reason = ""
     instrument = selected_instrument
@@ -526,7 +560,26 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
             "snapshot_age_seconds": None,
         }
     else:
+        if (
+            selected_intent_status == "SELECTED"
+            and selected_instrument
+            and not selected_requires_options
+            and selected_exposure_type in EQUITY_EXPOSURE_TYPES
+        ):
+            pre_capture_blocker, _pre_capture_artifact = _validate_equity_snapshot(
+                ctx=data_ctx,
+                instrument=selected_instrument,
+                eval_time_utc=generated_at,
+                data_mode="EQUITY",
+            )
+            if pre_capture_blocker:
+                equity_capture_result = _run_equity_capture(data_ctx, selected_instrument, generated_at)
         command_result = _run_market_data_supply(ctx)
+        if equity_capture_result:
+            command_result = {
+                "equity_capture": equity_capture_result,
+                "market_data_supply": command_result,
+            }
         supply = _read_json(supply_path)
         supply_instrument = _root_instrument(supply)
         if selected_instrument:

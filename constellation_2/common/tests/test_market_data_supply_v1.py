@@ -15,6 +15,7 @@ import ops.tools.aegis_chatgpt_packet as packet  # noqa: E402
 import ops.tools.run_aegis_day_v1 as day_run  # noqa: E402
 import ops.tools.run_ib_market_data_entitlement_probe_v1 as entitlement  # noqa: E402
 import ops.tools.run_aegis_requirement_graph_v1 as req_graph  # noqa: E402
+import ops.tools.run_equity_market_data_snapshot_required_day_v1 as equity_required  # noqa: E402
 import ops.tools.run_market_open_data_gate_v1 as open_gate  # noqa: E402
 import ops.tools.run_market_data_supply_v1 as supply  # noqa: E402
 import ops.tools.run_options_chain_snapshot_required_day_v1 as options_required  # noqa: E402
@@ -245,6 +246,51 @@ def _equity_snapshot(
     return snap, cert
 
 
+def _equity_quote(day_utc: str, *, symbol: str = "SPY") -> dict[str, object]:
+    return {
+        "symbol": symbol,
+        "bid": "499.95",
+        "ask": "500.05",
+        "spot": "500.00",
+        "last": "500.00",
+        "close": "499.80",
+        "quote_as_of_utc": f"{day_utc}T15:00:00Z",
+        "market_data_type_requested": 1,
+        "market_data_type_callback": 1,
+        "market_data_mode": "LIVE",
+    }
+
+
+def test_equity_required_day_producer_writes_selected_execution_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path, environment="LIVE")
+    alt_root = tmp_path / "truth_sleeves" / "SECONDARY" / "LIVE"
+    alt_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(equity_required, "_capture_equity_quote", lambda **_kwargs: _equity_quote(ctx.day_utc, symbol="DIA"))
+
+    report_path, payload = equity_required.run_equity_market_data_snapshot_required_day_v1(
+        day_utc=ctx.day_utc,
+        environment="LIVE",
+        truth_root=str(alt_root),
+        symbols=["DIA"],
+        symbols_from_intents=False,
+        eval_time_utc=f"{ctx.day_utc}T15:00:00Z",
+    )
+
+    snap = alt_root / "market_data_snapshot_v1" / "snapshots" / ctx.day_utc / "DIA.market_data_snapshot.v1.json"
+    cert = alt_root / "market_data_snapshot_v1" / "snapshots" / ctx.day_utc / "DIA.freshness_certificate.v1.json"
+    assert payload["status"] == "OK"
+    assert report_path == alt_root / "reports" / "equity_market_data_snapshot_required_day_v1" / ctx.day_utc / "equity_market_data_snapshot_required_day.v1.json"
+    assert snap.exists()
+    assert cert.exists()
+    assert payload["results"][0]["path"] == str(snap.resolve())
+    assert str(ctx.execution_root) not in payload["results"][0]["path"]
+    snap_payload = json.loads(snap.read_text(encoding="utf-8"))
+    assert snap_payload["symbol"] == "DIA"
+    assert snap_payload["bid"] == "499.95"
+    assert snap_payload["ask"] == "500.05"
+    assert snap_payload["provenance"]["capture_method"] == "IBKR_EQUITY_SNAPSHOT_REQUIRED_DAY"
+
+
 def _add_dte_coverage(snapshot_path: Path, *, omitted: bool = False) -> None:
     payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
     payload["provenance"]["capture_method"] = "IBKR_SNAPSHOT_DAY_ANCHORED"
@@ -392,6 +438,7 @@ def test_long_equity_selected_intent_creates_equity_market_data_requirements(tmp
     assert {row["market_data_family"] for row in rows} == {"EQUITY"}
     assert all("options_chain_snapshot" not in str(row.get("expected_path") or "") for row in rows)
     assert all("run_options_chain_snapshot_required_day_v1.py" not in str(row.get("producer_command") or "") for row in rows)
+    assert all("run_equity_market_data_snapshot_required_day_v1.py" in str(row.get("producer_command") or "") for row in rows)
     assert payload["active_intents"][0]["requires_equity_market_data"] is True
     assert payload["active_intents"][0]["requires_options"] is False
 
@@ -423,6 +470,7 @@ def test_long_equity_selected_intent_uses_selected_sleeve_root(tmp_path: Path) -
     assert all(str(row["expected_path"]).startswith(str(alt_root.resolve())) for row in rows)
     assert all(str(ctx.execution_root) not in str(row["expected_path"]) for row in rows)
     assert all("options_chain_snapshot" not in str(row.get("expected_path") or "") for row in rows)
+    assert all(f"--truth_root {alt_root.resolve()}" in str(row.get("producer_command") or "") for row in rows)
 
 
 def test_long_equity_requires_options_flag_adds_options_requirements(tmp_path: Path) -> None:
@@ -487,6 +535,43 @@ def test_valid_qqq_long_equity_market_evidence_allows_supply_pass(monkeypatch: p
     assert payload["status"] == "PASS"
     assert payload["canonical_blocker"] == ""
     assert {row["instrument"] for row in payload["requirements"]} == {"QQQ"}
+    assert payload["capture_attempts"] == []
+
+
+def test_historical_jsonl_alone_does_not_satisfy_long_equity_market_data(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _selected_long_equity_pointer(ctx, symbol="SPY")
+    graph = req_graph.build_requirement_graph(ctx)
+    graph_path = ctx.truth_root / "reports" / "aegis_requirement_graph_v1" / ctx.day_utc / "requirement_graph.v1.json"
+    graph_path.parent.mkdir(parents=True, exist_ok=True)
+    graph_path.write_text(json.dumps(graph, sort_keys=True), encoding="utf-8")
+    jsonl = ctx.execution_root / "market_data_snapshot_v1" / "SPY" / f"{ctx.day_utc[:4]}.jsonl"
+    jsonl.parent.mkdir(parents=True, exist_ok=True)
+    jsonl.write_text(
+        json.dumps(
+            {
+                "dataset_version": "v1",
+                "symbol": "SPY",
+                "timestamp_utc": f"{ctx.day_utc}T00:00:00Z",
+                "open": 499.0,
+                "high": 501.0,
+                "low": 498.0,
+                "close": 500.0,
+                "volume": 1000,
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
+    monkeypatch.setattr(supply, "_run_capture", lambda *_args, **_kwargs: pytest.fail("LONG_EQUITY must not invoke options-chain capture"))
+
+    payload = supply.build_market_data_supply(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "EQUITY_MARKET_DATA_SNAPSHOT_MISSING"
+    assert payload["artifacts"][0]["snapshot_path"] == ""
     assert payload["capture_attempts"] == []
 
 
@@ -568,6 +653,43 @@ def test_stale_equity_freshness_blocks_long_equity(monkeypatch: pytest.MonkeyPat
     graph_path.parent.mkdir(parents=True, exist_ok=True)
     graph_path.write_text(json.dumps(graph, sort_keys=True), encoding="utf-8")
     _equity_snapshot(ctx, symbol="SPY", fresh=False)
+    monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
+    monkeypatch.setattr(supply, "_run_capture", lambda *_args, **_kwargs: pytest.fail("LONG_EQUITY must not invoke options-chain capture"))
+
+    payload = supply.build_market_data_supply(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "EQUITY_MARKET_DATA_STALE"
+    assert payload["capture_attempts"] == []
+
+
+def test_missing_equity_freshness_certificate_blocks_long_equity(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _selected_long_equity_pointer(ctx, symbol="SPY")
+    graph = req_graph.build_requirement_graph(ctx)
+    graph_path = ctx.truth_root / "reports" / "aegis_requirement_graph_v1" / ctx.day_utc / "requirement_graph.v1.json"
+    graph_path.parent.mkdir(parents=True, exist_ok=True)
+    graph_path.write_text(json.dumps(graph, sort_keys=True), encoding="utf-8")
+    _snap, cert = _equity_snapshot(ctx, symbol="SPY")
+    cert.unlink()
+    monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
+    monkeypatch.setattr(supply, "_run_capture", lambda *_args, **_kwargs: pytest.fail("LONG_EQUITY must not invoke options-chain capture"))
+
+    payload = supply.build_market_data_supply(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "EQUITY_FRESHNESS_CERTIFICATE_MISSING"
+    assert payload["capture_attempts"] == []
+
+
+def test_missing_equity_timestamp_blocks_long_equity(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _selected_long_equity_pointer(ctx, symbol="SPY")
+    graph = req_graph.build_requirement_graph(ctx)
+    graph_path = ctx.truth_root / "reports" / "aegis_requirement_graph_v1" / ctx.day_utc / "requirement_graph.v1.json"
+    graph_path.parent.mkdir(parents=True, exist_ok=True)
+    graph_path.write_text(json.dumps(graph, sort_keys=True), encoding="utf-8")
+    _equity_snapshot(ctx, symbol="SPY", timestamps=False)
     monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
     monkeypatch.setattr(supply, "_run_capture", lambda *_args, **_kwargs: pytest.fail("LONG_EQUITY must not invoke options-chain capture"))
 
@@ -1090,14 +1212,50 @@ def test_market_open_gate_long_equity_does_not_capture_options(monkeypatch: pyte
     monkeypatch.setattr(open_gate, "_market_session_state", lambda: "REGULAR")
     monkeypatch.setattr(open_gate, "_run_market_data_supply", lambda _ctx: {"exit_code": 0})
     monkeypatch.setattr(open_gate, "_run_capture", lambda *_args, **_kwargs: pytest.fail("LONG_EQUITY must not invoke options-chain capture"))
+    monkeypatch.setattr(open_gate, "_run_equity_capture", lambda *_args, **_kwargs: pytest.fail("valid LONG_EQUITY snapshot should not be recaptured"))
 
     payload = open_gate.build_market_open_data_gate(ctx)
 
     assert payload["status"] == "PASS"
     assert payload["canonical_blocker"] == ""
     assert payload["capture_attempted_by_gate"] is False
+    assert payload["equity_capture_attempted_by_gate"] is False
     assert payload["required_options_symbol"] == ""
     assert payload["selected_intent_requires_options"] is False
+    assert payload["snapshot_path"].endswith("/SPY.market_data_snapshot.v1.json")
+
+
+def test_market_open_gate_long_equity_invokes_equity_snapshot_producer_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _same_day_options_readiness(monkeypatch, ctx)
+    _selected_long_equity_pointer(ctx, symbol="SPY")
+
+    def _supply_pass(supply_ctx: bod.BodContext) -> dict[str, int]:
+        mds_path = supply.market_data_supply_path(truth_root=supply_ctx.truth_root, day_utc=supply_ctx.day_utc)
+        mds_path.parent.mkdir(parents=True, exist_ok=True)
+        mds_path.write_text('{"status":"PASS","canonical_blocker":"","requirements":[{"instrument":"SPY"}],"artifacts":[]}\n', encoding="utf-8")
+        return {"exit_code": 0}
+
+    calls: list[tuple[str, str]] = []
+
+    def _equity_capture(data_ctx: bod.BodContext, instrument: str, _eval_time_utc: str) -> dict[str, object]:
+        calls.append((str(data_ctx.execution_root), instrument))
+        _equity_snapshot(data_ctx, symbol=instrument)
+        return {"status": "PASS", "exit_code": 0, "instrument": instrument}
+
+    monkeypatch.setattr(open_gate, "_market_session_state", lambda: "REGULAR")
+    monkeypatch.setattr(open_gate, "_run_market_data_supply", _supply_pass)
+    monkeypatch.setattr(open_gate, "_run_equity_capture", _equity_capture)
+    monkeypatch.setattr(open_gate, "_run_capture", lambda *_args, **_kwargs: pytest.fail("LONG_EQUITY must not invoke options-chain capture"))
+
+    payload = open_gate.build_market_open_data_gate(ctx)
+
+    assert payload["status"] == "PASS"
+    assert payload["canonical_blocker"] == ""
+    assert calls == [(str(ctx.execution_root.resolve()), "SPY")]
+    assert payload["equity_capture_attempted_by_gate"] is True
+    assert payload["equity_capture_result"]["instrument"] == "SPY"
+    assert payload["capture_attempted_by_gate"] is False
     assert payload["snapshot_path"].endswith("/SPY.market_data_snapshot.v1.json")
 
 
@@ -1142,6 +1300,7 @@ def test_market_open_gate_uses_selected_sleeve_root_for_long_equity(monkeypatch:
     assert payload["snapshot_path"].startswith(str(alt_root.resolve()))
     assert payload["required_options_symbol"] == ""
     assert payload["capture_attempted_by_gate"] is False
+    assert payload["equity_capture_attempted_by_gate"] is False
 
 
 def test_market_open_gate_passes_with_fresh_snapshot_when_supply_has_no_requirements(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
