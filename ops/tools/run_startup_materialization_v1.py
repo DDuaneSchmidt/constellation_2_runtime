@@ -64,7 +64,14 @@ def _startup_materialization_input_convergence_path(*, truth_root: Path, day_utc
     return resolve_startup_materialization_input_convergence_path(truth_root=truth_root, day_utc=day_utc)
 
 
-def _run_input_convergence(*, day_utc: str, truth_root: Path) -> Dict[str, Any]:
+def _run_input_convergence(
+    *,
+    day_utc: str,
+    truth_root: Path,
+    operator_input_root: Path,
+    execution_truth_root: Path,
+    ib_account: str,
+) -> Dict[str, Any]:
     cmd = [
         sys.executable,
         str((REPO_ROOT / "ops/tools/run_startup_materialization_input_convergence_v1.py").resolve()),
@@ -72,6 +79,14 @@ def _run_input_convergence(*, day_utc: str, truth_root: Path) -> Dict[str, Any]:
         day_utc,
         "--truth_root",
         str(truth_root),
+        "--operator_input_root",
+        str(operator_input_root),
+        "--execution_truth_root",
+        str(execution_truth_root),
+        "--environment",
+        "PAPER",
+        "--ib_account",
+        ib_account,
     ]
     proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True, check=False)
     return {
@@ -479,12 +494,15 @@ def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="run_startup_materialization_v1")
     ap.add_argument("--day_utc", required=True)
     ap.add_argument("--truth_root", default="")
+    ap.add_argument("--operator_input_root", default=str((REPO_ROOT / "constellation_2").resolve()))
     args = ap.parse_args(argv)
 
     day_utc = parse_day_utc_v1(args.day_utc)
     truth_root = resolve_decision_truth_root_v1(args.truth_root, repo_root=REPO_ROOT)
+    operator_input_root = Path(str(args.operator_input_root or "").strip()).expanduser().resolve()
     intent_truth_root = resolve_paper_intent_truth_root_v1(truth_root=truth_root, repo_root=REPO_ROOT)
     execution_truth_root = _resolve_execution_truth_root()
+    ib_account = resolve_single_paper_ib_account_from_sleeve_registry(REPO_ROOT)
     produced_at_utc = now_utc_iso_v1()
     session_id = canonical_paper_session_id_v1(day_utc)
 
@@ -512,7 +530,13 @@ def main(argv: List[str] | None = None) -> int:
     inputs_prep_path = _startup_materialization_inputs_prep_path(truth_root=truth_root, day_utc=day_utc)
     input_convergence_path = _startup_materialization_input_convergence_path(truth_root=truth_root, day_utc=day_utc)
     phasec_risk_inputs_prep_path = _phasec_risk_inputs_prep_path(truth_root=truth_root, day_utc=day_utc)
-    input_convergence_result = _run_input_convergence(day_utc=day_utc, truth_root=truth_root)
+    input_convergence_result = _run_input_convergence(
+        day_utc=day_utc,
+        truth_root=truth_root,
+        operator_input_root=operator_input_root,
+        execution_truth_root=execution_truth_root,
+        ib_account=ib_account,
+    )
     input_convergence_payload = _load_input_convergence_payload(input_convergence_path)
     input_convergence_blocking_codes: List[str] = []
     if input_convergence_payload is None:

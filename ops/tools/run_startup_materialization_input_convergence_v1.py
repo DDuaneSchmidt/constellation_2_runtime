@@ -16,6 +16,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from ops.tools.c2_account_resolution_v1 import resolve_single_paper_ib_account_from_sleeve_registry  # noqa: E402
+from constellation_2.common.paper_execution_authority_v1 import resolve_governed_paper_execution_roots  # noqa: E402
 from constellation_2.common.paper_session_path_alignment_v1 import resolve_operator_statement_path  # noqa: E402
 from constellation_2.common.runtime_path_authority_v1 import resolve_decision_truth_root_v1  # noqa: E402
 from constellation_2.common.startup_materialization_input_convergence_v1 import (  # noqa: E402
@@ -123,13 +124,34 @@ def _artifact_result(
     }
 
 
-def _runtime_operator_input_root(*, truth_root: Path, operator_input_root: str = "") -> Path:
+def _runtime_operator_input_root(*, truth_root: Path, environment: str, operator_input_root: str = "") -> Path:
     if str(operator_input_root or "").strip():
         return Path(str(operator_input_root).strip()).expanduser().resolve()
+    if str(environment or "").strip().upper() == "PAPER":
+        return (REPO_ROOT / "constellation_2").resolve()
     root = Path(truth_root).resolve()
     if root.name == "truth":
         return root.parent.resolve()
     return root.resolve()
+
+
+def _runtime_execution_truth_root(
+    *,
+    truth_root: Path,
+    environment: str,
+    execution_truth_root: str = "",
+    ib_account: str = "",
+) -> Path:
+    if str(execution_truth_root or "").strip():
+        return Path(str(execution_truth_root).strip()).expanduser().resolve()
+    if str(environment or "").strip().upper() == "PAPER":
+        return resolve_governed_paper_execution_roots(
+            repo_root=REPO_ROOT,
+            environment="PAPER",
+            ib_account=str(ib_account).strip(),
+            sleeve_id="PRIMARY",
+        ).execution_root_path.resolve()
+    return Path(truth_root).resolve()
 
 
 def _operator_statement_path(*, operator_input_root: Path, day_utc: str) -> Path:
@@ -141,17 +163,27 @@ def main(argv: List[str] | None = None) -> int:
     ap.add_argument("--day_utc", required=True)
     ap.add_argument("--truth_root", default="")
     ap.add_argument("--operator_input_root", default="")
+    ap.add_argument("--execution_truth_root", default="")
+    ap.add_argument("--environment", default=str(os.environ.get("C2_MODE") or "PAPER"))
     ap.add_argument("--ib_account", default="")
     args = ap.parse_args(argv)
 
     day_utc = str(args.day_utc).strip()
     truth_root = resolve_decision_truth_root_v1(args.truth_root, repo_root=REPO_ROOT)
-    operator_input_root = _runtime_operator_input_root(
-        truth_root=truth_root,
-        operator_input_root=str(args.operator_input_root or ""),
-    )
+    environment = str(args.environment or "PAPER").strip().upper()
     git_sha = _git_sha()
     ib_account = str(args.ib_account).strip() or resolve_single_paper_ib_account_from_sleeve_registry(REPO_ROOT)
+    operator_input_root = _runtime_operator_input_root(
+        truth_root=truth_root,
+        environment=environment,
+        operator_input_root=str(args.operator_input_root or ""),
+    )
+    execution_truth_root = _runtime_execution_truth_root(
+        truth_root=truth_root,
+        environment=environment,
+        execution_truth_root=str(args.execution_truth_root or ""),
+        ib_account=ib_account,
+    )
     operator_statement_path = _operator_statement_path(operator_input_root=operator_input_root, day_utc=day_utc)
     runtime_python = _critical_path_python()
 
@@ -190,7 +222,7 @@ def main(argv: List[str] | None = None) -> int:
                 "--producer_git_sha",
                 git_sha,
             ],
-            env_overrides={"C2_TRUTH_ROOT": str(truth_root), "C2_MODE": "PAPER"},
+            env_overrides={"C2_TRUTH_ROOT": str(execution_truth_root), "C2_MODE": environment},
             logical_name="constellation_2.phaseF.cash_ledger.run.run_cash_ledger_snapshot_day_v1",
         )
     )
@@ -237,7 +269,7 @@ def main(argv: List[str] | None = None) -> int:
         ),
         _artifact_result(
             artifact_id="cash_ledger_snapshot_v1",
-            artifact_path=truth_root / "cash_ledger_v1" / "snapshots" / day_utc / "cash_ledger_snapshot.v1.json",
+            artifact_path=execution_truth_root / "cash_ledger_v1" / "snapshots" / day_utc / "cash_ledger_snapshot.v1.json",
             target_day=day_utc,
             required=True,
             acceptable_statuses=("OK",),
