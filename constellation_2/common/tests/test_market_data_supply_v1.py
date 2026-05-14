@@ -377,6 +377,7 @@ def test_long_equity_selected_intent_creates_equity_market_data_requirements(tmp
         "bid_ask_quotes",
         "freshness_certificate",
     ]
+    assert {row["market_data_family"] for row in rows} == {"EQUITY"}
     assert all("options_chain_snapshot" not in str(row.get("expected_path") or "") for row in rows)
     assert all("run_options_chain_snapshot_required_day_v1.py" not in str(row.get("producer_command") or "") for row in rows)
     assert payload["active_intents"][0]["requires_equity_market_data"] is True
@@ -397,6 +398,7 @@ def test_long_equity_requires_options_flag_adds_options_requirements(tmp_path: P
     ]
     assert "options_snapshot_artifact" in {row["required_artifact"] for row in rows}
     assert "bid_ask_quotes" in {row["required_artifact"] for row in rows}
+    assert {"EQUITY", "OPTIONS"}.issubset({row["market_data_family"] for row in rows})
     assert any("run_options_chain_snapshot_required_day_v1.py" in str(row.get("producer_command") or "") for row in rows)
     assert payload["active_intents"][0]["requires_options"] is True
     assert payload["active_intents"][0]["requires_equity_market_data"] is True
@@ -500,6 +502,27 @@ def test_stale_equity_freshness_blocks_long_equity(monkeypatch: pytest.MonkeyPat
 
     assert payload["status"] == "BLOCKED"
     assert payload["canonical_blocker"] == "EQUITY_MARKET_DATA_STALE"
+    assert payload["capture_attempts"] == []
+
+
+def test_long_equity_with_options_flag_still_requires_equity_evidence(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _selected_long_equity_pointer(ctx, symbol="SPY", requires_options=True)
+    graph = req_graph.build_requirement_graph(ctx)
+    graph_path = ctx.truth_root / "reports" / "aegis_requirement_graph_v1" / ctx.day_utc / "requirement_graph.v1.json"
+    graph_path.parent.mkdir(parents=True, exist_ok=True)
+    graph_path.write_text(json.dumps(graph, sort_keys=True), encoding="utf-8")
+    _entitlement(ctx, status="PASS", live=True, delayed=False)
+    _snapshot(ctx, symbol="SPY")
+    monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
+    monkeypatch.setattr(supply, "_run_capture", lambda *_args, **_kwargs: pytest.fail("existing option snapshot should avoid capture"))
+    monkeypatch.setattr(supply, "validate_against_repo_schema_v1", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(supply, "_run_market_data_authority", lambda _ctx: pytest.fail("missing equity evidence should block before authority"))
+
+    payload = supply.build_market_data_supply(ctx)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["canonical_blocker"] == "EQUITY_MARKET_DATA_SNAPSHOT_MISSING"
     assert payload["capture_attempts"] == []
 
 

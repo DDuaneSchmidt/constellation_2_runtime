@@ -309,6 +309,7 @@ def _requirement_rows(requirement_graph: dict[str, Any]) -> tuple[list[dict[str,
         if not str(row.get("source_id") or "").strip() or not str(row.get("instrument") or "").strip():
             unowned = row
             continue
+        market_data_family = str(row.get("market_data_family") or "").strip().upper()
         requirements.append(
             {
                 "requirement_id": str(row.get("requirement_id") or "").strip(),
@@ -316,6 +317,7 @@ def _requirement_rows(requirement_graph: dict[str, Any]) -> tuple[list[dict[str,
                 "source_id": str(row.get("source_id") or "").strip(),
                 "instrument": str(row.get("instrument") or "").strip().upper(),
                 "data_type": MARKET_DATA_REQUIREMENT_ARTIFACTS[artifact],
+                "market_data_family": market_data_family,
                 "required": True,
             }
         )
@@ -948,7 +950,18 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
     option_keys = {
         (str(row.get("source_id") or "").strip(), str(row.get("instrument") or "").strip().upper())
         for row in requirements
-        if str(row.get("data_type") or "").strip().upper() in {"OPTION_CHAIN", "OPTIONS_SNAPSHOT"}
+        if str(row.get("market_data_family") or "").strip().upper() == "OPTIONS"
+        or str(row.get("data_type") or "").strip().upper() in {"OPTION_CHAIN", "OPTIONS_SNAPSHOT"}
+    }
+    equity_keys = {
+        (str(row.get("source_id") or "").strip(), str(row.get("instrument") or "").strip().upper())
+        for row in requirements
+        if str(row.get("market_data_family") or "").strip().upper() == "EQUITY"
+        or (
+            str(row.get("market_data_family") or "").strip().upper() == ""
+            and str(row.get("data_type") or "").strip().upper() in {"UNDERLYING_SPOT", "BID_ASK_QUOTES", "FRESHNESS_CERTIFICATE"}
+            and (str(row.get("source_id") or "").strip(), str(row.get("instrument") or "").strip().upper()) not in option_keys
+        )
     }
     option_instruments = sorted(
         {
@@ -957,7 +970,7 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
             if (str(row.get("source_id") or "").strip(), str(row.get("instrument") or "").strip().upper()) in option_keys
         }
     )
-    equity_instruments = sorted(set(instruments) - set(option_instruments))
+    equity_instruments = sorted({instrument for _source_id, instrument in equity_keys if instrument})
     provider_blocker = ""
     provider_action = ""
     for instrument in option_instruments:
