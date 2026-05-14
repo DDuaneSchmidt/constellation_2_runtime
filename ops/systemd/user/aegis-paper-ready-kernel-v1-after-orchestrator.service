@@ -1,0 +1,10 @@
+[Unit]
+Description=Aegis PAPER ready kernel v1 after startup materialization
+Requires=c2-paper-day-orchestrator.service
+After=c2-paper-day-orchestrator.service
+
+[Service]
+Type=oneshot
+Environment=PYTHONDONTWRITEBYTECODE=1
+WorkingDirectory=/home/node
+ExecStart=/home/node/constellation_runtime_data/truth/releases/run_current_release_tool_v1.sh run_aegis_paper_ready_kernel_v1 --target-day @today_utc@ --environment PAPER --scheduled-run true

@@ -7,7 +7,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SERVICE_PATH = REPO_ROOT / "ops/systemd/user/aegis-paper-ready-kernel-v1.service"
 TIMER_PATH = REPO_ROOT / "ops/systemd/user/aegis-paper-ready-kernel-v1.timer"
-TARGET_TIMES = ["09:31", "10:15", "11:00", "11:45", "13:30", "14:30", "15:30"]
+OPEN_GATED_SERVICE_PATH = REPO_ROOT / "ops/systemd/user/aegis-paper-ready-kernel-v1-after-orchestrator.service"
+OPEN_GATED_TIMER_PATH = REPO_ROOT / "ops/systemd/user/aegis-paper-ready-kernel-v1-after-orchestrator.timer"
+TARGET_TIMES = ["10:15", "11:00", "11:45", "13:30", "14:30", "15:30"]
 
 
 def _read(path: Path) -> str:
@@ -19,13 +21,37 @@ def _on_calendar_lines(timer_text: str) -> list[str]:
     return [line.strip() for line in timer_text.splitlines() if line.startswith("OnCalendar=")]
 
 
-def test_paper_ready_timer_uses_target_seven_run_schedule() -> None:
+def test_paper_ready_timer_uses_target_later_run_schedule() -> None:
     lines = _on_calendar_lines(_read(TIMER_PATH))
 
     assert lines == [f"OnCalendar=Mon..Fri *-*-* {time}:00 America/New_York" for time in TARGET_TIMES]
-    assert len(lines) == 7
+    assert len(lines) == 6
     assert all("America/New_York" in line for line in lines)
-    assert not any("09:29" in line or "15:45" in line for line in lines)
+    assert not any("09:29" in line or "09:31" in line or "15:45" in line for line in lines)
+
+
+def test_paper_ready_0931_timer_is_gated_after_day_orchestrator() -> None:
+    timer_text = _read(OPEN_GATED_TIMER_PATH)
+    service_text = _read(OPEN_GATED_SERVICE_PATH)
+
+    assert _on_calendar_lines(timer_text) == ["OnCalendar=Mon..Fri *-*-* 09:31:00 America/New_York"]
+    assert "Unit=aegis-paper-ready-kernel-v1-after-orchestrator.service" in timer_text
+    assert "Requires=c2-paper-day-orchestrator.service" in service_text
+    assert "After=c2-paper-day-orchestrator.service" in service_text
+    assert service_text.index("Requires=c2-paper-day-orchestrator.service") < service_text.index("[Service]")
+    assert service_text.index("After=c2-paper-day-orchestrator.service") < service_text.index("[Service]")
+    assert "run_current_release_tool_v1.sh run_aegis_paper_ready_kernel_v1" in service_text
+    assert "--target-day @today_utc@" in service_text
+    assert "--environment PAPER" in service_text
+    assert "--scheduled-run true" in service_text
+
+
+def test_regular_paper_ready_service_does_not_require_or_start_orchestrator() -> None:
+    service_text = _read(SERVICE_PATH)
+
+    assert "Requires=c2-paper-day-orchestrator.service" not in service_text
+    assert "Wants=c2-paper-day-orchestrator.service" not in service_text
+    assert "After=c2-paper-day-orchestrator.service" not in service_text
 
 
 def test_paper_ready_timer_points_to_oneshot_kernel_service() -> None:
@@ -56,7 +82,14 @@ def test_paper_ready_service_uses_launcher_tool_name_form_only() -> None:
 
 
 def test_paper_ready_timer_source_has_no_runtime_or_policy_controls() -> None:
-    combined = _read(TIMER_PATH) + "\n" + _read(SERVICE_PATH)
+    combined = "\n".join(
+        [
+            _read(TIMER_PATH),
+            _read(SERVICE_PATH),
+            _read(OPEN_GATED_TIMER_PATH),
+            _read(OPEN_GATED_SERVICE_PATH),
+        ]
+    )
     forbidden = [
         "placeOrder",
         "transmit=true",

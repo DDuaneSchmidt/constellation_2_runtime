@@ -200,6 +200,38 @@ def test_daily_market_snapshot_convergence_fails_closed_when_only_spy_exists(tmp
     assert per_symbol[0]["artifact_id"] == "market_data_snapshot_v1:TLT"
 
 
+def test_daily_market_snapshot_convergence_passes_when_required_tlt_exists(tmp_path: Path) -> None:
+    sleeve_truth_root = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    tlt_snapshot = (
+        sleeve_truth_root
+        / "market_data_snapshot_v1"
+        / "snapshots"
+        / "2026-05-12"
+        / "TLT.market_data_snapshot.v1.json"
+    )
+    tlt_snapshot.parent.mkdir(parents=True, exist_ok=True)
+    tlt_snapshot.write_text(
+        json.dumps({"schema_id": "market_data_snapshot_v1", "day_utc": "2026-05-12", "status": "OK"}),
+        encoding="utf-8",
+    )
+
+    aggregate, materialized, missing, per_symbol = convergence_tool._daily_market_snapshot_convergence_result(
+        sleeve_truth_root=sleeve_truth_root,
+        target_day="2026-05-12",
+        required_symbols=["TLT"],
+    )
+
+    assert aggregate["ready"] is True
+    assert aggregate["blocker_code"] == ""
+    assert aggregate["required_snapshot_symbols"] == ["TLT"]
+    assert aggregate["materialized_snapshot_symbols"] == ["TLT"]
+    assert aggregate["missing_snapshot_symbols"] == []
+    assert materialized == ["TLT"]
+    assert missing == []
+    assert per_symbol[0]["artifact_id"] == "market_data_snapshot_v1:TLT"
+    assert per_symbol[0]["ready"] is True
+
+
 def test_convergence_tool_materializes_registry_required_daily_snapshots(tmp_path: Path) -> None:
     decision_truth_root = (tmp_path / "truth").resolve()
     sleeve_truth_root = (tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER").resolve()
