@@ -145,6 +145,9 @@ def test_exposure_net_stage_runs_after_authority_freshness_and_before_capital_al
     assert stage_ids.index("structure_decision_supply") < stage_ids.index("exposure_net")
     assert stage_ids.index("paper_authority_head_freshness") < stage_ids.index("exposure_net")
     assert stage_ids.index("exposure_net") < stage_ids.index("capital_authority_allocation")
+    assert stage_ids.index("risk_definition_contract") < stage_ids.index("sleeve_edge_measurement")
+    assert stage_ids.index("sleeve_edge_measurement") < stage_ids.index("governed_evaluation")
+    assert stage_ids.index("governed_evaluation") < stage_ids.index("capital_authority_allocation")
 
 
 def test_market_data_requirement_graph_and_supply_run_before_authorization_supply() -> None:
@@ -294,6 +297,25 @@ def _runner_until_exposure_net(
                     {"schema_id": "C2_EXPOSURE_NET_V1", "schema_version": 1, "day_utc": DAY, "status": "OK"},
                 )
             return subprocess.CompletedProcess(command, exposure_net_returncode, stdout="", stderr="producer failed")
+        elif script == "run_sleeve_edge_measurement_v1.py":
+            _write_json(
+                sleeve_root
+                / "reports/sleeve_edge_snapshot_v1"
+                / DAY
+                / "C2_TREND_EQ_PRIMARY"
+                / "r1"
+                / "sleeve_edge_snapshot.v1.json",
+                {"day_utc": DAY, "status": "QUALIFIED"},
+            )
+        elif script == "run_governed_evaluation_day_v1.py":
+            _write_json(
+                sleeve_root
+                / "reports/sleeve_governance_action_state_v1"
+                / DAY
+                / "C2_TREND_EQ_PRIMARY"
+                / "sleeve_governance_action_state.v1.json",
+                {"day_utc": DAY, "status": "OK", "scope_kind": "sleeve", "scope_id": "C2_TREND_EQ_PRIMARY", "action_state": "continue"},
+            )
         elif script == "run_capital_authority_allocation_day_v1.py":
             raise AssertionError("capital allocation must not run when exposure_net is unavailable")
         return subprocess.CompletedProcess(command, 0, stdout="{}\n", stderr="")
@@ -387,6 +409,56 @@ def test_valid_existing_exposure_net_is_reused_without_overwrite_and_allocation_
     assert "run_exposure_net_day_v1.py" not in call_log
     assert "run_capital_authority_allocation_day_v1.py" in call_log
     assert exposure_path.read_bytes() == before
+
+
+def test_missing_governed_evaluation_stops_before_capital_authority_allocation(tmp_path: Path) -> None:
+    canonical_root = tmp_path / "truth"
+    sleeve_root = tmp_path / "truth_sleeves/PRIMARY/PAPER"
+    _write_authority(sleeve_root)
+    intent_path = _write_selected_intent(sleeve_root)
+    _write_exposure_net(sleeve_root, intent_path=intent_path)
+    call_log: list[str] = []
+
+    def runner(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        script = Path(command[1]).name if len(command) > 1 else ""
+        call_log.append(script)
+        if script == "run_exposure_net_day_v1.py":
+            raise AssertionError("existing valid exposure_net must be reused without invoking producer")
+        if script == "run_sleeve_edge_measurement_v1.py":
+            _write_json(
+                sleeve_root
+                / "reports/sleeve_edge_snapshot_v1"
+                / DAY
+                / "C2_TREND_EQ_PRIMARY"
+                / "r1"
+                / "sleeve_edge_snapshot.v1.json",
+                {"day_utc": DAY, "status": "QUALIFIED"},
+            )
+            return subprocess.CompletedProcess(command, 0, stdout="{}\n", stderr="")
+        if script == "run_governed_evaluation_day_v1.py":
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr="governed evaluation failed")
+        if script == "run_capital_authority_allocation_day_v1.py":
+            raise AssertionError("capital allocation must not run when governed evaluation evidence is missing")
+        return _runner_until_exposure_net(
+            canonical_root=canonical_root,
+            sleeve_root=sleeve_root,
+            call_log=[],
+            exposure_net_returncode=0,
+            write_exposure_net=False,
+        )(command, cwd)
+
+    report = kernel.run_paper_ready_kernel_v1(
+        target_day=DAY,
+        canonical_truth_root=canonical_root,
+        paper_sleeve_root=sleeve_root,
+        require_current_release=False,
+        command_runner=runner,
+    )
+
+    assert report["failed_stage_id"] == "governed_evaluation"
+    assert report["first_blocker"] == "MISSING_ARTIFACT"
+    assert "run_governed_evaluation_day_v1.py" in call_log
+    assert "run_capital_authority_allocation_day_v1.py" not in call_log
 
 
 def test_wrong_day_existing_exposure_net_blocks_before_allocation(tmp_path: Path) -> None:

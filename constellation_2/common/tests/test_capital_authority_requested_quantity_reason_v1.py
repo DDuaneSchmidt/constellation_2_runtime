@@ -409,6 +409,20 @@ def test_discovery_mode_relaxes_sleeve_governance_multiplier_for_paper() -> None
     assert reason_codes == ["PAPER_DISCOVERY_SLEEVE_THROTTLE_RELAXED"]
 
 
+def test_missing_sleeve_governance_action_state_blocks_discovery_relaxation() -> None:
+    effective, reason_codes = allocation_module._effective_sleeve_governance_multiplier_bp(
+        governed_multiplier_bp=0,
+        environment="PAPER",
+        qualification_meta={
+            "discovery_mode_active": True,
+            "discovery_sleeve_governance_multiplier_bp": 10000,
+            "governance_artifact_status": "MISSING",
+        },
+    )
+    assert effective == 0
+    assert reason_codes == []
+
+
 def test_discovery_mode_never_relaxes_sleeve_governance_multiplier_for_live() -> None:
     effective, reason_codes = allocation_module._effective_sleeve_governance_multiplier_bp(
         governed_multiplier_bp=5000,

@@ -357,6 +357,8 @@ def _stages(
         _stage("paper_authority_head_freshness", "authorization", ["python3", "-c", "pass"], "PAPER_SLEEVE", Path("run_pointer_v2/canonical_authority_head.v1.json"), ("PASS",), "Inspect PAPER authorization_gate_verdict_v1 and canonical authority head; do not synthesize authority.", "Resolve same-day PAPER authorization gate verdict and canonical authority head before capital allocation."),
         _stage("exposure_net", "risk", ["python3", "ops/tools/run_exposure_net_day_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("risk_v1/exposure_net_v1") / target_day / "exposure_net.v1.json", ("OK", "PASS", "READY"), "python3 ops/tools/run_exposure_net_day_v1.py --day_utc {day} --truth_root {sleeve}", "Produce same-day exposure_net_v1 before capital authority allocation."),
         _stage("risk_definition_contract", "risk", ["python3", "ops/tools/run_risk_definition_contract_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root), "--intent_hash", "<selected_intent_hash>"], "PAPER_SLEEVE", None, ("PASS",), "python3 ops/tools/run_risk_definition_contract_v1.py --day_utc {day} --truth_root {sleeve} --intent_hash <selected_intent_hash>", "Produce selected LONG_EQUITY stop-risk contract before capital allocation; resolve missing market data or intent evidence through governed producers."),
+        _stage("sleeve_edge_measurement", "sleeve_edge", ["python3", "ops/tools/run_sleeve_edge_measurement_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/sleeve_edge_snapshot_v1") / target_day, ("OK", "PASS", "READY", "QUALIFIED", "WATCHLIST"), "python3 ops/tools/run_sleeve_edge_measurement_v1.py --day_utc {day} --truth_root {sleeve}", "Produce governed sleeve-edge measurement evidence before allocation."),
+        _stage("governed_evaluation", "authorization", ["python3", "ops/tools/run_governed_evaluation_day_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/sleeve_governance_action_state_v1") / target_day, ("OK", "PASS", "READY"), "python3 ops/tools/run_governed_evaluation_day_v1.py --day_utc {day} --truth_root {sleeve}", "Produce governed sleeve control action-state evidence before allocation."),
         _stage("capital_authority_allocation", "authorization", ["python3", "ops/tools/run_capital_authority_allocation_day_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root), "--canonical_sequence_owner", "ops/tools/run_c2_paper_day_orchestrator_v2.py"], "PAPER_SLEEVE", Path("allocation_v1/capital_authority_allocation_v1") / target_day / "capital_authority_allocation.v1.json", ("OK", "PASS", "READY"), "python3 ops/tools/run_capital_authority_allocation_day_v1.py --day_utc {day} --truth_root {sleeve} --canonical_sequence_owner ops/tools/run_c2_paper_day_orchestrator_v2.py", "Allocate capital authority for the selected intent."),
         _stage("phasec_identity_materializer", "authorization", ["python3", "ops/tools/run_phasec_identity_materializer_day_v1.py", "--day_utc", target_day, "--eval_time_utc", _iso(datetime.now(UTC)), "--truth_root", str(canonical_truth_root), "--execution_truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("phaseC_preflight_v1") / target_day, ("OK", "PASS", "READY", "SUCCESS"), "python3 ops/tools/run_phasec_identity_materializer_day_v1.py --day_utc {day} --eval_time_utc $(date -u +%FT%TZ) --truth_root {canonical} --execution_truth_root {sleeve}", "Materialize Phase C identity and defined-risk proof into the PAPER sleeve."),
         _stage("strategy_decision_authority", "authorization", ["python3", "ops/tools/run_strategy_decision_authority_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root), "--execution_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/strategy_decision_authority_v1") / target_day / "strategy_decision_authority.v1.json", ("PASS", "READY", "OK"), "python3 ops/tools/run_strategy_decision_authority_v1.py --day_utc {day} --truth_root {sleeve} --execution_root {sleeve}", "Materialize strategy decision authority before authorization artifacts so freshness dependencies are ordered."),
@@ -376,6 +378,24 @@ def _validate_stage_artifact(*, stage: KernelStage, artifact_path: Path | None, 
     if artifact_path is None:
         return {"status": "PASS", "artifact_status": "OK"}
     if artifact_path.is_dir():
+        if stage.stage_id == "sleeve_edge_measurement":
+            if not any(artifact_path.glob("*/*/sleeve_edge_snapshot.v1.json")):
+                return _blocked(
+                    "SLEEVE_EDGE_SNAPSHOT_MISSING",
+                    "MISSING",
+                    f"{artifact_path} contains no sleeve_edge_snapshot.v1.json evidence",
+                    stage,
+                )
+            return {"status": "PASS", "artifact_status": "OK"}
+        if stage.stage_id == "governed_evaluation":
+            if not any(artifact_path.glob("*/sleeve_governance_action_state.v1.json")):
+                return _blocked(
+                    "SLEEVE_GOVERNANCE_ACTION_STATE_MISSING",
+                    "MISSING",
+                    f"{artifact_path} contains no sleeve_governance_action_state.v1.json evidence",
+                    stage,
+                )
+            return {"status": "PASS", "artifact_status": "OK"}
         if not any(artifact_path.iterdir()):
             return _blocked("MISSING_ARTIFACT", "MISSING", f"{artifact_path} exists but is empty", stage)
         return {"status": "PASS", "artifact_status": "OK"}

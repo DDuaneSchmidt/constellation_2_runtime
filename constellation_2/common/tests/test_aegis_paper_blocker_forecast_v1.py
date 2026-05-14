@@ -75,7 +75,13 @@ def _write_startup_pass(truth: Path, canonical: Path) -> None:
 
 
 def _write_intent_pass(truth: Path) -> None:
-    selected = {"intent_id": "intent-spy", "instrument": "SPY"}
+    selected = {
+        "intent_id": "intent-spy",
+        "intent_hash": "a" * 64,
+        "instrument": "SPY",
+        "engine_id": "C2_TREND_EQ_PRIMARY_V1",
+        "sleeve_id": "C2_TREND_EQ_PRIMARY_V1",
+    }
     _write_json(truth / f"reports/trading_day_intent_generation_v1/{DAY}/trading_day_intent_generation.v1.json", {"day_utc": DAY, "final_status": "INTENTS_PRESENT", "generated_at_utc": f"{DAY}T13:31:00Z"})
     _write_json(truth / f"reports/portfolio_activation_gate_v1/{DAY}/portfolio_activation_gate.v1.json", {"day_utc": DAY, "status": "PASS", "generated_at_utc": f"{DAY}T13:31:01Z"})
     _write_json(truth / f"reports/portfolio_scoring_v1/{DAY}/portfolio_scoring.v1.json", {"day_utc": DAY, "status": "PASS", "generated_at_utc": f"{DAY}T13:31:02Z"})
@@ -129,6 +135,15 @@ def _write_authority_and_allocation_pass(truth: Path, canonical: Path, *, kill_s
     )
     _write_json(truth / f"risk_v1/exposure_net_v1/{DAY}/exposure_net.v1.json", {"day_utc": DAY, "status": "OK", "generated_at_utc": f"{DAY}T13:33:02Z"})
     _write_json(truth / f"allocation_v1/capital_authority_allocation_v1/{DAY}/capital_authority_allocation.v1.json", {"day_utc": DAY, "status": "OK", "generated_at_utc": f"{DAY}T13:33:03Z"})
+    _write_json(
+        truth
+        / f"reports/sleeve_governance_action_state_v1/{DAY}/C2_TREND_EQ_PRIMARY/sleeve_governance_action_state.v1.json",
+        {"day_utc": DAY, "status": "OK", "scope_kind": "sleeve", "scope_id": "C2_TREND_EQ_PRIMARY", "action_state": "continue"},
+    )
+    _write_json(
+        truth / f"reports/strategy_decision_authority_v1/{DAY}/strategy_decision_authority.v1.json",
+        {"day_utc": DAY, "status": "PASS", "strategy_decision_state": "INTENT_CREATED", "generated_at_utc": f"{DAY}T13:33:03Z"},
+    )
     (truth / f"phaseC_preflight_v1/{DAY}").mkdir(parents=True, exist_ok=True)
     _write_json(truth / f"phaseC_preflight_v1/{DAY}/identity.json", {"day_utc": DAY, "status": "OK"})
     _write_json(truth / f"engine_activity_v1/authorization_v1/{DAY}/auth.json", {"day_utc": DAY, "status": "AUTHORIZED"})
@@ -183,6 +198,8 @@ def test_missing_sleeve_edge_forecasts_allocation_blocker(tmp_path: Path) -> Non
     assert first["stage_id"] == "sleeve_edge_snapshot"
     assert first["domain"] == "exposure/risk/allocation"
     assert first["blocker_code"] == "SLEEVE_EDGE_SNAPSHOT_MISSING"
+    assert "/C2_TREND_EQ_PRIMARY/" in first["artifact_path"]
+    assert "/PRIMARY/" not in first["artifact_path"].replace("truth_sleeves/PRIMARY/PAPER", "truth_sleeves/<execution>/PAPER")
 
 
 def test_stale_kill_switch_forecasts_submit_blocker(tmp_path: Path) -> None:
@@ -192,7 +209,7 @@ def test_stale_kill_switch_forecasts_submit_blocker(tmp_path: Path) -> None:
     _write_intent_pass(truth)
     _write_requirement_graph_pass(truth)
     _write_market_and_structure_pass(truth)
-    _write_json(truth / f"reports/sleeve_edge_snapshot_v1/{DAY}/{SLEEVE}/r1/sleeve_edge_snapshot.v1.json", {"day_utc": DAY, "status": "QUALIFIED", "generated_at_utc": f"{DAY}T13:32:06Z"})
+    _write_json(truth / f"reports/sleeve_edge_snapshot_v1/{DAY}/C2_TREND_EQ_PRIMARY/r1/sleeve_edge_snapshot.v1.json", {"day_utc": DAY, "status": "QUALIFIED", "generated_at_utc": f"{DAY}T13:32:06Z"})
     _write_authority_and_allocation_pass(
         truth,
         canonical,

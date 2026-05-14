@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import json
 from pathlib import Path
+import re
 import sys
 from typing import Any
 
@@ -52,6 +53,8 @@ STAGE_DOMAIN = {
     "paper_authority_head_freshness": "authority/freshness",
     "risk_budget_supply": "exposure/risk/allocation",
     "exposure_net": "exposure/risk/allocation",
+    "sleeve_edge_measurement": "exposure/risk/allocation",
+    "governed_evaluation": "exposure/risk/allocation",
     "capital_authority_allocation": "exposure/risk/allocation",
     "phasec_identity_materializer": "executable authorization",
     "authorization_artifacts": "executable authorization",
@@ -347,6 +350,9 @@ def _extract_selected_intent(ctx: ForecastContext) -> dict[str, Any]:
         "available": bool(selected),
         "path": str(pointer_path),
         "intent_id": str(selected.get("intent_id") or payload.get("selected_intent_id") or "").strip(),
+        "intent_hash": str(selected.get("intent_hash") or "").strip(),
+        "engine_id": str(selected.get("engine_id") or "").strip(),
+        "sleeve_id": str(selected.get("sleeve_id") or "").strip(),
         "symbol": _intent_symbol(selected) if selected else "",
         "status": str(payload.get("status") or "").strip().upper(),
     }
@@ -397,10 +403,47 @@ def _equity_snapshot_result(ctx: ForecastContext, selected_intent: dict[str, Any
     return {**base, "status": PASS, "blocker_code": "", "artifact_status": _status_of(payload), "reason": "", "artifact_timestamp": _timestamp(payload)}
 
 
-def _sleeve_edge_result(ctx: ForecastContext) -> dict[str, Any]:
+def _strip_version_suffix(value: str) -> str:
+    return re.sub(r"_V[0-9]+$", "", str(value or "").strip())
+
+
+def _strategy_sleeve_id_for_selected_intent(ctx: ForecastContext, selected_intent: dict[str, Any]) -> str:
+    allocation_path = (
+        ctx.truth_root
+        / "allocation_v1"
+        / "capital_authority_allocation_v1"
+        / ctx.day_utc
+        / "capital_authority_allocation.v1.json"
+    ).resolve()
+    allocation = _read_json(allocation_path) if allocation_path.is_file() else {}
+    intent_id = str(selected_intent.get("intent_id") or "").strip()
+    intent_hash = str(selected_intent.get("intent_hash") or "").strip()
+    decision_chain = allocation.get("decision_chain") if isinstance(allocation.get("decision_chain"), dict) else {}
+    for key in ("authorized_trade_intents", "trade_intents", "candidate_actions"):
+        rows = decision_chain.get(key)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            row_intent_id = str(row.get("intent_id") or "").strip()
+            row_intent_hash = str(row.get("intent_hash") or "").strip()
+            if (intent_hash and row_intent_hash == intent_hash) or (intent_id and row_intent_id == intent_id):
+                strategy_sleeve = str(row.get("strategy_sleeve_id") or "").strip()
+                if strategy_sleeve:
+                    return strategy_sleeve
+    for key in ("sleeve_id", "engine_id"):
+        value = _strip_version_suffix(str(selected_intent.get(key) or ""))
+        if value:
+            return value
+    return ctx.sleeve
+
+
+def _sleeve_edge_result(ctx: ForecastContext, selected_intent: dict[str, Any]) -> dict[str, Any]:
     domain = "exposure/risk/allocation"
     source_fixes, operator_actions = _safe_stage_action(domain)
-    base_dir = (ctx.truth_root / "reports" / "sleeve_edge_snapshot_v1" / ctx.day_utc / ctx.sleeve).resolve()
+    strategy_sleeve_id = _strategy_sleeve_id_for_selected_intent(ctx, selected_intent)
+    base_dir = (ctx.truth_root / "reports" / "sleeve_edge_snapshot_v1" / ctx.day_utc / strategy_sleeve_id).resolve()
     candidates = sorted(base_dir.glob("*/sleeve_edge_snapshot.v1.json")) if base_dir.is_dir() else []
     path = candidates[-1] if candidates else (base_dir / "<revision>" / "sleeve_edge_snapshot.v1.json")
     base = {
@@ -413,7 +456,7 @@ def _sleeve_edge_result(ctx: ForecastContext) -> dict[str, Any]:
         "status": MISSING,
         "blocker_code": "SLEEVE_EDGE_SNAPSHOT_MISSING",
         "artifact_status": MISSING,
-        "reason": "canonical sleeve-edge control snapshot missing before allocation",
+        "reason": f"canonical sleeve-edge control snapshot missing before allocation for strategy sleeve {strategy_sleeve_id}",
         "suggested_safe_source_only_fixes": source_fixes,
         "suggested_operator_governed_actions": operator_actions,
         "root_path_mismatch": None,
@@ -488,16 +531,17 @@ def build_aegis_paper_blocker_forecast_v1(
         ib_account="",
         release_commit="",
     )
-    stage_results = [_stage_result(ctx, stage) for stage in stages]
     selected_intent = _extract_selected_intent(ctx)
+    stage_results = [
+        _sleeve_edge_result(ctx, selected_intent)
+        if stage.stage_id == "sleeve_edge_measurement"
+        else _stage_result(ctx, stage)
+        for stage in stages
+    ]
     equity_result = _equity_snapshot_result(ctx, selected_intent)
     if equity_result is not None:
         insert_at = next((i + 1 for i, row in enumerate(stage_results) if row["stage_id"] == "aegis_requirement_graph"), len(stage_results))
         stage_results.insert(insert_at, equity_result)
-    stage_results.insert(
-        next((i for i, row in enumerate(stage_results) if row["stage_id"] == "capital_authority_allocation"), len(stage_results)),
-        _sleeve_edge_result(ctx),
-    )
     blockers = _blockers(stage_results)
     first = blockers[0] if blockers else {}
     root_mismatches, missing_edges, stale, reuse = _risk_lists(stage_results)

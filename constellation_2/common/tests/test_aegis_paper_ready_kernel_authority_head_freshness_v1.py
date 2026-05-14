@@ -220,7 +220,9 @@ def test_risk_definition_contract_stage_runs_after_structure_before_allocation()
     stage_ids = [stage.stage_id for stage in stages]
 
     assert stage_ids.index("structure_decision_supply") < stage_ids.index("risk_definition_contract")
-    assert stage_ids.index("risk_definition_contract") < stage_ids.index("capital_authority_allocation")
+    assert stage_ids.index("risk_definition_contract") < stage_ids.index("sleeve_edge_measurement")
+    assert stage_ids.index("sleeve_edge_measurement") < stage_ids.index("governed_evaluation")
+    assert stage_ids.index("governed_evaluation") < stage_ids.index("capital_authority_allocation")
 
 
 def test_risk_definition_contract_stage_materializes_selected_long_equity_stop_contract(tmp_path: Path) -> None:
