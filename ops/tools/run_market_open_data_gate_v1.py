@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -210,7 +211,17 @@ def _selected_intent_requires_options(payload: dict[str, Any], selected: dict[st
     return isinstance(option, dict) or exposure_type in {"SHORT_VOL_DEFINED", "VOL_INCOME_DEFINED"} or "DEFINED" in risk_class
 
 
-def _selected_intent_state(ctx: bod.BodContext) -> tuple[str, str, bool, str]:
+def _intent_execution_root_from_path(path: Path) -> Path | None:
+    parts = path.resolve().parts
+    if "intents_v1" not in parts:
+        return None
+    idx = parts.index("intents_v1")
+    if idx <= 0:
+        return None
+    return Path(*parts[:idx]).resolve()
+
+
+def _selected_intent_state(ctx: bod.BodContext) -> tuple[str, str, bool, str, Path, str]:
     pointer = _read_json(selected_intent_pointer_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc))
     status = str(pointer.get("status") or "").strip().upper()
     selected = pointer.get("selected_intent") if isinstance(pointer.get("selected_intent"), dict) else {}
@@ -218,13 +229,18 @@ def _selected_intent_state(ctx: bod.BodContext) -> tuple[str, str, bool, str]:
     intent_path = str(selected.get("intent_path") or "").strip()
     requires_options = bool(selected.get("requires_options") is True)
     exposure_type = str(selected.get("exposure_type") or "").strip().upper()
+    execution_root = ctx.execution_root
+    environment = str(selected.get("environment") or pointer.get("environment") or ctx.environment).strip().upper()
     if intent_path:
-        payload = _read_json(Path(intent_path).expanduser().resolve())
+        resolved_intent_path = Path(intent_path).expanduser().resolve()
+        payload = _read_json(resolved_intent_path)
         underlying = payload.get("underlying") if isinstance(payload.get("underlying"), dict) else {}
         symbol = str(underlying.get("symbol") or payload.get("symbol") or symbol).strip().upper()
         requires_options = _selected_intent_requires_options(payload, selected)
         exposure_type = str(payload.get("exposure_type") or exposure_type).strip().upper()
-    return status, symbol, requires_options, exposure_type
+        execution_root = _intent_execution_root_from_path(resolved_intent_path) or execution_root
+        environment = str(payload.get("environment") or environment).strip().upper()
+    return status, symbol, requires_options, exposure_type, execution_root, environment
 
 
 def _has_bid_ask(contract: dict[str, Any]) -> bool:
@@ -379,13 +395,27 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
         environment=ctx.environment,
     )
     readiness_mode = str(readiness.get("readiness_mode") or "").strip().upper()
-    selected_intent_status, selected_instrument, selected_requires_options, selected_exposure_type = _selected_intent_state(ctx)
+    (
+        selected_intent_status,
+        selected_instrument,
+        selected_requires_options,
+        selected_exposure_type,
+        selected_execution_root,
+        selected_environment,
+    ) = _selected_intent_state(ctx)
+    data_ctx = replace(
+        ctx,
+        execution_root=selected_execution_root,
+        environment=selected_environment or ctx.environment,
+    )
     supply_path = market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     symbol_diagnostics: dict[str, Any] = {
         "selected_intent_status": selected_intent_status,
         "selected_intent_symbol": selected_instrument,
         "selected_intent_requires_options": bool(selected_requires_options),
         "selected_intent_exposure_type": selected_exposure_type,
+        "selected_intent_execution_root": str(data_ctx.execution_root),
+        "selected_intent_environment": data_ctx.environment,
         "required_options_symbol": selected_instrument if selected_intent_status == "SELECTED" and selected_requires_options else "",
         "options_snapshot_symbol": "",
         "symbol_source": "SELECTED_INTENT" if selected_instrument else "NONE",
@@ -405,11 +435,11 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
             "gate_decision": status,
             "canonical_blocker": blocker,
             "specific_fail_closed_reason": specific_reason,
-            "expected_evidence_path": str(validation.get("expected_evidence_path") or (ctx.execution_root / "options_chain_snapshot_v1" / ctx.day_utc).resolve()),
+            "expected_evidence_path": str(validation.get("expected_evidence_path") or (data_ctx.execution_root / "options_chain_snapshot_v1" / data_ctx.day_utc).resolve()),
             "actual_evidence_path": actual_evidence_path or str(validation.get("snapshot_path") or ""),
             "truth_root": str(ctx.truth_root),
-            "execution_root": str(ctx.execution_root),
-            "environment": ctx.environment,
+            "execution_root": str(data_ctx.execution_root),
+            "environment": data_ctx.environment,
             "evaluated_timestamp_utc": generated_at,
             "evaluated_timestamp_local": evaluated_local.isoformat(),
             "evaluated_timezone": "America/New_York",
@@ -527,7 +557,7 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
             )
         if not selected_requires_options:
             validation_blocker, equity_artifact = _validate_equity_snapshot(
-                ctx=ctx,
+                ctx=data_ctx,
                 instrument=instrument,
                 eval_time_utc=generated_at,
                 data_mode="EQUITY",
@@ -548,7 +578,7 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
                 "missing_contracts": [],
                 "stale_contracts": [],
                 "incomplete_quote_fields": ["bid", "ask"] if validation_blocker == "EQUITY_QUOTES_MISSING_BID_ASK" else [],
-                "expected_evidence_path": str((ctx.execution_root / "market_data_snapshot_v1" / "snapshots" / ctx.day_utc).resolve()),
+                "expected_evidence_path": str((data_ctx.execution_root / "market_data_snapshot_v1" / "snapshots" / data_ctx.day_utc).resolve()),
             }
             supply_status = str(supply.get("status") or "").strip().upper()
             blocker = _blocker_from_supply(supply) or validation_blocker
@@ -569,7 +599,7 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
                 capture_result={},
                 specific_reason=fail_closed_reason,
             )
-        snapshot_validation = _validate_current_snapshot(ctx, instrument, now_utc)
+        snapshot_validation = _validate_current_snapshot(data_ctx, instrument, now_utc)
         symbol_diagnostics["options_snapshot_symbol"] = str(snapshot_validation.get("options_snapshot_symbol") or "")
         supply_status = str(supply.get("status") or "").strip().upper()
         blocker = _blocker_from_supply(supply) or str(snapshot_validation.get("blocker") or "").strip()
@@ -577,7 +607,7 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
             blocker = "OPTIONS_SNAPSHOT_SYMBOL_MISMATCH"
         if blocker in REFRESHABLE_BLOCKERS:
             capture_attempted = True
-            capture_result = _run_capture(ctx, instrument)
+            capture_result = _run_capture(data_ctx, instrument)
             command_result = {
                 "initial_market_data_supply": command_result,
                 "capture": capture_result,
@@ -585,7 +615,7 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
             }
             supply = _read_json(supply_path)
             supply_status = str(supply.get("status") or "").strip().upper()
-            snapshot_validation = _validate_current_snapshot(ctx, instrument, datetime.now(UTC))
+            snapshot_validation = _validate_current_snapshot(data_ctx, instrument, datetime.now(UTC))
             symbol_diagnostics["options_snapshot_symbol"] = str(snapshot_validation.get("options_snapshot_symbol") or "")
             blocker = _blocker_from_supply(supply) or str(snapshot_validation.get("blocker") or "").strip()
             if symbol_diagnostics["stale_default_symbol_detected"] and blocker in {"", "OPTIONS_SNAPSHOT_STALE"}:
@@ -658,7 +688,7 @@ def run_market_open_data_gate_v1(day_utc: str, environment: str, truth_root: str
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="run_market_open_data_gate_v1")
     parser.add_argument("--day_utc", required=True)
-    parser.add_argument("--environment", default="PAPER", choices=["PAPER"])
+    parser.add_argument("--environment", default="PAPER")
     parser.add_argument("--truth_root", default="")
     args = parser.parse_args(argv)
     day_utc = parse_day_utc_v1(args.day_utc)

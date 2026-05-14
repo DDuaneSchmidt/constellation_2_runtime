@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -109,18 +110,50 @@ def _active_selected_intent(ctx: bod.BodContext) -> dict[str, Any]:
     symbol = str(selected.get("symbol") or "").strip().upper()
     intent_path = str(selected.get("intent_path") or "").strip()
     exposure_type = ""
+    environment = str(selected.get("environment") or pointer.get("environment") or ctx.environment).strip().upper()
+    sleeve_id = str(selected.get("sleeve_id") or "").strip()
+    execution_root = ctx.execution_root
     if intent_path:
-        payload = _read_json(Path(intent_path).expanduser().resolve())
+        resolved_intent_path = Path(intent_path).expanduser().resolve()
+        payload = _read_json(resolved_intent_path)
         underlying = payload.get("underlying") if isinstance(payload.get("underlying"), dict) else {}
         symbol = str(underlying.get("symbol") or payload.get("symbol") or symbol).strip().upper()
         exposure_type = str(payload.get("exposure_type") or payload.get("intent_type") or "").strip().upper()
         intent_id = str(payload.get("intent_id") or intent_id).strip()
+        environment = str(payload.get("environment") or environment).strip().upper()
+        sleeve_id = str(payload.get("sleeve_id") or sleeve_id).strip()
+        execution_root = _intent_execution_root_from_path(resolved_intent_path) or execution_root
     return {
         "intent_id": intent_id,
         "symbol": symbol,
         "intent_path": intent_path,
         "exposure_type": exposure_type,
+        "environment": environment,
+        "sleeve_id": sleeve_id,
+        "execution_root": str(execution_root),
     }
+
+
+def _intent_execution_root_from_path(path: Path) -> Path | None:
+    parts = path.resolve().parts
+    if "intents_v1" not in parts:
+        return None
+    idx = parts.index("intents_v1")
+    if idx <= 0:
+        return None
+    return Path(*parts[:idx]).resolve()
+
+
+def _selected_intent_ctx(ctx: bod.BodContext, active_selected_intent: dict[str, Any]) -> bod.BodContext:
+    execution_root_text = str(active_selected_intent.get("execution_root") or "").strip()
+    environment_text = str(active_selected_intent.get("environment") or "").strip().upper()
+    if not execution_root_text and not environment_text:
+        return ctx
+    return replace(
+        ctx,
+        execution_root=Path(execution_root_text).expanduser().resolve() if execution_root_text else ctx.execution_root,
+        environment=environment_text or ctx.environment,
+    )
 
 
 def _entitlement_probe_path(ctx: bod.BodContext, instrument: str) -> Path:
@@ -858,6 +891,7 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
     req_path = requirement_graph_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     requirement_graph = _read_json(req_path)
     active_selected_intent = _active_selected_intent(ctx)
+    data_ctx = _selected_intent_ctx(ctx, active_selected_intent)
     graph_day = str(requirement_graph.get("day_utc") or "").strip()
     graph_usable = bool(requirement_graph) and graph_day == ctx.day_utc
     requirements, unowned = _requirement_rows(requirement_graph if graph_usable else {})
@@ -866,7 +900,7 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
     artifacts: list[dict[str, Any]] = []
     entitlement_probes: list[dict[str, Any]] = []
     authority_result: dict[str, Any] = {}
-    delayed_policy = _delayed_data_policy(ctx)
+    delayed_policy = _delayed_data_policy(data_ctx)
     blocker = ""
     if active_selected_intent and not graph_usable:
         blocker = "MARKET_DATA_REQUIREMENT_GRAPH_MISSING"
@@ -890,6 +924,8 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
             "schema_version": SCHEMA_VERSION,
             "day_utc": ctx.day_utc,
             "environment": ctx.environment,
+            "market_data_environment": data_ctx.environment,
+            "market_data_execution_root": str(data_ctx.execution_root),
             "generated_at_utc": eval_time_utc,
             "market_session_state": market_session_state,
             "status": "SKIPPED",
@@ -921,6 +957,8 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
             "schema_version": SCHEMA_VERSION,
             "day_utc": ctx.day_utc,
             "environment": ctx.environment,
+            "market_data_environment": data_ctx.environment,
+            "market_data_execution_root": str(data_ctx.execution_root),
             "generated_at_utc": eval_time_utc,
             "market_session_state": market_session_state,
             "status": "BLOCKED",
@@ -974,14 +1012,14 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
     provider_blocker = ""
     provider_action = ""
     for instrument in option_instruments:
-        probe_path = _entitlement_probe_path(ctx, instrument)
+        probe_path = _entitlement_probe_path(data_ctx, instrument)
         probe = _read_json(probe_path)
         if probe:
             probe = {**probe, "path": str(probe_path)}
             entitlement_probes.append(probe)
-            checks, check_blocker, check_action = _provider_checks_from_entitlement(ctx=ctx, instrument=instrument, entitlement_probe=probe, delayed_policy=delayed_policy)
+            checks, check_blocker, check_action = _provider_checks_from_entitlement(ctx=data_ctx, instrument=instrument, entitlement_probe=probe, delayed_policy=delayed_policy)
         else:
-            checks, check_blocker, check_action = _provider_checks_for_instrument(ctx=ctx, instrument=instrument)
+            checks, check_blocker, check_action = _provider_checks_for_instrument(ctx=data_ctx, instrument=instrument)
         provider_checks.extend(checks)
         if check_blocker and not provider_blocker:
             provider_blocker = check_blocker
@@ -1008,18 +1046,18 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
                 for row in provider_checks
             )
             if unknown:
-                capture = _run_capture(ctx, instrument)
+                capture = _run_capture(data_ctx, instrument)
                 capture["data_mode"] = market_data_mode
-                capture["blocker"] = _refine_delayed_capture_blocker(ctx, instrument, capture, delayed_data_used=delayed_data_used, delayed_policy=delayed_policy)
+                capture["blocker"] = _refine_delayed_capture_blocker(data_ctx, instrument, capture, delayed_data_used=delayed_data_used, delayed_policy=delayed_policy)
                 capture_attempts.append(capture)
-                probe_path = _entitlement_probe_path(ctx, instrument)
+                probe_path = _entitlement_probe_path(data_ctx, instrument)
                 probe = _read_json(probe_path)
                 if probe:
                     probe = {**probe, "path": str(probe_path)}
                     entitlement_probes.append(probe)
-                    checks, check_blocker, check_action = _provider_checks_from_entitlement(ctx=ctx, instrument=instrument, entitlement_probe=probe, delayed_policy=delayed_policy)
+                    checks, check_blocker, check_action = _provider_checks_from_entitlement(ctx=data_ctx, instrument=instrument, entitlement_probe=probe, delayed_policy=delayed_policy)
                 else:
-                    checks, check_blocker, check_action = _provider_checks_for_instrument(ctx=ctx, instrument=instrument)
+                    checks, check_blocker, check_action = _provider_checks_for_instrument(ctx=data_ctx, instrument=instrument)
                 provider_checks = [row for row in provider_checks if not (row.get("instrument") == instrument and row.get("provider") == "IBKR")]
                 provider_checks.extend(checks)
                 if check_blocker:
@@ -1031,11 +1069,11 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
                     break
         if not blocker:
             for instrument in option_instruments:
-                snapshot_path, _cert_path, _snapshot_payload, _cert_payload = _latest_snapshot_for_symbol(execution_root=ctx.execution_root, day_utc=ctx.day_utc, instrument=instrument)
+                snapshot_path, _cert_path, _snapshot_payload, _cert_payload = _latest_snapshot_for_symbol(execution_root=data_ctx.execution_root, day_utc=data_ctx.day_utc, instrument=instrument)
                 if snapshot_path is None and not any(row.get("instrument") == instrument for row in capture_attempts):
-                    capture = _run_capture(ctx, instrument)
+                    capture = _run_capture(data_ctx, instrument)
                     capture["data_mode"] = market_data_mode
-                    capture["blocker"] = _refine_delayed_capture_blocker(ctx, instrument, capture, delayed_data_used=delayed_data_used, delayed_policy=delayed_policy)
+                    capture["blocker"] = _refine_delayed_capture_blocker(data_ctx, instrument, capture, delayed_data_used=delayed_data_used, delayed_policy=delayed_policy)
                     capture_attempts.append(capture)
                     if capture["status"] != "PASS":
                         blocker = str(capture.get("blocker") or "OPTIONS_SNAPSHOT_CAPTURE_FAILED")
@@ -1044,7 +1082,7 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
                 pass
         if not blocker:
             for instrument in option_instruments:
-                validation_blocker, artifact = _validate_snapshot(ctx=ctx, instrument=instrument, eval_time_utc=eval_time_utc, data_mode=market_data_mode)
+                validation_blocker, artifact = _validate_snapshot(ctx=data_ctx, instrument=instrument, eval_time_utc=eval_time_utc, data_mode=market_data_mode)
                 artifacts.append(artifact)
                 if validation_blocker:
                     blocker = validation_blocker
@@ -1052,7 +1090,7 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
         if not blocker:
             for instrument in equity_instruments:
                 validation_blocker, artifact = _validate_equity_snapshot(
-                    ctx=ctx,
+                    ctx=data_ctx,
                     instrument=instrument,
                     eval_time_utc=eval_time_utc,
                     data_mode="EQUITY",
@@ -1062,7 +1100,7 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
                     blocker = validation_blocker
                     break
         if not blocker:
-            authority_result, authority_blocker = _run_market_data_authority(ctx)
+            authority_result, authority_blocker = _run_market_data_authority(data_ctx)
             if authority_blocker:
                 blocker = authority_blocker
     status = "PRE_MARKET_PENDING" if blocker == "MARKET_OPEN_DATA_PENDING" else ("PASS" if not blocker else "BLOCKED")
@@ -1082,6 +1120,8 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
         "schema_version": SCHEMA_VERSION,
         "day_utc": ctx.day_utc,
         "environment": ctx.environment,
+        "market_data_environment": data_ctx.environment,
+        "market_data_execution_root": str(data_ctx.execution_root),
         "generated_at_utc": eval_time_utc,
         "market_session_state": market_session_state,
         "status": status,
@@ -1094,7 +1134,7 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
         "capture_attempts": capture_attempts,
         "artifacts": artifacts,
         "authority_result": authority_result,
-        "entitlement_probe_path": str(_entitlement_probe_path(ctx, root_instrument)) if root_instrument else "",
+        "entitlement_probe_path": str(_entitlement_probe_path(data_ctx, root_instrument)) if root_instrument else "",
         "entitlement_status": str(root_probe.get("status") or ("MISSING" if root_instrument else "NOT_REQUIRED")).strip().upper(),
         "tested_data_types": root_probe.get("tested_data_types") if isinstance(root_probe.get("tested_data_types"), list) else [],
         "live_data_available": bool(root_probe.get("live_data_available") is True),
@@ -1142,7 +1182,7 @@ def run_market_data_supply_v1(day_utc: str, environment: str, truth_root: str = 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="run_market_data_supply_v1")
     parser.add_argument("--day_utc", required=True)
-    parser.add_argument("--environment", default="PAPER", choices=["PAPER"])
+    parser.add_argument("--environment", default="PAPER")
     parser.add_argument("--truth_root", default="")
     args = parser.parse_args(argv)
     day_utc = parse_day_utc_v1(args.day_utc)

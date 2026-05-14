@@ -85,7 +85,19 @@ def _requires_options_market_data(payload: dict[str, Any]) -> bool:
 
 def _is_long_equity_intent(payload: dict[str, Any]) -> bool:
     exposure_type = str(payload.get("exposure_type") or payload.get("intent_type") or "").strip().upper()
-    return exposure_type == "LONG_EQUITY"
+    structure = str(payload.get("structure") or payload.get("structure_type") or payload.get("selected_structure") or "").strip().upper()
+    instrument_type = str(payload.get("instrument_type") or payload.get("asset_class") or "").strip().upper()
+    return exposure_type == "LONG_EQUITY" or structure == "EQUITY_SPOT" or instrument_type == "EQUITY_SPOT"
+
+
+def _intent_execution_root_from_path(path: Path) -> Path | None:
+    parts = path.resolve().parts
+    if "intents_v1" not in parts:
+        return None
+    idx = parts.index("intents_v1")
+    if idx <= 0:
+        return None
+    return Path(*parts[:idx]).resolve()
 
 
 def _intent_symbol(payload: dict[str, Any]) -> str:
@@ -113,11 +125,16 @@ def _discover_active_intents(*, truth_root: Path, execution_root: Path, day_utc:
             payload = read_json_object_v1(path)
             intent_id = str(payload.get("intent_id") or selected.get("intent_id") or path.stem).strip()
             symbol = _intent_symbol(payload)
+            intent_execution_root = _intent_execution_root_from_path(path) or execution_root
+            intent_environment = str(payload.get("environment") or selected.get("environment") or pointer.get("environment") or "").strip().upper()
             return [
                 {
                     "intent_id": intent_id,
                     "intent_path": str(path),
                     "instrument": symbol,
+                    "execution_root": str(intent_execution_root),
+                    "environment": intent_environment,
+                    "sleeve_id": str(payload.get("sleeve_id") or selected.get("sleeve_id") or "").strip(),
                     "requires_options": _requires_options_market_data(payload) and bool(symbol),
                     "requires_equity_market_data": _is_long_equity_intent(payload) and bool(symbol),
                     "requires_defined_risk_authorization": _is_option_intent(payload) and bool(symbol),
@@ -140,11 +157,15 @@ def _discover_active_intents(*, truth_root: Path, execution_root: Path, day_utc:
                 continue
             intent_id = str(payload.get("intent_id") or payload.get("id") or path.stem).strip()
             symbol = _intent_symbol(payload)
+            intent_execution_root = _intent_execution_root_from_path(path) or root
             out.append(
                 {
                     "intent_id": intent_id,
                     "intent_path": str(path.resolve()),
                     "instrument": symbol,
+                    "execution_root": str(intent_execution_root),
+                    "environment": str(payload.get("environment") or "").strip().upper(),
+                    "sleeve_id": str(payload.get("sleeve_id") or "").strip(),
                     "requires_options": _requires_options_market_data(payload) and bool(symbol),
                     "requires_equity_market_data": _is_long_equity_intent(payload) and bool(symbol),
                     "requires_defined_risk_authorization": _is_option_intent(payload) and bool(symbol),
@@ -776,12 +797,13 @@ def build_requirement_graph(ctx: bod.BodContext) -> dict[str, Any]:
     else:
         intents = _discover_active_intents(truth_root=ctx.truth_root, execution_root=ctx.execution_root, day_utc=ctx.day_utc)
     for intent in intents:
+        intent_execution_root = Path(str(intent.get("execution_root") or ctx.execution_root)).expanduser().resolve()
         if intent.get("requires_options"):
-            nodes.extend(_option_requirement_nodes(day_utc=ctx.day_utc, execution_root=ctx.execution_root, intent=intent))
+            nodes.extend(_option_requirement_nodes(day_utc=ctx.day_utc, execution_root=intent_execution_root, intent=intent))
         if intent.get("requires_defined_risk_authorization"):
-            nodes.append(_defined_risk_requirement_node(day_utc=ctx.day_utc, execution_root=ctx.execution_root, intent=intent))
+            nodes.append(_defined_risk_requirement_node(day_utc=ctx.day_utc, execution_root=intent_execution_root, intent=intent))
         if intent.get("requires_equity_market_data"):
-            nodes.extend(_equity_requirement_nodes(day_utc=ctx.day_utc, execution_root=ctx.execution_root, intent=intent))
+            nodes.extend(_equity_requirement_nodes(day_utc=ctx.day_utc, execution_root=intent_execution_root, intent=intent))
     root = _root_requirement(nodes)
     status = "STALE" if str(root.get("status") or "") == "STALE" else ("BLOCKED" if root else "PASS")
     payload = {
@@ -833,7 +855,7 @@ def run_requirement_graph_v1(day_utc: str, environment: str, truth_root: str = "
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="run_aegis_requirement_graph_v1")
     parser.add_argument("--day_utc", required=True)
-    parser.add_argument("--environment", default="PAPER", choices=["PAPER"])
+    parser.add_argument("--environment", default="PAPER")
     parser.add_argument("--truth_root", default="")
     args = parser.parse_args(argv)
 

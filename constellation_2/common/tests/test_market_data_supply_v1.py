@@ -21,14 +21,14 @@ import ops.tools.run_options_chain_snapshot_required_day_v1 as options_required 
 from ops.tools import run_aegis_bod_prepare_v1 as bod  # noqa: E402
 
 
-def _ctx(tmp_path: Path, day: str = "2026-04-29") -> bod.BodContext:
+def _ctx(tmp_path: Path, day: str = "2026-04-29", *, sleeve_id: str = "PRIMARY", environment: str = "PAPER") -> bod.BodContext:
     truth = tmp_path / "truth"
-    execution = tmp_path / "truth_sleeves" / "PRIMARY" / "PAPER"
+    execution = tmp_path / "truth_sleeves" / sleeve_id / environment
     runtime = tmp_path / "runtime"
     operator = tmp_path / "operator"
     for path in (truth, execution, runtime, operator):
         path.mkdir(parents=True, exist_ok=True)
-    return bod.BodContext(day, "PAPER", truth, execution, runtime, operator, "DU123456")
+    return bod.BodContext(day, environment, truth, execution, runtime, operator, "DU123456")
 
 
 def _requirement(ctx: bod.BodContext, *, source_type: str = "ACTIVE_INTENT", day: str | None = None) -> Path:
@@ -272,8 +272,9 @@ def _add_dte_coverage(snapshot_path: Path, *, omitted: bool = False) -> None:
     snapshot_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
 
 
-def _selected_pointer(ctx: bod.BodContext, *, symbol: str = "SPY") -> Path:
-    intent_path = ctx.execution_root / "intents_v1" / "snapshots" / ctx.day_utc / f"{symbol.lower()}.exposure_intent.v1.json"
+def _selected_pointer(ctx: bod.BodContext, *, symbol: str = "SPY", execution_root: Path | None = None, sleeve_id: str = "PRIMARY") -> Path:
+    root = execution_root or ctx.execution_root
+    intent_path = root / "intents_v1" / "snapshots" / ctx.day_utc / f"{symbol.lower()}.exposure_intent.v1.json"
     intent_path.parent.mkdir(parents=True, exist_ok=True)
     intent_path.write_text(
         json.dumps(
@@ -281,6 +282,8 @@ def _selected_pointer(ctx: bod.BodContext, *, symbol: str = "SPY") -> Path:
                 "schema_id": "exposure_intent",
                 "schema_version": "v1",
                 "intent_id": f"intent_{symbol.lower()}",
+                "environment": ctx.environment,
+                "sleeve_id": sleeve_id,
                 "underlying": {"symbol": symbol},
                 "option": {"structure": "PUT"},
                 "exposure_type": "SHORT_VOL_DEFINED",
@@ -297,10 +300,10 @@ def _selected_pointer(ctx: bod.BodContext, *, symbol: str = "SPY") -> Path:
                 "schema_id": "selected_intent_pointer",
                 "schema_version": "v1",
                 "day_utc": ctx.day_utc,
-                "environment": "PAPER",
+                "environment": ctx.environment,
                 "status": "SELECTED",
                 "canonical_blocker": "",
-                "selected_intent": {"intent_id": f"intent_{symbol.lower()}", "intent_path": str(intent_path), "symbol": symbol},
+                "selected_intent": {"intent_id": f"intent_{symbol.lower()}", "intent_path": str(intent_path), "symbol": symbol, "sleeve_id": sleeve_id, "environment": ctx.environment},
             },
             sort_keys=True,
         ),
@@ -309,26 +312,35 @@ def _selected_pointer(ctx: bod.BodContext, *, symbol: str = "SPY") -> Path:
     return pointer
 
 
-def _selected_long_equity_pointer(ctx: bod.BodContext, *, symbol: str = "QQQ", requires_options: bool = False) -> Path:
-    intent_path = ctx.execution_root / "intents_v1" / "snapshots" / ctx.day_utc / f"{symbol.lower()}_long.exposure_intent.v1.json"
+def _selected_long_equity_pointer(
+    ctx: bod.BodContext,
+    *,
+    symbol: str = "QQQ",
+    requires_options: bool = False,
+    execution_root: Path | None = None,
+    sleeve_id: str = "PRIMARY",
+    exposure_type: str = "LONG_EQUITY",
+    structure: str = "",
+) -> Path:
+    root = execution_root or ctx.execution_root
+    intent_path = root / "intents_v1" / "snapshots" / ctx.day_utc / f"{symbol.lower()}_long.exposure_intent.v1.json"
     intent_path.parent.mkdir(parents=True, exist_ok=True)
-    intent_path.write_text(
-        json.dumps(
-            {
-                "schema_id": "exposure_intent",
-                "schema_version": "v1",
-                "day_utc": ctx.day_utc,
-                "intent_id": f"intent_{symbol.lower()}_long",
-                "underlying": {"symbol": symbol},
-                "symbol": symbol,
-                "exposure_type": "LONG_EQUITY",
-                "target_notional_pct": "0.10",
-                "requires_options": requires_options,
-            },
-            sort_keys=True,
-        ),
-        encoding="utf-8",
-    )
+    payload = {
+        "schema_id": "exposure_intent",
+        "schema_version": "v1",
+        "day_utc": ctx.day_utc,
+        "intent_id": f"intent_{symbol.lower()}_long",
+        "environment": ctx.environment,
+        "sleeve_id": sleeve_id,
+        "underlying": {"symbol": symbol},
+        "symbol": symbol,
+        "exposure_type": exposure_type,
+        "target_notional_pct": "0.10",
+        "requires_options": requires_options,
+    }
+    if structure:
+        payload["structure"] = structure
+    intent_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
     pointer = open_gate.selected_intent_pointer_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     pointer.parent.mkdir(parents=True, exist_ok=True)
     pointer.write_text(
@@ -337,10 +349,10 @@ def _selected_long_equity_pointer(ctx: bod.BodContext, *, symbol: str = "QQQ", r
                 "schema_id": "selected_intent_pointer",
                 "schema_version": "v1",
                 "day_utc": ctx.day_utc,
-                "environment": "PAPER",
+                "environment": ctx.environment,
                 "status": "SELECTED",
                 "canonical_blocker": "",
-                "selected_intent": {"intent_id": f"intent_{symbol.lower()}_long", "intent_path": str(intent_path), "symbol": symbol},
+                "selected_intent": {"intent_id": f"intent_{symbol.lower()}_long", "intent_path": str(intent_path), "symbol": symbol, "sleeve_id": sleeve_id, "environment": ctx.environment},
             },
             sort_keys=True,
         ),
@@ -382,6 +394,35 @@ def test_long_equity_selected_intent_creates_equity_market_data_requirements(tmp
     assert all("run_options_chain_snapshot_required_day_v1.py" not in str(row.get("producer_command") or "") for row in rows)
     assert payload["active_intents"][0]["requires_equity_market_data"] is True
     assert payload["active_intents"][0]["requires_options"] is False
+
+
+def test_long_equity_selected_intent_uses_selected_sleeve_root(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path, environment="LIVE")
+    alt_root = tmp_path / "truth_sleeves" / "SECONDARY" / "LIVE"
+    alt_root.mkdir(parents=True, exist_ok=True)
+    _selected_long_equity_pointer(
+        ctx,
+        symbol="DIA",
+        execution_root=alt_root,
+        sleeve_id="SECONDARY",
+        structure="EQUITY_SPOT",
+    )
+
+    payload = req_graph.build_requirement_graph(ctx)
+
+    rows = [
+        row for row in payload["requirements"]
+        if row.get("owner_phase") == "MARKET_DATA"
+        and row.get("source_type") == "ACTIVE_INTENT"
+        and row.get("instrument") == "DIA"
+    ]
+    assert rows
+    assert payload["active_intents"][0]["execution_root"] == str(alt_root.resolve())
+    assert payload["active_intents"][0]["sleeve_id"] == "SECONDARY"
+    assert {row["market_data_family"] for row in rows} == {"EQUITY"}
+    assert all(str(row["expected_path"]).startswith(str(alt_root.resolve())) for row in rows)
+    assert all(str(ctx.execution_root) not in str(row["expected_path"]) for row in rows)
+    assert all("options_chain_snapshot" not in str(row.get("expected_path") or "") for row in rows)
 
 
 def test_long_equity_requires_options_flag_adds_options_requirements(tmp_path: Path) -> None:
@@ -467,6 +508,38 @@ def test_spy_long_equity_market_data_supply_does_not_invoke_options_capture(monk
     assert payload["canonical_blocker"] == ""
     assert payload["capture_attempts"] == []
     assert {row["data_type"] for row in payload["requirements"]} == {"UNDERLYING_SPOT", "BID_ASK_QUOTES", "FRESHNESS_CERTIFICATE"}
+
+
+def test_long_equity_supply_reads_equity_evidence_from_selected_sleeve_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path, environment="LIVE")
+    alt_root = tmp_path / "truth_sleeves" / "SECONDARY" / "LIVE"
+    alt_root.mkdir(parents=True, exist_ok=True)
+    _selected_long_equity_pointer(
+        ctx,
+        symbol="DIA",
+        execution_root=alt_root,
+        sleeve_id="SECONDARY",
+        structure="EQUITY_SPOT",
+    )
+    graph = req_graph.build_requirement_graph(ctx)
+    graph_path = ctx.truth_root / "reports" / "aegis_requirement_graph_v1" / ctx.day_utc / "requirement_graph.v1.json"
+    graph_path.parent.mkdir(parents=True, exist_ok=True)
+    graph_path.write_text(json.dumps(graph, sort_keys=True), encoding="utf-8")
+    alt_ctx = bod.BodContext(ctx.day_utc, "LIVE", ctx.truth_root, alt_root, ctx.runtime_root, ctx.operator_input_root, ctx.ib_account)
+    _equity_snapshot(alt_ctx, symbol="DIA")
+    monkeypatch.setattr(supply, "_market_session_state", lambda: "REGULAR")
+    monkeypatch.setattr(supply, "_run_capture", lambda *_args, **_kwargs: pytest.fail("LONG_EQUITY must not invoke options-chain capture"))
+    monkeypatch.setattr(supply, "_run_market_data_authority", lambda authority_ctx: ({"exit_code": 0, "execution_root": str(authority_ctx.execution_root)}, ""))
+
+    payload = supply.build_market_data_supply(ctx)
+
+    assert payload["status"] == "PASS"
+    assert payload["canonical_blocker"] == ""
+    assert payload["market_data_environment"] == "LIVE"
+    assert payload["market_data_execution_root"] == str(alt_root.resolve())
+    assert payload["active_selected_intent"]["execution_root"] == str(alt_root.resolve())
+    assert payload["artifacts"][0]["snapshot_path"].startswith(str(alt_root.resolve()))
+    assert payload["capture_attempts"] == []
 
 
 def test_missing_equity_quote_blocks_long_equity(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -1026,6 +1099,49 @@ def test_market_open_gate_long_equity_does_not_capture_options(monkeypatch: pyte
     assert payload["required_options_symbol"] == ""
     assert payload["selected_intent_requires_options"] is False
     assert payload["snapshot_path"].endswith("/SPY.market_data_snapshot.v1.json")
+
+
+def test_market_open_gate_uses_selected_sleeve_root_for_long_equity(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path, environment="LIVE")
+    alt_root = tmp_path / "truth_sleeves" / "SECONDARY" / "LIVE"
+    alt_root.mkdir(parents=True, exist_ok=True)
+    _same_day_options_readiness(monkeypatch, ctx)
+    _selected_long_equity_pointer(
+        ctx,
+        symbol="DIA",
+        execution_root=alt_root,
+        sleeve_id="SECONDARY",
+        structure="EQUITY_SPOT",
+    )
+    mds_path = supply.market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
+    mds_path.parent.mkdir(parents=True, exist_ok=True)
+    mds_path.write_text(
+        json.dumps(
+            {
+                "status": "PASS",
+                "canonical_blocker": "",
+                "requirements": [{"requirement_id": "REQ1", "instrument": "DIA"}],
+                "artifacts": [],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    alt_ctx = bod.BodContext(ctx.day_utc, "LIVE", ctx.truth_root, alt_root, ctx.runtime_root, ctx.operator_input_root, ctx.ib_account)
+    _equity_snapshot(alt_ctx, symbol="DIA")
+    monkeypatch.setattr(open_gate, "_market_session_state", lambda: "REGULAR")
+    monkeypatch.setattr(open_gate, "_run_market_data_supply", lambda _ctx: {"exit_code": 0})
+    monkeypatch.setattr(open_gate, "_run_capture", lambda *_args, **_kwargs: pytest.fail("LONG_EQUITY must not invoke options-chain capture"))
+
+    payload = open_gate.build_market_open_data_gate(ctx)
+
+    assert payload["status"] == "PASS"
+    assert payload["canonical_blocker"] == ""
+    assert payload["selected_intent_execution_root"] == str(alt_root.resolve())
+    assert payload["selected_intent_environment"] == "LIVE"
+    assert payload["snapshot_path"].startswith(str(alt_root.resolve()))
+    assert payload["required_options_symbol"] == ""
+    assert payload["capture_attempted_by_gate"] is False
 
 
 def test_market_open_gate_passes_with_fresh_snapshot_when_supply_has_no_requirements(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
