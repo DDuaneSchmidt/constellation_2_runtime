@@ -393,6 +393,76 @@ def test_authorization_artifact_producer_requires_strategy_decision_authority(tm
         auth_artifacts.main(["--day_utc", ctx.day_utc, "--truth_root", str(ctx.execution_root)])
 
 
+def test_authorization_artifact_producer_accepts_strategy_decision_authority_manifest_type(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    intent_path = _intent(ctx)
+    intent_sha = _sha256(intent_path)
+    strategy_path = _write(
+        ctx.execution_root
+        / "reports"
+        / "strategy_decision_authority_v1"
+        / ctx.day_utc
+        / "strategy_decision_authority.v1.json",
+        {"day_utc": ctx.day_utc, "status": "PASS", "strategy_decision_state": "INTENT_CREATED", "intent_count": 1},
+    )
+    _write(
+        ctx.execution_root / "run_pointer_v2" / "canonical_authority_head.v1.json",
+        {
+            "schema_id": "c2_run_pointer_canonical_authority_head",
+            "schema_version": "v1",
+            "day_utc": ctx.day_utc,
+            "status": "PASS",
+            "authoritative": True,
+            "points_to": str(
+                ctx.execution_root
+                / "reports"
+                / "authorization_gate_verdict_v1"
+                / ctx.day_utc
+                / "authorization_gate_verdict.v1.json"
+            ),
+        },
+    )
+    _write(
+        ctx.execution_root
+        / "allocation_v1"
+        / "capital_authority_allocation_v1"
+        / ctx.day_utc
+        / "capital_authority_allocation.v1.json",
+        {
+            "schema_id": "capital_authority_allocation_v1",
+            "schema_version": "v1",
+            "produced_utc": f"{ctx.day_utc}T14:30:00Z",
+            "day_utc": ctx.day_utc,
+            "decision_chain": {
+                "authorized_trade_intents": [
+                    {
+                        "intent_id": "intent-1",
+                        "intent_hash": intent_sha,
+                        "symbol": "SPY",
+                        "requested_quantity": 1,
+                        "authorized_quantity": 0,
+                        "authorization_outcome": "REJECTED",
+                        "reason_codes": ["BUNDLE_B_HEADROOM_REJECTED"],
+                    }
+                ]
+            },
+        },
+    )
+
+    auth_artifacts.main(["--day_utc", ctx.day_utc, "--truth_root", str(ctx.execution_root)])
+
+    out_path = (
+        ctx.execution_root / "engine_activity_v1" / "authorization_v1" / ctx.day_utc / f"{intent_sha}.authorization.v1.json"
+    )
+    out = json.loads(out_path.read_text(encoding="utf-8"))
+    strategy_inputs = [row for row in out["input_manifest"] if row["type"] == "strategy_decision_authority"]
+
+    assert out["status"] == "REJECTED"
+    assert len(strategy_inputs) == 1
+    assert strategy_inputs[0]["path"] == str(strategy_path.resolve())
+    assert strategy_inputs[0]["sha256"] == _sha256(strategy_path)
+
+
 def test_missing_structure_decision_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _no_external(monkeypatch)
     ctx = _ctx(tmp_path)

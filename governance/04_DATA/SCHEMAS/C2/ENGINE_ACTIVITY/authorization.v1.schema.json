@@ -67,6 +67,7 @@
               "intent",
               "exposure_net",
               "capital_authority_allocation",
+              "strategy_decision_authority",
               "policy_manifest",
               "positions_snapshot",
               "cash_ledger_snapshot",
