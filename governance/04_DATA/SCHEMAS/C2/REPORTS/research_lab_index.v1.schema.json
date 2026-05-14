@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/research_lab_index.v1.schema.json",
+  "title": "research_lab_index.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "generated_at_utc",
+    "research_items",
+    "research_lab_only",
+    "runtime_mutation_allowed",
+    "broker_submit_required",
+    "transmit_automation_required",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "research_lab_index" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "research_lab_index_v1" },
+    "generated_at_utc": { "type": "string", "minLength": 20 },
+    "research_items": { "type": "array", "items": { "$ref": "#/$defs/research_item" } },
+    "research_lab_only": { "const": true },
+    "runtime_mutation_allowed": { "const": false },
+    "broker_submit_required": { "const": false },
+    "transmit_automation_required": { "const": false },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "research_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "research_id",
+        "title",
+        "research_type",
+        "research_status",
+        "latest_evidence_packet",
+        "latest_promotion_status",
+        "related_edge_family",
+        "related_sleeves",
+        "archived",
+        "operator_notes"
+      ],
+      "properties": {
+        "research_id": { "type": "string" },
+        "title": { "type": "string" },
+        "research_type": {
+          "type": "string",
+          "enum": ["SLEEVE", "EDGE", "REGIME", "GOVERNANCE", "OVERLAP", "STOP_LOGIC", "RISK_SIZING", "BEHAVIORAL_STATE"]
+        },
+        "research_status": {
+          "type": "string",
+          "enum": ["DRAFT", "UNDER_REVIEW", "VALIDATED_RESEARCH", "REJECTED", "ARCHIVED"]
+        },
+        "latest_evidence_packet": { "type": "string" },
+        "latest_promotion_status": {
+          "type": "string",
+          "enum": ["NOT_READY", "CANDIDATE", "APPROVED_FOR_LITE_REVIEW", "APPROVED_FOR_LITE_IMPLEMENTATION", "REJECTED", "DEFERRED"]
+        },
+        "related_edge_family": { "type": "string" },
+        "related_sleeves": { "type": "array", "items": { "type": "string" } },
+        "archived": { "type": "boolean" },
+        "operator_notes": { "type": "string" }
+      }
+    }
+  }
+}
