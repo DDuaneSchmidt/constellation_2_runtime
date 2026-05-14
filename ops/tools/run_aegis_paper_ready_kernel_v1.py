@@ -175,6 +175,30 @@ def run_paper_ready_kernel_v1(
                 )
             continue
 
+        if stage.stage_id == "risk_definition_contract":
+            result.update(
+                _run_risk_definition_contract_stage(
+                    stage=stage,
+                    target_day=target_day,
+                    sleeve_root=sleeve_root,
+                    runner=runner,
+                    workdir=workdir,
+                )
+            )
+            report["stage_results"].append(result)
+            if result.get("artifact_path"):
+                report["artifact_paths"][stage.stage_id] = str(result["artifact_path"])
+            _refresh_summary_fields(report, canonical_root=canonical_root, sleeve_root=sleeve_root, target_day=target_day)
+            if result["status"] != "PASS":
+                return _finish_blocked_report(
+                    report=report,
+                    stage=stage,
+                    result=result,
+                    canonical_truth_root=canonical_root,
+                    target_day=target_day,
+                )
+            continue
+
         stage_started_at = now_fn()
         completed = runner(stage.command, workdir)
         result["returncode"] = completed.returncode
@@ -332,6 +356,7 @@ def _stages(
         _stage("paper_authority_pointer_refresh", "authorization", ["python3", "ops/tools/run_pointer_append_v1.py", "--guarded-by", "authorization_gate_verdict_v1"], "PAPER_SLEEVE", Path("run_pointer_v2/canonical_authority_head.v1.json"), ("PASS", "BOOTSTRAP_PASS"), "Run governed pointer append/head materialization only after same-day PAPER authorization verdict PASS.", "Refresh the same-day PAPER canonical authority head from the governed PASS authorization verdict before capital allocation."),
         _stage("paper_authority_head_freshness", "authorization", ["python3", "-c", "pass"], "PAPER_SLEEVE", Path("run_pointer_v2/canonical_authority_head.v1.json"), ("PASS",), "Inspect PAPER authorization_gate_verdict_v1 and canonical authority head; do not synthesize authority.", "Resolve same-day PAPER authorization gate verdict and canonical authority head before capital allocation."),
         _stage("exposure_net", "risk", ["python3", "ops/tools/run_exposure_net_day_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("risk_v1/exposure_net_v1") / target_day / "exposure_net.v1.json", ("OK", "PASS", "READY"), "python3 ops/tools/run_exposure_net_day_v1.py --day_utc {day} --truth_root {sleeve}", "Produce same-day exposure_net_v1 before capital authority allocation."),
+        _stage("risk_definition_contract", "risk", ["python3", "ops/tools/run_risk_definition_contract_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root), "--intent_hash", "<selected_intent_hash>"], "PAPER_SLEEVE", None, ("PASS",), "python3 ops/tools/run_risk_definition_contract_v1.py --day_utc {day} --truth_root {sleeve} --intent_hash <selected_intent_hash>", "Produce selected LONG_EQUITY stop-risk contract before capital allocation; resolve missing market data or intent evidence through governed producers."),
         _stage("capital_authority_allocation", "authorization", ["python3", "ops/tools/run_capital_authority_allocation_day_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root), "--canonical_sequence_owner", "ops/tools/run_c2_paper_day_orchestrator_v2.py"], "PAPER_SLEEVE", Path("allocation_v1/capital_authority_allocation_v1") / target_day / "capital_authority_allocation.v1.json", ("OK", "PASS", "READY"), "python3 ops/tools/run_capital_authority_allocation_day_v1.py --day_utc {day} --truth_root {sleeve} --canonical_sequence_owner ops/tools/run_c2_paper_day_orchestrator_v2.py", "Allocate capital authority for the selected intent."),
         _stage("phasec_identity_materializer", "authorization", ["python3", "ops/tools/run_phasec_identity_materializer_day_v1.py", "--day_utc", target_day, "--eval_time_utc", _iso(datetime.now(UTC)), "--truth_root", str(canonical_truth_root), "--execution_truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("phaseC_preflight_v1") / target_day, ("OK", "PASS", "READY", "SUCCESS"), "python3 ops/tools/run_phasec_identity_materializer_day_v1.py --day_utc {day} --eval_time_utc $(date -u +%FT%TZ) --truth_root {canonical} --execution_truth_root {sleeve}", "Materialize Phase C identity and defined-risk proof into the PAPER sleeve."),
         _stage("strategy_decision_authority", "authorization", ["python3", "ops/tools/run_strategy_decision_authority_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root), "--execution_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/strategy_decision_authority_v1") / target_day / "strategy_decision_authority.v1.json", ("PASS", "READY", "OK"), "python3 ops/tools/run_strategy_decision_authority_v1.py --day_utc {day} --truth_root {sleeve} --execution_root {sleeve}", "Materialize strategy decision authority before authorization artifacts so freshness dependencies are ordered."),
@@ -1319,6 +1344,313 @@ def _validate_operational_refresh_artifact(*, artifact_path: Path, target_day: s
     if _wrong_day(data, target_day):
         return _blocked("TARGET_DAY_DATE_MISMATCH", _status_of(data), "artifact day does not match target day", stage)
     return {"status": "PASS", "artifact_status": str(data.get("readiness_mode") or _status_of(data)).upper()}
+
+
+def _run_risk_definition_contract_stage(
+    *,
+    stage: KernelStage,
+    target_day: str,
+    sleeve_root: Path,
+    runner: Callable[[list[str], Path], subprocess.CompletedProcess[str]],
+    workdir: Path,
+) -> dict[str, Any]:
+    selected = _selected_intent_for_risk_contract(
+        stage=stage,
+        target_day=target_day,
+        sleeve_root=sleeve_root,
+    )
+    if selected["status"] != "PASS":
+        return selected
+    if selected.get("risk_contract_required") is not True:
+        return selected
+
+    intent_hash = str(selected["selected_intent_hash"])
+    artifact_path = (
+        sleeve_root
+        / "risk_definition_contract_v1"
+        / target_day
+        / intent_hash
+        / "risk_definition_contract.v1.json"
+    ).resolve()
+    command = [
+        "python3",
+        "ops/tools/run_risk_definition_contract_v1.py",
+        "--day_utc",
+        target_day,
+        "--truth_root",
+        str(sleeve_root),
+        "--intent_hash",
+        intent_hash,
+    ]
+    _assert_safe_command(command)
+    completed = runner(command, workdir)
+    result: dict[str, Any] = {
+        **selected,
+        "artifact_path": str(artifact_path),
+        "producer_command": _command_text(command),
+        "returncode": completed.returncode,
+        "stdout_tail": (completed.stdout or "")[-1000:],
+        "stderr_tail": (completed.stderr or "")[-1000:],
+    }
+    validation = _validate_risk_definition_contract_artifact(
+        artifact_path=artifact_path,
+        target_day=target_day,
+        sleeve_root=sleeve_root,
+        intent_hash=intent_hash,
+        intent_id=str(selected.get("selected_intent_id") or ""),
+        intent_path=Path(str(selected.get("selected_intent_path") or "")).resolve(),
+        stage=stage,
+    )
+    result.update(validation)
+    if completed.returncode != 0 and result["status"] == "PASS":
+        result.update(
+            _blocked(
+                "RISK_DEFINITION_CONTRACT_PRODUCER_FAILED",
+                result.get("artifact_status", "UNKNOWN"),
+                "risk definition contract producer exited nonzero before capital allocation",
+                stage,
+                failed_field="returncode",
+                expected_value=0,
+                actual_value=completed.returncode,
+            )
+        )
+    return result
+
+
+def _selected_intent_for_risk_contract(*, stage: KernelStage, target_day: str, sleeve_root: Path) -> dict[str, Any]:
+    pointer_path = sleeve_root / "pointers" / "selected_intent_pointer.v1.json"
+    pointer = _read_json(pointer_path)
+    if not isinstance(pointer, dict) or _status_of(pointer) != "SELECTED":
+        return _blocked(
+            "RISK_CONTRACT_SELECTED_INTENT_MISSING",
+            "MISSING",
+            "selected intent pointer must be SELECTED before risk definition contract materialization",
+            stage,
+            failed_field="selected_intent_pointer.status",
+            expected_value="SELECTED",
+            actual_value=(pointer or {}).get("status") if isinstance(pointer, dict) else "MISSING",
+        )
+    if _wrong_day(pointer, target_day):
+        return _blocked(
+            "RISK_CONTRACT_SELECTED_INTENT_DAY_MISMATCH",
+            _status_of(pointer),
+            "selected intent pointer day does not match target day",
+            stage,
+            failed_field="selected_intent_pointer.day_utc",
+            expected_value=target_day,
+            actual_value=pointer.get("day_utc"),
+        )
+
+    selected = pointer.get("selected_intent") if isinstance(pointer.get("selected_intent"), dict) else {}
+    intent_path_text = str(selected.get("intent_path") or "").strip()
+    intent_hash = str(selected.get("intent_hash") or "").strip().lower()
+    if not intent_path_text or not intent_hash:
+        return _blocked(
+            "RISK_CONTRACT_SELECTED_INTENT_INCOMPLETE",
+            _status_of(pointer),
+            "selected intent pointer must include intent_path and intent_hash before risk contract materialization",
+            stage,
+            failed_field="selected_intent.intent_path/intent_hash",
+            expected_value="present",
+            actual_value=selected,
+        )
+    intent_path = Path(intent_path_text).expanduser().resolve()
+    try:
+        intent_path.relative_to(sleeve_root.resolve())
+    except ValueError:
+        return _blocked(
+            "RISK_CONTRACT_SELECTED_INTENT_WRONG_ROOT",
+            _status_of(pointer),
+            "selected intent path is outside the PAPER sleeve truth root",
+            stage,
+            failed_field="selected_intent.intent_path",
+            expected_value=str(sleeve_root.resolve()),
+            actual_value=str(intent_path),
+        )
+    if not intent_path.exists() or not intent_path.is_file():
+        return _blocked(
+            "RISK_CONTRACT_SELECTED_INTENT_ARTIFACT_MISSING",
+            _status_of(pointer),
+            "selected intent artifact is missing before risk contract materialization",
+            stage,
+            failed_field="selected_intent.intent_path",
+            expected_value="existing file",
+            actual_value=str(intent_path),
+        )
+    actual_intent_hash = _sha256_file(intent_path).lower()
+    if actual_intent_hash != intent_hash:
+        return _blocked(
+            "RISK_CONTRACT_SELECTED_INTENT_HASH_MISMATCH",
+            _status_of(pointer),
+            "selected intent hash does not match the selected intent artifact bytes",
+            stage,
+            failed_field="selected_intent.intent_hash",
+            expected_value=actual_intent_hash,
+            actual_value=intent_hash,
+        )
+
+    intent_obj = _read_json(intent_path)
+    if not isinstance(intent_obj, dict):
+        return _blocked(
+            "RISK_CONTRACT_SELECTED_INTENT_JSON_INVALID",
+            _status_of(pointer),
+            "selected intent artifact must be valid JSON object",
+            stage,
+            failed_field="selected_intent.intent_path",
+            expected_value="JSON object",
+            actual_value=str(intent_path),
+        )
+    exposure_type = str(intent_obj.get("exposure_type") or intent_obj.get("instrument_type") or "").strip().upper()
+    constraints = intent_obj.get("constraints") if isinstance(intent_obj.get("constraints"), dict) else {}
+    stop_loss_bps = constraints.get("stop_loss_bps")
+    required = exposure_type in {"LONG_EQUITY", "EQUITY_SPOT"} and stop_loss_bps is not None
+    expected_intent_path = (
+        sleeve_root
+        / "intents_v1"
+        / "snapshots"
+        / target_day
+        / f"{intent_hash}.exposure_intent.v1.json"
+    ).resolve()
+    if required and intent_path != expected_intent_path:
+        return _blocked(
+            "RISK_CONTRACT_SELECTED_INTENT_PATH_MISMATCH",
+            _status_of(pointer),
+            "selected intent path must match the selected intent hash path required by the risk contract producer",
+            stage,
+            failed_field="selected_intent.intent_path",
+            expected_value=str(expected_intent_path),
+            actual_value=str(intent_path),
+        )
+    base = {
+        "status": "PASS",
+        "artifact_status": "NOT_REQUIRED" if not required else "PENDING",
+        "risk_contract_required": required,
+        "selected_intent_id": str(intent_obj.get("intent_id") or selected.get("intent_id") or ""),
+        "selected_intent_hash": intent_hash,
+        "selected_intent_path": str(intent_path),
+        "selected_intent_exposure_type": exposure_type,
+        "selected_intent_stop_loss_bps": stop_loss_bps,
+    }
+    if not required:
+        base["detail"] = "selected intent does not require a LONG_EQUITY/EQUITY_SPOT stop-risk contract"
+    return base
+
+
+def _validate_risk_definition_contract_artifact(
+    *,
+    artifact_path: Path,
+    target_day: str,
+    sleeve_root: Path,
+    intent_hash: str,
+    intent_id: str,
+    intent_path: Path,
+    stage: KernelStage,
+) -> dict[str, Any]:
+    try:
+        artifact_path.resolve().relative_to(sleeve_root.resolve())
+    except ValueError:
+        return _blocked(
+            "RISK_DEFINITION_CONTRACT_WRONG_ROOT",
+            "INVALID",
+            "risk definition contract artifact is outside the PAPER sleeve truth root",
+            stage,
+            failed_field="artifact_path",
+            expected_value=str(sleeve_root.resolve()),
+            actual_value=str(artifact_path.resolve()),
+        )
+    if not artifact_path.exists() or not artifact_path.is_file():
+        return _blocked("RISK_DEFINITION_CONTRACT_MISSING", "MISSING", str(artifact_path), stage)
+    try:
+        data = json.loads(artifact_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return _blocked("RISK_DEFINITION_CONTRACT_JSON_INVALID", "INVALID", f"{type(exc).__name__}: {exc}", stage)
+
+    artifact_status = str(data.get("validation_status") or _status_of(data)).strip().upper()
+    if _wrong_day(data, target_day):
+        return _blocked(
+            "RISK_DEFINITION_CONTRACT_DAY_MISMATCH",
+            artifact_status,
+            "risk definition contract day does not match target day",
+            stage,
+            failed_field="day_utc",
+            expected_value=target_day,
+            actual_value=data.get("day_utc"),
+        )
+    if str(data.get("truth_root") or "").strip() != str(sleeve_root.resolve()):
+        return _blocked(
+            "RISK_DEFINITION_CONTRACT_TRUTH_ROOT_MISMATCH",
+            artifact_status,
+            "risk definition contract was produced for a different truth root",
+            stage,
+            failed_field="truth_root",
+            expected_value=str(sleeve_root.resolve()),
+            actual_value=data.get("truth_root"),
+        )
+    if str(data.get("intent_hash") or "").strip().lower() != intent_hash:
+        return _blocked(
+            "RISK_DEFINITION_CONTRACT_INTENT_HASH_MISMATCH",
+            artifact_status,
+            "risk definition contract intent hash does not match selected intent",
+            stage,
+            failed_field="intent_hash",
+            expected_value=intent_hash,
+            actual_value=data.get("intent_hash"),
+        )
+    if intent_id and str(data.get("intent_id") or "").strip() != intent_id:
+        return _blocked(
+            "RISK_DEFINITION_CONTRACT_INTENT_ID_MISMATCH",
+            artifact_status,
+            "risk definition contract intent id does not match selected intent",
+            stage,
+            failed_field="intent_id",
+            expected_value=intent_id,
+            actual_value=data.get("intent_id"),
+        )
+    if Path(str(data.get("source_intent_path") or "")).expanduser().resolve() != intent_path.resolve():
+        return _blocked(
+            "RISK_DEFINITION_CONTRACT_SOURCE_INTENT_PATH_MISMATCH",
+            artifact_status,
+            "risk definition contract source intent path does not match selected intent",
+            stage,
+            failed_field="source_intent_path",
+            expected_value=str(intent_path.resolve()),
+            actual_value=data.get("source_intent_path"),
+        )
+    if str(data.get("risk_type") or "").strip().upper() != "STOP_BASED":
+        return _blocked(
+            "RISK_DEFINITION_CONTRACT_RISK_TYPE_INVALID",
+            artifact_status,
+            "selected equity stop-risk contract must be STOP_BASED",
+            stage,
+            failed_field="risk_type",
+            expected_value="STOP_BASED",
+            actual_value=data.get("risk_type"),
+        )
+    if artifact_status != "PASS":
+        blockers = data.get("blockers") if isinstance(data.get("blockers"), list) else []
+        first = str(blockers[0]).strip().upper() if blockers else "RISK_DEFINITION_CONTRACT_FAILED"
+        return _blocked(first, artifact_status, "risk definition contract validation_status is not PASS", stage)
+    quantity_basis = data.get("quantity_basis") if isinstance(data.get("quantity_basis"), dict) else {}
+    quantity = _int_value(quantity_basis.get("quantity"))
+    risk_per_unit = _int_value(data.get("risk_per_unit"))
+    if quantity <= 0 or risk_per_unit <= 0:
+        return _blocked(
+            "RISK_DEFINITION_CONTRACT_RISK_PER_UNIT_INVALID",
+            artifact_status,
+            "risk definition contract must carry positive quantity and risk_per_unit",
+            stage,
+            failed_field="quantity_basis.quantity/risk_per_unit",
+            expected_value="> 0",
+            actual_value={"quantity": quantity, "risk_per_unit": risk_per_unit},
+        )
+    return {
+        "status": "PASS",
+        "artifact_status": artifact_status,
+        "risk_type": str(data.get("risk_type") or ""),
+        "risk_per_unit_cents": risk_per_unit,
+        "quantity": quantity,
+        "reference_price_source": str(data.get("reference_price_source") or ""),
+    }
 
 
 def _validate_existing_exposure_net_for_reuse(

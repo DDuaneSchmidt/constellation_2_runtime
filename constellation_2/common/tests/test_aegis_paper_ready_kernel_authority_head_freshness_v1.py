@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -20,6 +21,40 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _write_selected_long_equity_intent(sleeve_root: Path, *, day: str = DAY) -> tuple[str, Path, dict]:
+    payload = {
+        "schema_id": "exposure_intent",
+        "schema_version": "v1",
+        "intent_id": "c2_trend_eq_spy",
+        "engine": {"engine_id": "C2_TREND_EQ_PRIMARY_V1", "mode": "PAPER"},
+        "exposure_type": "LONG_EQUITY",
+        "underlying": {"symbol": "SPY", "currency": "USD"},
+        "target_notional_pct": "0.01",
+        "constraints": {"max_risk_pct": "0.01", "stop_loss_bps": 1000},
+    }
+    raw = json.dumps(payload, sort_keys=True).encode("utf-8") + b"\n"
+    intent_hash = hashlib.sha256(raw).hexdigest()
+    intent_path = sleeve_root / "intents_v1" / "snapshots" / day / f"{intent_hash}.exposure_intent.v1.json"
+    intent_path.parent.mkdir(parents=True, exist_ok=True)
+    intent_path.write_bytes(raw)
+    _write_json(
+        sleeve_root / "pointers" / "selected_intent_pointer.v1.json",
+        {
+            "schema_id": "selected_intent_pointer",
+            "day_utc": day,
+            "status": "SELECTED",
+            "selected_intent": {
+                "intent_id": payload["intent_id"],
+                "intent_hash": intent_hash,
+                "intent_path": str(intent_path),
+                "engine_id": "C2_TREND_EQ_PRIMARY_V1",
+                "symbol": "SPY",
+            },
+        },
+    )
+    return intent_hash, intent_path, payload
+
+
 def _authority_stage() -> kernel.KernelStage:
     return kernel._stage(
         "paper_authority_head_freshness",
@@ -30,6 +65,19 @@ def _authority_stage() -> kernel.KernelStage:
         ("PASS",),
         "Inspect PAPER authorization_gate_verdict_v1 and canonical authority head; do not synthesize authority.",
         "Resolve same-day PAPER authorization gate verdict and canonical authority head before capital allocation.",
+    )
+
+
+def _risk_contract_stage() -> kernel.KernelStage:
+    return kernel._stage(
+        "risk_definition_contract",
+        "risk",
+        ["python3", "ops/tools/run_risk_definition_contract_v1.py"],
+        "PAPER_SLEEVE",
+        None,
+        ("PASS",),
+        "python3 ops/tools/run_risk_definition_contract_v1.py --day_utc {day} --truth_root {sleeve} --intent_hash <selected_intent_hash>",
+        "Produce selected LONG_EQUITY stop-risk contract before capital allocation.",
     )
 
 
@@ -158,6 +206,122 @@ def test_authority_head_stage_is_before_capital_allocation() -> None:
 
     assert stage_ids.index("paper_authority_pointer_refresh") < stage_ids.index("paper_authority_head_freshness")
     assert stage_ids.index("paper_authority_head_freshness") < stage_ids.index("capital_authority_allocation")
+
+
+def test_risk_definition_contract_stage_runs_after_structure_before_allocation() -> None:
+    stages = kernel._stages(
+        target_day=DAY,
+        canonical_truth_root=Path("/tmp/canonical"),
+        paper_sleeve_root=Path("/tmp/sleeve"),
+        environment="PAPER",
+        ib_account="DUO847203",
+        release_commit="0" * 40,
+    )
+    stage_ids = [stage.stage_id for stage in stages]
+
+    assert stage_ids.index("structure_decision_supply") < stage_ids.index("risk_definition_contract")
+    assert stage_ids.index("risk_definition_contract") < stage_ids.index("capital_authority_allocation")
+
+
+def test_risk_definition_contract_stage_materializes_selected_long_equity_stop_contract(tmp_path: Path) -> None:
+    sleeve_root = tmp_path / "truth_sleeves/PRIMARY/PAPER"
+    intent_hash, intent_path, intent = _write_selected_long_equity_intent(sleeve_root)
+    call_log: list[list[str]] = []
+
+    def runner(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        call_log.append(command)
+        assert command[-1] == intent_hash
+        contract_path = sleeve_root / "risk_definition_contract_v1" / DAY / intent_hash / "risk_definition_contract.v1.json"
+        _write_json(
+            contract_path,
+            {
+                "schema_id": "risk_definition_contract_v1",
+                "schema_version": "v1",
+                "day_utc": DAY,
+                "validation_status": "PASS",
+                "truth_root": str(sleeve_root.resolve()),
+                "intent_id": intent["intent_id"],
+                "intent_hash": intent_hash,
+                "source_intent_path": str(intent_path),
+                "risk_type": "STOP_BASED",
+                "quantity_basis": {"basis": "ONE_UNIT_STOP_RISK_BOOTSTRAP", "quantity": 1},
+                "risk_per_unit": 5000,
+                "reference_price_source": str(sleeve_root / "market_data_snapshot_v1/snapshots" / DAY / "SPY.market_data_snapshot.v1.json"),
+            },
+        )
+        return subprocess.CompletedProcess(command, 0, stdout='{"status":"PASS"}\n', stderr="")
+
+    result = kernel._run_risk_definition_contract_stage(
+        stage=_risk_contract_stage(),
+        target_day=DAY,
+        sleeve_root=sleeve_root,
+        runner=runner,
+        workdir=tmp_path,
+    )
+
+    assert result["status"] == "PASS"
+    assert result["artifact_status"] == "PASS"
+    assert result["risk_type"] == "STOP_BASED"
+    assert result["quantity"] == 1
+    assert result["risk_per_unit_cents"] == 5000
+    assert call_log[0][:2] == ["python3", "ops/tools/run_risk_definition_contract_v1.py"]
+
+
+def test_risk_definition_contract_stage_blocks_when_producer_does_not_write_contract(tmp_path: Path) -> None:
+    sleeve_root = tmp_path / "truth_sleeves/PRIMARY/PAPER"
+    _write_selected_long_equity_intent(sleeve_root)
+
+    def runner(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 2, stdout='{"status":"FAIL"}\n', stderr="FAIL\n")
+
+    result = kernel._run_risk_definition_contract_stage(
+        stage=_risk_contract_stage(),
+        target_day=DAY,
+        sleeve_root=sleeve_root,
+        runner=runner,
+        workdir=tmp_path,
+    )
+
+    assert result["status"] == "BLOCKED"
+    assert result["first_blocker"] == "RISK_DEFINITION_CONTRACT_MISSING"
+    assert result["returncode"] == 2
+
+
+def test_risk_definition_contract_validation_fails_closed_for_wrong_root_day_or_hash(tmp_path: Path) -> None:
+    sleeve_root = tmp_path / "truth_sleeves/PRIMARY/PAPER"
+    intent_hash, intent_path, intent = _write_selected_long_equity_intent(sleeve_root)
+    contract_path = sleeve_root / "risk_definition_contract_v1" / DAY / intent_hash / "risk_definition_contract.v1.json"
+    base = {
+        "schema_id": "risk_definition_contract_v1",
+        "schema_version": "v1",
+        "day_utc": DAY,
+        "validation_status": "PASS",
+        "truth_root": str(sleeve_root.resolve()),
+        "intent_id": intent["intent_id"],
+        "intent_hash": intent_hash,
+        "source_intent_path": str(intent_path),
+        "risk_type": "STOP_BASED",
+        "quantity_basis": {"quantity": 1},
+        "risk_per_unit": 5000,
+    }
+
+    for override, blocker in (
+        ({"day_utc": "2026-05-11"}, "RISK_DEFINITION_CONTRACT_DAY_MISMATCH"),
+        ({"truth_root": str(tmp_path / "wrong")}, "RISK_DEFINITION_CONTRACT_TRUTH_ROOT_MISMATCH"),
+        ({"intent_hash": "b" * 64}, "RISK_DEFINITION_CONTRACT_INTENT_HASH_MISMATCH"),
+    ):
+        _write_json(contract_path, {**base, **override})
+        result = kernel._validate_risk_definition_contract_artifact(
+            artifact_path=contract_path,
+            target_day=DAY,
+            sleeve_root=sleeve_root,
+            intent_hash=intent_hash,
+            intent_id=intent["intent_id"],
+            intent_path=intent_path,
+            stage=_risk_contract_stage(),
+        )
+        assert result["status"] == "BLOCKED"
+        assert result["first_blocker"] == blocker
 
 
 def test_authority_head_freshness_stage_does_not_mutate_pointer_file(tmp_path: Path) -> None:
