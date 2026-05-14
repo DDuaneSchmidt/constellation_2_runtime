@@ -15,16 +15,18 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["task_id", "task_type", "hypothesis_id", "source_trigger", "priority", "requested_action", "created_at", "status", "owner", "blocking_reason", "output_expected"],
+        "required": ["task_id", "task_type", "hypothesis_id", "source_trigger", "priority", "requested_action", "status", "created_at", "started_at", "completed_at", "owner", "blocking_reason", "output_expected"],
         "properties": {
           "task_id": { "type": "string", "minLength": 1 },
-          "task_type": { "type": "string", "enum": ["exploratory_test", "retest", "sleeve_failure_review", "anomaly_review", "duplicate_review", "promotion_review", "retirement_review"] },
+          "task_type": { "type": "string", "enum": ["definition_check", "duplicate_review", "exploratory_test", "regime_test", "robustness_test", "friction_test", "out_of_sample_test", "failure_review", "edge_overlap_review", "promotion_review", "retest", "retirement_review", "sleeve_failure_review", "anomaly_review"] },
           "hypothesis_id": { "type": "string", "minLength": 1 },
           "source_trigger": { "type": "string", "minLength": 1 },
           "priority": { "type": "string", "minLength": 1 },
           "requested_action": { "type": "string", "minLength": 1 },
-          "created_at": { "type": "string" },
           "status": { "type": "string", "enum": ["open", "completed", "blocked", "failed"] },
+          "created_at": { "type": "string" },
+          "started_at": { "type": "string" },
+          "completed_at": { "type": "string" },
           "owner": { "type": "string" },
           "blocking_reason": { "type": "string" },
           "output_expected": { "type": "string" }

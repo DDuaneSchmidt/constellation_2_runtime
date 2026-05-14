@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/promotion_review.v1.schema.json",
+  "title": "promotion_review.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "artifact_id", "promotion_id", "hypothesis_id", "generated_at_utc", "completed_test_plan", "friction_adjusted_result", "out_of_sample_support", "regime_notes", "failure_mode_notes", "edge_overlap_review", "approved_by_human", "eligible_for_promoted_sleeve_library", "approval_reason_codes", "rejection_reason_codes", "research_lab_only", "automatic_promotion_allowed", "runtime_mutation_allowed", "broker_submit_required", "canonical_json_hash"],
+  "properties": {
+    "schema_id": { "const": "promotion_review" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "promotion_review_v1" },
+    "promotion_id": { "type": "string", "minLength": 1 },
+    "hypothesis_id": { "type": "string", "minLength": 1 },
+    "generated_at_utc": { "type": "string" },
+    "completed_test_plan": { "type": "boolean" },
+    "friction_adjusted_result": { "type": "string" },
+    "out_of_sample_support": { "type": "string" },
+    "regime_notes": { "type": "string" },
+    "failure_mode_notes": { "type": "string" },
+    "edge_overlap_review": { "type": "string" },
+    "approved_by_human": { "type": "boolean" },
+    "eligible_for_promoted_sleeve_library": { "type": "boolean" },
+    "approval_reason_codes": { "type": "array", "items": { "type": "string" } },
+    "rejection_reason_codes": { "type": "array", "items": { "type": "string" } },
+    "research_lab_only": { "const": true },
+    "automatic_promotion_allowed": { "const": false },
+    "runtime_mutation_allowed": { "const": false },
+    "broker_submit_required": { "const": false },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

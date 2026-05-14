@@ -13,7 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from constellation_2.common.aegis_research_lab_v1 import (  # noqa: E402
     apply_experiment_result_v1,
-    build_research_experiment_result_v1,
+    build_experiment_result_v1,
     build_research_lab_awareness_report_v1,
     validate_research_lab_artifact_v1,
     write_research_lab_artifact_v1,
@@ -42,7 +42,7 @@ def _plan_path(truth_root: Path, day_utc: str, hypothesis_id: str) -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="run_research_lab_v1")
-    parser.add_argument("--truth_root", default="/home/node/constellation_runtime_data/truth")
+    parser.add_argument("--truth_root", required=True)
     parser.add_argument("--day_utc", default="")
     parser.add_argument("--max_tasks", type=int, default=5)
     args = parser.parse_args(argv)
@@ -63,26 +63,32 @@ def main(argv: list[str] | None = None) -> int:
             continue
         hypothesis_id = str(task["hypothesis_id"])
         plan = _read(_plan_path(truth_root, day_utc, hypothesis_id))
-        result = build_research_experiment_result_v1(
+        result = build_experiment_result_v1(
             experiment_id=f"exp:{task['task_id']}",
             hypothesis_id=hypothesis_id,
             task_id=str(task["task_id"]),
+            test_stage=str(plan.get("current_stage") or "definition_check"),
             dataset_used="offline_placeholder_dataset",
+            instrument_universe=[],
             test_window="not_run_live_market",
             trigger_definition="Defined by hypothesis registry trigger_conditions.",
             outcome_definition="Defined by hypothesis registry expected_outcome.",
             sample_count=0,
             expectancy="not_computed",
             win_rate="not_computed",
-            drawdown="not_computed",
+            avg_return="not_computed",
+            median_return="not_computed",
+            max_drawdown="not_computed",
+            volatility="not_computed",
+            friction_adjusted_result="not_computed",
             regime_dependency="not_computed",
             robustness_notes="Offline runner produced protocol placeholder; no executable trade emitted.",
+            out_of_sample_result="not_computed",
             overlap_with_existing_sleeves="not_computed",
             result_status="insufficient_data",
             recommendation="continue_test_plan_when_dataset_available",
             next_action="collect_or_bind offline dataset",
-            completed_stage=str(plan.get("current_stage") or "definition_check"),
-            completed_at_utc=generated_at,
+            created_at=generated_at,
         )
         validate_research_lab_artifact_v1(result)
         write_research_lab_artifact_v1(truth_root=truth_root, day_utc=day_utc, payload=result)

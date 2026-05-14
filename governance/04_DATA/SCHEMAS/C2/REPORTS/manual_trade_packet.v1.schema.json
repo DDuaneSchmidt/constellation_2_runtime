@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/manual_trade_packet.v1.schema.json",
+  "title": "manual_trade_packet.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "artifact_id", "packet_id", "run_id", "date", "generated_at_utc", "manual_execution_only", "broker_submit_required", "ib_automation_status", "trade_candidates", "all_candidates_traceable_to_promoted_sleeves", "canonical_json_hash"],
+  "properties": {
+    "schema_id": { "const": "manual_trade_packet" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "manual_trade_packet_v1" },
+    "packet_id": { "type": "string", "minLength": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "date": { "type": "string", "minLength": 1 },
+    "generated_at_utc": { "type": "string" },
+    "manual_execution_only": { "const": true },
+    "broker_submit_required": { "const": false },
+    "ib_automation_status": { "const": "DEFERRED" },
+    "trade_candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["run_id", "date", "recommended_trade_id", "sleeve_id", "source_hypothesis_id", "symbol", "side", "instrument_type", "entry_reference_price", "order_type_suggestion", "quantity_or_sizing_guidance", "stop_price", "stop_logic", "risk_per_trade", "edge_family", "regime_state", "confidence", "inclusion_reason", "exclusion_reason", "governance_notes", "edge_overlap_result", "manual_execution_checklist", "actionable", "do_not_trade_blockers"],
+        "properties": {
+          "run_id": { "type": "string" },
+          "date": { "type": "string" },
+          "recommended_trade_id": { "type": "string" },
+          "sleeve_id": { "type": "string" },
+          "source_hypothesis_id": { "type": "string" },
+          "symbol": { "type": "string" },
+          "side": { "type": "string" },
+          "instrument_type": { "type": "string" },
+          "entry_reference_price": { "type": "string" },
+          "order_type_suggestion": { "type": "string" },
+          "quantity_or_sizing_guidance": { "type": "string" },
+          "stop_price": { "type": "string" },
+          "stop_logic": { "type": "string" },
+          "risk_per_trade": { "type": "string" },
+          "edge_family": { "type": "string" },
+          "regime_state": { "type": "string" },
+          "confidence": { "type": "string" },
+          "inclusion_reason": { "type": "string" },
+          "exclusion_reason": { "type": "string" },
+          "governance_notes": { "type": "string" },
+          "edge_overlap_result": { "type": "string" },
+          "manual_execution_checklist": { "type": "array", "items": { "type": "string" } },
+          "actionable": { "type": "boolean" },
+          "do_not_trade_blockers": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "all_candidates_traceable_to_promoted_sleeves": { "type": "boolean" },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

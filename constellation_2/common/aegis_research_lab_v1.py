@@ -15,23 +15,52 @@ SCHEMA_RELPATHS = {
     "edge_taxonomy": "governance/04_DATA/SCHEMAS/C2/REPORTS/edge_taxonomy.v1.schema.json",
     "hypothesis_registry": "governance/04_DATA/SCHEMAS/C2/REPORTS/hypothesis_registry.v1.schema.json",
     "research_task_queue": "governance/04_DATA/SCHEMAS/C2/REPORTS/research_task_queue.v1.schema.json",
+    "experiment_result": "governance/04_DATA/SCHEMAS/C2/REPORTS/experiment_result.v1.schema.json",
     "research_experiment_result": "governance/04_DATA/SCHEMAS/C2/REPORTS/research_experiment_result.v1.schema.json",
     "hypothesis_test_plan": "governance/04_DATA/SCHEMAS/C2/REPORTS/hypothesis_test_plan.v1.schema.json",
     "hypothesis_progress_report": "governance/04_DATA/SCHEMAS/C2/REPORTS/hypothesis_progress_report.v1.schema.json",
     "research_lab_awareness_report": "governance/04_DATA/SCHEMAS/C2/REPORTS/research_lab_awareness_report.v1.schema.json",
+    "promotion_review": "governance/04_DATA/SCHEMAS/C2/REPORTS/promotion_review.v1.schema.json",
     "promoted_sleeve_library": "governance/04_DATA/SCHEMAS/C2/REPORTS/promoted_sleeve_library.v1.schema.json",
+    "manual_trade_packet": "governance/04_DATA/SCHEMAS/C2/REPORTS/manual_trade_packet.v1.schema.json",
     "manual_execution_receipt": "governance/04_DATA/SCHEMAS/C2/REPORTS/manual_execution_receipt.v1.schema.json",
     "outcome_ledger": "governance/04_DATA/SCHEMAS/C2/REPORTS/outcome_ledger.v1.schema.json",
 }
-HYPOTHESIS_LIFECYCLE_STATES = {"proposed", "exploratory", "promising", "validated", "promoted", "rejected", "retired"}
+HYPOTHESIS_LIFECYCLE_STATES = {
+    "proposed",
+    "definition_ready",
+    "duplicate_checked",
+    "exploratory_testing",
+    "regime_testing",
+    "robustness_testing",
+    "friction_testing",
+    "out_of_sample_testing",
+    "failure_mode_review",
+    "edge_overlap_review",
+    "validated_candidate",
+    "promotion_review",
+    "promoted",
+    "rejected",
+    "insufficient_data",
+    "regime_dependent",
+    "duplicate_of_existing_edge",
+    "retired",
+}
 PROMOTION_STATES_LC = {"not_ready", "candidate", "approved_for_lite_review", "approved_for_lite_implementation", "rejected", "deferred"}
 TASK_TYPES = {
+    "definition_check",
+    "duplicate_review",
     "exploratory_test",
+    "regime_test",
+    "robustness_test",
+    "friction_test",
+    "out_of_sample_test",
+    "failure_review",
+    "edge_overlap_review",
+    "promotion_review",
     "retest",
     "sleeve_failure_review",
     "anomaly_review",
-    "duplicate_review",
-    "promotion_review",
     "retirement_review",
 }
 TASK_STATUSES = {"open", "completed", "blocked", "failed"}
@@ -41,6 +70,7 @@ RESULT_STATUSES = {
     "promising",
     "regime_dependent",
     "overlapping",
+    "duplicate",
     "rejected",
     "validated_candidate",
 }
@@ -64,6 +94,30 @@ TERMINAL_TEST_STATES = {
     "duplicate_of_existing_edge",
     "promoted",
     "retired",
+}
+STAGE_TASK_TYPES = {
+    "definition_check": "definition_check",
+    "duplicate_overlap_check": "duplicate_review",
+    "exploratory_backtest": "exploratory_test",
+    "regime_segmentation": "regime_test",
+    "robustness_check": "robustness_test",
+    "transaction_friction_check": "friction_test",
+    "out_of_sample_check": "out_of_sample_test",
+    "failure_mode_review": "failure_review",
+    "edge_overlap_review": "edge_overlap_review",
+    "promotion_review": "promotion_review",
+}
+STAGE_LIFECYCLE_STATES = {
+    "definition_check": "definition_ready",
+    "duplicate_overlap_check": "duplicate_checked",
+    "exploratory_backtest": "exploratory_testing",
+    "regime_segmentation": "regime_testing",
+    "robustness_check": "robustness_testing",
+    "transaction_friction_check": "friction_testing",
+    "out_of_sample_check": "out_of_sample_testing",
+    "failure_mode_review": "failure_mode_review",
+    "edge_overlap_review": "edge_overlap_review",
+    "promotion_review": "promotion_review",
 }
 RESEARCH_TYPES = {
     "SLEEVE",
@@ -117,6 +171,7 @@ def write_research_lab_artifact_v1(*, truth_root: Path, day_utc: str, payload: d
         or payload.get("taxonomy_id")
         or payload.get("hypothesis_id")
         or payload.get("experiment_id")
+        or payload.get("packet_id")
         or payload.get("receipt_id")
         or ("awareness" if schema_id == "research_lab_awareness_report" else "")
         or "index"
@@ -142,6 +197,8 @@ def build_hypothesis_record_v1(
     trigger_conditions: str,
     expected_outcome: str,
     failure_modes: str | list[str],
+    instrument_universe: list[str] | str | None = None,
+    time_horizon: str = "",
     related_hypotheses: list[str] | None = None,
     overlap_tags: list[str] | None = None,
     source_type: str = "manual",
@@ -165,6 +222,8 @@ def build_hypothesis_record_v1(
         "trigger_conditions": trigger_conditions,
         "expected_outcome": expected_outcome,
         "failure_modes": _strings(failure_modes),
+        "instrument_universe": _strings(instrument_universe),
+        "time_horizon": time_horizon,
         "related_hypotheses": _strings(related_hypotheses),
         "overlap_tags": _strings(overlap_tags),
         "source_type": source_type,
@@ -259,6 +318,7 @@ def build_hypothesis_test_plan_v1(
 def register_hypothesis_v1(
     *,
     registry: dict[str, Any],
+    task_queue: dict[str, Any] | None = None,
     title: str,
     edge_family: str,
     behavioral_thesis: str,
@@ -267,6 +327,8 @@ def register_hypothesis_v1(
     expected_outcome: str,
     failure_modes: str | list[str],
     created_at_utc: str,
+    instrument_universe: list[str] | str | None = None,
+    time_horizon: str = "",
     overlap_tags: list[str] | None = None,
     source_type: str = "manual",
     source_reference: str = "",
@@ -293,6 +355,8 @@ def register_hypothesis_v1(
         trigger_conditions=trigger_conditions,
         expected_outcome=expected_outcome,
         failure_modes=failure_modes,
+        instrument_universe=instrument_universe,
+        time_horizon=time_horizon,
         related_hypotheses=warnings["related_hypothesis_ids"],
         overlap_tags=overlap_tags,
         source_type=source_type,
@@ -304,21 +368,22 @@ def register_hypothesis_v1(
         notes=notes,
     )
     task = build_research_task_v1(
-        task_id=f"task:{hypothesis_id}:exploratory_test",
-        task_type="exploratory_test",
+        task_id=f"task:{hypothesis_id}:definition_check",
+        task_type="definition_check",
         hypothesis_id=hypothesis_id,
         source_trigger="manual_hypothesis_added",
         priority=priority,
-        requested_action="Run definition_check then exploratory offline test plan stage.",
+        requested_action="Run hypothesis definition_check stage.",
         created_at=created_at_utc,
-        output_expected="research_experiment_result.v1",
+        output_expected="experiment_result.v1",
     )
     plan = build_hypothesis_test_plan_v1(hypothesis_id=hypothesis_id)
     new_registry = build_hypothesis_registry_v1(
         generated_at_utc=created_at_utc,
         hypotheses=[*existing, record],
     )
-    queue = build_research_task_queue_v1(generated_at_utc=created_at_utc, tasks=[task])
+    existing_tasks = _objects((task_queue or {}).get("tasks"))
+    queue = build_research_task_queue_v1(generated_at_utc=created_at_utc, tasks=[*existing_tasks, task])
     return {
         "hypothesis": record,
         "registry": new_registry,
@@ -374,8 +439,10 @@ def build_research_task_v1(
     created_at: str,
     status: str = "open",
     owner: str = "research_lab",
+    started_at: str = "",
+    completed_at: str = "",
     blocking_reason: str = "",
-    output_expected: str = "research_experiment_result.v1",
+    output_expected: str = "experiment_result.v1",
 ) -> dict[str, Any]:
     return {
         "task_id": task_id,
@@ -384,8 +451,10 @@ def build_research_task_v1(
         "source_trigger": source_trigger,
         "priority": priority,
         "requested_action": requested_action,
-        "created_at": created_at,
         "status": _enum_lc(status, TASK_STATUSES, "status"),
+        "created_at": created_at,
+        "started_at": started_at,
+        "completed_at": completed_at,
         "owner": owner,
         "blocking_reason": blocking_reason,
         "output_expected": output_expected,
@@ -408,6 +477,72 @@ def build_research_task_queue_v1(*, generated_at_utc: str, tasks: list[dict[str,
     return payload
 
 
+def build_experiment_result_v1(
+    *,
+    experiment_id: str,
+    hypothesis_id: str,
+    task_id: str,
+    test_stage: str,
+    dataset_used: str,
+    instrument_universe: list[str] | str | None = None,
+    test_window: str,
+    trigger_definition: str,
+    outcome_definition: str,
+    sample_count: int,
+    expectancy: str,
+    win_rate: str,
+    avg_return: str = "",
+    median_return: str = "",
+    max_drawdown: str = "",
+    volatility: str = "",
+    friction_adjusted_result: str = "",
+    regime_dependency: str,
+    robustness_notes: str,
+    out_of_sample_result: str = "",
+    overlap_with_existing_sleeves: str,
+    result_status: str,
+    recommendation: str,
+    next_action: str,
+    created_at: str,
+) -> dict[str, Any]:
+    payload = {
+        "schema_id": "experiment_result",
+        "schema_version": "v1",
+        "artifact_id": "experiment_result_v1",
+        "experiment_id": experiment_id,
+        "hypothesis_id": hypothesis_id,
+        "task_id": task_id,
+        "test_stage": _enum_lc(test_stage, set(TEST_STAGES), "test_stage"),
+        "dataset_used": dataset_used,
+        "instrument_universe": _strings(instrument_universe),
+        "test_window": test_window,
+        "trigger_definition": trigger_definition,
+        "outcome_definition": outcome_definition,
+        "sample_count": int(sample_count),
+        "expectancy": expectancy,
+        "win_rate": win_rate,
+        "avg_return": avg_return,
+        "median_return": median_return,
+        "max_drawdown": max_drawdown,
+        "volatility": volatility,
+        "friction_adjusted_result": friction_adjusted_result,
+        "regime_dependency": regime_dependency,
+        "robustness_notes": robustness_notes,
+        "out_of_sample_result": out_of_sample_result,
+        "overlap_with_existing_sleeves": overlap_with_existing_sleeves,
+        "result_status": _enum_lc(result_status, RESULT_STATUSES, "result_status"),
+        "recommendation": recommendation,
+        "next_action": next_action,
+        "created_at": created_at,
+        "research_lab_only": True,
+        "executable_trade_created": False,
+        "automatic_promotion_allowed": False,
+        "canonical_json_hash": None,
+    }
+    payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
+    return payload
+
+
 def build_research_experiment_result_v1(
     *,
     experiment_id: str,
@@ -420,7 +555,7 @@ def build_research_experiment_result_v1(
     sample_count: int,
     expectancy: str,
     win_rate: str,
-    drawdown: str,
+    drawdown: str = "",
     regime_dependency: str,
     robustness_notes: str,
     overlap_with_existing_sleeves: str,
@@ -429,37 +564,40 @@ def build_research_experiment_result_v1(
     next_action: str,
     completed_stage: str,
     completed_at_utc: str,
+    instrument_universe: list[str] | str | None = None,
+    avg_return: str = "",
+    median_return: str = "",
+    volatility: str = "",
+    friction_adjusted_result: str = "",
+    out_of_sample_result: str = "",
 ) -> dict[str, Any]:
-    payload = {
-        "schema_id": "research_experiment_result",
-        "schema_version": "v1",
-        "artifact_id": "research_experiment_result_v1",
-        "experiment_id": experiment_id,
-        "hypothesis_id": hypothesis_id,
-        "task_id": task_id,
-        "dataset_used": dataset_used,
-        "test_window": test_window,
-        "trigger_definition": trigger_definition,
-        "outcome_definition": outcome_definition,
-        "sample_count": int(sample_count),
-        "expectancy": expectancy,
-        "win_rate": win_rate,
-        "drawdown": drawdown,
-        "regime_dependency": regime_dependency,
-        "robustness_notes": robustness_notes,
-        "overlap_with_existing_sleeves": overlap_with_existing_sleeves,
-        "result_status": _enum_lc(result_status, RESULT_STATUSES, "result_status"),
-        "recommendation": recommendation,
-        "next_action": next_action,
-        "completed_stage": _enum_lc(completed_stage, set(TEST_STAGES), "completed_stage"),
-        "completed_at_utc": completed_at_utc,
-        "research_lab_only": True,
-        "executable_trade_created": False,
-        "automatic_promotion_allowed": False,
-        "canonical_json_hash": None,
-    }
-    payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
-    return payload
+    return build_experiment_result_v1(
+        experiment_id=experiment_id,
+        hypothesis_id=hypothesis_id,
+        task_id=task_id,
+        test_stage=completed_stage,
+        dataset_used=dataset_used,
+        instrument_universe=instrument_universe,
+        test_window=test_window,
+        trigger_definition=trigger_definition,
+        outcome_definition=outcome_definition,
+        sample_count=sample_count,
+        expectancy=expectancy,
+        win_rate=win_rate,
+        avg_return=avg_return,
+        median_return=median_return,
+        max_drawdown=drawdown,
+        volatility=volatility,
+        friction_adjusted_result=friction_adjusted_result,
+        regime_dependency=regime_dependency,
+        robustness_notes=robustness_notes,
+        out_of_sample_result=out_of_sample_result,
+        overlap_with_existing_sleeves=overlap_with_existing_sleeves,
+        result_status=result_status,
+        recommendation=recommendation,
+        next_action=next_action,
+        created_at=completed_at_utc,
+    )
 
 
 def apply_experiment_result_v1(
@@ -472,7 +610,14 @@ def apply_experiment_result_v1(
 ) -> dict[str, Any]:
     hypothesis_id = str(result["hypothesis_id"])
     result_status = str(result["result_status"])
-    completed_stage = str(result["completed_stage"])
+    completed_stage = str(result.get("test_stage") or result.get("completed_stage") or "")
+    current_stage = str(test_plan.get("current_stage") or "")
+    if completed_stage != current_stage:
+        raise ValueError(f"EXPERIMENT_RESULT_STAGE_MISMATCH:expected={current_stage}:actual={completed_stage}")
+    prior_completed = _stage_list(test_plan.get("completed_stages"))
+    completed_with_result = _stage_list([*prior_completed, completed_stage])
+    if result_status == "validated_candidate" and (completed_stage != "promotion_review" or set(completed_with_result) != set(TEST_STAGES)):
+        raise ValueError("VALIDATED_CANDIDATE_REQUIRES_COMPLETED_TEST_PLAN")
     hypotheses = []
     for row in _objects(registry.get("hypotheses")):
         if str(row.get("hypothesis_id")) != hypothesis_id:
@@ -483,10 +628,10 @@ def apply_experiment_result_v1(
         updated["last_tested_at"] = updated_at_utc
         updated["test_count"] = int(updated.get("test_count") or 0) + 1
         updated["latest_result_status"] = result_status
-        updated["lifecycle_state"] = _lifecycle_for_result(result_status)
+        updated["lifecycle_state"] = _lifecycle_for_result(result_status, next_stage_hint=_next_stage(completed_with_result))
         updated["promotion_status"] = "candidate" if result_status == "validated_candidate" else str(updated.get("promotion_status") or "not_ready")
         hypotheses.append(updated)
-    completed = _stage_list([*(_strings(test_plan.get("completed_stages"))), completed_stage])
+    completed = completed_with_result
     failed = _stage_list(test_plan.get("failed_stages"))
     if result_status in {"weak", "rejected", "insufficient_data"}:
         failed = _stage_list([*failed, completed_stage])
@@ -504,6 +649,7 @@ def apply_experiment_result_v1(
         updated_task = dict(task)
         if str(task.get("task_id")) == str(result.get("task_id")):
             updated_task["status"] = "completed"
+            updated_task["completed_at"] = updated_at_utc
         tasks.append(updated_task)
     if next_stage:
         next_task_type = _task_type_for_stage(next_stage)
@@ -548,9 +694,64 @@ def build_research_lab_awareness_report_v1(
         ],
         "promotion_candidates": [row for row in hypotheses if row.get("promotion_status") == "candidate"],
         "rejected_ideas": [row for row in hypotheses if row.get("lifecycle_state") == "rejected"],
-        "stale_ideas_needing_retest": [row for row in hypotheses if row.get("lifecycle_state") == "promising" and not row.get("last_tested_at")],
+        "promising_ideas": [row for row in hypotheses if row.get("latest_result_status") == "promising"],
+        "stale_ideas_needing_retest": [row for row in hypotheses if row.get("latest_result_status") == "promising" and not row.get("last_tested_at")],
+        "sleeve_failure_reviews": [row for row in tasks if row.get("task_type") == "sleeve_failure_review"],
         "research_lab_only": True,
         "executable_trade_created": False,
+        "canonical_json_hash": None,
+    }
+    payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
+    return payload
+
+
+def build_promotion_review_v1(
+    *,
+    promotion_id: str,
+    hypothesis_id: str,
+    generated_at_utc: str,
+    test_plan: dict[str, Any],
+    friction_adjusted_result: str,
+    out_of_sample_support: str,
+    regime_notes: str,
+    failure_mode_notes: str,
+    edge_overlap_review: str,
+    approved_by_human: bool,
+    approval_reason_codes: list[str] | None = None,
+    rejection_reason_codes: list[str] | None = None,
+) -> dict[str, Any]:
+    completed = set(_strings(test_plan.get("completed_stages")))
+    plan_complete = all(stage in completed for stage in TEST_STAGES)
+    eligible = (
+        plan_complete
+        and _evidence_positive(friction_adjusted_result)
+        and str(out_of_sample_support).strip().lower() not in {"", "none", "missing", "not_computed"}
+        and bool(str(regime_notes).strip())
+        and bool(str(failure_mode_notes).strip())
+        and bool(str(edge_overlap_review).strip())
+        and bool(approved_by_human)
+    )
+    payload = {
+        "schema_id": "promotion_review",
+        "schema_version": "v1",
+        "artifact_id": "promotion_review_v1",
+        "promotion_id": promotion_id,
+        "hypothesis_id": hypothesis_id,
+        "generated_at_utc": generated_at_utc,
+        "completed_test_plan": plan_complete,
+        "friction_adjusted_result": friction_adjusted_result,
+        "out_of_sample_support": out_of_sample_support,
+        "regime_notes": regime_notes,
+        "failure_mode_notes": failure_mode_notes,
+        "edge_overlap_review": edge_overlap_review,
+        "approved_by_human": bool(approved_by_human),
+        "eligible_for_promoted_sleeve_library": eligible,
+        "approval_reason_codes": _strings(approval_reason_codes),
+        "rejection_reason_codes": _strings(rejection_reason_codes),
+        "research_lab_only": True,
+        "automatic_promotion_allowed": False,
+        "runtime_mutation_allowed": False,
+        "broker_submit_required": False,
         "canonical_json_hash": None,
     }
     payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
@@ -605,6 +806,46 @@ def build_promoted_sleeve_library_v1(*, generated_at_utc: str, sleeves: list[dic
     return payload
 
 
+def build_manual_trade_packet_v1(
+    *,
+    packet_id: str,
+    run_id: str,
+    date: str,
+    generated_at_utc: str,
+    regime_state: str,
+    trade_candidates: list[dict[str, Any]],
+    promoted_sleeve_library: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    promoted_sources = _promoted_sleeve_sources(promoted_sleeve_library)
+    candidates = [
+        _manual_trade_candidate(
+            row,
+            run_id=run_id,
+            date=date,
+            regime_state=regime_state,
+            promoted_sources=promoted_sources,
+        )
+        for row in trade_candidates
+    ]
+    payload = {
+        "schema_id": "manual_trade_packet",
+        "schema_version": "v1",
+        "artifact_id": "manual_trade_packet_v1",
+        "packet_id": packet_id,
+        "run_id": run_id,
+        "date": date,
+        "generated_at_utc": generated_at_utc,
+        "manual_execution_only": True,
+        "broker_submit_required": False,
+        "ib_automation_status": "DEFERRED",
+        "trade_candidates": candidates,
+        "all_candidates_traceable_to_promoted_sleeves": all(bool(row.get("sleeve_id") and row.get("source_hypothesis_id")) for row in candidates),
+        "canonical_json_hash": None,
+    }
+    payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
+    return payload
+
+
 def build_manual_execution_receipt_v1(
     *,
     receipt_id: str,
@@ -618,8 +859,10 @@ def build_manual_execution_receipt_v1(
     stop_order_entered: bool,
     stop_price: str,
     operator_notes: str,
+    deviations_from_recommendation: list[str] | None = None,
     deviations_from_aegis_recommendation: list[str] | None = None,
 ) -> dict[str, Any]:
+    deviations = _strings(deviations_from_recommendation) or _strings(deviations_from_aegis_recommendation)
     payload = {
         "schema_id": "manual_execution_receipt",
         "schema_version": "v1",
@@ -635,7 +878,8 @@ def build_manual_execution_receipt_v1(
         "stop_order_entered": bool(stop_order_entered),
         "stop_price": stop_price,
         "operator_notes": operator_notes,
-        "deviations_from_aegis_recommendation": _strings(deviations_from_aegis_recommendation),
+        "deviations_from_recommendation": deviations,
+        "deviations_from_aegis_recommendation": deviations,
         "manual_observation_only": True,
         "broker_submit_required": False,
         "canonical_json_hash": None,
@@ -658,6 +902,89 @@ def build_outcome_ledger_v1(*, generated_at_utc: str, outcome_rows: list[dict[st
     }
     payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
     return payload
+
+
+def build_learning_tasks_from_outcomes_v1(
+    *,
+    generated_at_utc: str,
+    outcome_ledger: dict[str, Any],
+    existing_tasks: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    tasks = list(existing_tasks or [])
+    for row in _objects(outcome_ledger.get("outcomes")):
+        trade_id = str(row.get("trade_id") or "")
+        hypothesis_id = str(row.get("hypothesis_id") or "")
+        if not trade_id or not hypothesis_id:
+            continue
+        status = str(row.get("outcome_status") or "").lower()
+        failure = str(row.get("failure_reason") or "").lower()
+        deviation = str(row.get("operator_deviation") or "").lower()
+        if status in {"loss", "stopped_out", "underperformed"}:
+            tasks.append(
+                build_research_task_v1(
+                    task_id=f"task:{hypothesis_id}:sleeve_failure_review:{_safe_id(trade_id)}",
+                    task_type="sleeve_failure_review",
+                    hypothesis_id=hypothesis_id,
+                    source_trigger="outcome_ledger_sleeve_underperformance",
+                    priority="high",
+                    requested_action=f"Review failed or underperforming manual trade outcome {trade_id}.",
+                    created_at=generated_at_utc,
+                    output_expected="experiment_result.v1",
+                )
+            )
+        if "delay" in deviation or "delay" in failure:
+            tasks.append(
+                build_research_task_v1(
+                    task_id=f"task:{hypothesis_id}:friction_test:{_safe_id(trade_id)}",
+                    task_type="friction_test",
+                    hypothesis_id=hypothesis_id,
+                    source_trigger="outcome_ledger_manual_delay",
+                    priority="normal",
+                    requested_action=f"Test manual execution friction impact for trade {trade_id}.",
+                    created_at=generated_at_utc,
+                    output_expected="experiment_result.v1",
+                )
+            )
+        if "overlap" in failure or "correlation" in failure:
+            tasks.append(
+                build_research_task_v1(
+                    task_id=f"task:{hypothesis_id}:edge_overlap_review:{_safe_id(trade_id)}",
+                    task_type="edge_overlap_review",
+                    hypothesis_id=hypothesis_id,
+                    source_trigger="outcome_ledger_correlated_loss",
+                    priority="high",
+                    requested_action=f"Review edge overlap and correlated loss behavior for trade {trade_id}.",
+                    created_at=generated_at_utc,
+                    output_expected="experiment_result.v1",
+                )
+            )
+        if "regime" in failure:
+            tasks.append(
+                build_research_task_v1(
+                    task_id=f"task:{hypothesis_id}:regime_test:{_safe_id(trade_id)}",
+                    task_type="regime_test",
+                    hypothesis_id=hypothesis_id,
+                    source_trigger="outcome_ledger_regime_dependency",
+                    priority="normal",
+                    requested_action=f"Retest regime dependency for trade {trade_id}.",
+                    created_at=generated_at_utc,
+                    output_expected="experiment_result.v1",
+                )
+            )
+        if "missed" in failure or status == "missed_opportunity":
+            tasks.append(
+                build_research_task_v1(
+                    task_id=f"task:{hypothesis_id}:anomaly_review:{_safe_id(trade_id)}",
+                    task_type="anomaly_review",
+                    hypothesis_id=hypothesis_id,
+                    source_trigger="outcome_ledger_missed_opportunity",
+                    priority="normal",
+                    requested_action=f"Investigate missed opportunity around trade {trade_id}.",
+                    created_at=generated_at_utc,
+                    output_expected="experiment_result.v1",
+                )
+            )
+    return build_research_task_queue_v1(generated_at_utc=generated_at_utc, tasks=tasks)
 
 
 def build_research_evidence_packet_v1(
@@ -980,13 +1307,7 @@ def _stage_list(value: Any) -> list[str]:
 
 def _task_type_for_stage(stage: str) -> str:
     stage = str(stage or "")
-    if stage in {"definition_check", "duplicate_overlap_check", "exploratory_backtest"}:
-        return "exploratory_test"
-    if stage == "promotion_review":
-        return "promotion_review"
-    if stage == "edge_overlap_review":
-        return "duplicate_review"
-    return "retest"
+    return STAGE_TASK_TYPES.get(stage, "retest")
 
 
 def _next_stage(completed: list[str]) -> str:
@@ -996,16 +1317,18 @@ def _next_stage(completed: list[str]) -> str:
     return ""
 
 
-def _lifecycle_for_result(result_status: str) -> str:
-    if result_status == "promising":
-        return "promising"
+def _lifecycle_for_result(result_status: str, *, next_stage_hint: str = "") -> str:
     if result_status == "validated_candidate":
-        return "validated"
+        return "validated_candidate"
     if result_status in {"weak", "rejected"}:
         return "rejected"
-    if result_status in {"insufficient_data", "regime_dependent", "overlapping"}:
-        return "exploratory"
-    return "exploratory"
+    if result_status == "insufficient_data":
+        return "insufficient_data"
+    if result_status == "regime_dependent":
+        return "regime_dependent"
+    if result_status in {"overlapping", "duplicate"}:
+        return "duplicate_of_existing_edge"
+    return STAGE_LIFECYCLE_STATES.get(next_stage_hint, "exploratory_testing")
 
 
 def _terminal_for_result(result_status: str) -> str:
@@ -1015,6 +1338,7 @@ def _terminal_for_result(result_status: str) -> str:
         "insufficient_data": "insufficient_data",
         "regime_dependent": "regime_dependent",
         "overlapping": "duplicate_of_existing_edge",
+        "duplicate": "duplicate_of_existing_edge",
     }
     return mapping.get(result_status, "")
 
@@ -1022,17 +1346,22 @@ def _terminal_for_result(result_status: str) -> str:
 def _promoted_sleeve(row: dict[str, Any]) -> dict[str, Any]:
     required = [
         "sleeve_id",
+        "source_hypothesis_id",
         "edge_family",
         "behavioral_thesis",
         "regime_fit",
         "instrument_universe",
         "entry_logic",
+        "exit_logic",
         "stop_logic",
         "sizing_logic",
         "invalidation_logic",
         "known_failure_modes",
         "overlap_tags",
         "promotion_evidence_path",
+        "production_status",
+        "created_at",
+        "updated_at",
     ]
     missing = [field for field in required if not row.get(field)]
     if missing:
@@ -1041,29 +1370,134 @@ def _promoted_sleeve(row: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("SLEEVE_LIBRARY_REQUIRES_PROMOTED_SLEEVES")
     return {
         "sleeve_id": str(row["sleeve_id"]),
+        "source_hypothesis_id": str(row["source_hypothesis_id"]),
         "edge_family": str(row["edge_family"]),
         "behavioral_thesis": str(row["behavioral_thesis"]),
         "regime_fit": _strings(row["regime_fit"]),
         "instrument_universe": _strings(row["instrument_universe"]),
         "entry_logic": str(row["entry_logic"]),
+        "exit_logic": str(row["exit_logic"]),
         "stop_logic": str(row["stop_logic"]),
         "sizing_logic": str(row["sizing_logic"]),
         "invalidation_logic": str(row["invalidation_logic"]),
         "known_failure_modes": _strings(row["known_failure_modes"]),
         "overlap_tags": _strings(row["overlap_tags"]),
         "promotion_evidence_path": str(row["promotion_evidence_path"]),
-        "research_hypothesis_id": str(row.get("research_hypothesis_id") or ""),
+        "research_hypothesis_id": str(row.get("research_hypothesis_id") or row["source_hypothesis_id"]),
         "promotion_status": "promoted",
+        "production_status": str(row["production_status"]),
+        "created_at": str(row["created_at"]),
+        "updated_at": str(row["updated_at"]),
+    }
+
+
+def _manual_trade_candidate(
+    row: dict[str, Any],
+    *,
+    run_id: str,
+    date: str,
+    regime_state: str,
+    promoted_sources: dict[str, str],
+) -> dict[str, Any]:
+    required = [
+        "sleeve_id",
+        "source_hypothesis_id",
+        "symbol",
+        "side",
+        "instrument_type",
+        "entry_reference_price",
+        "quantity_or_sizing_guidance",
+        "stop_price",
+        "stop_logic",
+        "risk_per_trade",
+    ]
+    missing = [field for field in required if row.get(field) is None or row.get(field) == "" or row.get(field) == []]
+    sleeve_id = str(row.get("sleeve_id") or "")
+    source_hypothesis_id = str(row.get("source_hypothesis_id") or row.get("hypothesis_id") or "")
+    source_blockers: list[str] = []
+    if not promoted_sources:
+        source_blockers.append("PROMOTED_SLEEVE_LIBRARY_MISSING")
+    elif promoted_sources.get(sleeve_id) != source_hypothesis_id:
+        source_blockers.append("UNPROMOTED_SLEEVE_SOURCE")
+    actionable = not missing and not source_blockers
+    checklist = _strings(row.get("manual_execution_checklist")) or [
+        "Review status and blockers before acting.",
+        "Enter the position manually in IB paper.",
+        "Immediately enter the protective stop.",
+        "Confirm the stop is accepted.",
+        "Record the manual execution receipt.",
+    ]
+    return {
+        "run_id": run_id,
+        "date": date,
+        "recommended_trade_id": str(row.get("recommended_trade_id") or row.get("candidate_id") or _safe_id(f"{run_id}-{row.get('sleeve_id')}-{row.get('symbol')}")),
+        "sleeve_id": sleeve_id,
+        "source_hypothesis_id": source_hypothesis_id,
+        "symbol": str(row.get("symbol") or "").upper(),
+        "side": str(row.get("side") or row.get("direction") or "").upper(),
+        "instrument_type": str(row.get("instrument_type") or ""),
+        "entry_reference_price": str(row.get("entry_reference_price") or ""),
+        "order_type_suggestion": str(row.get("order_type_suggestion") or "MANUAL_LIMIT_OR_MARKET_BY_OPERATOR"),
+        "quantity_or_sizing_guidance": str(row.get("quantity_or_sizing_guidance") or ""),
+        "stop_price": str(row.get("stop_price") or ""),
+        "stop_logic": str(row.get("stop_logic") or ""),
+        "risk_per_trade": str(row.get("risk_per_trade") or ""),
+        "edge_family": str(row.get("edge_family") or ""),
+        "regime_state": str(row.get("regime_state") or regime_state),
+        "confidence": str(row.get("confidence") or ""),
+        "inclusion_reason": str(row.get("inclusion_reason") or ""),
+        "exclusion_reason": str(row.get("exclusion_reason") or ("MISSING_REQUIRED_MANUAL_TRADE_FIELDS:" + ",".join(missing) if missing else "")),
+        "governance_notes": str(row.get("governance_notes") or ""),
+        "edge_overlap_result": str(row.get("edge_overlap_result") or ""),
+        "manual_execution_checklist": checklist,
+        "actionable": actionable,
+        "do_not_trade_blockers": [f"MISSING_{field.upper()}" for field in missing] + source_blockers,
     }
 
 
 def _outcome_row(row: dict[str, Any]) -> dict[str, Any]:
     return {
-        "recommended_trade_id": str(row.get("recommended_trade_id") or ""),
-        "manual_execution_receipt_id": str(row.get("manual_execution_receipt_id") or ""),
-        "actual_trade_outcome": str(row.get("actual_trade_outcome") or ""),
-        "stop_behavior": str(row.get("stop_behavior") or ""),
+        "trade_id": str(row.get("trade_id") or row.get("recommended_trade_id") or ""),
+        "sleeve_id": str(row.get("sleeve_id") or ""),
+        "hypothesis_id": str(row.get("hypothesis_id") or row.get("source_hypothesis_id") or ""),
+        "recommended_entry": str(row.get("recommended_entry") or ""),
+        "actual_entry": str(row.get("actual_entry") or ""),
+        "recommended_stop": str(row.get("recommended_stop") or ""),
+        "actual_stop": str(row.get("actual_stop") or ""),
+        "exit_price": str(row.get("exit_price") or ""),
+        "return_pct": str(row.get("return_pct") or ""),
+        "risk_adjusted_return": str(row.get("risk_adjusted_return") or ""),
+        "max_adverse_excursion": str(row.get("max_adverse_excursion") or ""),
+        "max_favorable_excursion": str(row.get("max_favorable_excursion") or ""),
+        "outcome_status": str(row.get("outcome_status") or row.get("actual_trade_outcome") or ""),
+        "failure_reason": str(row.get("failure_reason") or ""),
+        "operator_deviation": str(row.get("operator_deviation") or ""),
+        "notes": str(row.get("notes") or ""),
         "sleeve_attribution": str(row.get("sleeve_attribution") or ""),
         "edge_overlap_attribution": str(row.get("edge_overlap_attribution") or ""),
-        "research_feedback_action": str(row.get("research_feedback_action") or "none"),
     }
+
+
+def _promoted_sleeve_sources(promoted_sleeve_library: dict[str, Any] | None) -> dict[str, str]:
+    if not promoted_sleeve_library:
+        return {}
+    sources: dict[str, str] = {}
+    for row in _objects(promoted_sleeve_library.get("sleeves")):
+        if str(row.get("promotion_status") or "").lower() != "promoted":
+            continue
+        sleeve_id = str(row.get("sleeve_id") or "")
+        source_hypothesis_id = str(row.get("source_hypothesis_id") or row.get("research_hypothesis_id") or "")
+        if sleeve_id and source_hypothesis_id:
+            sources[sleeve_id] = source_hypothesis_id
+    return sources
+
+
+def _evidence_positive(value: str) -> bool:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return False
+    negative_terms = {"negative", "not_computed", "missing", "none", "failed", "fail", "weak", "insufficient"}
+    if any(term in normalized for term in negative_terms):
+        return False
+    positive_terms = {"positive", "pass", "passed", "supported", "profitable", "favorable"}
+    return any(term in normalized for term in positive_terms)
