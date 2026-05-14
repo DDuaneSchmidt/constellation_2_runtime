@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/hypothesis_progress_report.v1.schema.json",
+  "title": "hypothesis_progress_report.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "artifact_id", "generated_at_utc", "hypothesis_id", "title", "lifecycle_state", "current_test_stage", "completed_stages", "next_required_task", "blockers", "why_not_done_yet", "what_would_disprove_it", "what_would_validate_it", "research_lab_only", "canonical_json_hash"],
+  "properties": {
+    "schema_id": { "const": "hypothesis_progress_report" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "hypothesis_progress_report_v1" },
+    "generated_at_utc": { "type": "string" },
+    "hypothesis_id": { "type": "string" },
+    "title": { "type": "string" },
+    "lifecycle_state": { "type": "string" },
+    "current_test_stage": { "type": "string" },
+    "completed_stages": { "type": "array", "items": { "type": "string" } },
+    "next_required_task": { "type": "string" },
+    "blockers": { "type": "array", "items": { "type": "string" } },
+    "why_not_done_yet": { "type": "string" },
+    "what_would_disprove_it": { "type": "array", "items": { "type": "string" } },
+    "what_would_validate_it": { "type": "array", "items": { "type": "string" } },
+    "research_lab_only": { "const": true },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

@@ -44,3 +44,13 @@ Canonical Research Lab outputs include:
 - `research_to_lite_promotion.v1`
 - `research_lab_index.v1`
 - `edge_taxonomy.v1`
+- `hypothesis_registry.v1`
+- `hypothesis_test_plan.v1`
+- `research_task_queue.v1`
+- `research_experiment_result.v1`
+- `research_lab_awareness_report.v1`
+- `hypothesis_progress_report.v1`
+
+Every research action must come from an explicit trigger: manual hypothesis registration, sleeve failure review, EOD anomaly review, stale promising hypothesis retest, promotion candidate review, or duplicate-cluster review.
+
+Research Lab does not stop at one exploratory test. Each hypothesis must progress through the governed test plan before it can be rejected, validated, promoted, or retired.

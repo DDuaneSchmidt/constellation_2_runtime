@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/research_lab_awareness_report.v1.schema.json",
+  "title": "research_lab_awareness_report.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "artifact_id", "generated_at_utc", "new_hypotheses", "queued_tasks", "completed_experiments", "blocked_tasks", "duplicate_warnings", "promotion_candidates", "rejected_ideas", "stale_ideas_needing_retest", "research_lab_only", "executable_trade_created", "canonical_json_hash"],
+  "properties": {
+    "schema_id": { "const": "research_lab_awareness_report" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "research_lab_awareness_report_v1" },
+    "generated_at_utc": { "type": "string" },
+    "new_hypotheses": { "type": "array", "items": { "type": "object" } },
+    "queued_tasks": { "type": "array", "items": { "type": "object" } },
+    "completed_experiments": { "type": "array", "items": { "type": "object" } },
+    "blocked_tasks": { "type": "array", "items": { "type": "object" } },
+    "duplicate_warnings": { "type": "array", "items": { "type": "object" } },
+    "promotion_candidates": { "type": "array", "items": { "type": "object" } },
+    "rejected_ideas": { "type": "array", "items": { "type": "object" } },
+    "stale_ideas_needing_retest": { "type": "array", "items": { "type": "object" } },
+    "research_lab_only": { "const": true },
+    "executable_trade_created": { "const": false },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

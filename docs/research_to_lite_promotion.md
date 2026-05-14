@@ -12,4 +12,6 @@ Promotion must require evidence, not enthusiasm. A research idea becomes eligibl
 
 Even then, the promotion artifact does not mutate runtime behavior automatically. It is governance evidence for a future source change, test, build, and activation.
 
+Research Lab may recommend promotion, but it cannot directly place a sleeve into Aegis Lite. Lite may only consume sleeves present in `promoted_sleeve_library.v1`, and that library only accepts sleeves with `promotion_status=promoted` plus explicit promotion evidence.
+
 Draft, rejected, archived, or under-review research is not eligible for Lite implementation.

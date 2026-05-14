@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/hypothesis_test_plan.v1.schema.json",
+  "title": "hypothesis_test_plan.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "artifact_id", "hypothesis_id", "required_test_stages", "current_stage", "completed_stages", "failed_stages", "disproof_conditions", "validation_conditions", "minimum_sample_count", "minimum_regime_coverage", "required_robustness_checks", "required_overlap_checks", "required_out_of_sample_checks", "next_required_task", "terminal_state_allowed", "research_lab_only", "automatic_promotion_allowed", "canonical_json_hash"],
+  "properties": {
+    "schema_id": { "const": "hypothesis_test_plan" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "hypothesis_test_plan_v1" },
+    "hypothesis_id": { "type": "string", "minLength": 1 },
+    "required_test_stages": { "type": "array", "items": { "type": "string" }, "minItems": 10 },
+    "current_stage": { "type": "string" },
+    "completed_stages": { "type": "array", "items": { "type": "string" } },
+    "failed_stages": { "type": "array", "items": { "type": "string" } },
+    "disproof_conditions": { "type": "array", "items": { "type": "string" } },
+    "validation_conditions": { "type": "array", "items": { "type": "string" } },
+    "minimum_sample_count": { "type": "integer", "minimum": 1 },
+    "minimum_regime_coverage": { "type": "array", "items": { "type": "string" } },
+    "required_robustness_checks": { "type": "array", "items": { "type": "string" } },
+    "required_overlap_checks": { "type": "array", "items": { "type": "string" } },
+    "required_out_of_sample_checks": { "type": "array", "items": { "type": "string" } },
+    "next_required_task": { "type": "string" },
+    "terminal_state_allowed": { "type": "array", "items": { "type": "string" } },
+    "research_lab_only": { "const": true },
+    "automatic_promotion_allowed": { "const": false },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/hypothesis_registry.v1.schema.json",
+  "title": "hypothesis_registry.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "artifact_id", "generated_at_utc", "hypotheses", "research_lab_only", "runtime_mutation_allowed", "automatic_trade_generation_allowed", "broker_submit_required", "transmit_automation_required", "canonical_json_hash"],
+  "properties": {
+    "schema_id": { "const": "hypothesis_registry" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "hypothesis_registry_v1" },
+    "generated_at_utc": { "type": "string", "minLength": 1 },
+    "hypotheses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["hypothesis_id", "title", "behavioral_thesis", "edge_family", "market_regime", "trigger_conditions", "expected_outcome", "failure_modes", "related_hypotheses", "overlap_tags", "source_type", "source_reference", "priority", "lifecycle_state", "created_at", "updated_at", "last_tested_at", "test_count", "latest_result_status", "promotion_status", "notes"],
+        "properties": {
+          "hypothesis_id": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1 },
+          "behavioral_thesis": { "type": "string", "minLength": 1 },
+          "edge_family": { "type": "string", "minLength": 1 },
+          "market_regime": { "type": "string", "minLength": 1 },
+          "trigger_conditions": { "type": "string", "minLength": 1 },
+          "expected_outcome": { "type": "string", "minLength": 1 },
+          "failure_modes": { "type": "array", "items": { "type": "string" } },
+          "related_hypotheses": { "type": "array", "items": { "type": "string" } },
+          "overlap_tags": { "type": "array", "items": { "type": "string" } },
+          "source_type": { "type": "string", "minLength": 1 },
+          "source_reference": { "type": "string" },
+          "priority": { "type": "string", "minLength": 1 },
+          "lifecycle_state": { "type": "string", "enum": ["proposed", "exploratory", "promising", "validated", "promoted", "rejected", "retired"] },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" },
+          "last_tested_at": { "type": "string" },
+          "test_count": { "type": "integer", "minimum": 0 },
+          "latest_result_status": { "type": "string" },
+          "promotion_status": { "type": "string", "enum": ["not_ready", "candidate", "approved_for_lite_review", "approved_for_lite_implementation", "rejected", "deferred"] },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "research_lab_only": { "const": true },
+    "runtime_mutation_allowed": { "const": false },
+    "automatic_trade_generation_allowed": { "const": false },
+    "broker_submit_required": { "const": false },
+    "transmit_automation_required": { "const": false },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

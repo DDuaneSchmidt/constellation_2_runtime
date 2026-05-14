@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/promoted_sleeve_library.v1.schema.json",
+  "title": "promoted_sleeve_library.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "artifact_id", "generated_at_utc", "sleeves", "only_promoted_sleeves_allowed", "research_lab_artifacts_directly_executable", "broker_submit_required", "canonical_json_hash"],
+  "properties": {
+    "schema_id": { "const": "promoted_sleeve_library" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "promoted_sleeve_library_v1" },
+    "generated_at_utc": { "type": "string" },
+    "sleeves": { "type": "array", "items": { "type": "object" } },
+    "only_promoted_sleeves_allowed": { "const": true },
+    "research_lab_artifacts_directly_executable": { "const": false },
+    "broker_submit_required": { "const": false },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

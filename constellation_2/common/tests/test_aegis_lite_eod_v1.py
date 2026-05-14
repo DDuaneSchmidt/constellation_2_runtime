@@ -245,3 +245,22 @@ def test_pipeline_writes_overlap_and_eod_artifacts_without_ib_submit(tmp_path: P
     assert Path(report["edge_overlap_review"]["path"]).exists()
     assert report["run_receipt"]["ib_submit_automation_invoked"] is False
     assert report["run_receipt"]["broker_transmit_control_touched"] is False
+
+
+def test_eod_engine_filters_candidates_to_promoted_sleeve_library_only() -> None:
+    from ops.tools.run_aegis_lite_eod_engine_v1 import filter_promoted_sleeve_candidates_v1
+
+    filtered = filter_promoted_sleeve_candidates_v1(
+        {
+            "candidates": [
+                _candidate(candidate_id="promoted", sleeve_id="C2_TREND_EQ_PRIMARY"),
+                _candidate(candidate_id="research-only", sleeve_id="C2_RESEARCH_ONLY"),
+            ]
+        },
+        {"sleeves": [{"sleeve_id": "C2_TREND_EQ_PRIMARY", "promotion_status": "promoted"}]},
+    )
+
+    assert [row["candidate_id"] for row in filtered["candidates"]] == ["promoted"]
+    assert filtered["promoted_sleeve_filter"]["rejected_candidate_count"] == 1
+    assert filtered["promoted_sleeve_filter"]["rejected_candidates"][0]["reason_code"] == "SLEEVE_NOT_IN_PROMOTED_LIBRARY"
+    assert filtered["promoted_sleeve_filter"]["research_lab_artifacts_directly_executable"] is False

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/manual_execution_receipt.v1.schema.json",
+  "title": "manual_execution_receipt.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "artifact_id", "receipt_id", "recommended_trade_id", "actual_symbol", "actual_side", "actual_quantity", "order_type", "fill_price", "fill_timestamp", "stop_order_entered", "stop_price", "operator_notes", "deviations_from_aegis_recommendation", "manual_observation_only", "broker_submit_required", "canonical_json_hash"],
+  "properties": {
+    "schema_id": { "const": "manual_execution_receipt" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "manual_execution_receipt_v1" },
+    "receipt_id": { "type": "string" },
+    "recommended_trade_id": { "type": "string" },
+    "actual_symbol": { "type": "string" },
+    "actual_side": { "type": "string" },
+    "actual_quantity": { "type": "integer", "minimum": 0 },
+    "order_type": { "type": "string" },
+    "fill_price": { "type": "string" },
+    "fill_timestamp": { "type": "string" },
+    "stop_order_entered": { "type": "boolean" },
+    "stop_price": { "type": "string" },
+    "operator_notes": { "type": "string" },
+    "deviations_from_aegis_recommendation": { "type": "array", "items": { "type": "string" } },
+    "manual_observation_only": { "const": true },
+    "broker_submit_required": { "const": false },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

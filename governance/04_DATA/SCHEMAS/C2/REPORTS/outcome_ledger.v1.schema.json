@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/outcome_ledger.v1.schema.json",
+  "title": "outcome_ledger.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "artifact_id", "generated_at_utc", "outcomes", "feeds_research_lab", "runtime_mutation_allowed", "broker_submit_required", "canonical_json_hash"],
+  "properties": {
+    "schema_id": { "const": "outcome_ledger" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "outcome_ledger_v1" },
+    "generated_at_utc": { "type": "string" },
+    "outcomes": { "type": "array", "items": { "type": "object" } },
+    "feeds_research_lab": { "const": true },
+    "runtime_mutation_allowed": { "const": false },
+    "broker_submit_required": { "const": false },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

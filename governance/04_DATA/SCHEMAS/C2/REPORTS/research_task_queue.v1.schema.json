@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/research_task_queue.v1.schema.json",
+  "title": "research_task_queue.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "artifact_id", "generated_at_utc", "tasks", "research_lab_only", "runtime_mutation_allowed", "broker_submit_required", "canonical_json_hash"],
+  "properties": {
+    "schema_id": { "const": "research_task_queue" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "research_task_queue_v1" },
+    "generated_at_utc": { "type": "string" },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["task_id", "task_type", "hypothesis_id", "source_trigger", "priority", "requested_action", "created_at", "status", "owner", "blocking_reason", "output_expected"],
+        "properties": {
+          "task_id": { "type": "string", "minLength": 1 },
+          "task_type": { "type": "string", "enum": ["exploratory_test", "retest", "sleeve_failure_review", "anomaly_review", "duplicate_review", "promotion_review", "retirement_review"] },
+          "hypothesis_id": { "type": "string", "minLength": 1 },
+          "source_trigger": { "type": "string", "minLength": 1 },
+          "priority": { "type": "string", "minLength": 1 },
+          "requested_action": { "type": "string", "minLength": 1 },
+          "created_at": { "type": "string" },
+          "status": { "type": "string", "enum": ["open", "completed", "blocked", "failed"] },
+          "owner": { "type": "string" },
+          "blocking_reason": { "type": "string" },
+          "output_expected": { "type": "string" }
+        }
+      }
+    },
+    "research_lab_only": { "const": true },
+    "runtime_mutation_allowed": { "const": false },
+    "broker_submit_required": { "const": false },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}
