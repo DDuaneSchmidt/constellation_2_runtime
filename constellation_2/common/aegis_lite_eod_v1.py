@@ -14,6 +14,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 OVERLAP_REVIEW_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/sleeve_edge_overlap_review.v1.schema.json"
 EOD_REPORT_SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/aegis_lite_eod_report.v1.schema.json"
 EXECUTABLE_RECOMMENDATIONS = {"approve", "approve_reduced_size"}
+SUPPORTED_MANUAL_TRADE_CLASSES = {
+    "LONG_EQUITY",
+    "SHORT_EQUITY",
+    "LONG_CALL_OPTION",
+    "LONG_PUT_OPTION",
+    "ETF_ROTATION_PAIR",
+}
 BLOCKING_RECOMMENDATIONS = {
     "block_due_to_duplicate_edge",
     "block_due_to_concentration",
@@ -113,28 +120,36 @@ def normalize_trade_candidate_v1(raw: dict[str, Any], *, ordinal: int = 1) -> di
     candidate_id = _text(raw.get("candidate_id")) or f"CANDIDATE_{ordinal:03d}"
     reason_codes = _string_list(raw.get("reason_codes"))
     blockers: list[str] = []
+    suggested_quantity = _int(raw.get("suggested_quantity"))
     if not _text(raw.get("entry_reference_price")):
         blockers.append("ENTRY_REFERENCE_MISSING")
     if not _text(raw.get("stop_price")) or not _text(raw.get("stop_logic")):
         blockers.append("STOP_RISK_MISSING")
     if not _text(raw.get("risk_per_trade")):
         blockers.append("RISK_PER_TRADE_MISSING")
-    if not _text(raw.get("sizing_guidance")) and int(raw.get("suggested_quantity") or 0) <= 0:
+    if not _text(raw.get("sizing_guidance")):
         blockers.append("SIZING_GUIDANCE_MISSING")
+    if suggested_quantity <= 0:
+        blockers.append("REQUESTED_QUANTITY_MISSING")
     for field_name in ("symbol", "direction", "instrument_type"):
         if not _text(raw.get(field_name)):
             blockers.append(f"{field_name.upper()}_MISSING")
     instrument_type = _text(raw.get("instrument_type") or raw.get("exposure") or "UNKNOWN").upper()
     if instrument_type in {"EQUITY", "LONG_EQUITY", "EQUITY_SPOT"}:
         instrument_type = "EQUITY_SPOT" if instrument_type == "EQUITY_SPOT" else "LONG_EQUITY"
+    direction = _text(raw.get("direction") or "UNKNOWN").upper()
+    trade_class = _trade_class_from_candidate(instrument_type=instrument_type, direction=direction)
+    if trade_class not in SUPPORTED_MANUAL_TRADE_CLASSES:
+        blockers.append("UNSUPPORTED_MANUAL_EXECUTION")
     return {
         "candidate_id": candidate_id,
         "sleeve_id": _text(raw.get("sleeve_id") or raw.get("sleeve_ownership") or "UNKNOWN"),
         "symbol": _text(raw.get("symbol") or raw.get("symbol_or_pair")).upper(),
-        "direction": _text(raw.get("direction") or "UNKNOWN").upper(),
+        "direction": direction,
         "instrument_type": instrument_type,
+        "trade_class": trade_class,
         "entry_reference_price": _text(raw.get("entry_reference_price")),
-        "suggested_quantity": int(raw.get("suggested_quantity") or 0),
+        "suggested_quantity": suggested_quantity,
         "sizing_guidance": _text(raw.get("sizing_guidance")),
         "stop_price": _text(raw.get("stop_price")),
         "stop_logic": _text(raw.get("stop_logic")),
@@ -263,9 +278,11 @@ def build_aegis_lite_eod_report_v1(
     )
     feedback["warnings"] = _dedupe([*feedback["warnings"], *_position_concentration_warnings(report_candidates, feedback["open_manual_positions"])])
     warnings = _dedupe([*_report_warnings(report_candidates, overlap_review, gates), *feedback["warnings"]])
-    blockers = _report_blockers(report_candidates, gates)
+    blockers = _dedupe([*_report_blockers(report_candidates, gates), *feedback["blockers"]])
     manual_ready = (
         not blockers
+        and all(gate["status"] == "PASS" for gate in gates)
+        and feedback["operator_execution_queue_ready"]
         and any(
             row["executable_status"] == "EXECUTABLE" and row["governance_adjusted_status"] in EXECUTABLE_RECOMMENDATIONS
             for row in report_candidates
@@ -363,6 +380,25 @@ def _safe_run_id(run_id: str) -> str:
 
 def _text(value: Any) -> str:
     return "" if value is None else str(value).strip()
+
+
+def _int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _trade_class_from_candidate(*, instrument_type: str, direction: str) -> str:
+    instrument = str(instrument_type or "").upper()
+    side = str(direction or "").upper()
+    if instrument in {"LONG_EQUITY", "EQUITY_SPOT"} and side == "SHORT":
+        return "SHORT_EQUITY"
+    if instrument in {"LONG_EQUITY", "EQUITY_SPOT"}:
+        return "LONG_EQUITY"
+    if instrument in SUPPORTED_MANUAL_TRADE_CLASSES:
+        return instrument
+    return instrument or "UNKNOWN"
 
 
 def _string_list(value: Any) -> list[str]:
@@ -587,11 +623,11 @@ def _report_candidate(candidate: dict[str, Any], note: dict[str, Any]) -> dict[s
 
 def _data_integrity_gate(status: dict[str, Any]) -> dict[str, Any]:
     raw_status = _text(status.get("status")).upper()
-    blocked = raw_status in {"", "BLOCKED", "FAIL", "FAILED", "STALE", "MISSING"}
+    passed = raw_status == "PASS"
     return {
         "gate_id": "DATA_INTEGRITY",
-        "status": "BLOCKED" if blocked else "PASS",
-        "reason_codes": _string_list(status.get("reason_codes")) or (["DATA_FRESHNESS_STALE_OR_MISSING"] if blocked else []),
+        "status": "PASS" if passed else "BLOCKED",
+        "reason_codes": _string_list(status.get("reason_codes")) or ([] if passed else [f"DATA_STATUS_NOT_PASS:{raw_status or 'MISSING'}"]),
     }
 
 
@@ -601,7 +637,10 @@ def _governance_integrity_gate(
     overlap_review: dict[str, Any],
 ) -> dict[str, Any]:
     reason_codes = _string_list(status.get("reason_codes"))
-    blocked = _text(status.get("status")).upper() in {"", "BLOCKED", "FAIL", "FAILED", "MISSING"}
+    raw_status = _text(status.get("status")).upper()
+    blocked = raw_status != "PASS"
+    if blocked and not reason_codes:
+        reason_codes.append(f"GOVERNANCE_STATUS_NOT_PASS:{raw_status or 'MISSING'}")
     if any(candidate["executable_status"] != "EXECUTABLE" for candidate in candidates):
         blocked = True
         reason_codes.append("CANDIDATE_NOT_EXECUTABLE")
@@ -677,6 +716,8 @@ def _feedback_summary(
     unsupported = _string_list(operator_execution_queue.get("unsupported_manual_execution_warnings"))
     decisions = _objects(manual_operator_decisions)
     attributions = _objects(trade_outcome_attribution.get("attributions"))
+    queue_rows = _objects(operator_execution_queue.get("execution_queue"))
+    protective_rows = _objects(protective_order_snapshot.get("protective_orders"))
     skipped = [
         {
             "candidate_id": str(row.get("candidate_id") or ""),
@@ -690,6 +731,13 @@ def _feedback_summary(
         *[f"MISSING_PROTECTIVE_STOP:{item}" for item in missing_stop_warnings],
         *[f"UNSUPPORTED_MANUAL_EXECUTION:{item}" for item in unsupported],
     ]
+    blockers = _feedback_blockers(
+        positions=positions,
+        protective_rows=protective_rows,
+        missing_stop_warnings=missing_stop_warnings,
+        unsupported_warnings=unsupported,
+        queue_rows=queue_rows,
+    )
     return {
         "open_manual_positions": positions,
         "missing_stop_warnings": missing_stop_warnings,
@@ -697,13 +745,60 @@ def _feedback_summary(
         "manual_execution_events": _objects(manual_execution_events),
         "current_exposure_by_edge_cluster": _objects(portfolio_position_snapshot.get("exposure_by_edge_cluster")),
         "current_exposure_by_sleeve": _objects(portfolio_position_snapshot.get("exposure_by_sleeve")),
-        "manual_execution_queue": _objects(operator_execution_queue.get("execution_queue")),
+        "manual_execution_queue": queue_rows,
         "skipped_candidate_tracking": skipped,
         "unsupported_manual_execution_warnings": unsupported,
         "performance_summary": _performance_summary(attributions),
         "edge_clusters": _objects(edge_cluster.get("edge_clusters")),
         "warnings": _dedupe(warnings),
+        "blockers": blockers,
+        "operator_execution_queue_ready": bool(queue_rows) and not any(blocker.startswith("OPERATOR_QUEUE") for blocker in blockers),
     }
+
+
+def _feedback_blockers(
+    *,
+    positions: list[dict[str, Any]],
+    protective_rows: list[dict[str, Any]],
+    missing_stop_warnings: list[str],
+    unsupported_warnings: list[str],
+    queue_rows: list[dict[str, Any]],
+) -> list[str]:
+    blockers: list[str] = []
+    blockers.extend([f"MISSING_PROTECTIVE_STOP:{item}" for item in missing_stop_warnings])
+    blockers.extend([f"UNSUPPORTED_MANUAL_EXECUTION:{item}" for item in unsupported_warnings])
+    if positions and not protective_rows:
+        blockers.append("PROTECTIVE_ORDER_SNAPSHOT_MISSING_FOR_OPEN_POSITIONS")
+    protected_keys = {
+        str(row.get("position_id") or row.get("candidate_id") or "").strip()
+        for row in protective_rows
+        if str(row.get("position_id") or row.get("candidate_id") or "").strip()
+    }
+    for row in positions:
+        position_key = str(row.get("position_id") or row.get("candidate_id") or "").strip()
+        if position_key and protective_rows and position_key not in protected_keys:
+            blockers.append(f"PROTECTIVE_ORDER_MISSING_FOR_OPEN_POSITION:{position_key}")
+    for row in protective_rows:
+        status = str(row.get("protection_status") or "").upper()
+        if status != "PROTECTED" or bool(row.get("operator_action_required")):
+            blockers.append(f"UNPROTECTED_OPEN_POSITION:{row.get('candidate_id') or row.get('position_id') or 'UNKNOWN'}:{status or 'UNKNOWN'}")
+    if not queue_rows:
+        blockers.append("OPERATOR_QUEUE_MISSING")
+    for row in queue_rows:
+        candidate_id = str(row.get("candidate_id") or "UNKNOWN")
+        status = str(row.get("queue_status") or "").upper()
+        recipe = str(row.get("manual_execution_recipe") or "").strip()
+        required_orders = [str(item).strip() for item in row.get("required_orders", []) if str(item).strip()]
+        confirmations = [str(item).strip() for item in row.get("operator_confirmations", []) if str(item).strip()]
+        if status != "READY_FOR_MANUAL_ENTRY":
+            blockers.append(f"OPERATOR_QUEUE_ITEM_NOT_READY:{candidate_id}:{status or 'MISSING'}")
+        if not recipe or recipe == "UNSUPPORTED_MANUAL_EXECUTION":
+            blockers.append(f"OPERATOR_QUEUE_ITEM_MISSING_RECIPE:{candidate_id}")
+        if "PROTECTIVE_STOP" not in required_orders or not bool(row.get("stop_required")):
+            blockers.append(f"OPERATOR_QUEUE_ITEM_MISSING_STOP_ORDER:{candidate_id}")
+        if not confirmations:
+            blockers.append(f"OPERATOR_QUEUE_ITEM_MISSING_CONFIRMATIONS:{candidate_id}")
+    return _dedupe(blockers)
 
 
 def _position_concentration_warnings(candidates: list[dict[str, Any]], positions: list[dict[str, Any]]) -> list[str]:
@@ -717,10 +812,15 @@ def _position_concentration_warnings(candidates: list[dict[str, Any]], positions
 
 
 def _performance_summary(attributions: list[dict[str, Any]]) -> dict[str, Any]:
-    if not attributions:
+    evidence_rows = [
+        row
+        for row in attributions
+        if any(str(item).strip() for item in row.get("model_forward_returns", []) if str(item).strip() != "PENDING_FORWARD_ANALYSIS")
+    ]
+    if not evidence_rows:
         return {
             "status": "UNAVAILABLE",
-            "candidate_count": 0,
+            "candidate_count": len(attributions),
             "skipped_candidate_count": 0,
             "reason_codes": ["TRADE_OUTCOME_ATTRIBUTION_MISSING"],
         }
@@ -732,7 +832,7 @@ def _performance_summary(attributions: list[dict[str, Any]]) -> dict[str, Any]:
     ]
     return {
         "status": "AVAILABLE",
-        "candidate_count": len(attributions),
+        "candidate_count": len(evidence_rows),
         "skipped_candidate_count": len(skipped),
         "reason_codes": [],
         "sleeve_signal_quality": _quality_counts(attributions, "sleeve_signal_quality"),

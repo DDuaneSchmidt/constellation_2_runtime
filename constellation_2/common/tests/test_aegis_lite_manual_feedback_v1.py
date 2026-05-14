@@ -273,3 +273,150 @@ def test_eod_report_remains_manual_execution_first(tmp_path: Path) -> None:
     assert report["operating_model"]["broker_submit_required"] is False
     assert report["manual_execution_queue"]
     assert report["edge_clusters"]
+
+
+def test_unsupported_trade_class_cannot_be_executable(tmp_path: Path) -> None:
+    candidate = _candidate(instrument_type="MULTI_LEG_SPREAD")
+    clusters = build_edge_cluster_v1(day_utc=DAY, run_id=RUN_ID, candidates=[candidate])
+    queue = build_operator_execution_queue_v1(day_utc=DAY, run_id=RUN_ID, candidates=[candidate], edge_clusters=clusters)
+    report = _base_report(tmp_path, [candidate], edge_cluster=clusters, operator_execution_queue=queue)
+
+    assert report["selected_trade_candidates"][0]["executable_status"] == "NON_EXECUTABLE"
+    assert "UNSUPPORTED_MANUAL_EXECUTION" in report["selected_trade_candidates"][0]["blockers"]
+    assert report["manual_execution_status"] == "NOT_READY"
+
+
+def test_ready_for_manual_entry_requires_operator_queue(tmp_path: Path) -> None:
+    report = _base_report(tmp_path, [_candidate()])
+
+    assert report["manual_execution_status"] == "NOT_READY"
+    assert "OPERATOR_QUEUE_MISSING" in report["do_not_trade_blockers"]
+
+
+def test_missing_protective_stop_blocks_readiness(tmp_path: Path) -> None:
+    candidate = _candidate()
+    clusters = build_edge_cluster_v1(day_utc=DAY, run_id=RUN_ID, candidates=[candidate])
+    queue = build_operator_execution_queue_v1(day_utc=DAY, run_id=RUN_ID, candidates=[candidate], edge_clusters=clusters)
+    protective = build_protective_order_snapshot_v1(
+        day_utc=DAY,
+        run_id=RUN_ID,
+        snapshot_time_utc=NOW,
+        protective_orders=[
+            {
+                "snapshot_time_utc": NOW,
+                "position_id": "pos-spy",
+                "candidate_id": "trend-spy",
+                "symbol": "SPY",
+                "quantity": 1,
+                "stop_exists": False,
+                "stop_quantity": 0,
+            }
+        ],
+    )
+    report = _base_report(
+        tmp_path,
+        [candidate],
+        edge_cluster=clusters,
+        operator_execution_queue=queue,
+        protective_order_snapshot=protective,
+    )
+
+    assert report["manual_execution_status"] == "NOT_READY"
+    assert any(item.startswith("MISSING_PROTECTIVE_STOP") for item in report["do_not_trade_blockers"])
+
+
+def test_unknown_warn_and_malformed_status_block_readiness(tmp_path: Path) -> None:
+    candidate = _candidate()
+    clusters = build_edge_cluster_v1(day_utc=DAY, run_id=RUN_ID, candidates=[candidate])
+    queue = build_operator_execution_queue_v1(day_utc=DAY, run_id=RUN_ID, candidates=[candidate], edge_clusters=clusters)
+    overlap = build_sleeve_edge_overlap_review_v1(day_utc=DAY, run_id=RUN_ID, generated_at_utc=NOW, candidates=[candidate])
+
+    for status in ("UNKNOWN", "WARN", "NOT_A_STATUS"):
+        report = build_aegis_lite_eod_report_v1(
+            day_utc=DAY,
+            run_id=f"{RUN_ID}-{status}",
+            generated_at_utc=NOW,
+            truth_root=tmp_path,
+            candidates=[candidate],
+            overlap_review=overlap,
+            data_freshness_status={"status": status, "reason_codes": []},
+            governance_status={"status": "PASS", "reason_codes": []},
+            edge_cluster=clusters,
+            operator_execution_queue=queue,
+        )
+        assert report["manual_execution_status"] == "NOT_READY"
+        assert next(gate for gate in report["gates"] if gate["gate_id"] == "DATA_INTEGRITY")["status"] == "BLOCKED"
+
+
+def test_missing_entry_stop_risk_or_quantity_blocks_queue_readiness() -> None:
+    cases = [
+        _candidate(candidate_id="missing-entry", entry_reference_price=""),
+        _candidate(candidate_id="missing-stop", stop_price=""),
+        _candidate(candidate_id="missing-risk", risk_per_trade=""),
+        _candidate(candidate_id="missing-quantity", suggested_quantity=0),
+    ]
+    clusters = build_edge_cluster_v1(day_utc=DAY, run_id=RUN_ID, candidates=cases)
+    queue = build_operator_execution_queue_v1(day_utc=DAY, run_id=RUN_ID, candidates=cases, edge_clusters=clusters)
+
+    assert all(row["queue_status"] == "BLOCKED" for row in queue["execution_queue"])
+    assert all(row["reason_codes"] for row in queue["execution_queue"])
+
+
+def test_unprotected_open_position_creates_do_not_trade_blocker(tmp_path: Path) -> None:
+    candidate = _candidate()
+    clusters = build_edge_cluster_v1(day_utc=DAY, run_id=RUN_ID, candidates=[candidate])
+    queue = build_operator_execution_queue_v1(day_utc=DAY, run_id=RUN_ID, candidates=[candidate], edge_clusters=clusters)
+    positions = build_portfolio_position_snapshot_v1(
+        day_utc=DAY,
+        run_id=RUN_ID,
+        snapshot_time_utc=NOW,
+        source="MANUAL",
+        cash="100000",
+        net_liquidation="100500",
+        open_positions=[
+            {
+                "position_id": "pos-spy",
+                "candidate_id": "trend-spy",
+                "sleeve_id": "C2_TREND_EQ_PRIMARY",
+                "edge_cluster_id": "EDGE_CLUSTER_001",
+                "symbol": "SPY",
+                "direction": "LONG",
+                "quantity": 1,
+                "average_entry_price": "519.00",
+                "current_reference_price": "520.00",
+                "unrealized_pnl": "1.00",
+            }
+        ],
+    )
+    report = _base_report(tmp_path, [candidate], edge_cluster=clusters, operator_execution_queue=queue, portfolio_position_snapshot=positions)
+
+    assert "PROTECTIVE_ORDER_SNAPSHOT_MISSING_FOR_OPEN_POSITIONS" in report["do_not_trade_blockers"]
+    assert report["manual_execution_status"] == "NOT_READY"
+
+
+def test_performance_summary_unavailable_without_forward_return_evidence(tmp_path: Path) -> None:
+    decision = build_manual_operator_decision_v1(
+        day_utc=DAY,
+        run_id=RUN_ID,
+        candidate_id="trend-spy",
+        sleeve_id="C2_TREND_EQ_PRIMARY",
+        decision="SKIPPED",
+        decision_time_utc=NOW,
+    )
+    attribution = build_trade_outcome_attribution_v1(day_utc=DAY, run_id=RUN_ID, candidates=[_candidate()], decisions=[decision])
+    report = _base_report(tmp_path, [_candidate()], manual_operator_decisions=[decision], trade_outcome_attribution=attribution)
+
+    assert report["performance_summary"]["status"] == "UNAVAILABLE"
+
+
+def test_edge_clusters_do_not_merge_opposite_direction_candidates() -> None:
+    clusters = build_edge_cluster_v1(
+        day_utc=DAY,
+        run_id=RUN_ID,
+        candidates=[
+            _candidate(candidate_id="long-spy", direction="LONG", thesis_id="SPY_PAIR"),
+            _candidate(candidate_id="short-spy", direction="SHORT", thesis_id="SPY_PAIR"),
+        ],
+    )
+
+    assert len(clusters["edge_clusters"]) == 2

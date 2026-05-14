@@ -37,6 +37,22 @@ The artifact always declares:
 
 Report success does not require IB submit authority. The report does not submit orders, enable transmit, or clear safety gates.
 
+## READY_FOR_MANUAL_ENTRY
+
+`READY_FOR_MANUAL_ENTRY` is fail-closed. It is emitted only when:
+
+- Data integrity status is exactly `PASS`.
+- Governance status is exactly `PASS`.
+- Every candidate has symbol, direction, instrument type, entry reference, stop, risk, and positive quantity.
+- Every candidate is in a supported manual trade class.
+- A valid `operator_execution_queue.v1` is present.
+- Queue items are `READY_FOR_MANUAL_ENTRY`.
+- Manual recipes are present.
+- There are no do-not-trade blockers.
+- Protective stop requirements for open manual positions are satisfied.
+
+Unknown, missing, malformed, `WARN`, or `REVIEW_REQUIRED` statuses block readiness. Reports can still be generated as advisory artifacts, but they must not be treated as manual-entry ready.
+
 ## Fail-Closed Rules
 
 Missing critical candidate fields make a candidate non-executable or manual-review-required:
@@ -48,6 +64,8 @@ Missing critical candidate fields make a candidate non-executable or manual-revi
 - Missing symbol, direction, or instrument type.
 
 Stale or missing market data blocks Gate 1. Missing governance or non-executable candidates block Gate 2. Incomplete report fields or missing overlap review block Gate 3.
+
+Do-not-trade blockers include missing entry, missing stop, missing risk, missing quantity, unsupported manual execution, malformed status, missing queue, missing recipe, missing protective stop, and unprotected open positions.
 
 ## Replay
 

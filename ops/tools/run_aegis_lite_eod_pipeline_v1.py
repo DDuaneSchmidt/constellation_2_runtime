@@ -25,6 +25,12 @@ from constellation_2.common.aegis_lite_eod_v1 import (  # noqa: E402
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1, resolve_fact_plane_truth_root_v1  # noqa: E402
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1  # noqa: E402
 from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1  # noqa: E402
+from constellation_2.common.aegis_lite_manual_feedback_v1 import (  # noqa: E402
+    build_edge_cluster_v1,
+    build_operator_execution_queue_v1,
+    validate_manual_feedback_artifact_v1,
+    write_manual_feedback_artifact_v1,
+)
 
 
 def build_aegis_lite_eod_pipeline_v1(
@@ -47,6 +53,28 @@ def build_aegis_lite_eod_pipeline_v1(
     )
     validate_sleeve_edge_overlap_review_v1(overlap)
     overlap_path = write_sleeve_edge_overlap_review_v1(truth_root=truth_root, payload=overlap)
+    edge_cluster = _object(input_payload.get("edge_cluster"))
+    edge_cluster_path: Path | None = None
+    if not edge_cluster:
+        edge_cluster = build_edge_cluster_v1(day_utc=day_utc, run_id=run_id, candidates=candidates)
+        validate_manual_feedback_artifact_v1(edge_cluster)
+        edge_cluster_path = write_manual_feedback_artifact_v1(truth_root=truth_root, payload=edge_cluster)
+    operator_execution_queue = _object(input_payload.get("operator_execution_queue"))
+    operator_queue_path: Path | None = None
+    if not operator_execution_queue:
+        operator_execution_queue = build_operator_execution_queue_v1(
+            day_utc=day_utc,
+            run_id=run_id,
+            candidates=candidates,
+            edge_clusters=edge_cluster,
+        )
+        validate_manual_feedback_artifact_v1(operator_execution_queue)
+        operator_queue_path = write_manual_feedback_artifact_v1(truth_root=truth_root, payload=operator_execution_queue)
+    generated_refs = [artifact_ref_v1(overlap_path, artifact_type="sleeve_edge_overlap_review_v1")]
+    if edge_cluster_path is not None:
+        generated_refs.append(artifact_ref_v1(edge_cluster_path, artifact_type="edge_cluster_v1"))
+    if operator_queue_path is not None:
+        generated_refs.append(artifact_ref_v1(operator_queue_path, artifact_type="operator_execution_queue_v1"))
     report = build_aegis_lite_eod_report_v1(
         day_utc=day_utc,
         run_id=run_id,
@@ -62,14 +90,14 @@ def build_aegis_lite_eod_pipeline_v1(
         sleeve_performance_summary=_objects(input_payload.get("sleeve_performance_summary")),
         sandbox_research_notes=_objects(input_payload.get("sandbox_research_notes")),
         operator_notes=operator_notes or str(input_payload.get("operator_notes") or ""),
-        source_artifact_lineage=[*source_lineage, artifact_ref_v1(overlap_path, artifact_type="sleeve_edge_overlap_review_v1")],
+        source_artifact_lineage=[*source_lineage, *generated_refs],
         manual_operator_decisions=_objects(input_payload.get("manual_operator_decisions")),
         manual_execution_events=_objects(input_payload.get("manual_execution_events")),
         portfolio_position_snapshot=_object(input_payload.get("portfolio_position_snapshot")),
         protective_order_snapshot=_object(input_payload.get("protective_order_snapshot")),
         trade_outcome_attribution=_object(input_payload.get("trade_outcome_attribution")),
-        edge_cluster=_object(input_payload.get("edge_cluster")),
-        operator_execution_queue=_object(input_payload.get("operator_execution_queue")),
+        edge_cluster=edge_cluster,
+        operator_execution_queue=operator_execution_queue,
     )
     out_path = Path(str(report["artifact_path"]))
     attach_producer_contract_v1(
@@ -80,7 +108,7 @@ def build_aegis_lite_eod_pipeline_v1(
             f"--day_utc {day_utc} --truth_root {truth_root} --run_id {run_id}"
         ),
         input_artifacts=[Path(ref.get("path", "")) for ref in source_lineage if isinstance(ref, dict) and str(ref.get("path") or "")],
-        output_artifacts=[overlap_path, out_path],
+        output_artifacts=[path for path in [overlap_path, edge_cluster_path, operator_queue_path, out_path] if path is not None],
         schema_versions={"sleeve_edge_overlap_review": "v1", "aegis_lite_eod_report": "v1"},
     )
     report["run_receipt"]["producer_contract_attached"] = True

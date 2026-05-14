@@ -18,6 +18,10 @@ from constellation_2.common.aegis_lite_eod_v1 import (  # noqa: E402
     validate_aegis_lite_eod_report_v1,
     validate_sleeve_edge_overlap_review_v1,
 )
+from constellation_2.common.aegis_lite_manual_feedback_v1 import (  # noqa: E402
+    build_edge_cluster_v1,
+    build_operator_execution_queue_v1,
+)
 
 
 DAY = "2026-05-14"
@@ -80,6 +84,13 @@ def _report(tmp_path: Path, candidates: list[dict[str, object]], *, freshness: s
         source_artifact_lineage=[],
     )
     validate_sleeve_edge_overlap_review_v1(overlap)
+    edge_cluster = build_edge_cluster_v1(day_utc=DAY, run_id=RUN_ID, candidates=candidates)
+    operator_queue = build_operator_execution_queue_v1(
+        day_utc=DAY,
+        run_id=RUN_ID,
+        candidates=candidates,
+        edge_clusters=edge_cluster,
+    )
     report = build_aegis_lite_eod_report_v1(
         day_utc=DAY,
         run_id=RUN_ID,
@@ -91,6 +102,8 @@ def _report(tmp_path: Path, candidates: list[dict[str, object]], *, freshness: s
         governance_status=_governance(),
         market_regime_state={"status": "RISK_ON", "reason_codes": []},
         source_artifact_lineage=[],
+        edge_cluster=edge_cluster,
+        operator_execution_queue=operator_queue,
     )
     validate_aegis_lite_eod_report_v1(report)
     return report

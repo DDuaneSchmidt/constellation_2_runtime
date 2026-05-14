@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -168,8 +169,10 @@ def build_portfolio_position_snapshot_v1(
         "open_positions": positions,
         "cash": str(cash),
         "net_liquidation": str(net_liquidation),
-        "gross_exposure": str(sum(abs(int(row["quantity"])) for row in positions)),
-        "net_exposure": str(sum(int(row["quantity"]) for row in positions)),
+        "gross_exposure": _gross_exposure(positions),
+        "net_exposure": _net_exposure(positions),
+        "exposure_basis": _exposure_basis(positions),
+        "exposure_warnings": _exposure_warnings(positions),
         "exposure_by_symbol": _exposure_by(positions, "symbol"),
         "exposure_by_edge_cluster": _exposure_by(positions, "edge_cluster_id"),
         "exposure_by_sleeve": _exposure_by(positions, "sleeve_id"),
@@ -230,7 +233,11 @@ def build_edge_cluster_v1(
             candidate["thesis_id"],
             candidate["edge_family"],
             candidate["regime_dependency"],
+            candidate["direction"],
             ",".join(candidate["shared_risk_tags"]),
+            ",".join(candidate["correlated_symbols"]),
+            candidate["macro_sensitivity"],
+            candidate["volatility_liquidity_dependency"],
         )
         grouped.setdefault(key, []).append(candidate)
     clusters: list[dict[str, Any]] = []
@@ -242,7 +249,8 @@ def build_edge_cluster_v1(
                 "thesis_id": key[0],
                 "edge_family": key[1],
                 "regime_dependency": key[2],
-                "shared_risk_tags": key[3].split(",") if key[3] else [],
+                "direction": key[3],
+                "shared_risk_tags": key[4].split(",") if key[4] else [],
                 "correlated_symbols": sorted({symbol for row in rows for symbol in row["correlated_symbols"]}),
                 "candidates_in_cluster": [row["candidate_id"] for row in rows],
                 "duplicate_thesis_flag": len(rows) > 1,
@@ -284,7 +292,9 @@ def build_operator_execution_queue_v1(
     for idx, raw in enumerate(candidates, start=1):
         candidate = normalize_trade_candidate_v1(raw, ordinal=idx)
         trade_class = _trade_class(candidate)
-        supported = trade_class in SUPPORTED_TRADE_CLASSES
+        readiness_blockers = _queue_item_blockers(candidate=candidate, trade_class=trade_class)
+        supported = "UNSUPPORTED_MANUAL_EXECUTION" not in readiness_blockers
+        queue_status = "READY_FOR_MANUAL_ENTRY" if not readiness_blockers else ("UNSUPPORTED_MANUAL_EXECUTION" if not supported else "BLOCKED")
         rows.append(
             {
                 "run_id": run_id,
@@ -292,7 +302,7 @@ def build_operator_execution_queue_v1(
                 "candidate_id": candidate["candidate_id"],
                 "priority_rank": idx,
                 "trade_class": trade_class,
-                "manual_execution_recipe": _manual_recipe(candidate, trade_class, supported),
+                "manual_execution_recipe": _manual_recipe(raw, candidate, trade_class, supported),
                 "required_orders": _required_orders(candidate, trade_class, supported),
                 "stop_required": True,
                 "skip_ok_flag": True,
@@ -300,8 +310,8 @@ def build_operator_execution_queue_v1(
                 "edge_cluster_id": cluster_by_candidate.get(candidate["candidate_id"], ""),
                 "risk_bucket": ",".join(candidate["shared_risk_tags"]) or "UNCLASSIFIED",
                 "operator_confirmations": _operator_confirmations(supported),
-                "queue_status": "READY_FOR_MANUAL_REVIEW" if supported else "UNSUPPORTED_MANUAL_EXECUTION",
-                "reason_codes": [] if supported else ["UNSUPPORTED_MANUAL_EXECUTION"],
+                "queue_status": queue_status,
+                "reason_codes": readiness_blockers,
             }
         )
     payload = {
@@ -399,9 +409,15 @@ def _protective_order(row: dict[str, Any]) -> dict[str, Any]:
     stop_exists = bool(row.get("stop_exists"))
     quantity = int(row.get("quantity") or 0)
     stop_quantity = int(row.get("stop_quantity") or 0)
-    if not stop_exists:
+    required_quantity = abs(quantity)
+    stop_price = str(row.get("stop_price") or "").strip()
+    source_incomplete = not str(row.get("position_id") or "").strip() or not str(row.get("symbol") or "").strip() or required_quantity <= 0
+    valid_stop = stop_exists and bool(stop_price) and stop_quantity > 0
+    if source_incomplete:
+        status = "UNKNOWN"
+    elif not valid_stop:
         status = "UNPROTECTED"
-    elif stop_quantity < quantity:
+    elif stop_quantity < required_quantity:
         status = "PARTIALLY_PROTECTED"
     else:
         status = "PROTECTED"
@@ -412,11 +428,11 @@ def _protective_order(row: dict[str, Any]) -> dict[str, Any]:
         "symbol": str(row.get("symbol") or "").upper(),
         "quantity": quantity,
         "stop_exists": stop_exists,
-        "stop_price": str(row.get("stop_price") or ""),
+        "stop_price": stop_price,
         "stop_quantity": stop_quantity,
-        "protection_status": str(row.get("protection_status") or status).upper(),
-        "missing_stop_warning": (not stop_exists) or status in {"UNPROTECTED", "PARTIALLY_PROTECTED"},
-        "operator_action_required": (not stop_exists) or status in {"UNPROTECTED", "PARTIALLY_PROTECTED"},
+        "protection_status": status,
+        "missing_stop_warning": status != "PROTECTED",
+        "operator_action_required": status != "PROTECTED",
     }
 
 
@@ -426,6 +442,32 @@ def _exposure_by(positions: list[dict[str, Any]], key: str) -> list[dict[str, An
         bucket = str(row.get(key) or "UNKNOWN")
         totals[bucket] = totals.get(bucket, 0) + int(row["quantity"])
     return [{"key": key_value, "net_quantity": quantity} for key_value, quantity in sorted(totals.items())]
+
+
+def _exposure_basis(positions: list[dict[str, Any]]) -> str:
+    if not positions:
+        return "NONE"
+    if all(_decimal(row.get("current_reference_price")) is not None for row in positions):
+        return "NOTIONAL"
+    return "QUANTITY_ONLY"
+
+
+def _exposure_warnings(positions: list[dict[str, Any]]) -> list[str]:
+    if positions and _exposure_basis(positions) == "QUANTITY_ONLY":
+        return ["EXPOSURE_BASIS_QUANTITY_ONLY"]
+    return []
+
+
+def _gross_exposure(positions: list[dict[str, Any]]) -> str:
+    if _exposure_basis(positions) == "NOTIONAL":
+        return _decimal_string(sum(abs(Decimal(int(row["quantity"])) * _decimal(row["current_reference_price"])) for row in positions))
+    return str(sum(abs(int(row["quantity"])) for row in positions))
+
+
+def _net_exposure(positions: list[dict[str, Any]]) -> str:
+    if _exposure_basis(positions) == "NOTIONAL":
+        return _decimal_string(sum(Decimal(int(row["quantity"])) * _decimal(row["current_reference_price"]) for row in positions))
+    return str(sum(int(row["quantity"]) for row in positions))
 
 
 def _trade_class(candidate: dict[str, Any]) -> str:
@@ -440,13 +482,44 @@ def _trade_class(candidate: dict[str, Any]) -> str:
     return instrument or "UNKNOWN"
 
 
-def _manual_recipe(candidate: dict[str, Any], trade_class: str, supported: bool) -> str:
+def _queue_item_blockers(*, candidate: dict[str, Any], trade_class: str) -> list[str]:
+    blockers = list(candidate.get("blockers") or [])
+    if trade_class not in SUPPORTED_TRADE_CLASSES:
+        blockers.append("UNSUPPORTED_MANUAL_EXECUTION")
+    if int(candidate.get("suggested_quantity") or 0) <= 0:
+        blockers.append("REQUESTED_QUANTITY_MISSING")
+    for field_name, reason_code in (
+        ("symbol", "SYMBOL_MISSING"),
+        ("direction", "DIRECTION_MISSING"),
+        ("instrument_type", "INSTRUMENT_TYPE_MISSING"),
+        ("entry_reference_price", "ENTRY_REFERENCE_MISSING"),
+        ("stop_price", "STOP_RISK_MISSING"),
+        ("risk_per_trade", "RISK_PER_TRADE_MISSING"),
+    ):
+        if not str(candidate.get(field_name) or "").strip() or str(candidate.get(field_name) or "").strip().upper() == "UNKNOWN":
+            blockers.append(reason_code)
+    if str(candidate.get("executable_status") or "") != "EXECUTABLE":
+        blockers.append("CANDIDATE_NOT_EXECUTABLE")
+    return sorted(set(blockers))
+
+
+def _manual_recipe(raw: dict[str, Any], candidate: dict[str, Any], trade_class: str, supported: bool) -> str:
     if not supported:
         return "UNSUPPORTED_MANUAL_EXECUTION"
+    account = str(raw.get("account") or raw.get("account_id") or "UNSPECIFIED_ACCOUNT")
+    mode = str(raw.get("mode") or raw.get("environment") or "PAPER")
+    side = "SELL" if trade_class == "SHORT_EQUITY" else "BUY"
+    order_type = str(raw.get("order_type") or "MKT").upper()
+    stop_order_type = str(raw.get("stop_order_type") or "STP").upper()
+    stop_quantity = int(raw.get("stop_quantity") or candidate["suggested_quantity"])
     return (
-        f"Manual {trade_class}: {candidate['direction']} {candidate['symbol']} "
-        f"quantity={candidate['suggested_quantity']} entry_ref={candidate['entry_reference_price']} "
-        f"stop={candidate['stop_price']}"
+        f"Manual {trade_class} account={account} mode={mode} side={side} symbol={candidate['symbol']} "
+        f"quantity={candidate['suggested_quantity']} order_type={order_type} "
+        f"entry_instruction=use entry_ref {candidate['entry_reference_price']} as manual reference; "
+        f"stop_order_type={stop_order_type} stop_price={candidate['stop_price']} stop_quantity={stop_quantity}; "
+        "sequence=1 enter position, 2 immediately enter protective stop, 3 confirm stop accepted; "
+        "if_price_moved_materially=skip or mark MODIFIED and require operator note; "
+        "confirmations=CONFIRM_SYMBOL,CONFIRM_SIZE,CONFIRM_ENTRY,CONFIRM_STOP,CAPTURE_MANUAL_FILL"
     )
 
 
@@ -460,6 +533,20 @@ def _operator_confirmations(supported: bool) -> list[str]:
     if not supported:
         return ["MANUAL_REVIEW_UNSUPPORTED_STRUCTURE"]
     return ["CONFIRM_SYMBOL", "CONFIRM_SIZE", "CONFIRM_ENTRY", "CONFIRM_STOP", "CAPTURE_MANUAL_FILL"]
+
+
+def _decimal(value: Any) -> Decimal | None:
+    try:
+        text = str(value or "").strip()
+        return Decimal(text) if text else None
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _decimal_string(value: Decimal) -> str:
+    if value == value.to_integral_value():
+        return str(value.quantize(Decimal("1")))
+    return str(value.normalize())
 
 
 def _strings(value: Any) -> list[str]:

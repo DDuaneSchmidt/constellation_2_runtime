@@ -67,7 +67,7 @@
         "edge_cluster_id": { "type": "string" },
         "risk_bucket": { "type": "string" },
         "operator_confirmations": { "type": "array", "items": { "type": "string" } },
-        "queue_status": { "type": "string", "enum": ["READY_FOR_MANUAL_REVIEW", "UNSUPPORTED_MANUAL_EXECUTION"] },
+        "queue_status": { "type": "string", "enum": ["READY_FOR_MANUAL_ENTRY", "BLOCKED", "UNSUPPORTED_MANUAL_EXECUTION"] },
         "reason_codes": { "type": "array", "items": { "type": "string" } }
       }
     }

@@ -19,4 +19,6 @@ This layer is observational. It does not submit orders, enable transmit, automat
 - Broker submit and transmit automation remain false.
 - Unsupported manual trade classes fail closed as `UNSUPPORTED_MANUAL_EXECUTION`.
 - Open manual positions without confirmed stops create report warnings.
+- Missing protective stops, unsupported execution, missing queue, missing recipe, malformed status, and unprotected open positions are do-not-trade blockers for manual readiness.
+- Only explicit `PASS` passes data/governance gates; unknown, warning, review-required, missing, or malformed statuses block readiness.
 - Sleeve, edge, governance, and operator execution quality are measured separately.
