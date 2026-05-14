@@ -303,6 +303,10 @@ def _alloc_path(truth_root: Path, day: str) -> Path:
     return (truth_root / "allocation_v1" / "capital_authority_allocation_v1" / day / "capital_authority_allocation.v1.json").resolve()
 
 
+def _strategy_decision_authority_path(truth_root: Path, day: str) -> Path:
+    return (truth_root / "reports" / "strategy_decision_authority_v1" / day / "strategy_decision_authority.v1.json").resolve()
+
+
 def _intents_dir(truth_root: Path, day: str) -> Path:
     return (truth_root / "intents_v1" / "snapshots" / day).resolve()
 
@@ -423,6 +427,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         raise SystemExit(f"FAIL: ALLOCATION_AUTHORITY_MISSING: {str(p_alloc)}")
     alloc_sha = _sha256_file(p_alloc)
     alloc_obj = _read_json_obj(p_alloc)
+
+    p_strategy = _strategy_decision_authority_path(truth_root, day)
+    if not p_strategy.exists():
+        raise SystemExit(f"FAIL: STRATEGY_DECISION_AUTHORITY_MISSING: {str(p_strategy)}")
+    strategy_sha = _sha256_file(p_strategy)
 
     intents_dir = _intents_dir(truth_root, day)
     if not intents_dir.exists() or not intents_dir.is_dir():
@@ -635,6 +644,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             "input_manifest": [
                 {"type": "intent", "path": str(p.resolve()), "sha256": intent_sha, "day_utc": day, "producer": "intents_v1"},
                 {"type": "capital_authority_allocation", "path": str(p_alloc), "sha256": alloc_sha, "day_utc": day, "producer": "allocation_v1"},
+                {"type": "strategy_decision_authority", "path": str(p_strategy), "sha256": strategy_sha, "day_utc": day, "producer": "strategy_decision_authority_v1"},
                 {"type": "policy_manifest", "path": str(POLICY_PATH), "sha256": pol_sha, "day_utc": None, "producer": "governance"},
                 {"type": "other", "path": "git:HEAD", "sha256": producer_git_sha_hash, "day_utc": None, "producer": "git"},
             ],

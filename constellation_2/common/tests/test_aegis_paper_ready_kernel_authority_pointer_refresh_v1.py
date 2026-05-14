@@ -118,6 +118,52 @@ def test_same_day_pass_verdict_triggers_pointer_append_and_head_materialization(
     assert head["points_to"] == str(_verdict_path(sleeve_root))
 
 
+def test_strategy_decision_authority_runs_before_authorization_artifacts() -> None:
+    stages = kernel._stages(
+        target_day=DAY,
+        canonical_truth_root=Path("/tmp/canonical"),
+        paper_sleeve_root=Path("/tmp/sleeve"),
+        environment="PAPER",
+        ib_account="DUO847203",
+        release_commit="1" * 40,
+    )
+    stage_ids = [stage.stage_id for stage in stages]
+
+    assert stage_ids.index("strategy_decision_authority") < stage_ids.index("authorization_artifacts")
+    assert stage_ids.index("authorization_artifacts") < stage_ids.index("authorization_supply")
+
+
+def test_strategy_decision_authority_with_active_intents_satisfies_kernel_stage(tmp_path: Path) -> None:
+    artifact = tmp_path / "reports" / "strategy_decision_authority_v1" / DAY / "strategy_decision_authority.v1.json"
+    _write_json(
+        artifact,
+        {
+            "schema_id": "C2_STRATEGY_DECISION_AUTHORITY_V1",
+            "schema_version": 1,
+            "day_utc": DAY,
+            "status": "FAIL",
+            "strategy_decision_state": "SIGNAL_MISSING",
+            "intent_count": 2,
+        },
+    )
+    stage = kernel._stage(
+        "strategy_decision_authority",
+        "authorization",
+        ["python3", "ops/tools/run_strategy_decision_authority_v1.py"],
+        "PAPER_SLEEVE",
+        Path("reports/strategy_decision_authority_v1") / DAY / "strategy_decision_authority.v1.json",
+        ("PASS", "READY", "OK"),
+        "",
+        "",
+    )
+
+    result = kernel._validate_stage_artifact(stage=stage, artifact_path=artifact, target_day=DAY)
+
+    assert result["status"] == "PASS"
+    assert result["artifact_status"] == "FAIL"
+    assert result["intent_count"] == 2
+
+
 def test_same_day_bootstrap_pass_verdict_can_refresh_with_existing_pointer_rules(tmp_path: Path) -> None:
     sleeve_root = tmp_path / "truth_sleeves/PRIMARY/PAPER"
     _write_json(_verdict_path(sleeve_root), _verdict_payload(status="BOOTSTRAP_PASS"))

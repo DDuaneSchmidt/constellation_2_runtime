@@ -334,6 +334,7 @@ def _stages(
         _stage("exposure_net", "risk", ["python3", "ops/tools/run_exposure_net_day_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("risk_v1/exposure_net_v1") / target_day / "exposure_net.v1.json", ("OK", "PASS", "READY"), "python3 ops/tools/run_exposure_net_day_v1.py --day_utc {day} --truth_root {sleeve}", "Produce same-day exposure_net_v1 before capital authority allocation."),
         _stage("capital_authority_allocation", "authorization", ["python3", "ops/tools/run_capital_authority_allocation_day_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root), "--canonical_sequence_owner", "ops/tools/run_c2_paper_day_orchestrator_v2.py"], "PAPER_SLEEVE", Path("allocation_v1/capital_authority_allocation_v1") / target_day / "capital_authority_allocation.v1.json", ("OK", "PASS", "READY"), "python3 ops/tools/run_capital_authority_allocation_day_v1.py --day_utc {day} --truth_root {sleeve} --canonical_sequence_owner ops/tools/run_c2_paper_day_orchestrator_v2.py", "Allocate capital authority for the selected intent."),
         _stage("phasec_identity_materializer", "authorization", ["python3", "ops/tools/run_phasec_identity_materializer_day_v1.py", "--day_utc", target_day, "--eval_time_utc", _iso(datetime.now(UTC)), "--truth_root", str(canonical_truth_root), "--execution_truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("phaseC_preflight_v1") / target_day, ("OK", "PASS", "READY", "SUCCESS"), "python3 ops/tools/run_phasec_identity_materializer_day_v1.py --day_utc {day} --eval_time_utc $(date -u +%FT%TZ) --truth_root {canonical} --execution_truth_root {sleeve}", "Materialize Phase C identity and defined-risk proof into the PAPER sleeve."),
+        _stage("strategy_decision_authority", "authorization", ["python3", "ops/tools/run_strategy_decision_authority_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root), "--execution_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/strategy_decision_authority_v1") / target_day / "strategy_decision_authority.v1.json", ("PASS", "READY", "OK"), "python3 ops/tools/run_strategy_decision_authority_v1.py --day_utc {day} --truth_root {sleeve} --execution_root {sleeve}", "Materialize strategy decision authority before authorization artifacts so freshness dependencies are ordered."),
         _stage("authorization_artifacts", "authorization", ["python3", "ops/tools/run_authorization_artifacts_day_v1.py", "--day_utc", target_day, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("engine_activity_v1/authorization_v1") / target_day, ("OK", "PASS", "READY", "AUTHORIZED"), "python3 ops/tools/run_authorization_artifacts_day_v1.py --day_utc {day} --truth_root {sleeve}", "Write governed authorization artifacts for approved intents."),
         _stage("authorization_supply", "authorization", ["python3", "ops/tools/run_authorization_supply_v1.py", "--day_utc", target_day, "--environment", environment, "--truth_root", str(paper_sleeve_root)], "PAPER_SLEEVE", Path("reports/authorization_supply_v1") / target_day / "authorization_supply.v1.json", ("PASS", "OK", "READY", "AUTHORIZED"), "python3 ops/tools/run_authorization_supply_v1.py --day_utc {day} --environment PAPER --truth_root {sleeve}", "Refresh authorization supply from same-run PAPER sleeve authorization evidence."),
         _stage("global_kill_switch", "risk", ["python3", "ops/tools/run_global_kill_switch_v1.py", "--day_utc", target_day], "CANONICAL", Path("risk_v1/kill_switch_v1") / target_day / "global_kill_switch_state.v1.json", ("INACTIVE", "PASS", "OK"), "python3 ops/tools/run_global_kill_switch_v1.py --day_utc {day}", "Refresh governed global kill switch from current authorization evidence."),
@@ -387,6 +388,16 @@ def _validate_stage_artifact(*, stage: KernelStage, artifact_path: Path | None, 
         )
     if _wrong_day(data, target_day):
         return _blocked("TARGET_DAY_DATE_MISMATCH", _status_of(data), "artifact day does not match target day", stage)
+    if stage.stage_id == "strategy_decision_authority":
+        intent_count = data.get("intent_count")
+        state = str(data.get("strategy_decision_state") or data.get("status") or "").strip().upper()
+        if state in {"INTENT_CREATED", "READY", "VALID", "PASS"} or (isinstance(intent_count, int) and intent_count > 0):
+            return {
+                "status": "PASS",
+                "artifact_status": _status_of(data),
+                "strategy_decision_state": state,
+                "intent_count": intent_count if isinstance(intent_count, int) else None,
+            }
     blocker = _blocker_of(data)
     artifact_status = _status_of(data)
     if blocker == MARKET_NOT_OPEN or _contains_text(data, MARKET_NOT_OPEN):

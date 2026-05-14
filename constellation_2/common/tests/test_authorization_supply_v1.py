@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 
 import ops.tools.run_aegis_bod_prepare_v1 as bod  # noqa: E402
 import ops.tools.run_aegis_day_v1 as day_run  # noqa: E402
+import ops.tools.run_authorization_artifacts_day_v1 as auth_artifacts  # noqa: E402
 import ops.tools.run_authorization_supply_v1 as auth  # noqa: E402
 import ops.tools.run_intent_arbitration_v1 as arbitration  # noqa: E402
 import ops.tools.run_structure_decision_supply_v1 as structure_supply  # noqa: E402
@@ -310,6 +311,86 @@ def test_missing_strategy_decision_blocks(monkeypatch: pytest.MonkeyPatch, tmp_p
     _risk_budget(ctx)
     payload = auth.build_authorization_supply_v1(ctx)
     assert payload["canonical_blocker"] == "STRATEGY_DECISION_MISSING"
+
+
+def test_authorization_supply_does_not_materialize_strategy_decision(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _intent(ctx)
+    _market_supply(ctx)
+    _risk_budget(ctx)
+    called: list[list[str]] = []
+
+    def _fail_if_called(command: list[str], **_kwargs):  # noqa: ANN001
+        called.append(command)
+        raise AssertionError("authorization_supply must not materialize strategy_decision_authority")
+
+    monkeypatch.setattr(auth, "_run_command", _fail_if_called)
+
+    payload = auth.build_authorization_supply_v1(ctx)
+
+    assert payload["canonical_blocker"] == "STRATEGY_DECISION_MISSING"
+    assert called == []
+
+
+def test_authorization_artifact_strategy_dependency_change_quarantines_and_replaces(tmp_path: Path) -> None:
+    out_path = tmp_path / "engine_activity_v1" / "authorization_v1" / DAY / f"{'a' * 64}.authorization.v1.json"
+
+    def _artifact(strategy_sha: str) -> dict:
+        return {
+            "schema_id": "C2_AUTHORIZATION_V1",
+            "schema_version": 1,
+            "day_utc": DAY,
+            "status": "REJECTED",
+            "intent_id": "intent-1",
+            "input_manifest": [
+                {"type": "intent", "path": "intent.json", "sha256": "a" * 64, "day_utc": DAY, "producer": "intents_v1"},
+                {"type": "capital_authority_allocation", "path": "allocation.json", "sha256": "b" * 64, "day_utc": DAY, "producer": "allocation_v1"},
+                {
+                    "type": "strategy_decision_authority",
+                    "path": "strategy_decision_authority.v1.json",
+                    "sha256": strategy_sha,
+                    "day_utc": DAY,
+                    "producer": "strategy_decision_authority_v1",
+                },
+                {"type": "policy_manifest", "path": "policy.json", "sha256": "c" * 64, "day_utc": None, "producer": "governance"},
+                {"type": "other", "path": "git:HEAD", "sha256": "d" * 64, "day_utc": None, "producer": "git"},
+            ],
+            "authorization": {"decision": "REJECTED"},
+            "reason_codes": ["REJECTED"],
+        }
+
+    first_sha = auth_artifacts._write_daykey_with_freshness(out_path, _artifact("1" * 64))
+    second_sha = auth_artifacts._write_daykey_with_freshness(out_path, _artifact("2" * 64))
+    current = json.loads(out_path.read_text(encoding="utf-8"))
+    quarantines = sorted(out_path.parent.glob(f"{out_path.name}.INVALID_*.json"))
+
+    assert second_sha != first_sha
+    assert current["input_manifest"][2]["type"] == "strategy_decision_authority"
+    assert current["input_manifest"][2]["sha256"] == "2" * 64
+    assert len(quarantines) == 1
+    assert first_sha in quarantines[0].name
+
+
+def test_authorization_artifact_producer_requires_strategy_decision_authority(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    _write(
+        ctx.execution_root / "run_pointer_v2" / "canonical_authority_head.v1.json",
+        {
+            "schema_id": "c2_run_pointer_canonical_authority_head",
+            "schema_version": "v1",
+            "day_utc": ctx.day_utc,
+            "status": "PASS",
+            "authoritative": True,
+            "points_to": str(ctx.execution_root / "reports" / "authorization_gate_verdict_v1" / ctx.day_utc / "authorization_gate_verdict.v1.json"),
+        },
+    )
+    _write(
+        ctx.execution_root / "allocation_v1" / "capital_authority_allocation_v1" / ctx.day_utc / "capital_authority_allocation.v1.json",
+        {"schema_id": "capital_authority_allocation_v1", "day_utc": ctx.day_utc, "decision_chain": {"authorized_trade_intents": []}},
+    )
+
+    with pytest.raises(SystemExit, match="STRATEGY_DECISION_AUTHORITY_MISSING"):
+        auth_artifacts.main(["--day_utc", ctx.day_utc, "--truth_root", str(ctx.execution_root)])
 
 
 def test_missing_structure_decision_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

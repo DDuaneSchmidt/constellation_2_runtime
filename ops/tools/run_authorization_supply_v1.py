@@ -269,19 +269,6 @@ def _run_command(cmd: list[str], *, timeout_seconds: int = 120) -> dict[str, Any
 
 def _ensure_strategy_decision(ctx: bod.BodContext) -> tuple[dict[str, Any], str]:
     path = _strategy_decision_path(ctx)
-    if not path.exists():
-        _run_command(
-            [
-                sys.executable,
-                "ops/tools/run_strategy_decision_authority_v1.py",
-                "--day_utc",
-                ctx.day_utc,
-                "--truth_root",
-                str(ctx.truth_root),
-                "--execution_root",
-                str(ctx.execution_root),
-            ]
-        )
     payload = _read_json(path)
     state = str(payload.get("strategy_decision_state") or payload.get("status") or "").strip().upper()
     intent_count = payload.get("intent_count")
