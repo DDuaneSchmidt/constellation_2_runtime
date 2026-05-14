@@ -79,6 +79,10 @@ def _is_option_intent(payload: dict[str, Any]) -> bool:
     return isinstance(option, dict) or exposure_type in {"SHORT_VOL_DEFINED", "VOL_INCOME_DEFINED"} or "DEFINED" in risk_class
 
 
+def _requires_options_market_data(payload: dict[str, Any]) -> bool:
+    return payload.get("requires_options") is True or _is_option_intent(payload)
+
+
 def _is_long_equity_intent(payload: dict[str, Any]) -> bool:
     exposure_type = str(payload.get("exposure_type") or payload.get("intent_type") or "").strip().upper()
     return exposure_type == "LONG_EQUITY"
@@ -114,8 +118,9 @@ def _discover_active_intents(*, truth_root: Path, execution_root: Path, day_utc:
                     "intent_id": intent_id,
                     "intent_path": str(path),
                     "instrument": symbol,
-                    "requires_options": _is_option_intent(payload) and bool(symbol),
+                    "requires_options": _requires_options_market_data(payload) and bool(symbol),
                     "requires_equity_market_data": _is_long_equity_intent(payload) and bool(symbol),
+                    "requires_defined_risk_authorization": _is_option_intent(payload) and bool(symbol),
                     "risk_class": str(payload.get("risk_class") or "").strip(),
                     "exposure_type": str(payload.get("exposure_type") or "").strip(),
                 }
@@ -140,8 +145,9 @@ def _discover_active_intents(*, truth_root: Path, execution_root: Path, day_utc:
                     "intent_id": intent_id,
                     "intent_path": str(path.resolve()),
                     "instrument": symbol,
-                    "requires_options": _is_option_intent(payload) and bool(symbol),
+                    "requires_options": _requires_options_market_data(payload) and bool(symbol),
                     "requires_equity_market_data": _is_long_equity_intent(payload) and bool(symbol),
+                    "requires_defined_risk_authorization": _is_option_intent(payload) and bool(symbol),
                     "risk_class": str(payload.get("risk_class") or "").strip(),
                     "exposure_type": str(payload.get("exposure_type") or "").strip(),
                 }
@@ -185,6 +191,17 @@ def _snapshot_paths(*, execution_root: Path, day_utc: str, symbol: str) -> tuple
             cert = path.parent / "freshness_certificate.v1.json"
             return root, path.resolve(), cert.resolve()
     return root, None, None
+
+
+def _equity_snapshot_paths(*, execution_root: Path, day_utc: str, symbol: str) -> tuple[Path, Path | None, Path | None]:
+    root = (execution_root / "market_data_snapshot_v1" / "snapshots" / day_utc).resolve()
+    snapshot = (root / f"{symbol.upper()}.market_data_snapshot.v1.json").resolve()
+    cert_candidates = [
+        (root / f"{symbol.upper()}.freshness_certificate.v1.json").resolve(),
+        (root / f"{symbol.upper()}.market_data_freshness_certificate.v1.json").resolve(),
+    ]
+    cert = next((path for path in cert_candidates if path.exists() and path.is_file()), None)
+    return root, snapshot if snapshot.exists() and snapshot.is_file() else None, cert
 
 
 def _node(
@@ -435,12 +452,10 @@ def _equity_requirement_nodes(
 ) -> list[dict[str, Any]]:
     symbol = str(intent.get("instrument") or "").strip().upper()
     source_id = str(intent.get("intent_id") or "").strip()
-    root, snapshot_path, cert_path = _snapshot_paths(execution_root=execution_root, day_utc=day_utc, symbol=symbol)
-    diagnostic_path = _latest_capture_diagnostic(execution_root=execution_root, day_utc=day_utc, symbol=symbol)
-    capture_blocker, capture_detail = _capture_blocker_from_diagnostic(diagnostic_path)
-    missing_blocker = capture_blocker or "EQUITY_MARKET_DATA_SNAPSHOT_MISSING"
-    detail = capture_detail or (f"latest_capture_diagnostic={diagnostic_path}" if diagnostic_path else "no current-day market snapshot or capture diagnostic")
-    action = f"Run python3 ops/tools/run_options_chain_snapshot_required_day_v1.py --day_utc {day_utc} --symbol {symbol}"
+    root, snapshot_path, cert_path = _equity_snapshot_paths(execution_root=execution_root, day_utc=day_utc, symbol=symbol)
+    missing_blocker = "EQUITY_MARKET_DATA_SNAPSHOT_MISSING"
+    detail = "no current-day governed equity market-data snapshot"
+    action = f"Materialize governed market_data_snapshot_v1 equity evidence for {symbol} on {day_utc}"
     snapshot_status = "SATISFIED" if snapshot_path is not None else "BLOCKED"
     cert_status = "SATISFIED" if cert_path is not None and cert_path.exists() else "BLOCKED"
     consequences = ["market_data_supply", "authorization_supply", "submit_boundary"]
@@ -453,7 +468,7 @@ def _equity_requirement_nodes(
             instrument=symbol,
             required_artifact="underlying_spot",
             expected_path=snapshot_path or root,
-            producer_command=f"python3 ops/tools/run_options_chain_snapshot_required_day_v1.py --day_utc {day_utc} --symbol {symbol}",
+            producer_command=f"python3 constellation_2/phaseJ/tools/ib_historical_market_data_snapshot_downloader_v1.py --symbol {symbol}",
             consumer="market_data_supply_v1",
             status=snapshot_status,
             blocker="" if snapshot_status == "SATISFIED" else missing_blocker,
@@ -469,7 +484,7 @@ def _equity_requirement_nodes(
             instrument=symbol,
             required_artifact="bid_ask_quotes",
             expected_path=snapshot_path or root,
-            producer_command=f"python3 ops/tools/run_options_chain_snapshot_required_day_v1.py --day_utc {day_utc} --symbol {symbol}",
+            producer_command=f"python3 constellation_2/phaseJ/tools/ib_historical_market_data_snapshot_downloader_v1.py --symbol {symbol}",
             consumer="market_data_supply_v1",
             status=snapshot_status,
             blocker="" if snapshot_status == "SATISFIED" else missing_blocker,
@@ -485,11 +500,11 @@ def _equity_requirement_nodes(
             instrument=symbol,
             required_artifact="freshness_certificate",
             expected_path=cert_path or (root / "*/freshness_certificate.v1.json"),
-            producer_command=f"python3 ops/tools/run_options_chain_snapshot_required_day_v1.py --day_utc {day_utc} --symbol {symbol}",
+            producer_command=f"python3 constellation_2/phaseJ/tools/ib_historical_market_data_snapshot_downloader_v1.py --symbol {symbol}",
             consumer="market_data_supply_v1",
             status=cert_status,
-            blocker="" if cert_status == "SATISFIED" else missing_blocker,
-            blocker_detail="" if cert_status == "SATISFIED" else detail,
+            blocker="" if cert_status == "SATISFIED" else "EQUITY_FRESHNESS_CERTIFICATE_MISSING",
+            blocker_detail="" if cert_status == "SATISFIED" else "governed equity freshness certificate missing",
             downstream_consequences=consequences,
             operator_next_action="" if cert_status == "SATISFIED" else action,
         ),
@@ -753,8 +768,9 @@ def build_requirement_graph(ctx: bod.BodContext) -> dict[str, Any]:
     for intent in intents:
         if intent.get("requires_options"):
             nodes.extend(_option_requirement_nodes(day_utc=ctx.day_utc, execution_root=ctx.execution_root, intent=intent))
+        if intent.get("requires_defined_risk_authorization"):
             nodes.append(_defined_risk_requirement_node(day_utc=ctx.day_utc, execution_root=ctx.execution_root, intent=intent))
-        elif intent.get("requires_equity_market_data"):
+        if intent.get("requires_equity_market_data"):
             nodes.extend(_equity_requirement_nodes(day_utc=ctx.day_utc, execution_root=ctx.execution_root, intent=intent))
     root = _root_requirement(nodes)
     status = "STALE" if str(root.get("status") or "") == "STALE" else ("BLOCKED" if root else "PASS")

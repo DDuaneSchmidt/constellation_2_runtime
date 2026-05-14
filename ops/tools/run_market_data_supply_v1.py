@@ -45,6 +45,11 @@ ALLOWED_BLOCKERS = {
     "OPTIONS_MARKET_DATA_POLICY_REJECTED_QUOTE_TYPE",
     "MARKET_DATA_REQUIREMENT_GRAPH_MISSING",
     "MARKET_DATA_REQUIREMENTS_EMPTY_FOR_ACTIVE_INTENT",
+    "EQUITY_MARKET_DATA_SNAPSHOT_MISSING",
+    "EQUITY_MARKET_DATA_SNAPSHOT_INVALID",
+    "EQUITY_MARKET_DATA_STALE",
+    "EQUITY_QUOTES_MISSING_BID_ASK",
+    "EQUITY_FRESHNESS_CERTIFICATE_MISSING",
 }
 PAPER_DELAYED_POLICY_RELATIVE_PATH = Path("governance/paper_market_data_policy_v1.json")
 MARKET_DATA_REQUIREMENT_ARTIFACTS = {
@@ -591,6 +596,119 @@ def _latest_snapshot_for_symbol(*, execution_root: Path, day_utc: str, instrumen
     return candidates[-1]
 
 
+def _equity_freshness_certificate_candidates(snapshot_path: Path, instrument: str) -> list[Path]:
+    root = snapshot_path.parent
+    symbol = instrument.upper()
+    return [
+        (root / f"{symbol}.freshness_certificate.v1.json").resolve(),
+        (root / f"{symbol}.market_data_freshness_certificate.v1.json").resolve(),
+    ]
+
+
+def _latest_equity_snapshot_for_symbol(*, execution_root: Path, day_utc: str, instrument: str) -> tuple[Path | None, Path | None, dict[str, Any], dict[str, Any]]:
+    snapshot_path = (
+        execution_root
+        / "market_data_snapshot_v1"
+        / "snapshots"
+        / day_utc
+        / f"{instrument.upper()}.market_data_snapshot.v1.json"
+    ).resolve()
+    if not snapshot_path.exists() or not snapshot_path.is_file():
+        return None, None, {}, {}
+    snapshot = _read_json(snapshot_path)
+    cert_path = next((path for path in _equity_freshness_certificate_candidates(snapshot_path, instrument) if path.exists() and path.is_file()), None)
+    cert = _read_json(cert_path) if cert_path is not None else {}
+    return snapshot_path, cert_path, snapshot, cert
+
+
+def _equity_value(payload: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = payload.get(key)
+        if value not in (None, ""):
+            return value
+    quote = payload.get("quote")
+    if isinstance(quote, dict):
+        for key in keys:
+            value = quote.get(key)
+            if value not in (None, ""):
+                return value
+    return None
+
+
+def _has_equity_bid_ask(snapshot: dict[str, Any]) -> bool:
+    if _equity_value(snapshot, "bid", "bid_price") not in (None, "") and _equity_value(snapshot, "ask", "ask_price") not in (None, ""):
+        return True
+    if _equity_value(snapshot, "delayed_bid") not in (None, "") and _equity_value(snapshot, "delayed_ask") not in (None, ""):
+        return True
+    return False
+
+
+def _equity_evidence_timestamp(snapshot: dict[str, Any]) -> datetime | None:
+    for key in ("quote_as_of_utc", "as_of_utc", "timestamp_utc", "ingested_utc"):
+        parsed = _parse_iso(snapshot.get(key))
+        if parsed is not None:
+            return parsed
+    quote = snapshot.get("quote")
+    if isinstance(quote, dict):
+        for key in ("as_of_utc", "timestamp_utc"):
+            parsed = _parse_iso(quote.get(key))
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _validate_equity_snapshot(*, ctx: bod.BodContext, instrument: str, eval_time_utc: str, data_mode: str = "UNKNOWN") -> tuple[str, dict[str, Any]]:
+    snapshot_path, cert_path, snapshot, cert = _latest_equity_snapshot_for_symbol(
+        execution_root=ctx.execution_root,
+        day_utc=ctx.day_utc,
+        instrument=instrument,
+    )
+    artifact = {
+        "instrument": instrument,
+        "artifact_family": "EQUITY",
+        "snapshot_path": str(snapshot_path or ""),
+        "freshness_certificate_path": str(cert_path or ""),
+        "snapshot_valid": False,
+        "freshness_valid": False,
+        "data_mode": data_mode,
+        "quote_timestamp_available": False,
+        "blocker": "",
+    }
+    if snapshot_path is None or not snapshot:
+        artifact["blocker"] = "EQUITY_MARKET_DATA_SNAPSHOT_MISSING"
+        return "EQUITY_MARKET_DATA_SNAPSHOT_MISSING", artifact
+    expected_root = (ctx.execution_root / "market_data_snapshot_v1" / "snapshots" / ctx.day_utc).resolve()
+    if not str(snapshot_path).startswith(str(expected_root)):
+        artifact["blocker"] = "EQUITY_MARKET_DATA_SNAPSHOT_INVALID"
+        return "EQUITY_MARKET_DATA_SNAPSHOT_INVALID", artifact
+    observed_symbol = str(snapshot.get("symbol") or "").strip().upper()
+    if observed_symbol != instrument.upper():
+        artifact["blocker"] = "EQUITY_MARKET_DATA_SNAPSHOT_INVALID"
+        return "EQUITY_MARKET_DATA_SNAPSHOT_INVALID", artifact
+    timestamp = _equity_evidence_timestamp(snapshot)
+    if timestamp is None or timestamp.date().isoformat() != ctx.day_utc:
+        artifact["blocker"] = "EQUITY_MARKET_DATA_STALE"
+        return "EQUITY_MARKET_DATA_STALE", artifact
+    if _equity_value(snapshot, "spot", "spot_price", "last", "last_price", "close") in (None, ""):
+        artifact["blocker"] = "EQUITY_MARKET_DATA_SNAPSHOT_INVALID"
+        return "EQUITY_MARKET_DATA_SNAPSHOT_INVALID", artifact
+    if not _has_equity_bid_ask(snapshot):
+        artifact["blocker"] = "EQUITY_QUOTES_MISSING_BID_ASK"
+        return "EQUITY_QUOTES_MISSING_BID_ASK", artifact
+    if cert_path is None or not cert:
+        artifact["blocker"] = "EQUITY_FRESHNESS_CERTIFICATE_MISSING"
+        return "EQUITY_FRESHNESS_CERTIFICATE_MISSING", artifact
+    valid_until = _parse_iso(cert.get("valid_until_utc"))
+    eval_time = _parse_iso(eval_time_utc)
+    if valid_until is None or eval_time is None or valid_until < eval_time:
+        artifact["blocker"] = "EQUITY_MARKET_DATA_STALE"
+        return "EQUITY_MARKET_DATA_STALE", artifact
+    artifact["snapshot_valid"] = True
+    artifact["freshness_valid"] = True
+    artifact["quote_timestamp_available"] = True
+    return "", artifact
+
+
 def _snapshot_market_data_mode(snapshot: dict[str, Any]) -> str:
     provenance = snapshot.get("provenance") if isinstance(snapshot.get("provenance"), dict) else {}
     try:
@@ -697,6 +815,14 @@ def _run_market_data_authority(ctx: bod.BodContext) -> tuple[dict[str, Any], str
 
 
 def _operator_action(blocker: str, instrument: str, day_utc: str) -> str:
+    if blocker in {"EQUITY_MARKET_DATA_SNAPSHOT_MISSING", "EQUITY_MARKET_DATA_SNAPSHOT_INVALID"}:
+        return f"Materialize governed market_data_snapshot_v1 equity evidence for {instrument} on {day_utc}, then rerun market_data_supply_v1."
+    if blocker == "EQUITY_QUOTES_MISSING_BID_ASK":
+        return f"Capture governed {instrument} equity bid/ask quote evidence for {day_utc}, then rerun market_data_supply_v1."
+    if blocker == "EQUITY_FRESHNESS_CERTIFICATE_MISSING":
+        return f"Produce governed {instrument} equity freshness certificate for {day_utc}, then rerun market_data_supply_v1."
+    if blocker == "EQUITY_MARKET_DATA_STALE":
+        return f"Refresh governed {instrument} equity market-data evidence for {day_utc}, then rerun market_data_supply_v1."
     if blocker == "OPTIONS_MARKET_DATA_PERMISSION_DENIED":
         return f"Enable IBKR Client Portal market-data subscriptions and API market-data access for {instrument} underlying and options for the logged-in trading user/account."
     if blocker == "MARKET_OPEN_DATA_PENDING":
@@ -819,9 +945,22 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
             "operator_next_action": "Produce same-day PAPER-sleeve aegis_requirement_graph_v1 with MARKET_DATA requirements for the selected intent.",
         }
     instruments = sorted({str(row.get("instrument") or "").strip().upper() for row in requirements if row.get("instrument")})
+    option_keys = {
+        (str(row.get("source_id") or "").strip(), str(row.get("instrument") or "").strip().upper())
+        for row in requirements
+        if str(row.get("data_type") or "").strip().upper() in {"OPTION_CHAIN", "OPTIONS_SNAPSHOT"}
+    }
+    option_instruments = sorted(
+        {
+            str(row.get("instrument") or "").strip().upper()
+            for row in requirements
+            if (str(row.get("source_id") or "").strip(), str(row.get("instrument") or "").strip().upper()) in option_keys
+        }
+    )
+    equity_instruments = sorted(set(instruments) - set(option_instruments))
     provider_blocker = ""
     provider_action = ""
-    for instrument in instruments:
+    for instrument in option_instruments:
         probe_path = _entitlement_probe_path(ctx, instrument)
         probe = _read_json(probe_path)
         if probe:
@@ -845,10 +984,10 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
         pass
     elif provider_blocker:
         blocker = provider_blocker
-    elif market_session_state == "PRE_MARKET":
+    elif option_instruments and market_session_state == "PRE_MARKET":
         blocker = "MARKET_OPEN_DATA_PENDING"
     else:
-        for instrument in instruments:
+        for instrument in option_instruments:
             unknown = any(
                 row.get("instrument") == instrument
                 and row.get("capability") == "IB_MARKET_DATA_API_ACCESS"
@@ -878,7 +1017,7 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
                     blocker = str(capture.get("blocker") or "OPTIONS_SNAPSHOT_CAPTURE_FAILED")
                     break
         if not blocker:
-            for instrument in instruments:
+            for instrument in option_instruments:
                 snapshot_path, _cert_path, _snapshot_payload, _cert_payload = _latest_snapshot_for_symbol(execution_root=ctx.execution_root, day_utc=ctx.day_utc, instrument=instrument)
                 if snapshot_path is None and not any(row.get("instrument") == instrument for row in capture_attempts):
                     capture = _run_capture(ctx, instrument)
@@ -891,8 +1030,20 @@ def build_market_data_supply(ctx: bod.BodContext) -> dict[str, Any]:
             if blocker:
                 pass
         if not blocker:
-            for instrument in instruments:
+            for instrument in option_instruments:
                 validation_blocker, artifact = _validate_snapshot(ctx=ctx, instrument=instrument, eval_time_utc=eval_time_utc, data_mode=market_data_mode)
+                artifacts.append(artifact)
+                if validation_blocker:
+                    blocker = validation_blocker
+                    break
+        if not blocker:
+            for instrument in equity_instruments:
+                validation_blocker, artifact = _validate_equity_snapshot(
+                    ctx=ctx,
+                    instrument=instrument,
+                    eval_time_utc=eval_time_utc,
+                    data_mode="EQUITY",
+                )
                 artifacts.append(artifact)
                 if validation_blocker:
                     blocker = validation_blocker

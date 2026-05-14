@@ -20,6 +20,7 @@ from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1
 from ops.tools import run_aegis_bod_prepare_v1 as bod
 from ops.tools.run_market_data_supply_v1 import (
     _latest_snapshot_for_symbol,
+    _validate_equity_snapshot,
     _parse_iso,
     market_data_supply_path,
 )
@@ -200,17 +201,30 @@ def _root_instrument(supply: dict[str, Any]) -> str:
     return ""
 
 
-def _selected_intent_state(ctx: bod.BodContext) -> tuple[str, str]:
+def _selected_intent_requires_options(payload: dict[str, Any], selected: dict[str, Any]) -> bool:
+    if payload.get("requires_options") is True or selected.get("requires_options") is True:
+        return True
+    option = payload.get("option")
+    exposure_type = str(payload.get("exposure_type") or selected.get("exposure_type") or "").strip().upper()
+    risk_class = str(payload.get("risk_class") or selected.get("risk_class") or "").strip().upper()
+    return isinstance(option, dict) or exposure_type in {"SHORT_VOL_DEFINED", "VOL_INCOME_DEFINED"} or "DEFINED" in risk_class
+
+
+def _selected_intent_state(ctx: bod.BodContext) -> tuple[str, str, bool, str]:
     pointer = _read_json(selected_intent_pointer_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc))
     status = str(pointer.get("status") or "").strip().upper()
     selected = pointer.get("selected_intent") if isinstance(pointer.get("selected_intent"), dict) else {}
     symbol = str(selected.get("symbol") or "").strip().upper()
     intent_path = str(selected.get("intent_path") or "").strip()
+    requires_options = bool(selected.get("requires_options") is True)
+    exposure_type = str(selected.get("exposure_type") or "").strip().upper()
     if intent_path:
         payload = _read_json(Path(intent_path).expanduser().resolve())
         underlying = payload.get("underlying") if isinstance(payload.get("underlying"), dict) else {}
         symbol = str(underlying.get("symbol") or payload.get("symbol") or symbol).strip().upper()
-    return status, symbol
+        requires_options = _selected_intent_requires_options(payload, selected)
+        exposure_type = str(payload.get("exposure_type") or exposure_type).strip().upper()
+    return status, symbol, requires_options, exposure_type
 
 
 def _has_bid_ask(contract: dict[str, Any]) -> bool:
@@ -365,12 +379,14 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
         environment=ctx.environment,
     )
     readiness_mode = str(readiness.get("readiness_mode") or "").strip().upper()
-    selected_intent_status, selected_instrument = _selected_intent_state(ctx)
+    selected_intent_status, selected_instrument, selected_requires_options, selected_exposure_type = _selected_intent_state(ctx)
     supply_path = market_data_supply_path(truth_root=ctx.truth_root, day_utc=ctx.day_utc)
     symbol_diagnostics: dict[str, Any] = {
         "selected_intent_status": selected_intent_status,
         "selected_intent_symbol": selected_instrument,
-        "required_options_symbol": selected_instrument if selected_intent_status == "SELECTED" else "",
+        "selected_intent_requires_options": bool(selected_requires_options),
+        "selected_intent_exposure_type": selected_exposure_type,
+        "required_options_symbol": selected_instrument if selected_intent_status == "SELECTED" and selected_requires_options else "",
         "options_snapshot_symbol": "",
         "symbol_source": "SELECTED_INTENT" if selected_instrument else "NONE",
         "stale_default_symbol_detected": False,
@@ -389,7 +405,7 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
             "gate_decision": status,
             "canonical_blocker": blocker,
             "specific_fail_closed_reason": specific_reason,
-            "expected_evidence_path": str((ctx.execution_root / "options_chain_snapshot_v1" / ctx.day_utc).resolve()),
+            "expected_evidence_path": str(validation.get("expected_evidence_path") or (ctx.execution_root / "options_chain_snapshot_v1" / ctx.day_utc).resolve()),
             "actual_evidence_path": actual_evidence_path or str(validation.get("snapshot_path") or ""),
             "truth_root": str(ctx.truth_root),
             "execution_root": str(ctx.execution_root),
@@ -490,11 +506,11 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
         else:
             instrument = supply_instrument
             symbol_diagnostics["symbol_source"] = "MARKET_DATA_SUPPLY" if supply_instrument else "NONE"
-        symbol_diagnostics["required_options_symbol"] = instrument
+        symbol_diagnostics["required_options_symbol"] = instrument if selected_requires_options else ""
         if not instrument:
             status = "BLOCKED"
             blocker = "SELECTED_INTENT_SYMBOL_MISSING"
-            action = "Resolve selected intent symbol before evaluating market-open option data."
+            action = "Resolve selected intent symbol before evaluating market-open data."
             snapshot_validation = {
                 "blocker": blocker,
                 "snapshot_path": "",
@@ -508,6 +524,50 @@ def build_market_open_data_gate(ctx: bod.BodContext) -> dict[str, Any]:
                 command_result=command_result,
                 snapshot_validation=snapshot_validation,
                 specific_reason=blocker,
+            )
+        if not selected_requires_options:
+            validation_blocker, equity_artifact = _validate_equity_snapshot(
+                ctx=ctx,
+                instrument=instrument,
+                eval_time_utc=generated_at,
+                data_mode="EQUITY",
+            )
+            snapshot_validation = {
+                "blocker": validation_blocker,
+                "snapshot_path": str(equity_artifact.get("snapshot_path") or ""),
+                "freshness_certificate_path": str(equity_artifact.get("freshness_certificate_path") or ""),
+                "snapshot_age_seconds": None,
+                "evidence_timestamp_utc": "",
+                "observed_evidence_age_seconds": None,
+                "valid_until_utc": "",
+                "allowed_freshness_threshold_seconds": None,
+                "quote_count": 1 if equity_artifact.get("snapshot_valid") else 0,
+                "dte_coverage": {},
+                "missing_symbols": [instrument] if validation_blocker == "EQUITY_MARKET_DATA_SNAPSHOT_MISSING" else [],
+                "stale_symbols": [instrument] if validation_blocker == "EQUITY_MARKET_DATA_STALE" else [],
+                "missing_contracts": [],
+                "stale_contracts": [],
+                "incomplete_quote_fields": ["bid", "ask"] if validation_blocker == "EQUITY_QUOTES_MISSING_BID_ASK" else [],
+                "expected_evidence_path": str((ctx.execution_root / "market_data_snapshot_v1" / "snapshots" / ctx.day_utc).resolve()),
+            }
+            supply_status = str(supply.get("status") or "").strip().upper()
+            blocker = _blocker_from_supply(supply) or validation_blocker
+            if supply_status == "PASS" and not blocker:
+                status = "PASS"
+            else:
+                status = "PENDING"
+                blocker = blocker or "EQUITY_MARKET_DATA_SNAPSHOT_MISSING"
+                fail_closed_reason = blocker
+            action = "" if status == "PASS" else f"Capture current {instrument} equity bid/ask quote and freshness certificate during regular market hours, then rerun this gate."
+            return _payload(
+                status=status,
+                blocker=blocker,
+                action=action,
+                command_result=command_result,
+                snapshot_validation=snapshot_validation,
+                capture_attempted=False,
+                capture_result={},
+                specific_reason=fail_closed_reason,
             )
         snapshot_validation = _validate_current_snapshot(ctx, instrument, now_utc)
         symbol_diagnostics["options_snapshot_symbol"] = str(snapshot_validation.get("options_snapshot_symbol") or "")
