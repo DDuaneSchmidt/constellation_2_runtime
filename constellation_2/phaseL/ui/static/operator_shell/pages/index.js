@@ -2796,6 +2796,12 @@ async function renderAegisLiteQueuePage() {
           { label: "Ready disabled by mismatch", value: releaseMismatch ? "YES" : "NO" },
         ]),
       }),
+      renderCardSection({
+        eyebrow: "EVENT_AWARENESS",
+        title: "Event Monitoring",
+        subtitle: "View monitored event rules, monitor status, event ledger, and actionable/advisory packet separation.",
+        body: `<a class="inline-link" href="/aegis-events" data-route="/aegis-events">Open Event Monitoring</a>`,
+      }),
       degradedMessages.length ? renderCardSection({
         eyebrow: "NOT_READY",
         title: "Lite Report Not Generated Yet",
