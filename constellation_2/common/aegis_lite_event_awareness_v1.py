@@ -15,6 +15,9 @@ EVENT_TACTICAL_PACKET_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/event_tact
 EVENT_VALIDITY_GATE_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/event_validity_gate.v1.schema.json"
 TRADE_CAPTURE_ALERT_GATE_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/trade_capture_alert_gate.v1.schema.json"
 TRADE_CAPTURE_ALERT_LEDGER_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/trade_capture_alert_ledger.v1.schema.json"
+EVENT_RULES_REGISTRY_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/event_rules_registry.v1.schema.json"
+EVENT_MONITORING_STATUS_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/event_monitoring_status.v1.schema.json"
+TACTICAL_REVIEW_GATE_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/tactical_review_gate.v1.schema.json"
 
 EVENT_TYPES = {
     "PANIC_EXHAUSTION",
@@ -40,6 +43,7 @@ ALERT_GATE_STATES = {
 }
 ALERT_CHANNELS = {"SMS", "EMAIL"}
 MIN_SECONDS_REMAINING = {"LOW": 30 * 60, "MEDIUM": 15 * 60, "HIGH": 5 * 60}
+RUNTIME_TRUTH_CLASSIFICATIONS = {"REAL_RUNTIME", "DEMO_ONLY", "DRY_RUN_ONLY"}
 
 
 def event_artifact_path_v1(*, truth_root: Path, artifact_id: str, day_utc: str, identifier: str) -> Path:
@@ -55,6 +59,9 @@ def validate_event_awareness_artifact_v1(payload: dict[str, Any]) -> None:
         "event_validity_gate": EVENT_VALIDITY_GATE_SCHEMA,
         "trade_capture_alert_gate": TRADE_CAPTURE_ALERT_GATE_SCHEMA,
         "trade_capture_alert_ledger": TRADE_CAPTURE_ALERT_LEDGER_SCHEMA,
+        "event_rules_registry": EVENT_RULES_REGISTRY_SCHEMA,
+        "event_monitoring_status": EVENT_MONITORING_STATUS_SCHEMA,
+        "tactical_review_gate": TACTICAL_REVIEW_GATE_SCHEMA,
     }.get(schema_id)
     if not relpath:
         raise ValueError(f"UNSUPPORTED_AEGIS_LITE_EVENT_SCHEMA:{schema_id}")
@@ -63,7 +70,7 @@ def validate_event_awareness_artifact_v1(payload: dict[str, Any]) -> None:
 
 def write_event_awareness_artifact_v1(*, truth_root: Path, payload: dict[str, Any]) -> Path:
     validate_event_awareness_artifact_v1(payload)
-    identifier = str(payload.get("run_id") or payload.get("gate_id") or payload.get("event_run_id") or payload.get("event_id") or "index")
+    identifier = str(payload.get("run_id") or payload.get("monitor_run_id") or payload.get("gate_id") or payload.get("event_run_id") or payload.get("event_id") or "index")
     path = event_artifact_path_v1(
         truth_root=truth_root,
         artifact_id=str(payload["artifact_id"]),
@@ -85,15 +92,26 @@ def build_event_alert_v1(
     alert_level: str,
     severity: str,
     confidence: str,
+    monitor_run_id: str = "",
+    event_rule_id: str = "",
+    event_rule_version: str = "",
     assets_affected: list[str] | str | None = None,
     trigger_conditions: list[str] | str | None = None,
+    trigger_conditions_evaluated: list[str] | str | None = None,
+    thresholds_evaluated: list[str] | str | None = None,
     market_data_snapshot_refs: list[str] | str | None = None,
     reason_codes: list[str] | str | None = None,
+    pass_fail_reason_codes: list[str] | str | None = None,
     why_it_matters: str = "",
     recommended_operator_action: str = "",
+    required_inputs_present: bool = True,
+    stale_data_status: str = "UNKNOWN",
     tactical_review_requested: bool = False,
     event_packet_created: bool = False,
+    tactical_packet_id: str = "",
     validity_gate_status: str = "NOT_RUN",
+    alert_gate_status: str = "NOT_RUN",
+    email_delivery_status: str = "NOT_SENT",
 ) -> dict[str, Any]:
     level = _enum(alert_level, ALERT_LEVELS, "alert_level")
     gate_status = str(validity_gate_status or "NOT_RUN").strip().upper()
@@ -104,21 +122,32 @@ def build_event_alert_v1(
     return {
         "event_id": event_id,
         "run_id": run_id,
+        "monitor_run_id": monitor_run_id or run_id,
+        "event_rule_id": event_rule_id or "UNSPECIFIED_EVENT_RULE",
+        "event_rule_version": event_rule_version or "v1",
         "day_utc": day_utc,
         "timestamp_utc": timestamp_utc,
         "event_type": _enum(event_type, EVENT_TYPES, "event_type"),
         "alert_level": level,
         "severity": severity,
         "confidence": confidence,
+        "required_inputs_present": bool(required_inputs_present),
+        "stale_data_status": str(stale_data_status or "UNKNOWN").strip().upper(),
         "assets_affected": _strings(assets_affected),
         "trigger_conditions": _strings(trigger_conditions),
+        "trigger_conditions_evaluated": _strings(trigger_conditions_evaluated),
+        "thresholds_evaluated": _strings(thresholds_evaluated),
         "market_data_snapshot_refs": _strings(market_data_snapshot_refs),
         "reason_codes": _strings(reason_codes),
+        "pass_fail_reason_codes": _strings(pass_fail_reason_codes or reason_codes),
         "why_it_matters": why_it_matters,
         "recommended_operator_action": recommended_operator_action,
         "tactical_review_requested": bool(tactical_review_requested),
         "event_packet_created": bool(event_packet_created),
+        "tactical_packet_id": tactical_packet_id,
         "validity_gate_status": gate_status,
+        "alert_gate_status": str(alert_gate_status or "NOT_RUN").strip().upper(),
+        "email_delivery_status": str(email_delivery_status or "NOT_SENT").strip().upper(),
         "canonical_eod_state_mutated": False,
     }
 
@@ -168,16 +197,26 @@ def build_event_tactical_packet_v1(
     max_entry_slippage: str,
     invalidation_conditions: list[str] | str | None,
     inclusion_reason: str,
+    event_rule_id: str = "UNSPECIFIED_EVENT_RULE",
+    event_rule_version: str = "v1",
     exclusion_reason: str = "",
     governance_notes: str = "",
     manual_execution_checklist: list[str] | str | None = None,
     recommended_trade_id: str = "",
+    reason_codes: list[str] | str | None = None,
+    event_rule_enabled_status: str = "ENABLED",
+    production_status: str = "MANUAL_PAPER_ELIGIBLE",
+    research_status: str = "VALIDATED_RESEARCH",
+    runtime_truth_classification: str = "REAL_RUNTIME",
 ) -> dict[str, Any]:
+    runtime_class = _enum(runtime_truth_classification, RUNTIME_TRUTH_CLASSIFICATIONS, "runtime_truth_classification")
     payload = {
         "schema_id": "event_tactical_packet",
         "schema_version": "v1",
         "artifact_id": "event_tactical_packet_v1",
         "event_id": event_id,
+        "event_rule_id": event_rule_id or "UNSPECIFIED_EVENT_RULE",
+        "event_rule_version": event_rule_version or "v1",
         "event_run_id": event_run_id,
         "day_utc": day_utc,
         "recommended_trade_id": recommended_trade_id or f"event:{event_id}:{symbol.upper()}:{side.upper()}",
@@ -200,7 +239,14 @@ def build_event_tactical_packet_v1(
         "invalidation_conditions": _strings(invalidation_conditions),
         "inclusion_reason": inclusion_reason,
         "exclusion_reason": exclusion_reason,
+        "reason_codes": _strings(reason_codes),
         "governance_notes": governance_notes,
+        "runtime_truth_classification": runtime_class,
+        "demo_mode": runtime_class == "DEMO_ONLY",
+        "dry_run_only": runtime_class == "DRY_RUN_ONLY",
+        "event_rule_enabled_status": str(event_rule_enabled_status or "ENABLED").strip().upper(),
+        "production_status": str(production_status or "MANUAL_PAPER_ELIGIBLE").strip().upper(),
+        "research_status": str(research_status or "VALIDATED_RESEARCH").strip().upper(),
         "manual_execution_checklist": _strings(manual_execution_checklist)
         or [
             "Review validity gate status before acting.",
@@ -245,6 +291,19 @@ def build_event_validity_gate_v1(
         value = event_packet.get(field)
         if value in (None, "", []):
             blockers.append(f"MISSING_{field.upper()}")
+    if str(event_packet.get("event_rule_enabled_status") or "ENABLED").strip().upper() == "DISABLED":
+        blockers.append("EVENT_RULE_DISABLED")
+    if str(event_packet.get("production_status") or "").strip().upper() == "RESEARCH_ONLY":
+        blockers.append("RESEARCH_ONLY_EVENT_NOT_ACTIONABLE")
+    if str(event_packet.get("research_status") or "").strip().upper() == "RESEARCH_ONLY":
+        blockers.append("RESEARCH_ONLY_EVENT_NOT_ACTIONABLE")
+    runtime_class = str(event_packet.get("runtime_truth_classification") or "REAL_RUNTIME").strip().upper()
+    if runtime_class == "DEMO_ONLY":
+        blockers.append("DEMO_ONLY_EVENT_PACKET_NOT_ACTIONABLE")
+    elif runtime_class == "DRY_RUN_ONLY":
+        blockers.append("DRY_RUN_ONLY_EVENT_PACKET_NOT_ACTIONABLE")
+    elif runtime_class != "REAL_RUNTIME":
+        blockers.append(f"UNSUPPORTED_RUNTIME_TRUTH_CLASSIFICATION:{runtime_class}")
     sensitivity = str(event_packet.get("execution_sensitivity") or "").strip().upper()
     if sensitivity == "EXTREME":
         blockers.append("EXECUTION_SENSITIVITY_EXTREME_NOT_MANUAL_CAPTURE_SAFE")
@@ -269,10 +328,13 @@ def build_event_validity_gate_v1(
         "artifact_id": "event_validity_gate_v1",
         "gate_id": gate_id,
         "event_id": str(event_packet.get("event_id") or ""),
+        "event_rule_id": str(event_packet.get("event_rule_id") or "UNSPECIFIED_EVENT_RULE"),
+        "event_rule_version": str(event_packet.get("event_rule_version") or "v1"),
         "event_run_id": str(event_packet.get("event_run_id") or ""),
         "day_utc": str(event_packet.get("day_utc") or ""),
         "evaluated_at_utc": evaluated_at_utc,
         "current_price": current_price,
+        "runtime_truth_classification": runtime_class,
         "gate_status": status,
         "actionable_allowed": status == "PASS",
         "blockers": sorted(set(blockers)),
@@ -324,6 +386,13 @@ def build_trade_capture_alert_gate_v1(
             blockers.append(f"MISSING_{field.upper()}")
     if packet.get("stop_price") in (None, "", []) and packet.get("stop_logic") in (None, "", []):
         blockers.append("MISSING_STOP_PRICE_OR_STOP_LOGIC")
+    runtime_class = str(packet.get("runtime_truth_classification") or "REAL_RUNTIME").strip().upper()
+    if runtime_class == "DEMO_ONLY":
+        blockers.append("DEMO_ONLY_EVENT_PACKET_NOT_ALERTABLE")
+    elif runtime_class == "DRY_RUN_ONLY":
+        blockers.append("DRY_RUN_ONLY_EVENT_PACKET_NOT_ALERTABLE")
+    elif runtime_class != "REAL_RUNTIME":
+        blockers.append(f"UNSUPPORTED_RUNTIME_TRUTH_CLASSIFICATION:{runtime_class}")
     sensitivity = str(packet.get("execution_sensitivity") or validity.get("execution_sensitivity") or "").strip().upper()
     if sensitivity == "EXTREME":
         blockers.append("EXECUTION_SENSITIVITY_EXTREME_NOT_ALERTABLE")
@@ -378,6 +447,7 @@ def build_trade_capture_alert_gate_v1(
         "source_packet_type": "EVENT_TACTICAL_PACKET" if str(packet.get("schema_id") or "") == "event_tactical_packet" else str(packet.get("source_packet_type") or "EVENT_TACTICAL_PACKET"),
         "evaluated_at_utc": evaluated_at_utc,
         "alert_channel": channel,
+        "runtime_truth_classification": runtime_class,
         "alert_gate_status": status,
         "email_sms_allowed": status in {"ACTIONABLE_TRADE", "URGENT_ACTIONABLE_TRADE"},
         "validity_gate_status": str(validity.get("gate_status") or "MISSING"),
@@ -446,15 +516,26 @@ def _event_alert(row: dict[str, Any]) -> dict[str, Any]:
         alert_level=str(row.get("alert_level") or "INFO"),
         severity=str(row.get("severity") or ""),
         confidence=str(row.get("confidence") or ""),
+        monitor_run_id=str(row.get("monitor_run_id") or row.get("run_id") or ""),
+        event_rule_id=str(row.get("event_rule_id") or "UNSPECIFIED_EVENT_RULE"),
+        event_rule_version=str(row.get("event_rule_version") or "v1"),
         assets_affected=_strings(row.get("assets_affected")),
         trigger_conditions=_strings(row.get("trigger_conditions")),
+        trigger_conditions_evaluated=_strings(row.get("trigger_conditions_evaluated")),
+        thresholds_evaluated=_strings(row.get("thresholds_evaluated")),
         market_data_snapshot_refs=_strings(row.get("market_data_snapshot_refs")),
         reason_codes=_strings(row.get("reason_codes")),
+        pass_fail_reason_codes=_strings(row.get("pass_fail_reason_codes") or row.get("reason_codes")),
         why_it_matters=str(row.get("why_it_matters") or ""),
         recommended_operator_action=str(row.get("recommended_operator_action") or ""),
+        required_inputs_present=bool(row.get("required_inputs_present", True)),
+        stale_data_status=str(row.get("stale_data_status") or "UNKNOWN"),
         tactical_review_requested=bool(row.get("tactical_review_requested", False)),
         event_packet_created=bool(row.get("event_packet_created", False)),
+        tactical_packet_id=str(row.get("tactical_packet_id") or ""),
         validity_gate_status=str(row.get("validity_gate_status") or "NOT_RUN"),
+        alert_gate_status=str(row.get("alert_gate_status") or "NOT_RUN"),
+        email_delivery_status=str(row.get("email_delivery_status") or "NOT_SENT"),
     )
 
 
@@ -538,7 +619,7 @@ def _alert_attempt_from_gate(gate: dict[str, Any]) -> dict[str, Any]:
         "alert_gate_status": str(gate.get("alert_gate_status") or ""),
         "execution_sensitivity": str(gate.get("execution_sensitivity") or ""),
         "operator_action_required": "Review Aegis packet before manual entry." if allowed else "No operator interruption.",
-        "delivery_status": "WOULD_SEND" if allowed else "NOT_SENT",
+        "delivery_status": "DRY_RUN_MESSAGE_BODY_ONLY" if allowed else "NOT_SENT",
         "duplicate_suppressed": bool(gate.get("duplicate_suppressed", False)),
         "reason_codes": _strings(gate.get("reason_codes")),
         "no_alert_reason": str(gate.get("no_alert_reason") or ""),

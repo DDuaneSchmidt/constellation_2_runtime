@@ -2,7 +2,7 @@
 
 Aegis Lite remains EOD-centered. The official daily decision state is produced by the canonical 15:50 ET EOD run.
 
-The Event Awareness Layer is non-canonical. It may surface unusual intraday conditions, request operator review, write `event_awareness_ledger.v1`, and produce an optional `event_tactical_packet.v1`.
+The Event Awareness Layer is non-canonical. It reads `event_rules_registry.v1`, may surface unusual intraday conditions, request operator review, write `event_monitoring_status.v1` and `event_awareness_ledger.v1`, and produce an optional `event_tactical_packet.v1`.
 
 Event awareness cannot:
 - overwrite EOD state
@@ -19,6 +19,24 @@ Event awareness cannot:
 - `ACTIONABLE`: allowed only after `event_validity_gate.v1` returns `PASS`.
 - `BLOCKED`: event was detected but is not safe/manual executable.
 
+## Event Rules And Monitor
+
+The operator-readable rule source is `governance/02_REGISTRIES/C2_EVENT_RULES_REGISTRY_V1.json`.
+
+Run manually with an explicit truth root:
+
+```bash
+python3 ops/tools/run_aegis_event_monitor_v1.py --truth_root <safe_truth_root> --day_utc YYYY-MM-DD --market_snapshot_json <snapshot.json>
+```
+
+Rules are snapshotted into runtime truth for replay. Missing rules, disabled rules, stale data, missing inputs, research-only rules, no promoted sleeve, and low-confidence events fail closed.
+
+Read-only operator surfaces:
+
+- `/aegis-events`
+- `/api/aegis/event-monitoring`
+- `python3 ops/tools/read_aegis_event_monitoring_surface_v1.py --truth_root <safe_truth_root> --day_utc YYYY-MM-DD`
+
 ## Event Validity Gate
 
 The validity gate blocks tactical packets when required manual-capture fields are missing, the event is stale, price has moved beyond max slippage, or execution sensitivity is `EXTREME`.
@@ -33,7 +51,7 @@ Event tactical packets are separate from `manual_trade_packet.v1` and never over
 
 ## Trade Capture Alerts
 
-`trade_capture_alert_gate.v1` decides whether a packet is eligible to interrupt David. In current v1, this is a **gate and ledger only**. It writes SMS/email message bodies and records `WOULD_SEND` or `NOT_SENT`, but no real SMS/email transport is proven or wired.
+`trade_capture_alert_gate.v1` decides whether a packet is eligible to interrupt David. In current v1, this is a **gate and ledger only**. It writes SMS/email message bodies and records `DRY_RUN_MESSAGE_BODY_ONLY` or `NOT_SENT`, but no real SMS/email transport is proven or wired.
 
 The gate can mark a packet delivery-eligible only when:
 
@@ -52,7 +70,9 @@ Minimum time remaining:
 
 Only `ACTIONABLE_TRADE` and `URGENT_ACTIONABLE_TRADE` may become delivery-eligible. `INFO`, `WATCH`, `TACTICAL`, `BLOCKED`, `EXPIRED`, `INVALID`, and `MISSED_VALIDITY_WINDOW` are never delivery-eligible.
 
-`trade_capture_alert_ledger.v1` records every alert attempt, including blocked no-alert decisions. Duplicate SMS alerts for the same unchanged packet are suppressed at the gate/ledger layer. Until a transport is explicitly added and validated, operators must treat alert output as `GATE_ONLY_NO_TRANSPORT`.
+`trade_capture_alert_ledger.v1` records every alert attempt, including blocked no-alert decisions. Duplicate SMS alerts for the same unchanged packet are suppressed at the gate/ledger layer. Until a transport is explicitly added and validated, the operator-facing transport status is `GATE_ONLY_NO_TRANSPORT`; delivery rows use `DRY_RUN_MESSAGE_BODY_ONLY` for message bodies that would have been eligible for delivery.
+
+Event tactical packets carry `runtime_truth_classification` with values `REAL_RUNTIME`, `DEMO_ONLY`, or `DRY_RUN_ONLY`. Demo and dry-run packets are never actionable and cannot pass the event validity or trade-capture alert gates.
 
 ## Outcome And Research
 

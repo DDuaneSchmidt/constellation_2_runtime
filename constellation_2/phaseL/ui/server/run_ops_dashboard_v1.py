@@ -43,6 +43,7 @@ from constellation_2.phaseL.ui_api import (
     build_advisory_view,
     build_aegis_lite_execution_queue_view,
     build_aegis_lite_ui_health_view,
+    build_aegis_event_monitoring_view,
     build_alerts_view,
     build_capital_accounts_view,
     build_capital_allocation_view,
@@ -2067,6 +2068,7 @@ class OpsHandler(SimpleHTTPRequestHandler):
         "/sleeves",
         "/advisory",
         "/aegis-lite",
+        "/aegis-events",
         "/tax",
         "/operations",
         "/aegis-runtime",
@@ -2637,6 +2639,10 @@ class OpsHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/aegis/lite-execution-queue":
             self._send_json(HTTPStatus.OK, build_aegis_lite_execution_queue_view(requested_day, GLOBAL_TRUTH_ROOT))
+            return True
+
+        if path == "/api/aegis/event-monitoring":
+            self._send_json(HTTPStatus.OK, build_aegis_event_monitoring_view(requested_day, GLOBAL_TRUTH_ROOT))
             return True
 
         if path == "/api/command/overview":

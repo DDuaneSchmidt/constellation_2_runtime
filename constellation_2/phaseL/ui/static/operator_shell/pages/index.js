@@ -4,6 +4,7 @@ import {
   fetchActionAudit,
   fetchActivityToday,
   fetchAegisLiteExecutionQueue,
+  fetchAegisEventMonitoring,
   fetchAegisOperatorState,
   fetchRuntimeStatus,
   fetchAdvisory,
@@ -222,6 +223,13 @@ export const ROUTES = [
     label: "Aegis Lite Queue",
     eyebrow: "Aegis Lite Execution Queue",
     subtitle: "Manual-only EOD queue from current Lite report truth.",
+  },
+  {
+    path: "/aegis-events",
+    id: "aegis_events",
+    label: "Event Monitoring",
+    eyebrow: "Aegis Event Monitoring",
+    subtitle: "Read-only event rules, monitor status, event ledger, tactical packets, and alert gate evidence.",
   },
   {
     path: "/configuration",
@@ -2853,6 +2861,172 @@ async function renderAegisLiteQueuePage() {
   };
 }
 
+async function renderAegisEventMonitoringPage() {
+  let payload;
+  try {
+    payload = await fetchAegisEventMonitoring();
+  } catch (error) {
+    return {
+      title: "Event Monitoring",
+      meta: "Backend unavailable; event monitoring truth could not be loaded.",
+      html: renderCardSection({
+        eyebrow: "DEGRADED",
+        title: "Event Monitoring Unavailable",
+        subtitle: "The read-only event monitoring API is not reachable.",
+        body: renderDefinitionRows([
+          { label: "Endpoint", value: error?.operatorSafe?.endpointAttempted || "/api/aegis/event-monitoring" },
+          { label: "Broker submit required", value: "false" },
+          { label: "Canonical EOD mutated", value: "false" },
+        ]),
+      }),
+      contextHtml: "",
+    };
+  }
+
+  const rules = safeList(payload.event_rules);
+  const ledgerEvents = safeList(payload.event_ledger?.events);
+  const packets = safeList(payload.actionable_packets);
+  const blockedPackets = safeList(payload.blocked_packets);
+  const advisoryPackets = safeList(payload.advisory_packets);
+  const expiredPackets = safeList(payload.expired_packets);
+  const researchOnlyPackets = safeList(payload.research_only_packets);
+  const monitor = payload.monitor_status || {};
+  return {
+    title: "Event Monitoring",
+    meta: "Read-only Event Rules / Monitor / Ledger surface. Event runs are non-canonical and manual-only.",
+    html: [
+      renderCardSection({
+        eyebrow: "MANUAL_ONLY",
+        title: "THIS IS NOT BROKER AUTOMATION",
+        subtitle: "Event monitoring can alert the operator only after validity and alert gates pass. It never submits orders.",
+        body: renderDefinitionRows([
+          { label: "Email transport", value: payload.email_transport_status || "GATE_ONLY_NO_TRANSPORT" },
+          { label: "SMS transport", value: payload.sms_transport_status || "GATE_ONLY_NO_TRANSPORT" },
+          { label: "Broker submit required", value: String(payload.broker_submit_required === true) },
+          { label: "Canonical EOD mutated", value: String(payload.canonical_eod_state_mutated === true) },
+        ]),
+      }),
+      renderCardSection({
+        eyebrow: "Monitor",
+        title: "Event Monitor Status",
+        subtitle: "Latest monitor run, data freshness, evaluated rules, blocked events, and alert results.",
+        body: `
+          <div class="metric-grid">
+            ${renderMetricCard({ label: "Last run", value: monitor.monitor_run_id || "none" })}
+            ${renderMetricCard({ label: "Rules evaluated", value: String(safeList(monitor.event_rule_ids_evaluated).length) })}
+            ${renderMetricCard({ label: "Triggered", value: String(safeList(monitor.triggered_events).length) })}
+            ${renderMetricCard({ label: "Blocked", value: String(safeList(monitor.blocked_events).length) })}
+            ${renderMetricCard({ label: "Packets", value: String(safeList(monitor.tactical_packets_created).length) })}
+            ${renderMetricCard({ label: "Generated", value: formatTimestamp(monitor.timestamp_utc) })}
+          </div>
+          ${renderDefinitionRows([
+            { label: "Data snapshots", value: safeList(monitor.data_snapshot_refs).join(", ") || "n/a" },
+            { label: "Alert gate results", value: safeList(monitor.alert_gate_results).join(", ") || "none" },
+            { label: "Email delivery", value: safeList(monitor.email_delivery_results).join(", ") || "none" },
+          ])}
+        `,
+      }),
+      renderCardSection({
+        eyebrow: "Rules",
+        title: "Event Rules Registry",
+        subtitle: "Business rules are visible here and not buried in monitor code.",
+        body: renderSimpleTable({
+          columns: [
+            { label: "Event", key: "event_type" },
+            { label: "Rule", key: "event_rule_id" },
+            { label: "Enabled", key: "enabled_status" },
+            { label: "Production", key: "production_status" },
+            { label: "Research", key: "research_status" },
+            { label: "Required inputs", render: (row) => escapeHtml(safeList(row.required_inputs).join(", ")) },
+          ],
+          rows: rules,
+          emptyMessage: "No event rules registry loaded.",
+        }),
+      }),
+      renderCardSection({
+        eyebrow: "Ledger",
+        title: "Event Awareness Ledger",
+        subtitle: "Detected and blocked events with rule version, reason codes, tactical packet status, and alert gate state.",
+        body: renderSimpleTable({
+          columns: [
+            { label: "Event", key: "event_type" },
+            { label: "Level", key: "alert_level" },
+            { label: "Rule", key: "event_rule_id" },
+            { label: "Severity", key: "severity" },
+            { label: "Confidence", key: "confidence" },
+            { label: "Validity", key: "validity_gate_status" },
+            { label: "Alert gate", key: "alert_gate_status" },
+            { label: "Email", key: "email_delivery_status" },
+          ],
+          rows: ledgerEvents,
+          emptyMessage: "No event ledger entries for this day.",
+        }),
+      }),
+      renderCardSection({
+        eyebrow: packets.length ? "ACTIONABLE_PACKET_DETAILS" : "NO_ACTIONABLE_PACKETS",
+        title: "Actionable Event Packets",
+        subtitle: packets.length ? "Manual packet details for validity-gated event opportunities." : "No validity-gated event tactical packets are currently available.",
+        body: packets.map(renderEventPacketRows).join("") || `<div class="empty-state">No packets available.</div>`,
+      }),
+      renderCardSection({
+        eyebrow: "NON_ACTIONABLE_EVENT_PACKETS",
+        title: "Blocked / Advisory Event Packets",
+        subtitle: "Packets that are demo, dry-run, research-only, stale, invalid, or not fully gate-approved.",
+        body: [
+          renderEventPacketTable("Blocked", blockedPackets),
+          renderEventPacketTable("Expired", expiredPackets),
+          renderEventPacketTable("Research only", researchOnlyPackets),
+          renderEventPacketTable("Advisory", advisoryPackets),
+        ].join(""),
+      }),
+    ].join(""),
+    contextHtml: renderCardSection({
+      eyebrow: "Learning",
+      title: "Event Outcome / Research Learning",
+      subtitle: "Event outcomes may create offline Research Lab tasks only.",
+      body: renderDefinitionRows([
+        { label: "Research boundary", value: payload.research_learning_boundary || "offline learning only" },
+        { label: "Workflow", value: safeList(payload.operator_workflow).join(" | ") },
+      ]),
+    }),
+  };
+}
+
+function renderEventPacketRows(packet) {
+  return renderDefinitionRows([
+    { label: "Runtime truth", value: packet.runtime_truth_classification || "UNKNOWN" },
+    { label: "Symbol", value: packet.symbol || "n/a" },
+    { label: "Side", value: packet.side || "n/a" },
+    { label: "Entry reference", value: packet.entry_reference_price || "n/a" },
+    { label: "Sizing", value: packet.quantity_or_sizing_guidance || "n/a" },
+    { label: "Stop", value: packet.stop_price || packet.stop_logic || "n/a" },
+    { label: "Risk", value: packet.risk_per_trade || "n/a" },
+    { label: "Valid until", value: formatTimestamp(packet.valid_until) },
+    { label: "Max slippage", value: packet.max_entry_slippage || "n/a" },
+    { label: "Validity gate", value: packet.validity_gate_status || "NOT_RUN" },
+    { label: "Alert gate", value: packet.alert_gate_status || "NOT_RUN" },
+    { label: "Invalidation", value: safeList(packet.invalidation_conditions).join(", ") || "n/a" },
+  ]);
+}
+
+function renderEventPacketTable(title, rows) {
+  return `
+    <h3>${escapeHtml(title)}</h3>
+    ${renderSimpleTable({
+      columns: [
+        { label: "Runtime", key: "runtime_truth_classification" },
+        { label: "Event", key: "event_type" },
+        { label: "Symbol", key: "symbol" },
+        { label: "Validity", key: "validity_gate_status" },
+        { label: "Alert gate", key: "alert_gate_status" },
+        { label: "Blockers", render: (row) => escapeHtml([...safeList(row.validity_gate_blockers), ...safeList(row.alert_gate_blockers)].join(", ") || "none") },
+      ],
+      rows,
+      emptyMessage: `No ${title.toLowerCase()} packets.`,
+    })}
+  `;
+}
+
 function buildLiteDegradedMessages(payload) {
   const blockers = safeList(payload.current_blockers);
   const messages = [];
@@ -4873,6 +5047,8 @@ export async function loadRouteView(routeId, state) {
       return renderAegisRuntimePage(state);
     case "aegis_lite_queue":
       return renderAegisLiteQueuePage(state);
+    case "aegis_events":
+      return renderAegisEventMonitoringPage(state);
     case "outcomes":
       return renderOutcomesPage(state);
     case "refinement":

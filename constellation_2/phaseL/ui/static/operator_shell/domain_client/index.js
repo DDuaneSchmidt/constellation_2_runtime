@@ -68,6 +68,10 @@ export function fetchAegisLiteExecutionQueue(params = {}) {
   return query("/api/aegis/lite-execution-queue", params);
 }
 
+export function fetchAegisEventMonitoring(params = {}) {
+  return query("/api/aegis/event-monitoring", params);
+}
+
 export function fetchRuntimeStatus() {
   return query("/api/runtime-status");
 }

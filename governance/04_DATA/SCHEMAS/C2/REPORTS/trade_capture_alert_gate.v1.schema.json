@@ -4,7 +4,7 @@
   "title": "trade_capture_alert_gate.v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_id", "schema_version", "artifact_id", "gate_id", "event_id", "event_run_id", "day_utc", "source_packet_id", "source_packet_type", "evaluated_at_utc", "alert_channel", "alert_gate_status", "email_sms_allowed", "validity_gate_status", "execution_sensitivity", "valid_until_utc", "valid_until_display_et", "seconds_remaining_at_send", "minimum_seconds_required", "duplicate_suppressed", "blockers", "reason_codes", "no_alert_reason", "material_packet_hash", "sms_body", "email_subject", "email_body", "canonical_eod_state_mutated", "manual_execution_only", "broker_submit_required", "transmit_automation_required", "runtime_mutation_allowed", "automatic_promotion_allowed", "canonical_json_hash"],
+  "required": ["schema_id", "schema_version", "artifact_id", "gate_id", "event_id", "event_run_id", "day_utc", "source_packet_id", "source_packet_type", "evaluated_at_utc", "alert_channel", "runtime_truth_classification", "alert_gate_status", "email_sms_allowed", "validity_gate_status", "execution_sensitivity", "valid_until_utc", "valid_until_display_et", "seconds_remaining_at_send", "minimum_seconds_required", "duplicate_suppressed", "blockers", "reason_codes", "no_alert_reason", "material_packet_hash", "sms_body", "email_subject", "email_body", "canonical_eod_state_mutated", "manual_execution_only", "broker_submit_required", "transmit_automation_required", "runtime_mutation_allowed", "automatic_promotion_allowed", "canonical_json_hash"],
   "properties": {
     "schema_id": { "const": "trade_capture_alert_gate" },
     "schema_version": { "const": "v1" },
@@ -17,6 +17,7 @@
     "source_packet_type": { "type": "string" },
     "evaluated_at_utc": { "type": "string", "minLength": 20 },
     "alert_channel": { "type": "string", "enum": ["SMS", "EMAIL"] },
+    "runtime_truth_classification": { "type": "string", "enum": ["REAL_RUNTIME", "DEMO_ONLY", "DRY_RUN_ONLY"] },
     "alert_gate_status": { "type": "string", "enum": ["ACTIONABLE_TRADE", "URGENT_ACTIONABLE_TRADE", "INFO", "WATCH", "TACTICAL", "BLOCKED", "EXPIRED", "INVALID", "MISSED_VALIDITY_WINDOW"] },
     "email_sms_allowed": { "type": "boolean" },
     "validity_gate_status": { "type": "string" },

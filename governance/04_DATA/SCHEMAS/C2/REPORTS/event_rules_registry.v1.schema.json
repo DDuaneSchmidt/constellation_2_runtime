@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/event_rules_registry.v1.schema.json",
+  "title": "event_rules_registry.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "artifact_id", "generated_at_utc", "event_rules", "canonical_eod_state_mutated", "broker_submit_required", "canonical_json_hash"],
+  "properties": {
+    "schema_id": { "const": "event_rules_registry" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "event_rules_registry_v1" },
+    "generated_at_utc": { "type": "string", "minLength": 20 },
+    "event_rules": { "type": "array", "items": { "$ref": "#/$defs/rule" } },
+    "canonical_eod_state_mutated": { "const": false },
+    "broker_submit_required": { "const": false },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_rule_id", "event_rule_version", "event_type", "display_name", "behavioral_thesis", "required_inputs", "trigger_conditions", "thresholds", "severity_logic", "confidence_logic", "stale_data_rules", "tactical_review_rule", "validity_gate_requirements", "alert_eligibility_rule", "enabled_status", "production_status", "research_status", "last_updated", "owner_notes"],
+      "properties": {
+        "event_rule_id": { "type": "string", "minLength": 1 },
+        "event_rule_version": { "type": "string", "minLength": 1 },
+        "event_type": { "type": "string", "enum": ["PANIC_EXHAUSTION", "RECOVERY_FAILURE", "FAILED_BREAKOUT", "BREADTH_COLLAPSE", "DEFENSIVE_ROTATION", "VOLATILITY_SPIKE", "MACRO_EVENT_REACTION"] },
+        "display_name": { "type": "string", "minLength": 1 },
+        "behavioral_thesis": { "type": "string" },
+        "required_inputs": { "type": "array", "items": { "type": "string" } },
+        "trigger_conditions": { "type": "array", "items": { "type": "string" } },
+        "thresholds": { "type": "array", "items": { "$ref": "#/$defs/threshold" } },
+        "severity_logic": { "type": "object" },
+        "confidence_logic": { "type": "object" },
+        "stale_data_rules": { "type": "object" },
+        "tactical_review_rule": { "type": "object" },
+        "validity_gate_requirements": { "type": "array", "items": { "type": "string" } },
+        "alert_eligibility_rule": { "type": "object" },
+        "enabled_status": { "type": "string", "enum": ["ENABLED", "DISABLED"] },
+        "production_status": { "type": "string", "enum": ["MANUAL_PAPER_ELIGIBLE", "RESEARCH_ONLY", "DISABLED"] },
+        "research_status": { "type": "string", "enum": ["RESEARCH_ACTIVE", "RESEARCH_ONLY", "VALIDATED_RESEARCH"] },
+        "last_updated": { "type": "string", "minLength": 10 },
+        "owner_notes": { "type": "string" }
+      }
+    },
+    "threshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input_key", "operator", "value"],
+      "properties": {
+        "input_key": { "type": "string", "minLength": 1 },
+        "operator": { "type": "string", "enum": [">", ">=", "<", "<=", "==", "!="] },
+        "value": { "type": ["number", "string", "boolean"] }
+      }
+    }
+  }
+}

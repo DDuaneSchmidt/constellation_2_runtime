@@ -114,6 +114,7 @@ export const NAVIGATION_SCHEMA = [
           { id: "system_reliability", label: "Reliability", icon: "◉", route: "/reliability", truthOwner: "reliability_readiness" },
           { id: "system_aegis_runtime", label: "Aegis Runtime", icon: "◇", route: "/aegis-runtime", truthOwner: "aegis_operator_state_v1" },
           { id: "system_aegis_lite_queue", label: "Aegis Lite Queue", icon: "▣", route: "/aegis-lite", truthOwner: "aegis_lite_eod_report_v1" },
+          { id: "system_aegis_events", label: "Event Monitoring", icon: "!", route: "/aegis-events", truthOwner: "event_rules_registry_v1" },
           { id: "system_bug_log", label: "Bug Log", icon: "!", route: "/reliability/issues", badgeCount: 5, truthOwner: "reliability_issue_ledger" },
           { id: "system_integrations", label: "Integrations", icon: "↔", route: "/operations", truthOwner: "runtime_service_authority_v1" },
         ],
