@@ -33,7 +33,9 @@ Event tactical packets are separate from `manual_trade_packet.v1` and never over
 
 ## Trade Capture Alerts
 
-`trade_capture_alert_gate.v1` decides whether David should be interrupted by SMS/email. It can alert only when:
+`trade_capture_alert_gate.v1` decides whether a packet is eligible to interrupt David. In current v1, this is a **gate and ledger only**. It writes SMS/email message bodies and records `WOULD_SEND` or `NOT_SENT`, but no real SMS/email transport is proven or wired.
+
+The gate can mark a packet delivery-eligible only when:
 
 - the event validity gate is `PASS`
 - the source event tactical packet exists
@@ -48,9 +50,9 @@ Minimum time remaining:
 - `HIGH`: 5 minutes
 - `EXTREME`: always blocked
 
-Only `ACTIONABLE_TRADE` and `URGENT_ACTIONABLE_TRADE` may send email/SMS. `INFO`, `WATCH`, `TACTICAL`, `BLOCKED`, `EXPIRED`, `INVALID`, and `MISSED_VALIDITY_WINDOW` never send.
+Only `ACTIONABLE_TRADE` and `URGENT_ACTIONABLE_TRADE` may become delivery-eligible. `INFO`, `WATCH`, `TACTICAL`, `BLOCKED`, `EXPIRED`, `INVALID`, and `MISSED_VALIDITY_WINDOW` are never delivery-eligible.
 
-`trade_capture_alert_ledger.v1` records every alert attempt, including blocked no-alert decisions. Duplicate SMS alerts for the same unchanged packet are suppressed.
+`trade_capture_alert_ledger.v1` records every alert attempt, including blocked no-alert decisions. Duplicate SMS alerts for the same unchanged packet are suppressed at the gate/ledger layer. Until a transport is explicitly added and validated, operators must treat alert output as `GATE_ONLY_NO_TRANSPORT`.
 
 ## Outcome And Research
 

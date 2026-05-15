@@ -19,8 +19,89 @@ Reason:
 - Repo timer/source code, active user systemd, and current runtime operating status now use the canonical 15:50 ET EOD time.
 - Current runtime queue/report exists, but no promoted executable candidate is present.
 - Current runtime is `ADVISORY_ONLY`, with no actionable manual trade packet or executable operator queue item.
+- P0 offline proof has validated the promoted-sleeve-only queue and dry lifecycle mechanics under `/tmp`, but that proof is not a live runtime trade authorization.
 
 Safe dry-run/operator validation readiness: `READY_WITH_MANUAL_STEPS`.
+
+## P0 Operator Readiness Status
+
+Status date: 2026-05-15
+
+### What To Run Daily
+
+Pre-market / morning:
+```bash
+python3 ops/tools/list_research_hypotheses_v1.py --truth_root /path/to/offline_research_truth --day_utc YYYY-MM-DD
+python3 ops/tools/research_architecture_integrity_review_v1.py --truth_root /path/to/offline_research_truth
+```
+
+Near close:
+```bash
+python3 ops/tools/run_aegis_lite_eod_pipeline_v1.py --day_utc YYYY-MM-DD --truth_root /path/to/truth --environment PAPER --manual-only --allow-not-ready-exit-zero
+```
+
+After manual action or dry receipt:
+```bash
+python3 ops/tools/build_sleeve_performance_report_v1.py --truth_root /path/to/truth --day YYYY-MM-DD
+```
+
+### Ready
+
+- Canonical Lite EOD timer/status alignment is 15:50 ET.
+- Release/repo match is currently reported as `MATCH`.
+- Lite EOD fails closed when candidate input or promoted sleeve library is missing.
+- Offline P0 proof generated one promoted executable queue item from a human-approved promoted sleeve library.
+- Offline P0 proof rejected one unpromoted Research candidate with `SLEEVE_NOT_APPROVED_FOR_LITE_OPERATION`.
+- Offline P0 proof generated a complete `manual_trade_packet.v1`.
+- Offline P0 proof generated `manual_execution_receipt.v1`, `outcome_ledger.v1`, and `sleeve_performance_report.v1`.
+- Sleeve performance report generated offline Research follow-up task recommendations without mutating Lite runtime.
+
+### Blocked
+
+- Current runtime truth remains `ADVISORY_ONLY`.
+- Current runtime `operator_execution_queue.v1` is empty.
+- Current runtime `manual_trade_packet.v1` has no trade candidates.
+- No real current promoted non-demo executable candidate has been generated in runtime truth.
+- A real supervised IB paper trade has not been executed or measured.
+
+### Manual-Only
+
+- IB paper order entry is manual.
+- Protective stop entry is manual.
+- Receipt recording is manual.
+- Outcome/exit evidence is manual unless separately supplied by governed non-IB data.
+- Research feedback from performance remains offline and non-authoritative.
+
+### Unproven
+
+- Actual SMS/email delivery is unproven.
+- Event alert output is `GATE_ONLY_NO_TRANSPORT`: ledger and message-body artifacts only.
+- Dedicated UI panels for receipt status, outcome ledger, event alert ledger, sleeve performance report, and Research Lab are unproven.
+- Real Research dataset bindings for price, volatility, breadth, macro events, and regime labels remain incomplete.
+
+### P0 Offline Proof Artifacts
+
+Safe proof root:
+`/tmp/aegis_p0_offline_proof_20260515`
+
+Generated artifacts:
+- Candidate input: `/tmp/aegis_p0_offline_proof_20260515/inputs/candidate_input.v1.json`
+- Promoted sleeve library: `/tmp/aegis_p0_offline_proof_20260515/inputs/promoted_sleeve_library.v1.json`
+- EOD report: `/tmp/aegis_p0_offline_proof_20260515/reports/aegis_lite_eod_report_v1/2026-05-15/p0_promoted_queue_proof/aegis_lite_eod_report.v1.json`
+- Operator queue: `/tmp/aegis_p0_offline_proof_20260515/reports/operator_execution_queue_v1/2026-05-15/p0_promoted_queue_proof/operator_execution_queue.v1.json`
+- Manual trade packet: `/tmp/aegis_p0_offline_proof_20260515/reports/manual_trade_packet_v1/2026-05-15/p0_promoted_queue_proof/manual_trade_packet.v1.json`
+- Manual receipt: `/tmp/aegis_p0_offline_proof_20260515/research_lab/manual_execution_receipt_v1/2026-05-15/p0_receipt_001/manual_execution_receipt.v1.json`
+- Outcome ledger: `/tmp/aegis_p0_offline_proof_20260515/research_lab/outcome_ledger_v1/2026-05-15/index/outcome_ledger.v1.json`
+- Sleeve performance report: `/tmp/aegis_p0_offline_proof_20260515/reports/sleeve_performance_report_v1/2026-05-15/sleeve_performance_report.v1.json`
+
+P0 proof result:
+- `manual_execution_status=READY_FOR_MANUAL_ENTRY`
+- `readiness_classification=READY_FOR_SUPERVISED_MANUAL_PAPER_TRADING`
+- `broker_submit_required=false`
+- `manual_execution_only=true`
+- `transmit_automation_required=false`
+- `ib_automation_required=false`
+- sleeve report recommended 2 offline Research follow-up tasks and did not write Research queue or mutate Lite runtime.
 
 ## Timer Status
 
@@ -66,7 +147,8 @@ Confirmed controls:
 - Manual trade packet actionability requires the candidate sleeve/source hypothesis to match the promoted sleeve library.
 
 Remaining proof gap:
-- Current runtime executable queue is demo/dry-run. A real promoted sleeve candidate has not yet been proven end-to-end in active runtime.
+- P0 offline proof validated promoted-sleeve-only filtering and one ready queue item under `/tmp`.
+- Current runtime remains advisory and has no executable queue item. A real promoted sleeve candidate has not yet been proven end-to-end in runtime truth.
 
 ## Event Alert Transport
 
@@ -86,6 +168,7 @@ Alert safety:
 Transport finding:
 - The trade capture alert CLI writes gate/ledger artifacts and message bodies.
 - It does not currently send real email/SMS.
+- Operator-facing status is `GATE_ONLY_NO_TRANSPORT`.
 - Later enablement should wire a configured transport behind `trade_capture_alert_gate.v1` only, preserving the gate as send authority.
 
 ## Manual Execution Receipt
@@ -177,11 +260,11 @@ Scheduling:
 3. Operator UI lacks manual receipt, event alert ledger, trade capture alert ledger, Research Lab, and promotion-candidate views.
 4. Real paper-trade receipt/outcome/sleeve-performance lifecycle has not been proven from an actual IB paper fill.
 
-## Readiness Answer
+## Manual Paper Smoke Readiness Answer
 
-Aegis Lite is not ready for real manual paper trading today.
+Aegis Lite is not ready for a real supervised IB paper smoke from current runtime truth today.
 
-It is ready for supervised dry-run/operator validation with manual steps, using the existing report/queue and no broker automation.
+It is mechanically ready for supervised dry-run/operator validation with manual steps. The P0 offline proof shows the existing architecture can produce a promoted executable queue, manual packet, receipt, outcome ledger, sleeve performance report, and offline Research feedback without broker automation.
 
 Before the first real supervised IB paper trade:
 - confirm the 15:50 ET timer/status remains aligned,
