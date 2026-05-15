@@ -127,9 +127,11 @@ Use this checklist for the next governed paper attempt. Check in order and stop 
 
 ## Install / Update unit files (authoritative definitions are in repo)
 
-IB Gateway ownership is intentionally separate from these user units. The canonical supervised Gateway owner is the system unit `ib-gateway@node.service`. The deprecated user unit `c2-ib-gateway.service` must not launch, stop, or kill Gateway/IBC processes.
+IB Gateway ownership is intentionally separate from Aegis Lite. The Lite pivot is manual-only and broker-agnostic: no Gateway unit is part of the default Lite runtime, and `broker_required_for_runtime=false`.
 
-Do not use `c2-ib-gateway.service` state as PAPER trading readiness. Broker/account evidence remains authoritative through `ib_broker_event_probe_v1`, `broker_supply_v1`, `runtime_resilience_authority_v1`, and the submit boundary.
+The deprecated user unit `c2-ib-gateway.service` must not launch, stop, restart, reconnect, or kill Gateway/IBC processes. It should remain disabled and marker-only. A separate operator-started Gateway unit may be used only for explicit manual paper entry or later reconciliation, not as a scheduler-driven Lite dependency.
+
+Do not use `c2-ib-gateway.service` state as Lite readiness. Broker/account evidence and submit-boundary artifacts belong to the legacy/deferred broker-enabled PAPER path and are not current Lite readiness authority.
 
 Authoritative unit files live in:
 

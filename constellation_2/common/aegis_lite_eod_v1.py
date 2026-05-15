@@ -312,8 +312,10 @@ def build_aegis_lite_eod_report_v1(
         "operating_model": {
             "phase": "AEGIS_LITE",
             "near_term_product": "EOD_MANUAL_TRADE_REPORT",
+            "broker_mode": "MANUAL_ONLY",
             "manual_execution_only": True,
             "ib_automation_status": "DEFERRED",
+            "broker_required_for_runtime": False,
             "broker_submit_required": False,
             "autonomous_order_routing_allowed": False,
         },

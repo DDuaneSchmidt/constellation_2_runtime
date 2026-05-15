@@ -62,16 +62,20 @@
       "required": [
         "phase",
         "near_term_product",
+        "broker_mode",
         "manual_execution_only",
         "ib_automation_status",
+        "broker_required_for_runtime",
         "broker_submit_required",
         "autonomous_order_routing_allowed"
       ],
       "properties": {
         "phase": { "const": "AEGIS_LITE" },
         "near_term_product": { "const": "EOD_MANUAL_TRADE_REPORT" },
+        "broker_mode": { "const": "MANUAL_ONLY" },
         "manual_execution_only": { "const": true },
         "ib_automation_status": { "const": "DEFERRED" },
+        "broker_required_for_runtime": { "const": false },
         "broker_submit_required": { "const": false },
         "autonomous_order_routing_allowed": { "const": false }
       }

@@ -17,9 +17,13 @@ This guide is the operator contract for release, launcher, and scheduled Aegis c
 
 ## IB Gateway Ownership
 
-`ib-gateway@node.service` is the canonical supervised IB Gateway owner for the local PAPER runtime. The user unit `c2-ib-gateway.service` is deprecated and must remain non-owning: it must not launch IB Gateway, kill IBC/Gateway processes, or compete for port `4002`.
+For the Aegis Lite pivot, no IB Gateway unit is part of the default runtime. Aegis Lite is `MANUAL_ONLY`, `ib_automation_status=DEFERRED`, and `broker_required_for_runtime=false`.
 
-Trading readiness must be derived from broker/account evidence, not from the deprecated user unit state. The governed evidence path is `ib_broker_event_probe_v1`, `broker_supply_v1`, `runtime_resilience_authority_v1`, and downstream submit-boundary artifacts. A failed or inactive `c2-ib-gateway.service` is a cleanup signal, not a trading-readiness authority.
+The user unit `c2-ib-gateway.service` is deprecated and must remain non-owning: it must not launch IB Gateway, kill IBC/Gateway processes, reconnect, or compete for port `4002`. In the active user runtime it should be disabled and may be a marker-only unit.
+
+The separate `ib-gateway.service` may remain available for explicit operator-started manual paper entry or later reconciliation, but it must be disabled by default and must not be started by Lite EOD, event awareness, Research Lab, sleeve performance reporting, timers, or hidden reconnect logic.
+
+Trading readiness for the old broker-enabled PAPER path was derived from broker/account evidence through `ib_broker_event_probe_v1`, `broker_supply_v1`, `runtime_resilience_authority_v1`, and downstream submit-boundary artifacts. Those paths are legacy/deferred for Lite and are not current Lite readiness authority.
 
 ## NPM Contracts Used By Aegis
 

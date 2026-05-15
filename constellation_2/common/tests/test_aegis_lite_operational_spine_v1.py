@@ -188,6 +188,10 @@ def test_lite_timer_exists_at_1550_et_and_legacy_paper_timers_are_deferred() -> 
     assert status["lite_eod_timer_status"]["target_time_et"] == "15:50"
     assert status["lite_eod_timer_status"]["calendar"] == "Mon..Fri *-*-* 15:50:00 America/New_York"
     assert status["lite_eod_timer_status"]["status"] == "CONFIGURED"
+    assert status["broker_mode"] == "MANUAL_ONLY"
+    assert status["ib_automation_status"] == "DEFERRED"
+    assert status["broker_required_for_runtime"] is False
+    assert status["broker_submit_required"] is False
 
     for name in [
         "c2-paper-day-orchestrator",
@@ -218,8 +222,39 @@ def test_lite_producer_does_not_require_ib_state_or_submit_orders(tmp_path: Path
 
     assert report["run_receipt"]["ib_submit_automation_invoked"] is False
     assert report["run_receipt"]["broker_transmit_control_touched"] is False
+    assert report["operating_model"]["broker_mode"] == "MANUAL_ONLY"
+    assert report["operating_model"]["ib_automation_status"] == "DEFERRED"
+    assert report["operating_model"]["broker_required_for_runtime"] is False
     assert report["operating_model"]["broker_submit_required"] is False
     assert report["operating_model"]["autonomous_order_routing_allowed"] is False
+
+
+def test_default_lite_paths_do_not_attempt_ib_gateway_startup() -> None:
+    forbidden = (
+        "ibcstart.sh",
+        "ibcalpha.ibc.IbcGateway",
+        "/opt/ib/ibgateway",
+        "displaybannerandlaunch.sh",
+        "systemctl --user start c2-ib-gateway",
+        "systemctl --user start ib-gateway",
+    )
+    relpaths = (
+        "ops/tools/run_aegis_lite_eod_pipeline_v1.py",
+        "ops/tools/run_event_awareness_v1.py",
+        "ops/tools/run_event_tactical_review_v1.py",
+        "ops/tools/run_event_validity_gate_v1.py",
+        "ops/tools/run_trade_capture_alert_gate_v1.py",
+        "ops/tools/build_sleeve_performance_report_v1.py",
+        "ops/tools/run_aegis_research_lab_v1.py",
+        "constellation_2/common/aegis_lite_eod_v1.py",
+        "constellation_2/common/aegis_lite_event_awareness_v1.py",
+        "constellation_2/common/aegis_sleeve_performance_report_v1.py",
+        "constellation_2/common/aegis_research_lab_v1.py",
+    )
+    for relpath in relpaths:
+        text = (REPO_ROOT / relpath).read_text(encoding="utf-8")
+        for marker in forbidden:
+            assert marker not in text, f"{relpath} contains broker startup marker {marker}"
 
 
 def test_eod_pipeline_writes_complete_fail_closed_manual_trade_packet(tmp_path: Path) -> None:

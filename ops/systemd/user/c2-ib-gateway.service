@@ -3,7 +3,7 @@ Description=DEPRECATED non-owning C2 IB Gateway marker
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/printf 'DEPRECATED: c2-ib-gateway.service is non-owning. Canonical IB Gateway owner is ib-gateway@node.service. Broker/account evidence remains the trading-readiness authority.\n'
+ExecStart=/usr/bin/printf 'DEPRECATED: c2-ib-gateway.service is non-owning. Aegis Lite is MANUAL_ONLY; IB Gateway is optional operator-started tooling only and is not Lite readiness authority.\n'
 
 [Install]
 WantedBy=default.target

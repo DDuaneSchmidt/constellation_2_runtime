@@ -6,8 +6,11 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/home/node/constellation
+ConditionEnvironment=AEGIS_ENABLE_LEGACY_BROKER_OBSERVATION=1
 
-# Fail-closed: if python/ibapi or canonical Core 1 governance is unavailable, service will fail and restart.
+# LEGACY BROKER OBSERVATION DEFERRED AFTER AEGIS LITE PIVOT.
+# This service is not part of default Lite EOD/event/Research/performance operation.
+# It may run only when explicitly enabled for a separate broker-observation phase.
 ExecStart=/usr/bin/bash -lc 'set -euo pipefail; exec /home/node/constellation/ops/run/c2_execution_observer_v1.sh'
 
 Restart=always

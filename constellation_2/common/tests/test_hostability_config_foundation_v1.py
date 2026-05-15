@@ -43,6 +43,8 @@ def test_execution_observer_wrapper_resolves_governed_runtime_config() -> None:
 
 def test_execution_observer_service_uses_canonical_wrapper() -> None:
     text = _read("ops/systemd/user/c2-execution-observer.service")
+    assert "ConditionEnvironment=AEGIS_ENABLE_LEGACY_BROKER_OBSERVATION=1" in text
+    assert "LEGACY BROKER OBSERVATION DEFERRED AFTER AEGIS LITE PIVOT" in text
     assert "ops/run/c2_execution_observer_v1.sh" in text
     assert "/home/node/constellation_2_runtime/.venv_c2/bin/python" not in text
     assert "--host 127.0.0.1" not in text
@@ -53,7 +55,7 @@ def test_execution_observer_service_uses_canonical_wrapper() -> None:
 def test_deprecated_ib_gateway_user_unit_is_non_owning() -> None:
     text = _read("ops/systemd/user/c2-ib-gateway.service")
     assert "DEPRECATED" in text
-    assert "ib-gateway@node.service" in text
+    assert "non-owning" in text
     assert "ExecStartPre" not in text
     assert "pkill" not in text
     assert "ibcstart.sh" not in text
@@ -66,10 +68,11 @@ def test_ib_gateway_docs_identify_canonical_system_owner() -> None:
     command_contracts = _read("ops/docs/aegis_operator_command_contracts_v1.md")
     runbook = _read("ops/runbooks/C2_PAPER_OPS_RUNBOOK_V1.md")
     for text in (command_contracts, runbook):
-        assert "ib-gateway@node.service" in text
+        assert "MANUAL_ONLY" in text or "manual-only" in text
+        assert "broker_required_for_runtime=false" in text
         assert "c2-ib-gateway.service" in text
-        assert "broker/account evidence" in text.lower()
-        assert "runtime_resilience_authority_v1" in text
+        assert "disabled" in text
+        assert "not current Lite readiness authority" in text or "not as Lite readiness" in text
 
 
 def test_trading_readiness_sources_do_not_depend_on_deprecated_gateway_user_unit() -> None:

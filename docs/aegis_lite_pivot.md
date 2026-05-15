@@ -7,6 +7,8 @@ Aegis Lite is the current near-term operating model for Aegis. The product is th
 - IB automation is deferred for this phase.
 - Aegis Lite does not add broker-submit functionality, autonomous order routing, transmit-control logic, or fill lifecycle plumbing.
 - Existing IB execution code remains available for future governed reactivation, but the Lite EOD path does not depend on broker submit authority.
+- The Lite runtime broker mode is `MANUAL_ONLY`: `ib_automation_status=DEFERRED`, `broker_required_for_runtime=false`, and `broker_submit_required=false`.
+- IB Gateway must not auto-launch as part of normal Lite EOD, event awareness, Research Lab, or sleeve performance reporting.
 
 ## Canonical Flow
 
@@ -64,4 +66,6 @@ Readiness must be based on valid evidence and schema validation, not directory e
 
 ## Future Broker Reactivation
 
-Broker automation can be reactivated only through a separate governed phase. That future phase must explicitly reconnect submit authority, broker transmit controls, fill lifecycle handling, and post-trade reconciliation. Aegis Lite artifacts are advisory/manual-entry artifacts and must not be treated as broker execution approval.
+Broker automation can be reactivated only through a separate governed phase. That future phase must explicitly reconnect submit authority, broker transmit controls, fill lifecycle handling, Gateway launch ownership, reconnect policy, and post-trade reconciliation. Aegis Lite artifacts are advisory/manual-entry artifacts and must not be treated as broker execution approval.
+
+Optional operator-started IB Gateway use remains outside the default Lite runtime. It may be used for manual paper entry or future reconciliation only when the operator explicitly starts it; Lite must remain able to run with no Gateway process, no broker login, and no IB API dependency.

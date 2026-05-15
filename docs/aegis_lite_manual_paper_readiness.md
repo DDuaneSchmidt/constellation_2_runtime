@@ -49,6 +49,7 @@ python3 ops/tools/build_sleeve_performance_report_v1.py --truth_root /path/to/tr
 
 - Canonical Lite EOD timer/status alignment is 15:50 ET.
 - Release/repo match is currently reported as `MATCH`.
+- Lite runtime status carries `broker_mode=MANUAL_ONLY`, `ib_automation_status=DEFERRED`, and `broker_required_for_runtime=false`.
 - Lite EOD fails closed when candidate input or promoted sleeve library is missing.
 - Offline P0 proof generated one promoted executable queue item from a human-approved promoted sleeve library.
 - Offline P0 proof rejected one unpromoted Research candidate with `SLEEVE_NOT_APPROVED_FOR_LITE_OPERATION`.
@@ -67,6 +68,7 @@ python3 ops/tools/build_sleeve_performance_report_v1.py --truth_root /path/to/tr
 ### Manual-Only
 
 - IB paper order entry is manual.
+- IB Gateway is not launched by the Lite runtime. If the operator wants Gateway open for manual paper entry, it must be started explicitly outside the Lite scheduler.
 - Protective stop entry is manual.
 - Receipt recording is manual.
 - Outcome/exit evidence is manual unless separately supplied by governed non-IB data.
