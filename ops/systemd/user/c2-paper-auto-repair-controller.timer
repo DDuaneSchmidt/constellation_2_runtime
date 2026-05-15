@@ -1,5 +1,6 @@
 [Unit]
 Description=Constellation 2.0 Paper Auto Repair Controller Timer (paper hours every 5 minutes)
+# LEGACY_PAPER_AUTOMATION_DEFERRED: repeated intraday PAPER lifecycle repair is deferred.
 
 [Timer]
 OnCalendar=Mon..Fri *-*-* 13..20:0/5:00 UTC

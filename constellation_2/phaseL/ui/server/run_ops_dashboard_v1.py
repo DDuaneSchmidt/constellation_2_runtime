@@ -41,6 +41,7 @@ from constellation_2.phaseL.ui_api import (
     STATUS_SEMANTICS,
     build_action_inventory,
     build_advisory_view,
+    build_aegis_lite_execution_queue_view,
     build_alerts_view,
     build_capital_accounts_view,
     build_capital_allocation_view,
@@ -2629,6 +2630,10 @@ class OpsHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/aegis/operator-state":
             self._send_json(HTTPStatus.OK, get_operator_state(GLOBAL_TRUTH_ROOT))
+            return True
+
+        if path == "/api/aegis/lite-execution-queue":
+            self._send_json(HTTPStatus.OK, build_aegis_lite_execution_queue_view(requested_day, GLOBAL_TRUTH_ROOT))
             return True
 
         if path == "/api/command/overview":

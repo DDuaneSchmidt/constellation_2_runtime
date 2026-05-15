@@ -167,6 +167,10 @@ def normalize_trade_candidate_v1(raw: dict[str, Any], *, ordinal: int = 1) -> di
         "macro_sensitivity": _text(raw.get("macro_sensitivity") or "UNKNOWN"),
         "volatility_liquidity_dependency": _text(raw.get("volatility_liquidity_dependency") or "UNKNOWN"),
         "source_artifact_refs": _artifact_refs(raw.get("source_artifact_refs") or raw.get("source_artifact_lineage")),
+        "promotion_status": _text(raw.get("promotion_status") or "unknown"),
+        "execution_confidence_badges": _string_list(raw.get("execution_confidence_badges")),
+        "demo_mode": bool(raw.get("demo_mode", False)),
+        "dry_run_only": bool(raw.get("dry_run_only", False)),
         "executable_status": "NON_EXECUTABLE" if blockers else "EXECUTABLE",
         "blockers": blockers,
     }
@@ -288,6 +292,12 @@ def build_aegis_lite_eod_report_v1(
             for row in report_candidates
         )
     )
+    readiness_classification = _readiness_classification_v1(
+        report_candidates=report_candidates,
+        blockers=blockers,
+        gates=gates,
+        manual_ready=manual_ready,
+    )
     out_path = aegis_lite_eod_report_path_v1(truth_root=truth_root, day_utc=day_utc, run_id=run_id)
     overlap_path = sleeve_edge_overlap_review_path_v1(truth_root=truth_root, day_utc=day_utc, run_id=run_id)
     payload = {
@@ -357,6 +367,7 @@ def build_aegis_lite_eod_report_v1(
         },
         "report_status": "BLOCKED" if blockers else ("READY_WITH_WARNINGS" if warnings else "READY"),
         "manual_execution_status": "READY_FOR_MANUAL_ENTRY" if manual_ready else "NOT_READY",
+        "readiness_classification": readiness_classification,
         "canonical_json_hash": None,
     }
     payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
@@ -420,6 +431,22 @@ def _dedupe(values: list[str]) -> list[str]:
             seen.add(item)
             out.append(item)
     return out
+
+
+def _readiness_classification_v1(
+    *,
+    report_candidates: list[dict[str, Any]],
+    blockers: list[str],
+    gates: list[dict[str, Any]],
+    manual_ready: bool,
+) -> str:
+    if manual_ready:
+        return "READY_FOR_SUPERVISED_MANUAL_PAPER_TRADING"
+    if not report_candidates:
+        return "ADVISORY_ONLY"
+    if blockers or any(gate.get("status") != "PASS" for gate in gates):
+        return "NOT_READY"
+    return "ADVISORY_ONLY"
 
 
 def _artifact_refs(value: Any) -> list[dict[str, Any]]:
@@ -618,6 +645,10 @@ def _report_candidate(candidate: dict[str, Any], note: dict[str, Any]) -> dict[s
         else "EXECUTABLE",
         "blockers": candidate["blockers"],
         "source_artifact_refs": candidate["source_artifact_refs"],
+        "promotion_status": candidate["promotion_status"],
+        "execution_confidence_badges": candidate["execution_confidence_badges"],
+        "demo_mode": candidate["demo_mode"],
+        "dry_run_only": candidate["dry_run_only"],
     }
 
 

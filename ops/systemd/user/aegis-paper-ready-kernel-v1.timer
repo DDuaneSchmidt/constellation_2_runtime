@@ -1,5 +1,6 @@
 [Unit]
 Description=Scheduled Aegis PAPER ready kernel v1 windows after 09:31
+# LEGACY_PAPER_AUTOMATION_DEFERRED: repeated intraday PAPER readiness/submit automation is deferred.
 
 [Timer]
 OnCalendar=Mon..Fri *-*-* 10:15:00 America/New_York

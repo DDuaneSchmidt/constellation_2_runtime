@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/legacy_paper_runtime_status.v1.schema.json",
+  "title": "legacy_paper_runtime_status.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "generated_at_utc",
+    "disabled_timers",
+    "deferred_services",
+    "remaining_legacy_components",
+    "legacy_runtime_active",
+    "lite_operational_spine_active",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "legacy_paper_runtime_status" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "legacy_paper_runtime_status_v1" },
+    "generated_at_utc": { "type": "string", "minLength": 20 },
+    "disabled_timers": { "type": "array", "items": { "type": "string" } },
+    "deferred_services": { "type": "array", "items": { "type": "string" } },
+    "remaining_legacy_components": { "type": "array", "items": { "type": "string" } },
+    "legacy_runtime_active": { "type": "boolean" },
+    "lite_operational_spine_active": { "type": "boolean" },
+    "reason_codes": { "type": "array", "items": { "type": "string" } },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

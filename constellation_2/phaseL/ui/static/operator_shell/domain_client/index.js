@@ -64,6 +64,10 @@ export function fetchAegisOperatorState() {
   return fetchJson(new URL(path, window.location.origin).toString());
 }
 
+export function fetchAegisLiteExecutionQueue(params = {}) {
+  return query("/api/aegis/lite-execution-queue", params);
+}
+
 export function fetchRuntimeStatus() {
   return query("/api/runtime-status");
 }

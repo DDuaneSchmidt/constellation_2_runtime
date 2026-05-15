@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/promoted_candidate_set.v1.schema.json",
+  "title": "promoted_candidate_set.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "day_utc",
+    "run_id",
+    "generated_at_utc",
+    "candidate_count",
+    "promoted_candidate_count",
+    "candidates",
+    "manual_execution_only",
+    "broker_submit_required",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "promoted_candidate_set" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "promoted_candidate_set_v1" },
+    "day_utc": { "type": "string" },
+    "run_id": { "type": "string" },
+    "generated_at_utc": { "type": "string" },
+    "candidate_count": { "type": "integer", "minimum": 0 },
+    "promoted_candidate_count": { "type": "integer", "minimum": 0 },
+    "candidates": { "type": "array", "items": { "type": "object" } },
+    "manual_execution_only": { "const": true },
+    "broker_submit_required": { "const": false },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

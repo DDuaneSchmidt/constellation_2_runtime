@@ -1,5 +1,6 @@
 [Unit]
 Description=Constellation 2.0 Paper Auto Repair Controller EOD Final Timer
+# LEGACY_PAPER_AUTOMATION_DEFERRED: legacy PAPER lifecycle repair is deferred.
 
 [Timer]
 OnCalendar=Mon..Fri *-*-* 20:10:00 UTC

@@ -3,6 +3,7 @@ import {
   createConfigurationDraft,
   fetchActionAudit,
   fetchActivityToday,
+  fetchAegisLiteExecutionQueue,
   fetchAegisOperatorState,
   fetchRuntimeStatus,
   fetchAdvisory,
@@ -214,6 +215,13 @@ export const ROUTES = [
     label: "Aegis Runtime",
     eyebrow: "Aegis Runtime",
     subtitle: "Read-only operator state derived from the latest immutable scan artifacts.",
+  },
+  {
+    path: "/aegis-lite",
+    id: "aegis_lite_queue",
+    label: "Aegis Lite Queue",
+    eyebrow: "Aegis Lite Execution Queue",
+    subtitle: "Manual-only EOD queue from current Lite report truth.",
   },
   {
     path: "/configuration",
@@ -2737,6 +2745,141 @@ async function renderAegisRuntimePage() {
   };
 }
 
+async function renderAegisLiteQueuePage() {
+  let payload;
+  try {
+    payload = await fetchAegisLiteExecutionQueue();
+  } catch (error) {
+    return {
+      title: "Aegis Lite Queue",
+      meta: "Backend unavailable; current Lite report truth could not be loaded.",
+      html: renderCardSection({
+        eyebrow: "NOT_READY",
+        title: "No Current Lite Queue",
+        subtitle: "The UI cannot reach the read-only Lite queue API.",
+        body: renderDefinitionRows([
+          { label: "Endpoint", value: error?.operatorSafe?.endpointAttempted || "/api/aegis/lite-execution-queue" },
+          { label: "Manual execution status", value: "NOT_READY" },
+          { label: "Broker submit required", value: "false" },
+        ]),
+      }),
+      contextHtml: "",
+    };
+  }
+
+  const executable = safeList(payload.executable_trades);
+  const blocked = safeList(payload.blocked_or_advisory_trades);
+  const summary = payload.queue_summary || {};
+  const releaseMismatch = payload.release_match_status === "MISMATCH";
+  const legacy = payload.operating_status?.legacy_paper_runtime_status || {};
+  return {
+    title: "Aegis Lite Queue",
+    meta: "Manual-only EOD execution queue from current Aegis Lite report truth.",
+    html: [
+      renderCardSection({
+        eyebrow: "MANUAL_ONLY",
+        title: "THIS IS NOT BROKER AUTOMATION",
+        subtitle: "Aegis Lite produces an operator checklist. David manually enters any supervised IB paper trade and stop.",
+        body: renderDefinitionRows([
+          { label: "Broker submit required", value: String(payload.broker_submit_required === true) },
+          { label: "IB automation", value: payload.ib_automation_status || "DEFERRED" },
+          { label: "Release match", value: payload.release_match_status || "UNKNOWN" },
+          { label: "Ready disabled by mismatch", value: releaseMismatch ? "YES" : "NO" },
+        ]),
+      }),
+      renderCardSection({
+        eyebrow: payload.readiness_classification || "NOT_READY",
+        title: "Aegis Lite Execution Queue",
+        subtitle: executable.length ? `${executable.length} executable manual-paper candidate(s).` : "No executable manual-paper candidates.",
+        body: `
+          <div class="metric-grid">
+            ${renderMetricCard({ label: "Executable", value: String(summary.executable_trades_count ?? executable.length) })}
+            ${renderMetricCard({ label: "Blocked", value: String(summary.blocked_trades_count ?? blocked.length) })}
+            ${renderMetricCard({ label: "Distinct edges", value: String(summary.distinct_edge_count ?? 0) })}
+            ${renderMetricCard({ label: "Concentration warnings", value: String(summary.concentration_warnings ?? 0) })}
+            ${renderMetricCard({ label: "Unprotected positions", value: String(summary.open_unprotected_positions ?? 0) })}
+            ${renderMetricCard({ label: "Release match", value: summary.active_release_match_status || payload.release_match_status || "UNKNOWN" })}
+            ${renderMetricCard({ label: "Manual status", value: payload.manual_execution_status || "NOT_READY" })}
+            ${renderMetricCard({ label: "Generated", value: formatTimestamp(payload.generated_at) })}
+          </div>
+        `,
+      }),
+      renderCardSection({
+        eyebrow: executable.length ? "READY_FOR_MANUAL_ENTRY" : "EMPTY",
+        title: "Executable Manual Trades",
+        subtitle: "Only cards in this section may be considered for supervised IB paper entry.",
+        body: renderLiteTradeCards(executable, true),
+      }),
+      renderCardSection({
+        eyebrow: blocked.length ? "BLOCKED_OR_ADVISORY" : "CLEAR",
+        title: "Blocked / Advisory Candidates",
+        subtitle: "These cards are not executable.",
+        body: renderLiteTradeCards(blocked, false),
+      }),
+    ].join(""),
+    contextHtml: [
+      renderCardSection({
+        eyebrow: "Evidence",
+        title: "Lite Source Artifacts",
+        subtitle: "The queue page reads current Lite report/status artifacts, not stale operator state.",
+        body: renderDefinitionRows([
+          { label: "Report", value: payload.report_path || "missing" },
+          { label: "Queue", value: payload.queue_path || "missing" },
+          { label: "Status", value: payload.artifact_path || "missing" },
+          { label: "Current blockers", value: safeList(payload.current_blockers).join(", ") || "none" },
+          { label: "Warnings", value: safeList(payload.warnings).join(", ") || "none" },
+          { label: "Legacy operator state", value: payload.legacy_operator_state?.diagnostic_only ? "diagnostic only" : "not used" },
+          { label: "Lite operational spine", value: legacy.lite_operational_spine_active === false ? "inactive" : "active" },
+          { label: "Legacy PAPER runtime", value: legacy.legacy_runtime_active ? "active" : "deferred" },
+        ]),
+      }),
+    ].join(""),
+  };
+}
+
+function renderLiteTradeCards(cards, executable) {
+  const rows = safeList(cards);
+  if (!rows.length) {
+    return `<div class="empty-state">${executable ? "No executable Lite trades." : "No blocked or advisory candidates."}</div>`;
+  }
+  return renderList(rows, { renderItem: (card) => renderLiteTradeCard(card, executable) });
+}
+
+function renderLiteTradeCard(card, executable) {
+  const blockers = safeList(card.do_not_trade_blockers);
+  return `
+    <article class="stack-card" style="${executable ? "border-left:4px solid #16a34a;" : "border-left:4px solid #dc2626; opacity:.92;"}">
+      <div class="stack-card-title">${escapeHtml(card.execution_order || "")}. ${escapeHtml(card.symbol || "UNKNOWN")} ${escapeHtml(card.side || "")}</div>
+      <div class="stack-card-subtitle">${escapeHtml(card.trade_class || "UNKNOWN")} · ${escapeHtml(card.sleeve_owner || "UNKNOWN")} · ${escapeHtml(card.edge_cluster_id || "NO_EDGE_CLUSTER")}</div>
+      <div class="metric-grid" style="margin-top:12px;">
+        ${renderMetricCard({ label: "Priority", value: String(card.priority_rank || "") })}
+        ${renderMetricCard({ label: "Direction", value: card.direction || "UNKNOWN" })}
+        ${renderMetricCard({ label: "Quantity", value: String(card.quantity || 0) })}
+        ${renderMetricCard({ label: "Entry", value: card.entry_instruction || "missing" })}
+        ${renderMetricCard({ label: "Stop", value: card.stop_price || "missing" })}
+        ${renderMetricCard({ label: "Stop qty/type", value: `${card.stop_quantity || 0} ${card.stop_order_type || "STP"}` })}
+        ${renderMetricCard({ label: "Risk", value: card.risk_per_trade || "missing" })}
+        ${renderMetricCard({ label: "Governance", value: card.governance_recommendation || "UNKNOWN" })}
+        ${renderMetricCard({ label: "Promotion", value: card.promotion_status || "UNKNOWN" })}
+        ${renderMetricCard({ label: "Report time", value: formatTimestamp(card.report_timestamp) })}
+      </div>
+      <div style="margin-top:12px;">
+        ${renderStatusPill(executable ? "EXECUTABLE_MANUAL_ONLY" : "DO_NOT_TRADE")}
+        ${safeList(card.execution_confidence_badges).map((badge) => renderStatusPill(badge)).join(" ")}
+      </div>
+      ${blockers.length ? `<div class="callout danger" style="margin-top:12px;">${escapeHtml(blockers.join(", "))}</div>` : ""}
+      <div class="definition-list" style="margin-top:12px;">
+        ${renderDefinitionRows([
+          { label: "Manual IB recipe", value: card.manual_ib_recipe || "missing" },
+          { label: "Source sleeve", value: card.source_sleeve || "missing" },
+          { label: "Edge cluster", value: card.edge_cluster_id || "missing" },
+          { label: "Steps", value: safeList(card.operator_steps).join(" | ") },
+        ])}
+      </div>
+    </article>
+  `;
+}
+
 async function renderAuditPage() {
   const [audit, activity, homeBundle] = await Promise.all([
     fetchActionAudit(),
@@ -4698,6 +4841,8 @@ export async function loadRouteView(routeId, state) {
       return renderOperationsPage(state);
     case "aegis_runtime":
       return renderAegisRuntimePage(state);
+    case "aegis_lite_queue":
+      return renderAegisLiteQueuePage(state);
     case "outcomes":
       return renderOutcomesPage(state);
     case "refinement":

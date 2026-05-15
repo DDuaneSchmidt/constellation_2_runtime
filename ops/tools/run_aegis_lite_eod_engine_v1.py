@@ -13,38 +13,10 @@ if str(REPO_ROOT) not in sys.path:
 
 from constellation_2.common.aegis_lite_eod_v1 import artifact_ref_v1, now_utc_iso_v1, read_candidate_input_v1  # noqa: E402
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1, resolve_fact_plane_truth_root_v1  # noqa: E402
-from ops.tools.run_aegis_lite_eod_pipeline_v1 import build_aegis_lite_eod_pipeline_v1  # noqa: E402
-
-
-def filter_promoted_sleeve_candidates_v1(input_payload: dict[str, Any], promoted_sleeve_library: dict[str, Any]) -> dict[str, Any]:
-    sleeves = promoted_sleeve_library.get("sleeves") if isinstance(promoted_sleeve_library.get("sleeves"), list) else []
-    promoted_ids = {
-        str(row.get("sleeve_id") or "").strip()
-        for row in sleeves
-        if isinstance(row, dict) and str(row.get("promotion_status") or "").lower() == "promoted"
-    }
-    candidates = input_payload.get("candidates") if isinstance(input_payload.get("candidates"), list) else []
-    accepted = [row for row in candidates if isinstance(row, dict) and str(row.get("sleeve_id") or "").strip() in promoted_ids]
-    rejected = [
-        {
-            "candidate_id": str(row.get("candidate_id") or ""),
-            "sleeve_id": str(row.get("sleeve_id") or ""),
-            "reason_code": "SLEEVE_NOT_IN_PROMOTED_LIBRARY",
-        }
-        for row in candidates
-        if isinstance(row, dict) and str(row.get("sleeve_id") or "").strip() not in promoted_ids
-    ]
-    return {
-        **input_payload,
-        "candidates": accepted,
-        "promoted_sleeve_filter": {
-            "promoted_sleeve_ids": sorted(promoted_ids),
-            "accepted_candidate_count": len(accepted),
-            "rejected_candidate_count": len(rejected),
-            "rejected_candidates": rejected,
-            "research_lab_artifacts_directly_executable": False,
-        },
-    }
+from ops.tools.run_aegis_lite_eod_pipeline_v1 import (  # noqa: E402
+    build_aegis_lite_eod_pipeline_v1,
+    filter_promoted_sleeve_candidates_v1,
+)
 
 
 def _read_json(path: Path) -> dict[str, Any]:

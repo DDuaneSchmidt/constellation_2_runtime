@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/aegis_release_integrity_status.v1.schema.json",
+  "title": "aegis_release_integrity_status.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "generated_at_utc",
+    "repo_head_commit",
+    "active_release_commit",
+    "release_match_status",
+    "active_release_id",
+    "repo_dirty_status",
+    "runtime_path",
+    "active_release_path",
+    "operator_warning_required",
+    "current_runtime_mode",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "aegis_release_integrity_status" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "aegis_release_integrity_status_v1" },
+    "generated_at_utc": { "type": "string", "minLength": 20 },
+    "repo_head_commit": { "type": "string" },
+    "active_release_commit": { "type": "string" },
+    "release_match_status": { "type": "string", "enum": ["MATCH", "MISMATCH"] },
+    "active_release_id": { "type": "string" },
+    "repo_dirty_status": { "type": "string", "enum": ["CLEAN", "DIRTY", "UNKNOWN"] },
+    "runtime_path": { "type": "string" },
+    "active_release_path": { "type": "string" },
+    "operator_warning_required": { "type": "boolean" },
+    "current_runtime_mode": { "type": "string" },
+    "reason_codes": { "type": "array", "items": { "type": "string" } },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

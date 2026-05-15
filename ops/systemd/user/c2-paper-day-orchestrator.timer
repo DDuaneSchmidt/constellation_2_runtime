@@ -1,5 +1,6 @@
 [Unit]
 Description=Schedule C2 Paper Day Orchestrator (weekdays 09:31 America/New_York)
+# LEGACY_PAPER_AUTOMATION_DEFERRED: Aegis Lite EOD report is the primary manual PAPER operating path.
 
 [Timer]
 OnCalendar=Mon-Fri 09:31 America/New_York

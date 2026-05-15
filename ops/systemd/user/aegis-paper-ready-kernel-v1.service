@@ -1,5 +1,6 @@
 [Unit]
-Description=Aegis PAPER ready kernel v1
+Description=Aegis PAPER ready kernel v1 (LEGACY_PAPER_AUTOMATION_DEFERRED)
+ConditionEnvironment=AEGIS_ENABLE_LEGACY_PAPER_AUTOMATION=1
 
 [Service]
 Type=oneshot

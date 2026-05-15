@@ -44,6 +44,7 @@
     "run_receipt",
     "report_status",
     "manual_execution_status",
+    "readiness_classification",
     "canonical_json_hash"
   ],
   "properties": {
@@ -154,6 +155,16 @@
     },
     "report_status": { "type": "string", "enum": ["READY", "READY_WITH_WARNINGS", "BLOCKED"] },
     "manual_execution_status": { "type": "string", "enum": ["READY_FOR_MANUAL_ENTRY", "NOT_READY"] },
+    "readiness_classification": {
+      "type": "string",
+      "enum": [
+        "NOT_READY",
+        "ADVISORY_ONLY",
+        "READY_FOR_SUPERVISED_MANUAL_PAPER_TRADING",
+        "READY_FOR_UNSUPERVISED_MANUAL_PAPER_TRADING",
+        "READY_FOR_AUTOMATION"
+      ]
+    },
     "producer_contract_v1": { "type": "object" },
     "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
   },
@@ -279,6 +290,11 @@
         "executable_status": { "type": "string", "enum": ["EXECUTABLE", "NON_EXECUTABLE"] },
         "blockers": { "type": "array", "items": { "type": "string" } },
         "source_artifact_refs": { "type": "array", "items": { "$ref": "#/$defs/artifact_ref" } }
+        ,
+        "promotion_status": { "type": "string" },
+        "execution_confidence_badges": { "type": "array", "items": { "type": "string" } },
+        "demo_mode": { "type": "boolean" },
+        "dry_run_only": { "type": "boolean" }
       }
     },
     "recommendation": {

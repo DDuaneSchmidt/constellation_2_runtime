@@ -1,5 +1,6 @@
 [Unit]
-Description=Constellation 2.0 Paper Auto Repair Controller v1
+Description=Constellation 2.0 Paper Auto Repair Controller v1 (LEGACY_PAPER_AUTOMATION_DEFERRED)
+ConditionEnvironment=AEGIS_ENABLE_LEGACY_PAPER_AUTOMATION=1
 After=network-online.target
 Wants=network-online.target
 

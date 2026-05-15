@@ -1,5 +1,6 @@
 [Unit]
-Description=Aegis PAPER ready kernel v1 after startup materialization
+Description=Aegis PAPER ready kernel v1 after startup materialization (LEGACY_PAPER_AUTOMATION_DEFERRED)
+ConditionEnvironment=AEGIS_ENABLE_LEGACY_PAPER_AUTOMATION=1
 Requires=c2-paper-day-orchestrator.service
 After=c2-paper-day-orchestrator.service
 

@@ -257,10 +257,20 @@ def test_eod_engine_filters_candidates_to_promoted_sleeve_library_only() -> None
                 _candidate(candidate_id="research-only", sleeve_id="C2_RESEARCH_ONLY"),
             ]
         },
-        {"sleeves": [{"sleeve_id": "C2_TREND_EQ_PRIMARY", "promotion_status": "promoted"}]},
+        {
+            "sleeves": [
+                {
+                    "sleeve_id": "C2_TREND_EQ_PRIMARY",
+                    "promotion_status": "promoted",
+                    "human_approval_status": "approved",
+                    "implementation_status": "approved",
+                }
+            ]
+        },
     )
 
     assert [row["candidate_id"] for row in filtered["candidates"]] == ["promoted"]
     assert filtered["promoted_sleeve_filter"]["rejected_candidate_count"] == 1
-    assert filtered["promoted_sleeve_filter"]["rejected_candidates"][0]["reason_code"] == "SLEEVE_NOT_IN_PROMOTED_LIBRARY"
+    assert filtered["promoted_sleeve_filter"]["rejected_candidates"][0]["reason_code"] == "SLEEVE_NOT_APPROVED_FOR_LITE_OPERATION"
     assert filtered["promoted_sleeve_filter"]["research_lab_artifacts_directly_executable"] is False
+    assert filtered["promoted_sleeve_filter"]["human_approval_required"] is True

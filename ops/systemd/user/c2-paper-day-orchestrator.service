@@ -1,5 +1,6 @@
 [Unit]
-Description=C2 Paper Day Orchestrator (daily PAPER run; fail-closed; authority-head)
+Description=C2 Paper Day Orchestrator (LEGACY_PAPER_AUTOMATION_DEFERRED)
+ConditionEnvironment=AEGIS_ENABLE_LEGACY_PAPER_AUTOMATION=1
 Wants=network-online.target
 After=network-online.target
 OnFailure=c2-kill-switch-engage.service
