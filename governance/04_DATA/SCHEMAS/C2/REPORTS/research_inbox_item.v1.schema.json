@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/research_inbox_item.v1.schema.json",
+  "title": "research_inbox_item.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "artifact_id", "inbox_id", "created_at_utc", "source", "raw_text", "tags", "related_symbols", "related_edge_family", "suggested_program", "triage_status", "converted_hypothesis_id", "notes", "research_lab_only", "can_authorize_research_execution", "runtime_mutation_allowed", "trade_authorization_allowed", "automatic_promotion_allowed", "broker_submit_required", "transmit_automation_required", "canonical_json_hash"],
+  "properties": {
+    "schema_id": { "const": "research_inbox_item" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "research_inbox_item_v1" },
+    "inbox_id": { "type": "string", "minLength": 1 },
+    "created_at_utc": { "type": "string", "minLength": 20 },
+    "source": { "type": "string", "enum": ["CHATGPT", "MANUAL", "LITE_FEEDBACK", "MARKET_OBSERVATION", "TRADE_REVIEW"] },
+    "raw_text": { "type": "string", "minLength": 1 },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "related_symbols": { "type": "array", "items": { "type": "string" } },
+    "related_edge_family": { "type": "string" },
+    "suggested_program": { "type": "string" },
+    "triage_status": { "type": "string", "enum": ["NEW", "TRIAGED", "CONVERTED_TO_HYPOTHESIS", "REJECTED", "ARCHIVED"] },
+    "converted_hypothesis_id": { "type": "string" },
+    "notes": { "type": "string" },
+    "research_lab_only": { "const": true },
+    "can_authorize_research_execution": { "const": false },
+    "runtime_mutation_allowed": { "const": false },
+    "trade_authorization_allowed": { "const": false },
+    "automatic_promotion_allowed": { "const": false },
+    "broker_submit_required": { "const": false },
+    "transmit_automation_required": { "const": false },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

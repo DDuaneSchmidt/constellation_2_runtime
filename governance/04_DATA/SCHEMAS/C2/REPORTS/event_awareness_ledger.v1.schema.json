@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/event_awareness_ledger.v1.schema.json",
+  "title": "event_awareness_ledger.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "artifact_id", "run_id", "day_utc", "generated_at_utc", "events", "non_canonical_event_layer", "canonical_eod_state_mutated", "broker_submit_required", "transmit_automation_required", "runtime_mutation_allowed", "automatic_promotion_allowed", "canonical_json_hash"],
+  "properties": {
+    "schema_id": { "const": "event_awareness_ledger" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "event_awareness_ledger_v1" },
+    "run_id": { "type": "string", "minLength": 1 },
+    "day_utc": { "type": "string", "minLength": 10 },
+    "generated_at_utc": { "type": "string", "minLength": 20 },
+    "events": { "type": "array", "items": { "$ref": "#/$defs/event" } },
+    "non_canonical_event_layer": { "const": true },
+    "canonical_eod_state_mutated": { "const": false },
+    "broker_submit_required": { "const": false },
+    "transmit_automation_required": { "const": false },
+    "runtime_mutation_allowed": { "const": false },
+    "automatic_promotion_allowed": { "const": false },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_id", "run_id", "day_utc", "timestamp_utc", "event_type", "alert_level", "severity", "confidence", "assets_affected", "trigger_conditions", "market_data_snapshot_refs", "reason_codes", "why_it_matters", "recommended_operator_action", "tactical_review_requested", "event_packet_created", "validity_gate_status", "canonical_eod_state_mutated"],
+      "properties": {
+        "event_id": { "type": "string", "minLength": 1 },
+        "run_id": { "type": "string", "minLength": 1 },
+        "day_utc": { "type": "string", "minLength": 10 },
+        "timestamp_utc": { "type": "string", "minLength": 20 },
+        "event_type": { "type": "string", "enum": ["PANIC_EXHAUSTION", "RECOVERY_FAILURE", "FAILED_BREAKOUT", "BREADTH_COLLAPSE", "DEFENSIVE_ROTATION", "VOLATILITY_SPIKE", "MACRO_EVENT_REACTION"] },
+        "alert_level": { "type": "string", "enum": ["INFO", "WATCH", "TACTICAL", "ACTIONABLE", "BLOCKED"] },
+        "severity": { "type": "string" },
+        "confidence": { "type": "string" },
+        "assets_affected": { "type": "array", "items": { "type": "string" } },
+        "trigger_conditions": { "type": "array", "items": { "type": "string" } },
+        "market_data_snapshot_refs": { "type": "array", "items": { "type": "string" } },
+        "reason_codes": { "type": "array", "items": { "type": "string" } },
+        "why_it_matters": { "type": "string" },
+        "recommended_operator_action": { "type": "string" },
+        "tactical_review_requested": { "type": "boolean" },
+        "event_packet_created": { "type": "boolean" },
+        "validity_gate_status": { "type": "string" },
+        "canonical_eod_state_mutated": { "const": false }
+      }
+    }
+  }
+}

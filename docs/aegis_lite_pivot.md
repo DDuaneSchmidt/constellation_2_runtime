@@ -10,7 +10,7 @@ Aegis Lite is the current near-term operating model for Aegis. The product is th
 
 ## Canonical Flow
 
-The EOD pipeline runs near the close, approximately 15:30-15:45 ET:
+The EOD pipeline runs near the close at the canonical 15:50 ET timer:
 
 1. Market data snapshot validation.
 2. Regime classification.

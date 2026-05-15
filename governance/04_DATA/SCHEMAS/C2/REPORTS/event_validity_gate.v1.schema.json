@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/event_validity_gate.v1.schema.json",
+  "title": "event_validity_gate.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "artifact_id", "gate_id", "event_id", "event_run_id", "day_utc", "evaluated_at_utc", "current_price", "gate_status", "actionable_allowed", "blockers", "warnings", "execution_sensitivity", "valid_until", "max_entry_slippage", "canonical_eod_state_mutated", "manual_execution_only", "broker_submit_required", "transmit_automation_required", "runtime_mutation_allowed", "automatic_promotion_allowed", "canonical_json_hash"],
+  "properties": {
+    "schema_id": { "const": "event_validity_gate" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "event_validity_gate_v1" },
+    "gate_id": { "type": "string", "minLength": 1 },
+    "event_id": { "type": "string" },
+    "event_run_id": { "type": "string" },
+    "day_utc": { "type": "string", "minLength": 10 },
+    "evaluated_at_utc": { "type": "string", "minLength": 20 },
+    "current_price": { "type": "string" },
+    "gate_status": { "type": "string", "enum": ["PASS", "BLOCKED"] },
+    "actionable_allowed": { "type": "boolean" },
+    "blockers": { "type": "array", "items": { "type": "string" } },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "execution_sensitivity": { "type": "string" },
+    "valid_until": { "type": "string" },
+    "max_entry_slippage": { "type": "string" },
+    "canonical_eod_state_mutated": { "const": false },
+    "manual_execution_only": { "const": true },
+    "broker_submit_required": { "const": false },
+    "transmit_automation_required": { "const": false },
+    "runtime_mutation_allowed": { "const": false },
+    "automatic_promotion_allowed": { "const": false },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

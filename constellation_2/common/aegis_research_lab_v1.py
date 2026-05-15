@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -9,12 +10,20 @@ from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_again
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_RELPATHS = {
+    "research_inbox_item": "governance/04_DATA/SCHEMAS/C2/REPORTS/research_inbox_item.v1.schema.json",
+    "research_hypothesis": "governance/04_DATA/SCHEMAS/C2/REPORTS/research_hypothesis.v1.schema.json",
+    "research_program": "governance/04_DATA/SCHEMAS/C2/REPORTS/research_program.v1.schema.json",
     "research_evidence_packet": "governance/04_DATA/SCHEMAS/C2/REPORTS/research_evidence_packet.v1.schema.json",
+    "research_conclusion": "governance/04_DATA/SCHEMAS/C2/REPORTS/research_conclusion.v1.schema.json",
+    "research_failure_archetype": "governance/04_DATA/SCHEMAS/C2/REPORTS/research_failure_archetype.v1.schema.json",
     "research_to_lite_promotion": "governance/04_DATA/SCHEMAS/C2/REPORTS/research_to_lite_promotion.v1.schema.json",
+    "research_architecture_integrity_review": "governance/04_DATA/SCHEMAS/C2/REPORTS/research_architecture_integrity_review.v1.schema.json",
     "research_lab_index": "governance/04_DATA/SCHEMAS/C2/REPORTS/research_lab_index.v1.schema.json",
     "edge_taxonomy": "governance/04_DATA/SCHEMAS/C2/REPORTS/edge_taxonomy.v1.schema.json",
     "hypothesis_registry": "governance/04_DATA/SCHEMAS/C2/REPORTS/hypothesis_registry.v1.schema.json",
     "research_task_queue": "governance/04_DATA/SCHEMAS/C2/REPORTS/research_task_queue.v1.schema.json",
+    "research_result_ledger": "governance/04_DATA/SCHEMAS/C2/REPORTS/research_result_ledger.v1.schema.json",
+    "research_knowledge_graph": "governance/04_DATA/SCHEMAS/C2/REPORTS/research_knowledge_graph.v1.schema.json",
     "experiment_result": "governance/04_DATA/SCHEMAS/C2/REPORTS/experiment_result.v1.schema.json",
     "research_experiment_result": "governance/04_DATA/SCHEMAS/C2/REPORTS/research_experiment_result.v1.schema.json",
     "hypothesis_test_plan": "governance/04_DATA/SCHEMAS/C2/REPORTS/hypothesis_test_plan.v1.schema.json",
@@ -26,6 +35,47 @@ SCHEMA_RELPATHS = {
     "manual_execution_receipt": "governance/04_DATA/SCHEMAS/C2/REPORTS/manual_execution_receipt.v1.schema.json",
     "outcome_ledger": "governance/04_DATA/SCHEMAS/C2/REPORTS/outcome_ledger.v1.schema.json",
 }
+RESEARCH_INBOX_SOURCES = {"CHATGPT", "MANUAL", "LITE_FEEDBACK", "MARKET_OBSERVATION", "TRADE_REVIEW"}
+RESEARCH_INBOX_TRIAGE_STATUSES = {"NEW", "TRIAGED", "CONVERTED_TO_HYPOTHESIS", "REJECTED", "ARCHIVED"}
+RESEARCH_PROGRAM_STATUSES = {"ACTIVE", "PAUSED", "COMPLETE", "ARCHIVED"}
+RESEARCH_CONCLUSION_STATUSES = {"ACTIVE", "SUPERSEDED", "CONTRADICTED", "ARCHIVED"}
+RESEARCH_FAILURE_ARCHETYPE_STATUSES = {"ACTIVE", "SUPERSEDED", "ARCHIVED"}
+RESEARCH_HYPOTHESIS_STATUSES = {
+    "IDEA",
+    "UNDER_INVESTIGATION",
+    "BACKTESTING",
+    "REPLAY_REVIEW",
+    "OBSERVED_IN_MARKET",
+    "VALIDATED_RESEARCH",
+    "PROMOTION_CANDIDATE",
+    "APPROVED_FOR_LITE",
+    "REJECTED",
+    "ARCHIVED",
+}
+RESEARCH_HYPOTHESIS_SOURCES = {"CHATGPT_SEED", "MANUAL", "RESEARCH_LAB"}
+RESEARCH_TASK_TYPES_V1 = {
+    "DEFINITION_CHECK",
+    "DATA_AVAILABILITY_CHECK",
+    "REPLAY_ANALYSIS",
+    "BACKTEST",
+    "FORWARD_OBSERVATION",
+    "FAILURE_MODE_REVIEW",
+    "EXPECTANCY_REVIEW",
+    "PROMOTION_REVIEW",
+}
+RESEARCH_TASK_STATUSES_V1 = {"QUEUED", "RUNNING", "COMPLETED", "BLOCKED", "REJECTED"}
+RESEARCH_RESULT_STATUSES_V1 = {
+    "INSUFFICIENT_DATA",
+    "SUPPORTS_HYPOTHESIS",
+    "WEAK_SUPPORT",
+    "CONTRADICTS_HYPOTHESIS",
+    "INVALIDATED",
+    "NEEDS_MORE_RESEARCH",
+}
+RESEARCH_PROMOTION_RECOMMENDATIONS_V1 = {"NONE", "CONTINUE_RESEARCH", "PROMOTION_CANDIDATE", "REJECT", "ARCHIVE"}
+RESEARCH_PRIORITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "NORMAL": 2, "LOW": 3}
+RESEARCH_METHODOLOGY_VERSION_V1 = "aegis_research_offline_executor.v1"
+RESEARCH_CODE_VERSION_UNKNOWN = "repo_commit_unavailable"
 HYPOTHESIS_LIFECYCLE_STATES = {
     "proposed",
     "definition_ready",
@@ -62,6 +112,11 @@ TASK_TYPES = {
     "sleeve_failure_review",
     "anomaly_review",
     "retirement_review",
+    "event_failure_review",
+    "event_success_review",
+    "event_stale_entry_review",
+    "event_false_positive_review",
+    "event_overlap_review",
 }
 TASK_STATUSES = {"open", "completed", "blocked", "failed"}
 RESULT_STATUSES = {
@@ -166,7 +221,12 @@ def write_research_lab_artifact_v1(*, truth_root: Path, day_utc: str, payload: d
     validate_research_lab_artifact_v1(payload)
     schema_id = str(payload.get("schema_id") or "")
     identifier = str(
-        payload.get("research_id")
+        payload.get("inbox_id")
+        or payload.get("program_id")
+        or payload.get("conclusion_id")
+        or payload.get("failure_archetype_id")
+        or payload.get("review_id")
+        or payload.get("research_id")
         or payload.get("promotion_id")
         or payload.get("taxonomy_id")
         or payload.get("hypothesis_id")
@@ -256,6 +316,773 @@ def build_hypothesis_registry_v1(*, generated_at_utc: str, hypotheses: list[dict
     }
     payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
     return payload
+
+
+def deterministic_research_id_v1(*parts: Any, prefix: str) -> str:
+    material = "|".join(str(part or "").strip() for part in parts)
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
+    return f"{_safe_id(prefix)}-{digest}"
+
+
+def build_research_inbox_item_v1(
+    *,
+    inbox_id: str,
+    created_at_utc: str,
+    source: str,
+    raw_text: str,
+    tags: list[str] | str | None = None,
+    related_symbols: list[str] | str | None = None,
+    related_edge_family: str = "",
+    suggested_program: str = "",
+    triage_status: str = "NEW",
+    converted_hypothesis_id: str = "",
+    notes: str = "",
+) -> dict[str, Any]:
+    status = _enum(triage_status, RESEARCH_INBOX_TRIAGE_STATUSES, "triage_status")
+    if status == "CONVERTED_TO_HYPOTHESIS" and not str(converted_hypothesis_id or "").strip():
+        raise ValueError("CONVERTED_INBOX_REQUIRES_CONVERTED_HYPOTHESIS_ID")
+    payload = {
+        "schema_id": "research_inbox_item",
+        "schema_version": "v1",
+        "artifact_id": "research_inbox_item_v1",
+        "inbox_id": inbox_id,
+        "created_at_utc": created_at_utc,
+        "source": _enum(source, RESEARCH_INBOX_SOURCES, "source"),
+        "raw_text": raw_text,
+        "tags": _strings(tags),
+        "related_symbols": _strings(related_symbols),
+        "related_edge_family": related_edge_family,
+        "suggested_program": suggested_program,
+        "triage_status": status,
+        "converted_hypothesis_id": converted_hypothesis_id,
+        "notes": notes,
+        "research_lab_only": True,
+        "can_authorize_research_execution": False,
+        "runtime_mutation_allowed": False,
+        "trade_authorization_allowed": False,
+        "automatic_promotion_allowed": False,
+        "broker_submit_required": False,
+        "transmit_automation_required": False,
+        "canonical_json_hash": None,
+    }
+    payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
+    return payload
+
+
+def convert_inbox_item_to_research_hypothesis_v1(
+    *,
+    inbox_item: dict[str, Any],
+    hypothesis_id: str,
+    created_at_utc: str,
+    title: str,
+    hypothesis_summary: str,
+    market_thesis: str = "",
+    edge_family: str = "",
+    behavioral_state: str = "",
+    expected_regime: str = "",
+    expected_direction: str = "",
+    expected_holding_period: str = "",
+    instruments: list[str] | str | None = None,
+    rationale: str = "",
+    expected_behavior: str = "",
+    failure_conditions: list[str] | str | None = None,
+    invalidation_conditions: list[str] | str | None = None,
+    related_sleeves: list[str] | str | None = None,
+    related_research_refs: list[str] | str | None = None,
+    confidence_level: str = "LOW",
+) -> dict[str, Any]:
+    if str(inbox_item.get("schema_id") or "") != "research_inbox_item":
+        raise ValueError("INBOX_CONVERSION_REQUIRES_RESEARCH_INBOX_ITEM")
+    hypothesis = build_research_hypothesis_v1(
+        hypothesis_id=hypothesis_id,
+        created_at_utc=created_at_utc,
+        title=title,
+        hypothesis_summary=hypothesis_summary,
+        market_thesis=market_thesis,
+        edge_family=edge_family or str(inbox_item.get("related_edge_family") or ""),
+        behavioral_state=behavioral_state,
+        expected_regime=expected_regime,
+        expected_direction=expected_direction,
+        expected_holding_period=expected_holding_period,
+        instruments=instruments or inbox_item.get("related_symbols"),
+        rationale=rationale,
+        expected_behavior=expected_behavior,
+        failure_conditions=failure_conditions,
+        invalidation_conditions=invalidation_conditions,
+        related_sleeves=related_sleeves,
+        related_research_refs=[*_strings(related_research_refs), f"research_inbox_item.v1:{inbox_item.get('inbox_id')}"],
+        confidence_level=confidence_level,
+        status="IDEA",
+        source="MANUAL" if str(inbox_item.get("source") or "") != "CHATGPT" else "CHATGPT_SEED",
+        notes=f"Explicitly converted from research_inbox_item.v1:{inbox_item.get('inbox_id')}",
+    )
+    converted = dict(inbox_item)
+    converted["triage_status"] = "CONVERTED_TO_HYPOTHESIS"
+    converted["converted_hypothesis_id"] = hypothesis_id
+    converted["canonical_json_hash"] = None
+    converted["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(converted)
+    return {"inbox_item": converted, "hypothesis": hypothesis}
+
+
+def build_research_hypothesis_v1(
+    *,
+    hypothesis_id: str,
+    created_at_utc: str,
+    title: str,
+    hypothesis_summary: str,
+    market_thesis: str = "",
+    edge_family: str = "",
+    behavioral_state: str = "",
+    expected_regime: str = "",
+    expected_direction: str = "",
+    expected_holding_period: str = "",
+    instruments: list[str] | str | None = None,
+    rationale: str = "",
+    expected_behavior: str = "",
+    failure_conditions: list[str] | str | None = None,
+    invalidation_conditions: list[str] | str | None = None,
+    related_sleeves: list[str] | str | None = None,
+    related_research_refs: list[str] | str | None = None,
+    confidence_level: str = "LOW",
+    status: str = "IDEA",
+    source: str = "MANUAL",
+    notes: str = "",
+) -> dict[str, Any]:
+    payload = {
+        "schema_id": "research_hypothesis",
+        "schema_version": "v1",
+        "artifact_id": "research_hypothesis_v1",
+        "hypothesis_id": hypothesis_id,
+        "created_at_utc": created_at_utc,
+        "title": title,
+        "hypothesis_summary": hypothesis_summary,
+        "market_thesis": market_thesis,
+        "edge_family": edge_family,
+        "behavioral_state": behavioral_state,
+        "expected_regime": expected_regime,
+        "expected_direction": expected_direction,
+        "expected_holding_period": expected_holding_period,
+        "instruments": _strings(instruments),
+        "rationale": rationale,
+        "expected_behavior": expected_behavior,
+        "failure_conditions": _strings(failure_conditions),
+        "invalidation_conditions": _strings(invalidation_conditions),
+        "related_sleeves": _strings(related_sleeves),
+        "related_research_refs": _strings(related_research_refs),
+        "confidence_level": confidence_level,
+        "status": _enum(status, RESEARCH_HYPOTHESIS_STATUSES, "status"),
+        "source": _enum(source, RESEARCH_HYPOTHESIS_SOURCES, "source"),
+        "notes": notes,
+        "research_lab_only": True,
+        "runtime_mutation_allowed": False,
+        "trade_authorization_allowed": False,
+        "automatic_promotion_allowed": False,
+        "broker_submit_required": False,
+        "transmit_automation_required": False,
+        "canonical_json_hash": None,
+    }
+    payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
+    return payload
+
+
+def build_research_program_v1(
+    *,
+    program_id: str,
+    title: str,
+    thesis: str,
+    status: str = "ACTIVE",
+    related_hypotheses: list[str] | str | None = None,
+    edge_families: list[str] | str | None = None,
+    regimes: list[str] | str | None = None,
+    instruments: list[str] | str | None = None,
+    current_open_questions: list[str] | str | None = None,
+    summary_findings: list[str] | str | None = None,
+    research_priority: str = "NORMAL",
+    owner_notes: str = "",
+    created_at_utc: str,
+    updated_at_utc: str = "",
+) -> dict[str, Any]:
+    payload = {
+        "schema_id": "research_program",
+        "schema_version": "v1",
+        "artifact_id": "research_program_v1",
+        "program_id": program_id,
+        "title": title,
+        "thesis": thesis,
+        "status": _enum(status, RESEARCH_PROGRAM_STATUSES, "status"),
+        "related_hypotheses": _strings(related_hypotheses),
+        "edge_families": _strings(edge_families),
+        "regimes": _strings(regimes),
+        "instruments": _strings(instruments),
+        "current_open_questions": _strings(current_open_questions),
+        "summary_findings": _strings(summary_findings),
+        "research_priority": research_priority,
+        "owner_notes": owner_notes,
+        "created_at_utc": created_at_utc,
+        "updated_at_utc": updated_at_utc or created_at_utc,
+        "research_lab_only": True,
+        "can_authorize_promotion": False,
+        "runtime_mutation_allowed": False,
+        "trade_authorization_allowed": False,
+        "automatic_promotion_allowed": False,
+        "broker_submit_required": False,
+        "transmit_automation_required": False,
+        "canonical_json_hash": None,
+    }
+    payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
+    return payload
+
+
+def build_research_queue_task_v1(
+    *,
+    task_id: str,
+    hypothesis_id: str,
+    task_type: str,
+    priority: str = "NORMAL",
+    status: str = "QUEUED",
+    required_inputs: list[str] | str | None = None,
+    output_artifact_refs: list[str] | str | None = None,
+    blocker_reason_codes: list[str] | str | None = None,
+    created_at_utc: str,
+    updated_at_utc: str = "",
+) -> dict[str, Any]:
+    return {
+        "task_id": task_id,
+        "hypothesis_id": hypothesis_id,
+        "task_type": _enum(task_type, RESEARCH_TASK_TYPES_V1, "task_type"),
+        "priority": priority,
+        "status": _enum(status, RESEARCH_TASK_STATUSES_V1, "status"),
+        "required_inputs": _strings(required_inputs),
+        "output_artifact_refs": _strings(output_artifact_refs),
+        "blocker_reason_codes": _strings(blocker_reason_codes),
+        "created_at_utc": created_at_utc,
+        "updated_at_utc": updated_at_utc or created_at_utc,
+    }
+
+
+def build_research_result_v1(
+    *,
+    result_id: str,
+    hypothesis_id: str,
+    task_id: str,
+    result_status: str,
+    evidence_refs: list[str] | str | None = None,
+    conclusion_summary: str = "",
+    confidence_before: str = "",
+    confidence_after: str = "",
+    confidence_change: str = "",
+    metrics_summary: dict[str, Any] | None = None,
+    failure_mode_notes: str = "",
+    invalidation_notes: str = "",
+    next_recommended_task: str = "",
+    promotion_recommendation: str = "NONE",
+    created_at_utc: str = "",
+    data_snapshot_refs: list[str] | str | None = None,
+    methodology_version: str = RESEARCH_METHODOLOGY_VERSION_V1,
+    code_version: str = RESEARCH_CODE_VERSION_UNKNOWN,
+    artifact_lineage: list[dict[str, Any]] | None = None,
+    reason_codes: list[str] | str | None = None,
+    reproducibility_notes: str = "",
+) -> dict[str, Any]:
+    return {
+        "result_id": result_id,
+        "hypothesis_id": hypothesis_id,
+        "task_id": task_id,
+        "result_status": _enum(result_status, RESEARCH_RESULT_STATUSES_V1, "result_status"),
+        "evidence_refs": _strings(evidence_refs),
+        "conclusion_summary": conclusion_summary,
+        "confidence_before": confidence_before,
+        "confidence_after": confidence_after,
+        "confidence_change": confidence_change,
+        "metrics_summary": dict(metrics_summary or {}),
+        "failure_mode_notes": failure_mode_notes,
+        "invalidation_notes": invalidation_notes,
+        "next_recommended_task": next_recommended_task,
+        "promotion_recommendation": _enum(promotion_recommendation, RESEARCH_PROMOTION_RECOMMENDATIONS_V1, "promotion_recommendation"),
+        "created_at_utc": created_at_utc,
+        "data_snapshot_refs": _strings(data_snapshot_refs),
+        "methodology_version": methodology_version,
+        "code_version": code_version,
+        "artifact_lineage": _objects(artifact_lineage or []),
+        "reason_codes": _strings(reason_codes),
+        "reproducibility_notes": reproducibility_notes,
+        "immutable_artifact": True,
+    }
+
+
+def build_research_result_ledger_v1(*, generated_at_utc: str, results: list[dict[str, Any]]) -> dict[str, Any]:
+    sorted_results = sorted(
+        results,
+        key=lambda row: (
+            str(row.get("created_at_utc") or ""),
+            str(row.get("hypothesis_id") or ""),
+            str(row.get("task_id") or ""),
+            str(row.get("result_id") or ""),
+        ),
+    )
+    payload = {
+        "schema_id": "research_result_ledger",
+        "schema_version": "v1",
+        "artifact_id": "research_result_ledger_v1",
+        "generated_at_utc": generated_at_utc,
+        "results": sorted_results,
+        "research_lab_only": True,
+        "runtime_mutation_allowed": False,
+        "trade_authorization_allowed": False,
+        "automatic_promotion_allowed": False,
+        "broker_submit_required": False,
+        "transmit_automation_required": False,
+        "canonical_json_hash": None,
+    }
+    payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
+    return payload
+
+
+def validate_research_conclusion_lineage_v1(payload: dict[str, Any]) -> None:
+    if str(payload.get("schema_id") or "") != "research_conclusion":
+        raise ValueError("CONCLUSION_LINEAGE_REQUIRES_RESEARCH_CONCLUSION")
+    if not _strings(payload.get("supporting_evidence_refs")):
+        raise ValueError("RESEARCH_CONCLUSION_REQUIRES_EVIDENCE_REFS")
+    if not _strings(payload.get("result_ledger_refs")):
+        raise ValueError("RESEARCH_CONCLUSION_REQUIRES_RESULT_LEDGER_REFS")
+    if not _strings(payload.get("reason_codes")):
+        raise ValueError("RESEARCH_CONCLUSION_REQUIRES_REASON_CODES")
+    if not str(payload.get("methodology_version") or "").strip():
+        raise ValueError("RESEARCH_CONCLUSION_REQUIRES_METHODOLOGY_VERSION")
+    if not str(payload.get("code_version") or "").strip():
+        raise ValueError("RESEARCH_CONCLUSION_REQUIRES_CODE_VERSION")
+    if not str(payload.get("reproducibility_notes") or "").strip():
+        raise ValueError("RESEARCH_CONCLUSION_REQUIRES_REPRODUCIBILITY_NOTES")
+
+
+def build_research_conclusion_v1(
+    *,
+    conclusion_id: str,
+    hypothesis_id: str,
+    created_at_utc: str,
+    conclusion_summary: str,
+    conclusion_status: str = "ACTIVE",
+    supporting_evidence_refs: list[str] | str | None = None,
+    contradictory_evidence_refs: list[str] | str | None = None,
+    result_ledger_refs: list[str] | str | None = None,
+    confidence_level: str = "LOW",
+    confidence_trend: str = "FLAT",
+    regime_specificity: str = "",
+    edge_family: str = "",
+    operational_implications: list[str] | str | None = None,
+    known_failure_modes: list[str] | str | None = None,
+    limitations: list[str] | str | None = None,
+    invalidation_conditions: list[str] | str | None = None,
+    reproducibility_notes: str = "",
+    methodology_version: str = RESEARCH_METHODOLOGY_VERSION_V1,
+    data_snapshot_refs: list[str] | str | None = None,
+    code_version: str = RESEARCH_CODE_VERSION_UNKNOWN,
+    created_by: str = "research_lab",
+    reviewed_by: str = "",
+    program_id: str = "",
+    supersedes_conclusion_ids: list[str] | str | None = None,
+    superseded_by_conclusion_id: str = "",
+    artifact_lineage: list[dict[str, Any]] | None = None,
+    reason_codes: list[str] | str | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "schema_id": "research_conclusion",
+        "schema_version": "v1",
+        "artifact_id": "research_conclusion_v1",
+        "conclusion_id": conclusion_id,
+        "hypothesis_id": hypothesis_id,
+        "program_id": program_id,
+        "created_at_utc": created_at_utc,
+        "conclusion_summary": conclusion_summary,
+        "conclusion_status": _enum(conclusion_status, RESEARCH_CONCLUSION_STATUSES, "conclusion_status"),
+        "supporting_evidence_refs": _strings(supporting_evidence_refs),
+        "contradictory_evidence_refs": _strings(contradictory_evidence_refs),
+        "result_ledger_refs": _strings(result_ledger_refs),
+        "confidence_level": confidence_level,
+        "confidence_trend": confidence_trend,
+        "regime_specificity": regime_specificity,
+        "edge_family": edge_family,
+        "operational_implications": _strings(operational_implications),
+        "known_failure_modes": _strings(known_failure_modes),
+        "limitations": _strings(limitations),
+        "invalidation_conditions": _strings(invalidation_conditions),
+        "reproducibility_notes": reproducibility_notes,
+        "methodology_version": methodology_version,
+        "data_snapshot_refs": _strings(data_snapshot_refs),
+        "code_version": code_version,
+        "created_by": created_by,
+        "reviewed_by": reviewed_by,
+        "supersedes_conclusion_ids": _strings(supersedes_conclusion_ids),
+        "superseded_by_conclusion_id": superseded_by_conclusion_id,
+        "artifact_lineage": _objects(artifact_lineage or []),
+        "reason_codes": _strings(reason_codes),
+        "research_lab_only": True,
+        "runtime_mutation_allowed": False,
+        "trade_authorization_allowed": False,
+        "automatic_promotion_allowed": False,
+        "broker_submit_required": False,
+        "transmit_automation_required": False,
+        "immutable_artifact": True,
+        "canonical_json_hash": None,
+    }
+    validate_research_conclusion_lineage_v1(payload)
+    payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
+    return payload
+
+
+def supersede_research_conclusion_v1(*, prior_conclusion: dict[str, Any], new_conclusion: dict[str, Any]) -> dict[str, Any]:
+    if str(prior_conclusion.get("schema_id") or "") != "research_conclusion":
+        raise ValueError("SUPERSESSION_REQUIRES_PRIOR_RESEARCH_CONCLUSION")
+    if str(new_conclusion.get("schema_id") or "") != "research_conclusion":
+        raise ValueError("SUPERSESSION_REQUIRES_NEW_RESEARCH_CONCLUSION")
+    prior_id = str(prior_conclusion.get("conclusion_id") or "")
+    new_id = str(new_conclusion.get("conclusion_id") or "")
+    updated_prior = dict(prior_conclusion)
+    updated_prior["conclusion_status"] = "SUPERSEDED"
+    updated_prior["superseded_by_conclusion_id"] = new_id
+    updated_prior["canonical_json_hash"] = None
+    updated_prior["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(updated_prior)
+    updated_new = dict(new_conclusion)
+    supersedes = _strings(updated_new.get("supersedes_conclusion_ids"))
+    if prior_id and prior_id not in supersedes:
+        supersedes.append(prior_id)
+    updated_new["supersedes_conclusion_ids"] = sorted(set(supersedes))
+    updated_new["canonical_json_hash"] = None
+    updated_new["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(updated_new)
+    return {"prior_conclusion": updated_prior, "new_conclusion": updated_new}
+
+
+def build_research_failure_archetype_v1(
+    *,
+    failure_archetype_id: str,
+    title: str,
+    description: str,
+    related_hypotheses: list[str] | str | None = None,
+    related_conclusions: list[str] | str | None = None,
+    related_edge_families: list[str] | str | None = None,
+    related_regimes: list[str] | str | None = None,
+    failure_conditions: list[str] | str | None = None,
+    observable_warning_signs: list[str] | str | None = None,
+    example_evidence_refs: list[str] | str | None = None,
+    governance_implications: list[str] | str | None = None,
+    stop_risk_implications: list[str] | str | None = None,
+    created_at_utc: str,
+    status: str = "ACTIVE",
+) -> dict[str, Any]:
+    payload = {
+        "schema_id": "research_failure_archetype",
+        "schema_version": "v1",
+        "artifact_id": "research_failure_archetype_v1",
+        "failure_archetype_id": failure_archetype_id,
+        "title": title,
+        "description": description,
+        "related_hypotheses": _strings(related_hypotheses),
+        "related_conclusions": _strings(related_conclusions),
+        "related_edge_families": _strings(related_edge_families),
+        "related_regimes": _strings(related_regimes),
+        "failure_conditions": _strings(failure_conditions),
+        "observable_warning_signs": _strings(observable_warning_signs),
+        "example_evidence_refs": _strings(example_evidence_refs),
+        "governance_implications": _strings(governance_implications),
+        "stop_risk_implications": _strings(stop_risk_implications),
+        "created_at_utc": created_at_utc,
+        "status": _enum(status, RESEARCH_FAILURE_ARCHETYPE_STATUSES, "status"),
+        "advisory_research_memory_only": True,
+        "governance_rule_created": False,
+        "research_lab_only": True,
+        "runtime_mutation_allowed": False,
+        "trade_authorization_allowed": False,
+        "automatic_promotion_allowed": False,
+        "broker_submit_required": False,
+        "transmit_automation_required": False,
+        "canonical_json_hash": None,
+    }
+    payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
+    return payload
+
+
+def build_research_knowledge_graph_v1(
+    *,
+    generated_at_utc: str,
+    nodes: list[dict[str, Any]] | None = None,
+    edges: list[dict[str, Any]] | None = None,
+    hypothesis_refs: list[str] | str | None = None,
+    edge_family_refs: list[str] | str | None = None,
+    regime_refs: list[str] | str | None = None,
+    sleeve_refs: list[str] | str | None = None,
+    evidence_refs: list[str] | str | None = None,
+    failure_mode_refs: list[str] | str | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "schema_id": "research_knowledge_graph",
+        "schema_version": "v1",
+        "artifact_id": "research_knowledge_graph_v1",
+        "generated_at_utc": generated_at_utc,
+        "nodes": _objects(nodes or []),
+        "edges": _objects(edges or []),
+        "hypothesis_refs": _strings(hypothesis_refs),
+        "edge_family_refs": _strings(edge_family_refs),
+        "regime_refs": _strings(regime_refs),
+        "sleeve_refs": _strings(sleeve_refs),
+        "evidence_refs": _strings(evidence_refs),
+        "failure_mode_refs": _strings(failure_mode_refs),
+        "research_lab_only": True,
+        "runtime_mutation_allowed": False,
+        "trade_authorization_allowed": False,
+        "automatic_promotion_allowed": False,
+        "broker_submit_required": False,
+        "transmit_automation_required": False,
+        "non_authoritative_scaffold": True,
+        "canonical_json_hash": None,
+    }
+    payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
+    return payload
+
+
+def reject_invalidated_hypothesis_for_promotion_v1(hypothesis: dict[str, Any], result_ledger: dict[str, Any]) -> None:
+    hypothesis_id = str(hypothesis.get("hypothesis_id") or "")
+    invalidated = any(
+        str(row.get("hypothesis_id") or "") == hypothesis_id
+        and str(row.get("result_status") or "") in {"INVALIDATED", "CONTRADICTS_HYPOTHESIS"}
+        for row in _objects(result_ledger.get("results"))
+    )
+    if invalidated and str(hypothesis.get("status") or "") in {"PROMOTION_CANDIDATE", "APPROVED_FOR_LITE", "VALIDATED_RESEARCH"}:
+        raise ValueError(f"INVALIDATED_HYPOTHESIS_CANNOT_BE_PROMOTED:{hypothesis_id}")
+
+
+def validate_research_lifecycle_transition_v1(
+    *,
+    from_status: str,
+    to_status: str,
+    evidence_refs: list[str] | list[dict[str, Any]] | None = None,
+    result_ledger_refs: list[str] | list[dict[str, Any]] | None = None,
+    promotion_artifact: dict[str, Any] | None = None,
+    approved_by_human: bool = False,
+    confidence_before: str = "LOW",
+    confidence_after: str = "LOW",
+) -> dict[str, Any]:
+    source = _enum(from_status, RESEARCH_HYPOTHESIS_STATUSES, "from_status")
+    target = _enum(to_status, RESEARCH_HYPOTHESIS_STATUSES, "to_status")
+    evidence = _strings(evidence_refs)
+    result_refs = _strings(result_ledger_refs)
+    reason_codes: list[str] = [f"TRANSITION:{source}->{target}"]
+    if source in {"REJECTED", "ARCHIVED"} and target in {"PROMOTION_CANDIDATE", "APPROVED_FOR_LITE"}:
+        raise ValueError(f"{source}_HYPOTHESIS_CANNOT_BE_PROMOTED")
+    if source == "APPROVED_FOR_LITE" and target != "APPROVED_FOR_LITE":
+        raise ValueError("APPROVED_FOR_LITE_TRANSITION_REQUIRES_SUPERSESSION_NOT_MUTATION")
+    if target == "VALIDATED_RESEARCH" and not evidence:
+        raise ValueError("IDEA_CANNOT_BECOME_VALIDATED_RESEARCH_WITHOUT_EVIDENCE_REFS")
+    if target == "PROMOTION_CANDIDATE":
+        if source != "VALIDATED_RESEARCH":
+            raise ValueError("PROMOTION_CANDIDATE_REQUIRES_VALIDATED_RESEARCH_SOURCE")
+        if not result_refs:
+            raise ValueError("PROMOTION_CANDIDATE_REQUIRES_RESULT_LEDGER_SUPPORT")
+    if target == "APPROVED_FOR_LITE":
+        if not promotion_artifact or str(promotion_artifact.get("schema_id") or "") != "research_to_lite_promotion":
+            raise ValueError("APPROVED_FOR_LITE_REQUIRES_PROMOTION_ARTIFACT")
+        if not approved_by_human and not bool(promotion_artifact.get("approved_by_human")):
+            raise ValueError("APPROVED_FOR_LITE_REQUIRES_HUMAN_APPROVAL")
+        if str(promotion_artifact.get("promotion_status") or "") != "APPROVED_FOR_LITE_IMPLEMENTATION":
+            raise ValueError("APPROVED_FOR_LITE_REQUIRES_IMPLEMENTATION_APPROVAL_STATUS")
+    if abs(_confidence_rank(confidence_after) - _confidence_rank(confidence_before)) > 1:
+        raise ValueError("CONFIDENCE_CHANGE_OUT_OF_BOUNDS")
+    return {"allowed": True, "reason_codes": reason_codes}
+
+
+def apply_research_result_to_hypothesis_v1(
+    *,
+    hypothesis: dict[str, Any],
+    result: dict[str, Any],
+    evidence_packet_refs: list[str] | list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    hypothesis_id = str(hypothesis.get("hypothesis_id") or "")
+    if str(result.get("hypothesis_id") or "") != hypothesis_id:
+        raise ValueError(f"RESEARCH_RESULT_HYPOTHESIS_MISMATCH:{hypothesis_id}:{result.get('hypothesis_id')}")
+    evidence_refs = _strings(evidence_packet_refs) or _strings(result.get("evidence_refs"))
+    before_status = str(hypothesis.get("status") or "IDEA")
+    if before_status in {"REJECTED", "ARCHIVED"}:
+        raise ValueError(f"{before_status}_HYPOTHESIS_CANNOT_BE_PROMOTED")
+    if before_status == "APPROVED_FOR_LITE":
+        raise ValueError("APPROVED_FOR_LITE_REQUIRES_PROMOTION_ARTIFACT_NOT_RESULT_LEDGER")
+    result_status = _enum(str(result.get("result_status") or ""), RESEARCH_RESULT_STATUSES_V1, "result_status")
+    recommendation = _enum(str(result.get("promotion_recommendation") or "NONE"), RESEARCH_PROMOTION_RECOMMENDATIONS_V1, "promotion_recommendation")
+    if before_status == "REJECTED" and recommendation == "PROMOTION_CANDIDATE":
+        raise ValueError("REJECTED_HYPOTHESIS_CANNOT_BE_PROMOTED")
+    if result_status in {"INVALIDATED", "CONTRADICTS_HYPOTHESIS"} and recommendation == "PROMOTION_CANDIDATE":
+        raise ValueError("INVALIDATED_HYPOTHESIS_CANNOT_BE_PROMOTION_CANDIDATE")
+    before_confidence = str(hypothesis.get("confidence_level") or result.get("confidence_before") or "LOW")
+    after_confidence = _bounded_confidence_after(
+        before_confidence=before_confidence,
+        requested_after=str(result.get("confidence_after") or ""),
+        result_status=result_status,
+    )
+    reason_codes: list[str] = [f"RESULT_STATUS:{result_status}"]
+    if result_status == "INVALIDATED":
+        next_status = "REJECTED"
+        next_task = ""
+        reason_codes.append("HYPOTHESIS_INVALIDATED")
+    elif result_status == "CONTRADICTS_HYPOTHESIS":
+        next_status = "REJECTED"
+        next_task = "FAILURE_MODE_REVIEW"
+        reason_codes.append("CONTRADICTORY_EVIDENCE")
+    elif result_status == "SUPPORTS_HYPOTHESIS":
+        if not evidence_refs:
+            raise ValueError("VALIDATED_RESEARCH_REQUIRES_EVIDENCE_REFS")
+        next_status = "VALIDATED_RESEARCH" if recommendation == "PROMOTION_CANDIDATE" else "UNDER_INVESTIGATION"
+        next_task = "PROMOTION_REVIEW" if recommendation == "PROMOTION_CANDIDATE" else str(result.get("next_recommended_task") or "EXPECTANCY_REVIEW")
+        reason_codes.append("EVIDENCE_SUPPORTS_HYPOTHESIS")
+    elif result_status == "WEAK_SUPPORT":
+        next_status = "UNDER_INVESTIGATION"
+        next_task = "EXPECTANCY_REVIEW"
+        reason_codes.append("WEAK_SUPPORT_NEEDS_MORE_RESEARCH")
+    else:
+        next_status = "UNDER_INVESTIGATION"
+        next_task = str(result.get("next_recommended_task") or "DATA_AVAILABILITY_CHECK")
+        reason_codes.append("MORE_RESEARCH_REQUIRED")
+    if next_status == "APPROVED_FOR_LITE":
+        raise ValueError("DIRECT_LITE_APPROVAL_FORBIDDEN")
+    validate_research_lifecycle_transition_v1(
+        from_status=before_status,
+        to_status=next_status,
+        evidence_refs=evidence_refs,
+        result_ledger_refs=[str(result.get("result_id") or "")] if next_status == "PROMOTION_CANDIDATE" else [],
+        confidence_before=before_confidence,
+        confidence_after=after_confidence,
+    )
+    updated = dict(hypothesis)
+    updated["status"] = next_status
+    updated["confidence_level"] = after_confidence
+    notes = str(updated.get("notes") or "")
+    transition_note = f"research_result={result.get('result_id')}; status {before_status}->{next_status}; confidence {before_confidence}->{after_confidence}"
+    updated["notes"] = f"{notes}\n{transition_note}".strip()
+    updated["canonical_json_hash"] = None
+    updated["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(updated)
+    return {
+        "hypothesis": updated,
+        "updated_hypothesis": updated,
+        "previous_status": before_status,
+        "updated_status": next_status,
+        "confidence_before": before_confidence,
+        "confidence_after": after_confidence,
+        "confidence_change": _confidence_change(before_confidence, after_confidence),
+        "transition_reason_codes": reason_codes,
+        "next_recommended_task": next_task,
+        "lifecycle_notes": transition_note,
+    }
+
+
+def build_research_knowledge_graph_from_artifacts_v1(
+    *,
+    generated_at_utc: str,
+    hypotheses: list[dict[str, Any]] | None = None,
+    evidence_packets: list[dict[str, Any]] | None = None,
+    result_ledgers: list[dict[str, Any]] | None = None,
+    promotions: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
+    hypothesis_refs: list[str] = []
+    edge_family_refs: list[str] = []
+    regime_refs: list[str] = []
+    sleeve_refs: list[str] = []
+    evidence_refs: list[str] = []
+    failure_mode_refs: list[str] = []
+    for hypothesis in _objects(hypotheses or []):
+        hid = str(hypothesis.get("hypothesis_id") or "")
+        if not hid:
+            continue
+        hypothesis_refs.append(hid)
+        nodes.append({"node_id": hid, "node_type": "research_hypothesis", "status": str(hypothesis.get("status") or "")})
+        edge_family_refs.extend(_strings(hypothesis.get("edge_family")))
+        regime_refs.extend(_strings(hypothesis.get("expected_regime")))
+        sleeve_refs.extend(_strings(hypothesis.get("related_sleeves")))
+        failure_mode_refs.extend(_strings(hypothesis.get("failure_conditions")))
+    for evidence in _objects(evidence_packets or []):
+        eid = str(evidence.get("research_id") or "")
+        hid = str(evidence.get("hypothesis_id") or "")
+        if eid:
+            evidence_refs.append(eid)
+            nodes.append({"node_id": eid, "node_type": "research_evidence_packet", "status": str(evidence.get("research_status") or "")})
+        if eid and hid:
+            edges.append({"from": hid, "to": eid, "edge_type": "HAS_EVIDENCE"})
+    for ledger in _objects(result_ledgers or []):
+        for result in _objects(ledger.get("results")):
+            rid = str(result.get("result_id") or "")
+            hid = str(result.get("hypothesis_id") or "")
+            if rid:
+                nodes.append({"node_id": rid, "node_type": "research_result", "status": str(result.get("result_status") or "")})
+            if rid and hid:
+                edges.append({"from": hid, "to": rid, "edge_type": "HAS_RESULT"})
+    for promotion in _objects(promotions or []):
+        pid = str(promotion.get("promotion_id") or "")
+        hid = str(promotion.get("hypothesis_id") or "")
+        if pid:
+            nodes.append({"node_id": pid, "node_type": "research_to_lite_promotion", "status": str(promotion.get("promotion_status") or "")})
+        if pid and hid:
+            edges.append({"from": hid, "to": pid, "edge_type": "HAS_PROMOTION_REVIEW"})
+    return build_research_knowledge_graph_v1(
+        generated_at_utc=generated_at_utc,
+        nodes=nodes,
+        edges=edges,
+        hypothesis_refs=sorted(set(hypothesis_refs)),
+        edge_family_refs=sorted(set(edge_family_refs)),
+        regime_refs=sorted(set(regime_refs)),
+        sleeve_refs=sorted(set(sleeve_refs)),
+        evidence_refs=sorted(set(evidence_refs)),
+        failure_mode_refs=sorted(set(failure_mode_refs)),
+    )
+
+
+def taxonomy_warnings_for_research_hypotheses_v1(
+    *,
+    taxonomy: dict[str, Any],
+    hypotheses: list[dict[str, Any]],
+    programs: list[dict[str, Any]] | None = None,
+) -> list[str]:
+    warnings = list(taxonomy.get("duplicate_term_warnings") or [])
+    for section in ("market_theses", "edge_families", "edge_clusters", "trade_expressions"):
+        seen_terms: dict[str, int] = {}
+        for item in _strings(taxonomy.get(section)):
+            key = _norm(item)
+            seen_terms[key] = seen_terms.get(key, 0) + 1
+        for key, count in seen_terms.items():
+            if count > 1:
+                warnings.append(f"DUPLICATE_TAXONOMY_LABEL:{section}:{key}")
+    edge_families = {_norm(item) for item in _strings(taxonomy.get("edge_families"))}
+    edge_clusters = {_norm(item) for item in _strings(taxonomy.get("edge_clusters"))}
+    deprecated = {_norm(item) for item in _strings(taxonomy.get("deprecated_terms"))}
+    seen_titles: dict[str, str] = {}
+    thesis_by_edge: dict[str, set[str]] = {}
+    program_hypothesis_refs: dict[str, list[str]] = {}
+    for program in _objects(programs or []):
+        for hid in _strings(program.get("related_hypotheses")):
+            program_hypothesis_refs.setdefault(hid, []).append(str(program.get("program_id") or ""))
+    for hypothesis in _objects(hypotheses):
+        hid = str(hypothesis.get("hypothesis_id") or "")
+        title_key = _norm(str(hypothesis.get("title") or ""))
+        edge_family = _norm(str(hypothesis.get("edge_family") or ""))
+        thesis_key = _norm(str(hypothesis.get("market_thesis") or ""))
+        if title_key and title_key in seen_titles:
+            warnings.append(f"DUPLICATE_HYPOTHESIS_TITLE:{title_key}:{seen_titles[title_key]}:{hid}")
+        elif title_key:
+            seen_titles[title_key] = hid
+        if edge_family and thesis_key:
+            thesis_by_edge.setdefault(edge_family, set()).add(thesis_key)
+        if edge_family and edge_family not in edge_families:
+            warnings.append(f"UNMAPPED_EDGE_FAMILY:{edge_family}:{hid}")
+        if edge_family in deprecated:
+            warnings.append(f"DEPRECATED_EDGE_FAMILY:{edge_family}:{hid}")
+        for ref in _strings(hypothesis.get("related_research_refs")):
+            if ref.upper().startswith("EDGE_CLUSTER:") and _norm(ref.split(":", 1)[1]) not in edge_clusters:
+                warnings.append(f"UNMAPPED_EDGE_CLUSTER:{ref}:{hid}")
+        if len(program_hypothesis_refs.get(hid, [])) > 1:
+            warnings.append(f"AMBIGUOUS_PROGRAM_ASSIGNMENT:{hid}:{','.join(sorted(program_hypothesis_refs[hid]))}")
+    for edge_family, thesis_labels in thesis_by_edge.items():
+        if len(thesis_labels) > 1:
+            warnings.append(f"CONFLICTING_THESIS_LABELS:{edge_family}:{len(thesis_labels)}")
+    if len({str(item.get("edge_family") or "") for item in _objects(hypotheses) if item.get("edge_family")}) > max(10, len(edge_families) * 2):
+        warnings.append("CONCEPT_EXPLOSION_WARNING:EDGE_FAMILY_COUNT_EXCEEDS_TAXONOMY_EXPECTATION")
+    return sorted(set(warnings))
 
 
 def build_hypothesis_test_plan_v1(
@@ -462,15 +1289,26 @@ def build_research_task_v1(
 
 
 def build_research_task_queue_v1(*, generated_at_utc: str, tasks: list[dict[str, Any]]) -> dict[str, Any]:
+    sorted_tasks = sorted(
+        tasks,
+        key=lambda row: (
+            RESEARCH_PRIORITY_ORDER.get(str(row.get("priority") or "").strip().upper(), 9),
+            str(row.get("created_at_utc") or row.get("created_at") or ""),
+            str(row.get("task_id") or ""),
+        ),
+    )
     payload = {
         "schema_id": "research_task_queue",
         "schema_version": "v1",
         "artifact_id": "research_task_queue_v1",
         "generated_at_utc": generated_at_utc,
-        "tasks": tasks,
+        "tasks": sorted_tasks,
         "research_lab_only": True,
         "runtime_mutation_allowed": False,
+        "trade_authorization_allowed": False,
+        "automatic_promotion_allowed": False,
         "broker_submit_required": False,
+        "transmit_automation_required": False,
         "canonical_json_hash": None,
     }
     payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
@@ -862,6 +1700,15 @@ def build_manual_execution_receipt_v1(
     operator_notes: str,
     deviations_from_recommendation: list[str] | None = None,
     deviations_from_aegis_recommendation: list[str] | None = None,
+    source_packet_type: str = "EOD_MANUAL_PACKET",
+    alert_id: str = "",
+    source_packet_id: str = "",
+    event_id: str = "",
+    event_run_id: str = "",
+    fill_timestamp_utc: str = "",
+    deviation_from_entry_reference_price: str = "",
+    fill_before_valid_until: bool | None = None,
+    max_entry_slippage_respected: bool | None = None,
 ) -> dict[str, Any]:
     deviations = _strings(deviations_from_recommendation) or _strings(deviations_from_aegis_recommendation)
     payload = {
@@ -881,6 +1728,15 @@ def build_manual_execution_receipt_v1(
         "operator_notes": operator_notes,
         "deviations_from_recommendation": deviations,
         "deviations_from_aegis_recommendation": deviations,
+        "source_packet_type": _enum(str(source_packet_type or "EOD_MANUAL_PACKET"), {"EOD_MANUAL_PACKET", "EVENT_TACTICAL_PACKET"}, "source_packet_type"),
+        "alert_id": alert_id,
+        "source_packet_id": source_packet_id or recommended_trade_id,
+        "event_id": event_id,
+        "event_run_id": event_run_id,
+        "fill_timestamp_utc": fill_timestamp_utc or fill_timestamp,
+        "deviation_from_entry_reference_price": deviation_from_entry_reference_price,
+        "fill_before_valid_until": bool(fill_before_valid_until) if fill_before_valid_until is not None else False,
+        "max_entry_slippage_respected": bool(max_entry_slippage_respected) if max_entry_slippage_respected is not None else False,
         "manual_observation_only": True,
         "broker_submit_required": False,
         "canonical_json_hash": None,
@@ -920,6 +1776,74 @@ def build_learning_tasks_from_outcomes_v1(
         status = str(row.get("outcome_status") or "").lower()
         failure = str(row.get("failure_reason") or "").lower()
         deviation = str(row.get("operator_deviation") or "").lower()
+        source_packet_type = str(row.get("source_packet_type") or "").upper()
+        if source_packet_type == "EVENT_TACTICAL_PACKET":
+            event_type = str(row.get("event_type") or "event").lower()
+            if status in {"loss", "stopped_out", "underperformed"}:
+                tasks.append(
+                    build_research_task_v1(
+                        task_id=f"task:{hypothesis_id}:event_failure_review:{_safe_id(trade_id)}",
+                        task_type="event_failure_review",
+                        hypothesis_id=hypothesis_id,
+                        source_trigger="outcome_ledger_event_failure",
+                        priority="high",
+                        requested_action=f"Review failed event tactical outcome {trade_id} ({event_type}).",
+                        created_at=generated_at_utc,
+                        output_expected="experiment_result.v1",
+                    )
+                )
+            if status in {"win", "profitable", "outperformed"}:
+                tasks.append(
+                    build_research_task_v1(
+                        task_id=f"task:{hypothesis_id}:event_success_review:{_safe_id(trade_id)}",
+                        task_type="event_success_review",
+                        hypothesis_id=hypothesis_id,
+                        source_trigger="outcome_ledger_event_success",
+                        priority="normal",
+                        requested_action=f"Review successful event tactical outcome {trade_id} ({event_type}).",
+                        created_at=generated_at_utc,
+                        output_expected="experiment_result.v1",
+                    )
+                )
+            if not bool(row.get("valid_until_respected", False)):
+                tasks.append(
+                    build_research_task_v1(
+                        task_id=f"task:{hypothesis_id}:event_stale_entry_review:{_safe_id(trade_id)}",
+                        task_type="event_stale_entry_review",
+                        hypothesis_id=hypothesis_id,
+                        source_trigger="outcome_ledger_event_stale_entry",
+                        priority="high",
+                        requested_action=f"Review event entry timing validity for {trade_id}.",
+                        created_at=generated_at_utc,
+                        output_expected="experiment_result.v1",
+                    )
+                )
+            if not bool(row.get("entry_slippage_respected", False)):
+                tasks.append(
+                    build_research_task_v1(
+                        task_id=f"task:{hypothesis_id}:event_false_positive_review:{_safe_id(trade_id)}",
+                        task_type="event_false_positive_review",
+                        hypothesis_id=hypothesis_id,
+                        source_trigger="outcome_ledger_event_slippage_or_false_positive",
+                        priority="normal",
+                        requested_action=f"Review event validity/slippage quality for {trade_id}.",
+                        created_at=generated_at_utc,
+                        output_expected="experiment_result.v1",
+                    )
+                )
+            if "overlap" in failure or "correlation" in failure:
+                tasks.append(
+                    build_research_task_v1(
+                        task_id=f"task:{hypothesis_id}:event_overlap_review:{_safe_id(trade_id)}",
+                        task_type="event_overlap_review",
+                        hypothesis_id=hypothesis_id,
+                        source_trigger="outcome_ledger_event_overlap",
+                        priority="normal",
+                        requested_action=f"Review event overlap behavior for {trade_id}.",
+                        created_at=generated_at_utc,
+                        output_expected="experiment_result.v1",
+                    )
+                )
         if status in {"loss", "stopped_out", "underperformed"}:
             tasks.append(
                 build_research_task_v1(
@@ -1012,6 +1936,11 @@ def build_research_evidence_packet_v1(
     reproducibility_notes: str,
     artifact_lineage: list[dict[str, Any]],
     research_status: str,
+    task_id: str = "",
+    data_snapshot_refs: list[str] | str | None = None,
+    methodology_version: str = RESEARCH_METHODOLOGY_VERSION_V1,
+    code_version: str = RESEARCH_CODE_VERSION_UNKNOWN,
+    reason_codes: list[str] | str | None = None,
 ) -> dict[str, Any]:
     payload = {
         "schema_id": "research_evidence_packet",
@@ -1019,6 +1948,7 @@ def build_research_evidence_packet_v1(
         "artifact_id": "research_evidence_packet_v1",
         "research_id": research_id,
         "hypothesis_id": hypothesis_id,
+        "task_id": task_id,
         "title": title,
         "hypothesis_description": hypothesis_description,
         "research_type": _enum(research_type, RESEARCH_TYPES, "research_type"),
@@ -1030,6 +1960,7 @@ def build_research_evidence_packet_v1(
         "edge_family": edge_family,
         "expected_holding_period": expected_holding_period,
         "methodology_summary": methodology_summary,
+        "methodology_version": methodology_version,
         "metrics_summary": metrics_summary,
         "expectancy_summary": expectancy_summary,
         "drawdown_summary": drawdown_summary,
@@ -1038,6 +1969,9 @@ def build_research_evidence_packet_v1(
         "known_limitations": _strings(known_limitations),
         "reproducibility_notes": reproducibility_notes,
         "artifact_lineage": artifact_lineage,
+        "data_snapshot_refs": _strings(data_snapshot_refs),
+        "code_version": code_version,
+        "reason_codes": _strings(reason_codes),
         "research_status": _enum(research_status, RESEARCH_STATUSES, "research_status"),
         "research_lab_only": True,
         "execution_authority_granted": False,
@@ -1045,10 +1979,26 @@ def build_research_evidence_packet_v1(
         "broker_submit_required": False,
         "transmit_automation_required": False,
         "automatic_lite_promotion_allowed": False,
+        "immutable_artifact": True,
         "canonical_json_hash": None,
     }
     payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
     return payload
+
+
+def validate_research_promotion_lineage_v1(payload: dict[str, Any]) -> None:
+    if str(payload.get("schema_id") or "") != "research_to_lite_promotion":
+        raise ValueError("PROMOTION_LINEAGE_REQUIRES_RESEARCH_TO_LITE_PROMOTION")
+    if not _objects(payload.get("evidence_packet_refs")):
+        raise ValueError("PROMOTION_REQUIRES_EVIDENCE_PACKET_REFS")
+    if not _objects(payload.get("result_ledger_refs")):
+        raise ValueError("PROMOTION_REQUIRES_RESULT_LEDGER_REFS")
+    if not str(payload.get("methodology_version") or "").strip():
+        raise ValueError("PROMOTION_REQUIRES_METHODOLOGY_VERSION")
+    if not str(payload.get("code_version") or "").strip():
+        raise ValueError("PROMOTION_REQUIRES_CODE_VERSION")
+    if not _strings(payload.get("reason_codes")):
+        raise ValueError("PROMOTION_REQUIRES_REASON_CODES")
 
 
 def build_research_to_lite_promotion_v1(
@@ -1076,11 +2026,27 @@ def build_research_to_lite_promotion_v1(
     created_at_utc: str,
     reviewed_at_utc: str = "",
     source_research_status: str = "VALIDATED_RESEARCH",
+    result_ledger_refs: list[dict[str, Any]] | None = None,
+    research_hypothesis: dict[str, Any] | None = None,
+    data_snapshot_refs: list[str] | str | None = None,
+    methodology_version: str = RESEARCH_METHODOLOGY_VERSION_V1,
+    code_version: str = RESEARCH_CODE_VERSION_UNKNOWN,
+    artifact_lineage: list[dict[str, Any]] | None = None,
+    reason_codes: list[str] | str | None = None,
+    reproducibility_notes: str = "",
 ) -> dict[str, Any]:
     status = _enum(promotion_status, PROMOTION_STATUSES, "promotion_status")
     source_status = _enum(source_research_status, RESEARCH_STATUSES, "source_research_status")
     if not evidence_packet_refs:
         raise ValueError("PROMOTION_REQUIRES_EVIDENCE_PACKET_REFS")
+    if not result_ledger_refs:
+        raise ValueError("PROMOTION_REQUIRES_RESULT_LEDGER_REFS")
+    if research_hypothesis is not None:
+        hypothesis_status = str(research_hypothesis.get("status") or "")
+        if hypothesis_status in {"REJECTED", "ARCHIVED"}:
+            raise ValueError(f"{hypothesis_status}_HYPOTHESIS_CANNOT_BE_PROMOTED")
+        if hypothesis_status != "VALIDATED_RESEARCH" and status in {"CANDIDATE", "APPROVED_FOR_LITE_REVIEW", "APPROVED_FOR_LITE_IMPLEMENTATION"}:
+            raise ValueError("PROMOTION_REQUIRES_RESEARCH_HYPOTHESIS_VALIDATED_RESEARCH")
     if status in {"APPROVED_FOR_LITE_REVIEW", "APPROVED_FOR_LITE_IMPLEMENTATION"} and source_status != "VALIDATED_RESEARCH":
         raise ValueError(f"PROMOTION_REQUIRES_VALIDATED_RESEARCH:source_status={source_status}")
     if status == "APPROVED_FOR_LITE_IMPLEMENTATION" and not approved_by_human:
@@ -1099,6 +2065,7 @@ def build_research_to_lite_promotion_v1(
         ),
         "promotion_status": status,
         "evidence_packet_refs": evidence_packet_refs,
+        "result_ledger_refs": result_ledger_refs,
         "validation_summary": validation_summary,
         "regime_evidence": regime_evidence,
         "expectancy_evidence": expectancy_evidence,
@@ -1112,6 +2079,12 @@ def build_research_to_lite_promotion_v1(
         "required_tests": _strings(required_tests),
         "approval_reason_codes": _strings(approval_reason_codes),
         "rejection_reason_codes": _strings(rejection_reason_codes),
+        "data_snapshot_refs": _strings(data_snapshot_refs),
+        "methodology_version": methodology_version,
+        "code_version": code_version,
+        "artifact_lineage": _objects(artifact_lineage or []),
+        "reason_codes": _strings(reason_codes) or _strings(approval_reason_codes) or _strings(rejection_reason_codes),
+        "reproducibility_notes": reproducibility_notes,
         "approved_by_human": bool(approved_by_human),
         "created_at_utc": created_at_utc,
         "reviewed_at_utc": reviewed_at_utc,
@@ -1124,6 +2097,7 @@ def build_research_to_lite_promotion_v1(
         "transmit_automation_required": False,
         "canonical_json_hash": None,
     }
+    validate_research_promotion_lineage_v1(payload)
     payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
     return payload
 
@@ -1182,6 +2156,105 @@ def build_edge_taxonomy_v1(
         "duplicate_term_warnings": duplicate_warnings,
         "research_lab_only": True,
         "runtime_mutation_allowed": False,
+        "broker_submit_required": False,
+        "transmit_automation_required": False,
+        "canonical_json_hash": None,
+    }
+    payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
+    return payload
+
+
+def build_research_architecture_integrity_review_v1(
+    *,
+    review_id: str,
+    generated_at_utc: str,
+    hypotheses: list[dict[str, Any]] | None = None,
+    task_queues: list[dict[str, Any]] | None = None,
+    evidence_packets: list[dict[str, Any]] | None = None,
+    result_ledgers: list[dict[str, Any]] | None = None,
+    conclusions: list[dict[str, Any]] | None = None,
+    promotions: list[dict[str, Any]] | None = None,
+    knowledge_graphs: list[dict[str, Any]] | None = None,
+    taxonomy: dict[str, Any] | None = None,
+    legacy_registries: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    findings: list[dict[str, str]] = []
+    blockers: list[str] = []
+    warnings: list[str] = []
+    hypothesis_by_id = {str(row.get("hypothesis_id") or ""): row for row in _objects(hypotheses or [])}
+    for registry in _objects(legacy_registries or []):
+        if _objects(registry.get("hypotheses")):
+            warnings.append("LEGACY_HYPOTHESIS_REGISTRY_PRESENT_COMPATIBILITY_ONLY")
+            findings.append({"severity": "WARN", "code": "LEGACY_HYPOTHESIS_REGISTRY_PRESENT", "detail": "hypothesis_registry.v1 must not be canonical for new work."})
+    if taxonomy:
+        for warning in taxonomy_warnings_for_research_hypotheses_v1(taxonomy=taxonomy, hypotheses=list(hypothesis_by_id.values())):
+            warnings.append(warning)
+            findings.append({"severity": "WARN", "code": "TAXONOMY_WARNING", "detail": warning})
+    for packet in _objects(evidence_packets or []):
+        if packet.get("runtime_mutation_allowed") is not False or packet.get("broker_submit_required") is not False:
+            blockers.append("UNSAFE_EVIDENCE_RUNTIME_OR_BROKER_FLAG")
+        for field in ("hypothesis_id", "created_at_utc", "artifact_lineage", "methodology_version", "code_version", "reproducibility_notes"):
+            if not packet.get(field):
+                blockers.append(f"EVIDENCE_MISSING_LINEAGE:{field}:{packet.get('research_id')}")
+    for ledger in _objects(result_ledgers or []):
+        for result in _objects(ledger.get("results")):
+            for field in ("hypothesis_id", "task_id", "created_at_utc", "methodology_version", "code_version", "artifact_lineage", "reason_codes", "reproducibility_notes"):
+                if not result.get(field):
+                    blockers.append(f"RESULT_MISSING_LINEAGE:{field}:{result.get('result_id')}")
+            if str(result.get("result_status") or "") in {"INVALIDATED", "CONTRADICTS_HYPOTHESIS"} and str(result.get("promotion_recommendation") or "") == "PROMOTION_CANDIDATE":
+                blockers.append(f"INVALIDATED_RESULT_RECOMMENDS_PROMOTION:{result.get('result_id')}")
+    for conclusion in _objects(conclusions or []):
+        try:
+            validate_research_conclusion_lineage_v1(conclusion)
+        except ValueError as exc:
+            blockers.append(str(exc))
+        if conclusion.get("runtime_mutation_allowed") is not False:
+            blockers.append(f"CONCLUSION_RUNTIME_MUTATION_ALLOWED:{conclusion.get('conclusion_id')}")
+    for promotion in _objects(promotions or []):
+        try:
+            validate_research_promotion_lineage_v1(promotion)
+        except ValueError as exc:
+            blockers.append(str(exc))
+        hyp = hypothesis_by_id.get(str(promotion.get("hypothesis_id") or ""))
+        if hyp and str(hyp.get("status") or "") in {"REJECTED", "ARCHIVED"}:
+            blockers.append(f"PROMOTION_REFERENCES_NON_PROMOTABLE_HYPOTHESIS:{hyp.get('hypothesis_id')}")
+        if promotion.get("runtime_mutation_allowed") is not False or promotion.get("broker_submit_required") is not False:
+            blockers.append(f"PROMOTION_RUNTIME_OR_BROKER_COUPLING:{promotion.get('promotion_id')}")
+    for graph in _objects(knowledge_graphs or []):
+        if graph.get("non_authoritative_scaffold") is not True:
+            blockers.append("KNOWLEDGE_GRAPH_NOT_MARKED_NON_AUTHORITATIVE")
+        if graph.get("runtime_mutation_allowed") is not False:
+            blockers.append("KNOWLEDGE_GRAPH_RUNTIME_MUTATION_ALLOWED")
+    for queue in _objects(task_queues or []):
+        for task in _objects(queue.get("tasks")):
+            if str(task.get("status") or "") == "QUEUED" and not _strings(task.get("required_inputs")):
+                warnings.append(f"QUEUED_TASK_WITHOUT_REQUIRED_INPUTS:{task.get('task_id')}")
+    for code in sorted(set(blockers)):
+        findings.append({"severity": "BLOCKER", "code": code.split(":", 1)[0], "detail": code})
+    payload = {
+        "schema_id": "research_architecture_integrity_review",
+        "schema_version": "v1",
+        "artifact_id": "research_architecture_integrity_review_v1",
+        "review_id": review_id,
+        "generated_at_utc": generated_at_utc,
+        "review_status": "FAIL" if blockers else ("WARN" if warnings else "PASS"),
+        "blockers": sorted(set(blockers)),
+        "warnings": sorted(set(warnings)),
+        "findings": findings,
+        "checked_artifact_counts": {
+            "hypotheses": len(_objects(hypotheses or [])),
+            "task_queues": len(_objects(task_queues or [])),
+            "evidence_packets": len(_objects(evidence_packets or [])),
+            "result_ledgers": len(_objects(result_ledgers or [])),
+            "conclusions": len(_objects(conclusions or [])),
+            "promotions": len(_objects(promotions or [])),
+            "knowledge_graphs": len(_objects(knowledge_graphs or [])),
+            "legacy_registries": len(_objects(legacy_registries or [])),
+        },
+        "research_lab_only": True,
+        "runtime_mutation_allowed": False,
+        "trade_authorization_allowed": False,
+        "automatic_promotion_allowed": False,
         "broker_submit_required": False,
         "transmit_automation_required": False,
         "canonical_json_hash": None,
@@ -1262,6 +2335,37 @@ def _strings(value: Any) -> list[str]:
 
 def _objects(value: Any) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def _confidence_rank(value: str) -> int:
+    order = {"NONE": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3}
+    return order.get(str(value or "").strip().upper(), 1)
+
+
+def _confidence_label(rank: int) -> str:
+    labels = {0: "NONE", 1: "LOW", 2: "MEDIUM", 3: "HIGH"}
+    return labels[max(0, min(3, int(rank)))]
+
+
+def _bounded_confidence_after(*, before_confidence: str, requested_after: str, result_status: str) -> str:
+    before = _confidence_rank(before_confidence)
+    requested = str(requested_after or "").strip().upper()
+    if requested in {"NONE", "LOW", "MEDIUM", "HIGH"}:
+        target = _confidence_rank(requested)
+    elif result_status == "SUPPORTS_HYPOTHESIS":
+        target = before + 1
+    elif result_status in {"WEAK_SUPPORT", "NEEDS_MORE_RESEARCH", "INSUFFICIENT_DATA"}:
+        target = before
+    else:
+        target = before - 1
+    return _confidence_label(max(before - 1, min(before + 1, target)))
+
+
+def _confidence_change(before: str, after: str) -> str:
+    delta = _confidence_rank(after) - _confidence_rank(before)
+    if delta > 0:
+        return f"+{delta}"
+    return str(delta)
 
 
 def _norm(value: str) -> str:
@@ -1469,6 +2573,16 @@ def _manual_trade_candidate(
 def _outcome_row(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "trade_id": str(row.get("trade_id") or row.get("recommended_trade_id") or ""),
+        "alert_id": str(row.get("alert_id") or ""),
+        "source_packet_type": str(row.get("source_packet_type") or "EOD_MANUAL_PACKET"),
+        "event_id": str(row.get("event_id") or ""),
+        "event_type": str(row.get("event_type") or ""),
+        "alert_gate_status": str(row.get("alert_gate_status") or ""),
+        "execution_sensitivity": str(row.get("execution_sensitivity") or ""),
+        "validity_gate_status": str(row.get("validity_gate_status") or ""),
+        "valid_until_respected": bool(row.get("valid_until_respected", False)),
+        "entry_slippage_respected": bool(row.get("entry_slippage_respected", False)),
+        "operator_action_taken": str(row.get("operator_action_taken") or ""),
         "sleeve_id": str(row.get("sleeve_id") or ""),
         "hypothesis_id": str(row.get("hypothesis_id") or row.get("source_hypothesis_id") or ""),
         "recommended_entry": str(row.get("recommended_entry") or ""),

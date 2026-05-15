@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/research_result_ledger.v1.schema.json",
+  "title": "research_result_ledger.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "generated_at_utc",
+    "results",
+    "research_lab_only",
+    "runtime_mutation_allowed",
+    "trade_authorization_allowed",
+    "automatic_promotion_allowed",
+    "broker_submit_required",
+    "transmit_automation_required",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "research_result_ledger" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "research_result_ledger_v1" },
+    "generated_at_utc": { "type": "string", "minLength": 20 },
+    "results": { "type": "array", "items": { "$ref": "#/$defs/result" } },
+    "research_lab_only": { "const": true },
+    "runtime_mutation_allowed": { "const": false },
+    "trade_authorization_allowed": { "const": false },
+    "automatic_promotion_allowed": { "const": false },
+    "broker_submit_required": { "const": false },
+    "transmit_automation_required": { "const": false },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "result_id",
+        "hypothesis_id",
+        "task_id",
+        "result_status",
+        "evidence_refs",
+        "conclusion_summary",
+        "confidence_before",
+        "confidence_after",
+        "confidence_change",
+        "metrics_summary",
+        "failure_mode_notes",
+        "invalidation_notes",
+        "next_recommended_task",
+        "promotion_recommendation",
+        "created_at_utc",
+        "data_snapshot_refs",
+        "methodology_version",
+        "code_version",
+        "artifact_lineage",
+        "reason_codes",
+        "reproducibility_notes",
+        "immutable_artifact"
+      ],
+      "properties": {
+        "result_id": { "type": "string", "minLength": 1 },
+        "hypothesis_id": { "type": "string", "minLength": 1 },
+        "task_id": { "type": "string", "minLength": 1 },
+        "result_status": {
+          "type": "string",
+          "enum": [
+            "INSUFFICIENT_DATA",
+            "SUPPORTS_HYPOTHESIS",
+            "WEAK_SUPPORT",
+            "CONTRADICTS_HYPOTHESIS",
+            "INVALIDATED",
+            "NEEDS_MORE_RESEARCH"
+          ]
+        },
+        "evidence_refs": { "type": "array", "items": { "type": "string" } },
+        "conclusion_summary": { "type": "string" },
+        "confidence_before": { "type": "string" },
+        "confidence_after": { "type": "string" },
+        "confidence_change": { "type": "string" },
+        "metrics_summary": { "type": "object" },
+        "failure_mode_notes": { "type": "string" },
+        "invalidation_notes": { "type": "string" },
+        "next_recommended_task": { "type": "string" },
+        "promotion_recommendation": {
+          "type": "string",
+          "enum": ["NONE", "CONTINUE_RESEARCH", "PROMOTION_CANDIDATE", "REJECT", "ARCHIVE"]
+        },
+        "created_at_utc": { "type": "string", "minLength": 20 },
+        "data_snapshot_refs": { "type": "array", "items": { "type": "string" } },
+        "methodology_version": { "type": "string", "minLength": 1 },
+        "code_version": { "type": "string", "minLength": 1 },
+        "artifact_lineage": { "type": "array", "items": { "type": "object" } },
+        "reason_codes": { "type": "array", "items": { "type": "string" } },
+        "reproducibility_notes": { "type": "string" },
+        "immutable_artifact": { "const": true }
+      }
+    }
+  }
+}

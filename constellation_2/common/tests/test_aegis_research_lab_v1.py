@@ -75,6 +75,7 @@ def _promotion(**overrides: object) -> dict[str, object]:
         "proposed_lite_component_type": "EDGE_CLUSTER_RULE",
         "promotion_status": "APPROVED_FOR_LITE_IMPLEMENTATION",
         "evidence_packet_refs": [{"artifact_type": "research_evidence_packet_v1", "path": "/tmp/evidence.json"}],
+        "result_ledger_refs": [{"artifact_type": "research_result_ledger_v1", "path": "/tmp/result_ledger.json"}],
         "validation_summary": "Evidence reviewed.",
         "regime_evidence": "Works in risk-on regimes.",
         "expectancy_evidence": "Positive expectancy.",

@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/sleeve_performance_report.v1.schema.json",
+  "title": "sleeve_performance_report.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "day_utc",
+    "generated_at_utc",
+    "portfolio_summary",
+    "sleeve_summary",
+    "execution_quality",
+    "outcome_quality",
+    "research_feedback",
+    "trade_lifecycle_rows",
+    "join_diagnostics",
+    "input_counts",
+    "source_artifact_lineage",
+    "manual_execution_only",
+    "broker_submit_required",
+    "ib_automation_required",
+    "runtime_mutation_allowed",
+    "canonical_eod_state_mutated",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "sleeve_performance_report" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "sleeve_performance_report_v1" },
+    "day_utc": { "type": "string", "minLength": 10 },
+    "generated_at_utc": { "type": "string", "minLength": 20 },
+    "portfolio_summary": { "type": "object" },
+    "sleeve_summary": { "type": "array", "items": { "type": "object" } },
+    "execution_quality": { "type": "object" },
+    "outcome_quality": { "type": "object" },
+    "research_feedback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generated_or_recommended_tasks",
+        "task_count",
+        "writes_research_task_queue",
+        "automatic_promotion_allowed",
+        "lite_runtime_mutation_allowed"
+      ],
+      "properties": {
+        "generated_or_recommended_tasks": { "type": "array", "items": { "type": "object" } },
+        "task_count": { "type": "integer", "minimum": 0 },
+        "writes_research_task_queue": { "const": false },
+        "automatic_promotion_allowed": { "const": false },
+        "lite_runtime_mutation_allowed": { "const": false }
+      }
+    },
+    "trade_lifecycle_rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["trade_id", "lifecycle_status", "sleeve_id", "source_hypothesis_id"],
+        "properties": {
+          "trade_id": { "type": "string" },
+          "lifecycle_status": {
+            "type": "string",
+            "enum": [
+              "RECOMMENDED_NOT_EXECUTED",
+              "EXECUTED_OPEN",
+              "EXECUTED_CLOSED",
+              "MISSING_RECEIPT",
+              "MISSING_OUTCOME",
+              "INVALID_PACKET",
+              "BLOCKED",
+              "IGNORED",
+              "MISSED_VALIDITY_WINDOW"
+            ]
+          },
+          "sleeve_id": { "type": "string" },
+          "source_hypothesis_id": { "type": "string" }
+        }
+      }
+    },
+    "join_diagnostics": { "type": "array", "items": { "type": "object" } },
+    "input_counts": { "type": "object" },
+    "source_artifact_lineage": { "type": "array", "items": { "type": "object" } },
+    "manual_execution_only": { "const": true },
+    "broker_submit_required": { "const": false },
+    "ib_automation_required": { "const": false },
+    "runtime_mutation_allowed": { "const": false },
+    "canonical_eod_state_mutated": { "const": false },
+    "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

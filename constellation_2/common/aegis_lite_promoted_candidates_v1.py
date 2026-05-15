@@ -80,6 +80,8 @@ def build_promoted_candidate_set_v1(
 def build_demo_promoted_sleeve_library_v1(*, generated_at_utc: str) -> dict[str, Any]:
     sleeve = {
         "sleeve_id": "C2_DEMO_SUPERVISED_LITE",
+        "source_hypothesis_id": "RH_DEMO_SUPERVISED_LITE",
+        "research_hypothesis_id": "RH_DEMO_SUPERVISED_LITE",
         "sleeve_name": "Demo Supervised Lite Sleeve",
         "promotion_status": "promoted",
         "approved_by_human": True,
@@ -114,6 +116,8 @@ def build_demo_candidate_input_v1(*, generated_at_utc: str) -> dict[str, Any]:
             {
                 "candidate_id": "DEMO_SPY_SUPERVISED_001",
                 "sleeve_id": "C2_DEMO_SUPERVISED_LITE",
+                "source_hypothesis_id": "RH_DEMO_SUPERVISED_LITE",
+                "research_hypothesis_id": "RH_DEMO_SUPERVISED_LITE",
                 "symbol": "SPY",
                 "direction": "LONG",
                 "instrument_type": "LONG_EQUITY",

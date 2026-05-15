@@ -14,6 +14,8 @@ DEFAULT_RELEASE_METADATA_PATH = Path("/home/node/constellation_runtime_data/trut
 SCHEMA_RELPATH = "governance/04_DATA/SCHEMAS/C2/REPORTS/aegis_lite_operating_status.v1.schema.json"
 LITE_TIMER_NAME = "aegis-lite-eod-report-v1.timer"
 LITE_SERVICE_NAME = "aegis-lite-eod-report-v1.service"
+LITE_EOD_TARGET_TIME_ET = "15:50"
+LITE_EOD_ON_CALENDAR = "OnCalendar=Mon..Fri *-*-* 15:50:00 America/New_York"
 LEGACY_PAPER_TIMER_NAMES = (
     "c2-paper-day-orchestrator.timer",
     "aegis-paper-ready-kernel-v1.timer",
@@ -127,11 +129,10 @@ def _lite_timer_status_v1(repo_root: Path) -> dict[str, Any]:
     service_path = repo_root / "ops/systemd/user" / LITE_SERVICE_NAME
     timer_text = timer_path.read_text(encoding="utf-8") if timer_path.exists() else ""
     service_text = service_path.read_text(encoding="utf-8") if service_path.exists() else ""
-    expected_calendar = "OnCalendar=Mon..Fri *-*-* 15:35:00 America/New_York"
     configured = (
         timer_path.exists()
         and service_path.exists()
-        and expected_calendar in timer_text
+        and LITE_EOD_ON_CALENDAR in timer_text
         and "manual-only" in service_text
         and "broker submit" in service_text.lower()
     )
@@ -139,8 +140,8 @@ def _lite_timer_status_v1(repo_root: Path) -> dict[str, Any]:
         "timer_name": LITE_TIMER_NAME,
         "service_name": LITE_SERVICE_NAME,
         "status": "CONFIGURED" if configured else "MISSING_OR_MISCONFIGURED",
-        "target_time_et": "15:35",
-        "calendar": expected_calendar.replace("OnCalendar=", ""),
+        "target_time_et": LITE_EOD_TARGET_TIME_ET,
+        "calendar": LITE_EOD_ON_CALENDAR.replace("OnCalendar=", ""),
         "unit_path": str(timer_path),
         "service_path": str(service_path),
         "manual_execution_only": True,

@@ -45,6 +45,7 @@ def _candidate(**overrides: object) -> dict[str, object]:
     base: dict[str, object] = {
         "candidate_id": "trend-spy",
         "sleeve_id": "C2_TREND_EQ_PRIMARY",
+        "source_hypothesis_id": "rh-trend-spy",
         "symbol": "SPY",
         "direction": "LONG",
         "instrument_type": "LONG_EQUITY",
@@ -76,6 +77,16 @@ def _input(candidates: list[dict[str, object]]) -> dict[str, object]:
         "data_freshness_status": {"status": "PASS", "reason_codes": []},
         "governance_status": {"status": "PASS", "reason_codes": []},
         "market_regime_state": {"status": "RISK_ON", "reason_codes": []},
+        "promoted_sleeve_library": {
+            "sleeves": [
+                {
+                    "sleeve_id": "C2_TREND_EQ_PRIMARY",
+                    "source_hypothesis_id": "rh-trend-spy",
+                    "research_hypothesis_id": "rh-trend-spy",
+                    "promotion_status": "promoted",
+                }
+            ]
+        },
     }
 
 
@@ -159,12 +170,24 @@ def test_blocked_candidate_cannot_appear_in_executable_queue(tmp_path: Path) -> 
     assert "STOP_RISK_MISSING" in view["blocked_or_advisory_trades"][0]["do_not_trade_blockers"]
 
 
-def test_lite_timer_exists_at_1535_et_and_legacy_paper_timers_are_deferred() -> None:
+def test_lite_timer_exists_at_1550_et_and_legacy_paper_timers_are_deferred() -> None:
     lite_timer = (REPO_ROOT / "ops/systemd/user/aegis-lite-eod-report-v1.timer").read_text(encoding="utf-8")
     lite_service = (REPO_ROOT / "ops/systemd/user/aegis-lite-eod-report-v1.service").read_text(encoding="utf-8")
-    assert "OnCalendar=Mon..Fri *-*-* 15:35:00 America/New_York" in lite_timer
+    assert "OnCalendar=Mon..Fri *-*-* 15:50:00 America/New_York" in lite_timer
+    assert "15:35:00 America/New_York" not in lite_timer
     assert "--manual-only" in lite_service
     assert "no broker submit" in lite_service.lower()
+
+    status = build_aegis_lite_operating_status_v1(
+        day_utc=DAY,
+        generated_at_utc=GENERATED,
+        truth_root=Path("/tmp/aegis-lite-timer-test"),
+        repo_head_commit="repo",
+        active_release_commit="repo",
+    )
+    assert status["lite_eod_timer_status"]["target_time_et"] == "15:50"
+    assert status["lite_eod_timer_status"]["calendar"] == "Mon..Fri *-*-* 15:50:00 America/New_York"
+    assert status["lite_eod_timer_status"]["status"] == "CONFIGURED"
 
     for name in [
         "c2-paper-day-orchestrator",
@@ -197,6 +220,40 @@ def test_lite_producer_does_not_require_ib_state_or_submit_orders(tmp_path: Path
     assert report["run_receipt"]["broker_transmit_control_touched"] is False
     assert report["operating_model"]["broker_submit_required"] is False
     assert report["operating_model"]["autonomous_order_routing_allowed"] is False
+
+
+def test_eod_pipeline_writes_complete_fail_closed_manual_trade_packet(tmp_path: Path) -> None:
+    _run_pipeline(tmp_path, [_candidate()])
+
+    packet_path = next((tmp_path / "reports" / "manual_trade_packet_v1").rglob("manual_trade_packet.v1.json"))
+    packet = json.loads(packet_path.read_text(encoding="utf-8"))
+    trade = packet["trade_candidates"][0]
+
+    assert packet["manual_execution_only"] is True
+    assert packet["broker_submit_required"] is False
+    assert trade["run_id"] == "test-lite-spine"
+    assert trade["date"] == DAY
+    assert trade["sleeve_id"] == "C2_TREND_EQ_PRIMARY"
+    assert trade["source_hypothesis_id"] == "rh-trend-spy"
+    assert trade["symbol"] == "SPY"
+    assert trade["side"] == "BUY"
+    assert trade["instrument_type"] == "LONG_EQUITY"
+    assert trade["entry_reference_price"] == "520.10"
+    assert trade["quantity_or_sizing_guidance"]
+    assert trade["stop_price"] == "514.90"
+    assert trade["stop_logic"]
+    assert trade["risk_per_trade"] == "5.20"
+    assert trade["confidence"] == "MEDIUM"
+    assert trade["manual_execution_checklist"]
+    assert trade["actionable"] is True
+    assert trade["do_not_trade_blockers"] == []
+
+    _run_pipeline(tmp_path, [_candidate(stop_price="", stop_logic="")], run_id="blocked-packet")
+    blocked_path = next((tmp_path / "reports" / "manual_trade_packet_v1" / DAY / "blocked-packet").rglob("manual_trade_packet.v1.json"))
+    blocked_trade = json.loads(blocked_path.read_text(encoding="utf-8"))["trade_candidates"][0]
+    assert blocked_trade["actionable"] is False
+    assert "MISSING_STOP_PRICE" in blocked_trade["do_not_trade_blockers"]
+    assert "MISSING_STOP_LOGIC" in blocked_trade["do_not_trade_blockers"]
 
 
 def test_unpromoted_research_candidates_cannot_enter_operational_lite_report(tmp_path: Path) -> None:

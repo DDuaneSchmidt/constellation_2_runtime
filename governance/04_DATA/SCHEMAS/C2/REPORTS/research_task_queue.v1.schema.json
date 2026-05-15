@@ -10,32 +10,75 @@
     "schema_version": { "const": "v1" },
     "artifact_id": { "const": "research_task_queue_v1" },
     "generated_at_utc": { "type": "string" },
-    "tasks": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["task_id", "task_type", "hypothesis_id", "source_trigger", "priority", "requested_action", "status", "created_at", "started_at", "completed_at", "owner", "blocking_reason", "output_expected"],
-        "properties": {
-          "task_id": { "type": "string", "minLength": 1 },
-          "task_type": { "type": "string", "enum": ["definition_check", "duplicate_review", "exploratory_test", "regime_test", "robustness_test", "friction_test", "out_of_sample_test", "failure_review", "edge_overlap_review", "promotion_review", "retest", "retirement_review", "sleeve_failure_review", "anomaly_review"] },
-          "hypothesis_id": { "type": "string", "minLength": 1 },
-          "source_trigger": { "type": "string", "minLength": 1 },
-          "priority": { "type": "string", "minLength": 1 },
-          "requested_action": { "type": "string", "minLength": 1 },
-          "status": { "type": "string", "enum": ["open", "completed", "blocked", "failed"] },
-          "created_at": { "type": "string" },
-          "started_at": { "type": "string" },
-          "completed_at": { "type": "string" },
-          "owner": { "type": "string" },
-          "blocking_reason": { "type": "string" },
-          "output_expected": { "type": "string" }
-        }
-      }
-    },
+    "tasks": { "type": "array", "items": { "oneOf": [{ "$ref": "#/$defs/legacy_task" }, { "$ref": "#/$defs/research_task" }] } },
     "research_lab_only": { "const": true },
     "runtime_mutation_allowed": { "const": false },
+    "trade_authorization_allowed": { "const": false },
+    "automatic_promotion_allowed": { "const": false },
     "broker_submit_required": { "const": false },
+    "transmit_automation_required": { "const": false },
     "canonical_json_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "legacy_task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "task_type", "hypothesis_id", "source_trigger", "priority", "requested_action", "status", "created_at", "started_at", "completed_at", "owner", "blocking_reason", "output_expected"],
+      "properties": {
+        "task_id": { "type": "string", "minLength": 1 },
+        "task_type": { "type": "string", "enum": ["definition_check", "duplicate_review", "exploratory_test", "regime_test", "robustness_test", "friction_test", "out_of_sample_test", "failure_review", "edge_overlap_review", "promotion_review", "retest", "retirement_review", "sleeve_failure_review", "anomaly_review", "event_failure_review", "event_success_review", "event_stale_entry_review", "event_false_positive_review", "event_overlap_review"] },
+        "hypothesis_id": { "type": "string", "minLength": 1 },
+        "source_trigger": { "type": "string", "minLength": 1 },
+        "priority": { "type": "string", "minLength": 1 },
+        "requested_action": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "enum": ["open", "completed", "blocked", "failed"] },
+        "created_at": { "type": "string" },
+        "started_at": { "type": "string" },
+        "completed_at": { "type": "string" },
+        "owner": { "type": "string" },
+        "blocking_reason": { "type": "string" },
+        "output_expected": { "type": "string" }
+      }
+    },
+    "research_task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_id",
+        "hypothesis_id",
+        "task_type",
+        "priority",
+        "status",
+        "required_inputs",
+        "output_artifact_refs",
+        "blocker_reason_codes",
+        "created_at_utc",
+        "updated_at_utc"
+      ],
+      "properties": {
+        "task_id": { "type": "string", "minLength": 1 },
+        "hypothesis_id": { "type": "string", "minLength": 1 },
+        "task_type": {
+          "type": "string",
+          "enum": [
+            "DEFINITION_CHECK",
+            "DATA_AVAILABILITY_CHECK",
+            "REPLAY_ANALYSIS",
+            "BACKTEST",
+            "FORWARD_OBSERVATION",
+            "FAILURE_MODE_REVIEW",
+            "EXPECTANCY_REVIEW",
+            "PROMOTION_REVIEW"
+          ]
+        },
+        "priority": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "enum": ["QUEUED", "RUNNING", "COMPLETED", "BLOCKED", "REJECTED"] },
+        "required_inputs": { "type": "array", "items": { "type": "string" } },
+        "output_artifact_refs": { "type": "array", "items": { "type": "string" } },
+        "blocker_reason_codes": { "type": "array", "items": { "type": "string" } },
+        "created_at_utc": { "type": "string", "minLength": 20 },
+        "updated_at_utc": { "type": "string", "minLength": 20 }
+      }
+    }
   }
 }

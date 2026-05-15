@@ -44,6 +44,7 @@ from constellation_2.common.aegis_legacy_paper_runtime_status_v1 import (  # noq
 )
 from constellation_2.common.paper_session_fact_plane_v1 import parse_day_utc_v1, resolve_fact_plane_truth_root_v1  # noqa: E402
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1  # noqa: E402
+from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1  # noqa: E402
 from ops.tools.aegis_producer_contract_v1 import attach_producer_contract_v1  # noqa: E402
 from constellation_2.common.aegis_lite_manual_feedback_v1 import (  # noqa: E402
     build_edge_cluster_v1,
@@ -51,6 +52,33 @@ from constellation_2.common.aegis_lite_manual_feedback_v1 import (  # noqa: E402
     validate_manual_feedback_artifact_v1,
     write_manual_feedback_artifact_v1,
 )
+from constellation_2.common.aegis_research_lab_v1 import (  # noqa: E402
+    build_manual_trade_packet_v1,
+    validate_research_lab_artifact_v1,
+)
+
+
+def manual_trade_packet_path_v1(*, truth_root: Path, day_utc: str, run_id: str) -> Path:
+    return (
+        Path(truth_root).resolve()
+        / "reports"
+        / "manual_trade_packet_v1"
+        / day_utc
+        / _safe_run_id(run_id)
+        / "manual_trade_packet.v1.json"
+    )
+
+
+def write_manual_trade_packet_v1(*, truth_root: Path, payload: dict[str, Any]) -> Path:
+    validate_research_lab_artifact_v1(payload)
+    path = manual_trade_packet_path_v1(
+        truth_root=truth_root,
+        day_utc=str(payload["date"]),
+        run_id=str(payload["run_id"]),
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(canonical_json_bytes_v1(payload) + b"\n")
+    return path
 
 
 def build_aegis_lite_eod_pipeline_v1(
@@ -90,11 +118,22 @@ def build_aegis_lite_eod_pipeline_v1(
         )
         validate_manual_feedback_artifact_v1(operator_execution_queue)
         operator_queue_path = write_manual_feedback_artifact_v1(truth_root=truth_root, payload=operator_execution_queue)
+    manual_trade_packet = build_manual_trade_packet_v1(
+        packet_id=f"manual_trade_packet:{run_id}",
+        run_id=run_id,
+        date=day_utc,
+        generated_at_utc=generated_at_utc,
+        regime_state=str(_object(input_payload.get("market_regime_state")).get("status") or "UNKNOWN"),
+        trade_candidates=_manual_trade_packet_candidates_v1(candidates),
+        promoted_sleeve_library=_object(input_payload.get("promoted_sleeve_library")),
+    )
+    manual_trade_packet_path = write_manual_trade_packet_v1(truth_root=truth_root, payload=manual_trade_packet)
     generated_refs = [artifact_ref_v1(overlap_path, artifact_type="sleeve_edge_overlap_review_v1")]
     if edge_cluster_path is not None:
         generated_refs.append(artifact_ref_v1(edge_cluster_path, artifact_type="edge_cluster_v1"))
     if operator_queue_path is not None:
         generated_refs.append(artifact_ref_v1(operator_queue_path, artifact_type="operator_execution_queue_v1"))
+    generated_refs.append(artifact_ref_v1(manual_trade_packet_path, artifact_type="manual_trade_packet_v1"))
     promoted_candidate_set = build_promoted_candidate_set_v1(
         day_utc=day_utc,
         run_id=run_id,
@@ -136,8 +175,8 @@ def build_aegis_lite_eod_pipeline_v1(
             f"--day_utc {day_utc} --truth_root {truth_root} --run_id {run_id}"
         ),
         input_artifacts=[Path(ref.get("path", "")) for ref in source_lineage if isinstance(ref, dict) and str(ref.get("path") or "")],
-        output_artifacts=[path for path in [overlap_path, edge_cluster_path, operator_queue_path, out_path] if path is not None],
-        schema_versions={"sleeve_edge_overlap_review": "v1", "aegis_lite_eod_report": "v1"},
+        output_artifacts=[path for path in [overlap_path, edge_cluster_path, operator_queue_path, manual_trade_packet_path, out_path] if path is not None],
+        schema_versions={"sleeve_edge_overlap_review": "v1", "operator_execution_queue": "v1", "manual_trade_packet": "v1", "aegis_lite_eod_report": "v1"},
     )
     report["run_receipt"]["producer_contract_attached"] = True
     status_path = aegis_lite_operating_status_path_v1(truth_root=truth_root, day_utc=day_utc)
@@ -203,6 +242,7 @@ def filter_promoted_sleeve_candidates_v1(input_payload: dict[str, Any], promoted
     return {
         **input_payload,
         "candidates": accepted,
+        "promoted_sleeve_library": promoted_sleeve_library,
         "promoted_sleeve_filter": {
             "promoted_sleeve_ids": sorted(promoted_ids),
             "accepted_candidate_count": len(accepted),
@@ -281,6 +321,28 @@ def prepare_demo_operational_input_payload_v1(*, truth_root: Path, day_utc: str,
     return filtered
 
 
+def _manual_trade_packet_candidates_v1(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for raw in candidates:
+        if not isinstance(raw, dict):
+            continue
+        direction = str(raw.get("direction") or raw.get("side") or "").strip().upper()
+        side = str(raw.get("side") or ("SELL" if direction == "SHORT" else "BUY" if direction else "")).strip().upper()
+        rows.append(
+            {
+                **raw,
+                "side": side,
+                "source_hypothesis_id": str(raw.get("source_hypothesis_id") or raw.get("research_hypothesis_id") or raw.get("hypothesis_id") or ""),
+                "quantity_or_sizing_guidance": str(raw.get("quantity_or_sizing_guidance") or raw.get("sizing_guidance") or ""),
+                "inclusion_reason": str(raw.get("inclusion_reason") or ",".join(str(item) for item in _strings(raw.get("reason_codes")))),
+                "exclusion_reason": str(raw.get("exclusion_reason") or ""),
+                "governance_notes": str(raw.get("governance_notes") or ""),
+                "edge_overlap_result": str(raw.get("edge_overlap_result") or raw.get("edge_overlap_status") or ""),
+            }
+        )
+    return rows
+
+
 def apply_nyse_trading_day_gate_v1(*, input_payload: dict[str, Any], truth_root: Path, day_utc: str) -> dict[str, Any]:
     calendar_path = Path(truth_root).resolve() / "market_calendar_v1" / "NYSE" / f"{day_utc[:4]}.jsonl"
     state = _nyse_calendar_state_v1(calendar_path=calendar_path, day_utc=day_utc)
@@ -300,6 +362,19 @@ def _object(value: Any) -> dict[str, Any]:
 
 def _objects(value: Any) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def _strings(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [item.strip() for item in str(value).split(",") if item.strip()]
+
+
+def _safe_run_id(run_id: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in str(run_id or "").strip())
+    return cleaned or "aegis_lite_eod_v1"
 
 
 def _read_json(path: Path) -> dict[str, Any]:
