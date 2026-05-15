@@ -42,6 +42,7 @@ from constellation_2.phaseL.ui_api import (
     build_action_inventory,
     build_advisory_view,
     build_aegis_lite_execution_queue_view,
+    build_aegis_lite_ui_health_view,
     build_alerts_view,
     build_capital_accounts_view,
     build_capital_allocation_view,
@@ -2065,6 +2066,7 @@ class OpsHandler(SimpleHTTPRequestHandler):
         "/performance",
         "/sleeves",
         "/advisory",
+        "/aegis-lite",
         "/tax",
         "/operations",
         "/aegis-runtime",
@@ -2454,6 +2456,7 @@ class OpsHandler(SimpleHTTPRequestHandler):
             "/api/latest-packet": True,
             "/api/ui-service-authority": True,
             "/healthz": True,
+            "/healthz/aegis-lite-ui": True,
             "/readyz": True,
             "/runtime-status": True,
         }
@@ -3164,6 +3167,10 @@ class OpsHandler(SimpleHTTPRequestHandler):
         if path in {"/health", "/healthz"}:
             self._send_json(HTTPStatus.OK, self._health_payload())
             sys.stderr.write(f"TIMING: api endpoint={path} duration_ms={(time.perf_counter() - started) * 1000:.1f}\n")
+            return
+        if path == "/healthz/aegis-lite-ui":
+            self._send_json(HTTPStatus.OK, build_aegis_lite_ui_health_view(GLOBAL_TRUTH_ROOT))
+            sys.stderr.write(f"TIMING: api endpoint=/healthz/aegis-lite-ui duration_ms={(time.perf_counter() - started) * 1000:.1f}\n")
             return
         if path == "/readyz":
             payload = self._readyz_payload()

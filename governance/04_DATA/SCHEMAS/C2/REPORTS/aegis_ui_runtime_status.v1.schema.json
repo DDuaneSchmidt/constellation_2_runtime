@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/aegis_ui_runtime_status.v1.schema.json",
+  "title": "aegis_ui_runtime_status.v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "artifact_id",
+    "generated_at_utc",
+    "ui_process_alive",
+    "backend_api_alive",
+    "current_active_release",
+    "current_runtime_path",
+    "current_lite_artifact_availability",
+    "last_successful_ui_render_timestamp",
+    "upstream_api_status",
+    "health_status",
+    "last_ui_exception_summary",
+    "canonical_json_hash"
+  ],
+  "properties": {
+    "schema_id": { "const": "aegis_ui_runtime_status" },
+    "schema_version": { "const": "v1" },
+    "artifact_id": { "const": "aegis_ui_runtime_status_v1" },
+    "generated_at_utc": { "type": "string" },
+    "day_utc": { "type": "string" },
+    "ui_process_alive": { "type": "boolean" },
+    "backend_api_alive": { "type": "boolean" },
+    "current_active_release": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "current_runtime_path": { "type": "string" },
+    "truth_root": { "type": "string" },
+    "current_lite_artifact_availability": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "last_successful_ui_render_timestamp": { "type": "string" },
+    "upstream_api_status": { "type": "string", "enum": ["PASS", "WARN", "FAIL"] },
+    "health_status": { "type": "string", "enum": ["PASS", "WARN", "FAIL"] },
+    "readiness_classification": { "type": "string" },
+    "current_blockers": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "active_release_integrity": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "queue_availability": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "backend_connectivity": { "type": "string" },
+    "last_ui_exception_summary": { "type": "string" },
+    "canonical_json_hash": { "type": "string" }
+  }
+}

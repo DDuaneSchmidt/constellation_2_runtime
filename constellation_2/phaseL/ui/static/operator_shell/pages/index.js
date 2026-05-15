@@ -2772,6 +2772,7 @@ async function renderAegisLiteQueuePage() {
   const summary = payload.queue_summary || {};
   const releaseMismatch = payload.release_match_status === "MISMATCH";
   const legacy = payload.operating_status?.legacy_paper_runtime_status || {};
+  const degradedMessages = buildLiteDegradedMessages(payload);
   return {
     title: "Aegis Lite Queue",
     meta: "Manual-only EOD execution queue from current Aegis Lite report truth.",
@@ -2787,6 +2788,21 @@ async function renderAegisLiteQueuePage() {
           { label: "Ready disabled by mismatch", value: releaseMismatch ? "YES" : "NO" },
         ]),
       }),
+      degradedMessages.length ? renderCardSection({
+        eyebrow: "NOT_READY",
+        title: "Lite Report Not Generated Yet",
+        subtitle: "The operator surface is in degraded read-only mode and cannot authorize manual entry.",
+        body: `
+          <div class="callout danger">${degradedMessages.map((item) => escapeHtml(item)).join(" | ")}</div>
+          ${renderDefinitionRows([
+            { label: "Manual execution status", value: payload.manual_execution_status || "NOT_READY" },
+            { label: "Readiness", value: payload.readiness_classification || "NOT_READY" },
+            { label: "Broker submit required", value: String(payload.broker_submit_required === true) },
+            { label: "Report", value: payload.report_path || "Runtime artifact unavailable" },
+            { label: "Queue", value: payload.queue_path || "Runtime artifact unavailable" },
+          ])}
+        `,
+      }) : "",
       renderCardSection({
         eyebrow: payload.readiness_classification || "NOT_READY",
         title: "Aegis Lite Execution Queue",
@@ -2835,6 +2851,20 @@ async function renderAegisLiteQueuePage() {
       }),
     ].join(""),
   };
+}
+
+function buildLiteDegradedMessages(payload) {
+  const blockers = safeList(payload.current_blockers);
+  const messages = [];
+  if ((payload.readiness_classification || "NOT_READY") === "NOT_READY" || blockers.length) {
+    if (!payload.report_path || blockers.includes("NO_CURRENT_LITE_REPORT")) messages.push("No current Lite report");
+    if (!payload.queue_path || blockers.includes("NO_CURRENT_LITE_QUEUE")) messages.push("No executable queue");
+    if (blockers.includes("STATUS_UNAVAILABLE")) messages.push("Lite report not generated yet");
+    if (blockers.includes("FILE_NOT_FOUND") || blockers.includes("JSON_DECODE_ERROR") || blockers.includes("READ_ERROR")) {
+      messages.push("Runtime artifact unavailable");
+    }
+  }
+  return [...new Set(messages)];
 }
 
 function renderLiteTradeCards(cards, executable) {

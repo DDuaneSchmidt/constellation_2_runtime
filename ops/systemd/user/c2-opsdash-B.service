@@ -1,0 +1,21 @@
+[Unit]
+Description=Constellation 2.0 Ops Dashboard (Instance B) (read-only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/node/constellation_active
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/node/constellation_active
+Environment=C2_INSTANCE_CONFIG=/home/node/constellation_active/governance/06_RUNTIME_CONFIG/C2/instance_B.json
+ExecStartPre=/usr/bin/bash -lc 'ss -ltnp | rg ":8789" && exit 2 || exit 0'
+ExecStart=/usr/bin/python3 -B -m constellation_2.phaseL.ui.server.run_ops_dashboard_v1 --host 127.0.0.1 --port 8789
+
+Restart=always
+RestartSec=2
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target

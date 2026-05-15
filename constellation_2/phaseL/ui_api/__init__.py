@@ -1,6 +1,6 @@
 from .actions import ACTION_SPECS, build_action_inventory, list_action_audit_entries, run_action
 from .advisory_read_model import build_advisory_view
-from .aegis_lite_execution_queue_read_model import build_aegis_lite_execution_queue_view
+from .aegis_lite_execution_queue_read_model import build_aegis_lite_execution_queue_view, build_aegis_lite_ui_health_view
 from .aegis_operator_state_read_model import build_aegis_operator_state_view, get_operator_state
 from .alerts_read_model import build_alerts_view
 from .financial_state_read_model import build_financial_state_view
@@ -93,6 +93,7 @@ __all__ = [
     "build_action_inventory",
     "build_advisory_view",
     "build_aegis_lite_execution_queue_view",
+    "build_aegis_lite_ui_health_view",
     "build_aegis_operator_state_view",
     "get_operator_state",
     "build_alerts_view",
