@@ -42,7 +42,11 @@ python3 ops/tools/run_aegis_lite_eod_pipeline_v1.py --day_utc YYYY-MM-DD --truth
 
 After manual action or dry receipt:
 ```bash
+python3 ops/tools/record_manual_execution_receipt_v1.py --truth_root /path/to/truth --source_packet_id <recommended_trade_id> --symbol <SYMBOL> --side <BUY|SELL> --quantity <N> --fill_price <PRICE> --fill_timestamp_utc <UTC> --stop_entered <yes|no> --stop_price <PRICE> --notes "operator note"
+python3 ops/tools/record_trade_outcome_v1.py --truth_root /path/to/truth --trade_id <recommended_trade_id_or_receipt_id> --exit_price <PRICE> --exit_timestamp_utc <UTC> --outcome_status <WIN|LOSS|SCRATCH|OPEN|STOPPED_OUT> --notes "operator note"
 python3 ops/tools/build_sleeve_performance_report_v1.py --truth_root /path/to/truth --day YYYY-MM-DD
+python3 ops/tools/build_and_print_sleeve_performance_report_v1.py --truth_root /path/to/truth --day YYYY-MM-DD
+python3 ops/tools/build_aegis_operator_status_v1.py --truth_root /path/to/truth --day_utc YYYY-MM-DD
 ```
 
 ### Ready
@@ -77,8 +81,8 @@ python3 ops/tools/build_sleeve_performance_report_v1.py --truth_root /path/to/tr
 ### Unproven
 
 - Actual SMS/email delivery is unproven.
-- Event alert output is `GATE_ONLY_NO_TRANSPORT`: ledger and message-body artifacts only.
-- Dedicated UI panels for receipt status, outcome ledger, event alert ledger, sleeve performance report, and Research Lab are unproven.
+- Event alert output is `MESSAGE_BODY_DRY_RUN_ONLY`: ledger and message-body artifacts only.
+- Dedicated UI panels for receipt status, outcome ledger, sleeve performance report, and Research Lab are unproven. Receipt/outcome/performance/status CLIs now exist.
 - Real Research dataset bindings for price, volatility, breadth, macro events, and regime labels remain incomplete.
 
 ### P0 Offline Proof Artifacts
@@ -152,25 +156,29 @@ Remaining proof gap:
 - P0 offline proof validated promoted-sleeve-only filtering and one ready queue item under `/tmp`.
 - Current runtime remains advisory and has no executable queue item. A real promoted sleeve candidate has not yet been proven end-to-end in runtime truth.
 
-## Event Alert Transport
+## Event Monitoring And Alert Transport
 
-Status: `PRESENT_UNPROVEN`
+Status: `READY_WITH_MANUAL_STEPS`
 
 Implemented:
+- `event_rules_registry.v1`
+- `event_monitoring_status.v1`
 - `event_awareness_ledger.v1`
+- `tactical_review_gate.v1`
 - `event_tactical_packet.v1`
 - `event_validity_gate.v1`
 - `trade_capture_alert_gate.v1`
 - `trade_capture_alert_ledger.v1`
+- read-only UI/API surface at `/aegis-events` and `/api/aegis/event-monitoring`
 
 Alert safety:
 - Email/SMS is allowed only when the event validity gate is `PASS`, the source packet is complete, sensitivity is not `EXTREME`, and enough time remains before `valid_until`.
 - Blocked/expired/invalid/duplicate packets write no-alert ledger entries.
 
 Transport finding:
-- The trade capture alert CLI writes gate/ledger artifacts and message bodies.
-- It does not currently send real email/SMS.
-- Operator-facing status is `GATE_ONLY_NO_TRANSPORT`.
+- The event monitor and trade capture alert CLI write gate/ledger artifacts and message bodies.
+- They do not currently send real email/SMS.
+- Operator-facing status is `MESSAGE_BODY_DRY_RUN_ONLY`.
 - Later enablement should wire a configured transport behind `trade_capture_alert_gate.v1` only, preserving the gate as send authority.
 
 ## Manual Execution Receipt
@@ -181,9 +189,11 @@ Implemented:
 - `manual_execution_receipt.v1` schema and builder support EOD manual packet and event tactical packet sources.
 - Receipt fields include alert id, source packet id, event id/run id, fill timestamp, fill price, quantity, order type, stop entered, stop price, operator notes, deviation from recommendation, valid-until compliance, and max-slippage compliance.
 - Receipt is observational only and requires no broker submit.
+- Operator command:
+  `python3 ops/tools/record_manual_execution_receipt_v1.py --truth_root <path> --source_packet_id <recommended_trade_id> --symbol <SYMBOL> --side <BUY|SELL> --quantity <N> --fill_price <PRICE> --fill_timestamp_utc <UTC> --stop_entered <yes|no> --stop_price <PRICE> --notes "<note>"`
 
 Manual step:
-- Operator still records the receipt outside a dedicated Lite UI form.
+- Operator still records the receipt outside a dedicated Lite UI form, but no JSON editing is required.
 
 ## Outcome Ledger
 
@@ -194,6 +204,10 @@ Implemented:
 - `outcome_ledger.v1` records generic outcome rows and can include alert id, event attribution, source packet type, execution sensitivity, validity-window compliance, slippage compliance, operator action, and alert usefulness.
 - `sleeve_performance_report.v1` joins manual packets, receipts, outcomes, optional attributions, promoted sleeve lineage, event packets, and alert ledgers into the canonical Lite paper-performance report.
 - Outcome rows can generate offline Research Lab follow-up tasks without Lite mutation.
+- Operator command:
+  `python3 ops/tools/record_trade_outcome_v1.py --truth_root <path> --trade_id <recommended_trade_id_or_receipt_id> --exit_price <PRICE> --exit_timestamp_utc <UTC> --outcome_status <status> --notes "<note>"`
+- Operator performance summary command:
+  `python3 ops/tools/build_and_print_sleeve_performance_report_v1.py --truth_root <path> --day <YYYY-MM-DD>`
 
 Manual/no-IB mode:
 - Manual execution receipt and manually supplied outcome/market data are the source of truth when IB is not integrated.
@@ -208,12 +222,12 @@ Remaining proof gap:
 | --- | --- | --- |
 | Aegis Lite execution queue | `READY` | `/aegis-lite` reads current Lite report/status/queue and fails closed. |
 | EOD manual trade packet view | `PRESENT_UNPROVEN` | Packet artifact is now produced by repo pipeline, but UI primarily renders execution queue cards. |
-| Event alert status | `MISSING` | No dedicated UI surface for event awareness ledger/tactical packets. |
-| Trade capture alert ledger | `MISSING` | CLI/JSON only. |
+| Event rules / monitor / ledger | `READY_WITH_MANUAL_STEPS` | `/aegis-events` and `/api/aegis/event-monitoring` expose rules, monitor status, ledger, packet detail, and alert status from artifacts. |
+| Trade capture alert ledger | `READY_WITH_MANUAL_STEPS` | UI/API can read alert ledgers, but real email/SMS transport remains unimplemented. |
 | Sleeve scores/rankings | `READY_WITH_MANUAL_STEPS` | `sleeve_performance_report.v1` now aggregates sleeve counts, returns, win rate, stop-hit rate, MAE/MFE, regime/event/alert performance; no Lite UI panel is proven. |
 | Sleeve percent returns | `READY_WITH_MANUAL_STEPS` | `sleeve_performance_report.v1` computes sleeve total/average percent returns from closed outcome rows; missing receipts/outcomes are not treated as zero return. |
-| Manual receipts needed/status | `MISSING` | Receipt artifact exists; no Lite UI form/status panel found. |
-| Outcome ledger | `READY_WITH_MANUAL_STEPS` | `sleeve_performance_report.v1` reads outcome ledger rows; no dedicated Lite outcome-ledger UI is proven. |
+| Manual receipts needed/status | `READY_WITH_MANUAL_STEPS` | Receipt CLI exists and `aegis_operator_status.v1` can report missing receipt counts from the sleeve performance report; no Lite UI form/status panel is proven. |
+| Outcome ledger | `READY_WITH_MANUAL_STEPS` | Outcome CLI exists and `sleeve_performance_report.v1` reads outcome ledger rows; no dedicated Lite outcome-ledger UI is proven. |
 | Research Lab hypotheses/results | `MISSING` | Research Lab is CLI/JSON only. |
 | Promotion candidates | `MISSING` | No Research-to-Lite promotion UI found. |
 
@@ -249,7 +263,7 @@ Command/status coverage:
 | Outcome ledger update | `READY_WITH_MANUAL_STEPS` | `run_outcome_attribution_v1.py`, `run_trade_outcome_v1.py`, `ingest_trade_outcome_attribution_to_research_v1.py` | Performance measurement depends on manual receipt/outcome data without IB integration. |
 | Research Lab daily run | `READY_WITH_MANUAL_STEPS` | `run_research_lab_task_queue_v1.py` | Real dataset bindings remain incomplete; legacy `run_research_lab_v1.py` is compatibility-only. |
 | Awareness report | `PRESENT_UNPROVEN` | Legacy/status report concepts exist | New canonical Research Lab daily awareness report is not proven. |
-| Weekly sleeve/promotion review | `PRESENT_UNPROVEN` | Sleeve performance/evaluation and promotion manual review tools exist | Advisor benchmark comparison is missing; decisions remain human-only. |
+| Weekly sleeve/promotion review | `READY_WITH_MANUAL_STEPS` | Sleeve performance/evaluation, promotion CLI, and advisor benchmark CLI exist | Decisions remain human-only; no dedicated UI is proven. |
 
 Scheduling:
 - No new scheduling automation was added.

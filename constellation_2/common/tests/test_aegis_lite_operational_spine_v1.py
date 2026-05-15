@@ -385,8 +385,11 @@ def test_demo_promoted_candidates_are_visible_as_dry_run_only(tmp_path: Path) ->
     view = build_aegis_lite_execution_queue_view(DAY, tmp_path)
 
     assert report["selected_trade_candidates"][0]["demo_mode"] is True
-    assert "DEMO_ONLY" in view["executable_trades"][0]["execution_confidence_badges"]
-    assert "DRY_RUN_ONLY" in view["executable_trades"][0]["execution_confidence_badges"]
+    assert view["executable_trades"] == []
+    assert view["blocked_or_advisory_trades"]
+    assert "DEMO_ONLY" in view["blocked_or_advisory_trades"][0]["execution_confidence_badges"]
+    assert "DRY_RUN_ONLY" in view["blocked_or_advisory_trades"][0]["execution_confidence_badges"]
+    assert "DEMO_ONLY_NOT_ACTIONABLE" in view["blocked_or_advisory_trades"][0]["do_not_trade_blockers"]
 
 
 def _force_release_match_for_run(tmp_path: Path, run_id: str) -> None:

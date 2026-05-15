@@ -1666,6 +1666,12 @@ def build_manual_trade_packet_v1(
         )
         for row in trade_candidates
     ]
+    classifications = {str(row.get("runtime_truth_classification") or "REAL_RUNTIME") for row in candidates}
+    runtime_truth_classification = "REAL_RUNTIME"
+    if "DEMO_ONLY" in classifications:
+        runtime_truth_classification = "DEMO_ONLY"
+    elif "DRY_RUN_ONLY" in classifications:
+        runtime_truth_classification = "DRY_RUN_ONLY"
     payload = {
         "schema_id": "manual_trade_packet",
         "schema_version": "v1",
@@ -1674,6 +1680,7 @@ def build_manual_trade_packet_v1(
         "run_id": run_id,
         "date": date,
         "generated_at_utc": generated_at_utc,
+        "runtime_truth_classification": runtime_truth_classification,
         "manual_execution_only": True,
         "broker_submit_required": False,
         "ib_automation_status": "DEFERRED",
@@ -2534,7 +2541,19 @@ def _manual_trade_candidate(
         source_blockers.append("PROMOTED_SLEEVE_LIBRARY_MISSING")
     elif promoted_sources.get(sleeve_id) != source_hypothesis_id:
         source_blockers.append("UNPROMOTED_SLEEVE_SOURCE")
-    actionable = not missing and not source_blockers
+    runtime_truth_classification = str(row.get("runtime_truth_classification") or "").strip().upper()
+    if not runtime_truth_classification:
+        if bool(row.get("demo_mode", False)) or "DEMO_ONLY" in _strings(row.get("reason_codes")):
+            runtime_truth_classification = "DEMO_ONLY"
+        elif bool(row.get("dry_run_only", False)) or "DRY_RUN_ONLY" in _strings(row.get("reason_codes")):
+            runtime_truth_classification = "DRY_RUN_ONLY"
+        else:
+            runtime_truth_classification = "REAL_RUNTIME"
+    if runtime_truth_classification == "DEMO_ONLY":
+        source_blockers.append("DEMO_ONLY_NOT_ACTIONABLE")
+    if runtime_truth_classification == "DRY_RUN_ONLY" or bool(row.get("dry_run_only", False)):
+        source_blockers.append("DRY_RUN_ONLY_NOT_ACTIONABLE")
+    actionable = not missing and not source_blockers and runtime_truth_classification == "REAL_RUNTIME"
     checklist = _strings(row.get("manual_execution_checklist")) or [
         "Review status and blockers before acting.",
         "Enter the position manually in IB paper.",
@@ -2564,6 +2583,9 @@ def _manual_trade_candidate(
         "exclusion_reason": str(row.get("exclusion_reason") or ("MISSING_REQUIRED_MANUAL_TRADE_FIELDS:" + ",".join(missing) if missing else "")),
         "governance_notes": str(row.get("governance_notes") or ""),
         "edge_overlap_result": str(row.get("edge_overlap_result") or ""),
+        "runtime_truth_classification": runtime_truth_classification,
+        "demo_mode": bool(row.get("demo_mode", False)) or runtime_truth_classification == "DEMO_ONLY",
+        "dry_run_only": bool(row.get("dry_run_only", False)) or runtime_truth_classification == "DRY_RUN_ONLY",
         "manual_execution_checklist": checklist,
         "actionable": actionable,
         "do_not_trade_blockers": [f"MISSING_{field.upper()}" for field in missing] + source_blockers,

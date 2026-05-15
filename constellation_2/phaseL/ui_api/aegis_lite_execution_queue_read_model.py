@@ -214,6 +214,8 @@ def _trade_card(*, row: dict[str, Any], candidate: dict[str, Any]) -> dict[str, 
         [
             *[str(item) for item in row.get("reason_codes", []) if str(item)],
             *[str(item) for item in candidate.get("blockers", []) if str(item)],
+            *("DEMO_ONLY_NOT_ACTIONABLE" for _ in [0] if bool(candidate.get("demo_mode", False))),
+            *("DRY_RUN_ONLY_NOT_ACTIONABLE" for _ in [0] if bool(candidate.get("dry_run_only", False))),
         ]
     )
     return {
