@@ -17,7 +17,74 @@ python3 ops/tools/run_aegis_event_monitor_v1.py \
   --market_snapshot_json /path/to/event_market_snapshot.json
 ```
 
+For scheduled market-hours operation the CLI may be run with only an explicit
+truth root:
+
+```bash
+python3 ops/tools/run_aegis_event_monitor_v1.py --truth_root /home/node/constellation_runtime_data/truth
+```
+
+When no event market snapshot exists at
+`<truth_root>/reports/event_market_snapshot_v1/<day_utc>/event_market_snapshot.v1.json`,
+the monitor fails closed: it writes `event_monitoring_status.v1` and
+`event_awareness_ledger.v1` with `MISSING_INPUT` / `DATA_STALE` reason codes,
+creates no actionable packet, and sends no alert.
+
 The market snapshot must include `generated_at_utc`, input values required by registry rules, optional `current_prices`, optional `promoted_sleeves`, and optional tactical packet defaults. Missing or stale data blocks evaluation.
+
+## Market-Hours Schedule
+
+Source-controlled units:
+
+- `ops/systemd/user/aegis-event-monitor-v1.timer`
+- `ops/systemd/user/aegis-event-monitor-v1.service`
+
+Schedule:
+
+- Monday-Friday 09:30 ET
+- Monday-Friday 09:45 ET
+- Monday-Friday every 15 minutes from 10:00 through 15:45 ET
+- Monday-Friday 16:00 ET
+- `Persistent=false`, so missed overnight/weekend runs are not replayed
+
+The service command is:
+
+```bash
+/home/node/constellation_runtime_data/truth/releases/run_current_release_tool_v1.sh \
+  run_aegis_event_monitor_v1 \
+  --truth_root /home/node/constellation_runtime_data/truth \
+  --day_utc @today_utc@
+```
+
+The timer is disabled until the operator explicitly installs/enables it in the
+user systemd runtime:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp ops/systemd/user/aegis-event-monitor-v1.service ~/.config/systemd/user/
+cp ops/systemd/user/aegis-event-monitor-v1.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now aegis-event-monitor-v1.timer
+```
+
+Disable:
+
+```bash
+systemctl --user disable --now aegis-event-monitor-v1.timer
+```
+
+Status:
+
+```bash
+systemctl --user status aegis-event-monitor-v1.timer --no-pager
+systemctl --user list-timers aegis-event-monitor-v1.timer --all
+```
+
+Activation note: the current repo contains `/aegis-events`, but the active UI
+release must include this commit before the production UI route is available on
+`127.0.0.1:8787`. Do not activate a release blindly; use the existing release
+process and verify `/aegis-events` and `/api/aegis/event-monitoring` after
+activation.
 
 ## Outputs
 

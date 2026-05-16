@@ -1,0 +1,15 @@
+[Unit]
+Description=Schedule Aegis Event Monitor v1 every 15 minutes during regular U.S. market hours
+Documentation=file:/home/node/constellation/docs/aegis_event_monitoring_v1.md
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 09:30:00 America/New_York
+OnCalendar=Mon..Fri *-*-* 09:45:00 America/New_York
+OnCalendar=Mon..Fri *-*-* 10..15:00/15:00 America/New_York
+OnCalendar=Mon..Fri *-*-* 16:00:00 America/New_York
+AccuracySec=30s
+Persistent=false
+Unit=aegis-event-monitor-v1.service
+
+[Install]
+WantedBy=timers.target

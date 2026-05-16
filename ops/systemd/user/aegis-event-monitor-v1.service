@@ -1,0 +1,11 @@
+[Unit]
+Description=Aegis Event Monitor v1 (manual-only, no broker submit, no EOD mutation)
+Documentation=file:/home/node/constellation/docs/aegis_event_monitoring_v1.md
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/node/constellation_active
+Environment=PYTHONUNBUFFERED=1
+Environment=AEGIS_LITE_MANUAL_ONLY=1
+Environment=AEGIS_EVENT_MONITOR_SCHEDULED=1
+ExecStart=/home/node/constellation_runtime_data/truth/releases/run_current_release_tool_v1.sh run_aegis_event_monitor_v1 --truth_root /home/node/constellation_runtime_data/truth --day_utc @today_utc@

@@ -150,6 +150,22 @@ def test_stale_data_blocks_event_evaluation(tmp_path: Path) -> None:
     assert "event_rule:PANIC_EXHAUSTION:v1:STALE_DATA" in result["monitoring_status"]["pass_fail_reason_codes"]
 
 
+def test_monitor_cli_with_explicit_truth_root_fails_closed_without_snapshot(tmp_path: Path) -> None:
+    rc = monitor_main(["--truth_root", str(tmp_path), "--day_utc", DAY, "--timestamp_utc", NOW])
+
+    assert rc == 0
+    status_path = next(tmp_path.rglob("event_monitoring_status.v1.json"))
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+    assert status["triggered_events"] == []
+    assert status["blocked_events"]
+    assert "EVENT_MARKET_SNAPSHOT_MISSING" in status["pass_fail_reason_codes"]
+    assert "MISSING_INPUT:EVENT_RULE_INPUTS" in status["pass_fail_reason_codes"]
+    assert "DATA_STALE:MISSING_TIMESTAMP" in status["pass_fail_reason_codes"]
+    assert status["broker_submit_required"] is False
+    assert status["canonical_eod_state_mutated"] is False
+    assert not (tmp_path / "reports" / "aegis_lite_eod_report_v1").exists()
+
+
 def test_event_monitor_creates_lineaged_packet_gate_and_dry_run_email(tmp_path: Path) -> None:
     result = run_event_monitor_v1(
         truth_root=tmp_path,

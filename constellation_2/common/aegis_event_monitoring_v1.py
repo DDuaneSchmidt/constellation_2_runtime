@@ -202,7 +202,7 @@ def run_event_monitor_v1(
     alert_ledgers: list[dict[str, Any]] = []
     rule_ids: list[str] = []
     threshold_lines: list[str] = []
-    reason_codes: list[str] = []
+    reason_codes: list[str] = _snapshot_reason_codes(snapshot)
     triggered: list[str] = []
     blocked: list[str] = []
     alert_levels: list[str] = []
@@ -630,6 +630,18 @@ def _promoted_event_types(snapshot: dict[str, Any]) -> set[str]:
         if event_type:
             promoted.add(event_type)
     return promoted
+
+
+def _snapshot_reason_codes(snapshot: dict[str, Any]) -> list[str]:
+    reason_codes = _strings(snapshot.get("reason_codes"))
+    if not snapshot:
+        reason_codes.append("MISSING_INPUT:EVENT_MARKET_SNAPSHOT")
+    if not str(snapshot.get("generated_at_utc") or ""):
+        reason_codes.append("DATA_STALE:MISSING_TIMESTAMP")
+    inputs = snapshot.get("inputs")
+    if not isinstance(inputs, dict) or not inputs:
+        reason_codes.append("MISSING_INPUT:EVENT_RULE_INPUTS")
+    return sorted(set(reason_codes))
 
 
 def _latest_artifact(*, root: Path, family: str, day_utc: str, filename: str) -> dict[str, Any]:

@@ -229,6 +229,11 @@ def test_dataset_gap_and_operator_status_artifacts_are_operator_readable(tmp_pat
     assert status["manual_execution_only"] is True
     assert status["broker_submit_required"] is False
     assert status["dataset_blockers"]
+    assert status["event_monitor_schedule_status"]["source_configured"] is True
+    assert status["event_monitor_schedule_status"]["broker_submit_required"] is False
+    assert status["last_event_data_freshness_status"] == "UNKNOWN"
+    assert status["last_triggered_event_count"] == 0
+    assert status["last_blocked_event_count"] == 0
     assert "Review manual trade packet" in status["next_operator_action"]
 
 
