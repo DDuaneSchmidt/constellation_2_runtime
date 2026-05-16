@@ -1,5 +1,30 @@
 export const NAVIGATION_SCHEMA = [
   {
+    section: "AEGIS LITE",
+    domains: [
+      {
+        id: "aegis_lite",
+        label: "Aegis Lite",
+        icon: "▣",
+        accent: "cyan",
+        route: "/aegis-lite",
+        truthOwner: "aegis_lite_operating_status_v1",
+        description: "Tactical intelligence, event awareness, and broker-independent manual execution support.",
+        children: [
+          { id: "aegis_lite_today", label: "Today / Operator Status", icon: "◫", route: "/aegis-lite", truthOwner: "aegis_operator_status_v1", description: "What ran today, what needs action, and what is blocked." },
+          { id: "aegis_lite_eod_queue", label: "EOD Queue", icon: "▤", route: "/aegis-lite", truthOwner: "operator_execution_queue_v1", description: "Current manual execution queue from promoted sleeves only." },
+          { id: "aegis_lite_events", label: "Event Monitoring", icon: "!", route: "/aegis-events", truthOwner: "event_rules_registry_v1", description: "Event rules, monitor status, event ledger, and actionable/advisory packets." },
+          { id: "aegis_lite_packets", label: "Manual Trade Packets", icon: "□", route: "/reports", truthOwner: "manual_trade_packet_v1", description: "Manual packet artifacts and operator checklist evidence." },
+          { id: "aegis_lite_receipts", label: "Receipts / Outcomes", icon: "↔", route: "/outcomes", truthOwner: "manual_execution_receipt_v1", description: "Operator-entered fills, stops, exits, and outcome ledger evidence." },
+          { id: "aegis_lite_sleeve_performance", label: "Sleeve Performance", icon: "⌁", route: "/performance", truthOwner: "sleeve_performance_report_v1", description: "Paper-trade sleeve attribution and performance proof." },
+          { id: "aegis_lite_ai_feedback", label: "AI Feedback / EOD-EOW Review", icon: "✧", route: "/aegis-ai-feedback", truthOwner: "ai_feedback_review_v1", description: "Evidence-gated sleeve review and Research feedback loop." },
+          { id: "aegis_lite_research_lab", label: "Research Lab", icon: "◇", route: "/research-lab", truthOwner: "research_hypothesis_v1", description: "Offline hypothesis testing and sleeve validation." },
+          { id: "aegis_lite_operator_inbox", label: "Operator Inbox", icon: "+", route: "/operator-inbox", truthOwner: "operator_inbox_v1", description: "Lightweight idea capture; promotion remains strict." },
+        ],
+      },
+    ],
+  },
+  {
     section: "CORE",
     domains: [
       {
@@ -112,11 +137,26 @@ export const NAVIGATION_SCHEMA = [
         description: "Reliability, issue tracking, and integration health.",
         children: [
           { id: "system_reliability", label: "Reliability", icon: "◉", route: "/reliability", truthOwner: "reliability_readiness" },
-          { id: "system_aegis_runtime", label: "Aegis Runtime", icon: "◇", route: "/aegis-runtime", truthOwner: "aegis_operator_state_v1" },
-          { id: "system_aegis_lite_queue", label: "Aegis Lite Queue", icon: "▣", route: "/aegis-lite", truthOwner: "aegis_lite_eod_report_v1" },
-          { id: "system_aegis_events", label: "Event Monitoring", icon: "!", route: "/aegis-events", truthOwner: "event_rules_registry_v1" },
           { id: "system_bug_log", label: "Bug Log", icon: "!", route: "/reliability/issues", badgeCount: 5, truthOwner: "reliability_issue_ledger" },
           { id: "system_integrations", label: "Integrations", icon: "↔", route: "/operations", truthOwner: "runtime_service_authority_v1" },
+        ],
+      },
+    ],
+  },
+  {
+    section: "LEGACY / DEFERRED",
+    domains: [
+      {
+        id: "legacy_deferred",
+        label: "Legacy / Deferred",
+        icon: "◇",
+        accent: "orange",
+        route: "/aegis-runtime",
+        truthOwner: "legacy_diagnostics_only",
+        description: "Deferred broker integration, deprecated PAPER orchestration, and internal/debug views only.",
+        children: [
+          { id: "legacy_aegis_runtime", label: "Legacy Runtime Diagnostics", icon: "◇", route: "/aegis-runtime", truthOwner: "aegis_operator_state_v1", description: "Diagnostic-only legacy operator state; not a normal Lite workflow." },
+          { id: "legacy_operations", label: "Deferred Broker Integration", icon: "↔", route: "/operations", truthOwner: "runtime_service_authority_v1", description: "Internal readiness and deferred broker-integration diagnostics." },
         ],
       },
     ],

@@ -8,10 +8,11 @@ This is the daily operator command surface for the pivoted Aegis Lite + Research
 
 - Aegis Lite EOD is canonical at 15:50 ET.
 - Event monitoring is non-canonical and cannot overwrite EOD state.
+- Event monitoring may run automatically during market hours only after the operator explicitly enables the user timer.
 - Trades are entered manually in IB paper by David.
 - Receipts and outcomes are recorded through operator CLIs, not IB automation.
 - Research Lab remains offline and non-authoritative.
-- Alert transport is currently `DRY_RUN_MESSAGE_BODY_ONLY`; real email/SMS delivery is not proven.
+- Alert transport is currently `GATE_ONLY_NO_TRANSPORT`; real email/SMS delivery is not implemented.
 
 ## Daily Command Path
 
@@ -27,6 +28,30 @@ Intraday event monitor, when a governed market snapshot is available:
 
 ```bash
 python3 ops/tools/run_aegis_event_monitor_v1.py --truth_root <truth_root> --day_utc <YYYY-MM-DD> --market_snapshot_json <snapshot.json>
+```
+
+Fail-closed scheduled/manual event monitor:
+
+```bash
+python3 ops/tools/run_aegis_event_monitor_v1.py --truth_root <truth_root>
+```
+
+Enable disabled-by-default market-hours event monitoring:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp ops/systemd/user/aegis-event-monitor-v1.service ~/.config/systemd/user/
+cp ops/systemd/user/aegis-event-monitor-v1.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now aegis-event-monitor-v1.timer
+```
+
+Disable or inspect it:
+
+```bash
+systemctl --user disable --now aegis-event-monitor-v1.timer
+systemctl --user status aegis-event-monitor-v1.timer --no-pager
+systemctl --user list-timers aegis-event-monitor-v1.timer --all
 ```
 
 Canonical near-close Lite EOD:
@@ -53,6 +78,29 @@ Performance review:
 python3 ops/tools/build_and_print_sleeve_performance_report_v1.py --truth_root <truth_root> --day <YYYY-MM-DD>
 ```
 
+EOD sleeve feedback review:
+
+```bash
+python3 ops/tools/build_eod_sleeve_review_v1.py --truth_root <truth_root> --day <YYYY-MM-DD>
+python3 ops/tools/build_eod_sleeve_review_v1.py --truth_root <truth_root> --day <YYYY-MM-DD> --write_research_tasks
+```
+
+Weekly sleeve feedback review:
+
+```bash
+python3 ops/tools/build_eow_sleeve_review_v1.py --truth_root <truth_root> --week_ending <YYYY-MM-DD>
+python3 ops/tools/build_eow_sleeve_review_v1.py --truth_root <truth_root> --week_ending <YYYY-MM-DD> --write_research_tasks
+```
+
+AI feedback review with Evidence Gate:
+
+```bash
+python3 ops/tools/build_ai_eod_feedback_review_v1.py --truth_root <truth_root> --day <YYYY-MM-DD>
+python3 ops/tools/build_ai_eow_feedback_review_v1.py --truth_root <truth_root> --week_ending <YYYY-MM-DD>
+```
+
+The AI feedback commands currently use deterministic fallback only. They may write offline Research tasks when the Evidence Gate reaches at least `WEAK_SIGNAL`; they cannot create trades, promote/demote sleeves, mutate production logic, or touch broker paths.
+
 Operator status summary:
 
 ```bash
@@ -75,7 +123,13 @@ python3 ops/tools/build_advisor_benchmark_v1.py --truth_root <truth_root> --benc
 - missing receipt count
 - missing outcome count
 - sleeve performance report status
+- EOD/EOW sleeve review artifacts when generated
 - event monitor status
+- event monitor enabled/disabled status
+- last event monitor run
+- next scheduled event monitor run when systemd reports one
+- last event data freshness status
+- last triggered and blocked event counts
 - Research dataset blockers
 - next operator action
 

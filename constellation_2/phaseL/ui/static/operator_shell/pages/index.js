@@ -213,16 +213,16 @@ export const ROUTES = [
   {
     path: "/aegis-runtime",
     id: "aegis_runtime",
-    label: "Aegis Runtime",
-    eyebrow: "Aegis Runtime",
-    subtitle: "Read-only operator state derived from the latest immutable scan artifacts.",
+    label: "Legacy Runtime Diagnostics",
+    eyebrow: "Legacy / Deferred",
+    subtitle: "Internal/debug-only legacy operator state. Aegis Lite is the primary manual execution surface.",
   },
   {
     path: "/aegis-lite",
     id: "aegis_lite_queue",
-    label: "Aegis Lite Queue",
-    eyebrow: "Aegis Lite Execution Queue",
-    subtitle: "Manual-only EOD queue from current Lite report truth.",
+    label: "Aegis Lite",
+    eyebrow: "Aegis Lite",
+    subtitle: "Tactical intelligence, event awareness, and broker-independent manual execution support.",
   },
   {
     path: "/aegis-events",
@@ -230,6 +230,27 @@ export const ROUTES = [
     label: "Event Monitoring",
     eyebrow: "Aegis Event Monitoring",
     subtitle: "Read-only event rules, monitor status, event ledger, tactical packets, and alert gate evidence.",
+  },
+  {
+    path: "/aegis-ai-feedback",
+    id: "aegis_ai_feedback",
+    label: "AI Feedback",
+    eyebrow: "AI Feedback / EOD-EOW Review",
+    subtitle: "Evidence-gated sleeve review and Research feedback loop. Deterministic fallback only.",
+  },
+  {
+    path: "/research-lab",
+    id: "research_lab",
+    label: "Research Lab",
+    eyebrow: "Research Lab",
+    subtitle: "Offline hypothesis testing, evidence review, and sleeve validation. Not an execution surface.",
+  },
+  {
+    path: "/operator-inbox",
+    id: "operator_inbox",
+    label: "Operator Inbox",
+    eyebrow: "Operator Inbox",
+    subtitle: "Lightweight idea capture. Capture is easy; promotion is strict.",
   },
   {
     path: "/configuration",
@@ -492,8 +513,8 @@ function maybeNotifyAegisRuntime(operatorState = {}) {
   if (!("Notification" in window)) {
     return { status: "unsupported", key };
   }
-  const title = `Aegis Runtime: ${operatorState.state || "UNKNOWN"}`;
-  const body = operatorState.recommended_operator_action || operatorState.state_reason || "Review Aegis Runtime.";
+  const title = `Legacy Runtime Diagnostics: ${operatorState.state || "UNKNOWN"}`;
+  const body = operatorState.recommended_operator_action || operatorState.state_reason || "Review legacy runtime diagnostics.";
   if (window.Notification.permission === "granted") {
     new window.Notification(title, { body, tag: key });
     return { status: "sent", key };
@@ -2661,13 +2682,13 @@ async function renderAegisRuntimePage() {
     }
     const last = cached?.payload || {};
     return {
-      title: "Aegis Runtime",
-      meta: "Backend unavailable; showing operator recovery guidance and last known truth when available.",
+      title: "Legacy Runtime Diagnostics",
+      meta: "Backend unavailable; legacy/deferred diagnostics are not the primary Aegis Lite workflow.",
       html: [
         renderCardSection({
           eyebrow: "BACKEND_UNAVAILABLE",
-          title: "Aegis Runtime Backend Unavailable",
-          subtitle: "The frontend cannot reach the read-only projection API. Trading truth remains owned by canonical artifacts.",
+          title: "Legacy Runtime Diagnostics Backend Unavailable",
+          subtitle: "The frontend cannot reach this diagnostic API. Aegis Lite remains the primary manual workflow.",
           body: renderDefinitionRows([
             { label: "Connection state", value: window.__AEGIS_CONNECTION_STATE?.state || "BACKEND_UNAVAILABLE" },
             { label: "Recovery command", value: "npm run aegis:ui:restart" },
@@ -2677,7 +2698,7 @@ async function renderAegisRuntimePage() {
         }),
         last.final_status ? renderCardSection({
           eyebrow: "Last Known Truth",
-          title: "Cached Aegis Projection",
+          title: "Cached Legacy Projection",
           subtitle: "This is stale browser-held state and is not an authority.",
           body: `<div class="metric-grid">
             ${renderMetricCard({ label: "Final status", value: last.final_status || "UNKNOWN" })}
@@ -2702,13 +2723,13 @@ async function renderAegisRuntimePage() {
 
   const paths = payload.artifact_paths || {};
   return {
-    title: "Aegis Runtime",
-    meta: "Read-only projection over canonical runtime truth.",
+    title: "Legacy Runtime Diagnostics",
+    meta: "Read-only diagnostic projection for deferred/internal runtime state.",
     html: [
       renderCardSection({
         eyebrow: payload.status || "UNKNOWN",
-        title: "Aegis Runtime",
-        subtitle: payload.operator_next_action || "No operator action reported.",
+        title: "Legacy Runtime Diagnostics",
+        subtitle: payload.operator_next_action || "Diagnostic-only surface; use Aegis Lite for operator workflow.",
         body: `
           <div class="metric-grid">
             ${renderMetricCard({ label: "Final status", value: payload.final_status || "UNKNOWN", badge: aegisRuntimeStateBadge(payload.final_status) })}
@@ -2781,20 +2802,47 @@ async function renderAegisLiteQueuePage() {
   const releaseMismatch = payload.release_match_status === "MISMATCH";
   const legacy = payload.operating_status?.legacy_paper_runtime_status || {};
   const degradedMessages = buildLiteDegradedMessages(payload);
+  const runtimeTruth = payload.runtime_truth_classification || "REAL_RUNTIME";
+  const alertTransport = payload.alert_transport_status || "GATE_ONLY_NO_TRANSPORT";
   return {
-    title: "Aegis Lite Queue",
-    meta: "Manual-only EOD execution queue from current Aegis Lite report truth.",
+    title: "Aegis Lite",
+    meta: "Tactical intelligence, event awareness, and broker-independent manual execution support.",
     html: [
       renderCardSection({
         eyebrow: "MANUAL_ONLY",
-        title: "THIS IS NOT BROKER AUTOMATION",
-        subtitle: "Aegis Lite produces an operator checklist. David manually enters any supervised IB paper trade and stop.",
+        title: "Aegis Lite Control Plane",
+        subtitle: "Advisory-only tactical intelligence for operator-entered trades. This is not broker automation.",
         body: renderDefinitionRows([
+          { label: "Runtime truth", value: runtimeTruth },
+          { label: "Manual execution only", value: String(payload.manual_execution_only === true) },
+          { label: "Advisory-only", value: payload.readiness_classification === "ADVISORY_ONLY" ? "true" : "false" },
+          { label: "Alert transport", value: alertTransport },
           { label: "Broker submit required", value: String(payload.broker_submit_required === true) },
           { label: "IB automation", value: payload.ib_automation_status || "DEFERRED" },
           { label: "Release match", value: payload.release_match_status || "UNKNOWN" },
           { label: "Ready disabled by mismatch", value: releaseMismatch ? "YES" : "NO" },
         ]),
+      }),
+      renderCardSection({
+        eyebrow: "PRIMARY_NAVIGATION",
+        title: "Aegis Lite Operator Workflow",
+        subtitle: "Primary post-pivot surfaces for manual paper trading and Research feedback.",
+        body: renderAegisLitePrimaryNav(),
+      }),
+      renderCardSection({
+        eyebrow: "TODAY",
+        title: "What Needs Action?",
+        subtitle: "Current EOD queue state, receipt/outcome gaps, event monitor state, and next operator step.",
+        body: `
+          <div class="metric-grid">
+            ${renderMetricCard({ label: "Actionable trades", value: String(summary.executable_trades_count ?? executable.length) })}
+            ${renderMetricCard({ label: "Blocked/advisory", value: String(summary.blocked_trades_count ?? blocked.length) })}
+            ${renderMetricCard({ label: "Receipts missing", value: String(summary.missing_receipts ?? payload.missing_receipts_count ?? 0) })}
+            ${renderMetricCard({ label: "Outcomes missing", value: String(summary.missing_outcomes ?? payload.missing_outcomes_count ?? 0) })}
+            ${renderMetricCard({ label: "Event monitor", value: payload.event_monitor_status || legacy.event_monitor_status || "see Event Monitoring" })}
+            ${renderMetricCard({ label: "Next step", value: executable.length ? "Review manual packet" : "No manual entry" })}
+          </div>
+        `,
       }),
       renderCardSection({
         eyebrow: "EVENT_AWARENESS",
@@ -3015,6 +3063,35 @@ function renderEventPacketRows(packet) {
   ]);
 }
 
+function renderAegisLitePrimaryNav() {
+  const items = [
+    ["Today / Operator Status", "/aegis-lite", "What ran today, what needs action, what is blocked."],
+    ["EOD Queue", "/aegis-lite", "Promoted-sleeve manual execution queue."],
+    ["Event Monitoring", "/aegis-events", "Event rules, monitor status, ledger, actionable/blocked/advisory packets."],
+    ["Manual Trade Packets", "/reports", "Manual packet artifacts and operator checklist evidence."],
+    ["Receipts / Outcomes", "/outcomes", "Operator-entered fills, stops, exits, and outcome ledger."],
+    ["Sleeve Performance", "/performance", "Sleeve return, slippage, stop behavior, and attribution."],
+    ["AI Feedback / EOD-EOW Review", "/aegis-ai-feedback", "Evidence-gated deterministic review and Research task suggestions."],
+    ["Research Lab", "/research-lab", "Offline hypothesis testing and sleeve validation."],
+    ["Operator Inbox", "/operator-inbox", "Lightweight idea capture; promotion remains strict."],
+  ];
+  return `
+    <div class="stack-list">
+      ${items.map(([label, href, detail]) => `
+        <article class="stack-card">
+          <div class="stack-card-header">
+            <div>
+              <div class="stack-card-title">${escapeHtml(label)}</div>
+              <div class="stack-card-subtitle">${escapeHtml(detail)}</div>
+            </div>
+            <a class="inline-link" href="${escapeHtml(href)}" data-route="${escapeHtml(href)}">Open</a>
+          </div>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
 function renderEventPacketTable(title, rows) {
   return `
     <h3>${escapeHtml(title)}</h3>
@@ -3057,11 +3134,13 @@ function renderLiteTradeCards(cards, executable) {
 
 function renderLiteTradeCard(card, executable) {
   const blockers = safeList(card.do_not_trade_blockers);
+  const runtimeTruth = card.runtime_truth_classification || (card.demo_mode ? "DEMO_ONLY" : card.dry_run_only ? "DRY_RUN_ONLY" : "REAL_RUNTIME");
   return `
     <article class="stack-card" style="${executable ? "border-left:4px solid #16a34a;" : "border-left:4px solid #dc2626; opacity:.92;"}">
       <div class="stack-card-title">${escapeHtml(card.execution_order || "")}. ${escapeHtml(card.symbol || "UNKNOWN")} ${escapeHtml(card.side || "")}</div>
       <div class="stack-card-subtitle">${escapeHtml(card.trade_class || "UNKNOWN")} · ${escapeHtml(card.sleeve_owner || "UNKNOWN")} · ${escapeHtml(card.edge_cluster_id || "NO_EDGE_CLUSTER")}</div>
       <div class="metric-grid" style="margin-top:12px;">
+        ${renderMetricCard({ label: "Runtime truth", value: runtimeTruth })}
         ${renderMetricCard({ label: "Priority", value: String(card.priority_rank || "") })}
         ${renderMetricCard({ label: "Direction", value: card.direction || "UNKNOWN" })}
         ${renderMetricCard({ label: "Quantity", value: String(card.quantity || 0) })}
@@ -3075,6 +3154,7 @@ function renderLiteTradeCard(card, executable) {
       </div>
       <div style="margin-top:12px;">
         ${renderStatusPill(executable ? "EXECUTABLE_MANUAL_ONLY" : "DO_NOT_TRADE")}
+        ${renderStatusPill(runtimeTruth)}
         ${safeList(card.execution_confidence_badges).map((badge) => renderStatusPill(badge)).join(" ")}
       </div>
       ${blockers.length ? `<div class="callout danger" style="margin-top:12px;">${escapeHtml(blockers.join(", "))}</div>` : ""}
@@ -3088,6 +3168,113 @@ function renderLiteTradeCard(card, executable) {
       </div>
     </article>
   `;
+}
+
+async function renderAegisAiFeedbackPage() {
+  return {
+    title: "AI Feedback / EOD-EOW Review",
+    meta: "Evidence-gated sleeve review and Research feedback loop. Deterministic fallback only.",
+    html: [
+      renderCardSection({
+        eyebrow: "EVIDENCE_GATED",
+        title: "AI Feedback Engine",
+        subtitle: "Reviews sleeve performance after EOD/EOW and can recommend offline Research tasks only when the Evidence Gate permits.",
+        body: renderDefinitionRows([
+          { label: "AI runtime", value: "deterministic fallback only" },
+          { label: "Human review required", value: "true" },
+          { label: "Production mutation", value: "false" },
+          { label: "Broker action allowed", value: "false" },
+          { label: "Auto-promotion", value: "false" },
+          { label: "Auto-demotion", value: "false" },
+        ]),
+      }),
+      renderCardSection({
+        eyebrow: "OPERATOR_COMMANDS",
+        title: "Build Reviews",
+        subtitle: "Run from the active safe truth root after sleeve performance reports exist.",
+        body: renderDefinitionRows([
+          { label: "EOD", value: "python3 ops/tools/build_ai_eod_feedback_review_v1.py --truth_root <truth_root> --day <YYYY-MM-DD>" },
+          { label: "EOW", value: "python3 ops/tools/build_ai_eow_feedback_review_v1.py --truth_root <truth_root> --week_ending <YYYY-MM-DD>" },
+          { label: "Outputs", value: "evidence_gate.v1 + ai_feedback_review.v1 + gated offline Research tasks" },
+        ]),
+      }),
+      renderCardSection({
+        eyebrow: "TASK_GATE",
+        title: "Evidence Gate",
+        subtitle: "One or two trades are observations only. Strong conclusions are blocked until evidence is clean and sufficient.",
+        body: renderDefinitionRows([
+          { label: "1-2 trades", value: "OBSERVATION_ONLY; no automatic Research task creation" },
+          { label: "3-9 trades", value: "WEAK_SIGNAL; low-priority offline Research task may be created" },
+          { label: "10-19 trades", value: "REVIEWABLE_PATTERN; normal offline Research task may be created" },
+          { label: "20+ trades", value: "STRONGER_PATTERN; higher-priority offline Research task may be created" },
+        ]),
+      }),
+    ].join(""),
+    contextHtml: renderAegisLitePrimaryNav(),
+  };
+}
+
+async function renderResearchLabPage() {
+  return {
+    title: "Research Lab",
+    meta: "Offline hypothesis testing, evidence review, and sleeve validation. Not an execution surface.",
+    html: [
+      renderCardSection({
+        eyebrow: "OFFLINE_ONLY",
+        title: "Research Lab Boundary",
+        subtitle: "Research artifacts cannot create trades, mutate Lite runtime, or bypass promotion governance.",
+        body: renderDefinitionRows([
+          { label: "Canonical object", value: "research_hypothesis.v1" },
+          { label: "Task control", value: "research_task_queue.v1" },
+          { label: "Evidence", value: "research_evidence_packet.v1 / research_result_ledger.v1" },
+          { label: "Promotion", value: "human-gated research_to_lite_promotion.v1" },
+          { label: "Runtime authority", value: "none" },
+        ]),
+      }),
+      renderCardSection({
+        eyebrow: "OPERATOR_COMMANDS",
+        title: "Daily Research Workflow",
+        subtitle: "CLI-backed workflow until a dedicated Research Lab UI is built.",
+        body: renderDefinitionRows([
+          { label: "List hypotheses", value: "python3 ops/tools/list_research_hypotheses_v1.py --truth_root <truth_root>" },
+          { label: "Run queue", value: "python3 ops/tools/run_research_lab_task_queue_v1.py --truth_root <truth_root>" },
+          { label: "Integrity review", value: "python3 ops/tools/research_architecture_integrity_review_v1.py --truth_root <truth_root>" },
+        ]),
+      }),
+    ].join(""),
+    contextHtml: renderAegisLitePrimaryNav(),
+  };
+}
+
+async function renderOperatorInboxPage() {
+  return {
+    title: "Operator Inbox",
+    meta: "Lightweight idea capture. Capture is easy; promotion is strict.",
+    html: [
+      renderCardSection({
+        eyebrow: "CAPTURE_ONLY",
+        title: "Operator Inbox Boundary",
+        subtitle: "Inbox items cannot create Research tasks, trades, sleeves, or production state.",
+        body: renderDefinitionRows([
+          { label: "Capture", value: "operator_inbox_v1" },
+          { label: "Promotion to idea", value: "explicit review only" },
+          { label: "Promotion to hypothesis", value: "through Research Lab intake only" },
+          { label: "Task creation from raw inbox", value: "forbidden" },
+          { label: "Trade creation", value: "forbidden" },
+        ]),
+      }),
+      renderCardSection({
+        eyebrow: "OPERATOR_COMMANDS",
+        title: "Inbox Commands",
+        subtitle: "Low-friction capture remains separated from Research and Lite governance.",
+        body: renderDefinitionRows([
+          { label: "Capture", value: "python3 ops/tools/aegis_operator_inbox_capture_v1.py --truth_root <truth_root> --title <title> --description <text> --category <category>" },
+          { label: "Review", value: "python3 ops/tools/aegis_operator_inbox_review_v1.py --truth_root <truth_root> --list-open" },
+        ]),
+      }),
+    ].join(""),
+    contextHtml: renderAegisLitePrimaryNav(),
+  };
 }
 
 async function renderAuditPage() {
@@ -5055,6 +5242,12 @@ export async function loadRouteView(routeId, state) {
       return renderAegisLiteQueuePage(state);
     case "aegis_events":
       return renderAegisEventMonitoringPage(state);
+    case "aegis_ai_feedback":
+      return renderAegisAiFeedbackPage(state);
+    case "research_lab":
+      return renderResearchLabPage(state);
+    case "operator_inbox":
+      return renderOperatorInboxPage(state);
     case "outcomes":
       return renderOutcomesPage(state);
     case "refinement":

@@ -170,6 +170,9 @@ Implemented:
 - `trade_capture_alert_gate.v1`
 - `trade_capture_alert_ledger.v1`
 - read-only UI/API surface at `/aegis-events` and `/api/aegis/event-monitoring`
+- disabled-by-default market-hours timer/service:
+  - `ops/systemd/user/aegis-event-monitor-v1.timer`
+  - `ops/systemd/user/aegis-event-monitor-v1.service`
 
 Alert safety:
 - Email/SMS is allowed only when the event validity gate is `PASS`, the source packet is complete, sensitivity is not `EXTREME`, and enough time remains before `valid_until`.
@@ -178,8 +181,15 @@ Alert safety:
 Transport finding:
 - The event monitor and trade capture alert CLI write gate/ledger artifacts and message bodies.
 - They do not currently send real email/SMS.
-- Operator-facing status is `MESSAGE_BODY_DRY_RUN_ONLY`.
+- Operator-facing transport status is `GATE_ONLY_NO_TRANSPORT`.
+- Delivery rows may record `DRY_RUN_MESSAGE_BODY_ONLY` when a message body would have been eligible.
 - Later enablement should wire a configured transport behind `trade_capture_alert_gate.v1` only, preserving the gate as send authority.
+
+Scheduling finding:
+- Event monitoring is source-configured to run every 15 minutes during regular U.S. market hours when explicitly enabled by the operator.
+- The timer is not enabled by default and must be installed/enabled with `systemctl --user enable --now aegis-event-monitor-v1.timer`.
+- If market data is missing or stale, scheduled runs write blocked status/ledger artifacts and create no actionable packets.
+- Active UI route availability still depends on deploying an active release that includes `/aegis-events`; do not treat the repo route as active runtime until verified on `127.0.0.1:8787`.
 
 ## Manual Execution Receipt
 

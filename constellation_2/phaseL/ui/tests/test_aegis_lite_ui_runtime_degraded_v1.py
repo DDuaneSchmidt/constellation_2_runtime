@@ -61,6 +61,8 @@ def _write_valid_report(root: Path) -> None:
             "edge_overlap_summary": {"distinct_edge_count": 1, "portfolio_concentration_warnings": []},
             "missing_stop_warnings": [],
             "warnings": [],
+            "runtime_truth_classification": "REAL_RUNTIME",
+            "alert_transport_status": "GATE_ONLY_NO_TRANSPORT",
             "selected_trade_candidates": [
                 {
                     "candidate_id": "candidate-1",
@@ -77,6 +79,7 @@ def _write_valid_report(root: Path) -> None:
                     "risk_per_trade": "5.20",
                     "edge_overlap": {"governance_recommendation": "approve"},
                     "execution_confidence_badges": ["GOVERNED_READY"],
+                    "runtime_truth_classification": "REAL_RUNTIME",
                 }
             ],
         },
@@ -114,6 +117,8 @@ def _write_status(root: Path, match: str = "MATCH", *, queue_path: Path | None =
             "readiness_classification": "READY_FOR_SUPERVISED_MANUAL_PAPER_TRADING",
             "current_blockers": [],
             "warnings": [],
+            "runtime_truth_classification": "REAL_RUNTIME",
+            "alert_transport_status": "GATE_ONLY_NO_TRANSPORT",
             "legacy_paper_runtime_status": {
                 "lite_operational_spine_active": True,
                 "legacy_runtime_active": False,
@@ -186,10 +191,30 @@ def test_valid_queue_can_render_and_health_passes(tmp_path: Path) -> None:
     status = json.loads(aegis_ui_runtime_status_path_v1(truth_root=tmp_path).read_text(encoding="utf-8"))
 
     assert payload["readiness_classification"] == "READY_FOR_SUPERVISED_MANUAL_PAPER_TRADING"
+    assert payload["runtime_truth_classification"] == "REAL_RUNTIME"
+    assert payload["alert_transport_status"] == "GATE_ONLY_NO_TRANSPORT"
     assert payload["queue_summary"]["executable_trades_count"] == 1
     assert health["status"] == "PASS"
     assert health["queue_availability"]["available"] is True
     assert status["readiness_classification"] == "READY_FOR_SUPERVISED_MANUAL_PAPER_TRADING"
+
+
+def test_demo_runtime_truth_candidate_cannot_appear_executable(tmp_path: Path) -> None:
+    _write_release(tmp_path)
+    _write_valid_report(tmp_path)
+    report = json.loads(_report_path(tmp_path).read_text(encoding="utf-8"))
+    report["selected_trade_candidates"][0]["runtime_truth_classification"] = "DEMO_ONLY"
+    _write_json(_report_path(tmp_path), report)
+    _write_valid_queue(tmp_path)
+    _write_status(tmp_path)
+
+    payload = build_aegis_lite_execution_queue_view(DAY, tmp_path)
+
+    assert payload["executable_trades"] == []
+    assert payload["blocked_or_advisory_trades"]
+    card = payload["blocked_or_advisory_trades"][0]
+    assert card["runtime_truth_classification"] == "DEMO_ONLY"
+    assert "DEMO_ONLY_NOT_ACTIONABLE" in card["do_not_trade_blockers"]
 
 
 def test_health_endpoint_is_wired_to_structured_lite_health() -> None:
