@@ -116,6 +116,13 @@ def build_sleeve_performance_report_v1(
             "side": str(recommendation.get("side") or receipt.get("actual_side") or "").upper(),
             "recommended_entry": str(recommendation.get("entry_reference_price") or outcome.get("recommended_entry") or ""),
             "actual_fill": str(receipt.get("fill_price") or outcome.get("actual_entry") or attribution.get("actual_entry_price") or ""),
+            "suggested_quantity": int(recommendation.get("suggested_quantity") or receipt.get("suggested_quantity") or outcome.get("suggested_quantity") or 0),
+            "actual_quantity": int(receipt.get("actual_quantity") or outcome.get("actual_quantity") or 0),
+            "expected_risk": str(receipt.get("expected_risk") or outcome.get("expected_risk") or recommendation.get("max_loss_if_stopped") or ""),
+            "actual_risk": str(receipt.get("actual_risk") or outcome.get("actual_risk") or ""),
+            "quantity_override": bool(receipt.get("quantity_override", False)) if receipt else bool(outcome.get("operator_override_reason")),
+            "operator_override_reason": str(receipt.get("operator_override_reason") or outcome.get("operator_override_reason") or ""),
+            "sizing_quality": str(receipt.get("sizing_quality") or outcome.get("sizing_quality") or ""),
             "slippage": slippage["absolute"],
             "slippage_pct": slippage["pct"],
             "recommended_stop": str(recommendation.get("stop_price") or outcome.get("recommended_stop") or ""),
@@ -253,6 +260,19 @@ def _execution_quality(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "stop_entered_count": sum(1 for row in rows if row.get("stop_entered")),
         "stop_matched_recommendation_count": sum(1 for row in rows if row.get("stop_matched_recommendation")),
         "operator_deviation_count": sum(1 for row in rows if row.get("operator_deviation")),
+        "quantity_override_count": sum(1 for row in rows if row.get("quantity_override")),
+        "sizing_quality_rows": [
+            {
+                "trade_id": row["trade_id"],
+                "suggested_quantity": row["suggested_quantity"],
+                "actual_quantity": row["actual_quantity"],
+                "expected_risk": row["expected_risk"],
+                "actual_risk": row["actual_risk"],
+                "sizing_quality": row["sizing_quality"],
+                "operator_override_reason": row["operator_override_reason"],
+            }
+            for row in rows
+        ],
         "rows": [
             {
                 "trade_id": row["trade_id"],

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -13,6 +14,9 @@ from constellation_2.common.aegis_research_lab_v1 import (  # noqa: E402
     validate_research_lab_artifact_v1,
 )
 from constellation_2.common.aegis_trade_sizing_engine_v1 import build_trade_sizing_guidance_v1  # noqa: E402
+from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1  # noqa: E402
+from ops.tools import record_manual_execution_receipt_v1 as receipt_cli  # noqa: E402
+from ops.tools import record_trade_outcome_v1 as outcome_cli  # noqa: E402
 
 
 NOW = "2026-05-15T21:00:00Z"
@@ -114,6 +118,69 @@ def test_manual_trade_packet_includes_sizing_fields_and_blocks_unpromoted() -> N
     assert "UNPROMOTED_SLEEVE_BLOCKS_SIZING" in unpromoted["trade_candidates"][0]["sizing_blockers"]
 
 
+def test_receipt_and_outcome_capture_quantity_override(tmp_path: Path) -> None:
+    packet = build_manual_trade_packet_v1(
+        packet_id="packet-1",
+        run_id="run-1",
+        date=DAY,
+        generated_at_utc=NOW,
+        regime_state="PANIC",
+        promoted_sleeve_library=_library(),
+        trade_candidates=[_candidate(sizing_tier="VERY_SMALL")],
+    )
+    _write(tmp_path / "reports" / "manual_trade_packet_v1" / DAY / "run-1" / "manual_trade_packet.v1.json", packet)
+
+    receipt_cli.main(
+        [
+            "--truth_root",
+            str(tmp_path),
+            "--source_packet_id",
+            "trade-1",
+            "--symbol",
+            "SPY",
+            "--side",
+            "BUY",
+            "--quantity",
+            "10",
+            "--fill_price",
+            "100.50",
+            "--fill_timestamp_utc",
+            NOW,
+            "--stop_entered",
+            "yes",
+            "--stop_price",
+            "95.00",
+            "--operator_override_reason",
+            "supervised smoke cap",
+        ]
+    )
+    receipt = json.loads(next(tmp_path.rglob("manual_execution_receipt.v1.json")).read_text(encoding="utf-8"))
+    assert receipt["suggested_quantity"] == 20
+    assert receipt["actual_quantity"] == 10
+    assert receipt["quantity_override"] is True
+    assert receipt["sizing_quality"] == "OVERRIDDEN"
+
+    outcome_cli.main(
+        [
+            "--truth_root",
+            str(tmp_path),
+            "--trade_id",
+            "trade-1",
+            "--exit_price",
+            "102.00",
+            "--exit_timestamp_utc",
+            NOW,
+            "--outcome_status",
+            "CLOSED",
+        ]
+    )
+    ledger = json.loads(next(tmp_path.rglob("outcome_ledger.v1.json")).read_text(encoding="utf-8"))
+    outcome = ledger["outcomes"][0]
+    assert outcome["suggested_quantity"] == 20
+    assert outcome["actual_quantity"] == 10
+    assert outcome["sizing_quality"] == "OVERRIDDEN"
+
+
 def test_no_broker_or_ib_automation_added() -> None:
     text = (REPO_ROOT / "constellation_2/common/aegis_trade_sizing_engine_v1.py").read_text(encoding="utf-8")
     for marker in ("ib_insync", "IBGateway", "placeOrder", "transmit"):
@@ -171,3 +238,8 @@ def _library() -> dict[str, object]:
             }
         ],
     )
+
+
+def _write(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(canonical_json_bytes_v1(payload) + b"\n")

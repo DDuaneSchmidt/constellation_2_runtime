@@ -5,6 +5,7 @@ import argparse
 import json
 import sys
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +68,38 @@ def _now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _decimal(value: Any) -> Decimal | None:
+    try:
+        text = str(value).strip().replace("$", "").replace(",", "")
+        return Decimal(text) if text else None
+    except (InvalidOperation, TypeError):
+        return None
+
+
+def _actual_risk(receipt: dict[str, Any]) -> str:
+    fill = _decimal(receipt.get("fill_price"))
+    stop = _decimal(receipt.get("stop_price"))
+    quantity = int(receipt.get("actual_quantity") or 0)
+    if fill is None or stop is None:
+        return ""
+    text = format((abs(fill - stop) * Decimal(quantity)).quantize(Decimal("0.01")).normalize(), "f")
+    return "0" if text == "-0" else text
+
+
+def _sizing_quality(*, receipt: dict[str, Any], trade: dict[str, Any]) -> str:
+    suggested = int(receipt.get("suggested_quantity") or trade.get("suggested_quantity") or 0)
+    actual = int(receipt.get("actual_quantity") or 0)
+    if suggested <= 0:
+        return "UNKNOWN"
+    if suggested != actual:
+        return "OVERRIDDEN"
+    expected = _decimal(receipt.get("expected_risk") or trade.get("max_loss_if_stopped"))
+    actual_risk = _decimal(receipt.get("actual_risk") or _actual_risk(receipt))
+    if expected is not None and actual_risk is not None and actual_risk > expected:
+        return "RISK_ABOVE_EXPECTED"
+    return "MATCHED"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="record_trade_outcome_v1")
     parser.add_argument("--truth_root", required=True)
@@ -110,6 +143,12 @@ def main(argv: list[str] | None = None) -> int:
         "return_pct": _fmt(ret),
         "outcome_status": args.outcome_status,
         "operator_deviation": "; ".join(str(item) for item in receipt.get("deviations_from_recommendation", [])),
+        "suggested_quantity": int(receipt.get("suggested_quantity") or trade.get("suggested_quantity") or 0),
+        "actual_quantity": int(receipt.get("actual_quantity") or 0),
+        "expected_risk": str(receipt.get("expected_risk") or trade.get("max_loss_if_stopped") or ""),
+        "actual_risk": str(receipt.get("actual_risk") or _actual_risk(receipt)),
+        "operator_override_reason": str(receipt.get("operator_override_reason") or ""),
+        "sizing_quality": str(receipt.get("sizing_quality") or _sizing_quality(receipt=receipt, trade=trade)),
         "notes": args.notes,
         "sleeve_attribution": str(trade.get("sleeve_id") or ""),
         "edge_overlap_attribution": str(trade.get("edge_overlap_result") or ""),

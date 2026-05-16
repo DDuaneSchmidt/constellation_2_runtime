@@ -5,6 +5,7 @@ import argparse
 import json
 import sys
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--notes", default="")
     parser.add_argument("--order_type", default="MANUAL")
     parser.add_argument("--receipt_id", default="")
+    parser.add_argument("--operator_override_reason", default="")
     args = parser.parse_args(argv)
 
     root = Path(args.truth_root).expanduser().resolve()
@@ -79,6 +81,18 @@ def main(argv: list[str] | None = None) -> int:
     recommended_entry = _num(trade.get("entry_reference_price") or packet.get("entry_reference_price"))
     fill = _num(args.fill_price)
     deviation = "" if recommended_entry is None or fill is None else f"{fill - recommended_entry:.4f}".rstrip("0").rstrip(".")
+    suggested_quantity = int(trade.get("suggested_quantity") or packet.get("suggested_quantity") or 0)
+    expected_risk = str(trade.get("max_loss_if_stopped") or trade.get("allowed_dollar_risk") or "")
+    actual_risk = _actual_risk(fill_price=args.fill_price, stop_price=args.stop_price, quantity=args.quantity)
+    sizing_quality = _sizing_quality(
+        suggested_quantity=suggested_quantity,
+        actual_quantity=args.quantity,
+        expected_risk=expected_risk,
+        actual_risk=actual_risk,
+    )
+    deviations = [] if not deviation else [f"entry_deviation={deviation}"]
+    if suggested_quantity and suggested_quantity != args.quantity:
+        deviations.append(f"quantity_override=suggested:{suggested_quantity}:actual:{args.quantity}")
     receipt = build_manual_execution_receipt_v1(
         receipt_id=args.receipt_id or f"receipt:{recommended_trade_id}:{args.fill_timestamp_utc}",
         recommended_trade_id=recommended_trade_id,
@@ -91,15 +105,20 @@ def main(argv: list[str] | None = None) -> int:
         stop_order_entered=_bool(args.stop_entered),
         stop_price=args.stop_price,
         operator_notes=args.notes,
-        deviations_from_recommendation=[] if not deviation else [f"entry_deviation={deviation}"],
+        deviations_from_recommendation=deviations,
         source_packet_type=source_type,
         source_packet_id=args.source_packet_id,
         event_id=str(packet.get("event_id") or ""),
         event_run_id=str(packet.get("event_run_id") or ""),
         fill_timestamp_utc=args.fill_timestamp_utc,
         deviation_from_entry_reference_price=deviation,
-        fill_before_valid_until=_fill_before_valid_until(packet, args.fill_timestamp_utc),
+        fill_before_valid_until=_fill_before_valid_until(trade or packet, args.fill_timestamp_utc),
         max_entry_slippage_respected=True,
+        suggested_quantity=suggested_quantity,
+        expected_risk=expected_risk,
+        actual_risk=actual_risk,
+        operator_override_reason=args.operator_override_reason,
+        sizing_quality=sizing_quality,
     )
     validate_research_lab_artifact_v1(receipt)
     path = write_research_lab_artifact_v1(truth_root=root, day_utc=_day_from_source(packet, args.fill_timestamp_utc), payload=receipt)
@@ -122,6 +141,39 @@ def _fill_before_valid_until(packet: dict[str, Any], fill_timestamp: str) -> boo
         return datetime.fromisoformat(fill_timestamp.replace("Z", "+00:00")) <= datetime.fromisoformat(valid_until.replace("Z", "+00:00"))
     except ValueError:
         return False
+
+
+def _decimal(value: Any) -> Decimal | None:
+    try:
+        text = str(value).strip().replace("$", "").replace(",", "")
+        return Decimal(text) if text else None
+    except (InvalidOperation, TypeError):
+        return None
+
+
+def _actual_risk(*, fill_price: str, stop_price: str, quantity: int) -> str:
+    fill = _decimal(fill_price)
+    stop = _decimal(stop_price)
+    if fill is None or stop is None:
+        return ""
+    return _fmt(abs(fill - stop) * Decimal(int(quantity)))
+
+
+def _sizing_quality(*, suggested_quantity: int, actual_quantity: int, expected_risk: str, actual_risk: str) -> str:
+    if suggested_quantity <= 0:
+        return "UNKNOWN"
+    if suggested_quantity != actual_quantity:
+        return "OVERRIDDEN"
+    expected = _decimal(expected_risk)
+    actual = _decimal(actual_risk)
+    if expected is not None and actual is not None and actual > expected:
+        return "RISK_ABOVE_EXPECTED"
+    return "MATCHED"
+
+
+def _fmt(value: Decimal) -> str:
+    text = format(value.quantize(Decimal("0.01")).normalize(), "f")
+    return "0" if text == "-0" else text
 
 
 if __name__ == "__main__":
