@@ -6,6 +6,7 @@ from typing import Any
 
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
+from constellation_2.common.aegis_trade_sizing_engine_v1 import build_trade_sizing_guidance_v1
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -2521,6 +2522,15 @@ def _manual_trade_candidate(
     regime_state: str,
     promoted_sources: dict[str, str],
 ) -> dict[str, Any]:
+    promoted_sleeve_source_valid = bool(promoted_sources and promoted_sources.get(str(row.get("sleeve_id") or "")) == str(row.get("source_hypothesis_id") or row.get("hypothesis_id") or ""))
+    sizing = build_trade_sizing_guidance_v1(
+        candidate=row,
+        promoted_sleeve_source_valid=promoted_sleeve_source_valid,
+        portfolio_value=row.get("portfolio_value_used") or row.get("portfolio_value"),
+        sizing_tier=str(row.get("sizing_tier") or row.get("risk_tier") or ""),
+        early_paper_mode=bool(row.get("early_paper_mode", True)),
+    )
+    computed_quantity_guidance = f"{sizing['suggested_quantity']} share" if int(sizing["suggested_quantity"]) == 1 else f"{sizing['suggested_quantity']} shares"
     required = [
         "sleeve_id",
         "source_hypothesis_id",
@@ -2528,7 +2538,6 @@ def _manual_trade_candidate(
         "side",
         "instrument_type",
         "entry_reference_price",
-        "quantity_or_sizing_guidance",
         "stop_price",
         "stop_logic",
         "risk_per_trade",
@@ -2553,7 +2562,8 @@ def _manual_trade_candidate(
         source_blockers.append("DEMO_ONLY_NOT_ACTIONABLE")
     if runtime_truth_classification == "DRY_RUN_ONLY" or bool(row.get("dry_run_only", False)):
         source_blockers.append("DRY_RUN_ONLY_NOT_ACTIONABLE")
-    actionable = not missing and not source_blockers and runtime_truth_classification == "REAL_RUNTIME"
+    sizing_blockers = _strings(sizing.get("sizing_blockers"))
+    actionable = not missing and not source_blockers and not sizing_blockers and runtime_truth_classification == "REAL_RUNTIME"
     checklist = _strings(row.get("manual_execution_checklist")) or [
         "Review status and blockers before acting.",
         "Enter the position manually in IB paper.",
@@ -2572,10 +2582,25 @@ def _manual_trade_candidate(
         "instrument_type": str(row.get("instrument_type") or ""),
         "entry_reference_price": str(row.get("entry_reference_price") or ""),
         "order_type_suggestion": str(row.get("order_type_suggestion") or "MANUAL_LIMIT_OR_MARKET_BY_OPERATOR"),
-        "quantity_or_sizing_guidance": str(row.get("quantity_or_sizing_guidance") or ""),
+        "quantity_or_sizing_guidance": str(row.get("quantity_or_sizing_guidance") or computed_quantity_guidance),
         "stop_price": str(row.get("stop_price") or ""),
         "stop_logic": str(row.get("stop_logic") or ""),
         "risk_per_trade": str(row.get("risk_per_trade") or ""),
+        "portfolio_value_used": sizing["portfolio_value_used"],
+        "sizing_tier": sizing["sizing_tier"],
+        "risk_pct_used": sizing["risk_pct_used"],
+        "allowed_dollar_risk": sizing["allowed_dollar_risk"],
+        "risk_per_share": sizing["risk_per_share"],
+        "suggested_quantity": sizing["suggested_quantity"],
+        "estimated_position_value": sizing["estimated_position_value"],
+        "max_loss_if_stopped": sizing["max_loss_if_stopped"],
+        "overlap_adjustment": sizing["overlap_adjustment"],
+        "regime_adjustment": sizing["regime_adjustment"],
+        "concentration_adjustment": sizing["concentration_adjustment"],
+        "sizing_blockers": sizing_blockers,
+        "sizing_reason_codes": _strings(sizing.get("sizing_reason_codes")),
+        "ai_selected_size": False,
+        "operator_can_override": True,
         "edge_family": str(row.get("edge_family") or ""),
         "regime_state": str(row.get("regime_state") or regime_state),
         "confidence": str(row.get("confidence") or ""),
@@ -2588,7 +2613,7 @@ def _manual_trade_candidate(
         "dry_run_only": bool(row.get("dry_run_only", False)) or runtime_truth_classification == "DRY_RUN_ONLY",
         "manual_execution_checklist": checklist,
         "actionable": actionable,
-        "do_not_trade_blockers": [f"MISSING_{field.upper()}" for field in missing] + source_blockers,
+        "do_not_trade_blockers": sorted(set([f"MISSING_{field.upper()}" for field in missing] + source_blockers + sizing_blockers)),
     }
 
 
