@@ -23,6 +23,7 @@
     "aegis:chatgpt:control-packet": "python3 ops/tools/build_aegis_chatgpt_control_packet_v1.py --truth_root ${AEGIS_TRUTH_ROOT:-/home/node/constellation_runtime_data/truth} --day ${TARGET_DAY:-$(date -u +%F)}",
     "aegis:chatgpt:control-show": "python3 ops/tools/show_aegis_chatgpt_control_packet_v1.py --truth_root ${AEGIS_TRUTH_ROOT:-/home/node/constellation_runtime_data/truth} --day ${TARGET_DAY:-$(date -u +%F)}",
     "aegis:noon:preflight": "python3 ops/tools/run_aegis_noon_preflight_rehearsal_v1.py --truth_root ${AEGIS_TRUTH_ROOT:-/home/node/constellation_runtime_data/truth} --day_utc ${TARGET_DAY:-$(date -u +%F)}",
+    "aegis:audit": "npm run aegis:chatgpt:control-packet && npm run aegis:chatgpt:control-show && python3 ops/tools/build_aegis_audit_handoff_v1.py --truth_root ${AEGIS_TRUTH_ROOT:-/home/node/constellation_runtime_data/truth} --day ${TARGET_DAY:-$(date -u +%F)}",
     "aegis:alerts": "python3 ops/tools/run_aegis_alert_authority_v1.py",
     "repo:require-clean": "python3 ops/tools/require_canonical_repo_clean_v1.py",
     "workspace:create": "python3 ops/tools/create_codex_agent_workspace_v1.py --task_id default",
