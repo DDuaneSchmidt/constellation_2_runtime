@@ -35,6 +35,7 @@ def test_complete_packet_builds_with_all_sections(tmp_path: Path) -> None:
     for section in [
         "aegis_lite_status",
         "event_monitoring_status",
+        "market_context_status",
         "research_lab_status",
         "operator_inbox_status",
         "sleeve_performance_status",
@@ -101,6 +102,7 @@ def test_source_artifact_refs_are_preserved_and_output_is_deterministic(tmp_path
     assert first["canonical_json_hash"] == second["canonical_json_hash"]
     assert any(row["artifact_type"] == "manual_trade_packet" for row in first["source_artifacts_used"])
     assert first["source_artifact_timestamps"]["manual_trade_packet"] == NOW
+    assert first["market_context_status"]["regime_label"] == "TRENDING_UP"
 
 
 def test_packet_cli_writes_artifact_and_has_no_broker_dependency(tmp_path: Path, capsys) -> None:
@@ -184,7 +186,36 @@ def _write_complete_sources(
                 "timestamp_utc": generated_at,
                 "triggered_events": [],
                 "blocked_events": [],
+                "market_context": {
+                    "status": "PRESENT",
+                    "regime_label": "TRENDING_UP",
+                    "volatility_classification": "NORMAL_VOL",
+                    "breadth_classification": "STRONG_BREADTH",
+                    "macro_event_risk_level": "NONE",
+                    "stale_data_status": "FRESH",
+                },
+                "market_snapshot_freshness_status": "FRESH",
                 "canonical_eod_state_mutated": False,
+            },
+        ),
+        "event_market_snapshot": (
+            "reports/event_market_snapshot_v1/2026-05-15/event_market_snapshot.v1.json",
+            {
+                "schema_id": "event_market_snapshot",
+                "artifact_id": "event_market_snapshot_v1",
+                "snapshot_id": "snapshot-1",
+                "day_utc": DAY,
+                "generated_at_utc": generated_at,
+                "market_open_status": "OPEN",
+                "trading_day_type": "TRADING_DAY",
+                "regime_label": "TRENDING_UP",
+                "volatility_classification": "NORMAL_VOL",
+                "breadth_classification": "STRONG_BREADTH",
+                "macro_event_today": False,
+                "macro_event_type": "NONE",
+                "macro_event_risk_level": "NONE",
+                "stale_data_status": "FRESH",
+                "reason_codes": [],
             },
         ),
         "event_rules_registry": (

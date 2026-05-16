@@ -22,6 +22,7 @@
     "events_reviewed",
     "regimes_reviewed",
     "alerts_reviewed",
+    "market_context_summary",
     "findings",
     "hypothesis_suggestions",
     "research_tasks_created",
@@ -53,6 +54,7 @@
     "events_reviewed": { "type": "array", "items": { "type": "string" } },
     "regimes_reviewed": { "type": "array", "items": { "type": "string" } },
     "alerts_reviewed": { "type": "array", "items": { "type": "string" } },
+    "market_context_summary": { "type": "object" },
     "findings": {
       "type": "array",
       "items": {

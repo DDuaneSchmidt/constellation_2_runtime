@@ -24,6 +24,7 @@ FILE_NAMES = {
     "sleeve_performance_report": "sleeve_performance_report.v1.json",
     "event_awareness_ledger": "event_awareness_ledger.v1.json",
     "event_rules_registry": "event_rules_registry.v1.json",
+    "event_market_snapshot": "event_market_snapshot.v1.json",
 }
 
 
@@ -35,6 +36,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sleeve_performance_report", action="append", default=[])
     parser.add_argument("--event_awareness_ledger", action="append", default=[])
     parser.add_argument("--event_rules_registry", action="append", default=[])
+    parser.add_argument("--event_market_snapshot", action="append", default=[])
     parser.add_argument("--write_research_tasks", action="store_true")
     args = parser.parse_args(argv)
 
@@ -59,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
         sleeve_performance_report=sleeve_report,
         event_awareness_ledgers=[payload for _path, payload in loaded["event_awareness_ledger"]],
         event_rules_registries=[payload for _path, payload in loaded["event_rules_registry"]],
+        market_context_snapshots=[payload for _path, payload in loaded["event_market_snapshot"]],
         input_artifact_refs=lineage,
     )
     validate_eod_sleeve_review_v1(review)
@@ -119,6 +122,8 @@ def _matches_day(*, payload: dict[str, Any], path: Path, day_utc: str, key: str)
         return str(payload.get("day_utc") or "") == day_utc or day_utc in path.parts
     if key == "event_rules_registry":
         return True
+    if key == "event_market_snapshot":
+        return str(payload.get("day_utc") or "") == day_utc or day_utc in path.parts
     return day_utc in path.parts
 
 

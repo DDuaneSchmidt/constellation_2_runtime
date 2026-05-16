@@ -68,6 +68,29 @@ def test_overlap_and_regime_reductions_apply() -> None:
     assert sizing["suggested_quantity"] == 12
 
 
+def test_market_context_reduces_risk_without_increasing_size() -> None:
+    sizing = build_trade_sizing_guidance_v1(
+        candidate=_candidate(
+            sizing_tier="NORMAL",
+            portfolio_value_used="100000",
+            market_context={
+                "regime_label": "HIGH_VOLATILITY",
+                "volatility_classification": "HIGH_VOL",
+                "breadth_classification": "BREADTH_COLLAPSE",
+                "macro_event_risk_level": "HIGH",
+                "stale_data_status": "FRESH",
+            },
+        ),
+        promoted_sleeve_source_valid=True,
+    )
+
+    assert sizing["market_context_adjustment"] == "0.5"
+    assert sizing["allowed_dollar_risk"] == "125"
+    assert sizing["suggested_quantity"] == 25
+    assert "MARKET_CONTEXT_HIGH_VOL_RISK_REDUCTION" in sizing["sizing_reason_codes"]
+    assert "MARKET_CONTEXT_BREADTH_COLLAPSE_RISK_REDUCTION" in sizing["sizing_reason_codes"]
+
+
 def test_concentration_cap_blocks() -> None:
     sizing = build_trade_sizing_guidance_v1(
         candidate=_candidate(sizing_tier="NORMAL", concentration_adjustment="0"),

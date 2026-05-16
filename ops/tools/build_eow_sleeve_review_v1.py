@@ -26,6 +26,7 @@ FILE_NAMES = {
     "eod_sleeve_review": "eod_sleeve_review.v1.json",
     "event_awareness_ledger": "event_awareness_ledger.v1.json",
     "research_task_queue": "research_task_queue.v1.json",
+    "event_market_snapshot": "event_market_snapshot.v1.json",
 }
 
 
@@ -38,6 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--eod_sleeve_review", action="append", default=[])
     parser.add_argument("--event_awareness_ledger", action="append", default=[])
     parser.add_argument("--research_task_queue", action="append", default=[])
+    parser.add_argument("--event_market_snapshot", action="append", default=[])
     parser.add_argument("--write_research_tasks", action="store_true")
     args = parser.parse_args(argv)
 
@@ -63,6 +65,7 @@ def main(argv: list[str] | None = None) -> int:
         daily_eod_reviews=[payload for _path, payload in loaded["eod_sleeve_review"]],
         event_awareness_ledgers=[payload for _path, payload in loaded["event_awareness_ledger"]],
         research_task_queues=[payload for _path, payload in loaded["research_task_queue"]],
+        market_context_snapshots=[payload for _path, payload in loaded["event_market_snapshot"]],
         input_artifact_refs=lineage,
     )
     validate_eow_sleeve_review_v1(review)
@@ -123,6 +126,8 @@ def _matches_week(*, payload: dict[str, Any], path: Path, week_days: set[str], k
         return str(payload.get("day_utc") or "") in week_days or any(day in path.parts for day in week_days)
     if key == "research_task_queue":
         return any(day in path.parts for day in week_days)
+    if key == "event_market_snapshot":
+        return str(payload.get("day_utc") or "") in week_days or any(day in path.parts for day in week_days)
     return False
 
 

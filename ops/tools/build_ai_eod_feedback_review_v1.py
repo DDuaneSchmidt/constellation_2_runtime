@@ -27,6 +27,7 @@ FILE_NAMES = {
     "sleeve_performance_report": "sleeve_performance_report.v1.json",
     "event_awareness_ledger": "event_awareness_ledger.v1.json",
     "trade_capture_alert_ledger": "trade_capture_alert_ledger.v1.json",
+    "event_market_snapshot": "event_market_snapshot.v1.json",
 }
 
 
@@ -38,6 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sleeve_performance_report", action="append", default=[])
     parser.add_argument("--event_awareness_ledger", action="append", default=[])
     parser.add_argument("--trade_capture_alert_ledger", action="append", default=[])
+    parser.add_argument("--event_market_snapshot", action="append", default=[])
     args = parser.parse_args(argv)
 
     truth_root = Path(args.truth_root).expanduser().resolve()
@@ -62,6 +64,7 @@ def main(argv: list[str] | None = None) -> int:
         sleeve_performance_reports=reports,
         event_awareness_ledgers=[payload for _path, payload in loaded["event_awareness_ledger"]],
         alert_ledgers=[payload for _path, payload in loaded["trade_capture_alert_ledger"]],
+        market_context_snapshots=[payload for _path, payload in loaded["event_market_snapshot"]],
         input_artifact_refs=lineage,
     )
     validate_evidence_gate_v1(evidence_gate)
@@ -75,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         evidence_gate=evidence_gate,
         event_awareness_ledgers=[payload for _path, payload in loaded["event_awareness_ledger"]],
         alert_ledgers=[payload for _path, payload in loaded["trade_capture_alert_ledger"]],
+        market_context_snapshots=[payload for _path, payload in loaded["event_market_snapshot"]],
         input_artifact_refs=lineage + [{"artifact_type": "evidence_gate.v1", "path": str(evidence_path)}],
     )
     validate_ai_feedback_review_v1(review)
@@ -127,6 +131,8 @@ def _matches_day(*, payload: dict[str, Any], path: Path, day_utc: str, key: str)
     if key == "sleeve_performance_report":
         return str(payload.get("day_utc") or payload.get("period_end") or "") == day_utc
     if key in {"event_awareness_ledger", "trade_capture_alert_ledger"}:
+        return str(payload.get("day_utc") or "") == day_utc or day_utc in path.parts
+    if key == "event_market_snapshot":
         return str(payload.get("day_utc") or "") == day_utc or day_utc in path.parts
     return day_utc in path.parts
 

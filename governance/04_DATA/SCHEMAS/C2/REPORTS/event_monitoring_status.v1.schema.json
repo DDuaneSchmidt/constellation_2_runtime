@@ -4,7 +4,7 @@
   "title": "event_monitoring_status.v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_id", "schema_version", "artifact_id", "monitor_run_id", "day_utc", "timestamp_utc", "data_snapshot_refs", "event_rule_ids_evaluated", "thresholds_evaluated", "pass_fail_reason_codes", "triggered_events", "blocked_events", "alert_levels", "tactical_packets_created", "validity_gate_results", "alert_gate_results", "email_delivery_results", "event_awareness_ledger_path", "event_rules_registry_snapshot_path", "canonical_eod_state_mutated", "manual_execution_only", "broker_submit_required", "runtime_mutation_allowed", "automatic_promotion_allowed", "canonical_json_hash"],
+  "required": ["schema_id", "schema_version", "artifact_id", "monitor_run_id", "day_utc", "timestamp_utc", "data_snapshot_refs", "event_rule_ids_evaluated", "thresholds_evaluated", "pass_fail_reason_codes", "triggered_events", "blocked_events", "alert_levels", "tactical_packets_created", "validity_gate_results", "alert_gate_results", "email_delivery_results", "event_awareness_ledger_path", "event_rules_registry_snapshot_path", "market_context", "market_snapshot_freshness_status", "canonical_eod_state_mutated", "manual_execution_only", "broker_submit_required", "runtime_mutation_allowed", "automatic_promotion_allowed", "canonical_json_hash"],
   "properties": {
     "schema_id": { "const": "event_monitoring_status" },
     "schema_version": { "const": "v1" },
@@ -25,6 +25,8 @@
     "email_delivery_results": { "type": "array", "items": { "type": "string" } },
     "event_awareness_ledger_path": { "type": "string" },
     "event_rules_registry_snapshot_path": { "type": "string" },
+    "market_context": { "type": "object" },
+    "market_snapshot_freshness_status": { "type": "string" },
     "canonical_eod_state_mutated": { "const": false },
     "manual_execution_only": { "const": true },
     "broker_submit_required": { "const": false },

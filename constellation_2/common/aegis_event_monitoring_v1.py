@@ -16,6 +16,7 @@ from constellation_2.common.aegis_lite_event_awareness_v1 import (
     validate_event_awareness_artifact_v1,
     write_event_awareness_artifact_v1,
 )
+from constellation_2.common.aegis_market_context_v1 import market_context_summary_v1
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1
 
 
@@ -138,6 +139,7 @@ def build_event_monitoring_status_v1(
     email_delivery_results: list[str],
     event_awareness_ledger_path: str,
     event_rules_registry_snapshot_path: str,
+    market_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = {
         "schema_id": "event_monitoring_status",
@@ -159,6 +161,8 @@ def build_event_monitoring_status_v1(
         "email_delivery_results": sorted(set(email_delivery_results)),
         "event_awareness_ledger_path": event_awareness_ledger_path,
         "event_rules_registry_snapshot_path": event_rules_registry_snapshot_path,
+        "market_context": market_context or market_context_summary_v1(None),
+        "market_snapshot_freshness_status": str((market_context or {}).get("stale_data_status") or "MISSING"),
         "canonical_eod_state_mutated": False,
         "manual_execution_only": True,
         "broker_submit_required": False,
@@ -185,6 +189,7 @@ def run_event_monitor_v1(
     run_id = monitor_run_id or f"event-monitor:{day_utc}:{ts}"
     registry = load_event_rules_registry_v1(event_rules_registry_path)
     snapshot = market_snapshot or {}
+    market_context = market_context_summary_v1(snapshot)
     inputs = snapshot.get("inputs") if isinstance(snapshot.get("inputs"), dict) else {}
     data_refs = _strings(snapshot.get("data_snapshot_refs")) or _strings(snapshot.get("market_data_snapshot_refs"))
     promoted = _promoted_event_types(snapshot)
@@ -385,6 +390,7 @@ def run_event_monitor_v1(
         email_delivery_results=email_results or ["GATE_ONLY_NO_TRANSPORT"],
         event_awareness_ledger_path=str(ledger_path),
         event_rules_registry_snapshot_path=str(registry_snapshot_path),
+        market_context=market_context,
     )
     status_path = write_event_awareness_artifact_v1(truth_root=root, payload=status)
     return {
@@ -398,6 +404,7 @@ def run_event_monitor_v1(
         "validity_gates": validity_gates,
         "alert_gates": alert_gates,
         "alert_ledgers": alert_ledgers,
+        "market_context": market_context,
         "broker_submit_required": False,
         "canonical_eod_state_mutated": False,
     }
@@ -426,6 +433,8 @@ def build_event_monitoring_operator_surface_v1(*, truth_root: Path, day_utc: str
         "truth_root": str(root),
         "email_transport_status": "GATE_ONLY_NO_TRANSPORT",
         "sms_transport_status": "GATE_ONLY_NO_TRANSPORT",
+        "market_context": (status.get("payload") or {}).get("market_context") if isinstance(status.get("payload"), dict) else market_context_summary_v1(None),
+        "market_snapshot_freshness_status": str(((status.get("payload") or {}).get("market_context") or {}).get("stale_data_status") or "MISSING") if isinstance(status.get("payload"), dict) else "MISSING",
         "manual_execution_only": True,
         "broker_submit_required": False,
         "canonical_eod_state_mutated": False,
@@ -610,6 +619,9 @@ def _compare(actual: Any, operator: str, expected: Any) -> bool:
 
 
 def _freshness_status(*, snapshot: dict[str, Any], rule: dict[str, Any], evaluated_at_utc: str) -> str:
+    snapshot_stale_status = str(snapshot.get("stale_data_status") or "").strip().upper()
+    if snapshot_stale_status in {"MISSING_INPUT", "STALE"}:
+        return snapshot_stale_status
     generated = str(snapshot.get("generated_at_utc") or "")
     if not generated:
         return "MISSING_TIMESTAMP"

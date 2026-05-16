@@ -16,10 +16,10 @@ from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artif
 
 DATASETS = {
     "price_data": ["market_data_snapshot_v1", "prices", "ohlcv"],
-    "volatility_data": ["volatility", "vix", "realized_volatility"],
-    "breadth_data": ["breadth", "advance_decline", "market_breadth"],
-    "macro_event_calendar": ["macro_event_calendar", "events/macro", "economic_calendar"],
-    "regime_labels": ["regime", "regime_snapshot_v1", "regime_labels"],
+    "volatility_data": ["event_market_snapshot_v1", "volatility", "vix", "realized_volatility"],
+    "breadth_data": ["event_market_snapshot_v1", "breadth", "advance_decline", "market_breadth"],
+    "macro_event_calendar": ["event_market_snapshot_v1", "macro_event_calendar", "events/macro", "economic_calendar"],
+    "regime_labels": ["event_market_snapshot_v1", "regime", "regime_snapshot_v1", "regime_labels"],
     "sleeve_outcomes": ["sleeve_performance_report_v1", "outcome_ledger_v1", "trade_outcome_attribution_v1"],
 }
 

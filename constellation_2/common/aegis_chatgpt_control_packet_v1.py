@@ -52,6 +52,7 @@ SOURCE_SPECS = [
     SourceSpec("outcome_ledger", "outcome_ledger.v1.json", False),
     SourceSpec("trade_outcome_attribution", "trade_outcome_attribution.v1.json", False),
     SourceSpec("promoted_sleeve_library", "promoted_sleeve_library.v1.json", False, False),
+    SourceSpec("event_market_snapshot", "event_market_snapshot.v1.json", False),
     SourceSpec("event_monitoring_status", "event_monitoring_status.v1.json", True),
     SourceSpec("event_rules_registry", "event_rules_registry.v1.json", True),
     SourceSpec("event_awareness_ledger", "event_awareness_ledger.v1.json", False),
@@ -109,6 +110,7 @@ def build_aegis_chatgpt_control_packet_v1(
 
     lite_status = _build_lite_status(payloads)
     event_status = _build_event_status(payloads)
+    market_context_status = _build_market_context_status(payloads)
     research_status = _build_research_status(payloads)
     inbox_status = _build_operator_inbox_status(payloads)
     sleeve_status = _build_sleeve_performance_status(payloads)
@@ -155,6 +157,7 @@ def build_aegis_chatgpt_control_packet_v1(
         "stale_or_missing_sources": missing_or_stale,
         "aegis_lite_status": lite_status,
         "event_monitoring_status": event_status,
+        "market_context_status": market_context_status,
         "research_lab_status": research_status,
         "operator_inbox_status": inbox_status,
         "sleeve_performance_status": sleeve_status,
@@ -367,6 +370,28 @@ def _build_event_status(payloads: dict[str, dict[str, Any]]) -> dict[str, Any]:
         "alert_transport_status": "GATE_ONLY_NO_TRANSPORT",
         "email_delivery_status": _email_delivery_status(alert_ledger),
         "canonical_eod_state_mutated": bool(status.get("canonical_eod_state_mutated", False)),
+    }
+
+
+def _build_market_context_status(payloads: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    snapshot = payloads.get("event_market_snapshot", {})
+    monitor = payloads.get("event_monitoring_status", {})
+    context = monitor.get("market_context") if isinstance(monitor.get("market_context"), dict) else {}
+    source = snapshot or context
+    return {
+        "status": "PRESENT" if source else "MISSING",
+        "snapshot_id": str(source.get("snapshot_id") or ""),
+        "generated_at_utc": str(source.get("generated_at_utc") or ""),
+        "market_open_status": str(source.get("market_open_status") or "UNKNOWN"),
+        "trading_day_type": str(source.get("trading_day_type") or "UNKNOWN"),
+        "regime_label": str(source.get("regime_label") or "UNKNOWN"),
+        "volatility_classification": str(source.get("volatility_classification") or "UNKNOWN"),
+        "breadth_classification": str(source.get("breadth_classification") or "UNKNOWN"),
+        "macro_event_today": bool(source.get("macro_event_today", False)),
+        "macro_event_type": str(source.get("macro_event_type") or "NONE"),
+        "macro_event_risk_level": str(source.get("macro_event_risk_level") or "UNKNOWN"),
+        "stale_data_status": str(source.get("stale_data_status") or monitor.get("market_snapshot_freshness_status") or "MISSING"),
+        "reason_codes": _strings(source.get("reason_codes")),
     }
 
 

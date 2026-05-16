@@ -5,6 +5,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from constellation_2.common.aegis_market_context_v1 import market_context_summary_v1
 from constellation_2.common.aegis_research_lab_v1 import build_research_task_queue_v1, build_research_task_v1
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
@@ -90,11 +91,13 @@ def build_evidence_gate_v1(
     sleeve_performance_reports: list[dict[str, Any]],
     event_awareness_ledgers: list[dict[str, Any]] | None = None,
     alert_ledgers: list[dict[str, Any]] | None = None,
+    market_context_snapshots: list[dict[str, Any]] | None = None,
     input_artifact_refs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     kind = review_type.upper()
     reports = _objects(sleeve_performance_reports)
     rows = _trade_rows(reports)
+    market_context = _market_context_rollup(market_context_snapshots)
     sample_count = len(rows)
     sample_band = _sample_band(sample_count)
     missing_receipts = sum(1 for row in rows if row.get("lifecycle_status") == "MISSING_RECEIPT")
@@ -158,6 +161,7 @@ def build_evidence_gate_v1(
         "strong_conclusions_allowed": strong_allowed,
         "automatic_research_task_creation_allowed": evidence_gate_pass,
         "blocked_conclusion_reason_codes": blocked,
+        "market_context_summary": market_context,
         "manual_execution_only": True,
         "broker_action_allowed": False,
         "production_mutation_allowed": False,
@@ -177,12 +181,14 @@ def build_ai_feedback_review_v1(
     evidence_gate: dict[str, Any],
     event_awareness_ledgers: list[dict[str, Any]] | None = None,
     alert_ledgers: list[dict[str, Any]] | None = None,
+    market_context_snapshots: list[dict[str, Any]] | None = None,
     input_artifact_refs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     kind = review_type.upper()
     reports = _objects(sleeve_performance_reports)
     rows = _trade_rows(reports)
     event_ledgers = _objects(event_awareness_ledgers)
+    market_context = _market_context_rollup(market_context_snapshots)
     alerts = _alert_ids(_objects(alert_ledgers), rows)
     findings = _top_findings(
         rows=rows,
@@ -213,8 +219,9 @@ def build_ai_feedback_review_v1(
         "sleeves_reviewed": sorted({str(row.get("sleeve_id") or "") for row in rows if row.get("sleeve_id")}),
         "trades_reviewed": sorted({str(row.get("trade_id") or "") for row in rows if row.get("trade_id")}),
         "events_reviewed": sorted({str(row.get("event_id") or "") for row in rows if row.get("event_id")} | _event_ids(event_ledgers)),
-        "regimes_reviewed": sorted({str(row.get("regime_state") or "") for row in rows if row.get("regime_state")}),
+        "regimes_reviewed": sorted({str(row.get("regime_state") or "") for row in rows if row.get("regime_state")} | {row for row in [market_context.get("regime_label")] if row and row != "UNKNOWN"}),
         "alerts_reviewed": alerts,
+        "market_context_summary": market_context,
         "findings": findings,
         "hypothesis_suggestions": _hypothesis_suggestions(findings),
         "research_tasks_created": tasks,
@@ -254,6 +261,21 @@ def write_research_task_queue_from_ai_feedback_v1(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(canonical_json_bytes_v1(queue) + b"\n")
     return path
+
+
+def _market_context_rollup(snapshots: list[dict[str, Any]] | None) -> dict[str, Any]:
+    rows = [market_context_summary_v1(row) for row in _objects(snapshots)]
+    if not rows:
+        return market_context_summary_v1(None)
+    latest = sorted(rows, key=lambda row: (str(row.get("day_utc") or ""), str(row.get("generated_at_utc") or "")))[-1]
+    return {
+        **latest,
+        "snapshots_reviewed": len(rows),
+        "regime_labels_reviewed": sorted({str(row.get("regime_label") or "UNKNOWN") for row in rows}),
+        "volatility_labels_reviewed": sorted({str(row.get("volatility_classification") or "UNKNOWN") for row in rows}),
+        "breadth_labels_reviewed": sorted({str(row.get("breadth_classification") or "UNKNOWN") for row in rows}),
+        "macro_event_types_reviewed": sorted({str(row.get("macro_event_type") or "NONE") for row in rows}),
+    }
 
 
 def _top_findings(*, rows: list[dict[str, Any]], evidence_gate: dict[str, Any], input_artifact_refs: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:

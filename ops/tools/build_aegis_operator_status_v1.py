@@ -97,6 +97,25 @@ def _event_freshness_status(event: dict) -> str:
     return "FRESH_OR_NOT_TRIGGERED"
 
 
+def _market_context_status(root: Path, day_utc: str) -> dict:
+    snapshot = _read(_latest_matching(root, "event_market_snapshot.v1.json", day_utc, "day_utc"))
+    if not snapshot:
+        return {"status": "MISSING", "regime_label": "UNKNOWN", "volatility_classification": "UNKNOWN", "breadth_classification": "UNKNOWN", "macro_event_risk_level": "UNKNOWN", "stale_data_status": "MISSING"}
+    return {
+        "status": "PRESENT",
+        "snapshot_id": str(snapshot.get("snapshot_id") or ""),
+        "generated_at_utc": str(snapshot.get("generated_at_utc") or ""),
+        "regime_label": str(snapshot.get("regime_label") or "UNKNOWN"),
+        "volatility_classification": str(snapshot.get("volatility_classification") or "UNKNOWN"),
+        "breadth_classification": str(snapshot.get("breadth_classification") or "UNKNOWN"),
+        "macro_event_today": bool(snapshot.get("macro_event_today", False)),
+        "macro_event_type": str(snapshot.get("macro_event_type") or "NONE"),
+        "macro_event_risk_level": str(snapshot.get("macro_event_risk_level") or "UNKNOWN"),
+        "stale_data_status": str(snapshot.get("stale_data_status") or "UNKNOWN"),
+        "reason_codes": [str(item) for item in snapshot.get("reason_codes", []) if str(item)],
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="build_aegis_operator_status_v1")
     parser.add_argument("--truth_root", required=True)
@@ -108,6 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     packet = _read(_latest_matching(root, "manual_trade_packet.v1.json", args.day_utc, "date"))
     perf = _read(_latest_matching(root, "sleeve_performance_report.v1.json", args.day_utc, "day_utc"))
     event = _read(_latest_matching(root, "event_monitoring_status.v1.json", args.day_utc, "day_utc"))
+    market_context = _market_context_status(root, args.day_utc)
     event_schedule = _event_monitor_schedule_status(Path(__file__).resolve().parents[2])
     dataset = _read(_latest_matching(root, "research_dataset_gap.v1.json", args.day_utc, "day_utc"))
     candidates = [row for row in packet.get("trade_candidates", []) if isinstance(row, dict)]
@@ -143,6 +163,7 @@ def main(argv: list[str] | None = None) -> int:
         "last_event_monitor_run": event.get("monitor_run_id", ""),
         "next_event_monitor_scheduled_run": event_schedule.get("next_scheduled_run", ""),
         "last_event_data_freshness_status": _event_freshness_status(event),
+        "market_context_status": market_context,
         "last_triggered_event_count": len(event.get("triggered_events", [])) if event else 0,
         "last_blocked_event_count": len(event.get("blocked_events", [])) if event else 0,
         "research_lab_open_tasks": "UNPROVEN_UI_JSON_ONLY",

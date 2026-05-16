@@ -5,6 +5,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from constellation_2.common.aegis_market_context_v1 import market_context_summary_v1
 from constellation_2.common.aegis_research_lab_v1 import build_research_task_queue_v1, build_research_task_v1
 from constellation_2.phaseD.lib.canon_json_v1 import canonical_hash_for_c2_artifact_v1, canonical_json_bytes_v1
 from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_against_repo_schema_v1
@@ -71,6 +72,7 @@ def build_eod_sleeve_review_v1(
     sleeve_performance_report: dict[str, Any] | None,
     event_awareness_ledgers: list[dict[str, Any]] | None = None,
     event_rules_registries: list[dict[str, Any]] | None = None,
+    market_context_snapshots: list[dict[str, Any]] | None = None,
     input_artifact_refs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     report = sleeve_performance_report or {}
@@ -80,6 +82,7 @@ def build_eod_sleeve_review_v1(
     sleeves = _objects(report.get("sleeve_summary"))
     ledgers = _objects(event_awareness_ledgers)
     rules = _objects(event_rules_registries)
+    market_context = _market_context_rollup(market_context_snapshots)
 
     missing_receipts = [row for row in rows if row.get("lifecycle_status") == "MISSING_RECEIPT"]
     missing_outcomes = [row for row in rows if row.get("lifecycle_status") == "MISSING_OUTCOME"]
@@ -134,6 +137,7 @@ def build_eod_sleeve_review_v1(
         "slippage_issues": slippage_issues,
         "stop_behavior_issues": stop_issues,
         "event_regime_attribution": _event_regime_attribution(rows=rows, ledgers=ledgers),
+        "market_context_summary": market_context,
         "sleeve_warnings": _sleeve_warnings(sleeves=sleeves, rows=rows),
         "recommendations": recommendations,
         "research_tasks_created_or_recommended": tasks,
@@ -157,6 +161,7 @@ def build_eow_sleeve_review_v1(
     daily_eod_reviews: list[dict[str, Any]] | None = None,
     event_awareness_ledgers: list[dict[str, Any]] | None = None,
     research_task_queues: list[dict[str, Any]] | None = None,
+    market_context_snapshots: list[dict[str, Any]] | None = None,
     input_artifact_refs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     week_start = (date.fromisoformat(week_ending) - timedelta(days=4)).isoformat()
@@ -165,6 +170,7 @@ def build_eow_sleeve_review_v1(
     rows = [row for report in reports for row in _objects(report.get("trade_lifecycle_rows"))]
     event_ledgers = _objects(event_awareness_ledgers)
     queue_tasks = [task for queue in _objects(research_task_queues) for task in _objects(queue.get("tasks"))]
+    market_context = _market_context_rollup(market_context_snapshots)
     scorecard = _weekly_scorecard(rows)
     strongest = sorted(scorecard, key=lambda row: (_number(row.get("total_return")) or 0), reverse=True)[:3]
     weakest = sorted(scorecard, key=lambda row: (_number(row.get("total_return")) or 0))[:3]
@@ -204,6 +210,7 @@ def build_eow_sleeve_review_v1(
         "regime_dependent_sleeves": _regime_dependent_sleeves(rows),
         "repeated_failure_modes": repeated_failures,
         "event_false_positives": event_false_positives,
+        "market_context_summary": market_context,
         "promotion_review_candidates": _promotion_candidates(scorecard),
         "demotion_review_candidates": _demotion_candidates(scorecard),
         "recommendations": recommendations,
@@ -239,6 +246,21 @@ def write_research_task_queue_from_review_v1(
     existing_path.parent.mkdir(parents=True, exist_ok=True)
     existing_path.write_bytes(canonical_json_bytes_v1(queue) + b"\n")
     return existing_path
+
+
+def _market_context_rollup(snapshots: list[dict[str, Any]] | None) -> dict[str, Any]:
+    rows = [market_context_summary_v1(row) for row in _objects(snapshots)]
+    if not rows:
+        return market_context_summary_v1(None)
+    latest = sorted(rows, key=lambda row: (str(row.get("day_utc") or ""), str(row.get("generated_at_utc") or "")))[-1]
+    return {
+        **latest,
+        "snapshots_reviewed": len(rows),
+        "regime_labels_reviewed": sorted({str(row.get("regime_label") or "UNKNOWN") for row in rows}),
+        "volatility_labels_reviewed": sorted({str(row.get("volatility_classification") or "UNKNOWN") for row in rows}),
+        "breadth_labels_reviewed": sorted({str(row.get("breadth_classification") or "UNKNOWN") for row in rows}),
+        "macro_event_types_reviewed": sorted({str(row.get("macro_event_type") or "NONE") for row in rows}),
+    }
 
 
 def _research_tasks_from_recommendations(recommendations: list[dict[str, Any]], *, generated_at_utc: str, period_ref: str) -> list[dict[str, Any]]:

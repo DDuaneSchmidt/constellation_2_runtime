@@ -30,10 +30,11 @@ def build_trade_sizing_guidance_v1(
     stop = _decimal(candidate.get("stop_price"))
     portfolio = _decimal(portfolio_value or candidate.get("portfolio_value_used") or candidate.get("portfolio_value")) or DEFAULT_PORTFOLIO_VALUE
     overlap_adjustment = _adjustment(candidate.get("overlap_adjustment"), default=Decimal("1"))
-    regime_adjustment = _adjustment(candidate.get("regime_adjustment"), default=Decimal("1"))
+    market_context_adjustment, market_context_reasons = _market_context_adjustment(candidate.get("market_context") or candidate.get("market_context_status"))
+    regime_adjustment = _adjustment(candidate.get("regime_adjustment"), default=market_context_adjustment)
     concentration_adjustment = _adjustment(candidate.get("concentration_adjustment"), default=Decimal("1"))
     blockers: list[str] = []
-    reason_codes: list[str] = []
+    reason_codes: list[str] = [*market_context_reasons]
 
     if runtime_truth not in RUNTIME_TRUTH_CLASSIFICATIONS:
         blockers.append("INVALID_RUNTIME_TRUTH_CLASSIFICATION")
@@ -102,6 +103,7 @@ def build_trade_sizing_guidance_v1(
         "max_loss_if_stopped": _fmt(max_loss),
         "overlap_adjustment": _fmt(overlap_adjustment),
         "regime_adjustment": _fmt(regime_adjustment),
+        "market_context_adjustment": _fmt(market_context_adjustment),
         "concentration_adjustment": _fmt(concentration_adjustment),
         "sizing_blockers": sorted(set(blockers)),
         "sizing_reason_codes": sorted(set(reason_codes)),
@@ -135,6 +137,34 @@ def _adjustment(value: Any, *, default: Decimal) -> Decimal:
     if parsed > 1:
         return Decimal("1")
     return parsed
+
+
+def _market_context_adjustment(value: Any) -> tuple[Decimal, list[str]]:
+    if not isinstance(value, dict):
+        return Decimal("1"), []
+    regime = str(value.get("regime_label") or value.get("regime") or "").strip().upper()
+    volatility = str(value.get("volatility_classification") or value.get("volatility_status") or "").strip().upper()
+    breadth = str(value.get("breadth_classification") or value.get("breadth_status") or "").strip().upper()
+    macro_risk = str(value.get("macro_event_risk_level") or "").strip().upper()
+    stale = str(value.get("stale_data_status") or "").strip().upper()
+    adjustment = Decimal("1")
+    reasons: list[str] = []
+    if stale in {"STALE", "MISSING_INPUT"}:
+        adjustment = min(adjustment, Decimal("0.5"))
+        reasons.append(f"MARKET_CONTEXT_{stale}_RISK_REDUCTION")
+    if regime == "PANIC" or volatility == "PANIC_VOL":
+        adjustment = min(adjustment, Decimal("0.25"))
+        reasons.append("MARKET_CONTEXT_PANIC_RISK_REDUCTION")
+    elif regime == "HIGH_VOLATILITY" or volatility == "HIGH_VOL":
+        adjustment = min(adjustment, Decimal("0.5"))
+        reasons.append("MARKET_CONTEXT_HIGH_VOL_RISK_REDUCTION")
+    if breadth == "BREADTH_COLLAPSE":
+        adjustment = min(adjustment, Decimal("0.5"))
+        reasons.append("MARKET_CONTEXT_BREADTH_COLLAPSE_RISK_REDUCTION")
+    if macro_risk in {"HIGH", "EXTREME"}:
+        adjustment = min(adjustment, Decimal("0.75"))
+        reasons.append("MARKET_CONTEXT_MACRO_EVENT_RISK_REDUCTION")
+    return adjustment, sorted(set(reasons))
 
 
 def _stale(candidate: dict[str, Any]) -> bool:
