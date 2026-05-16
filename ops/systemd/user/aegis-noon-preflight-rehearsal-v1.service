@@ -1,0 +1,10 @@
+[Unit]
+Description=Aegis Noon Preflight Rehearsal v1 (fail-only notification, no broker submit)
+Documentation=/home/node/constellation/docs/aegis_noon_preflight_rehearsal.md
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/node/constellation_active
+Environment=PYTHONUNBUFFERED=1
+Environment=AEGIS_LITE_MANUAL_ONLY=1
+ExecStart=/home/node/constellation_runtime_data/truth/releases/run_current_release_tool_v1.sh run_aegis_noon_preflight_rehearsal_v1 --day_utc @today_utc@ --truth_root /home/node/constellation_runtime_data/truth

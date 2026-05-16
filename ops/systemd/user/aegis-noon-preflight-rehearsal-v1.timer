@@ -1,0 +1,12 @@
+[Unit]
+Description=Schedule Aegis Noon Preflight Rehearsal v1 at 12:00 America/New_York
+Documentation=/home/node/constellation/docs/aegis_noon_preflight_rehearsal.md
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 12:00:00 America/New_York
+AccuracySec=30s
+Persistent=false
+Unit=aegis-noon-preflight-rehearsal-v1.service
+
+[Install]
+WantedBy=timers.target

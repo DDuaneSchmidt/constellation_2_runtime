@@ -116,6 +116,41 @@ def _market_context_status(root: Path, day_utc: str) -> dict:
     }
 
 
+def _latest_preflight_status(root: Path, day_utc: str) -> dict:
+    path = _latest_matching(root, "preflight_status.v1.json", day_utc, "day_utc")
+    status = _read(path)
+    if not status:
+        return {
+            "status": "MISSING",
+            "result": "UNKNOWN",
+            "blockers": [],
+            "next_action": "No noon preflight status artifact found.",
+            "email_alert_required": False,
+            "email_alert_sent": False,
+            "email_transport_proven": False,
+            "operator_alert_status": "alert not live",
+            "canonical_eod_at_risk": False,
+            "status_path": "",
+        }
+    return {
+        "status": "PRESENT",
+        "result": str(status.get("result") or "UNKNOWN"),
+        "run_id": str(status.get("run_id") or ""),
+        "generated_at_utc": str(status.get("generated_at_utc") or ""),
+        "blockers": [str(item) for item in status.get("blockers", []) if str(item)] if isinstance(status.get("blockers"), list) else [],
+        "next_action": str(status.get("next_action") or ""),
+        "email_alert_required": bool(status.get("email_alert_required", False)),
+        "email_alert_sent": bool(status.get("email_alert_sent", False)),
+        "email_transport_proven": bool(status.get("email_transport_proven", False)),
+        "email_transport_status": str(status.get("email_transport_status") or "GATE_ONLY_NO_TRANSPORT"),
+        "delivery_status": str(status.get("delivery_status") or "NOT_SENT"),
+        "operator_alert_status": str(status.get("operator_alert_status") or "alert not live"),
+        "canonical_eod_at_risk": bool(status.get("canonical_eod_at_risk", False)),
+        "status_path": str(path or ""),
+        "alert_ledger_path": str(status.get("alert_ledger_path") or ""),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="build_aegis_operator_status_v1")
     parser.add_argument("--truth_root", required=True)
@@ -128,6 +163,7 @@ def main(argv: list[str] | None = None) -> int:
     perf = _read(_latest_matching(root, "sleeve_performance_report.v1.json", args.day_utc, "day_utc"))
     event = _read(_latest_matching(root, "event_monitoring_status.v1.json", args.day_utc, "day_utc"))
     market_context = _market_context_status(root, args.day_utc)
+    preflight = _latest_preflight_status(root, args.day_utc)
     event_schedule = _event_monitor_schedule_status(Path(__file__).resolve().parents[2])
     dataset = _read(_latest_matching(root, "research_dataset_gap.v1.json", args.day_utc, "day_utc"))
     candidates = [row for row in packet.get("trade_candidates", []) if isinstance(row, dict)]
@@ -164,6 +200,13 @@ def main(argv: list[str] | None = None) -> int:
         "next_event_monitor_scheduled_run": event_schedule.get("next_scheduled_run", ""),
         "last_event_data_freshness_status": _event_freshness_status(event),
         "market_context_status": market_context,
+        "latest_preflight": preflight,
+        "latest_preflight_result": preflight["result"],
+        "latest_preflight_blockers": preflight["blockers"],
+        "latest_preflight_next_action": preflight["next_action"],
+        "latest_preflight_email_alert_sent": preflight["email_alert_sent"],
+        "latest_preflight_email_transport_proven": preflight["email_transport_proven"],
+        "latest_preflight_canonical_eod_at_risk": preflight["canonical_eod_at_risk"],
         "last_triggered_event_count": len(event.get("triggered_events", [])) if event else 0,
         "last_blocked_event_count": len(event.get("blocked_events", [])) if event else 0,
         "research_lab_open_tasks": "UNPROVEN_UI_JSON_ONLY",

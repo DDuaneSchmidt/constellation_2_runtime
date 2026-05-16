@@ -148,6 +148,7 @@ def _queue_payload(
     report: dict[str, Any],
     queue: dict[str, Any],
 ) -> Dict[str, Any]:
+    preflight = _latest_preflight_status(root=root, day=day)
     candidates_by_id = {
         str(row.get("candidate_id") or ""): row
         for row in report.get("selected_trade_candidates", [])
@@ -197,6 +198,14 @@ def _queue_payload(
         "governance_status": str((report.get("governance_status") or {}).get("status") or "UNKNOWN"),
         "runtime_truth_classification": runtime_truth,
         "alert_transport_status": str(status.get("alert_transport_status") or report.get("alert_transport_status") or "GATE_ONLY_NO_TRANSPORT"),
+        "latest_preflight_result": preflight["result"],
+        "latest_preflight_blockers": preflight["blockers"],
+        "latest_preflight_next_action": preflight["next_action"],
+        "latest_preflight_email_alert_sent": preflight["email_alert_sent"],
+        "latest_preflight_email_transport_proven": preflight["email_transport_proven"],
+        "latest_preflight_operator_alert_status": preflight["operator_alert_status"],
+        "latest_preflight_canonical_eod_at_risk": preflight["canonical_eod_at_risk"],
+        "latest_preflight_status_path": preflight["status_path"],
         "manual_execution_only": True,
         "broker_submit_required": False,
         "ib_automation_status": str((report.get("operating_model") or {}).get("ib_automation_status") or "DEFERRED"),
@@ -211,6 +220,45 @@ def _queue_payload(
         "executable_trades": executable,
         "blocked_or_advisory_trades": blocked,
         "legacy_operator_state": _legacy_operator_state_diagnostic(root),
+    }
+
+
+def _latest_preflight_status(*, root: Path, day: str) -> Dict[str, Any]:
+    family = root / "reports" / "aegis_noon_preflight_rehearsal_v1" / day
+    paths = sorted(family.rglob("preflight_status.v1.json")) if family.exists() else []
+    if not paths:
+        return {
+            "result": "UNKNOWN",
+            "blockers": [],
+            "next_action": "No noon preflight status artifact found.",
+            "email_alert_sent": False,
+            "email_transport_proven": False,
+            "operator_alert_status": "alert not live",
+            "canonical_eod_at_risk": False,
+            "status_path": "",
+        }
+    path = paths[-1]
+    payload, error = read_json_dict(path)
+    if error is not None or payload is None:
+        return {
+            "result": "UNKNOWN",
+            "blockers": ["PREFLIGHT_STATUS_UNREADABLE"],
+            "next_action": "Rerun noon preflight.",
+            "email_alert_sent": False,
+            "email_transport_proven": False,
+            "operator_alert_status": "alert not live",
+            "canonical_eod_at_risk": True,
+            "status_path": str(path),
+        }
+    return {
+        "result": str(payload.get("result") or "UNKNOWN"),
+        "blockers": [str(item) for item in payload.get("blockers", []) if str(item)] if isinstance(payload.get("blockers"), list) else [],
+        "next_action": str(payload.get("next_action") or ""),
+        "email_alert_sent": bool(payload.get("email_alert_sent", False)),
+        "email_transport_proven": bool(payload.get("email_transport_proven", False)),
+        "operator_alert_status": str(payload.get("operator_alert_status") or "alert not live"),
+        "canonical_eod_at_risk": bool(payload.get("canonical_eod_at_risk", False)),
+        "status_path": str(path),
     }
 
 
@@ -320,6 +368,7 @@ def _not_ready_payload(
     status: dict[str, Any] | None = None,
     report: dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
+    preflight = _latest_preflight_status(root=root, day=day)
     return {
         "ok": True,
         "errors": [],
@@ -334,6 +383,14 @@ def _not_ready_payload(
         "governance_status": str(((report or {}).get("governance_status") or {}).get("status") or "UNKNOWN"),
         "runtime_truth_classification": str((status or {}).get("runtime_truth_classification") or (report or {}).get("runtime_truth_classification") or "ADVISORY_ONLY"),
         "alert_transport_status": str((status or {}).get("alert_transport_status") or (report or {}).get("alert_transport_status") or "GATE_ONLY_NO_TRANSPORT"),
+        "latest_preflight_result": preflight["result"],
+        "latest_preflight_blockers": preflight["blockers"],
+        "latest_preflight_next_action": preflight["next_action"],
+        "latest_preflight_email_alert_sent": preflight["email_alert_sent"],
+        "latest_preflight_email_transport_proven": preflight["email_transport_proven"],
+        "latest_preflight_operator_alert_status": preflight["operator_alert_status"],
+        "latest_preflight_canonical_eod_at_risk": preflight["canonical_eod_at_risk"],
+        "latest_preflight_status_path": preflight["status_path"],
         "manual_execution_only": True,
         "broker_submit_required": False,
         "ib_automation_status": "DEFERRED",

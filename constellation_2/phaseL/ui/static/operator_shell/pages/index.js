@@ -2817,6 +2817,9 @@ async function renderAegisLiteQueuePage() {
           { label: "Manual execution only", value: String(payload.manual_execution_only === true) },
           { label: "Advisory-only", value: payload.readiness_classification === "ADVISORY_ONLY" ? "true" : "false" },
           { label: "Alert transport", value: alertTransport },
+          { label: "Noon preflight", value: payload.latest_preflight_result || "UNKNOWN" },
+          { label: "15:50 EOD at risk", value: String(payload.latest_preflight_canonical_eod_at_risk === true) },
+          { label: "Preflight email", value: payload.latest_preflight_email_alert_sent ? "sent" : (payload.latest_preflight_operator_alert_status || "alert not live") },
           { label: "Broker submit required", value: String(payload.broker_submit_required === true) },
           { label: "IB automation", value: payload.ib_automation_status || "DEFERRED" },
           { label: "Release match", value: payload.release_match_status || "UNKNOWN" },
@@ -2840,6 +2843,7 @@ async function renderAegisLiteQueuePage() {
             ${renderMetricCard({ label: "Receipts missing", value: String(summary.missing_receipts ?? payload.missing_receipts_count ?? 0) })}
             ${renderMetricCard({ label: "Outcomes missing", value: String(summary.missing_outcomes ?? payload.missing_outcomes_count ?? 0) })}
             ${renderMetricCard({ label: "Event monitor", value: payload.event_monitor_status || legacy.event_monitor_status || "see Event Monitoring" })}
+            ${renderMetricCard({ label: "Preflight next", value: payload.latest_preflight_next_action || "No preflight artifact" })}
             ${renderMetricCard({ label: "Next step", value: executable.length ? "Review manual packet" : "No manual entry" })}
           </div>
         `,
