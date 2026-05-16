@@ -281,6 +281,8 @@ def build_operator_execution_queue_v1(
     candidates: list[dict[str, Any]],
     edge_clusters: dict[str, Any],
     source_artifact_lineage: list[dict[str, Any]] | None = None,
+    empty_reason: str = "",
+    input_contract_status: str = "PASS",
 ) -> dict[str, Any]:
     cluster_by_candidate = {
         candidate_id: row["edge_cluster_id"]
@@ -321,6 +323,8 @@ def build_operator_execution_queue_v1(
         "day_utc": day_utc,
         "run_id": run_id,
         "execution_queue": rows,
+        "empty_reason": str(empty_reason or ("NO_EXECUTABLE_CANDIDATES" if not rows else "")),
+        "input_contract_status": str(input_contract_status or "UNKNOWN"),
         "unsupported_manual_execution_warnings": [
             f"{row['candidate_id']}:UNSUPPORTED_MANUAL_EXECUTION"
             for row in rows

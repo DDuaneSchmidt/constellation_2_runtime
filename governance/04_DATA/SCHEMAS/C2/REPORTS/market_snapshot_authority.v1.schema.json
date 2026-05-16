@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/market_snapshot_authority.v1.schema.json",
+  "title": "market_snapshot_authority.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "artifact_id", "snapshot_id", "trading_date", "run_id", "dataset_manifest_path", "required_symbols", "fresh_symbols", "stale_symbols", "missing_symbols", "missing_bars", "snapshot_status", "created_at_utc", "source_artifact_lineage", "canonical_json_hash"],
+  "properties": {
+    "schema_id": {"const": "market_snapshot_authority"},
+    "schema_version": {"const": "v1"},
+    "artifact_id": {"const": "market_snapshot_authority_v1"},
+    "snapshot_id": {"type": "string"},
+    "trading_date": {"type": "string"},
+    "run_id": {"type": "string"},
+    "dataset_manifest_path": {"type": "string"},
+    "required_symbols": {"type": "array", "items": {"type": "string"}},
+    "fresh_symbols": {"type": "array", "items": {"type": "string"}},
+    "stale_symbols": {"type": "array", "items": {"type": "string"}},
+    "missing_symbols": {"type": "array", "items": {"type": "string"}},
+    "missing_bars": {"type": "array", "items": {"type": "string"}},
+    "snapshot_status": {"type": "string", "enum": ["COHERENT", "PARTIAL", "STALE", "MISSING", "DATA_NOT_READY"]},
+    "created_at_utc": {"type": "string"},
+    "source_artifact_lineage": {"type": "array", "items": {"type": "object"}},
+    "canonical_json_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

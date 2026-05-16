@@ -258,7 +258,15 @@ def build_aegis_lite_eod_report_v1(
     trade_outcome_attribution: dict[str, Any] | None = None,
     edge_cluster: dict[str, Any] | None = None,
     operator_execution_queue: dict[str, Any] | None = None,
+    eod_input_contract: dict[str, Any] | None = None,
+    blocked_advisory_candidates: list[dict[str, Any]] | None = None,
+    candidate_lineage_artifact_path: str = "",
+    eod_run_manifest_path: str = "",
+    market_snapshot_authority_path: str = "",
+    promoted_sleeve_manifest_path: str = "",
 ) -> dict[str, Any]:
+    has_explicit_input_contract = eod_input_contract is not None
+    input_contract = eod_input_contract or {"status": "PASS", "blockers": []}
     normalized = [normalize_trade_candidate_v1(candidate, ordinal=idx + 1) for idx, candidate in enumerate(candidates)]
     notes_by_id = {
         str(note.get("candidate_id")): note
@@ -271,6 +279,9 @@ def build_aegis_lite_eod_report_v1(
         _governance_integrity_gate(report_candidates, governance_status or {}, overlap_review),
         _report_completeness_gate(report_candidates, overlap_review),
     ]
+    clean_no_signal = _clean_no_signal_outcome(input_contract=input_contract, candidates=report_candidates)
+    if clean_no_signal:
+        gates = _suppress_no_trade_candidate_gate(gates)
     feedback = _feedback_summary(
         manual_operator_decisions=manual_operator_decisions or [],
         manual_execution_events=manual_execution_events or [],
@@ -282,7 +293,11 @@ def build_aegis_lite_eod_report_v1(
     )
     feedback["warnings"] = _dedupe([*feedback["warnings"], *_position_concentration_warnings(report_candidates, feedback["open_manual_positions"])])
     warnings = _dedupe([*_report_warnings(report_candidates, overlap_review, gates), *feedback["warnings"]])
-    blockers = _dedupe([*_report_blockers(report_candidates, gates), *feedback["blockers"]])
+    input_contract_blockers = _string_list(input_contract.get("blockers"))
+    feedback_blockers = feedback["blockers"]
+    if clean_no_signal:
+        feedback_blockers = [blocker for blocker in feedback_blockers if blocker != "OPERATOR_QUEUE_MISSING"]
+    blockers = _dedupe([*_report_blockers(report_candidates, gates), *feedback_blockers, *input_contract_blockers])
     manual_ready = (
         not blockers
         and all(gate["status"] == "PASS" for gate in gates)
@@ -350,6 +365,19 @@ def build_aegis_lite_eod_report_v1(
         "current_exposure_by_edge_cluster": feedback["current_exposure_by_edge_cluster"],
         "current_exposure_by_sleeve": feedback["current_exposure_by_sleeve"],
         "manual_execution_queue": feedback["manual_execution_queue"],
+        "eod_input_contract": input_contract,
+        "empty_section_reasons": _empty_section_reasons_v1(
+            report_candidates=report_candidates,
+            blocked_advisory_candidates=blocked_advisory_candidates or [],
+            input_contract=input_contract,
+            blockers=blockers,
+            clean_no_signal=clean_no_signal,
+        ),
+        "blocked_advisory_candidates": blocked_advisory_candidates or [],
+        "candidate_lineage_artifact_path": str(candidate_lineage_artifact_path),
+        "eod_run_manifest_path": str(eod_run_manifest_path),
+        "market_snapshot_authority_path": str(market_snapshot_authority_path),
+        "promoted_sleeve_manifest_path": str(promoted_sleeve_manifest_path),
         "skipped_candidate_tracking": feedback["skipped_candidate_tracking"],
         "unsupported_manual_execution_warnings": feedback["unsupported_manual_execution_warnings"],
         "performance_summary": feedback["performance_summary"],
@@ -367,7 +395,13 @@ def build_aegis_lite_eod_report_v1(
             "ib_submit_automation_invoked": False,
             "broker_transmit_control_touched": False,
         },
-        "report_status": "BLOCKED" if blockers else ("READY_WITH_WARNINGS" if warnings else "READY"),
+        "report_status": _report_status_v1(
+        blockers=blockers,
+        warnings=warnings,
+        input_contract=input_contract,
+        has_explicit_input_contract=has_explicit_input_contract,
+        clean_no_signal=clean_no_signal,
+    ),
         "manual_execution_status": "READY_FOR_MANUAL_ENTRY" if manual_ready else "NOT_READY",
         "readiness_classification": readiness_classification,
         "canonical_json_hash": None,
@@ -449,6 +483,105 @@ def _readiness_classification_v1(
     if blockers or any(gate.get("status") != "PASS" for gate in gates):
         return "NOT_READY"
     return "ADVISORY_ONLY"
+
+
+def _clean_no_signal_outcome(*, input_contract: dict[str, Any], candidates: list[dict[str, Any]]) -> bool:
+    if candidates:
+        return False
+    status = _text(input_contract.get("status")).upper()
+    raw_status = _text(input_contract.get("raw_candidate_status")).upper()
+    absent_reason = _text(input_contract.get("raw_candidate_absent_reason"))
+    blockers = set(_string_list(input_contract.get("blockers")))
+    if "CANDIDATE_INPUT_MISSING" in blockers:
+        return False
+    if status == "PASS" and (raw_status == "NO_RAW_CANDIDATES" or absent_reason):
+        return True
+    return False
+
+
+def _suppress_no_trade_candidate_gate(gates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for gate in gates:
+        if gate.get("gate_id") != "REPORT_COMPLETENESS":
+            out.append(gate)
+            continue
+        reason_codes = [code for code in _string_list(gate.get("reason_codes")) if code != "NO_TRADE_CANDIDATES"]
+        out.append({**gate, "reason_codes": reason_codes, "status": "BLOCKED" if reason_codes else "PASS"})
+    return out
+
+
+def _report_status_v1(
+    *,
+    blockers: list[str],
+    warnings: list[str],
+    input_contract: dict[str, Any],
+    has_explicit_input_contract: bool,
+    clean_no_signal: bool,
+) -> str:
+    contract_status = _text(input_contract.get("status")).upper()
+    if contract_status == "INPUT_CONTRACT_FAILED":
+        return "INPUT_CONTRACT_FAILED"
+    if not has_explicit_input_contract:
+        return "BLOCKED" if blockers else ("READY_WITH_WARNINGS" if warnings else "READY")
+    if any("RELEASE_MISMATCH" in blocker for blocker in blockers):
+        return "RELEASE_MISMATCH"
+    if any("RUNTIME_NOT_READY" in blocker or "IB_DISCONNECTED" in blocker or "NO_ACTIVE_SESSION" in blocker for blocker in blockers):
+        return "RUNTIME_NOT_READY"
+    if any("DATA_NOT_READY" in blocker or "STALE" in blocker or "MISSING_SYMBOLS" in blocker for blocker in blockers):
+        return "DATA_NOT_READY"
+    if blockers:
+        return "BLOCKED"
+    if clean_no_signal:
+        return "ADVISORY_ONLY"
+    return "READY_WITH_WARNINGS" if warnings else "READY"
+
+
+def _empty_section_reasons_v1(
+    *,
+    report_candidates: list[dict[str, Any]],
+    blocked_advisory_candidates: list[dict[str, Any]],
+    input_contract: dict[str, Any],
+    blockers: list[str],
+    clean_no_signal: bool,
+) -> dict[str, str]:
+    contract_blockers = set(_string_list(input_contract.get("blockers")))
+    if report_candidates and not blockers:
+        executable_reason = ""
+    elif clean_no_signal:
+        executable_reason = "no raw candidates generated"
+    elif "CANDIDATE_INPUT_MISSING" in contract_blockers:
+        executable_reason = "candidates not supplied to EOD"
+    elif "PROMOTED_SLEEVE_LIBRARY_REQUIRED" in contract_blockers:
+        executable_reason = "promoted sleeve library missing"
+    elif "OPERATOR_QUEUE_MISSING" in blockers:
+        executable_reason = "operator queue missing"
+    elif any("SUBMIT_NOT_AUTHORIZED" in blocker for blocker in blockers):
+        executable_reason = "submit not authorized"
+    elif any("RUNTIME_NOT_READY" in blocker or "IB_DISCONNECTED" in blocker for blocker in blockers):
+        executable_reason = "runtime readiness blocked"
+    elif any("DATA_NOT_READY" in blocker or "STALE" in blocker for blocker in blockers):
+        executable_reason = "data not ready"
+    elif any("RELEASE_MISMATCH" in blocker for blocker in blockers):
+        executable_reason = "release mismatch"
+    elif blockers:
+        executable_reason = "; ".join(blockers[:5])
+    else:
+        executable_reason = "no executable manual trades selected"
+
+    if blocked_advisory_candidates:
+        blocked_reason = ""
+    elif clean_no_signal:
+        blocked_reason = "no raw candidates generated"
+    elif "CANDIDATE_INPUT_MISSING" in contract_blockers:
+        blocked_reason = "raw candidates may exist upstream but candidate input was not consumed"
+    elif report_candidates:
+        blocked_reason = "candidates were executable or are represented in manual execution queue"
+    else:
+        blocked_reason = "no blocked/advisory candidates supplied"
+    return {
+        "executable_manual_trades": executable_reason,
+        "blocked_advisory_candidates": blocked_reason,
+    }
 
 
 def _artifact_refs(value: Any) -> list[dict[str, Any]]:

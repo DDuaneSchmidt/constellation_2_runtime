@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/candidate_lineage.v1.schema.json",
+  "title": "candidate_lineage.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "artifact_id", "trading_date", "run_id", "created_at_utc", "candidate_count", "lineage_rows", "canonical_json_hash"],
+  "properties": {
+    "schema_id": {"const": "candidate_lineage"},
+    "schema_version": {"const": "v1"},
+    "artifact_id": {"const": "candidate_lineage_v1"},
+    "trading_date": {"type": "string"},
+    "run_id": {"type": "string"},
+    "created_at_utc": {"type": "string"},
+    "candidate_count": {"type": "integer", "minimum": 0},
+    "lineage_rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "candidate_id",
+          "trading_date",
+          "sleeve_id",
+          "sleeve_version",
+          "symbol",
+          "candidate_source",
+          "raw_created",
+          "raw_candidate_artifact_path",
+          "promotion_status",
+          "promotion_reason",
+          "promoted_sleeve_manifest_path",
+          "readiness_status",
+          "execution_eligibility_status",
+          "block_reasons",
+          "final_state",
+          "consumed_by_eod",
+          "shown_in_report",
+          "created_at_utc"
+        ],
+        "properties": {
+          "candidate_id": {"type": "string"},
+          "trading_date": {"type": "string"},
+          "sleeve_id": {"type": "string"},
+          "sleeve_version": {"type": "string"},
+          "symbol": {"type": "string"},
+          "candidate_source": {"type": "string"},
+          "raw_created": {"type": "boolean"},
+          "raw_candidate_artifact_path": {"type": "string"},
+          "promotion_status": {"type": "string"},
+          "promotion_reason": {"type": "string"},
+          "promoted_sleeve_manifest_path": {"type": "string"},
+          "readiness_status": {"type": "string"},
+          "execution_eligibility_status": {"type": "string"},
+          "block_reasons": {"type": "array", "items": {"type": "string"}},
+          "final_state": {
+            "type": "string",
+            "enum": ["RAW_CREATED", "PROMOTION_SKIPPED", "PROMOTED", "BLOCKED", "ADVISORY_ONLY", "EXECUTION_READY", "QUEUED", "SUBMITTED", "REJECTED", "EXPIRED", "NOT_CONSUMED_BY_EOD"]
+          },
+          "consumed_by_eod": {"type": "boolean"},
+          "shown_in_report": {"type": "boolean"},
+          "created_at_utc": {"type": "string"}
+        }
+      }
+    },
+    "canonical_json_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

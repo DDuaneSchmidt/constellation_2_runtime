@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://constellation.local/schemas/C2/REPORTS/promoted_sleeve_manifest.v1.schema.json",
+  "title": "promoted_sleeve_manifest.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "artifact_id", "manifest_id", "trading_date", "run_id", "generated_at_utc", "manifest_status", "promoted_sleeve_count", "promoted_sleeves", "source_artifact", "canonical_json_hash"],
+  "properties": {
+    "schema_id": {"const": "promoted_sleeve_manifest"},
+    "schema_version": {"const": "v1"},
+    "artifact_id": {"const": "promoted_sleeve_manifest_v1"},
+    "manifest_id": {"type": "string"},
+    "trading_date": {"type": "string"},
+    "run_id": {"type": "string"},
+    "generated_at_utc": {"type": "string"},
+    "manifest_status": {"type": "string", "enum": ["EFFECTIVE", "INEFFECTIVE"]},
+    "promoted_sleeve_count": {"type": "integer", "minimum": 0},
+    "source_artifact": {"type": "string"},
+    "promoted_sleeves": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["manifest_id", "effective_date", "generated_at_utc", "sleeve_id", "sleeve_version", "promotion_status", "allowed_symbols", "account_mode", "expiry_date", "promotion_reason", "risk_approval_status", "source_artifact", "checksum"],
+        "properties": {
+          "manifest_id": {"type": "string"},
+          "effective_date": {"type": "string"},
+          "generated_at_utc": {"type": "string"},
+          "sleeve_id": {"type": "string"},
+          "sleeve_version": {"type": "string"},
+          "promotion_status": {"type": "string"},
+          "allowed_symbols": {"type": "array", "items": {"type": "string"}},
+          "account_mode": {"type": "string"},
+          "expiry_date": {"type": "string"},
+          "promotion_reason": {"type": "string"},
+          "risk_approval_status": {"type": "string"},
+          "source_artifact": {"type": "string"},
+          "checksum": {"type": "string"}
+        }
+      }
+    },
+    "canonical_json_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

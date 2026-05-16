@@ -52,6 +52,24 @@ from constellation_2.common.aegis_lite_manual_feedback_v1 import (  # noqa: E402
     validate_manual_feedback_artifact_v1,
     write_manual_feedback_artifact_v1,
 )
+from constellation_2.common.aegis_eod_artifact_contract_v1 import (  # noqa: E402
+    build_candidate_lineage_v1,
+    build_eod_run_manifest_v1,
+    build_market_snapshot_authority_v1,
+    build_promoted_sleeve_manifest_v1,
+    build_synthetic_advisory_rows_v1,
+    candidate_lineage_path_v1,
+    eod_run_manifest_path_v1,
+    load_upstream_candidate_rows_v1,
+    market_snapshot_authority_path_v1,
+    overall_status_from_inputs_v1,
+    promoted_sleeve_manifest_path_v1,
+    validate_eod_input_contract_v1,
+    write_candidate_lineage_v1,
+    write_eod_run_manifest_v1,
+    write_market_snapshot_authority_v1,
+    write_promoted_sleeve_manifest_v1,
+)
 from constellation_2.common.aegis_research_lab_v1 import (  # noqa: E402
     build_manual_trade_packet_v1,
     validate_research_lab_artifact_v1,
@@ -92,6 +110,62 @@ def build_aegis_lite_eod_pipeline_v1(
 ) -> dict[str, Any]:
     candidates = input_payload.get("candidates") if isinstance(input_payload.get("candidates"), list) else []
     source_lineage = input_payload.get("source_artifact_lineage") if isinstance(input_payload.get("source_artifact_lineage"), list) else []
+    upstream_candidate_manifest_path = _upstream_candidate_manifest_path_v1(truth_root=truth_root, day_utc=day_utc)
+    upstream_candidate_manifest = _read_json_or_empty(upstream_candidate_manifest_path)
+    raw_rows = _objects(input_payload.get("raw_candidates")) or candidates or load_upstream_candidate_rows_v1(upstream_candidate_manifest_path)
+    if not input_payload.get("sleeve_eval_artifact_path") and upstream_candidate_manifest.get("source_rollup_path"):
+        input_payload["sleeve_eval_artifact_path"] = str(upstream_candidate_manifest.get("source_rollup_path") or "")
+    if not input_payload.get("raw_candidate_absent_reason") and not raw_rows and input_payload.get("candidate_input_path"):
+        input_payload["raw_candidate_absent_reason"] = "NO_RAW_CANDIDATES"
+        input_payload["raw_candidate_status"] = "NO_RAW_CANDIDATES"
+    release_integrity = build_aegis_release_integrity_status_v1(generated_at_utc=generated_at_utc)
+    release_integrity_path = write_aegis_release_integrity_status_v1(truth_root=truth_root, payload=release_integrity)
+    legacy_runtime = build_legacy_paper_runtime_status_v1(generated_at_utc=generated_at_utc)
+    legacy_runtime_path = write_legacy_paper_runtime_status_v1(truth_root=truth_root, payload=legacy_runtime)
+    input_payload.setdefault("readiness_artifact_path", str(legacy_runtime_path))
+    market_snapshot_authority = build_market_snapshot_authority_v1(
+        truth_root=truth_root,
+        trading_date=day_utc,
+        run_id=run_id,
+        created_at_utc=generated_at_utc,
+        required_symbols=_required_symbols_v1([*raw_rows, *candidates]),
+        source_artifact_lineage=source_lineage,
+    )
+    market_snapshot_authority_path = write_market_snapshot_authority_v1(truth_root=truth_root, payload=market_snapshot_authority)
+    promoted_sleeve_manifest = build_promoted_sleeve_manifest_v1(
+        trading_date=day_utc,
+        run_id=run_id,
+        generated_at_utc=generated_at_utc,
+        promoted_sleeve_library=_object(input_payload.get("promoted_sleeve_library")),
+        source_artifact=str(input_payload.get("promoted_sleeve_library_path") or ""),
+    )
+    promoted_sleeve_manifest_path = write_promoted_sleeve_manifest_v1(truth_root=truth_root, payload=promoted_sleeve_manifest)
+    input_contract = validate_eod_input_contract_v1(
+        trading_date=day_utc,
+        input_payload=input_payload,
+        market_snapshot_authority=market_snapshot_authority,
+        promoted_sleeve_manifest=promoted_sleeve_manifest,
+        upstream_candidate_manifest_path=upstream_candidate_manifest_path,
+    )
+    if input_contract["status"] != "PASS":
+        for reason_code in input_contract["blockers"]:
+            input_payload["data_freshness_status"] = _status_with_reason(
+                input_payload.get("data_freshness_status"),
+                default_status="BLOCKED",
+                reason_code=str(reason_code),
+            )
+            input_payload["governance_status"] = _status_with_reason(
+                input_payload.get("governance_status"),
+                default_status="BLOCKED",
+                reason_code=str(reason_code),
+            )
+            input_payload["market_regime_state"] = _status_with_reason(
+                input_payload.get("market_regime_state"),
+                default_status="UNKNOWN",
+                reason_code=str(reason_code),
+            )
+        input_payload["data_freshness_status"]["status"] = "BLOCKED"
+        input_payload["governance_status"]["status"] = "BLOCKED"
     overlap = build_sleeve_edge_overlap_review_v1(
         day_utc=day_utc,
         run_id=run_id,
@@ -115,6 +189,8 @@ def build_aegis_lite_eod_pipeline_v1(
             run_id=run_id,
             candidates=candidates,
             edge_clusters=edge_cluster,
+            empty_reason=_operator_queue_empty_reason_v1(input_contract=input_contract, candidates=candidates),
+            input_contract_status=str(input_contract.get("status") or "UNKNOWN"),
         )
         validate_manual_feedback_artifact_v1(operator_execution_queue)
         operator_queue_path = write_manual_feedback_artifact_v1(truth_root=truth_root, payload=operator_execution_queue)
@@ -128,7 +204,11 @@ def build_aegis_lite_eod_pipeline_v1(
         promoted_sleeve_library=_object(input_payload.get("promoted_sleeve_library")),
     )
     manual_trade_packet_path = write_manual_trade_packet_v1(truth_root=truth_root, payload=manual_trade_packet)
-    generated_refs = [artifact_ref_v1(overlap_path, artifact_type="sleeve_edge_overlap_review_v1")]
+    generated_refs = [
+        artifact_ref_v1(market_snapshot_authority_path, artifact_type="market_snapshot_authority_v1"),
+        artifact_ref_v1(promoted_sleeve_manifest_path, artifact_type="promoted_sleeve_manifest_v1"),
+        artifact_ref_v1(overlap_path, artifact_type="sleeve_edge_overlap_review_v1"),
+    ]
     if edge_cluster_path is not None:
         generated_refs.append(artifact_ref_v1(edge_cluster_path, artifact_type="edge_cluster_v1"))
     if operator_queue_path is not None:
@@ -142,6 +222,21 @@ def build_aegis_lite_eod_pipeline_v1(
     )
     promoted_candidate_set_path = write_promoted_candidate_set_v1(truth_root=truth_root, payload=promoted_candidate_set)
     generated_refs.append(artifact_ref_v1(promoted_candidate_set_path, artifact_type="promoted_candidate_set_v1"))
+    lineage = build_candidate_lineage_v1(
+        trading_date=day_utc,
+        run_id=run_id,
+        created_at_utc=generated_at_utc,
+        input_payload=input_payload,
+        raw_rows=raw_rows,
+        consumed_candidates=candidates,
+        promoted_sleeve_manifest_path=str(promoted_sleeve_manifest_path),
+        input_contract=input_contract,
+        readiness_status=str(legacy_runtime.get("runtime_status") or legacy_runtime.get("status") or "UNKNOWN"),
+    )
+    candidate_lineage_path = write_candidate_lineage_v1(truth_root=truth_root, payload=lineage)
+    generated_refs.append(artifact_ref_v1(candidate_lineage_path, artifact_type="candidate_lineage_v1"))
+    synthetic_advisory_rows = build_synthetic_advisory_rows_v1(lineage=lineage, input_contract=input_contract)
+    manifest_path = eod_run_manifest_path_v1(truth_root=truth_root, trading_date=day_utc, run_id=run_id)
     report = build_aegis_lite_eod_report_v1(
         day_utc=day_utc,
         run_id=run_id,
@@ -165,6 +260,12 @@ def build_aegis_lite_eod_pipeline_v1(
         trade_outcome_attribution=_object(input_payload.get("trade_outcome_attribution")),
         edge_cluster=edge_cluster,
         operator_execution_queue=operator_execution_queue,
+        eod_input_contract=input_contract,
+        blocked_advisory_candidates=synthetic_advisory_rows,
+        candidate_lineage_artifact_path=str(candidate_lineage_path),
+        eod_run_manifest_path=str(manifest_path),
+        market_snapshot_authority_path=str(market_snapshot_authority_path),
+        promoted_sleeve_manifest_path=str(promoted_sleeve_manifest_path),
     )
     out_path = Path(str(report["artifact_path"]))
     attach_producer_contract_v1(
@@ -175,7 +276,23 @@ def build_aegis_lite_eod_pipeline_v1(
             f"--day_utc {day_utc} --truth_root {truth_root} --run_id {run_id}"
         ),
         input_artifacts=[Path(ref.get("path", "")) for ref in source_lineage if isinstance(ref, dict) and str(ref.get("path") or "")],
-        output_artifacts=[path for path in [overlap_path, edge_cluster_path, operator_queue_path, manual_trade_packet_path, out_path] if path is not None],
+        output_artifacts=[
+            path
+            for path in [
+                market_snapshot_authority_path,
+                promoted_sleeve_manifest_path,
+                overlap_path,
+                edge_cluster_path,
+                operator_queue_path,
+                manual_trade_packet_path,
+                promoted_candidate_set_path,
+                candidate_lineage_path,
+                out_path,
+                release_integrity_path,
+                legacy_runtime_path,
+            ]
+            if path is not None
+        ],
         schema_versions={"sleeve_edge_overlap_review": "v1", "operator_execution_queue": "v1", "manual_trade_packet": "v1", "aegis_lite_eod_report": "v1"},
     )
     report["run_receipt"]["producer_contract_attached"] = True
@@ -185,10 +302,42 @@ def build_aegis_lite_eod_pipeline_v1(
     report["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(report)
     validate_aegis_lite_eod_report_v1(report)
     report_path = write_aegis_lite_eod_report_v1(truth_root=truth_root, payload=report)
-    release_integrity = build_aegis_release_integrity_status_v1(generated_at_utc=generated_at_utc)
-    release_integrity_path = write_aegis_release_integrity_status_v1(truth_root=truth_root, payload=release_integrity)
-    legacy_runtime = build_legacy_paper_runtime_status_v1(generated_at_utc=generated_at_utc)
-    legacy_runtime_path = write_legacy_paper_runtime_status_v1(truth_root=truth_root, payload=legacy_runtime)
+    manifest = build_eod_run_manifest_v1(
+        run_id=run_id,
+        generated_at_utc=generated_at_utc,
+        trading_date=day_utc,
+        release_id=str(release_integrity.get("active_release_id") or release_integrity.get("release_id") or ""),
+        git_commit=str(release_integrity.get("repo_head_commit") or release_integrity.get("active_release_commit") or ""),
+        repo_dirty_status=str(release_integrity.get("repo_dirty_status") or release_integrity.get("repo_dirty") or "UNKNOWN"),
+        active_release_repo_match=str(release_integrity.get("release_match_status") or "UNKNOWN"),
+        paths={
+            "market_snapshot_artifact_path": str(market_snapshot_authority_path),
+            "sleeve_eval_artifact_path": str(input_contract.get("sleeve_eval_artifact_path") or ""),
+            "raw_candidate_artifact_path": str(input_contract.get("candidate_input_path") or upstream_candidate_manifest_path),
+            "promoted_sleeve_manifest_path": str(promoted_sleeve_manifest_path),
+            "promoted_candidate_artifact_path": str(promoted_candidate_set_path),
+            "readiness_artifact_path": str(legacy_runtime_path),
+            "operator_queue_artifact_path": str(operator_queue_path or ""),
+            "report_artifact_path": str(report_path),
+            "candidate_lineage_artifact_path": str(candidate_lineage_path),
+        },
+        overall_status=overall_status_from_inputs_v1(
+            input_contract=input_contract,
+            report=report,
+            release_match_status=str(release_integrity.get("release_match_status") or ""),
+        ),
+        blockers=_dedupe_strings_v1(
+            [
+                *_strings(input_contract.get("blockers")),
+                *_strings(report.get("do_not_trade_blockers")),
+                *_strings(release_integrity.get("reason_codes")),
+            ]
+        ),
+        advisory_only=str(report.get("readiness_classification") or "") == "ADVISORY_ONLY" or report.get("report_status") != "READY",
+        broker_transmit_control_touched=False,
+        ib_submit_automation_invoked=False,
+    )
+    manifest_path = write_eod_run_manifest_v1(truth_root=truth_root, payload=manifest)
     status = build_aegis_lite_operating_status_v1(
         day_utc=day_utc,
         generated_at_utc=generated_at_utc,
@@ -202,6 +351,7 @@ def build_aegis_lite_eod_pipeline_v1(
             *source_lineage,
             *generated_refs,
             artifact_ref_v1(report_path, artifact_type="aegis_lite_eod_report_v1"),
+            artifact_ref_v1(manifest_path, artifact_type="eod_run_manifest_v1"),
             artifact_ref_v1(release_integrity_path, artifact_type="aegis_release_integrity_status_v1"),
             artifact_ref_v1(legacy_runtime_path, artifact_type="legacy_paper_runtime_status_v1"),
         ],
@@ -269,6 +419,8 @@ def prepare_operational_input_payload_v1(
         )
     input_path = Path(candidate_input_path).expanduser().resolve()
     input_payload = read_candidate_input_v1(input_path)
+    input_payload["candidate_input_path"] = str(input_path)
+    input_payload["raw_candidates"] = input_payload.get("candidates") if isinstance(input_payload.get("candidates"), list) else []
     lineage = _objects(input_payload.get("source_artifact_lineage"))
     input_payload["source_artifact_lineage"] = [*lineage, artifact_ref_v1(input_path, artifact_type="aegis_lite_candidate_input_v1")]
     if not promoted_sleeve_library_path:
@@ -276,15 +428,26 @@ def prepare_operational_input_payload_v1(
             reason_codes=["PROMOTED_SLEEVE_LIBRARY_MISSING"],
             source_lineage=input_payload["source_artifact_lineage"],
         )
+        payload["candidate_input_path"] = str(input_path)
+        payload["raw_candidates"] = input_payload["raw_candidates"]
         payload["unpromoted_candidate_count"] = len(input_payload.get("candidates") if isinstance(input_payload.get("candidates"), list) else [])
         return payload
     library_path = Path(promoted_sleeve_library_path).expanduser().resolve()
     filtered = filter_promoted_sleeve_candidates_v1(input_payload, _read_json(library_path))
+    filtered["candidate_input_path"] = str(input_path)
+    filtered["promoted_sleeve_library_path"] = str(library_path)
+    filtered["raw_candidates"] = input_payload["raw_candidates"]
     filtered["source_artifact_lineage"] = [
         *(_objects(filtered.get("source_artifact_lineage"))),
         artifact_ref_v1(library_path, artifact_type="promoted_sleeve_library_v1"),
     ]
-    if not filtered.get("candidates"):
+    if not filtered.get("candidates") and not filtered.get("raw_candidates"):
+        filtered["raw_candidate_absent_reason"] = "NO_RAW_CANDIDATES"
+        filtered["raw_candidate_status"] = "NO_RAW_CANDIDATES"
+        filtered.setdefault("data_freshness_status", {"status": "PASS", "reason_codes": []})
+        filtered.setdefault("governance_status", {"status": "PASS", "reason_codes": []})
+        filtered.setdefault("market_regime_state", {"status": "NO_SIGNAL", "reason_codes": []})
+    elif not filtered.get("candidates"):
         filtered["data_freshness_status"] = _status_with_reason(
             filtered.get("data_freshness_status"),
             default_status="PASS",
@@ -382,6 +545,63 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"JSON_OBJECT_REQUIRED:{path}")
     return payload
+
+
+def _read_json_or_empty(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        return _read_json(path)
+    except (OSError, json.JSONDecodeError, ValueError):
+        return {}
+
+
+def _upstream_candidate_manifest_path_v1(*, truth_root: Path, day_utc: str) -> Path:
+    return (
+        Path(truth_root).resolve()
+        / "reports"
+        / "candidate_generation_manifest_v1"
+        / day_utc
+        / f"sleeve_evaluation_kernel_v1:{day_utc}"
+        / "candidate_generation_manifest.v1.json"
+    )
+
+
+def _required_symbols_v1(rows: list[dict[str, Any]]) -> list[str]:
+    symbols: set[str] = set()
+    for row in rows:
+        symbol = str(row.get("symbol") or row.get("symbol_or_pair") or "").strip().upper()
+        if not symbol:
+            continue
+        for part in symbol.replace("/", ",").split(","):
+            item = part.strip().upper()
+            if item:
+                symbols.add(item)
+    return sorted(symbols)
+
+
+def _operator_queue_empty_reason_v1(*, input_contract: dict[str, Any], candidates: list[dict[str, Any]]) -> str:
+    if candidates:
+        return ""
+    blockers = _strings(input_contract.get("blockers"))
+    if "CANDIDATE_INPUT_MISSING" in blockers:
+        return "CANDIDATE_INPUT_MISSING"
+    if "PROMOTED_SLEEVE_LIBRARY_REQUIRED" in blockers:
+        return "PROMOTED_SLEEVE_LIBRARY_REQUIRED"
+    if str(input_contract.get("raw_candidate_status") or "").upper() == "NO_RAW_CANDIDATES":
+        return "NO_RAW_CANDIDATES_GENERATED"
+    return "NO_EXECUTABLE_CANDIDATES"
+
+
+def _dedupe_strings_v1(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        item = str(value or "").strip()
+        if item and item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
 
 
 def _advisory_only_payload_v1(

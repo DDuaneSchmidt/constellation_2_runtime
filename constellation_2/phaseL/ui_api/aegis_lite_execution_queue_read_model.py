@@ -157,11 +157,12 @@ def _queue_payload(
     blocked: list[dict[str, Any]] = []
     release_match_status = str(status.get("release_repo_match_status") or (status.get("release_integrity_status") or {}).get("release_match_status") or "UNKNOWN")
     release_mismatch = release_match_status == "MISMATCH"
+    runtime_truth = str(status.get("runtime_truth_classification") or report.get("runtime_truth_classification") or "REAL_RUNTIME")
     for row in queue.get("execution_queue", []):
         if not isinstance(row, dict):
             continue
         candidate = candidates_by_id.get(str(row.get("candidate_id") or ""), {})
-        card = _trade_card(row=row, candidate=candidate)
+        card = _trade_card(row=row, candidate=candidate, default_runtime_truth=runtime_truth)
         card["report_timestamp"] = str(report.get("generated_at_utc") or "")
         if release_mismatch and "ACTIVE_RELEASE_REPO_MISMATCH" not in card["do_not_trade_blockers"]:
             card["do_not_trade_blockers"].append("ACTIVE_RELEASE_REPO_MISMATCH")
@@ -172,11 +173,16 @@ def _queue_payload(
             str(row.get("queue_status") or "") == "READY_FOR_MANUAL_ENTRY"
             and str(candidate.get("executable_status") or "") == "EXECUTABLE"
             and str(report.get("manual_execution_status") or "") == "READY_FOR_MANUAL_ENTRY"
+            and card["runtime_truth_classification"] == "REAL_RUNTIME"
             and not card["do_not_trade_blockers"]
         ):
             executable.append(card)
         else:
             blocked.append(card)
+    if not blocked:
+        for row in report.get("blocked_advisory_candidates", []):
+            if isinstance(row, dict):
+                blocked.append(_synthetic_advisory_card(row=row, default_runtime_truth=runtime_truth))
     return {
         "ok": True,
         "errors": [],
@@ -189,6 +195,8 @@ def _queue_payload(
         "readiness_classification": "ADVISORY_ONLY" if release_mismatch else str(report.get("readiness_classification") or status.get("readiness_classification") or "NOT_READY"),
         "data_status": str((report.get("data_freshness_status") or {}).get("status") or "UNKNOWN"),
         "governance_status": str((report.get("governance_status") or {}).get("status") or "UNKNOWN"),
+        "runtime_truth_classification": runtime_truth,
+        "alert_transport_status": str(status.get("alert_transport_status") or report.get("alert_transport_status") or "GATE_ONLY_NO_TRANSPORT"),
         "manual_execution_only": True,
         "broker_submit_required": False,
         "ib_automation_status": str((report.get("operating_model") or {}).get("ib_automation_status") or "DEFERRED"),
@@ -197,6 +205,7 @@ def _queue_payload(
         "operating_status": status,
         "current_blockers": status.get("current_blockers") or report.get("do_not_trade_blockers") or [],
         "warnings": status.get("warnings") or report.get("warnings") or [],
+        "empty_section_reasons": report.get("empty_section_reasons") or {},
         "queue_summary": _queue_summary(report=report, executable=executable, blocked=blocked, status=status),
         "release_match_status": release_match_status,
         "executable_trades": executable,
@@ -205,17 +214,20 @@ def _queue_payload(
     }
 
 
-def _trade_card(*, row: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+def _trade_card(*, row: dict[str, Any], candidate: dict[str, Any], default_runtime_truth: str) -> dict[str, Any]:
     recipe = str(row.get("manual_execution_recipe") or "")
     trade_class = str(row.get("trade_class") or candidate.get("trade_class") or "")
     direction = str(candidate.get("direction") or "").upper()
     quantity = int(candidate.get("suggested_quantity") or _recipe_int(recipe, "quantity") or 0)
+    runtime_truth = str(candidate.get("runtime_truth_classification") or row.get("runtime_truth_classification") or default_runtime_truth or "REAL_RUNTIME")
     blockers = _dedupe(
         [
             *[str(item) for item in row.get("reason_codes", []) if str(item)],
             *[str(item) for item in candidate.get("blockers", []) if str(item)],
             *("DEMO_ONLY_NOT_ACTIONABLE" for _ in [0] if bool(candidate.get("demo_mode", False))),
             *("DRY_RUN_ONLY_NOT_ACTIONABLE" for _ in [0] if bool(candidate.get("dry_run_only", False))),
+            *("DEMO_ONLY_NOT_ACTIONABLE" for _ in [0] if runtime_truth == "DEMO_ONLY"),
+            *("DRY_RUN_ONLY_NOT_ACTIONABLE" for _ in [0] if runtime_truth == "DRY_RUN_ONLY"),
         ]
     )
     return {
@@ -240,8 +252,11 @@ def _trade_card(*, row: dict[str, Any], candidate: dict[str, Any]) -> dict[str, 
                 *[str(item) for item in candidate.get("execution_confidence_badges", []) if str(item)],
                 *("DEMO_ONLY" for _ in [0] if bool(candidate.get("demo_mode", False))),
                 *("DRY_RUN_ONLY" for _ in [0] if bool(candidate.get("dry_run_only", False))),
+                *("DEMO_ONLY" for _ in [0] if runtime_truth == "DEMO_ONLY"),
+                *("DRY_RUN_ONLY" for _ in [0] if runtime_truth == "DRY_RUN_ONLY"),
             ]
         ),
+        "runtime_truth_classification": runtime_truth,
         "demo_mode": bool(candidate.get("demo_mode", False)),
         "dry_run_only": bool(candidate.get("dry_run_only", False)),
         "edge_cluster_id": str(row.get("edge_cluster_id") or ""),
@@ -255,6 +270,44 @@ def _trade_card(*, row: dict[str, Any], candidate: dict[str, Any]) -> dict[str, 
             "Confirm stop accepted",
             "Record ENTERED / SKIPPED / MODIFIED",
         ],
+    }
+
+
+def _synthetic_advisory_card(*, row: dict[str, Any], default_runtime_truth: str) -> dict[str, Any]:
+    blockers = _dedupe(
+        [
+            *[str(item) for item in row.get("block_reasons", []) if str(item)],
+            str(row.get("reason_not_executable") or ""),
+            str(row.get("reason_not_shown_as_manual_trade") or ""),
+        ]
+    )
+    return {
+        "execution_order": 0,
+        "priority_rank": 0,
+        "trade_class": "ADVISORY_ONLY",
+        "symbol": str(row.get("symbol") or "").upper(),
+        "direction": "",
+        "side": "",
+        "quantity": 0,
+        "entry_instruction": "",
+        "stop_price": "",
+        "stop_quantity": 0,
+        "stop_order_type": "",
+        "risk_per_trade": "",
+        "sleeve_owner": str(row.get("sleeve_id") or ""),
+        "source_sleeve": str(row.get("sleeve_id") or ""),
+        "promotion_status": str(row.get("final_state") or "ADVISORY_ONLY"),
+        "report_timestamp": "",
+        "execution_confidence_badges": ["ADVISORY_ONLY"],
+        "runtime_truth_classification": default_runtime_truth,
+        "demo_mode": False,
+        "dry_run_only": False,
+        "edge_cluster_id": "",
+        "governance_recommendation": "do_not_trade",
+        "queue_status": "BLOCKED",
+        "do_not_trade_blockers": blockers or ["CANDIDATE_NOT_EXECUTABLE"],
+        "manual_ib_recipe": "ADVISORY_ONLY_NO_MANUAL_TRADE",
+        "operator_steps": [],
     }
 
 
@@ -279,6 +332,8 @@ def _not_ready_payload(
         "readiness_classification": "NOT_READY",
         "data_status": str(((report or {}).get("data_freshness_status") or {}).get("status") or "UNKNOWN"),
         "governance_status": str(((report or {}).get("governance_status") or {}).get("status") or "UNKNOWN"),
+        "runtime_truth_classification": str((status or {}).get("runtime_truth_classification") or (report or {}).get("runtime_truth_classification") or "ADVISORY_ONLY"),
+        "alert_transport_status": str((status or {}).get("alert_transport_status") or (report or {}).get("alert_transport_status") or "GATE_ONLY_NO_TRANSPORT"),
         "manual_execution_only": True,
         "broker_submit_required": False,
         "ib_automation_status": "DEFERRED",
@@ -287,8 +342,13 @@ def _not_ready_payload(
         "operating_status": status or {},
         "current_blockers": _dedupe(reason_codes + [str(item) for item in (status or {}).get("current_blockers", []) if str(item)]),
         "warnings": (status or {}).get("warnings") or [],
+        "empty_section_reasons": (report or {}).get("empty_section_reasons") or {},
         "executable_trades": [],
-        "blocked_or_advisory_trades": [],
+        "blocked_or_advisory_trades": [
+            _synthetic_advisory_card(row=row, default_runtime_truth="ADVISORY_ONLY")
+            for row in (report or {}).get("blocked_advisory_candidates", [])
+            if isinstance(row, dict)
+        ],
         "queue_summary": {
             "executable_trades_count": 0,
             "blocked_trades_count": 0,
@@ -313,6 +373,7 @@ def _queue_summary(*, report: dict[str, Any], executable: list[dict[str, Any]], 
         "open_unprotected_positions": len(missing_stop),
         "readiness_classification": str(status.get("readiness_classification") or report.get("readiness_classification") or "NOT_READY"),
         "active_release_match_status": str(status.get("release_repo_match_status") or "UNKNOWN"),
+        "empty_section_reasons": report.get("empty_section_reasons") or {},
     }
 
 
