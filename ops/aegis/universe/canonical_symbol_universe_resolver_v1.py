@@ -275,8 +275,6 @@ def _deprecated_market_data_manifest_reason(symbols: list[str]) -> str:
     symbol_set = set(_normalize_symbols(symbols))
     if symbol_set == MINIMUM_VIABLE_ETF_SYMBOLS:
         return "minimum_viable_etf_contract_universe"
-    if len(symbol_set) in {10, 12, 41, 43}:
-        return f"fixed_etf_core_universe_count_{len(symbol_set)}"
     if 0 < len(symbol_set) < MIN_DYNAMIC_MARKET_DATA_SYMBOL_COUNT:
         return f"too_narrow_for_dynamic_market_universe_count_{len(symbol_set)}"
     return ""

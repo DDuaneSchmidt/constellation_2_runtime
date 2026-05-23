@@ -982,6 +982,7 @@ def build_operator_state_snapshot_v1(*, truth_root: Path | str, day_utc: str, ge
     capture_ready_ticket_count = int(current_day_status.get("capture_ready_ticket_count") or 0)
     blocked_selected_candidate_count = int(current_day_status.get("blocked_selected_candidate_count") or 0)
     candidate_pipeline_observability = current_day_status.get("candidate_pipeline_observability") if isinstance(current_day_status.get("candidate_pipeline_observability"), dict) else {}
+    candidate_funnel_projection = current_day_status.get("candidate_funnel_projection") if isinstance(current_day_status.get("candidate_funnel_projection"), dict) else {}
     thesis_graph_projection = _thesis_graph_projection(root, day, errors)
     mission_control_thesis_summary = thesis_graph_projection.get("mission_control_thesis_summary") if isinstance(thesis_graph_projection.get("mission_control_thesis_summary"), dict) else {}
     candidate_pipeline_alerts = candidate_pipeline_observability.get("alerts") if isinstance(candidate_pipeline_observability.get("alerts"), list) else []
@@ -1097,6 +1098,7 @@ def build_operator_state_snapshot_v1(*, truth_root: Path | str, day_utc: str, ge
         "current_day_candidates": _json_safe(current_day_candidate_rows),
         "candidate_pipeline_observability": _json_safe(candidate_pipeline_observability),
         "candidate_pipeline_alerts": _json_safe(candidate_pipeline_alerts),
+        "candidate_funnel_projection": _json_safe(candidate_funnel_projection),
         "thesis_graph_projection": _json_safe(thesis_graph_projection),
         "mission_control_thesis_summary": _json_safe(mission_control_thesis_summary),
         "candidate_intent_plane": _json_safe(candidate_intent_plane),
@@ -1174,6 +1176,7 @@ def build_operator_state_snapshot_v1(*, truth_root: Path | str, day_utc: str, ge
             "execution_locked_non_certified_count": int(current_day_status.get("execution_locked_non_certified_count") or 0),
             "candidate_pipeline_observability": _json_safe(candidate_pipeline_observability),
             "candidate_pipeline_alerts": _json_safe(candidate_pipeline_alerts),
+            "candidate_funnel_projection": _json_safe(candidate_funnel_projection),
             "thesis_graph_projection": _json_safe(thesis_graph_projection),
             "mission_control_thesis_summary": _json_safe(mission_control_thesis_summary),
             "capture_ready_ticket_count": capture_ready_ticket_count,

@@ -14,6 +14,10 @@ from ops.aegis.market_data.market_data_mode_v1 import FINAL_EOD_CERTIFIED
 from ops.aegis.market_data.market_data_provider_v1 import fetch_market_data_v1, provider_config_from_env_v1
 from ops.aegis.market_data.symbol_alias_registry_v1 import canonicalize_symbol_list_v1, normalize_market_symbol_v1
 from ops.aegis.market_data.symbol_map_v1 import build_symbol_map_v1
+from ops.aegis.universe.canonical_universe_authority_v1 import (
+    canonical_universe_authority_path,
+    latest_canonical_universe_authority_v1,
+)
 
 
 SCHEMA_VERSION = "v1"
@@ -343,13 +347,39 @@ def _repo_root_v1() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def _required_eod_symbols_v1(day_utc: str) -> list[str]:
+def _governed_required_eod_universe_v1(root: Path | None, day_utc: str) -> dict[str, Any]:
+    if root is not None:
+        try:
+            authority = latest_canonical_universe_authority_v1(truth_root=Path(root), day_utc=day_utc)
+        except Exception:
+            authority = {}
+        symbols = canonicalize_symbol_list_v1(authority.get("universe_symbols", []) if isinstance(authority, dict) else [])
+        if symbols and str(authority.get("authority_status") or "").upper() == "PASS":
+            path = canonical_universe_authority_path(truth_root=Path(root), day_utc=day_utc)
+            return {
+                "symbols": symbols,
+                "source": "canonical_universe_authority_v1",
+                "source_artifact_path": str(path if path.exists() else ""),
+                "source_hash": str(authority.get("immutable_hash") or ""),
+                "symbol_count": len(symbols),
+            }
     try:
         symbol_map = build_symbol_map_v1(repo_root=_repo_root_v1(), day_utc=day_utc)
         raw = symbol_map.get("required_symbols") if isinstance(symbol_map.get("required_symbols"), list) else []
-        return canonicalize_symbol_list_v1(raw)
+        symbols = canonicalize_symbol_list_v1(raw)
     except Exception:
-        return []
+        symbols = []
+    return {
+        "symbols": symbols,
+        "source": "symbol_map_required_symbols",
+        "source_artifact_path": "",
+        "source_hash": "",
+        "symbol_count": len(symbols),
+    }
+
+
+def _required_eod_symbols_v1(day_utc: str, truth_root: Path | None = None) -> list[str]:
+    return list(_governed_required_eod_universe_v1(truth_root, day_utc).get("symbols") or [])
 
 
 def _num_v1(value: Any) -> float | int | None:
@@ -727,9 +757,10 @@ def _provider_configured_v1() -> bool:
 def _provider_fetch_report_from_rows_v1(*, root: Path, day_utc: str, base_payload: dict[str, Any], source_used: Path | None, force_provider_refresh: bool) -> tuple[dict[str, Any], Path | None, str]:
     try:
         symbol_map = build_symbol_map_v1(repo_root=Path(__file__).resolve().parents[3], day_utc=day_utc)
-        required_symbols = canonicalize_symbol_list_v1([str(symbol) for symbol in symbol_map.get("required_symbols", []) if str(symbol)])
+        governed_universe = _governed_required_eod_universe_v1(root, day_utc)
+        required_symbols = canonicalize_symbol_list_v1(governed_universe.get("symbols") or [])
         if not required_symbols:
-            required_symbols = canonicalize_symbol_list_v1(_required_eod_symbols_v1(day_utc))
+            required_symbols = canonicalize_symbol_list_v1([str(symbol) for symbol in symbol_map.get("required_symbols", []) if str(symbol)])
         existing_valid = {} if force_provider_refresh else _valid_eod_symbol_rows_v1(base_payload or {}, day_utc, list(required_symbols))
         symbols_to_fetch = list(required_symbols) if force_provider_refresh else sorted(set(required_symbols) - set(existing_valid))
         fetch_skipped = not symbols_to_fetch
@@ -778,6 +809,10 @@ def _provider_fetch_report_from_rows_v1(*, root: Path, day_utc: str, base_payloa
             "final_eod_ready": status == "CURRENT",
             "generated_at_utc": now,
             "requested_symbols": list(required_symbols),
+            "governed_universe_source": str(governed_universe.get("source") or ""),
+            "governed_universe_artifact_path": str(governed_universe.get("source_artifact_path") or ""),
+            "governed_universe_hash": str(governed_universe.get("source_hash") or ""),
+            "governed_universe_symbol_count": len(required_symbols),
             "fetched_symbols": sorted(fetched_symbols),
             "final_eod_symbols": final_symbols,
             "missing_symbols": missing_symbols,
@@ -846,7 +881,7 @@ def build_us_equities_eod_source_v1(*, truth_root: Path | str, day_utc: str, for
     provider_error = ""
     loaded_existing_artifact = False
     if source_path and source_path.exists() and source_path.is_file():
-        required_symbols = _required_eod_symbols_v1(day_utc)
+        required_symbols = _required_eod_symbols_v1(day_utc, truth_root=root)
         payload, _manual_errors = _normalize_manual_eod_source_v1(source_path=source_path, day_utc=day_utc, required_symbols=required_symbols)
         source_used = source_path
     elif source_path and not source_path.exists():
@@ -867,7 +902,7 @@ def build_us_equities_eod_source_v1(*, truth_root: Path | str, day_utc: str, for
                         loaded_existing_artifact = True
                         break
             if payload:
-                required_symbols = canonicalize_symbol_list_v1(_required_eod_symbols_v1(day_utc))
+                required_symbols = canonicalize_symbol_list_v1(_required_eod_symbols_v1(day_utc, truth_root=root))
                 payload = {**payload, "requested_symbols": required_symbols}
         if not payload:
             payload, source_used, provider_error = _build_provider_final_eod_payload_v1(root=root, day_utc=day_utc, base_payload=payload, source_used=source_used, force_provider_refresh=force_provider_rebuild)

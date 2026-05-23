@@ -19,6 +19,10 @@ from ops.aegis.domain_source_builders_v1 import (
     write_json_v1,
 )
 from ops.aegis.market_data.symbol_map_v1 import build_symbol_map_v1
+from ops.aegis.universe.canonical_universe_authority_v1 import (
+    canonical_universe_authority_path,
+    latest_canonical_universe_authority_v1,
+)
 from ops.aegis.market_data.market_data_provider_v1 import (
     ProviderConfig,
     provider_config_from_env_v1,
@@ -31,9 +35,41 @@ from ops.aegis.market_data.market_data_provider_v1 import (
 DEFAULT_TRUTH_ROOT = Path("/home/node/constellation_runtime_data/truth")
 
 
-def required_universe_v1(*, day_utc: str) -> list[str]:
+def _canonicalize_symbols_v1(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    return sorted({str(symbol).strip().upper() for symbol in raw if str(symbol).strip()})
+
+
+def governed_required_universe_v1(*, day_utc: str, truth_root: Path | None = None) -> dict[str, Any]:
+    if truth_root is not None:
+        try:
+            authority = latest_canonical_universe_authority_v1(truth_root=Path(truth_root), day_utc=day_utc)
+        except Exception:
+            authority = {}
+        symbols = _canonicalize_symbols_v1(authority.get("universe_symbols") if isinstance(authority, dict) else [])
+        if symbols and str(authority.get("authority_status") or "").upper() == "PASS":
+            path = canonical_universe_authority_path(truth_root=Path(truth_root), day_utc=day_utc)
+            return {
+                "symbols": symbols,
+                "count": len(symbols),
+                "source": "canonical_universe_authority_v1",
+                "source_artifact_path": str(path if path.exists() else ""),
+                "source_hash": str(authority.get("immutable_hash") or ""),
+            }
     payload = build_symbol_map_v1(repo_root=REPO_ROOT, day_utc=day_utc)
-    return [str(symbol).upper() for symbol in payload.get("required_symbols", []) if str(symbol)]
+    symbols = _canonicalize_symbols_v1(payload.get("required_symbols", []))
+    return {
+        "symbols": symbols,
+        "count": len(symbols),
+        "source": "symbol_map_required_symbols",
+        "source_artifact_path": "",
+        "source_hash": "",
+    }
+
+
+def required_universe_v1(*, day_utc: str, truth_root: Path | None = None) -> list[str]:
+    return list(governed_required_universe_v1(day_utc=day_utc, truth_root=truth_root).get("symbols") or [])
 
 
 def universe_path_v1(*, truth_root: Path, day_utc: str) -> Path:
@@ -41,11 +77,12 @@ def universe_path_v1(*, truth_root: Path, day_utc: str) -> Path:
 
 
 def write_required_universe_v1(*, truth_root: Path, day_utc: str) -> dict[str, Any]:
-    symbols = required_universe_v1(day_utc=day_utc)
+    universe = governed_required_universe_v1(day_utc=day_utc, truth_root=truth_root)
+    symbols = list(universe.get("symbols") or [])
     path = universe_path_v1(truth_root=truth_root, day_utc=day_utc)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(symbols) + "\n", encoding="utf-8")
-    return {"path": str(path), "symbols": symbols, "count": len(symbols)}
+    return {"path": str(path), **universe, "symbols": symbols, "count": len(symbols)}
 
 
 def template_csv_v1(*, day_utc: str, symbols: list[str]) -> str:

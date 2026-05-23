@@ -24,6 +24,10 @@ from ops.aegis.candidate_intent_plane_v1 import (
     build_candidate_intent_plane_v1,
     candidate_intent_plane_path_v1,
 )
+from ops.aegis.universe.canonical_universe_authority_v1 import (
+    canonical_universe_authority_path,
+    latest_canonical_universe_authority_v1,
+)
 
 SCHEMA_ID = "current_operator_truth"
 SCHEMA_VERSION = "v1"
@@ -423,6 +427,226 @@ def _candidate_diagnostics(rows: list[dict[str, Any]], scoring: dict[str, Any] |
             "lowest_score": round(min(score_values), 6) if score_values else 0.0,
             "score_unavailable_reasons": dict(sorted(unavailable.items())),
         },
+    }
+
+
+def _read_optional_json(path: Path | None) -> dict[str, Any]:
+    if path is None or not path.exists() or not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _latest_report_artifact_path(root: Path, family: str, day_utc: str, filename: str) -> Path | None:
+    base = root / "reports" / family / day_utc
+    if not base.exists() or not base.is_dir():
+        return None
+    exact = base / filename
+    candidates = [exact] if exact.exists() and exact.is_file() else []
+    candidates.extend(path for path in base.glob(f"**/{filename}") if path.exists() and path.is_file() and path != exact)
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda path: (path.stat().st_mtime_ns, str(path)), reverse=True)[0]
+
+
+def _latest_report_artifact(root: Path, family: str, day_utc: str, filename: str) -> tuple[Path | None, dict[str, Any]]:
+    path = _latest_report_artifact_path(root, family, day_utc, filename)
+    return path, _read_optional_json(path)
+
+
+def _candidate_funnel_summary(*, raw: int, promoted: int, capture_tickets: int, uncovered: int, low_score: int, policy: int, excluded: int) -> str:
+    if raw <= 0:
+        return "No raw candidates were available for the candidate consumption audit."
+    if promoted > 0:
+        return f"{promoted} candidate{'s were' if promoted != 1 else ' was'} promoted and {capture_tickets} capture ticket{'s were' if capture_tickets != 1 else ' was'} available."
+    parts: list[str] = []
+    if uncovered:
+        parts.append(f"{uncovered} candidate{'s were' if uncovered != 1 else ' was'} outside the certified universe")
+    if low_score:
+        parts.append(f"{low_score} {'were' if low_score != 1 else 'was'} below score threshold")
+    if policy:
+        parts.append(f"{policy} {'were' if policy != 1 else 'was'} excluded by policy")
+    if not parts and excluded:
+        parts.append(f"{excluded} candidate{'s were' if excluded != 1 else ' was'} excluded")
+    if not parts:
+        return "No candidates were promoted and no exclusion reason was reported."
+    return "No capture tickets were created because " + ", ".join(parts[:-1]) + ((", and " if len(parts) > 1 else "") + parts[-1] if parts else "") + "."
+
+
+def _candidate_funnel_trend(root: Path, day_utc: str, limit: int = 5) -> list[dict[str, Any]]:
+    base = root / "reports" / "candidate_consumption_audit_v1"
+    if not base.exists() or not base.is_dir():
+        return []
+    days = sorted([path.name for path in base.iterdir() if path.is_dir() and path.name <= day_utc], reverse=True)[:limit]
+    rows: list[dict[str, Any]] = []
+    for day in sorted(days):
+        _path, audit = _latest_report_artifact(root, "candidate_consumption_audit_v1", day, "candidate_consumption_audit.v1.json")
+        if not audit:
+            continue
+        counts = audit.get("consumption_counts") if isinstance(audit.get("consumption_counts"), dict) else {}
+        rows.append({
+            "trading_day": day,
+            "raw_candidate_count": _safe_int(audit.get("raw_candidate_count")),
+            "promoted_candidate_count": _safe_int(audit.get("promoted_candidate_count")),
+            "excluded_candidate_count": _safe_int(audit.get("excluded_candidate_count")),
+            "excluded_uncovered_symbol_count": _safe_int(counts.get("EXCLUDED_UNCOVERED_SYMBOL")),
+            "excluded_low_score_count": _safe_int(counts.get("EXCLUDED_LOW_SCORE")),
+            "excluded_policy_count": _safe_int(counts.get("EXCLUDED_POLICY")),
+        })
+    return rows
+
+
+def _candidate_funnel_projection(root: Path, day_utc: str, current_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    audit_path, audit = _latest_report_artifact(root, "candidate_consumption_audit_v1", day_utc, "candidate_consumption_audit.v1.json")
+    eod_path, eod_report = _latest_report_artifact(root, "aegis_lite_eod_report_v1", day_utc, "aegis_lite_eod_report.v1.json")
+    diagnostics_path, diagnostics = _latest_report_artifact(root, "aegis_candidate_generation_diagnostics_v1", day_utc, "candidate_generation_diagnostics.v1.json")
+    maturity_path, maturity = _latest_report_artifact(root, "aegis_operational_maturity_hardening_v1", day_utc, "operational_maturity_hardening.v1.json")
+    promoted_path, promoted_set = _latest_report_artifact(root, "promoted_candidate_set_v1", day_utc, "promoted_candidate_set.v1.json")
+    capture_projection = maturity.get("capture_ticket_projection") if isinstance(maturity.get("capture_ticket_projection"), dict) else {}
+    rows = [row for row in (audit.get("candidate_rows") if isinstance(audit.get("candidate_rows"), list) else []) if isinstance(row, dict)]
+    counts = audit.get("consumption_counts") if isinstance(audit.get("consumption_counts"), dict) else {}
+    raw = _safe_int(audit.get("raw_candidate_count") if audit else len(current_rows))
+    promoted = _safe_int(audit.get("promoted_candidate_count") if audit else 0)
+    excluded = _safe_int(audit.get("excluded_candidate_count") if audit else 0)
+    uncovered = _safe_int(counts.get("EXCLUDED_UNCOVERED_SYMBOL"))
+    low_score = _safe_int(counts.get("EXCLUDED_LOW_SCORE"))
+    policy = _safe_int(counts.get("EXCLUDED_POLICY"))
+    covered = sum(1 for row in rows if row.get("covered_by_certified_eod") is True)
+    capture_count = _safe_int(capture_projection.get("capture_ticket_count") if capture_projection else maturity.get("capture_ticket_count"))
+    certified_symbols = sorted({str(symbol).strip().upper() for symbol in (audit.get("certified_universe_symbols") if isinstance(audit.get("certified_universe_symbols"), list) else []) if str(symbol).strip()})
+    certified_path = str(audit.get("certified_artifact_path") or "")
+    certified_hash = ""
+    if certified_path:
+        try:
+            certified_file = Path(certified_path)
+            certified_hash = _sha256_file(certified_file) if certified_file.exists() else ""
+        except Exception:
+            certified_hash = ""
+    try:
+        authority = latest_canonical_universe_authority_v1(truth_root=root, day_utc=day_utc)
+    except Exception:
+        authority = {}
+    authority_path = canonical_universe_authority_path(truth_root=root, day_utc=day_utc)
+    authority_symbols = sorted({str(symbol).strip().upper() for symbol in (authority.get("universe_symbols") if isinstance(authority, dict) and isinstance(authority.get("universe_symbols"), list) else []) if str(symbol).strip()})
+    expected_sleeves = diagnostics.get("expected_sleeve_ids") if isinstance(diagnostics.get("expected_sleeve_ids"), list) else []
+    if not expected_sleeves and isinstance(diagnostics.get("expected_sleeves"), list):
+        expected_sleeves = [row.get("sleeve_id") for row in diagnostics.get("expected_sleeves", []) if isinstance(row, dict)]
+    linked_sleeves = sorted({str(item).strip() for item in [*expected_sleeves, *(row.get("sleeve_id") or row.get("engine_id") for row in rows)] if str(item or "").strip()})
+    outside_rows = [row for row in rows if str(row.get("consumption_category") or "") == "EXCLUDED_UNCOVERED_SYMBOL"]
+    outside_symbols = sorted({str(row.get("symbol") or "").strip().upper() for row in outside_rows if str(row.get("symbol") or "").strip()})
+    certified_count = _safe_int(audit.get("certified_universe_symbol_count") or len(certified_symbols))
+    canonical_count = _safe_int(authority.get("universe_symbol_count") if isinstance(authority, dict) else len(authority_symbols))
+    certified_too_narrow = bool(uncovered and canonical_count and certified_count and certified_count < canonical_count)
+    generation_too_broad = bool(uncovered and not certified_too_narrow)
+    if certified_too_narrow:
+        diagnosis = "Certified EOD coverage is narrower than the governed canonical universe; candidates outside final EOD coverage were excluded before promotion."
+    elif generation_too_broad:
+        diagnosis = "Candidate generation produced symbols outside the currently certified EOD universe; filter earlier or expand certification coverage if those symbols are intended."
+    elif raw and not promoted:
+        diagnosis = "Raw candidates were generated, but score and policy gates left no promoted candidates."
+    else:
+        diagnosis = "Candidate funnel did not report a certified-universe blocker."
+    drilldown_rows = []
+    for row in rows:
+        reason_codes = row.get("raw_reason_codes") if isinstance(row.get("raw_reason_codes"), list) else []
+        drilldown_rows.append({
+            "candidate_id": str(row.get("candidate_id") or ""),
+            "symbol": str(row.get("symbol") or ""),
+            "sleeve": str(row.get("sleeve_id") or row.get("engine_id") or ""),
+            "sleeve_id": str(row.get("sleeve_id") or row.get("engine_id") or ""),
+            "exclusion_category": str(row.get("consumption_category") or "PROMOTED"),
+            "exclusion_reason": str(row.get("consumption_reason") or ", ".join(str(item) for item in reason_codes) or row.get("source_status") or ""),
+            "score": row.get("score") if row.get("score") is not None else row.get("score_total"),
+            "covered_by_certified_universe": bool(row.get("covered_by_certified_eod") is True),
+            "coverage": "covered" if row.get("covered_by_certified_eod") is True else "uncovered",
+            "source_artifact": str(row.get("source_artifact_path") or ""),
+            "source_artifact_path": str(row.get("source_artifact_path") or ""),
+        })
+    categories = sorted({str(row.get("exclusion_category") or "") for row in drilldown_rows if str(row.get("exclusion_category") or "")})
+    return {
+        "schema_id": "candidate_funnel_projection",
+        "schema_version": "v1",
+        "day_utc": day_utc,
+        "available": bool(audit),
+        "plain_english_summary": _candidate_funnel_summary(raw=raw, promoted=promoted, capture_tickets=capture_count, uncovered=uncovered, low_score=low_score, policy=policy, excluded=excluded),
+        "raw_candidate_count": raw,
+        "covered_by_certified_universe_count": covered,
+        "promoted_candidate_count": promoted,
+        "excluded_candidate_count": excluded,
+        "excluded_uncovered_symbol_count": uncovered,
+        "excluded_low_score_count": low_score,
+        "excluded_policy_count": policy,
+        "capture_ticket_count": capture_count,
+        "capture_ticket_status": str(capture_projection.get("capture_ticket_status") or maturity.get("capture_ticket_status") or "NONE_AVAILABLE"),
+        "consumption_counts": dict(sorted(counts.items())) if isinstance(counts, dict) else {},
+        "drilldown_rows": drilldown_rows,
+        "filters": {
+            "sleeves": sorted({row["sleeve"] for row in drilldown_rows if row.get("sleeve")}),
+            "symbols": sorted({row["symbol"] for row in drilldown_rows if row.get("symbol")}),
+            "exclusion_categories": categories,
+            "coverage": ["covered", "uncovered"],
+        },
+        "trend_5d": _candidate_funnel_trend(root, day_utc, limit=5),
+        "artifact_paths": {
+            "candidate_consumption_audit_v1": str(audit_path or ""),
+            "aegis_lite_eod_report_v1": str(eod_path or ""),
+            "candidate_generation_diagnostics_v1": str(diagnostics_path or ""),
+            "operational_maturity_hardening_v1": str(maturity_path or ""),
+            "promoted_candidate_set_v1": str(promoted_path or ""),
+        },
+        "artifact_hashes": {
+            "candidate_consumption_audit_v1": _sha256_file(audit_path) if audit_path else "",
+            "certified_universe": certified_hash,
+            "canonical_universe_authority_v1": str(authority.get("immutable_hash") or "") if isinstance(authority, dict) else "",
+        },
+        "certified_universe": {
+            "source": "final_eod_market_data_v1",
+            "artifact_path": certified_path,
+            "content_hash": certified_hash,
+            "symbol_count": certified_count,
+            "symbols": certified_symbols,
+        },
+        "canonical_universe_authority": {
+            "universe_id": str(authority.get("canonical_universe_authority_id") or "") if isinstance(authority, dict) else "",
+            "operational_day": str(authority.get("day_utc") or authority.get("source_day") or day_utc) if isinstance(authority, dict) else day_utc,
+            "artifact_path": str(authority_path if authority_path.exists() else ""),
+            "symbol_count": canonical_count,
+            "symbols": authority_symbols,
+            "source": str(authority.get("generation_pipeline") or authority.get("writer_process") or "") if isinstance(authority, dict) else "",
+            "generated_at": str(authority.get("generated_at") or "") if isinstance(authority, dict) else "",
+            "linked_sleeves": linked_sleeves,
+            "linked_hypotheses": [],
+            "content_hash": str(authority.get("immutable_hash") or "") if isinstance(authority, dict) else "",
+        },
+        "universe_diagnostics": {
+            "universe_artifact_path": str(authority_path if authority_path.exists() else certified_path),
+            "universe_source": "canonical_universe_authority_v1" if authority_symbols else "final_eod_market_data_v1",
+            "symbol_count": canonical_count or certified_count,
+            "symbols_included": authority_symbols or certified_symbols,
+            "sleeves_requiring_universe": linked_sleeves,
+            "candidates_outside_universe": outside_symbols,
+            "candidate_generation_too_broad": generation_too_broad,
+            "certified_universe_too_narrow": certified_too_narrow,
+            "sleeves_require_larger_universe": certified_too_narrow,
+            "universe_config_needs_expansion": bool(uncovered and not authority_symbols),
+            "filter_candidates_earlier": bool(uncovered),
+            "diagnosis": diagnosis,
+        },
+        "diagnostics": {
+            "did_sleeves_run": _safe_int(diagnostics.get("total_sleeves_run")) > 0 or bool(current_rows),
+            "sleeves_expected": _safe_int(diagnostics.get("total_sleeves_expected") or diagnostics.get("total_sleeves_expected_today")),
+            "sleeves_run": _safe_int(diagnostics.get("total_sleeves_run")),
+            "candidate_generation_status": str(diagnostics.get("candidate_generation_status") or ""),
+            "eod_outcome_status": str(eod_report.get("eod_outcome_status") or ""),
+            "promoted_candidate_set_count": _safe_int(promoted_set.get("promoted_candidate_count") or len(promoted_set.get("candidates", []) if isinstance(promoted_set.get("candidates"), list) else [])),
+        },
+        "broker_submit_transmit_allowed": False,
+        "broker_execution_allowed": False,
+        "autonomous_execution_allowed": False,
+        "trade_advice_allowed": False,
     }
 
 
@@ -1078,6 +1302,7 @@ def _current_day_status(root: Path, day_utc: str, errors: list[dict[str, Any]]) 
         selected_intent_id=selected_intent_id,
         candidate_certification_state=_candidate_certification_state_from_payload(manifest),
     )
+    candidate_funnel_projection = _candidate_funnel_projection(root=root, day_utc=day_utc, current_rows=operator_candidate_rows)
     intent_rows = intent_plane.get("intent_snapshots") if isinstance(intent_plane.get("intent_snapshots"), list) else []
     intent_lifecycle_summary = {
         "intent_count": int(intent_plane.get("intent_count") or len(intent_rows)),
@@ -1198,6 +1423,7 @@ def _current_day_status(root: Path, day_utc: str, errors: list[dict[str, Any]]) 
             **candidate_semantic_counts,
             "candidate_pipeline_observability": candidate_pipeline_observability,
             "candidate_pipeline_alerts": candidate_pipeline_observability.get("alerts", []),
+            "candidate_funnel_projection": candidate_funnel_projection,
             "intent_lifecycle_summary": intent_lifecycle_summary,
             "candidate_intent_plane": intent_plane,
             "candidate_rows": operator_candidate_rows,
@@ -1237,6 +1463,7 @@ def _current_day_status(root: Path, day_utc: str, errors: list[dict[str, Any]]) 
             **candidate_semantic_counts,
             "candidate_pipeline_observability": candidate_pipeline_observability,
             "candidate_pipeline_alerts": candidate_pipeline_observability.get("alerts", []),
+            "candidate_funnel_projection": candidate_funnel_projection,
             "intent_lifecycle_summary": intent_lifecycle_summary,
             "candidate_intent_plane": intent_plane,
             "candidate_rows": operator_candidate_rows,
@@ -1276,6 +1503,7 @@ def _current_day_status(root: Path, day_utc: str, errors: list[dict[str, Any]]) 
             **candidate_semantic_counts,
             "candidate_pipeline_observability": candidate_pipeline_observability,
             "candidate_pipeline_alerts": candidate_pipeline_observability.get("alerts", []),
+            "candidate_funnel_projection": candidate_funnel_projection,
             "intent_lifecycle_summary": intent_lifecycle_summary,
             "candidate_intent_plane": intent_plane,
             "candidate_rows": operator_candidate_rows,
@@ -1329,6 +1557,7 @@ def _current_day_status(root: Path, day_utc: str, errors: list[dict[str, Any]]) 
             "capture_ready_trend": [],
         },
         "candidate_pipeline_alerts": [],
+        "candidate_funnel_projection": _candidate_funnel_projection(root=root, day_utc=day_utc, current_rows=[]),
         "candidate_rows": [],
         "selected_candidate_count": 0,
         "capture_ready_ticket_count": 0,
