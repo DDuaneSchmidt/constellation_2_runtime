@@ -111,6 +111,36 @@ def test_snapshot_cli_writes_fail_closed_missing_input_snapshot(tmp_path: Path, 
     assert payload["broker_submit_required"] is False
 
 
+def test_snapshot_cli_derives_truth_lineage_without_fabricating_stale_market_data(tmp_path: Path, capsys) -> None:
+    manifest_path = tmp_path / "market_data_snapshot_v1" / "dataset_manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps({"source_snapshot_utc": "2026-05-15T13:45:00Z"}), encoding="utf-8")
+    for symbol, close in (("SPY", "505"), ("QQQ", "430")):
+        path = tmp_path / "market_data_snapshot_v1" / symbol / "2026.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"symbol": symbol, "timestamp_utc": "2026-05-15T00:00:00Z", "close": close, "ingested_utc": "2026-05-15T13:45:00Z"})
+            + "\n",
+            encoding="utf-8",
+        )
+
+    assert snapshot_cli_main(["--truth_root", str(tmp_path), "--day_utc", "2026-05-18", "--generated_at_utc", "2026-05-18T16:00:00Z"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    payload = json.loads(Path(out["path"]).read_text(encoding="utf-8"))
+    validate_event_market_snapshot_v1(payload)
+
+    lineage_types = {entry["artifact_type"] for entry in payload["source_lineage"]}
+    assert payload["stale_data_status"] == "STALE"
+    assert "market_data_snapshot_v1:dataset_manifest" in lineage_types
+    assert "market_data_snapshot_v1:SPY" in lineage_types
+    assert "market_data_snapshot_v1:QQQ" in lineage_types
+    assert payload["current_prices"]["SPY"] == ""
+    assert payload["current_prices"]["QQQ"] == ""
+    assert "MARKET_CONTEXT_SOURCE_STALE" in payload["reason_codes"]
+    assert "MISSING_INPUT:spy_price" in payload["reason_codes"]
+    assert payload["broker_submit_required"] is False
+
+
 def test_event_monitor_consumes_snapshot_and_blocks_stale_context(tmp_path: Path) -> None:
     snapshot = _snapshot(source_timestamp_utc="2026-05-15T17:00:00Z")
     assert snapshot["stale_data_status"] == "STALE"
@@ -176,7 +206,7 @@ def test_chatgpt_control_packet_exposes_market_context(tmp_path: Path) -> None:
 
     packet = build_aegis_chatgpt_control_packet_v1(truth_root=tmp_path, day_utc=DAY, generated_at_utc=NOW)
 
-    assert packet["runtime_truth_classification"] == "ADVISORY_ONLY"
+    assert packet["runtime_truth_classification"] == "PARTIAL_CONTEXT"
     assert packet["market_context_status"]["regime_label"] == "TRENDING_UP"
     assert packet["market_context_status"]["macro_event_risk_level"] == "HIGH"
     assert packet["trade_advice_allowed"] is False

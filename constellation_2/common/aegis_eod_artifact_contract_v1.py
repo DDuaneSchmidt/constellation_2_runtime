@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,6 +14,7 @@ from constellation_2.phaseD.lib.validate_against_schema_v1 import validate_again
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EOD_RUN_MANIFEST_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/eod_run_manifest.v1.schema.json"
 CANDIDATE_LINEAGE_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/candidate_lineage.v1.schema.json"
+CANDIDATE_CONSUMPTION_AUDIT_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/candidate_consumption_audit.v1.schema.json"
 PROMOTED_SLEEVE_MANIFEST_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/promoted_sleeve_manifest.v1.schema.json"
 MARKET_SNAPSHOT_AUTHORITY_SCHEMA = "governance/04_DATA/SCHEMAS/C2/REPORTS/market_snapshot_authority.v1.schema.json"
 
@@ -31,6 +33,16 @@ def eod_run_manifest_path_v1(*, truth_root: Path, trading_date: str, run_id: str
 
 def candidate_lineage_path_v1(*, truth_root: Path, trading_date: str, run_id: str) -> Path:
     return _artifact_path(truth_root=truth_root, family="candidate_lineage_v1", trading_date=trading_date, run_id=run_id, filename="candidate_lineage.v1.json")
+
+
+def candidate_consumption_audit_path_v1(*, truth_root: Path, trading_date: str, run_id: str) -> Path:
+    return _artifact_path(
+        truth_root=truth_root,
+        family="candidate_consumption_audit_v1",
+        trading_date=trading_date,
+        run_id=run_id,
+        filename="candidate_consumption_audit.v1.json",
+    )
 
 
 def promoted_sleeve_manifest_path_v1(*, truth_root: Path, trading_date: str, run_id: str) -> Path:
@@ -166,17 +178,24 @@ def validate_eod_input_contract_v1(
     candidate_input_path = _text(input_payload.get("candidate_input_path"))
     promoted_library_path = _text(input_payload.get("promoted_sleeve_library_path"))
     supplied_candidates = input_payload.get("candidates") if isinstance(input_payload.get("candidates"), list) else []
+    raw_candidates = input_payload.get("raw_candidates") if isinstance(input_payload.get("raw_candidates"), list) else []
+    raw_candidate_count = len(raw_candidates)
     artifact_inputs_required = bool(upstream_candidate_manifest_path.exists() or input_payload.get("enforce_eod_input_contract"))
+    market_snapshot_required = bool(artifact_inputs_required or supplied_candidates)
     sleeve_eval_path = _text(input_payload.get("sleeve_eval_artifact_path")) or _default_sleeve_eval_path(input_payload, trading_date)
     readiness_path = _text(input_payload.get("readiness_artifact_path"))
     market_path = _text(market_snapshot_authority.get("dataset_manifest_path"))
 
-    if artifact_inputs_required:
+    if market_snapshot_required:
         _require_path("market_snapshot_artifact_path", market_path, blockers, missing_artifacts, "MARKET_SNAPSHOT_MISSING")
     if artifact_inputs_required and not _path_exists(sleeve_eval_path) and not _text(input_payload.get("sleeve_eval_absent_reason")):
         blockers.append("SLEEVE_EVALUATION_INPUT_MISSING")
         missing_artifacts.append({"logical_name": "sleeve_eval_artifact_path", "path": sleeve_eval_path})
-    if not supplied_candidates and not candidate_input_path and not raw_absent_reason:
+    if not supplied_candidates and raw_candidate_count > 0:
+        blockers.append("NO_PROMOTABLE_CANDIDATES")
+        if str(promoted_sleeve_manifest.get("manifest_status") or "") != "EFFECTIVE":
+            blockers.append("MISSING_PROMOTION_APPROVAL")
+    elif not supplied_candidates and not candidate_input_path and not raw_absent_reason:
         blockers.append("CANDIDATE_INPUT_MISSING")
         if upstream_candidate_manifest_path.exists():
             blockers.append("RAW_CANDIDATES_EXISTED_NOT_CONSUMED")
@@ -199,9 +218,10 @@ def validate_eod_input_contract_v1(
         blockers.append("READINESS_ARTIFACT_MISSING")
         missing_artifacts.append({"logical_name": "readiness_artifact_path", "path": ""})
     snapshot_status = str(market_snapshot_authority.get("snapshot_status") or "MISSING")
-    if artifact_inputs_required and snapshot_status in {"PARTIAL", "STALE", "MISSING", "DATA_NOT_READY"}:
+    if market_snapshot_required and snapshot_status in {"PARTIAL", "STALE", "MISSING", "DATA_NOT_READY"}:
         blockers.append(f"MARKET_SNAPSHOT_{snapshot_status}")
-    contract_status = "PASS" if not blockers else EOD_STATUS_INPUT_CONTRACT_FAILED
+    promotion_only_blockers = {"NO_PROMOTABLE_CANDIDATES", "MISSING_PROMOTION_APPROVAL", "PROMOTED_SLEEVE_LIBRARY_REQUIRED", "PROMOTED_SLEEVE_MANIFEST_INEFFECTIVE"}
+    contract_status = "PASS" if not blockers else "NO_PROMOTABLE_CANDIDATES" if set(_dedupe(blockers)).issubset(promotion_only_blockers) and raw_candidate_count > 0 else EOD_STATUS_INPUT_CONTRACT_FAILED
     return {
         "schema_id": "eod_input_contract",
         "schema_version": "v1",
@@ -211,6 +231,9 @@ def validate_eod_input_contract_v1(
         "missing_artifacts": missing_artifacts,
         "candidate_input_path": candidate_input_path,
         "raw_candidate_absent_reason": raw_absent_reason,
+        "raw_candidate_status": _text(input_payload.get("raw_candidate_status")),
+        "raw_candidate_count": raw_candidate_count,
+        "report_candidate_count": len(supplied_candidates),
         "upstream_candidate_manifest_path": str(upstream_candidate_manifest_path),
         "upstream_candidate_manifest_exists": upstream_candidate_manifest_path.exists(),
         "promoted_sleeve_library_path": promoted_library_path,
@@ -278,6 +301,124 @@ def build_candidate_lineage_v1(
     }
     payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
     return payload
+
+
+def build_candidate_consumption_audit_v1(
+    *,
+    trading_date: str,
+    run_id: str,
+    created_at_utc: str,
+    raw_rows: list[dict[str, Any]],
+    consumed_candidates: list[dict[str, Any]],
+    promoted_sleeve_manifest: dict[str, Any],
+    certified_symbols: list[str],
+    certified_artifact_path: str,
+    input_contract: dict[str, Any],
+) -> dict[str, Any]:
+    consumed_ids = {_text(row.get("candidate_id")) for row in consumed_candidates if isinstance(row, dict)}
+    covered = {symbol.upper() for symbol in _strings(certified_symbols)}
+    manifest_status = _text(promoted_sleeve_manifest.get("manifest_status")).upper()
+    promoted_sleeves = promoted_sleeve_manifest.get("promoted_sleeves") if isinstance(promoted_sleeve_manifest.get("promoted_sleeves"), list) else []
+    promoted_sleeve_ids = {
+        _text(row.get("sleeve_id"))
+        for row in promoted_sleeves
+        if isinstance(row, dict) and _text(row.get("promotion_status")).lower() == "promoted"
+    }
+    rows: list[dict[str, Any]] = []
+    for idx, raw in enumerate(raw_rows, start=1):
+        if not isinstance(raw, dict):
+            continue
+        candidate_id = _text(raw.get("candidate_id")) or _text(raw.get("raw_intent_id")) or f"RAW_{idx:03d}"
+        symbol = _text(raw.get("symbol") or raw.get("symbol_or_pair")).upper()
+        sleeve_id = _text(raw.get("sleeve_id") or raw.get("engine_id"))
+        source_status = _text(raw.get("status") or raw.get("candidate_status") or raw.get("final_state")).upper()
+        raw_reasons = _dedupe([*_strings(raw.get("reason_codes")), *_strings(raw.get("block_reasons"))])
+        category, reason = _candidate_consumption_category_v1(
+            candidate_id=candidate_id,
+            symbol=symbol,
+            sleeve_id=sleeve_id,
+            source_status=source_status,
+            raw_reasons=raw_reasons,
+            consumed_ids=consumed_ids,
+            covered_symbols=covered,
+            manifest_status=manifest_status,
+            promoted_sleeve_ids=promoted_sleeve_ids,
+            certified_artifact_path=certified_artifact_path,
+        )
+        rows.append(
+            {
+                "candidate_id": candidate_id,
+                "symbol": symbol,
+                "sleeve_id": sleeve_id,
+                "source_status": source_status or "UNKNOWN",
+                "consumption_category": category,
+                "consumption_reason": reason,
+                "covered_by_certified_eod": bool(symbol and symbol in covered),
+                "promoted_sleeve_approved": bool(sleeve_id and sleeve_id in promoted_sleeve_ids),
+                "raw_reason_codes": raw_reasons,
+                "source_artifact_path": _text(raw.get("raw_intent_path") or raw.get("raw_candidate_artifact_path")),
+            }
+        )
+    counts: dict[str, int] = {}
+    for row in rows:
+        category = str(row.get("consumption_category") or "UNKNOWN")
+        counts[category] = counts.get(category, 0) + 1
+    payload = {
+        "schema_id": "candidate_consumption_audit",
+        "schema_version": "v1",
+        "artifact_id": "candidate_consumption_audit_v1",
+        "trading_date": trading_date,
+        "run_id": run_id,
+        "created_at_utc": created_at_utc,
+        "raw_candidate_count": len(rows),
+        "promoted_candidate_count": counts.get("PROMOTED", 0),
+        "excluded_candidate_count": len(rows) - counts.get("PROMOTED", 0),
+        "consumption_counts": dict(sorted(counts.items())),
+        "certified_universe_symbol_count": len(covered),
+        "certified_universe_symbols": sorted(covered),
+        "certified_artifact_path": certified_artifact_path,
+        "promotion_contract": {
+            "promoted_sleeve_manifest_status": manifest_status or "UNKNOWN",
+            "promoted_sleeve_count": int(promoted_sleeve_manifest.get("promoted_sleeve_count") or 0),
+            "promoted_sleeve_ids": sorted(promoted_sleeve_ids),
+            "input_contract_status": _text(input_contract.get("status")),
+            "input_contract_blockers": _strings(input_contract.get("blockers")),
+        },
+        "candidate_rows": rows,
+        "normal_no_op": bool(rows and counts.get("PROMOTED", 0) == 0 and set(_strings(input_contract.get("blockers"))).issubset({"NO_PROMOTABLE_CANDIDATES", "MISSING_PROMOTION_APPROVAL", "PROMOTED_SLEEVE_LIBRARY_REQUIRED", "PROMOTED_SLEEVE_MANIFEST_INEFFECTIVE"})),
+        "canonical_json_hash": None,
+    }
+    payload["canonical_json_hash"] = canonical_hash_for_c2_artifact_v1(payload)
+    return payload
+
+
+def _candidate_consumption_category_v1(
+    *,
+    candidate_id: str,
+    symbol: str,
+    sleeve_id: str,
+    source_status: str,
+    raw_reasons: list[str],
+    consumed_ids: set[str],
+    covered_symbols: set[str],
+    manifest_status: str,
+    promoted_sleeve_ids: set[str],
+    certified_artifact_path: str,
+) -> tuple[str, str]:
+    reason_set = {reason.upper() for reason in raw_reasons}
+    if candidate_id in consumed_ids:
+        return "PROMOTED", "Candidate passed promotion governance and was consumed by the EOD report."
+    if not certified_artifact_path:
+        return "EXCLUDED_MISSING_CERTIFIED_DATA", "No certified EOD artifact was available for candidate coverage validation."
+    if symbol and symbol not in covered_symbols:
+        return "EXCLUDED_UNCOVERED_SYMBOL", f"{symbol} is outside the certified EOD universe used by the report."
+    if source_status in {"NO_SIGNAL", "SUPPRESSED"} or reason_set.intersection({"NO_RAW_SIGNAL", "NO_INTENT_DECLARED", "ONE_PRIMARY_PER_REGIME_BUCKET_SUPPRESSED"}):
+        return "EXCLUDED_LOW_SCORE", "Raw candidate did not present a promotable signal for the EOD report."
+    if manifest_status != "EFFECTIVE":
+        return "EXCLUDED_POLICY", "No effective promoted sleeve manifest exists for EOD report promotion."
+    if sleeve_id and sleeve_id not in promoted_sleeve_ids:
+        return "EXCLUDED_POLICY", "Candidate sleeve is not present in the approved promoted sleeve manifest."
+    return "EXCLUDED_POLICY", "Candidate did not satisfy promotion policy for EOD report consumption."
 
 
 def build_synthetic_advisory_rows_v1(*, lineage: dict[str, Any], input_contract: dict[str, Any]) -> list[dict[str, Any]]:
@@ -370,6 +511,12 @@ def write_candidate_lineage_v1(*, truth_root: Path, payload: dict[str, Any]) -> 
     return _write_immutable_json(path, payload)
 
 
+def write_candidate_consumption_audit_v1(*, truth_root: Path, payload: dict[str, Any]) -> Path:
+    validate_against_repo_schema_v1(payload, REPO_ROOT, CANDIDATE_CONSUMPTION_AUDIT_SCHEMA)
+    path = candidate_consumption_audit_path_v1(truth_root=truth_root, trading_date=str(payload["trading_date"]), run_id=str(payload["run_id"]))
+    return _write_immutable_json(path, payload)
+
+
 def write_eod_run_manifest_v1(*, truth_root: Path, payload: dict[str, Any]) -> Path:
     validate_against_repo_schema_v1(payload, REPO_ROOT, EOD_RUN_MANIFEST_SCHEMA)
     path = eod_run_manifest_path_v1(truth_root=truth_root, trading_date=str(payload["trading_date"]), run_id=str(payload["run_id"]))
@@ -436,8 +583,19 @@ def _artifact_path(*, truth_root: Path, family: str, trading_date: str, run_id: 
 
 def _write_immutable_json(path: Path, payload: dict[str, Any]) -> Path:
     data = canonical_json_bytes_v1(payload) + b"\n"
-    if path.exists() and path.read_bytes() != data:
-        raise FileExistsError(f"REFUSE_OVERWRITE_EXISTING_ARTIFACT:{path}")
+    if path.exists():
+        if path.read_bytes() == data:
+            return path
+        content_hash = hashlib.sha256(data).hexdigest()[:16]
+        versioned_parent = path.parent.parent / f"{path.parent.name}__{content_hash}"
+        versioned_path = versioned_parent / path.name
+        if versioned_path.exists():
+            if versioned_path.read_bytes() == data:
+                return versioned_path
+            raise FileExistsError(f"REFUSE_OVERWRITE_EXISTING_ARTIFACT_VERSION_COLLISION:{versioned_path}")
+        versioned_path.parent.mkdir(parents=True, exist_ok=True)
+        versioned_path.write_bytes(data)
+        return versioned_path
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
     return path

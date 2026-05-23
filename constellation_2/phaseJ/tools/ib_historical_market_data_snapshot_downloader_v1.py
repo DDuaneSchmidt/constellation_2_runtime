@@ -27,6 +27,8 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from decimal import Decimal
+from statistics import median
 from typing import Dict, List, Optional, Tuple
 
 ISO_Z = "%Y-%m-%dT%H:%M:%SZ"
@@ -38,6 +40,16 @@ LEGACY_DEPRECATED_SYMBOL_SETS = {
     ("GLD", "IWM", "QQQ", "TLT"),
     ("GLD", "HYG", "IWM", "QQQ", "SPY", "TLT"),
 }
+DYNAMIC_SYMBOL_SOURCE = "market_data_snapshot_v1.dynamic_discovery"
+CANONICAL_DISCOVERY_SEED_SYMBOL_SOURCE = "canonical_universe_discovery_v1.accepted_symbols"
+DISCOVERY_HISTORY_DAYS_FLOOR = 45
+DYNAMIC_UNIVERSE_MIN_TARGET_FRACTION_NUMERATOR = 4
+DYNAMIC_UNIVERSE_MIN_TARGET_FRACTION_DENOMINATOR = 5
+
+
+def _minimum_required_dynamic_symbol_count(target_symbol_count: int) -> int:
+    target = int(target_symbol_count)
+    return (target * DYNAMIC_UNIVERSE_MIN_TARGET_FRACTION_NUMERATOR + DYNAMIC_UNIVERSE_MIN_TARGET_FRACTION_DENOMINATOR - 1) // DYNAMIC_UNIVERSE_MIN_TARGET_FRACTION_DENOMINATOR
 
 
 def _sha256_bytes(b: bytes) -> str:
@@ -53,7 +65,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _stable_json_dumps(obj: dict) -> str:
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return json.dumps(obj, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
 
 
 def _parse_run_utc_z(s: str) -> str:
@@ -91,6 +103,118 @@ def _normalize_symbols(values: List[str]) -> List[str]:
             if symbol:
                 symbols.append(symbol)
     return sorted(set(symbols))
+
+
+def _decimal(value: object) -> Decimal:
+    return Decimal(str(value).strip())
+
+
+def _select_dynamic_universe_symbols(
+    *,
+    day_utc: str,
+    candidate_symbols: List[str],
+    discovery_records_by_symbol: Dict[str, List[dict]],
+    lookback_sessions: int,
+    price_min: Decimal,
+    median_dollar_volume_min: Decimal,
+    target_symbol_count: int,
+) -> List[str]:
+    ranked: List[Tuple[Decimal, str]] = []
+    day = str(day_utc).strip()
+    for symbol in _normalize_symbols(candidate_symbols):
+        records = [
+            row
+            for row in discovery_records_by_symbol.get(symbol, [])
+            if str(row.get("timestamp_utc") or "")[:10] <= day
+        ]
+        records.sort(key=lambda row: str(row.get("timestamp_utc") or ""))
+        if len(records) < int(lookback_sessions):
+            continue
+        if str(records[-1].get("timestamp_utc") or "")[:10] != day:
+            continue
+        tail = records[-int(lookback_sessions):]
+        try:
+            latest_close = _decimal(tail[-1].get("close"))
+            dollar_volumes = [float(_decimal(row.get("close")) * _decimal(row.get("volume"))) for row in tail]
+            median_dollar_volume = Decimal(str(median(dollar_volumes)))
+        except Exception:
+            continue
+        if latest_close < price_min:
+            continue
+        if median_dollar_volume < median_dollar_volume_min:
+            continue
+        ranked.append((median_dollar_volume, symbol))
+    ranked.sort(key=lambda row: (-row[0], row[1]))
+    return [symbol for _, symbol in ranked[: int(target_symbol_count)]]
+
+
+def _records_for_symbol_from_manifest(*, truth_root: Path, manifest: dict, symbol: str, day_utc: str) -> List[dict]:
+    spine_root = (truth_root / "market_data_snapshot_v1").resolve()
+    out: List[dict] = []
+    for entry in manifest.get("files") if isinstance(manifest.get("files"), list) else []:
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("symbol") or "").strip().upper() != symbol.upper():
+            continue
+        rel = str(entry.get("file") or "").strip()
+        if not rel:
+            continue
+        path = (spine_root / rel).resolve()
+        if not str(path).startswith(str(spine_root)) or not path.exists():
+            continue
+        for row in _read_jsonl_records(path):
+            if str(row.get("symbol") or "").strip().upper() == symbol.upper() and str(row.get("timestamp_utc") or "")[:10] <= day_utc:
+                out.append(row)
+    out.sort(key=lambda row: str(row.get("timestamp_utc") or ""))
+    return out
+
+
+def _resolve_dynamic_discovery_symbols(
+    *,
+    truth_root: Path,
+    manifest: Optional[dict],
+    cli_symbols: List[str],
+    day_utc: str,
+    target_symbol_count: int,
+) -> Tuple[List[str], dict]:
+    if manifest is None:
+        raise SystemExit("FAIL: dynamic_universe_discovery_requires_existing_market_data_manifest")
+    manifest_symbols = _normalize_symbols(manifest.get("symbols") if isinstance(manifest.get("symbols"), list) else [])
+    if not manifest_symbols and isinstance(manifest.get("files"), list):
+        manifest_symbols = _normalize_symbols([entry.get("symbol") for entry in manifest.get("files", []) if isinstance(entry, dict)])
+    candidates = _normalize_symbols(manifest_symbols + list(cli_symbols or []))
+    if not candidates:
+        raise SystemExit("FAIL: dynamic_universe_discovery_no_candidate_symbols")
+    discovery_records = {
+        symbol: _records_for_symbol_from_manifest(truth_root=truth_root, manifest=manifest, symbol=symbol, day_utc=day_utc)
+        for symbol in candidates
+    }
+    selected = _select_dynamic_universe_symbols(
+        day_utc=day_utc,
+        candidate_symbols=candidates,
+        discovery_records_by_symbol=discovery_records,
+        lookback_sessions=5,
+        price_min=Decimal("10"),
+        median_dollar_volume_min=Decimal("20000000"),
+        target_symbol_count=target_symbol_count,
+    )
+    diagnostics = {
+        "symbol_source": DYNAMIC_SYMBOL_SOURCE,
+        "symbols_requested": selected,
+        "symbols_authoritative": candidates,
+        "deprecated_symbol_source_detected": False,
+        "affected_components": ["historical_market_data_backfill", "market_data_snapshot_v1", "ranked_symbol_universe_v1"],
+        "dynamic_discovery_day_utc": day_utc,
+        "dynamic_discovery_candidate_count": len(candidates),
+        "dynamic_discovery_selected_count": len(selected),
+    }
+    min_required = _minimum_required_dynamic_symbol_count(target_symbol_count)
+    if len(selected) < min_required:
+        raise SystemExit(
+            f"FAIL: UNIVERSE_BREADTH_FAILURE dynamic_universe_discovery_selected_count={len(selected)} "
+            f"target_symbol_count={int(target_symbol_count)} minimum_required={min_required}"
+        )
+    return selected, diagnostics
 
 
 def _authoritative_symbols_from_engine_registry(repo_root: Path) -> List[str]:
@@ -175,7 +299,7 @@ def _write_jsonl_immutable(path: Path, lines: List[str]) -> None:
 def _write_manifest(path: Path, manifest: dict) -> None:
     tmp = path.with_suffix(".tmp")
     with tmp.open("w", encoding="utf-8", newline="\n") as f:
-        f.write(json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False))
+        f.write(json.dumps(manifest, sort_keys=True, separators=(',', ':'), ensure_ascii=False))
         f.write("\n")
     os.replace(tmp, path)
 
@@ -399,6 +523,21 @@ def main() -> int:
     ap.add_argument("--client_id", type=int, default=7, help="IB clientId (default 7).")
     ap.add_argument("--sleep_sec", type=float, default=1.0, help="Sleep seconds between IB requests (default 1.0).")
     ap.add_argument("--use_rth", type=int, default=1, help="Use RTH only (1) or include extended hours (0). Default 1.")
+    ap.add_argument("--discover_dynamic_universe", action="store_true", help="Resolve a dynamic universe from current market_data_snapshot_v1 before refreshing.")
+    ap.add_argument("--discover_day_utc", default="", help="YYYY-MM-DD day used for dynamic universe selection.")
+    ap.add_argument("--discover_target_symbol_count", type=int, default=200, help="Maximum dynamic universe symbol count.")
+    ap.add_argument("--discover_rows_per_query", type=int, default=50, help="Reserved deterministic discovery batch size; accepted for orchestrator compatibility.")
+    ap.add_argument(
+        "--allow_symbol_rejections",
+        action="store_true",
+        help="For governed broad discovery refreshes, reject per-symbol feed failures and continue if breadth remains above --minimum_successful_symbols.",
+    )
+    ap.add_argument(
+        "--minimum_successful_symbols",
+        type=int,
+        default=0,
+        help="Minimum refreshed symbols required when --allow_symbol_rejections is set.",
+    )
     args = ap.parse_args()
 
     repo_root = Path(__file__).resolve().parents[3]
@@ -411,7 +550,8 @@ def main() -> int:
     if not dataset_version:
         raise SystemExit("FAIL: --dataset_version must be non-empty")
 
-    symbols, symbol_diagnostics = _resolve_requested_symbols(repo_root, args.symbol, args.symbols)
+    symbols: List[str] = []
+    symbol_diagnostics: dict = {}
 
     if args.start_year > args.end_year:
         raise SystemExit("FAIL: --start_year must be <= --end_year")
@@ -419,8 +559,6 @@ def main() -> int:
     print(f"OK: repo_root={repo_root}")
     print(f"OK: truth_root={truth_root}")
     print(f"OK: spine_root={spine_root}")
-    print(f"OK: symbol_resolution={json.dumps(symbol_diagnostics, sort_keys=True, separators=(',', ':'))}")
-    print(f"OK: symbols={symbols}")
     print(f"OK: years={args.start_year}..{args.end_year}")
     print(f"OK: run_utc={run_utc}")
 
@@ -445,6 +583,27 @@ def main() -> int:
             "created_utc": run_utc,
         }
         print("OK: existing_manifest_present=0 (will create)")
+
+    cli_symbols_for_discovery = _normalize_symbols(list(args.symbol or []) + [args.symbols or ""])
+    if bool(args.discover_dynamic_universe):
+        discover_day = str(args.discover_day_utc or "").strip() or run_utc[:10]
+        symbols, symbol_diagnostics = _resolve_dynamic_discovery_symbols(
+            truth_root=truth_root,
+            manifest=manifest,
+            cli_symbols=cli_symbols_for_discovery,
+            day_utc=discover_day,
+            target_symbol_count=int(args.discover_target_symbol_count),
+        )
+    else:
+        symbols, symbol_diagnostics = _resolve_requested_symbols(repo_root, args.symbol, args.symbols)
+        if bool(args.allow_symbol_rejections):
+            symbol_diagnostics = _symbol_resolution_diagnostics(
+                symbol_source=CANONICAL_DISCOVERY_SEED_SYMBOL_SOURCE,
+                symbols_requested=symbols,
+                symbols_authoritative=symbols,
+            )
+    print(f"OK: symbol_resolution={json.dumps(symbol_diagnostics, sort_keys=True, separators=(',', ':'))}")
+    print(f"OK: symbols={symbols}")
 
     # Build lookup for existing manifest entries
     existing_keys: set[Tuple[str, int]] = set()
@@ -477,15 +636,27 @@ def main() -> int:
     currency = "USD"
     use_rth = int(args.use_rth)
 
+    rejected_symbols: List[dict] = []
+    successful_symbols: set[str] = set()
+
     for sym in symbols:
         contract = Stock(sym, exchange, currency)
         try:
             q = ib.qualifyContracts(contract)
         except Exception as e:
+            if bool(args.allow_symbol_rejections):
+                rejected_symbols.append({"symbol": sym, "reason": "qualifyContracts_failed", "detail": repr(e)})
+                print(f"REJECT: symbol={sym} reason=qualifyContracts_failed detail={e!r}")
+                continue
             raise SystemExit(f"FAIL: qualifyContracts_failed symbol={sym}: {e!r}")
         if not q:
+            if bool(args.allow_symbol_rejections):
+                rejected_symbols.append({"symbol": sym, "reason": "qualifyContracts_empty_result", "detail": "empty_result"})
+                print(f"REJECT: symbol={sym} reason=qualifyContracts_empty_result")
+                continue
             raise SystemExit(f"FAIL: qualifyContracts_failed symbol={sym}: empty_result")
 
+        symbol_failed = False
         for year in range(int(args.start_year), int(args.end_year) + 1):
             key = (sym, int(year))
             out_rel = f"{sym}/{year}.jsonl"
@@ -531,9 +702,19 @@ def main() -> int:
                     keepUpToDate=False,
                 )
             except Exception as e:
+                if bool(args.allow_symbol_rejections):
+                    rejected_symbols.append({"symbol": sym, "reason": "reqHistoricalData_failed", "year": int(year), "detail": repr(e)})
+                    print(f"REJECT: symbol={sym} year={year} reason=reqHistoricalData_failed detail={e!r}")
+                    symbol_failed = True
+                    break
                 raise SystemExit(f"FAIL: reqHistoricalData_failed symbol={sym} year={year}: {e!r}")
 
             if not bars:
+                if bool(args.allow_symbol_rejections):
+                    rejected_symbols.append({"symbol": sym, "reason": "no_bars_returned", "year": int(year), "detail": "empty_bars"})
+                    print(f"REJECT: symbol={sym} year={year} reason=no_bars_returned")
+                    symbol_failed = True
+                    break
                 raise SystemExit(f"FAIL: no_bars_returned symbol={sym} year={year}")
 
             # Normalize bars into daily records
@@ -587,7 +768,11 @@ def main() -> int:
             sha = _sha256_file(out_path)
 
             new_entries.append({"symbol": sym, "year": int(year), "file": out_rel, "sha256": sha})
+            successful_symbols.add(sym)
             print(f"OK: market_data_year_file action={action} symbol={sym} year={year} appended={appended} path={out_path} sha256={sha}")
+
+        if symbol_failed:
+            continue
 
     try:
         ib.disconnect()
@@ -603,6 +788,19 @@ def main() -> int:
 
     merged_files_sorted = sorted(merged_files_map.values(), key=lambda e: (e["symbol"], int(e["year"])))
     symbols_sorted = sorted({e["symbol"] for e in merged_files_sorted})
+    requested_symbols_set = set(_normalize_symbols(symbols))
+    refreshed_symbols_sorted = sorted({e["symbol"] for e in new_entries})
+
+    if bool(args.allow_symbol_rejections):
+        min_successful = int(args.minimum_successful_symbols or 0)
+        if min_successful <= 0 and bool(args.discover_dynamic_universe):
+            min_successful = _minimum_required_dynamic_symbol_count(int(args.discover_target_symbol_count))
+        if min_successful > 0 and len(refreshed_symbols_sorted) < min_successful:
+            raise SystemExit(
+                f"FAIL: UNIVERSE_BREADTH_FAILURE refreshed_symbol_count={len(refreshed_symbols_sorted)} "
+                f"requested_symbol_count={len(requested_symbols_set)} minimum_successful_symbols={min_successful} "
+                f"rejected_symbol_count={len(rejected_symbols)}"
+            )
 
     # Derive date_range and verify sha for every referenced file
     all_days: List[str] = []
@@ -636,6 +834,24 @@ def main() -> int:
         "created_utc": manifest.get("created_utc") or run_utc,
         "source_snapshot_utc": run_utc,
     }
+    if bool(args.allow_symbol_rejections):
+        manifest_out["symbol_rejection_policy"] = {
+            "allow_symbol_rejections": True,
+            "minimum_successful_symbols": int(args.minimum_successful_symbols or 0),
+            "requested_symbol_count": len(requested_symbols_set),
+            "refreshed_symbol_count": len(refreshed_symbols_sorted),
+            "rejected_symbol_count": len(rejected_symbols),
+            "rejected_symbols": rejected_symbols,
+        }
+
+    if bool(args.discover_dynamic_universe):
+        min_required_manifest = _minimum_required_dynamic_symbol_count(int(args.discover_target_symbol_count))
+        if len(symbols_sorted) < min_required_manifest:
+            raise SystemExit(
+                f"FAIL: UNIVERSE_BREADTH_FAILURE refusing_to_write_narrow_dynamic_manifest "
+                f"symbol_count={len(symbols_sorted)} target_symbol_count={int(args.discover_target_symbol_count)} "
+                f"minimum_required={min_required_manifest}"
+            )
 
     # Validate output manifest by the same verifier rules (fail-closed) before write.
     # (This ensures our computed global_hash is consistent with file list.)
@@ -645,6 +861,20 @@ def main() -> int:
 
     print(f"OK: wrote_manifest={manifest_path}")
     print(f"OK: symbols_in_manifest={manifest_out['symbols']}")
+    if bool(args.allow_symbol_rejections):
+        print(
+            "OK: symbol_rejections="
+            + json.dumps(
+                {
+                    "requested_symbol_count": len(requested_symbols_set),
+                    "refreshed_symbol_count": len(refreshed_symbols_sorted),
+                    "rejected_symbol_count": len(rejected_symbols),
+                    "rejected_symbols": rejected_symbols,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
     print(f"OK: global_hash={manifest_out['global_hash']}")
     print("OK: done=1")
     return 0

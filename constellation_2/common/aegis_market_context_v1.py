@@ -209,6 +209,15 @@ def build_event_market_snapshot_v1(
         "assets_affected": ["SPY", "QQQ"],
         "data_snapshot_refs": _strings(data.get("data_snapshot_refs")) or [f"event_market_snapshot_v1:{day_utc}"],
         "source_lineage": sorted(source_lineage or _objects(data.get("source_lineage")), key=lambda row: (str(row.get("artifact_type") or ""), str(row.get("path") or ""))),
+        "market_data_status": str(data.get("market_data_status") or data.get("status") or "UNKNOWN"),
+        "missing_fields": _strings(data.get("missing_fields")),
+        "stale_fields": _strings(data.get("stale_fields")),
+        "usable_for_candidate_generation": bool(data.get("usable_for_candidate_generation", False)),
+        "source_hashes": data.get("source_hashes") if isinstance(data.get("source_hashes"), dict) else {},
+        "provider_statuses": data.get("provider_statuses") if isinstance(data.get("provider_statuses"), list) else [],
+        "global_context_status": data.get("global_context_status") if isinstance(data.get("global_context_status"), dict) else {},
+        "per_symbol_status": data.get("per_symbol_status") if isinstance(data.get("per_symbol_status"), dict) else _per_symbol_status(data),
+        "breadth_status": data.get("breadth_status") if isinstance(data.get("breadth_status"), dict) else {"freshness_status": str((data.get("breadth") if isinstance(data.get("breadth"), dict) else {}).get("freshness_status") or "UNKNOWN")},
         "manual_execution_only": True,
         "broker_submit_required": False,
         "canonical_eod_state_mutated": False,
@@ -283,6 +292,20 @@ def _instrument(symbol: str, data: dict[str, Any]) -> dict[str, str]:
         "price": _fmt(price),
         "prev_close": _fmt(prev_close),
         "return_pct": _fmt(return_pct),
+    }
+
+
+def _per_symbol_status(data: dict[str, Any]) -> dict[str, Any]:
+    symbols = data.get("symbols") if isinstance(data.get("symbols"), dict) else {}
+    return {
+        str(symbol): {
+            "freshness_status": row.get("freshness_status"),
+            "market_session_date": row.get("market_session_date"),
+            "provider": row.get("provider") or row.get("source"),
+            "data_timestamp_utc": row.get("data_timestamp_utc"),
+        }
+        for symbol, row in symbols.items()
+        if isinstance(row, dict)
     }
 
 
@@ -389,8 +412,6 @@ def _missing_inputs(*, spy: dict[str, str], qqq: dict[str, str], vix: dict[str, 
         "qqq_return_pct": qqq.get("return_pct"),
         "vix_level": volatility.get("vix_level"),
         "vix_change_pct": volatility.get("vix_change_pct"),
-        "breadth_down_pct": breadth.get("breadth_down_pct"),
-        "advance_decline_delta": breadth.get("advance_decline_delta"),
         "spy_20d_return_pct": trend.get("spy_20d_return_pct"),
         "spy_above_50dma": trend.get("spy_above_50dma"),
     }
@@ -409,6 +430,11 @@ def _stale_status(*, data: dict[str, Any], generated_at_utc: str, missing: list[
     parsed_generated = _parse_utc(generated_at_utc)
     if parsed_source is None or parsed_generated is None:
         return ("STALE" if not missing else base, sorted(set([*reasons, "MARKET_CONTEXT_TIMESTAMP_UNPARSEABLE"])))
+    source_day = source_ts[:10]
+    context_day = str(data.get("day_utc") or "")[:10]
+    market_data_mode = str(data.get("market_data_mode") or "").strip().upper()
+    if not missing and market_data_mode == "FINAL_EOD_CERTIFIED" and source_day and source_day == context_day:
+        return "FRESH", sorted(set(reasons))
     age_minutes = (parsed_generated - parsed_source).total_seconds() / 60
     if age_minutes > SNAPSHOT_STALE_AFTER_MINUTES:
         return "STALE", sorted(set([*reasons, "MARKET_CONTEXT_SOURCE_STALE"]))

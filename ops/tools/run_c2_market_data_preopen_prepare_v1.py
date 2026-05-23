@@ -8,12 +8,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from constellation_2.common.engine_universe_v1 import EngineUniverseError, resolve_engine_candidate_basis
 from constellation_2.common.runtime_contract_v1 import resolve_canonical_truth_root
 
 
-REPO_ROOT = Path("/home/node/constellation_2_runtime").resolve()
+REPO_ROOT = Path(__file__).resolve().parents[2]
 GLOBAL_TRUTH_ROOT = resolve_canonical_truth_root().resolve()
+ENGINE_REGISTRY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/ENGINE_MODEL_REGISTRY_V1.json").resolve()
 POLICY_REGISTRY_PATH = (REPO_ROOT / "governance/02_REGISTRIES/ENGINE_UNIVERSE_POLICY_V1.json").resolve()
 ALLOWED_SYMBOL_SOURCE_CLASSES = {"DYNAMIC_SAME_DAY", "GOVERNED_CURATED", "FIXED_STRUCTURAL"}
 
@@ -71,6 +76,23 @@ def _policy_rows() -> Dict[str, Dict[str, Any]]:
         if engine_id:
             out[engine_id] = policy
     return out
+
+
+def active_controllable_runtime_engine_ids_for_sleeve(*, sleeve_id: str, mode: str) -> List[str]:
+    registry = _read_json(ENGINE_REGISTRY_PATH)
+    engines = registry.get("engines")
+    if not isinstance(engines, list):
+        raise SystemExit("FAIL: engine registry engines not list")
+    out: List[str] = []
+    for row in engines:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("activation_status") or "").strip().upper() != "ACTIVE":
+            continue
+        engine_id = str(row.get("engine_id") or "").strip().upper()
+        if engine_id:
+            out.append(engine_id)
+    return sorted(set(out))
 
 
 def _curated_symbols_for_engine(policy: Dict[str, Any]) -> List[str]:
@@ -264,6 +286,10 @@ def main() -> int:
         if str(engine_id).strip()
     ]
     fallback_engines = sorted(fallback_basis_by_engine.keys())
+    candidate_basis_blocker_reason_codes = ["RANKED_ENGINE_CANDIDATE_BASIS_UNAVAILABLE"]
+    if any("UNIVERSE_BREADTH_FAILURE" in str(row.get("reason_code") or "") for row in (candidate_basis_result.get("results") or []) if isinstance(row, dict)):
+        candidate_basis_blocker_reason_codes.append("UNIVERSE_BREADTH_FAILURE")
+
     inactive_engine_ids_due_to_missing_candidate_basis = sorted(set(candidate_basis_failures) - set(fallback_engines))
 
     ranked_candidate_symbols_by_engine: Dict[str, List[str]] = {}
@@ -348,7 +374,7 @@ def main() -> int:
             "candidate_basis_result": candidate_basis_result,
             "symbols_requested": [],
             "status": "FAIL",
-            "reason_codes": ["RANKED_ENGINE_CANDIDATE_BASIS_UNAVAILABLE"],
+            "reason_codes": candidate_basis_blocker_reason_codes,
         }
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 2
@@ -390,7 +416,7 @@ def main() -> int:
                 "candidate_basis_result": candidate_basis_result,
                 "symbols_requested": [],
                 "status": "FAIL",
-                "reason_codes": ["RANKED_ENGINE_CANDIDATE_BASIS_UNAVAILABLE"],
+                "reason_codes": candidate_basis_blocker_reason_codes,
             }
             print(json.dumps(payload, indent=2, sort_keys=True))
             return 2
