@@ -1,0 +1,64 @@
+selection_policy: Packet 31 expanded research universe for sector_research_v1.
+source_notes: >
+  Research data expansion only. Universe membership does not imply data availability, trading permission, or investment recommendation.
+symbols:
+  - symbol: SPY
+    asset_type: ETF
+    category: core_index
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for core_index.
+  - symbol: RSP
+    asset_type: ETF
+    category: equal_weight
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for equal_weight.
+  - symbol: XLF
+    asset_type: ETF
+    category: sector_financials
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for sector_financials.
+  - symbol: XLK
+    asset_type: ETF
+    category: sector_technology
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for sector_technology.
+  - symbol: XLE
+    asset_type: ETF
+    category: sector_energy
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for sector_energy.
+  - symbol: XLV
+    asset_type: ETF
+    category: sector_healthcare
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for sector_healthcare.
+  - symbol: XLY
+    asset_type: ETF
+    category: sector_discretionary
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for sector_discretionary.
+  - symbol: XLP
+    asset_type: ETF
+    category: sector_staples
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for sector_staples.
+  - symbol: XLI
+    asset_type: ETF
+    category: sector_industrials
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for sector_industrials.
+  - symbol: XLU
+    asset_type: ETF
+    category: sector_utilities
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for sector_utilities.

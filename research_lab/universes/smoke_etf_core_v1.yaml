@@ -1,0 +1,7 @@
+created_by: Aegis
+selection_policy: "Small live smoke-test ETF universe for validating Research Lab OHLCV ingestion."
+source_notes: "Smoke universe for runtime validation only; not a research production universe."
+symbols:
+  - {symbol: SPY, asset_type: ETF, category: equity_index, active: true, min_start_date: "1993-01-29", notes: "S&P 500 ETF."}
+  - {symbol: QQQ, asset_type: ETF, category: equity_index, active: true, min_start_date: "1999-03-10", notes: "Nasdaq 100 ETF."}
+  - {symbol: IWM, asset_type: ETF, category: equity_index, active: true, min_start_date: "2000-05-22", notes: "Russell 2000 ETF."}

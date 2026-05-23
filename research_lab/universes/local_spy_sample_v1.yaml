@@ -1,0 +1,5 @@
+created_by: Aegis
+selection_policy: "Single-symbol local CSV smoke universe using existing user-supplied SPY.csv."
+source_notes: "Used to validate immutable local_csv OHLCV snapshot creation from local files without live provider access."
+symbols:
+  - {symbol: SPY, asset_type: ETF, category: equity_index, active: true, min_start_date: "1993-01-29", notes: "S&P 500 ETF; local CSV source expected from LOCAL_CSV_OHLCV_ROOT."}

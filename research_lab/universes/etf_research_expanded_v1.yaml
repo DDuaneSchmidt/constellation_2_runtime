@@ -1,0 +1,154 @@
+selection_policy: Packet 31 expanded research universe for etf_research_expanded_v1.
+source_notes: >
+  Research data expansion only. Universe membership does not imply data availability, trading permission, or investment recommendation.
+symbols:
+  - symbol: SPY
+    asset_type: ETF
+    category: core_index
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for core_index.
+  - symbol: QQQ
+    asset_type: ETF
+    category: growth_index
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for growth_index.
+  - symbol: IWM
+    asset_type: ETF
+    category: small_cap
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for small_cap.
+  - symbol: RSP
+    asset_type: ETF
+    category: equal_weight
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for equal_weight.
+  - symbol: DIA
+    asset_type: ETF
+    category: large_cap
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for large_cap.
+  - symbol: TLT
+    asset_type: ETF
+    category: rates_duration
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for rates_duration.
+  - symbol: IEF
+    asset_type: ETF
+    category: rates_intermediate
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for rates_intermediate.
+  - symbol: SHY
+    asset_type: ETF
+    category: rates_short
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for rates_short.
+  - symbol: HYG
+    asset_type: ETF
+    category: credit_high_yield
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for credit_high_yield.
+  - symbol: LQD
+    asset_type: ETF
+    category: credit_investment_grade
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for credit_investment_grade.
+  - symbol: GLD
+    asset_type: ETF
+    category: commodity_gold
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for commodity_gold.
+  - symbol: USO
+    asset_type: ETF
+    category: commodity_oil
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for commodity_oil.
+  - symbol: DBC
+    asset_type: ETF
+    category: commodity_basket
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for commodity_basket.
+  - symbol: XLE
+    asset_type: ETF
+    category: sector_energy
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for sector_energy.
+  - symbol: XOP
+    asset_type: ETF
+    category: sector_energy_exploration
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for sector_energy_exploration.
+  - symbol: XLF
+    asset_type: ETF
+    category: sector_financials
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for sector_financials.
+  - symbol: XLK
+    asset_type: ETF
+    category: sector_technology
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for sector_technology.
+  - symbol: XLV
+    asset_type: ETF
+    category: sector_healthcare
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for sector_healthcare.
+  - symbol: XLY
+    asset_type: ETF
+    category: sector_discretionary
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for sector_discretionary.
+  - symbol: XLP
+    asset_type: ETF
+    category: sector_staples
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for sector_staples.
+  - symbol: XLI
+    asset_type: ETF
+    category: sector_industrials
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for sector_industrials.
+  - symbol: XLU
+    asset_type: ETF
+    category: sector_utilities
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for sector_utilities.
+  - symbol: VIXY
+    asset_type: ETF
+    category: volatility
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for volatility.
+  - symbol: VXX
+    asset_type: ETF
+    category: volatility
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for volatility.
+  - symbol: SVXY
+    asset_type: ETF
+    category: inverse_volatility
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for inverse_volatility.

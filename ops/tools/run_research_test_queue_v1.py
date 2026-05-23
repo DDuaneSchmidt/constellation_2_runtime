@@ -15,6 +15,9 @@ from constellation_2.research_lab.ai_hypothesis_batch_v1 import (
     queue_all_validated_without_test_v1,
     queue_edge_hypothesis_v1,
 )
+from constellation_2.common.aegis_research_lab_v1 import build_research_task_queue_v1
+from constellation_2.phaseD.lib.canon_json_v1 import canonical_json_bytes_v1
+from ops.aegis.event_append_transaction_v1 import canonical_payload_hash_v1, emit_artifact_evidence_transaction_v1
 
 
 def _read_json(path: Path) -> dict:
@@ -31,6 +34,9 @@ def main() -> int:
             "Supports --idea_id or --all_validated_without_test; does not run sandbox tests."
         )
     )
+    ap.add_argument("--truth_root", default="", help="Write canonical explicit research_task_queue evidence under this truth root")
+    ap.add_argument("--day_utc", default="", help="Canonical day for explicit research_task_queue evidence")
+    ap.add_argument("--generated_at_utc", default="2026-05-15T20:55:00Z", help="Deterministic timestamp for explicit evidence mode")
     ap.add_argument("--idea_id", default="", help="Queue one validated idea by idea_id")
     ap.add_argument(
         "--all_validated_without_test",
@@ -44,7 +50,35 @@ def main() -> int:
     )
     args = ap.parse_args()
 
+    explicit_evidence_mode = bool(str(args.truth_root).strip()) or bool(str(args.day_utc).strip())
     requested = [bool(str(args.idea_id).strip()), bool(args.all_validated_without_test), bool(str(args.idea_json).strip())]
+    if explicit_evidence_mode and not any(requested):
+        if not str(args.truth_root).strip() or not str(args.day_utc).strip():
+            raise SystemExit("FAIL: --truth_root and --day_utc are required together")
+        root = Path(args.truth_root).expanduser().resolve()
+        day = str(args.day_utc).strip()
+        queue = build_research_task_queue_v1(generated_at_utc=str(args.generated_at_utc), tasks=[])
+        path = root / "research_lab" / "research_task_queue_v1" / day / "index" / "research_task_queue.v1.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(canonical_json_bytes_v1(queue) + b"\n")
+        events = emit_artifact_evidence_transaction_v1(
+            truth_root=root,
+            day_utc=day,
+            artifact_path=path,
+            payload=queue,
+            producer_id="ops/tools/run_research_test_queue_v1.py",
+            producer_version="v1",
+            run_id=f"run_research_test_queue_v1:{day}",
+            created_at_utc=str(args.generated_at_utc),
+            input_hashes={
+                "queue_intent_hash": canonical_payload_hash_v1({"day_utc": day, "empty_queue_intentionally_generated": True}),
+                "item_count": "0",
+                "blocked_count": "0",
+            },
+            validation_status="VALID",
+        )
+        print(json.dumps({"path": str(path), "item_count": 0, "blocked_count": 0, "empty_queue_intentionally_generated": True, "event_ids": [str(row.get("event", {}).get("event_id") or "") for row in events]}, sort_keys=True))
+        return 0
     if sum(1 for item in requested if item) != 1:
         raise SystemExit("FAIL: select exactly one mode: --idea_id or --all_validated_without_test or --idea_json")
 

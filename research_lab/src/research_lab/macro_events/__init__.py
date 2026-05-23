@@ -1,0 +1,1 @@
+from research_lab.macro_events.macro_event_loader import import_macro_event_calendar

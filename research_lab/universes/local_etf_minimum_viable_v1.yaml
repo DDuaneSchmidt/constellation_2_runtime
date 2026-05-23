@@ -1,0 +1,36 @@
+selection_policy: Minimum viable local ETF universe for first practical event-study dataset.
+source_notes: >
+  Intentionally small Packet 4C bootstrap universe. The operator can obtain
+  these five CSVs quickly; workflows require at least three valid symbols to
+  build the first practical multi-symbol DatasetSnapshot.
+symbols:
+  - symbol: SPY
+    asset_type: ETF
+    category: core_index
+    active: true
+    min_start_date: "2015-01-01"
+    notes: S&P 500 ETF.
+  - symbol: QQQ
+    asset_type: ETF
+    category: growth_index
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Nasdaq 100 ETF.
+  - symbol: IWM
+    asset_type: ETF
+    category: small_cap
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Russell 2000 ETF.
+  - symbol: TLT
+    asset_type: ETF
+    category: rates_duration
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Long-duration Treasury ETF.
+  - symbol: GLD
+    asset_type: ETF
+    category: commodity_gold
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Gold ETF.

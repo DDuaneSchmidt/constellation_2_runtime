@@ -1,0 +1,138 @@
+selection_policy: Local daily OHLCV research universe for ETF event-study snapshots.
+source_notes: >
+  Packet 4 starter universe. Research Store builds may use --allow-missing-symbols
+  when only a subset of local CSV files is present. Missing symbols must be
+  reported explicitly in manifest, quality, and coverage reports.
+symbols:
+  - symbol: SPY
+    asset_type: ETF
+    category: US_EQUITY_BROAD
+    active: true
+    min_start_date: "2015-01-01"
+    notes: S&P 500 ETF.
+  - symbol: QQQ
+    asset_type: ETF
+    category: US_EQUITY_GROWTH
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Nasdaq 100 ETF.
+  - symbol: IWM
+    asset_type: ETF
+    category: US_EQUITY_SMALL_CAP
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Russell 2000 ETF.
+  - symbol: DIA
+    asset_type: ETF
+    category: US_EQUITY_BROAD
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Dow Jones Industrial Average ETF.
+  - symbol: VTI
+    asset_type: ETF
+    category: US_EQUITY_BROAD
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Total US stock market ETF.
+  - symbol: XLF
+    asset_type: ETF
+    category: US_EQUITY_SECTOR
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Financial sector ETF.
+  - symbol: XLK
+    asset_type: ETF
+    category: US_EQUITY_SECTOR
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Technology sector ETF.
+  - symbol: XLE
+    asset_type: ETF
+    category: US_EQUITY_SECTOR
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Energy sector ETF.
+  - symbol: XLV
+    asset_type: ETF
+    category: US_EQUITY_SECTOR
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Health care sector ETF.
+  - symbol: XLY
+    asset_type: ETF
+    category: US_EQUITY_SECTOR
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Consumer discretionary sector ETF.
+  - symbol: XLP
+    asset_type: ETF
+    category: US_EQUITY_SECTOR
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Consumer staples sector ETF.
+  - symbol: XLU
+    asset_type: ETF
+    category: US_EQUITY_SECTOR
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Utilities sector ETF.
+  - symbol: XLI
+    asset_type: ETF
+    category: US_EQUITY_SECTOR
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Industrials sector ETF.
+  - symbol: TLT
+    asset_type: ETF
+    category: FIXED_INCOME
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Long-duration Treasury ETF.
+  - symbol: IEF
+    asset_type: ETF
+    category: FIXED_INCOME
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Intermediate Treasury ETF.
+  - symbol: SHY
+    asset_type: ETF
+    category: FIXED_INCOME
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Short Treasury ETF.
+  - symbol: HYG
+    asset_type: ETF
+    category: CREDIT
+    active: true
+    min_start_date: "2015-01-01"
+    notes: High-yield corporate bond ETF.
+  - symbol: LQD
+    asset_type: ETF
+    category: CREDIT
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Investment-grade corporate bond ETF.
+  - symbol: GLD
+    asset_type: ETF
+    category: COMMODITY
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Gold ETF.
+  - symbol: SLV
+    asset_type: ETF
+    category: COMMODITY
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Silver ETF.
+  - symbol: EFA
+    asset_type: ETF
+    category: INTERNATIONAL_EQUITY
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Developed ex-US equity ETF.
+  - symbol: EEM
+    asset_type: ETF
+    category: INTERNATIONAL_EQUITY
+    active: true
+    min_start_date: "2015-01-01"
+    notes: Emerging markets equity ETF.

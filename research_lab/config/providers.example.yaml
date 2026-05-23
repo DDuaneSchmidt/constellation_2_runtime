@@ -1,0 +1,13 @@
+providers:
+  alpha_vantage:
+    enabled: true
+    api_key_env: ALPHA_VANTAGE_API_KEY
+    bar_policy: bp_daily_ohlcv_alpha_vantage_v1
+  tiingo:
+    enabled: true
+    api_key_env: TIINGO_API_KEY
+    bar_policy: bp_daily_ohlcv_tiingo_v1
+  eodhd:
+    enabled: false
+    api_key_env: EODHD_API_KEY
+    bar_policy: bp_daily_ohlcv_eodhd_v1

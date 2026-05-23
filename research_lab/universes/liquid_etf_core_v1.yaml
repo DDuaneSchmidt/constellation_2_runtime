@@ -1,0 +1,50 @@
+created_by: Aegis
+selection_policy: >
+  Starter liquid ETF research universe for daily OHLCV research snapshots. This
+  file defines universe membership only; provider ingestion and listing-date
+  verification are packet 2+ responsibilities.
+source_notes: >
+  Not a canonical market-data source. Minimum start dates are metadata hints for
+  planning and must be validated against provider data before production research.
+symbols:
+  - {symbol: SPY, asset_type: ETF, category: equity_index, active: true, min_start_date: "1993-01-29", notes: "S&P 500 ETF."}
+  - {symbol: QQQ, asset_type: ETF, category: equity_index, active: true, min_start_date: "1999-03-10", notes: "Nasdaq 100 ETF."}
+  - {symbol: DIA, asset_type: ETF, category: equity_index, active: true, min_start_date: "1998-01-14", notes: "Dow Jones Industrial Average ETF."}
+  - {symbol: IWM, asset_type: ETF, category: equity_index, active: true, min_start_date: "2000-05-22", notes: "Russell 2000 ETF."}
+  - {symbol: VTI, asset_type: ETF, category: equity_index, active: true, min_start_date: "2001-05-24", notes: "Total US market ETF."}
+  - {symbol: RSP, asset_type: ETF, category: equity_index, active: true, min_start_date: "2003-04-24", notes: "Equal-weight S&P 500 ETF."}
+  - {symbol: XLB, asset_type: ETF, category: sector, active: true, min_start_date: "1998-12-16", notes: "Materials sector ETF."}
+  - {symbol: XLE, asset_type: ETF, category: sector, active: true, min_start_date: "1998-12-16", notes: "Energy sector ETF."}
+  - {symbol: XLF, asset_type: ETF, category: sector, active: true, min_start_date: "1998-12-16", notes: "Financials sector ETF."}
+  - {symbol: XLI, asset_type: ETF, category: sector, active: true, min_start_date: "1998-12-16", notes: "Industrials sector ETF."}
+  - {symbol: XLK, asset_type: ETF, category: sector, active: true, min_start_date: "1998-12-16", notes: "Technology sector ETF."}
+  - {symbol: XLP, asset_type: ETF, category: sector, active: true, min_start_date: "1998-12-16", notes: "Consumer staples sector ETF."}
+  - {symbol: XLU, asset_type: ETF, category: sector, active: true, min_start_date: "1998-12-16", notes: "Utilities sector ETF."}
+  - {symbol: XLV, asset_type: ETF, category: sector, active: true, min_start_date: "1998-12-16", notes: "Health care sector ETF."}
+  - {symbol: XLY, asset_type: ETF, category: sector, active: true, min_start_date: "1998-12-16", notes: "Consumer discretionary sector ETF."}
+  - {symbol: XLRE, asset_type: ETF, category: sector, active: true, min_start_date: "2015-10-08", notes: "Real estate sector ETF."}
+  - {symbol: XLC, asset_type: ETF, category: sector, active: true, min_start_date: "2018-06-18", notes: "Communication services sector ETF."}
+  - {symbol: TLT, asset_type: ETF, category: rates, active: true, min_start_date: "2002-07-22", notes: "Long Treasury ETF."}
+  - {symbol: IEF, asset_type: ETF, category: rates, active: true, min_start_date: "2002-07-22", notes: "Intermediate Treasury ETF."}
+  - {symbol: SHY, asset_type: ETF, category: rates, active: true, min_start_date: "2002-07-22", notes: "Short Treasury ETF."}
+  - {symbol: BIL, asset_type: ETF, category: rates, active: true, min_start_date: "2007-05-25", notes: "Treasury bill ETF."}
+  - {symbol: HYG, asset_type: ETF, category: credit, active: true, min_start_date: "2007-04-11", notes: "High-yield corporate bond ETF."}
+  - {symbol: LQD, asset_type: ETF, category: credit, active: true, min_start_date: "2002-07-22", notes: "Investment-grade corporate bond ETF."}
+  - {symbol: JNK, asset_type: ETF, category: credit, active: true, min_start_date: "2007-11-28", notes: "High-yield corporate bond ETF."}
+  - {symbol: GLD, asset_type: ETF, category: commodity, active: true, min_start_date: "2004-11-18", notes: "Gold ETF."}
+  - {symbol: SLV, asset_type: ETF, category: commodity, active: true, min_start_date: "2006-04-21", notes: "Silver ETF."}
+  - {symbol: USO, asset_type: ETF, category: commodity, active: true, min_start_date: "2006-04-10", notes: "Oil ETF."}
+  - {symbol: DBC, asset_type: ETF, category: commodity, active: true, min_start_date: "2006-02-03", notes: "Commodity basket ETF."}
+  - {symbol: EFA, asset_type: ETF, category: international, active: true, min_start_date: "2001-08-14", notes: "Developed international equity ETF."}
+  - {symbol: EEM, asset_type: ETF, category: international, active: true, min_start_date: "2003-04-11", notes: "Emerging markets ETF."}
+  - {symbol: EWJ, asset_type: ETF, category: international, active: true, min_start_date: "1996-03-12", notes: "Japan equity ETF."}
+  - {symbol: FXI, asset_type: ETF, category: international, active: true, min_start_date: "2004-10-08", notes: "China large-cap equity ETF."}
+  - {symbol: EWZ, asset_type: ETF, category: international, active: true, min_start_date: "2000-07-14", notes: "Brazil equity ETF."}
+  - {symbol: MTUM, asset_type: ETF, category: factor, active: true, min_start_date: "2013-04-18", notes: "Momentum factor ETF."}
+  - {symbol: QUAL, asset_type: ETF, category: factor, active: true, min_start_date: "2013-07-18", notes: "Quality factor ETF."}
+  - {symbol: VLUE, asset_type: ETF, category: factor, active: true, min_start_date: "2013-04-18", notes: "Value factor ETF."}
+  - {symbol: USMV, asset_type: ETF, category: factor, active: true, min_start_date: "2011-10-18", notes: "Minimum volatility ETF."}
+  - {symbol: SPLV, asset_type: ETF, category: factor, active: true, min_start_date: "2011-05-05", notes: "Low volatility ETF."}
+  - {symbol: VIXY, asset_type: ETF, category: volatility, active: true, min_start_date: "2011-01-04", notes: "Short-term VIX futures ETF."}
+  - {symbol: VXX, asset_type: ETF, category: volatility, active: true, min_start_date: "2009-01-30", notes: "Short-term VIX ETN lineage; verify instrument continuity."}
+  - {symbol: SVXY, asset_type: ETF, category: volatility, active: true, min_start_date: "2011-10-04", notes: "Short volatility futures ETF."}

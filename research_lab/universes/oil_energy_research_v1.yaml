@@ -1,0 +1,40 @@
+selection_policy: Packet 31 expanded research universe for oil_energy_research_v1.
+source_notes: >
+  Research data expansion only. Universe membership does not imply data availability, trading permission, or investment recommendation.
+symbols:
+  - symbol: USO
+    asset_type: ETF
+    category: commodity_oil
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for commodity_oil.
+  - symbol: XLE
+    asset_type: ETF
+    category: sector_energy
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for sector_energy.
+  - symbol: XOP
+    asset_type: ETF
+    category: sector_energy_exploration
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for sector_energy_exploration.
+  - symbol: DBC
+    asset_type: ETF
+    category: commodity_basket
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for commodity_basket.
+  - symbol: GLD
+    asset_type: ETF
+    category: commodity_gold
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for commodity_gold.
+  - symbol: SPY
+    asset_type: ETF
+    category: core_index
+    active: true
+    min_start_date: "2005-01-01"
+    notes: Packet 31 research coverage symbol for core_index.
